@@ -98,11 +98,13 @@
 		form.existingChatId ? sessions.byId[form.existingChatId] : undefined,
 	);
 	const minimumDate = $derived(localDateValue(currentTime));
-	const snippetContextKey = $derived(
-		form.targetType === 'new-chat'
+	const snippetContextKey = $derived.by(() => {
+		const pathKey = form.targetType === 'new-chat'
 			? form.startup.pathContextKey
-			: `${selectedChat?.executorId ?? 'local'}\u0000${selectedChat?.projectPath ?? ''}`,
-	);
+			: `${selectedChat?.executorId ?? 'local'}\u0000${selectedChat?.projectPath ?? ''}`;
+		const agentId = form.targetType === 'new-chat' ? form.startup.agentId : selectedChat?.agentId;
+		return JSON.stringify([pathKey, agentId, form.executionPolicy]);
+	});
 	const timezone = $derived(browserTimeZoneLabel(currentTime));
 	const schedulePreview = $derived(form.schedulePreview(PREVIEW_RUN_COUNT, currentTime));
 	const canSave = $derived(form.canSaveAt(currentTime));
@@ -147,8 +149,10 @@
 	});
 
 	$effect(() => {
-		if (!open || form.targetType !== 'new-chat' || !form.startup.executorReady) return;
-		const catalog = modelCatalog;
+		if (!open) return;
+		const executorId = form.targetType === 'new-chat' ? form.startup.executorId : selectedChat?.executorId;
+		if (!executorId || !executors.isReady(executorId)) return;
+		const catalog = rootModelCatalog.forExecutor(executorId);
 		void catalog.version;
 		untrack(() => void catalog.refreshIfStale());
 	});
@@ -410,6 +414,7 @@
 
 				{#if form.targetType === 'new-chat'}
 					<ScheduledNewChatComposer
+						conversationInput={form.executionPolicy === 'conversation'}
 						startup={form.startup}
 						{modelCatalog}
 						{remoteSettings}
@@ -422,7 +427,7 @@
 						onPromptKeydown={handlePromptKeydown}
 						{snippetContext}
 						{snippetContextKey}
-						snippetTrigger={localSettings.snippetTrigger}
+						snippetTrigger={form.executionPolicy === 'conversation' ? localSettings.snippetTrigger : ''}
 						onSnippetPendingChange={(pending) => (form.promptTransformPending = pending)}
 					/>
 				{:else}
@@ -478,7 +483,7 @@
 					onPromptKeydown={handlePromptKeydown}
 					{snippetContext}
 					{snippetContextKey}
-					snippetTrigger={localSettings.snippetTrigger}
+					snippetTrigger={form.executionPolicy === 'conversation' ? localSettings.snippetTrigger : ''}
 					onSnippetPendingChange={(pending) => (form.promptTransformPending = pending)}
 					onEditSnippets={(returnFocus) => appShell.openSnippetsOverScheduledPrompts(returnFocus)}
 				/>

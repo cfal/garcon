@@ -36,8 +36,10 @@
 		resolveModelSelection,
 	} from '../../../../../test/model-catalog';
 	import { untrack } from 'svelte';
+	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '$shared/attachments';
 
 	interface Props {
+		executionPolicy?: 'conversation' | 'literal';
 		allowDirectChats?: boolean;
 		catalogVersion?: number;
 		catalogValidated?: boolean;
@@ -46,6 +48,7 @@
 		endpointBackedDirectModel?: boolean;
 		modelsAvailable?: boolean;
 		supportsImages?: boolean;
+		fileAttachmentMimeTypes?: readonly string[];
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
@@ -56,6 +59,7 @@
 	}
 
 	let {
+		executionPolicy = 'conversation',
 		allowDirectChats = false,
 		catalogVersion = 0,
 		catalogValidated = true,
@@ -64,6 +68,7 @@
 		endpointBackedDirectModel = false,
 		modelsAvailable = true,
 		supportsImages = true,
+		fileAttachmentMimeTypes = CHAT_FILE_ATTACHMENT_MIME_TYPES,
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',
@@ -205,6 +210,7 @@
 		},
 		getAgent(agentId: string) {
 			return {
+				executionPolicy,
 				id: agentId,
 				label: agentLabelFor(agentId),
 				description: '',
@@ -271,6 +277,9 @@
 		},
 		supportsImages() {
 			return supportsImages;
+		},
+		fileAttachmentMimeTypes() {
+			return fileAttachmentMimeTypes;
 		},
 		getModelForSelection(agentId: string, model: string, endpointId?: string | null) {
 			return modelForSelection(agentId, model, endpointId);

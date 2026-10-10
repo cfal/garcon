@@ -12,7 +12,7 @@ import {
   selectPrioritizedProjection,
   type PrioritizedProjectionEntry,
 } from '../../../../common/transcript-projection.js';
-import { projectToolUseSummary } from '../../../../common/transcript-seed.js';
+import { isPublicationGapMessage, projectToolUseSummary } from '../../../../common/transcript-seed.js';
 import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
 import {
   redactDataUrl,
@@ -42,8 +42,12 @@ export function foldHandoffArtifactEntries(
 ): HandoffArtifactSourceFold {
   const source: HandoffArtifactSourceEntry[] = [];
   const excludedCounts = new Map<ChatHandoffArtifactExclusionCategory, number>();
+  let hasPublicationGap = false;
   let turn = -1;
   for (const entry of entries) {
+    if (entry.kind === 'message' && isPublicationGapMessage(entry.message)) {
+      hasPublicationGap = true;
+    }
     if (entry.kind !== 'message' || !isEligibleMessage(entry.message)) {
       excludedCounts.set(entry.category, (excludedCounts.get(entry.category) ?? 0) + 1);
       continue;
@@ -58,6 +62,7 @@ export function foldHandoffArtifactEntries(
   }
   return {
     entries: source,
+    hasPublicationGap,
     sourceEntryCount: entries.length,
     eligibleEntryCount: source.length,
     excludedEntryCounts: CHAT_HANDOFF_ARTIFACT_EXCLUSION_CATEGORIES.flatMap((category) => {
@@ -140,6 +145,8 @@ export function renderHandoffArtifactEntry(
 function isEligibleMessage(message: ChatMessage): boolean {
   return message.type === 'user-message'
     || message.type === 'assistant-message'
+    || message.type === 'command-output'
+    || message.type === 'command-result'
     || message.type === 'compaction'
     || message.type === 'agent-switch'
     || isToolUseMessage(message)
@@ -166,6 +173,21 @@ function projectEntry(
     });
   }
   switch (message.type) {
+    case 'command-output':
+    case 'command-result': {
+      const body = artifactBody(message.content);
+      return sourceEntry({
+        ordinal,
+        turn,
+        level: projectionPriorityLevel(message.type),
+        tag: message.type,
+        attributes: message.type === 'command-output'
+          ? [{ name: 'channel', value: message.channel }, { name: 'format', value: message.format }]
+          : [{ name: 'outcome', value: message.result.outcome }],
+        body: body.text,
+        abridged: body.abridged,
+      });
+    }
     case 'user-message': {
       const body = artifactBody(message.content);
       const presentation = transcriptExportEntryCliPresentation(entry);
@@ -174,9 +196,9 @@ function projectEntry(
         turn,
         level: projectionPriorityLevel(message.type),
         tag: 'user',
-        attributes: presentation === null
-          ? []
-          : [
+        attributes: [
+          ...(message.metadata?.contentMode === 'literal' ? [{ name: 'content-mode', value: 'literal' }] : []),
+          ...(presentation === null ? [] : [
             { name: 'origin', value: presentation.origin },
             ...(presentation.style === undefined
               ? []
@@ -184,7 +206,8 @@ function projectEntry(
             ...(presentation.title === undefined
               ? []
               : [{ name: 'title', value: presentation.title }]),
-          ],
+          ]),
+        ],
         body: body.text,
         abridged: body.abridged || (message.images?.length ?? 0) > 0,
       });

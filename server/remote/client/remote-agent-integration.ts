@@ -1,4 +1,5 @@
 import { parseChatMessage, isToolUseMessage } from '@garcon/common/chat-types';
+import { parseCommandWorkingDirectory } from '@garcon/common/command-output';
 import {
   AgentCallError,
   assertAgentResourceScope,
@@ -71,6 +72,8 @@ export class RemoteAgentIntegration implements AgentIntegration {
   readonly lifecycle: AgentIntegration['lifecycle'];
   readonly migration: AgentIntegration['migration'];
   readonly auth: AgentIntegration['auth'];
+  readonly literalExecution: AgentIntegration['literalExecution'];
+  readonly readiness: AgentIntegration['readiness'];
   readonly commands: AgentIntegration['commands'];
   readonly compaction: AgentIntegration['compaction'];
   readonly forking: AgentIntegration['forking'];
@@ -225,6 +228,8 @@ export class RemoteAgentIntegration implements AgentIntegration {
       translateLegacySettings: ({ signal, ...request }) => call('migration.translateLegacySettings', request, { signal }),
     };
     const cap = manifest.capabilities;
+    this.literalExecution = cap.literalExecution ? manifest.literalExecution : null;
+    this.readiness = cap.readiness ? { status: (signal) => call('readiness.status', null, { signal }) } : null;
     this.auth = cap.auth ? {
       status: (signal) => call('auth.status', null, { signal }),
       ...(manifest.authMethods.launchLogin ? { launchLogin: () => call('auth.launchLogin', null) } : {}),
@@ -560,6 +565,11 @@ function decodeProducerEvent(
   event: AgentProducerNotification['event'],
   scope: AgentResourceScope,
 ): AgentProducerNotification['event'] {
+  if (event.type === 'run-ended' && event.workingDirectory !== undefined) {
+    const workingDirectory = parseCommandWorkingDirectory(event.workingDirectory);
+    if (!workingDirectory) throw new Error('Invalid completion working directory');
+    return { ...event, workingDirectory };
+  }
   if (event.type === 'publication-failed') {
     if (!isFailureDetail(event.error)) throw new Error('Invalid producer publication failure');
     return event;

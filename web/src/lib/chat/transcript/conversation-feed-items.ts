@@ -14,6 +14,7 @@ import type { PendingPermissionRequest } from '$lib/types/chat';
 import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tools/tool-display-registry.js';
 import { resolveDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
 import { isHiddenBashToolUse, type BashCommandMatcher } from './hidden-bash-commands.js';
+import { projectCommandOutput } from '$shared/command-output-projection.js';
 
 export interface PermissionTerminalState {
 	permissionOccurrenceId: string;
@@ -244,11 +245,21 @@ export function buildConversationFeedRenderModel(
 	}
 
 	return {
-		items,
+		items: projectCommandOutputs(items),
 		toolResultByUseRowId: toolPairs.toolResultByUseRowId,
 		toolResultRowIdByUseRowId: toolPairs.toolResultRowIdByUseRowId,
 		permissionTerminalByOccurrence,
 	};
+}
+
+function projectCommandOutputs(items: ConversationFeedRenderItem[]): ConversationFeedRenderItem[] {
+	const output = projectCommandOutput(items.map(item => item.kind === 'message' ? item.message : null));
+	for (const [index, message] of output) {
+		const item = items[index];
+		if (item.kind !== 'message') continue;
+		item.message = message;
+	}
+	return items;
 }
 
 export function buildConversationFeedRenderItems(

@@ -245,6 +245,10 @@ function requiredString(value: unknown): string | null {
   return normalized || null;
 }
 
+function promptSource(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
 function nullableString(value: unknown): string | null | undefined {
   if (value === null) return null;
   return typeof value === 'string' ? value.trim() || null : undefined;
@@ -350,14 +354,13 @@ export function normalizeScheduledPrompt(value: unknown): ScheduledPrompt | null
   const raw = asRecord(value);
   if (!raw) return null;
   const id = requiredString(raw.id);
-  const prompt = requiredString(raw.prompt);
+  const prompt = promptSource(raw.prompt);
   const schedule = normalizeScheduledPromptSchedule(raw.schedule);
   const target = normalizeScheduledPromptTarget(raw.target);
   if (
     !id ||
     !prompt ||
     prompt.length > SCHEDULED_PROMPT_MAX_LENGTH ||
-    hasLeadingSlashCommand(prompt) ||
     !schedule ||
     !target ||
     typeof raw.createdAt !== 'string' ||
@@ -380,7 +383,7 @@ export function normalizeScheduledPromptDefinitionInput(value: unknown): Schedul
   const raw = asRecord(value);
   const schedule = asRecord(raw?.schedule);
   const target = normalizeScheduledPromptTarget(raw?.target);
-  const prompt = requiredString(raw?.prompt);
+  const prompt = promptSource(raw?.prompt);
   if (
     !raw ||
     !schedule ||
@@ -388,9 +391,7 @@ export function normalizeScheduledPromptDefinitionInput(value: unknown): Schedul
     'intervalDays' in schedule ||
     !target ||
     !prompt ||
-    prompt.length > SCHEDULED_PROMPT_MAX_LENGTH ||
-    !scheduledPromptFitsRenderedLimit(prompt) ||
-    hasLeadingSlashCommand(prompt)
+    prompt.length > SCHEDULED_PROMPT_MAX_LENGTH
   )
     return null;
 

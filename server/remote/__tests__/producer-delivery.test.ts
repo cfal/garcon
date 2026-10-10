@@ -78,6 +78,23 @@ async function runningTurn(dialer: 'controller' | 'worker') {
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`completion preserves the executor's Windows cwd (${dialer} dials)`, async () => {
+    const { fixture, integration, request, publish } = await runningTurn(dialer);
+    try {
+      const terminals: AgentProducerNotification['event'][] = [];
+      integration.producers.subscribe(({ event }) => {
+        if (event.type === 'run-ended' || event.type === 'publication-failed') terminals.push(event);
+      });
+      const terminal = {
+        type: 'run-ended', runId: request.runId, outcome: 'finished',
+        workingDirectory: { kind: 'reported', path: 'C:/workspace' },
+      } as const;
+      publish(terminal);
+      await integration.execution.runningSessions();
+      expect(terminals).toEqual([terminal]);
+    } finally { await fixture.dispose(); }
+  });
+
   test(`malformed and inherited message types remain publication gaps (${dialer} dials)`, async () => {
     const { fixture, integration, publish } = await runningTurn(dialer);
     try {

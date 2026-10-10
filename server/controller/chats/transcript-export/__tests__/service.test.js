@@ -3,6 +3,8 @@ import {
   AgentSwitchMessage,
   AssistantMessage,
   BashToolUseMessage,
+  CommandOutputMessage,
+  CommandResultMessage,
   ErrorMessage,
   ThinkingMessage,
   ToolResultMessage,
@@ -20,6 +22,20 @@ const CHAT_ID = '1787505989127000';
 const VIEW_ID = transcriptViewId('view-1');
 
 describe('TranscriptExportService', () => {
+  it('keeps output literal when its publication gap is excluded from the export', async () => {
+    const service = createService([
+      providerRow(1, new CommandOutputMessage(AT, 'command', 'stdout', 'markdown', '# partial heading',
+        { executorId: 'local', projectPath: '/synthetic' })),
+      providerRow(2, new TranscriptNoticeMessage(AT, 'Lost output', { type: 'publication-gap' })),
+      providerRow(3, new CommandResultMessage(AT, 'command', {
+        outcome: 'finished', exitCode: 0, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/synthetic' },
+      })),
+    ]);
+    const response = await exported(service, { chatId: CHAT_ID, format: 'markdown', exclusions: ['diagnostics'] }, signal());
+    expect(response.document).toContain('```text\n# partial heading\n```');
+    expect(response.document).not.toContain('Lost output');
+    expect(response.omitted).toEqual([{ category: 'diagnostics', count: 1 }]);
+  });
   it('filters every category while preserving the conversation spine and disclosure', async () => {
     const rows = [
       providerRow(1, new UserMessage(AT, 'prompt')),

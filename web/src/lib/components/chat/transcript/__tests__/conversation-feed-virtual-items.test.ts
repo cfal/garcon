@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
 	BashToolUseMessage,
+	CommandOutputMessage,
+	CommandResultMessage,
 	GlobToolUseMessage,
 	ToolResultMessage,
 	TranscriptNoticeMessage,
@@ -66,6 +68,31 @@ function build(
 }
 
 describe('conversation virtual feed model', () => {
+	it('routes each command output search target to its own visible row', () => {
+		const rows = [1, 2].map(index => ({ ...userItem(index), message: new CommandOutputMessage(
+			'2026-08-03T00:00:00.000Z', 'command-1', 'stdout', 'plain', `part ${index}`,
+			{ executorId: 'local', projectPath: '/project' }, (index - 1) * 'part 1'.length,
+		) }));
+		const rendered = buildConversationFeedRenderModel(rows).items;
+		const model = build(rendered);
+		expect(model.indexByRowId.get('generation-1:2')).not.toBe(model.indexByRowId.get('generation-1:1'));
+		expect(model.targetByDomAnchorId.get('generation-1:2')?.innerRowId).toBe('generation-1:2');
+	});
+
+	it('rebuilds output when a result arrives without more stdout', () => {
+		const output = { ...userItem(1), message: new CommandOutputMessage(
+			'', 'command-1', 'stdout', 'markdown', '# heading', { executorId: 'local', projectPath: '/project' },
+		) };
+		const terminal = { ...userItem(2), message: new CommandResultMessage('', 'command-1', {
+			outcome: 'finished', exitCode: 0, signal: null, capture: 'complete',
+			cwd: { kind: 'reported', path: '/project' },
+		}) };
+		const initial = buildConversationFeedRenderModel([output]);
+		expect(initial.items[0]).toMatchObject({ message: { format: 'plain' } });
+		expect(appendConversationVirtualTranscriptTail(build(initial.items), 'chat-1:generation-1', [terminal])).toBeNull();
+		expect(buildConversationFeedRenderModel([output, terminal]).items[0]).toMatchObject({ message: { format: 'markdown' } });
+	});
+
 	it('combines two ordinary tool inputs and indexes each hidden member to the summary', () => {
 		const model = build([bashItem(1), bashItem(2, 'reused')], {
 			combineToolUseMessages: true,

@@ -53,7 +53,7 @@ export interface ConversationRouterStoreDeps {
 	conversationUi: ConversationUiPort;
 	startupCoordinator: StartupCoordinator;
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
-	notifyCompletion: () => void;
+	notifyCompletion: (chatId: string) => void;
 	chatDrafts?: Pick<ChatDraftStore, 'discardChat'>;
 	panels: ConversationPanelRegistry;
 	clearDeletedChat: (chatId: string) => void;

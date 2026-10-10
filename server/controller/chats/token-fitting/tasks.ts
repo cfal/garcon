@@ -1,5 +1,6 @@
 import { parseChatMessage, type ChatMessage } from '../../../../common/chat-types.js';
 import { isRecord } from '../../../../common/json.js';
+import type { CarriedContext } from '../../../../common/transcript-seed.js';
 import { decodeClonedStoredRows, type StoredLedgerRow } from '../../ledger/codec.js';
 import { foldRowsForExport } from '../../ledger/export-fold.js';
 import type { HandoffArtifactChatMetadata, RenderedHandoffArtifact } from '../handoff-artifact/model.js';
@@ -8,6 +9,7 @@ import { renderFittedHandoffArtifact } from '../handoff-artifact/xml.js';
 import {
   assessCarryover,
   fitCompactionPrompt,
+  projectCompactedCarryover,
   type CarryoverAssessment,
   type CompactionDestination,
   type CompactionPromptFit,
@@ -26,6 +28,7 @@ export interface HandoffArtifactRenderInput {
 // separately in bounded batches.
 export type TokenFittingTask =
   | { readonly kind: 'assess-carryover' }
+  | { readonly kind: 'project-compacted-carryover'; readonly summary: string }
   | {
       readonly kind: 'fit-compaction-prompt';
       readonly destination: CompactionDestination;
@@ -43,6 +46,7 @@ export type TokenFittingTask =
 export type TokenFittingTaskKind = TokenFittingTask['kind'];
 
 export interface TokenFittingResults {
+  readonly 'project-compacted-carryover': CarriedContext;
   readonly 'assess-carryover': CarryoverAssessment;
   readonly 'fit-compaction-prompt': CompactionPromptFit;
   readonly 'render-handoff-artifact': RenderedHandoffArtifact | null;
@@ -56,6 +60,7 @@ type TaskHandlers = {
 };
 
 const TASK_HANDLERS: TaskHandlers = {
+  'project-compacted-carryover': (task, items) => projectCompactedCarryover(chatMessages(items), task.summary),
   'assess-carryover': (_task, items) => assessCarryover(chatMessages(items)),
   'fit-compaction-prompt': (task, items) => fitCompactionPrompt({
     messages: chatMessages(items),

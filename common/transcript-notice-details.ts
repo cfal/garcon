@@ -36,6 +36,10 @@ export interface HandoffSummaryNoticeDetail {
   readonly type: 'handoff-summary';
 }
 
+export interface PublicationGapNoticeDetail {
+  readonly type: 'publication-gap';
+}
+
 export interface ChatIdDisclosureNoticeDetail {
   readonly type: 'chat-id-disclosure';
 }
@@ -95,6 +99,7 @@ export type TranscriptNoticeDetail =
   | PreambleSelectionChangedNoticeDetail
   | CarryoverMigrationQuarantineNoticeDetail
   | HandoffSummaryNoticeDetail
+  | PublicationGapNoticeDetail
   | ChatIdDisclosureNoticeDetail
   | ChatIdDiscoveryFailureNoticeDetail
   | InterAgentMessageOutcomeNoticeDetail
@@ -161,6 +166,12 @@ export function isHandoffSummaryNoticeDetail(
   return hasType(value, 'handoff-summary');
 }
 
+export function isPublicationGapNoticeDetail(
+  value: unknown,
+): value is PublicationGapNoticeDetail {
+  return hasType(value, 'publication-gap');
+}
+
 export function isChatIdDisclosureNoticeDetail(
   value: unknown,
 ): value is ChatIdDisclosureNoticeDetail {
@@ -223,6 +234,7 @@ function hasType(value: unknown, type: string): boolean {
 }
 
 export function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
+  if (isPublicationGapNoticeDetail(value)) return { type: value.type };
   const progress = parseAgentStartProgressNotice(value);
   if (progress) return progress;
   const outcome = parseAgentCommandOutcome(value);

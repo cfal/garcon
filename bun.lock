@@ -44,6 +44,7 @@
         "@garcon/server-agent-interface": "workspace:*",
         "@garcon/server-agent-opencode": "workspace:*",
         "@garcon/server-agent-pi": "workspace:*",
+        "@garcon/server-agent-shell": "workspace:*",
         "bun-pty": "^0.4.10",
         "emoji-regex": "^11.0.0",
         "jsonwebtoken": "^9.0.3",
@@ -213,6 +214,19 @@
         "@earendil-works/pi-ai": "1.0.2",
         "@earendil-works/pi-coding-agent": "1.0.2",
         "@earendil-works/pi-tui": "1.0.2",
+        "@garcon/common": "workspace:*",
+        "@garcon/server-agent-common": "workspace:*",
+        "@garcon/server-agent-interface": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.4.2",
+        "typescript": "^6.0.3",
+      },
+    },
+    "server-agents/shell": {
+      "name": "@garcon/server-agent-shell",
+      "version": "0.1.0",
+      "dependencies": {
         "@garcon/common": "workspace:*",
         "@garcon/server-agent-common": "workspace:*",
         "@garcon/server-agent-interface": "workspace:*",
@@ -598,6 +612,8 @@
     "@garcon/server-agent-opencode": ["@garcon/server-agent-opencode@workspace:server-agents/opencode"],
 
     "@garcon/server-agent-pi": ["@garcon/server-agent-pi@workspace:server-agents/pi"],
+
+    "@garcon/server-agent-shell": ["@garcon/server-agent-shell@workspace:server-agents/shell"],
 
     "@google/genai": ["@google/genai@2.21.0", "", { "dependencies": { "google-auth-library": "^10.3.0", "p-retry": "^4.6.2", "protobufjs": "^7.5.4", "ws": "^8.18.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-+PDtco2/Z0ONdzCGekCoCT+O1VJS9xJQNN4XzQpXG/t3El/SWWMkCWlFRO1KmivOHPa4Q0VjUYu1HBKCZ/v33Q=="],
 

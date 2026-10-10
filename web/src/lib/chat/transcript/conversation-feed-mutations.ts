@@ -62,6 +62,7 @@ export function conversationFeedEndBehavior(
 
 export function responseMessageType(message: ChatMessage): string | null {
 	return message instanceof AssistantMessage ||
+		message.type === 'command-output' || message.type === 'command-result' ||
 		message instanceof ThinkingMessage ||
 		message instanceof ErrorMessage ||
 		message instanceof PermissionRequestMessage ||

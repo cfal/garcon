@@ -24,6 +24,8 @@
 	import Play from '@lucide/svelte/icons/play';
 
 	interface Props {
+		chatId: string;
+		executionKey?: string;
 		open: boolean;
 		queue: ChatQueueState | null;
 		editor: QueuedInputEditorState;
@@ -42,6 +44,8 @@
 	}
 
 	let {
+		chatId,
+		executionKey = '',
 		open,
 		queue,
 		editor,
@@ -59,6 +63,8 @@
 	// Lives at dialog lifetime so a pending refinement survives the draft card
 	// relocating from its inline row to the departed-draft recovery slot.
 	const refinement = new QueuedInputRefinementController({
+		get chatId() { return chatId; },
+		get executionKey() { return executionKey; },
 		get editor() {
 			return editor;
 		},
@@ -89,6 +95,10 @@
 	const queuedCount = $derived(entries.length);
 	const editorOpen = $derived(editor.phase !== 'closed');
 	const refinementPending = $derived(refinement.pending);
+	$effect(() => {
+		executionKey;
+		return () => refinement.abort();
+	});
 	// A live entry edits in place inside the list; a departed draft (sent or
 	// removed) is recovered above the list without a stale queue position.
 	const editorInline = $derived(editorOpen && editor.liveEntry !== null);
@@ -173,6 +183,7 @@
 			case 'manual':
 				return null;
 			case 'queued-turn-failed':
+			case 'turn-failed':
 				return m.chat_queue_pause_failed_detail();
 			case 'completion-uncertain':
 				return m.chat_queue_pause_completion_uncertain_detail();

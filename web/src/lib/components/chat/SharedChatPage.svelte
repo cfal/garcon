@@ -14,10 +14,13 @@
 		isToolUseMessage,
 	} from '$shared/chat-types';
 	import Markdown from '$lib/components/rich-text/Markdown.svelte';
+	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 	import MessageRenderFallback from '$lib/components/chat/transcript/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
 	import ChatEventCard from '$lib/components/chat/transcript/rows/ChatEventCard.svelte';
 	import CliRow from '$lib/components/chat/transcript/rows/CliRow.svelte';
+	import CommandStatusRow from '$lib/components/chat/transcript/rows/CommandStatusRow.svelte';
+	import { projectCommandOutput } from '$shared/command-output-projection.js';
 	import CliPresentationHeader from '$lib/components/chat/transcript/rows/CliPresentationHeader.svelte';
 	import CollapsibleBody from '$lib/components/chat/transcript/rows/CollapsibleBody.svelte';
 	import TranscriptNoticeRow from '$lib/components/chat/transcript/rows/TranscriptNoticeRow.svelte';
@@ -46,6 +49,13 @@
 	type SharedViewError = 'not-found' | 'load-failed';
 
 	let messages = $state<SharedMessageEntry[]>([]);
+	const renderedMessages = $derived.by(() => {
+		const output = projectCommandOutput(messages.map(entry => entry.message));
+		return messages.map((entry, index) => {
+			const message = output.get(index);
+			return message ? { ...entry, message } : entry;
+		});
+	});
 	let title = $state('');
 	let agentId = $state('');
 	let sharedAt = $state('');
@@ -259,7 +269,7 @@
 						<div class="h-px flex-1 bg-border/70"></div>
 					</div>
 				{/if}
-				{#each messages as entry (entry.index)}
+				{#each renderedMessages as entry (entry.index)}
 					{@const message = entry.message}
 					{@const userPresentation =
 						message instanceof UserMessage ? message.presentation : undefined}
@@ -295,11 +305,15 @@
 											previewHeight={userPresentation?.style ? 'default' : 'tall'}
 										>
 											<div class={userPresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
+												{#if message.metadata?.contentMode === 'literal'}
+													<pre class="whitespace-pre-wrap break-words font-mono">{message.content}</pre>
+												{:else}
 												<Markdown
 													source={message.content}
 													variant={userPresentation?.style ? 'presented' : 'user'}
 													chatReferencePolicy="explicit"
 												/>
+												{/if}
 											</div>
 										</CollapsibleBody>
 										{#if message.images && message.images.length > 0}
@@ -315,6 +329,14 @@
 										{/if}
 									</div>
 								</div>
+							{:else if message.type === 'command-result' || (message.type === 'command-output' && message.channel === 'stderr')}
+								<CommandStatusRow {message} />
+							{:else if message.type === 'command-output'}
+								{#if message.format === 'markdown'}
+									<Markdown source={message.content} variant="assistant" chatReferencePolicy="explicit" />
+								{:else}
+									<CodeBlock text={message.content} />
+								{/if}
 							{:else if message instanceof AssistantMessage}
 								<div class="text-sm text-foreground">
 									<Markdown

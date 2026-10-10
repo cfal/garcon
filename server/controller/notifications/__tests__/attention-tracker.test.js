@@ -6,6 +6,7 @@ import { PermissionRequestMessage, AssistantMessage, BashToolUseMessage } from '
 function createMockAgentRegistry() {
   const emitter = new EventEmitter();
   return {
+    chatExecutionPolicy: mock(() => 'conversation'),
     onTranscriptCommitted: (cb) => emitter.on('transcript', cb),
     emitInput: (chatId, content, steer = false) => emitter.emit('transcript', {
       type: 'rows', chatId, viewId: 'view-1',
@@ -154,6 +155,23 @@ describe('AttentionTracker', () => {
   function createTracker() {
     return new AttentionTracker(agents, queue, settings, registry, metadata, telegram, telegramSettings);
   }
+
+  it.each(['completed', 'failed', 'dispatch-failed', 'stopped', 'permission'])('suppresses %s notifications for literal execution', async (event) => {
+    agents.chatExecutionPolicy.mockReturnValue('literal');
+    createTracker();
+    agents.emitInput('c1', 'printf output');
+    if (event === 'completed') agents.emitFinished('c1', 0, { text: 'output' });
+    if (event === 'failed') agents.emitFailed('c1', 'Command failed');
+    if (event === 'dispatch-failed') queue.emitTurnFailed('c1', 'Directory save failed');
+    if (event === 'stopped') queue.emitSessionStopped('c1', 'interrupt-requested');
+    if (event === 'permission') agents.emitPermissionRequest('c1', new PermissionRequestMessage(
+      '2024-01-01T00:00:01Z', 'permission-1', new BashToolUseMessage('2024-01-01T00:00:01Z', 'tool-1', 'true'),
+    ));
+    queue.emitChatIdle('c1');
+    await Promise.resolve();
+    expect(agents.chatExecutionPolicy).toHaveBeenCalledWith('c1');
+    expect(telegram.send).not.toHaveBeenCalled();
+  });
 
   // Simulates a conversation round and its durable assistant commit.
   function simulateConversation(chatId, userText, assistantText) {

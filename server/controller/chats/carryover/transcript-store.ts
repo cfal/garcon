@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ChatMessage } from '../../../../common/chat-types.js';
-import { boundProjectedMessage, isProjectableMessage } from '../../../../common/transcript-seed.js';
+import { boundProjectedMessage, isProjectableMessage, isPublicationGapMessage } from '../../../../common/transcript-seed.js';
 import { AgentSwitchMessage } from '../../../../common/chat-types.js';
 import { DomainError } from '../../../common/domain-error.js';
 import { writeJsonFileAtomic, syncDirectory } from '../../../common/json-file-store.js';
@@ -317,6 +317,7 @@ export class CarryOverTranscriptStore {
     if (archivedLogicalCount(input.refs) === 0) return [];
     const maxBytes = input.maxBytes ?? 64 * 1024 * 1024;
     const collected: ChatMessage[] = [];
+    let publicationGap: ChatMessage | undefined;
     let bytes = 2;
     for await (const batch of this.stream({
       refs: input.refs,
@@ -324,6 +325,10 @@ export class CarryOverTranscriptStore {
       signal: input.signal,
     })) {
       for (const message of batch) {
+        if (isPublicationGapMessage(message)) {
+          publicationGap ??= message;
+          continue;
+        }
         // Only messages the projection can actually render are admitted, so the
         // byte guard is never spent on content that is discarded downstream.
         // Tool results alone are 45% of a typical archive; counting them here
@@ -354,7 +359,8 @@ export class CarryOverTranscriptStore {
         collected.splice(index, 1);
       }
     }
-    return collected;
+    // The warning must survive eviction of any affected output or results.
+    return publicationGap ? [publicationGap, ...collected] : collected;
   }
 
   async *stream(input: {

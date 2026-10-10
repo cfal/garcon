@@ -7,7 +7,7 @@ import { browseDirectory } from '$lib/api/files';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { GitWorktreeItem } from '$lib/api/git';
-import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
+import type { AgentMetadata, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import {
@@ -186,7 +186,14 @@ const mockModelCatalog = {
 		'direct-anthropic-compatible': { label: 'Direct (Anthropic)' },
 		'direct-openai-compatible': { label: 'Direct (Chat Completions)' },
 	},
+	getAgent: vi.fn((agentId: string): Pick<AgentMetadata, 'label' | 'executionPolicy'> | null => {
+		const metadata = Object.entries(mockModelCatalog.agentMetadata)
+			.find(([id]) => id === agentId)?.[1];
+		return metadata ? { ...metadata, executionPolicy: 'conversation' } : null;
+	}),
 	getAgents: vi.fn(() => ['claude', 'codex', 'direct-openai-compatible']),
+	supportsImages: vi.fn(() => true),
+	fileAttachmentMimeTypes: vi.fn(() => ['application/pdf', 'text/plain', 'text/markdown']),
 	getSelectableAgents: vi.fn(() => [
 		'claude',
 		'codex',

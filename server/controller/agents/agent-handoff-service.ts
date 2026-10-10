@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import type { AgentIntegration } from '@garcon/server-agent-interface';
 import type {
   AgentHandoffRequest,
 } from '../../../common/chat-command-contracts.js';
@@ -25,7 +26,7 @@ import type { CarryOverCompactionInput } from '../chats/carryover/compaction.js'
 import type { CarryOverOutcome } from '../chats/carryover/outcome.js';
 import type { PreparedCarryover } from '../chats/carryover/prepared-store.js';
 import { OwnershipTransferPendingError } from './ownership-transfer-fence.js';
-import { isThinkingModeSupported } from '../../../common/execution-defaults.js';
+import { isThinkingModeSupported, isPermissionModeSupported } from '../../../common/execution-defaults.js';
 
 const logger = createLogger('agents:handoff');
 const MAX_RECOVERY_RETRY_DELAY_MS = 1_000;
@@ -154,6 +155,7 @@ export class AgentHandoffService {
         422,
       );
     }
+    assertHandoffDestination(integration);
     const selection = this.deps.endpointResolver.resolveSelection({
       executorId,
       agentId: requested.agentId,
@@ -204,7 +206,9 @@ export class AgentHandoffService {
       catalog.supportedThinkingModes,
       'none',
     );
-    assertSupported(catalog.supportedPermissionModes, permissionMode, 'permission mode');
+    if (!isPermissionModeSupported(permissionMode, catalog.supportedPermissionModes)) {
+      throwUnsupported(permissionMode, 'permission mode');
+    }
     if (!isThinkingModeSupported(thinkingMode, catalog.supportedThinkingModes)) {
       throwUnsupported(thinkingMode, 'reasoning effort');
     }
@@ -279,6 +283,7 @@ export class AgentHandoffService {
           }
 
           context.assertAdmissionActive();
+          assertHandoffDestination(this.deps.integrations.require(input.target.agentId, input.target.executorId));
           this.deps.ledger.closeProducer(input.chatId);
           producerClosed = true;
           const watermark = this.deps.ledger.highWatermark(input.chatId);
@@ -292,7 +297,7 @@ export class AgentHandoffService {
             const planningController = new AbortController();
             this.#carryoverPreparations.set(input.chatId, planningController);
             try {
-              const messages = await this.deps.ledger.conversationMessages(input.chatId);
+              const messages = await this.deps.ledger.carryoverMessages(input.chatId);
               carryoverOutcome = await this.deps.carryover.planFor({
                 operation: 'agent-switch',
                 chatId: input.chatId,
@@ -313,7 +318,7 @@ export class AgentHandoffService {
           const decide = () => {
             this.#requireUnchangedSource(input.chatId, sourceFence);
             context.assertAdmissionActive();
-            this.deps.integrations.require(input.target.agentId, input.target.executorId);
+            assertHandoffDestination(this.deps.integrations.require(input.target.agentId, input.target.executorId));
             this.deps.endpointResolver.resolveSelection(input.target);
             decisionAttempted = true;
             return this.deps.ownership.decideHandoff({
@@ -602,6 +607,12 @@ export class AgentHandoffService {
   }
 }
 
+function assertHandoffDestination(integration: AgentIntegration): void {
+  if (integration.literalExecution) {
+    throw new DomainError('VALIDATION_FAILED', 'Literal execution agents cannot receive handoffs. Start a new chat instead.', 422);
+  }
+}
+
 function assertMatchingHandoff(intent: AgentHandoffIntent, submittedTargetHash: string): void {
   if (intent.submittedTargetHash === submittedTargetHash) return;
   throw new DomainError(
@@ -735,12 +746,6 @@ function stableStringify(value: unknown): string {
 
 function preferredValue<T extends string>(supported: readonly T[], preferred: T): T {
   return supported.includes(preferred) ? preferred : supported[0] ?? preferred;
-}
-
-function assertSupported(values: readonly string[], value: string, label: string): void {
-  if (!values.includes(value)) {
-    throwUnsupported(value, label);
-  }
 }
 
 function throwUnsupported(value: string, label: string): never {

@@ -155,6 +155,8 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
   switch (message.type) {
     case 'user-message':
     case 'assistant-message':
+    case 'command-output':
+    case 'command-result':
     case 'thinking':
       return joinBounded(MAX_BODY_CHARS, [message.content], budget);
     case 'error':
@@ -275,6 +277,7 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
 function roleForMessage(message: ChatMessage): ChatSearchSnippetRole {
   if (message.type === 'user-message') return 'user';
   if (message.type === 'assistant-message' || message.type === 'thinking') return 'assistant';
+  if (message.type === 'command-output') return message.channel === 'stdout' ? 'assistant' : 'system';
   if (message.type.endsWith('-tool-use')
       || message.type === 'tool-result'
       || message.type === 'permission-request') return 'tool';

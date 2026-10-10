@@ -12,11 +12,25 @@ import { chatDraftStorageKey } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
 import * as commandsApi from '$lib/api/commands.js';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
-import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
+import { ModelCatalogStore, type AgentMetadata } from '$lib/agents/model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 
 const appCss = readFileSync('src/app.css', 'utf8');
+
+function conversationalCatalog(): ModelCatalogStore {
+	const catalog = new ModelCatalogStore();
+	catalog.forExecutor(remoteExecutor.id).agentMetadata.claude = {
+		id: 'claude', label: 'Claude', executionPolicy: 'conversation', defaultModel: 'opus',
+		supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
+		supportsForkWhileRunning: false, supportsUpdateProjectPath: true,
+		supportsSteering: false, supportsImages: false, fileAttachmentMimeTypes: [],
+		acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false,
+		supportedPermissionModes: [], supportedThinkingModes: [], settings: [],
+		defaultSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+	} satisfies AgentMetadata;
+	return catalog;
+}
 
 vi.mock('$lib/api/snippets', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/snippets')>();
@@ -73,6 +87,30 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 }
 
 describe('PromptComposer focus', () => {
+	it.each(['', 'printf command'])('preserves incompatible draft attachments and blocks all submit paths: %s', async (source) => {
+		const onsubmit = vi.fn();
+		const { container, rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'synthetic-draft', selectedStatus: 'draft', onsubmit,
+		});
+		const input = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.input(input, { target: { value: source } });
+		await fireEvent.change(container.querySelector('input[type="file"]')!, {
+			target: { files: [new File(['notes'], 'notes.pdf', { type: 'application/pdf' })] },
+		});
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(false);
+		await rerender({ executionPolicy: 'literal', fileAttachmentMimeTypes: [] });
+		expect(screen.getByRole('alert').textContent).toContain('Remove attachments');
+		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' });
+		expect(send.disabled).toBe(true);
+		await fireEvent.click(send);
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+		expect(onsubmit).not.toHaveBeenCalled();
+		expect(screen.getByTestId('composer-attachment-count').textContent).toBe('1');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove attachment notes.pdf' }));
+		expect(send.disabled).toBe(!source);
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
 	it('recalls only into an empty draft, browses with arrows, and releases recall after editing or switching chats', async () => {
 		const rendered = render(PromptComposerTestHost, {
 			recallPrompts: [
@@ -169,7 +207,7 @@ describe('PromptComposer focus', () => {
 	});
 
 	it('loads a cold remote catalog and blocks click and Enter until it is validated, including reconnect', async () => {
-		const catalog = new ModelCatalogStore();
+		const catalog = conversationalCatalog();
 		const remote = catalog.forExecutor(remoteExecutor.id);
 		remote.invalidate();
 		const coldLoad = Promise.withResolvers<void>();
@@ -223,7 +261,7 @@ describe('PromptComposer focus', () => {
 	it.each(['offline', 'cold-catalog'])(
 		'allows controller commands through click, Enter and steer shortcut with %s',
 		async (availability) => {
-			const catalog = new ModelCatalogStore();
+			const catalog = conversationalCatalog();
 			const remote = catalog.forExecutor(remoteExecutor.id);
 			remote.invalidate();
 			vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
@@ -300,7 +338,7 @@ describe('PromptComposer focus', () => {
 	});
 
 	it('keeps remote submission blocked after catalog failure and offers an explicit retry', async () => {
-		const catalog = new ModelCatalogStore();
+		const catalog = conversationalCatalog();
 		const remote = catalog.forExecutor(remoteExecutor.id);
 		remote.invalidate();
 		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
@@ -355,7 +393,7 @@ describe('PromptComposer focus', () => {
 	});
 
 	it('submits file mentions with click and Enter when the ready executor has no Files capability', async () => {
-		const catalog = new ModelCatalogStore();
+		const catalog = conversationalCatalog();
 		catalog.forExecutor(remoteExecutor.id).lastValidatedAt = Date.now();
 		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
 		vi.spyOn(catalog.forExecutor(remoteExecutor.id), 'refreshIfStale').mockResolvedValue();
@@ -482,6 +520,24 @@ describe('PromptComposer focus', () => {
 		} finally {
 			syncUrls.mockRestore();
 		}
+	});
+
+	it('keeps automatic snippet triggers disabled when closing a literal expanded editor', async () => {
+		render(PromptComposerTestHost, { selectedChatId: 'chat-literal-expanded', executionPolicy: 'literal' });
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.click(screen.getByRole('button', { name: 'Open expanded composer' }));
+		const editor = await screen.findByRole('textbox', { name: 'Expanded composer text' }) as HTMLTextAreaElement;
+		const source = 'case x in x) true ;;';
+		editor.value = source;
+		editor.setSelectionRange(source.length, source.length);
+		await fireEvent.input(editor);
+		await fireEvent.pointerUp(editor);
+		await fireEvent.keyDown(editor, { key: 'Escape' });
+		await waitFor(() => expect(document.activeElement).toBe(textarea));
+		expect(textarea.value).toBe(source);
+		expect(screen.queryByRole('option', { name: /^review/ })).toBeNull();
+		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 	});
 
 	it('opens a live expanded editor and restores directional selection on Escape', async () => {
@@ -791,6 +847,28 @@ describe('PromptComposer focus', () => {
 		await fireEvent.focus(textarea);
 
 		expect(screen.getByTestId('sidebar-recenter-request-count').textContent).toBe('0');
+	});
+
+	it.each(['conversation', 'literal'] as const)('validates retained attachments by capability, not %s policy', async (executionPolicy) => {
+		const onsubmit = vi.fn();
+		const { container, rerender } = render(PromptComposerTestHost, { onsubmit, executionPolicy });
+		const input = screen.getByRole('textbox');
+		await fireEvent.input(input, { target: { value: 'synthetic command' } });
+		await fireEvent.change(container.querySelector('input[type="file"]')!, {
+			target: { files: [new File(['notes'], 'notes.pdf', { type: 'application/pdf' })] },
+		});
+		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' });
+		expect(send.disabled).toBe(false);
+		await rerender({ fileAttachmentMimeTypes: [] });
+		expect(await screen.findByText(/Remove attachments before submitting/)).toBeTruthy();
+		expect(send.disabled).toBe(true);
+		await fireEvent.click(send);
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+		expect(onsubmit).not.toHaveBeenCalled();
+		await rerender({ fileAttachmentMimeTypes: ['application/pdf'] });
+		expect(send.disabled).toBe(false);
+		expect(screen.queryByText(/Remove attachments before submitting/)).toBeNull();
 	});
 
 	it('names permission and thinking controls by purpose and active value', () => {
@@ -1329,6 +1407,27 @@ describe('PromptComposer focus', () => {
 		expect(screen.getByRole('button', { name: 'Codex · OpenAI OAuth · GPT-5' })).toBeTruthy();
 	});
 
+	it('keeps the current literal owner selectable beside AI destinations but excludes incoming literal choices', async () => {
+		const catalog = conversationalCatalog();
+		const metadata = catalog.forExecutor(remoteExecutor.id).getAgent('claude')!;
+		catalog.agentMetadata = {
+			claude: { ...metadata, executionPolicy: 'literal' },
+			codex: { ...metadata, id: 'codex', label: 'Codex', defaultModel: 'gpt-5' },
+		};
+		catalog.agentModels = {
+			claude: [{ value: 'opus', label: 'Opus' }],
+			codex: [{ value: 'gpt-5', label: 'GPT-5' }],
+		};
+		const view = render(PromptComposerTestHost, {
+			catalog, selectedChatId: 'chat-1', selectedAgentId: 'claude', selectedStatus: 'running',
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		expect(await screen.findByRole('button', { name: 'Codex' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Claude' })).toBeTruthy();
+		await view.rerender({ selectedAgentId: 'codex' });
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'Claude' })).toBeNull());
+	});
+
 	it('hides direct agents and direct recents in a non-direct chat when disabled', async () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',
@@ -1735,7 +1834,7 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('/snippet review cancellable');
 	});
 
-	it('inserts a menu-selected snippet at the current selection without sending', async () => {
+	it.each(['conversation', 'literal'] as const)('inserts a menu-selected snippet into a %s draft without sending', async (executionPolicy) => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
 			source: 'snippet',
@@ -1749,6 +1848,7 @@ describe('PromptComposer focus', () => {
 		const onsubmit = vi.fn();
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-insert',
+			executionPolicy,
 			selectedStatus: 'running',
 			snippetDefaultArguments: 'the API',
 			onsubmit,
@@ -1758,6 +1858,9 @@ describe('PromptComposer focus', () => {
 		textarea.setSelectionRange(7, 14);
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
 		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await screen.findByRole('option', { name: /^review/ });
+		expect(Boolean(screen.queryByText('Tip: type ;; while composing to open this palette')))
+			.toBe(executionPolicy === 'conversation');
 		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		const argumentsInput = (await screen.findByRole('textbox', {
 			name: 'Arguments',
@@ -2272,7 +2375,7 @@ describe('PromptComposer focus', () => {
 	it.each(['missing', 'request-failed'])(
 		'prioritizes executor, project (%s), then catalog notices across disconnect and recovery without losing the draft',
 		async (failure) => {
-			const catalog = new ModelCatalogStore();
+			const catalog = conversationalCatalog();
 			const remote = catalog.forExecutor(remoteExecutor.id);
 			remote.invalidate();
 			remote.error = 'Synthetic catalog failure';

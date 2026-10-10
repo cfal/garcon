@@ -1,4 +1,5 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
+import type { UserMessagePresentation } from '@garcon/common/chat-types';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { CarriedContext } from '@garcon/common/transcript-seed';
 import type { AgentRunningSession } from './execution.js';
@@ -19,6 +20,11 @@ export interface AgentExecutionContextV5 {
   readonly endpoint: AgentEndpointSelection | null;
   readonly runId: string;
   readonly producerBinding: AgentProducerBinding;
+  readonly submission?: {
+    readonly clientMessageId: string | null;
+    readonly timestamp: string;
+    readonly presentation?: UserMessagePresentation;
+  };
 }
 
 export interface AgentStartRequestV5 extends AgentExecutionContextV5 {

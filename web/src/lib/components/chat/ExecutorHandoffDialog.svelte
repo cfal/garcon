@@ -57,10 +57,14 @@
 	const confirmError = $derived(
 		handoff.error && destination.nonblankPath === confirmedPath ? handoff.error : null,
 	);
+	const selectableAgents = $derived(catalog.getSelectableAgents().filter((agentId) =>
+		(handoff.target && sessions.isDraft(handoff.target.chatId))
+		|| catalog.getAgent(agentId)?.executionPolicy !== 'literal',
+	));
 	const agents = $derived(
 		localSettings.allowDirectChats || isDirectAgentId(handoff.selection?.agentId ?? '')
-			? catalog.getSelectableAgents()
-			: nonDirectAgentIds(catalog.getSelectableAgents()),
+			? selectableAgents
+			: nonDirectAgentIds(selectableAgents),
 	);
 	// A destination has no current path, so each request validates its suggested
 	// folder like an edit; a new executor also replaces the browser and worktrees.

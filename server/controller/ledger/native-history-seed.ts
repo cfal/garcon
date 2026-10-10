@@ -64,6 +64,7 @@ export async function importNativeHistoryDrafts({
     for (const row of batch) {
       messages.push(row.message);
       providerMetas.push(row.providerMeta ?? null);
+      await steps.next();
     }
     onRowsRead?.(messages.length);
     await steps.next();

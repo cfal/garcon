@@ -12,6 +12,7 @@ import * as m from '$lib/paraglide/messages.js';
 import type { PromptComposerUiState } from './prompt-composer-state.svelte.js';
 
 interface PromptComposerRefinementOptions {
+	get executionKey(): string;
 	composer: Pick<
 		ComposerState,
 		'inputText' | 'contentRevision' | 'queueDraftSave' | 'isDragActive'
@@ -84,7 +85,8 @@ export class PromptComposerRefinementController {
 
 	async #run(): Promise<void> {
 		const sourceChatId = this.options.sessions.selectedChatId;
-		if (!sourceChatId) return;
+		if (!sourceChatId || this.options.startBlocked) return;
+		const executionKey = this.options.executionKey;
 		const sourceText = this.options.composer.inputText;
 		const sourceRevision = this.options.composer.contentRevision;
 		this.options.ui.closeFileMenu();
@@ -95,6 +97,7 @@ export class PromptComposerRefinementController {
 		try {
 			const result = await this.#request.run({ draft: sourceText, target: 'prompt' });
 			if (result.kind !== 'refined') return;
+			if (this.options.executionKey !== executionKey || this.options.startBlocked) return;
 			if (
 				this.options.sessions.selectedChatId !== sourceChatId ||
 				this.options.composer.contentRevision !== sourceRevision ||

@@ -28,6 +28,7 @@
 		open: boolean;
 		onOpenChange: (open: boolean) => void;
 		initialQuery?: string;
+		triggerPrefix?: string;
 		interactionKey: string;
 		contextHint?: string | null;
 		insertionError?: string | null;
@@ -41,6 +42,7 @@
 		open,
 		onOpenChange,
 		initialQuery = '',
+		triggerPrefix,
 		interactionKey,
 		contextHint = null,
 		insertionError = null,
@@ -57,7 +59,7 @@
 	const uid = $props.id();
 	const listId = `${uid}-list`;
 	const searchId = `${uid}-search`;
-	const triggerHint = $derived(normalizeSnippetTrigger(localSettings.snippetTrigger));
+	const triggerHint = $derived(triggerPrefix ?? normalizeSnippetTrigger(localSettings.snippetTrigger));
 	const mobileKeyboardVisible = $derived(appShell.isMobile && appShell.keyboardHeight > 0);
 	const catalogsLoading = $derived(
 		(snippets.status === 'loading' && !snippets.hasLoaded) ||
@@ -274,9 +276,11 @@
 				<Settings2 class="size-4" />
 				{m.snippets_edit_all()}
 			</button>
-			<p class="text-center text-xs text-muted-foreground">
-				{m.snippets_palette_trigger_hint({ trigger: triggerHint })}
-			</p>
+			{#if triggerHint}
+				<p class="text-center text-xs text-muted-foreground">
+					{m.snippets_palette_trigger_hint({ trigger: triggerHint })}
+				</p>
+			{/if}
 		</div>
 	</Dialog.Content>
 </Dialog.Root>

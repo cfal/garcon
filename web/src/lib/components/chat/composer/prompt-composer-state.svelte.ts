@@ -48,7 +48,13 @@ export class PromptComposerUiState {
 		this.setSlashCommandTrigger(null);
 	}
 
-	updateTriggers(value: string, caret: number, snippetTrigger: unknown, isComposing = false): void {
+	updateTriggers(value: string, caret: number, snippetTrigger: unknown, isComposing: boolean, mode: 'conversation' | 'literal'): void {
+		if (mode === 'literal') {
+			this.closeFileMenu();
+			this.closeSlashMenu();
+			this.snippetPalette.dismiss();
+			return;
+		}
 		const fileTrigger = findFileMentionTrigger(value, caret);
 		this.setFileMentionTrigger(fileTrigger);
 		if (fileTrigger) {

@@ -11,6 +11,7 @@ import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import {
   isCarryoverMigrationQuarantineNoticeDetail,
   isPreambleApplicationNoticeDetail,
+  isPublicationGapNoticeDetail,
 } from '../../../common/transcript-notice-details.js';
 import {
   chatIdDisclosureNoticeContent,
@@ -70,6 +71,9 @@ function importedDraftFor(
   preambleApplication?: PreambleHistoryEvidence,
 ): LedgerRowDraft[] {
   const at = original.timestamp || now();
+  if (original.type === 'user-message' && original.metadata?.contentMode === 'literal') {
+    return importedUserInputDrafts(original, providerMeta, at);
+  }
   if (original.type === 'user-message' && preambleApplication) {
     return importedUserInputDrafts(original, providerMeta, at, preambleApplication);
   }
@@ -184,7 +188,9 @@ function importedUserInputDrafts(
       kind: 'user-input',
       at,
       detail: {
-        clientMessageId: null,
+        clientMessageId: message.metadata?.contentMode === 'literal'
+          ? message.metadata.clientMessageId || null
+          : null,
         message,
         attachments: (message.images ?? []).map((image) => ({
           kind: 'image' as const,
@@ -228,6 +234,8 @@ function frozenDraftFor(message: ChatMessage, now: () => string): LedgerRowDraft
         providerMeta: null,
       }];
     case 'assistant-message':
+    case 'command-output':
+    case 'command-result':
     case 'thinking':
     case 'tool-result':
     case 'error':
@@ -250,6 +258,15 @@ function frozenDraftFor(message: ChatMessage, now: () => string): LedgerRowDraft
         providerMeta: null,
       }];
     case 'transcript-notice':
+      if (isPublicationGapNoticeDetail(message.detail)) {
+        return [{
+          kind: 'notice',
+          at,
+          message: message.content,
+          detail: { type: message.detail.type, ...(message.title ? { title: message.title } : {}) },
+          providerMeta: null,
+        }];
+      }
       if (
         !isCarryoverMigrationQuarantineNoticeDetail(message.detail)
         && !isPreambleApplicationNoticeDetail(message.detail)

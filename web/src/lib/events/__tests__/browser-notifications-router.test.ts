@@ -32,7 +32,7 @@ function permission(kind: 'upsert' | 'remove' | 'clear-run' = 'upsert') {
 	);
 }
 
-function fixture(messages: unknown[], enabled = true, focused = false, processing = false) {
+function fixture(messages: unknown[], enabled = true, focused = false, processing = false, allowsNotifications = true) {
 	let currentProcessing = processing;
 	const ws = {
 		messages: messages.map((data) => ({
@@ -47,6 +47,7 @@ function fixture(messages: unknown[], enabled = true, focused = false, processin
 		enabled: () => enabled,
 		isFocused: () => focused,
 		isChatProcessing: () => currentProcessing,
+		allowsNotifications: () => allowsNotifications,
 	});
 	router.start();
 	router.tick();
@@ -97,7 +98,7 @@ describe('root browser notifications routing', () => {
 		expect(busy.delivery.show).toHaveBeenCalledOnce();
 		busy.router.destroy();
 	});
-	it('delivers authenticated live events before chat-list hydration finishes', () => {
+	it('suppresses completion and permission notifications without conversational policy', () => {
 		const completed = new AgentRunFinishedMessage(
 			'background',
 			0,
@@ -106,8 +107,8 @@ describe('root browser notifications routing', () => {
 			undefined,
 			'finished',
 		);
-		const f = fixture([completed, permission()]);
-		expect(f.delivery.show).toHaveBeenCalledTimes(2);
+		const f = fixture([completed, permission()], true, false, false, false);
+		expect(f.delivery.show).not.toHaveBeenCalled();
 		f.router.destroy();
 	});
 	it.each(['remove', 'clear-run'] as const)(

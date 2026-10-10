@@ -205,11 +205,19 @@ function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
     return {
       role,
       timestamp: message.timestamp,
-      content: `${message.content}${normalizeImages(message.images)}`.trim(),
+      content: message.metadata?.contentMode === 'literal'
+        ? message.content : `${message.content}${normalizeImages(message.images)}`.trim(),
     };
   }
   if (message instanceof AssistantMessage) {
     return { role: 'Assistant', timestamp: message.timestamp, content: message.content || '' };
+  }
+  if (message.type === 'command-output' || message.type === 'command-result') {
+    return {
+      role: message.type === 'command-result' ? 'Command result' : message.channel,
+      timestamp: message.timestamp,
+      content: message.content,
+    };
   }
   if (message instanceof ThinkingMessage) {
     return { role: 'Assistant Thinking', timestamp: message.timestamp, content: message.content || '' };

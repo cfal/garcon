@@ -7,7 +7,7 @@ import { createProducerFixture } from './producer-fixture.ts';
 function makeRouter(compaction, options = {}) {
   const producer = createProducerFixture();
   const transcript = createRuntimeTranscriptFixture({
-    conversationMessages: options.conversationMessages,
+    carryoverMessages: options.carryoverMessages,
   });
   const execution = {
     start: mock(async () => ({ agentSessionId: 'session-a', nativeSession: null })),
@@ -99,17 +99,17 @@ describe('AgentRuntimeRouter compaction', () => {
 
   it('calls the compaction facet when the integration provides one', async () => {
     const compact = mock(async () => undefined);
-    const conversationMessages = mock(() => {
+    const carryoverMessages = mock(() => {
       throw new Error('native compaction must not scan ledger context');
     });
-    const { router, execution } = makeRouter({ compact }, { conversationMessages });
+    const { router, execution } = makeRouter({ compact }, { carryoverMessages });
 
     await router.compactSession('chat-1', { instructions: 'focus on auth' });
 
     expect(compact).toHaveBeenCalledTimes(1);
     expect(compact.mock.calls[0][0]).toMatchObject({ prompt: '/compact focus on auth' });
     expect(compact.mock.calls[0][0]).not.toHaveProperty('priorContext');
-    expect(conversationMessages).not.toHaveBeenCalled();
+    expect(carryoverMessages).not.toHaveBeenCalled();
     expect(execution.resume).not.toHaveBeenCalled();
   });
 

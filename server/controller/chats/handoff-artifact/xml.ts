@@ -30,6 +30,7 @@ export interface HandoffArtifactXmlInput {
   readonly sourceEntryCount: number;
   readonly eligibleEntryCount: number;
   readonly excludedEntryCounts: readonly ChatHandoffArtifactExcludedEntryCount[];
+  readonly hasPublicationGap: boolean;
   readonly selection: HandoffArtifactSelection;
 }
 
@@ -52,6 +53,7 @@ export function renderFittedHandoffArtifact(input: {
     sourceEntryCount: input.sourceFold.sourceEntryCount,
     eligibleEntryCount: input.sourceFold.eligibleEntryCount,
     excludedEntryCounts: input.sourceFold.excludedEntryCounts,
+    hasPublicationGap: input.sourceFold.hasPublicationGap,
     selection: fixedSelection,
   });
   const fitted = fitEstimatedTokenDocument({
@@ -70,6 +72,7 @@ export function renderFittedHandoffArtifact(input: {
         sourceEntryCount: input.sourceFold.sourceEntryCount,
         eligibleEntryCount: input.sourceFold.eligibleEntryCount,
         excludedEntryCounts: input.sourceFold.excludedEntryCounts,
+        hasPublicationGap: input.sourceFold.hasPublicationGap,
         selection,
       });
       return { selection, rendered };
@@ -134,6 +137,9 @@ function renderWithEstimate(input: HandoffArtifactXmlInput, estimatedTokens: num
     `<handoff-artifact version="1" fold="${CHAT_HANDOFF_ARTIFACT_FOLD}" gap-unit="${CHAT_HANDOFF_ARTIFACT_GAP_UNIT}" chat-id="${xmlAttribute(input.chat.id)}" transcript-view-id="${xmlAttribute(input.transcriptViewId)}" last-ordinal="${input.lastOrdinal}" context-window-tokens="${input.contextWindowTokens}" usable-token-budget="${input.usableTokenBudget}" estimated-tokens="${estimatedTokens}" source-entries="${input.sourceEntryCount}" eligible-entries="${input.eligibleEntryCount}" included-entries="${selection.includedEntryCount}" budget-omitted-entries="${selection.budgetOmittedEntryCount}" abridged-entries="${selection.abridgedEntryCount}" gaps="${selection.gapCount}" projection-truncated="${selection.projectionTruncated}">`,
     `  <chat title="${xmlAttribute(input.chat.title)}" agent="${xmlAttribute(input.chat.agentId)}"${input.chat.model === null ? '' : ` model="${xmlAttribute(input.chat.model)}"`}/>`,
     ...(excludedAttributes === '' ? [] : [`  <fixed-fold-excluded ${excludedAttributes}/>`]),
+    ...(input.hasPublicationGap
+      ? ['  <publication-gap>Some earlier output was not delivered. Retained command results do not establish complete output.</publication-gap>']
+      : []),
   ];
   if (selection.nodes.length === 0) {
     lines.push('  <entries/>');

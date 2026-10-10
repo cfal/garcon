@@ -60,8 +60,8 @@ describe('AgentRegistry session cache', () => {
     adoption = { ensure: () => Promise.reject(new Error('unused')) },
     preambles = { snapshot: () => ({ revision: 0, preambles: [] }) },
     integrations = {
-      has: () => false,
-      get: () => null,
+      has: (agentId) => agentId === 'test',
+      get: (agentId) => agentId === 'test' ? { literalExecution: null } : null,
       require: () => { throw new Error('unused'); },
       list: () => [],
     },
@@ -131,6 +131,23 @@ describe('AgentRegistry session cache', () => {
       .rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('returns the same no-auth status for known agents in individual and catalog requests', async () => {
+    const integration = { descriptor: { id: 'test', label: 'Synthetic agent' }, auth: null };
+    const registry = createRegistry(undefined, undefined, {
+      list: () => [integration],
+      get: (id) => id === 'test' ? integration : null,
+    });
+    const routes = createAgentRoutes({ agents: registry });
+    const expected = { test: { authenticated: false, canReauth: false, label: 'Synthetic agent', source: 'none' } };
+    for (const query of ['', '?agent=test']) {
+      const url = new URL(`http://localhost/api/v1/agents/auth${query}`);
+      const response = await routes['/api/v1/agents/auth'].GET(new Request(url), url);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(expected);
+    }
+    expect(registry.supportsAuthLogin('test')).toBe(false);
+  });
+
   it('returns a client error for unknown-agent auth and an empty command catalog', async () => {
     const registry = createRegistry();
     const routes = createAgentRoutes({ agents: registry });
@@ -198,6 +215,30 @@ describe('AgentRegistry session cache', () => {
       },
     );
   }
+
+  it.each([undefined, 'literal'])('checks input identity without executor inventory: %s', async (contentMode) => {
+    const viewId = ledger.currentView(CHAT_ID).viewId;
+    ledger.appendInputAndCompose({
+      chatId: CHAT_ID,
+      viewId,
+      message: new UserMessage(AT, 'Synthetic input', undefined, contentMode ? { contentMode } : undefined),
+      attachments: [],
+      clientMessageId: 'input-original',
+      steer: false,
+    });
+    await chats.installAgentOwnership(CHAT_ID, {
+      executorId: '22222222-2222-4222-8222-222222222222', projectPath: '/repo', patch: {},
+    });
+    const registry = createRegistry();
+    const matches = (clientMessageId, content = 'Synthetic input') => registry.hasMatchingInput(
+      CHAT_ID, new UserMessage(AT, content), { transcriptViewId: viewId, clientMessageId, commandType: 'agent-run' },
+    );
+
+    expect(matches('input-new')).toBe(false);
+    expect(matches('input-original')).toBe(true);
+    expect(() => matches('input-original', 'Different input')).toThrow();
+    expect(() => registry.chatExecutionPolicy(CHAT_ID)).toThrow('Executor is unavailable');
+  });
 
   it('applies the saved selection order, not catalog order', async () => {
     armBoundary('epoch-current');

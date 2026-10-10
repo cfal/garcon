@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../../../../common/chat-types.js';
+import type { CarriedContext } from '../../../../common/transcript-seed.js';
 import { TaskWorker } from '../../lib/task-worker.js';
 import type { RenderedHandoffArtifact } from '../handoff-artifact/model.js';
 import type {
@@ -23,6 +24,7 @@ export interface TokenFitting {
     input: CompactionPromptInput,
     signal?: AbortSignal,
   ): Promise<CompactionPromptFit>;
+  projectCompactedCarryover(messages: readonly ChatMessage[], summary: string, signal?: AbortSignal): Promise<CarriedContext>;
   renderHandoffArtifact(
     input: HandoffArtifactRenderInput,
     signal?: AbortSignal,
@@ -50,6 +52,10 @@ export class TokenFittingWorker implements TokenFitting {
     signal?: AbortSignal,
   ): Promise<CompactionPromptFit> {
     return this.#worker.run({ kind: 'fit-compaction-prompt', ...parameters }, messages, signal);
+  }
+
+  projectCompactedCarryover(messages: readonly ChatMessage[], summary: string, signal?: AbortSignal): Promise<CarriedContext> {
+    return this.#worker.run({ kind: 'project-compacted-carryover', summary }, messages, signal);
   }
 
   renderHandoffArtifact(

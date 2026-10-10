@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
 	AssistantMessage,
+	CommandOutputMessage,
+	CommandResultMessage,
 	BashToolUseMessage,
 	ReadToolUseMessage,
 	ToolResultMessage,
@@ -17,6 +19,20 @@ function row(ordinal: number, message: ChatMessage): ChatDisplayRow {
 }
 
 describe('ConversationFeedRenderModelController', () => {
+	it('rebuilds prior output when a complete result makes Markdown eligible', () => {
+		const controller = new ConversationFeedRenderModelController();
+		const context = { executorId: 'local', projectPath: '/project' };
+		const first = row(1, new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', '# first', context));
+		const initial = controller.reconcile('surface', [first]);
+		expect(initial.items[0]).toMatchObject({ message: { format: 'plain' } });
+		const next = controller.reconcileDetailed('surface', [first,
+			row(2, new CommandResultMessage(TS, 'command-1', { outcome: 'finished', exitCode: 0, signal: null,
+				capture: 'complete', cwd: { kind: 'reported', path: '/project' } }))]);
+		expect(next.change.kind).toBe('rebuilt');
+		expect(next.model.items[0]).toMatchObject({ id: first.id, message: { content: '# first', format: 'markdown' } });
+		expect(initial.items[0]).toMatchObject({ message: { format: 'plain' } });
+	});
+
 	it('publishes streamed message and tool rows once in exact transcript order', () => {
 		const controller = new ConversationFeedRenderModelController();
 		const source = [

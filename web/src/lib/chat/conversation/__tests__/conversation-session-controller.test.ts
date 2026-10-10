@@ -678,6 +678,15 @@ function createDeps(chat = createRunningChat()) {
 			openNewChatDialog: vi.fn(),
 		},
 		modelCatalog: {
+			getAgent: vi.fn<SessionControllerDeps['modelCatalog']['getAgent']>((id) => ({
+				id, label: id, executionPolicy: 'conversation', defaultModel: '',
+				supportsCompact: false, supportsFork: true, supportsForkAtMessage: true,
+				supportsForkWhileRunning: false, supportsUpdateProjectPath: true,
+				supportsSteering: true, supportsImages: true, fileAttachmentMimeTypes: [],
+				acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false,
+				supportedPermissionModes: ['default'], supportedThinkingModes: ['none'], settings: [],
+				defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },
+			})),
 			getModelForSelection: vi.fn<SessionControllerDeps['modelCatalog']['getModelForSelection']>(
 				(_agentId, model) => ({ value: model, label: model }),
 			),
@@ -791,6 +800,20 @@ describe('ConversationSessionController', () => {
 		});
 	});
 
+	it('permits literal executor selections only for drafts, even when the initial model is available', () => {
+		const { deps } = createDeps();
+		const metadata = deps.modelCatalog.getAgent('claude')!;
+		deps.modelCatalog.getAgent.mockReturnValue({ ...metadata, executionPolicy: 'literal' });
+		const controller = new ConversationSessionController(deps);
+		void controller.executorHandoff.ask('chat-1', 'local', '/workspace/project', {
+			agentId: 'claude', model: 'opus', apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+		});
+		expect(controller.executorHandoff.canConfirm).toBe(false);
+		deps.sessions.isDraft.mockReturnValue(true);
+		expect(controller.executorHandoff.canConfirm).toBe(true);
+		controller.executorHandoff.cancel();
+	});
+
 	it('preserves saved remote settings while its catalog is empty and fences every submit route', async () => {
 		const executorId = '22222222-2222-4222-8222-222222222222';
 		const { deps } = createDeps(
@@ -812,6 +835,22 @@ describe('ConversationSessionController', () => {
 		expect(mockSteerChat).not.toHaveBeenCalled();
 		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
 	});
+
+	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
+		'preserves source without interpreting controls while policy is unknown through %s',
+		async (submit) => {
+			const { deps } = createDeps();
+			deps.modelCatalog.getAgent.mockReturnValue(null);
+			deps.canSubmitToExecutor.mockReturnValue(false);
+			const source = '/rename not-a-title  \n';
+			deps.composerState.inputText = source;
+			const controller = new ConversationSessionController(deps);
+			expect(await controller[submit]('chat-1')).toBe('no-op');
+			expect(deps.sessions.renameChat).not.toHaveBeenCalled();
+			expect(deps.composerState.inputText).toBe(source);
+			expect(mockRunChat).not.toHaveBeenCalled();
+		},
+	);
 
 	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
 		'keeps controller commands available without executor admission through %s',
@@ -3748,6 +3787,34 @@ describe('ConversationSessionController', () => {
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');
 	});
 
+	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
+		'preserves literal source and bypasses controller slash commands through %s', async (submit) => {
+			const { deps } = createDeps(createRunningChat({ agentId: 'codex', model: 'variant',
+				agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} }, isProcessing: false }));
+			deps.agentState.model = 'variant';
+			deps.modelCatalog.getAgent.mockImplementation((id) => id !== 'codex' ? null : ({
+				id, label: 'Literal test', executionPolicy: 'literal', defaultModel: 'variant',
+				supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
+				supportsForkWhileRunning: false, supportsUpdateProjectPath: false, supportsSteering: false,
+				supportsImages: false, fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false,
+				supportedProtocols: [], authLoginSupported: false, supportedPermissionModes: [],
+				supportedThinkingModes: [], settings: [], defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },
+			}));
+			const command = "/compact '  exact source @file  '\n ";
+			deps.composerState.inputText = command;
+			mockRunChat.mockResolvedValueOnce({ success: true, commandType: 'agent-run', clientRequestId: 'req-literal',
+				chatId: 'chat-1', turnId: 'literal-turn', status: 'accepted', acceptedAt: '2026-08-10T00:00:00.000Z' });
+			const outcome = await new ConversationSessionController(deps)[submit]('chat-1');
+			expect(deps.chatState.appendLocalNoticeForChat).not.toHaveBeenCalled();
+			expect(outcome).toBe('accepted');
+			expect(mockRunChat).toHaveBeenCalledWith(expect.objectContaining({ command }));
+			expect(mockSteerChat).not.toHaveBeenCalled();
+			expect(deps.chatState.optimisticUserInputs).toEqual([
+				expect.objectContaining({ content: command, contentMode: 'literal' }),
+			]);
+		},
+	);
+
 	it('uses normal submission for Ctrl+Enter preference while idle', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: false }));
 		deps.agentState.model = 'opus';
@@ -3809,10 +3876,12 @@ describe('ConversationSessionController', () => {
 		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 	});
 
-	it('rejects unsupported or attachment steering without clearing or queueing', async () => {
+	it.each(['conversation', 'literal'] as const)('rejects unsupported or attachment steering without clearing or queueing: %s', async (executionPolicy) => {
 		const unsupported = createDeps(
 			createRunningChat({ agentId: 'cursor', model: 'auto', isProcessing: true }),
 		);
+		const metadata = unsupported.deps.modelCatalog.getAgent('cursor')!;
+		unsupported.deps.modelCatalog.getAgent.mockReturnValue({ ...metadata, executionPolicy });
 		unsupported.deps.composerState.inputText = 'keep this draft';
 		const unsupportedOutcome = await new ConversationSessionController(
 			unsupported.deps,

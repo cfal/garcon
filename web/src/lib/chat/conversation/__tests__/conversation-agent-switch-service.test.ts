@@ -54,6 +54,7 @@ function harness() {
 		}),
 	};
 	const catalog: ReturnType<ConversationAgentSwitchDeps['modelCatalogForExecutor']> = {
+		getAgent: () => ({ executionPolicy: 'conversation' }),
 		selectionFor: (_agentId, value) => ({ ...model, model: value }),
 		selectionValueFor: (_agentId, value) => value,
 	};
@@ -82,6 +83,19 @@ function harness() {
 }
 
 describe('ConversationAgentSwitchService', () => {
+	it.each(['running', 'draft'] as const)('allows literal destinations only before creation (%s)', async (status) => {
+		const { deps, service, chat } = harness();
+		chat.status = status;
+		deps.modelCatalogForExecutor().getAgent = () => ({ executionPolicy: 'literal' });
+		const switching = service.switchAgent('chat-1', { agentId: 'shell', modelValue: 'sh' });
+		if (status === 'draft') {
+			await switching;
+			expect(deps.sessions.patchDraftStartup).toHaveBeenCalledWith('chat-1', expect.objectContaining({ agentId: 'shell' }));
+		} else {
+			await expect(switching).rejects.toThrow('cannot receive handoffs');
+		}
+		expect(deps.commitHandoff).not.toHaveBeenCalled();
+	});
 	it('commits the confirmed executor and folder immediately without optimistic retargeting', async () => {
 		const { deps, service, agentState } = harness();
 		const confirmation = Promise.withResolvers<ExecutorHandoffDestination | null>();

@@ -3,6 +3,10 @@ import { runTokenFittingTask } from '../tasks.ts';
 
 // Runs fitting tasks in-process on structured clones, matching what the Worker receives.
 export const inlineTokenFitting = {
+  async projectCompactedCarryover(messages, summary, signal) {
+    signal?.throwIfAborted();
+    return runTokenFittingTask({ kind: 'project-compacted-carryover', summary }, structuredClone(messages));
+  },
   async assessCarryover(messages, signal) {
     signal?.throwIfAborted();
     return runTokenFittingTask({ kind: 'assess-carryover' }, structuredClone(messages));

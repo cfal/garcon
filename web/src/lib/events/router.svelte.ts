@@ -150,7 +150,7 @@ export interface EventRouterStores {
 	startup: EventRouterStartupStore;
 	readState: EventRouterReadStateStore;
 	chatPresentations: EventRouterChatPresentations;
-	notifyCompletion: () => void;
+	notifyCompletion: (chatId: string) => void;
 }
 
 export function createChatMessagesAccumulator(

@@ -19,6 +19,20 @@ const TS = '2026-08-12T00:00:00.000Z';
 const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 
 describe('TranscriptLedgerService', () => {
+  it('retains publication gaps only in the carryover fold, even across excluded inputs', async () => {
+    await withService(async ({ ledger }) => {
+      const view = ledger.initializeChat('chat-1');
+      ledger.appendNotice('chat-1', view.viewId, { content: 'Generic notice', detail: {} });
+      const gap = ledger.appendNotice('chat-1', view.viewId, { content: 'Output lost', detail: { type: 'publication-gap' } });
+      const lease = ledger.openProducer('chat-1', 'test');
+      lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(TS, 'Retained response') }] });
+      expect((await ledger.conversationMessages('chat-1')).map(message => message.content)).toEqual(['Retained response']);
+      expect(await ledger.carryoverMessages('chat-1', new Set([gap.ordinal]))).toMatchObject([
+        { type: 'transcript-notice', detail: { type: 'publication-gap' } },
+        { type: 'assistant-message', content: 'Retained response' },
+      ]);
+    });
+  });
   describe('chat ID discovery requests', () => {
     it('[TLV5-CHAT-ID-DISCOVERY.01-CORE-UNIT-01] commits and strips the marker before starting immediate delivery', async () => {
       const requests = mock(() => undefined);

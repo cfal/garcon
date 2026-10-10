@@ -89,6 +89,7 @@ import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
 import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
 import { ProjectAdmission } from './projects/project-admission.js';
+import { WorkingDirectorySettler } from './projects/working-directory-settlement.js';
 import { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import { CarryOverGarbageCollector } from './chats/carryover/garbage-collector.js';
 import { CarryOverTranscriptStore } from './chats/carryover/transcript-store.js';
@@ -521,6 +522,8 @@ export async function startServer(): Promise<void> {
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
       {
         projectAdmission,
+        executionPolicy: (chatId) => agentRegistry.chatExecutionPolicy(chatId),
+        workingDirectorySettlement: new WorkingDirectorySettler({ registry: chatRegistry, ledger: transcriptLedger, inspect: inspectProject, lock: chatMutationLock }),
         attachmentAdmission: queuedAttachmentAdmission(chatRegistry, agentRegistry),
         canDispatch: (chatId) => executors.isReady(effectiveExecutorId(chatRegistry.getChat(chatId)?.executorId)),
         unsettledQueueReceiptKeys: (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
@@ -531,6 +534,7 @@ export async function startServer(): Promise<void> {
         resolveSteerContent: queuedSteerContentResolver({ resolve: resolveFileMentions }, chatRegistry),
       },
     );
+    transcriptLedger.subscribeRunEndedCommitted((chatId, runId) => queue.markRunTerminalCommitted(chatId, runId));
     executionQueries = queue;
     const transcriptReload = new TranscriptReloadService({
       ledger: transcriptLedger,

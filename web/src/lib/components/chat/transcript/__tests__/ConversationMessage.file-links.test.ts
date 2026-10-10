@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	AssistantMessage,
+	CommandOutputMessage,
 	TranscriptNoticeMessage,
 	UserMessage,
 	ThinkingMessage,
@@ -20,6 +21,20 @@ import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures
 const TS = '2026-05-14T00:00:00.000Z';
 
 describe('ConversationMessage file links', () => {
+	it('uses immutable command origin after cwd and executor changes', async () => {
+		const openAuto = vi.fn();
+		render(ConversationMessageHost, {
+			message: new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', '[report](REPORT.md)',
+				{ executorId: 'local', projectPath: '/workspace/original' }),
+			openAuto, chatContext: { chatId: 'chat-1', executorId: remoteExecutor.id, projectPath: '/worker/next' },
+			executors: [localExecutor, remoteExecutor],
+		});
+		await fireEvent.click(screen.getByRole('link', { name: 'report' }));
+		expect(openAuto).toHaveBeenCalledWith(expect.objectContaining({
+			executorId: 'local', fileRootPath: '/workspace', relativePath: 'original/REPORT.md',
+		}));
+	});
+
 	it.each([
 		['assistant', new AssistantMessage(TS, 'Open [report](REPORT.md)')],
 		['permission', new PermissionRequestMessage(TS, 'synthetic-plan',

@@ -139,6 +139,7 @@ function stubMatchMedia(matches: boolean): void {
 async function renderSubmittableForm(
 	onStartChat: () => void,
 	props: {
+		executionPolicy?: 'conversation' | 'literal';
 		supportsImages?: boolean;
 		snippetTrigger?: string;
 		snippetTemplate?: string;
@@ -247,6 +248,19 @@ describe('NewChatForm', () => {
 			orderedPreambleIds: request.orderedPreambleIds ?? [],
 			projection: { catalogRevision: 0, eligiblePreambles: [], unavailable: [] },
 		}));
+	});
+
+	it('retains explicit helpers and submits literal slash source unchanged', async () => {
+		stubMatchMedia(false);
+		const onStartChat = vi.fn();
+		const input = await renderSubmittableForm(onStartChat, { executionPolicy: 'literal' });
+		expect(screen.queryByRole('button', { name: 'Edit preambles' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Refine prompt' })).toBeTruthy();
+		const firstMessage = '/snippet untouched\n  ';
+		await fireEvent.input(input, { target: { value: firstMessage } });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		expect(onStartChat).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ firstMessage }), PROSPECTIVE_CHAT_ID);
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 	});
 
 	it('reveals the form after settings and loads preamble data independently', async () => {
@@ -1264,7 +1278,7 @@ describe('NewChatForm', () => {
 		);
 	});
 
-	it('inserts an unchanged saved default as an explicit palette value', async () => {
+	it.each(['conversation', 'literal'] as const)('inserts an explicit snippet into a new %s draft', async (executionPolicy) => {
 		stubMatchMedia(false);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
@@ -1278,6 +1292,7 @@ describe('NewChatForm', () => {
 		});
 		const messageInput = await renderSubmittableForm(vi.fn(), {
 			snippetDefaultArguments: 'saved default',
+			executionPolicy,
 		});
 		await fireEvent.input(messageInput, { target: { value: 'Before replace after' } });
 		messageInput.setSelectionRange(7, 14);
@@ -1424,6 +1439,63 @@ describe('NewChatForm', () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await waitFor(() => expect(document.activeElement).toBe(argumentsInput));
 		expect(screen.getByRole('dialog', { name: 'Arguments for /snippet review' })).toBeTruthy();
+	});
+
+	it('cancels a pending snippet when the execution policy becomes literal', async () => {
+		stubMatchMedia(false);
+		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const { rerender } = render(NewChatFormTestHost);
+		await waitFor(() => expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull());
+		const input = screen.getByPlaceholderText<HTMLTextAreaElement>('How can I help you today?');
+		await fireEvent.input(input, { target: { value: '/snippet review source' } });
+		await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' }).disabled).toBe(false));
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await waitFor(() => expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce());
+		await rerender({ executionPolicy: 'literal' });
+		await waitFor(() => expect(vi.mocked(snippetsApi.expandSnippet).mock.calls[0][1]?.signal?.aborted).toBe(true));
+		pending.resolve({ success: true, source: 'snippet', sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z', shortName: 'review',
+			contextExecutorId: 'local', contextProjectPath: '/workspace/project', expandedText: 'Must not apply' });
+		await pending.promise;
+		expect(input.value).toBe('/snippet review source');
+	});
+
+	it.each(['conversation', 'literal'] as const)('blocks unsupported attachments regardless of input policy: %s', async (executionPolicy) => {
+		const source = 'printf command';
+		stubMatchMedia(false);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const onStartChat = vi.fn();
+		const { container, rerender } = render(NewChatFormTestHost, { onStartChat });
+		const input = screen.getByPlaceholderText<HTMLTextAreaElement>('How can I help you today?');
+		await fireEvent.input(input, { target: { value: source } });
+		await fireEvent.change(container.querySelector('input[type="file"]')!, {
+			target: { files: [new File(['notes'], 'notes.pdf', { type: 'application/pdf' })] },
+		});
+		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
+		await waitFor(() => expect(send.disabled).toBe(false));
+		await rerender({ executionPolicy });
+		expect(send.disabled).toBe(false);
+		expect(screen.queryByText(/Remove attachments before submitting/)).toBeNull();
+		await rerender({ executionPolicy, supportsImages: false, fileAttachmentMimeTypes: [] });
+		expect(await screen.findByText(/Remove attachments before submitting/)).toBeTruthy();
+		expect(send.disabled).toBe(true);
+		await fireEvent.click(send);
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+		expect(onStartChat).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove attachment notes.pdf' }));
+		expect(send.disabled).toBe(!source);
+		expect(screen.queryByText(/Remove attachments before submitting/)).toBeNull();
 	});
 
 	it('does not apply a pending expansion after the project path changes', async () => {

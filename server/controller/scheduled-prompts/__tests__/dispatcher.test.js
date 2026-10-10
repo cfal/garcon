@@ -34,6 +34,18 @@ function prompt(target, text = 'Review the current work') {
 }
 
 describe('scheduled prompt dispatcher', () => {
+  it('expands chat IDs without trimming executable source', async () => {
+    const submitScheduledExistingChat = mock(async input => ({ type: 'sent', chatId: input.chatId }));
+    const dispatcher = new ScheduledPromptDispatcher({
+      chatIds: { allocate: () => CREATED_CHAT_ID },
+      commands: { submitScheduledExistingChat, async submitScheduledStart() { throw new Error('unexpected'); } },
+    });
+    const source = '/md printf "{{chat_id}} \\{{chat_id}}"  \n';
+    const scheduled = prompt({ type: 'existing-chat', chatId: CREATED_CHAT_ID, busyBehavior: 'queue' }, source);
+    await dispatcher.dispatch(scheduled, '2030-01-01T09:00:00.000Z');
+    expect(submitScheduledExistingChat.mock.calls[0][0]).toMatchObject({ command: `/md printf "${CREATED_CHAT_ID} {{chat_id}}"  \n` });
+  });
+
   it('forwards complete new-chat configuration through chat commands', async () => {
     const calls = [];
     const allocate = mock(() => CREATED_CHAT_ID);

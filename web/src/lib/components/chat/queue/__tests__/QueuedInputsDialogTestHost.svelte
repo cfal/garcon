@@ -10,6 +10,7 @@
 	import type { QueueEntryPlacement } from '$shared/chat-command-contracts';
 
 	interface Props {
+		executionKey?: string;
 		initialQueue: ChatQueueState;
 		onCreate: (content: string) => Promise<void>;
 		onReplace: (entryId: string, content: string, expectedRevision: number) => Promise<void>;
@@ -25,6 +26,7 @@
 	}
 
 	let {
+		executionKey = '',
 		initialQueue,
 		onCreate,
 		onReplace,
@@ -67,6 +69,8 @@
 
 {#if open}
 	<QueuedInputsDialog
+		chatId="1783725900000000"
+		{executionKey}
 		open={true}
 		{queue}
 		{editor}

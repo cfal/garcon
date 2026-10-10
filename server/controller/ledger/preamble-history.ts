@@ -71,7 +71,8 @@ export function sanitizeRecordedPreamblePrefixes(input: {
   const used = new Set<number>();
   const messages: SanitizedPreambleMessage[] = [];
   for (const message of input.messages) {
-    if (!(message instanceof UserMessage) || !message.content.startsWith(PREAMBLE_OPEN_PREFIX)) {
+    if (!(message instanceof UserMessage) || message.metadata?.contentMode === 'literal'
+      || !message.content.startsWith(PREAMBLE_OPEN_PREFIX)) {
       messages.push({ message });
       continue;
     }

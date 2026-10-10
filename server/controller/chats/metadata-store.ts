@@ -399,7 +399,7 @@ function boundedPreview(text: string, maxChars: number): string {
 
 function extractPreviewText(msg: ChatMessage | null | undefined): string {
   if (!msg) return '';
-  if (msg.type === 'user-message' || msg.type === 'assistant-message') {
+  if (msg.type === 'user-message' || msg.type === 'assistant-message' || msg.type === 'command-output') {
     const content = typeof msg.content === 'string' ? msg.content : '';
     return content;
   }

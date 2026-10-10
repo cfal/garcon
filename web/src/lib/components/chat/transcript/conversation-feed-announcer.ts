@@ -37,7 +37,8 @@ function isAnnounceableResponseMessageType(
 	messageType: string,
 	hiddenToolTypes: readonly string[],
 ): boolean {
-	if (messageType === 'assistant-message' || messageType === 'permission-request') return true;
+	if (messageType === 'assistant-message' || messageType === 'permission-request'
+		|| messageType === 'command-output' || messageType === 'command-result') return true;
 	if (
 		messageType === 'unknown-tool-use' ||
 		messageType === 'external-tool-use' ||
@@ -136,6 +137,10 @@ export function announcementForAppendedRow(
 ): string | null {
 	if (row.kind === 'local-notice') return plainAnnouncementText(row.content) || null;
 	const message = row.message;
+	if (message.type === 'command-output' || message.type === 'command-result'
+		|| (message.type === 'user-message' && message.metadata?.contentMode === 'literal')) {
+		return message.content.length <= 4096 ? message.content : `${message.content.slice(0, 4096)}...`;
+	}
 	if (message instanceof UserMessage && message.presentation?.style) {
 		const label = cliPresentationLabel(message.presentation.style);
 		const title = message.presentation.title ? `: ${message.presentation.title}` : '';
@@ -358,6 +363,7 @@ export class ConversationFeedAnnouncerState {
 		if (row.kind !== 'message') return false;
 		if (
 			row.message instanceof AssistantMessage ||
+			row.message.type === 'command-output' || row.message.type === 'command-result' ||
 			row.message instanceof PermissionRequestMessage
 		) {
 			return true;

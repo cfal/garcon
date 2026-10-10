@@ -88,6 +88,8 @@ function createFixture(overrides = {}) {
     {
       projectAdmission,
       attachmentAdmission,
+      executionPolicy: overrides.executionPolicy,
+      workingDirectorySettlement: overrides.workingDirectorySettlement,
       unsettledQueueReceiptKeys: () => new Set(),
       appendControlReceipt,
       isControlInputViewCurrent: overrides.isControlInputViewCurrent ?? (() => true),
@@ -113,6 +115,93 @@ describe('ChatExecutionCoordinator', () => {
 
   afterEach(async () => {
     coordinator.beginShutdown();
+  });
+
+  it('retains a committed terminal owner across Stop and interrupt-and-send while cwd settles', async () => {
+    const inspection = deferred();
+    const fixture = createFixture({
+      executionPolicy: () => 'literal',
+      workingDirectorySettlement: { settle: mock(() => inspection.promise) },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'command-1' });
+    await coordinator.runReservedTurn(reservation, 'cd next', { turnId: 'command-1' });
+    coordinator.markRunTerminalCommitted('chat-1', 'command-1');
+    const settling = coordinator.onAgentTurnTerminal('chat-1', { turnId: 'command-1' });
+    await coordinator.createChatQueueEntry('chat-1', 'pwd');
+    expect(await coordinator.interruptActiveTurn('chat-1')).toBe('already-idle');
+    expect((await coordinator.stopActiveTurn('chat-1')).outcome).toBe('already-idle');
+    expect(coordinator.ownsExecution('chat-1')).toBe(true);
+    expect(fixture.turnRunner.abortSession).not.toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(1);
+    inspection.resolve({ kind: 'settled' });
+    await settling;
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    expect((await coordinator.readChatExecutionControl('chat-1')).entries).toHaveLength(1);
+  });
+
+  it.each(['failed', 'cwd-failed', 'cwd-threw'])('pauses waiting literal work after a direct %s terminal', async (failure) => {
+    const fixture = createFixture({
+      executionPolicy: () => 'literal',
+      workingDirectorySettlement: { settle: async () => {
+        if (failure === 'cwd-threw') throw new Error('Unexpected settlement failure');
+        return failure === 'cwd-failed' ? { kind: 'failed', message: 'Cwd persistence failed' } : { kind: 'settled' };
+      } },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'command-1' });
+    await coordinator.runReservedTurn(reservation, 'false', { turnId: 'command-1' });
+    await coordinator.createChatQueueEntry('chat-1', 'pending');
+    coordinator.markRunTerminalCommitted('chat-1', 'command-1');
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: 'command-1' }, failure === 'failed' ? 'failed' : 'finished');
+    await coordinator.checkChatIdle('chat-1');
+    const control = await coordinator.readChatExecutionControl('chat-1');
+    expect(control.pause).toMatchObject({ kind: 'turn-failed', turnId: 'command-1' });
+    expect(control.entries).toHaveLength(1);
+    expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('pauses literal work when direct admission fails before a terminal exists', async () => {
+    const admission = deferred();
+    const fixture = createFixture({ executionPolicy: () => 'literal', turnRunner: { runAgentTurn: () => admission.promise } });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'command-1' });
+    const running = coordinator.runReservedTurn(reservation, 'command', { turnId: 'command-1' }).catch(error => error);
+    await coordinator.createChatQueueEntry('chat-1', 'pending');
+    admission.reject(new Error('Unavailable executable'));
+    expect(await running).toBeInstanceOf(Error);
+    expect((await coordinator.readChatExecutionControl('chat-1')).pause).toMatchObject({ kind: 'turn-failed' });
+  });
+
+  it('admits server control input on literal targets', async () => {
+    const fixture = createFixture({ executionPolicy: () => 'literal' });
+    coordinator = fixture.coordinator;
+    const signal = new AbortController().signal;
+    expect(await coordinator.offerServerControlInput('chat-1', interAgentInput('printf scheduled'), signal, null)).toEqual({ kind: 'queued' });
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    expect(fixture.appendControlReceipt).toHaveBeenCalled();
+  });
+
+  it.each([false, true])('releases direct ownership after startup compensation removes the chat (terminal committed: %s)', async (terminalCommitted) => {
+    let exists = true;
+    const fixture = createFixture({
+      chatExists: () => exists,
+      executionPolicy: () => {
+        if (!exists) throw new Error('Session not initialized');
+        return 'literal';
+      },
+      turnRunner: { runAgentTurn: async () => {
+        if (terminalCommitted) coordinator.markRunTerminalCommitted('chat-1', 'command-1');
+        exists = false;
+        throw new Error('Session limit reached');
+      } },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'command-1' });
+    await expect(coordinator.runReservedTurn(reservation, 'command', { turnId: 'command-1' }))
+      .rejects.toThrow('Session limit reached');
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    await coordinator.waitForExecutionOwners();
   });
 
   it('stops a startup before a provider run exists and fences its late completion from a successor', async () => {
@@ -204,6 +293,25 @@ describe('ChatExecutionCoordinator', () => {
     expect(fixture.projection.admitQueuedInput).toHaveBeenCalledTimes(1);
     expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
     expect((await coordinator.readChatExecutionControl('chat-1')).entries).toEqual([]);
+  });
+
+  it('admits queued schedules under the current execution policy', async () => {
+    let policy = 'conversation';
+    const fixture = createFixture({ executionPolicy: () => policy });
+    coordinator = fixture.coordinator;
+    const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
+    await coordinator.enqueueAccepted({
+      command: { key: 'schedule-command', chatId: 'chat-1', clientRequestId: 'schedule-request', entryId: 'schedule-entry' },
+      content: 'printf scheduled', images: [],
+      clientMessageId: 'schedule-input', transcriptViewId: 'view-1',
+      admissionDeadline: null, settlement: { settleQueueMutation: mock(async () => undefined) },
+    });
+    policy = 'literal';
+    await coordinator.releaseTranscriptSnapshot(snapshot);
+    await coordinator.triggerDrain('chat-1');
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    expect(fixture.projection.admitQueuedInput).toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalled();
   });
 
   it('does not restore a committed queue input when provider dispatch fails', async () => {

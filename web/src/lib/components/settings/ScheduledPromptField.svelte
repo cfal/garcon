@@ -205,6 +205,7 @@
 {#if snippetContext !== undefined}
 	<ComposerSnippetPalette
 		open={snippets.palette.isOpen}
+		triggerPrefix={snippetTrigger}
 		onOpenChange={(open) => (open ? snippets.palette.openFromMenu() : snippets.palette.hide())}
 		initialQuery={snippets.palette.initialQuery}
 		{interactionKey}

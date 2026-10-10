@@ -134,6 +134,7 @@ export class StartCommands {
     if (!this.deps.agents.hasAgent(input.agentId, executorId)) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${input.agentId}`);
     }
+    const literal = this.deps.agents.executionPolicy(input.agentId, executorId) === 'literal';
     this.deps.agents.assertExecutionModeSelectionSupported(input.agentId, {
       executorId,
       thinkingMode: input.thinkingMode,
@@ -187,7 +188,7 @@ export class StartCommands {
 
     // Omitted IDs resolve the newest defaults here, at actual creation; an
     // explicit list is proven safe against this same catalog snapshot.
-    const preambleSelection = resolveNewChatPreambleSelection({
+    const preambleSelection = literal ? { revision: 0, orderedPreambleIds: [] } : resolveNewChatPreambleSelection({
       catalog: this.deps.preambles.snapshot(),
       canonicalProjectPath: projectPath,
       executorId,
@@ -211,7 +212,9 @@ export class StartCommands {
       agentId: input.agentId,
       projectPath,
       idempotencyProjectPath,
-      command: input.command,
+      // Exact retries must remain independent of executor inventory and prompt normalization.
+      idempotencyCommand: input.command,
+      command: literal ? input.command : input.command.trim(),
       images,
       model: input.model,
       apiProviderId: input.apiProviderId ?? null,
@@ -461,7 +464,7 @@ function startPayload(input: NormalizedChatStart): Record<string, unknown> {
     clientMessageId: input.clientMessageId,
     agentId: input.agentId,
     projectPath: input.idempotencyProjectPath,
-    command: input.command,
+    command: input.idempotencyCommand,
     model: input.model,
     images: input.images,
     apiProviderId: input.apiProviderId,

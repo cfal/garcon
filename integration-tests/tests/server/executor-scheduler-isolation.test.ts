@@ -43,7 +43,13 @@ for (const dialer of ['controller', 'worker'] as const) {
       const executorId = '22222222-2222-4222-8222-222222222222';
       const scheduler = new ScheduledPromptScheduler({
         store, cron, runLog: new ScheduledPromptRunLog(), chats: { getChat: () => null },
-        agents: { hasAgent: () => true, assertExecutorReady() {}, assertExecutionModeSelectionSupported() {} },
+        agents: {
+          hasAgent: () => true,
+          executionPolicy: () => 'conversation',
+          chatExecutionPolicy: () => 'conversation',
+          assertExecutorReady() {},
+          assertExecutionModeSelectionSupported() {},
+        },
         preambles: { snapshot: () => ({ revision: 0, preambles: [] }) },
         inspectProject: async (projectPath, selectedExecutor) => {
           expect(selectedExecutor).toBe(executorId);

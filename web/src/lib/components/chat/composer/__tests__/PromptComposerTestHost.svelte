@@ -60,6 +60,7 @@
 	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
 	import type { RecallPrompt } from '$lib/chat/composer/prompt-recall';
+	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '$shared/attachments';
 
 	interface Props {
 		recallPrompts?: readonly RecallPrompt[];
@@ -71,6 +72,8 @@
 		selectedAgentId?: SessionAgentId;
 		selectedThinkingMode?: ChatSessionRecord['thinkingMode'];
 		selectedStatus?: ChatStatus;
+		executionPolicy?: 'conversation' | 'literal';
+		fileAttachmentMimeTypes?: readonly string[];
 		selectedIsProcessing?: boolean;
 		isVisible?: boolean;
 		isPresented?: boolean;
@@ -110,6 +113,8 @@
 		selectedAgentId = 'claude',
 		selectedThinkingMode = 'none',
 		selectedStatus = 'running',
+		executionPolicy = 'conversation',
+		fileAttachmentMimeTypes = CHAT_FILE_ATTACHMENT_MIME_TYPES,
 		selectedIsProcessing = false,
 		isVisible = true,
 		isPresented,
@@ -338,6 +343,7 @@
 		get selectedChatId() {
 			return selectedChatId;
 		},
+		isDraft: () => selectedStatus === 'draft',
 		get selectedChat() {
 			return selectedChat;
 		},
@@ -355,6 +361,7 @@
 		getSelectableAgents: () => selectableAgents,
 		getAgent: (agentId: string) => ({
 			id: agentId,
+			executionPolicy,
 			label: labelForAgent(agentId),
 			description: '',
 			supportsFork: agentId !== 'amp',
@@ -389,6 +396,7 @@
 		getModelForSelection: modelForSelection,
 		supportsImages: (agentId: string, model: string) =>
 			modelForSelection(agentId, model)?.supportsImages ?? true,
+		fileAttachmentMimeTypes: () => fileAttachmentMimeTypes,
 		supportsFork: (agentId: string) => agentId !== 'amp',
 		supportsForkWhileRunning: () => true,
 		supportsSteering: (agentId: string) => agentId === 'codex',

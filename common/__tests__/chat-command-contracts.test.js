@@ -93,7 +93,7 @@ describe('chat command request parsers', () => {
       model: 'opus',
       permissionMode: 'default',
       thinkingMode: 'none',
-      command: 'hello',
+      command: ' hello ',
       tags: ['qa', 'review-needed'],
       origin: 'interactive',
       parentChatId: SOURCE_CHAT_ID,

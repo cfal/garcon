@@ -13,6 +13,7 @@ import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import { findModelForSelection } from '../../../../test/model-catalog';
 
 interface CatalogOverrides {
+	executionPolicy?: 'conversation' | 'literal' | null;
 	getModels?(agentId: string): ModelOption[];
 	getPermissionModes?: ModelCatalogStore['getPermissionModes'];
 	getThinkingModes?: ModelCatalogStore['getThinkingModes'];
@@ -27,6 +28,7 @@ function createForm(
 	catalogOverrides: CatalogOverrides = {},
 ): ScheduledPromptFormState {
 	const sessions = {
+		get byId() { return Object.fromEntries([...existingIds].map(id => [id, { agentId: 'claude', executorId: 'local' }])); },
 		hasChat: (chatId: string) => existingIds.has(chatId),
 		isDraft: () => false,
 	};
@@ -41,6 +43,14 @@ function createForm(
 	vi.spyOn(modelCatalog, 'isValidated', 'get').mockImplementation(() => catalogOverrides.isValidated ?? true);
 	vi.spyOn(modelCatalog, 'error', 'get').mockImplementation(() => catalogOverrides.error ?? null);
 	Object.assign(modelCatalog, {
+		getAgent: (id: string) => catalogOverrides.executionPolicy === null ? null : ({
+			id, label: id, executionPolicy: catalogOverrides.executionPolicy ?? 'conversation', defaultModel: 'gpt-5',
+			supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
+			supportsForkWhileRunning: false, supportsUpdateProjectPath: false, supportsSteering: false,
+			supportsImages: false, fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false,
+			supportedProtocols: [], authLoginSupported: false, supportedPermissionModes: ['default'],
+			supportedThinkingModes: ['none'], settings: [], defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },
+		}),
 		forExecutor: () => modelCatalog,
 		refreshIfStale: catalogOverrides.refreshIfStale ?? vi.fn(async () => {}),
 		getSelectableAgents: () => [...selectableAgentIds()],
@@ -287,6 +297,34 @@ describe('ScheduledPromptFormState', () => {
 		expect(form.canSave).toBe(false);
 	});
 
+	it('preserves literal scheduled source including slash prefixes and template-looking text', async () => {
+		const form = createForm(undefined, undefined, { executionPolicy: 'literal' });
+		await form.initialize(existingPrompt({ type: 'once', nextRunAt: '2099-01-02T09:00:00.000Z' }));
+		const source = '/markdown printf "{{chat_id}}"  \n';
+		form.prompt = source;
+		expect(form.canSave).toBe(true);
+		expect(form.buildDefinition()?.prompt).toBe(source);
+	});
+
+	it('preserves unknown-policy existing schedules without allowing unknown new-chat selection', async () => {
+		const form = createForm(undefined, undefined, { executionPolicy: null });
+		await form.initialize(existingPrompt({ type: 'once', nextRunAt: '2099-01-02T09:00:00.000Z' }));
+		form.prompt = '  /usr/bin/printf "{{chat_id}}"  \n';
+		expect(form.executionPolicy).toBeNull();
+		expect(form.canSave).toBe(true);
+		expect(form.buildDefinition()?.prompt).toBe(form.prompt);
+		form.targetType = 'new-chat';
+		expect(form.canSave).toBe(false);
+	});
+
+	it.each(['conversation', 'literal'] as const)('validates the saved rather than discarded whitespace for %s prompts', async (executionPolicy) => {
+		const form = createForm(undefined, undefined, { executionPolicy });
+		await form.initialize(existingPrompt({ type: 'once', nextRunAt: '2099-01-02T09:00:00.000Z' }));
+		form.prompt = ' '.repeat(SCHEDULED_PROMPT_MAX_LENGTH) + 'printf result\n';
+		expect(form.canSave).toBe(executionPolicy === 'conversation');
+		if (executionPolicy === 'conversation') expect(form.buildDefinition()?.prompt).toBe('printf result');
+	});
+
 	it('validates the prompt length after chat ID substitution', () => {
 		const form = createForm();
 		const tomorrow = new Date();
@@ -306,6 +344,14 @@ describe('ScheduledPromptFormState', () => {
 		form.prompt = `${'x'.repeat(SCHEDULED_PROMPT_MAX_LENGTH - 16)}${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`;
 		expect(form.promptError).toBeNull();
 		expect(form.canSave).toBe(true);
+	});
+
+	it.each(['conversation', 'literal'] as const)('validates template expansion on the normalized %s source', async (executionPolicy) => {
+		const form = createForm(undefined, undefined, { executionPolicy });
+		await form.initialize(existingPrompt({ type: 'once', nextRunAt: '2099-01-02T09:00:00.000Z' }));
+		form.prompt = ' '.repeat(100) + 'x'.repeat(32_000 - 100 - '{{chat_id}} '.length) + '{{chat_id}} ';
+		expect(form.canSave).toBe(executionPolicy === 'conversation');
+		if (executionPolicy === 'conversation') expect(form.buildDefinition()?.prompt).toBe(form.prompt.trim());
 	});
 
 	it('starts a recurring schedule at the visible date and time of a converted one-off prompt', async () => {

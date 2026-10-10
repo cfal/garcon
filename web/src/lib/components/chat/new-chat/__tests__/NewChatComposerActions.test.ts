@@ -160,6 +160,24 @@ describe('NewChatForm composer actions', () => {
 		vi.clearAllMocks();
 	});
 
+	it('cancels pending refinement when the selection becomes literal without replacing the draft', async () => {
+		const pending = deferredRefinement();
+		vi.mocked(refinementApi.refinePrompt).mockReturnValueOnce(pending.promise);
+		const { rerender } = render(NewChatFormTestHost);
+		await waitFor(() => expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull());
+		const input = screen.getByPlaceholderText<HTMLTextAreaElement>('How can I help you today?');
+		await fireEvent.input(input, { target: { value: 'Original draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Refine prompt' }));
+		await waitFor(() => expect(refinementApi.refinePrompt).toHaveBeenCalledOnce());
+		await rerender({ executionPolicy: 'literal' });
+		await waitFor(() => expect(input.readOnly).toBe(false));
+		expect(vi.mocked(refinementApi.refinePrompt).mock.calls[0][1]?.signal?.aborted).toBe(true);
+		pending.resolve({ success: true, refinedPrompt: 'Must not apply' });
+		await pending.promise;
+		expect(input.value).toBe('Original draft');
+		expect(screen.getByRole('button', { name: 'Refine prompt' })).toBeTruthy();
+	});
+
 	it('places Refine between expanded composer and Start and enforces draft limits', async () => {
 		const { messageInput } = await renderReady();
 		const open = screen.getByRole('button', { name: 'Open expanded composer' });

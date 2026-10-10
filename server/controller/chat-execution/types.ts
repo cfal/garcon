@@ -30,11 +30,25 @@ import { DomainError } from '../../common/domain-error.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
 import type { QueuedTurnFinalizationOutcome } from './turn-finalization-tracker.ts';
 import type { QueueExecutionAttempt } from './execution-attempt.ts';
+import type { WorkingDirectorySettlementPort } from '../projects/working-directory-settlement.js';
+import type { QueuedSteerDeliveryOptions } from './queued-steer-delivery.ts';
 import type {
   QueueCommandIdentity,
   TransitionContext,
   TransitionRejection,
 } from './chat-execution-control-transitions.ts';
+
+export interface ChatExecutionCoordinatorOptions {
+  executionPolicy?: (chatId: string) => 'conversation' | 'literal';
+  workingDirectorySettlement?: WorkingDirectorySettlementPort;
+  projectAdmission: ProjectAdmissionPort;
+  attachmentAdmission: QueuedAttachmentAdmissionPort;
+  canDispatch?: (chatId: string) => boolean;
+  isControlInputViewCurrent: (chatId: string, viewId: string) => boolean;
+  unsettledQueueReceiptKeys?: (chatId: string) => ReadonlySet<string>;
+  appendControlReceipt?: (chatId: string, entry: StoredControlInputEntry) => void;
+  resolveSteerContent?: QueuedSteerDeliveryOptions['resolveContent'];
+}
 
 export type UserInputAdmissionOptions = Pick<
   RunAgentTurnOptions,

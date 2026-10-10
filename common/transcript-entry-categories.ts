@@ -39,6 +39,8 @@ export function transcriptEntryCategoryForMessage(message: ChatMessage): Transcr
   switch (message.type) {
     case 'user-message':
     case 'assistant-message':
+    case 'command-output':
+    case 'command-result':
     case 'compaction':
       return 'conversation';
     case 'thinking':

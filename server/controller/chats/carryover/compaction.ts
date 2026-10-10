@@ -6,10 +6,8 @@ import {
   DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
   parseAgentSwitchContextWindowTokens,
 } from '../../../../common/handoff-sizing.js';
-import type { CarriedContext } from '../../../../common/transcript-seed.js';
 import {
   CARRYOVER_INJECTION_MAX_CHARS,
-  createCarryoverTranscript,
 } from '../../../../common/transcript-seed.js';
 import { isRecord } from '../../../../common/json.js';
 import { resolveGenerationContextForSelection, type GenerationDiscoveryAgents } from '../../settings/generation-config-source.js';
@@ -27,7 +25,6 @@ import {
 import type { CarryOverOutcome } from './outcome.js';
 import { retryAfterSessionLoss } from '../../agents/session-loss-retry.js';
 import {
-  spineStart,
   type CompactionDestination,
   type CompactionPromptUnavailableReason,
 } from '../token-fitting/carryover.js';
@@ -60,7 +57,7 @@ export interface CarryOverCompactionAgents extends GenerationDiscoveryAgents {
 
 export interface CarryOverCompactionDeps {
   readonly agents: CarryOverCompactionAgents;
-  readonly fitting: Pick<TokenFitting, 'assessCarryover' | 'fitCompactionPrompt'>;
+  readonly fitting: Pick<TokenFitting, 'assessCarryover' | 'fitCompactionPrompt' | 'projectCompactedCarryover'>;
   getUiSettings(): { agentSwitchCompaction?: unknown } | null | undefined;
   onCompactionStarted?(chatId: string): void;
 }
@@ -148,10 +145,7 @@ export class CarryOverCompactionService {
           signal: createGenerationRequestSignal(input.signal, CARRYOVER_COMPACTION_TIMEOUT_MS),
         }), input.signal);
         const summary = validateCompactionSummary(raw);
-        const context = projectSummaryWithSpine(
-          summary,
-          input.messages.slice(spineStart(input.messages)),
-        );
+        const context = await this.deps.fitting.projectCompactedCarryover(input.messages, summary, input.signal);
         return { kind: 'compacted', context, summary };
       } catch (error) {
         input.signal?.throwIfAborted();
@@ -207,20 +201,6 @@ function validateCompactionSummary(raw: string): string {
     );
   }
   return inner;
-}
-
-function projectSummaryWithSpine(
-  summary: string,
-  spine: readonly ChatMessage[],
-): CarriedContext {
-  const projected = createCarryoverTranscript(spine, CARRYOVER_INJECTION_MAX_CHARS, { summary });
-  if (!projected || projected.summaryTruncated
-    || projected.prefix.length > CARRYOVER_INJECTION_MAX_CHARS) {
-    throw new Error(
-      `Agent-switch compaction produced a summary too large for the ${CARRYOVER_INJECTION_MAX_CHARS} character carryover limit`,
-    );
-  }
-  return projected;
 }
 
 function compactionRequired(input: CarryOverCompactionInput): DomainError {

@@ -17,7 +17,6 @@ import { QueueExecutionAttempt } from './execution-attempt.ts';
 import type { QueuedTurnFinalizationOutcome } from './turn-finalization-tracker.js';
 import {
   hasPendingTurnInput,
-  type StoredControlInputEntry,
   type StoredChatExecutionControlState,
 } from './control-state.ts';
 import type { ChatExecutionControlRepository } from './chat-execution-control-repository.ts';
@@ -39,6 +38,7 @@ import {
   type AgentTurnRunnerPort,
   type ChatExecutionService,
   type ChatExecutionCoordinatorEvents,
+  type ChatExecutionCoordinatorOptions,
   type ChatExistsResolver,
   type CapturedSteerTarget,
   type ChatIdleCallback,
@@ -67,8 +67,12 @@ import { ExecutionOwnership } from './execution-ownership.ts';
 import { AcceptedInputHandler } from './accepted-input-handler.ts';
 import { AcceptedInputTranscript, type AcceptedInputTranscriptPort } from './accepted-input-transcript.ts';
 import { SteerInputDelivery } from './steer-input-delivery.ts';
-import { QueuedSteerDelivery, type QueuedSteerDeliveryOptions } from './queued-steer-delivery.ts';
+import { QueuedSteerDelivery } from './queued-steer-delivery.ts';
 import { ControlInputDelivery } from './control-input-delivery.ts';
+import { settleAgentTurn } from './turn-terminal-settlement.js';
+import { controlInputBlockedError, serverShuttingDownError, chatNotFoundError } from './execution-errors.js';
+import type { TurnEventMetadata } from '../agents/event-bus.js';
+import type { WorkingDirectorySettlement, WorkingDirectorySettlementPort } from '../projects/working-directory-settlement.js';
 
 export type { QueueCommandIdentity } from './chat-execution-control-transitions.ts';
 export {
@@ -84,17 +88,6 @@ export {
 } from './types.ts';
 
 const logger = createLogger('queue');
-
-interface ChatExecutionCoordinatorOptions {
-  projectAdmission: ProjectAdmissionPort;
-  attachmentAdmission: QueuedAttachmentAdmissionPort;
-  canDispatch?: (chatId: string) => boolean;
-  isControlInputViewCurrent: (chatId: string, viewId: string) => boolean;
-  unsettledQueueReceiptKeys?: (chatId: string) => ReadonlySet<string>;
-  appendControlReceipt?: (chatId: string, entry: StoredControlInputEntry) => void;
-  selectionAdmissionLock?: KeyedPromiseLock;
-  resolveSteerContent?: QueuedSteerDeliveryOptions['resolveContent'];
-}
 
 export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordinatorEvents> implements ChatExecutionService {
   #locks = new KeyedPromiseLock();
@@ -114,6 +107,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #steerInputDelivery: SteerInputDelivery;
   #queuedSteers: QueuedSteerDelivery;
   #controlInputDelivery: ControlInputDelivery;
+  #executionPolicy: (chatId: string) => 'conversation' | 'literal';
+  #workingDirectorySettlement?: WorkingDirectorySettlementPort;
 
   constructor(
     turnRunner: AgentTurnRunnerPort,
@@ -121,7 +116,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     getDrainOptions: QueueDrainOptionsResolver,
     chatExists: ChatExistsResolver,
     controls: ChatExecutionControlRepository,
-    options: ChatExecutionCoordinatorOptions,
+    options: ChatExecutionCoordinatorOptions & { selectionAdmissionLock?: KeyedPromiseLock },
   ) {
     super();
     if (!turnRunner) throw new Error('ChatExecutionCoordinator requires an agent turn runner');
@@ -141,6 +136,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     const appendControlReceipt = options.appendControlReceipt ?? (() => undefined);
     const selectionAdmissionLock = options.selectionAdmissionLock ?? new KeyedPromiseLock();
     this.#turnRunner = turnRunner;
+    this.#executionPolicy = options.executionPolicy ?? (() => 'conversation');
+    this.#workingDirectorySettlement = options.workingDirectorySettlement;
     this.#getDrainOptions = getDrainOptions;
     this.#chatExists = chatExists;
     this.#canDispatch = options.canDispatch ?? (() => true);
@@ -301,20 +298,19 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
 
   async onAgentTurnTerminal(
     chatId: string,
-    turn: TurnIdentity | undefined,
+    turn: TurnEventMetadata | undefined,
     outcome: 'finished' | 'failed' = 'finished',
-  ): Promise<void> {
-    const attempt = this.#ownership.attempt(chatId);
-    if (!attempt?.matches(turn)) {
-      await this.checkChatIdle(chatId);
-      return;
-    }
-    if (outcome === 'failed' && attempt.entryId) {
-      await this.#controlOperations.pauseAfterDispatchFailure(chatId, attempt.entryId);
-    }
-    this.#retireAttempt(chatId, attempt);
-    this.#invalidateProcessing(chatId);
+  ): Promise<WorkingDirectorySettlement> {
+    return settleAgentTurn({ ownership: this.#ownership, control: this.#controlOperations,
+      workingDirectory: this.#workingDirectorySettlement, executionPolicy: this.#executionPolicy,
+      checkIdle: id => this.checkChatIdle(id), retire: (id, attempt) => {
+        this.#retireAttempt(id, attempt);
+        this.#invalidateProcessing(id);
+      },
+    }, chatId, turn, outcome);
   }
+
+  markRunTerminalCommitted = (chatId: string, runId: string): void => this.#ownership.markRunTerminalCommitted(chatId, runId);
 
   replaceTurnWithTranscriptSnapshotReservation(
     chatId: string,
@@ -858,14 +854,29 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       // settles. Its late finally block has no execution state left to release.
       return;
     }
-    this.#ownership.releaseDirect(reservation);
     const attempt = this.#ownership.attempt(reservation.chatId);
-    if (attempt && outcome !== 'completed' && !this.#turnRunner.isChatRunning(reservation.chatId)) {
-      this.#retireAttempt(reservation.chatId, attempt);
+    let released = false;
+    try {
+      if (outcome === 'failed' && !attempt?.hasTerminalCommit && this.#chatExists(reservation.chatId)
+        && this.#executionPolicy(reservation.chatId) === 'literal') {
+        const turnId = attempt?.identity().turnId;
+        if (turnId) await this.#controlOperations.pauseAfterTurnFailure(reservation.chatId, turnId);
+      }
+    } finally {
+      if (this.#ownership.isDirectCurrent(reservation)) {
+        this.#ownership.releaseDirect(reservation);
+        released = true;
+        // Startup compensation removes the chat before its terminal notification can retire the attempt.
+        const awaitingTerminal = attempt?.hasTerminalCommit && this.#chatExists(reservation.chatId);
+        if (attempt && outcome !== 'completed' && !awaitingTerminal && !this.#turnRunner.isChatRunning(reservation.chatId)) {
+          this.#retireAttempt(reservation.chatId, attempt);
+        }
+        this.#ownership.notifyOwnersChanged();
+        this.#invalidateProcessing(reservation.chatId);
+      }
     }
+    if (!released) return;
     const drainRequested = this.#ownership.hasDrainRequest(reservation.chatId);
-    this.#ownership.notifyOwnersChanged();
-    this.#invalidateProcessing(reservation.chatId);
     if (!this.#chatExists(reservation.chatId) || this.#shuttingDown) return;
     if (outcome !== 'released' || drainRequested) {
       try {
@@ -948,6 +959,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
 
   async #performStop(chatId: string): Promise<ChatStopOutcome> {
     const attempt = this.#ownership.attempt(chatId);
+    if (attempt?.hasTerminalCommit) return 'already-idle';
     const interruption = new Error('Turn interrupted by the user');
     if (attempt) this.#ownership.abortAdmission(chatId, interruption);
     try {
@@ -978,21 +990,4 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#ownership.clearDeletionSuppression(chatId);
     this.#requestDrain(chatId, 'deletion rollback');
   }
-}
-
-function controlInputBlockedError(): DomainError {
-  return new DomainError(
-    'SESSION_BUSY',
-    'Server control input is currently blocked',
-    409,
-    true,
-  );
-}
-
-function serverShuttingDownError(): DomainError {
-  return new DomainError('SERVER_SHUTTING_DOWN', 'The server is shutting down', 503, true);
-}
-
-function chatNotFoundError(): DomainError {
-  return new DomainError('SESSION_NOT_FOUND', 'Session not found', 404);
 }

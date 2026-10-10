@@ -3,6 +3,8 @@ import {
   AssistantMessage,
   BashToolUseMessage,
   CliRowMessage,
+  CommandOutputMessage,
+  CommandResultMessage,
   TranscriptNoticeMessage,
   ToolResultMessage,
   UserMessage,
@@ -12,6 +14,74 @@ import { renderTranscriptExportMarkdown } from '../markdown.ts';
 const AT = '2026-08-23T00:00:00.000Z';
 
 describe('Markdown transcript export', () => {
+  const context = { executorId: 'local', projectPath: '/synthetic' };
+  const stdout = (content, offset = 0, outputContext = context) => new CommandOutputMessage(AT, 'command', 'stdout', 'markdown', content, outputContext, offset);
+  const result = (capture = 'complete') => new CommandResultMessage(AT, 'command', {
+    outcome: 'finished', exitCode: 0, signal: null, capture, cwd: { kind: 'reported', path: '/synthetic' },
+  });
+
+  it.each([
+    ['unfinished', [stdout('# incomplete heading')]],
+    ['incomplete', [stdout('# incomplete heading'), result('incomplete')]],
+    ['truncated', [stdout('# incomplete heading'), result('truncated')]],
+    ['partial tail', [stdout('# incomplete heading', 10), result()]],
+    ['noncontiguous', [stdout('# incomplete heading'), stdout('suffix', 100), result()]],
+    ['changed context', [stdout('# incomplete heading'), stdout('suffix', 20, { ...context, projectPath: '/different' }), result()]],
+    ['publication gap', [stdout('# incomplete heading'), new TranscriptNoticeMessage(AT, 'Lost output', { type: 'publication-gap' }), result()]],
+  ])('fences %s Markdown output', (_label, messages) => {
+    const document = renderTranscriptExportMarkdown(model(messages.map((message, index) => entry(index + 1, 'conversation', message))));
+    expect(document).toContain('```text\n# incomplete heading\n```');
+  });
+
+  it('renders complete stdout as Markdown and stderr as literal text', () => {
+    const document = renderTranscriptExportMarkdown(model([
+      entry(1, 'conversation', stdout('# complete heading')),
+      entry(2, 'conversation', new CommandOutputMessage(AT, 'command', 'stderr', 'plain', 'diagnostic', context)),
+      entry(4, 'conversation', result()),
+    ]));
+    expect(document).toContain('\n\n# complete heading\n\n');
+    expect(document).toContain('```text\ndiagnostic\n```');
+  });
+
+  it('keeps duplicate stream records literal and preserves their original ordinals', () => {
+    const document = renderTranscriptExportMarkdown(model([
+      entry(2, 'conversation', stdout('# first')),
+      entry(5, 'conversation', stdout('# second', 7)),
+      entry(6, 'conversation', result()),
+    ]));
+    expect(document).toContain('## [2]');
+    expect(document).toContain('## [5]');
+    expect(document).toContain('```text\n# first\n```');
+    expect(document).toContain('```text\n# second\n```');
+  });
+
+  it('fences a settled literal tail without interpreting its Markdown-looking contents', () => {
+    const document = renderTranscriptExportMarkdown(model([
+      entry(1, 'conversation', new CommandOutputMessage(AT, 'command', 'stdout', 'plain', '# retained tail',
+        { executorId: 'local', projectPath: '/synthetic' }, 65_536)),
+      entry(2, 'conversation', new CommandResultMessage(AT, 'command', {
+        outcome: 'finished', exitCode: 0, signal: null, capture: 'truncated', cwd: { kind: 'reported', path: '/synthetic' },
+      })),
+    ]));
+    expect(document).toContain('```text\n# retained tail\n```');
+    expect(document).toContain('Output truncated');
+  });
+
+  it('retains literal command input, both streams, and status without interpreting markup', () => {
+    const document = renderTranscriptExportMarkdown(model([
+      entry(1, 'conversation', new UserMessage(AT, '  printf "**literal**"\n', undefined, { contentMode: 'literal' })),
+      entry(2, 'conversation', new CommandOutputMessage(AT, 'command', 'stdout', 'plain', '<garcon-get-chat-id />', { executorId: 'local', projectPath: '/synthetic' })),
+      entry(3, 'conversation', new CommandOutputMessage(AT, 'command', 'stderr', 'plain', 'diagnostic', { executorId: 'local', projectPath: '/synthetic' })),
+      entry(4, 'conversation', new CommandResultMessage(AT, 'command', {
+        outcome: 'failed', exitCode: 7, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/synthetic' },
+      })),
+    ]));
+    expect(document).toContain('  printf "**literal**"\n');
+    expect(document).toContain('```text\n<garcon-get-chat-id />\n```');
+    expect(document).toContain('diagnostic');
+    expect(document).toContain('Exit 7');
+  });
+
   it('labels styleless collapsible CLI user messages without inventing a style', () => {
     const document = renderTranscriptExportMarkdown(model([
       entry(1, 'conversation', new UserMessage(

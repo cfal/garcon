@@ -51,6 +51,9 @@ export function jsonErrorFromUnknown(
       error.retryable,
     );
   }
+  if (error instanceof AgentIntegrationError && error.code === 'INVALID_SETTINGS') {
+    return jsonError(error.message, 422, error.code, false);
+  }
   if (isDomainError(error)) {
     return jsonError(error.message, error.status, error.code, error.retryable);
   }

@@ -285,6 +285,11 @@ export class ExecutionOwnership {
     return this.#chats.get(chatId)?.turn?.attempt ?? undefined;
   }
 
+  markRunTerminalCommitted(chatId: string, runId: string): void {
+    const attempt = this.attempt(chatId);
+    if (attempt?.identity().turnId === runId) attempt.markTerminalCommitted();
+  }
+
   hasAttempt(chatId: string): boolean {
     return this.#chats.get(chatId)?.turn != null;
   }

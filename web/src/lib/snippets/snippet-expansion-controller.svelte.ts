@@ -1,5 +1,11 @@
 import { expandSnippet } from '$lib/api/snippets.js';
+import { ApiError } from '$lib/api/client.js';
 import type { ExpandSnippetRequest, ExpandSnippetResponse } from '$shared/snippets';
+
+export function snippetErrorDetail(error: unknown): string {
+	if (error instanceof ApiError) return error.details || error.message;
+	return error instanceof Error ? error.message : String(error);
+}
 
 export type SnippetExpansionResult =
 	| { kind: 'expanded'; response: ExpandSnippetResponse; generation: number }

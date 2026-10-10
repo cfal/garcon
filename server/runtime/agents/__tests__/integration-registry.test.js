@@ -64,6 +64,8 @@ function createFacetIntegration(host, id, lifecycle = {}) {
       translateLegacySettings: async () => null,
     },
     auth: null,
+    literalExecution: null,
+    readiness: null,
     commands: null,
     compaction: null,
     forking: null,

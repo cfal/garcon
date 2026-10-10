@@ -48,6 +48,8 @@ export interface ModelOption {
 }
 
 export interface AgentMetadata {
+	executionPolicy?: 'conversation' | 'literal';
+	selectionLabel?: string;
 	id: string;
 	label: string;
 	description?: string;
@@ -337,6 +339,8 @@ function parseCatalogResponse(data: unknown): {
 		if (!isAgentId(id)) continue;
 		agentMetadata[id] = {
 			id,
+			executionPolicy: entry.executionPolicy === 'literal' ? 'literal' : 'conversation',
+			selectionLabel: typeof entry.selectionLabel === 'string' ? entry.selectionLabel : 'Model',
 			label: typeof entry.label === 'string' ? entry.label : id,
 			description: typeof entry.description === 'string' ? entry.description : undefined,
 			supportsCompact: Boolean(entry.supportsCompact),
@@ -383,6 +387,7 @@ function emptySnapshot(): ModelCatalogSnapshot {
 }
 
 function normalizeSnapshot(parsed: Record<string, unknown>): ModelCatalogSnapshot {
+  if (parsed.schemaVersion !== 2) return emptySnapshot();
 	const agentModels =
 		typeof parsed.agentModels === 'object' && parsed.agentModels !== null
 			? (parsed.agentModels as AgentModels)
@@ -432,8 +437,12 @@ function readPersisted(executorId: string): ModelCatalogSnapshot {
 }
 
 function persist(executorId: string, snapshot: ModelCatalogSnapshot): void {
-	if (executorId === 'local') setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog, JSON.stringify(snapshot));
-	else setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors, JSON.stringify({ ...readExecutorSnapshots(), [executorId]: snapshot }));
+	const persisted = { ...snapshot, schemaVersion: 2 };
+	if (executorId === 'local') setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog, JSON.stringify(persisted));
+	else {
+		const snapshots = Object.fromEntries(Object.entries(readExecutorSnapshots()).map(([id, value]) => [id, { ...value, schemaVersion: 2 }]));
+		setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors, JSON.stringify({ ...snapshots, [executorId]: persisted }));
+	}
 }
 
 interface CatalogApplyResult {
@@ -505,7 +514,8 @@ export class ModelCatalogStore {
 			}
 			this.#executorAvailability.set(executor.id, availability);
 		}
-		setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors, JSON.stringify(persisted));
+		const snapshots = Object.fromEntries(Object.entries(persisted).map(([id, value]) => [id, { ...value, schemaVersion: 2 }]));
+		setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors, JSON.stringify(snapshots));
 	}
 
 	invalidate(): void {

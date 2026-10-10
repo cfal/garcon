@@ -338,6 +338,10 @@
 		enabled: () => localSettings.browserNotifications,
 		isFocused: () => document.visibilityState === 'visible' && document.hasFocus(),
 		isChatProcessing: (id) => chatSessions.isChatProcessing(id),
+		allowsNotifications: (id) => {
+			const chat = chatSessions.byId[id];
+			return !!chat && modelCatalog.forExecutor(chat.executorId).getAgent(chat.agentId)?.executionPolicy === 'conversation';
+		},
 	});
 	onMount(() => {
 		browserNotifications.start();

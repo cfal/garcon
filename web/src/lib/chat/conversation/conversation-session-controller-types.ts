@@ -134,6 +134,7 @@ export interface SessionControllerDeps {
 		| 'selectionFor'
 		| 'selectionValueFor'
 		| 'getAgentLabel'
+		| 'getAgent'
 		| 'getDefaultAgentSettings'
 		| 'getPermissionModes'
 		| 'getThinkingModes'

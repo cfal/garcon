@@ -111,6 +111,7 @@ const chatViews = {
   })),
 };
 const agents = {
+  executionPolicy: () => 'conversation',
   startSession: mock(() => undefined),
   isAgentSessionRunning: mock(() => false),
 };

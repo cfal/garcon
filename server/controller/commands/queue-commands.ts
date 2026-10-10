@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { hasLeadingSlashCommand } from '../../../common/scheduled-prompts.js';
 import type {
   QueueEntryCommandResponse,
   QueueEntryCreateCommandRequest,
@@ -221,12 +222,16 @@ export class QueueCommands {
 
   async submitScheduledExistingChat(input: ScheduledExistingChatInput): Promise<ScheduledExistingChatOutcome> {
     const chatId = input.chatId.trim();
-    const command = input.command.trim();
-    this.support.assertContent(command);
+    this.support.assertContent(input.command);
     return this.support.withChatMutationLock(chatId, async (deadline) => {
       const session = this.deps.chats.getChat(chatId);
       if (!session) {
         throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+      }
+      const policy = this.deps.agents.executionPolicy(session.agentId, session.executorId);
+      const command = policy === 'conversation' ? input.command.trim() : input.command;
+      if (policy === 'conversation' && hasLeadingSlashCommand(command)) {
+        throw new CommandValidationError('VALIDATION_FAILED', 'Scheduled prompts cannot start with a slash command');
       }
       const transcriptViewId = input.transcriptViewId
         ?? await this.deps.agents.currentTranscriptViewId(chatId);

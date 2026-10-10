@@ -44,11 +44,13 @@ export function optimisticUserInput(
 	content: string,
 	images: ChatImage[],
 	clientMessageId: string,
+	contentMode?: 'literal',
 ): OptimisticUserInput {
 	return {
 		chatId,
 		clientMessageId,
 		content,
+		...(contentMode ? { contentMode } : {}),
 		createdAt: new Date().toISOString(),
 		delivery: 'pending',
 		...(images.length > 0 ? { images } : {}),

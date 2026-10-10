@@ -20,6 +20,7 @@ function optimisticInputToRow(input: OptimisticUserInput): ChatTranscriptRow {
 		id: `optimistic:${input.clientMessageId}`,
 		message: new UserMessage(input.createdAt, input.content, input.images, {
 			clientMessageId: input.clientMessageId,
+			...(input.contentMode ? { contentMode: input.contentMode } : {}),
 		}),
 		...(input.delivery === 'pending' ? { awaitingDelivery: true } : {}),
 	};

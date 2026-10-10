@@ -44,7 +44,7 @@ describe.each(['local', '22222222-2222-4222-8222-222222222222'])('cached catalog
 		const options = { modelCatalog: root, remoteSettings, selectableAgentIds: ['sample'] };
 		const newChat = new NewChatFormState(options);
 		const scheduled = new ScheduledPromptFormState(root, remoteSettings, {
-			hasChat: () => false, isDraft: () => false,
+			byId: {}, hasChat: () => false, isDraft: () => false,
 		}, options);
 		for (const startup of [newChat, scheduled.startup]) {
 			startup.executorId = executorId;

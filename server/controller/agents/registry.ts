@@ -1,4 +1,5 @@
 import type {
+  AgentIntegration,
   AgentNativeSessionRef,
   AgentProjectPathUpdatePreparation,
   AgentSteerResult,
@@ -6,6 +7,7 @@ import type {
   AgentTranscriptSourceLocation,
   ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
+import type { AgentAuthStatus } from '../../../common/agent-execution.js';
 import type { PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { ChatTransientControlAction } from '../../../common/chat-transient-feed.js';
@@ -42,7 +44,7 @@ import { type CreateCarriedContextInput } from '../chats/carryover/context.js';
 import { AgentSessionSettingsService, type AgentConfigurationInput } from './session-settings-service.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import { createLogger } from '../../common/log.js';
-import type { UserMessage } from '@garcon/common/chat-types';
+import { UserMessage } from '@garcon/common/chat-types';
 import type { UserInputAdmissionOptions } from '../chat-execution/types.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import { transcriptViewId } from '../ledger/contracts.js';
@@ -62,16 +64,25 @@ import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
 import { dispatchListenersSequentially } from './listener-dispatch.js';
 import {
   isThinkingModeSupported,
+  isPermissionModeSupported,
   normalizeSupportedThinkingMode,
 } from '../../../common/execution-defaults.js';
 
 const logger = createLogger('agents:registry');
+
+async function getIntegrationAuthStatus(integration: AgentIntegration): Promise<AgentAuthStatus> {
+  return integration.auth
+    ? integration.auth.status(new AbortController().signal)
+    : { authenticated: false, canReauth: false, label: integration.descriptor.label, source: 'none' };
+}
 
 // Whether an agent can be steered. It is unknown while the agent's executor has not reported the
 // integration, as before a remote executor first connects after the controller starts.
 export type SteeringSupport = 'supported' | 'unsupported' | 'unknown';
 
 export interface AgentRegistryServiceContract {
+  executionPolicy(agentId: string, executorId?: string | null): 'conversation' | 'literal';
+  chatExecutionPolicy(chatId: string): 'conversation' | 'literal';
   hasAgent(agentId: string, executorId?: string | null): boolean;
   assertExecutorReady(executorId?: string | null): void;
   assertAgentAvailable(agentId: string, executorId?: string | null): void;
@@ -265,7 +276,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     if (!descriptor) throw new DomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${agentId}`, 422);
     if (
       selection.permissionMode !== undefined
-      && !descriptor.supportedPermissionModes.includes(selection.permissionMode)
+      && !isPermissionModeSupported(selection.permissionMode, descriptor.supportedPermissionModes)
     ) {
       throw new DomainError(
         'VALIDATION_FAILED',
@@ -476,20 +487,22 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       ?? { state: 'idle', running: false };
   }
   async getAgentAuthStatus(agentId: string, executorId?: string | null): Promise<unknown | null> {
-    const auth = this.#directory.list(executorId).find(integration => integration.descriptor.id === agentId)?.auth;
-    return auth ? auth.status(new AbortController().signal) : null;
+    const integration = this.#directory.list(executorId).find(integration => integration.descriptor.id === agentId);
+    return integration ? getIntegrationAuthStatus(integration) : null;
   }
   async getAgentAuthStatusMap(executorId?: string | null): Promise<Record<string, unknown>> {
     return Object.fromEntries(await Promise.all(this.#directory.list(executorId).map(async (integration) => [
       integration.descriptor.id,
-      integration.auth
-        ? await integration.auth.status(new AbortController().signal)
-        : { authenticated: false, canReauth: false, label: integration.descriptor.label, source: 'none' },
+      await getIntegrationAuthStatus(integration),
     ])));
   }
   async getAgentReadinessMap(authByAgent?: Record<string, unknown>, executorId?: string | null) {
     const auth = authByAgent ?? await this.getAgentAuthStatusMap(executorId);
-    return Object.fromEntries(this.#directory.list(executorId).map((integration) => {
+    return Object.fromEntries(await Promise.all(this.#directory.list(executorId).map(async (integration) => {
+      if (integration.readiness) {
+        const availability = await integration.readiness.status(new AbortController().signal);
+        return [integration.descriptor.id, { ...availability, nativeReady: availability.ready, endpointReady: false }];
+      }
       const status = auth[integration.descriptor.id] as { authenticated?: boolean } | undefined;
       const nativeReady = status?.authenticated === true;
       const endpointReady = integration.endpoints !== null
@@ -504,7 +517,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
             ? 'Native agent authentication is available.'
             : 'No native authentication or compatible API provider endpoint is configured.',
       }];
-    }));
+    })));
   }
 
   onSessionCreated(cb: (chatId: string) => void | Promise<void>): void { this.#events.onSessionCreated(cb); }
@@ -532,7 +545,31 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
 
   resendCandidates(chatId: string) {
+    const chat = this.#registry.getChat(chatId);
+    const integration = chat && this.#directory.get(chat.agentId, chat.executorId);
+    if (!integration || integration.literalExecution) return [];
     return this.#ledger.resendCandidates(chatId);
+  }
+
+  executionPolicy(agentId: string, executorId?: string | null): 'conversation' | 'literal' {
+    const integration = this.#directory.get(agentId, executorId) ?? this.#directory.require(agentId, executorId);
+    return integration.literalExecution ? 'literal' : 'conversation';
+  }
+
+  chatExecutionPolicy(chatId: string): 'conversation' | 'literal' {
+    const chat = this.#registry.getChat(chatId);
+    if (!chat) throw new Error(`Session not initialized: ${chatId}`);
+    return this.executionPolicy(chat.agentId, chat.executorId);
+  }
+
+  #normalizeInput(chatId: string, message: UserMessage): UserMessage {
+    const literal = this.chatExecutionPolicy(chatId) === 'literal';
+    if (!literal && message.metadata?.contentMode === undefined) return message;
+    const { contentMode: _mode, ...metadata } = message.metadata ?? {};
+    return new UserMessage(message.timestamp, message.content, message.images, {
+      ...metadata,
+      ...(literal ? { contentMode: 'literal' as const } : {}),
+    }, message.presentation);
   }
 
   discardPreparedInput(chatId: string, clientMessageId: string | null | undefined): void {
@@ -601,7 +638,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   ): { readonly inserted: boolean } {
     const session = this.#registry.getChat(chatId);
     if (!session) throw new Error(`Session not initialized: ${chatId}`);
-    const pending = options.commandType === 'steer'
+    message = this.#normalizeInput(chatId, message);
+    const literal = message.metadata?.contentMode === 'literal';
+    const pending = literal || options.commandType === 'steer'
       ? null
       : session.pendingPreambleBoundary ?? null;
     const alreadyConsumed = pending
@@ -697,7 +736,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     if (event.type === 'session') {
       await this.#events.publishSession(event.chatId);
     } else if (event.type === 'run-ended') {
-      await this.#events.publishRunEnded(event.chatId, event.runId, event.row);
+      await this.#events.publishRunEnded(event.chatId, event.runId, event.row, event.workingDirectory);
     }
   }
 

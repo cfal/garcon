@@ -3,6 +3,7 @@ import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { effectiveExecutorId } from '$shared/executors';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import { getLocale } from '$lib/paraglide/runtime.js';
+import * as m from '$lib/paraglide/messages.js';
 import { buildThinkingModeOptions } from '$lib/agents/thinking-mode-options';
 import { normalizeThinkingMode, type ThinkingMode } from '$shared/chat-modes';
 import type {
@@ -99,6 +100,10 @@ export class ModelSelectorState {
 		return (
 			this.mode.effort === 'select' && this.modelCatalog.getThinkingModes(this.agentId).length > 1
 		);
+	}
+
+	get selectionLabel(): string {
+		return this.modelCatalog.getAgent(this.agentId)?.selectionLabel ?? m.model_selector_model();
 	}
 
 	get thinkingMode(): ThinkingMode {

@@ -549,7 +549,7 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
   const parentChatId = optionalChatId(body, 'parentChatId');
   const agentId = requiredString(body, 'agentId');
   const images = optionalImages(body.images);
-  const command = contentOrImages(body, 'command', images).trim();
+  const command = contentOrImages(body, 'command', images);
   const agentSettings = requiredAgentSettings(body.agentSettings, 'agentSettings');
   const userMessagePresentation = parseCommandUserMessagePresentation(body.userMessagePresentation);
   const orderedPreambleIds = optionalOrderedPreambleIds(body.orderedPreambleIds);

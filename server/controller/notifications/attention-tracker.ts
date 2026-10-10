@@ -43,6 +43,7 @@ function toolDisplayName(requestedTool: unknown): string {
 
 interface AgentRegistryDep {
   onTranscriptCommitted(cb: (event: TranscriptCommitEvent) => void): void;
+  chatExecutionPolicy(chatId: string): 'conversation' | 'literal';
 }
 
 interface QueueManagerDep {
@@ -324,6 +325,7 @@ export class AttentionTracker {
       const config = (notifications.telegram ?? {}) as Record<string, unknown>;
       const recipientChatId = this.#telegramSettings.getRecipientChatId();
       if (config.enabled !== true || !recipientChatId || !this.#registry.getChat(chatId)) return;
+      if (this.#agents.chatExecutionPolicy(chatId) !== 'conversation') return;
       const html = this.#formatMessage(this.#chatMeta(chatId), userMsg, assistantMsg, status);
       const ok = await this.#telegram.send(recipientChatId, html, 'HTML');
       if (!ok) {

@@ -71,6 +71,8 @@ export default class CursorAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'cursor';
   static readonly apiVersion = 5 as const;
   readonly descriptor = CURSOR_DESCRIPTOR;
+  readonly literalExecution = null;
+  readonly readiness = null;
   readonly attachments = null;
   readonly execution;
   readonly producers;

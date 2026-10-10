@@ -10,6 +10,8 @@ export type CatalogQueryResult =
         label: string;
         description: string | null;
         defaultModel: string;
+        selectionLabel?: string;
+        executionPolicy?: 'conversation' | 'literal';
         acceptsApiProviders: boolean;
         supportedProtocols: ApiProtocol[];
         permissions: string[];
@@ -41,6 +43,7 @@ export type CatalogQueryResult =
   | {
       resource: 'models';
       agentId: string;
+      selectionLabel?: string;
       defaultModel: string;
       models: Array<{
         value: string;
@@ -78,7 +81,7 @@ function humanListing(result: CatalogQueryResult): string {
   switch (result.resource) {
     case 'agents':
       return formatTextTable(
-        ['AGENT', 'LABEL', 'DEFAULT MODEL'],
+        ['AGENT', 'LABEL', 'DEFAULT SELECTION'],
         result.agents.map((agent) => [agent.id, agent.label, agent.defaultModel]),
       );
     case 'preambles':
@@ -112,7 +115,7 @@ function humanListing(result: CatalogQueryResult): string {
       );
     case 'models':
       return formatTextTable(
-        ['MODEL', 'LABEL', 'PROVIDER', 'ENDPOINT', 'DEFAULT'],
+        [(result.selectionLabel ?? 'Model').toUpperCase(), 'LABEL', 'PROVIDER', 'ENDPOINT', 'DEFAULT'],
         result.models.map((model) => [
           model.value,
           model.label,

@@ -242,6 +242,7 @@ export class QueueDrainer {
   ): Promise<boolean> {
     const result = await this.#runProvider(chatId, input.entry, options, attempt);
     if (result.kind !== 'failed' || attempt.isSettled) return true;
+    if (attempt.hasTerminalCommit) return false;
 
     const message = result.error instanceof Error ? result.error.message : String(result.error);
     logger.error('queue: queued turn failed:', {

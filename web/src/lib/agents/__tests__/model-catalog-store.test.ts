@@ -53,6 +53,19 @@ describe('ModelCatalogStore', () => {
 		vi.mocked(clientApi.apiFetch).mockReset();
 	});
 
+	it.each(['local', remoteExecutor.id])('invalidates a recent cache without execution policy on %s', (executorId) => {
+		const cached = {
+			agentModels: { shell: [{ value: 'sh', label: 'Sh' }] },
+			agentMetadata: { shell: agentEntry('shell') }, apiProviderCatalog: [],
+			lastFetchedAt: Date.now(), lastValidatedAt: Date.now(),
+		};
+		localStorage.setItem(executorId === 'local' ? STORAGE_KEY : LOCAL_STORAGE_KEYS.modelCatalogExecutors,
+			JSON.stringify(executorId === 'local' ? cached : { [executorId]: cached }));
+		const catalog = createModelCatalogStore().forExecutor(executorId);
+		expect(catalog.getAgent('shell')).toBeNull();
+		expect(catalog.isStale()).toBe(true);
+	});
+
 	it('isolates identical agent/model identities by executor in requests and persisted catalogs', async () => {
 		const store = createModelCatalogStore();
 		const remote = store.forExecutor(remoteExecutor.id);
@@ -170,10 +183,23 @@ describe('ModelCatalogStore', () => {
 		expect(createModelCatalogStore().forExecutor(remoteExecutor.id).isStale()).toBe(true);
 	});
 
+	it('retains the remote schema and literal policy through reconciliation and cold hydration', async () => {
+		const store = createModelCatalogStore();
+		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample', {
+			executionPolicy: 'literal',
+		})])));
+		await store.forExecutor(remoteExecutor.id).forceRefresh();
+		store.reconcileExecutors([localExecutor, remoteExecutor]);
+		const restored = createModelCatalogStore().forExecutor(remoteExecutor.id);
+		expect(restored.isValidated).toBe(true);
+		expect(restored.getAgent('sample')?.executionPolicy).toBe('literal');
+	});
+
 	it('hydrates models, capabilities, modes, and settings from storage', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
+				schemaVersion: 2,
 				agentModels: { sample: [{ value: 'sample-model', label: 'Sample Model' }] },
 				agentMetadata: {
 					sample: agentEntry('sample', {
@@ -241,7 +267,7 @@ describe('ModelCatalogStore', () => {
 		});
 	});
 
-	it('loads the previous catalog schema and validates it against the server', async () => {
+	it('discards the previous catalog schema and validates it against the server', async () => {
 		localStorage.setItem(
 			LEGACY_STORAGE_KEY,
 			JSON.stringify({
@@ -267,7 +293,7 @@ describe('ModelCatalogStore', () => {
 		);
 
 		const store = createModelCatalogStore();
-		expect(store.getDefaultModel('sample')).toBe('old-model');
+		expect(store.getDefaultModel('sample')).toBe('');
 
 		await store.refreshIfStale();
 
@@ -281,6 +307,7 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
+				schemaVersion: 2,
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
 				apiProviderCatalog: [],
@@ -324,6 +351,7 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
+				schemaVersion: 2,
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
 				apiProviderCatalog: [],
@@ -346,6 +374,7 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
+				schemaVersion: 2,
 				agentModels: { stale: [{ value: 'stale', label: 'Stale' }] },
 				agentMetadata: { stale: agentEntry('stale', { defaultModel: 'stale' }) },
 				apiProviderCatalog: [],
@@ -418,6 +447,7 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
+				schemaVersion: 2,
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
 				apiProviderCatalog: [],
@@ -528,6 +558,7 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
+				schemaVersion: 2,
 				agentModels: {
 					sample: [
 						{ value: 'sol', label: 'Sol' },
@@ -589,6 +620,7 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
+				schemaVersion: 2,
 				agentModels: { 'Bad Id': [{ value: 'bad', label: 'Bad' }] },
 				agentMetadata: { 'Bad Id': agentEntry('Bad Id', { defaultModel: 'bad' }) },
 				apiProviderCatalog: [],

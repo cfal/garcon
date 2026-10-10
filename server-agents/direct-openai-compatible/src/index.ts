@@ -44,6 +44,8 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
   static readonly integrationId = DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID;
   static readonly apiVersion = 5 as const;
   readonly descriptor = DESCRIPTOR;
+  readonly literalExecution = null;
+  readonly readiness = null;
   readonly attachments = {
     fileMimeTypes: TEXT_FILE_ATTACHMENT_MIME_TYPES,
   } as const;

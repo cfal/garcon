@@ -38,6 +38,7 @@ import type {
   AgentSteerOptions,
   ForkedAgentSessionOutcome,
   PrepareProjectPathUpdateRequest,
+  PreparedAgentPrompt,
   RunAgentTurnOptions,
   NativeForkCleanup,
 } from './session-types.js';
@@ -50,7 +51,6 @@ import type {
   TranscriptLedgerService,
   TranscriptProducerLease,
 } from '../ledger/service.js';
-import type { TranscriptViewId } from '../ledger/contracts.js';
 import {
   dispatchFailureDetail,
   executionSetupFailure,
@@ -90,17 +90,6 @@ export interface RunSingleQueryOptions {
   readonly [key: string]: unknown;
 }
 
-type PreparedPrompt =
-  | { readonly dispatch: false }
-  | {
-      readonly dispatch: true;
-      readonly prompt: string;
-      readonly outboundPrompt: string;
-      readonly attachments: ReturnType<typeof attachments>;
-      readonly excludedOrdinals: ReadonlySet<number>;
-      readonly viewId: TranscriptViewId;
-    };
-
 export class AgentRuntimeRouter {
   readonly #registry: IChatRegistry;
   readonly #directory: AgentDirectory;
@@ -136,10 +125,12 @@ export class AgentRuntimeRouter {
       this.#ledger.failRun(chatId, runId, error);
     },
     (chatId, lease) => {
-      if (this.#producerLeases.get(chatId)?.lease !== lease) return;
-      const runId = this.#ledger.activeRunId(chatId);
-      if (!runId) return;
-      lease.sink.publish({ type: 'notice', runId, title: 'Output not delivered', content: EXECUTOR_OUTPUT_GAP_NOTICE });
+      if (this.#producerLeases.get(chatId)?.lease !== lease || lease.closed) return;
+      const view = this.#ledger.currentView(chatId);
+      if (!view) return;
+      this.#ledger.appendNotice(chatId, view.viewId, {
+        title: 'Output not delivered', content: EXECUTOR_OUTPUT_GAP_NOTICE, detail: { type: 'publication-gap' },
+      });
     },
     (chatId, lease, agentId, event) => {
       if (this.#producerLeases.get(chatId)?.lease === lease) this.#settleLostLaunch(chatId, agentId, event);
@@ -196,13 +187,16 @@ export class AgentRuntimeRouter {
       assertExecutionAdmissionOpen(opts);
       if (!prepared.dispatch) return;
       const operation = operationIdentity(entry, opts, opts.commandType ?? 'chat-start');
-      this.#events.trackTurn(chatId, operationMetadata(operation));
       const producer = this.#producer(chatId);
+      this.#events.trackTurn(chatId, { ...operationMetadata(operation), executionSnapshot: {
+        agentId: entry.agentId, executorId: effectiveExecutorId(entry.executorId), projectPath: entry.projectPath,
+        transcriptViewId: prepared.viewId, producerLease: producer,
+      } });
       runId = this.#beginRun(chatId, operation.turnId);
       assertExecutionAdmissionOpen(opts);
-      const messages = await this.#ledger.conversationMessages(chatId, prepared.excludedOrdinals);
+      const messages = integration.literalExecution ? [] : await this.#ledger.carryoverMessages(chatId, prepared.excludedOrdinals);
       assertExecutionAdmissionOpen(opts);
-      const outcome = await this.#createCarriedContext({
+      const outcome = integration.literalExecution ? { kind: 'no-history' as const } : await this.#createCarriedContext({
         chatId,
         entry,
         messages,
@@ -226,6 +220,7 @@ export class AgentRuntimeRouter {
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         producerBinding: await this.#bindings.bind(integration, chatId, producer, sending),
         prompt: prepared.outboundPrompt,
+        submission: prepared.submission,
         attachments: prepared.attachments,
         carriedContext: carryover.context,
       };
@@ -275,8 +270,11 @@ export class AgentRuntimeRouter {
       if (!prepared.dispatch) return;
       assertExecutionAdmissionOpen(opts);
       const operation = operationIdentity(entry, opts, opts.commandType ?? 'agent-run');
-      this.#events.trackTurn(chatId, operationMetadata(operation));
       const producer = this.#producer(chatId);
+      this.#events.trackTurn(chatId, { ...operationMetadata(operation), executionSnapshot: {
+        agentId: entry.agentId, executorId: effectiveExecutorId(entry.executorId), projectPath: entry.projectPath,
+        transcriptViewId: prepared.viewId, producerLease: producer,
+      } });
       runId = this.#beginRun(chatId, operation.turnId);
       const request = {
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
@@ -284,6 +282,7 @@ export class AgentRuntimeRouter {
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt: prepared.outboundPrompt,
+        submission: prepared.submission,
         attachments: prepared.attachments,
       };
       assertExecutionAdmissionOpen(opts);
@@ -782,7 +781,7 @@ export class AgentRuntimeRouter {
     chatId: string,
     fallbackPrompt: string,
     opts: Pick<RunAgentTurnOptions, 'clientMessageId' | 'images' | 'executionAdmission'> & { readonly dispatchDeadline?: number },
-  ): Promise<PreparedPrompt> {
+  ): Promise<PreparedAgentPrompt> {
     const composition = this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
     if (composition && !composition.inserted) {
       return { dispatch: false };
@@ -798,6 +797,22 @@ export class AgentRuntimeRouter {
       ? promptRows.flatMap((row) => row.detail.attachments)
       : attachments(opts.images);
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+    if (this.#directory.require(entry.agentId, entry.executorId).literalExecution) {
+      const source = composition?.input.detail.message.content ?? fallbackPrompt;
+      return {
+        dispatch: true,
+        prompt: source,
+        outboundPrompt: source,
+        attachments: [...preparedAttachments],
+        excludedOrdinals: excluded,
+        viewId,
+        submission: composition ? {
+          clientMessageId: composition.input.detail.clientMessageId,
+          timestamp: composition.input.at,
+          presentation: composition.input.detail.message.presentation,
+        } : undefined,
+      };
+    }
     // The input is already taken, so only the resolution itself is repeated.
     const signal = opts.executionAdmission?.signal;
     const resolvedPrompt = await retryAfterSessionLoss(

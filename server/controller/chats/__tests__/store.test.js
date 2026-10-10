@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { ChatRegistry } from '../store.ts';
+import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write-failure.ts';
 
 const CHAT_ID = '1783725900000200';
 const SECOND_CHAT_ID = '1783725900000201';
@@ -71,6 +72,30 @@ async function writeRegistry(sessions, version = 5) {
 
 describe('ChatRegistry phased updates', () => {
   const SELECTION_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+
+  it('does not publish an observed cwd whose directory sync is unconfirmed', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-cwd-unknown-'));
+    const registry = new ChatRegistry(directory);
+    try {
+      await registry.init();
+      registry.addChat(newChat());
+      await registry.flush();
+      const updated = mock();
+      registry.onChatProjectPathUpdated(updated);
+      const result = await withFailingDirectorySync(directory, () => registry.updateObservedProjectPath(CHAT_ID, {
+        chatId: CHAT_ID, projectPath: '/repo/next', effectiveProjectKey: '/repo/next', previousProjectPath: '/repo',
+      }));
+      expect(result.durability).toBe('unknown');
+      expect(registry.getChat(CHAT_ID).projectPath).toBe('/repo');
+      expect(registry.chatMutationDurability(CHAT_ID)).toBe('unknown');
+      expect(updated).not.toHaveBeenCalled();
+      const stored = JSON.parse(await fs.readFile(path.join(directory, 'chats.json'), 'utf8'));
+      expect(stored.sessions[CHAT_ID].projectPath).toBe('/repo/next');
+    } finally {
+      await registry.flush();
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
 
   it('rolls a rejected selection patch back even after an unrelated concurrent mutation', async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-chats-phased-'));

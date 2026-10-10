@@ -4,8 +4,9 @@ import * as chatsApi from '$lib/api/chats';
 import * as gitApi from '$lib/api/git';
 import type { GitWorktreeItem } from '$lib/api/git';
 import * as settingsApi from '$lib/api/settings.js';
-import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
+import { ModelCatalogStore, type AgentMetadata } from '$lib/agents/model-catalog-store.svelte';
 import { ExecutorHandoffProjectState } from '$lib/chat/conversation/executor-handoff-project.svelte.js';
+import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-settings-snapshot-fixture';
@@ -80,6 +81,33 @@ function confirmButton(): HTMLButtonElement {
 }
 
 describe('ExecutorHandoffDialog', () => {
+	it.each([false, true])('filters literal handoff destinations unless the chat is a draft (%s)', async (isDraft) => {
+		vi.spyOn(ChatSessionsStore.prototype, 'isDraft').mockReturnValue(isDraft);
+		vi.spyOn(ModelCatalogStore.prototype, 'getSelectableAgents').mockReturnValue(['claude', 'shell']);
+		const metadata = {
+			id: 'claude', label: 'Claude', defaultModel: 'opus', executionPolicy: 'conversation',
+			supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
+			supportsForkWhileRunning: false, supportsUpdateProjectPath: true, supportsSteering: false,
+			supportsImages: false, fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false,
+			supportedProtocols: [], authLoginSupported: false, supportedPermissionModes: [],
+			supportedThinkingModes: [], settings: [], defaultSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+		} satisfies AgentMetadata;
+		vi.spyOn(ModelCatalogStore.prototype, 'getAgent').mockImplementation((id) =>
+			id === 'shell' ? { ...metadata, id, executionPolicy: 'literal' } : metadata,
+		);
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const handoff = new ExecutorHandoffProjectState(() => true);
+		void handoff.ask('chat-1', worker.id, '/workspace/project', selection);
+		const rendered = render(ExecutorHandoffDialogTestHost, { handoff, executors, remoteSettings: settingsWithPins() });
+		try {
+			const selector = await screen.findByRole('button', { name: 'Model selector' });
+			expect(selector.getAttribute('data-selectable-agent-ids')).toBe(isDraft ? 'claude,shell' : 'claude');
+		} finally {
+			handoff.cancel();
+			rendered.unmount();
+		}
+	});
+
 	beforeEach(() => {
 		vi.useFakeTimers();
 		vi.spyOn(ModelCatalogStore.prototype, 'refreshIfStale').mockResolvedValue();

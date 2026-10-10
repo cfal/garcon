@@ -1,6 +1,7 @@
 import {
   isCarryoverMigrationQuarantineNoticeDetail,
   isPreambleApplicationNoticeDetail,
+  isPublicationGapNoticeDetail,
 } from '../../../common/transcript-notice-details.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { LedgerConversationRow, LedgerRow, LedgerRowDraft } from './contracts.js';
@@ -47,6 +48,7 @@ export function frozenConversationDrafts(rows: readonly LedgerRow[]): LedgerRowD
       && (
         isCarryoverMigrationQuarantineNoticeDetail(row.detail)
         || isPreambleApplicationNoticeDetail(row.detail)
+        || isPublicationGapNoticeDetail(row.detail)
       )
     ) {
       return [{

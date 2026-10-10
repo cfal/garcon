@@ -91,13 +91,14 @@ export class ConversationSessionController {
 
 	constructor(private deps: SessionControllerDeps) {
 		this.executorHandoff = new ExecutorHandoffProjectState(
-			(executorId, selection) =>
-				deps.canSubmitToExecutor(executorId) &&
-				Boolean(
-					deps
-						.modelCatalogForExecutor(executorId)
-						.getModelForSelection(selection.agentId, selection.model, selection.modelEndpointId),
-				),
+			(executorId, selection) => {
+				if (!deps.canSubmitToExecutor(executorId)) return false;
+				const catalog = deps.modelCatalogForExecutor(executorId);
+				const target = this.executorHandoff.target;
+				const isDraft = target !== null && deps.sessions.isDraft(target.chatId);
+				if (!isDraft && catalog.getAgent(selection.agentId)?.executionPolicy === 'literal') return false;
+				return Boolean(catalog.getModelForSelection(selection.agentId, selection.model, selection.modelEndpointId));
+			},
 		);
 		this.#acceptedInputs = new AcceptedInputSubmissionService();
 		this.#slashCommands = new ConversationSlashCommandService(
@@ -322,7 +323,7 @@ export class ConversationSessionController {
 				deps.agentState.thinkingMode = startup.thinkingMode;
 				deps.agentState.setAgentSettings(startup.agentSettings);
 				if (startup.firstMessage?.trim() || (startup.initialImages?.length ?? 0) > 0) {
-					const startupText = startup.firstMessage.trim();
+					const startupText = startup.firstMessage;
 					const startupImages = startup.initialImages ?? [];
 					const startupChatId = chatId;
 					queueMicrotask(() => {
@@ -528,7 +529,7 @@ export class ConversationSessionController {
 		if (!selected?.projectPath) return 'no-op';
 		const isDraft = selected.status === 'draft';
 		const draft = deps.composerState.draftSnapshot(chatId);
-		const text = messageOverride ?? draft.text.trim();
+		let text = messageOverride ?? draft.text;
 		const submissionImages = imageOverride ?? draft.attachments;
 		const startup = deps.sessions.startupByChatId[chatId];
 		if (
@@ -545,8 +546,13 @@ export class ConversationSessionController {
 			selection = deps.agentState;
 		}
 		const executorId = selection.executorId ?? 'local';
+		const agent = deps.modelCatalogForExecutor(executorId).getAgent(selection.agentId ?? '');
+		if (!agent) return isDraft && source === 'automatic-start' ? rejectUnavailableDraftStart(deps, chatId) : 'no-op';
+		const literal = agent.executionPolicy === 'literal';
+		const contentMode = literal ? 'literal' as const : undefined;
+		if (!literal) text = text.trim();
 		if (
-			(isDraft || !isControllerSlashCommand(text)) &&
+			(literal || isDraft || !isControllerSlashCommand(text)) &&
 			(!deps.canSubmitToExecutor(executorId) ||
 				!isCustomProviderSelectionAvailable(deps.modelCatalogForExecutor(executorId), selection))
 		) {
@@ -554,10 +560,10 @@ export class ConversationSessionController {
 				? rejectUnavailableDraftStart(deps, chatId)
 				: 'no-op';
 		}
-		if (!text && submissionImages.length === 0) return 'no-op';
+		if (!text.trim() && submissionImages.length === 0) return 'no-op';
 		const previousText = draft.text;
 		const previousImages = [...draft.attachments];
-		const slash = this.#slashCommands.dispatchSubmission({
+		const slash = literal ? { kind: 'pass-through' as const, content: text } : this.#slashCommands.dispatchSubmission({
 			chatId,
 			chat: selected,
 			text,
@@ -567,6 +573,7 @@ export class ConversationSessionController {
 		if (slash.kind === 'handled') return slash.outcome;
 
 		const specializedContext = {
+			contentMode,
 			chatId,
 			chat: selected,
 			startup,
@@ -645,6 +652,7 @@ export class ConversationSessionController {
 			}
 
 			const context = {
+				contentMode,
 				chatId,
 				chat: selected,
 				startup,
@@ -678,12 +686,14 @@ export class ConversationSessionController {
 		if (deps.sessions.selectedChatId !== chatId || this.isDirectAdmissionPending(chatId)) {
 			return 'no-op';
 		}
+		const agent = deps.modelCatalogForExecutor(deps.agentState.executorId).getAgent(deps.agentState.agentId);
+		if (!agent) return 'no-op';
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
-		const text = deps.composerState.inputText.trim();
+		const text = agent.executionPolicy === 'literal' ? deps.composerState.inputText : deps.composerState.inputText.trim();
 		const hasAttachments = deps.composerState.images.length > 0;
-		if (!text && !hasAttachments) return 'no-op';
-		if (selected.status === 'running' && isControllerSlashCommand(text))
+		if (!text.trim() && !hasAttachments) return 'no-op';
+		if (agent.executionPolicy !== 'literal' && selected.status === 'running' && isControllerSlashCommand(text))
 			return this.submitForChat(chatId);
 		if (
 			!deps.canSubmitToExecutor(deps.agentState.executorId) ||
@@ -701,6 +711,7 @@ export class ConversationSessionController {
 			chatId,
 			chat: selected,
 			text,
+			contentMode: agent.executionPolicy === 'literal' ? 'literal' : undefined,
 			supportsSteering: deps
 				.modelCatalogForExecutor(selected.executorId ?? 'local')
 				.supportsSteering(selected.agentId),

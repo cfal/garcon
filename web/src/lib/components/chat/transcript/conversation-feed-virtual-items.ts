@@ -326,6 +326,8 @@ export function appendConversationVirtualTranscriptTail(
 	appendedItems: ConversationFeedRenderItem[],
 ): ConversationVirtualFeedModel | null {
 	if (appendedItems.length === 0) return null;
+	if (appendedItems.some(item => item.kind === 'message'
+		&& (item.message.type === 'command-output' || item.message.type === 'command-result'))) return null;
 	const insertIndex = model.transcriptEndIndex;
 	const appendedVirtualItems = appendedItems.map((item): ConversationVirtualFeedItem => ({
 		kind: 'transcript',

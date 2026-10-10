@@ -75,9 +75,11 @@ export class ScheduledPromptFormState {
 	#originalEndDate: string | null = null;
 
 	constructor(
-		modelCatalog: ModelCatalogStore,
+		private readonly modelCatalog: ModelCatalogStore,
 		remoteSettings: RemoteSettingsStore,
-		private readonly sessions: Pick<ChatSessionsStore, 'hasChat' | 'isDraft'>,
+		private readonly sessions: Pick<ChatSessionsStore, 'hasChat' | 'isDraft'> & {
+			readonly byId: Record<string, Pick<ChatSessionsStore['byId'][string], 'agentId' | 'executorId'>>;
+		},
 		private readonly options: ScheduledPromptFormStateOptions,
 	) {
 		this.startup = new NewChatFormState({
@@ -114,14 +116,25 @@ export class ScheduledPromptFormState {
 
 	get promptError(): string | null {
 		if (!this.prompt.trim()) return m.scheduled_prompts_prompt_required();
-		if (this.prompt.trim().length > SCHEDULED_PROMPT_MAX_LENGTH) {
+		if (this.normalizedPrompt.length > SCHEDULED_PROMPT_MAX_LENGTH) {
 			return m.scheduled_prompts_prompt_too_long();
 		}
-		if (!scheduledPromptFitsRenderedLimit(this.prompt.trim())) {
+		if (!scheduledPromptFitsRenderedLimit(this.normalizedPrompt)) {
 			return m.scheduled_prompts_prompt_rendered_too_long();
 		}
-		if (hasLeadingSlashCommand(this.prompt)) return m.scheduled_prompts_slash_command_error();
+		if (this.executionPolicy === 'conversation' && hasLeadingSlashCommand(this.prompt)) return m.scheduled_prompts_slash_command_error();
 		return null;
+	}
+
+	get executionPolicy(): 'literal' | 'conversation' | null {
+		const selection = this.targetType === 'new-chat' ? this.startup : this.sessions.byId[this.existingChatId ?? ''];
+		if (!selection) return null;
+		const agent = this.modelCatalog.forExecutor(selection.executorId).getAgent(selection.agentId);
+		return agent ? agent.executionPolicy ?? 'conversation' : null;
+	}
+
+	private get normalizedPrompt(): string {
+		return this.executionPolicy === 'conversation' ? this.prompt.trim() : this.prompt;
 	}
 
 	scheduleIssue(now = new Date()): ScheduleIssue | null {
@@ -171,6 +184,7 @@ export class ScheduledPromptFormState {
 			);
 		}
 		return (
+			this.executionPolicy !== null &&
 			this.startup.settingsLoaded &&
 			this.startup.executorReady &&
 			this.startup.modelCatalogValidated &&
@@ -253,7 +267,7 @@ export class ScheduledPromptFormState {
 					chatId: this.existingChatId,
 					busyBehavior: this.busyBehavior,
 				},
-				prompt: this.prompt.trim(),
+				prompt: this.normalizedPrompt,
 			};
 		}
 		const selection = this.startup.resolvedModelSelection;
@@ -275,7 +289,7 @@ export class ScheduledPromptFormState {
 				tags: [...this.startup.chatTags],
 				preambleChoice: this.startup.preambles.choiceSnapshot,
 			},
-			prompt: this.prompt.trim(),
+			prompt: this.normalizedPrompt,
 		};
 	}
 

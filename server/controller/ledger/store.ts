@@ -274,7 +274,7 @@ export class TranscriptLedgerStore {
       const input = committedRows[committedRows.length - 1] as LedgerUserInputRow;
       const prompt = runTransaction(entry.db, () => {
         insertEncodedRows(entry.db, request.viewId, encoded, firstOrdinal);
-        return prepared.detail.steer
+        return prepared.detail.steer || prepared.detail.message.metadata?.contentMode === 'literal'
           ? [input]
           : this.#composePrompt(entry, request.viewId, input, request.excludedOrdinals);
       });
@@ -960,7 +960,7 @@ function collectResendCandidates(
   for (const stored of storedRows) {
     const row = decodeStoredLedgerRow(stored);
     if (row.kind === 'user-input') {
-      if (!excludedOrdinals?.has(row.ordinal)) candidates.unshift(row);
+      if (row.detail.message.metadata?.contentMode !== 'literal' && !excludedOrdinals?.has(row.ordinal)) candidates.unshift(row);
       continue;
     }
     if (row.kind === 'run-ended' && row.outcome === 'interrupted') continue;

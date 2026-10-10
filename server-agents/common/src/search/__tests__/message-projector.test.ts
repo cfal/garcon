@@ -1,9 +1,24 @@
 import { describe, expect, test } from 'bun:test';
-import { PiToolSearchToolUseMessage, UserMessage } from '@garcon/common/chat-types';
+import { CommandOutputMessage, CommandResultMessage, PiToolSearchToolUseMessage, UserMessage } from '@garcon/common/chat-types';
 import { projectSearchMessage } from '../message-projector.js';
 import { SEARCH_TIMESTAMP_MAX_BYTES } from '../schema.js';
 
 describe('transcript search message projector', () => {
+  test('indexes retained command streams and outcomes with their semantic roles', () => {
+    for (const channel of ['stdout', 'stderr'] as const) {
+      const output = new CommandOutputMessage('', 'command', channel, 'plain', '<garcon-get-chat-id />',
+        { executorId: 'local', projectPath: '/synthetic/project' });
+      expect(projectSearchMessage(output)).toMatchObject({
+        role: channel === 'stdout' ? 'assistant' : 'system', body: '<garcon-get-chat-id />',
+      });
+    }
+    const result = new CommandResultMessage('', 'command', {
+      outcome: 'failed', exitCode: 7, signal: null, capture: 'incomplete',
+      cwd: { kind: 'reported', path: '/synthetic/project' },
+    });
+    expect(projectSearchMessage(result)).toMatchObject({ role: 'system', body: 'Exit 7 Output capture incomplete' });
+  });
+
   test('indexes Pi tool discovery queries', () => {
     expect(projectSearchMessage(new PiToolSearchToolUseMessage('', 'search', 'issue tools', 3)))
       .toMatchObject({ role: 'tool', body: 'issue tools' });

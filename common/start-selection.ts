@@ -11,6 +11,7 @@ import {
 import {
   executionDefaultsForAgent,
   isThinkingModeSupported,
+  isPermissionModeSupported,
   normalizeSupportedPermissionMode,
   normalizeSupportedThinkingMode,
 } from './execution-defaults.js';
@@ -285,7 +286,7 @@ function strictPermissionMode(
   if (requested === undefined) {
     return normalizeSupportedPermissionMode(fallback, agent.supportedPermissionModes);
   }
-  if (!agent.supportedPermissionModes.includes(requested)) {
+  if (!isPermissionModeSupported(requested, agent.supportedPermissionModes)) {
     fail('UNSUPPORTED_PERMISSION_MODE', `permission mode ${requested} is not supported by agent ${agent.id}`);
   }
   return requested;

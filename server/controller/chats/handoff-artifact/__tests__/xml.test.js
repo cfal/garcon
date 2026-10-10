@@ -3,6 +3,7 @@ import {
   AgentSwitchMessage,
   AssistantMessage,
   BashToolUseMessage,
+  CommandResultMessage,
   CompactionMessage,
   TranscriptNoticeMessage,
   UserMessage,
@@ -99,6 +100,36 @@ describe('handoff artifact XML', () => {
     expect(rendered.gapCount).toBeGreaterThan(1);
   });
 
+  it('retains publication loss outside the budgeted command evidence', () => {
+    const messages = [
+      new UserMessage(AT, 'printf example', undefined, { contentMode: 'literal' }),
+      new TranscriptNoticeMessage(AT, 'Lost output', { type: 'publication-gap' }),
+      new CommandResultMessage(AT, 'command-1', {
+        outcome: 'finished', exitCode: 0, signal: null, capture: 'complete',
+        cwd: { kind: 'reported', path: '/workspace' },
+      }),
+    ];
+    for (const contextWindowTokens of [1_024, 200_000]) {
+      const rendered = render(messages, contextWindowTokens);
+      expect(rendered.document).toContain('<publication-gap>');
+      expect(rendered.document).toContain('Retained command results do not establish complete output.');
+      expect(rendered.document.indexOf('<publication-gap>')).toBeLessThan(rendered.document.indexOf('<entries>'));
+      expect(rendered.estimatedTokens).toBeLessThanOrEqual(rendered.usableTokenBudget);
+      expect(rendered.eligibleEntryCount).toBe(2);
+    }
+    const gapOnly = render([messages[1]], 1_024);
+    expect(gapOnly.document).toContain('<publication-gap>');
+    expect(gapOnly.document).toContain('<entries/>');
+
+    const constrained = render([
+      ...messages,
+      ...Array.from({ length: 80 }, (_, index) => new UserMessage(AT, `Later input ${index} ${'x'.repeat(3_900)}`)),
+    ], 1_024);
+    expect(constrained.budgetOmittedEntryCount).toBeGreaterThan(0);
+    expect(constrained.document).toContain('<publication-gap>');
+    expect(constrained.estimatedTokens).toBeLessThanOrEqual(constrained.usableTokenBudget);
+  });
+
   it('tries the minimum rendering after a correction crosses below it', () => {
     const messages = [];
     for (let index = 0; index < 90; index += 1) {
@@ -127,6 +158,7 @@ describe('handoff artifact XML', () => {
       contextWindowTokens: 1_024,
       sourceFold: {
         entries: [],
+        hasPublicationGap: false,
         sourceEntryCount: 0,
         eligibleEntryCount: 0,
         excludedEntryCounts: [],

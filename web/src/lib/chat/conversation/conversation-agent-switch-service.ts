@@ -36,6 +36,7 @@ interface AgentSwitchState extends ResolvedModelSelection {
 }
 
 interface AgentSwitchModelCatalog {
+	getAgent(agentId: string): { executionPolicy?: 'conversation' | 'literal' } | null;
 	selectionFor(
 		agentId: SessionAgentId,
 		model: string,
@@ -164,6 +165,9 @@ export class ConversationAgentSwitchService {
 			return;
 		}
 		if (!ownershipEpoch) throw new Error('The chat has no ownership epoch');
+		if (this.deps.modelCatalogForExecutor(executorId).getAgent(agentId)?.executionPolicy === 'literal') {
+			throw new Error('Literal execution agents cannot receive handoffs. Start a new chat instead.');
+		}
 		const { projectPath: destinationProjectPath, ...target } = selection;
 		await this.deps.commitHandoff(chatId, {
 			target: {

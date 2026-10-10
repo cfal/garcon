@@ -3,6 +3,8 @@ import { EventEmitter } from 'events';
 import type { ProjectInspector } from '../../../common/project-resolution.js';
 import {
   normalizeScheduledPromptDefinitionInput,
+  hasLeadingSlashCommand,
+  scheduledPromptFitsRenderedLimit,
   isMinuteAlignedIso,
   isScheduledPromptIntervalMinutes,
   type ScheduleForChatRequest,
@@ -146,7 +148,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       chats: Pick<IChatRegistry, 'getChat'>;
       agents: Pick<
         AgentRegistryServiceContract,
-        'hasAgent' | 'assertExecutorReady' | 'assertExecutionModeSelectionSupported'
+        'hasAgent' | 'assertExecutorReady' | 'assertExecutionModeSelectionSupported' | 'executionPolicy' | 'chatExecutionPolicy'
       >;
       preambles: Pick<PreambleService, 'snapshot'>;
       inspectProject: ProjectInspector;
@@ -208,8 +210,8 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
       await this.#reconcileMissed(new Date(), false);
       const now = new Date();
-      this.#validateDefinition(definition, now);
-      await this.#createDefinition(definition, now, request.expectedRevision);
+      const validated = this.#validateDefinition(definition, now);
+      await this.#createDefinition(validated, now, request.expectedRevision);
       return this.#snapshot();
     });
   }
@@ -219,7 +221,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       await this.#reconcileMissed(fixedNow ?? new Date(), false);
       const now = fixedNow ?? new Date();
       const chatId = typeof request?.chatId === 'string' ? request.chatId.trim() : '';
-      const prompt = typeof request?.prompt === 'string' ? request.prompt.trim() : '';
+      const prompt = typeof request?.prompt === 'string' ? request.prompt : '';
       const durationToken = typeof request?.duration === 'string' ? request.duration : '';
       const duration = parseScheduleDuration(durationToken);
       if (!duration.ok) throw scheduleDurationDomainError(duration.error);
@@ -273,8 +275,8 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       if (!previous) {
         throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_NOT_FOUND', 'Scheduled prompt not found', 404);
       }
-      this.#validateDefinition(definition);
-      const replacement = this.#promptFromDefinition(request.id, definition, new Date(), previous.createdAt);
+      const validated = this.#validateDefinition(definition);
+      const replacement = this.#promptFromDefinition(request.id, validated, new Date(), previous.createdAt);
       const release = this.deps.retainExecutorReferences?.(
         replacement.target.type === 'new-chat' ? [replacement.target.executorId] : [],
         previous.target.type === 'new-chat' ? [previous.target.executorId] : [],
@@ -331,6 +333,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     if (!definition) {
       throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_VALIDATION_FAILED', 'Scheduled prompt is invalid', 400);
     }
+    const target = definition.target;
     const firstRunAt =
       definition.schedule.type === 'once' ? definition.schedule.runAtUtc : definition.schedule.firstRunAtUtc;
     if (Date.parse(firstRunAt) < nextMinute(now)) {
@@ -340,22 +343,32 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
         400,
       );
     }
-    if (definition.target.type === 'existing-chat') {
-      if (!this.deps.chats.getChat(definition.target.chatId)) {
+    let policy: 'literal' | 'conversation' | null = null;
+    if (target.type === 'existing-chat') {
+      const chat = this.deps.chats.getChat(target.chatId);
+      if (!chat) {
         throw new ScheduledPromptDomainError('SESSION_NOT_FOUND', 'Selected chat was not found', 404);
       }
-      return definition;
+      if (this.deps.agents.hasAgent(chat.agentId, chat.executorId)) {
+        policy = this.deps.agents.chatExecutionPolicy(target.chatId);
+      }
+    } else {
+      this.deps.agents.assertExecutorReady(target.executorId);
+      if (!this.deps.agents.hasAgent(target.agentId, target.executorId)) {
+        throw new ScheduledPromptDomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${target.agentId}`, 422);
+      }
+      this.deps.agents.assertExecutionModeSelectionSupported(target.agentId, {
+        executorId: target.executorId,
+        permissionMode: target.permissionMode,
+        thinkingMode: target.thinkingMode,
+      });
+      policy = this.deps.agents.executionPolicy(target.agentId, target.executorId);
     }
-    this.deps.agents.assertExecutorReady(definition.target.executorId);
-    if (!this.deps.agents.hasAgent(definition.target.agentId, definition.target.executorId)) {
-      throw new ScheduledPromptDomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${definition.target.agentId}`, 422);
+    const prompt = policy === 'conversation' ? definition.prompt.trim() : definition.prompt;
+    if ((policy === 'conversation' && hasLeadingSlashCommand(prompt)) || !scheduledPromptFitsRenderedLimit(prompt)) {
+      throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_VALIDATION_FAILED', 'Scheduled prompt is invalid', 400);
     }
-    this.deps.agents.assertExecutionModeSelectionSupported(definition.target.agentId, {
-      executorId: definition.target.executorId,
-      permissionMode: definition.target.permissionMode,
-      thinkingMode: definition.target.thinkingMode,
-    });
-    return definition;
+    return { ...definition, prompt };
   }
 
   async #validateNewChatTarget(target: NewChatScheduledPromptTarget): Promise<void> {
@@ -371,7 +384,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       throw new ScheduledPromptDomainError('PROJECT_PATH_NOT_FOUND', 'Project path was not found', 404);
     }
     const canonicalProjectPath = resolution.effectiveProjectKey;
-    if (target.preambleChoice.mode === 'explicit') {
+    if (this.deps.agents.executionPolicy(target.agentId, target.executorId) === 'conversation' && target.preambleChoice.mode === 'explicit') {
       try {
         resolveNewChatPreambleSelection({
           catalog: this.deps.preambles.snapshot(),

@@ -1,4 +1,5 @@
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
+import type { CommandWorkingDirectory } from '@garcon/common/command-output';
 import type { ChatMessage, ToolUseChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
@@ -81,11 +82,11 @@ export interface AgentRunFailureDetail {
 }
 
 export interface AgentFinalResponse {
-  readonly type: 'text';
+  readonly type: 'text' | 'literal-text';
   readonly text: string;
 }
 
-export type AgentRunEndedEvent =
+export type AgentRunEndedEvent = { readonly workingDirectory?: CommandWorkingDirectory } & (
   | {
       readonly type: 'run-ended';
       readonly runId: string;
@@ -106,7 +107,7 @@ export type AgentRunEndedEvent =
       readonly outcome: 'interrupted';
       readonly error?: never;
       readonly finalResponse?: never;
-    };
+    });
 
 export type AgentProducerEvent =
   | { readonly type: 'rows'; readonly rows: readonly AgentProducedRow[] }

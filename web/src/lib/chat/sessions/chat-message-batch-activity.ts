@@ -18,7 +18,7 @@ export function selectPreviewFromBatch(
 ): { content: string; timestamp: string } | null {
 	for (let index = messages.length - 1; index >= 0; index--) {
 		const message = messages[index];
-		if (message instanceof AssistantMessage || message instanceof UserMessage) {
+		if (message instanceof AssistantMessage || message instanceof UserMessage || message.type === 'command-output') {
 			return {
 				content: extractPreviewFirstLine(String(message.content || '')).slice(0, 200),
 				timestamp: message.timestamp,

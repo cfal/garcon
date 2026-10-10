@@ -27,6 +27,7 @@ const MESSAGE_PROJECTION_MAX_CHARS = 4_000;
 // cap is enough to fill it.
 const PROJECTED_BODY_MAX_CHARS = MESSAGE_PROJECTION_MAX_CHARS * 2;
 const TRUNCATION_ELEMENT = '    <earlier-turns-truncated/>';
+const PUBLICATION_GAP_ELEMENT = '    <publication-gap>Some earlier output was not delivered. Retained command results do not establish complete output.</publication-gap>';
 // The newest turns are admitted whole, at every level, before the ladder runs.
 // The ladder admits by class, so without this the newest turn keeps its prose but
 // can lose the commands that went with it, leaving the working set uncompressed
@@ -192,12 +193,14 @@ function prepareCarryoverProjection(
   messages: readonly ChatMessage[],
   options: { readonly summary?: string },
 ): PreparedCarryoverProjection | null {
-  const projected = messages.filter(isProjectableMessage);
-  if (projected.length === 0 && !options.summary) return null;
+  const publicationGap = messages.some(isPublicationGapMessage);
+  const projected = messages.filter(message => isProjectableMessage(message) && !isPublicationGapMessage(message));
+  if (projected.length === 0 && !options.summary && !publicationGap) return null;
   const opening = [
     `<carried-context version="${CARRIED_CONTEXT_VERSION}">`,
     `  <instructions>${CARRIED_CONTEXT_PREAMBLE}</instructions>`,
     '  <transcript>',
+    ...(publicationGap ? [PUBLICATION_GAP_ELEMENT] : []),
   ].join('\n');
   const closing = '  </transcript>\n</carried-context>\n\n';
   const summaryElement = options.summary
@@ -206,7 +209,7 @@ function prepareCarryoverProjection(
   const lead = summaryElement ? `${summaryElement}\n` : '';
   const turns = groupIntoTurns(projected);
   const entries = turns.flatMap((turn, index) => renderTurn(turn, index));
-  if (entries.length === 0 && !summaryElement) return null;
+  if (entries.length === 0 && !summaryElement && !publicationGap) return null;
   const body = entries.map((entry) => entry.text).join('\n');
   const full = entries.length > 0
     ? `${opening}\n${lead}${body}\n${closing}`
@@ -449,7 +452,14 @@ export function renderTranscriptSeed(
 export function isProjectableMessage(message: ChatMessage): boolean {
   return message.type === 'user-message'
     || message.type === 'assistant-message'
+    || message.type === 'command-output'
+    || message.type === 'command-result'
+    || isPublicationGapMessage(message)
     || isToolUseMessage(message);
+}
+
+export function isPublicationGapMessage(message: ChatMessage): boolean {
+  return message.type === 'transcript-notice' && message.detail?.type === 'publication-gap';
 }
 
 // Returns a copy holding only what the projection can render. `boundedCollapse`
@@ -458,12 +468,14 @@ export function isProjectableMessage(message: ChatMessage): boolean {
 // byte of output. The loader uses this to keep its byte guard a real bound: user
 // messages are deliberately never evicted, so without it one oversized ask
 // defeats the guard entirely.
+// Command evidence retains its body and is fitted by the document budget instead.
 export function boundProjectedMessage(message: ChatMessage): ChatMessage {
   if (message.type === 'user-message') {
     if (message.content.length <= PROJECTED_BODY_MAX_CHARS && !message.images?.length) return message;
+    // The extra literal code unit lets the renderer identify truncation itself.
     return new UserMessage(
       message.timestamp,
-      message.content.slice(0, PROJECTED_BODY_MAX_CHARS),
+      message.content.slice(0, PROJECTED_BODY_MAX_CHARS + (message.metadata?.contentMode === 'literal' ? 1 : 0)),
       undefined,
       message.metadata,
       message.presentation,
@@ -488,9 +500,12 @@ function renderMessageElement(message: ChatMessage, maximum = Number.POSITIVE_IN
   }
   switch (message.type) {
     case 'user-message':
-      return fitElement('    <user>', boundedCollapse(message.content), '</user>', maximum);
+      return fitElement(userElementOpen(message), userElementContent(message), '</user>', maximum);
     case 'assistant-message':
       return fitElement('    <assistant>', boundedCollapse(message.content), '</assistant>', maximum);
+    case 'command-output':
+    case 'command-result':
+      return fitElement('    <execution-output>', commandContent(message), '</execution-output>', maximum);
     default:
       return '';
   }
@@ -514,8 +529,8 @@ function refitMessageElement(
   switch (message.type) {
     case 'user-message':
       return fitElementWithinCost(
-        '    <user>',
-        boundedCollapse(message.content),
+        userElementOpen(message),
+        userElementContent(message),
         '</user>',
         maximumCost,
         cost,
@@ -528,9 +543,34 @@ function refitMessageElement(
         maximumCost,
         cost,
       );
+    case 'command-output':
+    case 'command-result':
+      return fitElementWithinCost('    <execution-output>', commandContent(message),
+        '</execution-output>', maximumCost, cost);
     default:
       return '';
   }
+}
+
+function userElementOpen(message: UserMessage): string {
+  return message.metadata?.contentMode === 'literal' ? '    <user content-mode="literal">' : '    <user>';
+}
+
+function userElementContent(message: UserMessage): string {
+  return message.metadata?.contentMode === 'literal' ? boundedLiteral(message.content) : boundedCollapse(message.content);
+}
+
+function boundedLiteral(content: string): string {
+  if (content.length <= PROJECTED_BODY_MAX_CHARS) return content;
+  return `${content.slice(0, PROJECTED_BODY_MAX_CHARS).replace(/[\uD800-\uDBFF]$/u, '')}...`;
+}
+
+function commandContent(message: Extract<ChatMessage, { type: 'command-output' | 'command-result' }>): string {
+  if (message.type === 'command-output') {
+    return `${message.channel}: ${message.content}\nExecutor: ${message.context.executorId}\nStarting directory: ${message.context.projectPath}`;
+  }
+  const reportedDirectory = message.result.cwd.kind === 'reported' ? `\nWorking directory: ${message.result.cwd.path}` : '';
+  return `Command result: ${message.content}${reportedDirectory}`;
 }
 
 function fitElement(open: string, content: string, close: string, maximum: number): string {

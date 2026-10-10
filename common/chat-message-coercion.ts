@@ -37,6 +37,7 @@ export function asRecord(value: unknown): Record<string, unknown> {
 export function parseChatMessageMetadata(value: unknown): ChatMessageMetadata | undefined {
   const raw = asRecord(value);
   const metadata: ChatMessageMetadata = {};
+  if (raw.contentMode === 'literal') metadata.contentMode = 'literal';
   if (typeof raw.clientRequestId === 'string') metadata.clientRequestId = raw.clientRequestId;
   if (typeof raw.clientMessageId === 'string') metadata.clientMessageId = raw.clientMessageId;
   if (typeof raw.upstreamRequestId === 'string') metadata.upstreamRequestId = raw.upstreamRequestId;

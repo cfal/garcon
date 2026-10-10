@@ -16,6 +16,7 @@
 		ui: PromptComposerUiState;
 		textarea: HTMLTextAreaElement | undefined;
 		isVisible: boolean;
+		conversationInput: boolean;
 		isPresented: boolean;
 		isDisabled: boolean;
 		promptTransformPending: boolean;
@@ -29,6 +30,7 @@
 		ui,
 		textarea,
 		isVisible,
+		conversationInput,
 		isPresented,
 		isDisabled,
 		promptTransformPending,
@@ -64,6 +66,9 @@
 		},
 		get snippetTrigger() {
 			return localSettings.snippetTrigger;
+		},
+		get conversationInput() {
+			return conversationInput;
 		},
 	});
 

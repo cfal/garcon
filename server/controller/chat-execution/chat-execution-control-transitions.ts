@@ -732,6 +732,16 @@ export function pauseAfterDispatchFailure(
   return accepted(next, undefined, true);
 }
 
+export function pauseAfterTurnFailure(
+  current: StoredChatExecutionControlState, turnId: string, context: TransitionContext,
+): ControlTransition<void> {
+  const next = cloneStoredChatExecutionControl(current);
+  if (!hasPendingTurnInput(next)) return accepted(next, undefined, false);
+  next.pause = { id: context.newId(), kind: 'turn-failed', turnId, pausedAt: context.now };
+  bump(next, context.now);
+  return accepted(next, undefined, true);
+}
+
 function cloneControlInputEntry(entry: StoredControlInputEntry): StoredControlInputEntry {
   return {
     ...entry,

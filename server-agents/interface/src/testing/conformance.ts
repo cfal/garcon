@@ -15,6 +15,8 @@ const REQUIRED_FACET_METHODS = {
 } as const;
 
 const NULLABLE_FACET_METHODS = {
+  literalExecution: [],
+  readiness: ['status'],
   auth: ['status'],
   commands: ['discover'],
   compaction: ['compact'],
@@ -70,6 +72,10 @@ export function validateAgentIntegration(
     'loginStatus',
   ]);
   assertSingleQueryOptions(agentId, integrationRecord.singleQuery);
+  if (integration.literalExecution && (
+    !integration.literalExecution.selectionLabel
+    || integration.singleQuery !== null || integration.compaction !== null || integration.steering !== null
+  )) throw new Error(`Agent integration ${agentId} has an invalid literal execution contract`);
   if ('transcriptSearch' in integration) {
     throw new Error(`Agent integration ${agentId} exposes removed transcriptSearch state`);
   }

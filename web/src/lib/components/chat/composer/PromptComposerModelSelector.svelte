@@ -8,6 +8,7 @@
 		getExecutors,
 	} from '$lib/context';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
+	import { effectiveExecutorId } from '$shared/executors';
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import { composerModelSelectorMode } from '$lib/components/model-selector/composer-model-selector-mode';
@@ -32,8 +33,13 @@
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(agentState.executorId));
 
 	function selectableAgentsForExecutor(executorId: string) {
-		const allAgentIds = rootModelCatalog.forExecutor(executorId).getSelectableAgents();
-		const selectedAgentId = sessions.selectedChat?.agentId;
+		const catalog = rootModelCatalog.forExecutor(executorId);
+		const chat = sessions.selectedChat;
+		const allAgentIds = catalog.getSelectableAgents().filter((agentId) =>
+			!chat || chat.status === 'draft' || catalog.getAgent(agentId)?.executionPolicy !== 'literal'
+			|| (chat.agentId === agentId && effectiveExecutorId(chat.executorId) === executorId),
+		);
+		const selectedAgentId = chat?.agentId;
 		if (localSettings.allowDirectChats || (selectedAgentId && isDirectAgentId(selectedAgentId))) {
 			return allAgentIds;
 		}

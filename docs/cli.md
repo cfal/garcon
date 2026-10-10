@@ -124,7 +124,9 @@ list's `BULK` column and detail panel report bulk separately. Files content, mos
 Git operations, history import, and large CLI operations wait up to 20 seconds
 for bulk within their existing deadline; they never fall back to Local or primary.
 CLI context, turn receipts, Stop, and permission decisions stay on primary with
-a 64 KiB encoded RPC cap. Other forwarded operations retain their 1 MiB request
+a 64 KiB encoded RPC cap. Oversized successful receipt output is shortened to
+its tail with a notice and `completeness: best-effort`; the terminal outcome and
+retained transcript stay intact. Other forwarded operations retain their 1 MiB request
 and 8 MiB reply limits. An undeliverable mutation reply remains an unknown
 outcome, not permission to retry. See [Executor Transport](./executor/transport.md).
 
@@ -436,6 +438,11 @@ request identity, so they are not automatically retried; an ambiguous failure
 names the generated target chat ID to inspect first.
 
 ## Discover Exact Selections
+
+For [Shell command chats](./shell.md), `list models --agent shell` lists shell
+execution variants and `--model sh|bash|zsh|fish` selects one. No provider,
+endpoint, permission, or reasoning selection is needed. Start/resume preserve
+literal source and return inert stdout, including an empty silent-success result.
 
 Query the running server rather than guessing provider, model, permission, or effort values:
 

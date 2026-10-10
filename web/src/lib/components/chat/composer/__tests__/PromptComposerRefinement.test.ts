@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import type { RefinePromptResponse } from '$shared/prompt-refinement';
 import { PROMPT_REFINEMENT_DRAFT_MAX_LENGTH } from '$shared/prompt-refinement';
 import * as refinementApi from '$lib/api/prompt-refinement';
@@ -69,6 +70,33 @@ describe('PromptComposer prompt refinement', () => {
 		expect((refine as HTMLButtonElement).disabled).toBe(false);
 		await typeDraft('x'.repeat(PROMPT_REFINEMENT_DRAFT_MAX_LENGTH + 1));
 		expect((refine as HTMLButtonElement).disabled).toBe(true);
+	});
+
+	it.each(['conversation', 'literal'] as const)('refines a browser-only %s draft without a persisted chat', async (executionPolicy) => {
+		vi.mocked(refinementApi.refinePrompt).mockResolvedValueOnce({ success: true, refinedPrompt: 'Refined draft' });
+		render(PromptComposerTestHost, { selectedChatId: 'draft-refine', selectedStatus: 'draft', executionPolicy });
+		await typeDraft('Source draft');
+		await fireEvent.click(screen.getByRole('button', { name: 'Refine prompt' }));
+		await waitFor(() => expect(refinementApi.refinePrompt).toHaveBeenCalledWith({
+			draft: 'Source draft', target: 'prompt',
+		}, expect.anything()));
+		await waitFor(() => expect(compactTextarea().value).toBe('Refined draft'));
+	});
+
+	it('cancels a pending transform when the same chat switches to literal execution', async () => {
+		const pending = deferredRefinement();
+		vi.mocked(refinementApi.refinePrompt).mockReturnValueOnce(pending.promise);
+		const { rerender } = render(PromptComposerTestHost, { selectedChatId: 'chat-handoff' });
+		const textarea = await typeDraft('Source draft');
+		await fireEvent.click(screen.getByRole('button', { name: 'Refine prompt' }));
+		await waitFor(() => expect(refinementApi.refinePrompt).toHaveBeenCalledOnce());
+		const [, options] = vi.mocked(refinementApi.refinePrompt).mock.calls[0];
+		await rerender({ executionPolicy: 'literal' });
+		expect(options?.signal?.aborted).toBe(true);
+		pending.resolve({ success: true, refinedPrompt: 'Must not execute' });
+		await tick();
+		expect(textarea.value).toBe('Source draft');
+		expect(textarea.readOnly).toBe(false);
 	});
 
 	it('locks compact draft mutations and cancellation preserves text and attachments', async () => {

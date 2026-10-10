@@ -23,7 +23,7 @@ it('[TLV5-PERM.11-NOTIFIER-UNIT-01] ignores late inert permission history withou
   });
 
   new AttentionTracker(
-    { onTranscriptCommitted: (callback) => { onTranscriptCommitted = callback; } },
+    { onTranscriptCommitted: (callback) => { onTranscriptCommitted = callback; }, chatExecutionPolicy: () => 'conversation' },
     {
       onChatIdle: (callback) => { onChatIdle = callback; },
       onSessionStopped: () => {},

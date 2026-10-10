@@ -1,4 +1,6 @@
 import type { TranscriptExportDocumentModel } from './model.js';
+import { projectCommandOutput } from '../../../../common/command-output-projection.js';
+import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
 import type { TranscriptExportField } from './values.js';
 import {
   textSafe,
@@ -12,7 +14,18 @@ import {
   transcriptExportEntryPreambleSnapshot,
 } from './values.js';
 
-export function renderTranscriptExportMarkdown(model: TranscriptExportDocumentModel): string {
+export function renderTranscriptExportMarkdown(
+  model: TranscriptExportDocumentModel,
+  sourceEntries: readonly TranscriptExportEntry[] = model.entries,
+): string {
+  // Completeness uses the unfiltered evidence, including excluded gap notices.
+  const output = projectCommandOutput(sourceEntries.map(entry => entry.kind === 'message' ? entry.message : null));
+  const projected = new Map<number, TranscriptExportEntry>();
+  for (const [index, message] of output) {
+    const entry = sourceEntries[index]!;
+    if (entry.kind !== 'message') continue;
+    projected.set(entry.ordinal, { ...entry, message });
+  }
   const omitted = model.omitted
     .filter(({ count }) => count > 0)
     .map(({ category, count }) => `${category} ${count}`)
@@ -25,7 +38,8 @@ export function renderTranscriptExportMarkdown(model: TranscriptExportDocumentMo
     '',
   ];
 
-  for (const entry of model.entries) {
+  for (const original of model.entries) {
+    const entry = projected.get(original.ordinal) ?? original;
     const type = transcriptExportEntryType(entry);
     const preambleSnapshot = transcriptExportEntryPreambleSnapshot(entry);
     const preambles = preambleSnapshot?.preambles ?? null;
@@ -41,7 +55,15 @@ export function renderTranscriptExportMarkdown(model: TranscriptExportDocumentMo
     );
 
     const content = transcriptExportEntryText(entry);
-    if (content !== null) lines.push(content, '');
+    if (content !== null) {
+      const literal = entry.kind === 'message' && (
+        (entry.message.type === 'user-message' && entry.message.metadata?.contentMode === 'literal')
+        || (entry.message.type === 'command-output' && entry.message.format === 'plain')
+        || entry.message.type === 'command-result'
+      );
+      const fence = '`'.repeat(Math.max(3, longestBacktickRun(content) + 1));
+      lines.push(...(literal ? [`${fence}text`, content, fence] : [content]), '');
+    }
 
     const fields = [...transcriptExportEntryFields(entry)];
     const toolId = transcriptExportEntryToolId(entry);

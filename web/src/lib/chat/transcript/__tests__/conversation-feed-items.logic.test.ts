@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
 	AssistantMessage,
+	CommandOutputMessage,
+	CommandResultMessage,
 	AskUserQuestionToolUseMessage,
 	BashToolUseMessage,
 	ExecToolUseMessage,
@@ -28,6 +30,35 @@ import type { LocalNoticeRow } from '$lib/chat/transcript/local-notice.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 
 const TS = '2026-05-29T00:00:00.000Z';
+
+it('keeps duplicate command output records separately visible without mutating durable messages', () => {
+	const context = { executorId: 'local', projectPath: '/original' };
+	const first = new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', '```ts\nconst ', context);
+	const second = new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', 'n = 1;\n```', context, first.content.length);
+	const result = new CommandResultMessage(TS, 'command-1', { outcome: 'finished', exitCode: 0, signal: null,
+		capture: 'complete', cwd: { kind: 'reported', path: '/original' } });
+	const items = buildConversationFeedRenderItems(rows([first, second, result]));
+	expect(items).toHaveLength(3);
+	expect(items[0]).toMatchObject({ id: 'row-0', message: { ...first, format: 'plain' } });
+	expect(items[1]).toMatchObject({ id: 'row-1', message: { ...second, format: 'plain' } });
+	expect(conversationFeedItemLayout(items[0])).toBe('standard');
+	expect(conversationFeedItemLayout(items[1])).toBe('standard');
+	expect(first.content).toBe('```ts\nconst ');
+	expect(first.format).toBe('markdown');
+	expect(buildConversationFeedRenderItems(rows([second]))[0]).toMatchObject({ message: { ...second, format: 'plain' } });
+});
+
+it('does not combine output across missing rows or command boundaries', () => {
+	const context = { executorId: 'local', projectPath: '/original' };
+	const messages = rows([
+		new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', 'first', context),
+		new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', 'second', context),
+		new CommandOutputMessage(TS, 'command-2', 'stdout', 'markdown', 'third', context),
+	]);
+	messages[1].ordinal = 3;
+	messages[2].ordinal = 4;
+	expect(buildConversationFeedRenderItems(messages).map(conversationFeedItemLayout)).toEqual(['standard', 'standard', 'standard']);
+});
 
 function rows(messages: ChatMessage[]) {
 	return messages.map((message, index) => ({

@@ -28,6 +28,7 @@ export interface RecentlyDispatchedQueueEntry {
 export type QueuePause =
   | { id: string; kind: 'manual'; pausedAt: string }
   | { id: string; kind: 'queued-turn-failed'; entryId: string; pausedAt: string }
+  | { id: string; kind: 'turn-failed'; turnId: string; pausedAt: string }
   | { id: string; kind: 'completion-uncertain'; entryId: string; pausedAt: string }
   | { id: string; kind: 'unknown'; entryId?: string; pausedAt: string | null };
 
@@ -126,6 +127,8 @@ export function parseQueuePause(value: unknown): QueuePause | null | undefined {
   }
   if (!isIsoTimestamp(raw.pausedAt)) return undefined;
   if (raw.kind === 'manual') return { id, kind: 'manual', pausedAt: raw.pausedAt };
+  if (raw.kind === 'turn-failed') return typeof raw.turnId === 'string' && raw.turnId
+    ? { id, kind: 'turn-failed', turnId: raw.turnId, pausedAt: raw.pausedAt } : undefined;
   if (
     raw.kind === 'queued-turn-failed' ||
     raw.kind === 'completion-uncertain'

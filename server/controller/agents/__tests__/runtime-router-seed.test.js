@@ -41,7 +41,7 @@ function makeRouter(overrides = {}) {
   const transcript = createRuntimeTranscriptFixture({
     conversation,
     composition: overrides.composition,
-    conversationMessages: overrides.conversationMessages,
+    carryoverMessages: overrides.carryoverMessages,
     appendNotice: overrides.appendNotice,
     currentView: overrides.currentView,
   });
@@ -65,6 +65,7 @@ function makeRouter(overrides = {}) {
   const providerTarget = overrides.providerTarget ?? {};
   const captureTarget = overrides.captureTarget ?? mock(async () => providerTarget);
   const integration = {
+    literalExecution: overrides.literalExecution ?? null,
     producers: producer.producers,
     descriptor: {
       id: 'test',
@@ -139,6 +140,26 @@ function makeRouter(overrides = {}) {
 }
 
 describe('AgentRuntimeRouter producer boundary', () => {
+  it.each([{ attachments: [] }, { attachments: [{ kind: 'image', data: 'synthetic', name: 'example.png', mimeType: 'image/png' }] }])(
+    'preserves literal input and admitted attachments without conversational preparation: %j', async ({ attachments }) => {
+    const forbidden = mock(() => { throw new Error('Conversational transformation invoked'); });
+    const source = '  /bin/cat @notes.txt\n  ';
+    const input = inputRow(2, source);
+    const presentation = { origin: 'cli', style: 'notice', disclosure: 'collapsed' };
+    input.detail.message.presentation = presentation;
+    input.detail.attachments = attachments;
+    const { router, start } = makeRouter({
+      literalExecution: { selectionLabel: 'Runtime' },
+      composition: { inserted: true, input, prompt: [inputRow(1, 'never resend'), input], providerPrefix: 'never prepend' },
+      carryoverMessages: forbidden, createCarriedContext: forbidden, resolveFileMentions: forbidden,
+    });
+    await router.runAgentTurn('chat-1', 'fallback', { clientMessageId: 'message-2', turnId: 'turn-1' });
+    expect(start.mock.calls[0][0]).toMatchObject({
+      prompt: source, carriedContext: null, attachments,
+      submission: { clientMessageId: input.detail.clientMessageId, timestamp: input.at, presentation },
+    });
+    expect(forbidden).not.toHaveBeenCalled();
+  });
   it('forwards actual compaction and context readiness in order before provider startup', async () => {
     const observed = [];
     const f = makeRouter({
@@ -250,7 +271,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
 
   it('excludes every composed prompt row from fresh-session carried context', async () => {
     const context = [new AssistantMessage('2026-08-12T00:00:00.000Z', 'earlier answer')];
-    const conversationMessages = mock((_chatId, excluded) => {
+    const carryoverMessages = mock((_chatId, excluded) => {
       expect([...excluded]).toEqual([2, 3]);
       return context;
     });
@@ -259,14 +280,14 @@ describe('AgentRuntimeRouter producer boundary', () => {
       input: inputRow(3, 'current'),
       prompt: [inputRow(2, 'unanswered'), inputRow(3, 'current')],
     };
-    const { router, start } = makeRouter({ composition, conversationMessages });
+    const { router, start } = makeRouter({ composition, carryoverMessages });
 
     await router.runAgentTurn('chat-1', 'fallback', {
       clientMessageId: 'message-3',
       turnId: 'turn-1',
     });
 
-    expect(conversationMessages).toHaveBeenCalledWith('chat-1', expect.any(Set));
+    expect(carryoverMessages).toHaveBeenCalledWith('chat-1', expect.any(Set));
     expect(start).toHaveBeenCalledWith(expect.objectContaining({
       prompt: 'unanswered\n\ncurrent',
       carriedContext: expect.objectContaining({
@@ -548,7 +569,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
   });
 
   it('resumes without materializing the ledger conversation', async () => {
-    const conversationMessages = mock(() => {
+    const carryoverMessages = mock(() => {
       throw new Error('resume must not scan ledger context');
     });
     const { router, resume, transcript } = makeRouter({
@@ -556,12 +577,12 @@ describe('AgentRuntimeRouter producer boundary', () => {
         agentSessionId: 'native-1',
         nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
       },
-      conversationMessages,
+      carryoverMessages,
     });
 
     await router.runAgentTurn('chat-1', 'resume', { turnId: 'turn-1' });
 
-    expect(conversationMessages).not.toHaveBeenCalled();
+    expect(carryoverMessages).not.toHaveBeenCalled();
     expect(resume.mock.calls[0][0]).not.toHaveProperty('priorContext');
     expect(transcript.notices).toEqual([]);
   });

@@ -95,6 +95,7 @@ export interface MetadataDep {
 export type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
   | 'hasAgent'
+  | 'executionPolicy'
   | 'assertExecutorReady'
   | 'supportsImages'
   | 'supportsFileAttachmentMimeType'
@@ -270,6 +271,7 @@ export interface NormalizedChatStart {
   agentId: string;
   projectPath: string;
   idempotencyProjectPath: string;
+  idempotencyCommand: string;
   command: string;
   images: NonNullable<RunAgentTurnOptions['images']>;
   model: string;

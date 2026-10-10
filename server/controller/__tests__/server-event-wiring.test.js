@@ -192,7 +192,7 @@ function createFixture(overrides = {}) {
     onProjectUnavailable: mock((callback) => { queue.projectUnavailable = callback; }),
     onTurnSettled: mock((callback) => { queue.settled = callback; }),
     getQueuedTurnFinalization: mock(() => null),
-    onAgentTurnTerminal: mock(async () => undefined),
+    onAgentTurnTerminal: mock(async () => ({ kind: 'settled' })),
     checkChatIdle: mock(async () => undefined),
     triggerDrain: mock(async () => undefined),
     retryQueuedSteers: mock(() => undefined),
@@ -968,6 +968,23 @@ describe('server event wiring', () => {
       'finished',
       {},
     );
+  });
+
+  it('fails a successful process receipt when cwd settlement fails without publishing success', async () => {
+    const fixture = createFixture({ queue: {
+      onAgentTurnTerminal: mock(async () => ({ kind: 'failed', message: 'Synthetic cwd persistence failure' })),
+    } });
+    fixture.agent.transcript(terminalCommit());
+    await fixture.agent.finished('chat-1', 0, turn, 'finished');
+    await fixture.wiring.waitForIdle();
+    expect(fixture.published.some(message => message.type === 'agent-run-finished')).toBe(false);
+    expect(fixture.published.find(message => message.type === 'agent-run-failed')).toMatchObject({
+      error: 'Synthetic cwd persistence failure',
+    });
+    expect(fixture.commandLedger.settleTerminal).toHaveBeenCalledWith(
+      'agent-run:chat-1:request-1', 'failed', { error: 'Synthetic cwd persistence failure', errorCode: 'PROJECT_PATH_DESTINATION_REJECTED' },
+    );
+    expect(fixture.queueService.onAgentTurnTerminal).toHaveBeenCalledTimes(1);
   });
 
   it('removes a validated permission through the production registry listener chain without a terminal fact', async () => {

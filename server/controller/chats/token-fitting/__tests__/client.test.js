@@ -10,7 +10,7 @@ import { storedProviderRows } from '../../../ledger/__tests__/stored-rows.ts';
 import { foldRowsForExport } from '../../../ledger/export-fold.ts';
 import { foldHandoffArtifactEntries } from '../../handoff-artifact/projection.ts';
 import { renderFittedHandoffArtifact } from '../../handoff-artifact/xml.ts';
-import { assessCarryover, fitCompactionPrompt } from '../carryover.ts';
+import { assessCarryover, fitCompactionPrompt, projectCompactedCarryover } from '../carryover.ts';
 import { TokenFittingWorker } from '../client.ts';
 
 const AT = '2026-01-01T00:00:00.000Z';
@@ -65,6 +65,9 @@ describe('TokenFittingWorker', () => {
     const fitted = await fitting.fitCompactionPrompt(prompt);
     expect(fitted.kind).toBe('fitted');
     expect(fitted).toEqual(fitCompactionPrompt(prompt));
+    expect(await fitting.projectCompactedCarryover(messages, 'Synthetic summary')).toEqual(
+      projectCompactedCarryover(messages, 'Synthetic summary'),
+    );
     const rendered = await fitting.renderHandoffArtifact(artifact);
     expect(rendered?.budgetOmittedEntryCount).toBeGreaterThan(0);
     expect(rendered).toEqual(renderFittedHandoffArtifact({

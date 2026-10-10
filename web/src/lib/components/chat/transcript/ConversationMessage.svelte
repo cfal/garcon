@@ -31,6 +31,7 @@
 		getWorkspaceCoordinator,
 	} from '$lib/context';
 	import Markdown from '$lib/components/rich-text/Markdown.svelte';
+	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
 	import { resolveFileOpenTarget } from '$lib/chat/file-links/file-open-target.js';
 	import {
@@ -47,6 +48,7 @@
 	import AgentSwitchRow from './AgentSwitchRow.svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import CliRow from './rows/CliRow.svelte';
+	import CommandStatusRow from './rows/CommandStatusRow.svelte';
 	import CliPresentationHeader from './rows/CliPresentationHeader.svelte';
 	import CollapsibleBody from './rows/CollapsibleBody.svelte';
 	import TranscriptNoticeRow from './rows/TranscriptNoticeRow.svelte';
@@ -153,7 +155,7 @@
 		};
 	});
 	const executorId = $derived(
-		activeChatContext?.executorId ??
+		(message.type === 'command-output' ? message.context.executorId : activeChatContext?.executorId) ??
 			(activeChatContext ? sessions.byId[activeChatContext.chatId]?.executorId : null) ??
 			'local',
 	);
@@ -162,7 +164,7 @@
 	// Automatic reads wait for the confirmed executor root, not the shell's startup default.
 	const imageFileRootPath = $derived(executors.get(executorId)?.projectBasePath);
 	const chatProjectPath = $derived(
-		filesAvailable ? (activeChatContext?.projectPath ?? null) : null,
+		filesAvailable ? (message.type === 'command-output' ? message.context.projectPath : activeChatContext?.projectPath ?? null) : null,
 	);
 	const resolveChatReference: ResolveChatReference = (chatId) =>
 		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
@@ -175,6 +177,7 @@
 			case 'user-message':
 				return 'user';
 			case 'assistant-message':
+			case 'command-output':
 				return 'assistant';
 			default:
 				return msg.type;
@@ -198,6 +201,8 @@
 		userMessagePresentation?.style === 'custom' ? userMessagePresentation.customStyle : null,
 	);
 	const asAssistant = $derived(message instanceof AssistantMessage ? message : null);
+	const asCommandOutput = $derived(message.type === 'command-output' ? message : null);
+	const plainResponse = $derived(asCommandOutput?.format === 'plain');
 	const asThinking = $derived(message instanceof ThinkingMessage ? message : null);
 	const asToolUse = $derived(isToolUseMessage(message) ? message : null);
 	const asToolResult = $derived(message instanceof ToolResultMessage ? message : null);
@@ -223,7 +228,7 @@
 	const showNonAssistantHeader = $derived(Boolean(asError));
 
 	function getFormattedContent(): string {
-		if (message instanceof AssistantMessage || message instanceof ErrorMessage) {
+		if (message instanceof AssistantMessage || message instanceof ErrorMessage || message.type === 'command-output') {
 			return String(message.content || '');
 		}
 		return '';
@@ -240,6 +245,7 @@
 
 	function getMessageMenuText(): string {
 		if (asAssistant) return String(asAssistant.content || '');
+		if (asCommandOutput) return asCommandOutput.content;
 		if (asUser) return String(asUser.content || '');
 		return '';
 	}
@@ -247,7 +253,7 @@
 	const messageMenuText = $derived(getMessageMenuText());
 	const canGenerateTitleFromMessage = $derived(
 		Boolean(
-			(asUser || asAssistant) &&
+			(asUser || asAssistant || asCommandOutput) &&
 			messageMenuText.trim() &&
 			activeChatContext?.chatId &&
 			forkUpToSeq !== undefined &&
@@ -483,11 +489,10 @@
 			});
 			return true;
 		}
-		const chat = activeChatContext;
-		if (!chat?.projectPath) return;
+		if (!chatProjectPath) return true;
 		const resolved = resolveFileLinkTarget(link.rawHref, {
 			fileRootPath: projectBasePath,
-			sourceDirectoryPath: chat.projectPath,
+			sourceDirectoryPath: chatProjectPath,
 		});
 		if (!resolved) return;
 		void fileSessions.open({
@@ -601,6 +606,9 @@
 									: undefined}
 							>
 								<div class={userMessagePresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
+									{#if asUser.metadata?.contentMode === 'literal'}
+										<pre class="whitespace-pre-wrap break-words font-mono">{asUser.content}</pre>
+									{:else}
 									<Markdown
 										source={asUser.content}
 										variant={userMessagePresentation?.style ? 'presented' : 'user'}
@@ -611,6 +619,7 @@
 										chatReferencePolicy={userMessagePresentation ? 'explicit' : 'explicit-and-bare'}
 										{acquireTransientActivity}
 									/>
+									{/if}
 								</div>
 							</CollapsibleBody>
 							{#if asUser.images && asUser.images.length > 0}
@@ -648,7 +657,7 @@
 							canForkNow={canForkAtMessageNow}
 							onFork={handleFork}
 							onCopy={copyText}
-							onQuoteSelection={quoteSelection}
+							onQuoteSelection={onAppendToDraft ? quoteSelection : undefined}
 							onSendToNewSession={sendToNewSession}
 							onSelectText={openSelectTextDialog}
 							onGenerateTitleFromMessage={canGenerateTitleFromMessage
@@ -781,7 +790,9 @@
 								{/if}
 							{/snippet}
 						</ChatEventCard>
-					{:else if asAssistant}
+					{:else if message.type === 'command-result' || (message.type === 'command-output' && message.channel === 'stderr')}
+						<CommandStatusRow {message} {disclosureState} />
+					{:else if asAssistant || asCommandOutput}
 						<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 							<ContextMenuTrigger
 								bind:ref={messageMenuTriggerRef}
@@ -790,6 +801,9 @@
 							>
 								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
 									<div class="px-px text-sm text-foreground">
+										{#if plainResponse}
+											<CodeBlock text={formattedContent} />
+										{:else}
 										<Markdown
 											source={formattedContent}
 											variant="assistant"
@@ -800,6 +814,7 @@
 											chatReferencePolicy="explicit-and-bare"
 											{acquireTransientActivity}
 										/>
+										{/if}
 									</div>
 									{@render floatingMessageMenuButton('-bottom-1 right-1')}
 								</div>
@@ -814,7 +829,7 @@
 									canForkNow={canForkAtMessageNow}
 									onFork={handleFork}
 									onCopy={copyText}
-									onQuoteSelection={quoteSelection}
+									onQuoteSelection={onAppendToDraft ? quoteSelection : undefined}
 									onSendToNewSession={sendToNewSession}
 									onSelectText={openSelectTextDialog}
 									onGenerateTitleFromMessage={canGenerateTitleFromMessage
