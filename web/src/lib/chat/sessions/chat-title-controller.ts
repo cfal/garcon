@@ -34,10 +34,11 @@ export class ChatTitleController {
 			const response = await renameRemoteChat(chatId, newTitle);
 			const chat = sessions.byId[chatId];
 			if (!chat) return true;
-			if (
+
+			const needsReconciliation =
 				chat.title !== response.title &&
-				(serverEntryGeneration !== readServerEntryGeneration() || titleRevision !== this.#revision)
-			) {
+				(serverEntryGeneration !== readServerEntryGeneration() || titleRevision !== this.#revision);
+			if (needsReconciliation) {
 				await sessions.quietRefreshChats();
 			} else {
 				sessions.patchChat(chatId, { title: response.title });

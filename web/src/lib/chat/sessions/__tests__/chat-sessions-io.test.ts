@@ -759,69 +759,90 @@ describe('ChatSessionsStore IO', () => {
 		{ source: 'event', initialTitle: 'Renamed' },
 		{ source: 'response', initialTitle: 'Renamed' },
 	])('fences an older list after a title $source (previous title: $initialTitle)', async ({ source, initialTitle }) => {
-		const beforeRename = deferred<Awaited<ReturnType<typeof listChats>>>();
-		const afterRename = deferred<Awaited<ReturnType<typeof listChats>>>();
+		const staleList = deferred<Awaited<ReturnType<typeof listChats>>>();
+		const freshList = deferred<Awaited<ReturnType<typeof listChats>>>();
 		const fetchChats = vi.fn<typeof listChats>()
-			.mockReturnValueOnce(beforeRename.promise).mockReturnValueOnce(afterRename.promise);
+			.mockReturnValueOnce(staleList.promise)
+			.mockReturnValueOnce(freshList.promise);
 		const store = new ChatSessionsStore({
 			listChats: fetchChats,
-			updateSessionName: async () => ({ success: true, chatId: 'chat-1', title: 'Renamed', changed: true }),
+			updateSessionName: async () => ({
+				success: true,
+				chatId: 'chat-1',
+				title: 'Renamed',
+				changed: true,
+			}),
 		});
 		store.upsertFromServer([makeServerSession({ title: initialTitle })]);
 
 		const refreshing = store.quietRefreshChats();
-		if (source === 'event') store.patchChat('chat-1', { title: 'Renamed' });
-		else await store.renameChat('chat-1', 'Renamed');
-		beforeRename.resolve({ sessions: [makeServerSession()], total: 1, lastSelectedChatId: null });
+		if (source === 'event') {
+			store.patchChat('chat-1', { title: 'Renamed' });
+		} else {
+			await store.renameChat('chat-1', 'Renamed');
+		}
+		staleList.resolve({ sessions: [makeServerSession()], total: 1, lastSelectedChatId: null });
 		await flushMicrotasks();
 
 		expect(store.byId['chat-1']?.title).toBe('Renamed');
 		expect(fetchChats).toHaveBeenCalledTimes(2);
-		afterRename.resolve({ sessions: [makeServerSession({ title: 'Renamed', isPinned: true, orderGroup: 'pinned' })], total: 1, lastSelectedChatId: null });
+		freshList.resolve({
+			sessions: [makeServerSession({ title: 'Renamed', isPinned: true, orderGroup: 'pinned' })],
+			total: 1,
+			lastSelectedChatId: null,
+		});
 		await refreshing;
 		expect(store.byId['chat-1']).toMatchObject({ title: 'Renamed', isPinned: true });
 	});
 
 	it('reconciles a delayed rename response instead of replacing a newer title', async () => {
-		const rename = deferred<Awaited<ReturnType<typeof updateSessionName>>>();
-		const refresh = deferred<Awaited<ReturnType<typeof listChats>>>();
-		const fetchChats = vi.fn<typeof listChats>().mockReturnValueOnce(refresh.promise);
+		const renameResponse = deferred<Awaited<ReturnType<typeof updateSessionName>>>();
+		const refreshedList = deferred<Awaited<ReturnType<typeof listChats>>>();
+		const fetchChats = vi.fn<typeof listChats>().mockReturnValueOnce(refreshedList.promise);
 		const store = new ChatSessionsStore({
-			updateSessionName: () => rename.promise,
+			updateSessionName: () => renameResponse.promise,
 			listChats: fetchChats,
 		});
 		store.upsertFromServer([makeServerSession()]);
 
 		const renaming = store.renameChat('chat-1', 'First rename');
 		store.patchChat('chat-1', { title: 'Newer rename' });
-		rename.resolve({ success: true, chatId: 'chat-1', title: 'First rename', changed: true });
+		renameResponse.resolve({ success: true, chatId: 'chat-1', title: 'First rename', changed: true });
 		await flushMicrotasks();
 		expect(store.byId['chat-1']?.title).toBe('Newer rename');
 		expect(fetchChats).toHaveBeenCalledOnce();
-		refresh.resolve({ sessions: [makeServerSession({ title: 'Newer rename' })], total: 1, lastSelectedChatId: null });
+		refreshedList.resolve({
+			sessions: [makeServerSession({ title: 'Newer rename' })],
+			total: 1,
+			lastSelectedChatId: null,
+		});
 		expect(await renaming).toBe(true);
 		expect(store.byId['chat-1']?.title).toBe('Newer rename');
 	});
 
 	it('does not refetch when the rename event already installed the confirmed title', async () => {
-		const rename = deferred<Awaited<ReturnType<typeof updateSessionName>>>();
-		const store = new ChatSessionsStore({ updateSessionName: () => rename.promise });
+		const renameResponse = deferred<Awaited<ReturnType<typeof updateSessionName>>>();
+		const store = new ChatSessionsStore({ updateSessionName: () => renameResponse.promise });
 		store.upsertFromServer([makeServerSession()]);
+
 		const renaming = store.renameChat('chat-1', 'Renamed');
 		store.patchChat('chat-1', { title: 'Renamed' });
-		rename.resolve({ success: true, chatId: 'chat-1', title: 'Renamed', changed: true });
+		renameResponse.resolve({ success: true, chatId: 'chat-1', title: 'Renamed', changed: true });
+
 		expect(await renaming).toBe(true);
 		expect(store.byId['chat-1']?.title).toBe('Renamed');
 		expect(mockListChats).not.toHaveBeenCalled();
 	});
 
 	it('does not restore a chat deleted while its rename was in flight', async () => {
-		const rename = deferred<Awaited<ReturnType<typeof updateSessionName>>>();
-		const store = new ChatSessionsStore({ updateSessionName: () => rename.promise });
+		const renameResponse = deferred<Awaited<ReturnType<typeof updateSessionName>>>();
+		const store = new ChatSessionsStore({ updateSessionName: () => renameResponse.promise });
 		store.upsertFromServer([makeServerSession()]);
+
 		const renaming = store.renameChat('chat-1', 'Renamed');
 		store.removeChat('chat-1');
-		rename.resolve({ success: true, chatId: 'chat-1', title: 'Renamed', changed: true });
+		renameResponse.resolve({ success: true, chatId: 'chat-1', title: 'Renamed', changed: true });
+
 		expect(await renaming).toBe(true);
 		expect(store.hasChat('chat-1')).toBe(false);
 		expect(mockListChats).not.toHaveBeenCalled();

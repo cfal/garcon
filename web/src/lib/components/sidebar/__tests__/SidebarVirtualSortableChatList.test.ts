@@ -262,10 +262,11 @@ describe('SidebarVirtualSortableChatList', () => {
 			expect(screen.getByText('Renamed chat')).toBeTruthy();
 			expect(screen.queryByText('Chat 1')).toBeNull();
 			expect(view.container.querySelector('[data-sidebar-virtual-row="chat-1"]')).toBe(row);
-			expect(Array.from(
+			const visibleChatIds = Array.from(
 				view.container.querySelectorAll('[data-sidebar-virtual-row]'),
 				(element) => element.getAttribute('data-sidebar-virtual-row'),
-			)).toEqual(['chat-1', 'chat-2']);
+			);
+			expect(visibleChatIds).toEqual(['chat-1', 'chat-2']);
 		},
 	);
 
