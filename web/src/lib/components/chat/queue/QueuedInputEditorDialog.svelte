@@ -15,7 +15,7 @@
 
 	interface Props {
 		chatId: string;
-		executionKey?: string;
+		executionKey: string;
 		editor: QueuedInputEditorState;
 		onClose: () => void;
 		onFocusComposer: (chatId: string) => void;
@@ -24,7 +24,7 @@
 	}
 	let {
 		chatId,
-		executionKey = '',
+		executionKey,
 		editor,
 		onClose,
 		onFocusComposer,
