@@ -2,6 +2,7 @@ import { TICKET_ACTIONS, type TicketAction } from './ticket-commands.js';
 import type { AgentCommandCorrelation } from './garcon-command-results.js';
 import { isTicketReadAction, type GarconTicketCommand } from './garcon-ticket-command.js';
 import { parseTicketListQuery } from './ticket-query.js';
+import { normalizeStoredTicketOutcome, normalizeStoredTicketResult } from './ticket-stored.js';
 import { escapeGarconXmlText, parseGarconCommandEnvelope } from './garcon-command-envelope.js';
 import { parseTicketDetail, parseTicketHistoryPage, parseTicketPage } from './ticket-responses.js';
 import { ticketBytes, storedTicketId, ticketInteger, ticketInvalid, ticketLinkKind, ticketRecord, ticketRef, ticketStatus, ticketUuid } from './ticket-validation.js';
@@ -180,7 +181,7 @@ export function parseGarconTicketResult(content: string): GarconTicketResult | n
       raw.requestOrdinal = Number(raw.requestOrdinal);
       Object.assign(raw, ticketRecord(JSON.parse(envelope.body), raw.status === 'error'
         ? ['errorCode', 'message', 'context'] : ['data', 'context']));
-      return parseTicketCommandResult(raw);
+      return parseTicketCommandResult(normalizeStoredTicketResult(raw));
     } catch { return null; }
   }
   return null;
@@ -215,4 +216,9 @@ export function parseTicketCommandOutcome(value: unknown): TicketCommandOutcome 
     if (!identity.ticketId) return null;
     return { ...identity, status: 'ok', revision: ticketInteger(raw.revision, 'revision') } as TicketCommandOutcome;
   } catch { return null; }
+}
+
+export function parseStoredTicketCommandOutcome(value: unknown): TicketCommandOutcome | null {
+  try { return parseTicketCommandOutcome(normalizeStoredTicketOutcome(value)); }
+  catch { return null; }
 }

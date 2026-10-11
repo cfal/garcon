@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { TICKET_ACTIONS } from '../ticket-commands.js';
 import { garconTicketResultContent, ticketCommandOutcome, ticketCommandContext, ticketMutationReceipt,
-  parseGarconTicketResult, parseTicketCommandOutcome, parseTicketCommandResult } from '../garcon-ticket-result.js';
+  parseGarconTicketResult, parseStoredTicketCommandOutcome, parseTicketCommandOutcome, parseTicketCommandResult } from '../garcon-ticket-result.js';
 import { TICKET_LIMITS } from '../tickets.js';
 import { ticketBytes } from '../ticket-validation.js';
 import { parseGarconTicketCommand } from '../garcon-ticket-command.js';
@@ -34,6 +34,24 @@ function result(command, status = 'ok') {
 }
 
 describe('command-specific ticket results', () => {
+  test('historical native results and ledger filters normalize ownership without rewriting actor labels', () => {
+    const owner = { kind: 'user', ownerKey: 'original' };
+    for (const command of ['read', 'list', 'history']) {
+      const current = structuredClone(result(command));
+      if (command === 'read') current.data.ticket.assignee = owner;
+      if (command === 'list') {
+        current.data.items[0].assignee = owner;
+        current.context = { filters: { assignee: owner } };
+      }
+      if (command === 'history') current.data.items[0].ticket.assignee = owner;
+      const xml = garconTicketResultContent(current).replaceAll('&quot;ownerKey&quot;', '&quot;username&quot;');
+      expect(parseGarconTicketResult(xml)).toEqual(current);
+    }
+    const outcome = { ...ticketCommandOutcome(result('list')), context: { filters: { assignee: owner } } };
+    const historical = { ...outcome, context: { filters: { assignee: { kind: 'user', username: 'original' } } } };
+    expect(parseTicketCommandOutcome(historical)).toBeNull();
+    expect(parseStoredTicketCommandOutcome(historical)).toEqual(outcome);
+  });
   test.each([
     ['create', 'Created ticket G-1'], ['update', 'Updated ticket G-1'],
     ['claim', 'Assigned ticket G-1 to this chat'], ['release', 'Released ticket G-1'],
@@ -95,7 +113,7 @@ describe('command-specific ticket results', () => {
 
   test.each([
     ['unassigned', 'unassigned'],
-    [{ kind: 'user', username: 'synthetic-user' }, 'synthetic-user'],
+    [{ kind: 'user', ownerKey: 'synthetic-user' }, 'synthetic-user'],
     [{ kind: 'chat', chatId: actor.chatId }, `chat ${actor.chatId}`],
   ])('formats the list assignee %j without changing its identity', (assignee, expected) => {
     const outcome = ticketCommandOutcome({ ...result('list'), context: { filters: { assignee } } });

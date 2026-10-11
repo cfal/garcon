@@ -51,15 +51,17 @@ describe('Tickets surface', () => {
 		'keeps non-chat assignee %j as plain text',
 		async (username) => {
 			const { controller, setItems, view } = await mount();
-			setItems([{
-				...syntheticTicket(),
-				assignee: username === null ? null : { kind: 'user', username },
-			}]);
+			setItems([
+				{
+					...syntheticTicket(),
+					assignee: username === null ? null : { kind: 'user', ownerKey: username },
+				},
+			]);
 			controller.select('G-1');
 			await controller.refresh();
 			await tick();
 			const assignee = within(view.container.querySelector<HTMLElement>('.ticket-assignee-value')!);
-			const label = username ?? 'Unassigned';
+			const label = username === 'local' ? 'local (Me)' : (username ?? 'Unassigned');
 			expect(assignee.getByText(label).tagName).toBe('SPAN');
 			expect(assignee.queryByRole('button', { name: label })).toBeNull();
 		},
@@ -211,7 +213,9 @@ describe('Tickets surface', () => {
 			expect(screen.queryByText('This ticket is outside the current filters.')).toBeNull();
 			api.counts.mockImplementation(counts);
 			await controller.refresh();
-			await waitFor(() => expect(view.container.querySelector('[data-ticket-id="G-1"]')).toBeNull());
+			await waitFor(() =>
+				expect(view.container.querySelector('[data-ticket-id="G-1"]')).toBeNull(),
+			);
 			expect(await screen.findByText('This ticket is outside the current filters.')).toBeTruthy();
 			expect(document.activeElement).toBe(
 				view.container.querySelector('.ticket-lane[data-status="open"] h3'),
@@ -309,7 +313,9 @@ describe('Tickets surface', () => {
 			focused.focus();
 			release();
 			await controller.refresh();
-			await waitFor(() => expect(view.container.querySelector('[data-ticket-id="G-1"]')).toBeNull());
+			await waitFor(() =>
+				expect(view.container.querySelector('[data-ticket-id="G-1"]')).toBeNull(),
+			);
 			expect(document.activeElement).toBe(focused);
 		},
 	);
@@ -752,7 +758,9 @@ describe('Tickets surface', () => {
 		const { controller } = await mount();
 		await controller.beginCreate('/synthetic/context');
 		const dialog = within(await screen.findByRole('dialog'));
-		await fireEvent.input(dialog.getByLabelText('Title'), { target: { value: 'Synthetic ticket' } });
+		await fireEvent.input(dialog.getByLabelText('Title'), {
+			target: { value: 'Synthetic ticket' },
+		});
 		await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
 		expect(dialog.getByText('Discard this draft?')).toBeTruthy();
 		await fireEvent.click(dialog.getByRole('button', { name: 'Create ticket' }));

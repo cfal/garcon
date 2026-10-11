@@ -206,6 +206,13 @@ Introduce an explicit delegated-executor principal with stable executor-based au
 
 Tickets gain explicit UUID-based executor actor and executor owner variants. A claim without `--from-chat` belongs to the executor; declared chat ownership remains supported. Update validation, owner keys/filters, CLI formatting, and UI presentation. Labels do not enter fingerprints or comment-edit authority. Durable retries deduplicate only from the same origin; retry hints must preserve the runtime selector and warn against switching to Local or another executor. Older builds cannot read executor-attributed tickets; no dual format is required.
 
+User ticket owners use `{kind:'user', ownerKey:string}` and CLI selectors
+`user:<ownerKey>`. This key is immutable, initially the original account username;
+login renames never change it. Historical actor usernames remain attribution,
+not assignment or retry authority. Protocol revision 26 carries this DTO in both
+forwarding directions. Account username/password endpoints are controller-browser
+only and remain excluded from the CLI allowlist.
+
 Changing or revoking CLI access does not replace the connector or terminate PTYs/agents. It invalidates an executor/session authorization lease and cancels bridge waits best effort. Revoke/re-enable cannot authorize late completion under the old lease. Already accepted work is not rolled back. Check current entry configuration, verified readiness, exact RPC backing, and quiescence on each call, not captured connector configuration. Capture these checks with the original lease and cancellation signal in a per-call RPC reply guard, including context discovery. Run that guard synchronously immediately before enqueue; validation at handler completion alone leaves a promise-continuation race.
 
 This is an OS-account trust boundary, not isolation between processes using that account. The private descriptor and local capability prevent unrelated users or unauthenticated local HTTP clients from gaining access; they do not identify which agent issued a shell command. No browser CORS access is enabled.

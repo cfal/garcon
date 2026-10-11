@@ -25,7 +25,7 @@ export const TICKET_LIMITS = {
 export type TicketOwner =
   | { readonly kind: 'executor'; readonly executorId: string }
   | { readonly kind: 'chat'; readonly chatId: string }
-  | { readonly kind: 'user'; readonly username: string };
+  | { readonly kind: 'user'; readonly ownerKey: string };
 
 export type TicketActor =
   | { readonly kind: 'executor'; readonly executorId: string; readonly declaredChatId: string | null }
@@ -192,7 +192,7 @@ export interface TicketProjectDefault {
 export function ticketOwnerKey(owner: TicketOwner): string {
   if (owner.kind === 'executor') return `executor:${owner.executorId}`;
   if (owner.kind === 'chat') return `chat:${owner.chatId}`;
-  return `user:${owner.username}`;
+  return `user:${owner.ownerKey}`;
 }
 
 export function ticketAssigneeQuery(owner: TicketOwner | 'unassigned'): string {

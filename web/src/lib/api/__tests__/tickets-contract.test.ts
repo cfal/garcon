@@ -32,7 +32,7 @@ describe('Tickets transport contracts', () => {
 		vi.stubGlobal('fetch', fetcher);
 		const abort = new AbortController();
 		await ticketsApi.list(
-			{ project: 'A & B/项目', assignee: { kind: 'user', username: 'name:part' }, priority: 0 },
+			{ project: 'A & B/项目', assignee: { kind: 'user', ownerKey: 'name:part' }, priority: 0 },
 			abort.signal,
 		);
 		const [url, options] = fetcher.mock.calls[0]!;

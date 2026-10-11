@@ -36,11 +36,13 @@
 	setTransientLayers(new TransientLayerRegistry(new WorkspaceInteractionGate()));
 	const remoteSettings = new RemoteSettingsStore();
 	remoteSettings.applySnapshot(makeRemoteSettingsSnapshot());
-	setTicketChat(new TicketChatController({
-		appShell: untrack(() => appShell) ?? new AppShellStore(),
-		remoteSettings,
-		notifications: createNotificationsStore(),
-	}));
+	setTicketChat(
+		new TicketChatController({
+			appShell: untrack(() => appShell) ?? new AppShellStore(),
+			remoteSettings,
+			notifications: createNotificationsStore(),
+		}),
+	);
 	onMount(() => {
 		void frame.activate(false);
 		return () => frame.deactivate();
@@ -53,6 +55,7 @@
 	visible
 	{chats}
 	username="local"
+	ownerKey="local"
 	directory={null}
 	{onOpenChat}
 	onOpenSource={() => {}}

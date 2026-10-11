@@ -43,7 +43,7 @@ test('executor claim, filter and release use the executor identity and reject fo
   expect(claimed.ticket.assignee).toEqual({ kind: 'executor', executorId });
   expect(fixture.service.list({ assignee: { kind: 'executor', executorId } }).items.map((ticket) => ticket.id)).toEqual([created.ticket.id]);
   expect(() => fixture.service.executeHttp(fixture.request({ action: 'update', ticketId: created.ticket.id,
-    expectedRevision: 2, patch: { assignee: { kind: 'user', username: 'local' } } }), executorCaller)).toThrow();
+    expectedRevision: 2, patch: { assignee: { kind: 'user', ownerKey: 'local' } } }), executorCaller)).toThrow();
   expect(() => fixture.service.executeHttp(fixture.request({ action: 'update', ticketId: created.ticket.id,
     expectedRevision: 2, patch: { assignee: { kind: 'executor', executorId: crypto.randomUUID() } } }), executorCaller)).toThrow();
   const released = fixture.service.executeHttp(fixture.request({ action: 'release', ticketId: created.ticket.id, expectedRevision: 2 }), executorCaller);

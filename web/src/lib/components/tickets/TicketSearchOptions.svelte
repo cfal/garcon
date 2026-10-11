@@ -24,20 +24,29 @@
 	let {
 		controller,
 		chats,
+		ownerKey,
 		username,
 		onFilter,
 	}: {
 		controller: TicketsController;
 		chats: readonly TicketChatSummary[];
+		ownerKey: string;
 		username: string;
 		onFilter: (change: Pick<TicketListQuery, 'label' | 'ready' | 'includeClosed'>) => boolean;
 	} = $props();
 	const labelId = $props.id();
 	const executors = hasExecutors() ? getExecutors() : null;
 	const executorOptions = $derived.by(() => {
-		const options = (executors?.executors ?? []).filter((executor) => executor.kind === 'remote').map(({ id, label }) => ({ id, label }));
+		const options = (executors?.executors ?? [])
+			.filter((executor) => executor.kind === 'remote')
+			.map(({ id, label }) => ({ id, label }));
 		const assignee = controller.query.assignee;
-		if (assignee && assignee !== 'unassigned' && assignee.kind === 'executor' && !options.some((executor) => executor.id === assignee.executorId)) {
+		if (
+			assignee &&
+			assignee !== 'unassigned' &&
+			assignee.kind === 'executor' &&
+			!options.some((executor) => executor.id === assignee.executorId)
+		) {
 			options.push({ id: assignee.executorId, label: assignee.executorId });
 		}
 		return options;
@@ -72,7 +81,7 @@
 		>
 			<option value="">{m.tickets_any_assignee()}</option>
 			<option value="unassigned">{m.tickets_unassigned()}</option>
-			<option value={`user:${username}`}>{m.tickets_me()}</option>
+			<option value={`user:${ownerKey}`}>{username} ({m.tickets_me()})</option>
 			{#each executorOptions as executor (executor.id)}
 				<svelte:boundary>
 					<option value={`executor:${executor.id}`}>{executor.label}</option>

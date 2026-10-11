@@ -35,7 +35,7 @@ describe('ticket CLI arguments', () => {
     ];
     for (const args of cases) expect(parse(...args).operation.action).toBe(args[0]);
     const list = parse(...cases[1]!).operation;
-    expect(list).toMatchObject({ query: { assignee: { kind: 'user', username: 'author:team' }, query: '%_' } });
+    expect(list).toMatchObject({ query: { assignee: { kind: 'user', ownerKey: 'author:team' }, query: '%_' } });
   });
 
   test('defaults cwd only for a new implicit-project create and keeps explicit project opaque', () => {

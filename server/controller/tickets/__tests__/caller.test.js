@@ -11,7 +11,7 @@ test.each(['alice\nadmin', 'alice\0admin', 'alice\u0085admin', 'alice\ud800', 'a
   const principal = { username, key: username, mode: 'authenticated', expiresAtMs: null };
   expect(() => deriveTicketCaller(principal)).toThrow(expect.objectContaining({ code: 'TICKET_VALIDATION_FAILED' }));
   const caller = { actor: { kind: 'user', username, principalMode: 'authenticated', declaredChatId: null },
-    authority: { kind: 'principal', mode: 'authenticated', key: username }, owner: { kind: 'user', username } };
+    authority: { kind: 'principal', mode: 'authenticated', key: username }, owner: { kind: 'user', ownerKey: username } };
   const request = fixture.request({ action: 'create', input: { title: 'Synthetic', project: 'Synthetic' } });
   expect(() => fixture.service.executeHttp(request, caller)).toThrow(expect.objectContaining({ code: 'TICKET_VALIDATION_FAILED' }));
   expect(fixture.service.list({}).items).toEqual([]);

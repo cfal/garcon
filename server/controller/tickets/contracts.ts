@@ -38,7 +38,7 @@ export function deriveTicketCaller(principal: ServerPrincipal, fromChatId?: stri
   const authority: TicketAuthority = { kind: 'principal', mode: principal.mode, key: principal.key };
   const owner: TicketOwner = fromChatId
     ? { kind: 'chat', chatId: fromChatId }
-    : { kind: 'user', username: principal.username };
+    : { kind: 'user', ownerKey: principal.key };
   return validateTicketCaller({ actor, authority, owner });
 }
 
@@ -53,14 +53,29 @@ export function validateTicketCaller(caller: TicketCaller): TicketCaller {
   });
 }
 
-export function ticketFingerprint(payload: TicketMutationPayload | MarkupTicketMutationPayload, actor: TicketActor): string {
-  return createHash('sha256').update(JSON.stringify([payload, actor])).digest('hex');
+function fingerprintOwner(owner: TicketOwner | null | undefined) {
+  return owner?.kind === 'user' ? { kind: 'user', username: owner.ownerKey } : owner;
+}
+
+export function ticketFingerprint(payload: TicketMutationPayload | MarkupTicketMutationPayload, caller: TicketCaller): string {
+  // Stored operation hashes retain their original preimage, including field order.
+  const projected = payload.action === 'create'
+    ? { ...payload, input: { ...payload.input, ...(Object.hasOwn(payload.input, 'assignee')
+      ? { assignee: fingerprintOwner(payload.input.assignee) } : {}) } }
+    : payload.action === 'update'
+      ? { ...payload, patch: { ...payload.patch, ...(Object.hasOwn(payload.patch, 'assignee')
+        ? { assignee: fingerprintOwner(payload.patch.assignee) } : {}) } }
+      : payload;
+  const actor = caller.actor.kind === 'user' && caller.authority.kind === 'principal'
+    ? { ...caller.actor, username: caller.authority.key } : caller.actor;
+  return createHash('sha256').update(JSON.stringify([projected, actor])).digest('hex');
 }
 
 export function markupTicketContext(expectedStoreId: string, source: TicketSource,
   ref: string, payload: MarkupTicketMutationPayload): TicketMutationContext {
   const actor: TicketActor = { kind: 'chat', chatId: source.chatId, provenance: 'observed' };
-  return { actor, authority: { kind: 'chat', chatId: source.chatId },
-    owner: { kind: 'chat', chatId: source.chatId }, expectedStoreId, source,
-    operationKey: JSON.stringify(['markup', source.chatId, ref]), fingerprint: ticketFingerprint(payload, actor) };
+  const caller: TicketCaller = { actor, authority: { kind: 'chat', chatId: source.chatId },
+    owner: { kind: 'chat', chatId: source.chatId } };
+  return { ...caller, expectedStoreId, source,
+    operationKey: JSON.stringify(['markup', source.chatId, ref]), fingerprint: ticketFingerprint(payload, caller) };
 }

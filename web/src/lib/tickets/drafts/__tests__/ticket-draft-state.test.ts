@@ -45,7 +45,12 @@ const ticket: Ticket = {
 	updatedAt: '2026-01-01T00:00:00.000Z',
 	createdBy: { kind: 'user', principalMode: 'local', username: 'local', declaredChatId: null },
 };
-const confirmed: TicketWriteResult = { success: true, ticket, storeId: STORE, collectionRevision: 2 };
+const confirmed: TicketWriteResult = {
+	success: true,
+	ticket,
+	storeId: STORE,
+	collectionRevision: 2,
+};
 
 function storage(): Storage {
 	const entries = new Map<string, string>();
@@ -94,6 +99,40 @@ afterEach(() => {
 });
 
 describe('ticket draft state', () => {
+	it('recovers frozen legacy assignments without changing request or recovery identities', () => {
+		const recovered = parseTicketDraft({
+			...initial,
+			id: 'fields:G-1:',
+			kind: 'fields',
+			baseRevision: 1,
+			fields: { assignee: 'user:original' },
+			frozen: {
+				version: 0,
+				request: {
+					requestId: OTHER_STORE,
+					expectedStoreId: STORE,
+					payload: {
+						action: 'update',
+						ticketId: 'G-1',
+						expectedRevision: 1,
+						patch: { assignee: { kind: 'user', username: 'original' } },
+					},
+				},
+			},
+		});
+		expect(recovered.viewerKey).toBe(initial.viewerKey);
+		expect(recovered.fields.assignee).toBe('user:original');
+		expect(recovered.frozen?.request).toEqual({
+			requestId: OTHER_STORE,
+			expectedStoreId: STORE,
+			payload: {
+				action: 'update',
+				ticketId: 'G-1',
+				expectedRevision: 1,
+				patch: { assignee: { kind: 'user', ownerKey: 'original' } },
+			},
+		});
+	});
 	it('submits a valid request without secure-context-only randomUUID', async () => {
 		const unavailable = vi.spyOn(crypto, 'randomUUID').mockImplementation(() => {
 			throw new TypeError('crypto.randomUUID is unavailable');
@@ -116,7 +155,7 @@ describe('ticket draft state', () => {
 	it('sends only changed fields, preserving another user’s assignment and remote metadata', () => {
 		const fields = ticketEditorFields({
 			...ticket,
-			assignee: { kind: 'user', username: 'another-user' },
+			assignee: { kind: 'user', ownerKey: 'another-user' },
 		});
 		const { draft } = harness({
 			...initial,

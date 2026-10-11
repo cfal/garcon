@@ -23,6 +23,7 @@
 		visible,
 		chats,
 		username,
+		ownerKey,
 		directory,
 		executorId = 'local',
 		onOpenChat,
@@ -35,6 +36,7 @@
 		visible: boolean;
 		chats: readonly TicketChatSummary[];
 		username: string;
+		ownerKey: string;
 		directory: string | null;
 		executorId?: string;
 		onOpenChat: (id: string) => void;
@@ -203,6 +205,7 @@
 				{controller}
 				{chats}
 				{username}
+				{ownerKey}
 				{onClose}
 				{closeDisabled}
 				onCreate={() => {
@@ -222,7 +225,8 @@
 					{m.tickets_created_outside()}
 					<button
 						class="ticket-text-button"
-						onclick={() => controller.setQuery({ includeClosed: true })}>{m.tickets_reveal()}</button
+						onclick={() => controller.setQuery({ includeClosed: true })}
+						>{m.tickets_reveal()}</button
 					>
 				</div>{/if}
 			<div class="ticket-collection" aria-busy={controller.loading}>
@@ -239,6 +243,8 @@
 						<p>{m.tickets_empty_hint()}</p>
 					</div>{/if}
 				<TicketCollection
+					{username}
+					{ownerKey}
 					{controller}
 					pinned={panel.pinned}
 					onOpen={(ticket) => void open(ticket)}
@@ -253,6 +259,7 @@
 						error={detailError}
 						{chats}
 						{username}
+						{ownerKey}
 						{onOpenChat}
 						{onOpenSource}
 						{onClose}
@@ -284,6 +291,7 @@
 			{controller}
 			{chats}
 			{username}
+			{ownerKey}
 			{pinnedProjectPaths}
 			ownerId={memory.id}
 			onClose={() => void panel.restoreInvoker()}
