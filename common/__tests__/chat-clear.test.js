@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { parseClearChatRequest, parseClearChatResponse } from '../chat-clear.ts';
 
-const request = { chatId: '1791674837578000', transcriptViewId: 'view-1', lastOrdinal: 9 };
+const request = { chatId: '1780000000000001', transcriptViewId: 'view-1', lastOrdinal: 9 };
 
 describe('clear chat request', () => {
   it('requires a captured view and watermark', () => {
