@@ -10,15 +10,23 @@ import { startScriptedCodexTestEnvironment } from "../../support/scripted-codex.
 
 async function expectQueueFooter(tray: Locator): Promise<void> {
   await browserExpect(tray.locator("footer")).toBeInViewport({ ratio: 1 });
-  await browserExpect.poll(() => tray.evaluate((element) => {
-    const list = element.querySelector("[data-queue-list]");
-    const footer = element.querySelector("footer");
-    if (!list || !footer) return false;
-    return element.firstElementChild === list
-      && list.nextElementSibling === footer
-      && list.getBoundingClientRect().bottom <= footer.getBoundingClientRect().top
-      && footer.getBoundingClientRect().bottom <= element.getBoundingClientRect().bottom;
-  })).toBe(true);
+  await browserExpect
+    .poll(() => tray.evaluate((element) => {
+      const list = element.querySelector("[data-queue-list]");
+      const footer = element.querySelector("footer");
+      if (!list || !footer) return false;
+
+      const listBounds = list.getBoundingClientRect();
+      const footerBounds = footer.getBoundingClientRect();
+      const trayBounds = element.getBoundingClientRect();
+      return (
+        element.firstElementChild === list &&
+        list.nextElementSibling === footer &&
+        listBounds.bottom <= footerBounds.top &&
+        footerBounds.bottom <= trayBounds.bottom
+      );
+    }))
+    .toBe(true);
 }
 
 test("reorders, expands, edits, and steers queued messages from the chat on desktop and mobile", async () => {
@@ -60,6 +68,7 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         });
         await browserExpect(queueButton).toBeVisible({ timeout: 20_000 });
         const tray = page.locator("[data-queue-status-summary]");
+        const footer = tray.locator("footer");
         let footerTop: number | undefined;
         for (const [index, message] of messages.entries()) {
           await composer.fill(message);
@@ -67,8 +76,13 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           await browserExpect(composer).toHaveValue("");
           await browserExpect(tray.getByText(`${index + 1} queued`, { exact: true })).toBeVisible();
           await expectQueueFooter(tray);
-          if (footerTop === undefined) footerTop = (await tray.locator("footer").boundingBox())!.y;
-          else await browserExpect.poll(async () => (await tray.locator("footer").boundingBox())?.y).toBe(footerTop);
+          if (footerTop === undefined) {
+            footerTop = (await footer.boundingBox())!.y;
+          } else {
+            await browserExpect
+              .poll(async () => (await footer.boundingBox())?.y)
+              .toBe(footerTop);
+          }
         }
         await composer.fill("Keep this draft while arranging the queue.");
         const previews = tray.locator("[data-queue-preview]");
@@ -87,9 +101,10 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         };
         await browserExpect(previews).toHaveText(messages);
         await browserExpect(tray.getByText("Next", { exact: true })).toHaveCount(0);
-        expect(await tray.locator("[data-queue-entry-id]").evaluateAll((rows) =>
+        const desktopRowPadding = await tray.locator("[data-queue-entry-id]").evaluateAll((rows) =>
           rows.map((row) => getComputedStyle(row).paddingLeft),
-        )).toEqual(["8px", "8px", "8px"]);
+        );
+        expect(desktopRowPadding).toEqual(["8px", "8px", "8px"]);
         await browserExpect(tray.getByRole("button", { name: "Steer", exact: true })).toHaveCount(3);
         await browserExpect(
           page.getByRole("button", { name: "Edit queue", exact: true }),
@@ -104,7 +119,9 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         await page.keyboard.press("Tab");
         await browserExpect(tray.getByRole("button", { name: "Pause", exact: true })).toBeFocused();
         await page.keyboard.press("Tab");
-        await browserExpect(tray.getByRole("button", { name: "Expand all queued messages" })).toBeFocused();
+        await browserExpect(
+          tray.getByRole("button", { name: "Expand all queued messages" }),
+        ).toBeFocused();
 
         phase("checking the head overflow menu");
         await tray
@@ -169,7 +186,9 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           tray.getByRole("button", { name: "Collapse queued message 3" }),
         ).toHaveAttribute("aria-expanded", "true");
         await expectQueueFooter(tray);
-        await browserExpect.poll(async () => (await tray.locator("footer").boundingBox())?.y).toBe(footerTop);
+        await browserExpect
+          .poll(async () => (await footer.boundingBox())?.y)
+          .toBe(footerTop);
         await captureDesktop("desktop-expanded.png");
         await tray
           .getByRole("button", { name: "Edit queued message", exact: true })
@@ -205,9 +224,10 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           )
           .toBe(true);
         const firstMobileRow = tray.locator("[data-queue-entry-id]").first();
-        expect(await tray.locator("[data-queue-entry-id]").evaluateAll((rows) =>
+        const mobileRowPadding = await tray.locator("[data-queue-entry-id]").evaluateAll((rows) =>
           rows.map((row) => getComputedStyle(row).paddingLeft),
-        )).toEqual(["4px", "4px", "4px"]);
+        );
+        expect(mobileRowPadding).toEqual(["4px", "4px", "4px"]);
         const mobileSteer = firstMobileRow.getByRole("button", { name: "Steer", exact: true });
         await browserExpect(mobileSteer.locator("span")).toBeHidden();
         await browserExpect(mobileSteer.locator("svg")).toBeVisible();
@@ -220,7 +240,7 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           expect(bounds?.height).toBeGreaterThanOrEqual(44);
         }
         await expectQueueFooter(tray);
-        const mobileFooterTop = (await tray.locator("footer").boundingBox())!.y;
+        const mobileFooterTop = (await footer.boundingBox())!.y;
         await page.screenshot({
           path: join(artifactDir, "mobile-compact.png"),
         });
@@ -246,7 +266,9 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         if (!expandedPreviewBounds || !mobileTrayBounds) throw new Error("Queue text is not visible");
         expect(expandedPreviewBounds.width).toBeGreaterThan(mobileTrayBounds.width * 0.75);
         await expectQueueFooter(tray);
-        await browserExpect.poll(async () => (await tray.locator("footer").boundingBox())?.y).toBe(mobileFooterTop);
+        await browserExpect
+          .poll(async () => (await footer.boundingBox())?.y)
+          .toBe(mobileFooterTop);
         await page.screenshot({
           path: join(artifactDir, "mobile-expanded.png"),
         });
@@ -510,8 +532,9 @@ test("retains late reorder errors and keeps a large expanded queue above a tall 
           await tray.locator("[data-queue-entry-id]").count(),
         ).toBeLessThan(40);
         const list = tray.locator("[data-queue-list]");
+        const footer = tray.locator("footer");
         await expectQueueFooter(tray);
-        const pausedFooterTop = (await tray.locator("footer").boundingBox())!.y;
+        const pausedFooterTop = (await footer.boundingBox())!.y;
         await list.evaluate((element) => {
           element.scrollTop = element.scrollHeight;
         });
@@ -521,9 +544,13 @@ test("retains late reorder errors and keeps a large expanded queue above a tall 
           "Synthetic budget message 249\nSynthetic expanded detail.",
         );
         await expectQueueFooter(tray);
-        expect((await tray.locator("footer").boundingBox())?.y).toBe(pausedFooterTop);
-        await browserExpect(tray.locator("footer").getByRole("button", { name: "Resume queue", exact: true })).toBeInViewport({ ratio: 1 });
-        await browserExpect(tray.locator("footer").getByText("Messages stay queued until you resume.")).toBeInViewport({ ratio: 1 });
+        expect((await footer.boundingBox())?.y).toBe(pausedFooterTop);
+        await browserExpect(
+          footer.getByRole("button", { name: "Resume queue", exact: true }),
+        ).toBeInViewport({ ratio: 1 });
+        await browserExpect(
+          footer.getByText("Messages stay queued until you resume."),
+        ).toBeInViewport({ ratio: 1 });
 
         phase("retaining keyboard focus while moving beyond the mounted viewport");
         const tailEntry = (await integration.client.getExecutionControl(chatA)).queue.entries.at(-1)!;
