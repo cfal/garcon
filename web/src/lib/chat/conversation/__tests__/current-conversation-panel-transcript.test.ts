@@ -10,8 +10,11 @@ import {
 	type ConversationPanelDescriptor,
 } from '../conversation-panel-registry.svelte.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
+import { ConversationClearController } from '../conversation-clear-controller.svelte.js';
+import { clearChat } from '$lib/api/chat-clear.js';
 
 vi.mock('$lib/api/chats.js', () => ({ getChatMessages: vi.fn() }));
+vi.mock('$lib/api/chat-clear.js', () => ({ clearChat: vi.fn() }));
 
 function entry(ordinal: number): TranscriptMessage {
 	return {
@@ -47,7 +50,7 @@ function deferredPage(lastOrdinal = 2, transcriptViewId = 'view-1') {
 			transcriptViewId,
 			messages: Array.from({ length: lastOrdinal }, (_, index) => entry(index + 1)),
 			lastOrdinal,
-			pageOldestOrdinal: 1,
+			pageOldestOrdinal: lastOrdinal > 0 ? 1 : 0,
 			pageNewestOrdinal: lastOrdinal,
 			nextBeforeOrdinal: null,
 			hasMore: false,
@@ -62,6 +65,7 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 	beforeEach(() => {
 		localStorage.clear();
 		vi.mocked(getChatMessages).mockReset();
+		vi.mocked(clearChat).mockReset();
 	});
 
 	afterEach(() => {
@@ -112,6 +116,115 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 			},
 		};
 	}
+
+	it.each([0, 1, 2])('recovers Clear without WS delivery across %i panels and an older activation', async (panelCount) => {
+		const { cache, registry, selected } = fixture();
+		registry.reconcile(['window-left', 'window-right'].slice(0, panelCount).map(windowId =>
+			presentation(windowId as `window-${string}`)));
+		selected.upsertOptimisticUserInput({ chatId: 'chat-1', clientMessageId: 'synthetic-input',
+			content: 'Synthetic optimistic input', createdAt: '2026-01-01T00:00:00.000Z', delivery: 'pending' });
+		selected.appendLocalNoticeForChat('chat-1', 'error', 'Synthetic old error');
+		const resolveOld = deferredPage(2);
+		const oldLoad = selected.loadMessages('chat-1', { purpose: 'activation' });
+		const resolveCleared = deferredPage(0, 'view-cleared');
+		const sessions = { quietRefreshChats: vi.fn(async () => {}) };
+		const controller = new ConversationClearController({ chatState: selected, sessions,
+			composerState: { draftRevision: () => 1, clearAfterSubmit: vi.fn() } });
+		vi.mocked(clearChat).mockResolvedValue({ success: true, chatId: 'chat-1', transcriptViewId: 'view-cleared' });
+		controller.request('chat-1', true);
+		const clearing = controller.confirm();
+		await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledTimes(2));
+		resolveCleared();
+		await clearing;
+		resolveOld();
+		await oldLoad;
+		expect(cache.get('chat-1')?.transcriptViewId).toBe('view-cleared');
+		expect(selected.chatMessages).toEqual([]);
+		expect(registry.overlayFor('chat-1')?.optimisticInputs).toEqual([]);
+		expect(selected.displayRows).toEqual([]);
+		expect(sessions.quietRefreshChats).toHaveBeenCalledOnce();
+		expect(controller.isOpen).toBe(false);
+	});
+
+	it.each(['failure', 'unmount'])('never restores cleared cached rows after recovery %s and a revisit', async (outcome) => {
+		const { cache, registry, selected, selectChat } = fixture();
+		registry.reconcile([presentation('window-left')]);
+		const pending = Promise.withResolvers<Awaited<ReturnType<typeof getChatMessages>>>();
+		vi.mocked(getChatMessages).mockReturnValueOnce(pending.promise);
+		const recovery = selected.recoverViewReplacement('chat-1', 'view-1');
+		expect(cache.get('chat-1')).toBeNull();
+		if (outcome === 'failure') {
+			pending.reject(new Error('Synthetic recovery failure'));
+			await expect(recovery).rejects.toThrow('Synthetic recovery failure');
+		} else {
+			selectChat('chat-2');
+			registry.reconcile([presentation('window-left', 'chat-2')]);
+			pending.resolve({ chatId: 'chat-1', historyState: { kind: 'complete' },
+				transcriptViewId: 'view-cleared', messages: [], lastOrdinal: 1,
+				pageOldestOrdinal: 0, pageNewestOrdinal: 0, nextBeforeOrdinal: null,
+				hasMore: false, limit: 50, resendCandidates: [] });
+			await recovery;
+		}
+		selectChat('chat-2');
+		registry.reconcile([presentation('window-left', 'chat-2')]);
+		const resolveReload = deferredPage(0, 'view-cleared');
+		selectChat('chat-1');
+		registry.reconcile([presentation('window-left')]);
+		expect(selected.chatMessages).toEqual([]);
+		resolveReload();
+		await registry.loadChatSnapshot('chat-1');
+	});
+
+	it('preserves newer-view output and overlays when Clear acknowledgement is delayed', async () => {
+		const { cache, registry, selected } = fixture();
+		registry.reconcile([presentation('window-left')]);
+		cache.replace('chat-1', 'view-later', [entry(5)], 5, null);
+		registry.panel('chat-view:window-left')!.transcript.installCachedSnapshot('chat-1');
+		selected.upsertOptimisticUserInput({ chatId: 'chat-1', clientMessageId: 'new-input',
+			content: 'Synthetic newer input', createdAt: '2026-01-01T00:00:00.000Z', delivery: 'pending' });
+		await selected.recoverViewReplacement('chat-1', 'view-1');
+		expect(getChatMessages).not.toHaveBeenCalled();
+		expect(selected.transcriptViewId).toBe('view-later');
+		expect(selected.displayMessages.some(message =>
+			message.type === 'user-message' && message.content === 'Synthetic newer input')).toBe(true);
+	});
+
+	it('recovers only the captured chat after selection changes', async () => {
+		const { cache, registry, selected, selectChat } = fixture();
+		selectChat('chat-2');
+		registry.reconcile([presentation('window-left', 'chat-2'), presentation('window-right')]);
+		const resolve = deferredPage(0, 'view-cleared');
+		const recovery = selected.recoverViewReplacement('chat-1', 'view-1');
+		resolve();
+		await recovery;
+		expect(cache.get('chat-1')?.messages).toEqual([]);
+		expect(selected.transcriptViewId).toBe('view-other');
+		expect(selected.chatMessages).toEqual([entry(10).message]);
+	});
+
+	it('evicts cleared history after its panel disappears and fallback activation changes chats', async () => {
+		const { cache, registry, selected, selectChat } = fixture();
+		registry.reconcile([presentation('window-left')]);
+		const reply = Promise.withResolvers<Awaited<ReturnType<typeof clearChat>>>();
+		vi.mocked(clearChat).mockReturnValueOnce(reply.promise);
+		const controller = new ConversationClearController({ chatState: selected,
+			sessions: { quietRefreshChats: vi.fn(async () => {}) },
+			composerState: { draftRevision: () => 1, clearAfterSubmit: vi.fn() } });
+		controller.request('chat-1', true);
+		const clearing = controller.confirm();
+		selectChat('chat-2');
+		registry.reconcile([]);
+		selected.activateChat('chat-2');
+		controller.handleChatSwitch('chat-2');
+		reply.resolve({ success: true, chatId: 'chat-1', transcriptViewId: 'view-cleared' });
+		await clearing;
+		expect(getChatMessages).not.toHaveBeenCalled();
+		expect(cache.get('chat-1')).toBeNull();
+		expect(selected.transcriptViewId).toBe('view-other');
+		selectChat('chat-1');
+		selected.activateChat('chat-1');
+		expect(selected.chatMessages).toEqual([]);
+	});
 
 	it.each([1, 2])(
 		'publishes a deferred activation to %i newly mounted panels',

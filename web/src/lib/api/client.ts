@@ -108,7 +108,7 @@ export class ApiMutationOutcomeUnknownError extends Error {
 	}
 }
 
-function isHttpErrorResponse(value: unknown): value is HttpErrorResponse {
+export function isHttpErrorResponse(value: unknown): value is HttpErrorResponse {
 	return (
 		isRecord(value) &&
 		value.success === false &&

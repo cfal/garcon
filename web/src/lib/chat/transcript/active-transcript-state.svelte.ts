@@ -788,10 +788,18 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		this.feedMutations.record('replacement');
 	}
 
-	#resetToEmptyTranscript(): void {
+	invalidatePendingLoads(): void {
 		this.#invalidatePageLoad();
-		this.expandedVisibleStartOrdinal = null;
 		this.#loadEpoch += 1;
+		this.#windowNavigationEpoch += 1;
+		this.#snapshotBuffer = null;
+		this.#reconnectReplay.reset();
+		this.isLoadingMessages = false;
+	}
+
+	#resetToEmptyTranscript(): void {
+		this.invalidatePendingLoads();
+		this.expandedVisibleStartOrdinal = null;
 		this.windowRevision += 1;
 		this.entries = [];
 		this.transcriptViewId = '';
@@ -806,9 +814,6 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		this.hasEarlierMessages = false;
 		this.hasLaterMessages = false;
 		this.loadError = null;
-		this.isLoadingMessages = false;
-		this.#snapshotBuffer = null;
-		this.#reconnectReplay.reset();
 	}
 
 	async navigateToWindow(

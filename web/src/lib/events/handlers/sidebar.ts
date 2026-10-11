@@ -54,6 +54,6 @@ export function handleChatListInvalidated(
 	msg: ChatListRefreshRequestedMessage,
 	ctx: SidebarContext,
 ) {
-	if (!msg.chatId) return;
+	if (!msg.chatId && msg.reason !== 'metadata-repaired') return;
 	ctx.refreshChats();
 }

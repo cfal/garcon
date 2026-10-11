@@ -59,6 +59,7 @@
 		applySlashCommand,
 		findSlashCommandTrigger,
 		isControllerSlashCommand,
+		isClearCommand,
 		parseSnippetCommand,
 		type SnippetCommandParseResult,
 	} from '$lib/chat/composer/slash-commands.js';
@@ -560,8 +561,8 @@
 	}
 
 	function handleCompletionKeyDown(event: KeyboardEvent): boolean {
-		const showFileMenu = filesAvailable && ui.showFileMenu;
-		if (!conversationInput || (!showFileMenu && !ui.showSlashMenu)) return false;
+		const showFileMenu = conversationInput && filesAvailable && ui.showFileMenu;
+		if (!showFileMenu && !ui.showSlashMenu) return false;
 		const menu = showFileMenu ? fileMentionMenu : slashCommandMenu;
 		if (menu?.handleKeyDown(event)) return true;
 		if (menu && !showFileMenu && event.key === 'Enter') return false;
@@ -642,7 +643,7 @@
 	);
 	const controllerCommand = $derived(
 		sessions.selectedChat?.status === 'running' &&
-			conversationInput && isControllerSlashCommand(composerState.inputText),
+			(isClearCommand(composerState.inputText) || (conversationInput && isControllerSlashCommand(composerState.inputText))),
 	);
 	// Loading is explained by the disabled send button so the composer keeps its height.
 	const modelsLoading = $derived(
@@ -650,12 +651,12 @@
 	);
 	const sendTitle = $derived.by(() => {
 		if (modelsLoading && !controllerCommand) return m.chat_composer_loading_models();
-		return requiresQueuedSubmission ? m.chat_composer_queue_message() : m.chat_composer_send_message();
+		return requiresQueuedSubmission && !controllerCommand ? m.chat_composer_queue_message() : m.chat_composer_send_message();
 	});
 
 	const canSubmit = $derived(
 		canSubmitComposer(
-			!executionAgent || isDisabled || attachmentError !== null ||
+			(!executionAgent && !controllerCommand) || isDisabled || attachmentError !== null ||
 				directAdmissionPending ||
 				promptTransformPending ||
 				(!controllerCommand &&
@@ -897,7 +898,9 @@
 			executorId={agentState.executorId}
 			projectPath={completionProjectPath}
 			chatId={selectedProjectTarget?.kind === 'chat' ? sessions.selectedChatId : null}
-			isVisible={conversationInput && ui.showSlashMenu && executors.isReady(agentState.executorId) && !showProjectNotice}
+			isVisible={ui.showSlashMenu && (!conversationInput || executors.isReady(agentState.executorId)) && !showProjectNotice}
+			{conversationInput}
+			canClear={Boolean(sessions.selectedChat && sessions.selectedChat.status !== 'draft')}
 			projectPending={Boolean(
 				selectedProjectTarget &&
 				(selectedProjectResolution.kind === 'unchecked' ||

@@ -628,7 +628,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		const operation: SnapshotLoad = {
 			minimumLimit,
 			purpose: options.purpose,
-			promise: this.#performChatSnapshotLoad(chatId, options).finally(() => {
+			promise: this.#performChatSnapshotLoad(chatId, options, () => this.#snapshotLoads.get(chatId) === operation).finally(() => {
 				if (this.#snapshotLoads.get(chatId) === operation) this.#snapshotLoads.delete(chatId);
 			}),
 		};
@@ -649,6 +649,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	async #performChatSnapshotLoad(
 		chatId: string,
 		options: ChatLoadMessagesOptions,
+		isCurrent: () => boolean,
 		retryAfterLoaderRemoval = true,
 	): Promise<boolean> {
 		const loader = [...this.#panels.values()].find(
@@ -660,10 +661,11 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		} else {
 			await loader.transcript.loadMessages(chatId, options);
 		}
+		if (!isCurrent()) return false;
 		const loaderWasRemoved = this.#panels.get(loader.surfaceId) !== loader;
 		if (loaderWasRemoved) {
 			return retryAfterLoaderRemoval
-				? this.#performChatSnapshotLoad(chatId, options, false)
+				? this.#performChatSnapshotLoad(chatId, options, isCurrent, false)
 				: false;
 		}
 		const cursor = this.options.cache.readAppliedCursor(chatId);
@@ -828,6 +830,8 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	handleViewReplacement(chatId: string): void {
+		this.#snapshotLoads.delete(chatId);
+		for (const panel of this.panelsForChat(chatId)) panel.transcript.invalidatePendingLoads();
 		this.#inactiveWindows.removeChat(chatId);
 		this.options.cache.markStale(chatId);
 		this.#applyOverlayMutation(chatId, this.options.overlays.resetForTranscriptReplacement(chatId));
