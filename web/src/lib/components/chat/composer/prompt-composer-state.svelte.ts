@@ -24,7 +24,6 @@ export class PromptComposerUiState {
 	readonly snippetPalette = new SnippetPaletteTriggerState();
 	previousChatId = $state<string | null>(null);
 	composerEditorOpen = $state(false);
-	markdownPreviewText = $state<string | null>(null);
 	composerEditorChatId = $state<string | null>(null);
 	composerEditorFocusRequestId = $state(0);
 	composerEditorSelection = $state<PromptEditorSelection>({ anchor: 0, head: 0 });
@@ -112,7 +111,6 @@ export class PromptComposerUiState {
 		this.closeSlashMenu();
 		this.snippetPalette.reset();
 		this.closeComposerEditor();
-		this.markdownPreviewText = null;
 		return true;
 	}
 }

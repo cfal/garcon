@@ -88,44 +88,6 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 }
 
 describe('PromptComposer focus', () => {
-	it('keeps preview shortcut submission gated and restores editing focus after steering', async () => {
-		const onsubmit = vi.fn();
-		const onSteerPreferredSubmit = vi.fn();
-		const { rerender } = render(PromptComposerTestHost, { onsubmit, onSteerPreferredSubmit });
-		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-		const source = '| Check | Example |\n| --- | --- |\n| Ready | Synthetic draft |';
-		await expectComposerFocus(textarea);
-		await inputAtCaret(textarea, source, source.length, { inputType: 'insertFromPaste' });
-		const preview = await screen.findByRole('region', { name: 'Markdown preview' });
-		expect(document.activeElement).toBe(preview);
-		await rerender({ directAdmissionPending: true, onsubmit, onSteerPreferredSubmit });
-		await fireEvent.keyDown(preview, { key: 'Enter' });
-		await fireEvent.keyDown(preview, { key: 'Enter', ctrlKey: true });
-		expect(onsubmit).not.toHaveBeenCalled();
-		expect(onSteerPreferredSubmit).not.toHaveBeenCalled();
-		expect(screen.getByRole('region', { name: 'Markdown preview' })).toBe(preview);
-		await rerender({ directAdmissionPending: false, onsubmit, onSteerPreferredSubmit });
-		await fireEvent.keyDown(preview, { key: 'Enter', ctrlKey: true });
-		expect(onSteerPreferredSubmit).toHaveBeenCalledOnce();
-		expect(textarea.value).toBe(source);
-		await expectComposerFocus(textarea);
-		expect(screen.queryByRole('region', { name: 'Markdown preview' })).toBeNull();
-	});
-
-	it('does not open a delayed table preview after focus moves to another control', async () => {
-		render(PromptComposerTestHost);
-		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-		await expectComposerFocus(textarea);
-		textarea.value = '| Check | Example |\n| --- | --- |\n| Ready | Synthetic draft |';
-		textarea.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
-		const otherControl = screen.getByRole('button', { name: 'Open expanded composer' });
-		otherControl.focus();
-		await nextAnimationFrame();
-		expect(screen.queryByRole('region', { name: 'Markdown preview' })).toBeNull();
-		expect(document.activeElement).toBe(otherControl);
-		expect(textarea.value).toContain('Synthetic draft');
-	});
-
 	it.each(['', 'printf command'])('preserves incompatible draft attachments and blocks all submit paths: %s', async (source) => {
 		const onsubmit = vi.fn();
 		const { container, rerender } = render(PromptComposerTestHost, {

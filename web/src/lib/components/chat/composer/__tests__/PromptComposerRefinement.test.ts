@@ -49,19 +49,6 @@ async function settleExpandedDialogOpen(): Promise<void> {
 }
 
 describe('PromptComposer prompt refinement', () => {
-	it('returns from Markdown preview to the editable draft for unchanged refinement', async () => {
-		const source = '**Synthetic draft**';
-		vi.mocked(refinementApi.refinePrompt).mockResolvedValueOnce({ success: true, refinedPrompt: source });
-		render(PromptComposerTestHost, { selectedChatId: 'synthetic-preview-refine' });
-		const textarea = await typeDraft(source);
-		await fireEvent.click(screen.getByRole('button', { name: 'Preview Markdown' }));
-		await screen.findByRole('region', { name: 'Markdown preview' });
-		await fireEvent.click(screen.getByRole('button', { name: 'Refine prompt' }));
-		await waitFor(() => expect(document.activeElement).toBe(textarea));
-		expect(screen.queryByRole('region', { name: 'Markdown preview' })).toBeNull();
-		expect(textarea.value).toBe(source);
-	});
-
 	afterEach(() => {
 		cleanup();
 		resetPromptEditorStub();

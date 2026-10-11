@@ -17,7 +17,6 @@
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import Square from '@lucide/svelte/icons/square';
 	import Send from '@lucide/svelte/icons/send';
-	import Eye from '@lucide/svelte/icons/eye';
 	import * as m from '$lib/paraglide/messages.js';
 	import ComposerAddMenu from './ComposerAddMenu.svelte';
 
@@ -27,7 +26,6 @@
 		onAddImage: () => void;
 		onOpenSnippetPalette?: () => void;
 		onOpenExpandedEditor?: () => void;
-		onPreviewMarkdown?: () => void;
 		onRefinePrompt?: () => void;
 		canRefinePrompt?: boolean;
 		isPromptRefinementPending?: boolean;
@@ -59,7 +57,6 @@
 		onAddImage,
 		onOpenSnippetPalette = () => undefined,
 		onOpenExpandedEditor,
-		onPreviewMarkdown,
 		onRefinePrompt,
 		canRefinePrompt = false,
 		isPromptRefinementPending = false,
@@ -107,18 +104,6 @@
 	);
 	const composerActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [];
-		if (onPreviewMarkdown) {
-			actions.push({
-				id: 'preview-markdown',
-				label: m.chat_composer_preview_markdown(),
-				icon: Eye,
-				onclick: onPreviewMarkdown,
-				disabled: addMenuDisabled || isPromptTransformPending,
-				priority: 2,
-				buttonClass:
-					'size-9 rounded-lg border border-border bg-background text-foreground hover:bg-muted',
-			});
-		}
 		if (onOpenExpandedEditor) {
 			actions.push({
 				id: 'expanded-composer',
@@ -150,11 +135,7 @@
 		return actions;
 	});
 	const composerActionsClass = $derived(
-		composerActions.length > 2
-			? 'w-9 min-w-9 flex-none sm:w-29'
-			: composerActions.length > 1
-				? 'w-9 min-w-9 flex-none sm:w-19'
-				: 'w-9 min-w-9 flex-none',
+		composerActions.length > 1 ? 'w-9 min-w-9 flex-none sm:w-19' : 'w-9 min-w-9 flex-none',
 	);
 </script>
 
