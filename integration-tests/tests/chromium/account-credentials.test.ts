@@ -73,11 +73,22 @@ test('separate credential forms retain source, sibling, and other-device work on
       phase('password change in the retained settings dialog');
       await settings.locator('#password-current-password').fill(credentials.password);
       await settings.locator('#account-new-password').fill('synthetic-password-next');
+      await settings.locator('#account-confirm-password').fill('synthetic-password-typo');
+      await browserExpect(settings.getByRole('button', { name: 'Change password', exact: true })).toBeDisabled();
+      await browserExpect(settings.locator('#account-confirm-password')).toHaveAttribute('aria-invalid', 'true');
       await settings.locator('#account-confirm-password').fill('synthetic-password-next');
+      const reveal = settings.locator('button[aria-controls="account-new-password"]');
+      await reveal.focus();
+      await reveal.press('Enter');
+      await browserExpect(settings.locator('#account-new-password')).toHaveAttribute('type', 'text');
+      await browserExpect(settings.locator('#account-confirm-password')).toHaveAttribute('type', 'password');
+      await browserExpect(reveal).toHaveAccessibleName('Hide password');
+      await reveal.press('Space');
+      await browserExpect(settings.locator('#account-new-password')).toHaveAttribute('type', 'password');
       expect(await settings.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
       const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
       await mkdir(artifacts, { recursive: true });
-      await page.screenshot({ path: join(artifacts, 'account-credentials-desktop.png') });
+      await page.screenshot({ path: join(artifacts, 'account-credentials-confirmation-desktop.png') });
       await settings.getByRole('button', { name: 'Change password', exact: true }).click();
       await browserExpect(settings.getByRole('status')).toContainText('Password changed.');
       expect(await page.locator('[data-retained-settings]').count()).toBe(1);
@@ -122,6 +133,13 @@ test('storage failure retains memory authorization and a lost response requires 
     await settings.locator('#password-current-password').fill(credentials.password);
     await settings.locator('#account-new-password').fill('synthetic-lost-response');
     await settings.locator('#account-confirm-password').fill('synthetic-lost-response');
+    await settings.locator('button[aria-controls="account-confirm-password"]').click();
+    await browserExpect(settings.locator('#account-confirm-password')).toHaveAttribute('type', 'text');
+    await browserExpect(settings.locator('#account-new-password')).toHaveAttribute('type', 'password');
+    expect(await settings.locator('#account-confirm-password')
+      .evaluate(element => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
+    expect(await settings.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+    await page.screenshot({ path: join(artifacts, 'account-credentials-confirmation-mobile.png') });
     await settings.getByRole('button', { name: 'Change password', exact: true }).click();
     phase('reauthentication after a committed mutation loses its reply');
     const overlay = page.locator('dialog');

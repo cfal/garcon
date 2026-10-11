@@ -3,6 +3,7 @@
 	import { getAuth } from '$lib/context';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
+	import PasswordInput from '$lib/components/auth/PasswordInput.svelte';
 	import { validateUsername } from '$shared/auth';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -112,9 +113,8 @@
 			</div>
 			<div class="space-y-1">
 				<label for="username-current-password" class="text-sm">{m.auth_current_password()}</label>
-				<Input
+				<PasswordInput
 					id="username-current-password"
-					type="password"
 					bind:value={usernamePassword}
 					autocomplete="current-password"
 					maxlength={128}
@@ -140,9 +140,8 @@
 			<h3 class="font-medium">{m.settings_tab_password()}</h3>
 			<div class="space-y-1">
 				<label for="password-current-password" class="text-sm">{m.auth_current_password()}</label>
-				<Input
+				<PasswordInput
 					id="password-current-password"
-					type="password"
 					bind:value={passwordCurrent}
 					autocomplete="current-password"
 					maxlength={128}
@@ -154,9 +153,8 @@
 			</div>
 			<div class="space-y-1">
 				<label for="account-new-password" class="text-sm">{m.auth_new_password()}</label>
-				<Input
+				<PasswordInput
 					id="account-new-password"
-					type="password"
 					bind:value={passwordNew}
 					autocomplete="new-password"
 					minlength={8}
@@ -167,9 +165,8 @@
 			</div>
 			<div class="space-y-1">
 				<label for="account-confirm-password" class="text-sm">{m.auth_confirm_password()}</label>
-				<Input
+				<PasswordInput
 					id="account-confirm-password"
-					type="password"
 					bind:value={passwordConfirmation}
 					autocomplete="new-password"
 					maxlength={128}
@@ -178,6 +175,7 @@
 					aria-describedby={passwordConfirmation && passwordNew !== passwordConfirmation
 						? 'password-mismatch'
 						: undefined}
+					aria-invalid={!!passwordConfirmation && passwordNew !== passwordConfirmation}
 				/>
 			</div>
 			{#if passwordConfirmation && passwordNew !== passwordConfirmation}<p

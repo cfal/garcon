@@ -69,9 +69,14 @@ it('confirmation never reaches the API and pending disables both form paths', as
 	});
 	await fireEvent.submit(form);
 	expect(change).not.toHaveBeenCalled();
+	expect(screen.getByLabelText('Confirm password').getAttribute('aria-invalid')).toBe('true');
+	expect(
+		(within(form).getByRole('button', { name: 'Change password' }) as HTMLButtonElement).disabled,
+	).toBe(true);
 	await fireEvent.input(screen.getByLabelText('Confirm password'), {
 		target: { value: 'after-password' },
 	});
+	expect(screen.getByLabelText('Confirm password').getAttribute('aria-invalid')).toBe('false');
 	void fireEvent.submit(form);
 	await Promise.resolve();
 	flushSync();
@@ -101,4 +106,51 @@ it('keeps the username draft and clears current password on a form error', async
 	expect((screen.getByLabelText('Username') as HTMLInputElement).value).toBe('next');
 	expect((within(form).getByLabelText('Current password') as HTMLInputElement).value).toBe('');
 	expect(auth.isAuthenticated).toBe(true);
+});
+
+it('reveals fields independently without submitting or changing their values', async () => {
+	const changeUsername = vi.spyOn(auth, 'changeUsername');
+	const changePassword = vi.spyOn(auth, 'changePassword');
+	render(PasswordSection);
+	const passwords = Array.from(document.querySelectorAll<HTMLInputElement>('input[type=password]'));
+	expect(passwords).toHaveLength(4);
+	for (const input of passwords) {
+		await fireEvent.input(input, { target: { value: ' exact password ' } });
+		const toggle = document.querySelector<HTMLButtonElement>(
+			`button[aria-controls="${input.id}"]`,
+		)!;
+		expect(toggle.type).toBe('button');
+		expect(toggle.getAttribute('aria-label')).toBe('Show password');
+		await fireEvent.click(toggle);
+		expect(input.type).toBe('text');
+		expect(input.value).toBe(' exact password ');
+		expect(toggle.getAttribute('aria-label')).toBe('Hide password');
+		expect(toggle.title).toBe('Hide password');
+		for (const other of passwords.filter((other) => other !== input))
+			expect(other.type).toBe('password');
+		await fireEvent.click(toggle);
+		expect(input.type).toBe('password');
+	}
+	expect(changeUsername).not.toHaveBeenCalled();
+	expect(changePassword).not.toHaveBeenCalled();
+});
+
+it.each(['cleared', 'suspended'] as const)('masks revealed passwords when %s', async (reason) => {
+	render(PasswordSection);
+	const input = screen.getByLabelText('New password') as HTMLInputElement;
+	await fireEvent.input(input, { target: { value: 'after-password' } });
+	await fireEvent.click(document.querySelector('button[aria-controls="account-new-password"]')!);
+	expect(input.type).toBe('text');
+	if (reason === 'cleared') await fireEvent.input(input, { target: { value: '' } });
+	else
+		flushSync(() => {
+			auth.availability = 'reauth-required';
+		});
+	expect(input.value).toBe('');
+	expect(input.type).toBe('password');
+	flushSync(() => {
+		auth.availability = 'active';
+	});
+	await fireEvent.input(input, { target: { value: 'next-password' } });
+	expect(input.type).toBe('password');
 });
