@@ -10,6 +10,7 @@ const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 45000;
 const SHUTDOWN_TIMEOUT_MS = 15000;
 const SMOKE_CHAT_ID = '1767225600000000';
+const basePath = Bun.argv.find(argument => argument.startsWith('--base-path='))?.slice('--base-path='.length) ?? '';
 const EXPECTED_BUNDLED_PREAMBLES = [
   ['5c3a9b1c-f675-4bca-9a8f-239cd4c38b87', 'Garcon: Chat identity'],
   ['36edcbed-0d64-4d8e-b3df-3f1b1f8602b9', 'Garcon: Inter-chat messages'],
@@ -27,6 +28,7 @@ const SMOKE_ISOLATION_ENV_KEYS = new Set([
   'GARCON_PORT',
   'GARCON_BIND_ADDRESS',
   'GARCON_PUBLIC_URL',
+  'GARCON_BASE_PATH',
   'GARCON_CONTROLLER_URL',
   'GARCON_EXECUTOR_ADVERTISE_URL',
   'GARCON_PROJECT_BASE_DIR',
@@ -108,7 +110,7 @@ async function waitForServerUrl(processHandle) {
   url.hostname = '127.0.0.1';
   await Promise.race([stdoutPump, delay(50)]);
   await Promise.race([stderrPump, delay(50)]);
-  return { url: url.origin, getOutput: () => output };
+  return { url: url.href.replace(/\/$/, ''), getOutput: () => output };
 }
 
 async function stopProcess(processHandle) {
@@ -194,7 +196,7 @@ async function assertCompiledExecutor(url, executablePath, workspaceDir, apiFetc
       if (Date.now() >= deadline) throw new Error('Compiled worker did not become ready');
       await delay(50);
     }
-    const inspectionUrl = new URL('/api/v1/chats/validate-start', url);
+    const inspectionUrl = new URL(`${url}/api/v1/chats/validate-start`);
     inspectionUrl.searchParams.set('executorId', configured.id);
     inspectionUrl.searchParams.set('path', workspaceDir);
     const inspection = await apiFetch(inspectionUrl);
@@ -352,6 +354,8 @@ async function run() {
       executablePath,
       '--port',
       '0',
+      '--base-path',
+      basePath,
       '--bind-address',
       '0.0.0.0',
       '--config-dir',

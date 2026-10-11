@@ -62,7 +62,7 @@ export class E2eFixture {
       context = await browser.createBrowserContext();
       const page = await context.newPage();
       await installLightpandaWorkspaceGeometry(page);
-      await page.evaluateOnNewDocument((authToken) => {
+      await page.evaluateOnNewDocument(({ authToken, wsPath }) => {
         if (location.hostname === '127.0.0.1' && authToken && !globalThis.localStorage.getItem('bearer-token')) {
           globalThis.localStorage.setItem('bearer-token', authToken);
         }
@@ -95,7 +95,7 @@ export class E2eFixture {
           construct(Target, args: ConstructorParameters<typeof WebSocket>) {
             const socket = new Target(...args);
             const url = new URL(String(args[0]), globalThis.location.href);
-            if (url.pathname === '/ws') {
+            if (url.pathname === wsPath) {
               socket.addEventListener('open', () => {
                 scope.__garconSpaWsOpenCount = (scope.__garconSpaWsOpenCount ?? 0) + 1;
                 globalThis.sessionStorage.setItem(
@@ -114,7 +114,7 @@ export class E2eFixture {
             return socket;
           },
         });
-      }, integration.garcon.authToken);
+      }, { authToken: integration.garcon.authToken, wsPath: new URL(`${integration.garcon.baseUrl}/ws`).pathname });
       return new E2eFixture({
         integration,
         lightpanda,
