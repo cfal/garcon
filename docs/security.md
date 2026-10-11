@@ -34,7 +34,8 @@ rejects mixed builds carrying different ticket-owner contracts.
 
 Log out revokes the current browser session, including tabs sharing it, without
 logging out other devices. Confirmation discards unsaved browser-local drafts
-and clears Garcon's cached transcripts, workspace layout, file drafts and recents.
+and attempts to clear Garcon's cached transcripts, workspace layout, file drafts
+and recents.
 The workspace is abandoned and the full sign-in page replaces it; this differs
 from the retained workspace used during authentication repair. Already admitted
 work, agents, terminal shells, executor links and CLI capabilities are unaffected.
@@ -55,12 +56,20 @@ Tokens without session claims are rejected on upgrade; users sign in again.
 No worker wire contracts or resource ownership keys change.
 
 Browser logout fences pending responses and storage checkpoints, coordinates
-active tabs, and checks suspended tabs on wake. Network failure still removes
-local access but reports that server revocation was not confirmed. Storage or
-coordination failures show a separate cleanup warning. Logout cannot erase
-downloads, password-manager entries, browser backups, or data already copied
-outside Garcon; public computers should use a private browsing session and HTTPS.
-Restoring old auth/registry backups can restore old authorization.
+active tabs, and checks suspended tabs on wake. Browser-data cleanup is best
+effort, not guaranteed erasure. Shared localStorage writes are not serialized
+with logout: a write from another tab, including a background autosave, can pass
+its logout check before cleanup and finish afterward, leaving private data behind.
+This does not restore the revoked session's server access.
+
+Network failure still removes local access but reports that server revocation
+was not confirmed. Detected storage or coordination failures show a separate
+cleanup warning; the absence of that warning does not certify erasure. Before
+leaving a shared computer, close all Garcon tabs and clear this site's browser
+data. Logout cannot erase downloads, password-manager entries, browser backups,
+or data already copied outside Garcon; public computers should use a private
+browsing session and HTTPS. Restoring old auth/registry backups can restore old
+authorization.
 
 ## WebSocket Auth Tokens
 
