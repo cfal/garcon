@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { isPlainTextInput } from '$shared/input-format';
 	import { onDestroy, tick } from 'svelte';
 	import {
 		UserMessage,
@@ -608,7 +609,7 @@
 									: undefined}
 							>
 								<div class={userMessagePresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
-									{#if asUser.metadata?.contentMode === 'literal'}
+									{#if isPlainTextInput(asUser)}
 										<pre class="whitespace-pre-wrap break-words font-mono">{asUser.content}</pre>
 									{:else}
 									<Markdown

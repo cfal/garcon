@@ -1,4 +1,5 @@
 import { parseChatMessage, isToolUseMessage } from '@garcon/common/chat-types';
+import { isInputFormatByModel } from '@garcon/common/input-format';
 import { parseCommandWorkingDirectory } from '@garcon/common/command-output';
 import {
   AgentCallError,
@@ -228,6 +229,9 @@ export class RemoteAgentIntegration implements AgentIntegration {
       translateLegacySettings: ({ signal, ...request }) => call('migration.translateLegacySettings', request, { signal }),
     };
     const cap = manifest.capabilities;
+    if (manifest.literalExecution !== null && !isInputFormatByModel(manifest.literalExecution.inputFormatByModel)) {
+      throw new Error('Invalid literal input formats in executor manifest');
+    }
     this.literalExecution = manifest.literalExecution;
     this.readiness = cap.readiness ? { status: (signal) => call('readiness.status', null, { signal }) } : null;
     this.auth = cap.auth ? {

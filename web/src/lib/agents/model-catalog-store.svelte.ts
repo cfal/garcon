@@ -47,7 +47,7 @@ export interface ModelOption {
 	protocol?: ApiProtocol;
 }
 
-export interface AgentMetadata extends Pick<AgentCatalogEntry, 'executionPolicy' | 'selectionLabel'> {
+export interface AgentMetadata extends Pick<AgentCatalogEntry, 'executionPolicy' | 'selectionLabel' | 'inputFormatByModel'> {
 	id: string;
 	label: string;
 	description?: string;
@@ -340,6 +340,7 @@ function parseCatalogResponse(data: unknown): {
 			id,
 			executionPolicy: entry.executionPolicy,
 			selectionLabel: entry.selectionLabel,
+			inputFormatByModel: entry.inputFormatByModel,
 			label: typeof entry.label === 'string' ? entry.label : id,
 			description: typeof entry.description === 'string' ? entry.description : undefined,
 			supportsCompact: Boolean(entry.supportsCompact),

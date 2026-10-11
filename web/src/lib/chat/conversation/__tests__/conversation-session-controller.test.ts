@@ -686,7 +686,7 @@ function createDeps(chat = createRunningChat()) {
 		},
 		modelCatalog: {
 			getAgent: vi.fn<SessionControllerDeps['modelCatalog']['getAgent']>((id) => ({
-				selectionLabel: 'Model',
+				selectionLabel: 'Model', inputFormatByModel: {},
 				id, label: id, executionPolicy: 'conversation', defaultModel: '',
 				supportsCompact: false, supportsFork: true, supportsForkAtMessage: true,
 				supportsForkWhileRunning: false, supportsUpdateProjectPath: true,
@@ -3888,6 +3888,9 @@ describe('ConversationSessionController', () => {
 			chatId: 'chat-1',
 			transcriptViewId: 'generation-1',
 			content: 'queue this',
+			expectedAgentId: 'claude',
+			expectedAgentOwnershipEpoch: 'epoch-1',
+			expectedModel: undefined,
 			excludedResendOrdinals: [],
 		});
 		expect(mockRunChat).not.toHaveBeenCalled();
@@ -3975,7 +3978,7 @@ describe('ConversationSessionController', () => {
 				agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} }, isProcessing: false }));
 			deps.agentState.model = 'variant';
 			deps.modelCatalog.getAgent.mockImplementation((id) => id !== 'codex' ? null : ({
-				selectionLabel: 'Model',
+				selectionLabel: 'Model', inputFormatByModel: { variant: 'markdown' },
 				id, label: 'Literal test', executionPolicy: 'literal', defaultModel: 'variant',
 				supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
 				supportsForkWhileRunning: false, supportsUpdateProjectPath: false, supportsSteering: false,
@@ -3990,10 +3993,11 @@ describe('ConversationSessionController', () => {
 			const outcome = await new ConversationSessionController(deps)[submit]('chat-1');
 			expect(deps.chatState.appendLocalNoticeForChat).not.toHaveBeenCalled();
 			expect(outcome).toBe('accepted');
-			expect(mockRunChat).toHaveBeenCalledWith(expect.objectContaining({ command }));
+			expect(mockRunChat).toHaveBeenCalledWith(expect.objectContaining({ command, model: 'variant',
+				expectedAgentId: 'codex', expectedAgentOwnershipEpoch: 'epoch-1' }));
 			expect(mockSteerChat).not.toHaveBeenCalled();
 			expect(deps.chatState.optimisticUserInputs).toEqual([
-				expect.objectContaining({ content: command, contentMode: 'literal' }),
+				expect.objectContaining({ content: command, contentMode: 'literal', contentFormat: 'markdown' }),
 			]);
 		},
 	);
@@ -4250,6 +4254,9 @@ describe('ConversationSessionController', () => {
 			chatId: 'chat-1',
 			transcriptViewId: 'generation-1',
 			content: 'second queued message',
+			expectedAgentId: 'claude',
+			expectedAgentOwnershipEpoch: 'epoch-1',
+			expectedModel: undefined,
 			excludedResendOrdinals: [],
 		});
 		expect(mockRunChat).not.toHaveBeenCalled();

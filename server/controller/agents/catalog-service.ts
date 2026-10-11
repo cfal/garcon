@@ -85,6 +85,7 @@ export class AgentCatalogService {
       kind: "agent",
       executionPolicy: integration.literalExecution ? 'literal' : 'conversation',
       selectionLabel: integration.literalExecution?.selectionLabel ?? 'Model',
+      inputFormatByModel: integration.literalExecution?.inputFormatByModel ?? {},
       supportsCompact: integration.compaction !== null,
       supportsFork: true,
       supportsForkAtMessage: true,

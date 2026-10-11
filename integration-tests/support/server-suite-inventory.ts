@@ -20,7 +20,7 @@ export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze
     'executor-session-setup', 'executor-shutdown',
     'executor-terminal-pressure', 'executor-terminals', 'executor-ticket-defaults',
     'executor-unknown-agent', 'git-input-boundaries', 'lazy-native-compaction',
-    'lazy-native-sessions',
+    'lazy-native-sessions', 'shell-notes',
   ].map(name => [name, 'Owns its Local/remote fixtures or explicit transport/management matrix.'])),
   ...Object.fromEntries([
     'agent-settings-migration', 'carryover-bootstrap-migration', 'scheduled-prompt-migration',

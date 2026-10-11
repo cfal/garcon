@@ -62,6 +62,7 @@ export interface ChatProcessingEntry {
 
 export interface ChatMessageMetadata {
   contentMode?: 'literal';
+  contentFormat?: 'plain' | 'markdown';
   clientRequestId?: string;
   clientMessageId?: string;
   upstreamRequestId?: string;

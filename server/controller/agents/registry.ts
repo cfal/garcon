@@ -41,7 +41,8 @@ import { AgentDirectory, type ExecutionIntegrationDirectory } from './directory.
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
 import { AgentRuntimeRouter, type RunSingleQueryOptions } from './runtime-router.js';
 import { type CreateCarriedContextInput } from '../chats/carryover/context.js';
-import { AgentSessionSettingsService, type AgentConfigurationInput } from './session-settings-service.js';
+import { AgentSessionSettingsService, type AgentConfigurationInput, type SettingsExecutionPort } from './session-settings-service.js';
+import { literalInputFormat } from '../../../common/input-format.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import { createLogger } from '../../common/log.js';
 import { UserMessage } from '@garcon/common/chat-types';
@@ -211,6 +212,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     onSettingsCommitted?: (chatId: string) => void;
     chatMutationLock?: KeyedPromiseLock;
+    settingsExecution: SettingsExecutionPort;
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
     hasPendingOwnershipTransfer(chatId: string): boolean;
@@ -249,6 +251,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       endpointResolver: args.endpointResolver,
       chatMutationLock: args.chatMutationLock,
       onCommitted: args.onSettingsCommitted,
+      execution: args.settingsExecution,
     });
     this.#ledger.subscribeSessionCommitted((event) => {
       this.#registry.updateChat(event.chatId, {
@@ -574,13 +577,18 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.executionPolicy(chat.agentId, chat.executorId);
   }
 
-  #normalizeInput(chatId: string, message: UserMessage): UserMessage {
-    const literal = this.chatExecutionPolicy(chatId) === 'literal';
-    if (!literal && message.metadata?.contentMode === undefined) return message;
-    const { contentMode: _mode, ...metadata } = message.metadata ?? {};
+  #normalizeInput(session: AgentChatEntry, message: UserMessage, model?: string): UserMessage {
+    const integration = this.#directory.get(session.agentId, session.executorId)
+      ?? this.#directory.require(session.agentId, session.executorId);
+    const literal = integration.literalExecution;
+    if (!literal && message.metadata?.contentMode === undefined && message.metadata?.contentFormat === undefined) return message;
+    const { contentMode: _mode, contentFormat: _format, ...metadata } = message.metadata ?? {};
     return new UserMessage(message.timestamp, message.content, message.images, {
       ...metadata,
-      ...(literal ? { contentMode: 'literal' as const } : {}),
+      ...(literal ? {
+        contentMode: 'literal' as const,
+        contentFormat: literalInputFormat(literal.inputFormatByModel, model ?? session.model ?? ''),
+      } : {}),
     }, message.presentation);
   }
 
@@ -650,7 +658,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   ): { readonly inserted: boolean } {
     const session = this.#registry.getChat(chatId);
     if (!session) throw new Error(`Session not initialized: ${chatId}`);
-    message = this.#normalizeInput(chatId, message);
+    message = this.#normalizeInput(session, message, options.model);
     const literal = message.metadata?.contentMode === 'literal';
     const pending = literal || options.commandType === 'steer'
       ? null

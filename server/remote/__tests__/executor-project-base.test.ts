@@ -33,7 +33,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       fixture.integration.lifecycle.start = async () => { entering.resolve(); await barrier; };
       generations.push(fixture);
       const integration: AgentIntegration = literal
-        ? { ...fixture.integration, literalExecution: { selectionLabel: 'Runtime' }, singleQuery: null }
+        ? { ...fixture.integration, literalExecution: { selectionLabel: 'Runtime', inputFormatByModel: {} }, singleQuery: null }
         : fixture.integration;
       scopes.push(servePairedRuntime(worker, transport,
         { ...fixture.executor, getAgentIntegration: async () => integration }, new ProducerRelay()));
@@ -44,7 +44,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       else worker.dial(controller.listen());
       await firstReady;
       const integration = await executor.getAgentIntegration('test');
-      expect(integration.literalExecution).toEqual(literal ? { selectionLabel: 'Runtime' } : null);
+      expect(integration.literalExecution).toEqual(literal ? { selectionLabel: 'Runtime', inputFormatByModel: {} } : null);
       const projects = await executor.getProjectService();
       const inventory = executor.inventory;
       let info = await executor.getInfo();
@@ -65,7 +65,7 @@ for (const dialer of ['controller', 'worker'] as const) {
         expect(replacement.projectBasePath).toBe(nextBase);
         expect(replacement.instanceId).not.toBe(info.instanceId);
         expect(await executor.getAgentIntegration('test')).toBe(integration);
-        expect(integration.literalExecution).toEqual(literal ? { selectionLabel: 'Runtime' } : null);
+        expect(integration.literalExecution).toEqual(literal ? { selectionLabel: 'Runtime', inputFormatByModel: {} } : null);
         expect(await executor.getProjectService()).toBe(projects);
         expect(executor.inventory).toEqual(inventory);
         info = replacement;
@@ -83,7 +83,7 @@ const manifestChanges: Record<string, (integration: AgentIntegration) => AgentIn
   descriptor: (integration) => ({ ...integration, descriptor: { ...integration.descriptor, label: 'Changed' } }),
   settings: (integration) => ({ ...integration, settings: { ...integration.settings, defaults: () => ({ ownerId: 'test', schemaVersion: 2, values: {} }) } }),
   capability: (integration) => ({ ...integration, singleQuery: null }),
-  literalExecution: (integration) => ({ ...integration, literalExecution: { selectionLabel: 'Runtime' }, singleQuery: null }),
+  literalExecution: (integration) => ({ ...integration, literalExecution: { selectionLabel: 'Runtime', inputFormatByModel: {} }, singleQuery: null }),
   readiness: (integration) => ({ ...integration, readiness: { async status() { return { ready: true, reason: 'Available' }; } } }),
 };
 

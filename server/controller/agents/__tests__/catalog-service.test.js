@@ -88,7 +88,7 @@ describe("AgentCatalogService", () => {
 
     expect(entry).toMatchObject({
       executionPolicy: 'conversation',
-      selectionLabel: 'Model',
+      selectionLabel: 'Model', inputFormatByModel: {},
       id: "sample-agent",
       label: "Sample Agent",
       supportsFork: true,

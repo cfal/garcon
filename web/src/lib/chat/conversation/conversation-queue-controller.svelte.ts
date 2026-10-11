@@ -176,9 +176,13 @@ export class ConversationQueueController {
 	}
 
 	async createForChat(chatId: string, content: string): Promise<void> {
-		if (!this.#hasChat(chatId)) return;
+		const chat = this.options.sessions.byId[chatId];
+		if (!chat) return;
 		const submission = this.options.acceptedInputs.enqueue({
 			chatId,
+			expectedModel: chat.model ?? undefined,
+			expectedAgentId: chat.agentId,
+			expectedAgentOwnershipEpoch: chat.agentOwnershipEpoch ?? undefined,
 			transcriptViewId: this.#transcriptViewId(chatId),
 			content,
 		});

@@ -98,7 +98,7 @@ function service({
       id: 'claude',
       label: 'Claude',
       executionPolicy: 'conversation',
-      selectionLabel: 'Model',
+      selectionLabel: 'Model', inputFormatByModel: {},
       kind: 'agent',
       models: [{ id: 'haiku', label: 'Haiku' }],
     }]))),

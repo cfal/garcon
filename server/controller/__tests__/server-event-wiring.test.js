@@ -460,7 +460,7 @@ describe('server event wiring', () => {
       `retains %s cwd failure after ${outcome} and publishes its notice before terminal UI`, async failure => {
         const directory = await mkdtemp(path.join(tmpdir(), 'cwd-diagnostic-'));
         const fixture = createExecutionFixture(directory, undefined, undefined, {
-          literalExecution: { selectionLabel: 'Runtime' },
+          literalExecution: { selectionLabel: 'Runtime', inputFormatByModel: {} },
           inputTranscript: agents => agents,
           coordinator: { executionPolicy: () => 'literal' },
           workingDirectory: {

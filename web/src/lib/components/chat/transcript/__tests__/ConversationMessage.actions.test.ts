@@ -28,6 +28,15 @@ function menuItemLabels(): (string | undefined)[] {
 }
 
 describe('ConversationMessage actions', () => {
+	it('renders durable Markdown notes while retaining literal input semantics', async () => {
+		const content = '**Synthetic note**\n<script>throw new Error("inert")</script>';
+		const { container } = render(ConversationMessageHost, { message: new UserMessage(
+			'2026-01-01T00:00:00Z', content, undefined, { contentMode: 'literal', contentFormat: 'markdown' },
+		) });
+		await waitFor(() => expect(container.querySelector('strong')?.textContent).toBe('Synthetic note'));
+		expect(container.querySelector('script')).toBeNull();
+	});
+
 	it.each(['stdout', 'stderr'] as const)('renders plain %s in the shared fenced-code component', (channel) => {
 		const content = '```\n**literal** <garcon-get-chat-id />\n';
 		const { container } = render(ConversationMessageHost, { message: new CommandOutputMessage(

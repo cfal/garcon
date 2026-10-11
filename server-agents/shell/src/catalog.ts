@@ -3,6 +3,10 @@ import { AgentIntegrationError, type AgentCatalog, type AgentHost } from '@garco
 
 export const SHELL_FAMILIES = ['sh', 'bash', 'zsh', 'fish'] as const;
 export type ShellFamily = typeof SHELL_FAMILIES[number];
+export const SHELL_INPUT_FORMATS = { 'notes-markdown': 'markdown' } as const;
+export function isNotesMode(selection: string): boolean {
+  return selection === 'notes' || selection === 'notes-markdown';
+}
 const LABELS: Record<ShellFamily, string> = { sh: 'Sh', bash: 'Bash', zsh: 'Zsh', fish: 'Fish' };
 
 export function discoverShells(host: Pick<AgentHost, 'environment'>): { family: ShellFamily; executable: string }[] {
@@ -26,8 +30,12 @@ export function createShellCatalog(host: AgentHost): AgentCatalog {
       const shells = discoverShells(host);
       const configured = basename(host.environment.get('GARCON_TERMINAL_SHELL') ?? host.environment.get('SHELL') ?? '/bin/bash');
       return {
-        models: shells.map(({ family }) => ({ value: family, label: LABELS[family], isLocal: true })),
-        defaultModel: shells.find(shell => shell.family === configured)?.family ?? shells[0]?.family ?? '',
+        models: [
+          ...shells.map(({ family }) => ({ value: family, label: LABELS[family], isLocal: true })),
+          { value: 'notes', label: 'Notes', isLocal: true },
+          { value: 'notes-markdown', label: 'Notes (Markdown)', isLocal: true },
+        ],
+        defaultModel: shells.find(shell => shell.family === configured)?.family ?? shells[0]?.family ?? 'notes',
         requiresStrictModelDiscovery: true,
         generation: null,
       };

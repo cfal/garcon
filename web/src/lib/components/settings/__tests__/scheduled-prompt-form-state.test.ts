@@ -44,7 +44,7 @@ function createForm(
 	vi.spyOn(modelCatalog, 'error', 'get').mockImplementation(() => catalogOverrides.error ?? null);
 	Object.assign(modelCatalog, {
 		getAgent: (id: string) => catalogOverrides.executionPolicy === null ? null : ({
-			selectionLabel: 'Model',
+			selectionLabel: 'Model', inputFormatByModel: {},
 			id, label: id, executionPolicy: catalogOverrides.executionPolicy ?? 'conversation', defaultModel: 'gpt-5',
 			supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
 			supportsForkWhileRunning: false, supportsUpdateProjectPath: false, supportsSteering: false,

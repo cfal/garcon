@@ -97,7 +97,7 @@ function installFakeTimers() {
 describe('AgentHandoffService', () => {
   it('rejects literal destinations during resolution without changing ownership', async () => {
     const deps = targetResolutionDeps();
-    deps.integrations.get('target-agent').literalExecution = { selectionLabel: 'Runtime' };
+    deps.integrations.get('target-agent').literalExecution = { selectionLabel: 'Runtime', inputFormatByModel: {} };
     const service = createService(deps);
     await expect(service.resolveTarget({ chat: sourceChat(), handoff: handoff(), deadline: Date.now() + 10_000 }))
       .rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
@@ -108,12 +108,12 @@ describe('AgentHandoffService', () => {
     const calls = [];
     const deps = targetResolutionDeps();
     const destination = deps.integrations.get('target-agent');
-    if (when === 'before-preparation') destination.literalExecution = { selectionLabel: 'Runtime' };
+    if (when === 'before-preparation') destination.literalExecution = { selectionLabel: 'Runtime', inputFormatByModel: {} };
     const ownership = handoffState(current, calls).ownership;
     const service = createService({
       ...deps, registry: { getChat: () => current }, ownership, ledger: ledgerState(calls),
       carryover: { planFor: async () => {
-        destination.literalExecution = { selectionLabel: 'Runtime' };
+        destination.literalExecution = { selectionLabel: 'Runtime', inputFormatByModel: {} };
         return { kind: 'no-history' };
       } },
       reopenProducer: () => calls.push('reopen'),

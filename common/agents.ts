@@ -8,6 +8,7 @@ import type {
 } from "./agent-integration.js";
 import type { PermissionMode, ThinkingMode } from "./chat-modes.js";
 import { isRecord } from './json.js';
+import { isInputFormatByModel, type InputFormatByModel } from './input-format.js';
 
 export const DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID =
   "direct-openai-compatible" as const;
@@ -43,6 +44,7 @@ export interface AgentCatalogEntry {
   kind: "agent";
   executionPolicy: 'conversation' | 'literal';
   selectionLabel: string;
+  inputFormatByModel: InputFormatByModel;
   supportsCompact: boolean;
   supportsFork: boolean;
   supportsForkAtMessage: boolean;
@@ -77,8 +79,9 @@ export function isAgentId(value: unknown): value is AgentId {
 
 export function hasAgentExecutionMetadata(
   value: unknown,
-): value is Record<string, unknown> & Pick<AgentCatalogEntry, 'executionPolicy' | 'selectionLabel'> {
+): value is Record<string, unknown> & Pick<AgentCatalogEntry, 'executionPolicy' | 'selectionLabel' | 'inputFormatByModel'> {
   return isRecord(value)
     && (value.executionPolicy === 'conversation' || value.executionPolicy === 'literal')
-    && typeof value.selectionLabel === 'string' && value.selectionLabel.length > 0;
+    && typeof value.selectionLabel === 'string' && value.selectionLabel.length > 0
+    && isInputFormatByModel(value.inputFormatByModel);
 }

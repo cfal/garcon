@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { isPlainTextInput } from '$shared/input-format';
 	import { onMount, tick } from 'svelte';
 	import { getSharedChat } from '$lib/api/shares.js';
 	import { ApiError } from '$lib/api/client.js';
@@ -307,7 +308,7 @@
 											previewHeight={userPresentation?.style ? 'default' : 'tall'}
 										>
 											<div class={userPresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
-												{#if message.metadata?.contentMode === 'literal'}
+												{#if isPlainTextInput(message)}
 													<pre class="whitespace-pre-wrap break-words font-mono">{message.content}</pre>
 												{:else}
 												<Markdown

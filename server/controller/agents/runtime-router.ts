@@ -228,7 +228,8 @@ export class AgentRuntimeRouter {
       const handle = await this.#launch(chatId, runId, () => integration.execution.start(request, sending));
       if (handle) await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
       assertExecutionAdmissionOpen(opts);
-      const updated = this.#registry.updateChat(chatId, {
+      // Literal overrides stay turn-local; a late startup must not change queued input's mode.
+      const updated = integration.literalExecution ? this.#registry.getChat(chatId) : this.#registry.updateChat(chatId, {
         model: selection.model,
         apiProviderId: selection.apiProviderId,
         modelEndpointId: selection.endpointId,

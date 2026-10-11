@@ -1,6 +1,7 @@
 // Owns chat lifecycle and delegates all viewport operations through the dependency interface.
 
 import { getChatSnapshot, handoffChat, interruptAndSendChat, stopChat } from '$lib/api/chats.js';
+import { literalInputFormat } from '$shared/input-format';
 import { isStopSatisfied, type ChatImage, type ChatStopOutcome } from '$shared/chat-types';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import {
@@ -568,6 +569,12 @@ export class ConversationSessionController {
 		if (!agent) return isDraft && source === 'automatic-start' ? rejectUnavailableDraftStart(deps, chatId) : 'no-op';
 		const literal = agent.executionPolicy === 'literal';
 		const contentMode = literal ? 'literal' as const : undefined;
+		const contentFormat = literal ? literalInputFormat(agent.inputFormatByModel, selection.model ?? '') : undefined;
+		const capturedSelection = {
+			model: literal ? selection.model ?? undefined : undefined,
+			expectedAgentId: selection.agentId ?? undefined,
+			expectedAgentOwnershipEpoch: selected.agentOwnershipEpoch ?? undefined,
+		};
 		if (!literal) text = text.trim();
 		if (
 			(literal || isDraft || !isControllerSlashCommand(text)) &&
@@ -591,7 +598,9 @@ export class ConversationSessionController {
 		if (slash.kind === 'handled') return slash.outcome;
 
 		const specializedContext = {
+			...capturedSelection,
 			contentMode,
+			contentFormat,
 			chatId,
 			chat: selected,
 			startup,
@@ -670,7 +679,9 @@ export class ConversationSessionController {
 			}
 
 			const context = {
+				...capturedSelection,
 				contentMode,
+				contentFormat,
 				chatId,
 				chat: selected,
 				startup,
@@ -731,6 +742,8 @@ export class ConversationSessionController {
 			chat: selected,
 			text,
 			contentMode: agent.executionPolicy === 'literal' ? 'literal' : undefined,
+			contentFormat: agent.executionPolicy === 'literal'
+				? literalInputFormat(agent.inputFormatByModel, deps.agentState.model) : undefined,
 			supportsSteering: deps
 				.modelCatalogForExecutor(selected.executorId ?? 'local')
 				.supportsSteering(selected.agentId),
