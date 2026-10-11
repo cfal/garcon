@@ -1,4 +1,6 @@
-import { AuthValidationError, type AuthUserResponse, type AuthStatusResponse } from '../../../common/auth.js';
+import { AuthValidationError, type AuthUserResponse, type AuthStatusResponse, type LogoutResponse } from '../../../common/auth.js';
+import { isCurrentBrowserPrincipal, verifyLogoutToken } from '../auth/token.js';
+import { getTokenFromRequest } from '../../common/http-body.js';
 import { getAuthStore, needsSetup } from '../auth/store.js';
 import { getAuthService } from '../auth/service.js';
 import { readAuthBody } from '../auth/http.js';
@@ -12,6 +14,8 @@ import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 const loginLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
 const registerLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
 const credentialLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
+const logoutLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 30 });
+let logoutActive = false;
 
 function authRoute(handler: RouteHandler): RouteHandler {
   return markRouteNoStore(async (...args) => {
@@ -84,12 +88,29 @@ const user = authRoute(async (_request, _url, _server, context) => {
   const principal = context?.principal;
   if (
     !account ||
-    (principal?.mode === 'authenticated' &&
-      (!store.isCurrent(principal.key, principal.credentialRevision) || principal.expiresAtMs <= Date.now()))
+    (principal?.mode === 'authenticated' && !isCurrentBrowserPrincipal(principal))
   ) {
     throw new DomainError('AUTH_SESSION_INVALID', 'Sign in again.', 401);
   }
   return Response.json({ user: { id: account.ownerKey, username: account.username } } satisfies AuthUserResponse);
+});
+
+const logout = authRoute(async (request, _url, server, context) => {
+  requireEnabled();
+  if (context?.principal && context.principal.mode !== 'authenticated') {
+    throw new DomainError('AUTH_CHANGE_FORBIDDEN', 'Only browser sessions can log out.', 403);
+  }
+  const limited = logoutLimiter.check(request, ipServer(server));
+  if (limited) return limited;
+  if (logoutActive) throw new DomainError('AUTH_BUSY', 'Logout is busy. Try again shortly.', 429);
+  logoutActive = true;
+  try {
+    const claims = await verifyLogoutToken(getTokenFromRequest(request));
+    if (!claims) throw new DomainError('AUTH_SESSION_INVALID', 'Invalid session.', 401);
+    request.signal.throwIfAborted();
+    await getAuthStore().revokeSession(claims.ownerKey, claims.sessionId);
+    return Response.json({ success: true } satisfies LogoutResponse);
+  } finally { logoutActive = false; }
 });
 
 const routes: RouteMap = {
@@ -99,7 +120,7 @@ const routes: RouteMap = {
   '/api/v1/auth/user': { GET: user },
   '/api/v1/auth/username': { PATCH: credentialRoute('username') },
   '/api/v1/auth/password': { PATCH: credentialRoute('password') },
-  '/api/v1/auth/logout': { POST: authRoute(() => Response.json({ success: true })) },
+  '/api/v1/auth/logout': { POST: markRouteNoAuth(logout) },
 };
 
 export default routes;

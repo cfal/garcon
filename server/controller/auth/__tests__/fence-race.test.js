@@ -51,7 +51,7 @@ async function registerAccount(prefix) {
 test('auth reads that straddle an uncertain write preserve the storage fence', async () => {
   const { service, first } = await registerAccount('garcon-auth-fence-race-');
   const principal = { mode: 'authenticated', key: first.user.id, username: first.user.username,
-    credentialRevision: 1, expiresAtMs: Date.now() + 60_000 };
+    ...(await verifyAuthTokenClaims(first.token)) };
   pendingWrite = { persisted: Promise.withResolvers(), outcome: Promise.withResolvers() };
   const change = service.changeUsername(principal,
     async () => ({ currentPassword: 'password-before', username: 'synthetic-next' })).catch(error => error);
@@ -80,7 +80,7 @@ test('a user probe cannot validate a captured snapshot after successful rotation
   const { store, service, first } = await registerAccount('garcon-auth-probe-race-');
   const snapshot = await store.snapshot();
   const principal = { mode: 'authenticated', key: first.user.id, username: first.user.username,
-    credentialRevision: 1, expiresAtMs: Date.now() + 60_000 };
+    ...(await verifyAuthTokenClaims(first.token)) };
   const pendingSnapshot = Promise.withResolvers();
   const capture = spyOn(store, 'snapshot').mockImplementationOnce(() => pendingSnapshot.promise);
   try {

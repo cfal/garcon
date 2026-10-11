@@ -48,6 +48,7 @@ export function createWebSocketUpgradeHandler({ executors, executionSockets, wsA
           mode: 'authenticated',
           key: claims.ownerKey,
           credentialRevision: claims.credentialRevision,
+          sessionId: claims.sessionId,
           username: claims.username,
           expiresAtMs: claims.expiresAtMs,
         };

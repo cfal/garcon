@@ -6,6 +6,7 @@ import { AtomicJsonWriteError, readJsonStateFile, writeJsonFileAtomic } from '..
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { DomainError } from '../../common/domain-error.js';
 import { createLogger } from '../../common/log.js';
+import { AUTH_SESSION_LIMIT, parseStoredSessions, type AuthBrowserSession } from './sessions.js';
 
 export interface AuthAccount {
   readonly ownerKey: string;
@@ -20,7 +21,7 @@ export interface AuthSnapshot {
   readonly account: AuthAccount | null;
 }
 
-export type AuthChange = 'credentials' | 'storage-unavailable';
+export type AuthChange = 'credentials' | 'sessions' | 'storage-unavailable';
 export class AuthSnapshotChangedError extends Error {}
 export class AuthAccountAlreadyConfiguredError extends DomainError {
   constructor() { super('VALIDATION_FAILED', 'Account already configured', 409); }
@@ -70,12 +71,18 @@ export class AuthAccountStore {
   #snapshot: AuthSnapshot | null = null;
   #initializing: Promise<void> | null = null;
   #unavailable = false;
+  #sessions: readonly AuthBrowserSession[] = [];
+  readonly sessionsFilePath: string;
 
-  constructor(readonly filePath: string, private readonly write: Writer = writeJsonFileAtomic) {}
+  constructor(readonly filePath: string, private readonly write: Writer = writeJsonFileAtomic) {
+    this.sessionsFilePath = path.join(path.dirname(filePath), 'auth-sessions.json');
+  }
 
   initialize(): Promise<void> {
     return this.#initializing ??= this.#lock.runExclusive(this.filePath, async () => {
       const parsed = await readJsonStateFile({ filePath: this.filePath, empty: () => parseStoredAuth({}), normalize: parseStoredAuth });
+      this.#sessions = await readJsonStateFile({ filePath: this.sessionsFilePath,
+        empty: () => [], normalize: parseStoredSessions });
       if (parsed.initialize) await this.#persist(parsed.snapshot);
       this.#snapshot = parsed.snapshot;
     });
@@ -99,16 +106,74 @@ export class AuthAccountStore {
     return !this.#unavailable && !!account && account.ownerKey === ownerKey && account.credentialRevision === revision;
   }
 
+  isSessionCurrent(ownerKey: string, sessionId: string, expiresAtMs: number): boolean {
+    return !this.#unavailable && expiresAtMs > Date.now() && this.#sessions.some(session =>
+      session.sessionId === sessionId && session.ownerKey === ownerKey && session.expiresAtMs === expiresAtMs);
+  }
+
   onChange(listener: (change: AuthChange) => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   }
 
-  withCurrent<T>(expected: AuthSnapshot, operation: () => T): Promise<T> {
+  openSession<T>(expected: AuthSnapshot, prepare: () => { session: AuthBrowserSession; result: T }): Promise<T> {
     return this.#lock.runExclusive(this.filePath, async () => {
       this.#assertSnapshot(expected);
-      return operation();
+      const { session, result } = prepare();
+      await this.#addSession(session);
+      return result;
     });
+  }
+
+  register<T>(expected: AuthSnapshot, prepare: () => { account: AuthAccount; session: AuthBrowserSession; result: T }): Promise<T> {
+    return this.#lock.runExclusive(this.filePath, async () => {
+      this.#assertSnapshot(expected);
+      const { account, session, result } = prepare();
+      const candidate = Object.freeze({ jwtSecret: expected.jwtSecret, account: Object.freeze(account) });
+      // A failed account write may leave a bounded, unissued session, never an issued token.
+      await this.#addSession(session);
+      await this.#persist(candidate);
+      this.#snapshot = candidate;
+      this.#publish('credentials');
+      return result;
+    });
+  }
+
+  revokeSession(ownerKey: string, sessionId: string): Promise<void> {
+    return this.#lock.runExclusive(this.filePath, async () => {
+      this.assertHealthy();
+      if (this.#snapshot?.account?.ownerKey !== ownerKey) {
+        throw new DomainError('AUTH_SESSION_INVALID', 'Invalid session.', 401);
+      }
+      if (!this.#sessions.some(session => session.sessionId === sessionId)) return;
+      const candidate = this.#sessions.filter(session => session.sessionId !== sessionId && session.expiresAtMs > Date.now());
+      await this.#persistSessions(candidate);
+      this.#sessions = candidate;
+      this.#publish('sessions');
+    });
+  }
+
+  async #addSession(session: AuthBrowserSession): Promise<void> {
+    const candidate = this.#sessions.filter(entry => entry.expiresAtMs > Date.now());
+    if (candidate.length >= AUTH_SESSION_LIMIT) throw new DomainError('AUTH_BUSY', 'Too many active browser sessions. Log out an existing session or wait for it to expire.', 429);
+    if (candidate.some(entry => entry.sessionId === session.sessionId)) throw new Error('Duplicate auth session');
+    candidate.push(Object.freeze(session));
+    await this.#persistSessions(candidate);
+    this.#sessions = Object.freeze(candidate);
+  }
+
+  async #persistSessions(candidate: readonly AuthBrowserSession[]): Promise<void> {
+    try { await this.write(this.sessionsFilePath, { version: 1, sessions: candidate }, { mode: 0o600 }); }
+    catch (error) {
+      if (error instanceof AtomicJsonWriteError && error.renamed) {
+        this.#sessions = candidate;
+        this.#unavailable = true;
+        this.#publish('storage-unavailable');
+        logger.error('Session write durability is unknown; browser authentication fenced.');
+        this.assertHealthy();
+      }
+      throw new DomainError('AUTH_SAVE_FAILED', 'The session change could not be saved.', 500);
+    }
   }
 
   commit<T>(expected: AuthSnapshot, prepare: () => { account: AuthAccount; result: T }): Promise<T> {

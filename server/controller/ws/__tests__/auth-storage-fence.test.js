@@ -42,7 +42,7 @@ test.each(['open', 'message'])('storage fencing has a distinct close reason at b
   const session = await service.register({ username: 'synthetic-owner', password: 'synthetic-password' });
   const claims = await verifyAuthTokenClaims(session.token);
   const principal = { mode: 'authenticated', key: claims.ownerKey, username: claims.username,
-    credentialRevision: claims.credentialRevision, expiresAtMs: claims.expiresAtMs };
+    credentialRevision: claims.credentialRevision, sessionId: claims.sessionId, expiresAtMs: claims.expiresAtMs };
   const socket = { data: { kind: 'primary', connectionId: 'captured-upgrade', principal },
     readyState: 1, close: mock(() => {}) };
   const admission = new WebSocketAdmissionController(1);

@@ -37,15 +37,18 @@ test('only current HS256 owner/revision tokens authenticate, including after res
     async () => ({ currentPassword: 'password-before', username: 'owner-after' }));
   expect(await verifyAuthTokenClaims(first.token)).toBeNull();
   expect(await verifyAuthTokenClaims(changed.token)).toMatchObject({ username: 'owner-after', ownerKey: 'owner-before', credentialRevision: 2 });
-  expect(await verifyAuthTokenClaims(signAuthSnapshot(snapshot))).toBeNull();
+  expect(await verifyAuthTokenClaims(signAuthSnapshot(snapshot, {
+    ownerKey: claims.ownerKey, sessionId: claims.sessionId, expiresAtMs: claims.expiresAtMs,
+  }))).toBeNull();
 });
 
 test('rejects legacy, malformed, missing, expired and wrong-algorithm tokens', async () => {
-  await service.register({ username: 'owner', password: 'password-test' });
+  const first = await service.register({ username: 'owner', password: 'password-test' });
   const { jwtSecret } = await getAuthStore().snapshot();
-  const claims = { sub: 'owner', credentialRevision: 1 };
+  const claims = { sub: 'owner', credentialRevision: 1, sid: jwt.decode(first.token).sid };
   for (const token of [null, 'not-a-token',
     jwt.sign({ username: 'owner' }, jwtSecret, { expiresIn: '1h' }),
+    jwt.sign({ sub: 'owner', credentialRevision: 1 }, jwtSecret, { expiresIn: '1h' }),
     jwt.sign(claims, jwtSecret),
     jwt.sign({ ...claims, credentialRevision: 0 }, jwtSecret, { expiresIn: '1h' }),
     jwt.sign({ ...claims, sub: 'another-owner' }, jwtSecret, { expiresIn: '1h' }),

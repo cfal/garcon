@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
-const claims = { ownerKey: 'original', credentialRevision: 2, username: 'ada', expiresAtMs: 2_000_000_000_000 };
+const claims = { ownerKey: 'original', credentialRevision: 2, sessionId: 'a'.repeat(64), username: 'ada', expiresAtMs: 2_000_000_000_000 };
 const verifyAuthTokenClaims = mock(async () => claims);
 
 mock.module('../../auth/token.js', () => ({
@@ -46,6 +46,7 @@ describe('authenticateHttpRequest', () => {
       mode: 'authenticated',
       key: 'original',
       credentialRevision: 2,
+      sessionId: 'a'.repeat(64),
       username: 'ada',
       expiresAtMs: 2_000_000_000_000,
     });

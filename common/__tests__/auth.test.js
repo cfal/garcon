@@ -19,7 +19,10 @@ test('new usernames remain compatible with ticket labels and password limits rem
 test('session responses and token identity metadata are validated, not asserted', () => {
   expect(parseAuthSessionResponse({ success: true, user: { id: 'owner-before', username: 'owner-after' }, token: 'token' }).user.id).toBe('owner-before');
   expect(() => parseAuthSessionResponse({ success: true, user: { username: 'owner' }, token: '' })).toThrow();
-  expect(parseAuthTokenIdentity({ sub: 'owner', credentialRevision: 1 })).toEqual({ ownerKey: 'owner', credentialRevision: 1 });
+  expect(parseAuthTokenIdentity({ sub: 'owner', credentialRevision: 1, sid: 'a'.repeat(64) })).toEqual({ ownerKey: 'owner', credentialRevision: 1, sessionId: 'a'.repeat(64) });
+  for (const sid of [undefined, '', 'a'.repeat(63), 'z'.repeat(64)]) {
+    expect(parseAuthTokenIdentity({ sub: 'owner', credentialRevision: 1, sid })).toBeNull();
+  }
   for (const credentialRevision of [0, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, '1']) expect(parseAuthTokenIdentity({ sub: 'owner', credentialRevision })).toBeNull();
 });
 

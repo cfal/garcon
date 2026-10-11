@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { getAuthStore } from '../../auth/store.js';
 import { AuthService } from '../../auth/service.js';
+import { verifyAuthTokenClaims } from '../../auth/token.js';
 import { fixturePasswords } from '../../auth/__tests__/fixture.js';
 import { resetServerConfigForTests } from '../../config.js';
 import { PrimarySocketDelivery } from '../primary-delivery.js';
@@ -25,9 +26,9 @@ test('a browser verified before rotation cannot open afterward, but its replacem
   directory = await mkdtemp(join(homedir(), 'garcon-ws-auth-test-'));
   process.env.GARCON_CONFIG_DIR = directory; resetServerConfigForTests();
   const service = new AuthService(getAuthStore(), fixturePasswords);
-  await service.register({ username: 'owner-before', password: 'password-before' });
+  const first = await service.register({ username: 'owner-before', password: 'password-before' });
   const principal = { mode: 'authenticated', key: 'owner-before', username: 'owner-before', credentialRevision: 1,
-    expiresAtMs: Date.now() + 60_000 };
+    ...(await verifyAuthTokenClaims(first.token)) };
   await service.changeUsername(principal, async () => ({ currentPassword: 'password-before', username: 'owner-after' }));
   const admission = new WebSocketAdmissionController(2);
   const delivery = new PrimarySocketDelivery(1024);

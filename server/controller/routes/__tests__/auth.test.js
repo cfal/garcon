@@ -8,6 +8,8 @@ import { resetServerConfigForTests } from '../../config.js';
 import { getAuthService } from '../../auth/service.js';
 import { getAuthStore } from '../../auth/store.js';
 import { authenticateHttpRequest } from '../../lib/http-request.js';
+import { verifyAuthTokenClaims } from '../../auth/token.js';
+import jwt from 'jsonwebtoken';
 
 function registerRequest(body = {}) {
   return new Request('http://localhost/api/v1/auth/register', {
@@ -108,8 +110,8 @@ describe('POST /api/v1/auth/register', () => {
   });
 
   it('rejects non-browser principals, wrong passwords and combined bodies without rotating', async () => {
-    await getAuthService().register({ username: 'owner', password: 'password-before' });
-    const principal = { mode: 'authenticated', key: 'owner', username: 'owner', credentialRevision: 1, expiresAtMs: Date.now() + 60000 };
+    const session = await getAuthService().register({ username: 'owner', password: 'password-before' });
+    const principal = { mode: 'authenticated', key: 'owner', ...(await verifyAuthTokenClaims(session.token)) };
     for (const [caller, body, expected] of [
       [{ mode: 'local' }, { currentPassword: 'password-before', username: 'next' }, 'AUTH_CHANGE_FORBIDDEN'],
       [{ mode: 'executor' }, { currentPassword: 'password-before', username: 'next' }, 'AUTH_CHANGE_FORBIDDEN'],
@@ -122,6 +124,30 @@ describe('POST /api/v1/auth/register', () => {
       expect((await response.json()).errorCode).toBe(expected);
     }
     expect((await getAuthStore().snapshot()).account.credentialRevision).toBe(1);
+  });
+
+  it('logout accepts only signed session proofs, is idempotent, and revokes delayed replacements', async () => {
+    const first = await getAuthService().register({ username: 'owner', password: 'password-before' });
+    const second = await getAuthService().login({ username: 'owner', password: 'password-before' });
+    const claims = await verifyAuthTokenClaims(first.token);
+    const renamed = await getAuthService().changeUsername({ mode: 'authenticated', key: claims.ownerKey, ...claims },
+      async () => ({ currentPassword: 'password-before', username: 'owner-next' }));
+    const independent = await getAuthService().login({ username: 'owner-next', password: 'password-before' });
+    const url = new URL('http://localhost/api/v1/auth/logout');
+    const send = token => authRoutes[url.pathname].POST(new Request(url, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    }), url, serverForAddress('logout'));
+    expect((await send('not-a-token')).status).toBe(401);
+    const response = await send(first.token);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(await verifyAuthTokenClaims(renamed.token)).toBeNull();
+    expect(await verifyAuthTokenClaims(independent.token)).not.toBeNull();
+    expect((await send(first.token)).status).toBe(200);
+    const { jwtSecret } = await getAuthStore().snapshot();
+    const expired = jwt.sign({ sub: claims.ownerKey, sid: jwt.decode(second.token).sid, credentialRevision: 1, exp: 1 }, jwtSecret);
+    expect((await send(expired)).status).toBe(200);
+    expect(getAuthStore().isSessionCurrent(claims.ownerKey, jwt.decode(second.token).sid, jwt.decode(second.token).exp * 1000)).toBe(false);
   });
 
   it('bounds chunked JSON before authentication work', async () => {

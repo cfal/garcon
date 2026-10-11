@@ -5,7 +5,8 @@ import {
 import { DomainError } from '../../common/domain-error.js';
 import { AuthAccountAlreadyConfiguredError, AuthSnapshotChangedError, getAuthStore,
   type AuthAccount, type AuthAccountStore, type AuthSnapshot } from './store.js';
-import { signAuthSnapshot } from './token.js';
+import { signAuthSnapshot, prepareAuthSession } from './token.js';
+import type { AuthBrowserSession } from './sessions.js';
 import type { ServerPrincipal } from '../lib/http-route-types.js';
 import { createLogger } from '../../common/log.js';
 
@@ -20,9 +21,16 @@ const defaultPasswords: Passwords = {
   hash: password => Bun.password.hash(password, { algorithm: 'bcrypt', cost: 12 }),
 };
 
-function session(snapshot: AuthSnapshot): AuthSessionResponse {
+function session(snapshot: AuthSnapshot, browserSession: AuthBrowserSession): AuthSessionResponse {
   if (!snapshot.account) throw new Error('Account is not configured');
-  return { success: true, user: { id: snapshot.account.ownerKey, username: snapshot.account.username }, token: signAuthSnapshot(snapshot) };
+  return { success: true, user: { id: snapshot.account.ownerKey, username: snapshot.account.username }, token: signAuthSnapshot(snapshot, browserSession) };
+}
+
+function newSession(snapshot: AuthSnapshot) {
+  const prepared = prepareAuthSession(snapshot);
+  return { session: prepared.session, result: {
+    success: true, user: { id: snapshot.account!.ownerKey, username: snapshot.account!.username }, token: prepared.token,
+  } satisfies AuthSessionResponse };
 }
 
 export class AuthService {
@@ -42,7 +50,7 @@ export class AuthService {
         throw this.#invalidLogin();
       }
       try {
-        return await this.store.withCurrent(snapshot, () => { signal?.throwIfAborted(); return session(snapshot); });
+        return await this.store.openSession(snapshot, () => { signal?.throwIfAborted(); return newSession(snapshot); });
       } catch (error) { if (error instanceof AuthSnapshotChangedError) throw this.#invalidLogin(); throw error; }
     });
   }
@@ -54,11 +62,11 @@ export class AuthService {
       if (snapshot.account) throw new AuthAccountAlreadyConfiguredError();
       const passwordHash = await this.passwords.hash(input.password);
       try {
-        return await this.store.commit(snapshot, () => {
+        return await this.store.register(snapshot, () => {
           signal?.throwIfAborted();
           const account: AuthAccount = { ownerKey: input.username, username: input.username, credentialRevision: 1,
             passwordHash, createdAt: new Date().toISOString() };
-          return { account, result: session({ ...snapshot, account }) };
+          return { account, ...newSession({ ...snapshot, account }) };
         });
       } catch (error) {
         if (error instanceof AuthSnapshotChangedError) throw new AuthAccountAlreadyConfiguredError();
@@ -115,7 +123,9 @@ export class AuthService {
             this.#assertPrincipal(principal, snapshot);
             signal?.throwIfAborted();
             const account = { ...updated, credentialRevision: updated.credentialRevision + 1 };
-            return { account, result: session({ ...snapshot, account }) };
+            return { account, result: session({ ...snapshot, account }, {
+              sessionId: principal.sessionId, ownerKey: principal.key, expiresAtMs: principal.expiresAtMs,
+            }) };
           });
           logger.info('Account credentials changed', { operation, previousRevision: updated.credentialRevision,
             credentialRevision: updated.credentialRevision + 1 });
@@ -130,7 +140,8 @@ export class AuthService {
 
   #assertPrincipal(principal: Extract<ServerPrincipal, { mode: 'authenticated' }>, snapshot: AuthSnapshot): void {
     if (!snapshot.account || principal.expiresAtMs <= Date.now() || principal.key !== snapshot.account.ownerKey
-      || principal.credentialRevision !== snapshot.account.credentialRevision) {
+      || principal.credentialRevision !== snapshot.account.credentialRevision
+      || !this.store.isSessionCurrent(principal.key, principal.sessionId, principal.expiresAtMs)) {
       throw new DomainError('AUTH_SESSION_INVALID', 'Sign in again.', 401);
     }
   }

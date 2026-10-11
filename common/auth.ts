@@ -7,7 +7,8 @@ export interface AuthStatusResponse { readonly needsSetup: boolean; readonly isA
 export interface ChangeUsernameRequest { readonly currentPassword: string; readonly username: string }
 export interface ChangePasswordRequest { readonly currentPassword: string; readonly newPassword: string }
 export interface LoginRequest { readonly username: string; readonly password: string }
-export interface AuthTokenIdentity { readonly ownerKey: string; readonly credentialRevision: number }
+export interface AuthTokenIdentity { readonly ownerKey: string; readonly credentialRevision: number; readonly sessionId: string }
+export interface LogoutResponse { readonly success: true }
 
 export class AuthValidationError extends Error {}
 
@@ -91,6 +92,10 @@ export function parseAuthStatusResponse(value: unknown): AuthStatusResponse {
 export function parseAuthTokenIdentity(value: unknown): AuthTokenIdentity | null {
   if (!isRecord(value) || typeof value.sub !== 'string' || !value.sub
     || typeof value.credentialRevision !== 'number' || !Number.isSafeInteger(value.credentialRevision)
-    || value.credentialRevision < 1) return null;
-  return { ownerKey: value.sub, credentialRevision: value.credentialRevision };
+    || value.credentialRevision < 1 || !isAuthSessionId(value.sid)) return null;
+  return { ownerKey: value.sub, credentialRevision: value.credentialRevision, sessionId: value.sid };
+}
+
+export function isAuthSessionId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 }

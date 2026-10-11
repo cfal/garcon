@@ -5,7 +5,7 @@ declare module 'jsonwebtoken' {
   }
 
   export function sign(payload: object, secret: string, options?: SignOptions): string;
-  export function verify(token: string, secret: string, options?: { algorithms?: readonly string[] }): unknown;
+  export function verify(token: string, secret: string, options?: { algorithms?: readonly string[]; ignoreExpiration?: boolean }): unknown;
 
   const jwt: {
     sign: typeof sign;
