@@ -79,6 +79,63 @@ describe('ComposerSnippetPalette', () => {
 		expect(screen.getByTestId('cancel-count').textContent).toBe('0');
 	});
 
+	it('ignores pointer entry when options appear beneath a stationary mouse', async () => {
+		render(ComposerSnippetPaletteTestHost);
+		const search = await screen.findByRole('combobox', { name: 'Search snippets' });
+		const hovered = screen.getByRole('option', { name: /^item-3\b/ });
+
+		await fireEvent.mouseEnter(hovered);
+		await fireEvent.pointerEnter(hovered, { pointerType: 'mouse' });
+		expect(screen.getByRole('option', { name: /^item-0\b/ }).getAttribute('aria-selected')).toBe(
+			'true',
+		);
+
+		await fireEvent.keyDown(search, { key: 'ArrowDown' });
+		await fireEvent.mouseEnter(hovered);
+		await fireEvent.pointerEnter(hovered, { pointerType: 'mouse' });
+		await fireEvent.keyDown(search, { key: 'Enter' });
+
+		await waitFor(() => expect(screen.getByTestId('selected-snippet').textContent).toBe('item-1'));
+	});
+
+	it('allows mouse movement to take over again after keyboard navigation within the same row', async () => {
+		render(ComposerSnippetPaletteTestHost);
+		const search = await screen.findByRole('combobox', { name: 'Search snippets' });
+		const hovered = screen.getByRole('option', { name: /^item-3\b/ });
+
+		await fireEvent.pointerMove(hovered, { pointerType: 'mouse', clientX: 100, clientY: 100 });
+		expect(search.getAttribute('aria-activedescendant')).toBe(hovered.id);
+		expect(screen.getByRole('region', { name: 'Template preview' }).textContent).toContain(
+			'Summarize item 3',
+		);
+		await fireEvent.keyDown(search, { key: 'ArrowUp' });
+		expect(search.getAttribute('aria-activedescendant')).not.toBe(hovered.id);
+
+		await fireEvent.pointerMove(hovered, { pointerType: 'mouse', clientX: 101, clientY: 100 });
+		expect(search.getAttribute('aria-activedescendant')).toBe(hovered.id);
+		await fireEvent.keyDown(search, { key: 'Enter' });
+
+		await waitFor(() => expect(screen.getByTestId('selected-snippet').textContent).toBe('item-3'));
+	});
+
+	it.each(['touch', 'pen'])(
+		'ignores %s movement without preventing explicit selection',
+		async (pointerType) => {
+			render(ComposerSnippetPaletteTestHost);
+			const search = await screen.findByRole('combobox', { name: 'Search snippets' });
+			const option = screen.getByRole('option', { name: /^item-3\b/ });
+			const activeId = search.getAttribute('aria-activedescendant');
+
+			await fireEvent.pointerMove(option, { pointerType });
+			expect(search.getAttribute('aria-activedescendant')).toBe(activeId);
+			await fireEvent.click(option);
+
+			await waitFor(() =>
+				expect(screen.getByTestId('selected-snippet').textContent).toBe('item-3'),
+			);
+		},
+	);
+
 	it('does not keyboard-select a hidden preamble while snippets are loading', async () => {
 		render(ComposerSnippetPaletteTestHost, {
 			count: 0,
