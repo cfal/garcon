@@ -2956,5 +2956,9 @@
 	"command_recent_chat": "Recent chat",
 	"command_chat_running": "Running",
 	"command_chat_unread": "Unread",
-	"command_chat_location": "{executor}: {path} · #{chatId}"
+	"command_chat_location": "{executor}: {path} · #{chatId}",
+	"chat_composer_markdown_preview": "Markdown preview",
+	"chat_composer_preview_markdown": "Preview Markdown",
+	"chat_composer_edit_markdown": "Edit Markdown",
+	"chat_composer_markdown_preview_failed": "Preview could not load. Your draft is still available to edit."
 }
