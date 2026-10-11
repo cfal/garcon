@@ -52,11 +52,15 @@ test('separate credential forms retain source, sibling, and other-device work on
       await committed.promise;
       phase('early revocation while replacement response is delayed');
       await browserExpect(page.locator('dialog')).toBeVisible();
+      phase('recovery backdrop clicks cannot dismiss retained Settings or drafts');
+      await page.mouse.click(10, 10);
+      await browserExpect(page.locator('dialog')).toBeVisible();
       expect(await page.locator('[data-retained-settings]').count()).toBe(1);
       expect(await page.locator('[data-retained-ticket]').inputValue()).toBe('Source draft');
       await browserExpect(other.locator('dialog')).toBeVisible();
       release.resolve();
       await browserExpect(page.locator('dialog')).toHaveCount(0);
+      expect(await page.locator('[data-retained-settings]').count()).toBe(1);
       await browserExpect(settings.getByRole('status')).toContainText('Username changed.');
       const replacement = await page.evaluate(() => localStorage.getItem('bearer-token'));
       await browserExpect.poll(() => peer.evaluate(() => localStorage.getItem('bearer-token'))).toBe(replacement);

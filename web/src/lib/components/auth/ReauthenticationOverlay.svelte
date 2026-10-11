@@ -20,6 +20,8 @@
 <dialog
 	bind:this={dialog}
 	oncancel={(event) => event.preventDefault()}
+	onpointerdown={(event) => event.stopPropagation()}
+	onclick={(event) => event.stopPropagation()}
 	aria-labelledby="reauth-title"
 	class="transient-backdrop pointer-events-auto m-auto w-[calc(100%-2rem)] max-w-md rounded-lg border border-border bg-background p-6 text-foreground shadow-lg"
 >
