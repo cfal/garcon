@@ -24,6 +24,9 @@ Repair completion publishes one workspace-wide list invalidation so clients
 that loaded before validation refresh their previews.
 Persisted empty-first-message previews are reconstructed from bounded ledger
 candidates even when their view matches, covering the first-input crash gap.
+Live appends validate cold cached previews through the same bounded repair before
+using the appended suffix. Unavailable previews remain hidden and eligible for
+repair rather than certifying a later input as the first message.
 Clear rechecks pending user/control input under the execution-control lock
 around the final watermark check and synchronous promotion.
 The chat must exist and have no durable pending ownership decision before

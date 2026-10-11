@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { ClearChatRequest, ClearChatResponse } from '../../../common/chat-clear.js';
 import type { ChatDetailsResponse } from '../../../common/chat-details.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -118,5 +120,45 @@ test('rejects Clear for conversational agents without changing history or native
     await client.waitForTurnTerminal(chatId, next.turnId);
     expect(fixture.fakeProviders.openAi.requests().at(-1)?.body.messages.map(message => message.content))
       .toEqual(['synthetic-retained-history', 'echo:synthetic-retained-history', 'synthetic-followup']);
+  });
+}, 60_000);
+
+test('cold Clear previews never substitute a later input when bounded reconstruction is unavailable', async () => {
+  await withIntegrationFixture('chat-clear-cold-preview', async fixture => {
+    const chatId = fixture.newChatId();
+    const started = await fixture.client.startChat({ chatId, agentId: 'shell', model: 'sh',
+      projectPath: fixture.executionDirs.project, permissionMode: 'default', thinkingMode: 'none',
+      agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} }, origin: 'interactive',
+      clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(), command: 'printf synthetic-old' });
+    await fixture.client.waitForTurnTerminal(chatId, started.turnId);
+    await fixture.client.waitForProcessing(chatId, false);
+    const original = await fixture.client.getMessages(chatId);
+    await fixture.client.post('/api/v1/chats/clear', {
+      chatId, transcriptViewId: original.transcriptViewId, lastOrdinal: original.lastOrdinal,
+    } satisfies ClearChatRequest);
+    const run = async (command: string) => {
+      const turn = await fixture.client.runChat({ chatId, command,
+        clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID() });
+      await fixture.client.waitForTurnTerminal(chatId, turn.turnId);
+      await fixture.client.waitForProcessing(chatId, false);
+    };
+    await run(`printf synthetic-first\n#${'x'.repeat(80 * 1024)}`);
+    const metadataPath = join(fixture.dirs.workspace, 'chat-metadata.json');
+    await fixture.restartGarcon({ beforeStart: async () => {
+      const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+      // Reproduces a durable first input whose preview missed the post-Clear save.
+      metadata.chats[chatId].firstMessage = '';
+      metadata.chats[chatId].lastMessage = '';
+      await writeFile(metadataPath, JSON.stringify(metadata));
+    } });
+    await run('printf synthetic-later');
+    expect((await fixture.client.listChats()).sessions.find(chat => chat.id === chatId)?.title).toBe('New Session');
+    await fixture.restartGarcon();
+    const persisted = JSON.parse(await readFile(metadataPath, 'utf8'));
+    expect(persisted.chats[chatId].firstMessage).toBe('');
+    expect((await fixture.client.listChats()).sessions.find(chat => chat.id === chatId)?.title).toBe('New Session');
+    const messages = (await fixture.client.getMessages(chatId)).messages;
+    expect(messages.some(row => row.message.type === 'command-output' && row.message.content === 'synthetic-first')).toBe(true);
+    expect(messages.some(row => row.message.type === 'command-output' && row.message.content === 'synthetic-later')).toBe(true);
   });
 }, 60_000);

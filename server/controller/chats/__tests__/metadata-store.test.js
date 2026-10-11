@@ -253,6 +253,42 @@ describe('metadata-store', () => {
 
   describe('identity invalidation', () => {
 
+    it.each(['unavailable', 'failed'])('retains cold first-message repair through live appends when preview reads are %s', async outcome => {
+      const metadataPath = path.join(tmpDir, 'chat-metadata.json');
+      await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({
+        cold: { firstMessage: '', lastMessage: '', source: 'live' },
+      })));
+      const transcripts = {
+        getExistingTranscriptViewId: () => 'view-1',
+        getExistingTranscriptPreview: mock(() => {
+          if (outcome === 'failed') throw new Error('Synthetic preview failure');
+          return null;
+        }),
+      };
+      const index = new MetadataIndex(makeRegistry({ cold: session() }), transcripts, mockCarryOver, { metadataPath });
+      try {
+        await index.init();
+        for (const type of ['assistant-message', 'user-message']) {
+          expect(() => index.updateFromAppendedMessages('cold', 'view-1', [
+            { type, timestamp: '2026-01-02T00:00:00Z', content: 'Synthetic later content' },
+          ])).not.toThrow();
+        }
+        expect(index.getChatMetadata('cold')).toBeNull();
+        await index.flush();
+        expect(JSON.parse(await fs.readFile(metadataPath, 'utf8')).chats.cold.firstMessage).toBe('');
+        transcripts.getExistingTranscriptPreview.mockReturnValue(previewResult({
+          firstMessage: 'Synthetic first input', lastMessage: 'Synthetic later content',
+        }));
+        await index.repair();
+        expect(index.getChatMetadata('cold')).toMatchObject({
+          firstMessage: 'Synthetic first input', lastMessage: 'Synthetic later content',
+        });
+      } finally {
+        await index.close();
+        await index.flush();
+      }
+    });
+
     it('serves validated list previews from memory and invalidates replacement synchronously', async () => {
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
       const ids = Array.from({ length: 1_000 }, (_, index) => `synthetic-${index}`);

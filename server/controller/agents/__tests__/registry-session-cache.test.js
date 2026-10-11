@@ -16,6 +16,7 @@ import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import { AgentRegistry } from '../registry.ts';
 import { MetadataIndex } from '../../chats/metadata-store.ts';
+import { resolveChatTitle } from '../../chats/chat-title.ts';
 import createAgentRoutes from '../../routes/agents.ts';
 
 const CHAT_ID = '1783725900000200';
@@ -160,7 +161,7 @@ describe('AgentRegistry session cache', () => {
     }
   });
 
-  it('reconstructs the first post-Clear input missed by same-view empty preview persistence', async () => {
+  it.each(['before-repair', 'after-repair'])('reconstructs the first post-Clear input with a live append %s', async timing => {
     const registry = createRegistry();
     const options = { metadataPath: path.join(root, 'chat-metadata.json') };
     const carryover = { revision: () => 'carry-1' };
@@ -170,15 +171,27 @@ describe('AgentRegistry session cache', () => {
     await before.close();
     const lease = ledger.openProducer(CHAT_ID, 'test');
     lease.sink.publish({ type: 'rows', rows: [{ message: new UserMessage(AT, 'Synthetic first input') }] });
-    const restarted = new MetadataIndex(chats, registry, carryover, options);
+    let restarted = new MetadataIndex(chats, registry, carryover, options);
     try {
       await restarted.init();
-      await restarted.repair();
-      expect(restarted.getChatMetadata(CHAT_ID).firstMessage).toBe('Synthetic first input');
+      if (timing === 'after-repair') await restarted.repair();
+      const continuation = new AssistantMessage(AT, 'Synthetic continuation');
+      lease.sink.publish({ type: 'rows', rows: [{ message: continuation }] });
+      restarted.updateFromAppendedMessages(CHAT_ID, ledger.currentView(CHAT_ID).viewId, [continuation]);
       const later = new UserMessage(AT, 'Synthetic later input');
       lease.sink.publish({ type: 'rows', rows: [{ message: later }] });
       restarted.updateFromAppendedMessages(CHAT_ID, ledger.currentView(CHAT_ID).viewId, [later]);
+      await restarted.repair();
       expect(restarted.getChatMetadata(CHAT_ID).firstMessage).toBe('Synthetic first input');
+      expect(resolveChatTitle(null, restarted.getChatMetadata(CHAT_ID).firstMessage)).toBe('Synthetic first input');
+      await restarted.close();
+      await restarted.flush();
+      restarted = new MetadataIndex(chats, registry, carryover, options);
+      await restarted.init();
+      await restarted.repair();
+      expect(restarted.getChatMetadata(CHAT_ID)).toMatchObject({
+        firstMessage: 'Synthetic first input', lastMessage: 'Synthetic later input',
+      });
     } finally {
       await restarted.close();
       await restarted.flush();

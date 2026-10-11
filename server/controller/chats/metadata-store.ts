@@ -152,7 +152,14 @@ export class MetadataIndex {
     const key = String(chatId);
     if (this.#transcripts.getExistingTranscriptViewId(key) !== transcriptViewId) return;
     const cached = this.#metadataByChatId.get(key);
-    const current = cached?.transcriptViewId === transcriptViewId ? cached : null;
+    let current = cached?.transcriptViewId === transcriptViewId ? cached : null;
+    if (cached && !this.#validatedChatIds.has(key)) {
+      const session = this.#registry.getChat(key);
+      if (!session) return;
+      current = this.#repairChatMetadata(key, session);
+      // A live suffix cannot establish the first input missing from a cold preview.
+      if (!current) return;
+    }
     const createdAt = current?.createdAt ?? firstTimestamp(appendedMessages) ?? new Date().toISOString();
     const firstMessage = current?.firstMessage || firstMessagePreview(firstUserText(appendedMessages));
     const lastMessage = lastMessagePreview(latestPreviewText(appendedMessages) ?? current?.lastMessage ?? firstMessage);
@@ -255,22 +262,28 @@ export class MetadataIndex {
       if (this.#closed) break;
       const session = this.#registry.getChat(chatId);
       if (!session) continue;
-      const existing = this.#metadataByChatId.get(String(chatId));
-      try {
-        if (existing?.firstMessage && !this.#isStale(existing, session)) {
-          this.#validatedChatIds.add(chatId);
-          continue;
-        }
-        // Read and publish synchronously so no live update, deletion, or view replacement can interleave.
-        const metadata = this.#buildMetadataFromPreview(chatId, session);
-        if (metadata) {
-          this.#metadataByChatId.set(chatId, metadata);
-          this.#validatedChatIds.add(chatId);
-          this.#scheduleSave();
-        }
-      } catch (error) {
-        logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(error));
+      this.#repairChatMetadata(chatId, session);
+    }
+  }
+
+  #repairChatMetadata(chatId: string, session: ChatRegistryEntry): ChatMetadata | null {
+    const existing = this.#metadataByChatId.get(chatId);
+    try {
+      if (existing?.firstMessage && !this.#isStale(existing, session)) {
+        this.#validatedChatIds.add(chatId);
+        return existing;
       }
+      // Read and publish synchronously so no live update, deletion, or view replacement can interleave.
+      const metadata = this.#buildMetadataFromPreview(chatId, session);
+      if (metadata) {
+        this.#metadataByChatId.set(chatId, metadata);
+        this.#validatedChatIds.add(chatId);
+        this.#scheduleSave();
+      }
+      return metadata;
+    } catch (error) {
+      logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(error));
+      return null;
     }
   }
 
