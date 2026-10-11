@@ -74,8 +74,10 @@ beforeEach(() => {
 	});
 	vi.mocked(cleanup.clearBrowserPrivateData).mockResolvedValue(true);
 	vi.mocked(cleanup.clearTabPrivateData).mockReturnValue(true);
+	vi.mocked(cleanup.reconcileTabPrivateData).mockReturnValue(true);
 	clearAuthToken();
 	localStorage.clear();
+	sessionStorage.clear();
 	setAuthDispatchAvailable(true);
 	vi.mocked(api.getAuthStatus).mockResolvedValue({
 		needsSetup: false,
@@ -175,9 +177,33 @@ describe('deliberate logout', () => {
 		vi.mocked(lifetime.isBrowserDataCurrent).mockReturnValue(false);
 		window.dispatchEvent(new Event('pageshow'));
 		expect(readStoredAuthToken()).toBe(session(2).token);
-		expect(cleanup.clearTabPrivateData).toHaveBeenCalledTimes(1);
+		expect(cleanup.reconcileTabPrivateData).toHaveBeenCalledTimes(2);
+		expect(cleanup.clearTabPrivateData).not.toHaveBeenCalled();
 		expect(cleanup.clearBrowserPrivateData).not.toHaveBeenCalled();
 		expect(api.logout).not.toHaveBeenCalled();
+		expect(navigate).toHaveBeenCalledExactlyOnceWith('/login?loggedOut=peer');
+	});
+
+	it('a BFCache-restored document preserves drafts already reconciled by a newer document', async () => {
+		const { auth, navigate } = await ready();
+		auth.start();
+		const actualCleanup = await vi.importActual<typeof cleanup>('$lib/auth/logout-cleanup');
+		vi.mocked(cleanup.clearTabPrivateData).mockImplementation(actualCleanup.clearTabPrivateData);
+		vi.mocked(cleanup.reconcileTabPrivateData).mockImplementation(
+			actualCleanup.reconcileTabPrivateData,
+		);
+		localStorage.setItem('garcon.logout-epoch', 'new-lifetime');
+		sessionStorage.setItem('garcon.tab-logout-epoch', 'new-lifetime');
+		sessionStorage.setItem('garcon-ticket-draft-v1:fresh', 'New ticket draft');
+		sessionStorage.setItem('chat-canvas-recovery-v1:fresh', 'New canvas draft');
+		vi.mocked(lifetime.isBrowserDataCurrent).mockReturnValue(false);
+
+		window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+
+		expect(auth.logoutPending).toBe(true);
+		expect(auth.token).toBeNull();
+		expect(sessionStorage.getItem('garcon-ticket-draft-v1:fresh')).toBe('New ticket draft');
+		expect(sessionStorage.getItem('chat-canvas-recovery-v1:fresh')).toBe('New canvas draft');
 		expect(navigate).toHaveBeenCalledExactlyOnceWith('/login?loggedOut=peer');
 	});
 

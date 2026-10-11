@@ -42,7 +42,6 @@ import {
 } from '$lib/utils/browser-data-lifetime';
 import {
 	clearBrowserPrivateData,
-	clearTabPrivateData,
 	reconcileTabPrivateData,
 } from '$lib/auth/logout-cleanup';
 
@@ -550,7 +549,7 @@ export class AuthStore {
 	#abandonFromPeer(): void {
 		if (this.#logoutTask || this.logoutPending) return;
 		this.#abandon();
-		const cleared = clearTabPrivateData();
+		const cleared = reconcileTabPrivateData();
 		this.navigateAfterLogout(
 			`${appPath('/login')}?loggedOut=peer${cleared ? '' : '&cleanup=incomplete'}`,
 		);
