@@ -79,13 +79,15 @@ test('Clear removes inherited fork history and Reload restores only the bound na
   });
 }, 60_000);
 
-test('ledger clear removes search history while an AI agent retains native context', async () => {
-  await withIntegrationFixture('chat-clear-ai', async fixture => {
-    const { client, directAgents } = fixture;
+test('ledger clear removes Shell history from search', async () => {
+  await withIntegrationFixture('chat-clear-search', async fixture => {
+    const { client } = fixture;
     await client.updateSettings({ features: { transcriptSearch: { enabled: true } } });
     const chatId = fixture.newChatId();
-    const first = await client.startDirectChat({ chatId, agent: directAgents.openAi, projectPath: fixture.executionDirs.project,
-      content: 'syntheticclearneedle' });
+    const first = await client.startChat({ chatId, agentId: 'shell', model: 'sh', projectPath: fixture.executionDirs.project,
+      permissionMode: 'default', thinkingMode: 'none', agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} },
+      origin: 'interactive', clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
+      command: 'printf syntheticclearneedle' });
     await client.waitForTurnTerminal(chatId, first.turnId);
     await client.waitForProcessing(chatId, false);
     const query = { query: 'syntheticclearneedle' };
@@ -94,12 +96,27 @@ test('ledger clear removes search history while an AI agent retains native conte
     await client.post('/api/v1/chats/clear', { chatId, transcriptViewId: original.transcriptViewId, lastOrdinal: original.lastOrdinal } satisfies ClearChatRequest);
     expect((await client.getMessages(chatId)).messages).toEqual([]);
     await client.waitForChatSearch(query, result => result.results.every(match => match.chatId !== chatId));
+    await client.reloadChat(chatId);
+    expect((await client.getMessages(chatId)).messages.some(row => row.message.type === 'command-output' && row.message.content === 'syntheticclearneedle')).toBe(true);
+  });
+}, 60_000);
+
+test('rejects Clear for conversational agents without changing history or native context', async () => {
+  await withIntegrationFixture('chat-clear-unsupported', async fixture => {
+    const { client, directAgents } = fixture;
+    const chatId = fixture.newChatId();
+    const first = await client.startDirectChat({ chatId, agent: directAgents.openAi, projectPath: fixture.executionDirs.project,
+      content: 'synthetic-retained-history' });
+    await client.waitForTurnTerminal(chatId, first.turnId);
+    await client.waitForProcessing(chatId, false);
+    const original = await client.getMessages(chatId);
+    expect(await rejectionOf(client.post('/api/v1/chats/clear', {
+      chatId, transcriptViewId: original.transcriptViewId, lastOrdinal: original.lastOrdinal,
+    } satisfies ClearChatRequest))).toMatchObject({ status: 422, body: { errorCode: 'OPERATION_UNSUPPORTED', retryable: false } });
+    expect(await client.getMessages(chatId)).toEqual(original);
     const next = await client.runDirectChat({ chatId, agent: directAgents.openAi, content: 'synthetic-followup' });
     await client.waitForTurnTerminal(chatId, next.turnId);
     expect(fixture.fakeProviders.openAi.requests().at(-1)?.body.messages.map(message => message.content))
-      .toEqual(['syntheticclearneedle', 'echo:syntheticclearneedle', 'synthetic-followup']);
-    await client.waitForProcessing(chatId, false);
-    await client.reloadChat(chatId);
-    expect((await client.getMessages(chatId)).messages.some(row => row.message.type === 'user-message' && row.message.content === 'syntheticclearneedle')).toBe(true);
+      .toEqual(['synthetic-retained-history', 'echo:synthetic-retained-history', 'synthetic-followup']);
   });
 }, 60_000);

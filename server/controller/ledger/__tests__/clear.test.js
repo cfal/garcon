@@ -42,7 +42,9 @@ async function withClear(run, { hasSession = true, frozenRows = 0 } = {}) {
     readChatExecutionControl: mock(async () => ({ entries: [], controlEntries: [] })),
     withChatExecutionControl: mock(async (_id, operation) => operation(await execution.readChatExecutionControl())),
   };
-  const options = { ledger, registry, execution, ownership: { hasPending: () => false }, adoption: { ensure: mock(async () => {}) },
+  const options = { ledger, registry, execution, ownership: { hasPending: () => false },
+    integrations: { get: mock(() => ({ literalExecution: { selectionLabel: 'Runtime' } })) },
+    adoption: { ensure: mock(async () => {}) },
     chatMutationLock: new KeyedPromiseLock(), reopenProducer: () => { lease = ledger.openProducer(chatId, 'test'); } };
   const clear = new TranscriptClearService(options);
   const request = () => { const head = ledger.highWatermark(chatId); return { chatId, transcriptViewId: head.viewId, lastOrdinal: head.ordinal }; };
@@ -85,6 +87,25 @@ it('allows an empty replacement without a native session', async () => {
     expect(ledger.currentRows(chatId)).toEqual([]);
     expect(ledger.currentView(chatId).contentStartOrdinal).toBe(1);
   }, { hasSession: false });
+});
+
+it.each([null, { literalExecution: null }])('rejects unknown and conversational agents before reservation: %j', async integration => {
+  await withClear(async fixture => {
+    const { clear, request, options, ledger, entry } = fixture;
+    entry.executorId = '11111111-1111-4111-8111-111111111111';
+    options.integrations.get.mockReturnValue(integration);
+    const original = request();
+    const rows = ledger.currentRows(chatId);
+    await expect(clear.clear(original, new AbortController().signal)).rejects.toMatchObject({
+      code: 'OPERATION_UNSUPPORTED', status: 422, retryable: false,
+    });
+    expect(options.integrations.get).toHaveBeenCalledWith(entry.agentId, entry.executorId);
+    expect(options.execution.reserveTranscriptSnapshot).not.toHaveBeenCalled();
+    expect(options.adoption.ensure).not.toHaveBeenCalled();
+    expect(fixture.lease.closed).toBe(false);
+    expect(request()).toEqual(original);
+    expect(ledger.currentRows(chatId)).toEqual(rows);
+  });
 });
 
 it('preserves opaque native identity, seed receipts, and an empty paused queue', async () => {
@@ -247,6 +268,7 @@ it('rejects Clear when a production background reply queues after its initial em
     const replies = new AgentCommandReplies({ registry, notices: ledger, execution, chatMutationLock });
     const clear = new TranscriptClearService({ ledger, registry, execution, chatMutationLock,
       ownership: { hasPending: () => false },
+      integrations: fixture.options.integrations,
       adoption: { ensure: async () => {} }, reopenProducer: () => ledger.openProducer(chatId, 'test') });
     const source = { chatId, viewId: ledger.currentView(chatId).viewId, requestOrdinal: 1 };
     const detail = { type: 'agent-schedule-outcome', requestViewId: source.viewId, requestOrdinal: 1,

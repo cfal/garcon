@@ -124,8 +124,9 @@ also removes its SQLite recovery sidecars.
 
 ## Clearing The Displayed History
 
-In the composer, standalone `/clear` opens Garcon's confirmation dialog for any
-agent, including Shell. It clears the current ledger transcript, not the agent's
+In a Shell chat's composer, standalone `/clear` opens Garcon's confirmation
+dialog. Other agents reject this app command rather than forwarding it to their
+native command handling. It clears the current ledger transcript, not the agent's
 native history or context. It never launches a shell process, stops a command,
 or removes queued work. Finish active work and run or remove queued inputs first.
 

@@ -900,7 +900,7 @@
 			chatId={selectedProjectTarget?.kind === 'chat' ? sessions.selectedChatId : null}
 			isVisible={ui.showSlashMenu && (!conversationInput || executors.isReady(agentState.executorId)) && !showProjectNotice}
 			{conversationInput}
-			canClear={Boolean(sessions.selectedChat && sessions.selectedChat.status !== 'draft')}
+			canClear={executionAgent?.executionPolicy === 'literal' && Boolean(sessions.selectedChat && sessions.selectedChat.status !== 'draft')}
 			projectPending={Boolean(
 				selectedProjectTarget &&
 				(selectedProjectResolution.kind === 'unchecked' ||

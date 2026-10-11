@@ -553,6 +553,7 @@ export async function startServer(): Promise<void> {
     const transcriptClear = new TranscriptClearService({
       ledger: transcriptLedger,
       ownership: agentOwnership,
+      integrations: directory,
       adoption: transcriptAdoption,
       registry: chatRegistry,
       execution: queue,

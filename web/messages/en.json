@@ -450,6 +450,7 @@
 	"chat_clear_pending": "Clearing...",
 	"chat_clear_not_loaded": "Wait for the chat history to load before clearing it.",
 	"chat_clear_no_attachments": "Remove attachments before clearing chat history.",
+	"chat_clear_unsupported": "Clearing displayed history is not available for this agent.",
 	"chat_handoff_fork_description": "The agent has not written this message to its own history yet, so the new chat cannot branch from it natively. Garcon can carry the conversation over into a fresh session instead.",
 	"chat_handoff_fork_confirm": "Fork anyway",
 	"chat_executor_handoff_title": "Move to {label}",

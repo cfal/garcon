@@ -4,6 +4,7 @@ import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
 import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js';
+import type { AgentDirectory } from '../agents/directory.js';
 import { ownershipTransferPendingError } from '../agents/ownership-transfer-fence.js';
 import type { ChatExecutionService } from '../chat-execution/chat-execution-coordinator.js';
 import { hasPendingTurnInput, type StoredChatExecutionControlState } from '../chat-execution/control-state.js';
@@ -18,6 +19,7 @@ interface TranscriptClearOptions {
   readonly adoption: Pick<TranscriptAdoptionService, 'ensure'>;
   readonly registry: Pick<IChatRegistry, 'getChat' | 'updateChat' | 'flush'>;
   readonly ownership: Pick<AgentOwnershipJournal, 'hasPending'>;
+  readonly integrations: Pick<AgentDirectory, 'get'>;
   readonly execution: Pick<
     ChatExecutionService,
     'reserveTranscriptSnapshot' | 'releaseTranscriptSnapshot' | 'readChatExecutionControl' | 'withChatExecutionControl'
@@ -36,6 +38,9 @@ export class TranscriptClearService {
       const { ledger } = this.options;
       const entry = this.#requireChat(chatId);
       if (this.options.ownership.hasPending(chatId)) throw ownershipTransferPendingError();
+      if (!this.options.integrations.get(entry.agentId, entry.executorId)?.literalExecution) {
+        throw new DomainError('OPERATION_UNSUPPORTED', 'Clearing displayed history is not available for this agent.', 422, false);
+      }
       const reservation = this.#reserve(chatId);
       let promoted = false;
       try {

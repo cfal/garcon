@@ -537,6 +537,11 @@ export class ConversationSessionController {
 		const submissionImages = imageOverride ?? draft.attachments;
 		if (source === 'explicit' && isClearCommand(text)) {
 			if (isDraft) return 'no-op';
+			const owner = deps.modelCatalogForExecutor(selected.executorId ?? 'local').getAgent(selected.agentId ?? '');
+			if (owner?.executionPolicy !== 'literal') {
+				deps.chatState.appendLocalNoticeForChat(chatId, 'error', m.chat_clear_unsupported());
+				return 'rejected';
+			}
 			if (submissionImages.length > 0) {
 				deps.chatState.appendLocalNoticeForChat(chatId, 'error', m.chat_clear_no_attachments());
 				return 'rejected';

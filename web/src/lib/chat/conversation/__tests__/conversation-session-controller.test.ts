@@ -762,9 +762,17 @@ function createDeps(chat = createRunningChat()) {
 	return { deps, waitForConnection };
 }
 
+function createClearDeps() {
+	const fixture = createDeps();
+	const metadata = fixture.deps.modelCatalog.getAgent('codex');
+	if (!metadata) throw new Error('Missing fixture metadata');
+	fixture.deps.modelCatalog.getAgent.mockReturnValue({ ...metadata, executionPolicy: 'literal' });
+	return fixture;
+}
+
 describe('ConversationSessionController', () => {
 	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
-		'confirms clear without provider admission through %s for every execution policy', async (submit) => {
+		'only confirms literal Clear through %s and never dispatches unsupported requests', async (submit) => {
 			for (const policy of ['conversation', 'literal', 'unknown']) {
 				const { deps } = createDeps();
 				const metadata = deps.modelCatalog.getAgent('codex');
@@ -775,8 +783,14 @@ describe('ConversationSessionController', () => {
 				deps.canSubmitToExecutor.mockReturnValue(false);
 				deps.composerState.inputText = '/clear';
 				const controller = new ConversationSessionController(deps);
-				await controller[submit]('chat-1');
-				expect(controller.clearHistory.isOpen).toBe(true);
+				const outcome = await controller[submit]('chat-1');
+				expect(controller.clearHistory.isOpen).toBe(policy === 'literal');
+				expect(outcome).toBe(policy === 'literal' ? 'no-op' : 'rejected');
+				if (policy !== 'literal') {
+					expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+						'chat-1', 'error', 'Clearing displayed history is not available for this agent.',
+					);
+				}
 				expect(clearChat).not.toHaveBeenCalled();
 				controller.clearHistory.cancel();
 				expect(deps.composerState.inputText).toBe('/clear');
@@ -787,8 +801,41 @@ describe('ConversationSessionController', () => {
 		},
 	);
 
+	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
+		'uses the owning executor catalog for Clear through %s', async (submit) => {
+			const executorId = '22222222-2222-4222-8222-222222222222';
+			for (const executionPolicy of ['literal', 'conversation'] as const) {
+				const { deps } = createDeps(createRunningChat({ executorId }));
+				const metadata = deps.modelCatalog.getAgent('codex');
+				if (!metadata) throw new Error('Missing fixture metadata');
+				deps.modelCatalog.getAgent.mockReturnValue({
+					...metadata, executionPolicy: executionPolicy === 'literal' ? 'conversation' : 'literal',
+				});
+				const remoteCatalog = {
+					...deps.modelCatalog,
+					getAgent: vi.fn(() => ({ ...metadata, executionPolicy })),
+				} satisfies SessionControllerDeps['modelCatalog'];
+				const modelCatalogForExecutor = vi.fn((id: string) => (
+					id === executorId ? remoteCatalog : deps.modelCatalog
+				));
+				deps.composerState.inputText = '/clear';
+				const controller = new ConversationSessionController({ ...deps, modelCatalogForExecutor });
+				const outcome = await controller[submit]('chat-1');
+				expect(modelCatalogForExecutor).toHaveBeenCalledWith(executorId);
+				expect(controller.clearHistory.isOpen).toBe(executionPolicy === 'literal');
+				expect(outcome).toBe(executionPolicy === 'literal' ? 'no-op' : 'rejected');
+				expect(deps.composerState.inputText).toBe('/clear');
+				controller.clearHistory.cancel();
+			}
+			expect(clearChat).not.toHaveBeenCalled();
+			expect(mockRunChat).not.toHaveBeenCalled();
+			expect(mockSteerChat).not.toHaveBeenCalled();
+			expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		},
+	);
+
 	it('captures the clear target and preserves a newer draft during confirmation', async () => {
-		const { deps } = createDeps();
+		const { deps } = createClearDeps();
 		deps.composerState.inputText = '/clear';
 		deps.chatState.loadMessages.mockResolvedValue([]);
 		vi.mocked(clearChat).mockResolvedValue({ success: true, chatId: 'chat-1', transcriptViewId: 'new-view' });
@@ -805,7 +852,7 @@ describe('ConversationSessionController', () => {
 	});
 
 	it('keeps the original clear target and draft on a rejected confirmation', async () => {
-		const { deps } = createDeps();
+		const { deps } = createClearDeps();
 		deps.composerState.inputText = '/clear';
 		vi.mocked(clearChat).mockRejectedValue(new ApiError(409, 'History changed'));
 		const controller = new ConversationSessionController(deps);
@@ -819,7 +866,7 @@ describe('ConversationSessionController', () => {
 
 	it.each(['acknowledged', 'unknown'] as const)(
 		'refreshes the sidebar after failed %s Clear recovery without replacing its error policy', async outcome => {
-			const { deps } = createDeps();
+			const { deps } = createClearDeps();
 			deps.composerState.inputText = '/clear';
 			if (outcome === 'acknowledged') {
 				vi.mocked(clearChat).mockResolvedValue({ success: true, chatId: 'chat-1', transcriptViewId: 'replacement-view' });
@@ -848,7 +895,7 @@ describe('ConversationSessionController', () => {
 	);
 
 	it.each(['generation-1', 'replacement-view', 'unavailable'])('disarms uncertain Clear and reconciles %s without resubmission', async viewId => {
-		const { deps } = createDeps();
+		const { deps } = createClearDeps();
 		deps.composerState.inputText = '/clear';
 		vi.mocked(clearChat).mockRejectedValue(new ApiMutationOutcomeUnknownError('Clear could not be confirmed'));
 		const snapshot = chatSnapshot(transientFeed([], 0, viewId));
@@ -872,7 +919,7 @@ describe('ConversationSessionController', () => {
 	});
 
 	it('keeps uncertain Clear recovery attached to its originating chat after a switch', async () => {
-		const { deps } = createDeps();
+		const { deps } = createClearDeps();
 		deps.composerState.inputText = '/clear';
 		const pending = deferred<Awaited<ReturnType<typeof clearChat>>>();
 		vi.mocked(clearChat).mockReturnValue(pending.promise);

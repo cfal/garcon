@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
-test('confirmed clear works for Shell and AI on desktop and mobile without resetting context', async () => {
+test('confirmed Shell clear works on desktop and mobile while AI clear is rejected without dispatch', async () => {
   await withChromiumFixture('chat-clear', async ({ page, integration, assertNoBrowserErrors }, phase) => {
     const { client } = integration;
     let dropReplacement = false;
@@ -26,7 +26,11 @@ test('confirmed clear works for Shell and AI on desktop and mobile without reset
         } else route.send(message);
       });
     });
-    for (const agent of ['shell', 'ai'] as const) {
+    for (const { agent, mobile } of [
+      { agent: 'shell', mobile: false },
+      { agent: 'shell', mobile: true },
+      { agent: 'ai', mobile: true },
+    ] as const) {
       const chatId = integration.newChatId();
       const started = agent === 'shell'
         ? await client.startChat({ chatId, agentId: 'shell', model: 'sh', projectPath: integration.executionDirs.project,
@@ -37,20 +41,36 @@ test('confirmed clear works for Shell and AI on desktop and mobile without reset
           projectPath: integration.executionDirs.project, content: 'synthetic-old-history' });
       await client.waitForTurnTerminal(chatId, started.turnId);
       await client.waitForProcessing(chatId, false);
-      await page.setViewportSize(agent === 'shell' ? { width: 1440, height: 900 } : { width: 390, height: 844 });
+      await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
       await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
       const editor = page.locator('[data-composer] textarea');
       const feed = page.locator('[data-chat-feed-content]');
       await browserExpect(editor).toBeVisible();
       await browserExpect(feed).toContainText('synthetic-old-history');
+      if (agent === 'ai') {
+        phase('AI: rejects the app command without clearing or provider dispatch');
+        const previousPosts = clearPosts;
+        const providerRequests = integration.fakeProviders.openAi.requests().length;
+        await editor.fill('/cl');
+        await browserExpect(page.getByText('No matching commands')).toBeVisible();
+        await editor.fill('/clear ');
+        await page.locator('[data-composer]').getByRole('button', { name: 'Send message', exact: true }).click();
+        await browserExpect(page.getByText('Clearing displayed history is not available for this agent.')).toBeVisible();
+        await browserExpect(page.getByRole('dialog')).toHaveCount(0);
+        await browserExpect(editor).toHaveValue('/clear ');
+        await browserExpect(feed).toContainText('synthetic-old-history');
+        expect(clearPosts).toBe(previousPosts);
+        expect(integration.fakeProviders.openAi.requests()).toHaveLength(providerRequests);
+        continue;
+      }
       phase(`${agent}: cancellation retains history and the draft`);
-      if (agent === 'shell') {
+      if (!mobile) {
         await editor.fill('/cl');
         await browserExpect(page.getByRole('listbox')).toBeVisible();
         await editor.press('Tab');
         await browserExpect(editor).toHaveValue('/clear ');
       } else await editor.fill('/clear ');
-      if (agent === 'shell') await editor.press('Enter');
+      if (!mobile) await editor.press('Enter');
       else await page.locator('[data-composer]').getByRole('button', { name: 'Send message', exact: true }).click();
       const dialog = page.getByRole('dialog');
       await browserExpect(dialog).toBeVisible();
@@ -59,7 +79,7 @@ test('confirmed clear works for Shell and AI on desktop and mobile without reset
       await browserExpect(feed).toContainText('synthetic-old-history');
       await browserExpect(editor).toHaveValue('/clear ');
       phase(`${agent}: explicit confirmation, refresh and native Reload`);
-      if (agent === 'shell') await editor.press('Control+Enter');
+      if (!mobile) await editor.press('Control+Enter');
       else await page.locator('[data-composer]').getByRole('button', { name: 'Send message', exact: true }).click();
       await browserExpect(dialog).toBeVisible();
       const bounds = await dialog.boundingBox();
@@ -68,9 +88,9 @@ test('confirmed clear works for Shell and AI on desktop and mobile without reset
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
       const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
       await mkdir(artifacts, { recursive: true });
-      await page.screenshot({ path: join(artifacts, `chat-clear-${agent}.png`) });
-      dropReplacement = agent === 'shell';
-      loseAcknowledgement = agent === 'shell';
+      await page.screenshot({ path: join(artifacts, `chat-clear-${mobile ? 'mobile' : 'desktop'}.png`) });
+      dropReplacement = !mobile;
+      loseAcknowledgement = !mobile;
       const previousPosts = clearPosts;
       await dialog.getByRole('button', { name: 'Clear history', exact: true }).click();
       await browserExpect(dialog).toHaveCount(0);

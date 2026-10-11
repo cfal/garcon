@@ -115,6 +115,23 @@ describe('PromptComposer focus', () => {
 		await fireEvent.keyDown(input, { key: 'Enter' });
 		expect(onsubmit).toHaveBeenCalledOnce();
 	});
+	it('hides Clear autocomplete for conversational chats', async () => {
+		const commands = vi.spyOn(commandsApi, 'getSlashCommands').mockResolvedValue([
+			{ name: 'clear', source: 'command', description: 'Synthetic native command' },
+		]);
+		try {
+			render(PromptComposerTestHost, {
+				selectedChatId: 'synthetic-conversation-clear', selectedStatus: 'running',
+				executionPolicy: 'conversation',
+			});
+			const input = screen.getByRole<HTMLTextAreaElement>('textbox');
+			await inputAtCaret(input, '/cl', 3);
+			await waitFor(() => expect(screen.getByText('No matching commands')).toBeTruthy());
+			expect(screen.queryByText('/clear')).toBeNull();
+		} finally {
+			commands.mockRestore();
+		}
+	});
 	it.each(['', 'printf command'])('preserves incompatible draft attachments and blocks all submit paths: %s', async (source) => {
 		const onsubmit = vi.fn();
 		const { container, rerender } = render(PromptComposerTestHost, {
