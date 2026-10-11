@@ -2,8 +2,8 @@
 
 ## Account Credentials
 
-Settings > Server > Password provides separate username and password changes.
-Both require the current password. A successful change keeps the submitting tab
+Settings > Server > Authentication provides logout and separate username and password changes.
+Both credential changes require the current password. A successful change keeps the submitting tab
 signed in and revokes all previous browser JWTs. Same-origin tabs validate and
 adopt the replacement token best effort; other devices and browser profiles must
 sign in again. An established session retains its mounted workspace behind a
@@ -30,6 +30,38 @@ tickets are preserved through historical readers, not a database rewrite.
 Deploy matching controller, browser, and workers; executor protocol revision 26
 rejects mixed builds carrying different ticket-owner contracts.
 
+## Browser Logout
+
+Log out revokes the current browser session, including tabs sharing it, without
+logging out other devices. Confirmation discards unsaved browser-local drafts
+and clears Garcon's cached transcripts, workspace layout, file drafts and recents.
+The workspace is abandoned and the full sign-in page replaces it; this differs
+from the retained workspace used during authentication repair. Already admitted
+work, agents, terminal shells, executor links and CLI capabilities are unaffected.
+
+JWTs additionally require a random session ID in the controller's private
+`auth-sessions.json` beside `auth.json`. The registry is loaded into memory;
+atomic 0600 writes precede login issuance and confirmed logout. Revocation survives
+restart. A missing registry is empty, never permissive. Corruption fails closed;
+uncertain post-rename durability installs the same operator-recovery fence as an
+account write. Expired rows are pruned on mutations; at most 256 sessions are
+retained, and capacity rejects login rather than evicting another device.
+
+Credential changes keep the same session ID and original absolute expiry while
+advancing account revision. They do not renew the session lifetime. Logout may
+accept a signed expired or old-revision token only to revoke its own session,
+so a delayed credential response cannot restore a session after logout.
+Tokens without session claims are rejected on upgrade; users sign in again.
+No worker wire contracts or resource ownership keys change.
+
+Browser logout fences pending responses and storage checkpoints, coordinates
+active tabs, and checks suspended tabs on wake. Network failure still removes
+local access but reports that server revocation was not confirmed. Storage or
+coordination failures show a separate cleanup warning. Logout cannot erase
+downloads, password-manager entries, browser backups, or data already copied
+outside Garcon; public computers should use a private browsing session and HTTPS.
+Restoring old auth/registry backups can restore old authorization.
+
 ## WebSocket Auth Tokens
 
 Garcon exposes one browser WebSocket endpoint, `/ws`. Browser clients authenticate with
@@ -42,7 +74,7 @@ Non-browser clients may send `Authorization: Bearer <token>` instead. The server
 accept tokens in the URL, so upgrade URLs in browser history and proxy logs carry no
 credentials.
 
-The token is validated when `/ws` upgrades, and current revision and expiration
+The token is validated when `/ws` upgrades, and current session, revision and expiration
 are rechecked at open and message admission. Chat WebSocket commands subscribe, query
 reconnect state, ping, and run manual Reload with its progress and cancellation; every
 other mutating Chat command uses an authenticated HTTP request. Terminal input and resize
