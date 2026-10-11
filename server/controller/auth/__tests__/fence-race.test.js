@@ -37,13 +37,19 @@ afterEach(async () => {
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 
-test('auth reads that straddle an uncertain write preserve the storage fence', async () => {
-  directory = await mkdtemp(join(tmpdir(), 'garcon-auth-fence-race-'));
+async function registerAccount(prefix) {
+  directory = await mkdtemp(join(tmpdir(), prefix));
   process.env.GARCON_CONFIG_DIR = directory;
   process.env.GARCON_AUTH_DISABLED = 'false';
   resetServerConfigForTests();
-  const service = new AuthService(getAuthStore(), fixturePasswords);
+  const store = getAuthStore();
+  const service = new AuthService(store, fixturePasswords);
   const first = await service.register({ username: 'synthetic-owner', password: 'password-before' });
+  return { store, service, first };
+}
+
+test('auth reads that straddle an uncertain write preserve the storage fence', async () => {
+  const { service, first } = await registerAccount('garcon-auth-fence-race-');
   const principal = { mode: 'authenticated', key: first.user.id, username: first.user.username,
     credentialRevision: 1, expiresAtMs: Date.now() + 60_000 };
   pendingWrite = { persisted: Promise.withResolvers(), outcome: Promise.withResolvers() };
@@ -71,13 +77,7 @@ test('auth reads that straddle an uncertain write preserve the storage fence', a
 });
 
 test('a user probe cannot validate a captured snapshot after successful rotation', async () => {
-  directory = await mkdtemp(join(tmpdir(), 'garcon-auth-probe-race-'));
-  process.env.GARCON_CONFIG_DIR = directory;
-  process.env.GARCON_AUTH_DISABLED = 'false';
-  resetServerConfigForTests();
-  const store = getAuthStore();
-  const service = new AuthService(store, fixturePasswords);
-  const first = await service.register({ username: 'synthetic-owner', password: 'password-before' });
+  const { store, service, first } = await registerAccount('garcon-auth-probe-race-');
   const snapshot = await store.snapshot();
   const principal = { mode: 'authenticated', key: first.user.id, username: first.user.username,
     credentialRevision: 1, expiresAtMs: Date.now() + 60_000 };

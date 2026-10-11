@@ -82,8 +82,11 @@ const user = authRoute(async (_request, _url, _server, context) => {
   const account = (await store.snapshot()).account;
   store.assertHealthy();
   const principal = context?.principal;
-  if (!account || principal?.mode === 'authenticated'
-    && (!store.isCurrent(principal.key, principal.credentialRevision) || principal.expiresAtMs <= Date.now())) {
+  if (
+    !account ||
+    (principal?.mode === 'authenticated' &&
+      (!store.isCurrent(principal.key, principal.credentialRevision) || principal.expiresAtMs <= Date.now()))
+  ) {
     throw new DomainError('AUTH_SESSION_INVALID', 'Sign in again.', 401);
   }
   return Response.json({ user: { id: account.ownerKey, username: account.username } } satisfies AuthUserResponse);

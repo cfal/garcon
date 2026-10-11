@@ -35,6 +35,7 @@
 			passwordNew.length <= 128 &&
 			passwordNew === passwordConfirmation,
 	);
+	const passwordMismatch = $derived(!!passwordConfirmation && passwordNew !== passwordConfirmation);
 
 	function clearPasswords() {
 		usernamePassword = '';
@@ -172,16 +173,11 @@
 					maxlength={128}
 					required
 					disabled={!available}
-					aria-describedby={passwordConfirmation && passwordNew !== passwordConfirmation
-						? 'password-mismatch'
-						: undefined}
-					aria-invalid={!!passwordConfirmation && passwordNew !== passwordConfirmation}
+					aria-describedby={passwordMismatch ? 'password-mismatch' : undefined}
+					aria-invalid={passwordMismatch}
 				/>
 			</div>
-			{#if passwordConfirmation && passwordNew !== passwordConfirmation}<p
-					id="password-mismatch"
-					class="text-sm text-destructive"
-				>
+			{#if passwordMismatch}<p id="password-mismatch" class="text-sm text-destructive">
 					{m.auth_password_mismatch()}
 				</p>{/if}
 			{#if passwordError}<p id="password-error" role="alert" class="text-sm text-destructive">

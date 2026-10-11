@@ -41,8 +41,14 @@ describe('command-specific ticket results', () => {
     for (const command of ['read', 'list', 'history']) {
       const [current, historical] = [owner, legacyOwner].map(assignee => {
         const output = structuredClone(result(command));
-        const assigned = command === 'read' ? output.data.ticket
-          : command === 'history' ? output.data.items[0].ticket : output.data.items[0];
+        let assigned;
+        if (command === 'read') {
+          assigned = output.data.ticket;
+        } else if (command === 'history') {
+          assigned = output.data.items[0].ticket;
+        } else {
+          assigned = output.data.items[0];
+        }
         assigned.assignee = assignee;
         assigned.createdBy = historicalActor;
         if (command === 'list') output.context = { filters: { assignee } };
