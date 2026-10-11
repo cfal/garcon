@@ -17,6 +17,7 @@ const configEnvironment = Object.fromEntries([
   'GARCON_PROJECT_BASE_DIR',
   'GARCON_BIND_ADDRESS',
   'GARCON_PUBLIC_URL',
+  'GARCON_BASE_PATH',
   'GARCON_PORT',
   'GARCON_MAX_WS_CLIENTS',
   'GARCON_HTTP_COMPRESSION',
@@ -36,13 +37,29 @@ afterEach(() => {
 describe('server configuration', () => {
   it('public URL flags override environment, preserve base paths, and reject invalid configuration', () => {
     process.env.GARCON_PUBLIC_URL = 'https://public.test/base';
+    process.env.GARCON_BASE_PATH = '/base';
     expect(initializeServerConfig().publicUrl).toBe('https://public.test/base/');
-    process.argv = [...originalArgv, '--public-url', 'https://override.test/prefix/'];
+    process.argv = [...originalArgv, '--public-url', 'https://override.test/prefix/', '--base-path=/prefix/'];
     expect(initializeServerConfig().publicUrl).toBe('https://override.test/prefix/');
     process.argv = [...originalArgv, '--public-url', 'https://user:secret@host/'];
     expect(() => initializeServerConfig()).toThrow('no credentials');
     process.argv = [...originalArgv, '--public-url', ''];
     expect(() => initializeServerConfig()).toThrow('absolute HTTP(S)');
+  });
+  it('normalizes and freezes the mount, with CLI precedence and aligned public URLs', () => {
+    delete process.env.GARCON_PUBLIC_URL;
+    process.env.GARCON_BASE_PATH = '/tools/garcon/';
+    process.argv = [...originalArgv];
+    expect(initializeServerConfig().basePath).toBe('/tools/garcon');
+    process.argv = [...originalArgv, '--base-path=/'];
+    expect(initializeServerConfig().basePath).toBe('');
+    process.env.GARCON_PUBLIC_URL = 'https://public.test/other';
+    expect(() => initializeServerConfig()).toThrow('Public URL path must match');
+    delete process.env.GARCON_PUBLIC_URL;
+    process.argv = [...originalArgv, '--base-path=/bad//path'];
+    expect(() => initializeServerConfig()).toThrow('Invalid base path');
+    process.argv = [...originalArgv, '--base-path'];
+    expect(() => initializeServerConfig()).toThrow('--base-path requires a value');
   });
   it('rejects duplicate value flags and conflicting explicit workspace selectors', () => {
     process.argv = [...originalArgv, '--config-dir', '/first', '--config-dir=/second'];

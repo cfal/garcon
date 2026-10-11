@@ -82,3 +82,20 @@ test('rejects unauthorized clients, unknown executors, and unrelated routes', as
   expect((await fixture().handler(new Request('http://localhost/ws'), server)).status).toBe(404);
   expect(server.upgrade).not.toHaveBeenCalled();
 });
+
+test('mounts browser and executor sockets without replacing the native upgrade Request', async () => {
+  const link = { upgrade: mock(() => new Response('executor')) };
+  const { handler, wsAdmission } = fixture({ basePath: '/tools/garcon', executors: { inboundLink: () => link } });
+  const server = { upgrade: mock(() => true) };
+  const browser = request('/tools/garcon/ws?v=1');
+  expect(await handler(browser, server)).toBeUndefined();
+  expect(server.upgrade.mock.calls[0][0]).toBe(browser);
+  const executor = request('/tools/garcon/executor/22222222-2222-4222-8222-222222222222');
+  expect((await handler(executor, server)).status).toBe(200);
+  expect(link.upgrade.mock.calls[0][0]).toBe(executor);
+  for (const pathname of ['/ws', '/executor/123', '/tools/garcon-other/ws', '/tools/garcon/ws/']) {
+    expect((await handler(request(pathname), server)).status).toBe(404);
+  }
+  expect(wsAdmission.tryReserve).toHaveBeenCalledTimes(1);
+  expect(link.upgrade).toHaveBeenCalledTimes(1);
+});

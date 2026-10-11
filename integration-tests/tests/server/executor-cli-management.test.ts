@@ -104,7 +104,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const stored = JSON.parse(await readFile(join(fixture.dirs.workspace, 'executors.json'), 'utf8'));
       expect(stored.executors.find((entry: { id: string }) => entry.id === id).connection)
         .toEqual({ kind: 'executor-connects', advertisedUrl: null });
-    }, { executionBackend, serverEnvironment: { GARCON_PUBLIC_URL: 'https://controller.test/garcon/' } });
+    }, { executionBackend, serverEnvironment: { GARCON_PUBLIC_URL: 'https://controller.test/garcon/', GARCON_BASE_PATH: '/garcon' } });
   }, 60_000);
 }
 

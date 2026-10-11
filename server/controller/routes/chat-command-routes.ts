@@ -78,14 +78,16 @@ function isRequestTimeoutServer(value: unknown): value is RequestTimeoutServer {
 function acceptedTurnResponse(
   result: CommandAcceptedResponse,
   parentChat: ParentChatRef | null,
+  request: Request,
 ): Response {
   if (!result.chatId || !result.turnId) {
     throw new Error('Accepted agent turn is missing its receipt identity');
   }
-  const location = `/api/v1/chats/turn-receipt?chatId=${encodeURIComponent(result.chatId)}&turnId=${encodeURIComponent(result.turnId)}`;
+  const receipt = new URL('turn-receipt', request.url);
+  receipt.search = new URLSearchParams({ chatId: result.chatId, turnId: result.turnId }).toString();
   return Response.json(
     { ...result, parentChat },
-    { status: 202, headers: { Location: location } },
+    { status: 202, headers: { Location: receipt.pathname + receipt.search } },
   );
 }
 
@@ -124,12 +126,12 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
 }): RouteMap {
 
 
-  async function postStartSession(body: unknown): Promise<Response> {
+  async function postStartSession(body: unknown, request: Request): Promise<Response> {
     try {
       const input = parseCommandRequest(parseStartChatCommandRequest, body);
       const images = validatedCommandAttachments(input.images);
       const result = await commands.submitStart({ ...input, images });
-      return acceptedTurnResponse(result, registry.getChat(input.chatId)?.parentChat ?? null);
+      return acceptedTurnResponse(result, registry.getChat(input.chatId)?.parentChat ?? null, request);
     } catch (error: unknown) {
       if (error instanceof ModelSelectionError) {
         return jsonError((error as Error).message, 422);
@@ -169,7 +171,7 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
       }
       const result = await commands.submitRun({ ...input, images });
 
-      return acceptedTurnResponse(result, registry.getChat(input.chatId)?.parentChat ?? null);
+      return acceptedTurnResponse(result, registry.getChat(input.chatId)?.parentChat ?? null, request);
     } catch (error: unknown) {
       return handoffOrRunErrorResponse(error);
     }

@@ -8,8 +8,10 @@ import { serverShuttingDownResponse } from '../lib/http-route.js';
 import { LOCAL_SERVER_PRINCIPAL, type ServerPrincipal } from '../lib/http-route-types.js';
 import { getWebSocketAuthToken, webSocketUpgradeHeaders } from '../lib/websocket-auth.js';
 import type { WsConnectionData } from './server-sockets.js';
+import { stripBasePath } from '@garcon/common/base-path';
 
-export function createWebSocketUpgradeHandler({ executors, executionSockets, wsAdmission, authDisabled, isShuttingDown }: {
+export function createWebSocketUpgradeHandler({ executors, executionSockets, wsAdmission, authDisabled, isShuttingDown, basePath = '' }: {
+  basePath?: string;
   executors: Pick<ExecutorManager, 'inboundLink'>;
   executionSockets: ReturnType<typeof createNoiseServer>;
   wsAdmission: Pick<WebSocketAdmissionController, 'tryReserve' | 'release'>;
@@ -19,15 +21,17 @@ export function createWebSocketUpgradeHandler({ executors, executionSockets, wsA
   return async (request: Request, server: Pick<Server<WsConnectionData>, 'upgrade'>): Promise<Response | undefined> => {
     if (isShuttingDown()) return serverShuttingDownResponse();
     const url = new URL(request.url);
+    const pathname = stripBasePath(url.pathname, basePath);
+    if (pathname === null) return new Response('Not found', { status: 404 });
 
     if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
-      const executorMatch = /^\/executor\/([0-9a-f-]+)$/u.exec(url.pathname);
+      const executorMatch = /^\/executor\/([0-9a-f-]+)$/u.exec(pathname);
       if (executorMatch) {
         const link = executors.inboundLink(executorMatch[1]!);
         if (!link) return new Response('Executor is unavailable', { status: 404 });
         return link.upgrade(request, server, executionSockets);
       }
-      if (url.pathname !== '/ws') {
+      if (pathname !== '/ws') {
         return new Response('Not found', { status: 404 });
       }
 

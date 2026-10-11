@@ -12,6 +12,7 @@ import {
   type CliRuntimeDescriptor,
 } from '@garcon/common/server-runtime';
 import { CliError } from './errors.js';
+import { parseBasePath } from '@garcon/common/base-path';
 
 const RUNTIME_PROBE_TIMEOUT_MS = 5_000;
 
@@ -63,10 +64,11 @@ export function parseLoopbackServerUrl(value: string): string {
   if (url.username || url.password || url.search || url.hash) {
     throw new CliError('discovery', 'server URL must not include credentials, query, or fragment', 3);
   }
-  if (url.pathname !== '/' && url.pathname !== '') {
-    throw new CliError('discovery', 'server URL must not include a path', 3);
+  try {
+    return url.origin + parseBasePath(url.pathname);
+  } catch (error) {
+    throw new CliError('discovery', 'server URL must contain a valid base path', 3, { cause: error });
   }
-  return url.toString().replace(/\/$/, '');
 }
 
 async function readRuntimeDescriptor(descriptorPath: string, runtime: RuntimeKind): Promise<CliRuntimeDescriptor> {

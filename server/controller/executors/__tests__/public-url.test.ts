@@ -14,6 +14,7 @@ test('explicit public configuration wins over Host and forwarded headers', () =>
   } });
   expect(requestPublicUrl(request, 'https://controller.test/base')).toBe('https://controller.test/base/');
   expect(requestPublicUrl(request, null)).toBe('http://other.test:9000/');
+  expect(requestPublicUrl(request, null, '/tools/garcon')).toBe('http://other.test:9000/tools/garcon/');
   expect(requestPublicUrl(new Request('https://controller.test/api/v1/executors'), null)).toBe('https://controller.test/');
 });
 

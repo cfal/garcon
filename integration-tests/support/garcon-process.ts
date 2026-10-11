@@ -113,7 +113,7 @@ export class GarconProcess {
       if (match) {
         const clientUrl = new URL(match[1]);
         clientUrl.hostname = '127.0.0.1';
-        ready.resolve(clientUrl.origin);
+        ready.resolve(clientUrl.href.replace(/\/$/, ''));
       }
     };
     const captureLine = (line: string) => {

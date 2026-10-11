@@ -249,7 +249,12 @@ describe('parseLoopbackServerUrl', () => {
     expect(parseLoopbackServerUrl(url)).toBe(url);
   });
 
-  test.each(['http://example.com', 'file:///tmp/socket', 'http://user@localhost:8080', 'http://localhost:8080/api'])('%s is rejected', (url) => {
+  test.each(['http://example.com', 'file:///tmp/socket', 'http://user@localhost:8080', 'http://localhost:8080/a%2fb', 'http://localhost:8080/a//b', 'http://localhost:8080/a?q=1'])('%s is rejected', (url) => {
     expect(() => parseLoopbackServerUrl(url)).toThrow();
+  });
+  test('retains a normalized mount without weakening loopback restrictions', () => {
+    expect(parseLoopbackServerUrl('http://localhost:8080/tools/garcon/')).toBe('http://localhost:8080/tools/garcon');
+    expect(parseLoopbackServerUrl('https://[::1]:8080/garcon')).toBe('https://[::1]:8080/garcon');
+    expect(() => parseLoopbackServerUrl('https://remote.test/garcon')).toThrow('loopback');
   });
 });

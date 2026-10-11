@@ -798,9 +798,9 @@ export async function startServer(): Promise<void> {
       idleTimeout: config.httpIdleTimeoutSeconds,
       maxConnections: config.maxConnections,
       maxRequestBodySize: config.maxRequestBodySize,
-      routes: wrapRoutes(routes, { localCapability: runtimeState.localCapability, serverInstanceId: runtimeState.identity.instanceId, isShuttingDown: () => shuttingDown }),
+      routes: wrapRoutes(routes, { basePath: config.basePath, localCapability: runtimeState.localCapability, serverInstanceId: runtimeState.identity.instanceId, isShuttingDown: () => shuttingDown }),
       error: unhandledRouteErrorResponse,
-      fetch: createWebSocketUpgradeHandler({ executors, executionSockets, wsAdmission, authDisabled, isShuttingDown: () => shuttingDown }),
+      fetch: createWebSocketUpgradeHandler({ basePath: config.basePath, executors, executionSockets, wsAdmission, authDisabled, isShuttingDown: () => shuttingDown }),
       websocket: createServerSocketHandlers({ primary: primaryWs, admission: wsAdmission, config, logger, execution: executionSockets.websocket, delivery: primaryDelivery }),
     } satisfies ServeOptionsWithConnectionLimit;
 
@@ -820,7 +820,7 @@ export async function startServer(): Promise<void> {
 
     const server = Bun.serve<WsConnectionData>(serveOptions);
     const actualPort = server.port ?? listenPort;
-    const runtimeBaseUrl = advertisedServerUrl(bindAddress, actualPort);
+    const runtimeBaseUrl = advertisedServerUrl(bindAddress, actualPort) + config.basePath;
     let runtimeFilePath: string;
     try {
       const publishedRuntime = await publishServerRuntime(runtimeState, runtimeBaseUrl, config.configDir);
@@ -933,7 +933,7 @@ export async function startServer(): Promise<void> {
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
 
-    logServerReady(logger, { bindAddress, port: actualPort, authDisabled });
+    logServerReady(logger, { bindAddress, port: actualPort, authDisabled, basePath: config.basePath });
     void eventWiring.repairChatMetadata().catch((error) => logger.warn('Metadata repair failed:', errorMessage(error)));
   } catch (error) {
     await workspaceLease?.release().catch((releaseError) => {

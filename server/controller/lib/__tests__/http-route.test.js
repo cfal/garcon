@@ -253,6 +253,24 @@ describe('http route wrapping', () => {
     expect(authenticateHttpRequest).toHaveBeenCalledTimes(1);
   });
 
+  it('mounts routes while preserving request identity, bodies, auth and internal URL semantics', async () => {
+    const request = new Request('http://localhost/tools/garcon/api/private?x=a%2Fb', { method: 'POST', body: 'payload' });
+    const handler = mock(async (incoming, url) => Response.json({
+      sameRequest: incoming === request, path: url.pathname, query: url.searchParams.get('x'), body: await incoming.text(),
+    }));
+    const wrapped = wrapRoutes({ '/api/private': { POST: handler } }, { basePath: '/tools/garcon' });
+    expect(wrapped['/api/private']).toBeUndefined();
+    const response = await wrapped['/tools/garcon/api/private'].POST(request);
+    expect(await response.json()).toEqual({ sameRequest: true, path: '/api/private', query: 'a/b', body: 'payload' });
+    expect(authenticateHttpRequest).toHaveBeenCalledTimes(1);
+    const redirect = await wrapped['/tools/garcon'].GET(new Request('http://localhost/tools/garcon?ticket=G-1'));
+    expect(redirect.status).toBe(308);
+    expect(redirect.headers.get('Location')).toBe('/tools/garcon/?ticket=G-1');
+    const outside = await wrapped['/tools/garcon/api/private'].POST(new Request('http://localhost/tools/garcon-other/api/private'));
+    expect(outside.status).toBe(404);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
   it('bypasses auth for all handlers when auth is globally disabled', async () => {
     isAuthDisabled.mockReturnValue(true);
     const handler = mock((_request, _url, _server, context) => Response.json({

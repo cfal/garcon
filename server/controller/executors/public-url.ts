@@ -12,13 +12,13 @@ export function parsePublicUrl(value: string): string {
   return url.href;
 }
 
-export function requestPublicUrl(request: Request, configured: string | null): string {
+export function requestPublicUrl(request: Request, configured: string | null, basePath = ''): string {
   if (configured !== null) return parsePublicUrl(configured);
   const incoming = new URL(request.url);
   const host = request.headers.get('host') ?? incoming.host;
   if (!host || /[\s\\/@?#]/u.test(host)) throw new ValidationDomainError('Invalid public Host; configure --public-url');
   // Forwarding headers cannot prove the proxy's public scheme or path.
-  return parsePublicUrl(`${incoming.protocol}//${host}/`);
+  return parsePublicUrl(`${incoming.protocol}//${host}${basePath}/`);
 }
 
 export function executorPublicUrl(base: string, id: string): string {
