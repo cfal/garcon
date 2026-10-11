@@ -187,7 +187,7 @@ export class MetadataIndex {
     transcriptViewId: string,
     pages: AsyncIterable<readonly ChatMessage[]>,
   ): Promise<void> {
-    let firstText = '';
+    let firstMessage = '';
     let firstAt: string | null = null;
     let lastText: string | null = null;
     let lastAt: string | null = null;
@@ -195,7 +195,7 @@ export class MetadataIndex {
     for await (const messages of pages) {
       for (const message of messages) {
         const text = extractPreviewText(message);
-        if (!firstText && message.type === 'user-message') firstText = firstMessagePreview(text);
+        if (!firstMessage && message.type === 'user-message') firstMessage = firstMessagePreview(text);
         if (text) lastText = lastMessagePreview(text);
         if (typeof message.timestamp === 'string') {
           firstAt ??= message.timestamp;
@@ -207,7 +207,6 @@ export class MetadataIndex {
     const key = String(chatId);
     if (this.#transcripts.getExistingTranscriptViewId(key) !== transcriptViewId) return;
     const current = this.#metadataByChatId.get(key);
-    const firstMessage = firstText;
     const createdAt = current?.createdAt ?? firstAt ?? new Date().toISOString();
     const lastMessage = lastText ?? lastMessagePreview(firstMessage);
     const lastActivity = lastAt ?? createdAt;
@@ -275,11 +274,10 @@ export class MetadataIndex {
       }
       // Read and publish synchronously so no live update, deletion, or view replacement can interleave.
       const metadata = this.#buildMetadataFromPreview(chatId, session);
-      if (metadata) {
-        this.#metadataByChatId.set(chatId, metadata);
-        this.#validatedChatIds.add(chatId);
-        this.#scheduleSave();
-      }
+      if (!metadata) return null;
+      this.#metadataByChatId.set(chatId, metadata);
+      this.#validatedChatIds.add(chatId);
+      this.#scheduleSave();
       return metadata;
     } catch (error) {
       logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(error));
@@ -305,7 +303,7 @@ export class MetadataIndex {
     const transcriptViewId = this.#transcripts.getExistingTranscriptViewId(chatId);
     const result = this.#transcripts.getExistingTranscriptPreview(session, chatId);
     if (!result) return null;
-    const preview = result && isAgentPreviewMetadata(result.preview) ? result.preview : null;
+    const preview = isAgentPreviewMetadata(result.preview) ? result.preview : null;
     const refs = session.carryOverSegments ?? [];
     const firstMessage = firstMessagePreview(preview?.firstMessage);
     const createdAt = preview?.createdAt || null;

@@ -9,7 +9,13 @@ export async function clearChat(request: ClearChatRequest): Promise<ClearChatRes
 		}
 		return response;
 	} catch (error) {
-		if (error instanceof ApiError && error.status >= 400 && error.status < 500 && isHttpErrorResponse(error.payload)) throw error;
+		if (
+			error instanceof ApiError &&
+			error.status >= 400 && error.status < 500 &&
+			isHttpErrorResponse(error.payload)
+		) {
+			throw error;
+		}
 		throw new ApiMutationOutcomeUnknownError(
 			'Clear could not be confirmed. Refresh the chat before trying again. The agent context is unchanged.',
 			{ cause: error },

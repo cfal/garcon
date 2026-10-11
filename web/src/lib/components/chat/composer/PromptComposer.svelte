@@ -641,17 +641,19 @@
 	const isDisabled = $derived(
 		directAdmissionPending && sessions.selectedChat?.status === 'draft',
 	);
-	const controllerCommand = $derived(
-		sessions.selectedChat?.status === 'running' &&
-			(isClearCommand(composerState.inputText) || (conversationInput && isControllerSlashCommand(composerState.inputText))),
-	);
+	const controllerCommand = $derived.by(() => {
+		if (sessions.selectedChat?.status !== 'running') return false;
+		if (isClearCommand(composerState.inputText)) return true;
+		return conversationInput && isControllerSlashCommand(composerState.inputText);
+	});
 	// Loading is explained by the disabled send button so the composer keeps its height.
 	const modelsLoading = $derived(
 		executors.isReady(agentState.executorId) && !modelCatalog.isValidated && !modelCatalog.error,
 	);
 	const sendTitle = $derived.by(() => {
 		if (modelsLoading && !controllerCommand) return m.chat_composer_loading_models();
-		return requiresQueuedSubmission && !controllerCommand ? m.chat_composer_queue_message() : m.chat_composer_send_message();
+		if (requiresQueuedSubmission && !controllerCommand) return m.chat_composer_queue_message();
+		return m.chat_composer_send_message();
 	});
 
 	const canSubmit = $derived(
