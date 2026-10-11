@@ -288,6 +288,7 @@ export class AuthStore {
 		code: 'AUTH_SESSION_INVALID' | 'AUTH_STORAGE_UNAVAILABLE',
 	): void {
 		if (token !== this.token || this.#destroyed || this.authDisabled) return;
+		if (this.availability === 'storage-unavailable') return;
 		this.#rejectionVersion++;
 		if (code === 'AUTH_STORAGE_UNAVAILABLE') {
 			this.#version++;
@@ -295,7 +296,7 @@ export class AuthStore {
 			this.#setAvailability('storage-unavailable');
 			return;
 		}
-		this.#setAvailability('repairing');
+		this.#setAvailability(token === this.#uncertainToken ? 'reauth-required' : 'repairing');
 		void this.reconcile();
 	}
 
@@ -353,7 +354,7 @@ export class AuthStore {
 				this.#rejectedStoredToken = candidate;
 				discardStoredAuthToken(candidate);
 			}
-			if (candidate !== this.token && this.token) {
+			if (candidate !== this.token && this.token && this.token !== this.#uncertainToken) {
 				// Untrusted storage must not revoke an independently accepted memory session.
 				try {
 					const current = this.token;
@@ -409,7 +410,7 @@ export class AuthStore {
 			return;
 		}
 		this.error = describeAuthError(error);
-		this.#setAvailability('repairing');
+		this.#setAvailability(this.#uncertainToken ? 'reauth-required' : 'repairing');
 		this.#scheduleRepair(2_000);
 	}
 	#scheduleRepair(delay: number): void {

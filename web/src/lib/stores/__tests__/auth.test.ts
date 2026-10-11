@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthStore } from '../auth.svelte';
-import { ApiError } from '$lib/api/client';
+import { ApiError, apiGet } from '$lib/api/client';
 import {
 	clearAuthToken,
 	setAuthToken,
@@ -60,6 +60,7 @@ afterEach(() => {
 	for (const auth of stores.splice(0)) auth.destroy();
 	vi.useRealTimers();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 });
 
 describe('initial authority', () => {
@@ -396,6 +397,82 @@ describe('same-origin repair', () => {
 		expect(auth.availability).toBe('reauth-required');
 		expect(api.getUser).toHaveBeenCalledTimes(1);
 	});
+	it.each(['HTTP', 'WS'] as const)(
+		'keeps sign-in available after an uncertain mutation receives a late %s rejection',
+		async (source) => {
+			const auth = await signedIn();
+			auth.start();
+			const delayed = Promise.withResolvers<Response>();
+			vi.stubGlobal(
+				'fetch',
+				vi.fn(() => delayed.promise),
+			);
+			const oldRequest = source === 'HTTP' ? apiGet('/protected') : null;
+			vi.mocked(api.changePassword).mockRejectedValue(new TypeError('Lost response'));
+			await auth.changePassword({ currentPassword: 'password', newPassword: 'new-password' });
+			expect(auth.availability).toBe('reauth-required');
+			if (oldRequest) {
+				delayed.resolve(
+					Response.json(
+						{
+							error: 'Revoked',
+							errorCode: 'AUTH_SESSION_INVALID',
+							retryable: false,
+						},
+						{ status: 401 },
+					),
+				);
+				await expect(oldRequest).rejects.toMatchObject({ errorCode: 'AUTH_SESSION_INVALID' });
+			} else auth.sessionRejected(auth.token, 'AUTH_SESSION_INVALID');
+			await auth.reconcile();
+			await vi.advanceTimersByTimeAsync(60_000);
+			expect(auth.availability).toBe('reauth-required');
+			expect(canDispatchAuthenticated()).toBe(false);
+			expect(auth.presentationOwner?.key).toBe(user.id);
+			expect(api.getUser).toHaveBeenCalledTimes(1);
+			expect(api.changePassword).toHaveBeenCalledTimes(1);
+			vi.mocked(api.login).mockResolvedValue(session(2));
+			expect((await auth.login(user.username, 'new-password')).success).toBe(true);
+			expect(auth.isAuthenticated).toBe(true);
+		},
+	);
+	it('retains the storage fence after late revocation of an uncertain session', async () => {
+		const auth = await signedIn();
+		vi.mocked(api.changePassword).mockRejectedValue(new TypeError('Lost response'));
+		await auth.changePassword({ currentPassword: 'password', newPassword: 'new-password' });
+		auth.sessionRejected(auth.token, 'AUTH_STORAGE_UNAVAILABLE');
+		auth.sessionRejected(auth.token, 'AUTH_SESSION_INVALID');
+		await auth.reconcile();
+		expect(auth.availability).toBe('storage-unavailable');
+		expect(canDispatchAuthenticated()).toBe(false);
+		expect(api.getUser).toHaveBeenCalledTimes(1);
+	});
+	it('still adopts an independent replacement after late rejection of an uncertain session', async () => {
+		const auth = await signedIn();
+		vi.mocked(api.changePassword).mockRejectedValue(new TypeError('Lost response'));
+		await auth.changePassword({ currentPassword: 'password', newPassword: 'new-password' });
+		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(2).token);
+		auth.sessionRejected(auth.token, 'AUTH_SESSION_INVALID');
+		await auth.reconcile();
+		expect(auth.token).toBe(session(2).token);
+		expect(auth.isAuthenticated).toBe(true);
+		expect(api.getUser).toHaveBeenLastCalledWith(session(2).token);
+	});
+	it.each([invalid(), new TypeError('Offline')])(
+		'keeps uncertain authority suspended when a stored replacement fails verification',
+		async (failure) => {
+			const auth = await signedIn();
+			vi.mocked(api.changePassword).mockRejectedValue(new TypeError('Lost response'));
+			await auth.changePassword({ currentPassword: 'password', newPassword: 'new-password' });
+			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(999).token);
+			vi.mocked(api.getUser).mockRejectedValueOnce(failure).mockResolvedValue({ user });
+			await auth.reconcile();
+			expect(api.getUser).toHaveBeenCalledTimes(2);
+			expect(api.getUser).toHaveBeenLastCalledWith(session(999).token);
+			expect(auth.availability).toBe('reauth-required');
+			expect(canDispatchAuthenticated()).toBe(false);
+		},
+	);
 	it('validates storage replacement and refuses late old login completion', async () => {
 		const auth = await signedIn();
 		const pending = Promise.withResolvers<AuthSessionResponse>();

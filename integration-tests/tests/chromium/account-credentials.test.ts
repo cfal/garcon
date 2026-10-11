@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
-import { expect as browserExpect, type Page } from 'playwright/test';
+import { expect as browserExpect, type Page, type Route } from 'playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { TicketBootstrap, TicketWriteResult } from '../../../common/tickets.js';
 import { authenticateChromiumContext, withChromiumFixture } from '../../support/chromium-fixture.js';
+import { withTimeout } from '../../support/deferred.js';
 
 async function openPasswordSettings(page: Page) {
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
@@ -105,7 +106,7 @@ test('separate credential forms retain source, sibling, and other-device work on
   });
 }, 120_000);
 
-test('storage failure retains memory authorization and a lost response requires sign-in without repeating PATCH', async () => {
+test('storage failure retains memory authorization and late HTTP rejection preserves sign-in after a lost response', async () => {
   await withChromiumFixture('account-credentials-uncertainty', async ({ page, integration }, phase) => {
     await page.goto(integration.garcon.baseUrl);
     const settings = await openPasswordSettings(page);
@@ -126,6 +127,13 @@ test('storage failure retains memory authorization and a lost response requires 
     const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
     await mkdir(artifacts, { recursive: true });
     await page.screenshot({ path: join(artifacts, 'account-credentials-mobile.png') });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await settings.getByRole('button', { name: 'Close', exact: true }).click();
+    const heldSettings = Promise.withResolvers<Route>();
+    await page.route('**/api/v1/app/settings', route => { heldSettings.resolve(route); });
+    await openPasswordSettings(page);
+    const oldRequest = await withTimeout(heldSettings.promise, 20_000, () => 'Missing settings refresh');
+    await page.setViewportSize({ width: 390, height: 844 });
     let patches = 0;
     await page.route('**/api/v1/auth/password', async route => {
       patches++; await route.fetch(); await route.abort('failed');
@@ -144,6 +152,14 @@ test('storage failure retains memory authorization and a lost response requires 
     phase('reauthentication after a committed mutation loses its reply');
     const overlay = page.locator('dialog');
     await browserExpect(overlay.getByLabel('Username', { exact: true })).toHaveValue('memory-owner');
+    phase('late HTTP rejection cannot replace sign-in with an unrecoverable reconnect state');
+    const rejected = await oldRequest.fetch();
+    expect(rejected.status()).toBe(401);
+    const delivered = page.waitForEvent('requestfinished', { predicate: request => request === oldRequest.request() });
+    await oldRequest.fulfill({ response: rejected });
+    await delivered;
+    await page.unroute('**/api/v1/app/settings');
+    await browserExpect(overlay.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
     await overlay.getByLabel('Password', { exact: true }).fill('synthetic-lost-response');
     await overlay.getByLabel('Password', { exact: true }).press('Enter');
     await browserExpect(overlay).toHaveCount(0);
