@@ -23,6 +23,7 @@ export async function verifyAuthTokenClaims(token: string | null | undefined): P
   store.assertHealthy();
   if (!token) return null;
   const snapshot = await store.snapshot();
+  store.assertHealthy();
   if (!snapshot.account) return null;
   try {
     const decoded = jwt.verify(token, snapshot.jwtSecret, { algorithms: ['HS256'] });

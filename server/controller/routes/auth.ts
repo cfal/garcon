@@ -37,9 +37,12 @@ function ipServer(server: unknown): RequestIpServer | null {
 }
 
 const status = authRoute(async () => {
-  getAuthStore().assertHealthy();
+  const store = getAuthStore();
+  store.assertHealthy();
   const authDisabled = isAuthDisabled();
-  return Response.json({ needsSetup: authDisabled ? false : await needsSetup(), isAuthenticated: authDisabled,
+  const setupRequired = authDisabled ? false : await needsSetup();
+  store.assertHealthy();
+  return Response.json({ needsSetup: setupRequired, isAuthenticated: authDisabled,
     authDisabled } satisfies AuthStatusResponse);
 });
 
@@ -75,10 +78,12 @@ function credentialRoute(operation: 'username' | 'password'): RouteHandler {
 
 const user = authRoute(async (_request, _url, _server, context) => {
   if (isAuthDisabled()) return Response.json({ user: { id: 'local', username: 'local' } } satisfies AuthUserResponse);
-  const account = (await getAuthStore().snapshot()).account;
+  const store = getAuthStore();
+  const account = (await store.snapshot()).account;
+  store.assertHealthy();
   const principal = context?.principal;
-  if (!account || principal?.mode === 'authenticated' && (principal.key !== account.ownerKey
-    || principal.credentialRevision !== account.credentialRevision || principal.expiresAtMs <= Date.now())) {
+  if (!account || principal?.mode === 'authenticated'
+    && (!store.isCurrent(principal.key, principal.credentialRevision) || principal.expiresAtMs <= Date.now())) {
     throw new DomainError('AUTH_SESSION_INVALID', 'Sign in again.', 401);
   }
   return Response.json({ user: { id: account.ownerKey, username: account.username } } satisfies AuthUserResponse);
