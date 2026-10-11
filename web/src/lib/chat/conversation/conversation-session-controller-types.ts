@@ -34,6 +34,8 @@ type SessionTranscriptState = Pick<
 	transcriptCache: Pick<ChatTranscriptCache, 'markValidated' | 'readAppliedCursor'>;
 	hasMountedPresentation(chatId: string): boolean;
 	getCursorForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
+	getKnownHeadForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
+	recoverViewReplacement(chatId: string, previousViewId: string): Promise<void>;
 	appendLocalNoticeForChat(
 		chatId: string,
 		noticeType: Parameters<ActiveTranscriptPort['appendLocalNotice']>[0],

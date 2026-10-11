@@ -211,11 +211,15 @@ describe('event router integration', () => {
 		vi.mocked(getChatSnapshot).mockReset();
 	});
 
-	it.each(['archive-toggled', 'execution-settings-updated'])(
-		'routes %s globally through normalize + filter + handler', (reason) => {
+	it.each([
+		['archive-toggled', 'chat-b'],
+		['execution-settings-updated', 'chat-b'],
+		['metadata-repaired', null],
+	])(
+		'routes %s globally through normalize + filter + handler', (reason, chatId) => {
 		const stores = createStores();
 		renderRouterWithRawMessages(
-			[{ type: 'chat-list-refresh-requested', reason, chatId: 'chat-b' }],
+			[{ type: 'chat-list-refresh-requested', reason, chatId }],
 			stores,
 		);
 

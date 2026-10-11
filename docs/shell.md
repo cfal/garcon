@@ -122,6 +122,34 @@ also removes its SQLite recovery sidecars.
   history windows, truncated output, or capture gaps render literally rather
   than interpreting an incomplete Markdown document.
 
+## Clearing The Displayed History
+
+In a Shell chat's composer, standalone `/clear` opens Garcon's confirmation
+dialog. Other agents reject this app command rather than forwarding it to their
+native command handling. It clears the current ledger transcript, not the agent's
+native history or context. It never launches a shell process, stops a command,
+or removes queued work. Finish active work and run or remove queued inputs first.
+
+The command must be lowercase at the beginning of the input, with only optional
+trailing ASCII whitespace. `/clear argument`, `/clear; pwd`, `/clear` followed
+by another command, ` /clear`, `/Clear`, and `/md /clear` remain ordinary input.
+Printed `/clear` is inert. CLI `resume CHAT_ID '/clear'` is ordinary agent input,
+not the confirmed composer action.
+
+Clear removes old content from chat search, future exports and future
+ledger-derived handoff context. It also removes inherited fork history that has
+not yet been sent to an agent. Established native context, session identity,
+settings and cwd remain unchanged. Manual Reload may restore the current native
+session's available history, but cannot restore Garcon-only or inherited rows;
+it is not an exact Undo. Existing shares, forks, downloaded exports and command
+filesystem effects are unaffected.
+
+If Clear cannot be confirmed because the connection failed, Garcon checks for
+a replacement view without retrying the mutation. Refresh and inspect the chat
+before issuing another Clear. Delete Chat remains the way to delete the chat
+and release its native session. Neither operation promises secure erasure of
+previously retained copies.
+
 ## CLI
 
 The existing opaque `--model` selection slot selects a shell family. Catalog

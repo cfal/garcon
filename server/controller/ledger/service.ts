@@ -608,6 +608,10 @@ export class TranscriptLedgerService {
     return this.#store.rowsThrough(chatId, watermark);
   }
 
+  rowPagesThrough(chatId: string, watermark: TranscriptWatermark, fromOrdinal = 1, signal?: AbortSignal): AsyncIterable<readonly LedgerRow[]> {
+    return this.#store.rowPagesThrough(chatId, watermark, fromOrdinal, signal);
+  }
+
   withStoredRowsThrough<T>(chatId: string, watermark: TranscriptWatermark, work: StoredRowsWork<T>, signal?: AbortSignal): Promise<T> {
     return this.#store.withStoredRowsThrough(chatId, watermark, work, signal);
   }

@@ -14,6 +14,11 @@ import { normalizeTags } from '$shared/tags';
 // misses them. Each command is handled by its owning submit or runtime path.
 export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 	{
+		name: 'clear',
+		source: 'command',
+		description: 'Clear displayed chat history without resetting agent context',
+	},
+	{
 		name: 'compact',
 		source: 'command',
 		description: 'Summarize the conversation to free up context',
@@ -229,10 +234,14 @@ export function parseScheduleInCommand(input: string): ScheduleInCommandParseRes
 }
 
 export function isControllerSlashCommand(input: string): boolean {
-	return parseRenameCommand(input) !== null ||
+	return isClearCommand(input) || parseRenameCommand(input) !== null ||
 		parseMoveChatBoundaryCommand(input).kind !== 'not-command' ||
 		parseTagCommand(input).kind !== 'not-command' ||
 		parseScheduleInCommand(input).kind !== 'not-command';
+}
+
+export function isClearCommand(input: string): boolean {
+	return /^\/clear[ \t\r\n\v\f]*$/.test(input);
 }
 
 export type SnippetCommandParseResult =

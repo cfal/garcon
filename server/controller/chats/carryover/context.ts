@@ -13,7 +13,7 @@ export interface CreateCarriedContextInput {
   readonly onCompactionStarted?: () => void;
   readonly chatId: string;
   readonly entry: AgentChatEntry;
-  readonly messages: readonly ChatMessage[];
+  readMessages(): Promise<readonly ChatMessage[]>;
   readonly transcriptViewId: TranscriptViewId;
   readonly destinationPrompt: string;
   readonly clientRequestId: string | null;
@@ -25,6 +25,7 @@ export async function createCarriedContext(
   preparedCarryover: PreparedCarryoverStore,
   compaction: Pick<CarryOverCompactionService, 'planFor'> | null,
 ): Promise<CarryOverOutcome> {
+  input.signal?.throwIfAborted();
   const prepared = preparedCarryover.take({
     chatId: input.chatId,
     transcriptViewId: input.transcriptViewId,
@@ -35,11 +36,13 @@ export async function createCarriedContext(
   });
   if (prepared) return prepared;
   if (!compaction) throw new Error('Carryover compaction is not initialized');
+  const messages = await input.readMessages();
+  input.signal?.throwIfAborted();
   return compaction.planFor({
     operation: 'fresh-start',
     onCompactionStarted: input.onCompactionStarted,
     chatId: input.chatId,
-    messages: input.messages,
+    messages,
     destination: {
       agentId: input.entry.agentId,
       model: input.entry.model ?? '',

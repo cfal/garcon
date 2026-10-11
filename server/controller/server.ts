@@ -122,6 +122,7 @@ import {
 } from './ledger/index.js';
 
 import createAllRoutes from './routes/index.js';
+import { TranscriptClearService } from './ledger/clear.js';
 import { ModelCatalogResponseCache } from './agents/model-catalog-cache.js';
 import { createLogger } from '../common/log.js';
 import { errorMessage } from '../common/errors.js';
@@ -552,6 +553,16 @@ export async function startServer(): Promise<void> {
       ),
       chatMutationLock,
     });
+    const transcriptClear = new TranscriptClearService({
+      ledger: transcriptLedger,
+      ownership: agentOwnership,
+      integrations: directory,
+      adoption: transcriptAdoption,
+      registry: chatRegistry,
+      execution: queue,
+      reopenProducer: (chatId) => agentRegistry.reopenTranscriptProducer(chatId),
+      chatMutationLock,
+    });
     const chatRows = new ChatRowService({
       registry: chatRegistry,
       adoption: transcriptAdoption,
@@ -747,6 +758,7 @@ export async function startServer(): Promise<void> {
       transientFeeds,
       chatRows,
       transcriptExport,
+      transcriptClear,
       handoffArtifact,
     });
 
@@ -922,7 +934,7 @@ export async function startServer(): Promise<void> {
     process.on('SIGINT', shutdown);
 
     logServerReady(logger, { bindAddress, port: actualPort, authDisabled });
-    void metadata.repair().catch((error) => logger.warn('Metadata repair failed:', errorMessage(error)));
+    void eventWiring.repairChatMetadata().catch((error) => logger.warn('Metadata repair failed:', errorMessage(error)));
   } catch (error) {
     await workspaceLease?.release().catch((releaseError) => {
       logger.warn('Failed to release workspace lease:', errorMessage(releaseError));

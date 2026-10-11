@@ -88,6 +88,50 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 }
 
 describe('PromptComposer focus', () => {
+	it.each(['literal', 'conversation'] as const)('labels Clear as Send rather than Queue for %s agents', async executionPolicy => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'synthetic-clear-label', selectedStatus: 'running',
+			executionPolicy, requiresQueuedSubmission: true,
+		});
+		const input = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.input(input, { target: { value: '/clear' } });
+		expect(screen.queryByRole('button', { name: 'Queue message' })).toBeNull();
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(false);
+	});
+	it.each(['Tab', 'Enter'])('completes literal /clear with %s without submitting', async (key) => {
+		const onsubmit = vi.fn();
+		render(PromptComposerTestHost, {
+			selectedChatId: 'synthetic-literal-clear', selectedStatus: 'running',
+			executionPolicy: 'literal', onsubmit,
+		});
+		const input = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await inputAtCaret(input, '/cl', 3);
+		await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(1));
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+		await fireEvent.keyDown(input, { key });
+		expect(input.value).toBe('/clear ');
+		expect(onsubmit).not.toHaveBeenCalled();
+		expect(screen.queryByRole('listbox')).toBeNull();
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		expect(onsubmit).toHaveBeenCalledOnce();
+	});
+	it('hides Clear autocomplete for conversational chats', async () => {
+		const commands = vi.spyOn(commandsApi, 'getSlashCommands').mockResolvedValue([
+			{ name: 'clear', source: 'command', description: 'Synthetic native command' },
+		]);
+		try {
+			render(PromptComposerTestHost, {
+				selectedChatId: 'synthetic-conversation-clear', selectedStatus: 'running',
+				executionPolicy: 'conversation',
+			});
+			const input = screen.getByRole<HTMLTextAreaElement>('textbox');
+			await inputAtCaret(input, '/cl', 3);
+			await waitFor(() => expect(screen.getByText('No matching commands')).toBeTruthy());
+			expect(screen.queryByText('/clear')).toBeNull();
+		} finally {
+			commands.mockRestore();
+		}
+	});
 	it.each(['', 'printf command'])('preserves incompatible draft attachments and blocks all submit paths: %s', async (source) => {
 		const onsubmit = vi.fn();
 		const { container, rerender } = render(PromptComposerTestHost, {

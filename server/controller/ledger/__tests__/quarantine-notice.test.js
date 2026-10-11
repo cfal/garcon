@@ -57,7 +57,7 @@ describe('carryover migration quarantine notice', () => {
         chatExists: () => true,
         schedule: (_chatId, task) => task(),
         broadcast: () => undefined,
-        updateMetadata: (_chatId, messages) => metadataUpdates.push(...messages),
+        updateMetadata: (_chatId, _viewId, messages) => metadataUpdates.push(...messages),
         replaceMetadata: () => undefined,
         resendCandidates: () => [],
       });

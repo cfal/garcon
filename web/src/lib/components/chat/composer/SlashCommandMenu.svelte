@@ -30,6 +30,8 @@
 		supportsFork: boolean;
 		supportsSteering: boolean;
 		canScheduleIn: boolean;
+		canClear?: boolean;
+		conversationInput?: boolean;
 		onSelect: (name: string) => void;
 		onClose: () => void;
 		position?: { top: number; left: number };
@@ -48,6 +50,8 @@
 		supportsFork,
 		supportsSteering,
 		canScheduleIn,
+		canClear = false,
+		conversationInput = true,
 		onSelect,
 		onClose,
 		position,
@@ -69,7 +73,7 @@
 	// Re-fetches when the agent/project identity changes.
 	$effect(() => {
 		const key = contextKey;
-		if (!projectPath || !isVisible) return;
+		if (!conversationInput || !projectPath || !isVisible) return;
 		if (fetchedKey === key) return;
 		isLoading = true;
 		loadFailed = false;
@@ -109,6 +113,8 @@
 	// The app-owned /in command stays reserved when unavailable for draft chats.
 	let mergedCommands = $derived.by(() => {
 		const builtins = BUILTIN_SLASH_COMMANDS.filter((command) => {
+			if (command.name === 'clear') return canClear;
+			if (!conversationInput) return false;
 			if (command.name === 'fork') return supportsFork;
 			if (command.name === 'in') return canScheduleIn;
 			if (command.name === 'steer' || command.name === 'st') return supportsSteering;
@@ -116,6 +122,7 @@
 		});
 		const builtinNames = new Set(builtins.map((command) => command.name));
 		const discovered =
+			conversationInput &&
 			projectPath &&
 			!projectPending &&
 			!projectUnavailable &&
@@ -123,7 +130,7 @@
 			!loadFailed &&
 			fetchedKey === contextKey
 				? allCommands.filter(
-						(command) => command.name !== 'in' && !builtinNames.has(command.name),
+						(command) => command.name !== 'in' && command.name !== 'clear' && !builtinNames.has(command.name),
 					)
 				: [];
 		return [...builtins, ...discovered];

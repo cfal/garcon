@@ -7,6 +7,7 @@
 	import PromptComposer from './composer/PromptComposer.svelte';
 	import QueuedInputEditorDialog from './queue/QueuedInputEditorDialog.svelte';
 	import HandoffForkDialog from './HandoffForkDialog.svelte';
+	import ClearChatDialog from './ClearChatDialog.svelte';
 	import ExecutorHandoffDialog from './ExecutorHandoffDialog.svelte';
 	import ReloadChatDialog from './ReloadChatDialog.svelte';
 	import UserMessageNavigatorDialog from './transcript/UserMessageNavigatorDialog.svelte';
@@ -220,6 +221,7 @@
 	onDestroy(() => {
 		controller.executorHandoff.cancel();
 		reloadDialog.dispose();
+		controller.clearHistory.handleChatSwitch(null);
 		drainHandle.cleanup();
 		transcriptCache.flush();
 	});
@@ -915,6 +917,13 @@
 		onConfirm={() => void reloadDialog.confirm(reloadFromNative)}
 	/>
 	<ExecutorHandoffDialog handoff={controller.executorHandoff} />
+	<ClearChatDialog
+		open={controller.clearHistory.isOpen}
+		busy={controller.clearHistory.busy}
+		error={controller.clearHistory.error}
+		onCancel={() => controller.clearHistory.cancel()}
+		onConfirm={() => void controller.clearHistory.confirm()}
+	/>
 	<HandoffForkDialog
 		open={controller.handoffForkConfirmation.isOpen}
 		onCancel={() => controller.handoffForkConfirmation.cancel()}

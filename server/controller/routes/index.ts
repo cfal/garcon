@@ -22,6 +22,8 @@ import { createRuntimeRoutes } from './runtime.js';
 import { createAgentTurnReceiptRoutes } from './agent-turn-receipt.js';
 import { createChatSnapshotRoutes } from './chat-snapshot.js';
 import { createChatRowRoutes } from './chat-rows.js';
+import { createChatClearRoutes } from './chat-clear.js';
+import type { TranscriptClearService } from '../ledger/clear.js';
 import { createChatExportRoutes } from './chat-export.js';
 import { createChatHandoffArtifactRoutes } from './chat-handoff-artifact.js';
 import { createNativeSessionLookupRoutes } from './native-session-lookup.js';
@@ -110,6 +112,7 @@ export default function createAllRoutes(workspaceDir: string, {
   transientFeeds,
   chatRows,
   transcriptExport,
+  transcriptClear,
   handoffArtifact,
   executors,
   projectBasePath,
@@ -150,6 +153,7 @@ export default function createAllRoutes(workspaceDir: string, {
   transientFeeds: ChatTransientFeedStore;
   chatRows: ChatRowService;
   transcriptExport: TranscriptExportService;
+  transcriptClear: TranscriptClearService;
   handoffArtifact: HandoffArtifactService;
   executors: ExecutorManager;
   projectBasePath: string;
@@ -170,6 +174,7 @@ export default function createAllRoutes(workspaceDir: string, {
     }),
     createChatRowRoutes(chatRows),
     createChatExportRoutes(transcriptExport),
+    createChatClearRoutes(transcriptClear),
     createChatHandoffArtifactRoutes(handoffArtifact),
     createNativeSessionLookupRoutes(registry, agents),
     createProjectResolutionRoutes({ registry, inspect: inspectProject }),

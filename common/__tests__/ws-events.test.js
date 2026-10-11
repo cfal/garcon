@@ -16,6 +16,14 @@ it('round-trips execution settings invalidations', () => {
   expect(parseServerWsMessage(JSON.parse(JSON.stringify(event)))).toEqual(event);
 });
 
+it('round-trips workspace metadata repair without accepting missing targets for chat mutations', () => {
+  const event = new ChatListRefreshRequestedMessage('metadata-repaired', null);
+  expect(parseServerWsMessage(JSON.parse(JSON.stringify(event)))).toEqual(event);
+  expect(parseServerWsMessage({ ...event, chatId: 'chat-1' })).toBeNull();
+  expect(parseServerWsMessage({ ...event, chatId: undefined })).toBeNull();
+  expect(parseServerWsMessage({ ...event, reason: 'execution-settings-updated' })).toBeNull();
+});
+
 describe('parseServerWsMessage chat-reload-progress', () => {
   it('round-trips each phase and rejects malformed progress', () => {
     for (const phase of ['preparing', 'reading', 'saving']) {

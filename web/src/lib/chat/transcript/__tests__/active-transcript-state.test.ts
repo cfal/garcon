@@ -1531,6 +1531,25 @@ describe('ActiveTranscriptState', () => {
 		]);
 	});
 
+	it('fences old snapshot work and buffered rows without blanking the replacement presentation', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, user('Synthetic original'))], {
+			lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		const before = chat.entries;
+		const oldEpoch = chat.beginSnapshotLoad();
+		applyMessages(chat, 'chat-1', 'generation-1', [entry(2, assistant('Synthetic buffered'))]);
+		chat.invalidatePendingLoads();
+		expect(chat.entries).toBe(before);
+		expect(chat.isLoadingMessages).toBe(false);
+		expect(chat.setFromPage('chat-1', page(), oldEpoch)).toBe('stale');
+		const newEpoch = chat.beginSnapshotLoad();
+		expect(chat.setFromPage('chat-1', page({
+			transcriptViewId: 'generation-2', messages: [entry(1, user('Synthetic replacement'))],
+		}), newEpoch)).toBe('applied');
+		expect(chat.chatMessages.map(contentOf)).toEqual(['Synthetic replacement']);
+	});
+
 	it('buffers live same-generation messages while a snapshot is loading', () => {
 		const chat = new ActiveTranscriptState();
 		const epoch = chat.beginSnapshotLoad();

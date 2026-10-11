@@ -35,7 +35,7 @@ describe('transcript event fanout', () => {
 
     expect(broadcast).not.toHaveBeenCalled();
     tasks[0]();
-    expect(updateMetadata).toHaveBeenCalledWith('chat-1', [
+    expect(updateMetadata).toHaveBeenCalledWith('chat-1', 'view-1', [
       expect.objectContaining({ content: 'answer' }),
     ]);
     expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({

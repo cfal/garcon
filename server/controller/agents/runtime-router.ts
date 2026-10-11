@@ -194,12 +194,10 @@ export class AgentRuntimeRouter {
       } });
       runId = this.#beginRun(chatId, operation.turnId);
       assertExecutionAdmissionOpen(opts);
-      const messages = integration.literalExecution ? [] : await this.#ledger.carryoverMessages(chatId, prepared.excludedOrdinals);
-      assertExecutionAdmissionOpen(opts);
       const outcome = integration.literalExecution ? { kind: 'no-history' as const } : await this.#createCarriedContext({
         chatId,
         entry,
-        messages,
+        readMessages: () => this.#ledger.carryoverMessages(chatId, prepared.excludedOrdinals),
         transcriptViewId: prepared.viewId,
         destinationPrompt: prepared.prompt,
         clientRequestId: opts.clientRequestId ?? null,

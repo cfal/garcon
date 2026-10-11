@@ -27,6 +27,7 @@ import {
 import { ConversationQueueController } from '$lib/chat/conversation/conversation-queue-controller.svelte.js';
 import { ConversationSettingsController } from '$lib/chat/conversation/conversation-settings-controller.svelte.js';
 import { HandoffForkConfirmationState } from './handoff-fork-confirmation.svelte.js';
+import { ConversationClearController } from './conversation-clear-controller.svelte.js';
 import { ExecutorHandoffProjectState } from './executor-handoff-project.svelte.js';
 import { ConversationPermissionService } from './conversation-permission-service.js';
 import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
@@ -55,7 +56,7 @@ import { ApiError } from '$lib/api/client.js';
 import { CommandOutcomeUnknownError } from './idempotent-command.js';
 import { resolveConversationModelSelection } from './conversation-model-selection.js';
 import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
-import { isControllerSlashCommand } from '$lib/chat/composer/slash-commands.js';
+import { isClearCommand, isControllerSlashCommand } from '$lib/chat/composer/slash-commands.js';
 import type {
 	SessionControllerDeps,
 	SessionTranscriptLoadTarget,
@@ -88,8 +89,10 @@ export class ConversationSessionController {
 	#observedExecutionSelection = '';
 	readonly #handoffForkConfirmation = new HandoffForkConfirmationState();
 	readonly executorHandoff: ExecutorHandoffProjectState;
+	readonly clearHistory: ConversationClearController;
 
 	constructor(private deps: SessionControllerDeps) {
+		this.clearHistory = new ConversationClearController(deps);
 		this.executorHandoff = new ExecutorHandoffProjectState(
 			(executorId, selection) => {
 				if (!deps.canSubmitToExecutor(executorId)) return false;
@@ -251,6 +254,7 @@ export class ConversationSessionController {
 
 	// Deduplicates chat-switch calls so the component effect can be stateless.
 	handleChatSwitchIfChanged(chatId: string | null): void {
+		this.clearHistory.handleChatSwitch(chatId);
 		if (this.executorHandoff.target && this.executorHandoff.target.chatId !== chatId)
 			this.executorHandoff.cancel();
 		if (chatId === this.#lastChatId) {
@@ -531,6 +535,20 @@ export class ConversationSessionController {
 		const draft = deps.composerState.draftSnapshot(chatId);
 		let text = messageOverride ?? draft.text;
 		const submissionImages = imageOverride ?? draft.attachments;
+		if (source === 'explicit' && isClearCommand(text)) {
+			if (isDraft) return 'no-op';
+			const owner = deps.modelCatalogForExecutor(selected.executorId ?? 'local').getAgent(selected.agentId ?? '');
+			if (owner?.executionPolicy !== 'literal') {
+				deps.chatState.appendLocalNoticeForChat(chatId, 'error', m.chat_clear_unsupported());
+				return 'rejected';
+			}
+			if (submissionImages.length > 0) {
+				deps.chatState.appendLocalNoticeForChat(chatId, 'error', m.chat_clear_no_attachments());
+				return 'rejected';
+			}
+			this.clearHistory.request(chatId, ownsComposer);
+			return 'no-op';
+		}
 		const startup = deps.sessions.startupByChatId[chatId];
 		if (
 			source === 'automatic-start' &&
@@ -686,6 +704,7 @@ export class ConversationSessionController {
 		if (deps.sessions.selectedChatId !== chatId || this.isDirectAdmissionPending(chatId)) {
 			return 'no-op';
 		}
+		if (isClearCommand(deps.composerState.inputText)) return this.submitForChat(chatId);
 		const agent = deps.modelCatalogForExecutor(deps.agentState.executorId).getAgent(deps.agentState.agentId);
 		if (!agent) return 'no-op';
 		const selected = deps.sessions.byId[chatId];

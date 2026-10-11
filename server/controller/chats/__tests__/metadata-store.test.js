@@ -11,6 +11,7 @@ const mockRegistry = {
   onChatRemoved: mock(() => {}),
 };
 const mockAgents = {
+  getExistingTranscriptViewId: () => 'view-1',
   getExistingTranscriptPreview: mock(() => null),
 };
 const mockCarryOver = {
@@ -53,7 +54,7 @@ function makeRegistry(sessions = {}) {
 function makeSnapshot(chats) {
   return {
     version: 1,
-    chats,
+    chats: Object.fromEntries(Object.entries(chats).map(([id, value]) => [id, { transcriptViewId: 'view-1', ...value }])),
   };
 }
 
@@ -76,7 +77,7 @@ describe('metadata-store', () => {
 
   describe('extractPreviewText uses full message content', () => {
     it('keeps full multiline content from assistant-message', () => {
-      metadata.updateFromAppendedMessages(chatId, [
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [
         { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'first line\nsecond line\nthird' },
       ]);
 
@@ -85,7 +86,7 @@ describe('metadata-store', () => {
     });
 
     it('keeps full multiline content from user-message', () => {
-      metadata.updateFromAppendedMessages(chatId, [
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [
         { type: 'user-message', timestamp: '2026-01-02T00:00:00Z', content: 'question line\nmore details' },
       ]);
 
@@ -94,7 +95,7 @@ describe('metadata-store', () => {
     });
 
     it('returns full content when no newline', () => {
-      metadata.updateFromAppendedMessages(chatId, [
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [
         { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'single line' },
       ]);
 
@@ -103,7 +104,7 @@ describe('metadata-store', () => {
     });
 
     it('preserves whitespace', () => {
-      metadata.updateFromAppendedMessages(chatId, [
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [
         { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: '  padded content  \nmore' },
       ]);
 
@@ -115,7 +116,7 @@ describe('metadata-store', () => {
       const metaBefore = metadata.getChatMetadata(chatId);
       const prevMessage = metaBefore.lastMessage;
 
-      metadata.updateFromAppendedMessages(chatId, [
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [
         { type: 'read-tool-use', timestamp: '2026-01-02T00:00:00Z', toolId: 't1', filePath: '/tmp/test.ts' },
       ]);
 
@@ -126,7 +127,7 @@ describe('metadata-store', () => {
 
   describe('updateFromAppendedMessages', () => {
     it('updates lastActivity from message timestamps', () => {
-      metadata.updateFromAppendedMessages(chatId, [
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [
         { type: 'bash-tool-use', timestamp: '2099-01-01T00:00:00Z', toolId: 't1', command: 'ls' },
       ]);
 
@@ -135,7 +136,7 @@ describe('metadata-store', () => {
     });
 
     it('creates metadata when live messages arrive before startup repair', () => {
-      metadata.updateFromAppendedMessages('unknown-chat', [
+      metadata.updateFromAppendedMessages('unknown-chat', 'view-1', [
         { type: 'user-message', timestamp: '2026-01-01T00:00:00Z', content: 'hello' },
       ]);
 
@@ -150,7 +151,7 @@ describe('metadata-store', () => {
       const index = new MetadataIndex(mockRegistry, mockAgents, mockCarryOver, { metadataPath, saveDelayMs: 0 });
       index.addNewChatMetadata('live-chat', 'first');
 
-      index.updateFromAppendedMessages('live-chat', [
+      index.updateFromAppendedMessages('live-chat', 'view-1', [
         { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'saved preview' },
       ]);
       await index.flush();
@@ -174,27 +175,27 @@ describe('metadata-store', () => {
         yield [{ type: 'user-message', timestamp: '2026-01-02T00:00:00Z', content: 'first user' }];
         yield [{ type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'last preview' }];
       }
-      await metadata.replaceFromTranscriptView('uncached', pages());
+      await metadata.replaceFromTranscriptView('uncached', 'view-1', pages());
       expect(metadata.getChatMetadata('uncached')).toMatchObject({
         createdAt: '2026-01-01T00:00:00Z', lastActivity: '2026-01-03T00:00:00Z',
         firstMessage: 'first user', lastMessage: 'last preview',
       });
     });
 
-    it('retains replacement fallback rules and does not publish a failed fold', async () => {
+    it('removes old previews on empty replacement and does not publish a failed fold', async () => {
       metadata.addNewChatMetadata('fallback', 'original title');
       const current = metadata.getChatMetadata('fallback');
-      await metadata.replaceFromTranscriptView('fallback', messagePages([]));
+      await metadata.replaceFromTranscriptView('fallback', 'view-1', messagePages([]));
       expect(metadata.getChatMetadata('fallback')).toMatchObject({
         createdAt: current.createdAt, lastActivity: current.createdAt,
-        firstMessage: 'original title', lastMessage: 'original title',
+        firstMessage: '', lastMessage: '',
       });
       const before = metadata.getChatMetadata('fallback');
       async function* failed() {
         yield [{ type: 'user-message', content: 'unpublished' }];
         throw new Error('view replaced');
       }
-      await expect(metadata.replaceFromTranscriptView('fallback', failed())).rejects.toThrow('view replaced');
+      await expect(metadata.replaceFromTranscriptView('fallback', 'view-1', failed())).rejects.toThrow('view replaced');
       expect(metadata.getChatMetadata('fallback')).toBe(before);
     });
 
@@ -202,7 +203,7 @@ describe('metadata-store', () => {
     const longLast = `Done with the refactor\n${'last body '.repeat(1_000)}`;
 
     it('caps stored previews while keeping their first lines', async () => {
-      await metadata.replaceFromTranscriptView(chatId, messagePages([
+      await metadata.replaceFromTranscriptView(chatId, 'view-1', messagePages([
         { type: 'user-message', timestamp: '2026-01-01T00:00:00Z', content: longFirst },
         { type: 'assistant-message', timestamp: '2026-01-01T00:01:00Z', content: longLast },
       ]));
@@ -216,7 +217,7 @@ describe('metadata-store', () => {
     });
 
     it('caps live appends and new chats the same way', () => {
-      metadata.updateFromAppendedMessages(chatId, [
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [
         { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: longLast },
       ]);
       metadata.addNewChatMetadata('long-first-chat', longFirst);
@@ -227,7 +228,7 @@ describe('metadata-store', () => {
     });
 
     it('does not split a surrogate pair at the cut', () => {
-      metadata.updateFromAppendedMessages(chatId, [
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [
         { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: `${'x'.repeat(511)}\u{1F600}tail` },
       ]);
 
@@ -251,6 +252,96 @@ describe('metadata-store', () => {
   });
 
   describe('identity invalidation', () => {
+
+    it.each(['unavailable', 'failed'])('retains cold first-message repair through live appends when preview reads are %s', async outcome => {
+      const metadataPath = path.join(tmpDir, 'chat-metadata.json');
+      await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({
+        cold: { firstMessage: '', lastMessage: '', source: 'live' },
+      })));
+      const transcripts = {
+        getExistingTranscriptViewId: () => 'view-1',
+        getExistingTranscriptPreview: mock(() => {
+          if (outcome === 'failed') throw new Error('Synthetic preview failure');
+          return null;
+        }),
+      };
+      const index = new MetadataIndex(makeRegistry({ cold: session() }), transcripts, mockCarryOver, { metadataPath });
+      try {
+        await index.init();
+        for (const type of ['assistant-message', 'user-message']) {
+          expect(() => index.updateFromAppendedMessages('cold', 'view-1', [
+            { type, timestamp: '2026-01-02T00:00:00Z', content: 'Synthetic later content' },
+          ])).not.toThrow();
+        }
+        expect(index.getChatMetadata('cold')).toBeNull();
+        await index.flush();
+        expect(JSON.parse(await fs.readFile(metadataPath, 'utf8')).chats.cold.firstMessage).toBe('');
+        transcripts.getExistingTranscriptPreview.mockReturnValue(previewResult({
+          firstMessage: 'Synthetic first input', lastMessage: 'Synthetic later content',
+        }));
+        await index.repair();
+        expect(index.getChatMetadata('cold')).toMatchObject({
+          firstMessage: 'Synthetic first input', lastMessage: 'Synthetic later content',
+        });
+      } finally {
+        await index.close();
+        await index.flush();
+      }
+    });
+
+    it('serves validated list previews from memory and invalidates replacement synchronously', async () => {
+      const metadataPath = path.join(tmpDir, 'chat-metadata.json');
+      const ids = Array.from({ length: 1_000 }, (_, index) => `synthetic-${index}`);
+      await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot(Object.fromEntries(
+        ids.map(id => [id, { firstMessage: 'Synthetic cached preview', source: 'live' }]),
+      ))));
+      const transcripts = {
+        getExistingTranscriptViewId: mock(() => 'view-1'),
+        getExistingTranscriptPreview: mock(() => null),
+      };
+      const index = new MetadataIndex(makeRegistry(Object.fromEntries(ids.map(id => [id, session()]))),
+        transcripts, mockCarryOver, { metadataPath });
+      try {
+        await index.init();
+        expect(index.listAllChatMetadata().size).toBe(0);
+        expect(transcripts.getExistingTranscriptViewId).not.toHaveBeenCalled();
+        await index.repair();
+        expect(transcripts.getExistingTranscriptViewId).toHaveBeenCalledTimes(ids.length);
+        transcripts.getExistingTranscriptViewId.mockClear();
+        for (let repeat = 0; repeat < 3; repeat += 1) expect(index.listAllChatMetadata().size).toBe(ids.length);
+        expect(transcripts.getExistingTranscriptViewId).not.toHaveBeenCalled();
+        expect(transcripts.getExistingTranscriptPreview).not.toHaveBeenCalled();
+        index.invalidateTranscriptView(ids[0]);
+        expect(index.getChatMetadata(ids[0])).toBeNull();
+        expect(index.listAllChatMetadata().size).toBe(ids.length - 1);
+      } finally {
+        await index.close();
+        await index.flush();
+      }
+    });
+
+    it('defers unavailable previews instead of certifying them as an empty current view', async () => {
+      const metadataPath = path.join(tmpDir, 'chat-metadata.json');
+      await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({
+        deferred: { firstMessage: 'Synthetic saved preview', source: 'live' },
+      })));
+      const transcripts = { getExistingTranscriptViewId: () => 'view-2', getExistingTranscriptPreview: mock(() => null) };
+      const index = new MetadataIndex(makeRegistry({ deferred: session() }), transcripts, mockCarryOver, { metadataPath });
+      try {
+        await index.init();
+        await index.repair();
+        expect(index.getChatMetadata('deferred')).toBeNull();
+        await index.flush();
+        const persisted = JSON.parse(await fs.readFile(metadataPath, 'utf8')).chats.deferred;
+        expect(persisted.transcriptViewId).toBe('view-1');
+        expect(persisted.firstMessage).toBe('Synthetic saved preview');
+        await index.repair();
+        expect(transcripts.getExistingTranscriptPreview).toHaveBeenCalledTimes(2);
+      } finally {
+        await index.close();
+        await index.flush();
+      }
+    });
     const identity = (overrides = {}) => ({
       carryOverRevision: 'carry-v1:0',
       agentOwnershipEpoch: 'owner-1',
@@ -258,7 +349,7 @@ describe('metadata-store', () => {
     });
 
     it('stamps the commit identity on durable append', () => {
-      metadata.updateFromAppendedMessages(chatId, [
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [
         { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'appended' },
       ], identity());
 
@@ -266,11 +357,11 @@ describe('metadata-store', () => {
     });
 
     it('rebuilds preview text from a replacement transcript view', async () => {
-      metadata.updateFromAppendedMessages(chatId, [
+      metadata.updateFromAppendedMessages(chatId, 'view-1', [
         { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'pre-reset tail' },
       ], identity());
 
-      await metadata.replaceFromTranscriptView(chatId, messagePages([
+      await metadata.replaceFromTranscriptView(chatId, 'view-1', messagePages([
         { type: 'user-message', timestamp: '2026-01-01T00:00:00Z', content: 'surviving prompt' },
         { type: 'assistant-message', timestamp: '2026-01-01T00:01:00Z', content: 'surviving reply' },
         { type: 'bash-tool-use', timestamp: '2026-01-01T00:02:00Z', toolId: 'tool-1', command: 'pwd' },
@@ -331,13 +422,14 @@ describe('metadata-store', () => {
           { metadataPath },
         );
         await index.init();
+        await index.repair();
         expect(index.getChatMetadata('persisted-chat').lastMessage).toBe('last persisted');
       } finally {
         chmod.mockRestore();
       }
     });
 
-    it('loads persisted metadata before agent preview repair', async () => {
+    it('withholds persisted metadata until its view is validated by paced repair', async () => {
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
       await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({
         'persisted-chat': {
@@ -348,7 +440,8 @@ describe('metadata-store', () => {
           source: 'live',
         },
       })), 'utf8');
-      const agents = { getExistingTranscriptPreview: mock(() => null) };
+      const agents = { getExistingTranscriptViewId: () => 'view-1',
+        getExistingTranscriptPreview: mock(() => null) };
       const index = new MetadataIndex(
         makeRegistry({ 'persisted-chat': session() }),
         agents,
@@ -357,6 +450,9 @@ describe('metadata-store', () => {
       );
 
       await index.init();
+      expect(index.getChatMetadata('persisted-chat')).toBeNull();
+      expect(index.listAllChatMetadata().size).toBe(0);
+      await index.repair();
       await index.flush();
 
       expect(agents.getExistingTranscriptPreview).toHaveBeenCalledTimes(0);
@@ -365,6 +461,7 @@ describe('metadata-store', () => {
 
     it('repairs missing metadata from existing transcript previews', async () => {
       const agents = {
+        getExistingTranscriptViewId: () => 'view-1',
         getExistingTranscriptPreview: mock(() => previewResult({
           firstMessage: 'first repaired',
           lastMessage: 'last repaired',
@@ -386,38 +483,53 @@ describe('metadata-store', () => {
       expect(index.getChatMetadata('missing-chat').source).toBe('agent-preview');
     });
 
-    it('yields during synchronous repairs, stops at the elapsed budget, and preserves completed work', async () => {
+    it.each(['missing', 'persisted'])('paces the complete %s repair suffix without a total elapsed-time cutoff', async (kind) => {
       const sessions = Object.fromEntries(Array.from({ length: 48 }, (_, i) => [`chat-${i}`, session()]));
-      const agents = { getExistingTranscriptPreview: mock(() => {
-        const end = performance.now() + 4;
-        while (performance.now() < end) { /* Simulates synchronous SQLite/JSON work. */ }
-        return previewResult({ firstMessage: 'repaired' });
-      }) };
+      let elapsed = 0;
+      const clock = spyOn(performance, 'now').mockImplementation(() => elapsed);
+      const agents = {
+        getExistingTranscriptViewId: mock(() => {
+          elapsed += 10_000;
+          return 'view-1';
+        }),
+        getExistingTranscriptPreview: mock(() => previewResult({ firstMessage: 'repaired' })),
+      };
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
-      const index = new MetadataIndex(makeRegistry(sessions), agents, mockCarryOver, {
-        metadataPath, repairDeadlineMs: 20,
-      });
-      await index.init();
-      expect(agents.getExistingTranscriptPreview).not.toHaveBeenCalled();
+      if (kind === 'persisted') {
+        await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot(Object.fromEntries(
+          Object.keys(sessions).map(id => [id, { firstMessage: 'repaired', source: 'live' }]),
+        ))));
+      }
+      const index = new MetadataIndex(makeRegistry(sessions), agents, mockCarryOver, { metadataPath });
       let timerFired = false;
-      const timer = setTimeout(() => { timerFired = true; }, 1);
-      const repair = index.repair();
-      expect(index.repair()).toBe(repair);
-      await repair;
-      clearTimeout(timer);
-      expect(timerFired).toBe(true);
-      expect(agents.getExistingTranscriptPreview.mock.calls.length).toBeGreaterThan(0);
-      expect(agents.getExistingTranscriptPreview.mock.calls.length).toBeLessThan(48);
-      await index.flush();
-      const saved = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
-      expect(Object.keys(saved.chats)).toHaveLength(agents.getExistingTranscriptPreview.mock.calls.length);
-      expect(saved.chats['chat-0'].firstMessage).toBe('repaired');
+      const timer = setImmediate(() => { timerFired = true; });
+      try {
+        await index.init();
+        expect(index.listAllChatMetadata().size).toBe(0);
+        const repair = index.repair();
+        expect(index.repair()).toBe(repair);
+        await repair;
+        expect(index.listAllChatMetadata().size).toBe(48);
+        expect(timerFired).toBe(true);
+        expect(agents.getExistingTranscriptViewId.mock.calls.map(([id]) => id)).toEqual(Object.keys(sessions));
+        expect(agents.getExistingTranscriptPreview).toHaveBeenCalledTimes(kind === 'missing' ? 48 : 0);
+        await index.flush();
+        const saved = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+        expect(Object.keys(saved.chats)).toHaveLength(48);
+        expect(saved.chats['chat-47'].firstMessage).toBe('repaired');
+      } finally {
+        clock.mockRestore();
+        clearImmediate(timer);
+        await index.close();
+        await index.flush();
+      }
     });
 
     it.each(['append', 'replace', 'delete', 'ownership'])('rechecks %s changes between background reads', async (change) => {
       const sessions = { first: session(), second: session() };
       const firstRead = Promise.withResolvers();
-      const transcripts = { getExistingTranscriptPreview: mock((_entry, id) => {
+      const transcripts = { getExistingTranscriptViewId: () => 'view-1',
+        getExistingTranscriptPreview: mock((_entry, id) => {
         if (id === 'first') firstRead.resolve();
         return previewResult({ firstMessage: 'repaired' });
       }) };
@@ -425,8 +537,8 @@ describe('metadata-store', () => {
       await index.init();
       const repair = index.repair();
       await firstRead.promise;
-      if (change === 'append') index.updateFromAppendedMessages('second', [{ type: 'user-message', content: 'live' }]);
-      if (change === 'replace') await index.replaceFromTranscriptView('second', messagePages([{ type: 'user-message', content: 'replacement' }]));
+      if (change === 'append') index.updateFromAppendedMessages('second', 'view-1', [{ type: 'user-message', content: 'live' }]);
+      if (change === 'replace') await index.replaceFromTranscriptView('second', 'view-1', messagePages([{ type: 'user-message', content: 'replacement' }]));
       if (change === 'delete') delete sessions.second;
       if (change === 'ownership') sessions.second = session({ agentOwnershipEpoch: 'new-owner' });
       await repair;
@@ -442,7 +554,8 @@ describe('metadata-store', () => {
 
     it('stops background reads on close without losing completed repairs', async () => {
       const firstRead = Promise.withResolvers();
-      const transcripts = { getExistingTranscriptPreview: mock(() => {
+      const transcripts = { getExistingTranscriptViewId: () => 'view-1',
+        getExistingTranscriptPreview: mock(() => {
         firstRead.resolve();
         return previewResult({ firstMessage: 'kept' });
       }) };
@@ -460,7 +573,8 @@ describe('metadata-store', () => {
     });
 
     it('isolates a failed preview and continues with healthy chats', async () => {
-      const transcripts = { getExistingTranscriptPreview: (_entry, id) => {
+      const transcripts = { getExistingTranscriptViewId: () => 'view-1',
+        getExistingTranscriptPreview: (_entry, id) => {
         if (id === 'bad') throw new Error('Synthetic ledger failure');
         return previewResult({ firstMessage: 'healthy' });
       } };
@@ -483,6 +597,7 @@ describe('metadata-store', () => {
         },
       })), 'utf8');
       const stalledAgents = {
+        getExistingTranscriptViewId: () => 'view-1',
         getExistingTranscriptPreview: mock(() => { throw new Error('Must not read'); }),
       };
       const index = new MetadataIndex(
@@ -516,6 +631,7 @@ describe('metadata-store', () => {
         },
       })), 'utf8');
       const agents = {
+        getExistingTranscriptViewId: () => 'view-1',
         getExistingTranscriptPreview: mock(() => previewResult({
           firstMessage: 'fresh first',
           lastMessage: 'fresh last',
@@ -555,7 +671,8 @@ describe('metadata-store', () => {
           },
         },
       })), 'utf8');
-      const agents = { getExistingTranscriptPreview: mock(() => null) };
+      const agents = { getExistingTranscriptViewId: () => 'view-1',
+        getExistingTranscriptPreview: mock(() => null) };
       const index = new MetadataIndex(
         makeRegistry({ 'fresh-chat': session() }),
         agents,
@@ -574,7 +691,8 @@ describe('metadata-store', () => {
         revision: () => 'carry-v5:seg',
         loadPage: mock(() => { throw new Error('Legacy carryover must not be opened'); }),
       };
-      const transcripts = { getExistingTranscriptPreview: mock(() => previewResult({
+      const transcripts = { getExistingTranscriptViewId: () => 'view-1',
+        getExistingTranscriptPreview: mock(() => previewResult({
         firstMessage: 'carried first',
         lastMessage: 'current reply',
         createdAt: '2026-01-01T00:00:00Z',
@@ -611,7 +729,8 @@ describe('metadata-store', () => {
           identity: { carryOverRevision: 'old', agentOwnershipEpoch: 'old' },
         },
       })));
-      const transcripts = { getExistingTranscriptPreview: mock(() => null) };
+      const transcripts = { getExistingTranscriptViewId: () => null,
+        getExistingTranscriptPreview: mock(() => null) };
       const index = new MetadataIndex(
         makeRegistry({ 'stale-chat': session(), 'unadopted-chat': session() }),
         transcripts,
@@ -625,7 +744,9 @@ describe('metadata-store', () => {
         await index.flush();
         expect(transcripts.getExistingTranscriptPreview).toHaveBeenCalledTimes(2);
         expect(index.getChatMetadata('unadopted-chat')).toBeNull();
-        expect(index.getChatMetadata('stale-chat').lastMessage).toBe('cached last');
+        expect(index.getChatMetadata('stale-chat')).toBeNull();
+        const persisted = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+        expect(persisted.chats['stale-chat'].lastMessage).toBe('cached last');
         expect(warning).not.toHaveBeenCalled();
       } finally {
         warning.mockRestore();

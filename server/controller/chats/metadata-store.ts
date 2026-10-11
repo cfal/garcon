@@ -1,5 +1,5 @@
-// Persistent metadata index for chat list rendering. Ledger previews repair
-// missing entries, while live appends keep latest preview text durable.
+// Persisted previews remain hidden until paced repair validates their ledger view.
+// Live appends and synchronous replacement invalidation keep list reads memory-only.
 
 import { promises as fs } from 'fs';
 import { writeJsonFileAtomic } from '../../common/json-file-store.ts';
@@ -19,7 +19,6 @@ const logger = createLogger('chats:metadata-store');
 // is rewritten whole.
 const DEFAULT_SAVE_DELAY_MS = 1000;
 const METADATA_VERSION = 1;
-const DEFAULT_REPAIR_DEADLINE_MS = 30_000;
 // Titles and list previews show only a first line, but the whole preview is kept for every
 // chat and rewritten on each save, so both are capped. The first message keeps enough for
 // the chat details dialog.
@@ -38,6 +37,7 @@ export interface ChatMetadataIdentity {
 
 export interface ChatMetadata {
   chatId: string;
+  transcriptViewId: string | null;
   createdAt: string | null;
   lastActivity: string | null;
   lastMessage: string;
@@ -56,10 +56,10 @@ interface AgentPreviewMetadata {
 interface MetadataIndexOptions {
   metadataPath?: string | null;
   saveDelayMs?: number;
-  repairDeadlineMs?: number;
 }
 
 interface MetadataTranscriptSource {
+  getExistingTranscriptViewId(chatId: string): string | null;
   getExistingTranscriptPreview(session: ChatRegistryEntry, chatId: string): {
     preview: unknown;
   } | null;
@@ -71,13 +71,13 @@ interface MetadataCarryOverSource {
 
 export class MetadataIndex {
   #metadataByChatId = new Map<string, ChatMetadata>();
+  #validatedChatIds = new Set<string>();
   #registry: IChatRegistry;
   #transcripts: MetadataTranscriptSource;
   #carryOver: MetadataCarryOverSource;
   #initialized = false;
   #metadataPath: string | null;
   #saveDelayMs: number;
-  #repairDeadlineMs: number;
   #repairPromise: Promise<void> | null = null;
   #closed = false;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -94,7 +94,6 @@ export class MetadataIndex {
     this.#carryOver = carryOver;
     this.#metadataPath = options.metadataPath ?? null;
     this.#saveDelayMs = options.saveDelayMs ?? DEFAULT_SAVE_DELAY_MS;
-    this.#repairDeadlineMs = options.repairDeadlineMs ?? DEFAULT_REPAIR_DEADLINE_MS;
   }
 
   async init(): Promise<void> {
@@ -102,11 +101,13 @@ export class MetadataIndex {
       this.#initialized = true;
       this.#registry.onChatRemoved((chatId) => {
         this.#metadataByChatId.delete(String(chatId));
+        this.#validatedChatIds.delete(String(chatId));
         this.#scheduleSave();
       });
     }
 
     this.#metadataByChatId = await this.#loadPersistedMetadata();
+    this.#validatedChatIds.clear();
     this.#pruneMissingRegistryEntries();
     this.#scheduleSave();
   }
@@ -125,27 +126,48 @@ export class MetadataIndex {
   }
 
   getChatMetadata(chatId: string): ChatMetadata | null {
-    return this.#metadataByChatId.get(String(chatId)) || null;
+    const key = String(chatId);
+    return this.#validatedChatIds.has(key) ? this.#metadataByChatId.get(key) ?? null : null;
+  }
+
+  invalidateTranscriptView(chatId: string): void {
+    this.#validatedChatIds.delete(String(chatId));
   }
 
   listAllChatMetadata(): Map<string, ChatMetadata> {
-    return new Map(this.#metadataByChatId);
+    const entries = new Map<string, ChatMetadata>();
+    for (const chatId of this.#metadataByChatId.keys()) {
+      const metadata = this.getChatMetadata(chatId);
+      if (metadata) entries.set(chatId, metadata);
+    }
+    return entries;
   }
 
   updateFromAppendedMessages(
     chatId: string,
+    transcriptViewId: string,
     appendedMessages: ChatMessage[],
     identity?: ChatMetadataIdentity,
   ): void {
     const key = String(chatId);
-    const current = this.#metadataByChatId.get(key);
+    if (this.#transcripts.getExistingTranscriptViewId(key) !== transcriptViewId) return;
+    const cached = this.#metadataByChatId.get(key);
+    let current = cached?.transcriptViewId === transcriptViewId ? cached : null;
+    if (cached && !this.#validatedChatIds.has(key)) {
+      const session = this.#registry.getChat(key);
+      if (!session) return;
+      current = this.#repairChatMetadata(key, session);
+      // A live suffix cannot establish the first input missing from a cold preview.
+      if (!current) return;
+    }
     const createdAt = current?.createdAt ?? firstTimestamp(appendedMessages) ?? new Date().toISOString();
-    const firstMessage = current?.firstMessage || firstMessagePreview(firstUserText(appendedMessages)) || 'New Session';
+    const firstMessage = current?.firstMessage || firstMessagePreview(firstUserText(appendedMessages));
     const lastMessage = lastMessagePreview(latestPreviewText(appendedMessages) ?? current?.lastMessage ?? firstMessage);
     const lastActivity = latestTimestamp(appendedMessages) ?? current?.lastActivity ?? createdAt;
 
     this.#metadataByChatId.set(key, {
       chatId: key,
+      transcriptViewId,
       createdAt,
       lastActivity,
       lastMessage,
@@ -155,15 +177,17 @@ export class MetadataIndex {
         ? { identity: identity ?? current?.identity }
         : {}),
     });
+    this.#validatedChatIds.add(key);
     this.#scheduleSave();
   }
 
   // Recomputes the cached preview from the complete replacement view.
   async replaceFromTranscriptView(
     chatId: string,
+    transcriptViewId: string,
     pages: AsyncIterable<readonly ChatMessage[]>,
   ): Promise<void> {
-    let firstText = '';
+    let firstMessage = '';
     let firstAt: string | null = null;
     let lastText: string | null = null;
     let lastAt: string | null = null;
@@ -171,7 +195,7 @@ export class MetadataIndex {
     for await (const messages of pages) {
       for (const message of messages) {
         const text = extractPreviewText(message);
-        if (!firstText && message.type === 'user-message') firstText = firstMessagePreview(text);
+        if (!firstMessage && message.type === 'user-message') firstMessage = firstMessagePreview(text);
         if (text) lastText = lastMessagePreview(text);
         if (typeof message.timestamp === 'string') {
           firstAt ??= message.timestamp;
@@ -181,13 +205,14 @@ export class MetadataIndex {
       }
     }
     const key = String(chatId);
+    if (this.#transcripts.getExistingTranscriptViewId(key) !== transcriptViewId) return;
     const current = this.#metadataByChatId.get(key);
-    const firstMessage = firstText || current?.firstMessage || 'New Session';
     const createdAt = current?.createdAt ?? firstAt ?? new Date().toISOString();
     const lastMessage = lastText ?? lastMessagePreview(firstMessage);
     const lastActivity = lastAt ?? createdAt;
     this.#metadataByChatId.set(key, {
       chatId: key,
+      transcriptViewId,
       createdAt,
       lastActivity,
       lastMessage,
@@ -195,6 +220,7 @@ export class MetadataIndex {
       source: 'live',
       ...(current?.identity ? { identity: current.identity } : {}),
     });
+    this.#validatedChatIds.add(key);
     this.#scheduleSave();
   }
 
@@ -206,12 +232,14 @@ export class MetadataIndex {
     const createdAt = new Date().toISOString();
     this.#metadataByChatId.set(key, {
       chatId: key,
+      transcriptViewId: this.#transcripts.getExistingTranscriptViewId(key),
       createdAt,
       lastActivity: createdAt,
       lastMessage: lastMessagePreview(firstMessage),
       firstMessage: firstMessagePreview(firstMessage),
       source: 'startup',
     });
+    this.#validatedChatIds.add(key);
     this.#scheduleSave();
   }
 
@@ -227,31 +255,39 @@ export class MetadataIndex {
   }
 
   async #repairFromTranscriptPreviews(): Promise<void> {
-    const started = performance.now();
     for (const chatId of this.#registry.listChatIds()) {
       // Timers cannot interrupt synchronous SQLite/JSON work. Yield between bounded reads.
       await Bun.sleep(0);
-      if (this.#closed || performance.now() - started >= this.#repairDeadlineMs) break;
+      if (this.#closed) break;
       const session = this.#registry.getChat(chatId);
       if (!session) continue;
-      const existing = this.#metadataByChatId.get(String(chatId));
-      if (existing && !this.#isCheaplyStale(existing, session)) continue;
-      try {
-        // Read and publish synchronously so no live update, deletion, or view replacement can interleave.
-        const metadata = this.#buildMetadataFromPreview(chatId, session);
-        if (metadata) {
-          this.#metadataByChatId.set(chatId, metadata);
-          this.#scheduleSave();
-        }
-      } catch (error) {
-        logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(error));
-      }
+      this.#repairChatMetadata(chatId, session);
     }
   }
 
-  // Detects ownership and carryover changes without opening every ledger at startup.
-  // Live transcript events keep view and ordinal identity current.
-  #isCheaplyStale(entry: ChatMetadata, session: ChatRegistryEntry): boolean {
+  #repairChatMetadata(chatId: string, session: ChatRegistryEntry): ChatMetadata | null {
+    const existing = this.#metadataByChatId.get(chatId);
+    try {
+      if (existing?.firstMessage && !this.#isStale(existing, session)) {
+        this.#validatedChatIds.add(chatId);
+        return existing;
+      }
+      // Read and publish synchronously so no live update, deletion, or view replacement can interleave.
+      const metadata = this.#buildMetadataFromPreview(chatId, session);
+      if (!metadata) return null;
+      this.#metadataByChatId.set(chatId, metadata);
+      this.#validatedChatIds.add(chatId);
+      this.#scheduleSave();
+      return metadata;
+    } catch (error) {
+      logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(error));
+      return null;
+    }
+  }
+
+  #isStale(entry: ChatMetadata, session: ChatRegistryEntry): boolean {
+    const viewId = this.#transcripts.getExistingTranscriptViewId(entry.chatId);
+    if (viewId && entry.transcriptViewId !== viewId) return true;
     const identity = entry.identity;
     if (!identity) return false;
     if (identity.agentOwnershipEpoch !== session.agentOwnershipEpoch) return true;
@@ -264,17 +300,16 @@ export class MetadataIndex {
   }
 
   #buildMetadataFromPreview(chatId: string, session: ChatRegistryEntry): ChatMetadata | null {
+    const transcriptViewId = this.#transcripts.getExistingTranscriptViewId(chatId);
     const result = this.#transcripts.getExistingTranscriptPreview(session, chatId);
     if (!result) return null;
-    const preview = result && isAgentPreviewMetadata(result.preview) ? result.preview : null;
+    const preview = isAgentPreviewMetadata(result.preview) ? result.preview : null;
     const refs = session.carryOverSegments ?? [];
     const firstMessage = firstMessagePreview(preview?.firstMessage);
-    if (!firstMessage) {
-      throw new Error(`Failed to build preview for chat: ${chatId}`);
-    }
     const createdAt = preview?.createdAt || null;
     return {
       chatId,
+      transcriptViewId,
       createdAt,
       lastActivity: preview?.lastActivity || createdAt,
       lastMessage: lastMessagePreview(preview?.lastMessage || firstMessage),
@@ -361,12 +396,12 @@ function normalizePersistedIdentity(value: unknown): ChatMetadataIdentity | unde
 
 // Caps previews written before they were bounded, so the next save shrinks the file.
 function normalizePersistedMetadata(chatId: string, value: unknown): ChatMetadata | null {
-  if (!isRecord(value)) return null;
-  const firstMessage = firstMessagePreview(typeof value.firstMessage === 'string' ? value.firstMessage : '');
-  if (!firstMessage) return null;
+  if (!isRecord(value) || typeof value.firstMessage !== 'string') return null;
+  const firstMessage = firstMessagePreview(value.firstMessage);
   const identity = normalizePersistedIdentity(value.identity);
   return {
     chatId,
+    transcriptViewId: typeof value.transcriptViewId === 'string' ? value.transcriptViewId : null,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : null,
     lastActivity: typeof value.lastActivity === 'string' ? value.lastActivity : null,
     lastMessage: lastMessagePreview(typeof value.lastMessage === 'string' ? value.lastMessage : firstMessage),

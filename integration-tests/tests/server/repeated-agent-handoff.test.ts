@@ -127,6 +127,10 @@ describe('repeated agent handoff lifecycle', () => {
       });
       const blockedHistory = await fixture.client.getMessages(blockedChatId);
       expect(blockedHistory).toEqual(histories[0]);
+      expect(await rejectionOf(fixture.client.post('/api/v1/chats/clear', {
+        chatId: blockedChatId, transcriptViewId: blockedHistory.transcriptViewId, lastOrdinal: blockedHistory.lastOrdinal,
+      }))).toMatchObject({ status: 409, body: { errorCode: 'OWNERSHIP_TRANSFER_PENDING' } });
+      expect(await fixture.client.getMessages(blockedChatId)).toEqual(blockedHistory);
       const blockedListing = (await fixture.client.listChats()).sessions.find(
         (chat) => chat.id === blockedChatId,
       );

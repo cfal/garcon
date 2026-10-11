@@ -2,13 +2,15 @@ import { UserMessage, type ChatMessage } from '../../../common/chat-types.js';
 import {
   PREAMBLE_OPEN_PREFIX,
   preamblePrefixSha256,
+  parsePreamblePrefixReceipt,
   type PreamblePrefixReceipt,
 } from '../../../common/preamble-prefix.js';
 import {
   isPreambleApplicationNoticeDetail,
   type AppliedPreambleReference,
 } from '../../../common/transcript-notice-details.js';
-import type { PendingPreambleBoundary } from '../../../common/preambles.js';
+import { normalizePendingPreambleBoundary, type PendingPreambleBoundary } from '../../../common/preambles.js';
+import { isRecord, type JsonObject } from '../../../common/json.js';
 import type { LedgerRow } from './contracts.js';
 
 export interface PreambleHistoryEvidence {
@@ -31,31 +33,79 @@ export type SanitizePreamblePrefixesResult =
 export function collectPreambleHistoryEvidence(
   rows: readonly LedgerRow[],
 ): readonly PreambleHistoryEvidence[] {
-  const evidence: PreambleHistoryEvidence[] = [];
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index]!;
-    if (row.kind === 'notice' && isPreambleApplicationNoticeDetail(row.detail)) {
-      const input = rows[index + 1];
-      if (
-        input?.kind !== 'user-input'
-        || !input.detail.preambleBoundary
-        || !input.detail.preamblePrefixReceipt
-      ) throw new Error('Preamble application notice is not adjacent to its input receipt');
-      const receipt = input.detail.preamblePrefixReceipt;
-      evidence.push({
-        receipt,
-        boundary: input.detail.preambleBoundary,
-        preambles: row.detail.preambles.map((preamble) => ({ ...preamble })),
-        requiresNativeOccurrence: hasProviderTurnCompletion(rows, index + 2),
-      });
-      index += 1;
-      continue;
-    }
-    if (row.kind === 'user-input' && row.detail.preamblePrefixReceipt) {
-      throw new Error('Preamble input receipt has no adjacent application notice');
+  const collector = new PreambleHistoryCollector();
+  collector.add(rows);
+  return collector.finish();
+}
+
+export class PreambleHistoryCollector {
+  readonly #evidence: PreambleHistoryEvidence[] = [];
+  readonly #activeApplications: number[] = [];
+  #pendingPreambles: readonly AppliedPreambleReference[] | null = null;
+
+  add(rows: readonly LedgerRow[]): void {
+    for (const row of rows) {
+      if (row.kind === 'user-input' && !row.detail.steer) this.#activeApplications.length = 0;
+      if (this.#pendingPreambles !== null) {
+        if (row.kind !== 'user-input' || !row.detail.preambleBoundary || !row.detail.preamblePrefixReceipt) {
+          throw new Error('Preamble application notice is not adjacent to its input receipt');
+        }
+        this.#activeApplications.push(this.#evidence.length);
+        this.#evidence.push({
+          receipt: row.detail.preamblePrefixReceipt,
+          boundary: row.detail.preambleBoundary,
+          preambles: this.#pendingPreambles,
+          requiresNativeOccurrence: false,
+        });
+        this.#pendingPreambles = null;
+      } else if (row.kind === 'notice' && isPreambleApplicationNoticeDetail(row.detail)) {
+        this.#pendingPreambles = row.detail.preambles.map(preamble => ({ ...preamble }));
+      } else if (row.kind === 'user-input' && row.detail.preamblePrefixReceipt) {
+        throw new Error('Preamble input receipt has no adjacent application notice');
+      } else if (row.kind === 'session' && row.providerMeta?.garconPreambleHistory !== undefined) {
+        this.#evidence.push(...parseRetainedEvidence(row.providerMeta.garconPreambleHistory));
+      } else if (row.kind === 'run-ended' && row.origin === 'provider') {
+        for (const index of this.#activeApplications) {
+          this.#evidence[index] = { ...this.#evidence[index]!, requiresNativeOccurrence: true };
+        }
+        this.#activeApplications.length = 0;
+      }
     }
   }
-  return evidence;
+
+  finish(): readonly PreambleHistoryEvidence[] {
+    if (this.#pendingPreambles !== null) throw new Error('Preamble application notice is not adjacent to its input receipt');
+    return this.#evidence;
+  }
+}
+
+// Clear retains only sanitation receipts, never the deleted prompt or preamble body.
+// Collection reads every session row in the binding, so later session facts need no copying.
+export function retainedPreambleHistoryMetadata(evidence: readonly PreambleHistoryEvidence[]): JsonObject | null {
+  if (evidence.length === 0) return null;
+  return {
+    garconPreambleHistory: evidence.map((entry) => ({
+      receipt: { ...entry.receipt },
+      boundary: { ...entry.boundary },
+      preambles: entry.preambles.map((preamble) => ({ ...preamble })),
+      requiresNativeOccurrence: entry.requiresNativeOccurrence,
+    })),
+  };
+}
+
+function parseRetainedEvidence(value: unknown): PreambleHistoryEvidence[] {
+  if (!Array.isArray(value)) throw new Error('Invalid retained preamble history');
+  return value.map((entry) => {
+    if (!isRecord(entry)) throw new Error('Invalid retained preamble history');
+    const receipt = parsePreamblePrefixReceipt(entry.receipt);
+    const boundary = normalizePendingPreambleBoundary(entry.boundary);
+    const application = { type: 'preamble-application', preambles: entry.preambles };
+    if (!receipt || !boundary || !isPreambleApplicationNoticeDetail(application)
+      || typeof entry.requiresNativeOccurrence !== 'boolean') {
+      throw new Error('Invalid retained preamble history');
+    }
+    return { receipt, boundary, preambles: application.preambles, requiresNativeOccurrence: entry.requiresNativeOccurrence };
+  });
 }
 
 export function sanitizeRecordedPreamblePrefixes(input: {
@@ -118,15 +168,6 @@ export function sanitizeRecordedPreamblePrefixes(input: {
     };
   }
   return { kind: 'sanitized', messages };
-}
-
-function hasProviderTurnCompletion(rows: readonly LedgerRow[], startIndex: number): boolean {
-  for (let index = startIndex; index < rows.length; index += 1) {
-    const row = rows[index]!;
-    if (row.kind === 'user-input' && !row.detail.steer) return false;
-    if (row.kind === 'run-ended' && row.origin === 'provider') return true;
-  }
-  return false;
 }
 
 function hasMissingRequiredNativeOccurrence(

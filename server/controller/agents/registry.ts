@@ -403,16 +403,28 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
 
   // Best-effort previews never adopt legacy history or inspect native sessions.
+  getExistingTranscriptViewId(chatId: string): string | null {
+    return this.#ledger.existingCurrentView(chatId)?.viewId ?? null;
+  }
+
   getExistingTranscriptPreview(session: AgentChatEntry | null, chatId: string): {
     preview: unknown;
   } | null {
     if (!session?.agentId || !chatId) return null;
     const preview = this.#ledger.existingPreview(chatId);
-    if (!preview) return null;
+    if (!preview) {
+      if (!this.#ledger.existingCurrentView(chatId)) return null;
+      const { ordinal } = this.#ledger.highWatermark(chatId);
+      // Only an empty or session-only view proves that no preview was omitted.
+      if (ordinal === 0 || (ordinal === 1 && this.#ledger.currentSession(chatId)?.ordinal === 1)) {
+        return { preview: { firstMessage: '', lastMessage: '', createdAt: null, lastActivity: null } };
+      }
+      return null;
+    }
     const { first, last } = preview;
     return {
       preview: {
-        firstMessage: messageText(first),
+        firstMessage: first.type === 'user-message' ? messageText(first) : '',
         lastMessage: messageText(last),
         createdAt: first.timestamp || null,
         lastActivity: last.timestamp || null,

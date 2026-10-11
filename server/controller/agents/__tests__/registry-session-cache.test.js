@@ -15,6 +15,8 @@ import { KeyedPromiseLock } from '../../../common/keyed-lock.ts';
 import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import { AgentRegistry } from '../registry.ts';
+import { MetadataIndex } from '../../chats/metadata-store.ts';
+import { resolveChatTitle } from '../../chats/chat-title.ts';
 import createAgentRoutes from '../../routes/agents.ts';
 
 const CHAT_ID = '1783725900000200';
@@ -114,7 +116,7 @@ describe('AgentRegistry session cache', () => {
     const before = ledger.currentRows(CHAT_ID);
     expect(registry.getExistingTranscriptPreview(chats.getChat(CHAT_ID), CHAT_ID))
       .toEqual({ preview: {
-        firstMessage: 'Stored conversation', lastMessage: 'Stored conversation',
+        firstMessage: '', lastMessage: 'Stored conversation',
         createdAt: AT, lastActivity: AT,
       } });
     expect(adoption.ensure).not.toHaveBeenCalled();
@@ -129,6 +131,85 @@ describe('AgentRegistry session cache', () => {
     expect(adoption.ensure).not.toHaveBeenCalled();
     await expect(stat(path.join(root, 'transcript-ledgers', CHAT_ID)))
       .rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('keeps the first user preview empty when rebuilding an assistant-only cleared view after restart', async () => {
+    const registry = createRegistry();
+    const options = { metadataPath: path.join(root, 'chat-metadata.json') };
+    const carryover = { revision: () => 'carry-1' };
+    let metadata = new MetadataIndex(chats, registry, carryover, options);
+    metadata.addNewChatMetadata(CHAT_ID, 'Synthetic old prompt');
+    await metadata.flush();
+    await metadata.close();
+    const original = ledger.currentView(CHAT_ID);
+    const staged = await ledger.stageView(CHAT_ID, [], 1);
+    ledger.replaceCurrentView(CHAT_ID, original.viewId, staged.viewId);
+    const lease = ledger.openProducer(CHAT_ID, 'test');
+    lease.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(AT, 'Synthetic continuation') }] });
+    metadata = new MetadataIndex(chats, registry, carryover, options);
+    try {
+      await metadata.init();
+      await metadata.repair();
+      expect(metadata.getChatMetadata(CHAT_ID)).toMatchObject({ firstMessage: '', lastMessage: 'Synthetic continuation' });
+      const input = new UserMessage(AT, 'Synthetic first post-clear input');
+      lease.sink.publish({ type: 'rows', rows: [{ message: input }] });
+      metadata.updateFromAppendedMessages(CHAT_ID, staged.viewId, [input]);
+      expect(metadata.getChatMetadata(CHAT_ID).firstMessage).toBe(input.content);
+    } finally {
+      await metadata.close();
+      await metadata.flush();
+    }
+  });
+
+  it.each(['before-repair', 'after-repair'])('reconstructs the first post-Clear input with a live append %s', async timing => {
+    const registry = createRegistry();
+    const options = { metadataPath: path.join(root, 'chat-metadata.json') };
+    const carryover = { revision: () => 'carry-1' };
+    const before = new MetadataIndex(chats, registry, carryover, options);
+    await before.replaceFromTranscriptView(CHAT_ID, ledger.currentView(CHAT_ID).viewId, ledger.conversationMessagePages(CHAT_ID));
+    await before.flush();
+    await before.close();
+    const lease = ledger.openProducer(CHAT_ID, 'test');
+    lease.sink.publish({ type: 'rows', rows: [{ message: new UserMessage(AT, 'Synthetic first input') }] });
+    let restarted = new MetadataIndex(chats, registry, carryover, options);
+    try {
+      await restarted.init();
+      if (timing === 'after-repair') await restarted.repair();
+      const continuation = new AssistantMessage(AT, 'Synthetic continuation');
+      lease.sink.publish({ type: 'rows', rows: [{ message: continuation }] });
+      restarted.updateFromAppendedMessages(CHAT_ID, ledger.currentView(CHAT_ID).viewId, [continuation]);
+      const later = new UserMessage(AT, 'Synthetic later input');
+      lease.sink.publish({ type: 'rows', rows: [{ message: later }] });
+      restarted.updateFromAppendedMessages(CHAT_ID, ledger.currentView(CHAT_ID).viewId, [later]);
+      await restarted.repair();
+      expect(restarted.getChatMetadata(CHAT_ID).firstMessage).toBe('Synthetic first input');
+      expect(resolveChatTitle(null, restarted.getChatMetadata(CHAT_ID).firstMessage)).toBe('Synthetic first input');
+      await restarted.close();
+      await restarted.flush();
+      restarted = new MetadataIndex(chats, registry, carryover, options);
+      await restarted.init();
+      await restarted.repair();
+      expect(restarted.getChatMetadata(CHAT_ID)).toMatchObject({
+        firstMessage: 'Synthetic first input', lastMessage: 'Synthetic later input',
+      });
+    } finally {
+      await restarted.close();
+      await restarted.flush();
+    }
+  });
+
+  it('distinguishes empty and session-only views from an unavailable oversized preview', () => {
+    const registry = createRegistry();
+    expect(registry.getExistingTranscriptPreview(chats.getChat(CHAT_ID), CHAT_ID))
+      .toMatchObject({ preview: { firstMessage: '', lastMessage: '' } });
+    const lease = ledger.openProducer(CHAT_ID, 'test');
+    lease.sink.publish({ type: 'session', session: {
+      agentSessionId: 'synthetic-session', nativeSession: null, nativeSeedReceipt: null,
+    } });
+    expect(registry.getExistingTranscriptPreview(chats.getChat(CHAT_ID), CHAT_ID))
+      .toMatchObject({ preview: { firstMessage: '', lastMessage: '' } });
+    lease.sink.publish({ type: 'rows', rows: [{ message: new UserMessage(AT, 'x'.repeat(80 * 1024)) }] });
+    expect(registry.getExistingTranscriptPreview(chats.getChat(CHAT_ID), CHAT_ID)).toBeNull();
   });
 
   it('returns the same no-auth status for known agents in individual and catalog requests', async () => {

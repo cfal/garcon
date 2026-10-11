@@ -343,6 +343,7 @@ function buildDispatch(
 		},
 		'chat-transcript-replaced': (msg) => {
 			if (!(msg instanceof ChatTranscriptReplacedMessage)) return;
+			void stores.sessions.quietRefreshChats();
 			transientTranscriptViews.set(msg.chatId, msg.transcriptViewId);
 			stores.conversationUi.removeTransientFeed(msg.chatId);
 			handleViewTransition(msg.chatId, msg.transcriptViewId);

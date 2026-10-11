@@ -20,7 +20,8 @@ import {
 	stopChat,
 	updateChatModel,
 } from '$lib/api/chats.js';
-import { ApiError } from '$lib/api/client.js';
+import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
+import { clearChat } from '$lib/api/chat-clear.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import {
 	ConversationSessionController,
@@ -92,6 +93,7 @@ vi.mock('$lib/api/chats.js', () => ({
 vi.mock('$lib/api/scheduled-prompts.js', () => ({
 	scheduleChatPrompt: vi.fn(),
 }));
+vi.mock('$lib/api/chat-clear.js', () => ({ clearChat: vi.fn() }));
 
 const mockForkChat = vi.mocked(forkChat);
 const mockForkRunChat = vi.mocked(forkRunChat);
@@ -362,7 +364,12 @@ function createDeps(chat = createRunningChat()) {
 			transcriptViewId: 'generation-1',
 			lastOrdinal: chatState.entries.at(-1)?.ordinal ?? 0,
 		})),
+		getKnownHeadForChat: vi.fn((_chatId: string) => ({
+			transcriptViewId: 'generation-1',
+			lastOrdinal: chatState.entries.at(-1)?.ordinal ?? 0,
+		})),
 		hasMountedPresentation: vi.fn(() => false),
+		recoverViewReplacement: vi.fn(async (_chatId: string, _previousViewId: string) => {}),
 		clearMessages: vi.fn(),
 		resetForNewChat: vi.fn(() => {
 			chatState.chatMessages = [];
@@ -755,7 +762,181 @@ function createDeps(chat = createRunningChat()) {
 	return { deps, waitForConnection };
 }
 
+function createClearDeps() {
+	const fixture = createDeps();
+	const metadata = fixture.deps.modelCatalog.getAgent('codex');
+	if (!metadata) throw new Error('Missing fixture metadata');
+	fixture.deps.modelCatalog.getAgent.mockReturnValue({ ...metadata, executionPolicy: 'literal' });
+	return fixture;
+}
+
 describe('ConversationSessionController', () => {
+	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
+		'only confirms literal Clear through %s and never dispatches unsupported requests', async (submit) => {
+			for (const policy of ['conversation', 'literal', 'unknown']) {
+				const { deps } = createDeps();
+				const metadata = deps.modelCatalog.getAgent('codex');
+				if (!metadata) throw new Error('Missing fixture metadata');
+				deps.modelCatalog.getAgent.mockReturnValue(policy === 'unknown' ? null : {
+					...metadata, executionPolicy: policy === 'literal' ? 'literal' : 'conversation',
+				});
+				deps.canSubmitToExecutor.mockReturnValue(false);
+				deps.composerState.inputText = '/clear';
+				const controller = new ConversationSessionController(deps);
+				const outcome = await controller[submit]('chat-1');
+				expect(controller.clearHistory.isOpen).toBe(policy === 'literal');
+				expect(outcome).toBe(policy === 'literal' ? 'no-op' : 'rejected');
+				if (policy !== 'literal') {
+					expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+						'chat-1', 'error', 'Clearing displayed history is not available for this agent.',
+					);
+				}
+				expect(clearChat).not.toHaveBeenCalled();
+				controller.clearHistory.cancel();
+				expect(deps.composerState.inputText).toBe('/clear');
+			}
+			expect(mockRunChat).not.toHaveBeenCalled();
+			expect(mockSteerChat).not.toHaveBeenCalled();
+			expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		},
+	);
+
+	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
+		'uses the owning executor catalog for Clear through %s', async (submit) => {
+			const executorId = '22222222-2222-4222-8222-222222222222';
+			for (const executionPolicy of ['literal', 'conversation'] as const) {
+				const { deps } = createDeps(createRunningChat({ executorId }));
+				const metadata = deps.modelCatalog.getAgent('codex');
+				if (!metadata) throw new Error('Missing fixture metadata');
+				deps.modelCatalog.getAgent.mockReturnValue({
+					...metadata, executionPolicy: executionPolicy === 'literal' ? 'conversation' : 'literal',
+				});
+				const remoteCatalog = {
+					...deps.modelCatalog,
+					getAgent: vi.fn(() => ({ ...metadata, executionPolicy })),
+				} satisfies SessionControllerDeps['modelCatalog'];
+				const modelCatalogForExecutor = vi.fn((id: string) => (
+					id === executorId ? remoteCatalog : deps.modelCatalog
+				));
+				deps.composerState.inputText = '/clear';
+				const controller = new ConversationSessionController({ ...deps, modelCatalogForExecutor });
+				const outcome = await controller[submit]('chat-1');
+				expect(modelCatalogForExecutor).toHaveBeenCalledWith(executorId);
+				expect(controller.clearHistory.isOpen).toBe(executionPolicy === 'literal');
+				expect(outcome).toBe(executionPolicy === 'literal' ? 'no-op' : 'rejected');
+				expect(deps.composerState.inputText).toBe('/clear');
+				controller.clearHistory.cancel();
+			}
+			expect(clearChat).not.toHaveBeenCalled();
+			expect(mockRunChat).not.toHaveBeenCalled();
+			expect(mockSteerChat).not.toHaveBeenCalled();
+			expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		},
+	);
+
+	it('captures the clear target and preserves a newer draft during confirmation', async () => {
+		const { deps } = createClearDeps();
+		deps.composerState.inputText = '/clear';
+		deps.chatState.loadMessages.mockResolvedValue([]);
+		vi.mocked(clearChat).mockResolvedValue({ success: true, chatId: 'chat-1', transcriptViewId: 'new-view' });
+		const controller = new ConversationSessionController(deps);
+		await controller.submitForChat('chat-1');
+		deps.composerState.inputText = 'New draft';
+		deps.composerState.contentRevision += 1;
+		deps.chatState.getCursorForChat.mockReturnValue({ transcriptViewId: 'other-view', lastOrdinal: 100 });
+		await controller.clearHistory.confirm();
+		expect(clearChat).toHaveBeenCalledWith({ chatId: 'chat-1', transcriptViewId: 'generation-1', lastOrdinal: 0 });
+		expect(deps.composerState.inputText).toBe('New draft');
+		expect(controller.clearHistory.isOpen).toBe(false);
+		expect(deps.chatState.recoverViewReplacement).toHaveBeenCalledWith('chat-1', 'generation-1');
+	});
+
+	it('keeps the original clear target and draft on a rejected confirmation', async () => {
+		const { deps } = createClearDeps();
+		deps.composerState.inputText = '/clear';
+		vi.mocked(clearChat).mockRejectedValue(new ApiError(409, 'History changed'));
+		const controller = new ConversationSessionController(deps);
+		await controller.submitForChat('chat-1');
+		await controller.clearHistory.confirm();
+		expect(controller.clearHistory.error).toBe('History changed');
+		expect(deps.composerState.inputText).toBe('/clear');
+		controller.clearHistory.handleChatSwitch('chat-2');
+		expect(controller.clearHistory.isOpen).toBe(false);
+	});
+
+	it.each(['acknowledged', 'unknown'] as const)(
+		'refreshes the sidebar after failed %s Clear recovery without replacing its error policy', async outcome => {
+			const { deps } = createClearDeps();
+			deps.composerState.inputText = '/clear';
+			if (outcome === 'acknowledged') {
+				vi.mocked(clearChat).mockResolvedValue({ success: true, chatId: 'chat-1', transcriptViewId: 'replacement-view' });
+			} else {
+				vi.mocked(clearChat).mockRejectedValue(new ApiMutationOutcomeUnknownError('Clear could not be confirmed'));
+				mockGetChatSnapshot.mockResolvedValue(chatSnapshot(transientFeed([], 0, 'replacement-view')));
+			}
+			const calls: string[] = [];
+			deps.chatState.recoverViewReplacement.mockImplementation(async () => {
+				calls.push('recover');
+				throw new Error('Synthetic recovery failure');
+			});
+			deps.sessions.quietRefreshChats.mockImplementation(async () => { calls.push('refresh'); });
+			const controller = new ConversationSessionController(deps);
+			await controller.submitForChat('chat-1');
+			await controller.clearHistory.confirm();
+
+			expect(calls).toEqual(['recover', 'refresh']);
+			expect(controller.clearHistory.isOpen).toBe(false);
+			expect(controller.clearHistory.busy).toBe(false);
+			expect(deps.composerState.inputText).toBe(outcome === 'acknowledged' ? '' : '/clear');
+			expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+				'chat-1', 'error', outcome === 'acknowledged' ? 'Synthetic recovery failure' : 'Clear could not be confirmed',
+			);
+		},
+	);
+
+	it.each(['generation-1', 'replacement-view', 'unavailable'])('disarms uncertain Clear and reconciles %s without resubmission', async viewId => {
+		const { deps } = createClearDeps();
+		deps.composerState.inputText = '/clear';
+		vi.mocked(clearChat).mockRejectedValue(new ApiMutationOutcomeUnknownError('Clear could not be confirmed'));
+		const snapshot = chatSnapshot(transientFeed([], 0, viewId));
+		if (viewId === 'unavailable') mockGetChatSnapshot.mockRejectedValue(new Error('offline'));
+		else mockGetChatSnapshot.mockResolvedValue(snapshot);
+		const controller = new ConversationSessionController(deps);
+		await controller.submitForChat('chat-1');
+		deps.composerState.inputText = 'New draft';
+		deps.composerState.contentRevision += 1;
+		await controller.clearHistory.confirm();
+		await controller.clearHistory.confirm();
+		expect(clearChat).toHaveBeenCalledTimes(1);
+		expect(mockGetChatSnapshot).toHaveBeenCalledWith('chat-1', 1);
+		expect(controller.clearHistory.isOpen).toBe(false);
+		expect(deps.composerState.inputText).toBe('New draft');
+		if (viewId === 'replacement-view') {
+			expect(deps.chatState.recoverViewReplacement).toHaveBeenCalledWith('chat-1', 'generation-1');
+			expect(deps.sessions.quietRefreshChats).toHaveBeenCalled();
+		} else expect(deps.chatState.recoverViewReplacement).not.toHaveBeenCalled();
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith('chat-1', 'error', 'Clear could not be confirmed');
+	});
+
+	it('keeps uncertain Clear recovery attached to its originating chat after a switch', async () => {
+		const { deps } = createClearDeps();
+		deps.composerState.inputText = '/clear';
+		const pending = deferred<Awaited<ReturnType<typeof clearChat>>>();
+		vi.mocked(clearChat).mockReturnValue(pending.promise);
+		mockGetChatSnapshot.mockResolvedValue(chatSnapshot(transientFeed([], 0, 'replacement-view')));
+		const controller = new ConversationSessionController(deps);
+		await controller.submitForChat('chat-1');
+		const confirmation = controller.clearHistory.confirm();
+		controller.clearHistory.handleChatSwitch('chat-2');
+		deps.composerState.inputText = 'Other chat draft';
+		deps.composerState.contentRevision += 1;
+		pending.reject(new ApiMutationOutcomeUnknownError('Clear could not be confirmed'));
+		await confirmation;
+		expect(deps.chatState.recoverViewReplacement).toHaveBeenCalledWith('chat-1', 'generation-1');
+		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+		expect(deps.composerState.inputText).toBe('Other chat draft');
+		expect(controller.clearHistory.isOpen).toBe(false);
+	});
 	beforeEach(() => {
 		localStorage.clear();
 		mockForkChat.mockReset();

@@ -113,6 +113,13 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		};
 	}
 
+	getKnownHeadForChat(chatId: string): ChatCursor {
+		const transcript = this.#panelForChat(chatId)?.transcript;
+		if (transcript) return { transcriptViewId: transcript.transcriptViewId, lastOrdinal: transcript.lastOrdinal };
+		const cached = this.transcriptCache.get(chatId);
+		return { transcriptViewId: cached?.transcriptViewId ?? '', lastOrdinal: cached?.lastOrdinal ?? 0 };
+	}
+
 	applyMessages(
 		chatId: string,
 		transcriptViewId: string,
@@ -172,6 +179,21 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void {
 		const chatId = this.options.getSelectedChatId();
 		if (chatId) this.options.panels.appendLocalNotice(chatId, noticeType, content);
+	}
+
+	async recoverViewReplacement(chatId: string, previousViewId: string): Promise<void> {
+		const currentViewId = this.transcriptCache.get(chatId)?.transcriptViewId;
+		// A delivered replacement or a later view already owns the presentation.
+		if (currentViewId && currentViewId !== previousViewId) return;
+		this.discardChat(chatId);
+		this.options.panels.handleViewReplacement(chatId);
+		this.transcriptCache.remove(chatId);
+		for (const panel of this.options.panels.panelsForChat(chatId)) panel.transcript.clearMessages();
+		if (!this.hasMountedPresentation(chatId)) {
+			if (this.options.getSelectedChatId() !== chatId) return;
+			this.#fallback.activateChat(chatId);
+		}
+		await this.loadMessages(chatId, { purpose: 'activation' });
 	}
 
 	appendLocalNoticeForChat(chatId: string, noticeType: LocalNoticeType, content: string): void {
