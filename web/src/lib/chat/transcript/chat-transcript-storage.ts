@@ -1,4 +1,5 @@
 import { parseTranscriptMessages, type TranscriptMessage } from '$shared/chat-view';
+import { canPersistBrowserData } from '$lib/utils/browser-data-lifetime';
 import {
 	CHAT_TRANSCRIPT_INDEX_KEY as INDEX_KEY,
 	CHAT_TRANSCRIPT_SNAPSHOT_PREFIX as SNAPSHOT_PREFIX,
@@ -154,7 +155,7 @@ export class LocalChatTranscriptStorage {
 		chatId: string,
 		options: ChatTranscriptWindowOptions = {},
 	): RestoredChatTranscript | null {
-		if (!chatId) return null;
+		if (!chatId || !canPersistBrowserData()) return null;
 		try {
 			const raw = localStorage.getItem(snapshotKey(chatId));
 			if (!raw) {
@@ -213,7 +214,7 @@ export class LocalChatTranscriptStorage {
 		},
 		options: ChatTranscriptWindowOptions = {},
 	): void {
-		if (!chatId) return;
+		if (!chatId || !canPersistBrowserData()) return;
 		if (entries.length === 0 || !cursor.transcriptViewId) {
 			this.remove(chatId);
 			return;
@@ -247,7 +248,7 @@ export class LocalChatTranscriptStorage {
 	}
 
 	remove(chatId: string): void {
-		if (!chatId) return;
+		if (!chatId || !canPersistBrowserData()) return;
 		try {
 			localStorage.removeItem(snapshotKey(chatId));
 			const index = readIndex();
@@ -258,7 +259,7 @@ export class LocalChatTranscriptStorage {
 	}
 
 	markStale(chatId: string): void {
-		if (!chatId) return;
+		if (!chatId || !canPersistBrowserData()) return;
 		try {
 			if (!hasSnapshot(chatId)) {
 				this.remove(chatId);
@@ -272,7 +273,7 @@ export class LocalChatTranscriptStorage {
 	}
 
 	markValidated(chatId: string): void {
-		if (!chatId) return;
+		if (!chatId || !canPersistBrowserData()) return;
 		try {
 			if (!hasSnapshot(chatId)) {
 				this.remove(chatId);
@@ -291,6 +292,7 @@ export class LocalChatTranscriptStorage {
 	}
 
 	listCursors(limit = 20): CachedChatCursor[] {
+		if (!canPersistBrowserData()) return [];
 		const boundedLimit = Math.max(0, Math.floor(limit));
 		if (boundedLimit === 0) return [];
 		try {
@@ -331,6 +333,7 @@ export class LocalChatTranscriptStorage {
 	}
 
 	clearAll(): void {
+		if (!canPersistBrowserData()) return;
 		try {
 			const index = readIndex();
 			for (const entry of index.entries) {
