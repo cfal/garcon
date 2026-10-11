@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
@@ -8,7 +8,7 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 let directory: string;
 let bundle: string;
 beforeAll(async () => {
-  directory = await mkdtemp(join(homedir(), 'tmp/logout-storage-contract-'));
+  directory = await mkdtemp(join(tmpdir(), 'logout-storage-contract-'));
   const root = fileURLToPath(new URL('../../../', import.meta.url));
   const entry = join(directory, 'entry.ts');
   await writeFile(
