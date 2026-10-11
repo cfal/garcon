@@ -8,6 +8,8 @@ import type { PrimaryWsHandler } from './primary.js';
 import type { PrimarySocketDelivery, PrimaryWebSocketData } from './primary-delivery.js';
 import { PRIMARY_WEBSOCKET_TRANSPORT_OPTIONS } from './transport.js';
 import { decodeWebSocketMessage, sendWebSocketJson } from './utils.js';
+import { isCurrentBrowserPrincipal } from '../auth/token.js';
+import { AUTH_REVOKED_CLOSE_CODE, AUTH_REVOKED_CLOSE_REASON } from '../../../common/ws-auth.js';
 
 interface PrimaryConnectionData extends PrimaryWebSocketData {
   kind: 'primary';
@@ -43,6 +45,11 @@ export function createServerSocketHandlers(options: {
     open(ws) {
       if (isExecutionSocket(ws)) { execution.open?.(ws); return; }
       if (!isPrimarySocket(ws)) return;
+      if (!isCurrentBrowserPrincipal(ws.data.principal)) {
+        admission.release(ws.data.connectionId);
+        ws.close(AUTH_REVOKED_CLOSE_CODE, AUTH_REVOKED_CLOSE_REASON);
+        return;
+      }
       const result = admission.confirm(ws.data.connectionId);
       if (!result.ok) { ws.close(1013, result.reason); return; }
       const peer = delivery.add(ws);
@@ -53,6 +60,12 @@ export function createServerSocketHandlers(options: {
       if (!isPrimarySocket(ws)) return;
       const peer = delivery.get(ws);
       if (!peer || peer.readyState !== 1) return;
+      if (!isCurrentBrowserPrincipal(peer.data.principal)) {
+        const retired = delivery.remove(ws);
+        try { if (retired) primary.close(retired, AUTH_REVOKED_CLOSE_CODE, AUTH_REVOKED_CLOSE_REASON); }
+        finally { admission.release(ws.data.connectionId); ws.close(AUTH_REVOKED_CLOSE_CODE, AUTH_REVOKED_CLOSE_REASON); }
+        return;
+      }
       const bytes = typeof message === 'string' ? Buffer.byteLength(message) : message.byteLength;
       if (bytes > config.wsMaxPayloadLength) {
         peer.close(1009, 'Message exceeds the configured size limit');

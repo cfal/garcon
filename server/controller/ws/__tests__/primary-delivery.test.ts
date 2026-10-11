@@ -2,14 +2,15 @@ import { describe, expect, mock, test } from 'bun:test';
 import { PrimarySocketDelivery } from '../primary-delivery.js';
 import { publishWebSocketPayload, sendWebSocketPayload } from '../transport.js';
 import { sendWebSocketJson } from '../utils.js';
+import { LOCAL_SERVER_PRINCIPAL, type ServerPrincipal } from '../../lib/http-route-types.js';
 
-function socketFixture() {
+function socketFixture(principal: ServerPrincipal = LOCAL_SERVER_PRINCIPAL) {
   let bufferedBytes = 0;
   const topics = new Set<string>();
   const socket = {
     data: {
       connectionId: crypto.randomUUID(),
-      principal: { mode: 'local', key: 'local', username: 'local', expiresAtMs: null },
+      principal,
     },
     readyState: 1,
     subscribe: (topic: string) => { topics.add(topic); return true; },
@@ -26,6 +27,33 @@ function socketFixture() {
 }
 
 describe('PrimarySocketDelivery', () => {
+  test('credential retirement fences every old peer before cleanup and permits replacements', () => {
+    const delivery = new PrimarySocketDelivery(1024);
+    const principal: ServerPrincipal = { mode: 'authenticated', key: 'owner', username: 'owner', credentialRevision: 1, expiresAtMs: Date.now() + 60000 };
+    const first = socketFixture(principal);
+    const second = socketFixture(principal);
+    const trusted = socketFixture();
+    const peers = [delivery.add(first.socket), delivery.add(second.socket)];
+    const localPeer = delivery.add(trusted.socket);
+    for (const peer of [...peers, localPeer]) peer.subscribe('chat');
+    const cleaned = [];
+    expect(delivery.retireWhere(principal => principal.mode === 'authenticated', 4001, 'AUTH_REVOKED', peer => {
+      expect(peers.every(old => old.readyState === 3)).toBe(true);
+      expect(delivery.get(first.socket)).toBeUndefined();
+      expect(delivery.get(second.socket)).toBeUndefined();
+      cleaned.push(peer);
+    })).toBe(2);
+    expect(cleaned).toEqual(peers);
+    expect(first.socket.close).toHaveBeenCalledWith(4001, 'AUTH_REVOKED');
+    expect(delivery.remove(first.socket)).toBeUndefined();
+    const next = socketFixture({ ...principal, credentialRevision: 2 });
+    delivery.add(next.socket).subscribe('chat');
+    delivery.publish('chat', 'after');
+    expect(first.socket.send).not.toHaveBeenCalled();
+    expect(second.socket.send).not.toHaveBeenCalled();
+    expect(trusted.socket.send).toHaveBeenCalledWith('after', undefined);
+    expect(next.socket.send).toHaveBeenCalledWith('after', undefined);
+  });
   test('shutdown fences current peers and upgrades admitted before shutdown', () => {
     const delivery = new PrimarySocketDelivery(1024);
     const current = socketFixture();

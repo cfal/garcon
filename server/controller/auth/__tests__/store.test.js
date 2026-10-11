@@ -1,62 +1,75 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { resetServerConfigForTests } from '../../config.ts';
-import { CorruptStateFileError, QUARANTINE_INFIX } from '../../../common/json-file-store.ts';
-import {
-  AuthAccountAlreadyConfiguredError,
-  createUser,
-  getUser,
-  init,
-  needsSetup,
-} from '../store.ts';
+import { afterEach, expect, test } from 'bun:test';
+import { readFile, writeFile, stat } from 'node:fs/promises';
+import { AuthAccountStore } from '../store.js';
+import { AtomicJsonWriteError, CorruptStateFileError, writeJsonFileAtomic } from '../../../common/json-file-store.js';
+import { authFixture } from './fixture.js';
 
-describe('auth store', () => {
-  const originalConfigDir = process.env.GARCON_CONFIG_DIR;
-  let configDir;
+const fixtures = [];
+async function fixture(options) { const value = await authFixture(options); fixtures.push(value); return value; }
+afterEach(async () => { await Promise.all(fixtures.splice(0).map(value => value.dispose())); });
 
-  beforeEach(async () => {
-    configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-auth-store-'));
-    process.env.GARCON_CONFIG_DIR = configDir;
-    resetServerConfigForTests();
-  });
+test('normalizes old ownership once and preserves secret, timestamps and private permissions', async () => {
+  const f = await fixture();
+  const original = { jwtSecret: 'synthetic-secret', username: 'owner-before', passwordHash: 'hash:password-before', createdAt: '2020-01-01T00:00:00.000Z' };
+  await writeFile(f.filePath, JSON.stringify(original));
+  const first = await f.store.snapshot();
+  expect(first.account).toMatchObject({ username: original.username, passwordHash: original.passwordHash, createdAt: original.createdAt });
+  expect(first.account.ownerKey).toBe('owner-before');
+  expect(first.account.credentialRevision).toBe(1);
+  expect((await stat(f.filePath)).mode & 0o777).toBe(0o600);
+  await f.service.changeUsername(await f.principal(), async () => ({ currentPassword: 'password-before', username: 'owner-after' }));
+  const restarted = await new AuthAccountStore(f.filePath).snapshot();
+  expect(restarted.jwtSecret).toBe(original.jwtSecret);
+  expect(restarted.account).toMatchObject({ ownerKey: 'owner-before', username: 'owner-after', credentialRevision: 2, createdAt: original.createdAt });
+  expect(JSON.parse(await readFile(f.filePath, 'utf8'))).toMatchObject({ ownerKey: 'owner-before', credentialRevision: 2 });
+});
 
-  afterEach(async () => {
-    if (originalConfigDir === undefined) delete process.env.GARCON_CONFIG_DIR;
-    else process.env.GARCON_CONFIG_DIR = originalConfigDir;
-    resetServerConfigForTests();
-    await fs.rm(configDir, { recursive: true, force: true });
-  });
+test.each([
+  '{', JSON.stringify({ username: 'owner' }),
+  JSON.stringify({ unexpectedAccount: { username: 'owner' } }),
+  JSON.stringify({ jwtSecret: 'secret', username: 'owner', passwordHash: 'hash', ownerKey: 'owner' }),
+  JSON.stringify({ jwtSecret: 'secret', username: 'owner', passwordHash: 'hash', ownerKey: 'owner', credentialRevision: 0 }),
+])('corrupt or partial accounts never reopen setup: %s', async raw => {
+  const f = await fixture();
+  await writeFile(f.filePath, raw);
+  await expect(f.store.snapshot()).rejects.toBeInstanceOf(CorruptStateFileError);
+  await expect(new AuthAccountStore(f.filePath).snapshot()).rejects.toBeInstanceOf(CorruptStateFileError);
+});
 
-  it('quarantines corrupt auth state and keeps registration closed', async () => {
-    const filePath = path.join(configDir, 'auth.json');
-    const corruptBytes = '{"jwtSecret":"secret","username":"owner"';
-    await fs.writeFile(filePath, corruptBytes, { mode: 0o600 });
+test.each([false, true])('write failure preserves the correct authority, renamed=%s', async renamed => {
+  let fail = false;
+  const f = await fixture({ write: async (...args) => {
+    if (!fail) return writeJsonFileAtomic(...args);
+    if (renamed) await writeJsonFileAtomic(...args);
+    throw new AtomicJsonWriteError('synthetic failure', renamed);
+  } });
+  await f.register();
+  const previous = await f.store.snapshot();
+  const principal = await f.principal();
+  const changes = [];
+  f.store.onChange(change => changes.push(change));
+  fail = true;
+  await expect(f.service.changeUsername(principal, async () => ({ currentPassword: 'password-before', username: 'owner-after' })))
+    .rejects.toMatchObject({ code: renamed ? 'AUTH_STORAGE_UNAVAILABLE' : 'AUTH_SAVE_FAILED', retryable: false });
+  expect(f.store.isCurrent(principal.key, 1)).toBe(!renamed);
+  if (renamed) {
+    expect(changes).toEqual(['storage-unavailable']);
+    await expect(f.store.snapshot()).rejects.toMatchObject({ code: 'AUTH_STORAGE_UNAVAILABLE' });
+    await expect(f.service.login({ username: 'owner-after', password: 'password-before' })).rejects.toMatchObject({ code: 'AUTH_STORAGE_UNAVAILABLE' });
+    expect((await new AuthAccountStore(f.filePath).snapshot()).account.credentialRevision).toBe(2);
+  } else {
+    expect(changes).toEqual([]);
+    expect(await f.store.snapshot()).toBe(previous);
+  }
+});
 
-    await expect(init()).rejects.toBeInstanceOf(CorruptStateFileError);
-    const [quarantineName] = (await fs.readdir(configDir)).filter((entry) =>
-      entry.startsWith(`auth.json${QUARANTINE_INFIX}`));
-    expect(await fs.readFile(path.join(configDir, quarantineName), 'utf8')).toBe(corruptBytes);
-    await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(needsSetup()).rejects.toBeInstanceOf(CorruptStateFileError);
-  });
-
-  it('allows only one concurrent initial registration', async () => {
-    await init();
-
-    const results = await Promise.allSettled([
-      createUser('owner-a', 'hash-a'),
-      createUser('owner-b', 'hash-b'),
-    ]);
-    const fulfilled = results.filter((result) => result.status === 'fulfilled');
-    const rejected = results.filter((result) => result.status === 'rejected');
-
-    expect(fulfilled).toHaveLength(1);
-    expect(rejected).toHaveLength(1);
-    expect(rejected[0].reason).toBeInstanceOf(AuthAccountAlreadyConfiguredError);
-    expect(await getUser()).toMatchObject({
-      username: fulfilled[0].value.username,
-    });
-  });
+test('pre-writer failures retain the previous snapshot', async () => {
+  let fail = false;
+  const f = await fixture({ write: (...args) => { if (fail) throw new Error('synthetic mkdir failure'); return writeJsonFileAtomic(...args); } });
+  await f.register();
+  const previous = await f.store.snapshot();
+  fail = true;
+  await expect(f.service.changeUsername(await f.principal(), async () => ({ currentPassword: 'password-before', username: 'owner-after' })))
+    .rejects.toMatchObject({ code: 'AUTH_SAVE_FAILED' });
+  expect(await f.store.snapshot()).toBe(previous);
 });

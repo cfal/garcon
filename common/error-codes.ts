@@ -4,6 +4,17 @@
 // subsets of it (see `chat-command-contracts.ts` and `ws-events.ts`). Adding a
 // server error code means adding it here first.
 export const ERROR_CODES = [
+  'AUTH_VALIDATION_FAILED',
+  'AUTH_CURRENT_PASSWORD_INVALID',
+  'AUTH_NO_CHANGE',
+  'AUTH_CREDENTIALS_INVALID',
+  'AUTH_SESSION_INVALID',
+  'AUTH_CHANGE_FORBIDDEN',
+  'AUTH_REVISION_EXHAUSTED',
+  'AUTH_REQUEST_TOO_LARGE',
+  'AUTH_BUSY',
+  'AUTH_SAVE_FAILED',
+  'AUTH_STORAGE_UNAVAILABLE',
   // Generic
   'VALIDATION_FAILED',
   'INTERNAL_ERROR',

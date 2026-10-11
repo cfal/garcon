@@ -39,3 +39,7 @@ export function bearerTokenFromWebSocketProtocolHeader(
   if (!authProtocol || authProtocol.length <= GARCON_WS_AUTH_PROTOCOL_PREFIX.length) return null;
   return authProtocol.slice(GARCON_WS_AUTH_PROTOCOL_PREFIX.length);
 }
+export const AUTH_REVOKED_CLOSE_CODE = 4001;
+export const AUTH_REVOKED_CLOSE_REASON = 'AUTH_REVOKED';
+export const AUTH_UNAVAILABLE_CLOSE_CODE = 4002;
+export const AUTH_UNAVAILABLE_CLOSE_REASON = 'AUTH_STORAGE_UNAVAILABLE';
