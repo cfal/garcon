@@ -1,5 +1,54 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
+Ledger-only Clear amendment: the confirmed, controller-owned `/clear` action is
+an additional explicit view-replacement path. Earlier Reload-only statements
+remain applicable to native-history replacement, not this ledger-only action.
+Admission is limited to literal-execution agents (currently Shell); other or
+unknown execution policies reject the app command without provider dispatch.
+Clear requires exclusive transcript ownership and no queued user/control input.
+The request pins the confirmed view and high watermark; both are checked again
+immediately before cutover. Core closes the old producer, flushes consumed
+preamble-boundary state, and stages only the current session (or an empty view
+when no session exists), with `content_start_ordinal = 1`. The existing atomic
+promotion and replacement fanout invalidate paging, caches, previews and search.
+Failures before promotion retain the old view and reopen its producer.
+Persisted list previews are qualified by transcript view and withheld until
+paced startup repair validates them. Replacement invalidates previews
+synchronously; ordinary list reads remain memory-only.
+Repair yields between bounded per-chat reads and visits the complete startup
+inventory unless shutdown cancels it. An empty preview stores no first-message
+text; display fallbacks are not persisted as transcript content, so the first
+post-Clear input becomes the new preview and derived title. Cold reconstruction
+uses assistant-only history for the last preview, never the first user prompt.
+Repair completion publishes one workspace-wide list invalidation so clients
+that loaded before validation refresh their previews.
+Persisted empty-first-message previews are reconstructed from bounded ledger
+candidates even when their view matches, covering the first-input crash gap.
+Clear rechecks pending user/control input under the execution-control lock
+around the final watermark check and synchronous promotion.
+The chat must exist and have no durable pending ownership decision before
+adoption or reservation under the chat mutation lock. Evidence collection reads
+bounded pages of the current binding only, retaining receipts rather than prompt
+or output rows. Failures after promotion, including producer reopening and
+reservation release, report an unknown outcome rather than a definite rejection.
+The client validates the returned chat and replacement view. An uncertain reply
+disarms confirmation and preserves the draft, then checks the current view and
+recovers an observed replacement without resubmitting or retargeting Clear.
+
+Clear never mutates native history, session identity, cwd, settings or provider
+context. It removes the frozen prefix and all visible ledger rows. Inherited
+context not yet sent to an agent is therefore lost; already-established native
+context remains intact. Reload can reconstruct native history but is not an
+undo of Garcon-only rows. Previously published shares and exports are unchanged.
+The replacement session's controller-owned `providerMeta.garconPreambleHistory`
+retains validated ordered preamble sanitation receipts, boundary identities,
+immutable title references and native-occurrence requirements, without source
+text or preamble bodies. Evidence collection reads these alongside later input
+pairs across the current binding. Subsequent session facts do not copy the array;
+the retained session row remains in the binding until replacement. Repeated Clear
+consolidates evidence once; native Reload reconstructs ordinary pairs and drops
+the retained field, preventing double-counting.
+
 Status: revision 41 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
