@@ -36,15 +36,24 @@ function result(command, status = 'ok') {
 describe('command-specific ticket results', () => {
   test('historical native results and ledger filters normalize ownership without rewriting actor labels', () => {
     const owner = { kind: 'user', ownerKey: 'original' };
+    const legacyOwner = { kind: 'user', username: 'original' };
+    const historicalActor = { kind: 'user', username: 'original-label', principalMode: 'authenticated', declaredChatId: null };
     for (const command of ['read', 'list', 'history']) {
-      const current = structuredClone(result(command));
-      if (command === 'read') current.data.ticket.assignee = owner;
-      if (command === 'list') {
-        current.data.items[0].assignee = owner;
-        current.context = { filters: { assignee: owner } };
-      }
-      if (command === 'history') current.data.items[0].ticket.assignee = owner;
-      const xml = garconTicketResultContent(current).replaceAll('&quot;ownerKey&quot;', '&quot;username&quot;');
+      const [current, historical] = [owner, legacyOwner].map(assignee => {
+        const output = structuredClone(result(command));
+        const assigned = command === 'read' ? output.data.ticket
+          : command === 'history' ? output.data.items[0].ticket : output.data.items[0];
+        assigned.assignee = assignee;
+        assigned.createdBy = historicalActor;
+        if (command === 'list') output.context = { filters: { assignee } };
+        if (command === 'read') output.data.comments.items[0].author = historicalActor;
+        if (command === 'history') output.data.items[0].actor = historicalActor;
+        return output;
+      });
+      const xml = garconTicketResultContent(historical);
+      expect(xml).toContain(JSON.stringify(legacyOwner));
+      expect(xml).not.toContain('"ownerKey"');
+      expect(() => parseTicketCommandResult(historical)).toThrow();
       expect(parseGarconTicketResult(xml)).toEqual(current);
     }
     const outcome = { ...ticketCommandOutcome(result('list')), context: { filters: { assignee: owner } } };
