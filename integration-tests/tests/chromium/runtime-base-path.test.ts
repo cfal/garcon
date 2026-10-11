@@ -53,6 +53,12 @@ for (const basePath of ['', '/garcon', '/tools/garcon']) {
         if (url.origin === origin) requested.add(url.pathname);
       });
       page.on('websocket', socket => sockets.push(new URL(socket.url()).pathname));
+      await page.goto(`${baseUrl}/api/v1/auth/status`);
+      await page.evaluate(async () => {
+        const legacy = await caches.open('garcon-pre-prefix-version');
+        await legacy.put('/synthetic-legacy-asset.js', new Response('synthetic legacy asset'));
+        await caches.open('unrelated');
+      });
       await writeFile(join(integration.dirs.project, 'mounted.html'), '<section>Synthetic mounted editor</section>');
       const chatId = integration.newChatId();
       const turn = await integration.client.startDirectChat({ chatId, content: 'Synthetic mounted browser turn',
@@ -87,6 +93,8 @@ for (const basePath of ['', '/garcon', '/tools/garcon']) {
       expect(worker.scope).toBe(`${baseUrl}/`);
       expect(worker.script).toBe(`${baseUrl}/service-worker.js`);
       expect(worker.caches.some(name => name.startsWith(`garcon:${encodeURIComponent(basePath)}:`))).toBe(true);
+      expect(worker.caches.includes('garcon-pre-prefix-version')).toBe(basePath !== '');
+      expect(worker.caches).toContain('unrelated');
       await context.setOffline(true);
       const offline = await page.goto(`${baseUrl}/chat/synthetic-offline`);
       expect(offline?.fromServiceWorker()).toBe(true);

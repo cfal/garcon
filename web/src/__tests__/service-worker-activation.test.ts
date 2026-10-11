@@ -1,0 +1,66 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const deployment = vi.hoisted(() => ({ base: '' }));
+vi.mock('$service-worker', () => ({
+	get base() {
+		return deployment.base;
+	},
+	build: [],
+	files: [],
+	version: 'current',
+}));
+
+describe('service worker activation', () => {
+	beforeEach(() => {
+		vi.resetModules();
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it.each(['', '/tools/garcon'])(
+		'removes obsolete caches owned by mount "%s" before claiming clients',
+		async (basePath) => {
+			deployment.base = basePath;
+			const prefix = `garcon:${encodeURIComponent(basePath)}:`;
+			const names = [
+				`${prefix}current`,
+				`${prefix}outdated`,
+				'garcon-pre-prefix-version',
+				'garcon:%2Fother:outdated',
+				'unrelated',
+			];
+			const pendingDelete = Promise.withResolvers<boolean>();
+			const storage = {
+				keys: vi.fn<CacheStorage['keys']>().mockResolvedValue(names),
+				delete: vi.fn<CacheStorage['delete']>().mockReturnValue(pendingDelete.promise),
+			} satisfies Pick<CacheStorage, 'keys' | 'delete'>;
+			const claim = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const scope = new EventTarget();
+			vi.stubGlobal('self', {
+				addEventListener: scope.addEventListener.bind(scope),
+				clients: { claim },
+			});
+			vi.stubGlobal('caches', storage);
+			await vi.importActual('../service-worker');
+			const lifetimes: Promise<unknown>[] = [];
+			scope.dispatchEvent(
+				Object.assign(new Event('activate'), {
+					waitUntil: (promise: Promise<unknown>) => lifetimes.push(promise),
+				}),
+			);
+
+			await vi.waitFor(() => expect(storage.delete).toHaveBeenCalled());
+			const deleted = [`${prefix}outdated`];
+			if (basePath === '') deleted.push('garcon-pre-prefix-version');
+			expect(storage.delete.mock.calls.map(([name]) => name)).toEqual(deleted);
+			expect(claim).not.toHaveBeenCalled();
+			expect(lifetimes).toHaveLength(1);
+
+			pendingDelete.resolve(true);
+			await lifetimes[0];
+			expect(claim).toHaveBeenCalledOnce();
+		},
+	);
+});

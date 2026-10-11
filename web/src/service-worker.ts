@@ -59,15 +59,18 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-	// Evict old garcon caches from previous deploys. Only touch our own prefix.
+	// Root upgrades also retire caches created before mount-specific naming.
 	event.waitUntil(
 		caches
 			.keys()
 			.then((keys) =>
 				Promise.all(
 					keys
-						.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)
-						.map((k) => caches.delete(k)),
+						.filter((name) => {
+							const legacyRootCache = base === '' && name.startsWith('garcon-');
+							return legacyRootCache || (name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME);
+						})
+						.map((name) => caches.delete(name)),
 				),
 			)
 			.then(() => self.clients.claim()),
