@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import ComposerDraftPreview from './ComposerDraftPreview.svelte';
+	import { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
 	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
@@ -63,10 +64,7 @@
 		parseSnippetCommand,
 		type SnippetCommandParseResult,
 	} from '$lib/chat/composer/slash-commands.js';
-	import {
-		SnippetExpansionController,
-		snippetErrorDetail,
-	} from '$lib/snippets/snippet-expansion-controller.svelte.js';
+	import { SnippetExpansionController, snippetErrorDetail } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -117,15 +115,10 @@
 	const executors = getExecutors();
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(agentState.executorId));
 	const executionAgent = $derived(modelCatalog.getAgent(agentState.agentId));
-	const conversationInput = $derived(
-		Boolean(executionAgent && executionAgent.executionPolicy !== 'literal'),
-	);
-	const executionKey = $derived(
-		JSON.stringify([agentState.executorId, agentState.agentId, executionAgent?.executionPolicy]),
-	);
+	const conversationInput = $derived(Boolean(executionAgent && executionAgent.executionPolicy !== 'literal'));
+	const executionKey = $derived(JSON.stringify([agentState.executorId, agentState.agentId, executionAgent?.executionPolicy]));
 	const attachmentError = $derived(
-		executionAgent &&
-			composerState.images.some((file) => !isSupportedChatAttachment(file, attachmentSupport))
+		executionAgent && composerState.images.some(file => !isSupportedChatAttachment(file, attachmentSupport))
 			? m.chat_composer_remove_attachments({ agent: executionAgent.label })
 			: null,
 	);
@@ -149,33 +142,27 @@
 	const markdownPreviewOpen = $derived(
 		composerState.inputText.length > 0 && ui.markdownPreviewText === composerState.inputText,
 	);
-	let previewRequestId = 0;
-
-	function openMarkdownPreview(): void {
-		if (
-			!isPresented ||
-			!isVisible ||
-			isDisabled ||
-			promptTransformPending ||
-			ui.composerEditorOpen ||
-			!composerState.inputText.trim()
-		)
-			return;
-		ui.markdownPreviewText = composerState.inputText;
-		ui.closeFileMenu();
-		ui.closeSlashMenu();
-		ui.snippetPalette.dismiss();
-	}
-
-	async function editMarkdown(): Promise<void> {
-		const chatId = sessions.selectedChatId;
-		previewRequestId += 1;
-		ui.markdownPreviewText = null;
-		await tick();
-		if (!destroyed && isVisible && sessions.selectedChatId === chatId) {
-			textarea?.focus({ preventScroll: true });
-		}
-	}
+	const markdown = new PromptComposerMarkdownController({
+		ui,
+		composer: composerState,
+		get chatId() {
+			return sessions.selectedChatId;
+		},
+		get textarea() {
+			return textarea;
+		},
+		get canPreview() {
+			return (
+				isVisible && isPresented && !isDisabled && !promptTransformPending && !ui.composerEditorOpen
+			);
+		},
+		get visible() {
+			return isVisible;
+		},
+		get interactionGeneration() {
+			return workspaceShortcuts.userInteractionGeneration;
+		},
+	});
 	const promptRecall = new PromptComposerRecallController({
 		getIdentity: () => recallIdentity,
 		getPrompts: () => recallPrompts,
@@ -285,8 +272,7 @@
 	onDestroy(() => onAvailabilityNoticeChange?.(null));
 
 	function requestComposerFocusForChat(chatId: string | null): void {
-		previewRequestId += 1;
-		ui.markdownPreviewText = null;
+		markdown.reset();
 		focusDelivery.request(
 			chatId,
 			untrack(() => workspaceShortcuts.userInteractionGeneration),
@@ -299,9 +285,7 @@
 	});
 
 	const promptRefinement = new PromptComposerRefinementController({
-		get executionKey() {
-			return executionKey;
-		},
+		get executionKey() { return executionKey; },
 		composer: composerState,
 		sessions,
 		notifications,
@@ -322,7 +306,7 @@
 	});
 	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
 	function handleRefinePrompt(): void {
-		ui.markdownPreviewText = null;
+		markdown.reset();
 		promptRefinement.handleAction();
 	}
 	$effect(() => {
@@ -353,7 +337,7 @@
 		const chatId = sessions.selectedChatId;
 		const changed = ui.resetOnChatSwitch(chatId);
 		if (!changed) return;
-		previewRequestId += 1;
+		markdown.reset();
 		snippetExpansion.cancel();
 		promptRefinement.abort();
 		attachmentController.resetDrag();
@@ -403,6 +387,7 @@
 
 	onDestroy(() => {
 		destroyed = true;
+		markdown.destroy();
 		projectState.destroy();
 		snippetExpansion.cancel();
 		promptRefinement.destroy();
@@ -492,7 +477,7 @@
 
 	function returnComposerFocus(): void {
 		if (destroyed || !isVisible) return;
-		if (markdownPreviewOpen) void editMarkdown();
+		if (markdownPreviewOpen) void markdown.edit();
 		else textarea?.focus({ preventScroll: true });
 	}
 
@@ -585,8 +570,7 @@
 			});
 			if (result.kind !== 'expanded') return;
 			if (
-				!conversationInput ||
-				executionKey !== sourceExecutionKey ||
+				!conversationInput || executionKey !== sourceExecutionKey ||
 				!projectState.matchesSnippetContext(result.prepared, result.response) ||
 				composerState.inputText !== sourceText
 			)
@@ -647,9 +631,7 @@
 
 	function handleFormSubmit(action: Exclude<ComposerEnterAction, 'newline'> = 'submit') {
 		if (!canSubmit || promptTransformPending) return;
-		const command = conversationInput
-			? parseSnippetCommand(composerState.inputText)
-			: { kind: 'none' as const };
+		const command = conversationInput ? parseSnippetCommand(composerState.inputText) : { kind: 'none' as const };
 		if (command.kind === 'invalid') {
 			notifications.error(
 				command.error === 'short-name-required'
@@ -663,14 +645,13 @@
 			void expandSnippetInvocation(command);
 			return;
 		}
-		if (markdownPreviewOpen) void editMarkdown();
+		if (markdownPreviewOpen) void markdown.edit();
 		if (action === 'steer-preferred') onSteerPreferredSubmit();
 		else onsubmit();
 	}
 
 	function handleInput(event: Event) {
-		const requestId = ++previewRequestId;
-		ui.markdownPreviewText = null;
+		markdown.reset();
 		promptRecall.reset();
 		const target = event.currentTarget as HTMLTextAreaElement;
 		if (isDisabled || promptRefinement.pending) {
@@ -688,34 +669,17 @@
 			conversationInput ? 'conversation' : 'literal',
 		);
 		queueCurrentDraft(value);
-		if ((event as InputEvent).inputType === 'insertFromPaste') {
-			const chatId = sessions.selectedChatId;
-			void import('./composer-markdown.js')
-				.then(({ hasMarkdownTable }) => {
-					if (
-						!destroyed &&
-						previewRequestId === requestId &&
-						sessions.selectedChatId === chatId &&
-						composerState.inputText === value &&
-						document.activeElement === textarea &&
-						hasMarkdownTable(value)
-					) {
-						void openMarkdownPreview();
-					}
-				})
-				.catch(() => {
-					// Failed preview loading leaves the editable draft intact.
-				});
-		}
+		if ((event as InputEvent).inputType === 'insertFromPaste') markdown.previewPaste(value);
 	}
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
 	const capabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
-	const isDisabled = $derived(directAdmissionPending && sessions.selectedChat?.status === 'draft');
+	const isDisabled = $derived(
+		directAdmissionPending && sessions.selectedChat?.status === 'draft',
+	);
 	const controllerCommand = $derived(
 		sessions.selectedChat?.status === 'running' &&
-			conversationInput &&
-			isControllerSlashCommand(composerState.inputText),
+			conversationInput && isControllerSlashCommand(composerState.inputText),
 	);
 	// Loading is explained by the disabled send button so the composer keeps its height.
 	const modelsLoading = $derived(
@@ -723,16 +687,12 @@
 	);
 	const sendTitle = $derived.by(() => {
 		if (modelsLoading && !controllerCommand) return m.chat_composer_loading_models();
-		return requiresQueuedSubmission
-			? m.chat_composer_queue_message()
-			: m.chat_composer_send_message();
+		return requiresQueuedSubmission ? m.chat_composer_queue_message() : m.chat_composer_send_message();
 	});
 
 	const canSubmit = $derived(
 		canSubmitComposer(
-			!executionAgent ||
-				isDisabled ||
-				attachmentError !== null ||
+			!executionAgent || isDisabled || attachmentError !== null ||
 				directAdmissionPending ||
 				promptTransformPending ||
 				(!controllerCommand &&
@@ -894,7 +854,7 @@
 				{#if markdownPreviewOpen}
 					<ComposerDraftPreview
 						source={composerState.inputText}
-						onEdit={() => void editMarkdown()}
+						onEdit={() => void markdown.edit()}
 						onSubmitKeydown={handleKeyDown}
 					/>
 				{/if}
@@ -918,7 +878,7 @@
 			<ComposerBottomBar
 				canAttachImages={canAttachAttachments}
 				onPreviewMarkdown={composerState.inputText.trim() && !markdownPreviewOpen
-					? () => void openMarkdownPreview()
+					? () => markdown.open()
 					: undefined}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={() => attachmentController.pick()}
@@ -984,10 +944,7 @@
 			executorId={agentState.executorId}
 			projectPath={completionProjectPath}
 			chatId={selectedProjectTarget?.kind === 'chat' ? sessions.selectedChatId : null}
-			isVisible={conversationInput &&
-				ui.showSlashMenu &&
-				executors.isReady(agentState.executorId) &&
-				!showProjectNotice}
+			isVisible={conversationInput && ui.showSlashMenu && executors.isReady(agentState.executorId) && !showProjectNotice}
 			projectPending={Boolean(
 				selectedProjectTarget &&
 				(selectedProjectResolution.kind === 'unchecked' ||
