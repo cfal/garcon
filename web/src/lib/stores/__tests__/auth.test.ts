@@ -306,6 +306,53 @@ describe('session ordering and credential operations', () => {
 });
 
 describe('same-origin repair', () => {
+	it.each([false, true])(
+		'retains a successful replacement while validating newer storage (candidate valid: %s)',
+		async (valid) => {
+			const auth = await signedIn();
+			const pending = Promise.withResolvers<AuthSessionResponse>();
+			vi.mocked(api.changePassword).mockReturnValue(pending.promise);
+			const change = auth.changePassword({
+				currentPassword: 'before',
+				newPassword: 'after-password',
+			});
+			const candidate = session(999).token;
+			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, candidate);
+			vi.mocked(api.getUser).mockImplementation(async (token) => {
+				if (token === session(2).token || (valid && token === candidate)) return { user };
+				throw invalid();
+			});
+			pending.resolve(session(2));
+			expect((await change).success).toBe(true);
+			expect(auth.token).toBe(session(2).token);
+			expect(getAuthToken()).toBe(session(2).token);
+			expect(canDispatchAuthenticated()).toBe(false);
+			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe(candidate);
+			await vi.advanceTimersByTimeAsync(2_000);
+			expect(auth.token).toBe(valid ? candidate : session(2).token);
+			expect(auth.isAuthenticated).toBe(true);
+			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe(auth.token);
+		},
+	);
+	it('backs off an unchanged failing storage candidate even when memory verification succeeds', async () => {
+		const auth = await signedIn();
+		const candidate = session(999).token;
+		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, candidate);
+		vi.mocked(api.getUser)
+			.mockClear()
+			.mockImplementation(async (token) => {
+				if (token === candidate) throw new TypeError('Network failure');
+				return { user };
+			});
+		await auth.reconcile();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.getUser).toHaveBeenCalledTimes(2);
+		expect(auth.token).toBe(session().token);
+		await vi.advanceTimersByTimeAsync(1_999);
+		expect(api.getUser).toHaveBeenCalledTimes(2);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(api.getUser).toHaveBeenCalledTimes(4);
+	});
 	it('never lets an in-flight login lift a storage fence', async () => {
 		const auth = await signedIn();
 		const pending = Promise.withResolvers<AuthSessionResponse>();

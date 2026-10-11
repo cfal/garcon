@@ -54,12 +54,18 @@ export function register(username: string, password: string): Promise<AuthSessio
 }
 
 export async function getUser(token = getAuthToken()): Promise<AuthUserResponse> {
+	let headers: Headers;
+	try {
+		headers = new Headers(token ? { Authorization: `Bearer ${token}` } : {});
+	} catch {
+		throw new ApiError(401, 'Invalid session token.', 'AUTH_SESSION_INVALID');
+	}
 	return parseAuthUserResponse(
 		await parseApiResponse(
 			await publicApiFetch('/api/v1/auth/user', {
 				timeoutMs: 5_000,
 				cache: 'no-store',
-				headers: token ? { Authorization: `Bearer ${token}` } : {},
+				headers,
 			}),
 		),
 	);

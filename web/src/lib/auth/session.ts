@@ -28,9 +28,13 @@ export function getAuthToken(): string | null {
 	return token;
 }
 
-export function setAuthToken(value: string): boolean {
+export function retainAuthToken(value: string): void {
 	initialized = true;
 	token = value;
+}
+
+export function setAuthToken(value: string): boolean {
+	retainAuthToken(value);
 	try {
 		globalThis.localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, value);
 		return true;

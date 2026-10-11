@@ -9,6 +9,7 @@ import {
 import { ApiError, isIntermediaryResponse } from '$lib/api/client.js';
 import {
 	getAuthToken,
+	retainAuthToken,
 	setAuthToken,
 	clearAuthToken,
 	setAuthDispatchAvailable,
@@ -112,10 +113,8 @@ export class AuthStore {
 	#accept(data: AuthSessionResponse): boolean {
 		if (isOlderAuthToken(data.token, this.token)) return false;
 		const stored = readStoredAuthToken();
-		if (stored !== this.#rejectedStoredToken && isOlderAuthToken(data.token, stored)) {
-			void this.reconcile();
-			return false;
-		}
+		const newerStoredCandidate =
+			stored !== this.#rejectedStoredToken && isOlderAuthToken(data.token, stored);
 		const identity = authTokenIdentity(data.token);
 		if (!identity || identity.ownerKey !== data.user.id)
 			throw new Error('Invalid session identity.');
@@ -131,8 +130,15 @@ export class AuthStore {
 		this.presentationOwner = { mode: 'authenticated', key: data.user.id };
 		this.needsSetup = false;
 		this.error = null;
-		this.persistenceWarning = !setAuthToken(data.token);
-		this.#setAvailability('active');
+		if (newerStoredCandidate) {
+			// Retains the verified response without overwriting an unverified sibling candidate.
+			retainAuthToken(data.token);
+			this.#setAvailability('repairing');
+			this.#scheduleRepair(2_000);
+		} else {
+			this.persistenceWarning = !setAuthToken(data.token);
+			this.#setAvailability('active');
+		}
 		if (ownerChanged) window.location.reload();
 		return true;
 	}

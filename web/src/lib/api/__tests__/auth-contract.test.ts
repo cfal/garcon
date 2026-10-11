@@ -72,8 +72,10 @@ it('validates auth probes and does not classify login failures as credential mut
 		'/api/v1/auth/user',
 		expect.objectContaining({
 			cache: 'no-store',
-			headers: { Authorization: 'Bearer captured-token' },
 		}),
+	);
+	expect(new Headers(fetchMock.mock.lastCall?.[1]?.headers).get('Authorization')).toBe(
+		'Bearer captured-token',
 	);
 	fetchMock.mockResolvedValueOnce(Response.json({ authDisabled: 'false' }));
 	await expect(getAuthStatus()).rejects.toThrow('Invalid authentication status');
