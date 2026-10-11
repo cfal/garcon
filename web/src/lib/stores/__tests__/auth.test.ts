@@ -207,6 +207,41 @@ describe('deliberate logout', () => {
 		expect(navigate).toHaveBeenCalledExactlyOnceWith('/login?loggedOut=peer');
 	});
 
+	it('an uncoordinated peer logout clears private tab data despite an unchanged epoch', async () => {
+		const channel = {
+			onmessage: null as ((event: MessageEvent) => void) | null,
+			postMessage: vi.fn(),
+			close: vi.fn(),
+		} satisfies Pick<BroadcastChannel, 'onmessage' | 'postMessage' | 'close'>;
+		vi.stubGlobal(
+			'BroadcastChannel',
+			class {
+				constructor() {
+					return channel;
+				}
+			},
+		);
+		const { auth, navigate } = await ready();
+		auth.start();
+		const actualCleanup = await vi.importActual<typeof cleanup>('$lib/auth/logout-cleanup');
+		vi.mocked(cleanup.clearTabPrivateData).mockImplementation(actualCleanup.clearTabPrivateData);
+		vi.mocked(cleanup.reconcileTabPrivateData).mockImplementation(
+			actualCleanup.reconcileTabPrivateData,
+		);
+		sessionStorage.setItem('garcon-ticket-draft-v1:previous', 'Previous ticket draft');
+		sessionStorage.setItem('chat-canvas-recovery-v1:previous', 'Previous canvas draft');
+		sessionStorage.setItem('unrelated-app', 'keep');
+
+		channel.onmessage?.(new MessageEvent('message', { data: { type: 'logout', epoch: null } }));
+
+		expect(auth.logoutPending).toBe(true);
+		expect(auth.token).toBeNull();
+		expect(sessionStorage.getItem('garcon-ticket-draft-v1:previous')).toBeNull();
+		expect(sessionStorage.getItem('chat-canvas-recovery-v1:previous')).toBeNull();
+		expect(sessionStorage.getItem('unrelated-app')).toBe('keep');
+		expect(navigate).toHaveBeenCalledExactlyOnceWith('/login?loggedOut=peer&cleanup=incomplete');
+	});
+
 	it('the peer logout destination never deletes a subsequent fresh login', async () => {
 		setAuthToken(session(2).token);
 		const previousUrl = window.location.href;

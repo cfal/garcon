@@ -42,6 +42,7 @@ import {
 } from '$lib/utils/browser-data-lifetime';
 import {
 	clearBrowserPrivateData,
+	clearTabPrivateData,
 	reconcileTabPrivateData,
 } from '$lib/auth/logout-cleanup';
 
@@ -123,7 +124,7 @@ export class AuthStore {
 		const release = onAuthRejection(({ token, code }) => this.sessionRejected(token, code));
 		const reconcile = () => {
 			if (!isBrowserDataCurrent()) {
-				this.#abandonFromPeer();
+				this.#abandonFromPeer('epoch-changed');
 				return;
 			}
 			void this.reconcile();
@@ -139,8 +140,9 @@ export class AuthStore {
 			try {
 				this.#logoutChannel = new BroadcastChannel('garcon.logout');
 				this.#logoutChannel.onmessage = (event) => {
-					if (event.data?.type === 'logout' && (!event.data.epoch || !isBrowserDataCurrent()))
-						this.#abandonFromPeer();
+					if (event.data?.type !== 'logout') return;
+					if (!event.data.epoch) this.#abandonFromPeer('uncoordinated');
+					else if (!isBrowserDataCurrent()) this.#abandonFromPeer('epoch-changed');
 				};
 			} catch {
 				/* Storage and wakeup checks remain available. */
@@ -546,12 +548,14 @@ export class AuthStore {
 		this.navigateAfterLogout(`${appPath('/login')}?${params}`);
 	}
 
-	#abandonFromPeer(): void {
+	#abandonFromPeer(reason: 'epoch-changed' | 'uncoordinated'): void {
 		if (this.#logoutTask || this.logoutPending) return;
 		this.#abandon();
-		const cleared = reconcileTabPrivateData();
+		const cleared =
+			reason === 'uncoordinated' ? clearTabPrivateData() : reconcileTabPrivateData();
+		const incomplete = !cleared || reason === 'uncoordinated';
 		this.navigateAfterLogout(
-			`${appPath('/login')}?loggedOut=peer${cleared ? '' : '&cleanup=incomplete'}`,
+			`${appPath('/login')}?loggedOut=peer${incomplete ? '&cleanup=incomplete' : ''}`,
 		);
 	}
 	destroy(): void {
