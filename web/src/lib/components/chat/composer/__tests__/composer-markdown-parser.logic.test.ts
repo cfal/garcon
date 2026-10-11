@@ -93,24 +93,33 @@ describe('composer Markdown parsing', () => {
 		const manager = new MarkdownManager({ extensions: composerMarkdownEditorExtensions() });
 		expect(manager.serialize(document)).toContain('first<br>second');
 	});
-	it.each(['a\nb', 'a\n', '\na', ' a ', '  ', '`edge`', 'a``b`c```d', 'a\n`b`\n c '])(
-		'round trips edited code text in table cells: %s',
-		(text) => {
-			const document = parseComposerMarkdown({ source: table })!;
-			const cell = nodes(document).find((node) => node.type === 'tableCell')!;
-			cell.content = [
-				{ type: 'paragraph', content: [{ type: 'text', text, marks: [{ type: 'code' }] }] },
-			];
-			const manager = new MarkdownManager({
-				extensions: composerMarkdownEditorExtensions(),
-				markedOptions: { breaks: true },
-			});
-			configureComposerMarkdown(manager);
-			const output = manager.parse(serializeComposerMarkdown(manager, document));
-			const paragraph = nodes(output).find((node) => node.type === 'tableCell')!.content![0];
-			expect(
-				paragraph.content!.map((node) => (node.type === 'hardBreak' ? '\n' : node.text)).join(''),
-			).toBe(text);
-		},
-	);
+	it.each([
+		'a\nb',
+		'a\n',
+		'\na',
+		' a ',
+		'  ',
+		'`edge`',
+		'a``b`c```d',
+		'a\n`b`\n c ',
+		'a|b',
+		'a\\|b',
+		'a\\\\|b',
+	])('round trips edited code text in table cells: %s', (text) => {
+		const document = parseComposerMarkdown({ source: table })!;
+		const cell = nodes(document).find((node) => node.type === 'tableCell')!;
+		cell.content = [
+			{ type: 'paragraph', content: [{ type: 'text', text, marks: [{ type: 'code' }] }] },
+		];
+		const manager = new MarkdownManager({
+			extensions: composerMarkdownEditorExtensions(),
+			markedOptions: { breaks: true },
+		});
+		configureComposerMarkdown(manager);
+		const output = manager.parse(serializeComposerMarkdown(manager, document));
+		const paragraph = nodes(output).find((node) => node.type === 'tableCell')!.content![0];
+		expect(
+			paragraph.content!.map((node) => (node.type === 'hardBreak' ? '\n' : node.text)).join(''),
+		).toBe(text);
+	});
 });
