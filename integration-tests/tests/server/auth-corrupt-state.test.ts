@@ -84,7 +84,9 @@ describe('corrupt auth state', () => {
       expect(await readFile(authPath, 'utf8')).toBe(corruptBytes);
       await garcon.stop();
       garcon = null;
-      await expect(GarconProcess.start(processOptions(directories))).rejects.toThrow('Garcon exited unexpectedly with code 1');
+      expect(await rejectionOf(GarconProcess.start(processOptions(directories)))).toMatchObject({
+        message: expect.stringContaining('Garcon exited unexpectedly with code 1'),
+      });
       const [quarantineName] = (await readdir(directories.config)).filter((entry) =>
         entry.startsWith('auth.json.corrupt-'));
       expect(await readFile(join(directories.config, quarantineName), 'utf8')).toBe(corruptBytes);
