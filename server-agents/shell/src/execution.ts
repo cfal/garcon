@@ -1,6 +1,6 @@
 import { CommandOutputMessage, CommandResultMessage, UserMessage } from '@garcon/common/chat-types';
 import type { CommandOutcome } from '@garcon/common/command-output';
-import { literalInputFormat } from '@garcon/common/input-format';
+import { literalInputFormat, type InputFormat } from '@garcon/common/input-format';
 import {
   AgentCallError, AgentIntegrationError, createAgentResourceRef, type AgentExecutionHandle, type AgentHost,
   type AgentIntegration, type AgentProducerNotification, type AgentProducerBinding,
@@ -155,10 +155,7 @@ export class ShellExecution {
       log.reconcile();
       invocation.cancellation.signal.throwIfAborted();
       const format = literalInputFormat(SHELL_INPUT_FORMATS, request.model);
-      const input = new UserMessage(request.submission?.timestamp ?? invocation.startedAt, request.prompt, undefined, {
-        contentMode: 'literal', contentFormat: format,
-        ...(request.submission?.clientMessageId ? { clientMessageId: request.submission.clientMessageId } : {}),
-      }, request.submission?.presentation);
+      const input = createNativeInput(request, invocation.startedAt, format);
       log.append(crypto.randomUUID(), input, { kind: 'note', version: 1, format, completed: true });
       sessionPublished = this.#emit(invocation.binding, {
         type: 'session',
@@ -205,10 +202,7 @@ export class ShellExecution {
       log = commandLog;
       commandLog.reconcile();
       invocation.cancellation.signal.throwIfAborted();
-      const input = new UserMessage(request.submission?.timestamp ?? invocation.startedAt, request.prompt, undefined, {
-        contentMode: 'literal', contentFormat: 'plain',
-        ...(request.submission?.clientMessageId ? { clientMessageId: request.submission.clientMessageId } : {}),
-      }, request.submission?.presentation);
+      const input = createNativeInput(request, invocation.startedAt, 'plain');
       commandLog.append(commandId, input, {
         ...parsed,
         family: shell.family,
@@ -327,6 +321,17 @@ export class ShellExecution {
     await Promise.all(active.map(invocation => invocation.settled));
     this.#bindings.clear();
   }
+}
+
+function createNativeInput(
+  request: AgentStartRequestV5 | AgentResumeRequestV5,
+  startedAt: string,
+  contentFormat: InputFormat,
+): UserMessage {
+  return new UserMessage(request.submission?.timestamp ?? startedAt, request.prompt, undefined, {
+    contentMode: 'literal', contentFormat,
+    ...(request.submission?.clientMessageId ? { clientMessageId: request.submission.clientMessageId } : {}),
+  }, request.submission?.presentation);
 }
 
 function busy(): AgentIntegrationError {

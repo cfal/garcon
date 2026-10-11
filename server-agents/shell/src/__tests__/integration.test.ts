@@ -119,6 +119,20 @@ describe('Shell integration', () => {
     } finally { process.mockRestore(); environment.mockRestore(); }
   });
 
+  it.each(['sh', 'notes', 'notes-markdown'])('records %s input without submission metadata', async model => {
+    const before = Date.now();
+    await integration.execution.start({ ...request, model, submission: undefined });
+    expect(await terminal()).toMatchObject({ outcome: 'finished' });
+    const after = Date.now();
+    const input = (await history())[0];
+    if (input?.type !== 'user-message') throw new Error('Expected the durable user input');
+    expect(Date.parse(input.timestamp)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(input.timestamp)).toBeLessThanOrEqual(after);
+    expect(input).toEqual(new UserMessage(input.timestamp, request.prompt, undefined, {
+      contentMode: 'literal', contentFormat: model === 'notes-markdown' ? 'markdown' : 'plain',
+    }));
+  });
+
   it('does not report success or retain a new note session when native persistence fails', async () => {
     const append = spyOn(NativeLog.prototype, 'append').mockImplementation(() => { throw new Error('synthetic storage failure'); });
     try {
