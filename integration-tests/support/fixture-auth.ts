@@ -14,6 +14,8 @@ export async function prepareFixtureAuth(configDir: string): Promise<{ username:
   const credentials = { username: 'integration', password: randomBytes(32).toString('hex') };
   await writeFile(authPath, JSON.stringify({
     username: credentials.username,
+	ownerKey: typeof stored.ownerKey === 'string' ? stored.ownerKey : credentials.username,
+	credentialRevision: typeof stored.credentialRevision === 'number' ? stored.credentialRevision : 1,
     passwordHash: await Bun.password.hash(credentials.password, { algorithm: 'bcrypt', cost: 4 }),
     // Existing browser tokens remain valid through a controller restart.
     jwtSecret: typeof stored.jwtSecret === 'string' && stored.jwtSecret
