@@ -71,6 +71,7 @@
 		isPreparingInitialScroll?: boolean;
 		isProcessing?: boolean;
 		onForkChat?: (upToSeq?: number) => void;
+		onClearBefore?: (ordinal: number) => void;
 		onAppendToDraft?: (block: string) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		isVisible: boolean;
@@ -100,6 +101,7 @@
 		isPreparingInitialScroll = false,
 		isProcessing = false,
 		onForkChat,
+		onClearBefore,
 		onAppendToDraft,
 		onGenerateTitleFromMessage,
 		isVisible,
@@ -120,6 +122,7 @@
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(chatContext.executorId));
 
 	const supportsForkAtMessage = $derived(modelCatalog.supportsForkAtMessage(agentId));
+	const canClearBefore = $derived(modelCatalog.getAgent(agentId)?.executionPolicy === 'literal');
 	const canShowForkAtMessage = $derived(
 		canShowForkAtMessageAction({
 			supportsForkAtMessage,
@@ -493,6 +496,7 @@
 						{onPermissionDecision}
 						{onExitPlanMode}
 						onForkChat={canShowForkAtMessage ? onForkChat : undefined}
+						onClearBefore={canClearBefore ? onClearBefore : undefined}
 						{onAppendToDraft}
 						{onGenerateTitleFromMessage}
 						canForkAtMessageNow={canUseForkAtMessage}

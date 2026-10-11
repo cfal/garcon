@@ -37,6 +37,25 @@ describe('ConversationMessage actions', () => {
 		expect(container.querySelector('script')).toBeNull();
 	});
 
+	it.each([
+		{ user: true, ordinal: 7, available: true },
+		{ user: true, ordinal: undefined, available: false },
+		{ user: false, ordinal: 7, available: false },
+	])('offers Clear before only for durable user messages: %j', async ({ user, ordinal, available }) => {
+		const onClearBefore = vi.fn();
+		render(ConversationMessageHost, {
+			message: user ? new UserMessage('2026-01-01T00:00:00Z', 'synthetic input') : new AssistantMessage('2026-01-01T00:00:00Z', 'synthetic output'),
+			forkUpToSeq: ordinal, onClearBefore,
+		});
+		await fireEvent.contextMenu(document.querySelector('[data-slot="context-menu-trigger"]')!);
+		await screen.findByRole('menu');
+		if (!available) {
+			expect(screen.queryByRole('menuitem', { name: 'Clear before message' })).toBeNull();
+			return;
+		}
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Clear before message' }));
+		expect(onClearBefore).toHaveBeenCalledWith(ordinal);
+	});
 	it.each(['stdout', 'stderr'] as const)('renders plain %s in the shared fenced-code component', (channel) => {
 		const content = '```\n**literal** <garcon-get-chat-id />\n';
 		const { container } = render(ConversationMessageHost, { message: new CommandOutputMessage(

@@ -255,13 +255,13 @@ export class ConversationSessionController {
 
 	// Deduplicates chat-switch calls so the component effect can be stateless.
 	handleChatSwitchIfChanged(chatId: string | null): void {
-		this.clearHistory.handleChatSwitch(chatId);
 		if (this.executorHandoff.target && this.executorHandoff.target.chatId !== chatId)
 			this.executorHandoff.cancel();
 		if (chatId === this.#lastChatId) {
 			this.#reconcileExecutionSelection(chatId);
 			return;
 		}
+		this.clearHistory.handleChatSwitch(chatId);
 		// Route selection can arrive before the chat-list record. Defers the
 		// transition so hydration can retry without poisoning the dedupe key.
 		if (chatId && !this.deps.sessions.byId[chatId]) return;

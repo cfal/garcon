@@ -3,8 +3,9 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
 
-	let { open, busy, error, onCancel, onConfirm }: {
+	let { open, targetKind = 'all', busy, error, onCancel, onConfirm }: {
 		open: boolean;
+		targetKind?: 'all' | 'before-message';
 		busy: boolean;
 		error: string | null;
 		onCancel: () => void;
@@ -15,8 +16,8 @@
 <Dialog.Root {open} onOpenChange={(next) => { if (!next) onCancel(); }}>
 	<Dialog.Content class="sm:max-w-lg">
 		<Dialog.Header>
-			<Dialog.Title>{m.chat_clear_title()}</Dialog.Title>
-			<Dialog.Description>{m.chat_clear_description()}</Dialog.Description>
+			<Dialog.Title>{targetKind === 'before-message' ? m.chat_clear_before_title() : m.chat_clear_title()}</Dialog.Title>
+			<Dialog.Description>{targetKind === 'before-message' ? m.chat_clear_before_description() : m.chat_clear_description()}</Dialog.Description>
 		</Dialog.Header>
 		{#if error}
 			<p role="alert" class="text-sm text-destructive">{error}</p>

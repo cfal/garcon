@@ -13,6 +13,7 @@ import type { TranscriptView } from './contracts.js';
 import { LedgerFencedError } from './errors.js';
 import { PreambleHistoryCollector, retainedPreambleHistoryMetadata } from './preamble-history.js';
 import type { TranscriptLedgerService } from './service.js';
+import { stageBeforeMessage } from './clear-before.js';
 
 interface TranscriptClearOptions {
   readonly ledger: TranscriptLedgerService;
@@ -55,7 +56,10 @@ export class TranscriptClearService {
           ledger.closeProducer(chatId);
           let staging: TranscriptView | null = null;
           try {
-            staging = await this.#stageClearedView(chatId, current, entry, signal);
+            staging = request.target.kind === 'before-message'
+              ? await stageBeforeMessage(ledger, chatId, current, ledger.highWatermark(chatId), request.target.ordinal,
+                signal, () => this.#flushBoundary(chatId, entry))
+              : await this.#stageClearedView(chatId, current, entry, signal);
             const stagedViewId = staging.viewId;
             return await this.options.execution.withChatExecutionControl<ClearChatResponse>(chatId, async (queue) => {
               signal.throwIfAborted();
@@ -100,7 +104,7 @@ export class TranscriptClearService {
     entry: ChatRegistryEntry,
     signal: AbortSignal,
   ): Promise<TranscriptView> {
-    const { ledger, registry } = this.options;
+    const { ledger } = this.options;
     const session = ledger.currentSession(chatId);
     const collector = new PreambleHistoryCollector();
     if (session) {
@@ -113,12 +117,7 @@ export class TranscriptClearService {
         collector.add(page);
       }
     }
-    const pending = entry.pendingPreambleBoundary;
-    if (pending && ledger.hasPreambleBoundaryProof(chatId, pending)) {
-      registry.updateChat(chatId, { pendingPreambleBoundary: null });
-    }
-    // Flushes consumed boundaries before deleting their only durable input proof.
-    await registry.flush();
+    await this.#flushBoundary(chatId, entry);
     const drafts = session
       ? [
           {
@@ -130,6 +129,14 @@ export class TranscriptClearService {
         ]
       : [];
     return ledger.stageView(chatId, drafts, 1);
+  }
+
+  async #flushBoundary(chatId: string, entry: ChatRegistryEntry): Promise<void> {
+    const { ledger, registry } = this.options;
+    const pending = entry.pendingPreambleBoundary;
+    if (pending && ledger.hasPreambleBoundaryProof(chatId, pending)) registry.updateChat(chatId, { pendingPreambleBoundary: null });
+    // Flushes consumed boundaries before deleting their only durable input proof.
+    await registry.flush();
   }
 
   #assertEmptyQueue(queue: StoredChatExecutionControlState): void {
@@ -163,7 +170,7 @@ export class TranscriptClearService {
     if (watermark.viewId !== request.transcriptViewId || watermark.ordinal !== request.lastOrdinal) {
       throw new DomainError(
         'STALE_TRANSCRIPT_VIEW',
-        'Chat history changed. Review it and run /clear again.',
+        'Chat history changed. Review it and confirm Clear again.',
         409,
         false,
       );

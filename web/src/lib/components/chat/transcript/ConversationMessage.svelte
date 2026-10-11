@@ -99,6 +99,7 @@
 		chatContext?: ConversationMessageChatContext | null;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
 		onForkChat?: (upToSeq?: number) => void;
+		onClearBefore?: (ordinal: number) => void;
 		/** Appends a formatted block to the active chat draft. Omitted when no composer owns the chat. */
 		onAppendToDraft?: (block: string) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
@@ -128,6 +129,7 @@
 		showThinking = true,
 		chatContext = null,
 		onForkChat,
+		onClearBefore,
 		onAppendToDraft,
 		onGenerateTitleFromMessage,
 		canForkAtMessageNow = true,
@@ -657,6 +659,7 @@
 						<MessageActionMenu
 							hasSelection={hasMessageSelection}
 							canFork={Boolean(onForkChat && forkUpToSeq)}
+							onClearBefore={onClearBefore && forkUpToSeq !== undefined ? () => onClearBefore?.(forkUpToSeq!) : undefined}
 							canForkNow={canForkAtMessageNow}
 							onFork={handleFork}
 							onCopy={copyText}

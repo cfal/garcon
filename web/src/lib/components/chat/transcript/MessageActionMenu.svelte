@@ -3,6 +3,7 @@
 	import { ContextMenuItem, ContextMenuSeparator } from '$lib/components/ui/context-menu';
 	import Copy from '@lucide/svelte/icons/copy';
 	import GitFork from '@lucide/svelte/icons/git-fork';
+	import Eraser from '@lucide/svelte/icons/eraser';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import SquareArrowOutUpRight from '@lucide/svelte/icons/square-arrow-out-up-right';
 	import TextSelect from '@lucide/svelte/icons/text-select';
@@ -13,6 +14,7 @@
 		canFork?: boolean;
 		canForkNow?: boolean;
 		onFork?: (event: MouseEvent) => void;
+		onClearBefore?: () => void;
 		onCopy: () => void | Promise<void>;
 		onQuoteSelection?: () => void;
 		onSendToNewSession: () => void;
@@ -25,6 +27,7 @@
 		canFork = false,
 		canForkNow = true,
 		onFork,
+		onClearBefore,
 		onCopy,
 		onQuoteSelection,
 		onSendToNewSession,
@@ -67,6 +70,14 @@
 	<SquareArrowOutUpRight />
 	{m.chat_message_send_to_new_session()}
 </ContextMenuItem>
+
+{#if onClearBefore}
+	<ContextMenuSeparator />
+	<ContextMenuItem onclick={onClearBefore}>
+		<Eraser />
+		{m.chat_clear_before_action()}
+	</ContextMenuItem>
+{/if}
 
 {#if onGenerateTitleFromMessage}
 	<ContextMenuSeparator />

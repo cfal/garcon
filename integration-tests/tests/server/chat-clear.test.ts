@@ -6,6 +6,37 @@ import type { ChatDetailsResponse } from '../../../common/chat-details.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 
+test('Clear before a note keeps its suffix and native Reload restores all notes', async () => {
+  await withIntegrationFixture('chat-clear-before-note', async fixture => {
+    const chatId = fixture.newChatId();
+    const started = await fixture.client.startChat({ chatId, agentId: 'shell', model: 'notes-markdown',
+      projectPath: fixture.executionDirs.project, permissionMode: 'default', thinkingMode: 'none',
+      agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} }, origin: 'interactive',
+      clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(), command: '# Earlier note' });
+    await fixture.client.waitForTurnTerminal(chatId, started.turnId);
+    await fixture.client.waitForProcessing(chatId, false);
+    for (const command of ['# Selected note', '# Later note']) {
+      const turn = await fixture.client.runChat({ chatId, command, clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID() });
+      await fixture.client.waitForTurnTerminal(chatId, turn.turnId);
+      await fixture.client.waitForProcessing(chatId, false);
+    }
+    const original = await fixture.client.getMessages(chatId);
+    const selected = original.messages.find(row => row.message.type === 'user-message' && row.message.content === '# Selected note')!;
+    const retained = original.messages.slice(1).map(row => row.message);
+    for (let repeat = 0; repeat < 2; repeat++) {
+      const current = await fixture.client.getMessages(chatId);
+      const target = repeat === 0 ? selected : current.messages[0]!;
+      await fixture.client.post('/api/v1/chats/clear', { chatId, transcriptViewId: current.transcriptViewId,
+        lastOrdinal: current.lastOrdinal, target: { kind: 'before-message', ordinal: target.ordinal } } satisfies ClearChatRequest);
+      expect((await fixture.client.getMessages(chatId)).messages.map(row => row.message)).toEqual(retained);
+    }
+    await fixture.restartGarcon();
+    expect((await fixture.client.getMessages(chatId)).messages.map(row => row.message)).toEqual(retained);
+    await fixture.client.reloadChat(chatId);
+    expect((await fixture.client.getMessages(chatId)).messages.map(row => row.message)).toEqual(original.messages.map(row => row.message));
+  });
+}, 60_000);
+
 test('ledger clear preserves Shell cwd/session and native Reload restores history', async () => {
   await withIntegrationFixture('chat-clear-shell', async fixture => {
     const { client, executionDirs } = fixture;
@@ -22,7 +53,7 @@ test('ledger clear preserves Shell cwd/session and native Reload restores histor
     const detailsPath = `/api/v1/chats/details?${new URLSearchParams({ chatId })}`;
     const beforeDetails = await client.get<ChatDetailsResponse>(detailsPath);
     expect(beforeDetails.agentSessionId).toBeTruthy();
-    const request: ClearChatRequest = { chatId, transcriptViewId: original.transcriptViewId, lastOrdinal: original.lastOrdinal };
+    const request: ClearChatRequest = { chatId, transcriptViewId: original.transcriptViewId, lastOrdinal: original.lastOrdinal, target: { kind: 'all' } };
     const cleared = await client.post<ClearChatResponse>('/api/v1/chats/clear', request);
     expect(cleared.transcriptViewId).not.toBe(original.transcriptViewId);
     expect((await client.getMessages(chatId)).messages).toEqual([]);
@@ -69,7 +100,7 @@ test('Clear removes inherited fork history and Reload restores only the bound na
       if (hasNativeSession) await run('printf synthetic-native-output');
       const before = await client.getMessages(chatId);
       expect(before.messages.some(row => row.message.type === 'command-output' && row.message.content === 'synthetic-inherited-output')).toBe(true);
-      await client.post('/api/v1/chats/clear', { chatId, transcriptViewId: before.transcriptViewId, lastOrdinal: before.lastOrdinal });
+      await client.post('/api/v1/chats/clear', { chatId, transcriptViewId: before.transcriptViewId, lastOrdinal: before.lastOrdinal, target: { kind: 'all' } });
       expect((await client.getMessages(chatId)).messages).toEqual([]);
       await run('printf synthetic-new-output');
       await client.reloadChat(chatId);
@@ -95,7 +126,7 @@ test('ledger clear removes Shell history from search', async () => {
     const query = { query: 'syntheticclearneedle' };
     await client.waitForChatSearch(query, result => result.results.some(match => match.chatId === chatId));
     const original = await client.getMessages(chatId);
-    await client.post('/api/v1/chats/clear', { chatId, transcriptViewId: original.transcriptViewId, lastOrdinal: original.lastOrdinal } satisfies ClearChatRequest);
+    await client.post('/api/v1/chats/clear', { chatId, transcriptViewId: original.transcriptViewId, lastOrdinal: original.lastOrdinal, target: { kind: 'all' } } satisfies ClearChatRequest);
     expect((await client.getMessages(chatId)).messages).toEqual([]);
     await client.waitForChatSearch(query, result => result.results.every(match => match.chatId !== chatId));
     await client.reloadChat(chatId);
@@ -113,7 +144,7 @@ test('rejects Clear for conversational agents without changing history or native
     await client.waitForProcessing(chatId, false);
     const original = await client.getMessages(chatId);
     expect(await rejectionOf(client.post('/api/v1/chats/clear', {
-      chatId, transcriptViewId: original.transcriptViewId, lastOrdinal: original.lastOrdinal,
+      chatId, transcriptViewId: original.transcriptViewId, lastOrdinal: original.lastOrdinal, target: { kind: 'all' },
     } satisfies ClearChatRequest))).toMatchObject({ status: 422, body: { errorCode: 'OPERATION_UNSUPPORTED', retryable: false } });
     expect(await client.getMessages(chatId)).toEqual(original);
     const next = await client.runDirectChat({ chatId, agent: directAgents.openAi, content: 'synthetic-followup' });
@@ -134,7 +165,7 @@ test('cold Clear previews never substitute a later input when bounded reconstruc
     await fixture.client.waitForProcessing(chatId, false);
     const original = await fixture.client.getMessages(chatId);
     await fixture.client.post('/api/v1/chats/clear', {
-      chatId, transcriptViewId: original.transcriptViewId, lastOrdinal: original.lastOrdinal,
+      chatId, transcriptViewId: original.transcriptViewId, lastOrdinal: original.lastOrdinal, target: { kind: 'all' },
     } satisfies ClearChatRequest);
     const run = async (command: string) => {
       const turn = await fixture.client.runChat({ chatId, command,

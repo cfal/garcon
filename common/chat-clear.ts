@@ -9,7 +9,12 @@ export interface ClearChatRequest {
   readonly chatId: string;
   readonly transcriptViewId: string;
   readonly lastOrdinal: number;
+  readonly target: ClearChatTarget;
 }
+
+export type ClearChatTarget =
+  | { readonly kind: 'all' }
+  | { readonly kind: 'before-message'; readonly ordinal: number };
 
 export interface ClearChatResponse {
   readonly success: true;
@@ -22,10 +27,22 @@ export function parseClearChatRequest(value: unknown): ClearChatRequest {
   if (typeof body.lastOrdinal !== 'number' || !Number.isSafeInteger(body.lastOrdinal) || body.lastOrdinal < 0) {
     throw new CommandRequestValidationError('lastOrdinal must be a nonnegative integer');
   }
+  const target = requestRecord(body.target);
+  let parsedTarget: ClearChatTarget;
+  if (target.kind === 'all' && Object.keys(target).length === 1) {
+    parsedTarget = { kind: 'all' };
+  } else if (target.kind === 'before-message' && Object.keys(target).every(key => key === 'kind' || key === 'ordinal')
+    && typeof target.ordinal === 'number' && Number.isSafeInteger(target.ordinal)
+    && target.ordinal >= 1 && target.ordinal <= body.lastOrdinal) {
+    parsedTarget = { kind: 'before-message', ordinal: target.ordinal };
+  } else {
+    throw new CommandRequestValidationError('A valid clear target is required');
+  }
   return {
     chatId: requiredChatId(body, 'chatId'),
     transcriptViewId: requiredString(body, 'transcriptViewId'),
     lastOrdinal: body.lastOrdinal,
+    target: parsedTarget,
   };
 }
 
