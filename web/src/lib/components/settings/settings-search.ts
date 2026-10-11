@@ -11,13 +11,16 @@ export interface SettingsSearchEntry {
 // Uses the same translated copy as the settings controls, without indexing user values.
 export function settingsSearchEntries(): SettingsSearchEntry[] {
 	return [
-		...[m.settings_tab_password(), m.auth_change_username(), m.auth_change_password()].map(
-			(label) => ({
-				tab: 'password' as const,
-				label,
-				section: m.settings_tab_password(),
-			}),
-		),
+		...[
+			m.settings_tab_authentication(),
+			m.auth_logout(),
+			m.auth_change_username(),
+			m.auth_change_password(),
+		].map((label) => ({
+			tab: 'authentication' as const,
+			label,
+			section: m.settings_tab_authentication(),
+		})),
 		...[
 			m.settings_tab_interface(),
 			m.settings_highlight_active_window(),

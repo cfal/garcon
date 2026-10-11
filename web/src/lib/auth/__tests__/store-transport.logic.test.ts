@@ -1,7 +1,12 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest';
 import { AuthStore } from '$lib/stores/auth.svelte';
-import { clearAuthToken, setAuthDispatchAvailable, setAuthToken } from '../session';
+import {
+	clearAuthToken,
+	readStoredAuthToken,
+	setAuthDispatchAvailable,
+	setAuthToken,
+} from '../session';
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -24,7 +29,7 @@ it('discards malformed stored headers through the real probe without looping or 
 	setAuthDispatchAvailable(true);
 	const user = { id: 'synthetic-owner', username: 'synthetic-owner' };
 	const token = (revision: number) =>
-		`header.${btoa(JSON.stringify({ sub: user.id, credentialRevision: revision }))}.signature`;
+		`header.${btoa(JSON.stringify({ sub: user.id, credentialRevision: revision, sid: 'a'.repeat(64) }))}.signature`;
 	const current = token(1);
 	const fetch = vi.fn<typeof globalThis.fetch>(async (url, options) => {
 		if (url === '/api/v1/auth/status')
@@ -39,13 +44,16 @@ it('discards malformed stored headers through the real probe without looping or 
 	try {
 		await auth.checkAuthStatus();
 		fetch.mockClear();
-		localStorage.setItem('bearer-token', token(999) + '\ninvalid');
+		localStorage.setItem(
+			'bearer-token',
+			JSON.stringify({ token: token(999) + '\ninvalid', epoch: null }),
+		);
 		await auth.reconcile();
 		await vi.advanceTimersByTimeAsync(60_000);
 		expect(fetch).toHaveBeenCalledTimes(1);
 		expect(auth.isAuthenticated).toBe(true);
 		expect(auth.token).toBe(current);
-		expect(localStorage.getItem('bearer-token')).toBe(current);
+		expect(readStoredAuthToken()).toBe(current);
 	} finally {
 		auth.destroy();
 	}

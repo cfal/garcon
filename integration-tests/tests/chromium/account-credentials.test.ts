@@ -10,7 +10,7 @@ async function openPasswordSettings(page: Page) {
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
-  await settings.getByRole('tab', { name: 'Password', exact: true }).click();
+  await settings.getByRole('tab', { name: 'Authentication', exact: true }).click();
   return settings;
 }
 
@@ -62,8 +62,8 @@ test('separate credential forms retain source, sibling, and other-device work on
       await browserExpect(page.locator('dialog')).toHaveCount(0);
       expect(await page.locator('[data-retained-settings]').count()).toBe(1);
       await browserExpect(settings.getByRole('status')).toContainText('Username changed.');
-      const replacement = await page.evaluate(() => localStorage.getItem('bearer-token'));
-      await browserExpect.poll(() => peer.evaluate(() => localStorage.getItem('bearer-token'))).toBe(replacement);
+      const replacement = await page.evaluate(() => (JSON.parse(localStorage.getItem('bearer-token') ?? 'null')?.token ?? null));
+      await browserExpect.poll(() => peer.evaluate(() => (JSON.parse(localStorage.getItem('bearer-token') ?? 'null')?.token ?? null))).toBe(replacement);
       await browserExpect(peer.locator('dialog')).toHaveCount(0);
       expect(await peer.locator('[data-retained-ticket]').inputValue()).toBe('Sibling draft');
 

@@ -521,6 +521,7 @@
 	// Redirects unauthenticated users, checks onboarding status.
 	// Also guards /setup when account already exists.
 	$effect(() => {
+		if (auth.logoutPending) return;
 		if (auth.isLoading) return;
 		if (auth.authDisabled) return;
 		if (auth.isUnavailable) return;
@@ -577,7 +578,11 @@
 	});
 </script>
 
-{#if !auth.presentationOwner && auth.isLoading && (!isPublicRoute || auth.token)}
+{#if auth.logoutPending}
+	<div class="min-h-dvh bg-background flex items-center justify-center p-4">
+		<p role="status" class="text-muted-foreground">{m.auth_logging_out()}</p>
+	</div>
+{:else if !auth.presentationOwner && auth.isLoading && (!isPublicRoute || auth.token)}
 	<div class="min-h-dvh bg-background flex items-center justify-center p-4">
 		<div class="text-center">
 			<div class="flex justify-center mb-4">

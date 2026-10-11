@@ -11,7 +11,7 @@
 	import Network from '@lucide/svelte/icons/network';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
-	import PasswordSection from './PasswordSection.svelte';
+	import AuthenticationSection from './AuthenticationSection.svelte';
 	import Bot from '@lucide/svelte/icons/bot';
 	import Bell from '@lucide/svelte/icons/bell';
 	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
@@ -51,7 +51,7 @@
 			label: m.settings_group_server(),
 			tabs: [
 				{ value: 'providers', label: m.settings_tab_providers(), icon: KeyRound },
-				{ value: 'password', label: m.settings_tab_password(), icon: LockKeyhole },
+				{ value: 'authentication', label: m.settings_tab_authentication(), icon: LockKeyhole },
 				{ value: 'other-agents', label: m.settings_tab_other_agents(), icon: Bot },
 				{ value: 'general', label: m.settings_tab_general(), icon: SlidersHorizontal },
 				{ value: 'automation', label: m.settings_tab_automation(), icon: Sparkles },
@@ -179,8 +179,8 @@
 					</div>
 				{/if}
 				<div hidden={Boolean(searchQuery.trim())}>
-					<Tabs.Content value="password" class="mt-0">
-						{#if appShell.settingsTab === 'password'}<PasswordSection />{/if}
+					<Tabs.Content value="authentication" class="mt-0">
+						{#if appShell.settingsTab === 'authentication'}<AuthenticationSection />{/if}
 					</Tabs.Content>
 					<Tabs.Content value="interface" class="mt-0 space-y-6">
 						{#if appShell.settingsTab === 'interface'}

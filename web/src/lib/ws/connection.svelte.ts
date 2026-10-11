@@ -4,6 +4,7 @@
 
 import { getAuthToken } from '$lib/api/client';
 import { appPath } from '$lib/deployment/paths';
+import { isBrowserDataCurrent } from '$lib/utils/browser-data-lifetime';
 import {
 	webSocketProtocolsForAuth,
 	AUTH_REVOKED_CLOSE_CODE,
@@ -206,7 +207,7 @@ export class WsConnection {
 	}
 
 	connect(token: string | null, authDisabled = false): void {
-		if (this.#destroyed) return;
+		if (this.#destroyed || !isBrowserDataCurrent()) return;
 		this.#authPaused = false;
 		this.#authDisabled = authDisabled;
 
@@ -241,7 +242,7 @@ export class WsConnection {
 			this.#connectStartedAt = Date.now();
 
 			websocket.onopen = () => {
-				if (!this.#isCurrentSocket(websocket)) return;
+				if (!this.#isCurrentSocket(websocket) || !isBrowserDataCurrent()) return;
 				this.#clearConnectTimeout();
 				const now = Date.now();
 				this.#lastInboundAt = now;
@@ -262,7 +263,7 @@ export class WsConnection {
 			};
 
 			websocket.onmessage = (event: MessageEvent) => {
-				if (!this.#isCurrentSocket(websocket)) return;
+				if (!this.#isCurrentSocket(websocket) || !isBrowserDataCurrent()) return;
 				this.#lastInboundAt = Date.now();
 				try {
 					const data = JSON.parse(event.data as string) as Record<string, unknown>;
@@ -476,7 +477,7 @@ export class WsConnection {
 
 	/** Sends a JSON-serializable message. Returns true if sent. */
 	sendMessage(msg: unknown): boolean {
-		if (this.#authPaused) return false;
+		if (this.#authPaused || !isBrowserDataCurrent()) return false;
 		const socket = this.#ws;
 		if (socket && socket.readyState === WebSocket.OPEN) {
 			socket.send(JSON.stringify(msg));

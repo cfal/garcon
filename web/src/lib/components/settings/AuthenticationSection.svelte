@@ -3,6 +3,8 @@
 	import { getAuth } from '$lib/context';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import LogOut from '@lucide/svelte/icons/log-out';
 	import PasswordInput from '$lib/components/auth/PasswordInput.svelte';
 	import { validateUsername } from '$shared/auth';
 	import * as m from '$lib/paraglide/messages.js';
@@ -18,7 +20,10 @@
 	let success = $state('');
 	let successForm = $state<'username' | 'password' | null>(null);
 	let mounted = true;
-	const available = $derived(auth.isAuthenticated && !auth.credentialPending);
+	let confirmLogout = $state(false);
+	const available = $derived(
+		auth.isAuthenticated && !auth.credentialPending && !auth.logoutPending,
+	);
 	const canSubmitUsername = $derived(
 		available &&
 			username.trim() !== auth.user?.username &&
@@ -91,11 +96,37 @@
 	}
 </script>
 
-<section class="max-w-lg space-y-6" aria-label={m.settings_tab_password()}>
-	<h2 class="text-lg font-semibold">{m.settings_tab_password()}</h2>
+<section class="max-w-lg space-y-6" aria-label={m.settings_tab_authentication()}>
+	<h2 class="text-lg font-semibold">{m.settings_tab_authentication()}</h2>
 	{#if auth.authDisabled}
 		<p class="text-sm text-muted-foreground">{m.auth_disabled_notice()}</p>
 	{:else}
+		<Button variant="outline" disabled={!available} onclick={() => (confirmLogout = true)}>
+			<LogOut class="size-4" />{m.auth_logout()}
+		</Button>
+		{#if confirmLogout}
+			<Dialog.Root bind:open={confirmLogout}>
+				<Dialog.Content>
+					<Dialog.Header>
+						<Dialog.Title>{m.auth_logout_title()}</Dialog.Title>
+						<Dialog.Description>{m.auth_logout_description()}</Dialog.Description>
+					</Dialog.Header>
+					<Dialog.Footer>
+						<Button variant="outline" onclick={() => (confirmLogout = false)}
+							>{m.common_cancel()}</Button
+						>
+						<Button
+							disabled={!available}
+							onclick={() => {
+								if (available) void auth.logout();
+							}}
+						>
+							<LogOut class="size-4" />{m.auth_logout()}
+						</Button>
+					</Dialog.Footer>
+				</Dialog.Content>
+			</Dialog.Root>
+		{/if}
 		<p class="text-sm text-muted-foreground">{m.auth_other_devices_notice()}</p>
 		<form onsubmit={submitUsername} class="space-y-3" aria-label={m.auth_change_username()}>
 			<h3 class="font-medium">{m.auth_login_username()}</h3>
@@ -138,7 +169,7 @@
 			class="space-y-3 border-t border-border pt-6"
 			aria-label={m.auth_change_password()}
 		>
-			<h3 class="font-medium">{m.settings_tab_password()}</h3>
+			<h3 class="font-medium">{m.auth_login_password()}</h3>
 			<div class="space-y-1">
 				<label for="password-current-password" class="text-sm">{m.auth_current_password()}</label>
 				<PasswordInput

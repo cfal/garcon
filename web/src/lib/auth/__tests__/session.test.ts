@@ -7,6 +7,7 @@ import {
 	getAuthToken,
 	onAuthRejection,
 	publishCredentialPending,
+	readStoredAuthToken,
 	setAuthDispatchAvailable,
 	setAuthToken,
 } from '../session';
@@ -23,10 +24,14 @@ afterEach(() => {
 
 it('decodes Unicode identity only as ordering metadata', () => {
 	const bytes = new TextEncoder().encode(
-		JSON.stringify({ sub: 'owner-\u03bb', credentialRevision: 7 }),
+		JSON.stringify({ sub: 'owner-\u03bb', credentialRevision: 7, sid: 'a'.repeat(64) }),
 	);
 	const token = `header.${btoa(String.fromCharCode(...bytes))}.signature`;
-	expect(authTokenIdentity(token)).toEqual({ ownerKey: 'owner-\u03bb', credentialRevision: 7 });
+	expect(authTokenIdentity(token)).toEqual({
+		ownerKey: 'owner-\u03bb',
+		credentialRevision: 7,
+		sessionId: 'a'.repeat(64),
+	});
 	publishCredentialPending(token);
 	expect(credentialPendingDeadline(token)).toBeGreaterThan(Date.now());
 	expect(credentialPendingDeadline('header.invalid.signature')).toBeNull();
@@ -34,10 +39,20 @@ it('decodes Unicode identity only as ordering metadata', () => {
 
 it('never erases a newer sibling token when clearing its captured memory token', () => {
 	setAuthToken('before');
-	localStorage.setItem('bearer-token', 'after');
+	localStorage.setItem('bearer-token', JSON.stringify({ token: 'after', epoch: null }));
 	clearAuthToken();
-	expect(localStorage.getItem('bearer-token')).toBe('after');
+	expect(readStoredAuthToken()).toBe('after');
 	expect(getAuthToken()).toBeNull();
+});
+
+it('rejects a leftover token after logout even when storage deletion failed', () => {
+	setAuthToken('before');
+	localStorage.setItem('garcon.logout-epoch', 'next');
+	expect(localStorage.getItem('bearer-token')).toBe(
+		JSON.stringify({ token: 'before', epoch: null }),
+	);
+	expect(readStoredAuthToken()).toBeNull();
+	expect(setAuthToken('late-login')).toBe(false);
 });
 
 it('reports the token that sent an old request, not a subsequently installed replacement', async () => {

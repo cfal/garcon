@@ -2,10 +2,10 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/sve
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { AuthStore } from '$lib/stores/auth.svelte';
-import PasswordSection from '../PasswordSection.svelte';
+import AuthenticationSection from '../AuthenticationSection.svelte';
 
 let auth: AuthStore;
-vi.mock('$lib/context', () => ({ getAuth: () => auth }));
+vi.mock('$lib/context', () => ({ getAuth: () => auth, getOptionalTransientLayers: () => null }));
 beforeEach(() => {
 	auth = new AuthStore();
 	auth.user = { id: 'original', username: 'owner' };
@@ -20,9 +20,28 @@ afterEach(() => {
 
 it('keeps disabled authentication discoverable without forms', () => {
 	auth.authDisabled = true;
-	render(PasswordSection);
+	render(AuthenticationSection);
 	expect(screen.getByText('Authentication is disabled by server configuration.')).toBeTruthy();
 	expect(screen.queryByRole('button')).toBeNull();
+});
+
+it('requires confirmation, supports cancel, and logs out only on confirmation', async () => {
+	const logout = vi.spyOn(auth, 'logout').mockResolvedValue();
+	render(AuthenticationSection);
+	expect(screen.getByRole('heading', { name: 'Authentication' })).toBeTruthy();
+	await fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
+	const dialog = await screen.findByRole('dialog', { name: 'Log out of this browser?' });
+	expect(logout).not.toHaveBeenCalled();
+	await fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+	expect(logout).not.toHaveBeenCalled();
+	await fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
+	await fireEvent.click(
+		within(await screen.findByRole('dialog', { name: 'Log out of this browser?' })).getByRole(
+			'button',
+			{ name: 'Log out' },
+		),
+	);
+	expect(logout).toHaveBeenCalledTimes(1);
 });
 
 it('submits username by form, preserves Settings, and clears all secrets on success', async () => {
@@ -30,7 +49,7 @@ it('submits username by form, preserves Settings, and clears all secrets on succ
 		auth.user = { id: 'original', username: 'next' };
 		return { success: true };
 	});
-	render(PasswordSection);
+	render(AuthenticationSection);
 	await fireEvent.input(screen.getByLabelText('Username'), { target: { value: 'next' } });
 	const form = screen.getByRole('form', { name: 'Change username' });
 	await fireEvent.input(within(form).getByLabelText('Current password'), {
@@ -56,7 +75,7 @@ it('confirmation never reaches the API and pending disables both form paths', as
 		auth.credentialPending = true;
 		return pending.promise;
 	});
-	render(PasswordSection);
+	render(AuthenticationSection);
 	const form = screen.getByRole('form', { name: 'Change password' });
 	await fireEvent.input(within(form).getByLabelText('Current password'), {
 		target: { value: 'before-password' },
@@ -95,7 +114,7 @@ it('keeps the username draft and clears current password on a form error', async
 		success: false,
 		error: 'Incorrect current password',
 	});
-	render(PasswordSection);
+	render(AuthenticationSection);
 	const form = screen.getByRole('form', { name: 'Change username' });
 	await fireEvent.input(screen.getByLabelText('Username'), { target: { value: 'next' } });
 	await fireEvent.input(within(form).getByLabelText('Current password'), {
@@ -111,7 +130,7 @@ it('keeps the username draft and clears current password on a form error', async
 it('reveals fields independently without submitting or changing their values', async () => {
 	const changeUsername = vi.spyOn(auth, 'changeUsername');
 	const changePassword = vi.spyOn(auth, 'changePassword');
-	render(PasswordSection);
+	render(AuthenticationSection);
 	const passwords = Array.from(document.querySelectorAll<HTMLInputElement>('input[type=password]'));
 	expect(passwords).toHaveLength(4);
 	for (const input of passwords) {
@@ -136,7 +155,7 @@ it('reveals fields independently without submitting or changing their values', a
 });
 
 it.each(['cleared', 'suspended'] as const)('masks revealed passwords when %s', async (reason) => {
-	render(PasswordSection);
+	render(AuthenticationSection);
 	const input = screen.getByLabelText('New password') as HTMLInputElement;
 	await fireEvent.input(input, { target: { value: 'after-password' } });
 	await fireEvent.click(document.querySelector('button[aria-controls="account-new-password"]')!);

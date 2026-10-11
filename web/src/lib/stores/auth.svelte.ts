@@ -5,6 +5,7 @@ import {
 	getUser,
 	changeUsername as apiChangeUsername,
 	changePassword as apiChangePassword,
+	logout as apiLogout,
 } from '$lib/api/auth.js';
 import { ApiError, isIntermediaryResponse } from '$lib/api/client.js';
 import {
@@ -12,6 +13,7 @@ import {
 	retainAuthToken,
 	setAuthToken,
 	clearAuthToken,
+	clearMemoryAuthToken,
 	setAuthDispatchAvailable,
 	onAuthRejection,
 	readStoredAuthToken,
@@ -29,6 +31,20 @@ import type {
 	ChangePasswordRequest,
 } from '$shared/auth';
 import * as m from '$lib/paraglide/messages.js';
+import { appPath } from '$lib/deployment/paths';
+import {
+	captureBrowserDataLifetime,
+	isBrowserDataCurrent,
+	publishBrowserLogout,
+	retireBrowserData,
+	waitForBrowserLogoutCleanup,
+	type BrowserLogout,
+} from '$lib/utils/browser-data-lifetime';
+import {
+	clearBrowserPrivateData,
+	clearTabPrivateData,
+	reconcileTabPrivateData,
+} from '$lib/auth/logout-cleanup';
 
 export type AuthAvailability =
 	| 'initializing'
@@ -36,6 +52,7 @@ export type AuthAvailability =
 	| 'repairing'
 	| 'reauth-required'
 	| 'storage-unavailable'
+	| 'logging-out'
 	| 'signed-out';
 export type PresentationOwner = { readonly mode: 'authenticated' | 'local'; readonly key: string };
 export interface AuthResult {
@@ -65,6 +82,8 @@ export class AuthStore {
 	#pendingDeadline = 0;
 	#dispose: (() => void) | null = null;
 	#destroyed = false;
+	#logoutChannel: BroadcastChannel | null = null;
+	#logoutTask: Promise<void> | null = null;
 	token = $state<string | null>(getAuthToken());
 	user = $state<AuthUser | null>(null);
 	presentationOwner = $state<PresentationOwner | null>(null);
@@ -74,6 +93,7 @@ export class AuthStore {
 	error = $state<string | null>(null);
 	persistenceWarning = $state(false);
 	credentialPending = $state(false);
+	logoutPending = $state(false);
 	isLoading = $derived(this.availability === 'initializing');
 	isUnavailable = $derived(
 		this.availability === 'storage-unavailable' ||
@@ -83,10 +103,30 @@ export class AuthStore {
 		this.availability === 'active' && (this.authDisabled || (!!this.token && !!this.user)),
 	);
 
+	constructor(
+		private readonly navigateAfterLogout: (url: string) => void = (url) =>
+			window.location.replace(url),
+	) {
+		captureBrowserDataLifetime();
+		reconcileTabPrivateData();
+		if (
+			typeof window !== 'undefined' &&
+			new URL(window.location.href).searchParams.has('loggedOut')
+		) {
+			this.#rejectedStoredToken = readStoredAuthToken();
+			clearMemoryAuthToken();
+			this.token = null;
+		}
+	}
+
 	start(): void {
 		if (this.#dispose || typeof window === 'undefined') return;
 		const release = onAuthRejection(({ token, code }) => this.sessionRejected(token, code));
 		const reconcile = () => {
+			if (!isBrowserDataCurrent()) {
+				void this.#abandonFromPeer();
+				return;
+			}
 			void this.reconcile();
 		};
 		const visible = () => {
@@ -96,12 +136,24 @@ export class AuthStore {
 		window.addEventListener('online', reconcile);
 		window.addEventListener('pageshow', reconcile);
 		document.addEventListener('visibilitychange', visible);
+		if (typeof BroadcastChannel !== 'undefined') {
+			try {
+				this.#logoutChannel = new BroadcastChannel('garcon.logout');
+				this.#logoutChannel.onmessage = (event) => {
+					if (event.data?.type === 'logout' && (!event.data.epoch || !isBrowserDataCurrent()))
+						void this.#abandonFromPeer();
+				};
+			} catch {
+				/* Storage and wakeup checks remain available. */
+			}
+		}
 		this.#dispose = () => {
 			release();
 			window.removeEventListener('storage', reconcile);
 			window.removeEventListener('online', reconcile);
 			window.removeEventListener('pageshow', reconcile);
 			document.removeEventListener('visibilitychange', visible);
+			this.#logoutChannel?.close();
 		};
 	}
 
@@ -111,6 +163,7 @@ export class AuthStore {
 	}
 
 	#accept(data: AuthSessionResponse): boolean {
+		if (this.logoutPending || !isBrowserDataCurrent()) return false;
 		if (isOlderAuthToken(data.token, this.token)) return false;
 		const stored = readStoredAuthToken();
 		const newerStoredCandidate =
@@ -144,6 +197,7 @@ export class AuthStore {
 	}
 
 	async checkAuthStatus(): Promise<void> {
+		if (this.logoutPending) return;
 		if (this.presentationOwner) return this.reconcile();
 		if (this.#statusCheck) return this.#statusCheck;
 		this.#statusCheck = this.#checkStatus().finally(() => {
@@ -157,6 +211,9 @@ export class AuthStore {
 		const rejectionVersion = this.#rejectionVersion;
 		this.#setAvailability('initializing');
 		try {
+			const cleanup = waitForBrowserLogoutCleanup();
+			if (cleanup) await cleanup;
+			if (version !== this.#version || this.#destroyed || !isBrowserDataCurrent()) return;
 			const status = await getAuthStatus();
 			if (version !== this.#version || this.#destroyed) return;
 			this.authDisabled = status.authDisabled;
@@ -191,10 +248,15 @@ export class AuthStore {
 		return this.#openSession(() => apiRegister(username, password));
 	}
 	async #openSession(request: () => Promise<AuthSessionResponse>): Promise<AuthResult> {
+		if (this.logoutPending || !isBrowserDataCurrent()) return { success: false };
 		if (this.authDisabled) return { success: false, error: m.auth_errors_auth_disabled() };
 		const version = ++this.#version;
 		let rejectionVersion = this.#rejectionVersion;
 		try {
+			const cleanup = waitForBrowserLogoutCleanup();
+			if (cleanup) await cleanup;
+			if (version !== this.#version || this.#destroyed || !isBrowserDataCurrent())
+				return { success: false };
 			let data = await request();
 			if (version !== this.#version || this.#destroyed) return { success: false };
 			if (rejectionVersion !== this.#rejectionVersion) {
@@ -230,7 +292,14 @@ export class AuthStore {
 		request: (token: string) => Promise<AuthSessionResponse>,
 	): Promise<AuthResult> {
 		const token = this.token;
-		if (this.credentialPending || !this.isAuthenticated || this.authDisabled || !token)
+		if (
+			this.logoutPending ||
+			!isBrowserDataCurrent() ||
+			this.credentialPending ||
+			!this.isAuthenticated ||
+			this.authDisabled ||
+			!token
+		)
 			return { success: false };
 		const version = ++this.#version;
 		this.credentialPending = true;
@@ -245,6 +314,7 @@ export class AuthStore {
 				!before ||
 				!after ||
 				after.ownerKey !== before.ownerKey ||
+				after.sessionId !== before.sessionId ||
 				after.credentialRevision !== before.credentialRevision + 1
 			)
 				throw new Error('Invalid replacement session.');
@@ -287,7 +357,7 @@ export class AuthStore {
 		token: string | null,
 		code: 'AUTH_SESSION_INVALID' | 'AUTH_STORAGE_UNAVAILABLE',
 	): void {
-		if (token !== this.token || this.#destroyed || this.authDisabled) return;
+		if (token !== this.token || this.#destroyed || this.authDisabled || this.logoutPending) return;
 		if (this.availability === 'storage-unavailable') return;
 		this.#rejectionVersion++;
 		if (code === 'AUTH_STORAGE_UNAVAILABLE') {
@@ -307,7 +377,13 @@ export class AuthStore {
 	}
 
 	reconcile(): Promise<void> {
-		if (this.#destroyed || this.authDisabled || this.availability === 'storage-unavailable')
+		if (
+			this.#destroyed ||
+			this.authDisabled ||
+			this.logoutPending ||
+			!isBrowserDataCurrent() ||
+			this.availability === 'storage-unavailable'
+		)
 			return Promise.resolve();
 		if (this.#probe) {
 			this.#probeAgain = true;
@@ -325,6 +401,9 @@ export class AuthStore {
 	async #reconcile(): Promise<void> {
 		if (!this.#statusKnown && !this.presentationOwner) return this.checkAuthStatus();
 		const version = this.#version;
+		const cleanup = waitForBrowserLogoutCleanup();
+		if (cleanup) await cleanup;
+		if (version !== this.#version || this.#destroyed || !isBrowserDataCurrent()) return;
 		const stored = readStoredAuthToken();
 		const rejectionVersion = this.#rejectionVersion;
 		const candidate =
@@ -419,6 +498,63 @@ export class AuthStore {
 			this.#repairTimer = null;
 			void this.reconcile();
 		}, delay);
+	}
+
+	logout(): Promise<void> {
+		if (this.#logoutTask) return this.#logoutTask;
+		if (this.authDisabled || this.credentialPending || !this.token) return Promise.resolve();
+		const token = this.token;
+		const logout = publishBrowserLogout();
+		try {
+			this.#logoutChannel?.postMessage({
+				type: 'logout',
+				epoch: logout.coordinated ? logout.epoch : null,
+			});
+		} catch {
+			/* The persisted epoch also notifies and fences sibling tabs. */
+		}
+		this.#abandon();
+		this.#logoutTask = this.#finishLogout(token, logout);
+		return this.#logoutTask;
+	}
+
+	#abandon(): void {
+		retireBrowserData();
+		this.#version++;
+		this.#rejectionVersion++;
+		this.logoutPending = true;
+		this.token = null;
+		this.user = null;
+		this.presentationOwner = null;
+		clearMemoryAuthToken();
+		if (this.#repairTimer) clearTimeout(this.#repairTimer);
+		this.#repairTimer = null;
+		this.#setAvailability('logging-out');
+	}
+
+	async #finishLogout(token: string, logout: BrowserLogout): Promise<void> {
+		const cleanup = clearBrowserPrivateData(logout);
+		let revoked = false;
+		try {
+			await apiLogout(token);
+			revoked = true;
+		} catch {
+			/* Local logout still completes. */
+		}
+		const cleared = await cleanup;
+		const params = new URLSearchParams({ loggedOut: revoked ? 'confirmed' : 'unconfirmed' });
+		if (!cleared || !logout.coordinated) params.set('cleanup', 'incomplete');
+		this.navigateAfterLogout(`${appPath('/login')}?${params}`);
+	}
+
+	#abandonFromPeer(): Promise<void> {
+		if (this.#logoutTask || this.logoutPending) return this.#logoutTask ?? Promise.resolve();
+		this.#abandon();
+		const cleared = clearTabPrivateData();
+		this.navigateAfterLogout(
+			`${appPath('/login')}?loggedOut=peer${cleared ? '' : '&cleanup=incomplete'}`,
+		);
+		return Promise.resolve();
 	}
 	destroy(): void {
 		this.#destroyed = true;

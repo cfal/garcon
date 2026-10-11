@@ -109,7 +109,7 @@ describe("Lightpanda Chat Board", () => {
       await fixture.page.waitForFunction(
         async (id) => {
           const response = await fetch("/api/v1/chats", {
-            headers: { Authorization: `Bearer ${localStorage.getItem('bearer-token')}` },
+            headers: { Authorization: `Bearer ${(JSON.parse(localStorage.getItem('bearer-token') ?? 'null')?.token ?? null)}` },
           });
           const body = (await response.json()) as {
             sessions?: { id: string; tags: string[] }[];
@@ -182,7 +182,7 @@ describe("Lightpanda Chat Board", () => {
       await fixture.page.waitForFunction(
         async (id) => {
           const response = await fetch("/api/v1/chats", {
-            headers: { Authorization: `Bearer ${localStorage.getItem('bearer-token')}` },
+            headers: { Authorization: `Bearer ${(JSON.parse(localStorage.getItem('bearer-token') ?? 'null')?.token ?? null)}` },
           });
           const body = (await response.json()) as {
             sessions?: { id: string; tags: string[] }[];

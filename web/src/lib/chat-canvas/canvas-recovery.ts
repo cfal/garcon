@@ -1,4 +1,5 @@
 import { parseChatCanvas, type ChatCanvas } from '$shared/chat-canvas';
+import { canPersistBrowserData } from '$lib/utils/browser-data-lifetime';
 
 export interface CanvasRecoveryPort {
 	list(): ChatCanvas[];
@@ -39,9 +40,11 @@ export const browserCanvasRecovery: CanvasRecoveryPort = {
 		return parseRecovery(raw, id);
 	},
 	write(canvas) {
+		if (!canPersistBrowserData()) return;
 		globalThis.sessionStorage.setItem(prefix + canvas.id, JSON.stringify(canvas));
 	},
 	remove(id) {
+		if (!canPersistBrowserData()) return;
 		globalThis.sessionStorage.removeItem(prefix + id);
 	},
 };

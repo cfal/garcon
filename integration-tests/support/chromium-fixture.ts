@@ -59,8 +59,9 @@ export async function authenticateChromiumContext(
   const authToken = integration.garcon.authToken;
   if (!authToken) throw new Error('Chromium fixture requires an authenticated controller.');
   await context.addInitScript((authToken) => {
-    if (location.hostname === '127.0.0.1' && !globalThis.localStorage.getItem('bearer-token')) {
-      globalThis.localStorage.setItem('bearer-token', authToken);
+    if (location.hostname === '127.0.0.1' && !globalThis.localStorage.getItem('bearer-token')
+      && !globalThis.localStorage.getItem('garcon.logout-epoch')) {
+      globalThis.localStorage.setItem('bearer-token', JSON.stringify({ token: authToken, epoch: null }));
     }
   }, authToken);
 }

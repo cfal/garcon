@@ -53,6 +53,23 @@ export function register(username: string, password: string): Promise<AuthSessio
 	return openSession('register', username, password);
 }
 
+export async function logout(token: string): Promise<void> {
+	try {
+		const response = await parseApiResponse<{ success: boolean }>(
+			await publicApiFetch('/api/v1/auth/logout', {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${token}` },
+				timeoutMs: 10_000,
+				cache: 'no-store',
+			}),
+		);
+		if (response.success !== true) throw new Error('Invalid logout response.');
+	} catch (error) {
+		if (error instanceof ApiError && error.errorCode === 'AUTH_SESSION_INVALID') return;
+		throw error;
+	}
+}
+
 export async function getUser(token = getAuthToken()): Promise<AuthUserResponse> {
 	let headers: Headers;
 	try {

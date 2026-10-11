@@ -63,8 +63,9 @@ export class E2eFixture {
       const page = await context.newPage();
       await installLightpandaWorkspaceGeometry(page);
       await page.evaluateOnNewDocument(({ authToken, wsPath }) => {
-        if (location.hostname === '127.0.0.1' && authToken && !globalThis.localStorage.getItem('bearer-token')) {
-          globalThis.localStorage.setItem('bearer-token', authToken);
+        if (location.hostname === '127.0.0.1' && authToken && !globalThis.localStorage.getItem('bearer-token')
+          && !globalThis.localStorage.getItem('garcon.logout-epoch')) {
+          globalThis.localStorage.setItem('bearer-token', JSON.stringify({ token: authToken, epoch: null }));
         }
         const localSettingsKey = 'pref_local_settings';
         try {

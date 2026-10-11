@@ -2,6 +2,7 @@ import type { FileRevision } from '$shared/file-contracts';
 import { effectiveExecutorId, parseExecutorId } from '$shared/executors';
 import * as m from '$lib/paraglide/messages.js';
 import { indexedDbRequest, indexedDbTransactionCompletion } from '$lib/utils/indexed-db.js';
+import { canPersistBrowserData } from '$lib/utils/browser-data-lifetime';
 
 export const FILE_DRAFT_DATABASE_NAME = 'garcon-file-drafts-v1';
 export const FILE_DRAFT_STORE_NAME = 'drafts';
@@ -88,7 +89,8 @@ export function createFileDraftRepository(
 	return {
 		durable: true,
 		async putDraft(record) {
-			await runTransaction(await open(), FILE_DRAFT_STORE_NAME, 'readwrite', async (store) => {
+			const database = await open();
+			await runTransaction(database, FILE_DRAFT_STORE_NAME, 'readwrite', async (store) => {
 				const records = await indexedDbRequest<FileDraft[]>(store.getAll());
 				for (const id of draftEvictions(record, records)) {
 					await indexedDbRequest(store.delete(id));
@@ -297,6 +299,7 @@ async function runTransaction<T>(
 	mode: IDBTransactionMode,
 	operation: (store: IDBObjectStore) => Promise<T>,
 ): Promise<T> {
+	if (mode === 'readwrite' && !canPersistBrowserData()) throw new Error('Browser session ended');
 	const transaction = database.transaction([storeName], mode);
 	const completion = indexedDbTransactionCompletion(transaction);
 	// A request failure also aborts the transaction; both promises must be observed.

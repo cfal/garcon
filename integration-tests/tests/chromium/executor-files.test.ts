@@ -46,7 +46,7 @@ test('edits remote files and retains offline buffers without touching controller
     const offlineProbe = new URL('/api/v1/files/text', integration.garcon.baseUrl);
     offlineProbe.search = new URLSearchParams({ executorId: client.executorId, projectPath: executionDirs.project, path: 'remote-file.txt' }).toString();
     expect(await page.evaluate(async (url) => {
-      const response = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('bearer-token')}` } });
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${(JSON.parse(localStorage.getItem('bearer-token') ?? 'null')?.token ?? null)}` } });
       return { status: response.status, body: await response.json() };
     }, offlineProbe.href)).toMatchObject({ status: 503, body: { success: false, errorCode: 'EXECUTOR_UNAVAILABLE' } });
     await source.press('Control+a');

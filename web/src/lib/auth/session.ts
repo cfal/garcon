@@ -1,5 +1,11 @@
 import { parseAuthTokenIdentity, type AuthTokenIdentity } from '$shared/auth';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
+import {
+	isBrowserDataCurrent,
+	canPersistBrowserData,
+	browserDocumentEpoch,
+	readBrowserLogoutEpoch,
+} from '$lib/utils/browser-data-lifetime';
 
 export const CREDENTIAL_PENDING_KEY = 'garcon.credential-update-pending';
 export const CREDENTIAL_PENDING_MS = 35_000;
@@ -14,7 +20,12 @@ const listeners = new Set<(event: Rejection) => void>();
 
 export function readStoredAuthToken(): string | null {
 	try {
-		return globalThis.localStorage?.getItem(LOCAL_STORAGE_KEYS.authToken) ?? null;
+		const stored = JSON.parse(
+			globalThis.localStorage?.getItem(LOCAL_STORAGE_KEYS.authToken) ?? 'null',
+		);
+		return stored?.epoch === readBrowserLogoutEpoch() && typeof stored.token === 'string'
+			? stored.token
+			: null;
 	} catch {
 		return null;
 	}
@@ -29,23 +40,34 @@ export function getAuthToken(): string | null {
 }
 
 export function retainAuthToken(value: string): void {
+	if (!isBrowserDataCurrent()) return;
 	initialized = true;
 	token = value;
 }
 
 export function setAuthToken(value: string): boolean {
+	if (!canPersistBrowserData()) return false;
+	const epoch = browserDocumentEpoch();
 	retainAuthToken(value);
 	try {
-		globalThis.localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, value);
-		return true;
+		globalThis.localStorage.setItem(
+			LOCAL_STORAGE_KEYS.authToken,
+			JSON.stringify({ token: value, epoch }),
+		);
+		return isBrowserDataCurrent();
 	} catch {
 		return false;
 	}
 }
 
+export function clearMemoryAuthToken(): void {
+	initialized = true;
+	token = null;
+}
+
 export function clearAuthToken(): void {
 	const previous = getAuthToken();
-	token = null;
+	clearMemoryAuthToken();
 	try {
 		if (readStoredAuthToken() === previous)
 			globalThis.localStorage.removeItem(LOCAL_STORAGE_KEYS.authToken);
@@ -67,7 +89,7 @@ export function setAuthDispatchAvailable(available: boolean): void {
 	dispatchAvailable = available;
 }
 export function canDispatchAuthenticated(): boolean {
-	return dispatchAvailable;
+	return dispatchAvailable && isBrowserDataCurrent();
 }
 export function onAuthRejection(listener: (event: Rejection) => void): () => void {
 	listeners.add(listener);
@@ -106,6 +128,7 @@ export function isOlderAuthToken(candidate: string, accepted: string | null): bo
 }
 
 export function publishCredentialPending(value: string): void {
+	if (!isBrowserDataCurrent()) return;
 	const identity = authTokenIdentity(value);
 	if (!identity) return;
 	try {

@@ -1,3 +1,5 @@
+import { canPersistBrowserData } from './browser-data-lifetime';
+
 export const CHAT_TRANSCRIPT_SNAPSHOT_PREFIX = 'chat_snapshot_';
 export const CHAT_TRANSCRIPT_INDEX_KEY = 'chat_snapshot_index_v3';
 
@@ -74,6 +76,7 @@ export function setLocalStorageWithCacheRecovery(
 	key: string,
 	value: string,
 ): void {
+	if (!canPersistBrowserData()) return;
 	while (true) {
 		try {
 			storage.setItem(key, value);

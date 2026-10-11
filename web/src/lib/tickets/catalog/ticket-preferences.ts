@@ -1,6 +1,7 @@
 import { parseTicketListQuery } from '$shared/ticket-query';
 import type { TicketListQuery } from '$shared/tickets';
 import type { TicketLayout } from './ticket-collection.js';
+import { canPersistBrowserData } from '$lib/utils/browser-data-lifetime';
 
 export interface TicketPreferences {
 	readonly layout: TicketLayout;
@@ -30,6 +31,7 @@ export const browserTicketPreferences: TicketPreferencesPort = {
 		}
 	},
 	write(preferences) {
+		if (!canPersistBrowserData()) return;
 		try {
 			globalThis.localStorage.setItem(key, JSON.stringify({ version: 1, ...preferences }));
 		} catch {

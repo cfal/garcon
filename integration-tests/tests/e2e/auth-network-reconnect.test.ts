@@ -15,7 +15,7 @@ describe('Lightpanda auth reconnect recovery', () => {
         const nativeFetch = globalThis.fetch;
         scope.__garconAuthApiAvailable = false;
         scope.__garconAuthStatusAttempts = 0;
-        localStorage.setItem('bearer-token', token);
+        localStorage.setItem('bearer-token', JSON.stringify({ token, epoch: null }));
         globalThis.fetch = Object.assign(
           async (input: RequestInfo | URL, init?: RequestInit) => {
             const rawUrl = typeof input === 'string' || input instanceof URL
@@ -47,7 +47,7 @@ describe('Lightpanda auth reconnect recovery', () => {
 
       expect(await fixture.page.evaluate(() => ({
         pathname: globalThis.location.pathname,
-        token: localStorage.getItem('bearer-token'),
+        token: (JSON.parse(localStorage.getItem('bearer-token') ?? 'null')?.token ?? null),
         attempts: (globalThis as typeof globalThis & {
           __garconAuthStatusAttempts?: number;
         }).__garconAuthStatusAttempts,
@@ -66,7 +66,7 @@ describe('Lightpanda auth reconnect recovery', () => {
       await app.waitForButton('New Chat');
       await fixture.waitForSpaWebSocket();
 
-      expect(await fixture.page.evaluate(() => localStorage.getItem('bearer-token')))
+      expect(await fixture.page.evaluate(() => (JSON.parse(localStorage.getItem('bearer-token') ?? 'null')?.token ?? null)))
         .toBe(savedToken);
       const recoveredAttemptCount = await fixture.page.evaluate(() =>
         (globalThis as typeof globalThis & {

@@ -5,6 +5,7 @@ import {
 	clearAuthToken,
 	setAuthToken,
 	getAuthToken,
+	readStoredAuthToken,
 	canDispatchAuthenticated,
 	setAuthDispatchAvailable,
 	publishCredentialPending,
@@ -19,15 +20,33 @@ vi.mock('$lib/api/auth.js', () => ({
 	getUser: vi.fn(),
 	changeUsername: vi.fn(),
 	changePassword: vi.fn(),
+	logout: vi.fn(),
+}));
+vi.mock('$lib/utils/browser-data-lifetime', () => ({
+	captureBrowserDataLifetime: vi.fn(),
+	isBrowserDataCurrent: vi.fn(() => true),
+	canPersistBrowserData: vi.fn(() => true),
+	browserDocumentEpoch: () => null,
+	waitForBrowserLogoutCleanup: vi.fn(() => null),
+	publishBrowserLogout: vi.fn(),
+	retireBrowserData: vi.fn(),
+	readBrowserLogoutEpoch: () => localStorage.getItem('garcon.logout-epoch'),
+}));
+vi.mock('$lib/auth/logout-cleanup', () => ({
+	clearBrowserPrivateData: vi.fn(async () => true),
+	clearTabPrivateData: vi.fn(() => true),
+	reconcileTabPrivateData: vi.fn(() => true),
 }));
 import * as api from '$lib/api/auth.js';
+import * as lifetime from '$lib/utils/browser-data-lifetime';
+import * as cleanup from '$lib/auth/logout-cleanup';
 
 const user = { id: 'owner-before', username: 'owner-before' };
 function session(revision = 1, username = user.username): AuthSessionResponse {
 	return {
 		success: true,
 		user: { ...user, username },
-		token: `header.${btoa(JSON.stringify({ sub: user.id, credentialRevision: revision }))}.signature`,
+		token: `header.${btoa(JSON.stringify({ sub: user.id, credentialRevision: revision, sid: 'a'.repeat(64) }))}.signature`,
 	};
 }
 const invalid = () => new ApiError(401, 'Invalid session', 'AUTH_SESSION_INVALID');
@@ -46,6 +65,15 @@ async function signedIn() {
 beforeEach(() => {
 	vi.useFakeTimers();
 	vi.resetAllMocks();
+	vi.mocked(lifetime.isBrowserDataCurrent).mockReturnValue(true);
+	vi.mocked(lifetime.canPersistBrowserData).mockReturnValue(true);
+	vi.mocked(lifetime.publishBrowserLogout).mockReturnValue({
+		epoch: 'next',
+		deadline: Date.now() + 10_000,
+		coordinated: true,
+	});
+	vi.mocked(cleanup.clearBrowserPrivateData).mockResolvedValue(true);
+	vi.mocked(cleanup.clearTabPrivateData).mockReturnValue(true);
 	clearAuthToken();
 	localStorage.clear();
 	setAuthDispatchAvailable(true);
@@ -55,6 +83,118 @@ beforeEach(() => {
 		isAuthenticated: false,
 	});
 	vi.mocked(api.getUser).mockResolvedValue({ user });
+});
+
+describe('deliberate logout', () => {
+	async function ready() {
+		const navigate = vi.fn();
+		setAuthToken(session().token);
+		const auth = new AuthStore(navigate);
+		stores.push(auth);
+		await auth.checkAuthStatus();
+		return { auth, navigate };
+	}
+
+	it('abandons presentation immediately, revokes once, cleans data and fully navigates', async () => {
+		const { auth, navigate } = await ready();
+		const pending = Promise.withResolvers<void>();
+		vi.mocked(api.logout).mockReturnValue(pending.promise);
+		const logout = auth.logout();
+		expect(auth.logout()).toBe(logout);
+		expect(auth.presentationOwner).toBeNull();
+		expect(auth.user).toBeNull();
+		expect(auth.isAuthenticated).toBe(false);
+		expect(canDispatchAuthenticated()).toBe(false);
+		expect(getAuthToken()).toBeNull();
+		expect(api.logout).toHaveBeenCalledExactlyOnceWith(session().token);
+		expect(cleanup.clearBrowserPrivateData).toHaveBeenCalledTimes(1);
+		pending.resolve();
+		await logout;
+		expect(navigate).toHaveBeenCalledExactlyOnceWith('/login?loggedOut=confirmed');
+	});
+
+	it('holds fresh sign-in admission until shared cleanup settles', async () => {
+		const { auth } = await ready();
+		const cleanup = Promise.withResolvers<void>();
+		vi.mocked(lifetime.waitForBrowserLogoutCleanup).mockReturnValue(cleanup.promise);
+		vi.mocked(api.login).mockResolvedValue(session(2));
+		const login = auth.login('owner', 'password');
+		expect(api.login).not.toHaveBeenCalled();
+		cleanup.resolve();
+		expect((await login).success).toBe(true);
+		expect(api.login).toHaveBeenCalledTimes(1);
+	});
+
+	it.each(['login', 'probe', 'credentials'] as const)(
+		'a late %s cannot restore a logged-out session',
+		async (operation) => {
+			const { auth } = await ready();
+			const pending = Promise.withResolvers<AuthSessionResponse>();
+			let request: Promise<unknown>;
+			if (operation === 'login') {
+				vi.mocked(api.login).mockReturnValue(pending.promise);
+				request = auth.login('owner', 'password');
+			} else if (operation === 'probe') {
+				vi.mocked(api.getUser).mockReturnValue(pending.promise);
+				request = auth.reconcile();
+			} else {
+				vi.mocked(api.changeUsername).mockReturnValue(pending.promise);
+				request = auth.changeUsername({ username: 'next', currentPassword: 'password' });
+			}
+			// Another tab may log out while this tab is changing credentials.
+			auth.start();
+			vi.mocked(lifetime.isBrowserDataCurrent).mockReturnValue(false);
+			window.dispatchEvent(new Event('storage'));
+			pending.resolve(session(2));
+			await request;
+			expect(auth.logoutPending).toBe(true);
+			expect(auth.token).toBeNull();
+			expect(auth.presentationOwner).toBeNull();
+			expect(getAuthToken()).toBeNull();
+		},
+	);
+
+	it('reports unknown server revocation and incomplete cleanup instead of success', async () => {
+		const { auth, navigate } = await ready();
+		vi.mocked(api.logout).mockRejectedValue(new TypeError('offline'));
+		vi.mocked(cleanup.clearBrowserPrivateData).mockResolvedValue(false);
+		await auth.logout();
+		expect(navigate).toHaveBeenCalledExactlyOnceWith(
+			'/login?loggedOut=unconfirmed&cleanup=incomplete',
+		);
+		expect(auth.token).toBeNull();
+	});
+
+	it('a sleeping peer clears only its tab data and preserves a fresh stored login', async () => {
+		const { auth, navigate } = await ready();
+		auth.start();
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.authToken,
+			JSON.stringify({ token: session(2).token, epoch: null }),
+		);
+		vi.mocked(lifetime.isBrowserDataCurrent).mockReturnValue(false);
+		window.dispatchEvent(new Event('pageshow'));
+		expect(readStoredAuthToken()).toBe(session(2).token);
+		expect(cleanup.clearTabPrivateData).toHaveBeenCalledTimes(1);
+		expect(cleanup.clearBrowserPrivateData).not.toHaveBeenCalled();
+		expect(api.logout).not.toHaveBeenCalled();
+		expect(navigate).toHaveBeenCalledExactlyOnceWith('/login?loggedOut=peer');
+	});
+
+	it('the peer logout destination never deletes a subsequent fresh login', async () => {
+		setAuthToken(session(2).token);
+		const previousUrl = window.location.href;
+		window.history.replaceState(null, '', '/login?loggedOut=peer');
+		try {
+			const auth = store();
+			await auth.checkAuthStatus();
+			expect(auth.isAuthenticated).toBe(false);
+			expect(getAuthToken()).toBeNull();
+			expect(readStoredAuthToken()).toBe(session(2).token);
+		} finally {
+			window.history.replaceState(null, '', previousUrl);
+		}
+	});
 });
 afterEach(() => {
 	for (const auth of stores.splice(0)) auth.destroy();
@@ -70,7 +210,10 @@ describe('initial authority', () => {
 			const auth = store();
 			await auth.checkAuthStatus();
 			const rejected = session(999).token;
-			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, rejected);
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.authToken,
+				JSON.stringify({ token: rejected, epoch: null }),
+			);
 			if (readOnly)
 				vi.spyOn(localStorage, 'removeItem').mockImplementation(() => {
 					throw new Error('Read-only storage');
@@ -83,7 +226,7 @@ describe('initial authority', () => {
 			expect(api.getUser).toHaveBeenCalledTimes(1);
 			expect(auth.token).toBeNull();
 			expect(auth.availability).toBe('signed-out');
-			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe(readOnly ? rejected : null);
+			expect(readStoredAuthToken()).toBe(readOnly ? rejected : null);
 			vi.mocked(api.login).mockResolvedValue(session());
 			expect((await auth.login('owner-before', 'password')).success).toBe(true);
 		},
@@ -91,11 +234,17 @@ describe('initial authority', () => {
 	it('reconciles a different token stored while a cold candidate is rejected', async () => {
 		const auth = store();
 		await auth.checkAuthStatus();
-		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session().token);
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.authToken,
+			JSON.stringify({ token: session().token, epoch: null }),
+		);
 		const pending = Promise.withResolvers<{ user: typeof user }>();
 		vi.mocked(api.getUser).mockReturnValueOnce(pending.promise);
 		const repair = auth.reconcile();
-		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(2).token);
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.authToken,
+			JSON.stringify({ token: session(2).token, epoch: null }),
+		);
 		pending.reject(invalid());
 		await repair;
 		await vi.advanceTimersByTimeAsync(0);
@@ -318,7 +467,10 @@ describe('same-origin repair', () => {
 				newPassword: 'after-password',
 			});
 			const candidate = session(999).token;
-			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, candidate);
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.authToken,
+				JSON.stringify({ token: candidate, epoch: null }),
+			);
 			vi.mocked(api.getUser).mockImplementation(async (token) => {
 				if (token === session(2).token || (valid && token === candidate)) return { user };
 				throw invalid();
@@ -328,17 +480,20 @@ describe('same-origin repair', () => {
 			expect(auth.token).toBe(session(2).token);
 			expect(getAuthToken()).toBe(session(2).token);
 			expect(canDispatchAuthenticated()).toBe(false);
-			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe(candidate);
+			expect(readStoredAuthToken()).toBe(candidate);
 			await vi.advanceTimersByTimeAsync(2_000);
 			expect(auth.token).toBe(valid ? candidate : session(2).token);
 			expect(auth.isAuthenticated).toBe(true);
-			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe(auth.token);
+			expect(readStoredAuthToken()).toBe(auth.token);
 		},
 	);
 	it('backs off an unchanged failing storage candidate even when memory verification succeeds', async () => {
 		const auth = await signedIn();
 		const candidate = session(999).token;
-		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, candidate);
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.authToken,
+			JSON.stringify({ token: candidate, epoch: null }),
+		);
 		vi.mocked(api.getUser)
 			.mockClear()
 			.mockImplementation(async (token) => {
@@ -370,11 +525,14 @@ describe('same-origin repair', () => {
 		const probe = Promise.withResolvers<{ user: typeof user }>();
 		vi.mocked(api.getUser).mockReturnValueOnce(probe.promise).mockResolvedValue({ user });
 		const earlier = auth.reconcile();
-		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(2).token);
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.authToken,
+			JSON.stringify({ token: session(2).token, epoch: null }),
+		);
 		probe.resolve({ user });
 		await earlier;
 		await auth.reconcile();
-		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe(session(2).token);
+		expect(readStoredAuthToken()).toBe(session(2).token);
 		expect(auth.token).toBe(session(2).token);
 	});
 	it('does not revive a rejected session through a previously successful probe', async () => {
@@ -451,7 +609,10 @@ describe('same-origin repair', () => {
 		const auth = await signedIn();
 		vi.mocked(api.changePassword).mockRejectedValue(new TypeError('Lost response'));
 		await auth.changePassword({ currentPassword: 'password', newPassword: 'new-password' });
-		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(2).token);
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.authToken,
+			JSON.stringify({ token: session(2).token, epoch: null }),
+		);
 		auth.sessionRejected(auth.token, 'AUTH_SESSION_INVALID');
 		await auth.reconcile();
 		expect(auth.token).toBe(session(2).token);
@@ -464,7 +625,10 @@ describe('same-origin repair', () => {
 			const auth = await signedIn();
 			vi.mocked(api.changePassword).mockRejectedValue(new TypeError('Lost response'));
 			await auth.changePassword({ currentPassword: 'password', newPassword: 'new-password' });
-			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(999).token);
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.authToken,
+				JSON.stringify({ token: session(999).token, epoch: null }),
+			);
 			vi.mocked(api.getUser).mockRejectedValueOnce(failure).mockResolvedValue({ user });
 			await auth.reconcile();
 			expect(api.getUser).toHaveBeenCalledTimes(2);
@@ -478,7 +642,10 @@ describe('same-origin repair', () => {
 		const pending = Promise.withResolvers<AuthSessionResponse>();
 		vi.mocked(api.login).mockReturnValue(pending.promise);
 		const login = auth.login('owner', 'password');
-		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(2).token);
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.authToken,
+			JSON.stringify({ token: session(2).token, epoch: null }),
+		);
 		await auth.reconcile();
 		pending.resolve(session());
 		await login;
@@ -487,7 +654,10 @@ describe('same-origin repair', () => {
 	});
 	it('never accepts an unvalidated higher revision from storage', async () => {
 		const auth = await signedIn();
-		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(999).token);
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.authToken,
+			JSON.stringify({ token: session(999).token, epoch: null }),
+		);
 		vi.mocked(api.getUser).mockRejectedValueOnce(invalid()).mockResolvedValueOnce({ user });
 		await auth.reconcile();
 		expect(auth.token).toBe(session().token);
@@ -508,7 +678,10 @@ describe('same-origin repair', () => {
 		async (event) => {
 			const auth = await signedIn();
 			auth.start();
-			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(2).token);
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.authToken,
+				JSON.stringify({ token: session(2).token, epoch: null }),
+			);
 			(event === 'visibilitychange' ? document : window).dispatchEvent(new Event(event));
 			await auth.reconcile();
 			expect(auth.token).toBe(session(2).token);
