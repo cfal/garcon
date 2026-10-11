@@ -1,3 +1,4 @@
+import { normalizeStoredTicketRequest } from '$shared/ticket-stored';
 import {
 	parseHttpTicketMutationRequest,
 	type HttpTicketMutationRequest,
@@ -137,7 +138,7 @@ export function parseTicketDraft(value: unknown): TicketDraftSnapshot {
 		const submission = ticketRecord(raw.frozen, ['version', 'request']);
 		frozen = {
 			version: ticketInteger(submission.version, 'submittedVersion', 0, version),
-			request: parseHttpTicketMutationRequest(submission.request),
+			request: parseHttpTicketMutationRequest(normalizeStoredTicketRequest(submission.request)),
 		};
 		if (frozen.request.expectedStoreId !== storeId)
 			throw new Error('Draft submission belongs to another store');
@@ -168,7 +169,8 @@ export function parseTicketDraft(value: unknown): TicketDraftSnapshot {
 		fields: parsedFields,
 		baseFields,
 		frozen,
-		baseRevision: raw.baseRevision === null ? null : ticketInteger(raw.baseRevision, 'baseRevision'),
+		baseRevision:
+			raw.baseRevision === null ? null : ticketInteger(raw.baseRevision, 'baseRevision'),
 	};
 }
 

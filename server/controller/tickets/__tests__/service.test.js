@@ -42,7 +42,7 @@ describe('ticket transactions and workflow', () => {
   });
 
   test('same-owner Open claim starts work; repeated claim is a no-op', () => {
-    const created = fixture.create({ assignee: { kind: 'user', username: 'local' } });
+    const created = fixture.create({ assignee: { kind: 'user', ownerKey: 'local' } });
     const claimed = change(created.ticket, 'claim');
     expect(claimed.ticket.status).toBe('in-progress');
     expect(claimed.ticket.revision).toBe(2);
@@ -118,9 +118,9 @@ describe('ticket transactions and workflow', () => {
   });
 
   test('rejects forged user assignment from markup and foreign users from HTTP', () => {
-    expect(() => fixture.markup({ action: 'create', input: { title: 'Bad', project: 'Project', assignee: { kind: 'user', username: 'local' } } }, 'bad'))
+    expect(() => fixture.markup({ action: 'create', input: { title: 'Bad', project: 'Project', assignee: { kind: 'user', ownerKey: 'local' } } }, 'bad'))
       .toThrow(expect.objectContaining({ code: 'TICKET_VALIDATION_FAILED' }));
-    expect(() => fixture.create({ assignee: { kind: 'user', username: 'someone-else' } }))
+    expect(() => fixture.create({ assignee: { kind: 'user', ownerKey: 'someone-else' } }))
       .toThrow(expect.objectContaining({ code: 'TICKET_VALIDATION_FAILED' }));
     expect(fixture.service.list({}).items).toEqual([]);
   });

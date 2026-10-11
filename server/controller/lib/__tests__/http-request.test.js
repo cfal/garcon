@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
-const verifyAuthTokenClaims = mock(async () => ({ username: 'ada', expiresAtMs: 2_000_000_000_000 }));
+const claims = { ownerKey: 'original', credentialRevision: 2, username: 'ada', expiresAtMs: 2_000_000_000_000 };
+const verifyAuthTokenClaims = mock(async () => claims);
 
 mock.module('../../auth/token.js', () => ({
   verifyAuthTokenClaims,
@@ -11,15 +12,16 @@ import { authenticateHttpRequest } from '../http-request.js';
 describe('authenticateHttpRequest', () => {
   beforeEach(() => {
     verifyAuthTokenClaims.mockReset();
-    verifyAuthTokenClaims.mockResolvedValue({ username: 'ada', expiresAtMs: 2_000_000_000_000 });
+    verifyAuthTokenClaims.mockResolvedValue(claims);
   });
 
   it('returns 401 when bearer token is missing', async () => {
+    verifyAuthTokenClaims.mockResolvedValue(null);
     const result = await authenticateHttpRequest(new Request('http://localhost/api/private'));
     const body = await result.errorResponse.json();
 
     expect(result.errorResponse.status).toBe(401);
-    expect(body.error).toBe('Access denied. No token provided.');
+    expect(body.errorCode).toBe('AUTH_SESSION_INVALID');
   });
 
   it('returns 401 when bearer token is invalid', async () => {
@@ -42,7 +44,8 @@ describe('authenticateHttpRequest', () => {
     expect(result.errorResponse).toBeNull();
     expect(result.principal).toEqual({
       mode: 'authenticated',
-      key: 'ada',
+      key: 'original',
+      credentialRevision: 2,
       username: 'ada',
       expiresAtMs: 2_000_000_000_000,
     });

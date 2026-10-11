@@ -107,7 +107,7 @@ describe('ticket CLI execution', () => {
   });
 
   test('encodes assignees without conflating colons, Unicode or unassigned', () => {
-    for (const assignee of ['unassigned', { kind: 'user', username: 'é:team' }, { kind: 'chat', chatId: '1000000000000001' }] as const) {
+    for (const assignee of ['unassigned', { kind: 'user', ownerKey: 'é:team' }, { kind: 'chat', chatId: '1000000000000001' }] as const) {
       expect(ticketQueryParams(ticketSearchParams({ assignee }))).toEqual({ assignee });
     }
   });

@@ -1,353 +1,517 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthStore } from '../auth.svelte';
+import { ApiError, apiGet } from '$lib/api/client';
+import {
+	clearAuthToken,
+	setAuthToken,
+	getAuthToken,
+	canDispatchAuthenticated,
+	setAuthDispatchAvailable,
+	publishCredentialPending,
+} from '$lib/auth/session';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
+import type { AuthSessionResponse } from '$shared/auth';
 
 vi.mock('$lib/api/auth.js', () => ({
 	getAuthStatus: vi.fn(),
 	login: vi.fn(),
 	register: vi.fn(),
 	getUser: vi.fn(),
+	changeUsername: vi.fn(),
+	changePassword: vi.fn(),
 }));
+import * as api from '$lib/api/auth.js';
 
-import {
-	getAuthStatus,
-	login as apiLogin,
-	register as apiRegister,
-	getUser,
-} from '$lib/api/auth.js';
-import { ApiError } from '$lib/api/client.js';
-
-describe('AuthStore', () => {
-	beforeEach(() => {
-		localStorage.clear();
-		vi.resetAllMocks();
+const user = { id: 'owner-before', username: 'owner-before' };
+function session(revision = 1, username = user.username): AuthSessionResponse {
+	return {
+		success: true,
+		user: { ...user, username },
+		token: `header.${btoa(JSON.stringify({ sub: user.id, credentialRevision: revision }))}.signature`,
+	};
+}
+const invalid = () => new ApiError(401, 'Invalid session', 'AUTH_SESSION_INVALID');
+const stores: AuthStore[] = [];
+function store() {
+	const auth = new AuthStore();
+	stores.push(auth);
+	return auth;
+}
+async function signedIn() {
+	setAuthToken(session().token);
+	const auth = store();
+	await auth.checkAuthStatus();
+	return auth;
+}
+beforeEach(() => {
+	vi.useFakeTimers();
+	vi.resetAllMocks();
+	clearAuthToken();
+	localStorage.clear();
+	setAuthDispatchAvailable(true);
+	vi.mocked(api.getAuthStatus).mockResolvedValue({
+		needsSetup: false,
+		authDisabled: false,
+		isAuthenticated: false,
 	});
+	vi.mocked(api.getUser).mockResolvedValue({ user });
+});
+afterEach(() => {
+	for (const auth of stores.splice(0)) auth.destroy();
+	vi.useRealTimers();
+	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
+});
 
-	afterEach(() => {
-		vi.useRealTimers();
-		localStorage.clear();
-	});
-
-	describe('constructor', () => {
-		it('reads token from localStorage', () => {
-			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'saved-token');
-			const auth = new AuthStore();
-			expect(auth.token).toBe('saved-token');
-		});
-
-		it('starts with isLoading true', () => {
-			const auth = new AuthStore();
-			expect(auth.isLoading).toBe(true);
-			expect(auth.isAuthenticated).toBe(false);
-		});
-	});
-
-	describe('checkAuthStatus', () => {
-		it.each([
-			{ status: 400, retryable: false, attempts: 1 },
-			{ status: 403, retryable: false, attempts: 1 },
-			{ status: 429, retryable: false, attempts: 5 },
-			{ status: 503, retryable: false, attempts: 5 },
-			{ status: 409, retryable: true, attempts: 5 },
-		])(
-			'makes $attempts attempts for HTTP $status (retryable: $retryable)',
-			async ({ status, retryable, attempts }) => {
-				vi.useFakeTimers();
-				vi.mocked(getAuthStatus).mockRejectedValue(
-					new ApiError(status, 'Unavailable', undefined, undefined, retryable),
-				);
-				const auth = new AuthStore();
-				const check = auth.checkAuthStatus();
-				await vi.runAllTimersAsync();
-				await check;
-				expect(getAuthStatus).toHaveBeenCalledTimes(attempts);
-				expect(auth.isLoading).toBe(false);
-				expect(auth.isUnavailable).toBe(true);
-			},
-		);
-
-		it('coalesces concurrent recovery checks', async () => {
-			let resolveStatus!: (status: {
-				needsSetup: boolean;
-				isAuthenticated: boolean;
-				authDisabled: boolean;
-			}) => void;
-			vi.mocked(getAuthStatus).mockImplementation(
-				() =>
-					new Promise((resolve) => {
-						resolveStatus = resolve;
-					}),
-			);
-			const auth = new AuthStore();
-			const first = auth.checkAuthStatus();
-			const second = auth.checkAuthStatus();
-			expect(getAuthStatus).toHaveBeenCalledTimes(1);
-			resolveStatus({ needsSetup: false, isAuthenticated: false, authDisabled: false });
-			await Promise.all([first, second]);
-			expect(getAuthStatus).toHaveBeenCalledTimes(1);
-		});
-
-		it('sets needsSetup when server reports setup needed', async () => {
-			vi.mocked(getAuthStatus).mockResolvedValue({
-				needsSetup: true,
-				isAuthenticated: false,
-				authDisabled: false,
-			});
-			const auth = new AuthStore();
+describe('initial authority', () => {
+	it.each([false, true])(
+		'discards a rejected cold storage candidate without a probe loop (storage read-only: %s)',
+		async (readOnly) => {
+			const auth = store();
 			await auth.checkAuthStatus();
-			expect(auth.needsSetup).toBe(true);
-			expect(auth.isLoading).toBe(false);
-		});
-
-		it('validates stored token by fetching user', async () => {
-			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'valid-token');
-			vi.mocked(getAuthStatus).mockResolvedValue({
-				needsSetup: false,
-				isAuthenticated: true,
-				authDisabled: false,
-			});
-			vi.mocked(getUser).mockResolvedValue({
-				user: { id: '1', username: 'admin' },
-			});
-			const auth = new AuthStore();
-			await auth.checkAuthStatus();
-			expect(auth.user).toEqual({ id: '1', username: 'admin' });
-		});
-
-		it.each([401, 403])(
-			'clears an invalid token after an authoritative %i rejection',
-			async (status) => {
-				localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'expired-token');
-				vi.mocked(getAuthStatus).mockResolvedValue({
-					needsSetup: false,
-					isAuthenticated: false,
-					authDisabled: false,
+			const rejected = session(999).token;
+			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, rejected);
+			if (readOnly)
+				vi.spyOn(localStorage, 'removeItem').mockImplementation(() => {
+					throw new Error('Read-only storage');
 				});
-				vi.mocked(getUser).mockRejectedValue(new ApiError(status, 'Rejected'));
-				const auth = new AuthStore();
-				await auth.checkAuthStatus();
-				expect(auth.token).toBeNull();
-				expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBeNull();
-			},
-		);
-
-		it('keeps the token and retries when auth status is temporarily unreachable', async () => {
-			vi.useFakeTimers();
-			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'saved-token');
-			vi.mocked(getAuthStatus).mockRejectedValue(new TypeError('Failed to fetch'));
-			const auth = new AuthStore();
-
-			const check = auth.checkAuthStatus();
-			await vi.runAllTimersAsync();
-			await check;
-
-			expect(getAuthStatus).toHaveBeenCalledTimes(5);
-			expect(auth.token).toBe('saved-token');
-			expect(auth.isUnavailable).toBe(true);
-			expect(auth.error).toBe('Network error. Please check your connection.');
-			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe('saved-token');
-		});
-
-		it('recovers when auth status becomes reachable during retries', async () => {
-			vi.useFakeTimers();
-			vi.mocked(getAuthStatus)
-				.mockRejectedValueOnce(new TypeError('Failed to fetch'))
-				.mockResolvedValueOnce({
-					needsSetup: false,
-					isAuthenticated: false,
-					authDisabled: false,
-				});
-			const auth = new AuthStore();
-
-			const check = auth.checkAuthStatus();
-			await vi.runAllTimersAsync();
-			await check;
-
-			expect(getAuthStatus).toHaveBeenCalledTimes(2);
-			expect(auth.isUnavailable).toBe(false);
-			expect(auth.error).toBeNull();
-		});
-
-		it('recovers from transient user validation without clearing the token', async () => {
-			vi.useFakeTimers();
-			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'saved-token');
-			vi.mocked(getAuthStatus).mockResolvedValue({
-				needsSetup: false,
-				isAuthenticated: true,
-				authDisabled: false,
-			});
-			vi.mocked(getUser)
-				.mockRejectedValueOnce(new TypeError('Failed to fetch'))
-				.mockResolvedValueOnce({ user: { id: '1', username: 'admin' } });
-			const auth = new AuthStore();
-
-			const check = auth.checkAuthStatus();
-			await vi.runAllTimersAsync();
-			await check;
-
-			expect(getUser).toHaveBeenCalledTimes(2);
-			expect(auth.token).toBe('saved-token');
-			expect(auth.user).toEqual({ id: '1', username: 'admin' });
-			expect(auth.isUnavailable).toBe(false);
-			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe('saved-token');
-		});
-
-		it('keeps the token when user validation exhausts its retries', async () => {
-			vi.useFakeTimers();
-			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'saved-token');
-			vi.mocked(getAuthStatus).mockResolvedValue({
-				needsSetup: false,
-				isAuthenticated: true,
-				authDisabled: false,
-			});
-			vi.mocked(getUser).mockRejectedValue(new TypeError('Failed to fetch'));
-			const auth = new AuthStore();
-
-			const check = auth.checkAuthStatus();
-			await vi.runAllTimersAsync();
-			await check;
-
-			expect(getUser).toHaveBeenCalledTimes(5);
-			expect(auth.token).toBe('saved-token');
-			expect(auth.user).toBeNull();
-			expect(auth.isUnavailable).toBe(true);
-			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe('saved-token');
-		});
-
-		it('does not let a stale status response overwrite successful registration', async () => {
-			let resolveStatus!: (status: {
-				needsSetup: boolean;
-				isAuthenticated: boolean;
-				authDisabled: boolean;
-			}) => void;
-			vi.mocked(getAuthStatus).mockImplementation(
-				() =>
-					new Promise((resolve) => {
-						resolveStatus = resolve;
-					}),
-			);
-			vi.mocked(apiRegister).mockResolvedValue({
-				success: true,
-				token: 'reg-token',
-				user: { id: '2', username: 'newuser' },
-			});
-			const auth = new AuthStore();
-			const check = auth.checkAuthStatus();
-
-			await auth.register('newuser', 'password');
-			resolveStatus({ needsSetup: true, isAuthenticated: false, authDisabled: false });
-			await check;
-
-			expect(auth.needsSetup).toBe(false);
-			expect(auth.token).toBe('reg-token');
-			expect(auth.user).toEqual({ id: '2', username: 'newuser' });
-			expect(auth.isUnavailable).toBe(false);
-		});
-
-		it('does not let stale status retries mark a successful login unavailable', async () => {
-			vi.useFakeTimers();
-			vi.mocked(getAuthStatus).mockRejectedValue(new TypeError('Failed to fetch'));
-			vi.mocked(apiLogin).mockResolvedValue({
-				success: true,
-				token: 'new-token',
-				user: { id: '1', username: 'admin' },
-			});
-			const auth = new AuthStore();
-			const check = auth.checkAuthStatus();
-
-			await auth.login('admin', 'password');
-			expect(auth.isLoading).toBe(false);
-			await vi.runAllTimersAsync();
-			await check;
-
-			expect(auth.token).toBe('new-token');
-			expect(auth.user).toEqual({ id: '1', username: 'admin' });
-			expect(auth.isUnavailable).toBe(false);
-			expect(auth.error).toBeNull();
-		});
-
-		it('enters app mode without token when auth is disabled by server config', async () => {
-			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'stale-token');
-			vi.mocked(getAuthStatus).mockResolvedValue({
-				needsSetup: false,
-				isAuthenticated: true,
-				authDisabled: true,
-			});
-			const auth = new AuthStore();
-			await auth.checkAuthStatus();
-			expect(auth.authDisabled).toBe(true);
-			expect(auth.isAuthenticated).toBe(true);
-			expect(auth.user).toEqual({ id: 'local', username: 'local' });
+			vi.mocked(api.getUser)
+				.mockRejectedValueOnce(invalid())
+				.mockReturnValue(new Promise(() => {}));
+			await auth.reconcile();
+			await vi.advanceTimersByTimeAsync(0);
+			expect(api.getUser).toHaveBeenCalledTimes(1);
 			expect(auth.token).toBeNull();
-			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBeNull();
-		});
+			expect(auth.availability).toBe('signed-out');
+			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe(readOnly ? rejected : null);
+			vi.mocked(api.login).mockResolvedValue(session());
+			expect((await auth.login('owner-before', 'password')).success).toBe(true);
+		},
+	);
+	it('reconciles a different token stored while a cold candidate is rejected', async () => {
+		const auth = store();
+		await auth.checkAuthStatus();
+		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session().token);
+		const pending = Promise.withResolvers<{ user: typeof user }>();
+		vi.mocked(api.getUser).mockReturnValueOnce(pending.promise);
+		const repair = auth.reconcile();
+		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(2).token);
+		pending.reject(invalid());
+		await repair;
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.getUser).toHaveBeenCalledTimes(2);
+		expect(auth.token).toBe(session(2).token);
+		expect(auth.isAuthenticated).toBe(true);
 	});
-
-	describe('login', () => {
-		it.each([
-			[new ApiError(401, 'Rejected'), 'Invalid credentials. Please try again.'],
-			[new ApiError(403, 'Rejected'), 'Access denied. You do not have permission.'],
-			[new ApiError(409, 'Already registered'), 'Already registered'],
-			[new ApiError(400, 'Invalid input'), 'Invalid input'],
-			[new ApiError(503, 'Unavailable'), 'Server error. Please try again later.'],
-			[null, 'Network error. Please check your connection.'],
-		])('maps %s without retrying a login mutation', async (error, message) => {
-			vi.mocked(apiLogin).mockRejectedValue(error);
-			const auth = new AuthStore();
-			expect(await auth.login('admin', 'pass')).toEqual({ success: false, error: message });
-			expect(auth.error).toBe(message);
-			expect(apiLogin).toHaveBeenCalledTimes(1);
-			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBeNull();
+	it('discards rejected boot-token claims before accepting a valid sign-in', async () => {
+		setAuthToken(session(999).token);
+		const auth = store();
+		vi.mocked(api.getUser).mockRejectedValue(invalid());
+		await auth.checkAuthStatus();
+		expect(auth.availability).toBe('signed-out');
+		expect(auth.token).toBeNull();
+		vi.mocked(api.login).mockResolvedValue(session());
+		expect((await auth.login('owner-before', 'password')).success).toBe(true);
+		expect(auth.token).toBe(session().token);
+	});
+	it('validates the captured stored token and establishes stable presentation ownership', async () => {
+		const auth = await signedIn();
+		expect(api.getUser).toHaveBeenCalledWith(session().token);
+		expect(auth.isAuthenticated).toBe(true);
+		expect(auth.presentationOwner).toEqual({ mode: 'authenticated', key: user.id });
+	});
+	it('coalesces setup checks', async () => {
+		const pending = Promise.withResolvers<Awaited<ReturnType<typeof api.getAuthStatus>>>();
+		vi.mocked(api.getAuthStatus).mockReturnValue(pending.promise);
+		const auth = store();
+		const first = auth.checkAuthStatus();
+		const second = auth.checkAuthStatus();
+		pending.resolve({ needsSetup: true, authDisabled: false, isAuthenticated: false });
+		await Promise.all([first, second]);
+		expect(api.getAuthStatus).toHaveBeenCalledTimes(1);
+		expect(auth.needsSetup).toBe(true);
+	});
+	it('supports local mode without retaining bearer authority', async () => {
+		setAuthToken(session().token);
+		vi.mocked(api.getAuthStatus).mockResolvedValue({
+			needsSetup: false,
+			authDisabled: true,
+			isAuthenticated: true,
 		});
+		const auth = store();
+		await auth.checkAuthStatus();
+		expect(auth.isAuthenticated).toBe(true);
+		expect(auth.token).toBeNull();
+		expect(getAuthToken()).toBeNull();
+		expect(auth.presentationOwner).toEqual({ mode: 'local', key: 'local' });
+	});
+	it('keeps credentials through a network outage and recovers', async () => {
+		setAuthToken(session().token);
+		vi.mocked(api.getAuthStatus).mockRejectedValueOnce(new TypeError('offline'));
+		const auth = store();
+		await auth.checkAuthStatus();
+		expect(auth.isUnavailable).toBe(true);
+		expect(auth.token).toBe(session().token);
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(auth.isAuthenticated).toBe(true);
+	});
+	it('does not interpret generic 401/403 or provider failures as revocation', async () => {
+		const auth = await signedIn();
+		vi.mocked(api.getUser).mockRejectedValue(new ApiError(403, 'Provider denied'));
+		await auth.reconcile();
+		expect(auth.availability).toBe('repairing');
+		expect(auth.token).toBe(session().token);
+	});
+	it('fences auth-storage failure without retrying or offering sign-in', async () => {
+		const auth = await signedIn();
+		vi.mocked(api.getUser).mockRejectedValue(
+			new ApiError(503, 'Storage', 'AUTH_STORAGE_UNAVAILABLE'),
+		);
+		await auth.reconcile();
+		await vi.advanceTimersByTimeAsync(60_000);
+		await auth.reconcile();
+		expect(api.getUser).toHaveBeenCalledTimes(2);
+		expect(auth.availability).toBe('storage-unavailable');
+		expect(canDispatchAuthenticated()).toBe(false);
+	});
+});
 
-		it('persists token on success', async () => {
-			vi.mocked(apiLogin).mockResolvedValue({
-				success: true,
-				token: 'new-token',
-				user: { id: '1', username: 'admin' },
-			});
-			const auth = new AuthStore();
-			const result = await auth.login('admin', 'pass');
+describe('session ordering and credential operations', () => {
+	it.each([false, true])(
+		'revalidates a login response overtaken by revocation, current=%s',
+		async (current) => {
+			const auth = await signedIn();
+			const pending = Promise.withResolvers<AuthSessionResponse>();
+			vi.mocked(api.login).mockReturnValue(pending.promise);
+			const login = auth.login('owner', 'password');
+			vi.mocked(api.getUser).mockRejectedValue(invalid());
+			auth.sessionRejected(auth.token, 'AUTH_SESSION_INVALID');
+			await auth.reconcile();
+			if (current) vi.mocked(api.getUser).mockResolvedValue({ user });
+			pending.resolve(session(current ? 2 : 1));
+			await login;
+			expect(auth.isAuthenticated).toBe(current);
+			expect(api.getUser).toHaveBeenLastCalledWith(session(current ? 2 : 1).token);
+		},
+	);
+	it('ignores stale status completion after login', async () => {
+		const pending = Promise.withResolvers<Awaited<ReturnType<typeof api.getAuthStatus>>>();
+		vi.mocked(api.getAuthStatus).mockReturnValue(pending.promise);
+		vi.mocked(api.login).mockResolvedValue(session());
+		const auth = store();
+		const status = auth.checkAuthStatus();
+		await auth.login('owner-before', 'password');
+		pending.resolve({ needsSetup: true, authDisabled: false, isAuthenticated: false });
+		await status;
+		expect(auth.isAuthenticated).toBe(true);
+		expect(auth.needsSetup).toBe(false);
+	});
+	it('fences earlier login at the start of a later login', async () => {
+		const first = Promise.withResolvers<AuthSessionResponse>();
+		vi.mocked(api.login)
+			.mockReturnValueOnce(first.promise)
+			.mockResolvedValueOnce(session(2, 'owner-after'));
+		const auth = store();
+		const earlier = auth.login('old', 'password');
+		await auth.login('new', 'password');
+		first.resolve(session());
+		await earlier;
+		expect(auth.token).toBe(session(2).token);
+	});
+	it.each(['changeUsername', 'changePassword'] as const)(
+		'adopts %s atomically without a status check or presentation reset',
+		async (operation) => {
+			const auth = await signedIn();
+			vi.mocked(api[operation]).mockResolvedValue(session(2, 'owner-after'));
+			const result =
+				operation === 'changeUsername'
+					? await auth.changeUsername({ username: 'owner-after', currentPassword: 'password' })
+					: await auth.changePassword({
+							newPassword: 'password-next',
+							currentPassword: 'password',
+						});
 			expect(result.success).toBe(true);
-			expect(auth.token).toBe('new-token');
-			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe('new-token');
-		});
-
-		it('returns error on failure', async () => {
-			vi.mocked(apiLogin).mockRejectedValue(new Error('bad creds'));
-			const auth = new AuthStore();
-			const result = await auth.login('admin', 'wrong');
-			expect(result.success).toBe(false);
-			expect(auth.error).toBeTruthy();
-		});
-
-		it('maps transport failures to a useful network error', async () => {
-			vi.mocked(apiLogin).mockRejectedValue(new TypeError('Failed to fetch'));
-			const auth = new AuthStore();
-			const result = await auth.login('admin', 'pass');
-			expect(result).toEqual({
-				success: false,
-				error: 'Network error. Please check your connection.',
-			});
-		});
+			expect(auth.user?.id).toBe(user.id);
+			expect(auth.token).toBe(session(2).token);
+			expect(auth.isAuthenticated).toBe(true);
+			expect(api.getAuthStatus).toHaveBeenCalledTimes(1);
+			auth.sessionRejected(session().token, 'AUTH_SESSION_INVALID');
+			expect(auth.isAuthenticated).toBe(true);
+		},
+	);
+	it('uses one mutation gate and retains it until the replacement is installed', async () => {
+		const auth = await signedIn();
+		const pending = Promise.withResolvers<AuthSessionResponse>();
+		vi.mocked(api.changeUsername).mockReturnValue(pending.promise);
+		const change = auth.changeUsername({ username: 'next', currentPassword: 'password' });
+		expect(
+			(await auth.changePassword({ currentPassword: 'password', newPassword: 'next-password' }))
+				.success,
+		).toBe(false);
+		expect(api.changePassword).not.toHaveBeenCalled();
+		pending.resolve(session(2));
+		await change;
+		expect(auth.credentialPending).toBe(false);
 	});
-
-	describe('register', () => {
-		it('persists token and clears needsSetup on success', async () => {
-			vi.mocked(apiRegister).mockResolvedValue({
-				success: true,
-				token: 'reg-token',
-				user: { id: '2', username: 'newuser' },
-			});
-			const auth = new AuthStore();
-			auth.needsSetup = true;
-			auth.isUnavailable = true;
-			const result = await auth.register('newuser', 'pass');
-			expect(result.success).toBe(true);
-			expect(auth.needsSetup).toBe(false);
-			expect(auth.isUnavailable).toBe(false);
-			expect(auth.token).toBe('reg-token');
-			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe('reg-token');
-		});
+	it('wrong current password is a form error and does not revoke authority', async () => {
+		const auth = await signedIn();
+		vi.mocked(api.changePassword).mockRejectedValue(
+			new ApiError(400, 'Incorrect password', 'AUTH_CURRENT_PASSWORD_INVALID'),
+		);
+		expect(
+			await auth.changePassword({ currentPassword: 'wrong', newPassword: 'new-password' }),
+		).toMatchObject({ success: false, errorCode: 'AUTH_CURRENT_PASSWORD_INVALID' });
+		expect(auth.isAuthenticated).toBe(true);
 	});
+	it('holds early socket revocation until the source response arrives', async () => {
+		const auth = await signedIn();
+		const pending = Promise.withResolvers<AuthSessionResponse>();
+		vi.mocked(api.changeUsername).mockReturnValue(pending.promise);
+		vi.mocked(api.getUser).mockRejectedValue(invalid());
+		const change = auth.changeUsername({ username: 'next', currentPassword: 'password' });
+		auth.sessionRejected(auth.token, 'AUTH_SESSION_INVALID');
+		await auth.reconcile();
+		expect(auth.availability).toBe('repairing');
+		expect(auth.presentationOwner?.key).toBe(user.id);
+		pending.resolve(session(2, 'next'));
+		await change;
+		expect(auth.isAuthenticated).toBe(true);
+	});
+	it.each([new TypeError('lost response'), new Error('malformed successful response')])(
+		'never repeats an unknown mutation',
+		async (error) => {
+			const auth = await signedIn();
+			vi.mocked(api.changePassword).mockRejectedValue(error);
+			const result = await auth.changePassword({
+				currentPassword: 'password',
+				newPassword: 'new-password',
+			});
+			expect(result.errorCode).toBe('AUTH_OUTCOME_UNKNOWN');
+			expect(auth.availability).toBe('reauth-required');
+			expect(api.changePassword).toHaveBeenCalledTimes(1);
+			expect(auth.presentationOwner?.key).toBe(user.id);
+		},
+	);
+	it('keeps memory authority when token persistence fails', async () => {
+		const auth = await signedIn();
+		vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+			throw new Error('unavailable');
+		});
+		vi.mocked(api.changeUsername).mockResolvedValue(session(2));
+		await auth.changeUsername({ username: 'next', currentPassword: 'password' });
+		expect(auth.persistenceWarning).toBe(true);
+		expect(getAuthToken()).toBe(session(2).token);
+		await auth.reconcile();
+		expect(auth.token).toBe(session(2).token);
+	});
+});
+
+describe('same-origin repair', () => {
+	it.each([false, true])(
+		'retains a successful replacement while validating newer storage (candidate valid: %s)',
+		async (valid) => {
+			const auth = await signedIn();
+			const pending = Promise.withResolvers<AuthSessionResponse>();
+			vi.mocked(api.changePassword).mockReturnValue(pending.promise);
+			const change = auth.changePassword({
+				currentPassword: 'before',
+				newPassword: 'after-password',
+			});
+			const candidate = session(999).token;
+			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, candidate);
+			vi.mocked(api.getUser).mockImplementation(async (token) => {
+				if (token === session(2).token || (valid && token === candidate)) return { user };
+				throw invalid();
+			});
+			pending.resolve(session(2));
+			expect((await change).success).toBe(true);
+			expect(auth.token).toBe(session(2).token);
+			expect(getAuthToken()).toBe(session(2).token);
+			expect(canDispatchAuthenticated()).toBe(false);
+			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe(candidate);
+			await vi.advanceTimersByTimeAsync(2_000);
+			expect(auth.token).toBe(valid ? candidate : session(2).token);
+			expect(auth.isAuthenticated).toBe(true);
+			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe(auth.token);
+		},
+	);
+	it('backs off an unchanged failing storage candidate even when memory verification succeeds', async () => {
+		const auth = await signedIn();
+		const candidate = session(999).token;
+		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, candidate);
+		vi.mocked(api.getUser)
+			.mockClear()
+			.mockImplementation(async (token) => {
+				if (token === candidate) throw new TypeError('Network failure');
+				return { user };
+			});
+		await auth.reconcile();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.getUser).toHaveBeenCalledTimes(2);
+		expect(auth.token).toBe(session().token);
+		await vi.advanceTimersByTimeAsync(1_999);
+		expect(api.getUser).toHaveBeenCalledTimes(2);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(api.getUser).toHaveBeenCalledTimes(4);
+	});
+	it('never lets an in-flight login lift a storage fence', async () => {
+		const auth = await signedIn();
+		const pending = Promise.withResolvers<AuthSessionResponse>();
+		vi.mocked(api.login).mockReturnValue(pending.promise);
+		const login = auth.login('owner', 'password');
+		auth.sessionRejected(auth.token, 'AUTH_STORAGE_UNAVAILABLE');
+		pending.resolve(session());
+		await login;
+		expect(auth.availability).toBe('storage-unavailable');
+		expect(auth.isAuthenticated).toBe(false);
+	});
+	it('does not overwrite a newer stored replacement with a delayed probe', async () => {
+		const auth = await signedIn();
+		const probe = Promise.withResolvers<{ user: typeof user }>();
+		vi.mocked(api.getUser).mockReturnValueOnce(probe.promise).mockResolvedValue({ user });
+		const earlier = auth.reconcile();
+		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(2).token);
+		probe.resolve({ user });
+		await earlier;
+		await auth.reconcile();
+		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe(session(2).token);
+		expect(auth.token).toBe(session(2).token);
+	});
+	it('does not revive a rejected session through a previously successful probe', async () => {
+		const auth = await signedIn();
+		const probe = Promise.withResolvers<{ user: typeof user }>();
+		vi.mocked(api.getUser).mockReturnValueOnce(probe.promise).mockRejectedValue(invalid());
+		const earlier = auth.reconcile();
+		auth.sessionRejected(auth.token, 'AUTH_SESSION_INVALID');
+		probe.resolve({ user });
+		await earlier;
+		await auth.reconcile();
+		expect(auth.isAuthenticated).toBe(false);
+		expect(canDispatchAuthenticated()).toBe(false);
+	});
+	it('does not use the old session to resolve an uncertain credential mutation', async () => {
+		const auth = await signedIn();
+		vi.mocked(api.changePassword).mockRejectedValue(new TypeError('lost response'));
+		await auth.changePassword({ currentPassword: 'password', newPassword: 'new-password' });
+		await auth.reconcile();
+		expect(auth.availability).toBe('reauth-required');
+		expect(api.getUser).toHaveBeenCalledTimes(1);
+	});
+	it.each(['HTTP', 'WS'] as const)(
+		'keeps sign-in available after an uncertain mutation receives a late %s rejection',
+		async (source) => {
+			const auth = await signedIn();
+			auth.start();
+			const delayed = Promise.withResolvers<Response>();
+			vi.stubGlobal(
+				'fetch',
+				vi.fn(() => delayed.promise),
+			);
+			const oldRequest = source === 'HTTP' ? apiGet('/protected') : null;
+			vi.mocked(api.changePassword).mockRejectedValue(new TypeError('Lost response'));
+			await auth.changePassword({ currentPassword: 'password', newPassword: 'new-password' });
+			expect(auth.availability).toBe('reauth-required');
+			if (oldRequest) {
+				delayed.resolve(
+					Response.json(
+						{
+							error: 'Revoked',
+							errorCode: 'AUTH_SESSION_INVALID',
+							retryable: false,
+						},
+						{ status: 401 },
+					),
+				);
+				await expect(oldRequest).rejects.toMatchObject({ errorCode: 'AUTH_SESSION_INVALID' });
+			} else auth.sessionRejected(auth.token, 'AUTH_SESSION_INVALID');
+			await auth.reconcile();
+			await vi.advanceTimersByTimeAsync(60_000);
+			expect(auth.availability).toBe('reauth-required');
+			expect(canDispatchAuthenticated()).toBe(false);
+			expect(auth.presentationOwner?.key).toBe(user.id);
+			expect(api.getUser).toHaveBeenCalledTimes(1);
+			expect(api.changePassword).toHaveBeenCalledTimes(1);
+			vi.mocked(api.login).mockResolvedValue(session(2));
+			expect((await auth.login(user.username, 'new-password')).success).toBe(true);
+			expect(auth.isAuthenticated).toBe(true);
+		},
+	);
+	it('retains the storage fence after late revocation of an uncertain session', async () => {
+		const auth = await signedIn();
+		vi.mocked(api.changePassword).mockRejectedValue(new TypeError('Lost response'));
+		await auth.changePassword({ currentPassword: 'password', newPassword: 'new-password' });
+		auth.sessionRejected(auth.token, 'AUTH_STORAGE_UNAVAILABLE');
+		auth.sessionRejected(auth.token, 'AUTH_SESSION_INVALID');
+		await auth.reconcile();
+		expect(auth.availability).toBe('storage-unavailable');
+		expect(canDispatchAuthenticated()).toBe(false);
+		expect(api.getUser).toHaveBeenCalledTimes(1);
+	});
+	it('still adopts an independent replacement after late rejection of an uncertain session', async () => {
+		const auth = await signedIn();
+		vi.mocked(api.changePassword).mockRejectedValue(new TypeError('Lost response'));
+		await auth.changePassword({ currentPassword: 'password', newPassword: 'new-password' });
+		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(2).token);
+		auth.sessionRejected(auth.token, 'AUTH_SESSION_INVALID');
+		await auth.reconcile();
+		expect(auth.token).toBe(session(2).token);
+		expect(auth.isAuthenticated).toBe(true);
+		expect(api.getUser).toHaveBeenLastCalledWith(session(2).token);
+	});
+	it.each([invalid(), new TypeError('Offline')])(
+		'keeps uncertain authority suspended when a stored replacement fails verification',
+		async (failure) => {
+			const auth = await signedIn();
+			vi.mocked(api.changePassword).mockRejectedValue(new TypeError('Lost response'));
+			await auth.changePassword({ currentPassword: 'password', newPassword: 'new-password' });
+			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(999).token);
+			vi.mocked(api.getUser).mockRejectedValueOnce(failure).mockResolvedValue({ user });
+			await auth.reconcile();
+			expect(api.getUser).toHaveBeenCalledTimes(2);
+			expect(api.getUser).toHaveBeenLastCalledWith(session(999).token);
+			expect(auth.availability).toBe('reauth-required');
+			expect(canDispatchAuthenticated()).toBe(false);
+		},
+	);
+	it('validates storage replacement and refuses late old login completion', async () => {
+		const auth = await signedIn();
+		const pending = Promise.withResolvers<AuthSessionResponse>();
+		vi.mocked(api.login).mockReturnValue(pending.promise);
+		const login = auth.login('owner', 'password');
+		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(2).token);
+		await auth.reconcile();
+		pending.resolve(session());
+		await login;
+		expect(auth.token).toBe(session(2).token);
+		expect(api.getUser).toHaveBeenLastCalledWith(session(2).token);
+	});
+	it('never accepts an unvalidated higher revision from storage', async () => {
+		const auth = await signedIn();
+		localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(999).token);
+		vi.mocked(api.getUser).mockRejectedValueOnce(invalid()).mockResolvedValueOnce({ user });
+		await auth.reconcile();
+		expect(auth.token).toBe(session().token);
+		expect(auth.isAuthenticated).toBe(true);
+	});
+	it('bounds pending notices and then requires reauthentication in place', async () => {
+		const auth = await signedIn();
+		publishCredentialPending(auth.token!);
+		vi.mocked(api.getUser).mockRejectedValue(invalid());
+		auth.sessionRejected(auth.token, 'AUTH_SESSION_INVALID');
+		await auth.reconcile();
+		await vi.advanceTimersByTimeAsync(35_001);
+		expect(auth.availability).toBe('reauth-required');
+		expect(auth.presentationOwner?.key).toBe(user.id);
+	});
+	it.each(['storage', 'pageshow', 'online', 'visibilitychange'])(
+		'reconciles on %s without remounting',
+		async (event) => {
+			const auth = await signedIn();
+			auth.start();
+			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, session(2).token);
+			(event === 'visibilitychange' ? document : window).dispatchEvent(new Event(event));
+			await auth.reconcile();
+			expect(auth.token).toBe(session(2).token);
+		},
+	);
 });

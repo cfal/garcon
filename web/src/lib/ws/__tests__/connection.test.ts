@@ -114,6 +114,50 @@ describe('WsConnection', () => {
 		vi.stubGlobal('WebSocket', originalWebSocket);
 	});
 
+	it.each([4001, 4002, 1006])(
+		'pauses revoked or opaque sockets until auth recovery, code %s',
+		async (code) => {
+			const connection = new WsConnection();
+			connection.onAuthFailure = vi.fn();
+			connection.connect('old-token');
+			const old = mockSockets[0];
+			old.open();
+			const staleOpen = old.onopen;
+			old.onclose?.(new CloseEvent('close', { code }));
+			expect(connection.onAuthFailure).toHaveBeenCalledWith('old-token', code);
+			expect(connection.sendMessage({ type: 'ws-ping' })).toBe(false);
+			window.dispatchEvent(new Event('online'));
+			document.dispatchEvent(new Event('visibilitychange'));
+			await vi.advanceTimersByTimeAsync(30_000);
+			expect(mockSockets).toHaveLength(1);
+			connection.resumeForAuth('replacement');
+			mockSockets[1].open();
+			staleOpen?.(new Event('open'));
+			expect(connection.isConnected).toBe(true);
+			expect(connection.sendMessage({ type: 'ws-ping' })).toBe(true);
+			expect(old.send).not.toHaveBeenCalled();
+			connection.disconnect();
+		},
+	);
+	it('retains reconnect backoff when HTTP authentication succeeds but WebSocket upgrades fail', async () => {
+		const connection = new WsConnection();
+		connection.onAuthFailure = () => connection.retryAfterAuthProbe();
+		connection.connect('current-token');
+		try {
+			for (let attempt = 1; attempt <= 4; attempt++) {
+				mockSockets.at(-1)!.onclose?.(new CloseEvent('close', { code: 1006 }));
+				expect(mockSockets).toHaveLength(attempt);
+				expect(connection.connectionStatus.reconnectAttempt).toBe(attempt);
+				const delay = connection.connectionStatus.nextRetryAt! - Date.now();
+				expect(delay).toBeGreaterThan(0);
+				await vi.advanceTimersByTimeAsync(delay);
+				expect(mockSockets).toHaveLength(attempt + 1);
+			}
+		} finally {
+			connection.disconnect();
+		}
+	});
+
 	it('closes a connecting socket before opening a replacement', () => {
 		const connection = new WsConnection();
 
@@ -913,25 +957,34 @@ describe('WsConnection', () => {
 		connection.disconnect();
 	});
 
-	it.each(['chat-subscribe', 'chat-reload'])('settles missing-chat errors for %s without waiting for timeout', async (type) => {
-		const connection = new WsConnection();
-		connection.connect('token');
-		const socket = mockSockets[0];
-		socket.open();
-		try {
-			const request = connection.sendRequest({ type });
-			const { clientRequestId } = lastSentPayload(socket);
-			socket.message({
-				type: 'client-request-error', clientRequestId, requestType: type,
-				code: 'MISSING_CHAT_ID', message: `Missing chatId for "${type}"`, retryable: false,
-			});
-			await expect(request).rejects.toMatchObject({
-				name: 'WsRequestError', code: 'MISSING_CHAT_ID', retryable: false,
-			});
-		} finally {
-			connection.disconnect();
-		}
-	});
+	it.each(['chat-subscribe', 'chat-reload'])(
+		'settles missing-chat errors for %s without waiting for timeout',
+		async (type) => {
+			const connection = new WsConnection();
+			connection.connect('token');
+			const socket = mockSockets[0];
+			socket.open();
+			try {
+				const request = connection.sendRequest({ type });
+				const { clientRequestId } = lastSentPayload(socket);
+				socket.message({
+					type: 'client-request-error',
+					clientRequestId,
+					requestType: type,
+					code: 'MISSING_CHAT_ID',
+					message: `Missing chatId for "${type}"`,
+					retryable: false,
+				});
+				await expect(request).rejects.toMatchObject({
+					name: 'WsRequestError',
+					code: 'MISSING_CHAT_ID',
+					retryable: false,
+				});
+			} finally {
+				connection.disconnect();
+			}
+		},
+	);
 
 	it('abandons offline sockets and reconnects immediately when the browser returns online', () => {
 		const connection = new WsConnection();

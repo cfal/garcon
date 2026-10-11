@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import { parseTicketActivity } from '../../../common/ticket-records.js';
+import { normalizeStoredTicketActivity } from '../../../common/ticket-stored.js';
 import { formatTicketId, TICKET_ID_PREFIX, ticketBytes, ticketNumber } from '../../../common/ticket-validation.js';
 import { TICKET_LIMITS, ticketOwnerKey, type TicketActivity, type TicketCollectionVersion,
   type TicketCommentsQuery, type TicketCommentView, type TicketCounts, type TicketDetail, type TicketFacets,
@@ -149,7 +150,7 @@ export function readTicketHistory(database: Database, storeId: string, query: Ti
     SELECT sequence,payload_json FROM ticket_activity WHERE ticket_number=? AND sequence<? ORDER BY sequence DESC LIMIT ?
   `).all(ticketNumber(query.ticketId), query.beforeSequence ?? Number.MAX_SAFE_INTEGER, limit + 1);
   const events = rows.map((row) => {
-    const activity = parseTicketActivity(parseStoredJson(row.payload_json, 'Ticket activity'));
+    const activity = parseTicketActivity(normalizeStoredTicketActivity(parseStoredJson(row.payload_json, 'Ticket activity')));
     if (activity.sequence !== row.sequence || activity.ticketId !== query.ticketId) throw new Error('Inconsistent ticket activity.');
     return activity;
   });

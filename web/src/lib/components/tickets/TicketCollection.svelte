@@ -9,11 +9,15 @@
 	import * as m from '$lib/paraglide/messages.js';
 	let {
 		controller,
+		username,
+		ownerKey,
 		onOpen,
 		onStatus,
 		pinned = null,
 	}: {
 		controller: TicketsController;
+		username: string;
+		ownerKey: string;
 		onOpen: (ticket: TicketSummary) => void;
 		onStatus: (ticket: TicketSummary, status: TicketStatus) => void;
 		pinned?: { key: TicketWindowKey; ticket: TicketSummary } | null;
@@ -36,6 +40,8 @@
 	{#each items(key) as ticket (ticket.id)}
 		<svelte:boundary>
 			<TicketCard
+				{username}
+				{ownerKey}
 				{ticket}
 				board={controller.layout === 'board'}
 				selected={controller.detail.selectedId === ticket.id}

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { verifyAuthTokenClaims } from '../auth/token.js';
-import { jsonError } from '../../common/http-error.js';
+import { getAuthStore } from '../auth/store.js';
+import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 import type { ServerPrincipal } from './http-route-types.js';
 
 import { getTokenFromRequest } from '../../common/http-body.js';
@@ -14,11 +15,7 @@ export async function authenticateHttpRequest(
   principal: ServerPrincipal | null;
 }> {
   const token = getTokenFromRequest(request);
-  if (!token) {
-    return { errorResponse: jsonError('Access denied. No token provided.', 401), principal: null };
-  }
-
-  const tokenBytes = Buffer.from(token);
+  const tokenBytes = Buffer.from(token ?? '');
   const localCapabilityBytes = options.localCapability
     ? Buffer.from(options.localCapability)
     : null;
@@ -38,16 +35,19 @@ export async function authenticateHttpRequest(
     };
   }
 
-  const claims = await verifyAuthTokenClaims(token);
+  let claims;
+  try { getAuthStore().assertHealthy(); claims = await verifyAuthTokenClaims(token); }
+  catch (error) { return { errorResponse: jsonErrorFromUnknown(error), principal: null }; }
   if (!claims) {
-    return { errorResponse: jsonError('Invalid token', 401), principal: null };
+    return { errorResponse: jsonError('Invalid token', 401, 'AUTH_SESSION_INVALID'), principal: null };
   }
 
   return {
     errorResponse: null,
     principal: {
       mode: 'authenticated',
-      key: claims.username,
+      key: claims.ownerKey,
+      credentialRevision: claims.credentialRevision,
       username: claims.username,
       expiresAtMs: claims.expiresAtMs,
     },

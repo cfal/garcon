@@ -9,6 +9,7 @@ const APP_SETTINGS_TABS = ['interface', 'shortcuts'] as const;
 export const SETTINGS_TABS = [
 	...APP_SETTINGS_TABS,
 	'providers',
+	'password',
 	'other-agents',
 	'general',
 	'automation',

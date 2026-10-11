@@ -171,7 +171,8 @@ Ticket management:
   comment-delete <G-n> --comment-id <uuid> --expected-revision <n>
   link|unlink <G-n> --expected-revision <n> --target-id <G-n> --target-revision <n> --link-kind <blocks|related>
   Every verb accepts --json. Mutations accept --from-chat <chat-id> as declared attribution.
-  Owners: chat:<id>, user:<username>, or unassigned. Read before editing to obtain revisions.
+  Owners: chat:<id>, user:<ownerKey>, or unassigned. User keys do not change with login names.
+  Read before editing to obtain revisions.
   New create defaults to the shared repository or folder path; --project is an arbitrary string.
   Mutations print a retry connection prefix and identity before POST. Keep the same operation/body and paired
   --request-id <uuid> --expected-store-id <uuid>; create retries also require the printed --project.

@@ -1,6 +1,6 @@
 export type ServerPrincipal =
   | { mode: 'executor'; key: string; executorId: string; expiresAtMs: null }
-  | { mode: 'authenticated'; key: string; username: string; expiresAtMs: number }
+  | { mode: 'authenticated'; key: string; username: string; expiresAtMs: number; credentialRevision: number }
   | { mode: 'local'; key: 'local'; username: 'local'; expiresAtMs: null };
 
 export const LOCAL_SERVER_PRINCIPAL: ServerPrincipal = Object.freeze({

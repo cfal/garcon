@@ -1,173 +1,105 @@
-import {
-  AuthAccountAlreadyConfiguredError,
-  needsSetup,
-  getUserByUsername,
-  createUser,
-  getUser,
-} from '../auth/store.js';
-import { generateAuthToken } from '../auth/token.js';
+import { AuthValidationError, type AuthUserResponse, type AuthStatusResponse } from '../../../common/auth.js';
+import { getAuthStore, needsSetup } from '../auth/store.js';
+import { getAuthService } from '../auth/service.js';
+import { readAuthBody } from '../auth/http.js';
 import { createRateLimiter, type RequestIpServer } from '../lib/rate-limit.js';
-import { markRouteNoAuth } from '../lib/http-route.js';
-import { withJsonBody } from '../lib/json-route.js';
+import { markRouteNoAuth, markRouteNoStore } from '../lib/http-route.js';
 import { isAuthDisabled } from '../config.js';
-import type { RouteMap } from '../lib/http-route-types.js';
-import { asJsonBody, type JsonBody } from './route-helpers.js';
-import { createLogger } from '../../common/log.js';
-import { jsonError } from '../../common/http-error.js';
-
-const logger = createLogger('routes:auth');
+import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
+import { DomainError } from '../../common/domain-error.js';
+import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 
 const loginLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
 const registerLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
+const credentialLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
 
-async function noauthGetStatus(): Promise<Response> {
-  try {
-    const authDisabled = isAuthDisabled();
-    if (authDisabled) {
-      return Response.json({
-        needsSetup: false,
-        isAuthenticated: true,
-        authDisabled: true,
-      });
+function authRoute(handler: RouteHandler): RouteHandler {
+  return markRouteNoStore(async (...args) => {
+    let response: Response;
+    try { response = await handler(...args); }
+    catch (error) {
+      response = error instanceof AuthValidationError
+        ? jsonError(error.message, 400, 'AUTH_VALIDATION_FAILED', false)
+        : jsonErrorFromUnknown(error);
     }
-    const setupNeeded = await needsSetup();
-    return Response.json({
-      needsSetup: setupNeeded,
-      isAuthenticated: false,
-      authDisabled: false,
-    });
-  } catch (error) {
-    logger.error('Auth status error:', error);
-    return jsonError('Internal server error', 500);
-  }
+    response.headers.set('Cache-Control', 'no-store');
+    if (response.status === 429) response.headers.set('Retry-After', '5');
+    return response;
+  });
 }
 
-async function noauthPostRegister(body: JsonBody): Promise<Response> {
-  try {
-    if (isAuthDisabled()) {
-      return jsonError('Authentication is disabled by server configuration', 403);
-    }
-    const input = asJsonBody(body);
-    const username = typeof input.username === 'string' ? input.username : '';
-    const password = typeof input.password === 'string' ? input.password : '';
-
-    if (!username || !password) {
-      return jsonError('Both username and password are required', 400);
-    }
-    const trimmedUsername = username.trim();
-    if (trimmedUsername.length < 1) {
-      return jsonError('Username is required', 400);
-    }
-    if (trimmedUsername.length > 64) {
-      return jsonError('Username must be 64 characters or fewer', 400);
-    }
-    if (password.length < 8) {
-      return jsonError('Password must be at least 8 characters', 400);
-    }
-    if (password.length > 128) {
-      return jsonError('Password must be 128 characters or fewer', 400);
-    }
-
-    const setupNeeded = await needsSetup();
-    if (!setupNeeded) {
-      return jsonError('Account already configured', 409);
-    }
-
-    const passwordHash = await Bun.password.hash(password, { algorithm: 'bcrypt', cost: 12 });
-    const user = await createUser(trimmedUsername, passwordHash);
-    const token = await generateAuthToken(user);
-
-    return Response.json({
-      success: true,
-      user: { id: user.username, username: user.username },
-      token,
-    });
-  } catch (error) {
-    if (error instanceof AuthAccountAlreadyConfiguredError) {
-      return jsonError(error.message, 409);
-    }
-    logger.error('Registration error:', error);
-    return jsonError('Internal server error', 500);
-  }
+function requireEnabled(): void {
+  if (isAuthDisabled()) throw new DomainError('AUTH_CHANGE_FORBIDDEN', 'Authentication is disabled by server configuration', 403);
 }
 
-async function noauthPostLogin(body: JsonBody): Promise<Response> {
-  try {
-    if (isAuthDisabled()) {
-      return jsonError('Authentication is disabled by server configuration', 403);
-    }
-    const input = asJsonBody(body);
-    const username = typeof input.username === 'string' ? input.username : '';
-    const password = typeof input.password === 'string' ? input.password : '';
-    if (!username || !password) {
-      return jsonError('Both username and password are required', 400);
-    }
-
-    const user = await getUserByUsername(username);
-    if (!user) {
-      return jsonError('Invalid username or password', 401);
-    }
-
-    const isValidPassword = await Bun.password.verify(password, user.passwordHash);
-    if (!isValidPassword) {
-      return jsonError('Invalid username or password', 401);
-    }
-
-    const token = await generateAuthToken(user);
-    return Response.json({
-      success: true,
-      user: { id: user.username, username: user.username },
-      token,
-    });
-  } catch (error) {
-    logger.error('Login error:', error);
-    return jsonError('Internal server error', 500);
-  }
-}
-
-const noauthPostLoginWithBody = withJsonBody(noauthPostLogin);
-const noauthPostRegisterWithBody = withJsonBody(noauthPostRegister);
-
-function asRequestIpServer(server: unknown): RequestIpServer | null {
+function ipServer(server: unknown): RequestIpServer | null {
   return server && typeof server === 'object' ? server as RequestIpServer : null;
 }
 
-async function noauthPostLoginRateLimited(request: Request, url: URL, server?: unknown): Promise<Response> {
-  const limited = loginLimiter.check(request, asRequestIpServer(server));
+const status = authRoute(async () => {
+  const store = getAuthStore();
+  store.assertHealthy();
+  const authDisabled = isAuthDisabled();
+  const setupRequired = authDisabled ? false : await needsSetup();
+  store.assertHealthy();
+  return Response.json({ needsSetup: setupRequired, isAuthenticated: authDisabled,
+    authDisabled } satisfies AuthStatusResponse);
+});
+
+const register = authRoute(async (request, _url, server) => {
+  requireEnabled();
+  const limited = registerLimiter.check(request, ipServer(server));
   if (limited) return limited;
-  return noauthPostLoginWithBody(request, url, server);
-}
+  return Response.json(await getAuthService().register(await readAuthBody(request), request.signal));
+});
 
-async function noauthPostRegisterRateLimited(request: Request, url: URL, server?: unknown): Promise<Response> {
-  const limited = registerLimiter.check(request, asRequestIpServer(server));
+const login = authRoute(async (request, _url, server) => {
+  requireEnabled();
+  const limited = loginLimiter.check(request, ipServer(server));
   if (limited) return limited;
-  return noauthPostRegisterWithBody(request, url, server);
+  return Response.json(await getAuthService().login(await readAuthBody(request), request.signal));
+});
+
+function credentialRoute(operation: 'username' | 'password'): RouteHandler {
+  return authRoute(async (request, _url, server, context) => {
+    requireEnabled();
+    if (context?.principal?.mode !== 'authenticated') {
+      throw new DomainError('AUTH_CHANGE_FORBIDDEN', 'Sign in to change credentials.', 403);
+    }
+    const limited = credentialLimiter.check(request, ipServer(server));
+    if (limited) return jsonError('Too many credential changes. Try again shortly.', 429, 'AUTH_BUSY', false);
+    const service = getAuthService();
+    const result = operation === 'username'
+      ? await service.changeUsername(context.principal, () => readAuthBody(request), request.signal)
+      : await service.changePassword(context.principal, () => readAuthBody(request), request.signal);
+    return Response.json(result);
+  });
 }
 
-async function getAuthUser(): Promise<Response> {
-  if (isAuthDisabled()) {
-    return Response.json({ user: { id: 'local', username: 'local' } });
+const user = authRoute(async (_request, _url, _server, context) => {
+  if (isAuthDisabled()) return Response.json({ user: { id: 'local', username: 'local' } } satisfies AuthUserResponse);
+  const store = getAuthStore();
+  const account = (await store.snapshot()).account;
+  store.assertHealthy();
+  const principal = context?.principal;
+  if (
+    !account ||
+    (principal?.mode === 'authenticated' &&
+      (!store.isCurrent(principal.key, principal.credentialRevision) || principal.expiresAtMs <= Date.now()))
+  ) {
+    throw new DomainError('AUTH_SESSION_INVALID', 'Sign in again.', 401);
   }
-
-  const user = await getUser();
-  if (!user) {
-    return jsonError('No user found', 404);
-  }
-  return Response.json({ user: { id: user.username, username: user.username } });
-}
-
-// No-op: JWTs are stateless so there's no server-side session to invalidate.
-// Add a token blocklist here if revocation is ever needed.
-async function postLogout(): Promise<Response> {
-  return Response.json({ success: true, message: 'Logged out successfully' });
-}
+  return Response.json({ user: { id: account.ownerKey, username: account.username } } satisfies AuthUserResponse);
+});
 
 const routes: RouteMap = {
-  '/api/v1/auth/status': { GET: markRouteNoAuth(noauthGetStatus) },
-  '/api/v1/auth/register': { POST: markRouteNoAuth(noauthPostRegisterRateLimited) },
-  '/api/v1/auth/login': { POST: markRouteNoAuth(noauthPostLoginRateLimited) },
-  '/api/v1/auth/user': { GET: getAuthUser },
-  '/api/v1/auth/logout': { POST: postLogout },
+  '/api/v1/auth/status': { GET: markRouteNoAuth(status) },
+  '/api/v1/auth/register': { POST: markRouteNoAuth(register) },
+  '/api/v1/auth/login': { POST: markRouteNoAuth(login) },
+  '/api/v1/auth/user': { GET: user },
+  '/api/v1/auth/username': { PATCH: credentialRoute('username') },
+  '/api/v1/auth/password': { PATCH: credentialRoute('password') },
+  '/api/v1/auth/logout': { POST: authRoute(() => Response.json({ success: true })) },
 };
 
 export default routes;

@@ -18,6 +18,7 @@
 		controller,
 		chats,
 		username,
+		ownerKey,
 		onCreate,
 		onClose,
 		closeDisabled = false,
@@ -25,6 +26,7 @@
 		controller: TicketsController;
 		chats: readonly TicketChatSummary[];
 		username: string;
+		ownerKey: string;
 		onCreate: () => void;
 		onClose?: () => void;
 		closeDisabled?: boolean;
@@ -160,7 +162,7 @@
 					>{m.tickets_clear_filters()}</button
 				>
 			</div>
-			<TicketSearchOptions {controller} {chats} {username} onFilter={apply} />
+			<TicketSearchOptions {controller} {chats} {username} {ownerKey} onFilter={apply} />
 		</div>
 		<span class="sr-only" role="status">
 			{#if saveFeedback === 'saving'}{m.tickets_saving()}

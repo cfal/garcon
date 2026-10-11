@@ -1,143 +1,163 @@
-// Flat-file auth persistence using auth.json in the config directory.
-// Stores JWT secret, username, password hash, and creation timestamp.
-// Always reads from disk before writing to avoid stale-cache issues.
-
-import { promises as fs } from 'fs';
-import path from 'path';
-import crypto from 'crypto';
+import path from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { isRecord } from '../../../common/json.js';
 import { getConfigDir } from '../config.js';
-import { readJsonStateFile, writeJsonFileAtomic } from '../../common/json-file-store.ts';
+import { AtomicJsonWriteError, readJsonStateFile, writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import { DomainError } from '../../common/domain-error.js';
+import { createLogger } from '../../common/log.js';
 
-interface AuthData {
-  jwtSecret?: unknown;
-  username?: unknown;
-  passwordHash?: unknown;
-  createdAt?: unknown;
+export interface AuthAccount {
+  readonly ownerKey: string;
+  readonly credentialRevision: number;
+  readonly username: string;
+  readonly passwordHash: string;
+  readonly createdAt: string | null;
 }
 
-export interface AuthUser {
-  username: string;
-  passwordHash: string;
-  createdAt: string | null;
+export interface AuthSnapshot {
+  readonly jwtSecret: string;
+  readonly account: AuthAccount | null;
 }
 
-export interface CreatedAuthUser {
-  username: string;
-  createdAt: string;
+export type AuthChange = 'credentials' | 'storage-unavailable';
+export class AuthSnapshotChangedError extends Error {}
+export class AuthAccountAlreadyConfiguredError extends DomainError {
+  constructor() { super('VALIDATION_FAILED', 'Account already configured', 409); }
 }
 
-function authPath(): string {
-  return path.join(getConfigDir(), 'auth.json');
-}
+const logger = createLogger('auth:store');
+type Writer = typeof writeJsonFileAtomic;
 
-const cachedJwtSecrets = new Map<string, string>();
-const inflightJwtSecrets = new Map<string, Promise<string>>();
-const authWriteLock = new KeyedPromiseLock();
-
-export class AuthAccountAlreadyConfiguredError extends Error {
-  constructor() {
-    super('Account already configured');
-    this.name = 'AuthAccountAlreadyConfiguredError';
+function parseStoredAuth(value: unknown): { snapshot: AuthSnapshot; initialize: boolean } {
+  if (!isRecord(value)) throw new Error('Auth state must be an object');
+  const fields = ['jwtSecret', 'username', 'passwordHash', 'createdAt', 'ownerKey', 'credentialRevision'];
+  if (Object.keys(value).some(key => !fields.includes(key))) throw new Error('Unknown auth state fields');
+  const hasAccount = ['username', 'passwordHash', 'createdAt', 'ownerKey', 'credentialRevision']
+    .some(key => Object.hasOwn(value, key));
+  if (Object.hasOwn(value, 'jwtSecret') && (typeof value.jwtSecret !== 'string' || !value.jwtSecret)) {
+    throw new Error('Invalid auth secret');
   }
-}
-
-// Ensures the auth config directory exists.
-export async function init(): Promise<void> {
-  await fs.mkdir(getConfigDir(), { recursive: true });
-  await getJwtSecret();
-}
-
-async function readFromDisk(filePath = authPath()): Promise<AuthData> {
-  return readJsonStateFile({
-    filePath,
-    empty: () => ({}),
-    normalize: (value) => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        throw new TypeError('Auth state must be a JSON object');
-      }
-      return value as AuthData;
-    },
+  if (!hasAccount) {
+    const secret = typeof value.jwtSecret === 'string' ? value.jwtSecret : randomBytes(32).toString('hex');
+    return { snapshot: Object.freeze({ jwtSecret: secret, account: null }), initialize: !value.jwtSecret };
+  }
+  if (typeof value.jwtSecret !== 'string' || !value.jwtSecret
+    || typeof value.username !== 'string' || !value.username
+    || typeof value.passwordHash !== 'string' || !value.passwordHash
+    || value.createdAt !== undefined && value.createdAt !== null && typeof value.createdAt !== 'string') {
+    throw new Error('Incomplete auth account');
+  }
+  const initialize = !Object.hasOwn(value, 'ownerKey') && !Object.hasOwn(value, 'credentialRevision');
+  const ownerKey = initialize ? value.username : value.ownerKey;
+  const credentialRevision = initialize ? 1 : value.credentialRevision;
+  if (typeof ownerKey !== 'string' || !ownerKey || typeof credentialRevision !== 'number'
+    || !Number.isSafeInteger(credentialRevision) || credentialRevision < 1) throw new Error('Invalid auth identity');
+  const account: AuthAccount = Object.freeze({
+    ownerKey, credentialRevision, username: value.username, passwordHash: value.passwordHash,
+    createdAt: typeof value.createdAt === 'string' ? value.createdAt : null,
   });
+  return { snapshot: Object.freeze({ jwtSecret: value.jwtSecret, account }), initialize };
 }
 
-async function writeToDisk(data: AuthData, filePath = authPath()): Promise<void> {
-  await writeJsonFileAtomic(filePath, data, { mode: 0o600 });
+function serialized(snapshot: AuthSnapshot) {
+  return { jwtSecret: snapshot.jwtSecret, ...snapshot.account };
 }
 
-async function ensureJwtSecret(filePath: string): Promise<string> {
-  const data = await readFromDisk(filePath);
-  if (typeof data.jwtSecret === 'string' && data.jwtSecret) {
-    return data.jwtSecret;
-  }
-  const secret = crypto.randomBytes(32).toString('hex');
-  data.jwtSecret = secret;
-  await writeToDisk(data, filePath);
-  return secret;
-}
+export class AuthAccountStore {
+  readonly #lock = new KeyedPromiseLock();
+  readonly #listeners = new Set<(change: AuthChange) => void>();
+  #snapshot: AuthSnapshot | null = null;
+  #initializing: Promise<void> | null = null;
+  #unavailable = false;
 
-// Returns the JWT secret owned by auth store initialization.
-export async function getJwtSecret(): Promise<string> {
-  const filePath = authPath();
-  const cachedJwtSecret = cachedJwtSecrets.get(filePath);
-  if (cachedJwtSecret) {
-    return cachedJwtSecret;
-  }
-  const inflightJwtSecret = inflightJwtSecrets.get(filePath);
-  if (inflightJwtSecret) {
-    return inflightJwtSecret;
-  }
+  constructor(readonly filePath: string, private readonly write: Writer = writeJsonFileAtomic) {}
 
-  const secretPromise = ensureJwtSecret(filePath)
-    .then((secret) => {
-      cachedJwtSecrets.set(filePath, secret);
-      return secret;
-    })
-    .finally(() => {
-      inflightJwtSecrets.delete(filePath);
+  initialize(): Promise<void> {
+    return this.#initializing ??= this.#lock.runExclusive(this.filePath, async () => {
+      const parsed = await readJsonStateFile({ filePath: this.filePath, empty: () => parseStoredAuth({}), normalize: parseStoredAuth });
+      if (parsed.initialize) await this.#persist(parsed.snapshot);
+      this.#snapshot = parsed.snapshot;
     });
+  }
 
-  inflightJwtSecrets.set(filePath, secretPromise);
-  return secretPromise;
-}
+  async snapshot(): Promise<AuthSnapshot> {
+    await this.initialize();
+    this.assertHealthy();
+    return this.#snapshot!;
+  }
 
-// Returns the user object or null if no user has been created.
-export async function getUser(): Promise<AuthUser | null> {
-  const data = await readFromDisk();
-  if (typeof data.username !== 'string' || typeof data.passwordHash !== 'string') return null;
-  return {
-    username: data.username,
-    passwordHash: data.passwordHash,
-    createdAt: typeof data.createdAt === 'string' ? data.createdAt : null,
-  };
-}
+  assertHealthy(): void {
+    if (this.#unavailable) throw new DomainError('AUTH_STORAGE_UNAVAILABLE',
+      'Credential durability is unknown. Resolve storage and restart the controller.', 503);
+  }
 
-// Returns the user by username, or null if credentials don't match.
-export async function getUserByUsername(username: string): Promise<AuthUser | null> {
-  const user = await getUser();
-  if (!user || user.username !== username) return null;
-  return user;
-}
+  get isUnavailable(): boolean { return this.#unavailable; }
 
-// Creates the single user. Throws if a user already exists.
-export async function createUser(username: string, passwordHash: string): Promise<CreatedAuthUser> {
-  const filePath = authPath();
-  return authWriteLock.runExclusive(filePath, async () => {
-    const data = await readFromDisk(filePath);
-    if (data.username && data.passwordHash) {
-      throw new AuthAccountAlreadyConfiguredError();
+  isCurrent(ownerKey: string, revision: number): boolean {
+    const account = this.#snapshot?.account;
+    return !this.#unavailable && !!account && account.ownerKey === ownerKey && account.credentialRevision === revision;
+  }
+
+  onChange(listener: (change: AuthChange) => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  withCurrent<T>(expected: AuthSnapshot, operation: () => T): Promise<T> {
+    return this.#lock.runExclusive(this.filePath, async () => {
+      this.#assertSnapshot(expected);
+      return operation();
+    });
+  }
+
+  commit<T>(expected: AuthSnapshot, prepare: () => { account: AuthAccount; result: T }): Promise<T> {
+    return this.#lock.runExclusive(this.filePath, async () => {
+      this.#assertSnapshot(expected);
+      const { account, result } = prepare();
+      const candidate = Object.freeze({ jwtSecret: expected.jwtSecret, account: Object.freeze(account) });
+      await this.#persist(candidate);
+      this.#snapshot = candidate;
+      this.#publish('credentials');
+      return result;
+    });
+  }
+
+  #assertSnapshot(expected: AuthSnapshot): void {
+    this.assertHealthy();
+    if (this.#snapshot !== expected) throw new AuthSnapshotChangedError('Credentials changed');
+  }
+
+  async #persist(candidate: AuthSnapshot): Promise<void> {
+    try { await this.write(this.filePath, serialized(candidate), { mode: 0o600 }); }
+    catch (error) {
+      if (error instanceof AtomicJsonWriteError && error.renamed) {
+        this.#snapshot = candidate;
+        this.#unavailable = true;
+        this.#publish('storage-unavailable');
+        logger.error('Auth write durability is unknown; browser authentication fenced.');
+        this.assertHealthy();
+      }
+      logger.error('Auth write failed before publication.');
+      throw new DomainError('AUTH_SAVE_FAILED', 'Credentials were not changed.', 500);
     }
-    data.username = username;
-    data.passwordHash = passwordHash;
-    const createdAt = new Date().toISOString();
-    data.createdAt = createdAt;
-    await writeToDisk(data, filePath);
-    return { username, createdAt };
-  });
+  }
+
+  #publish(change: AuthChange): void {
+    for (const listener of this.#listeners) {
+      try { listener(change); }
+      catch { logger.error('Browser authorization cleanup failed.'); }
+    }
+  }
 }
 
-// Returns true if no user account has been set up yet.
-export async function needsSetup(): Promise<boolean> {
-  const data = await readFromDisk();
-  return !data.username || !data.passwordHash;
+const stores = new Map<string, AuthAccountStore>();
+export function getAuthStore(): AuthAccountStore {
+  const filePath = path.join(getConfigDir(), 'auth.json');
+  let store = stores.get(filePath);
+  if (!store) { store = new AuthAccountStore(filePath); stores.set(filePath, store); }
+  return store;
 }
+
+export async function init(): Promise<void> { await getAuthStore().initialize(); }
+export async function needsSetup(): Promise<boolean> { return (await getAuthStore().snapshot()).account === null; }

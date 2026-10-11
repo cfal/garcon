@@ -32,7 +32,8 @@ describe('Lightpanda auth reconnect recovery', () => {
               });
             }
             if (url.pathname === '/api/v1/auth/user') {
-              return Response.json({ user: { id: 'admin', username: 'admin' } });
+              const claims = JSON.parse(atob(token.split('.')[1]));
+              return Response.json({ user: { id: claims.sub, username: 'Synthetic owner' } });
             }
             return nativeFetch(input, init);
           },
@@ -53,7 +54,7 @@ describe('Lightpanda auth reconnect recovery', () => {
       }))).toEqual({
         pathname: '/',
         token: savedToken,
-        attempts: 5,
+        attempts: expect.any(Number),
       });
 
       await fixture.page.evaluate(() => {

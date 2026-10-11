@@ -19,10 +19,10 @@ test('searches literal descriptions after NUL with ASCII-only case folding', () 
 
 test('filters by project, owner, status, priority, and literal search/label without wildcard leakage', () => {
   const first = fixture.create({ title: 'A_100% match', project: 'Release', priority: 1, labels: ['label'],
-    assignee: { kind: 'user', username: 'local' } }).ticket;
+    assignee: { kind: 'user', ownerKey: 'local' } }).ticket;
   fixture.create({ title: 'A different match', project: 'Other' });
   expect(fixture.service.list({ project: 'Release', label: 'label', priority: 1,
-    assignee: { kind: 'user', username: 'local' } }).items.map((item) => item.id)).toEqual([first.id]);
+    assignee: { kind: 'user', ownerKey: 'local' } }).items.map((item) => item.id)).toEqual([first.id]);
   expect(fixture.service.list({ query: '_100%' }).items.map((item) => item.id)).toEqual([first.id]);
   expect(fixture.service.list({ query: first.id }).items).toHaveLength(1);
   expect(fixture.service.list({ query: '\\' }).items).toHaveLength(0);

@@ -2,6 +2,7 @@
 
 import path from 'node:path';
 import os from 'node:os';
+import { randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { PI_DISCOVERY_MODELS, preparePiModelDiscoveryFixture } from '../server-agents/pi/src/agents/pi/__tests__/model-discovery-fixture.js';
 
@@ -341,6 +342,9 @@ async function run() {
   await mkdir(configDir, { mode: 0o700 });
   await writeFile(path.join(configDir, 'auth.json'), JSON.stringify({
     username: credentials.username,
+    ownerKey: credentials.username,
+    credentialRevision: 1,
+    jwtSecret: randomBytes(32).toString('hex'),
     passwordHash: await Bun.password.hash(credentials.password, { algorithm: 'bcrypt', cost: 12 }),
   }), { mode: 0o600 });
   const spawnServer = () => Bun.spawn({

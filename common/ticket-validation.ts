@@ -150,7 +150,7 @@ function ticketExecutorId(value: unknown): string {
 }
 
 export function ticketOwner(value: unknown): TicketOwner {
-  const raw = ticketRecord(value, ['kind', 'chatId', 'username', 'executorId']);
+  const raw = ticketRecord(value, ['kind', 'chatId', 'ownerKey', 'executorId']);
   if (raw.kind === 'executor') {
     ticketRecord(raw, ['kind', 'executorId']);
     return { kind: 'executor', executorId: ticketExecutorId(raw.executorId) };
@@ -160,8 +160,10 @@ export function ticketOwner(value: unknown): TicketOwner {
     return { kind: 'chat', chatId: ticketChatId(raw.chatId) };
   }
   if (raw.kind === 'user') {
-    ticketRecord(raw, ['kind', 'username']);
-    return { kind: 'user', username: ticketLine(raw.username, 'username', 256) };
+    ticketRecord(raw, ['kind', 'ownerKey']);
+    const ownerKey = ticketString(raw.ownerKey, 'ownerKey');
+    if (!ownerKey || Array.from(ownerKey).length > 256) return ticketInvalid('Invalid owner key.');
+    return { kind: 'user', ownerKey };
   }
   return ticketInvalid('Invalid ticket owner.');
 }
@@ -172,7 +174,7 @@ export function parseTicketAssigneeQuery(value: string): TicketOwner | 'unassign
   const kind = value.slice(0, separator);
   if (separator < 0) return ticketInvalid('Invalid assignee filter.');
   if (kind === 'chat') return ticketOwner({ kind, chatId: value.slice(separator + 1) });
-  if (kind === 'user') return ticketOwner({ kind, username: value.slice(separator + 1) });
+  if (kind === 'user') return ticketOwner({ kind, ownerKey: value.slice(separator + 1) });
   if (kind === 'executor') return ticketOwner({ kind, executorId: value.slice(separator + 1) });
   return ticketInvalid('Invalid assignee filter.');
 }

@@ -1,6 +1,7 @@
 export type TicketsInvalidation =
 	| { readonly kind: 'collection'; readonly revision: number }
 	| { readonly kind: 'reconnect' }
+	| { readonly kind: 'availability'; readonly authenticated: boolean }
 	| { readonly kind: 'authority'; readonly authenticated: boolean };
 
 export class TicketsInvalidationHub {
@@ -13,7 +14,8 @@ export class TicketsInvalidationHub {
 	}
 
 	publish(event: TicketsInvalidation): void {
-		if (event.kind === 'authority') this.authenticationAvailable = event.authenticated;
+		if (event.kind === 'authority' || event.kind === 'availability')
+			this.authenticationAvailable = event.authenticated;
 		for (const listener of this.#listeners) listener(event);
 	}
 
@@ -23,5 +25,10 @@ export class TicketsInvalidationHub {
 
 	publishAuthority(authenticated: boolean): void {
 		this.publish({ kind: 'authority', authenticated });
+	}
+
+	publishAvailability(authenticated: boolean): void {
+		if (this.authenticationAvailable !== authenticated)
+			this.publish({ kind: 'availability', authenticated });
 	}
 }

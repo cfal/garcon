@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { TICKET_ACTIONS } from '../ticket-commands.js';
 import { garconTicketResultContent, ticketCommandOutcome, ticketCommandContext, ticketMutationReceipt,
-  parseGarconTicketResult, parseTicketCommandOutcome, parseTicketCommandResult } from '../garcon-ticket-result.js';
+  parseGarconTicketResult, parseStoredTicketCommandOutcome, parseTicketCommandOutcome, parseTicketCommandResult } from '../garcon-ticket-result.js';
 import { TICKET_LIMITS } from '../tickets.js';
 import { ticketBytes } from '../ticket-validation.js';
 import { parseGarconTicketCommand } from '../garcon-ticket-command.js';
@@ -34,6 +34,39 @@ function result(command, status = 'ok') {
 }
 
 describe('command-specific ticket results', () => {
+  test('historical native results and ledger filters normalize ownership without rewriting actor labels', () => {
+    const owner = { kind: 'user', ownerKey: 'original' };
+    const legacyOwner = { kind: 'user', username: 'original' };
+    const historicalActor = { kind: 'user', username: 'original-label', principalMode: 'authenticated', declaredChatId: null };
+    for (const command of ['read', 'list', 'history']) {
+      const [current, historical] = [owner, legacyOwner].map(assignee => {
+        const output = structuredClone(result(command));
+        let assigned;
+        if (command === 'read') {
+          assigned = output.data.ticket;
+        } else if (command === 'history') {
+          assigned = output.data.items[0].ticket;
+        } else {
+          assigned = output.data.items[0];
+        }
+        assigned.assignee = assignee;
+        assigned.createdBy = historicalActor;
+        if (command === 'list') output.context = { filters: { assignee } };
+        if (command === 'read') output.data.comments.items[0].author = historicalActor;
+        if (command === 'history') output.data.items[0].actor = historicalActor;
+        return output;
+      });
+      const xml = garconTicketResultContent(historical);
+      expect(xml).toContain(JSON.stringify(legacyOwner));
+      expect(xml).not.toContain('"ownerKey"');
+      expect(() => parseTicketCommandResult(historical)).toThrow();
+      expect(parseGarconTicketResult(xml)).toEqual(current);
+    }
+    const outcome = { ...ticketCommandOutcome(result('list')), context: { filters: { assignee: owner } } };
+    const historical = { ...outcome, context: { filters: { assignee: { kind: 'user', username: 'original' } } } };
+    expect(parseTicketCommandOutcome(historical)).toBeNull();
+    expect(parseStoredTicketCommandOutcome(historical)).toEqual(outcome);
+  });
   test.each([
     ['create', 'Created ticket G-1'], ['update', 'Updated ticket G-1'],
     ['claim', 'Assigned ticket G-1 to this chat'], ['release', 'Released ticket G-1'],
@@ -95,7 +128,7 @@ describe('command-specific ticket results', () => {
 
   test.each([
     ['unassigned', 'unassigned'],
-    [{ kind: 'user', username: 'synthetic-user' }, 'synthetic-user'],
+    [{ kind: 'user', ownerKey: 'synthetic-user' }, 'synthetic-user'],
     [{ kind: 'chat', chatId: actor.chatId }, `chat ${actor.chatId}`],
   ])('formats the list assignee %j without changing its identity', (assignee, expected) => {
     const outcome = ticketCommandOutcome({ ...result('list'), context: { filters: { assignee } } });

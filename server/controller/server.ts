@@ -8,7 +8,10 @@ import { getConfigDir, initializeServerConfig } from './config.js';
 import { wrapRoutes, unhandledRouteErrorResponse } from './lib/http-route.js';
 import { ControllerCliDispatcher } from './executors/cli-dispatcher.js';
 import { createWebSocketUpgradeHandler } from './ws/upgrade.js';
-import { init as initAuthStore } from './auth/store.js';
+import { getAuthStore, init as initAuthStore } from './auth/store.js';
+import { isCurrentBrowserPrincipal } from './auth/token.js';
+import { AUTH_REVOKED_CLOSE_CODE, AUTH_REVOKED_CLOSE_REASON,
+  AUTH_UNAVAILABLE_CLOSE_CODE, AUTH_UNAVAILABLE_CLOSE_REASON } from '../../common/ws-auth.js';
 import { createForkedChat } from './chats/fork-chat.js';
 import { wireSearchSourceAvailability, wireServerEvents, type ServerEventWiring } from './server-event-wiring.js';
 import { startExecutionControlPlane } from './execution-control-plane.js';
@@ -819,6 +822,20 @@ export async function startServer(): Promise<void> {
       websocket: createServerSocketHandlers({ primary: primaryWs, admission: wsAdmission, config, logger, execution: executionSockets.websocket, delivery: primaryDelivery }),
     } satisfies ServeOptionsWithConnectionLimit;
 
+    const stopObservingAuth = getAuthStore().onChange(change => {
+      const unavailable = change === 'storage-unavailable';
+      const code = unavailable ? AUTH_UNAVAILABLE_CLOSE_CODE : AUTH_REVOKED_CLOSE_CODE;
+      const reason = unavailable ? AUTH_UNAVAILABLE_CLOSE_REASON : AUTH_REVOKED_CLOSE_REASON;
+      const retired = primaryDelivery.retireWhere(
+        principal => principal.mode === 'authenticated' && !isCurrentBrowserPrincipal(principal),
+        code, reason, peer => {
+          try { primaryWs.close(peer, code, reason); }
+          finally { wsAdmission.release(peer.data.connectionId); }
+        },
+      );
+      logger.info(`Browser credential authority retired: ${retired} peers (${change}).`);
+    });
+
     const server = Bun.serve<WsConnectionData>(serveOptions);
     const actualPort = server.port ?? listenPort;
     const runtimeBaseUrl = advertisedServerUrl(bindAddress, actualPort);
@@ -858,6 +875,7 @@ export async function startServer(): Promise<void> {
       for (const prepare of [
         stopStallMonitor,
         stopSlowStepReports,
+        stopObservingAuth,
         () => primaryDelivery.close(),
         () => agentCommands.shutdown(),
         () => carryOverGarbageCollector.shutdown(),

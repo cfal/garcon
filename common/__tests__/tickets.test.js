@@ -90,7 +90,7 @@ describe('ticket contracts', () => {
   });
 
   test('encodes assignees without conflating colon or Unicode usernames', () => {
-    for (const owner of ['unassigned', { kind: 'chat', chatId: '1000000000000001' }, { kind: 'user', username: 'user:λ' }]) {
+    for (const owner of ['unassigned', { kind: 'chat', chatId: '1000000000000001' }, { kind: 'user', ownerKey: 'user:λ' }]) {
       const encoded = ticketAssigneeQuery(owner);
       expect(parseTicketAssigneeQuery(encoded)).toEqual(owner);
       expect(ticketQueryParams(new URLSearchParams({ assignee: encoded })).assignee).toEqual(owner);

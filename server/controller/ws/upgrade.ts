@@ -2,6 +2,7 @@ import type { createNoiseServer } from '@cfal/noise-ws';
 import type { Server } from 'bun';
 import type { WebSocketAdmissionController } from '../../common/websocket-capacity.js';
 import { verifyAuthTokenClaims } from '../auth/token.js';
+import { jsonErrorFromUnknown } from '../../common/http-error.js';
 import type { ExecutorManager } from '../executors/manager.js';
 import { serverShuttingDownResponse } from '../lib/http-route.js';
 import { LOCAL_SERVER_PRINCIPAL, type ServerPrincipal } from '../lib/http-route-types.js';
@@ -31,9 +32,9 @@ export function createWebSocketUpgradeHandler({ executors, executionSockets, wsA
       }
 
       const token = getWebSocketAuthToken(request);
-      const claims = authDisabled
-        ? null
-        : await verifyAuthTokenClaims(token);
+      let claims;
+      try { claims = authDisabled ? null : await verifyAuthTokenClaims(token); }
+      catch (error) { return jsonErrorFromUnknown(error); }
       if (isShuttingDown()) return serverShuttingDownResponse();
       let principal: ServerPrincipal | null = null;
       if (authDisabled) {
@@ -41,7 +42,8 @@ export function createWebSocketUpgradeHandler({ executors, executionSockets, wsA
       } else if (claims) {
         principal = {
           mode: 'authenticated',
-          key: claims.username,
+          key: claims.ownerKey,
+          credentialRevision: claims.credentialRevision,
           username: claims.username,
           expiresAtMs: claims.expiresAtMs,
         };

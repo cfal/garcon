@@ -10,6 +10,8 @@
 	import GarconMark from '$lib/components/shared/GarconMark.svelte';
 
 	import { createAuthStore } from '$lib/stores/auth.svelte.js';
+	import ReauthenticationOverlay from '$lib/components/auth/ReauthenticationOverlay.svelte';
+	import { AUTH_UNAVAILABLE_CLOSE_CODE } from '$shared/ws-auth';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte.js';
@@ -259,9 +261,8 @@
 	setThemeRuntime(themeController);
 
 	const publicRoutes = ['/login', '/setup'];
-	let isPublicRoute = $derived(
-		publicRoutes.includes(page.url.pathname) || page.url.pathname.startsWith('/shared/'),
-	);
+	const isAuthRoute = $derived(publicRoutes.includes(page.url.pathname));
+	let isPublicRoute = $derived(isAuthRoute || page.url.pathname.startsWith('/shared/'));
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
 	// Projects presentation-only bounds without coupling Markdown loading to settings.
@@ -300,14 +301,20 @@
 				}
 			}
 			untrack(() => ws.connect(token, authDisabled));
-		}
+		} else untrack(() => ws.pauseForAuth());
 	});
 
+	let ticketOwner: string | null = null;
 	$effect(() => {
 		const authenticated = auth.isAuthenticated;
-		auth.token;
-		auth.authDisabled;
-		untrack(() => ticketsInvalidations.publishAuthority(authenticated));
+		const owner = auth.presentationOwner;
+		const key = owner ? JSON.stringify([owner.mode, owner.key]) : null;
+		untrack(() => {
+			if (key !== ticketOwner) {
+				ticketOwner = key;
+				ticketsInvalidations.publishAuthority(authenticated);
+			} else ticketsInvalidations.publishAvailability(authenticated);
+		});
 	});
 
 	let terminalsInitialized = false;
@@ -340,7 +347,11 @@
 		isChatProcessing: (id) => chatSessions.isChatProcessing(id),
 		allowsNotifications: (id) => {
 			const chat = chatSessions.byId[id];
-			return !!chat && modelCatalog.forExecutor(chat.executorId).getAgent(chat.agentId)?.executionPolicy === 'conversation';
+			return (
+				!!chat &&
+				modelCatalog.forExecutor(chat.executorId).getAgent(chat.agentId)?.executionPolicy ===
+					'conversation'
+			);
 		},
 	});
 	onMount(() => {
@@ -395,7 +406,10 @@
 		untrack(() => void preambles.refreshIfLoaded());
 		untrack(() => void snippets.refreshIfLoaded());
 		untrack(() => void executors.refresh());
-		untrack(() => { apiProviders.invalidate(); void modelCatalog.refreshIfStale(); });
+		untrack(() => {
+			apiProviders.invalidate();
+			void modelCatalog.refreshIfStale();
+		});
 		// A reconnect also refreshes an already-open chat selection editor;
 		// its dirty draft is preserved by the controller's refresh path.
 		untrack(() => chatPreambleSelectionInvalidationHub.publishReconnect());
@@ -405,30 +419,28 @@
 	});
 
 	onMount(() => {
+		auth.start();
+		ws.onAuthFailure = (token, code) => {
+			if (code !== 1006)
+				auth.sessionRejected(
+					token,
+					code === AUTH_UNAVAILABLE_CLOSE_CODE
+						? 'AUTH_STORAGE_UNAVAILABLE'
+						: 'AUTH_SESSION_INVALID',
+				);
+			void auth.reconcile().then(() => {
+				if (!auth.isAuthenticated) return;
+				if (code === 1006) ws.retryAfterAuthProbe();
+				else ws.resumeForAuth(auth.token, auth.authDisabled);
+			});
+		};
 		void auth.checkAuthStatus();
 		const removeCompletionSoundUnlockListeners = installCompletionSoundUnlockListeners(
 			() => localSettings.completionSoundMode !== 'off',
 		);
-		const handleOnline = () => {
-			if (auth.isUnavailable) void auth.checkAuthStatus();
-		};
-		const handleVisibilityChange = () => {
-			if (document.visibilityState === 'visible' && auth.isUnavailable) {
-				void auth.checkAuthStatus();
-			}
-		};
-		const retryInterval = window.setInterval(() => {
-			if (document.visibilityState === 'visible' && auth.isUnavailable) {
-				void auth.checkAuthStatus();
-			}
-		}, 15_000);
-		window.addEventListener('online', handleOnline);
-		document.addEventListener('visibilitychange', handleVisibilityChange);
 		return () => {
 			removeCompletionSoundUnlockListeners();
-			window.clearInterval(retryInterval);
-			window.removeEventListener('online', handleOnline);
-			document.removeEventListener('visibilitychange', handleVisibilityChange);
+			ws.onAuthFailure = null;
 		};
 	});
 
@@ -470,7 +482,7 @@
 	// and settings-changed WebSocket updates.
 	$effect(() => {
 		if (!auth.isAuthenticated) {
-			appShell.projectBasePath = '/';
+			if (!auth.presentationOwner) appShell.projectBasePath = '/';
 			return;
 		}
 		const projectBasePath = remoteSettings.snapshot?.projectBasePath;
@@ -479,6 +491,7 @@
 	});
 
 	onDestroy(() => {
+		auth.destroy();
 		window.removeEventListener('pagehide', handlePageHide);
 		browserNotificationsRouter.destroy();
 		browserNotifications.destroy();
@@ -509,6 +522,7 @@
 		if (auth.isLoading) return;
 		if (auth.authDisabled) return;
 		if (auth.isUnavailable) return;
+		if (auth.presentationOwner) return;
 
 		if (page.url.pathname === '/setup' && !auth.needsSetup && !auth.isAuthenticated) {
 			goto('/login');
@@ -559,7 +573,7 @@
 	});
 </script>
 
-{#if auth.isLoading && (!isPublicRoute || auth.token)}
+{#if !auth.presentationOwner && auth.isLoading && (!isPublicRoute || auth.token)}
 	<div class="min-h-dvh bg-background flex items-center justify-center p-4">
 		<div class="text-center">
 			<div class="flex justify-center mb-4">
@@ -580,7 +594,7 @@
 			<p class="text-muted-foreground mt-2">{m.status_loading()}</p>
 		</div>
 	</div>
-{:else if auth.isUnavailable && (!isPublicRoute || auth.token)}
+{:else if !auth.presentationOwner && auth.isUnavailable && (!isPublicRoute || auth.token || (isAuthRoute && auth.availability === 'storage-unavailable'))}
 	<div data-auth-recovery class="min-h-dvh bg-background flex items-center justify-center p-4">
 		<div class="max-w-md text-center">
 			<div class="flex justify-center mb-4">
@@ -588,18 +602,29 @@
 			</div>
 			<h1 class="text-2xl font-bold text-foreground mb-2">{m.auth_reconnecting_title()}</h1>
 			<p class="text-muted-foreground mb-4">
-				{auth.token ? m.auth_reconnecting_session_description() : m.auth_reconnecting_description()}
+				{auth.availability === 'storage-unavailable'
+					? m.auth_storage_unavailable()
+					: auth.token
+						? m.auth_reconnecting_session_description()
+						: m.auth_reconnecting_description()}
 			</p>
-			<Button onclick={() => auth.checkAuthStatus()} disabled={auth.isLoading}>
-				{m.common_retry()}
-			</Button>
+			{#if auth.availability !== 'storage-unavailable'}<Button
+					onclick={() => auth.checkAuthStatus()}
+					disabled={auth.isLoading}
+				>
+					{m.common_retry()}
+				</Button>{/if}
 		</div>
 	</div>
 {:else if isPublicRoute}
 	{@render children()}
-{:else if auth.isAuthenticated}
+{:else if auth.presentationOwner}
 	<AppShell />
 
 	<CommandMenu bind:this={commandMenu} />
-	<KeyboardShortcuts onToggleCommandMenu={() => commandMenu?.toggle()} />
+	<KeyboardShortcuts
+		authSuspended={!auth.isAuthenticated}
+		onToggleCommandMenu={() => commandMenu?.toggle()}
+	/>
+	{#if !auth.isAuthenticated}<ReauthenticationOverlay />{/if}
 {/if}

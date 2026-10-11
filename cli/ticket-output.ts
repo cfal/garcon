@@ -42,7 +42,7 @@ const priorities = ['Urgent', 'High', 'Normal', 'Low'];
 
 function ownerText(owner: TicketOwner | null): string {
   if (owner?.kind === 'executor') return `Executor ${owner.executorId}`;
-  return owner === null ? 'Unassigned' : owner.kind === 'chat' ? `Chat ${owner.chatId}` : owner.username;
+  return owner === null ? 'Unassigned' : owner.kind === 'chat' ? `Chat ${owner.chatId}` : owner.ownerKey;
 }
 
 function actorText(actor: TicketActor): string {

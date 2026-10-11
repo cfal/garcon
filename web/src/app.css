@@ -340,13 +340,15 @@
 		}
 	}
 
-	.transient-backdrop {
+	.transient-backdrop:not(dialog),
+	dialog.transient-backdrop::backdrop {
 		background-color: hsl(var(--transient-backdrop-color) / var(--transient-backdrop-opacity));
 		-webkit-backdrop-filter: blur(var(--transient-backdrop-blur));
 		backdrop-filter: blur(var(--transient-backdrop-blur));
 	}
 
-	:root[data-overlay-backdrop-effects='disabled'] .transient-backdrop {
+	:root[data-overlay-backdrop-effects='disabled'] .transient-backdrop:not(dialog),
+	:root[data-overlay-backdrop-effects='disabled'] dialog.transient-backdrop::backdrop {
 		background-color: transparent;
 		-webkit-backdrop-filter: none;
 		backdrop-filter: none;

@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { normalizeStoredTicket, normalizeStoredTicketWriteResult } from '../../../common/ticket-stored.js';
 import { parseTicket, parseTicketComment, parseTicketWriteResult } from '../../../common/ticket-records.js';
 import { ticketNumber } from '../../../common/ticket-validation.js';
 import { ticketOwnerKey, type Ticket, type TicketActivity, type TicketComment, type TicketWriteResult } from '../../../common/tickets.js';
@@ -30,7 +31,7 @@ export interface StoredCommentRow {
 }
 
 export function decodeTicket(row: StoredTicketRow): Ticket {
-  const ticket = parseTicket(parseStoredJson(row.payload_json, 'Ticket record'));
+  const ticket = parseTicket(normalizeStoredTicket(parseStoredJson(row.payload_json, 'Ticket record')));
   const assignee = ticket.assignee ? ticketOwnerKey(ticket.assignee) : null;
   const parent = ticket.parentId ? ticketNumber(ticket.parentId) : null;
   if (ticket.number !== row.number || ticket.revision !== row.revision || ticket.project !== row.project
@@ -127,7 +128,7 @@ export function readOperation(database: Database, context: TicketMutationContext
   ).get(context.operationKey);
   if (!row) return null;
   if (row.fingerprint !== context.fingerprint) throw new TicketDomainError('TICKET_REQUEST_CONFLICT', 'This request identity was already used for different ticket content.');
-  const result = parseTicketWriteResult(parseStoredJson(row.result_json, 'Ticket operation result'));
+  const result = parseTicketWriteResult(normalizeStoredTicketWriteResult(parseStoredJson(row.result_json, 'Ticket operation result')));
   if (result.storeId !== context.expectedStoreId) throw new Error('Inconsistent ticket operation store.');
   return result;
 }

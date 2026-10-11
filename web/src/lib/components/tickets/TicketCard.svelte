@@ -10,6 +10,8 @@
 	import * as m from '$lib/paraglide/messages.js';
 	let {
 		ticket,
+		username,
+		ownerKey,
 		board = false,
 		selected,
 		showProject,
@@ -18,6 +20,8 @@
 		onStatus,
 	}: {
 		ticket: TicketSummary;
+		username: string;
+		ownerKey: string;
 		board?: boolean;
 		selected: boolean;
 		showProject: boolean;
@@ -69,13 +73,21 @@
 				><MessageSquare size={12} />{ticket.commentCount}</span
 			>{/if}
 		{#if ticket.assignee?.kind === 'executor'}
-			<span class="ticket-owner"><TicketExecutorReference executorId={ticket.assignee.executorId} /></span>
+			<span class="ticket-owner"
+				><TicketExecutorReference executorId={ticket.assignee.executorId} /></span
+			>
 		{:else}<span
-			class="ticket-owner"
-			title={ticket.assignee?.kind === 'chat' ? ticket.assignee.chatId : ticket.assignee?.username}
-			>{ticket.assignee?.kind === 'chat'
-				? m.tickets_chat({ id: `…${ticket.assignee.chatId.slice(-4)}` })
-				: (ticket.assignee?.username ?? m.tickets_unassigned())}</span
-		>{/if}
+				class="ticket-owner"
+				title={ticket.assignee?.kind === 'chat'
+					? ticket.assignee.chatId
+					: ticket.assignee?.ownerKey}
+				>{ticket.assignee?.kind === 'chat'
+					? m.tickets_chat({ id: `…${ticket.assignee.chatId.slice(-4)}` })
+					: ticket.assignee?.kind === 'user'
+						? ticket.assignee.ownerKey === ownerKey
+							? `${username} (${m.tickets_me()})`
+							: ticket.assignee.ownerKey
+						: m.tickets_unassigned()}</span
+			>{/if}
 	</div>
 </article>

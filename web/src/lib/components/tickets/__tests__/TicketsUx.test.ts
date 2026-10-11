@@ -108,9 +108,9 @@ describe('Tickets stable, immediate interactions', () => {
 				within(screen.getByRole('region', { name: 'Ticket details' })).getByText(message),
 			).toBeTruthy();
 			await fireEvent.click(screen.getByRole('button', { name: 'Back to tickets' }));
-			expect(view.container.querySelector('.ticket-browser > .ticket-notice')?.textContent).toContain(
-				message,
-			);
+			expect(
+				view.container.querySelector('.ticket-browser > .ticket-notice')?.textContent,
+			).toContain(message);
 			expect(view.container.querySelector('.ticket-detail')).toBeNull();
 		},
 	);
@@ -210,7 +210,9 @@ describe('Tickets stable, immediate interactions', () => {
 			expect(
 				view.container.querySelector('[data-status="in-review"] [data-ticket-id="G-1"]'),
 			).not.toBeNull();
-			expect(view.container.querySelector('[data-status="open"] [data-ticket-id="G-1"]')).toBeNull();
+			expect(
+				view.container.querySelector('[data-status="open"] [data-ticket-id="G-1"]'),
+			).toBeNull();
 			expect(controller.activeLane).toBe('in-review');
 			if (changedLane) controller.activeLane = 'in-progress';
 			barrier.release();
@@ -256,7 +258,7 @@ describe('Tickets stable, immediate interactions', () => {
 			label: 'frontend',
 			status: 'in-review',
 			priority: 0,
-			assignee: { kind: 'user', username: 'local' },
+			assignee: { kind: 'user', ownerKey: 'local' },
 			ready: false,
 			includeClosed: true,
 		});
@@ -404,7 +406,7 @@ describe('Tickets stable, immediate interactions', () => {
 		async (assigned) => {
 			const { controller, setItems, api } = await mount();
 			setItems([
-				{ ...syntheticTicket(), assignee: assigned ? { kind: 'user', username: 'local' } : null },
+				{ ...syntheticTicket(), assignee: assigned ? { kind: 'user', ownerKey: 'local' } : null },
 			]);
 			await fireEvent.click(screen.getByRole('button', { name: 'Open G-1' }));
 			await controller.refresh();

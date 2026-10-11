@@ -1,66 +1,110 @@
-// Auth API. Login/register/status use plain fetch (unauthenticated).
-// The current-user endpoint requires an auth token.
+import {
+	parseAuthSessionResponse,
+	parseAuthUserResponse,
+	parseAuthStatusResponse,
+	type AuthStatusResponse,
+	type AuthUserResponse,
+	type AuthSessionResponse,
+	type ChangeUsernameRequest,
+	type ChangePasswordRequest,
+} from '$shared/auth';
+import {
+	getAuthToken,
+	publicApiFetch,
+	parseApiResponse,
+	ApiError,
+	ApiMutationOutcomeUnknownError,
+	isIntermediaryResponse,
+} from './client.js';
+export type { AuthUser, AuthStatusResponse } from '$shared/auth';
+export type LoginResponse = AuthSessionResponse;
+export type RegisterResponse = AuthSessionResponse;
+export type UserResponse = AuthUserResponse;
 
-import { apiGet, parseApiResponse } from './client.js';
-
-const AUTH_REQUEST_TIMEOUT_MS = 5_000;
-
-export interface AuthStatusResponse {
-	needsSetup: boolean;
-	isAuthenticated: boolean;
-	authDisabled: boolean;
-}
-
-export interface AuthUser {
-	id: string;
-	username: string;
-}
-
-export interface LoginResponse {
-	success: boolean;
-	user: AuthUser;
-	token: string;
-}
-
-export interface RegisterResponse {
-	success: boolean;
-	user: AuthUser;
-	token: string;
-}
-
-export interface UserResponse {
-	user: AuthUser;
-}
-
-/** Checks whether the server requires authentication. Unauthenticated. */
 export async function getAuthStatus(): Promise<AuthStatusResponse> {
-	const response = await fetch('/api/v1/auth/status', {
-		signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
-	});
-	return parseApiResponse<AuthStatusResponse>(response);
+	return parseAuthStatusResponse(
+		await parseApiResponse(
+			await publicApiFetch('/api/v1/auth/status', { timeoutMs: 5_000, cache: 'no-store' }),
+		),
+	);
 }
 
-/** Logs in with username/password. Unauthenticated. */
-export async function login(username: string, password: string): Promise<LoginResponse> {
-	const response = await fetch('/api/v1/auth/login', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ username, password }),
-	});
-	return parseApiResponse<LoginResponse>(response);
+async function openSession(
+	path: string,
+	username: string,
+	password: string,
+): Promise<AuthSessionResponse> {
+	return parseAuthSessionResponse(
+		await parseApiResponse(
+			await publicApiFetch(`/api/v1/auth/${path}`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ username, password }),
+			}),
+		),
+	);
 }
 
-/** Registers a new account. Unauthenticated. */
-export async function register(username: string, password: string): Promise<RegisterResponse> {
-	const response = await fetch('/api/v1/auth/register', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ username, password }),
-	});
-	return parseApiResponse<RegisterResponse>(response);
+export function login(username: string, password: string): Promise<AuthSessionResponse> {
+	return openSession('login', username, password);
 }
 
-/** Fetches the current authenticated user. */
-export async function getUser(): Promise<UserResponse> {
-	return apiGet<UserResponse>('/api/v1/auth/user', { timeoutMs: AUTH_REQUEST_TIMEOUT_MS });
+export function register(username: string, password: string): Promise<AuthSessionResponse> {
+	return openSession('register', username, password);
+}
+
+export async function getUser(token = getAuthToken()): Promise<AuthUserResponse> {
+	let headers: Headers;
+	try {
+		headers = new Headers(token ? { Authorization: `Bearer ${token}` } : {});
+	} catch {
+		throw new ApiError(401, 'Invalid session token.', 'AUTH_SESSION_INVALID');
+	}
+	return parseAuthUserResponse(
+		await parseApiResponse(
+			await publicApiFetch('/api/v1/auth/user', {
+				timeoutMs: 5_000,
+				cache: 'no-store',
+				headers,
+			}),
+		),
+	);
+}
+
+async function changeCredentials(
+	path: string,
+	input: ChangeUsernameRequest | ChangePasswordRequest,
+	token: string,
+): Promise<AuthSessionResponse> {
+	try {
+		return parseAuthSessionResponse(
+			await parseApiResponse(
+				await publicApiFetch(`/api/v1/auth/${path}`, {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+					body: JSON.stringify(input),
+					timeoutMs: 30_000,
+				}),
+			),
+		);
+	} catch (error) {
+		if (error instanceof ApiError && !isIntermediaryResponse(error)) throw error;
+		throw new ApiMutationOutcomeUnknownError('The credential change may have completed.', {
+			cause: error,
+		});
+	}
+}
+
+export function changeUsername(
+	input: ChangeUsernameRequest,
+	token: string,
+): Promise<AuthSessionResponse> {
+	return changeCredentials('username', input, token);
+}
+
+export function changePassword(
+	input: ChangePasswordRequest,
+	token: string,
+): Promise<AuthSessionResponse> {
+	return changeCredentials('password', input, token);
 }
