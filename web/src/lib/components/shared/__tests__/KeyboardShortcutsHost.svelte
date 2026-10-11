@@ -22,6 +22,7 @@
 	} from '$lib/workspace/workspace-scroll-region.js';
 
 	interface KeyboardShortcutsHostProps {
+		authSuspended?: boolean;
 		appShell: {
 			openSidebarSearch: () => void;
 			requestNewChat: () => void;
@@ -57,6 +58,7 @@
 	}
 
 	let {
+		authSuspended = false,
 		appShell,
 		navigation,
 		onToggleCommandMenu,
@@ -203,7 +205,7 @@
 	setWorkspaceShortcuts(shortcuts);
 </script>
 
-<KeyboardShortcuts {onToggleCommandMenu} />
+<KeyboardShortcuts {onToggleCommandMenu} {authSuspended} />
 
 {#if localShortcutOwner && !transientKind}
 	<div data-workspace-surface-id={CANONICAL_CHAT_SURFACE_ID} {@attach localShortcutBoundary}>

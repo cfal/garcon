@@ -1,5 +1,35 @@
 # Security Notes
 
+## Account Credentials
+
+Settings > Server > Password provides separate username and password changes.
+Both require the current password. A successful change keeps the submitting tab
+signed in and revokes all previous browser JWTs. Same-origin tabs validate and
+adopt the replacement token best effort; other devices and browser profiles must
+sign in again. An established session retains its mounted workspace behind a
+blocking sign-in dialog, including open drafts and Settings.
+
+The account has one immutable owner key, seeded from its original username, and
+a persisted credential revision. Renaming the login does not change ticket
+assignments, comment permissions, retry identities, recovery partitions, or
+terminal ownership. Historical ticket author labels remain unchanged. Browser
+socket retirement detaches subscriptions without terminating terminal shells,
+agents, executor connections, local CLI capabilities, or provider credentials.
+Previously admitted operations may finish; revocation is not rollback.
+
+The controller exclusively owns its private `auth.json`. External edits require
+a restart; concurrent writers are unsupported. Writes are atomic and private
+(`0600`). Failure before rename retains the previous credentials and sessions.
+Unconfirmed durability after rename retains the candidate but fences browser
+authentication until the operator resolves storage and restarts the controller.
+A lost change response has an unknown outcome: sign in to confirm, never retry
+the mutation automatically. Passwords and bearer tokens must not enter logs.
+
+Upgrade behavior: JWTs without the owner/revision claims are rejected. Existing
+tickets are preserved through historical readers, not a database rewrite.
+Deploy matching controller, browser, and workers; executor protocol revision 26
+rejects mixed builds carrying different ticket-owner contracts.
+
 ## WebSocket Auth Tokens
 
 Garcon exposes one browser WebSocket endpoint, `/ws`. Browser clients authenticate with
@@ -12,12 +42,14 @@ Non-browser clients may send `Authorization: Bearer <token>` instead. The server
 accept tokens in the URL, so upgrade URLs in browser history and proxy logs carry no
 credentials.
 
-The token is validated when `/ws` upgrades. Chat WebSocket commands subscribe, query
+The token is validated when `/ws` upgrades, and current revision and expiration
+are rechecked at open and message admission. Chat WebSocket commands subscribe, query
 reconnect state, ping, and run manual Reload with its progress and cancellation; every
 other mutating Chat command uses an authenticated HTTP request. Terminal input and resize
 are active shell operations, so terminal authorization also expires at the token deadline.
-Expiry clears queued terminal output and detaches terminal subscriptions without closing
-the shared Chat connection. Refreshed credentials take effect by replacing `/ws`.
+Expiry clears queued terminal output and detaches terminal subscriptions; the next
+browser command retires the expired connection. Refreshed credentials take effect
+by replacing `/ws`.
 
 A worker that dials the controller upgrades `/executor/<executor-id>`, not `/ws`; a
 controller that dials a worker uses the worker's own listener. Both directions
