@@ -9,6 +9,13 @@ test.each(['relative', '//host', '/a//b', '/a//', '/.', '/a/../b', '/a/./b', '/a
   'rejects ambiguous or unsafe mount %s', input => expect(() => parseBasePath(input)).toThrow('Invalid base path'),
 );
 
+test('checks the length limit after normalizing the trailing slash', () => {
+  const longestBasePath = '/' + 'a'.repeat(1023);
+  expect(parseBasePath(longestBasePath)).toBe(longestBasePath);
+  expect(parseBasePath(`${longestBasePath}/`)).toBe(longestBasePath);
+  expect(() => parseBasePath(`${longestBasePath}a/`)).toThrow('Invalid base path');
+});
+
 test('strips only complete mount segments, preserving query-independent encoded route data', () => {
   expect(stripBasePath('/tools/garcon/api/v1/files', '/tools/garcon')).toBe('/api/v1/files');
   expect(stripBasePath('/tools/garcon', '/tools/garcon')).toBe('/');

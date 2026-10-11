@@ -170,25 +170,27 @@ export function wrapRoutes(
   authOptions: HttpRouteAuthOptions = {},
 ): WrappedRouteMap {
   const basePath = authOptions.basePath ?? '';
-  const mounted = Object.fromEntries(
-    Object.entries(rawRoutes).map(([routePath, methods]) => [
-      `${basePath}${routePath}`,
-      Object.fromEntries(
+  const mountedRoutes: WrappedRouteMap = Object.fromEntries(
+    Object.entries(rawRoutes).map(([routePath, methods]) => {
+      const wrappedMethods = Object.fromEntries(
         Object.entries(methods).map(([method, handler]) => [
           method,
           wrapRoute(handler, routePath, method, authOptions),
-        ])
-      ),
-    ])
+        ]),
+      );
+      return [`${basePath}${routePath}`, wrappedMethods];
+    }),
   );
   if (basePath) {
-    mounted[basePath] = { GET: async request => {
-      if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
-      return new Response(null, {
-        status: 308,
-        headers: { Location: `${basePath}/${new URL(request.url).search}` },
-      });
-    } };
+    mountedRoutes[basePath] = {
+      GET: async request => {
+        if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
+        return new Response(null, {
+          status: 308,
+          headers: { Location: `${basePath}/${new URL(request.url).search}` },
+        });
+      },
+    };
   }
-  return mounted;
+  return mountedRoutes;
 }

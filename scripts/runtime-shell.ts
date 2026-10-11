@@ -3,43 +3,63 @@ import { RUNTIME_BASE_PATH_TOKEN } from '../common/runtime-shell.js';
 
 // Validates SvelteKit's generated bootstrap at build time, never rewrites hashed bundles.
 export async function prepareRuntimeShell(html: string): Promise<string> {
-  if (html.includes(RUNTIME_BASE_PATH_TOKEN)) throw new Error('Web shell already contains the runtime base token');
-  let bootstraps = 0;
-  let imports = 0;
-  let workers = 0;
-  let script = '';
-  const rewriteScript = (source: string): string => {
-    const parsed = ts.createSourceFile('shell.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  if (html.includes(RUNTIME_BASE_PATH_TOKEN)) {
+    throw new Error('Web shell already contains the runtime base token');
+  }
+  let bootstrapCount = 0;
+  let entryImportCount = 0;
+  let serviceWorkerCount = 0;
+
+  const rewriteInlineScript = (source: string): string => {
+    const sourceFile = ts.createSourceFile('shell.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
     const edits: { start: number; end: number; replacement: string }[] = [];
-    const replace = (node: ts.Node, text: string) => edits.push({ start: node.getStart(parsed), end: node.end, replacement: JSON.stringify(text) });
+    const replaceStringLiteral = (node: ts.StringLiteral, value: string): void => {
+      edits.push({
+        start: node.getStart(sourceFile),
+        end: node.end,
+        replacement: JSON.stringify(value),
+      });
+    };
     const visit = (node: ts.Node): void => {
-      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
-        && ts.isIdentifier(node.left) && /^__sveltekit_\w+$/.test(node.left.text) && ts.isObjectLiteralExpression(node.right)) {
-        const base = node.right.properties.find(property => ts.isPropertyAssignment(property) && property.name.getText(parsed) === 'base');
-        if (!base || !ts.isPropertyAssignment(base) || !ts.isStringLiteral(base.initializer) || base.initializer.text !== '') {
+      if (
+        ts.isBinaryExpression(node)
+        && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+        && ts.isIdentifier(node.left)
+        && /^__sveltekit_\w+$/.test(node.left.text)
+        && ts.isObjectLiteralExpression(node.right)
+      ) {
+        const baseProperty = node.right.properties.find(
+          (property): property is ts.PropertyAssignment =>
+            ts.isPropertyAssignment(property) && property.name.getText(sourceFile) === 'base',
+        );
+        if (!baseProperty || !ts.isStringLiteral(baseProperty.initializer) || baseProperty.initializer.text !== '') {
           throw new Error('Unsupported SvelteKit bootstrap base');
         }
-        replace(base.initializer, RUNTIME_BASE_PATH_TOKEN);
-        bootstraps++;
+        replaceStringLiteral(baseProperty.initializer, RUNTIME_BASE_PATH_TOKEN);
+        bootstrapCount++;
       }
       if (ts.isStringLiteral(node)) {
         if (node.text.startsWith('/_app/')) {
-          replace(node, RUNTIME_BASE_PATH_TOKEN + node.text);
-          if (ts.isCallExpression(node.parent) && node.parent.expression.kind === ts.SyntaxKind.ImportKeyword) imports++;
+          replaceStringLiteral(node, RUNTIME_BASE_PATH_TOKEN + node.text);
+          if (ts.isCallExpression(node.parent) && node.parent.expression.kind === ts.SyntaxKind.ImportKeyword) {
+            entryImportCount++;
+          }
         } else if (node.text === '/service-worker.js') {
-          replace(node, RUNTIME_BASE_PATH_TOKEN + node.text);
-          workers++;
+          replaceStringLiteral(node, RUNTIME_BASE_PATH_TOKEN + node.text);
+          serviceWorkerCount++;
         }
       }
       ts.forEachChild(node, visit);
     };
-    visit(parsed);
+    visit(sourceFile);
     let result = source;
-    for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    for (const edit of edits.sort((left, right) => right.start - left.start)) {
       result = result.slice(0, edit.start) + edit.replacement + result.slice(edit.end);
     }
     return result;
   };
+
+  let inlineScript = '';
   const transformed = await new HTMLRewriter()
     .on('[href], [src]', {
       element(element) {
@@ -53,17 +73,19 @@ export async function prepareRuntimeShell(html: string): Promise<string> {
     })
     .on('script:not([src])', {
       element(element) {
-        script = '';
-        element.onEndTag(tag => tag.before(rewriteScript(script), { html: true }));
+        inlineScript = '';
+        element.onEndTag(tag => {
+          tag.before(rewriteInlineScript(inlineScript), { html: true });
+        });
       },
       text(chunk) {
-        script += chunk.text;
+        inlineScript += chunk.text;
         chunk.remove();
       },
     })
     .transform(new Response(html)).text();
-  if (bootstraps !== 1 || imports !== 2 || workers !== 1) {
-    throw new Error(`Unsupported SvelteKit shell: ${bootstraps} bootstraps, ${imports} entry imports, ${workers} service workers`);
+  if (bootstrapCount !== 1 || entryImportCount !== 2 || serviceWorkerCount !== 1) {
+    throw new Error(`Unsupported SvelteKit shell: ${bootstrapCount} bootstraps, ${entryImportCount} entry imports, ${serviceWorkerCount} service workers`);
   }
   return transformed;
 }

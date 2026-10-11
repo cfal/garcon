@@ -25,6 +25,50 @@ test('renders one generated template at root and nested mounts without modifying
   }
 });
 
+test('rewrites local asset references while preserving relative and protocol-relative URLs', async () => {
+  const html = fixture.replace('</head>', `
+<script src="/assets/runtime.js"></script>
+<link href="//cdn.example.test/styles.css">
+<link href="./local.css">
+<script>
+const preload = '/_app/preload.js';
+const relative = './_app/local.js';
+const external = 'https://cdn.example.test/_app/external.js';
+const unrelated = { base: "" };
+</script></head>`);
+  const rendered = renderRuntimeShell(await prepareRuntimeShell(html), '/tools/garcon');
+
+  expect(rendered).toContain('src="/tools/garcon/assets/runtime.js"');
+  expect(rendered).toContain('href="//cdn.example.test/styles.css"');
+  expect(rendered).toContain('href="./local.css"');
+  expect(rendered).toContain('const preload = "/tools/garcon/_app/preload.js";');
+  expect(rendered).toContain("const relative = './_app/local.js';");
+  expect(rendered).toContain("const external = 'https://cdn.example.test/_app/external.js';");
+  expect(rendered).toContain('const unrelated = { base: "" };');
+});
+
+test.each(['', 'base: 0', 'base: ``', '"base": ""'])(
+  'rejects unsupported bootstrap properties: %s',
+  async properties => {
+    await expect(prepareRuntimeShell(fixture.replace('base: ""', properties)))
+      .rejects.toThrow('Unsupported SvelteKit bootstrap base');
+  },
+);
+
+test.each([
+  ['bootstrap', '__sveltekit_duplicate = { base: "" };', '2 bootstraps'],
+  ['entry import', "import('/_app/extra.js');", '3 entry imports'],
+  ['service worker', "const extraWorker = '/service-worker.js';", '2 service workers'],
+])('rejects a duplicate %s', async (_label, script, message) => {
+  await expect(prepareRuntimeShell(fixture.replace('</body>', `<script>${script}</script></body>`)))
+    .rejects.toThrow(message);
+});
+
+test('rejects a missing service worker registration', async () => {
+  await expect(prepareRuntimeShell(fixture.replace("'/service-worker.js'", "'/other-worker.js'")))
+    .rejects.toThrow('0 service workers');
+});
+
 test('fails closed when the framework bootstrap contract changes or the shell is not prepared', async () => {
   await expect(prepareRuntimeShell(fixture.replace('base: ""', 'base: "/compiled"'))).rejects.toThrow('Unsupported SvelteKit bootstrap');
   await expect(prepareRuntimeShell(fixture.replace('__sveltekit_example', 'unknown_bootstrap'))).rejects.toThrow('Unsupported SvelteKit shell');
