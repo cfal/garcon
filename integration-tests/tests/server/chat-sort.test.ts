@@ -29,6 +29,19 @@ async function moveToBottom(
   })).toMatchObject({ changed: true });
 }
 
+async function waitForSeedMetadata(fixture: IntegrationFixture, chatIds: readonly string[]): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const { sessions } = await fixture.client.listChats();
+    const ready = new Set(sessions
+      .filter(chat => chat.activity.lastActivityAt !== null)
+      .map(chat => chat.id));
+    if (chatIds.every(chatId => ready.has(chatId))) return;
+    await Bun.sleep(25);
+  }
+  throw new Error('Seed chat metadata did not become available before sorting.');
+}
+
 test('chat sort presets atomically reorder every persisted group and survive restart', async () => {
   await withIntegrationFixture('chat-sort', async (fixture) => {
     const chatCount = 6;
@@ -76,6 +89,7 @@ test('chat sort presets atomically reorder every persisted group and survive res
     let listed = await fixture.client.listChats();
     expect(listed.sessions.some((chat) => chat.id === hiddenChatId)).toBe(true);
 
+    await waitForSeedMetadata(fixture, [...chatIds, hiddenChatId]);
     const createdCursor = fixture.client.markEvents();
     expect(await fixture.client.sortChatOrder({ sortKey: 'created' })).toEqual({
       success: true,
@@ -120,6 +134,7 @@ test('chat sort presets atomically reorder every persisted group and survive res
       settings: { ui: { pinnedInsertPosition: 'bottom' } },
     });
 
+    await waitForSeedMetadata(fixture, [...chatIds, hiddenChatId]);
     const activityCursor = fixture.client.markEvents();
     expect(await fixture.client.sortChatOrder({ sortKey: 'activity' })).toEqual({
       success: true,
