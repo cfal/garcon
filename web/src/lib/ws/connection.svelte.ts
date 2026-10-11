@@ -3,6 +3,7 @@
 // drain consumers.
 
 import { getAuthToken } from '$lib/api/client';
+import { appPath } from '$lib/deployment/paths';
 import {
 	webSocketProtocolsForAuth,
 	AUTH_REVOKED_CLOSE_CODE,
@@ -124,7 +125,7 @@ function buildWebSocketUrl(): string {
 	// cache the 101 Switching Protocols response and refuse to establish a new WebSocket
 	// connection if the tab was suspended or encountered a momentary connection drop.
 	const params = new URLSearchParams({ v: String(Date.now()) });
-	return `${protocol}//${window.location.host}/ws?${params.toString()}`;
+	return `${protocol}//${window.location.host}${appPath('/ws')}?${params.toString()}`;
 }
 
 function generateRequestId() {

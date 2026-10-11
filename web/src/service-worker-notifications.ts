@@ -1,4 +1,5 @@
 import { parseChatId } from '../../common/chat-id.js';
+import { stripBasePath } from '../../common/base-path.js';
 
 export interface NotificationWindow {
 	readonly url: string;
@@ -11,6 +12,7 @@ export async function openNotificationChat(
 	origin: string,
 	windows: readonly NotificationWindow[],
 	openWindow: (url: string) => Promise<unknown>,
+	basePath = '',
 ): Promise<void> {
 	let id: string;
 	try {
@@ -18,12 +20,12 @@ export async function openNotificationChat(
 	} catch {
 		return;
 	}
-	const url = `${origin}/chat/${id}`;
+	const url = `${origin}${basePath}/chat/${id}`;
 	const appWindows = windows.filter((client) => {
 		const current = new URL(client.url);
+		const pathname = stripBasePath(current.pathname, basePath);
 		return (
-			current.origin === origin &&
-			(current.pathname === '/' || current.pathname.startsWith('/chat/'))
+			current.origin === origin && (pathname === '/' || pathname?.startsWith('/chat/') === true)
 		);
 	});
 	const client = appWindows.find((client) => client.focused) ?? appWindows[0];

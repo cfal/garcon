@@ -15,6 +15,7 @@ const webBuildIgnoredInputPaths = new Set([
 ]);
 
 export const webBuildInputs = [
+  path.join(repoRoot, 'scripts', 'runtime-shell.ts'),
   path.join(repoRoot, 'common'),
   path.join(repoRoot, 'web', '.env'),
   path.join(repoRoot, 'web', '.env.local'),

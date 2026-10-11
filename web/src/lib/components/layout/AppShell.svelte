@@ -4,6 +4,8 @@
 	import { MediaQuery } from 'svelte/reactivity';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { appPathname } from '$lib/deployment/paths';
 	import { page } from '$app/state';
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import Sidebar from '../sidebar/Sidebar.svelte';
@@ -248,7 +250,7 @@
 		showChatInCurrentWindow: (chatId) => workspace.showChatInCurrentWindow(chatId),
 		setSelectedChatId: (chatId) => sessions.setSelectedChatId(chatId),
 		navigateToChat: gotoChat,
-		navigateToBareRoute: () => goto('/'),
+		navigateToBareRoute: () => goto(resolve('/')),
 		requestComposerFocus: () => appShell.requestComposerFocus(),
 		requestSidebarRecenter: () => appShell.requestSidebarRecenterToSelected(),
 		reportOpenError: (error) => {
@@ -288,7 +290,7 @@
 	$effect(() => {
 		if (routeTicketId) return;
 		const chatId = page.params.id as string | undefined;
-		const selectedChatId = selectedChatIdFromRoute(page.url.pathname, chatId);
+		const selectedChatId = selectedChatIdFromRoute(appPathname(page.url.pathname), chatId);
 		if (selectedChatId === undefined) return;
 		untrack(() => chatNavigation.handleRouteChat(selectedChatId));
 	});
@@ -297,7 +299,7 @@
 		if (routeTicketId) return;
 		const lastSelectedChatId = sessions.lastSelectedChatId;
 		const target = restoreChatIdForBareRoute({
-			pathname: page.url.pathname,
+			pathname: appPathname(page.url.pathname),
 			routeChatId: page.params.id as string | undefined,
 			isLoadingChats: sessions.isLoadingChats,
 			lastSelectedChatId,

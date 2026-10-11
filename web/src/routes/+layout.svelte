@@ -5,6 +5,8 @@
 	import '../app.css';
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { appPathname } from '$lib/deployment/paths';
 	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import GarconMark from '$lib/components/shared/GarconMark.svelte';
@@ -261,8 +263,8 @@
 	setThemeRuntime(themeController);
 
 	const publicRoutes = ['/login', '/setup'];
-	const isAuthRoute = $derived(publicRoutes.includes(page.url.pathname));
-	let isPublicRoute = $derived(isAuthRoute || page.url.pathname.startsWith('/shared/'));
+	const isAuthRoute = $derived(publicRoutes.includes(appPathname(page.url.pathname)));
+	let isPublicRoute = $derived(isAuthRoute || page.route.id === '/shared/[token]');
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
 	// Projects presentation-only bounds without coupling Markdown loading to settings.
@@ -524,17 +526,19 @@
 		if (auth.isUnavailable) return;
 		if (auth.presentationOwner) return;
 
-		if (page.url.pathname === '/setup' && !auth.needsSetup && !auth.isAuthenticated) {
-			goto('/login');
+		if (page.route.id === '/setup' && !auth.needsSetup && !auth.isAuthenticated) {
+			goto(resolve('/login'));
 			return;
 		}
 
 		if (isPublicRoute) return;
 		if (auth.needsSetup) {
-			goto('/setup');
+			goto(resolve('/setup'));
 		} else if (!auth.isAuthenticated) {
-			const returnTo = page.url.pathname;
-			goto(returnTo === '/' ? '/login' : `/login?returnTo=${encodeURIComponent(returnTo)}`);
+			const returnTo = appPathname(page.url.pathname) + page.url.search + page.url.hash;
+			goto(
+				resolve('/login') + (returnTo === '/' ? '' : `?returnTo=${encodeURIComponent(returnTo)}`),
+			);
 		}
 	});
 
@@ -544,9 +548,9 @@
 		if (auth.isLoading) return;
 		if (auth.isUnavailable) return;
 		if (!isPublicRoute) return;
-		if (page.url.pathname.startsWith('/shared/')) return;
+		if (page.route.id === '/shared/[token]') return;
 		if (auth.authDisabled || (auth.isAuthenticated && !auth.needsSetup)) {
-			goto('/');
+			goto(resolve('/'));
 		}
 	});
 
@@ -561,7 +565,7 @@
 			isLoading: auth.isLoading,
 			isAuthenticated: auth.isAuthenticated,
 			authDisabled: auth.authDisabled,
-			isRegistrationRoute: page.url.pathname === '/setup',
+			isRegistrationRoute: page.route.id === '/setup',
 			justRegistered: getLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered) === '1',
 		});
 		if (decision === 'wait') return;

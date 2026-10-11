@@ -60,6 +60,21 @@ describe('service worker helpers', () => {
 		expect(isManifestPath('/icon.svg')).toBe(false);
 	});
 
+	it('keeps framework-prefixed assets and manifest filtering under the mount', async () => {
+		const addAll = vi.fn<Cache['addAll']>().mockResolvedValue(undefined);
+		const add = vi.fn<Cache['add']>().mockResolvedValue(undefined);
+		await precacheAppShell(
+			{ addAll, add },
+			{
+				build: ['/tools/garcon/_app/app.js'],
+				files: ['/tools/garcon/site.webmanifest', '/tools/garcon/icons/icon.svg'],
+			},
+			'/tools/garcon',
+		);
+		expect(addAll).toHaveBeenCalledWith(['/tools/garcon/', '/tools/garcon/_app/app.js']);
+		expect(add).toHaveBeenCalledExactlyOnceWith('/tools/garcon/icons/icon.svg');
+	});
+
 	it('does not cache navigation responses marked no-store', () => {
 		const response = (cacheControl?: string) =>
 			({

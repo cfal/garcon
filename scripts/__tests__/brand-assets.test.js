@@ -220,6 +220,8 @@ describe("Garcon brand assets", () => {
       ).toEqual(bytes);
       expect(renderedSources).toHaveLength(7);
       expect(renderedSources.every((source) => !source.includes("\r"))).toBe(true);
+      const manifest = JSON.parse(await readFile(path.join(root, "web/static/site.webmanifest"), "utf8"));
+      expect(manifest.icons.every(icon => icon.src.startsWith("./icons/"))).toBe(true);
 
       await runGit(root, "init", "--quiet");
       await runGit(
@@ -308,7 +310,7 @@ describe("Garcon brand assets", () => {
     const manifest = JSON.parse(await readText("web/static/site.webmanifest"));
     expect(manifest.theme_color).toBe("#111827");
     expect(manifest.icons).toContainEqual({
-      src: await assetHref("icon-maskable-512", "png"),
+      src: `.${await assetHref("icon-maskable-512", "png")}`,
       sizes: "512x512",
       type: "image/png",
       purpose: "maskable",

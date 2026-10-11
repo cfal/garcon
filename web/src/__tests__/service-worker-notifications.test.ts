@@ -2,6 +2,23 @@ import { describe, expect, it, vi } from 'vitest';
 import { openNotificationChat, type NotificationWindow } from '../service-worker-notifications.js';
 
 describe('notification click navigation', () => {
+	it('opens the captured mounted chat without navigating tabs outside the mount', async () => {
+		const outside: NotificationWindow = {
+			url: 'https://app.test/chat/1790000000000000',
+			focused: true,
+			navigate: vi.fn(),
+		};
+		const open = vi.fn();
+		await openNotificationChat(
+			'1790000000000000',
+			'https://app.test',
+			[outside],
+			open,
+			'/tools/garcon',
+		);
+		expect(outside.navigate).not.toHaveBeenCalled();
+		expect(open).toHaveBeenCalledWith('https://app.test/tools/garcon/chat/1790000000000000');
+	});
 	it('skips login tabs and navigates an app window even before its handler is ready', async () => {
 		const focused = { focus: vi.fn(async () => ({})) };
 		const login: NotificationWindow = {

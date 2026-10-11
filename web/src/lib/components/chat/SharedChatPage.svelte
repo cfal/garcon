@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { onMount, tick } from 'svelte';
 	import { getSharedChat } from '$lib/api/shares.js';
 	import { ApiError } from '$lib/api/client.js';
@@ -186,7 +187,7 @@
 	<header class="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border">
 		<div class="max-w-4xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-3">
 			<a
-				href="/"
+				href={resolve('/')}
 				class="size-8 flex-shrink-0 transition-opacity hover:opacity-90"
 				title={m.sidebar_app_title()}
 			>
@@ -245,7 +246,9 @@
 							{m.common_retry()}
 						</button>
 					{/if}
-					<a href="/" class="text-sm text-primary hover:underline">{m.shared_view_back_to_app()}</a>
+					<a href={resolve('/')} class="text-sm text-primary hover:underline"
+						>{m.shared_view_back_to_app()}</a
+					>
 				</div>
 			</div>
 		{:else}

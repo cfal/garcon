@@ -3,6 +3,7 @@
 import type { HttpErrorResponse } from '$shared/http-error';
 import { isRecord } from '$shared/json';
 import { getAuthToken, canDispatchAuthenticated, notifyAuthRejection } from '$lib/auth/session';
+import { appPath } from '$lib/deployment/paths';
 export { getAuthToken, setAuthToken, clearAuthToken } from '$lib/auth/session';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -42,7 +43,7 @@ export async function apiFetch(url: string, options: ApiFetchOptions = {}): Prom
 	}
 
 	const response = await globalThis.fetch(
-		url,
+		appPath(url),
 		withTimeout(
 			{
 				...fetchOptions,
@@ -58,7 +59,7 @@ export async function apiFetch(url: string, options: ApiFetchOptions = {}): Prom
 /** Wraps an unauthenticated fetch with the standard configurable timeout. */
 export function publicApiFetch(url: string, options: ApiFetchOptions = {}): Promise<Response> {
 	const { timeoutMs, ...fetchOptions } = options;
-	return globalThis.fetch(url, withTimeout(fetchOptions, timeoutMs));
+	return globalThis.fetch(appPath(url), withTimeout(fetchOptions, timeoutMs));
 }
 
 export class ApiError extends Error {

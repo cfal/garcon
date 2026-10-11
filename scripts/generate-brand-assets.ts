@@ -205,10 +205,10 @@ export async function generateBrandAssets(
   }
   const manifest = { ...(parsedManifest as Record<string, unknown>) };
   manifest.icons = [
-    { src: href("icon-192"), sizes: "192x192", type: "image/png" },
-    { src: href("icon-512"), sizes: "512x512", type: "image/png" },
+    { src: `.${href("icon-192")}`, sizes: "192x192", type: "image/png" },
+    { src: `.${href("icon-512")}`, sizes: "512x512", type: "image/png" },
     {
-      src: href("icon-maskable-512"),
+      src: `.${href("icon-maskable-512")}`,
       sizes: "512x512",
       type: "image/png",
       purpose: "maskable",

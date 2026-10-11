@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { appPath } from '$lib/deployment/paths';
 	import type { TicketCommandOutcome } from '$shared/garcon-ticket-result';
 	import { ticketCommandNoticeParts } from '$shared/ticket-command-notice';
 	import { ticketHref } from '$lib/tickets/catalog/ticket-deep-link.js';
@@ -41,7 +42,7 @@
 				{#if part.kind === 'ticket'}
 					{#if onOpenTicket}
 						<a
-							href={ticketHref(part.ticketId)}
+							href={appPath(ticketHref(part.ticketId))}
 							class="text-primary font-medium underline decoration-primary/40 underline-offset-2 hover:decoration-primary focus-visible:outline-2 focus-visible:outline-ring"
 							data-ticket-reference-id={part.ticketId}
 							onclick={(event) => open(event, part.ticketId)}
