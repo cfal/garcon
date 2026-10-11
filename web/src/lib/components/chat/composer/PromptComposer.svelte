@@ -160,10 +160,7 @@
 		get interactionGeneration() {
 			return workspaceShortcuts.userInteractionGeneration;
 		},
-		onChange(text) {
-			composerState.inputText = text;
-			queueCurrentDraft(text);
-		},
+		onChange: updateDraft,
 		onUnavailable() {
 			notifications.error(m.chat_composer_format_unavailable());
 		},
@@ -174,10 +171,7 @@
 		getText: () => composerState.inputText,
 		getTextarea: () => textarea,
 		canRecall: () => !isDisabled && isVisible,
-		setText: (text) => {
-			composerState.inputText = text;
-			queueCurrentDraft(text);
-		},
+		setText: updateDraft,
 	});
 	$effect(() => {
 		void recallIdentity;
@@ -428,7 +422,8 @@
 		return () => cancelAnimationFrame(frameId);
 	});
 
-	function queueCurrentDraft(text: string): void {
+	function updateDraft(text: string): void {
+		composerState.inputText = text;
 		const chatId = sessions.selectedChatId;
 		if (chatId) composerState.queueDraftSave(chatId, text);
 	}
@@ -446,8 +441,7 @@
 			return;
 		}
 		const replacement = applySlashCommand(composerState.inputText, trigger, name);
-		composerState.inputText = replacement.text;
-		queueCurrentDraft(replacement.text);
+		updateDraft(replacement.text);
 		ui.closeSlashMenu();
 		await tick();
 		textarea?.focus();
@@ -467,8 +461,7 @@
 			return;
 		}
 		const replacement = applyFileMention(composerState.inputText, trigger, path);
-		composerState.inputText = replacement.text;
-		queueCurrentDraft(replacement.text);
+		updateDraft(replacement.text);
 		ui.closeFileMenu();
 		await tick();
 		textarea?.focus();
@@ -532,8 +525,7 @@
 						text: sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end),
 						caret: start + result.response.expandedText.length,
 					};
-			composerState.inputText = replacement.text;
-			queueCurrentDraft(replacement.text);
+			updateDraft(replacement.text);
 			await settleComposerAfterSnippet(replacement.caret);
 			return 'inserted';
 		} catch (error) {
@@ -575,8 +567,7 @@
 				composerState.inputText !== sourceText
 			)
 				return;
-			composerState.inputText = result.response.expandedText;
-			queueCurrentDraft(result.response.expandedText);
+			updateDraft(result.response.expandedText);
 			ui.closeSlashMenu();
 			await settleComposerAfterSnippet(result.response.expandedText.length);
 		} catch (error) {
@@ -660,7 +651,7 @@
 		}
 		if (snippetExpansion.pending) snippetExpansion.cancel();
 		const value = target.value;
-		composerState.inputText = value;
+		updateDraft(value);
 		ui.updateTriggers(
 			value,
 			textarea?.selectionStart ?? value.length,
@@ -668,7 +659,6 @@
 			(event as InputEvent).isComposing,
 			conversationInput ? 'conversation' : 'literal',
 		);
-		queueCurrentDraft(value);
 		markdown.input(event as InputEvent);
 	}
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));

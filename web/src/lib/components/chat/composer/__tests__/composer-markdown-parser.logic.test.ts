@@ -4,6 +4,7 @@ import { getSchema, type JSONContent } from '@tiptap/core';
 import { parseComposerMarkdown } from '../composer-markdown-parser.js';
 import { composerMarkdownEditorExtensions } from '../composer-markdown-extensions.js';
 import { MAX_COMPOSER_MARKDOWN_LENGTH } from '../composer-markdown-limits.js';
+import { configureComposerMarkdown, serializeComposerMarkdown } from '../composer-markdown.js';
 
 const table = '| Check | Example |\n| - | - |\n| **Ready** | First<br>Second |';
 function nodes(document: JSONContent): JSONContent[] {
@@ -92,4 +93,24 @@ describe('composer Markdown parsing', () => {
 		const manager = new MarkdownManager({ extensions: composerMarkdownEditorExtensions() });
 		expect(manager.serialize(document)).toContain('first<br>second');
 	});
+	it.each(['a\nb', 'a\n', '\na', ' a ', '  ', '`edge`', 'a``b`c```d', 'a\n`b`\n c '])(
+		'round trips edited code text in table cells: %s',
+		(text) => {
+			const document = parseComposerMarkdown({ source: table })!;
+			const cell = nodes(document).find((node) => node.type === 'tableCell')!;
+			cell.content = [
+				{ type: 'paragraph', content: [{ type: 'text', text, marks: [{ type: 'code' }] }] },
+			];
+			const manager = new MarkdownManager({
+				extensions: composerMarkdownEditorExtensions(),
+				markedOptions: { breaks: true },
+			});
+			configureComposerMarkdown(manager);
+			const output = manager.parse(serializeComposerMarkdown(manager, document));
+			const paragraph = nodes(output).find((node) => node.type === 'tableCell')!.content![0];
+			expect(
+				paragraph.content!.map((node) => (node.type === 'hardBreak' ? '\n' : node.text)).join(''),
+			).toBe(text);
+		},
+	);
 });

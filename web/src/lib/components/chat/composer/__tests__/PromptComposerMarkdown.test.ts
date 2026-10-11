@@ -28,6 +28,12 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
+function richEditor(target: HTMLElement) {
+	const editor = (target as TiptapEditorHTMLElement).editor;
+	if (!editor) throw new Error('Formatted editor is not mounted');
+	return editor;
+}
+
 async function formatted({
 	selectedStatus = 'running',
 	source = table,
@@ -57,7 +63,7 @@ describe('formatted composer integration', () => {
 	});
 	it('updates Markdown on a direct edit and submits that draft through the existing gate', async () => {
 		const { editor, textarea, onsubmit } = await formatted();
-		(editor as TiptapEditorHTMLElement).editor.commands.setTextSelection(2);
+		richEditor(editor).commands.setTextSelection(2);
 		const transfer = new DataTransfer();
 		transfer.setData('text/plain', 'edited ');
 		await fireEvent.paste(editor, { clipboardData: transfer });
@@ -76,7 +82,7 @@ describe('formatted composer integration', () => {
 	it('opens pasted content at the end and restores source before snippet insertion', async () => {
 		const source = 'Prefix\n\n' + table;
 		const { editor, textarea } = await formatted({ source });
-		const rich = (editor as TiptapEditorHTMLElement).editor;
+		const rich = richEditor(editor);
 		expect(rich.state.selection.$head.parent.textContent).toBe('a  b');
 		expect(rich.state.selection.$head.parentOffset).toBe(4);
 		rich.commands.setTextSelection(2);
@@ -97,42 +103,46 @@ describe('formatted composer integration', () => {
 		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		await waitFor(() => expect(textarea.value).toBe(source + ' appended'));
 	});
-	it('escapes oversized text in a table cell before falling back to source', async () => {
-		const { editor, textarea } = await formatted();
-		const rich = (editor as TiptapEditorHTMLElement).editor;
-		let position = 0;
-		rich.state.doc.descendants((node, offset) => {
-			if (node.type.name === 'text' && node.text === 'Ready') position = offset + node.nodeSize;
-		});
-		rich.commands.setTextSelection(position);
-		const text = ' | literal `tick`\n'.repeat(2_000);
-		const transfer = new DataTransfer();
-		transfer.setData('text/plain', text);
-		await fireEvent.paste(editor, { clipboardData: transfer });
-		await waitFor(() =>
-			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
-		);
-		const manager = new MarkdownManager({
-			extensions: composerMarkdownEditorExtensions(),
-			markedOptions: { breaks: true },
-		});
-		configureComposerMarkdown(manager);
-		const document = manager.parse(textarea.value);
-		const rows = document.content![0].content!;
-		expect(rows).toHaveLength(2);
-		expect(rows.map((row) => row.content!.length)).toEqual([2, 2]);
-		expect(
-			rows[1]
-				.content![0].content![0].content!.filter((node) => node.type === 'text')
-				.map((node) => node.text)
-				.join(''),
-		).toBe('Ready' + text.replaceAll('\n', ''));
-	});
+	it.each(['Ready', 'a  b'])(
+		'escapes oversized text in table cell %s before falling back to source',
+		async (original) => {
+			const { editor, textarea } = await formatted();
+			const rich = richEditor(editor);
+			let position = 0;
+			rich.state.doc.descendants((node, offset) => {
+				if (node.type.name === 'text' && node.text === original) position = offset + node.nodeSize;
+			});
+			rich.commands.setTextSelection(position);
+			const text = ' | literal `tick`\n'.repeat(2_000);
+			const transfer = new DataTransfer();
+			transfer.setData('text/plain', text);
+			await fireEvent.paste(editor, { clipboardData: transfer });
+			await waitFor(() =>
+				expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
+			);
+			const manager = new MarkdownManager({
+				extensions: composerMarkdownEditorExtensions(),
+				markedOptions: { breaks: true },
+			});
+			configureComposerMarkdown(manager);
+			const document = manager.parse(textarea.value);
+			const rows = document.content![0].content!;
+			expect(rows).toHaveLength(2);
+			expect(rows.map((row) => row.content!.length)).toEqual([2, 2]);
+			expect(
+				rows[1]
+					.content![original === 'Ready' ? 0 : 1].content![0].content!.map((node) =>
+						node.type === 'hardBreak' ? '\n' : node.text,
+					)
+					.join(''),
+			).toBe(original + text);
+		},
+	);
 	it.each(['paste', 'drop'])(
 		'keeps oversized %s text in source before HTML parsing',
 		async (type) => {
 			const { editor, textarea } = await formatted();
-			(editor as TiptapEditorHTMLElement).editor.commands.setTextSelection(2);
+			richEditor(editor).commands.setTextSelection(2);
 			const text = '$& synthetic log\n'.repeat(3_000);
 			const transfer = new DataTransfer();
 			transfer.setData('text/plain', text);

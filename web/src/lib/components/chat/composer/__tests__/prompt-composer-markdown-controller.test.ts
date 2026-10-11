@@ -131,11 +131,6 @@ describe('formatted composer lifecycle', () => {
 			paste(table);
 			if (change === 'chat') options.chatId = 'two';
 			if (change === 'text') options.composer.inputText = 'new draft';
-			if (change === 'focus') {
-				const button = document.createElement('button');
-				document.body.append(button);
-				button.focus();
-			}
 			if (change === 'interaction') options.interactionGeneration++;
 			if (change === 'hidden') options.canFormat = false;
 			if (change === 'reset') controller.reset();

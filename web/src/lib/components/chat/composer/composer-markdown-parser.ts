@@ -1,7 +1,7 @@
 import { MarkdownManager } from '@tiptap/markdown';
 import type { JSONContent } from '@tiptap/core';
 import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
-import { configureComposerMarkdown } from './composer-markdown.js';
+import { configureComposerMarkdown, serializeComposerMarkdown } from './composer-markdown.js';
 import {
 	isComposerMarkdownSized,
 	isMarkdownTableCandidate,
@@ -36,7 +36,7 @@ export function serializeComposerMarkdownPaste({
 		...(node.text ? { text: node.text.replace(marker, () => text) } : {}),
 		...(node.content ? { content: node.content.map(replaceMarker) } : {}),
 	});
-	return manager.serialize(replaceMarker(document));
+	return serializeComposerMarkdown(manager, replaceMarker(document));
 }
 
 export function parseComposerMarkdown({

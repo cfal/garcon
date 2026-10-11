@@ -6,6 +6,7 @@
 	import { MAX_COMPOSER_MARKDOWN_LENGTH } from './composer-markdown-limits.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { ComposerMarkdownPasteRequest } from './composer-markdown-parser.js';
+	import { serializeComposerMarkdown } from './composer-markdown.js';
 
 	let {
 		document: documentContent,
@@ -47,7 +48,8 @@
 			editable: !readOnly,
 			enableInputRules: false,
 			enablePasteRules: false,
-			onUpdate: ({ editor: current }) => onChange(markdown.serialize(current.getJSON())),
+			onUpdate: ({ editor: current }) =>
+				onChange(serializeComposerMarkdown(markdown, current.getJSON())),
 			editorProps: {
 				attributes: {
 					role: 'textbox',
