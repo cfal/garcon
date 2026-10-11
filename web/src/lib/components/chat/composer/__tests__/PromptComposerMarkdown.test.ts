@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
-import { parseComposerMarkdownInWorker } from '../composer-markdown-worker.js';
+import { parseComposerMarkdownInWorker, serializeComposerMarkdownPasteInWorker } from '../composer-markdown-worker.js';
 import {
 	parseComposerMarkdown,
 	serializeComposerMarkdownPaste,
@@ -172,6 +172,27 @@ describe('formatted composer integration', () => {
 		await fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true });
 		expect(textarea.value).toBe(table);
 		expect(onsubmit).not.toHaveBeenCalled();
+	});
+	it('waits for oversized paste before allowing keyboard or button submission', async () => {
+		let resolve!: (source: string) => void;
+		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValueOnce(
+			new Promise((done) => { resolve = done; }),
+		);
+		const { editor, textarea, onsubmit } = await formatted();
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', 'large clipboard '.repeat(3_000));
+		await fireEvent.paste(editor, { clipboardData: transfer });
+		await fireEvent.keyDown(editor, { key: 'Enter' });
+		await fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true });
+		const send = screen.getByRole('button', { name: 'Pasting text...' });
+		expect(send.hasAttribute('disabled')).toBe(true);
+		expect(screen.getByText('Pasting text...').getAttribute('aria-live')).toBe('polite');
+		await fireEvent.click(send);
+		expect(onsubmit).not.toHaveBeenCalled();
+		resolve('completed paste');
+		await waitFor(() => expect(textarea.value).toBe('completed paste'));
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		expect(onsubmit).toHaveBeenCalledOnce();
 	});
 	it.each(['paste', 'drop'])(
 		'routes image %s to attachments while retaining the rich draft',

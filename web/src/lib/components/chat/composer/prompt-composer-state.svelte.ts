@@ -26,6 +26,7 @@ export class PromptComposerUiState {
 	previousChatId = $state<string | null>(null);
 	composerEditorOpen = $state(false);
 	formattedDraft = $state.raw<{ source: string; document: JSONContent } | null>(null);
+	formattedPastePending = $state(false);
 	formattedTarget = $state.raw<HTMLElement>();
 	composerEditorChatId = $state<string | null>(null);
 	composerEditorFocusRequestId = $state(0);
@@ -42,6 +43,7 @@ export class PromptComposerUiState {
 	}
 
 	closeFormattedDraft(): void {
+		this.formattedPastePending = false;
 		this.formattedDraft = null;
 		this.formattedTarget = undefined;
 	}

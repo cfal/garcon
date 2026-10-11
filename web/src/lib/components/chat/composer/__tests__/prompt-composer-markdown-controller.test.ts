@@ -48,6 +48,52 @@ afterEach(() => {
 });
 
 describe('formatted composer lifecycle', () => {
+	it('applies oversized paste after releasing the shared submission gate', async () => {
+		let resolve!: (text: string) => void;
+		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValue(
+			new Promise((done) => { resolve = done; }),
+		);
+		const { ui, options, controller } = fixture();
+		Object.defineProperty(options, 'canFormat', { get: () => !ui.formattedPastePending });
+		ui.formattedDraft = { source: table, document: parsed };
+		const completion = controller.pasteSource({ document: parsed, marker: 'marker', text: 'large' });
+		expect(ui.formattedPastePending).toBe(true);
+		resolve('completed paste');
+		await completion;
+		expect(ui.formattedPastePending).toBe(false);
+		expect(options.composer.inputText).toBe('completed paste');
+		expect(ui.formattedDraft).toBeNull();
+		controller.destroy();
+	});
+	it.each(['null', 'error'])('preserves the draft and unlocks submission on Worker %s', async (failure) => {
+		if (failure === 'null') vi.mocked(serializeComposerMarkdownPasteInWorker).mockResolvedValue(null);
+		else vi.mocked(serializeComposerMarkdownPasteInWorker).mockRejectedValue(new Error('Worker failed'));
+		const { ui, options, controller } = fixture();
+		ui.formattedDraft = { source: table, document: parsed };
+		await controller.pasteSource({ document: parsed, marker: 'marker', text: 'large' });
+		expect(ui.formattedPastePending).toBe(false);
+		expect(options.composer.inputText).toBe(table);
+		expect(options.onUnavailable).toHaveBeenCalledOnce();
+		controller.destroy();
+	});
+	it('does not unlock a newer paste when an aborted Worker completes', async () => {
+		let resolve!: (text: string) => void;
+		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValueOnce(
+			new Promise((done) => { resolve = done; }),
+		).mockReturnValueOnce(new Promise(() => {}));
+		const { ui, controller } = fixture();
+		ui.formattedDraft = { source: table, document: parsed };
+		const request = { document: parsed, marker: 'marker', text: 'large' };
+		const completion = controller.pasteSource(request);
+		controller.reset();
+		ui.formattedDraft = { source: table, document: parsed };
+		void controller.pasteSource(request);
+		resolve('stale paste');
+		await completion;
+		expect(ui.formattedPastePending).toBe(true);
+		controller.destroy();
+		expect(ui.formattedPastePending).toBe(false);
+	});
 	it.each(['chat', 'edit', 'reset', 'destroy'])(
 		'ignores oversized paste completion after %s',
 		async (change) => {
@@ -72,6 +118,7 @@ describe('formatted composer lifecycle', () => {
 			resolve('must not apply');
 			await completion;
 			expect(options.onChange).not.toHaveBeenCalled();
+			expect(ui.formattedPastePending).toBe(false);
 			controller.destroy();
 		},
 	);

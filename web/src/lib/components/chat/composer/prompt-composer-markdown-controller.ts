@@ -20,7 +20,7 @@ interface PromptComposerMarkdownOptions {
 }
 
 export class PromptComposerMarkdownController {
-	#parseAbort: AbortController | null = null;
+	#workerAbort: AbortController | null = null;
 	#pastedText: string | null = null;
 	#destroyed = false;
 	#focusGeneration = -1;
@@ -46,8 +46,8 @@ export class PromptComposerMarkdownController {
 	}
 
 	reset(): void {
-		this.#parseAbort?.abort();
-		this.#parseAbort = null;
+		this.#workerAbort?.abort();
+		this.#workerAbort = null;
 		this.#pastedText = null;
 		this.options.ui.closeFormattedDraft();
 		this.#focusGeneration = -1;
@@ -55,7 +55,7 @@ export class PromptComposerMarkdownController {
 
 	change(text: string): void {
 		if (!this.options.canFormat || !this.options.ui.formattedDraft) return;
-		this.#parseAbort?.abort();
+		this.#workerAbort?.abort();
 		this.options.onChange(text);
 		this.options.ui.formattedDraft = { ...this.options.ui.formattedDraft, source: text };
 		if (!isComposerMarkdownSized(text)) void this.edit();
@@ -64,14 +64,19 @@ export class PromptComposerMarkdownController {
 	async pasteSource(request: ComposerMarkdownPasteRequest): Promise<void> {
 		const draft = this.options.ui.formattedDraft;
 		if (!this.options.canFormat || !draft) return;
-		this.#parseAbort?.abort();
+		this.#workerAbort?.abort();
 		const abort = new AbortController();
-		this.#parseAbort = abort;
+		this.#workerAbort = abort;
+		this.options.ui.formattedPastePending = true;
 		const chatId = this.options.chatId;
 		const generation = this.options.interactionGeneration;
 		const text = await serializeComposerMarkdownPasteInWorker(request, abort.signal).catch(
 			() => null,
 		);
+		if (this.#workerAbort === abort) {
+			this.#workerAbort = null;
+			this.options.ui.formattedPastePending = false;
+		}
 		if (
 			this.#destroyed ||
 			abort.signal.aborted ||
@@ -137,9 +142,9 @@ export class PromptComposerMarkdownController {
 			if (pastedText === undefined) this.options.onUnavailable();
 			return;
 		}
-		this.#parseAbort?.abort();
+		this.#workerAbort?.abort();
 		const abort = new AbortController();
-		this.#parseAbort = abort;
+		this.#workerAbort = abort;
 		const chatId = this.options.chatId;
 		const generation = this.options.interactionGeneration;
 		const focusOrigin = document.activeElement;

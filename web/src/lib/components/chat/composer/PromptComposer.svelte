@@ -299,10 +299,10 @@
 			return isPresented;
 		},
 		get startBlocked() {
-			return isDisabled || directAdmissionPending || snippetExpansion.pending;
+			return isDisabled || directAdmissionPending || snippetExpansion.pending || ui.formattedPastePending;
 		},
 	});
-	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
+	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending || ui.formattedPastePending);
 	$effect(() => {
 		executionKey;
 		return () => {
@@ -694,7 +694,7 @@
 		),
 	);
 	const promptTransformStatus = $derived(
-		promptRefinement.pending ? m.chat_composer_refining_prompt() : m.snippets_expanding(),
+		ui.formattedPastePending ? m.chat_composer_pasting() : promptRefinement.pending ? m.chat_composer_refining_prompt() : m.snippets_expanding(),
 	);
 	const permissionOptions = $derived(
 		buildPermissionOptions(modelCatalog.getPermissionModes(agentState.agentId)),
