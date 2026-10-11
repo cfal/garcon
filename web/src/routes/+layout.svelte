@@ -261,9 +261,8 @@
 	setThemeRuntime(themeController);
 
 	const publicRoutes = ['/login', '/setup'];
-	let isPublicRoute = $derived(
-		publicRoutes.includes(page.url.pathname) || page.url.pathname.startsWith('/shared/'),
-	);
+	const isAuthRoute = $derived(publicRoutes.includes(page.url.pathname));
+	let isPublicRoute = $derived(isAuthRoute || page.url.pathname.startsWith('/shared/'));
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
 	// Projects presentation-only bounds without coupling Markdown loading to settings.
@@ -595,7 +594,7 @@
 			<p class="text-muted-foreground mt-2">{m.status_loading()}</p>
 		</div>
 	</div>
-{:else if !auth.presentationOwner && auth.isUnavailable && (!isPublicRoute || auth.token)}
+{:else if !auth.presentationOwner && auth.isUnavailable && (!isPublicRoute || auth.token || (isAuthRoute && auth.availability === 'storage-unavailable'))}
 	<div data-auth-recovery class="min-h-dvh bg-background flex items-center justify-center p-4">
 		<div class="max-w-md text-center">
 			<div class="flex justify-center mb-4">
