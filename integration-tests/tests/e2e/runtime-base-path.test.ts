@@ -6,7 +6,7 @@ test('mounted login returns to the protected deep link and reconnects after relo
   const basePath = '/tools/garcon';
   await withE2eFixture('runtime-mount-login', async fixture => {
     const { integration, page } = fixture;
-    const credentials = integration.garcon.authCredentials;
+    const credentials = integration.garcon.credentials;
     if (!credentials) throw new Error('Fixture credentials missing');
     const chatId = integration.newChatId();
     const turn = await integration.client.startDirectChat({ chatId, content: 'Synthetic mounted login',
@@ -21,12 +21,12 @@ test('mounted login returns to the protected deep link and reconnects after relo
     const returnTo = `/chat/${chatId}?synthetic=query#synthetic-fragment`;
     await page.goto(integration.garcon.baseUrl + returnTo);
     const app = new SpaDriver(page, integration);
-    await page.waitForSelector('#username');
+    await page.waitForSelector('input[name="username"]');
     const loginUrl = new URL(page.url());
     expect(loginUrl.pathname).toBe(`${basePath}/login`);
     expect(loginUrl.searchParams.get('returnTo')).toBe(returnTo);
-    await app.fill('#username', credentials.username);
-    await app.fill('#password', credentials.password);
+    await app.fill('input[name="username"]', credentials.username);
+    await app.fill('input[name="password"]', credentials.password);
     await app.clickButton('Sign in');
     await page.waitForFunction(path => location.pathname === path, {}, `${basePath}/chat/${chatId}`);
     expect(new URL(page.url()).search).toBe('?synthetic=query');
