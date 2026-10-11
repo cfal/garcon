@@ -4,6 +4,7 @@ import { createPreamblePrefix } from '../../../../common/preamble-prefix.ts';
 import { stripResolvedFileMentionContext } from '@garcon/common/file-mention-context';
 import {
   collectPreambleHistoryEvidence,
+  PreambleHistoryCollector,
   sanitizeRecordedPreamblePrefixes,
 } from '../preamble-history.ts';
 
@@ -90,6 +91,30 @@ function providerRunEndedRow(ordinal) {
 }
 
 describe('preamble history evidence', () => {
+  it.each([1, 2, 3, 4, 7])('folds receipt adjacency and completion across pages of %s rows', size => {
+    const first = rowGroup();
+    const second = rowGroup({ ordinal: 6, clientMessageId: 'message-two' });
+    const rows = [...first, userInputRow(3, true), providerRunEndedRow(4), userInputRow(5, false),
+      ...second, { ...providerRunEndedRow(8), origin: 'core' }, userInputRow(9, false), providerRunEndedRow(10)];
+    const collector = new PreambleHistoryCollector();
+    for (let index = 0; index < rows.length; index += size) collector.add(rows.slice(index, index + size));
+    expect(collector.finish()).toEqual([
+      { receipt: application().receipt, boundary: BOUNDARY, preambles: first[0].detail.preambles, requiresNativeOccurrence: true },
+      { receipt: application().receipt, boundary: BOUNDARY, preambles: second[0].detail.preambles, requiresNativeOccurrence: false },
+    ]);
+  });
+
+  it('retains every steered application awaiting the same provider completion', () => {
+    const collector = new PreambleHistoryCollector();
+    collector.add(rowGroup());
+    const [notice, input] = rowGroup({ ordinal: 3, clientMessageId: 'message-two' });
+    input.detail.steer = true;
+    collector.add([notice]);
+    collector.add([input]);
+    collector.add([providerRunEndedRow(5)]);
+    expect(collector.finish().map(entry => entry.requiresNativeOccurrence)).toEqual([true, true]);
+  });
+
   it('collects only an adjacent typed notice and receipt-bearing boundary input', () => {
     expect(collectPreambleHistoryEvidence(rowGroup())).toEqual([{
       receipt: application().receipt,

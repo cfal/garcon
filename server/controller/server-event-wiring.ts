@@ -110,6 +110,7 @@ export interface ServerEventWiringDeps {
 }
 
 export interface ServerEventWiring {
+  repairChatMetadata(): Promise<void>;
   notifyAgentHandoff(chatId: string): void;
   notifyChatSettingsUpdated(chatId: string): void;
   notifyTranscriptCompositionChanged(chatId: string): void;
@@ -382,11 +383,11 @@ export function wireServerEvents({
       void scheduleChatTask(chatId, 'transcript commit fanout', task);
     },
     broadcast,
-    updateMetadata: (chatId, messages) => {
-      metadata.updateFromAppendedMessages(chatId, [...messages]);
+    updateMetadata: (chatId, viewId, messages) => {
+      metadata.updateFromAppendedMessages(chatId, viewId, [...messages]);
     },
-    replaceMetadata: async (chatId) => {
-      await metadata.replaceFromTranscriptView(chatId, currentTranscriptMessagePages(chatId));
+    replaceMetadata: async (chatId, viewId) => {
+      await metadata.replaceFromTranscriptView(chatId, viewId, currentTranscriptMessagePages(chatId));
     },
     resendCandidates: (chatId) => processing.phase(chatId) === null
       ? agentRegistry.resendCandidates(chatId)
@@ -409,6 +410,7 @@ export function wireServerEvents({
     publishTransientFeedMutation(transientFeeds.retirePermission(control));
   });
   agentRegistry.onTranscriptCommitted(async (event) => {
+    if (event.type === 'view-replaced') metadata.invalidateTranscriptView(event.chatId);
     transcriptFanout(event);
     // A committed Preambles-updated notice invalidates the per-chat selection
     // cache. Scheduling here, immediately after the fanout has enqueued the
@@ -694,6 +696,10 @@ export function wireServerEvents({
   });
 
   return {
+    async repairChatMetadata(): Promise<void> {
+      await metadata.repair();
+      broadcast(new ChatListRefreshRequestedMessage('metadata-repaired', null));
+    },
     notifyAgentHandoff,
     notifyChatSettingsUpdated,
     notifyTranscriptCompositionChanged,

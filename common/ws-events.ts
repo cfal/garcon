@@ -333,6 +333,7 @@ export const CHAT_LIST_INVALIDATION_REASONS = [
   'chats-reordered',
   'agent-handoff',
   'execution-settings-updated',
+  'metadata-repaired',
 ] as const;
 
 export type ChatListInvalidationReason =
@@ -351,7 +352,7 @@ export class ChatListRefreshRequestedMessage {
   readonly type = 'chat-list-refresh-requested' as const;
   constructor(
     public reason: ChatListInvalidationReason,
-    public chatId: string,
+    public chatId: string | null,
   ) {}
 }
 
@@ -565,12 +566,6 @@ function chatProcessingSnapshotResult(value: unknown): ChatProcessingSnapshotRes
   }
 
   return { outcome: 'snapshot', chats };
-}
-
-function parseChatListInvalidationReason(
-  v: unknown,
-): ChatListInvalidationReason | null {
-  return isChatListInvalidationReason(v) ? v : null;
 }
 
 export function parseServerWsMessage(
@@ -899,9 +894,13 @@ export function parseServerWsMessage(
         : null;
     }
     case 'chat-list-refresh-requested': {
-      const reason = parseChatListInvalidationReason(data.reason);
+      if (!isChatListInvalidationReason(data.reason)) return null;
+      const reason = data.reason;
+      if (reason === 'metadata-repaired') {
+        return data.chatId === null ? new ChatListRefreshRequestedMessage(reason, null) : null;
+      }
       const chatId = requiredStr(data.chatId);
-      return reason && chatId
+      return chatId
         ? new ChatListRefreshRequestedMessage(reason, chatId)
         : null;
     }

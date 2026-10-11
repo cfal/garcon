@@ -509,8 +509,8 @@ export class TranscriptLedgerStore {
     return this.#pagesThrough(chatId, watermark, readBoundedPage);
   }
 
-  rowPagesThrough(chatId: string, watermark: TranscriptWatermark): AsyncIterable<readonly LedgerRow[]> {
-    return this.#streamPages(chatId, watermark, readBoundedPage);
+  rowPagesThrough(chatId: string, watermark: TranscriptWatermark, fromOrdinal = 1, signal?: AbortSignal): AsyncIterable<readonly LedgerRow[]> {
+    return this.#streamPages(chatId, watermark, readBoundedPage, signal, fromOrdinal);
   }
 
   // Reads stored rows for work that decodes them after the read, such as on a Worker. A row
@@ -548,11 +548,15 @@ export class TranscriptLedgerStore {
     watermark: TranscriptWatermark,
     readPage: (db: Database, viewId: TranscriptViewId, after: number, through: number) => BoundedPage<Row>,
     signal?: AbortSignal,
+    fromOrdinal = 1,
   ): AsyncGenerator<readonly Row[]> {
     if (!Number.isSafeInteger(watermark.ordinal) || watermark.ordinal < 0) {
       throw new TypeError('Transcript watermark ordinal is invalid');
     }
-    let after = 0;
+    if (!Number.isSafeInteger(fromOrdinal) || fromOrdinal < 1) {
+      throw new TypeError('Transcript starting ordinal is invalid');
+    }
+    let after = fromOrdinal - 1;
     for (;;) {
       signal?.throwIfAborted();
       const page = this.#read(chatId, (entry) => {

@@ -15,8 +15,8 @@ export interface TranscriptEventFanoutDeps {
   chatExists(chatId: string): boolean;
   schedule(chatId: string, task: () => Promise<void> | void): void;
   broadcast(payload: unknown): void;
-  updateMetadata(chatId: string, messages: readonly ChatMessage[]): void;
-  replaceMetadata(chatId: string): Promise<void>;
+  updateMetadata(chatId: string, transcriptViewId: string, messages: readonly ChatMessage[]): void;
+  replaceMetadata(chatId: string, transcriptViewId: string): Promise<void>;
   resendCandidates(chatId: string): readonly ResendCandidate[];
 }
 
@@ -35,7 +35,7 @@ async function applyTranscriptEvent(
 ): Promise<void> {
   if (!deps.chatExists(event.chatId)) return;
   if (event.type === 'view-replaced') {
-    await deps.replaceMetadata(event.chatId);
+    await deps.replaceMetadata(event.chatId, event.view.viewId);
     if (!deps.chatExists(event.chatId)) return;
     deps.broadcast(new ChatTranscriptReplacedMessage(
       event.chatId,
@@ -50,7 +50,7 @@ async function applyTranscriptEvent(
   const messages = ledgerRowsToTranscriptMessages(rows);
   const conversationalMessages = ledgerRowsToMessages(rows.filter(isConversationalLedgerRow));
   if (conversationalMessages.length > 0) {
-    deps.updateMetadata(event.chatId, conversationalMessages);
+    deps.updateMetadata(event.chatId, event.viewId, conversationalMessages);
   }
   deps.broadcast(new ChatMessagesMessage(
     event.chatId,

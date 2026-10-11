@@ -220,7 +220,9 @@ function createFixture(overrides = {}) {
     ...overrides.settings,
   };
   const metadata = {
+    repair: mock(async () => {}),
     updateFromAppendedMessages: mock(() => undefined),
+    invalidateTranscriptView: mock(() => undefined),
     replaceFromTranscriptView: mock(() => undefined),
     ...overrides.metadata,
   };
@@ -1219,6 +1221,16 @@ describe('server event wiring', () => {
     expect(fixture.queueService.retryQueuedSteers.mock.calls).toEqual([['chat-1']]);
   });
 
+  it('invalidates the browser list once after paced startup metadata repair completes', async () => {
+    const pending = Promise.withResolvers();
+    const fixture = createFixture({ metadata: { repair: mock(() => pending.promise) } });
+    const repair = fixture.wiring.repairChatMetadata();
+    expect(fixture.published).toEqual([]);
+    pending.resolve();
+    await repair;
+    expect(fixture.published).toEqual([{ type: 'chat-list-refresh-requested', reason: 'metadata-repaired', chatId: null }]);
+  });
+
   it('updates preview without scheduling a duplicate search rebuild for transcript commits', async () => {
     const fixture = createFixture();
 
@@ -1227,7 +1239,7 @@ describe('server event wiring', () => {
     await fixture.wiring.waitForIdle();
 
     expect(fixture.metadata.updateFromAppendedMessages).toHaveBeenCalledTimes(1);
-    expect(fixture.metadata.updateFromAppendedMessages).toHaveBeenCalledWith('chat-1', [
+    expect(fixture.metadata.updateFromAppendedMessages).toHaveBeenCalledWith('chat-1', 'view-1', [
       expect.objectContaining({ content: 'answer' }),
     ]);
     expect(fixture.searchIndex.catalogMayHaveChanged).not.toHaveBeenCalled();
@@ -1266,10 +1278,11 @@ describe('server event wiring', () => {
         contentStartOrdinal: 1,
       },
     });
+    expect(fixture.metadata.invalidateTranscriptView).toHaveBeenCalledWith('chat-1');
     await fixture.wiring.waitForIdle();
 
     expect(fixture.metadata.replaceFromTranscriptView)
-      .toHaveBeenCalledWith('chat-1', replacement);
+      .toHaveBeenCalledWith('chat-1', 'view-2', replacement);
     expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
     expect(fixture.published).toEqual([expect.objectContaining({
       type: 'chat-transcript-replaced',

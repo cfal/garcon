@@ -149,7 +149,7 @@ describe('transcript ledger read-fold matrix', () => {
         chatExists: () => true,
         schedule: (_chatId, task) => task(),
         broadcast: (message) => broadcasts.push(message),
-        updateMetadata: (_chatId, messages) => metadataUpdates.push(...messages),
+        updateMetadata: (_chatId, _viewId, messages) => metadataUpdates.push(...messages),
         replaceMetadata: () => undefined,
         resendCandidates: () => [],
       });
@@ -290,7 +290,7 @@ describe('transcript ledger read-fold matrix', () => {
         chatExists: () => true,
         schedule: (_chatId, task) => task(),
         broadcast: () => undefined,
-        updateMetadata: (_chatId, messages) => metadataUpdates.push(...messages),
+        updateMetadata: (_chatId, _viewId, messages) => metadataUpdates.push(...messages),
         replaceMetadata: () => undefined,
         resendCandidates: () => [],
       });
@@ -565,7 +565,7 @@ describe('transcript ledger read-fold matrix', () => {
         chatExists: () => true,
         schedule: (_chatId, task) => task(),
         broadcast: (message) => broadcasts.push(message),
-        updateMetadata: (_chatId, messages) => metadataUpdates.push(...messages),
+        updateMetadata: (_chatId, _viewId, messages) => metadataUpdates.push(...messages),
         replaceMetadata: () => undefined,
         resendCandidates: () => [],
       });
