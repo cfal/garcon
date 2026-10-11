@@ -46,6 +46,13 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       };
       const artifacts = join(import.meta.dirname, "../../artifacts/chromium");
       await mkdir(artifacts, { recursive: true });
+      const screenshot = async (name: string) => {
+        await page.locator("[data-composer-markdown-editor]").evaluate(element => {
+          element.scrollTop = 0;
+          element.scrollLeft = 0;
+        });
+        await page.screenshot({ path: join(artifacts, name) });
+      };
       for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: 900 });
         await textarea.fill("");
@@ -60,9 +67,7 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
             () => document.documentElement.scrollWidth <= innerWidth,
           ),
         ).toBe(true);
-        await page.screenshot({
-          path: join(artifacts, `composer-markdown-${width}.png`),
-        });
+        await screenshot(`composer-markdown-${width}.png`);
         await editor.locator("td").first().click();
         await page.keyboard.press("End");
         await page.keyboard.type(" edited");
@@ -88,11 +93,21 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
           await page.getByRole("menuitem", { name: "Format Markdown" }).click();
           await browserExpect(editor).toBeVisible();
           await browserExpect(editor).toBeFocused();
-          await editor.locator("td").first().click();
+          await editor.locator("td").first().locator("p").click();
+          await browserExpect
+            .poll(() => editor.evaluate(element => {
+              const mounted = element as HTMLElement & {
+                editor: { state: { selection: { $from: { parent: { textContent: string } } } } };
+              };
+              return mounted.editor.state.selection.$from.parent.textContent;
+            }))
+            .toBe("Startup ready edited");
           await page.keyboard.press("End");
           await page.keyboard.press("Shift+Enter");
           await page.keyboard.type("next paragraph");
-          await browserExpect(textarea).toHaveValue(/edited<br>next paragraph/);
+          await browserExpect(textarea).toHaveValue(
+            /\*\*Startup ready edited\*\*<br>\*\*next paragraph\*\*/,
+          );
           await page
             .getByRole("button", { name: "More composer actions" })
             .click();
@@ -233,9 +248,7 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await browserExpect(editor).toBeFocused();
       for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: 900 });
-        await page.screenshot({
-          path: join(artifacts, `composer-markdown-dark-${width}.png`),
-        });
+        await screenshot(`composer-markdown-dark-${width}.png`);
         await editor.locator("td").last().scrollIntoViewIfNeeded();
         await browserExpect(editor.locator("td").last()).toBeInViewport();
         await editor.locator("td").first().scrollIntoViewIfNeeded();
