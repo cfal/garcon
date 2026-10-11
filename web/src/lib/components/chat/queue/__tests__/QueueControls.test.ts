@@ -134,6 +134,30 @@ describe('inline queue', () => {
 		expect(container.querySelector('[data-queue-status-summary]')).toBeNull();
 	});
 
+	it('shows the first message without a next-entry label', () => {
+		const queue = makeQueue();
+		renderControls(queue);
+		const preview = row('q0').getByRole('button', {
+			name: m.chat_queue_toggle_message({ position: 1 }),
+		});
+		expect(preview.textContent?.trim()).toBe(queue.entries[0].content);
+	});
+
+	it('places queue-wide controls after and outside the scrollable messages', () => {
+		const { container } = renderControls(makeQueue(['q0']));
+		const tray = screen.getByRole('region', { name: m.chat_queue_dialog_title() });
+		const list = container.querySelector('[data-queue-list]');
+		const footer = container.querySelector('footer');
+		if (!list || !footer) throw new Error('Missing queue list or footer');
+		expect(tray.firstElementChild).toBe(list);
+		expect(list.nextElementSibling).toBe(footer);
+		const controls = within(footer);
+		const count = controls.getByText(m.chat_queue_pending_count({ count: 1 }));
+		expect(count.getAttribute('aria-live')).toBe('polite');
+		expect(controls.getByRole('button', { name: m.chat_queue_pause() })).toBeTruthy();
+		expect(controls.getByRole('button', { name: m.chat_queue_expand_all() })).toBeTruthy();
+	});
+
 	it.each([
 		['queued-turn-failed', m.chat_queue_pause_failed_detail()],
 		['completion-uncertain', m.chat_queue_pause_completion_uncertain_detail()],
@@ -144,10 +168,16 @@ describe('inline queue', () => {
 			kind === 'unknown'
 				? { id: 'pause-1', kind, entryId: 'departed', pausedAt: null }
 				: { id: 'pause-1', kind, entryId: 'departed', pausedAt: '2026-10-10T00:00:00.000Z' };
-		renderControls(paused);
-		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
-		expect(screen.getByText(detail, { exact: false })).toBeTruthy();
-		expect(screen.getByText(m.chat_queue_pause_affected_removed(), { exact: false })).toBeTruthy();
+		const { container } = renderControls(paused);
+		const footer = container.querySelector('footer');
+		if (!footer) throw new Error('Missing queue footer');
+		const controls = within(footer);
+		expect(controls.getByText(m.chat_queue_needs_attention())).toBeTruthy();
+		expect(controls.getByText(detail, { exact: false })).toBeTruthy();
+		expect(
+			controls.getByText(m.chat_queue_pause_affected_removed(), { exact: false }),
+		).toBeTruthy();
+		expect(controls.getByRole('button', { name: m.chat_queue_resume() })).toBeTruthy();
 	});
 
 	it('explains an active-turn failure without claiming a queued entry departed', () => {
