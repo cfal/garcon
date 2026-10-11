@@ -1,0 +1,180 @@
+import { expect, test } from "bun:test";
+import { expect as browserExpect } from "playwright/test";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { withChromiumFixture } from "../../support/chromium-fixture.js";
+
+const table =
+  "| Check | Example |\n| --- | --- |\n| **Startup ready** | Resolve earlier work before submitting. |\n| **Current data** | Use the latest observation.<br>Keep context current. |\n| **Code** | `a  b` |";
+
+test("editable Markdown tables preserve drafts, focus, submission, and responsive layout", async () => {
+  await withChromiumFixture(
+    "composer-markdown",
+    async ({ page, context, integration, assertNoBrowserErrors }) => {
+      const ids = [integration.newChatId(), integration.newChatId()];
+      for (const [index, chatId] of ids.entries()) {
+        const turn = await integration.client.startDirectChat({
+          chatId,
+          content: `Synthetic composer review ${index}`,
+          projectPath: integration.dirs.project,
+          agent: integration.directAgents.anthropic,
+        });
+        await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+        await integration.client.waitForProcessing(chatId, false);
+      }
+      await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+      await page.goto(`${integration.garcon.baseUrl}/chat/${ids[0]}`);
+      const textarea = page.getByPlaceholder("Reply...", { exact: true });
+      const editor = page.getByRole("textbox", { name: "Formatted message" });
+      const paste = async (text: string) => {
+        await page.evaluate(
+          (value) => navigator.clipboard.writeText(value),
+          text,
+        );
+        await page.keyboard.press("Control+V");
+      };
+      const artifacts = join(import.meta.dirname, "../../artifacts/chromium");
+      await mkdir(artifacts, { recursive: true });
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await textarea.fill("");
+        await textarea.focus();
+        await paste(table);
+        await browserExpect(editor).toBeVisible();
+        await browserExpect(editor).toBeFocused();
+        await browserExpect(editor.locator("table")).toHaveCount(1);
+        await browserExpect(textarea).toHaveValue(table);
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth,
+          ),
+        ).toBe(true);
+        await page.screenshot({
+          path: join(artifacts, `composer-markdown-${width}.png`),
+        });
+        await editor.locator("td").first().click();
+        await page.keyboard.press("End");
+        await page.keyboard.type(" edited");
+        await browserExpect(textarea).toHaveValue(/Startup ready.*edited/);
+        await browserExpect(textarea).toHaveValue(/`a  b`/);
+        if (width === 390) {
+          await page
+            .getByRole("button", { name: "More composer actions" })
+            .click();
+          await page
+            .getByRole("menuitem", { name: "Edit Markdown source" })
+            .click();
+        } else
+          await page
+            .getByRole("button", { name: "Edit Markdown source" })
+            .click();
+        await browserExpect(textarea).toBeVisible();
+        await browserExpect(textarea).toBeFocused();
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await textarea.fill(table);
+      await textarea.focus();
+      await paste("\nplain notes");
+      await browserExpect(editor).toHaveCount(0);
+      await browserExpect(textarea).toBeFocused();
+      const large = "synthetic log entry\n".repeat(55_189);
+      await textarea.fill("");
+      await textarea.focus();
+      const start = performance.now();
+      await paste(large);
+      await browserExpect
+        .poll(() => textarea.inputValue().then((value) => value.length))
+        .toBe(large.length);
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      const elapsed = performance.now() - start;
+      console.log(
+        `Large paste and animation frames: ${Math.round(elapsed)} ms`,
+      );
+      expect(elapsed).toBeLessThan(3_000);
+      await browserExpect(editor).toHaveCount(0);
+      await browserExpect(textarea).toBeFocused();
+      await textarea.fill("");
+      await textarea.focus();
+      await paste(table);
+      await browserExpect(editor).toBeFocused();
+      const richStart = performance.now();
+      await paste(large);
+      await browserExpect(editor).toHaveCount(0);
+      await browserExpect(textarea).toBeFocused();
+      expect((await textarea.inputValue()).includes(large)).toBe(true);
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+      console.log(`Large formatted paste to source: ${Math.round(performance.now() - richStart)} ms`);
+      expect(performance.now() - richStart).toBeLessThan(3_000);
+      for (const prefix of ["> ", "  "]) {
+        const nested =
+          (prefix === "  " ? "- Review\n\n" : "") +
+          table
+            .split("\n")
+            .map((line) => prefix + line)
+            .join("\n");
+        await textarea.fill("");
+        await textarea.focus();
+        await paste(nested);
+        await browserExpect(editor.locator("table")).toHaveCount(1);
+        await page
+          .getByRole("button", { name: "Edit Markdown source" })
+          .click();
+        await browserExpect(textarea).toHaveValue(nested);
+      }
+      const composerElement = await page
+        .locator("[data-composer]")
+        .elementHandle();
+      const bounds = await page.locator("[data-composer]").boundingBox();
+      for (const id of [ids[1], ids[0], ids[1], ids[0]]) {
+        await page
+          .locator(`[data-sidebar-virtual-row="${id}"]`)
+          .locator("button")
+          .first()
+          .click();
+        await page.waitForURL(`**/chat/${id}`);
+        expect(
+          await page.evaluate(
+            (element) => document.querySelector("[data-composer]") === element,
+            composerElement,
+          ),
+        ).toBe(true);
+        await browserExpect(editor).toHaveCount(0);
+      }
+      expect((await page.locator("[data-composer]").boundingBox())?.y).toBe(
+        bounds?.y,
+      );
+      await textarea.fill("");
+      await textarea.focus();
+      await paste(table);
+      await browserExpect(editor).toBeFocused();
+      await editor.locator("td").first().click();
+      await page.keyboard.press("End");
+      await page.keyboard.type(" submitted");
+      const submitted = await textarea.inputValue();
+      await editor.press("Enter");
+      await integration.client.waitForCommittedUserInput(ids[0], submitted);
+      await browserExpect(textarea).toHaveValue("");
+      await browserExpect(editor).toHaveCount(0);
+      await integration.client.waitForProcessing(ids[0], false);
+      await page.emulateMedia({ colorScheme: "dark" });
+      await browserExpect(page.locator("html")).toHaveClass(/dark/);
+      await textarea.fill("");
+      await textarea.focus();
+      await paste(table);
+      await browserExpect(editor).toBeFocused();
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.screenshot({ path: join(artifacts, `composer-markdown-dark-${width}.png`) });
+        await editor.locator("td").last().scrollIntoViewIfNeeded();
+        await browserExpect(editor.locator("td").last()).toBeInViewport();
+        await editor.locator("td").first().scrollIntoViewIfNeeded();
+      }
+      assertNoBrowserErrors();
+    },
+  );
+}, 180_000);

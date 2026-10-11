@@ -43,6 +43,7 @@ export class PromptComposerEditorController {
 			return false;
 		}
 		ui.closeFileMenu();
+		ui.closeFormattedDraft();
 		ui.closeSlashMenu();
 		ui.snippetPalette.dismiss();
 		const selection = promptEditorSelectionFromTextarea(textarea);

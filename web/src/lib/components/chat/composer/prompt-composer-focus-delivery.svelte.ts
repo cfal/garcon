@@ -2,7 +2,7 @@ interface PromptComposerFocusDeliveryOptions {
 	selectedChatId: string | null;
 	disabled: boolean;
 	visible: boolean;
-	textarea: HTMLTextAreaElement | undefined;
+	target: HTMLElement | undefined;
 	userInteractionGeneration(): number;
 }
 
@@ -33,7 +33,7 @@ export class PromptComposerFocusDelivery {
 
 	deliver(options: PromptComposerFocusDeliveryOptions): (() => void) | undefined {
 		const request = this.#pending;
-		const target = options.textarea;
+		const target = options.target;
 		if (!request || options.disabled || !options.visible || !target) return;
 		if (
 			request.chatId !== options.selectedChatId ||
