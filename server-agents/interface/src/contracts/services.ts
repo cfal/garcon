@@ -12,6 +12,7 @@ import type {
   AgentSettingsEnvelope,
 } from '@garcon/common/agent-integration';
 import type { AgentModelOption } from '@garcon/common/agents';
+import type { InputFormatByModel } from '@garcon/common/input-format';
 import type { ThinkingMode } from '@garcon/common/chat-modes';
 import type { JsonObject } from '@garcon/common/json';
 import type { SlashCommand } from '@garcon/common/slash-commands';
@@ -25,6 +26,7 @@ import type { AgentProducerBinding, AgentResourceRef, ExecutorCallOptions } from
 // Executes the accepted source without conversational preparation.
 export interface AgentLiteralExecution {
   readonly selectionLabel: string;
+  readonly inputFormatByModel: InputFormatByModel;
 }
 
 export interface AgentReadiness {

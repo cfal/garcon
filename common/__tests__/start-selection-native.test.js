@@ -10,7 +10,7 @@ const routed = {
 function catalog(models = [native, routed]) {
   return { catalog: {
     agents: [{
-      executionPolicy: 'conversation', selectionLabel: 'Model',
+      executionPolicy: 'conversation', selectionLabel: 'Model', inputFormatByModel: {},
       id: 'test', models, defaultModel: 'native-model',
       supportedPermissionModes: ['default'], supportedThinkingModes: ['none'],
       supportedProtocols: ['openai-compatible'], acceptsApiProviderEndpoints: true,

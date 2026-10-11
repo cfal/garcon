@@ -26,7 +26,7 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
       await mkdir(next);
       const catalog = await client.get<ModelCatalogResponse>(`/api/v1/models?executorId=${client.executorId}`);
       const agent = catalog.catalog.agents.find(entry => entry.id === 'shell');
-      expect(agent).toMatchObject({ executionPolicy: 'literal', selectionLabel: 'Shell', supportedPermissionModes: [], generation: null });
+      expect(agent).toMatchObject({ executionPolicy: 'literal', selectionLabel: 'Mode', inputFormatByModel: { 'notes-markdown': 'markdown' }, supportedPermissionModes: [], generation: null });
       expect(agent).not.toHaveProperty('selectionKind');
       expect(agent?.models.some(model => model.value === 'sh')).toBe(true);
       const auth = await client.get(`/api/v1/agents/auth?agent=shell&executorId=${client.executorId}`);
@@ -125,11 +125,23 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
       const cliAgents = await runCli(fixture, ['list', 'agents', '--json']);
       expect(cliAgents).toMatchObject({ exitCode: 0, stderr: '' });
       expect(JSON.parse(cliAgents.stdout).agents).toContainEqual(expect.objectContaining({
-        id: 'shell', executionPolicy: 'literal', selectionLabel: 'Shell',
+        id: 'shell', executionPolicy: 'literal', selectionLabel: 'Mode',
       }));
       const cliModels = await runCli(fixture, ['list', 'models', '--agent', 'shell', '--json']);
       expect(cliModels).toMatchObject({ exitCode: 0, stderr: '' });
-      expect(JSON.parse(cliModels.stdout)).toMatchObject({ agentId: 'shell', selectionLabel: 'Shell' });
+      expect(JSON.parse(cliModels.stdout)).toMatchObject({ agentId: 'shell', selectionLabel: 'Mode' });
+      for (const model of ['notes', 'notes-markdown']) {
+        const saved = await runCli(fixture, ['start', '--agent', 'shell', '--model', model, '--cwd', next, '**Synthetic CLI note**']);
+        expect(saved).toMatchObject({ exitCode: 0, stderr: '' });
+        expect(saved.stdout).toMatch(/^chat id: \d{16}\nturn id: [^\n]+\n$/);
+        const noteId = /^chat id: (\d{16})/m.exec(saved.stdout)![1]!;
+        await client.waitForProcessing(noteId, false);
+        await client.reloadChat(noteId);
+        expect((await client.getMessages(noteId)).messages.map(row => row.message)).toEqual([
+          expect.objectContaining({ type: 'user-message', content: '**Synthetic CLI note**',
+            metadata: expect.objectContaining({ contentMode: 'literal', contentFormat: model === 'notes' ? 'plain' : 'markdown' }) }),
+        ]);
+      }
       const cliStart = await runCli(fixture, ['start', '--agent', 'shell', '--model', 'sh', '--cwd', next,
         'printf "<garcon-get-chat-id />"']);
       expect(cliStart).toMatchObject({ exitCode: 0, stderr: '' });

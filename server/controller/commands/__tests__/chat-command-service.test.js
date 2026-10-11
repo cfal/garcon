@@ -5019,6 +5019,22 @@ describe('ChatCommandService', () => {
     expect(queue.triggerDrain).toHaveBeenCalledTimes(1);
   });
 
+  it('pins literal queue admission to captured ownership and mode, without changing accepted retries', async () => {
+    const { service, queue, agents, chats } = makeService({ session: { model: 'notes' } });
+    agents.executionPolicy.mockReturnValue('literal');
+    const input = { chatId: SOURCE_CHAT_ID, content: 'synthetic command-shaped note', clientRequestId: 'queue-mode',
+      expectedModel: 'notes', expectedAgentId: 'claude', expectedAgentOwnershipEpoch: 'epoch-1' };
+    await expect(service.submitQueueEntryCreate({ ...input, expectedModel: 'sh' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 409 });
+    await expect(service.submitQueueEntryCreate({ ...input, expectedAgentId: 'other' })).rejects.toMatchObject({ code: 'EXPECTED_AGENT_MISMATCH' });
+    await expect(service.submitQueueEntryCreate({ ...input, expectedAgentOwnershipEpoch: 'old' })).rejects.toMatchObject({ code: 'STALE_CHAT_OWNERSHIP' });
+    expect(queue.enqueueAccepted).not.toHaveBeenCalled();
+    expect((await service.submitQueueEntryCreate(input)).status).toBe('accepted');
+    chats.updateChat(SOURCE_CHAT_ID, { model: 'sh', agentOwnershipEpoch: 'epoch-2' });
+    expect((await service.submitQueueEntryCreate(input)).status).toBe('duplicate');
+    expect(queue.enqueueAccepted).toHaveBeenCalledTimes(1);
+    await expect(service.submitQueueEntryCreate({ ...input, expectedModel: 'sh' })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+  });
+
   it('passes queued attachments through and keys create retries by their content', async () => {
     const { service, queue } = makeService();
     const images = [{ data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' }];

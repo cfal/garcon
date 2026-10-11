@@ -186,14 +186,14 @@ describe('validateAgentIntegration', () => {
   });
 
   test.each([
-    { literalExecution: { selectionLabel: '' } },
+    { literalExecution: { selectionLabel: '', inputFormatByModel: {} } },
     { singleQuery: { async run() { return ''; } } },
     { compaction: { async compact() { return createAgentResourceRef(scope, 'execution'); } } },
     { steering: { async captureTarget() { return null; }, async steer() { return { kind: 'accepted' as const }; } } },
   ])('rejects incompatible literal execution capabilities: %j', patch => {
     expect(() => validateAgentIntegration({
       integrationClass: { integrationId: 'other', apiVersion: 5 },
-      integration: { ...integration, literalExecution: { selectionLabel: 'Runtime' }, ...patch },
+      integration: { ...integration, literalExecution: { selectionLabel: 'Runtime', inputFormatByModel: {} }, ...patch },
     })).toThrow('invalid literal execution contract');
   });
 });

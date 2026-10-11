@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clearChat } from '../chat-clear.js';
 import { ApiError, ApiMutationOutcomeUnknownError } from '../client.js';
 
-const request = { chatId: '1780000000000001', transcriptViewId: 'view-1', lastOrdinal: 3 };
+const request = { chatId: '1780000000000001', transcriptViewId: 'view-1', lastOrdinal: 3, target: { kind: 'all' as const } };
 const response = { success: true, chatId: request.chatId, transcriptViewId: 'view-2' };
 const fetchMock = vi.fn<typeof fetch>();
 beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal('fetch', fetchMock); });

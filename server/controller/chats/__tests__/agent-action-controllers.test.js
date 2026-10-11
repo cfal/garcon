@@ -49,7 +49,7 @@ function fixture(options = {}) {
     isEnabled: () => enabled,
   };
   const entry = {
-    executionPolicy: 'conversation', selectionLabel: 'Model',
+    executionPolicy: 'conversation', selectionLabel: 'Model', inputFormatByModel: {},
     id: 'test', models: [{ value: 'test-model', label: 'Test' }], defaultModel: 'test-model',
     supportedPermissionModes: ['default', 'bypassPermissions'], supportedThinkingModes: ['none', 'high'],
     supportedProtocols: [], acceptsApiProviderEndpoints: false, requiresStrictModelDiscovery: true,

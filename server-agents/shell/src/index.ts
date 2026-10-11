@@ -3,7 +3,7 @@ import { createVersionedSettings } from '@garcon/server-agent-common/settings/ve
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createAgentProjectPathUpdates } from '@garcon/server-agent-common/execution/project-path-adapter';
-import { createShellCatalog, discoverShells, requireShell } from './catalog.js';
+import { createShellCatalog, isNotesMode, requireShell, SHELL_INPUT_FORMATS } from './catalog.js';
 import { ShellExecution } from './execution.js';
 import { ShellNativeStore } from './native-store.js';
 
@@ -19,7 +19,7 @@ export default class ShellIntegration implements AgentIntegration {
       { key: 'GARCON_TERMINAL_SHELL', source: 'environment', description: 'Executor preferred shell override.' },
     ],
   } as const;
-  readonly literalExecution = { selectionLabel: 'Shell' };
+  readonly literalExecution = { selectionLabel: 'Mode', inputFormatByModel: SHELL_INPUT_FORMATS };
   readonly readiness;
   readonly attachments = null;
   readonly auth = null;
@@ -58,12 +58,11 @@ export default class ShellIntegration implements AgentIntegration {
     this.catalog = createShellCatalog(host);
     this.readiness = { async status(signal: AbortSignal) {
       signal.throwIfAborted();
-      const ready = discoverShells(host).length > 0;
-      return { ready, reason: ready ? 'A supported shell is available on this executor.' : 'No supported shell was found on this executor.' };
+      return { ready: true, reason: 'Notes is available; executable modes depend on this executor\'s installed shells.' };
     } };
     this.configurationValidation = { async validate(configuration, options) {
       options?.signal?.throwIfAborted();
-      requireShell(host, configuration.model);
+      if (!isNotesMode(configuration.model)) requireShell(host, configuration.model);
       if (configuration.endpoint) throw new AgentIntegrationError('INVALID_ENDPOINT', 'Shell does not accept API endpoints.', false);
     } };
     this.settings = createVersionedSettings({ ownerId: 'shell', schemaVersion: 1, defaults: {}, descriptors: [] });

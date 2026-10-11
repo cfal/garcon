@@ -23,6 +23,13 @@ const chatId = '1780000000000001';
 const session = { agentSessionId: 'session-1', nativeSession: null, nativeSeedReceipt: null };
 const boundary = { kind: 'new-chat', ownershipEpoch: 'owner-1' };
 
+function userDraft(content) {
+  return { kind: 'user-input', at, providerMeta: null, detail: {
+    message: new UserMessage(at, content, undefined, { contentMode: 'literal' }), clientMessageId: content,
+    attachments: [], steer: false, preambleBoundary: null, preamblePrefixReceipt: null,
+  } };
+}
+
 async function withClear(run, { hasSession = true, frozenRows = 0 } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'ledger-clear-'));
   const ledger = new TranscriptLedgerService(new TranscriptLedgerStore(root));
@@ -43,11 +50,11 @@ async function withClear(run, { hasSession = true, frozenRows = 0 } = {}) {
     withChatExecutionControl: mock(async (_id, operation) => operation(await execution.readChatExecutionControl())),
   };
   const options = { ledger, registry, execution, ownership: { hasPending: () => false },
-    integrations: { get: mock(() => ({ literalExecution: { selectionLabel: 'Runtime' } })) },
+    integrations: { get: mock(() => ({ literalExecution: { selectionLabel: 'Runtime', inputFormatByModel: {} } })) },
     adoption: { ensure: mock(async () => {}) },
     chatMutationLock: new KeyedPromiseLock(), reopenProducer: () => { lease = ledger.openProducer(chatId, 'test'); } };
   const clear = new TranscriptClearService(options);
-  const request = () => { const head = ledger.highWatermark(chatId); return { chatId, transcriptViewId: head.viewId, lastOrdinal: head.ordinal }; };
+  const request = () => { const head = ledger.highWatermark(chatId); return { chatId, transcriptViewId: head.viewId, lastOrdinal: head.ordinal, target: { kind: 'all' } }; };
   const native = [];
   const reload = new TranscriptReloadService({ ...options,
     integrations: { require: () => ({ descriptor: { id: 'test' }, settings: { parse: (value) => value, defaults: () => ({ ownerId: 'test', schemaVersion: 1, values: {} }) },
@@ -87,6 +94,132 @@ it('allows an empty replacement without a native session', async () => {
     expect(ledger.currentRows(chatId)).toEqual([]);
     expect(ledger.currentView(chatId).contentStartOrdinal).toBe(1);
   }, { hasSession: false });
+});
+
+it.each([
+  { ordinal: 3, hasLaterSession: true, expectedStart: 2, support: false },
+  { ordinal: 5, hasLaterSession: true, expectedStart: 1, support: false },
+  { ordinal: 5, hasLaterSession: false, expectedStart: 1, support: true },
+])('retains raw suffix and the binding boundary for %j', async ({ ordinal, hasLaterSession, expectedStart, support }) => {
+  await withClear(async ({ ledger, clear, request }) => {
+    const drafts = [userDraft('Synthetic old input'), { kind: 'provider-row', at, message: new AssistantMessage(at, 'Old answer') },
+      userDraft('Synthetic frozen input'), { kind: 'session', at, detail: session }, userDraft('Synthetic current input'),
+      { kind: 'notice', at, message: 'Synthetic diagnostic', detail: { type: 'diagnostic' } },
+      { kind: 'run-ended', at, outcome: 'finished', origin: 'provider', providerMeta: { synthetic: true } },
+      ...(hasLaterSession ? [{ kind: 'session', at, detail: session }] : []),
+    ];
+    const staged = await ledger.stageView(chatId, drafts, 4);
+    ledger.replaceCurrentView(chatId, ledger.currentView(chatId).viewId, staged.viewId);
+    const original = ledger.currentRows(chatId);
+    const target = { ...request(), target: { kind: 'before-message', ordinal } };
+    await clear.clear(target, new AbortController().signal);
+    const rows = ledger.currentRows(chatId);
+    const payload = ({ viewId, ordinal, ...row }) => row;
+    expect(rows.slice(support ? 1 : 0).map(payload)).toEqual(original.slice(ordinal - 1).map(payload));
+    expect(rows.map(row => row.ordinal)).toEqual(rows.map((_row, index) => index + 1));
+    expect(ledger.currentView(chatId).contentStartOrdinal).toBe(expectedStart);
+    expect(ledger.currentSession(chatId).detail).toEqual(session);
+    await expect(clear.clear(target, new AbortController().signal)).rejects.toMatchObject({ code: 'STALE_TRANSCRIPT_VIEW' });
+  });
+});
+
+it('retains a sessionless frozen suffix without creating a native binding', async () => {
+  await withClear(async ({ ledger, clear, request }) => {
+    const staged = await ledger.stageView(chatId, [userDraft('First note'), userDraft('Second note')], 3);
+    ledger.replaceCurrentView(chatId, ledger.currentView(chatId).viewId, staged.viewId);
+    await clear.clear({ ...request(), target: { kind: 'before-message', ordinal: 2 } }, new AbortController().signal);
+    expect(ledger.currentView(chatId).contentStartOrdinal).toBe(2);
+    expect(ledger.currentSession(chatId)).toBeNull();
+    expect(ledgerRowsToMessages(ledger.currentRows(chatId)).map(row => row.content)).toEqual(['Second note']);
+  });
+});
+
+it('remaps retained typed correlations but leaves deleted sources and authored text unchanged', async () => {
+  await withClear(async ({ ledger, clear, request }) => {
+    const viewId = crypto.randomUUID();
+    const oldSource = { requestViewId: viewId, requestOrdinal: 2 };
+    const keptSource = { requestViewId: viewId, requestOrdinal: 3 };
+    const schedule = { type: 'agent-schedule-outcome', ...keptSource, status: 'failed', reason: 'action-failed', nativeResultInput: true };
+    const ticket = { type: 'ticket-command-outcome', ...keptSource, command: 'list', status: 'ok', nativeResultInput: true };
+    const stale = { ...schedule, ...oldSource };
+    const text = `Synthetic authored reference ${viewId}:2`;
+    const staged = await ledger.stageView(chatId, [
+      { kind: 'session', at, detail: session, providerMeta: null }, userDraft('Old input'), userDraft(text),
+      ...[schedule, ticket, stale].map(detail => ({ kind: 'notice', at, message: 'Synthetic result', detail, providerMeta: { retained: true } })),
+    ], 1, viewId);
+    ledger.replaceCurrentView(chatId, ledger.currentView(chatId).viewId, staged.viewId);
+    await clear.clear({ ...request(), target: { kind: 'before-message', ordinal: 3 } }, new AbortController().signal);
+    const rows = ledger.currentRows(chatId);
+    expect(rows[0].kind).toBe('session');
+    expect(rows[1].detail.message.content).toBe(text);
+    const replacement = ledger.currentView(chatId).viewId;
+    expect(rows.slice(2).map(row => row.detail)).toEqual([
+      { ...schedule, requestViewId: replacement, requestOrdinal: 2 },
+      { ...ticket, requestViewId: replacement, requestOrdinal: 2 }, stale,
+    ]);
+    expect(rows.slice(2).every(row => row.providerMeta.retained)).toBe(true);
+  });
+});
+
+it('cancels a paged retained-tail scan without replacing history or losing the producer', async () => {
+  await withClear(async fixture => {
+    const { ledger, clear, request } = fixture;
+    const staged = await ledger.stageView(chatId, [
+      { kind: 'session', at, detail: session },
+      ...Array.from({ length: 600 }, (_, index) => userDraft(`Synthetic note ${index}`)),
+    ], 1);
+    ledger.replaceCurrentView(chatId, ledger.currentView(chatId).viewId, staged.viewId);
+    const before = ledger.currentRows(chatId);
+    const cancellation = new AbortController();
+    const pages = ledger.rowPagesThrough.bind(ledger);
+    ledger.rowPagesThrough = async function* (...args) {
+      for await (const page of pages(...args)) {
+        yield page;
+        cancellation.abort(new Error('Synthetic cancellation'));
+      }
+    };
+    await expect(clear.clear({ ...request(), target: { kind: 'before-message', ordinal: 3 } }, cancellation.signal))
+      .rejects.toThrow('Synthetic cancellation');
+    expect(ledger.currentRows(chatId)).toEqual(before);
+    expect(fixture.lease.closed).toBe(false);
+    expect(fixture.execution.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
+  });
+});
+
+it.each([0, 1, 2, 99])('rejects a non-user or out-of-bounds partial-clear target %s without replacement', async ordinal => {
+  await withClear(async fixture => {
+    const original = fixture.request();
+    await expect(fixture.clear.clear({ ...original, target: { kind: 'before-message', ordinal } }, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(fixture.request()).toEqual(original);
+    expect(fixture.lease.closed).toBe(false);
+  });
+});
+
+it('partitions repeated preamble receipts without duplicating surviving input pairs', async () => {
+  await withClear(async fixture => {
+    const { ledger, clear, request } = fixture;
+    for (const index of [1, 2]) {
+      ledger.appendInputAndCompose({ chatId, viewId: ledger.currentView(chatId).viewId,
+        message: new UserMessage(at, `Synthetic input ${index}`), attachments: [], clientMessageId: `input-${index}`,
+        steer: false, preambleBoundary: boundary,
+        preambles: [{ id: '3502b645-222b-49d2-ac39-1c91f9fb1174', title: 'Synthetic rules', content: 'Synthetic body',
+          enabled: true, scope: { type: 'global' }, createdAt: at, updatedAt: at }],
+      });
+      ledger.beginRun(chatId, `run-${index}`);
+      fixture.lease.sink.publish({ type: 'run-ended', runId: `run-${index}`, outcome: 'finished' });
+    }
+    const originalEvidence = collectPreambleHistoryEvidence(ledger.currentRows(chatId));
+    for (let repeat = 0; repeat < 2; repeat++) {
+      const selected = ledger.currentRows(chatId).find(row => row.kind === 'user-input' && row.detail.clientMessageId === 'input-2');
+      await clear.clear({ ...request(), target: { kind: 'before-message', ordinal: selected.ordinal } }, new AbortController().signal);
+      expect(collectPreambleHistoryEvidence(ledger.currentRows(chatId))).toEqual(originalEvidence);
+      expect(ledgerRowsToMessages(ledger.currentRows(chatId)).map(row => row.content)).toEqual(['Preambles applied', 'Synthetic input 2']);
+      expect(JSON.stringify(ledger.currentRows(chatId))).not.toContain('Synthetic input 1');
+    }
+    await clear.clear(request(), new AbortController().signal);
+    expect(collectPreambleHistoryEvidence(ledger.currentRows(chatId))).toEqual(originalEvidence);
+  });
 });
 
 it.each([null, { literalExecution: null }])('rejects unknown and conversational agents before reservation: %j', async integration => {

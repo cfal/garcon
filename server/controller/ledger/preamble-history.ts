@@ -40,6 +40,7 @@ export function collectPreambleHistoryEvidence(
 
 export class PreambleHistoryCollector {
   readonly #evidence: PreambleHistoryEvidence[] = [];
+  readonly #sourceOrdinals: number[] = [];
   readonly #activeApplications: number[] = [];
   #pendingPreambles: readonly AppliedPreambleReference[] | null = null;
 
@@ -51,6 +52,7 @@ export class PreambleHistoryCollector {
           throw new Error('Preamble application notice is not adjacent to its input receipt');
         }
         this.#activeApplications.push(this.#evidence.length);
+        this.#sourceOrdinals.push(row.ordinal);
         this.#evidence.push({
           receipt: row.detail.preamblePrefixReceipt,
           boundary: row.detail.preambleBoundary,
@@ -63,7 +65,9 @@ export class PreambleHistoryCollector {
       } else if (row.kind === 'user-input' && row.detail.preamblePrefixReceipt) {
         throw new Error('Preamble input receipt has no adjacent application notice');
       } else if (row.kind === 'session' && row.providerMeta?.garconPreambleHistory !== undefined) {
-        this.#evidence.push(...parseRetainedEvidence(row.providerMeta.garconPreambleHistory));
+        const retained = parseRetainedEvidence(row.providerMeta.garconPreambleHistory);
+        this.#evidence.push(...retained);
+        this.#sourceOrdinals.push(...retained.map(() => row.ordinal));
       } else if (row.kind === 'run-ended' && row.origin === 'provider') {
         for (const index of this.#activeApplications) {
           this.#evidence[index] = { ...this.#evidence[index]!, requiresNativeOccurrence: true };
@@ -76,6 +80,10 @@ export class PreambleHistoryCollector {
   finish(): readonly PreambleHistoryEvidence[] {
     if (this.#pendingPreambles !== null) throw new Error('Preamble application notice is not adjacent to its input receipt');
     return this.#evidence;
+  }
+
+  finishBefore(ordinal: number): readonly PreambleHistoryEvidence[] {
+    return this.finish().filter((_entry, index) => this.#sourceOrdinals[index]! < ordinal);
   }
 }
 

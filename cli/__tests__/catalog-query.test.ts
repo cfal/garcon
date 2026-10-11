@@ -13,7 +13,7 @@ const catalog: ModelCatalogResponse = {
       label: 'Codex',
       description: 'OpenAI Codex',
       executionPolicy: 'conversation',
-      selectionLabel: 'Model',
+      selectionLabel: 'Model', inputFormatByModel: {},
       kind: 'agent',
       supportsFork: true,
       supportsForkAtMessage: true,
@@ -145,7 +145,7 @@ describe('runCatalogQuery', () => {
     const variants = structuredClone(catalog);
     const agent = variants.catalog.agents[0]!;
     Object.assign(agent, {
-      selectionLabel: 'Runtime', executionPolicy: 'literal',
+      selectionLabel: 'Runtime', inputFormatByModel: {}, executionPolicy: 'literal',
       acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'variant',
       models: [{ value: 'variant', label: 'Variant', isLocal: true }],
     });

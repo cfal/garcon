@@ -14,7 +14,7 @@ import {
   hasPendingTurnInput,
   toClientChatExecutionControlState,
 } from '../chat-execution/control-state.ts';
-import type { CommandLedgerRecord } from './command-ledger.js';
+import type { CommandLedgerRecord, LedgerAcceptInput } from './command-ledger.js';
 import {
   CommandSupport,
   CommandValidationError,
@@ -276,7 +276,7 @@ export class QueueCommands {
   ): Promise<QueueEntryCommandResponse> {
     const content = input.content;
     const preparedEntryId = crypto.randomUUID();
-    const ledger = await this.deps.ledger.accept({
+    const acceptance: LedgerAcceptInput = {
       commandType: 'queue-entry-create',
       chatId: input.chatId,
       clientRequestId: this.support.requireClientRequestId(input.clientRequestId),
@@ -287,9 +287,17 @@ export class QueueCommands {
         excludedResendOrdinals: input.excludedResendOrdinals,
         content,
         images: input.images,
+        expectedModel: input.expectedModel,
+        expectedAgentId: input.expectedAgentId,
+        expectedAgentOwnershipEpoch: input.expectedAgentOwnershipEpoch,
       },
       entryId: preparedEntryId,
-    });
+    };
+    const observed = await this.deps.ledger.observe(acceptance);
+    if (!observed || (observed.kind === 'duplicate' && observed.record.status === 'accepted')) {
+      this.assertQueueSelection(input);
+    }
+    const ledger = observed ?? await this.deps.ledger.accept(acceptance);
     this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
     const recoveringAcceptedCommand = ledger.kind === 'duplicate' && ledger.record.status === 'accepted';
     if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
@@ -344,6 +352,21 @@ export class QueueCommands {
       chatId: input.chatId,
       control: toClientChatExecutionControlState(queue),
     };
+  }
+
+  private assertQueueSelection(input: QueueEntryCreateCommandRequest): void {
+    const chat = this.deps.chats.getChat(input.chatId);
+    if (!chat) throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+    if (input.expectedAgentOwnershipEpoch !== undefined && input.expectedAgentOwnershipEpoch !== chat.agentOwnershipEpoch) {
+      throw new CommandValidationError('STALE_CHAT_OWNERSHIP', 'Chat ownership changed before the message was queued.', 409);
+    }
+    if (input.expectedAgentId !== undefined && input.expectedAgentId !== chat.agentId) {
+      throw new CommandValidationError('EXPECTED_AGENT_MISMATCH', 'Chat agent changed before the message was queued.', 409);
+    }
+    if (input.expectedModel !== undefined && input.expectedModel !== chat.model
+      && this.deps.agents.executionPolicy(chat.agentId, chat.executorId) === 'literal') {
+      throw new CommandValidationError('VALIDATION_FAILED', 'Execution mode changed before the message was queued.', 409);
+    }
   }
 
   private async throwRecordedQueueMutationFailure(record: CommandLedgerRecord): Promise<void> {

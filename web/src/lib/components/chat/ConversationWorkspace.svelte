@@ -383,6 +383,15 @@
 			const panel = assertRenderedPanel(surfaceId, chatId);
 			void controller.forkChat(chatId, upToOrdinal, panel.transcript);
 		},
+		clearBefore(surfaceId, chatId, ordinal) {
+			const panel = assertRenderedPanel(surfaceId, chatId);
+			const chat = sessions.byId[chatId];
+			if (!chat || rootModelCatalog.forExecutor(chat.executorId).getAgent(chat.agentId)?.executionPolicy !== 'literal') return;
+			controller.clearHistory.requestBeforeMessage(chatId, {
+				transcriptViewId: panel.transcript.transcriptViewId,
+				lastOrdinal: panel.transcript.lastOrdinal,
+			}, ordinal);
+		},
 		appendToDraft(surfaceId, chatId, block) {
 			assertRenderedPanel(surfaceId, chatId);
 			if (!allowsConversationalActions(chatId)) return;
@@ -919,6 +928,7 @@
 	<ExecutorHandoffDialog handoff={controller.executorHandoff} />
 	<ClearChatDialog
 		open={controller.clearHistory.isOpen}
+		targetKind={controller.clearHistory.targetKind}
 		busy={controller.clearHistory.busy}
 		error={controller.clearHistory.error}
 		onCancel={() => controller.clearHistory.cancel()}

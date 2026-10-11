@@ -284,6 +284,7 @@
 				pendingPermissionRequests={pendingPermissions}
 				onRetry={() => actions?.reload(surfaceId, chatId)}
 				onForkChat={(ordinal) => actions?.fork(surfaceId, chatId, ordinal)}
+				onClearBefore={(ordinal) => actions?.clearBefore(surfaceId, chatId, ordinal)}
 				onAppendToDraft={conversationActions ? (block) => actions?.appendToDraft(surfaceId, chatId, block) : undefined}
 				onGenerateTitleFromMessage={(message, ordinal) =>
 					actions?.generateTitle(surfaceId, chatId, message, ordinal) ?? Promise.resolve()}

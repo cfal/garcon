@@ -37,7 +37,7 @@ function agent(overrides = {}) {
     id: 'codex',
     label: 'Codex',
     executionPolicy: 'conversation',
-    selectionLabel: 'Model',
+    selectionLabel: 'Model', inputFormatByModel: {},
     kind: 'agent',
     supportsFork: true,
     supportsForkAtMessage: true,
@@ -110,7 +110,7 @@ function expectCode(operation, code) {
 describe('shared start selection', () => {
   test.each([
     { executionPolicy: undefined }, { executionPolicy: 'unknown' },
-    { selectionLabel: undefined }, { selectionLabel: '' },
+    { selectionLabel: undefined }, { selectionLabel: '', inputFormatByModel: {} },
   ])('rejects incomplete execution metadata: %j', invalid => {
     expectCode(() => resolveModelSelection(catalog(agent(invalid)), 'codex', {
       model: 'gpt-5.4',

@@ -36,6 +36,10 @@ export interface SubmissionContext {
 	text: string;
 	content: string;
 	contentMode: 'literal' | undefined;
+	contentFormat?: 'plain' | 'markdown';
+	model?: string;
+	expectedAgentId?: string;
+	expectedAgentOwnershipEpoch?: string;
 	images: ChatImage[];
 	previousText: string;
 	previousImages: File[];
@@ -105,6 +109,9 @@ export async function submitQueueRoute(
 		chatId: context.chatId,
 		transcriptViewId: requireTranscriptView(deps, context.chatId),
 		content: context.content,
+		expectedModel: context.model,
+		expectedAgentId: context.expectedAgentId,
+		expectedAgentOwnershipEpoch: context.expectedAgentOwnershipEpoch,
 		images: context.images.length > 0 ? context.images : undefined,
 		excludedResendOrdinals: [...deps.chatState.excludedResendOrdinals],
 	});
@@ -148,7 +155,7 @@ export async function submitSteerRoute(
 		whenTurnUnavailable: 'queue',
 	});
 	deps.chatState.upsertOptimisticUserInput(
-		optimisticUserInput(context.chatId, context.content, [], submission.clientMessageId, context.contentMode),
+		optimisticUserInput(context.chatId, context.content, [], submission.clientMessageId, context.contentMode, context.contentFormat),
 	);
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	const clearedComposerRevision = clearOwnedComposer(deps, context);
@@ -186,6 +193,7 @@ export function submitSteerPreferenceRoute(
 		text: string;
 		supportsSteering: boolean;
 		contentMode: 'literal' | undefined;
+		contentFormat?: 'plain' | 'markdown';
 	},
 ): Promise<ConversationSubmissionOutcome> {
 	const rejection = steerSubmissionRejection({
@@ -209,6 +217,7 @@ export function submitSteerPreferenceRoute(
 		text: input.text,
 		content: input.text,
 		contentMode: input.contentMode,
+		contentFormat: input.contentFormat,
 		images: [],
 		previousText: deps.composerState.inputText,
 		previousImages: [...deps.composerState.images],
@@ -281,6 +290,9 @@ export async function submitRunRoute(
 		chatId: context.chatId,
 		transcriptViewId: requireTranscriptView(deps, context.chatId),
 		command: context.text,
+		...(context.model === undefined ? {} : { model: context.model }),
+		expectedAgentId: context.expectedAgentId,
+		expectedAgentOwnershipEpoch: context.expectedAgentOwnershipEpoch,
 		images: context.images.length > 0 ? context.images : undefined,
 		excludedResendOrdinals: [...deps.chatState.excludedResendOrdinals],
 	});
@@ -342,7 +354,7 @@ function beginOptimisticInput(
 	clientMessageId: string,
 ): number | null {
 	deps.chatState.upsertOptimisticUserInput(
-		optimisticUserInput(context.chatId, context.text, context.images, clientMessageId, context.contentMode),
+		optimisticUserInput(context.chatId, context.text, context.images, clientMessageId, context.contentMode, context.contentFormat),
 	);
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	const composerRevisionAfterClear = clearOwnedComposer(deps, context);

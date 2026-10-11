@@ -26,7 +26,7 @@ function agentEntry(id: string, overrides: Record<string, unknown> = {}): Record
 		label: id,
 		kind: 'agent',
 		executionPolicy: 'conversation',
-		selectionLabel: 'Model',
+		selectionLabel: 'Model', inputFormatByModel: {},
 		supportsFork: false,
 		supportsForkAtMessage: false,
 		supportsForkWhileRunning: false,
@@ -50,6 +50,14 @@ function catalogBody(agents: unknown[], apiProviders: unknown[] = []): unknown {
 }
 
 describe('ModelCatalogStore', () => {
+	it('retains selection-specific input formats through cold hydration', async () => {
+		localStorage.clear();
+		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('shell', {
+			executionPolicy: 'literal', inputFormatByModel: { 'notes-markdown': 'markdown' },
+		})])));
+		await createModelCatalogStore().forceRefresh();
+		expect(createModelCatalogStore().getAgent('shell')?.inputFormatByModel).toEqual({ 'notes-markdown': 'markdown' });
+	});
 	beforeEach(() => {
 		localStorage.clear();
 		vi.mocked(clientApi.apiFetch).mockReset();
@@ -102,7 +110,7 @@ describe('ModelCatalogStore', () => {
 
 		it.each([
 			{ executionPolicy: undefined }, { executionPolicy: 'unknown' },
-			{ selectionLabel: undefined }, { selectionLabel: '' },
+			{ selectionLabel: undefined }, { selectionLabel: '', inputFormatByModel: {} },
 		])('rejects incomplete HTTP and persisted metadata: %j', async missing => {
 			const entry = agentEntry('sample', missing);
 			const cached = { schemaVersion: 2, agentMetadata: { sample: entry },

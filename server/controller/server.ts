@@ -417,6 +417,24 @@ export async function startServer(): Promise<void> {
 
     agentRegistry = new AgentRegistry({
       onSettingsCommitted: (chatId) => eventWiring?.notifyChatSettingsUpdated(chatId),
+      settingsExecution: {
+        reserveTranscriptSnapshot: (chatId) => {
+          if (!queue) throw new Error('Chat execution coordinator is not initialized');
+          return queue.reserveTranscriptSnapshot(chatId);
+        },
+        releaseTranscriptSnapshot: (reservation) => {
+          if (!queue) throw new Error('Chat execution coordinator is not initialized');
+          return queue.releaseTranscriptSnapshot(reservation);
+        },
+        readChatExecutionControl: (chatId) => {
+          if (!queue) throw new Error('Chat execution coordinator is not initialized');
+          return queue.readChatExecutionControl(chatId);
+        },
+        withChatExecutionControl: (chatId, operation) => {
+          if (!queue) throw new Error('Chat execution coordinator is not initialized');
+          return queue.withChatExecutionControl(chatId, operation);
+        },
+      },
       resolveFileMentions,
       registry: chatRegistry,
       integrations: integrationRegistry,

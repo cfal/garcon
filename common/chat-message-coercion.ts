@@ -38,6 +38,7 @@ export function parseChatMessageMetadata(value: unknown): ChatMessageMetadata | 
   const raw = asRecord(value);
   const metadata: ChatMessageMetadata = {};
   if (raw.contentMode === 'literal') metadata.contentMode = 'literal';
+  if (raw.contentFormat === 'plain' || raw.contentFormat === 'markdown') metadata.contentFormat = raw.contentFormat;
   if (typeof raw.clientRequestId === 'string') metadata.clientRequestId = raw.clientRequestId;
   if (typeof raw.clientMessageId === 'string') metadata.clientMessageId = raw.clientMessageId;
   if (typeof raw.upstreamRequestId === 'string') metadata.upstreamRequestId = raw.upstreamRequestId;
