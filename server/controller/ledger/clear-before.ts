@@ -16,21 +16,21 @@ export async function stageBeforeMessage(
   flushBoundary: () => Promise<void>,
 ): Promise<TranscriptView> {
   if (!Number.isSafeInteger(ordinal) || ordinal < 1 || ordinal > watermark.ordinal) throw invalidTarget();
-  const edge = ledger.page(chatId, current.viewId, 2, ordinal + 1).rows;
-  const selected = edge.at(-1);
+  const targetRows = ledger.page(chatId, current.viewId, 2, ordinal + 1).rows;
+  const selected = targetRows.at(-1);
   if (selected?.ordinal !== ordinal || selected.kind !== 'user-input') throw invalidTarget();
-  const previous = edge.at(-2);
-  const firstOrdinal = previous?.kind === 'notice' && isPreambleApplicationNoticeDetail(previous.detail)
+  const previous = targetRows.at(-2);
+  const retainedStartOrdinal = previous?.kind === 'notice' && isPreambleApplicationNoticeDetail(previous.detail)
     ? previous.ordinal : ordinal;
   const session = ledger.currentSession(chatId);
   const collector = new PreambleHistoryCollector();
   const drafts: LedgerRowDraft[] = [];
   const steps = new EventLoopSteps('ledger-clear-before');
-  const fromOrdinal = session ? Math.min(firstOrdinal, current.contentStartOrdinal) : firstOrdinal;
-  for await (const page of ledger.rowPagesThrough(chatId, watermark, fromOrdinal, signal)) {
+  const scanStartOrdinal = session ? Math.min(retainedStartOrdinal, current.contentStartOrdinal) : retainedStartOrdinal;
+  for await (const page of ledger.rowPagesThrough(chatId, watermark, scanStartOrdinal, signal)) {
     for (const row of page) {
       if (session && row.ordinal >= current.contentStartOrdinal) collector.add([row]);
-      if (row.ordinal >= firstOrdinal) {
+      if (row.ordinal >= retainedStartOrdinal) {
         const { viewId: _viewId, ordinal: _ordinal, ...draft } = row;
         drafts.push(draft);
       }
@@ -38,12 +38,11 @@ export async function stageBeforeMessage(
     }
   }
   await flushBoundary();
-  const removedEvidence = collector.finishBefore(firstOrdinal);
-  const contentStartOrdinal = Math.max(0, current.contentStartOrdinal - firstOrdinal) + 1;
-  const supportIndex = contentStartOrdinal - 1;
-  const needsSupport = session !== null && (session.ordinal < firstOrdinal || removedEvidence.length > 0);
+  const removedEvidence = collector.finishBefore(retainedStartOrdinal);
+  const retainedFrozenRowCount = Math.max(0, current.contentStartOrdinal - retainedStartOrdinal);
+  const needsSupport = session !== null && (session.ordinal < retainedStartOrdinal || removedEvidence.length > 0);
   if (needsSupport) {
-    drafts.splice(supportIndex, 0, {
+    drafts.splice(retainedFrozenRowCount, 0, {
       kind: 'session', at: session.at, detail: session.detail,
       providerMeta: retainedPreambleHistoryMetadata(removedEvidence),
     });
@@ -54,15 +53,18 @@ export async function stageBeforeMessage(
     const correlation = draft.kind === 'notice'
       ? projectLedgerAgentCommandOutcome(draft.detail) ?? projectLedgerTicketCommandOutcome(draft.detail) : null;
     if (draft.kind === 'notice' && correlation?.requestViewId === current.viewId
-      && correlation.requestOrdinal >= firstOrdinal && correlation.requestOrdinal <= watermark.ordinal) {
-      const index = correlation.requestOrdinal - firstOrdinal;
-      drafts[draftIndex] = { ...draft, detail: { ...draft.detail, requestViewId: viewId,
-        requestOrdinal: index + 1 + (needsSupport && index >= supportIndex ? 1 : 0) } };
+      && correlation.requestOrdinal >= retainedStartOrdinal && correlation.requestOrdinal <= watermark.ordinal) {
+      const retainedRequestIndex = correlation.requestOrdinal - retainedStartOrdinal;
+      let requestOrdinal = retainedRequestIndex + 1;
+      if (needsSupport && retainedRequestIndex >= retainedFrozenRowCount) requestOrdinal += 1;
+      drafts[draftIndex] = {
+        ...draft, detail: { ...draft.detail, requestViewId: viewId, requestOrdinal },
+      };
     }
     await steps.next();
   }
   signal.throwIfAborted();
-  return ledger.stageView(chatId, drafts, contentStartOrdinal, viewId);
+  return ledger.stageView(chatId, drafts, retainedFrozenRowCount + 1, viewId);
 }
 
 function invalidTarget(): DomainError {
