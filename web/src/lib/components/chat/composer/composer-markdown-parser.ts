@@ -20,6 +20,25 @@ export interface ComposerMarkdownRequest {
 	pastedText?: string;
 }
 
+export interface ComposerMarkdownPasteRequest {
+	document: JSONContent;
+	marker: string;
+	text: string;
+}
+
+export function serializeComposerMarkdownPaste({
+	document,
+	marker,
+	text,
+}: ComposerMarkdownPasteRequest): string {
+	const replaceMarker = (node: JSONContent): JSONContent => ({
+		...node,
+		...(node.text ? { text: node.text.replace(marker, () => text) } : {}),
+		...(node.content ? { content: node.content.map(replaceMarker) } : {}),
+	});
+	return manager.serialize(replaceMarker(document));
+}
+
 export function parseComposerMarkdown({
 	source,
 	pastedText,

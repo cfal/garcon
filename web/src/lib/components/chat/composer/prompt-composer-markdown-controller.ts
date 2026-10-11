@@ -2,7 +2,11 @@ import { tick } from 'svelte';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import type { PromptComposerUiState } from './prompt-composer-state.svelte.js';
 import { isComposerMarkdownSized, isMarkdownTableCandidate } from './composer-markdown-limits.js';
-import { parseComposerMarkdownInWorker } from './composer-markdown-worker.js';
+import {
+	parseComposerMarkdownInWorker,
+	serializeComposerMarkdownPasteInWorker,
+} from './composer-markdown-worker.js';
+import type { ComposerMarkdownPasteRequest } from './composer-markdown-parser.js';
 
 interface PromptComposerMarkdownOptions {
 	ui: PromptComposerUiState;
@@ -51,15 +55,39 @@ export class PromptComposerMarkdownController {
 
 	change(text: string): void {
 		if (!this.options.canFormat || !this.options.ui.formattedDraft) return;
+		this.#parseAbort?.abort();
 		this.options.onChange(text);
 		this.options.ui.formattedDraft = { ...this.options.ui.formattedDraft, source: text };
 		if (!isComposerMarkdownSized(text)) void this.edit();
 	}
 
-	pasteSource(text: string): void {
-		if (!this.options.canFormat) return;
+	async pasteSource(request: ComposerMarkdownPasteRequest): Promise<void> {
+		const draft = this.options.ui.formattedDraft;
+		if (!this.options.canFormat || !draft) return;
+		this.#parseAbort?.abort();
+		const abort = new AbortController();
+		this.#parseAbort = abort;
+		const chatId = this.options.chatId;
+		const generation = this.options.interactionGeneration;
+		const text = await serializeComposerMarkdownPasteInWorker(request, abort.signal).catch(
+			() => null,
+		);
+		if (
+			this.#destroyed ||
+			abort.signal.aborted ||
+			!this.options.canFormat ||
+			this.options.chatId !== chatId ||
+			this.options.ui.formattedDraft !== draft ||
+			this.options.composer.inputText !== draft.source
+		)
+			return;
+		if (text === null) {
+			this.options.onUnavailable();
+			return;
+		}
 		this.options.onChange(text);
-		void this.edit();
+		if (generation === this.options.interactionGeneration) void this.edit();
+		else this.reset();
 	}
 
 	focus(target: HTMLElement): void {
@@ -71,17 +99,34 @@ export class PromptComposerMarkdownController {
 			this.#focusGeneration === this.options.interactionGeneration &&
 			(document.activeElement === document.body ||
 				document.activeElement === this.options.textarea ||
-				document.activeElement === this.#focusOrigin)
+				document.activeElement === this.#focusOrigin ||
+				this.options.textarea?.closest('[data-composer]')?.contains(document.activeElement))
 		)
 			target.focus({ preventScroll: true });
 	}
 
 	async edit(): Promise<void> {
 		const chatId = this.options.chatId;
+		const generation = this.options.interactionGeneration;
 		this.reset();
 		await tick();
+		if (
+			!this.#destroyed &&
+			this.options.canFormat &&
+			this.options.chatId === chatId &&
+			generation === this.options.interactionGeneration
+		) {
+			const textarea = this.options.textarea;
+			textarea?.focus({ preventScroll: true });
+			textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
+		}
+	}
+
+	async openSnippets(): Promise<void> {
+		const chatId = this.options.chatId;
+		if (this.options.ui.formattedDraft) await this.edit();
 		if (!this.#destroyed && this.options.canFormat && this.options.chatId === chatId) {
-			this.options.textarea?.focus({ preventScroll: true });
+			this.options.ui.snippetPalette.openFromMenu();
 		}
 	}
 
@@ -108,8 +153,7 @@ export class PromptComposerMarkdownController {
 			!this.options.canFormat ||
 			this.options.chatId !== chatId ||
 			this.options.composer.inputText !== source ||
-			this.options.interactionGeneration !== generation ||
-			document.activeElement !== focusOrigin
+			this.options.interactionGeneration !== generation
 		)
 			return;
 		if (!documentContent) {

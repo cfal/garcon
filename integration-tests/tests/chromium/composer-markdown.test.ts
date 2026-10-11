@@ -3,6 +3,7 @@ import { expect as browserExpect } from "playwright/test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
+import type { SnippetsSnapshot } from "../../../common/snippets.js";
 
 const table =
   "| Check | Example |\n| --- | --- |\n| **Startup ready** | Resolve earlier work before submitting. |\n| **Current data** | Use the latest observation.<br>Keep context current. |\n| **Code** | `a  b` |";
@@ -23,6 +24,16 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
         await integration.client.waitForProcessing(chatId, false);
       }
       await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+      const snippets =
+        await integration.client.get<SnippetsSnapshot>("/api/v1/snippets");
+      await integration.client.post("/api/v1/snippets", {
+        expectedRevision: snippets.revision,
+        snippet: {
+          shortName: "review",
+          template: " appended snippet",
+          defaultArguments: "",
+        },
+      });
       await page.goto(`${integration.garcon.baseUrl}/chat/${ids[0]}`);
       const textarea = page.getByPlaceholder("Reply...", { exact: true });
       const editor = page.getByRole("textbox", { name: "Formatted message" });
@@ -70,8 +81,51 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
             .click();
         await browserExpect(textarea).toBeVisible();
         await browserExpect(textarea).toBeFocused();
+        if (width === 390) {
+          await page
+            .getByRole("button", { name: "More composer actions" })
+            .click();
+          await page.getByRole("menuitem", { name: "Format Markdown" }).click();
+          await browserExpect(editor).toBeVisible();
+          await browserExpect(editor).toBeFocused();
+          await editor.locator("td").first().click();
+          await page.keyboard.press("End");
+          await page.keyboard.press("Shift+Enter");
+          await page.keyboard.type("next paragraph");
+          await browserExpect(textarea).toHaveValue(/edited<br>next paragraph/);
+          await page
+            .getByRole("button", { name: "More composer actions" })
+            .click();
+          await page
+            .getByRole("menuitem", { name: "Edit Markdown source" })
+            .click();
+        }
       }
       await page.setViewportSize({ width: 1440, height: 900 });
+      await textarea.fill("Prefix\n\n");
+      await textarea.focus();
+      await paste(table);
+      await browserExpect(editor).toBeFocused();
+      await page.keyboard.type(" at end");
+      await browserExpect(textarea).toHaveValue(
+        /Prefix[\s\S]*Code.*a  b.*at end/,
+      );
+      await editor.locator("p").first().click();
+      const beforeSnippet = await textarea.inputValue();
+      await page.getByRole("button", { name: "Add to prompt" }).click();
+      await page.getByRole("menuitem", { name: /Snippets/ }).click();
+      await browserExpect(editor).toHaveCount(0);
+      await browserExpect
+        .poll(() =>
+          textarea.evaluate(
+            (element: HTMLTextAreaElement) => element.selectionStart,
+          ),
+        )
+        .toBe(beforeSnippet.length);
+      await page.getByRole("option", { name: /^review/ }).click();
+      await browserExpect(textarea).toHaveValue(
+        beforeSnippet + " appended snippet",
+      );
       await textarea.fill(table);
       await textarea.focus();
       await paste("\nplain notes");
@@ -102,13 +156,23 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await textarea.focus();
       await paste(table);
       await browserExpect(editor).toBeFocused();
+      await editor.locator("td").first().click();
       const richStart = performance.now();
       await paste(large);
       await browserExpect(editor).toHaveCount(0);
       await browserExpect(textarea).toBeFocused();
-      expect((await textarea.inputValue()).includes(large)).toBe(true);
-      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-      console.log(`Large formatted paste to source: ${Math.round(performance.now() - richStart)} ms`);
+      expect(
+        (await textarea.inputValue()).includes("synthetic log entry<br>"),
+      ).toBe(true);
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          ),
+      );
+      console.log(
+        `Large formatted paste to source: ${Math.round(performance.now() - richStart)} ms`,
+      );
       expect(performance.now() - richStart).toBeLessThan(3_000);
       for (const prefix of ["> ", "  "]) {
         const nested =
@@ -169,7 +233,9 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await browserExpect(editor).toBeFocused();
       for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: 900 });
-        await page.screenshot({ path: join(artifacts, `composer-markdown-dark-${width}.png`) });
+        await page.screenshot({
+          path: join(artifacts, `composer-markdown-dark-${width}.png`),
+        });
         await editor.locator("td").last().scrollIntoViewIfNeeded();
         await browserExpect(editor.locator("td").last()).toBeInViewport();
         await editor.locator("td").first().scrollIntoViewIfNeeded();

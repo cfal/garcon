@@ -1,8 +1,17 @@
-import { parseComposerMarkdown, type ComposerMarkdownRequest } from './composer-markdown-parser.js';
+import {
+	parseComposerMarkdown,
+	serializeComposerMarkdownPaste,
+} from './composer-markdown-parser.js';
+import type { ComposerMarkdownTask, ComposerMarkdownResult } from './composer-markdown-worker.js';
 
-self.onmessage = (event: MessageEvent<ComposerMarkdownRequest>) => {
+self.onmessage = (event: MessageEvent<ComposerMarkdownTask>) => {
 	try {
-		self.postMessage(parseComposerMarkdown(event.data));
+		const task = event.data;
+		const result: ComposerMarkdownResult =
+			task.type === 'parse'
+				? { type: 'parsed', document: parseComposerMarkdown(task.request) }
+				: { type: 'pasted', source: serializeComposerMarkdownPaste(task.request) };
+		self.postMessage(result);
 	} catch {
 		self.postMessage(null);
 	}

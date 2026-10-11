@@ -82,4 +82,14 @@ describe('composer Markdown parsing', () => {
 		expect(output).toContain('`a  b`');
 		expect(output.length).toBeLessThan(source.length + 100);
 	});
+	it('preserves separate paragraphs in an edited table cell', () => {
+		const document = parseComposerMarkdown({ source: table })!;
+		const cell = nodes(document).find((node) => node.type === 'tableCell')!;
+		cell.content = ['first', 'second'].map((text) => ({
+			type: 'paragraph',
+			content: [{ type: 'text', text }],
+		}));
+		const manager = new MarkdownManager({ extensions: composerMarkdownEditorExtensions() });
+		expect(manager.serialize(document)).toContain('first<br>second');
+	});
 });

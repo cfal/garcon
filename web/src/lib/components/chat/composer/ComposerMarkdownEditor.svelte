@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Editor, type JSONContent } from '@tiptap/core';
+	import { Editor, resolveFocusPosition, type JSONContent } from '@tiptap/core';
 	import { MarkdownManager } from '@tiptap/markdown';
 	import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
 	import { MAX_COMPOSER_MARKDOWN_LENGTH } from './composer-markdown-limits.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { ComposerMarkdownPasteRequest } from './composer-markdown-parser.js';
 
 	let {
 		document: documentContent,
@@ -19,7 +20,7 @@
 		onChange: (source: string) => void;
 		onSubmitKeydown: (event: KeyboardEvent) => void;
 		onReady: (target: HTMLElement) => void;
-		onLargePaste: (source: string) => void;
+		onLargePaste: (request: ComposerMarkdownPasteRequest) => void;
 	} = $props();
 	let container: HTMLDivElement;
 	let editor: Editor | undefined = $state.raw();
@@ -31,10 +32,13 @@
 				view.dispatch(view.state.tr.insertText(text, position));
 				return;
 			}
-			// Maps the bounded rich selection to source without constructing the large document.
+			// Carries the bounded selection and its marks into off-thread serialization.
 			const marker = `garconClipboard${crypto.randomUUID().replaceAll('-', '')}`;
-			const document = view.state.tr.insertText(marker, position).doc;
-			onLargePaste(markdown.serialize(document.toJSON()).replace(marker, () => text));
+			onLargePaste({
+				document: view.state.tr.insertText(marker, position).doc.toJSON(),
+				marker,
+				text,
+			});
 		};
 		const mountedEditor = new Editor({
 			element: container,
@@ -83,6 +87,8 @@
 			},
 		});
 		editor = mountedEditor;
+		const selection = resolveFocusPosition(mountedEditor.state.doc, 'end');
+		if (selection) mountedEditor.view.dispatch(mountedEditor.state.tr.setSelection(selection));
 		onReady(mountedEditor.view.dom);
 		return () => mountedEditor.destroy();
 	});

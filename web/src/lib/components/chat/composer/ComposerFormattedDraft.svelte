@@ -2,6 +2,7 @@
 	import type { JSONContent } from '@tiptap/core';
 	import { lazyRenderer } from '$lib/utils/lazy-renderer.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { ComposerMarkdownPasteRequest } from './composer-markdown-parser.js';
 	let {
 		source,
 		document,
@@ -19,7 +20,7 @@
 		onEditSource: () => void;
 		onSubmitKeydown: (event: KeyboardEvent) => void;
 		onReady: (target: HTMLElement) => void;
-		onLargePaste: (source: string) => void;
+		onLargePaste: (request: ComposerMarkdownPasteRequest) => void;
 	} = $props();
 	const renderer = lazyRenderer(() => import('./ComposerMarkdownEditor.svelte'));
 </script>

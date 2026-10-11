@@ -20,7 +20,7 @@ const DraftTable = Table.extend({
 			`| ${cells
 				.map((cell) =>
 					helpers
-						.renderChildren(cell.content ?? [])
+						.renderChildren(cell.content ?? [], '\n')
 						.trim()
 						.replace(/ {2}\r?\n|\r?\n/g, '<br>')
 						.replace(/\\.|\|/g, (match) => (match === '|' ? '\\|' : match)),

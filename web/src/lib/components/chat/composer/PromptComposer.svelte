@@ -863,7 +863,7 @@
 						onEditSource={() => void markdown.edit()}
 						onSubmitKeydown={handleKeyDown}
 						onReady={(target) => markdown.focus(target)}
-						onLargePaste={(text) => markdown.pasteSource(text)}
+						onLargePaste={(request) => void markdown.pasteSource(request)}
 					/>
 				{/if}
 				<div class="relative z-10" hidden={Boolean(formattedDraft)}>
@@ -892,7 +892,7 @@
 				canAttachImages={canAttachAttachments}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={() => attachmentController.pick()}
-				onOpenSnippetPalette={() => ui.snippetPalette.openFromMenu()}
+				onOpenSnippetPalette={() => void markdown.openSnippets()}
 				onOpenExpandedEditor={() => expandedEditor?.open()}
 				onRefinePrompt={() => {
 					if (formattedDraft) void markdown.edit();

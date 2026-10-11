@@ -2,13 +2,30 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
 import { parseComposerMarkdownInWorker } from '../composer-markdown-worker.js';
-import { parseComposerMarkdown } from '../composer-markdown-parser.js';
+import {
+	parseComposerMarkdown,
+	serializeComposerMarkdownPaste,
+} from '../composer-markdown-parser.js';
+import type { TiptapEditorHTMLElement } from '@tiptap/core';
+import { MarkdownManager } from '@tiptap/markdown';
+import { composerMarkdownEditorExtensions } from '../composer-markdown-extensions.js';
+import { configureComposerMarkdown } from '../composer-markdown.js';
+import * as snippetsApi from '$lib/api/snippets';
 
-vi.mock('../composer-markdown-worker.js', () => ({ parseComposerMarkdownInWorker: vi.fn() }));
+vi.mock('../composer-markdown-worker.js', () => ({
+	parseComposerMarkdownInWorker: vi.fn(),
+	serializeComposerMarkdownPasteInWorker: vi.fn(async (request) =>
+		serializeComposerMarkdownPaste(request),
+	),
+}));
+vi.mock('$lib/api/snippets', async (importOriginal) => {
+	const actual = await importOriginal<typeof snippetsApi>();
+	return { ...actual, expandSnippet: vi.fn() };
+});
 const table = '| Check | Example |\n| --- | --- |\n| **Ready** | `a  b` |';
 afterEach(() => {
 	cleanup();
-	vi.resetAllMocks();
+	vi.clearAllMocks();
 });
 
 async function formatted({
@@ -20,6 +37,7 @@ async function formatted({
 	const rendered = render(PromptComposerTestHost, {
 		selectedChatId: 'markdown-test',
 		selectedStatus,
+		snippetTemplate: ' appended',
 		onsubmit,
 	});
 	const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
@@ -39,6 +57,7 @@ describe('formatted composer integration', () => {
 	});
 	it('updates Markdown on a direct edit and submits that draft through the existing gate', async () => {
 		const { editor, textarea, onsubmit } = await formatted();
+		(editor as TiptapEditorHTMLElement).editor.commands.setTextSelection(2);
 		const transfer = new DataTransfer();
 		transfer.setData('text/plain', 'edited ');
 		await fireEvent.paste(editor, { clipboardData: transfer });
@@ -54,10 +73,66 @@ describe('formatted composer integration', () => {
 		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
 		expect(textarea.value).toBe(table);
 	});
+	it('opens pasted content at the end and restores source before snippet insertion', async () => {
+		const source = 'Prefix\n\n' + table;
+		const { editor, textarea } = await formatted({ source });
+		const rich = (editor as TiptapEditorHTMLElement).editor;
+		expect(rich.state.selection.$head.parent.textContent).toBe('a  b');
+		expect(rich.state.selection.$head.parentOffset).toBe(4);
+		rich.commands.setTextSelection(2);
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValue({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: ' appended',
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+		expect(textarea.selectionStart).toBe(source.length);
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
+		await waitFor(() => expect(textarea.value).toBe(source + ' appended'));
+	});
+	it('escapes oversized text in a table cell before falling back to source', async () => {
+		const { editor, textarea } = await formatted();
+		const rich = (editor as TiptapEditorHTMLElement).editor;
+		let position = 0;
+		rich.state.doc.descendants((node, offset) => {
+			if (node.type.name === 'text' && node.text === 'Ready') position = offset + node.nodeSize;
+		});
+		rich.commands.setTextSelection(position);
+		const text = ' | literal `tick`\n'.repeat(2_000);
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', text);
+		await fireEvent.paste(editor, { clipboardData: transfer });
+		await waitFor(() =>
+			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
+		);
+		const manager = new MarkdownManager({
+			extensions: composerMarkdownEditorExtensions(),
+			markedOptions: { breaks: true },
+		});
+		configureComposerMarkdown(manager);
+		const document = manager.parse(textarea.value);
+		const rows = document.content![0].content!;
+		expect(rows).toHaveLength(2);
+		expect(rows.map((row) => row.content!.length)).toEqual([2, 2]);
+		expect(
+			rows[1]
+				.content![0].content![0].content!.filter((node) => node.type === 'text')
+				.map((node) => node.text)
+				.join(''),
+		).toBe('Ready' + text.replaceAll('\n', ''));
+	});
 	it.each(['paste', 'drop'])(
 		'keeps oversized %s text in source before HTML parsing',
 		async (type) => {
 			const { editor, textarea } = await formatted();
+			(editor as TiptapEditorHTMLElement).editor.commands.setTextSelection(2);
 			const text = '$& synthetic log\n'.repeat(3_000);
 			const transfer = new DataTransfer();
 			transfer.setData('text/plain', text);
@@ -65,7 +140,8 @@ describe('formatted composer integration', () => {
 			const reads = vi.spyOn(transfer, 'getData');
 			if (type === 'paste') await fireEvent.paste(editor, { clipboardData: transfer });
 			else await fireEvent.drop(editor, { dataTransfer: transfer, clientX: 0, clientY: 0 });
-			await waitFor(() => expect(textarea.value).toContain(text));
+			await waitFor(() => expect(textarea.value).toContain('synthetic log'));
+			expect(textarea.value).toContain('$&amp; synthetic log');
 			expect(reads).not.toHaveBeenCalledWith('text/html');
 			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
 			await waitFor(() => expect(document.activeElement).toBe(textarea));
