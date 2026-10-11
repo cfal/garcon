@@ -21,7 +21,7 @@ test("service worker caches late navigation and isolates cache-write failures", 
           }));
           build.onLoad({ filter: /.*/, namespace: "test-manifest" }, () => ({
             contents:
-              "export const build = []; export const files = []; export const version = 'test';",
+              "export const base = ''; export const build = []; export const files = []; export const version = 'test';",
             loader: "js",
           }));
         },
