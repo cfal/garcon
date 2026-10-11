@@ -38,6 +38,7 @@ export class AuthService {
       const snapshot = await this.store.snapshot();
       const account = snapshot.account;
       if (!account || input.username !== account.username || !await this.passwords.verify(input.password, account.passwordHash)) {
+        this.store.assertHealthy();
         throw this.#invalidLogin();
       }
       try {

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import jwt from 'jsonwebtoken';
 import { authFixture, fixturePasswords } from './fixture.js';
-import { writeJsonFileAtomic } from '../../../common/json-file-store.js';
+import { AtomicJsonWriteError, writeJsonFileAtomic } from '../../../common/json-file-store.js';
 
 const fixtures = [];
 async function fixture(options) { const value = await authFixture(options); fixtures.push(value); return value; }
@@ -46,6 +46,34 @@ test('login verification straddling a commit cannot sign the new revision', asyn
   await f.service.changePassword(await f.principal(), async () => ({ currentPassword: 'password-before', newPassword: 'password-after' }));
   verified.resolve(true);
   await expect(login).rejects.toMatchObject({ code: 'AUTH_CREDENTIALS_INVALID' });
+});
+
+test('failed login verification preserves a concurrent storage fence', async () => {
+  const verified = Promise.withResolvers();
+  const started = Promise.withResolvers();
+  let failAfterRename = false;
+  const f = await fixture({ write: async (...args) => {
+    await writeJsonFileAtomic(...args);
+    if (failAfterRename) throw new AtomicJsonWriteError('Synthetic durability failure', true);
+  } });
+  await f.register();
+  const principal = await f.principal();
+  let pause = true;
+  f.passwords.verify = async (...args) => {
+    if (pause) { pause = false; started.resolve(); return verified.promise; }
+    return fixturePasswords.verify(...args);
+  };
+  const login = f.service.login({ username: 'owner-before', password: 'incorrect-password' }).catch(error => error);
+  try {
+    await started.promise;
+    failAfterRename = true;
+    await expect(f.service.changePassword(principal, async () => ({ currentPassword: 'password-before', newPassword: 'password-after' })))
+      .rejects.toMatchObject({ code: 'AUTH_STORAGE_UNAVAILABLE', status: 503 });
+    expect(f.store.isUnavailable).toBe(true);
+  } finally {
+    verified.resolve(false);
+  }
+  expect(await login).toMatchObject({ code: 'AUTH_STORAGE_UNAVAILABLE', status: 503 });
 });
 
 test('cancelled verification retains admission until actual settlement', async () => {
