@@ -9,7 +9,10 @@ import type { PrimarySocketDelivery, PrimaryWebSocketData } from './primary-deli
 import { PRIMARY_WEBSOCKET_TRANSPORT_OPTIONS } from './transport.js';
 import { decodeWebSocketMessage, sendWebSocketJson } from './utils.js';
 import { isCurrentBrowserPrincipal } from '../auth/token.js';
-import { AUTH_REVOKED_CLOSE_CODE, AUTH_REVOKED_CLOSE_REASON } from '../../../common/ws-auth.js';
+import { getAuthStore } from '../auth/store.js';
+import type { ServerPrincipal } from '../lib/http-route-types.js';
+import { AUTH_REVOKED_CLOSE_CODE, AUTH_REVOKED_CLOSE_REASON,
+  AUTH_UNAVAILABLE_CLOSE_CODE, AUTH_UNAVAILABLE_CLOSE_REASON } from '../../../common/ws-auth.js';
 
 interface PrimaryConnectionData extends PrimaryWebSocketData {
   kind: 'primary';
@@ -23,6 +26,12 @@ function isPrimarySocket(socket: ServerWebSocket<WsConnectionData>): socket is S
 
 function isExecutionSocket(socket: ServerWebSocket<WsConnectionData>): socket is ServerWebSocket<NoiseSocketData> {
   return socket.data.kind === 'noise-ws';
+}
+
+function browserAuthRejection(principal: ServerPrincipal): { code: number; reason: string } | null {
+  if (isCurrentBrowserPrincipal(principal)) return null;
+  if (getAuthStore().isUnavailable) return { code: AUTH_UNAVAILABLE_CLOSE_CODE, reason: AUTH_UNAVAILABLE_CLOSE_REASON };
+  return { code: AUTH_REVOKED_CLOSE_CODE, reason: AUTH_REVOKED_CLOSE_REASON };
 }
 
 export function createServerSocketHandlers(options: {
@@ -45,9 +54,10 @@ export function createServerSocketHandlers(options: {
     open(ws) {
       if (isExecutionSocket(ws)) { execution.open?.(ws); return; }
       if (!isPrimarySocket(ws)) return;
-      if (!isCurrentBrowserPrincipal(ws.data.principal)) {
+      const rejection = browserAuthRejection(ws.data.principal);
+      if (rejection) {
         admission.release(ws.data.connectionId);
-        ws.close(AUTH_REVOKED_CLOSE_CODE, AUTH_REVOKED_CLOSE_REASON);
+        ws.close(rejection.code, rejection.reason);
         return;
       }
       const result = admission.confirm(ws.data.connectionId);
@@ -60,10 +70,11 @@ export function createServerSocketHandlers(options: {
       if (!isPrimarySocket(ws)) return;
       const peer = delivery.get(ws);
       if (!peer || peer.readyState !== 1) return;
-      if (!isCurrentBrowserPrincipal(peer.data.principal)) {
+      const rejection = browserAuthRejection(peer.data.principal);
+      if (rejection) {
         const retired = delivery.remove(ws);
-        try { if (retired) primary.close(retired, AUTH_REVOKED_CLOSE_CODE, AUTH_REVOKED_CLOSE_REASON); }
-        finally { admission.release(ws.data.connectionId); ws.close(AUTH_REVOKED_CLOSE_CODE, AUTH_REVOKED_CLOSE_REASON); }
+        try { if (retired) primary.close(retired, rejection.code, rejection.reason); }
+        finally { admission.release(ws.data.connectionId); ws.close(rejection.code, rejection.reason); }
         return;
       }
       const bytes = typeof message === 'string' ? Buffer.byteLength(message) : message.byteLength;

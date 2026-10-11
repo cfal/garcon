@@ -92,6 +92,8 @@ export class AuthAccountStore {
       'Credential durability is unknown. Resolve storage and restart the controller.', 503);
   }
 
+  get isUnavailable(): boolean { return this.#unavailable; }
+
   isCurrent(ownerKey: string, revision: number): boolean {
     const account = this.#snapshot?.account;
     return !this.#unavailable && !!account && account.ownerKey === ownerKey && account.credentialRevision === revision;
