@@ -52,7 +52,8 @@ test('a parked mouse cannot replace snippet selection during loading, opening, f
       const assertActive = async (option: Locator) => {
         await settlePaletteLayout(palette);
         await browserExpect(option).toHaveAttribute('aria-selected', 'true');
-        await browserExpect(search).toHaveAttribute('aria-activedescendant', await option.getAttribute('id') ?? '');
+        const optionId = await option.getAttribute('id') ?? '';
+        await browserExpect(search).toHaveAttribute('aria-activedescendant', optionId);
       };
       const openFromKeyboard = async () => {
         await composer.fill('');
@@ -65,13 +66,17 @@ test('a parked mouse cannot replace snippet selection during loading, opening, f
       await catalogRequested.promise;
       await browserExpect(palette.getByText('Loading snippets...', { exact: true })).toBeVisible();
       await settlePaletteLayout(palette);
-      await page.mouse.move(720, 450);
+      const parkedPointer = { x: 720, y: 450 };
+      await page.mouse.move(parkedPointer.x, parkedPointer.y);
       releaseCatalog.resolve(undefined);
       await browserExpect(options).toHaveCount(16);
       await assertActive(options.first());
-      const underPointer = await page.evaluate(() => document.elementFromPoint(720, 450)?.closest('[role="option"]')?.id);
-      expect(underPointer).toBeTruthy();
-      expect(underPointer).not.toBe(await options.first().getAttribute('id'));
+      const optionIdUnderPointer = await page.evaluate(
+        ({ x, y }) => document.elementFromPoint(x, y)?.closest('[role="option"]')?.id,
+        parkedPointer,
+      );
+      expect(optionIdUnderPointer).toBeTruthy();
+      expect(optionIdUnderPointer).not.toBe(await options.first().getAttribute('id'));
 
       phase('checking keyboard opening with the mouse already over a non-first row');
       await search.press('Escape');
