@@ -6,7 +6,6 @@ import { DomainError } from '../../common/domain-error.js';
 import { AuthAccountAlreadyConfiguredError, AuthSnapshotChangedError, getAuthStore,
   type AuthAccount, type AuthAccountStore, type AuthSnapshot } from './store.js';
 import { signAuthSnapshot, prepareAuthSession } from './token.js';
-import type { AuthBrowserSession } from './sessions.js';
 import type { ServerPrincipal } from '../lib/http-route-types.js';
 import { createLogger } from '../../common/log.js';
 
@@ -21,16 +20,18 @@ const defaultPasswords: Passwords = {
   hash: password => Bun.password.hash(password, { algorithm: 'bcrypt', cost: 12 }),
 };
 
-function session(snapshot: AuthSnapshot, browserSession: AuthBrowserSession): AuthSessionResponse {
+function sessionResponse(snapshot: AuthSnapshot, token: string): AuthSessionResponse {
   if (!snapshot.account) throw new Error('Account is not configured');
-  return { success: true, user: { id: snapshot.account.ownerKey, username: snapshot.account.username }, token: signAuthSnapshot(snapshot, browserSession) };
+  return {
+    success: true,
+    user: { id: snapshot.account.ownerKey, username: snapshot.account.username },
+    token,
+  };
 }
 
 function newSession(snapshot: AuthSnapshot) {
-  const prepared = prepareAuthSession(snapshot);
-  return { session: prepared.session, result: {
-    success: true, user: { id: snapshot.account!.ownerKey, username: snapshot.account!.username }, token: prepared.token,
-  } satisfies AuthSessionResponse };
+  const { session, token } = prepareAuthSession(snapshot);
+  return { session, result: sessionResponse(snapshot, token) };
 }
 
 export class AuthService {
@@ -50,7 +51,10 @@ export class AuthService {
         throw this.#invalidLogin();
       }
       try {
-        return await this.store.openSession(snapshot, () => { signal?.throwIfAborted(); return newSession(snapshot); });
+        return await this.store.openSession(snapshot, () => {
+          signal?.throwIfAborted();
+          return newSession(snapshot);
+        });
       } catch (error) { if (error instanceof AuthSnapshotChangedError) throw this.#invalidLogin(); throw error; }
     });
   }
@@ -123,9 +127,11 @@ export class AuthService {
             this.#assertPrincipal(principal, snapshot);
             signal?.throwIfAborted();
             const account = { ...updated, credentialRevision: updated.credentialRevision + 1 };
-            return { account, result: session({ ...snapshot, account }, {
+            const replacement = { ...snapshot, account };
+            const token = signAuthSnapshot(replacement, {
               sessionId: principal.sessionId, ownerKey: principal.key, expiresAtMs: principal.expiresAtMs,
-            }) };
+            });
+            return { account, result: sessionResponse(replacement, token) };
           });
           logger.info('Account credentials changed', { operation, previousRevision: updated.credentialRevision,
             credentialRevision: updated.credentialRevision + 1 });

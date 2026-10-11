@@ -69,6 +69,8 @@ export async function verifyAuthToken(token: string | null | undefined): Promise
 }
 
 export function isCurrentBrowserPrincipal(principal: ServerPrincipal): boolean {
-  return principal.mode !== 'authenticated' || getAuthStore().isCurrent(principal.key, principal.credentialRevision)
-    && getAuthStore().isSessionCurrent(principal.key, principal.sessionId, principal.expiresAtMs);
+  if (principal.mode !== 'authenticated') return true;
+  const store = getAuthStore();
+  return store.isCurrent(principal.key, principal.credentialRevision)
+    && store.isSessionCurrent(principal.key, principal.sessionId, principal.expiresAtMs);
 }

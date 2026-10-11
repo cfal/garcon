@@ -88,19 +88,22 @@ function clearDatabaseData(
 		request.onerror = () => finish(false);
 		request.onblocked = () => finish(false);
 		request.onsuccess = () => {
-			database = request.result;
+			const openedDatabase = request.result;
+			database = openedDatabase;
 			if (settled || !canClearBrowserData(logout)) {
-				database.close();
+				openedDatabase.close();
 				finish(false);
 				return;
 			}
-			const stores = storeNames.filter((name) => database!.objectStoreNames.contains(name));
+			const stores = storeNames.filter((storeName) =>
+				openedDatabase.objectStoreNames.contains(storeName),
+			);
 			if (!stores.length) {
 				finish(true);
 				return;
 			}
 			try {
-				transaction = database.transaction(stores, 'readwrite');
+				transaction = openedDatabase.transaction(stores, 'readwrite');
 				transaction.oncomplete = () => finish(true);
 				transaction.onabort = transaction.onerror = () => finish(false);
 				for (const name of stores) transaction.objectStore(name).clear();

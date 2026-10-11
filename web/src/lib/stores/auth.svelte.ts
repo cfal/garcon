@@ -124,7 +124,7 @@ export class AuthStore {
 		const release = onAuthRejection(({ token, code }) => this.sessionRejected(token, code));
 		const reconcile = () => {
 			if (!isBrowserDataCurrent()) {
-				void this.#abandonFromPeer();
+				this.#abandonFromPeer();
 				return;
 			}
 			void this.reconcile();
@@ -141,7 +141,7 @@ export class AuthStore {
 				this.#logoutChannel = new BroadcastChannel('garcon.logout');
 				this.#logoutChannel.onmessage = (event) => {
 					if (event.data?.type === 'logout' && (!event.data.epoch || !isBrowserDataCurrent()))
-						void this.#abandonFromPeer();
+						this.#abandonFromPeer();
 				};
 			} catch {
 				/* Storage and wakeup checks remain available. */
@@ -547,14 +547,13 @@ export class AuthStore {
 		this.navigateAfterLogout(`${appPath('/login')}?${params}`);
 	}
 
-	#abandonFromPeer(): Promise<void> {
-		if (this.#logoutTask || this.logoutPending) return this.#logoutTask ?? Promise.resolve();
+	#abandonFromPeer(): void {
+		if (this.#logoutTask || this.logoutPending) return;
 		this.#abandon();
 		const cleared = clearTabPrivateData();
 		this.navigateAfterLogout(
 			`${appPath('/login')}?loggedOut=peer${cleared ? '' : '&cleanup=incomplete'}`,
 		);
-		return Promise.resolve();
 	}
 	destroy(): void {
 		this.#destroyed = true;
