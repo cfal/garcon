@@ -168,7 +168,7 @@
 	aria-busy={steering || deleting}
 	aria-posinset={position}
 	aria-setsize={count}
-	class="@container/queue-row absolute inset-x-0 top-0 border-b border-border/40 px-2 py-1 last:border-b-0 hover:bg-accent/40 focus-within:bg-accent/40 sm:px-3"
+	class="@container/queue-row absolute inset-x-0 top-0 border-b border-border/40 pl-1 pr-2 py-1 last:border-b-0 hover:bg-accent/40 focus-within:bg-accent/40 sm:pl-2 sm:pr-3"
 	style:transform={`translateY(${virtualItem.start}px)`}
 	class:opacity-50={dragging}
 	onfocusin={() => onRetain('focus', true)}
@@ -217,15 +217,9 @@
 				? m.chat_queue_collapse_message({ position })
 				: m.chat_queue_toggle_message({ position })}
 			title={entry.content || attachmentNames}
-			class={`flex min-h-11 min-w-0 items-start gap-1.5 rounded px-1 ${expanded ? 'py-1.5' : 'py-3'} text-left text-sm leading-5 text-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:min-h-8 sm:pointer-fine:py-1.5 @min-[30rem]/queue-row:col-span-1`}
+			class={`flex min-h-11 min-w-0 items-start rounded px-1 ${expanded ? 'py-1.5' : 'py-3'} text-left text-sm leading-5 text-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:min-h-8 sm:pointer-fine:py-1.5 @min-[30rem]/queue-row:col-span-1`}
 			class:col-span-2={expanded}
 		>
-			{#if position === 1 && entry.kind === 'turn' && !steering}
-				<span
-					class="sr-only shrink-0 text-[10px] font-medium leading-5 text-muted-foreground @min-[30rem]/queue-row:not-sr-only"
-					>{m.chat_queue_next_up()}</span
-				>
-			{/if}
 			<span
 				data-queue-preview
 				class="block min-w-0 flex-1"

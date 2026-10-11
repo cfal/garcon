@@ -217,8 +217,63 @@
 		data-queue-chat-id={chatId}
 		tabindex="-1"
 	>
-		<header
-			class="flex shrink-0 flex-wrap items-center gap-x-2 border-b border-border/60 px-3 py-1"
+		<div
+			bind:this={listElement}
+			data-queue-list
+			class={`min-h-0 overflow-y-auto overscroll-contain ${expanded ? 'max-h-[40dvh]' : 'max-h-[25dvh]'}`}
+			{@attach listController.virtual.viewport}
+		>
+			<ol
+				class="relative"
+				style:height={`${snapshot.sizerSize}px`}
+				{@attach listController.virtual.sizer}
+			>
+				{#each renderedItems as { entry, virtualItem } (`${chatId}:${virtualItem.key}`)}
+					{@const index = virtualItem.index}
+					<svelte:boundary>
+						{@const steering =
+							queue.steeringEntryId === entry.id ||
+							(mutation?.kind === 'steering' && mutation.entryId === entry.id)}
+						<QueuedInputTrayRow
+							{chatId}
+							{entry}
+							position={index + 1}
+							{virtualItem}
+							count={entries.length}
+							measurement={listController.virtual.item(virtualItem.key)}
+							expanded={listController.isExpanded(entry.id, expanded)}
+							onToggle={() => listController.toggleExpanded(entry.id, expanded)}
+							onRetain={(reason, active) => listController.retain(entry.id, reason, active)}
+							{blocked}
+							{steering}
+							{announcementsEnabled}
+							deleting={mutation?.kind === 'deleting' && mutation.entryId === entry.id}
+							canSteer={canSteer && entry.kind !== 'steer' && Boolean(onSteer)}
+							canInterrupt={index === 0 && canInterrupt && !queue.pause && Boolean(onInterrupt)}
+							onSteer={() => {
+								if (onSteer && queue && entries.some((candidate) => candidate.id === entry.id)) {
+									const revision = queue.reorderRevision;
+									void mutate('steering', () => onSteer!(entry, revision), entry.id);
+								}
+							}}
+							onInterrupt={() => {
+								if (onInterrupt && entries[0]?.id === entry.id)
+									void mutate('interrupting', onInterrupt);
+							}}
+							onEdit={() => onEdit(entry)}
+							onDelete={() => void mutate('deleting', () => onDelete(entry.id), entry.id)}
+							onDrop={moveRelative}
+							onKeyboardMove={(direction) => moveByKeyboard(entry.id, direction)}
+						/>
+						{#snippet failed(error)}<li class="px-3 py-2 text-xs text-destructive" role="alert">
+								{m.chat_queue_item_render_failed({ detail: String(error) })}
+							</li>{/snippet}
+					</svelte:boundary>
+				{/each}
+			</ol>
+		</div>
+		<footer
+			class="flex shrink-0 flex-wrap items-center gap-x-2 border-t border-border/60 px-3 py-1"
 		>
 			<span
 				class="text-xs font-medium text-foreground"
@@ -276,62 +331,7 @@
 						{m.chat_queue_pause_affected_removed()}{/if}
 				</p>
 			{/if}
-		</header>
-		<div
-			bind:this={listElement}
-			data-queue-list
-			class={`min-h-0 overflow-y-auto overscroll-contain ${expanded ? 'max-h-[40dvh]' : 'max-h-[25dvh]'}`}
-			{@attach listController.virtual.viewport}
-		>
-			<ol
-				class="relative"
-				style:height={`${snapshot.sizerSize}px`}
-				{@attach listController.virtual.sizer}
-			>
-				{#each renderedItems as { entry, virtualItem } (`${chatId}:${virtualItem.key}`)}
-					{@const index = virtualItem.index}
-					<svelte:boundary>
-						{@const steering =
-							queue.steeringEntryId === entry.id ||
-							(mutation?.kind === 'steering' && mutation.entryId === entry.id)}
-						<QueuedInputTrayRow
-							{chatId}
-							{entry}
-							position={index + 1}
-							{virtualItem}
-							count={entries.length}
-							measurement={listController.virtual.item(virtualItem.key)}
-							expanded={listController.isExpanded(entry.id, expanded)}
-							onToggle={() => listController.toggleExpanded(entry.id, expanded)}
-							onRetain={(reason, active) => listController.retain(entry.id, reason, active)}
-							{blocked}
-							{steering}
-							{announcementsEnabled}
-							deleting={mutation?.kind === 'deleting' && mutation.entryId === entry.id}
-							canSteer={canSteer && entry.kind !== 'steer' && Boolean(onSteer)}
-							canInterrupt={index === 0 && canInterrupt && !queue.pause && Boolean(onInterrupt)}
-							onSteer={() => {
-								if (onSteer && queue && entries.some((candidate) => candidate.id === entry.id)) {
-									const revision = queue.reorderRevision;
-									void mutate('steering', () => onSteer!(entry, revision), entry.id);
-								}
-							}}
-							onInterrupt={() => {
-								if (onInterrupt && entries[0]?.id === entry.id)
-									void mutate('interrupting', onInterrupt);
-							}}
-							onEdit={() => onEdit(entry)}
-							onDelete={() => void mutate('deleting', () => onDelete(entry.id), entry.id)}
-							onDrop={moveRelative}
-							onKeyboardMove={(direction) => moveByKeyboard(entry.id, direction)}
-						/>
-						{#snippet failed(error)}<li class="px-3 py-2 text-xs text-destructive" role="alert">
-								{m.chat_queue_item_render_failed({ detail: String(error) })}
-							</li>{/snippet}
-					</svelte:boundary>
-				{/each}
-			</ol>
-		</div>
+		</footer>
 		{#if visibleNotice}<p class="sr-only" aria-live={announcementsEnabled ? 'polite' : 'off'}>
 				{visibleNotice.message}
 			</p>{/if}
