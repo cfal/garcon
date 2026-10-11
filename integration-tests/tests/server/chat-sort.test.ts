@@ -1,6 +1,7 @@
 import { mkdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test } from 'bun:test';
+import { chatIdFromTimestamp } from '../../../common/chat-id.js';
 import type { PersistedChatOrderGroup } from '../../../common/chat-order-contracts.js';
 import type { ChatListEntry } from '../../../common/chat-list.js';
 import type { ChatListRefreshRequestedMessage } from '../../../common/ws-events.js';
@@ -30,7 +31,12 @@ async function moveToBottom(
 
 test('chat sort presets atomically reorder every persisted group and survive restart', async () => {
   await withIntegrationFixture('chat-sort', async (fixture) => {
-    const chatIds = Array.from({ length: 6 }, () => fixture.newChatId());
+    const chatCount = 6;
+    const firstCreatedAt = Date.now() - chatCount;
+    // Distinct past ID timestamps keep cold-cache sorting deterministic without outranking later activity.
+    const chatIds = Array.from({ length: chatCount }, (_, index) =>
+      chatIdFromTimestamp(firstCreatedAt + index, 0),
+    );
     for (const [index, chatId] of chatIds.entries()) {
       const started = await fixture.client.startDirectChat({
         chatId,
