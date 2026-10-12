@@ -198,7 +198,7 @@
         "@garcon/common": "workspace:*",
         "@garcon/server-agent-common": "workspace:*",
         "@garcon/server-agent-interface": "workspace:*",
-        "@opencode-ai/sdk": "1.18.34",
+        "@opencode-ai/sdk": "1.19.0",
         "jsonc-parser": "3.3.1",
       },
       "devDependencies": {
@@ -725,7 +725,7 @@
 
     "@openai/codex-win32-x64": ["@openai/codex@0.160.0-win32-x64", "", { "os": "win32", "cpu": "x64" }, "sha512-/gCFcuOmGlQkgGivWCtY8BNEDixh70Pue0HZOk9S8bj2vUIE1GLD9zcNB/KqqDJmn0S+lIttauLpzQnw6HOCHA=="],
 
-    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.18.34", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-R9QWUpcngtdQ6FCixz7NC6n1WsSho6CEuRUzYHz/CzZcp3miSklDzXkm0oDwXVCnuEu+ANoeM0f6RDp51kOMzQ=="],
+    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.19.0", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-lDFYTD6qxzq1mfwxF6Kq1DAs6rEwF4xoZ2I3G1sB7hAZ8Yb28JurtSmmcK7ZzZ8Z4qBUYbZimHJ6DM4JFq5amw=="],
 
     "@oxc-minify/binding-android-arm-eabi": ["@oxc-minify/binding-android-arm-eabi@0.136.0", "", { "os": "android", "cpu": "arm" }, "sha512-gk1jzky1vLeOcK7w9Ib2RT/UooZ7O21s8YSeXCsy4tzsmguKb3Cbsv/Ra2fKhMp4mKeKCzvC1Xa41OfSBWfWdQ=="],
 
