@@ -134,8 +134,8 @@ describe('POST /api/v1/chats/lookup-native-session', () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({
       success: false,
-      error: 'Access denied. No token provided.',
-      errorCode: 'VALIDATION_FAILED',
+      error: 'Invalid token',
+      errorCode: 'AUTH_SESSION_INVALID',
       retryable: false,
     });
     expect(registry.lookupNativeSession).not.toHaveBeenCalled();

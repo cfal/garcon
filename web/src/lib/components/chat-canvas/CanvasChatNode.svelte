@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import type { NodeProps } from '@xyflow/svelte';
 	import type { CanvasFlowNode } from './canvas-node-types';
 	import { getCanvasView } from '$lib/context/canvas-context';
@@ -28,7 +29,7 @@
 	<div class="nodrag flex h-7 items-center justify-end border-t border-border px-2">
 		{#if chat}<a
 				class="canvas-link text-xs"
-				href={`/chat/${chat.id}`}
+				href={resolve('/chat/[id]', { id: chat.id })}
 				onclick={(event) => {
 					event.stopPropagation();
 					if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {

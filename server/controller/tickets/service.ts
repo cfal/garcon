@@ -44,7 +44,7 @@ export class TicketService {
     }
     const context: TicketMutationContext = { ...caller, expectedStoreId: request.expectedStoreId, source: null,
       operationKey: JSON.stringify(['http', ticketAuthorityKey(caller.authority), request.requestId]),
-      fingerprint: ticketFingerprint(request.payload, caller.actor) };
+      fingerprint: ticketFingerprint(request.payload, caller) };
     signal?.throwIfAborted();
     return this.execute(request.payload, context);
   }
@@ -143,7 +143,8 @@ export class TicketService {
       }
       return;
     }
-    if (context.actor.kind !== 'user' || owner.username !== context.actor.username) {
+    if (context.actor.kind !== 'user' || context.authority.kind !== 'principal'
+      || owner.ownerKey !== context.authority.key) {
       throw new TicketDomainError('TICKET_VALIDATION_FAILED', 'A user assignment must name the current authenticated user.');
     }
   }

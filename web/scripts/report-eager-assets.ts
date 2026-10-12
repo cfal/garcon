@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { renderRuntimeShell } from '../../common/runtime-shell.js';
 import { assertLazyLanguageAssets, collectEagerAssets, type ManifestEntry } from './eager-assets.js';
 
 interface AssetReport {
@@ -67,7 +68,7 @@ function packageVersion(packageName: string): string {
 }
 
 const manifest = readJson<Record<string, ManifestEntry>>(manifestPath);
-const html = readFileSync(indexPath, 'utf8');
+const html = renderRuntimeShell(readFileSync(indexPath, 'utf8'), '');
 const preloadFiles = linkedAssets(html, 'modulepreload');
 const { files: eagerFiles, cssFiles: eagerCssFiles, keysByFile } = collectEagerAssets(
 	preloadFiles, linkedAssets(html, 'stylesheet'), manifest,

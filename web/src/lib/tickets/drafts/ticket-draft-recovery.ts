@@ -1,3 +1,5 @@
+import { normalizeStoredTicketRequest } from '$shared/ticket-stored';
+import { canPersistBrowserData } from '$lib/utils/browser-data-lifetime';
 import {
 	parseHttpTicketMutationRequest,
 	type HttpTicketMutationRequest,
@@ -137,7 +139,7 @@ export function parseTicketDraft(value: unknown): TicketDraftSnapshot {
 		const submission = ticketRecord(raw.frozen, ['version', 'request']);
 		frozen = {
 			version: ticketInteger(submission.version, 'submittedVersion', 0, version),
-			request: parseHttpTicketMutationRequest(submission.request),
+			request: parseHttpTicketMutationRequest(normalizeStoredTicketRequest(submission.request)),
 		};
 		if (frozen.request.expectedStoreId !== storeId)
 			throw new Error('Draft submission belongs to another store');
@@ -168,7 +170,8 @@ export function parseTicketDraft(value: unknown): TicketDraftSnapshot {
 		fields: parsedFields,
 		baseFields,
 		frozen,
-		baseRevision: raw.baseRevision === null ? null : ticketInteger(raw.baseRevision, 'baseRevision'),
+		baseRevision:
+			raw.baseRevision === null ? null : ticketInteger(raw.baseRevision, 'baseRevision'),
 	};
 }
 
@@ -213,6 +216,7 @@ export function createTicketRecovery(storage: () => Storage): TicketRecoveryPort
 			return entries;
 		},
 		write(draft) {
+			if (!canPersistBrowserData()) return;
 			const target = storage();
 			const key = draftKey(draft);
 			if (target.getItem(key) === null && this.list(draft).length >= TICKET_RECOVERY_CAPACITY) {
@@ -223,9 +227,11 @@ export function createTicketRecovery(storage: () => Storage): TicketRecoveryPort
 			target.setItem(key, JSON.stringify(draft));
 		},
 		remove(partition, id) {
+			if (!canPersistBrowserData()) return;
 			storage().removeItem(partitionPrefix(partition) + encodeURIComponent(id));
 		},
 		discard(partition, key) {
+			if (!canPersistBrowserData()) return;
 			if (!key.startsWith(partitionPrefix(partition)))
 				throw new Error('Recovery entry belongs to another account or store');
 			storage().removeItem(key);

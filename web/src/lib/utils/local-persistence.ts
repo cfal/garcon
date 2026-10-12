@@ -1,4 +1,5 @@
 import { setLocalStorageWithCacheRecovery } from './local-storage-cache-recovery';
+import { canPersistBrowserData } from './browser-data-lifetime';
 
 type ValueOf<T> = T[keyof T];
 
@@ -73,6 +74,7 @@ export function setLocalStorageItem(key: LocalStorageKey, value: string): void {
 }
 
 export function removeLocalStorageItem(key: LocalStorageKey): void {
+	if (!canPersistBrowserData()) return;
 	try {
 		getBrowserStorage('local')?.removeItem(key);
 	} catch {
@@ -89,6 +91,7 @@ export function getSessionStorageItem(key: SessionStorageKey): string | null {
 }
 
 export function setSessionStorageItem(key: SessionStorageKey, value: string): void {
+	if (!canPersistBrowserData()) return;
 	try {
 		getBrowserStorage('session')?.setItem(key, value);
 	} catch {
@@ -97,6 +100,7 @@ export function setSessionStorageItem(key: SessionStorageKey, value: string): vo
 }
 
 export function removeSessionStorageItem(key: SessionStorageKey): void {
+	if (!canPersistBrowserData()) return;
 	try {
 		getBrowserStorage('session')?.removeItem(key);
 	} catch {

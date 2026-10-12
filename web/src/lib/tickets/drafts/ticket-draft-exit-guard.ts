@@ -1,10 +1,13 @@
 import type { TicketDraftStore } from './ticket-draft-store.svelte.js';
+import { isBrowserDataCurrent } from '$lib/utils/browser-data-lifetime';
 
 export function attachTicketDraftExitGuard(drafts: TicketDraftStore): () => void {
 	if (typeof window === 'undefined') return () => {};
-	const preserve = () => drafts.flush();
+	const preserve = () => {
+		if (isBrowserDataCurrent()) drafts.flush();
+	};
 	const beforeUnload = (event: BeforeUnloadEvent) => {
-		if (!drafts.needsExitGuard) return;
+		if (!isBrowserDataCurrent() || !drafts.needsExitGuard) return;
 		preserve();
 		event.preventDefault();
 		event.returnValue = '';

@@ -2,10 +2,32 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { expect as browserExpect } from "playwright/test";
+import type { Locator } from "playwright";
 import { authenticateChromiumContext, withChromiumFixture } from "../../support/chromium-fixture.js";
 import { codexAssistantMessage } from "../../support/fake-codex-model.js";
 import { liveCodexStartRequest } from "../../support/live-codex.js";
 import { startScriptedCodexTestEnvironment } from "../../support/scripted-codex.js";
+
+async function expectQueueFooter(tray: Locator): Promise<void> {
+  await browserExpect(tray.locator("footer")).toBeInViewport({ ratio: 1 });
+  await browserExpect
+    .poll(() => tray.evaluate((element) => {
+      const list = element.querySelector("[data-queue-list]");
+      const footer = element.querySelector("footer");
+      if (!list || !footer) return false;
+
+      const listBounds = list.getBoundingClientRect();
+      const footerBounds = footer.getBoundingClientRect();
+      const trayBounds = element.getBoundingClientRect();
+      return (
+        element.firstElementChild === list &&
+        list.nextElementSibling === footer &&
+        listBounds.bottom <= footerBounds.top &&
+        footerBounds.bottom <= trayBounds.bottom
+      );
+    }))
+    .toBe(true);
+}
 
 test("reorders, expands, edits, and steers queued messages from the chat on desktop and mobile", async () => {
   const environment = await startScriptedCodexTestEnvironment();
@@ -45,13 +67,24 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           exact: true,
         });
         await browserExpect(queueButton).toBeVisible({ timeout: 20_000 });
-        for (const message of messages) {
+        const tray = page.locator("[data-queue-status-summary]");
+        const footer = tray.locator("footer");
+        let footerTop: number | undefined;
+        for (const [index, message] of messages.entries()) {
           await composer.fill(message);
           await queueButton.click();
           await browserExpect(composer).toHaveValue("");
+          await browserExpect(tray.getByText(`${index + 1} queued`, { exact: true })).toBeVisible();
+          await expectQueueFooter(tray);
+          if (footerTop === undefined) {
+            footerTop = (await footer.boundingBox())!.y;
+          } else {
+            await browserExpect
+              .poll(async () => (await footer.boundingBox())?.y)
+              .toBe(footerTop);
+          }
         }
         await composer.fill("Keep this draft while arranging the queue.");
-        const tray = page.locator("[data-queue-status-summary]");
         const previews = tray.locator("[data-queue-preview]");
         const captureDesktop = async (name: string) => {
           const bounds = await tray.boundingBox();
@@ -67,6 +100,11 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           });
         };
         await browserExpect(previews).toHaveText(messages);
+        await browserExpect(tray.getByText("Next", { exact: true })).toHaveCount(0);
+        const desktopRowPadding = await tray.locator("[data-queue-entry-id]").evaluateAll((rows) =>
+          rows.map((row) => getComputedStyle(row).paddingLeft),
+        );
+        expect(desktopRowPadding).toEqual(["8px", "8px", "8px"]);
         await browserExpect(tray.getByRole("button", { name: "Steer", exact: true })).toHaveCount(3);
         await browserExpect(
           page.getByRole("button", { name: "Edit queue", exact: true }),
@@ -75,6 +113,15 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         await browserExpect(desktopSteer.locator("span")).toBeVisible();
         await browserExpect(desktopSteer.locator("svg")).toBeVisible();
         await captureDesktop("desktop-compact.png");
+
+        phase("following message actions with queue-wide controls in keyboard order");
+        await tray.getByRole("button", { name: "Queue actions", exact: true }).last().focus();
+        await page.keyboard.press("Tab");
+        await browserExpect(tray.getByRole("button", { name: "Pause", exact: true })).toBeFocused();
+        await page.keyboard.press("Tab");
+        await browserExpect(
+          tray.getByRole("button", { name: "Expand all queued messages" }),
+        ).toBeFocused();
 
         phase("checking the head overflow menu");
         await tray
@@ -138,6 +185,10 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         await browserExpect(
           tray.getByRole("button", { name: "Collapse queued message 3" }),
         ).toHaveAttribute("aria-expanded", "true");
+        await expectQueueFooter(tray);
+        await browserExpect
+          .poll(async () => (await footer.boundingBox())?.y)
+          .toBe(footerTop);
         await captureDesktop("desktop-expanded.png");
         await tray
           .getByRole("button", { name: "Edit queued message", exact: true })
@@ -173,6 +224,10 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           )
           .toBe(true);
         const firstMobileRow = tray.locator("[data-queue-entry-id]").first();
+        const mobileRowPadding = await tray.locator("[data-queue-entry-id]").evaluateAll((rows) =>
+          rows.map((row) => getComputedStyle(row).paddingLeft),
+        );
+        expect(mobileRowPadding).toEqual(["4px", "4px", "4px"]);
         const mobileSteer = firstMobileRow.getByRole("button", { name: "Steer", exact: true });
         await browserExpect(mobileSteer.locator("span")).toBeHidden();
         await browserExpect(mobileSteer.locator("svg")).toBeVisible();
@@ -184,6 +239,8 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           expect(bounds?.width).toBeGreaterThanOrEqual(44);
           expect(bounds?.height).toBeGreaterThanOrEqual(44);
         }
+        await expectQueueFooter(tray);
+        const mobileFooterTop = (await footer.boundingBox())!.y;
         await page.screenshot({
           path: join(artifactDir, "mobile-compact.png"),
         });
@@ -208,6 +265,10 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         const mobileTrayBounds = await tray.boundingBox();
         if (!expandedPreviewBounds || !mobileTrayBounds) throw new Error("Queue text is not visible");
         expect(expandedPreviewBounds.width).toBeGreaterThan(mobileTrayBounds.width * 0.75);
+        await expectQueueFooter(tray);
+        await browserExpect
+          .poll(async () => (await footer.boundingBox())?.y)
+          .toBe(mobileFooterTop);
         await page.screenshot({
           path: join(artifactDir, "mobile-expanded.png"),
         });
@@ -471,6 +532,9 @@ test("retains late reorder errors and keeps a large expanded queue above a tall 
           await tray.locator("[data-queue-entry-id]").count(),
         ).toBeLessThan(40);
         const list = tray.locator("[data-queue-list]");
+        const footer = tray.locator("footer");
+        await expectQueueFooter(tray);
+        const pausedFooterTop = (await footer.boundingBox())!.y;
         await list.evaluate((element) => {
           element.scrollTop = element.scrollHeight;
         });
@@ -479,6 +543,14 @@ test("retains late reorder errors and keeps a large expanded queue above a tall 
         ).toHaveText(
           "Synthetic budget message 249\nSynthetic expanded detail.",
         );
+        await expectQueueFooter(tray);
+        expect((await footer.boundingBox())?.y).toBe(pausedFooterTop);
+        await browserExpect(
+          footer.getByRole("button", { name: "Resume queue", exact: true }),
+        ).toBeInViewport({ ratio: 1 });
+        await browserExpect(
+          footer.getByText("Messages stay queued until you resume."),
+        ).toBeInViewport({ ratio: 1 });
 
         phase("retaining keyboard focus while moving beyond the mounted viewport");
         const tailEntry = (await integration.client.getExecutionControl(chatA)).queue.entries.at(-1)!;
@@ -539,6 +611,7 @@ test("retains late reorder errors and keeps a large expanded queue above a tall 
         await browserExpect(
           tray.locator("[data-queue-preview]").first(),
         ).toHaveText("Synthetic initial message 0");
+        await expectQueueFooter(tray);
         const artifactDir = join(
           import.meta.dir,
           "../../artifacts/chromium/inline-queue",

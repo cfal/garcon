@@ -179,6 +179,12 @@ Comment removal retains previous text in activity history; it is not redaction. 
 
 Activity's **Open source** opens the originating chat at the visible ticket-command result, including older rows outside the loaded transcript. If the transcript was reloaded or the exact result is missing, it opens the chat with a notification instead. Deleted chats cannot be opened. Source addresses remain immutable; navigation never substitutes a row from a replacement transcript.
 
+## Path-Prefix Deployments
+
+The webapp, API, and WebSockets can share a runtime URL prefix without rebuilding
+the frontend: set `--base-path /garcon` or `GARCON_BASE_PATH=/garcon`. Reverse
+proxies must preserve that prefix. See [path-prefix deployments](docs/cli.md#path-prefix-deployments).
+
 ## Remote Executors
 
 Garcon can run agents, files, Git, and terminals on Local and on trusted remote
@@ -189,7 +195,7 @@ or explicit `--no-tls` behind a protected TLS proxy.
 Add a target in the Executors dialog. Dialing workers receive their full
 connection credential through `GARCON_CONTROLLER_URL`, never `--connect`.
 Configure the controller's external address with `--public-url` or
-`GARCON_PUBLIC_URL`; proxy deployments should not rely on Host fallback.
+`GARCON_PUBLIC_URL`; its path must match `--base-path`. Proxy deployments should not rely on Host fallback.
 Workspace-wide CLI access is a separate default-off grant.
 
 See [executor deployment and onboarding](docs/cli.md#executor-connections) and

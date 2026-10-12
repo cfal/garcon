@@ -311,6 +311,9 @@ export interface QueueEntryCreateCommandRequest {
   excludedResendOrdinals?: number[];
   content: string;
   images?: AgentCommandImage[];
+  expectedModel?: string;
+  expectedAgentId?: string;
+  expectedAgentOwnershipEpoch?: string;
 }
 
 // Replacement edits text only; the entry keeps its attachments, so empty
@@ -717,6 +720,9 @@ export function parseQueueEntryCreateCommandRequest(value: unknown): QueueEntryC
   const body = requestRecord(value);
   const images = optionalImages(body.images);
   const content = requiredStringContent(body, 'content');
+  const expectedModel = optionalString(body, 'expectedModel');
+  const expectedAgentId = optionalNonEmptyString(body, 'expectedAgentId');
+  const expectedAgentOwnershipEpoch = optionalNonEmptyString(body, 'expectedAgentOwnershipEpoch');
   if (!content.trim() && !images?.length) {
     throw new CommandRequestValidationError('content or images are required');
   }
@@ -728,6 +734,9 @@ export function parseQueueEntryCreateCommandRequest(value: unknown): QueueEntryC
     ...(optionalResendOrdinals(body.excludedResendOrdinals) ?? {}),
     content,
     ...(images === undefined ? {} : { images }),
+    ...(expectedModel === undefined ? {} : { expectedModel }),
+    ...(expectedAgentId === undefined ? {} : { expectedAgentId }),
+    ...(expectedAgentOwnershipEpoch === undefined ? {} : { expectedAgentOwnershipEpoch }),
   };
 }
 

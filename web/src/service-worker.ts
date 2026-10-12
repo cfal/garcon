@@ -5,7 +5,8 @@
 declare const self: ServiceWorkerGlobalScope;
 
 import { openNotificationChat } from './service-worker-notifications.js';
-import { build, files, version } from '$service-worker';
+import { base, build, files, version } from '$service-worker';
+import { stripBasePath } from '../../common/base-path.js';
 import {
 	withNavigationTimeout,
 	isManifestPath,
@@ -14,9 +15,8 @@ import {
 	type ServiceWorkerPrecacheManifest,
 } from './service-worker-helpers';
 
-const CACHE_NAME = `garcon-${version}`;
-
-const CACHE_PREFIX = 'garcon-';
+const CACHE_PREFIX = `garcon:${encodeURIComponent(base)}:`;
+const CACHE_NAME = `${CACHE_PREFIX}${version}`;
 const PRECACHE_MANIFEST: ServiceWorkerPrecacheManifest = { build, files };
 
 self.addEventListener('notificationclick', (event) => {
@@ -30,6 +30,7 @@ self.addEventListener('notificationclick', (event) => {
 					self.location.origin,
 					windows as WindowClient[],
 					(url) => self.clients.openWindow(url),
+					base,
 				),
 			),
 	);
@@ -37,8 +38,8 @@ self.addEventListener('notificationclick', (event) => {
 // Paths that must never be cached (API, WebSocket upgrades).
 const PASSTHROUGH_PREFIXES = ['/api', '/ws'];
 
-function isPassthrough(url: URL): boolean {
-	return PASSTHROUGH_PREFIXES.some((p) => url.pathname.startsWith(p));
+function isPassthrough(pathname: string): boolean {
+	return PASSTHROUGH_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
 async function cacheSuccessfulNavigation(request: Request, response: Response): Promise<void> {
@@ -52,21 +53,24 @@ self.addEventListener('install', (event) => {
 	event.waitUntil(
 		caches
 			.open(CACHE_NAME)
-			.then((cache) => precacheAppShell(cache, PRECACHE_MANIFEST))
+			.then((cache) => precacheAppShell(cache, PRECACHE_MANIFEST, base))
 			.then(() => self.skipWaiting()),
 	);
 });
 
 self.addEventListener('activate', (event) => {
-	// Evict old garcon caches from previous deploys. Only touch our own prefix.
+	// Root upgrades also retire caches created before mount-specific naming.
 	event.waitUntil(
 		caches
 			.keys()
 			.then((keys) =>
 				Promise.all(
 					keys
-						.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)
-						.map((k) => caches.delete(k)),
+						.filter((name) => {
+							const legacyRootCache = base === '' && name.startsWith('garcon-');
+							return legacyRootCache || (name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME);
+						})
+						.map((name) => caches.delete(name)),
 				),
 			)
 			.then(() => self.clients.claim()),
@@ -78,11 +82,12 @@ self.addEventListener('fetch', (event) => {
 
 	// Never intercept API calls, WebSocket handshakes, or cross-origin requests.
 	if (url.origin !== self.location.origin) return;
-	if (isPassthrough(url)) return;
+	const pathname = stripBasePath(url.pathname, base);
+	if (pathname === null || isPassthrough(pathname)) return;
 
 	// Non-GET requests (form POSTs, etc.) go straight to network.
 	if (event.request.method !== 'GET') return;
-	if (isManifestPath(url.pathname)) return;
+	if (isManifestPath(pathname)) return;
 
 	// Navigation requests (HTML): network-first so the latest deploy is picked up,
 	// falling back to the cached app shell for offline/flaky-network scenarios.
@@ -96,7 +101,10 @@ self.addEventListener('fetch', (event) => {
 		);
 		event.respondWith(
 			withNavigationTimeout(network).catch(() =>
-				caches.match('/').then((r) => r ?? Response.error()),
+				caches
+					.open(CACHE_NAME)
+					.then((cache) => cache.match(`${base}/`))
+					.then((r) => r ?? Response.error()),
 			),
 		);
 		return;

@@ -14,6 +14,7 @@
 		controller,
 		draft,
 		chats,
+		ownerKey,
 		username,
 		onSubmit,
 		onRefinementPendingChange,
@@ -23,6 +24,7 @@
 		controller: TicketsController;
 		draft: TicketDraftState;
 		chats: readonly TicketChatSummary[];
+		ownerKey: string;
 		username: string;
 		onSubmit: () => void;
 		onRefinementPendingChange: (pending: boolean) => void;
@@ -109,12 +111,12 @@
 					value={draft.field('assignee')}
 					onchange={(event) => draft.setField('assignee', event.currentTarget.value)}
 				>
-					<option value="">{m.tickets_unassigned()}</option><option value={`user:${username}`}
-						>{m.tickets_me()}</option
+					<option value="">{m.tickets_unassigned()}</option><option value={`user:${ownerKey}`}
+						>{username} ({m.tickets_me()})</option
 					>
 					{#if draft
 						.field('assignee')
-						.startsWith('user:') && draft.field('assignee') !== `user:${username}`}<option
+						.startsWith('user:') && draft.field('assignee') !== `user:${ownerKey}`}<option
 							value={draft.field('assignee')}>{draft.field('assignee').slice(5)}</option
 						>{/if}
 					{#each chats as chat (chat.id)}<option value={`chat:${chat.id}`}

@@ -8,7 +8,7 @@ import { buildModelSelectorRecents } from '../model-selector-recents';
 function metadata(id: string): AgentMetadata {
 	return {
 		executionPolicy: 'conversation',
-		selectionLabel: 'Model',
+		selectionLabel: 'Model', inputFormatByModel: {},
 		id, label: id, supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
 		supportsForkWhileRunning: false, supportsUpdateProjectPath: true, supportsSteering: true,
 		supportsImages: false, fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false,

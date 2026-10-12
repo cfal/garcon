@@ -125,9 +125,18 @@ export class TicketsController implements PortableSingletonController {
 		this.mutations = new TicketMutationFeedback(() => this.drafts.active);
 		this.#releaseExitGuard = attachTicketDraftExitGuard(this.drafts);
 		this.#authenticated = deps.invalidations.authenticationAvailable !== false;
+		this.drafts.setAvailable(this.#authenticated);
 		this.#unsubscribe = deps.invalidations.subscribe((event) => {
+			if (event.kind === 'availability') {
+				this.#authenticated = event.authenticated;
+				this.drafts.setAvailable(event.authenticated);
+				this.#needsBootstrap = true;
+				this.#supersede();
+				return;
+			}
 			if (event.kind === 'authority') {
 				this.#authenticated = event.authenticated;
+				this.drafts.setAvailable(event.authenticated);
 				this.#needsBootstrap = true;
 				this.#knownRevision = 0;
 				this.bootstrap = null;
@@ -386,7 +395,8 @@ export class TicketsController implements PortableSingletonController {
 						this.#needsBootstrap = true;
 						continue;
 					}
-					if (error instanceof ApiError && error.errorCode === 'TICKET_COLLECTION_CHANGED') continue;
+					if (error instanceof ApiError && error.errorCode === 'TICKET_COLLECTION_CHANGED')
+						continue;
 					throw error;
 				}
 			}
@@ -401,6 +411,7 @@ export class TicketsController implements PortableSingletonController {
 	}
 
 	async page(key: TicketWindowKey, direction: 'more' | 'next' | 'previous'): Promise<void> {
+		if (!this.#authenticated) return;
 		const collection = this.collection;
 		const window = collection?.windows[key];
 		if (!collection || !window || this.pagePending || this.stale) return;
@@ -449,6 +460,7 @@ export class TicketsController implements PortableSingletonController {
 	}
 
 	async loadOlderComments(): Promise<void> {
+		if (!this.#authenticated) return;
 		const detail = this.detail.current;
 		if (!detail || detail.comments.nextBeforeSequence === null || this.pagePending) return;
 		const epoch = this.#epoch;
@@ -501,6 +513,7 @@ export class TicketsController implements PortableSingletonController {
 	}
 
 	async #loadHistory(beforeSequence?: number): Promise<void> {
+		if (!this.#authenticated) return;
 		const ticketId = this.detail.selectedId;
 		const bootstrap = this.bootstrap;
 		if (!ticketId || !bootstrap || this.pagePending) return;
@@ -565,7 +578,8 @@ export class TicketsController implements PortableSingletonController {
 	#pageError(error: unknown): void {
 		if (
 			error instanceof ApiError &&
-			(error.errorCode === 'TICKET_COLLECTION_CHANGED' || error.errorCode === 'TICKET_STORE_CHANGED')
+			(error.errorCode === 'TICKET_COLLECTION_CHANGED' ||
+				error.errorCode === 'TICKET_STORE_CHANGED')
 		) {
 			this.#needsBootstrap ||= error.errorCode === 'TICKET_STORE_CHANGED';
 			this.#supersede();
@@ -573,7 +587,7 @@ export class TicketsController implements PortableSingletonController {
 	}
 
 	async beginCreate(directory: string | null, executorId = 'local'): Promise<void> {
-		if (!this.bootstrap) return;
+		if (!this.bootstrap || !this.#authenticated) return;
 		const draft = this.drafts.open('create', null, {
 			project: this.query.project ?? '',
 			priority: '2',
@@ -628,7 +642,7 @@ export class TicketsController implements PortableSingletonController {
 		ticket: Pick<Ticket, 'id' | 'revision'>,
 		payload: TicketMutationPayload,
 	): Promise<boolean> {
-		if (!this.bootstrap || this.mutations.busy(ticket.id)) return false;
+		if (!this.bootstrap || !this.#authenticated || this.mutations.busy(ticket.id)) return false;
 		const draft = this.drafts.open('mutation', { ticket });
 		if (!draft) return false;
 		if (draft.needsExitGuard) {

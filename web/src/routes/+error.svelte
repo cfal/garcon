@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -20,7 +21,7 @@
 			{is404 ? m.error_page_not_found_description() : m.error_unexpected_description()}
 		</p>
 		<div class="pt-2">
-			<Button href="/">{m.error_go_home()}</Button>
+			<Button href={resolve('/')}>{m.error_go_home()}</Button>
 		</div>
 	</div>
 </div>

@@ -29,6 +29,7 @@ export interface ConversationPanelActions {
 		plan: string,
 	): void;
 	fork(surfaceId: ChatViewSurfaceId, chatId: string, upToOrdinal?: number): void;
+	clearBefore(surfaceId: ChatViewSurfaceId, chatId: string, ordinal: number): void;
 	appendToDraft(surfaceId: ChatViewSurfaceId, chatId: string, block: string): void;
 	generateTitle(
 		surfaceId: ChatViewSurfaceId,

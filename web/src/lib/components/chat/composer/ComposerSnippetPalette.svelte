@@ -186,7 +186,9 @@
 								aria-selected={snippet.key === palette.highlightedSnippet?.key}
 								aria-disabled={!palette.contextAvailable}
 								onclick={() => palette.selectSnippet(snippet)}
-								onmouseenter={() => palette.highlight(snippet.key)}
+								onpointermove={(event) => {
+									if (event.pointerType === 'mouse') palette.highlight(snippet.key);
+								}}
 								class="flex min-h-14 w-full items-start gap-3 rounded-md px-3 py-2 {snippet.key ===
 								palette.highlightedSnippet?.key
 									? 'bg-muted'

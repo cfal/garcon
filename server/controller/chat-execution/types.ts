@@ -56,6 +56,7 @@ export type UserInputAdmissionOptions = Pick<
   | 'clientMessageId'
   | 'transcriptViewId'
   | 'turnId'
+  | 'model'
   | 'images'
   | 'excludedResendOrdinals'
 > & {

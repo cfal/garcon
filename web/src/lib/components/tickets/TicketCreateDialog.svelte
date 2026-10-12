@@ -12,6 +12,7 @@
 		controller,
 		chats,
 		username,
+		ownerKey,
 		ownerId,
 		onClose,
 		pinnedProjectPaths = [],
@@ -19,6 +20,7 @@
 		controller: TicketsController;
 		chats: readonly TicketChatSummary[];
 		username: string;
+		ownerKey: string;
 		ownerId: string;
 		onClose: () => void;
 		pinnedProjectPaths?: string[];
@@ -94,6 +96,7 @@
 					{draft}
 					{chats}
 					{username}
+					{ownerKey}
 					{pinnedProjectPaths}
 					onSubmit={() => void submit()}
 					onRefinementPendingChange={(pending) => (refining = pending)}
@@ -128,8 +131,11 @@
 						</div>
 					</div>{/if}
 				<Dialog.Footer>
-					<button type="button" class="ticket-button" disabled={draft.pending} onclick={requestClose}
-						>{m.tickets_cancel()}</button
+					<button
+						type="button"
+						class="ticket-button"
+						disabled={draft.pending}
+						onclick={requestClose}>{m.tickets_cancel()}</button
 					>
 					<button type="submit" class="ticket-button ticket-primary" disabled={!canSubmit}
 						>{draft.pending && !chatRequested ? m.tickets_creating() : m.tickets_create()}</button

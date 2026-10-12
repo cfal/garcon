@@ -210,6 +210,7 @@
 				onOpenSource={(source) =>
 					void ticketSourceNavigation.open(source, presentation, () => controller.bootstrap)}
 				username={auth.user?.username ?? 'local'}
+				ownerKey={auth.user?.id ?? 'local'}
 				pinnedProjectPaths={remoteSettings.snapshot?.paths.pinnedProjectPaths ?? []}
 				directory={workspaceContext.current?.projectPath ?? null}
 				executorId={workspaceContext.current?.executorId}

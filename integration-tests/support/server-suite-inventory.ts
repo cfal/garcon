@@ -2,6 +2,8 @@ import type { ExecutionBackend } from './execution-backend.js';
 
 // New server suites join all three lanes unless an explicit exception is recorded here.
 export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze({
+  'browser-logout': 'Owns its browser-session and Local/remote execution matrix.',
+  'runtime-base-path': 'Owns the root/nested mount and Local/remote transport matrix.',
   ...Object.fromEntries([
     'api-provider-assignments', 'cross-executor-handoff', 'execution-worker-process', 'executor-admission', 'executor-app',
     'executor-bulk-isolation', 'executor-bulk-reconnect',
@@ -20,7 +22,7 @@ export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze
     'executor-session-setup', 'executor-shutdown',
     'executor-terminal-pressure', 'executor-terminals', 'executor-ticket-defaults',
     'executor-unknown-agent', 'git-input-boundaries', 'lazy-native-compaction',
-    'lazy-native-sessions',
+    'lazy-native-sessions', 'shell-notes',
   ].map(name => [name, 'Owns its Local/remote fixtures or explicit transport/management matrix.'])),
   ...Object.fromEntries([
     'agent-settings-migration', 'carryover-bootstrap-migration', 'scheduled-prompt-migration',

@@ -3,6 +3,7 @@
 // the UI component so ConversationWorkspace stays composition-focused.
 
 import { goto } from '$app/navigation';
+import { resolve } from '$app/paths';
 import { createEventRouter, type EventRouterStores } from '$lib/events/router.svelte';
 import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 import type { WsConnection } from '$lib/ws/connection.svelte';
@@ -166,7 +167,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 					void gotoChat(neighborId);
 				} else {
 					deps.sessions.setSelectedChatId(null);
-					goto('/');
+					goto(resolve('/'));
 				}
 			},
 		},

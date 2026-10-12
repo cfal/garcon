@@ -26,7 +26,7 @@ test.each(['in-process', 'remote-controller-dials', 'remote-executor-dials'] as 
       await fixture.client.ping();
       const observer = await fixture.connectObserver('authenticated');
       await observer.ping();
-      expect(() => fixture.client.fetch('https://example.invalid/')).toThrow('controller origin');
+      expect(() => fixture.client.fetch('https://example.invalid/')).toThrow('app-relative path');
 
       const separateConfig = join(fixture.dirs.root, 'separate-auth');
       await mkdir(separateConfig);

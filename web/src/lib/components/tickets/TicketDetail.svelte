@@ -35,6 +35,7 @@
 		error,
 		chats,
 		username,
+		ownerKey,
 		onOpenChat,
 		onOpenSource,
 		onBack,
@@ -48,6 +49,7 @@
 		error: string | null;
 		chats: readonly TicketChatSummary[];
 		username: string;
+		ownerKey: string;
 		onOpenChat: (id: string) => void;
 		onOpenSource: (source: TicketSource) => void;
 		onBack: () => void;
@@ -67,7 +69,7 @@
 	const ticket = $derived(controller.mutations.ticket(detail.ticket));
 	const saving = $derived(controller.mutations.busy(ticket.id));
 	const ownAssignment = $derived(
-		ticket.assignee?.kind === 'user' && ticket.assignee.username === username,
+		ticket.assignee?.kind === 'user' && ticket.assignee.ownerKey === ownerKey,
 	);
 	function edit() {
 		controller.detail.fieldsDraft = controller.drafts.open(
@@ -107,7 +109,8 @@
 			priorComments = comments;
 			const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
 			const anchor = [...element.querySelectorAll<HTMLElement>('[data-comment-id]')].find(
-				(executor) => executor.getBoundingClientRect().bottom >= element.getBoundingClientRect().top,
+				(executor) =>
+					executor.getBoundingClientRect().bottom >= element.getBoundingClientRect().top,
 			);
 			const offset = anchor?.getBoundingClientRect().top;
 			void tick().then(() => {
@@ -162,6 +165,7 @@
 				draft={editing}
 				{chats}
 				{username}
+				{ownerKey}
 				active={visible}
 				onSubmit={() => void save()}
 				onRefinementPendingChange={(pending) => (refining = pending)}
@@ -221,7 +225,11 @@
 		</div>
 		<dl class="ticket-properties-read">
 			<dt>{m.tickets_project()}</dt>
-			<dd class="ticket-project" data-path={isTicketProjectPath(ticket.project)} title={ticket.project}>
+			<dd
+				class="ticket-project"
+				data-path={isTicketProjectPath(ticket.project)}
+				title={ticket.project}
+			>
 				{ticket.project}
 			</dd>
 			<dt>{m.tickets_priority()}</dt>
@@ -232,8 +240,16 @@
 			<dd class="ticket-assignee-value">
 				{#if ticket.assignee?.kind === 'chat'}
 					<TicketChatReference chatId={ticket.assignee.chatId} {chats} {onOpenChat} />
-				{:else if ticket.assignee?.kind === 'executor'}<TicketExecutorReference executorId={ticket.assignee.executorId} />
-				{:else}<span>{ticket.assignee?.username ?? m.tickets_unassigned()}</span>{/if}
+				{:else if ticket.assignee?.kind === 'executor'}<TicketExecutorReference
+						executorId={ticket.assignee.executorId}
+					/>
+				{:else}<span
+						>{ticket.assignee?.kind === 'user'
+							? ticket.assignee.ownerKey === ownerKey
+								? `${username} (${m.tickets_me()})`
+								: ticket.assignee.ownerKey
+							: m.tickets_unassigned()}</span
+					>{/if}
 				{#if ownAssignment || (ticket.status !== 'closed' && !ticket.assignee)}
 					<button
 						type="button"

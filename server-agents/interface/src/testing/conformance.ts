@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { isInputFormatByModel } from '@garcon/common/input-format';
 import type {
   AgentIntegrationClass,
   AgentIntegration,
@@ -74,6 +75,7 @@ export function validateAgentIntegration(
   assertSingleQueryOptions(agentId, integrationRecord.singleQuery);
   if (integration.literalExecution && (
     !integration.literalExecution.selectionLabel
+    || !isInputFormatByModel(integration.literalExecution.inputFormatByModel)
     || integration.singleQuery !== null || integration.compaction !== null || integration.steering !== null
   )) throw new Error(`Agent integration ${agentId} has an invalid literal execution contract`);
   if ('transcriptSearch' in integration) {

@@ -253,6 +253,70 @@ describe('http route wrapping', () => {
     expect(authenticateHttpRequest).toHaveBeenCalledTimes(1);
   });
 
+  it('mounts routes while preserving request identity, bodies, auth and internal URL semantics', async () => {
+    const request = new Request('http://localhost/tools/garcon/api/private?x=a%2Fb', { method: 'POST', body: 'payload' });
+    const handler = mock(async (incoming, url) => Response.json({
+      sameRequest: incoming === request, path: url.pathname, query: url.searchParams.get('x'), body: await incoming.text(),
+    }));
+    const wrapped = wrapRoutes({ '/api/private': { POST: handler } }, { basePath: '/tools/garcon' });
+    expect(wrapped['/api/private']).toBeUndefined();
+    const response = await wrapped['/tools/garcon/api/private'].POST(request);
+    expect(await response.json()).toEqual({ sameRequest: true, path: '/api/private', query: 'a/b', body: 'payload' });
+    expect(authenticateHttpRequest).toHaveBeenCalledTimes(1);
+    const redirect = await wrapped['/tools/garcon'].GET(new Request('http://localhost/tools/garcon?ticket=G-1'));
+    expect(redirect.status).toBe(308);
+    expect(redirect.headers.get('Location')).toBe('/tools/garcon/?ticket=G-1');
+    const outside = await wrapped['/tools/garcon/api/private'].POST(new Request('http://localhost/tools/garcon-other/api/private'));
+    expect(outside.status).toBe(404);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['', '/tools/garcon'])('preserves route and method registration order at mount "%s"', async basePath => {
+    const rawRoutes = {
+      '/api/public': {
+        GET: markRouteNoAuth(() => new Response('public GET')),
+        POST: markRouteNoAuth(() => new Response('public POST')),
+      },
+      '/api/private': {
+        DELETE: () => new Response('private DELETE'),
+      },
+    };
+    const wrapped = wrapRoutes(rawRoutes, { basePath });
+    const expectedPaths = [`${basePath}/api/public`, `${basePath}/api/private`];
+    if (basePath) expectedPaths.push(basePath);
+    expect(Object.keys(wrapped)).toEqual(expectedPaths);
+
+    for (const [path, methods] of Object.entries(rawRoutes)) {
+      expect(Object.keys(wrapped[basePath + path])).toEqual(Object.keys(methods));
+      for (const method of Object.keys(methods)) {
+        const response = await wrapped[basePath + path][method](
+          new Request(`http://localhost${basePath}${path}`, { method }),
+        );
+        expect(await response.text()).toBe(`${path.slice('/api/'.length)} ${method}`);
+      }
+    }
+    expect(authenticateHttpRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('redirects the bare mount without auth and honors subsequent shutdown', async () => {
+    let shuttingDown = false;
+    const wrapped = wrapRoutes({}, {
+      basePath: '/tools/garcon',
+      isShuttingDown: () => shuttingDown,
+    });
+    expect(Object.keys(wrapped['/tools/garcon'])).toEqual(['GET']);
+    const request = new Request('http://localhost/tools/garcon');
+    const redirect = await wrapped['/tools/garcon'].GET(request);
+    expect(redirect.status).toBe(308);
+    expect(redirect.headers.get('Location')).toBe('/tools/garcon/');
+
+    shuttingDown = true;
+    const rejected = await wrapped['/tools/garcon'].GET(request);
+    expect(rejected.status).toBe(503);
+    expect(await rejected.json()).toMatchObject({ errorCode: 'SERVER_SHUTTING_DOWN' });
+    expect(authenticateHttpRequest).not.toHaveBeenCalled();
+  });
+
   it('bypasses auth for all handlers when auth is globally disabled', async () => {
     isAuthDisabled.mockReturnValue(true);
     const handler = mock((_request, _url, _server, context) => Response.json({

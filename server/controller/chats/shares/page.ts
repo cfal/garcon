@@ -47,11 +47,12 @@ function buildHeadTags(
   token: string,
   canonicalUrl: string,
   appTitle: PublicAppTitle,
+  basePath: string,
 ): string {
   const title = escapeHtml(shareTitle(snapshot));
   const siteName = escapeHtml(appTitle.title);
   const description = escapeHtml(shareDescription(snapshot));
-  const llmHref = escapeHtml(`/shared/llm/${encodeURIComponent(token)}`);
+  const llmHref = escapeHtml(`${basePath}/shared/llm/${encodeURIComponent(token)}`);
 
   return [
     `<title>${title} · ${siteName}</title>`,
@@ -77,10 +78,11 @@ function buildBodyFallback(
   snapshot: SharePageSummary,
   token: string,
   removable: boolean,
+  basePath: string,
 ): string {
   const title = escapeHtml(shareTitle(snapshot));
   const agent = escapeHtml(snapshot.agentId || 'agent');
-  const llmHref = escapeHtml(`/shared/llm/${encodeURIComponent(token)}`);
+  const llmHref = escapeHtml(`${basePath}/shared/llm/${encodeURIComponent(token)}`);
   const block = `<main id="${FALLBACK_ELEMENT_ID}"><h1>${title}</h1><p>Shared ${agent} conversation with ${snapshot.messageCount} messages.</p><p><a href="${llmHref}">Read the full plain-text transcript</a></p></main>`;
   if (!removable) return block;
   return `${block}<script>document.getElementById(${JSON.stringify(FALLBACK_ELEMENT_ID)})?.remove()</script>`;
@@ -95,9 +97,10 @@ export function injectSharedChatContext(
   token: string,
   canonicalUrl: string,
   appTitle: PublicAppTitle,
+  basePath = '',
 ): string {
-  const head = buildHeadTags(snapshot, token, canonicalUrl, appTitle);
-  const body = buildBodyFallback(snapshot, token, true);
+  const head = buildHeadTags(snapshot, token, canonicalUrl, appTitle, basePath);
+  const body = buildBodyFallback(snapshot, token, true, basePath);
   const bootstrap = appTitleBootstrapScript(appTitle);
 
   let html = /<title>[^<]*<\/title>/.test(shell)
@@ -119,9 +122,10 @@ export function renderStandaloneSharedHtml(
   token: string,
   canonicalUrl: string,
   appTitle: PublicAppTitle,
+  basePath = '',
 ): string {
-  const head = buildHeadTags(snapshot, token, canonicalUrl, appTitle);
-  const body = buildBodyFallback(snapshot, token, false);
+  const head = buildHeadTags(snapshot, token, canonicalUrl, appTitle, basePath);
+  const body = buildBodyFallback(snapshot, token, false, basePath);
   return `<!doctype html>
 <html lang="en">
 	<head>

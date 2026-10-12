@@ -17,7 +17,8 @@ import {
   injectSharedChatContext,
   renderStandaloneSharedHtml,
 } from '../chats/shares/page.ts';
-import { loadStaticText } from './static.js';
+import { loadSpaShell } from './static.js';
+import { getBasePath, getPublicUrl } from '../config.js';
 import { extractFirstLine } from '../lib/text.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
@@ -264,7 +265,7 @@ export default function createShareRoutes(
       const resp: ShareChatResponse = {
         success: true,
         shareToken: snapshot.shareToken,
-        shareUrl: `/shared/${snapshot.shareToken}`,
+        shareUrl: `${getBasePath()}/shared/${snapshot.shareToken}`,
       };
       return Response.json(resp);
     } catch (error: unknown) {
@@ -307,7 +308,7 @@ export default function createShareRoutes(
       ? {
           isShared: true,
           shareToken: existing.shareToken,
-          shareUrl: `/shared/${existing.shareToken}`,
+          shareUrl: `${getBasePath()}/shared/${existing.shareToken}`,
           sharedAt: existing.sharedAt,
         }
       : { isShared: false };
@@ -375,7 +376,7 @@ export default function createShareRoutes(
     request: Request,
     url: URL,
   ): Promise<Response> {
-    const shell = await loadStaticText('/index.html');
+    const shell = await loadSpaShell();
     const token = extractShareTokenFromPath(url.pathname);
     const snapshot = token ? await shareStore.getHeader(token) : null;
     const appTitle = resolvePublicAppTitle(
@@ -403,11 +404,13 @@ export default function createShareRoutes(
       });
     }
 
-    const canonicalUrl = `${url.origin}/shared/${encodeURIComponent(token)}`;
-    const llmPath = `/shared/llm/${encodeURIComponent(token)}`;
+    const basePath = getBasePath();
+    const publicBase = getPublicUrl() ?? `${url.origin}${basePath}/`;
+    const canonicalUrl = new URL(`shared/${encodeURIComponent(token)}`, publicBase).href;
+    const llmPath = `${basePath}/shared/llm/${encodeURIComponent(token)}`;
     const html = shell
-      ? injectSharedChatContext(shell, snapshot, token, canonicalUrl, appTitle)
-      : renderStandaloneSharedHtml(snapshot, token, canonicalUrl, appTitle);
+      ? injectSharedChatContext(shell, snapshot, token, canonicalUrl, appTitle, basePath)
+      : renderStandaloneSharedHtml(snapshot, token, canonicalUrl, appTitle, basePath);
     return htmlResponse(html, llmPath);
   };
 

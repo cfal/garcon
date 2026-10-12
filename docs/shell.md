@@ -1,4 +1,4 @@
-# Shell Commands In Chat
+# Shell Commands And Notes In Chat
 
 Shell executes commands on the selected executor, using Sh, Bash, Zsh, or Fish
 discovered on that executor's PATH. Linux and macOS
@@ -6,9 +6,32 @@ executors advertise Shell; Windows executors do not. No API profile, model,
 credentials, or permission mode is involved. Commands run with the executor
 account's privileges, not in a sandbox.
 
+## Notes
+
+The **Mode** selector also offers **Notes** (plain text) and **Notes (Markdown)**
+(sanitized Markdown). Both save the exact submitted text to Shell's native
+history without launching a process, loading shell startup files, changing cwd,
+or producing an assistant response. Formatting is stored per message: switching
+modes does not restyle saved notes. Copy returns the original source.
+
+Notes requires the selected executor and project just like command modes, but
+does not require an installed shell. It is not an offline notepad. The existing
+automatic AI-title setting applies: when enabled, the first note is sent to the
+configured title-generation model. Explicit title generation and prose refinement
+also remain available.
+
+Literal-input rules still apply to both formats. `/md`, `/markdown`, shell syntax,
+and Garcon control envelopes are note text; only the app's standalone `/clear`
+action is intercepted. Attachments and automatic preambles remain disabled.
+Native Reload restores saved notes and their original formats.
+
+Changing modes requires an idle chat with no queued user or control input.
+This prevents a queued note from becoming an executable command. A per-run
+model override affects only that turn, not the saved mode or subsequent queue.
+
 ## Execution
 
-Every submission starts a fresh process. Only the confirmed working directory
+Every command submission starts a fresh process. Only the confirmed working directory
 continues between commands. Variables, exports, functions, aliases, options,
 and activated environments do not survive; combine dependent operations into
 one multiline submission. Filesystem changes persist normally.
@@ -130,6 +153,13 @@ native command handling. It clears the current ledger transcript, not the agent'
 native history or context. It never launches a shell process, stops a command,
 or removes queued work. Finish active work and run or remove queued inputs first.
 
+The user-message menu also offers **Clear before message**, including in Notes
+modes. Confirmation keeps the selected message and all later history while
+removing earlier ledger rows. It never clears the composer draft. Only saved
+user messages can be selected, not pending inputs or command output. Both Clear
+actions pin the displayed view and head; a changed transcript requires a fresh
+selection and confirmation.
+
 The command must be lowercase at the beginning of the input, with only optional
 trailing ASCII whitespace. `/clear argument`, `/clear; pwd`, `/clear` followed
 by another command, ` /clear`, `/Clear`, and `/md /clear` remain ordinary input.
@@ -152,13 +182,15 @@ previously retained copies.
 
 ## CLI
 
-The existing opaque `--model` selection slot selects a shell family. Catalog
-entries label the selection as "Shell":
+The existing opaque `--model` selection slot selects a shell family or Notes
+mode. Catalog entries label the selection as "Mode":
 
 ```sh
 garcon-cli list models --agent shell
 garcon-cli start --agent shell --model bash --cwd /path/to/project 'pwd'
 garcon-cli resume CHAT_ID 'cd subdirectory; ls'
+garcon-cli start --agent shell --model notes --cwd /path/to/project 'A plain note'
+garcon-cli start --agent shell --model notes-markdown --cwd /path/to/project '# A Markdown note'
 ```
 
 The same operations work through an executor's loopback CLI gateway when its

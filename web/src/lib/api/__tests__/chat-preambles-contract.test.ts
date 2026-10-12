@@ -6,7 +6,8 @@ import {
 } from '../chat-preambles.js';
 
 vi.stubGlobal('localStorage', {
-	getItem: () => 'test-token',
+	getItem: (key: string) =>
+		key === 'bearer-token' ? JSON.stringify({ token: 'test-token', epoch: null }) : null,
 	setItem: () => {},
 	removeItem: () => {},
 });

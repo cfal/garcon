@@ -25,6 +25,23 @@ export class ConversationClearController {
 		return this.#target !== null;
 	}
 
+	get targetKind(): ClearChatRequest['target']['kind'] {
+		return this.#target?.request.target.kind ?? 'all';
+	}
+
+	requestBeforeMessage(chatId: string, head: { transcriptViewId: string | null; lastOrdinal: number }, ordinal: number): void {
+		if (this.busy) return;
+		if (!head.transcriptViewId || !Number.isSafeInteger(ordinal) || ordinal < 1 || ordinal > head.lastOrdinal) {
+			this.deps.chatState.appendLocalNoticeForChat(chatId, 'error', m.chat_clear_not_loaded());
+			return;
+		}
+		this.error = null;
+		this.#target = {
+			request: { chatId, transcriptViewId: head.transcriptViewId, lastOrdinal: head.lastOrdinal, target: { kind: 'before-message', ordinal } },
+			draftRevision: null,
+		};
+	}
+
 	request(chatId: string, ownsComposer: boolean): void {
 		if (this.busy) return;
 		const head = this.deps.chatState.getKnownHeadForChat(chatId);
@@ -34,7 +51,7 @@ export class ConversationClearController {
 		}
 		this.error = null;
 		this.#target = {
-			request: { chatId, transcriptViewId: head.transcriptViewId, lastOrdinal: head.lastOrdinal },
+			request: { chatId, transcriptViewId: head.transcriptViewId, lastOrdinal: head.lastOrdinal, target: { kind: 'all' } },
 			draftRevision: ownsComposer ? this.deps.composerState.draftRevision(chatId) : null,
 		};
 	}

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
-import { assistantContents } from '../../support/chat-assertions.js';
+import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import {
   claudeText,
   claudeToolUse,
@@ -9,6 +9,7 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import {
   expectFinished,
   LIVE_TURN_TIMEOUT_MS,
+  reloadUntilNativeStableAfterPrompt,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import { liveClaudeStartRequest } from '../../support/live-claude.js';
@@ -28,7 +29,7 @@ describe('scripted Claude background settlement', () => {
     environment?.dispose();
   });
 
-  test('settles a turn whose background task completed before the result', async () => {
+  test('settles background work before queued input and preserves continuation output on reload', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     const prompt = marker('BG_SETTLE_PROMPT');
@@ -101,7 +102,8 @@ describe('scripted Claude background settlement', () => {
         afterIndex: fixture.client.events().lastIndexOf(successorInput) + 1,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
-      const assistant = assistantContents((await fixture.client.getMessages(chatId)).messages);
+      const live = await fixture.client.getMessages(chatId);
+      const assistant = assistantContents(live.messages);
       const launchedIndex = assistant.findIndex((content) => content.includes(launched));
       const finishedIndex = assistant.findIndex((content) => content.includes(finished));
       const successorIndex = assistant.findIndex((content) => content.includes(successorReply));
@@ -113,6 +115,10 @@ describe('scripted Claude background settlement', () => {
         outcome: 'snapshot',
         chats: [],
       });
+      expect(userContents(live.messages)).toEqual([prompt, successorPrompt]);
+      const reloaded = await reloadUntilNativeStableAfterPrompt(fixture, chatId, successorPrompt);
+      expect(userContents(reloaded.messages)).toEqual([prompt, successorPrompt]);
+      expect(assistantContents(reloaded.messages)).toEqual(assistant);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,

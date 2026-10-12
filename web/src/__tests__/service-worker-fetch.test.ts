@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const deployment = vi.hoisted(() => ({ base: '' }));
+vi.mock('$service-worker', () => ({
+	get base() {
+		return deployment.base;
+	},
+	build: [],
+	files: [],
+	version: 'test',
+}));
+
 interface FetchEventPort {
 	request: Request;
 	waitUntil(promise: Promise<unknown>): void;
@@ -62,7 +72,10 @@ function navigationResponse(body: string) {
 }
 
 describe('installed service worker fetch handler', () => {
-	beforeEach(() => vi.resetModules());
+	beforeEach(() => {
+		vi.resetModules();
+		deployment.base = '';
+	});
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
@@ -71,6 +84,7 @@ describe('installed service worker fetch handler', () => {
 	it('keeps late navigation and its cache write alive after returning the offline fallback', async () => {
 		vi.useFakeTimers();
 		const { cache, network, dispatch } = harness();
+		cache.match.mockResolvedValue(new Response('offline'));
 		await installWorker();
 		const pendingNetwork = Promise.withResolvers<Response>();
 		const pendingWrite = Promise.withResolvers<void>();
@@ -138,5 +152,29 @@ describe('installed service worker fetch handler', () => {
 		const event = dispatch(path);
 		expect(event.response).toBeUndefined();
 		expect(event.lifetimes).toEqual([]);
+	});
+
+	it('limits interception and offline lookup to the configured mount', async () => {
+		deployment.base = '/tools/garcon';
+		const { cache, storage, network, dispatch } = harness();
+		await installWorker();
+		for (const path of [
+			'/api/v1/chats',
+			'/other',
+			'/tools/garcon-other/',
+			'/tools/garcon/api/v1/chats',
+			'/tools/garcon/ws',
+			'/tools/garcon/site.webmanifest',
+		]) {
+			expect(dispatch(path).response).toBeUndefined();
+		}
+		cache.match.mockResolvedValue(new Response('mounted offline'));
+		network.mockRejectedValue(new Error('offline'));
+		const event = dispatch('/tools/garcon/chat/one', true);
+		expect(await (await event.response).text()).toBe('mounted offline');
+		expect(storage.open).toHaveBeenCalledWith('garcon:%2Ftools%2Fgarcon:test');
+		expect(cache.match).toHaveBeenCalledWith('/tools/garcon/');
+		expect(storage.match).not.toHaveBeenCalled();
+		await Promise.all(event.lifetimes);
 	});
 });

@@ -28,7 +28,7 @@ for (const configured of [false, true]) {
       await fixture.restartGarcon();
       const read = await fixture.client.fetch(`/api/v1/executors/${created.id}/connection`, { headers: { host: 'visible.test:8080' } });
       expect((await read.json()).connectionUrl).toBe(created.connectionUrl);
-    }, { executionBackend: 'in-process', serverEnvironment: { GARCON_PUBLIC_URL: configured ? 'https://public.test/garcon' : '' } });
+    }, { executionBackend: 'in-process', serverEnvironment: { GARCON_PUBLIC_URL: configured ? 'https://public.test/garcon' : '', GARCON_BASE_PATH: configured ? '/garcon' : '' } });
   }, 45_000);
 }
 

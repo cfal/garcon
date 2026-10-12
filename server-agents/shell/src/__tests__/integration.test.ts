@@ -13,6 +13,7 @@ import { NativeLog, ShellNativeStore } from '../native-store.js';
 import { UserMessage } from '@garcon/common/chat-types';
 import { COMMAND_OUTPUT_BYTES } from '../output.js';
 import * as jsonFileStore from '@garcon/server-agent-common/lib/json-file-store';
+import * as shellProcess from '../process.js';
 import { rejectionOf, throwingRejectionOf } from '../../../../integration-tests/support/promise-assertions.js';
 
 describe('Shell integration', () => {
@@ -76,7 +77,7 @@ describe('Shell integration', () => {
     validateAgentIntegration({ integrationClass: ShellIntegration, integration });
     expect(integration.auth).toBeNull();
     expect(integration.singleQuery).toBeNull();
-    expect(integration.literalExecution.selectionLabel).toBe('Shell');
+    expect(integration.literalExecution.selectionLabel).toBe('Mode');
     expect(await integration.readiness.status(new AbortController().signal)).toMatchObject({ ready: true });
   });
 
@@ -89,6 +90,73 @@ describe('Shell integration', () => {
     expect(rows.some(row => row.type === 'command-output' && row.channel === 'stdout' && row.format === 'markdown')).toBe(true);
     expect(rows.at(-1)).toMatchObject({ type: 'command-result', result: { outcome: 'finished', exitCode: 0 } });
     expect(events.flatMap(event => event.type === 'rows' ? event.rows : []).every(row => row.message.type !== 'user-message')).toBe(true);
+  });
+
+  it.each(['notes', 'notes-markdown'])('saves %s atomically without invoking a shell or fabricating output', async (model) => {
+    const process = spyOn(shellProcess, 'executeShell');
+    const environment = spyOn(host.environment, 'get').mockReturnValue('/nonexistent-synthetic-path');
+    try {
+      const catalog = await integration.catalog.snapshot({ strict: true, signal: new AbortController().signal });
+      expect(catalog.models.map(option => option.value)).toEqual(['notes', 'notes-markdown']);
+      expect(catalog.defaultModel).toBe('notes');
+      const presentation = { origin: 'cli', disclosure: 'collapsed' } as const;
+      const prompt = '  /md **Synthetic note**\n$(touch never-executed)\n<garcon-get-chat-id />  ';
+      await integration.execution.start({ ...request, model, prompt, submission: { ...request.submission!, presentation } });
+      expect(await terminal()).toEqual({ type: 'run-ended', runId: request.runId, outcome: 'finished', finalResponse: { type: 'literal-text', text: '' } });
+      expect(process).not.toHaveBeenCalled();
+      expect(events.some(event => event.type === 'rows')).toBe(false);
+      expect(await history()).toEqual([new UserMessage(request.submission!.timestamp, prompt, undefined, {
+        contentMode: 'literal', contentFormat: model === 'notes' ? 'plain' : 'markdown', clientMessageId: 'input-1',
+      }, presentation)]);
+      expect(await history()).toHaveLength(1);
+      const ref = chat();
+      const restarted = new ShellIntegration(host);
+      try {
+        const imported = [];
+        for await (const batch of restarted.nativeHistoryImport.load({ chat: ref, signal: new AbortController().signal })) imported.push(...batch);
+        expect(imported.map(row => row.message)).toEqual(await history());
+      } finally { await restarted.lifecycle.stop(); }
+    } finally { process.mockRestore(); environment.mockRestore(); }
+  });
+
+  it.each(['sh', 'notes', 'notes-markdown'])('records %s input without submission metadata', async model => {
+    const before = Date.now();
+    await integration.execution.start({ ...request, model, submission: undefined });
+    expect(await terminal()).toMatchObject({ outcome: 'finished' });
+    const after = Date.now();
+    const input = (await history())[0];
+    if (input?.type !== 'user-message') throw new Error('Expected the durable user input');
+    expect(Date.parse(input.timestamp)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(input.timestamp)).toBeLessThanOrEqual(after);
+    expect(input).toEqual(new UserMessage(input.timestamp, request.prompt, undefined, {
+      contentMode: 'literal', contentFormat: model === 'notes-markdown' ? 'markdown' : 'plain',
+    }));
+  });
+
+  it('does not report success or retain a new note session when native persistence fails', async () => {
+    const append = spyOn(NativeLog.prototype, 'append').mockImplementation(() => { throw new Error('synthetic storage failure'); });
+    try {
+      await integration.execution.start({ ...request, model: 'notes', prompt: 'Synthetic note' });
+      expect(await terminal()).toMatchObject({ outcome: 'failed' });
+      expect(events.some(event => event.type === 'session')).toBe(false);
+      expect(await readdir(join(root, 'sessions-v1'))).toEqual([]);
+    } finally { append.mockRestore(); }
+  });
+
+  it('keeps the recorded format when switching modes in one native session', async () => {
+    await integration.execution.start({ ...request, model: 'notes-markdown', prompt: '**First note**' });
+    await terminal();
+    const ref = chat();
+    for (const [index, model] of ['notes', 'sh'].entries()) {
+      const runId = `continuation-${index}`;
+      await integration.execution.resume({ ...request, runId, model, agentSessionId: ref.agentSessionId!, nativeSession: ref.nativeSession,
+        prompt: model === 'notes' ? '/markdown is note text' : 'printf command',
+        submission: { ...request.submission!, clientMessageId: `input-${index + 2}` },
+      });
+      expect(await terminal(runId)).toMatchObject({ outcome: 'finished' });
+    }
+    expect((await history()).filter(row => row.type === 'user-message').map(row => row.metadata?.contentFormat))
+      .toEqual(['markdown', 'plain', 'plain']);
   });
 
   it('does not retain native preparations for repeated project path updates', async () => {

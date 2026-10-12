@@ -126,6 +126,7 @@ describe('Docker contract', () => {
     }
     expect(service.volumes.at(-1)).toBe(controller.services.garcon.volumes.at(-1));
     expect(controller.services.garcon.environment.GARCON_PUBLIC_URL).toBe('${GARCON_PUBLIC_URL:-}');
+    expect(controller.services.garcon.environment.GARCON_BASE_PATH).toBe('${GARCON_BASE_PATH:-}');
   });
 
   test('provisions every CLI-backed agent integration', async () => {

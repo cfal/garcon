@@ -33,6 +33,31 @@ function fullscreenKey(options: KeyboardEventInit = {}): KeyboardEvent {
 }
 
 describe('KeyboardShortcuts', () => {
+	it('blocks protected shortcuts and retained focus traps during authentication repair', async () => {
+		const appShell = createMockAppShell();
+		const { rerender } = render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			authSuspended: true,
+		});
+		const trap = vi.fn();
+		document.addEventListener('focusin', trap);
+		try {
+			window.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }),
+			);
+			document.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+			expect(appShell.openSidebarSearch).not.toHaveBeenCalled();
+			expect(trap).not.toHaveBeenCalled();
+			await rerender({ authSuspended: false });
+			window.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }),
+			);
+			expect(appShell.openSidebarSearch).toHaveBeenCalledOnce();
+		} finally {
+			document.removeEventListener('focusin', trap);
+		}
+	});
 	it('opens sidebar search on Ctrl-S while the chat list owns focus', async () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();

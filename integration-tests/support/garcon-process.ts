@@ -95,6 +95,7 @@ export class GarconProcess {
   readonly #stderrPump: Promise<void>;
   #baseUrl = '';
   #authToken: string | null = null;
+  #credentials: { username: string; password: string } | null = null;
   #expectedExit = false;
   #unexpectedExit: string | null = null;
   #exitCode: number | null = null;
@@ -112,7 +113,7 @@ export class GarconProcess {
       if (match) {
         const clientUrl = new URL(match[1]);
         clientUrl.hostname = '127.0.0.1';
-        ready.resolve(clientUrl.origin);
+        ready.resolve(clientUrl.href.replace(/\/$/, ''));
       }
     };
     const captureLine = (line: string) => {
@@ -170,6 +171,7 @@ export class GarconProcess {
         () => `Timed out waiting for Garcon startup.\n${instance.describeLogs()}`,
       );
       if (credentials) instance.#authToken = await fixtureAuthToken(instance.#baseUrl, credentials);
+      instance.#credentials = credentials;
       return instance;
     } catch (error) {
       await instance.#terminateAfterStartupFailure();
@@ -184,6 +186,8 @@ export class GarconProcess {
   get authToken(): string | null {
     return this.#authToken;
   }
+
+  get credentials(): { username: string; password: string } | null { return this.#credentials; }
 
   get pid(): number | null {
     return this.#exitCode === null ? this.#child.pid : null;

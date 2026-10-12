@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import type { Snippet } from 'svelte';
 	import type { ChatReferenceResolution } from '$lib/chat/transcript/chat-reference.js';
 	import { cn } from '$lib/utils/cn.js';
@@ -70,7 +71,7 @@
 
 {#if navigable}
 	<a
-		href={`/chat/${chatId}`}
+		href={resolve('/chat/[id]', { id: chatId })}
 		class={cn(
 			'rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring',
 			className,

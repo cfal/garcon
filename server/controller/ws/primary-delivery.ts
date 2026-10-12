@@ -1,6 +1,9 @@
 import type { ServerWebSocket } from 'bun';
 import type { ServerPrincipal } from '../lib/http-route-types.js';
 import type { WebSocketMessagePublisher } from './transport.js';
+import { createLogger } from '../../common/log.js';
+
+const logger = createLogger('ws:delivery');
 
 export interface PrimaryWebSocketData {
   connectionId: string;
@@ -70,6 +73,27 @@ export class PrimarySocketDelivery implements WebSocketMessagePublisher {
   close(): void {
     this.#closed = true;
     for (const peer of this.#sockets.values()) peer.close(1001, 'Server shutting down');
+  }
+
+  retireWhere(matches: (principal: ServerPrincipal) => boolean, code: number, reason: string,
+    cleanup: (peer: PrimaryWebSocket) => void): number {
+    const retired: [NativeSocket, BoundedPrimarySocket][] = [];
+    for (const [socket, peer] of this.#sockets) {
+      if (!matches(peer.data.principal)) continue;
+      peer.retire();
+      this.#sockets.delete(socket);
+      retired.push([socket, peer]);
+    }
+    for (const [socket, peer] of retired) {
+      try { cleanup(peer); }
+      catch { logger.error('Retired browser peer cleanup failed.'); }
+      try { socket.close(code, reason); }
+      catch {
+        try { socket.terminate(); }
+        catch { logger.error('Retired browser socket could not be closed.'); }
+      }
+    }
+    return retired.length;
   }
 
   publish(topic: string, payload: string, compress?: boolean): number {

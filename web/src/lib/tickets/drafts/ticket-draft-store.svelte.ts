@@ -24,16 +24,21 @@ const samePartition = (left: TicketDraftPartition | null, right: TicketDraftPart
 export class TicketDraftStore {
 	partition = $state.raw<TicketDraftPartition | null>(null);
 	entries = $state.raw<readonly TicketRecoveryEntry[]>([]);
-	oldEntries = $state.raw<readonly { partition: TicketDraftPartition; entry: TicketRecoveryEntry }[]>(
-		[],
-	);
+	oldEntries = $state.raw<
+		readonly { partition: TicketDraftPartition; entry: TicketRecoveryEntry }[]
+	>([]);
 	active = $state.raw<readonly TicketDraftState[]>([]);
 	warning = $state<string | null>(null);
 	#admitted = $state(false);
+	#available = $state(true);
 	#hiddenRecoveryViewers = $state.raw<readonly string[]>([]);
 	#retained: TicketDraftState[] = [];
 
 	constructor(private readonly deps: TicketDraftStoreDeps) {}
+
+	setAvailable(available: boolean): void {
+		this.#available = available;
+	}
 
 	setPartition(partition: TicketDraftPartition): void {
 		const unchanged = this.#admitted && samePartition(this.partition, partition);
@@ -81,7 +86,8 @@ export class TicketDraftStore {
 			{
 				...this.deps,
 				onSettled: () => this.reloadRecovery(),
-				isCurrentPartition: () => this.#admitted && samePartition(this.partition, snapshot),
+				isCurrentPartition: () =>
+					this.#admitted && this.#available && samePartition(this.partition, snapshot),
 			},
 			recovered,
 		);
@@ -96,7 +102,7 @@ export class TicketDraftStore {
 		fields: TicketDraftFields = {},
 		comment?: TicketCommentView,
 	): TicketDraftState | null {
-		if (!this.partition || !this.#admitted) return null;
+		if (!this.partition || !this.#admitted || !this.#available) return null;
 		this.pruneClean(
 			this.active
 				.filter((draft) => draft.current.kind !== 'mutation')

@@ -8,7 +8,10 @@ import { getConfigDir, initializeServerConfig } from './config.js';
 import { wrapRoutes, unhandledRouteErrorResponse } from './lib/http-route.js';
 import { ControllerCliDispatcher } from './executors/cli-dispatcher.js';
 import { createWebSocketUpgradeHandler } from './ws/upgrade.js';
-import { init as initAuthStore } from './auth/store.js';
+import { getAuthStore, init as initAuthStore } from './auth/store.js';
+import { isCurrentBrowserPrincipal } from './auth/token.js';
+import { AUTH_REVOKED_CLOSE_CODE, AUTH_REVOKED_CLOSE_REASON,
+  AUTH_UNAVAILABLE_CLOSE_CODE, AUTH_UNAVAILABLE_CLOSE_REASON } from '../../common/ws-auth.js';
 import { createForkedChat } from './chats/fork-chat.js';
 import { wireSearchSourceAvailability, wireServerEvents, type ServerEventWiring } from './server-event-wiring.js';
 import { startExecutionControlPlane } from './execution-control-plane.js';
@@ -414,6 +417,24 @@ export async function startServer(): Promise<void> {
 
     agentRegistry = new AgentRegistry({
       onSettingsCommitted: (chatId) => eventWiring?.notifyChatSettingsUpdated(chatId),
+      settingsExecution: {
+        reserveTranscriptSnapshot: (chatId) => {
+          if (!queue) throw new Error('Chat execution coordinator is not initialized');
+          return queue.reserveTranscriptSnapshot(chatId);
+        },
+        releaseTranscriptSnapshot: (reservation) => {
+          if (!queue) throw new Error('Chat execution coordinator is not initialized');
+          return queue.releaseTranscriptSnapshot(reservation);
+        },
+        readChatExecutionControl: (chatId) => {
+          if (!queue) throw new Error('Chat execution coordinator is not initialized');
+          return queue.readChatExecutionControl(chatId);
+        },
+        withChatExecutionControl: (chatId, operation) => {
+          if (!queue) throw new Error('Chat execution coordinator is not initialized');
+          return queue.withChatExecutionControl(chatId, operation);
+        },
+      },
       resolveFileMentions,
       registry: chatRegistry,
       integrations: integrationRegistry,
@@ -795,15 +816,29 @@ export async function startServer(): Promise<void> {
       idleTimeout: config.httpIdleTimeoutSeconds,
       maxConnections: config.maxConnections,
       maxRequestBodySize: config.maxRequestBodySize,
-      routes: wrapRoutes(routes, { localCapability: runtimeState.localCapability, serverInstanceId: runtimeState.identity.instanceId, isShuttingDown: () => shuttingDown }),
+      routes: wrapRoutes(routes, { basePath: config.basePath, localCapability: runtimeState.localCapability, serverInstanceId: runtimeState.identity.instanceId, isShuttingDown: () => shuttingDown }),
       error: unhandledRouteErrorResponse,
-      fetch: createWebSocketUpgradeHandler({ executors, executionSockets, wsAdmission, authDisabled, isShuttingDown: () => shuttingDown }),
+      fetch: createWebSocketUpgradeHandler({ basePath: config.basePath, executors, executionSockets, wsAdmission, authDisabled, isShuttingDown: () => shuttingDown }),
       websocket: createServerSocketHandlers({ primary: primaryWs, admission: wsAdmission, config, logger, execution: executionSockets.websocket, delivery: primaryDelivery }),
     } satisfies ServeOptionsWithConnectionLimit;
 
+    const stopObservingAuth = getAuthStore().onChange(change => {
+      const unavailable = change === 'storage-unavailable';
+      const code = unavailable ? AUTH_UNAVAILABLE_CLOSE_CODE : AUTH_REVOKED_CLOSE_CODE;
+      const reason = unavailable ? AUTH_UNAVAILABLE_CLOSE_REASON : AUTH_REVOKED_CLOSE_REASON;
+      const retired = primaryDelivery.retireWhere(
+        principal => principal.mode === 'authenticated' && !isCurrentBrowserPrincipal(principal),
+        code, reason, peer => {
+          try { primaryWs.close(peer, code, reason); }
+          finally { wsAdmission.release(peer.data.connectionId); }
+        },
+      );
+      logger.info(`Browser credential authority retired: ${retired} peers (${change}).`);
+    });
+
     const server = Bun.serve<WsConnectionData>(serveOptions);
     const actualPort = server.port ?? listenPort;
-    const runtimeBaseUrl = advertisedServerUrl(bindAddress, actualPort);
+    const runtimeBaseUrl = advertisedServerUrl(bindAddress, actualPort) + config.basePath;
     let runtimeFilePath: string;
     try {
       const publishedRuntime = await publishServerRuntime(runtimeState, runtimeBaseUrl, config.configDir);
@@ -840,6 +875,7 @@ export async function startServer(): Promise<void> {
       for (const prepare of [
         stopStallMonitor,
         stopSlowStepReports,
+        stopObservingAuth,
         () => primaryDelivery.close(),
         () => agentCommands.shutdown(),
         () => carryOverGarbageCollector.shutdown(),
@@ -915,7 +951,7 @@ export async function startServer(): Promise<void> {
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
 
-    logServerReady(logger, { bindAddress, port: actualPort, authDisabled });
+    logServerReady(logger, { bindAddress, port: actualPort, authDisabled, basePath: config.basePath });
     void eventWiring.repairChatMetadata().catch((error) => logger.warn('Metadata repair failed:', errorMessage(error)));
   } catch (error) {
     await workspaceLease?.release().catch((releaseError) => {

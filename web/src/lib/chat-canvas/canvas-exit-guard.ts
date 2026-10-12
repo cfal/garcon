@@ -1,5 +1,6 @@
 import type { CanvasSession } from './canvas-session.svelte.js';
 import type { CanvasRecoveryPort } from './canvas-recovery.js';
+import { isBrowserDataCurrent } from '$lib/utils/browser-data-lifetime';
 
 export class CanvasExitGuard {
 	#release: (() => void) | null = null;
@@ -11,9 +12,11 @@ export class CanvasExitGuard {
 
 	activate(): void {
 		if (this.#release || typeof window === 'undefined') return;
-		const preserve = () => this.session()?.preserveForExit();
+		const preserve = () => {
+			if (isBrowserDataCurrent()) this.session()?.preserveForExit();
+		};
 		const beforeUnload = (event: BeforeUnloadEvent) => {
-			if (!this.#hasUnsavedWork()) return;
+			if (!isBrowserDataCurrent() || !this.#hasUnsavedWork()) return;
 			preserve();
 			event.preventDefault();
 			event.returnValue = '';

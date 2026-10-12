@@ -61,7 +61,7 @@ describe('corrupt auth state', () => {
     }
   });
 
-  test('keeps registration closed after runtime auth corruption', async () => {
+  test('keeps the cached account configured after an external edit and rejects corruption on restart', async () => {
     const directories = await createDirectories();
     const authPath = join(directories.config, 'auth.json');
     const corruptBytes = '{"jwtSecret":"runtime-secret"';
@@ -77,12 +77,16 @@ describe('corrupt auth state', () => {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ username: 'attacker', password: 'password123' }),
         });
-        expect(response.status).toBe(500);
-        expect(await response.json()).toEqual({
-          success: false, error: 'Internal server error', errorCode: 'INTERNAL_ERROR', retryable: true,
-        });
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({ success: false });
       }
 
+      expect(await readFile(authPath, 'utf8')).toBe(corruptBytes);
+      await garcon.stop();
+      garcon = null;
+      expect(await rejectionOf(GarconProcess.start(processOptions(directories)))).toMatchObject({
+        message: expect.stringContaining('Garcon exited unexpectedly with code 1'),
+      });
       const [quarantineName] = (await readdir(directories.config)).filter((entry) =>
         entry.startsWith('auth.json.corrupt-'));
       expect(await readFile(join(directories.config, quarantineName), 'utf8')).toBe(corruptBytes);

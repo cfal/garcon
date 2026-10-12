@@ -3,7 +3,13 @@
 // drain consumers.
 
 import { getAuthToken } from '$lib/api/client';
-import { webSocketProtocolsForAuth } from '$shared/ws-auth';
+import { appPath } from '$lib/deployment/paths';
+import { isBrowserDataCurrent } from '$lib/utils/browser-data-lifetime';
+import {
+	webSocketProtocolsForAuth,
+	AUTH_REVOKED_CLOSE_CODE,
+	AUTH_UNAVAILABLE_CLOSE_CODE,
+} from '$shared/ws-auth';
 import type { PrimaryWsClientMessage } from '$shared/ws-protocol';
 import { createRandomId } from '$lib/utils/random-id';
 import { reconnectDelayMs } from './reconnect-policy';
@@ -120,7 +126,7 @@ function buildWebSocketUrl(): string {
 	// cache the 101 Switching Protocols response and refuse to establish a new WebSocket
 	// connection if the tab was suspended or encountered a momentary connection drop.
 	const params = new URLSearchParams({ v: String(Date.now()) });
-	return `${protocol}//${window.location.host}/ws?${params.toString()}`;
+	return `${protocol}//${window.location.host}${appPath('/ws')}?${params.toString()}`;
 }
 
 function generateRequestId() {
@@ -142,6 +148,8 @@ export class WsConnection {
 	#stabilityTimeout: ReturnType<typeof setTimeout> | null = null;
 	#reconnectAttempts = 0;
 	#destroyed = false;
+	#authPaused = false;
+	onAuthFailure: ((token: string | null, code: number) => void) | null = null;
 	#pendingRequests = new Map<string, PendingRequest>();
 	#connectionWaiters = new Set<{
 		resolve: () => void;
@@ -199,7 +207,8 @@ export class WsConnection {
 	}
 
 	connect(token: string | null, authDisabled = false): void {
-		if (this.#destroyed) return;
+		if (this.#destroyed || !isBrowserDataCurrent()) return;
+		this.#authPaused = false;
 		this.#authDisabled = authDisabled;
 
 		if (!token && !authDisabled) {
@@ -233,7 +242,7 @@ export class WsConnection {
 			this.#connectStartedAt = Date.now();
 
 			websocket.onopen = () => {
-				if (!this.#isCurrentSocket(websocket)) return;
+				if (!this.#isCurrentSocket(websocket) || !isBrowserDataCurrent()) return;
 				this.#clearConnectTimeout();
 				const now = Date.now();
 				this.#lastInboundAt = now;
@@ -254,7 +263,7 @@ export class WsConnection {
 			};
 
 			websocket.onmessage = (event: MessageEvent) => {
-				if (!this.#isCurrentSocket(websocket)) return;
+				if (!this.#isCurrentSocket(websocket) || !isBrowserDataCurrent()) return;
 				this.#lastInboundAt = Date.now();
 				try {
 					const data = JSON.parse(event.data as string) as Record<string, unknown>;
@@ -300,6 +309,17 @@ export class WsConnection {
 
 			websocket.onclose = (event) => {
 				if (!this.#isCurrentSocket(websocket)) return;
+				if (
+					!this.#authDisabled &&
+					this.onAuthFailure &&
+					(event.code === AUTH_REVOKED_CLOSE_CODE ||
+						event.code === AUTH_UNAVAILABLE_CLOSE_CODE ||
+						event.code === 1006)
+				) {
+					this.pauseForAuth();
+					this.onAuthFailure(token, event.code);
+					return;
+				}
 				console.warn('WebSocket closed:', {
 					code: event.code,
 					reason: event.reason || null,
@@ -339,6 +359,23 @@ export class WsConnection {
 			});
 			this.#scheduleReconnect('connect-threw', episodeId);
 		}
+	}
+
+	pauseForAuth(): void {
+		this.#authPaused = true;
+		this.#closeExisting({ rejectPending: true });
+		this.#rejectAllWaiters('Authentication is unavailable');
+		this.#setConnectionStatus({ phase: 'idle', reason: 'missing-auth', nextRetryAt: null });
+	}
+
+	resumeForAuth(token: string | null, authDisabled = false): void {
+		if (this.#authPaused) this.connect(token, authDisabled);
+	}
+
+	retryAfterAuthProbe(): void {
+		if (!this.#authPaused || this.#destroyed) return;
+		this.#authPaused = false;
+		this.#scheduleReconnect('socket-close', this.#beginOutage());
 	}
 
 	disconnect(): void {
@@ -440,6 +477,7 @@ export class WsConnection {
 
 	/** Sends a JSON-serializable message. Returns true if sent. */
 	sendMessage(msg: unknown): boolean {
+		if (this.#authPaused || !isBrowserDataCurrent()) return false;
 		const socket = this.#ws;
 		if (socket && socket.readyState === WebSocket.OPEN) {
 			socket.send(JSON.stringify(msg));
@@ -692,7 +730,7 @@ export class WsConnection {
 	}
 
 	#connectNow(reason: WsConnectionIssue): void {
-		if (this.#destroyed) return;
+		if (this.#destroyed || this.#authPaused) return;
 		if (
 			this.#activeSocket?.readyState === WebSocket.CONNECTING &&
 			this.#connectStartedAt !== null &&
@@ -712,7 +750,7 @@ export class WsConnection {
 		reason: WsConnectionIssue = 'socket-close',
 		episodeId = this.#currentEpisodeId,
 	): void {
-		if (this.#destroyed) return;
+		if (this.#destroyed || this.#authPaused) return;
 		this.#clearReconnectTimeout();
 		if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
 			const currentPhase = this.connectionStatus.phase;

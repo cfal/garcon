@@ -85,6 +85,7 @@ async function loadSidebarSearchStore(): Promise<{
     resolve: {
       alias: {
         $lib: join(webRoot, 'src/lib'),
+        $app: join(webRoot, 'src/lib/mocks/app'),
         $shared: join(webRoot, '../common'),
       },
     },

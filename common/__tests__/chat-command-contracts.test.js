@@ -528,6 +528,12 @@ describe('chat command request parsers', () => {
       content: '',
       images,
     });
+    const expectations = { expectedModel: 'notes', expectedAgentId: 'shell', expectedAgentOwnershipEpoch: 'owner-1' };
+    expect(parseQueueEntryCreateCommandRequest({ ...base, content: 'note', ...expectations }))
+      .toEqual({ ...base, content: 'note', ...expectations });
+    for (const field of Object.keys(expectations)) {
+      expect(() => parseQueueEntryCreateCommandRequest({ ...base, content: 'note', [field]: 42 })).toThrow();
+    }
     expect(parseQueueEntryCreateCommandRequest({ ...base, content: 'caption', images }).images)
       .toEqual(images);
     expect(parseQueueEntryCreateCommandRequest({ ...base, content: 'text only' }))

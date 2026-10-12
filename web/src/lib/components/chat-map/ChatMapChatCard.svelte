@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import { formatCompactProjectPath } from '$lib/project-paths/compact-project-path';
 	import * as m from '$lib/paraglide/messages.js';
@@ -47,7 +48,7 @@
 	data-chat-map-context={searchActive && !node.matchesQuery ? 'true' : undefined}
 >
 	<a
-		href={`/chat/${node.chat.id}`}
+		href={resolve('/chat/[id]', { id: node.chat.id })}
 		class="block min-w-0 px-3 py-2.5 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
 		aria-current={selected ? 'page' : undefined}
 		data-chat-map-chat-id={node.chat.id}

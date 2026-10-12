@@ -39,7 +39,8 @@ import { CHAT_STOP_OUTCOMES } from '$shared/chat-types';
 import { ApiError } from '../client';
 
 vi.stubGlobal('localStorage', {
-	getItem: () => 'test-token',
+	getItem: (key: string) =>
+		key === 'bearer-token' ? JSON.stringify({ token: 'test-token', epoch: null }) : null,
 	setItem: () => {},
 	removeItem: () => {},
 });

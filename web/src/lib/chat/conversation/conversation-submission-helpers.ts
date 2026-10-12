@@ -45,12 +45,14 @@ export function optimisticUserInput(
 	images: ChatImage[],
 	clientMessageId: string,
 	contentMode?: 'literal',
+	contentFormat?: 'plain' | 'markdown',
 ): OptimisticUserInput {
 	return {
 		chatId,
 		clientMessageId,
 		content,
 		...(contentMode ? { contentMode } : {}),
+		...(contentFormat ? { contentFormat } : {}),
 		createdAt: new Date().toISOString(),
 		delivery: 'pending',
 		...(images.length > 0 ? { images } : {}),

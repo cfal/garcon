@@ -15,7 +15,8 @@ Common options and environment variables:
 
 - `GARCON_PORT` / `--port`: listen port. Use `0` for a random port.
 - `GARCON_BIND_ADDRESS` / `--bind-address`: server bind address.
-- `GARCON_PUBLIC_URL` / `--public-url`: external HTTP(S) base URL for executor onboarding, including any proxy path prefix.
+- `GARCON_BASE_PATH` / `--base-path`: URL mount for the webapp, API, and WebSockets. Defaults to the origin root; requires a restart, not a rebuild.
+- `GARCON_PUBLIC_URL` / `--public-url`: external HTTP(S) base URL for executor onboarding and shared-page metadata. Its pathname must match the configured base path.
 - `GARCON_CONFIG_DIR` / `--config-dir`: base config directory. Defaults to `~/.garcon`.
 - `GARCON_WORKSPACE` / `--workspace`: named workspace under the config directory.
 - `GARCON_WORKSPACE_DIR` / `--workspace-dir`: explicit workspace directory.
@@ -32,9 +33,42 @@ Run `bun run help` for the complete server option list.
 
 Explicit flags take precedence over environment variables; nonempty environment values take precedence over defaults. The controller, executor, and CLI share `--config-dir` / `GARCON_CONFIG_DIR`, defaulting to `~/.garcon`. Relative roots are resolved from the process's working directory. Workspace options configure controller storage only, not CLI discovery or executor storage.
 
+## Path-Prefix Deployments
+
+One prebuilt application works at `/`, `/garcon/`, or a nested mount such as
+`/tools/garcon/`. Configure the controller at startup:
+
+```bash
+bun run start --base-path /tools/garcon \
+  --public-url https://garcon.example.com/tools/garcon/
+```
+
+The prefix must start with `/` and contain only unescaped letters, digits, dots,
+hyphens, underscores, tildes, and `/` separators. Empty and dot segments are
+rejected. A single trailing slash is normalized; `/` selects the root mount.
+The bare mount redirects to its trailing-slash URL, preserving the query.
+Requests outside the configured mount return 404.
+
+Serve the production build through Garcon, not `vite preview` or a generic static
+server: Garcon supplies the runtime mount in the HTML bootstrap. Hashed assets
+are served unchanged.
+
+Reverse proxies must preserve the prefix and support WebSocket upgrades. For
+example, an nginx `location /tools/garcon/` with `proxy_pass http://127.0.0.1:8080`
+(no trailing slash) forwards the original path. Do not strip the prefix or
+rewrite response bodies. Forwarded headers never determine the mount. Configure
+the external scheme and host with `--public-url` when TLS terminates upstream.
+
+Controller CLI discovery includes the mount automatically. The executor's private
+CLI gateway and independent listener remain unchanged. Deployments assume one
+Garcon instance per server/origin; URL prefixes do not isolate browser storage.
+When moving an existing installation to a different prefix, close its tabs and
+clear its old service-worker registration/site data before reopening it. This
+also clears browser-local preferences and drafts, but not server-side chats.
+
 ## Executor Connections
 
-Set `--public-url https://controller.example.com/garcon/` or `GARCON_PUBLIC_URL`
+Set `--base-path /garcon` with `--public-url https://controller.example.com/garcon/` (or the corresponding environment variables)
 on a proxied controller. The flag wins; the base path is retained when generating
 `wss://controller.example.com/garcon/executor/<id>`. Without configuration, the
 authenticated management request's validated `Host` and actual HTTP(S) scheme
@@ -268,7 +302,7 @@ bun cli/main.ts ticket close G-42 --expected-revision 3 --resolution done --comm
 
 `project` is an arbitrary, editable string, not a directory capability. New creates resolve an omitted project from `--cwd` or the process directory. Normal Git worktrees share the primary repository path; non-Git contexts use their canonical folder. If Git fails or cannot identify the primary checkout, the default is the canonical `--cwd` or process directory. An explicit `--project` bypasses filesystem lookup. Lists default to all projects and nonclosed tickets, not the process directory. Use `--include-closed` or an explicit `--status closed` to include closed work.
 
-Priorities are `0` Urgent, `1` High, `2` Normal (default), and `3` Low. Create accepts repeatable `--label`, `--assignee chat:<id>|user:<username>|unassigned`, and `--parent-id G-n`. User assignment is limited to the current authenticated user. Update accepts a JSON patch containing title, description, project, nonclosed status, priority, labels, assignee, or parentId; use JSON null to clear assignee/parent. Only `close` and `reopen` transition into/out of Closed.
+Priorities are `0` Urgent, `1` High, `2` Normal (default), and `3` Low. Create accepts repeatable `--label`, `--assignee chat:<id>|user:<ownerKey>|unassigned`, and `--parent-id G-n`. User assignment is limited to the current authenticated account's immutable owner key, initially its original username. Renaming the login does not change selectors. Structured owners use `{ "kind": "user", "ownerKey": "original-name" }`; actor usernames are historical labels. Update accepts a JSON patch containing title, description, project, nonclosed status, priority, labels, assignee, or parentId; use JSON null to clear assignee/parent. Only `close` and `reopen` transition into/out of Closed.
 
 Read the current revision before a field or workflow mutation. Comment append does not need a ticket revision and does not advance it. Claim atomically assigns the caller (or declared chat) and moves Open to In progress; release removes only that caller's assignment. Neither is an access-control lock. `--from-chat` records declared provenance alongside the actual HTTP principal; it cannot grant permission to edit a chat-authored comment.
 

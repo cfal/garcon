@@ -169,6 +169,7 @@ export const BUNDLED_PREAMBLES = [
       '| `link`, `unlink` | `ref`, `ticket-id`, `expected-revision` | JSON with `targetId`, `targetRevision`, and `kind` (`blocks` or `related`). |',
       '',
       'These independent examples cover every verb:',
+      'User assignees use {"kind":"user","ownerKey":"original-name"}, not a mutable login username. The immutable key is returned with existing assignments. Agents may assign chats; user assignment requires that account authority.',
       '',
       '```text',
       '<garcon-ticket-list>{"ready":true,"limit":10}</garcon-ticket-list>',

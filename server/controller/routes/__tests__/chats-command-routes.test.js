@@ -513,7 +513,7 @@ function createRouteAgent(sessionOverrides = {}) {
   };
 }
 
-async function callJson(handler, body, method = 'POST', server) {
+async function callJson(handler, body, method = 'POST', server, pathname = '/api/v1/chats/run') {
   const inputBody = body && typeof body === 'object' && 'chatId' in body
     ? {
         ...body,
@@ -528,7 +528,7 @@ async function callJson(handler, body, method = 'POST', server) {
     : body;
   const requestBody = inputBody;
   parseJsonBody.mockResolvedValueOnce(requestBody);
-  const request = new Request('http://localhost/test', { method });
+  const request = new Request(`http://localhost${pathname}`, { method });
   const response = await handler(request, new URL(request.url), server);
   return { request, response, body: await response.json() };
 }
@@ -568,6 +568,16 @@ describe('REST chat command routes', () => {
 
   it('does not expose a goal-control endpoint', () => {
     expect(createRouteAgent().routes['/api/v1/chats/goal-control']).toBeUndefined();
+  });
+
+  it('returns a receipt Location under the incoming HTTP mount', async () => {
+    const agent = createRouteAgent();
+    const { response, body } = await callJson(agent.routes['/api/v1/chats/run'].POST,
+      agentRunBody(), 'POST', undefined, '/tools/garcon/api/v1/chats/run');
+    expect(response.status).toBe(202);
+    expect(response.headers.get('Location')).toBe(
+      `/tools/garcon/api/v1/chats/turn-receipt?chatId=${CHAT_ID}&turnId=${body.turnId}`,
+    );
   });
 
   it('POST /run returns before agent completion and persists before running', async () => {

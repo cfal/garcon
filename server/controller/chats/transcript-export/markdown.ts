@@ -1,4 +1,5 @@
 import type { TranscriptExportDocumentModel } from './model.js';
+import { isPlainTextInput } from '../../../../common/input-format.js';
 import { projectCommandOutput } from '../../../../common/command-output-projection.js';
 import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
 import type { TranscriptExportField } from './values.js';
@@ -57,7 +58,7 @@ export function renderTranscriptExportMarkdown(
     const content = transcriptExportEntryText(entry);
     if (content !== null) {
       const literal = entry.kind === 'message' && (
-        (entry.message.type === 'user-message' && entry.message.metadata?.contentMode === 'literal')
+        (entry.message.type === 'user-message' && isPlainTextInput(entry.message))
         || (entry.message.type === 'command-output' && entry.message.format === 'plain')
         || entry.message.type === 'command-result'
       );

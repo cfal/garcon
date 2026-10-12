@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { chatBoardApi } from '../chat-boards';
 
 vi.stubGlobal('localStorage', {
-	getItem: () => 'test-token',
+	getItem: (key: string) =>
+		key === 'bearer-token' ? JSON.stringify({ token: 'test-token', epoch: null }) : null,
 	setItem: () => {},
 	removeItem: () => {},
 });

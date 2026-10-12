@@ -31,7 +31,7 @@ test('archive Undo restores the captured chat without changing selection', async
       await page.getByRole('button', { name: 'Undo', exact: true }).click();
       await expect.poll(async () => {
         const data = await page.evaluate(async id => {
-          const reply = await fetch('/api/v1/chats', { headers: { Authorization: `Bearer ${localStorage.getItem('bearer-token')}` } });
+          const reply = await fetch('/api/v1/chats', { headers: { Authorization: `Bearer ${(JSON.parse(localStorage.getItem('bearer-token') ?? 'null')?.token ?? null)}` } });
           const payload = await reply.json();
           return payload.sessions.find((chat: { id: string }) => chat.id === id)?.isArchived;
         }, ids[0]);

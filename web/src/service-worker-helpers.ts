@@ -5,11 +5,11 @@ export interface ServiceWorkerPrecacheManifest {
 	files: string[];
 }
 
-export function isManifestPath(value: string): boolean {
+export function isManifestPath(value: string, basePath = ''): boolean {
 	try {
-		return new URL(value, 'http://localhost').pathname === '/site.webmanifest';
+		return new URL(value, 'http://localhost').pathname === `${basePath}/site.webmanifest`;
 	} catch {
-		return value === '/site.webmanifest';
+		return value === `${basePath}/site.webmanifest`;
 	}
 }
 
@@ -24,11 +24,12 @@ export function shouldCacheNavigationResponse(response: Response): boolean {
 export async function precacheAppShell(
 	cache: Pick<Cache, 'addAll' | 'add'>,
 	manifest: ServiceWorkerPrecacheManifest,
+	basePath = '',
 ): Promise<void> {
 	// Keeps the offline navigation fallback strict while allowing optional static files to drift.
-	await cache.addAll(['/', ...manifest.build]);
+	await cache.addAll([`${basePath}/`, ...manifest.build]);
 	await Promise.allSettled(
-		manifest.files.filter((url) => !isManifestPath(url)).map((url) => cache.add(url)),
+		manifest.files.filter((url) => !isManifestPath(url, basePath)).map((url) => cache.add(url)),
 	);
 }
 

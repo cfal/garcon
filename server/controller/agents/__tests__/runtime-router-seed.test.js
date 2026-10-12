@@ -142,6 +142,21 @@ function makeRouter(overrides = {}) {
 }
 
 describe('AgentRuntimeRouter producer boundary', () => {
+  it('keeps a lazy literal startup override turn-local while later input uses the saved mode', async () => {
+    const launched = Promise.withResolvers();
+    const finish = Promise.withResolvers();
+    const start = mock(async request => { launched.resolve(request); await finish.promise; return { id: 'handle-override' }; });
+    const f = makeRouter({ entry: { model: 'notes' }, start,
+      literalExecution: { selectionLabel: 'Mode', inputFormatByModel: { 'notes-markdown': 'markdown' } } });
+    const running = f.router.startSession('chat-1', 'synthetic command', { model: 'sh' });
+    expect((await launched.promise).model).toBe('sh');
+    expect(f.registry.getChat('chat-1').model).toBe('notes');
+    finish.resolve();
+    await running;
+    expect(f.registry.getChat('chat-1').model).toBe('notes');
+    expect(f.registry.updateChat).not.toHaveBeenCalledWith('chat-1', expect.objectContaining({ model: 'sh' }));
+  });
+
   it.each([{ attachments: [] }, { attachments: [{ kind: 'image', data: 'synthetic', name: 'example.png', mimeType: 'image/png' }] }])(
     'preserves literal input and admitted attachments without conversational preparation: %j', async ({ attachments }) => {
     const forbidden = mock(() => { throw new Error('Conversational transformation invoked'); });
@@ -151,7 +166,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     input.detail.message.presentation = presentation;
     input.detail.attachments = attachments;
     const { router, start } = makeRouter({
-      literalExecution: { selectionLabel: 'Runtime' },
+      literalExecution: { selectionLabel: 'Runtime', inputFormatByModel: {} },
       composition: { inserted: true, input, prompt: [inputRow(1, 'never resend'), input], providerPrefix: 'never prepend' },
       carryoverMessages: forbidden, createCarriedContext: forbidden, resolveFileMentions: forbidden,
     });

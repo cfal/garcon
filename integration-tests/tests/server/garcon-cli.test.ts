@@ -1031,8 +1031,8 @@ describe('garcon-cli', () => {
       expect(unauthenticated.status).toBe(401);
       expect(await unauthenticated.json()).toEqual({
         success: false,
-        error: 'Access denied. No token provided.',
-        errorCode: 'VALIDATION_FAILED',
+        error: 'Invalid token',
+        errorCode: 'AUTH_SESSION_INVALID',
         retryable: false,
       });
 

@@ -1,5 +1,6 @@
 import { CommandOutputMessage, CommandResultMessage, UserMessage } from '@garcon/common/chat-types';
 import type { CommandOutcome } from '@garcon/common/command-output';
+import { literalInputFormat, type InputFormat } from '@garcon/common/input-format';
 import {
   AgentCallError, AgentIntegrationError, createAgentResourceRef, type AgentExecutionHandle, type AgentHost,
   type AgentIntegration, type AgentProducerNotification, type AgentProducerBinding,
@@ -7,7 +8,7 @@ import {
 } from '@garcon/server-agent-interface';
 import { AgentResourceTable } from '@garcon/server-agent-common/execution/resource-table';
 import { failureDetail } from '@garcon/server-agent-common/execution/producer-adapter';
-import { requireShell } from './catalog.js';
+import { isNotesMode, requireShell, SHELL_INPUT_FORMATS } from './catalog.js';
 import { executeShell } from './process.js';
 import { parseSubmission } from './source.js';
 import { CommandOutputTail } from './output.js';
@@ -114,8 +115,9 @@ export class ShellExecution {
       throw new AgentCallError('rejected', 'Producer binding is unavailable', 'STALE_RESOURCE');
     }
     if (this.#active.has(request.chatId) || this.#nativeReaders.has(request.chatId)) throw busy();
-    const parsed = parseSubmission(request.prompt);
-    const shell = requireShell(this.host, request.model);
+    const command = isNotesMode(request.model) ? null : {
+      parsed: parseSubmission(request.prompt), shell: requireShell(this.host, request.model),
+    };
     const sessionId = 'nativeSession' in request
       ? this.store.sessionId(request.nativeSession, request.agentSessionId) : crypto.randomUUID();
     const invocation: Invocation = {
@@ -126,7 +128,9 @@ export class ShellExecution {
     this.#active.set(request.chatId, invocation);
     const cancelAdmission = () => invocation.cancellation.abort();
     options?.signal?.addEventListener('abort', cancelAdmission, { once: true });
-    invocation.settled = this.#run(invocation, request, parsed, shell)
+    invocation.settled = (command
+      ? this.#run(invocation, request, command.parsed, command.shell)
+      : this.#recordNote(invocation, request))
       .catch((error): AgentRunEndedEvent => ({ type: 'run-ended', runId: request.runId, outcome: 'failed', error: failureDetail(error) }))
       .then(terminal => {
         options?.signal?.removeEventListener('abort', cancelAdmission);
@@ -136,6 +140,37 @@ export class ShellExecution {
         if (binding.detached) this.#bindings.delete(binding.ref);
       });
     return invocation.handle;
+  }
+
+  async #recordNote(
+    invocation: Invocation,
+    request: AgentStartRequestV5 | AgentResumeRequestV5,
+  ): Promise<AgentRunEndedEvent> {
+    let log: NativeLog | undefined;
+    let sessionPublished = false;
+    try {
+      log = 'nativeSession' in request
+        ? await this.store.load(invocation.sessionId, request.chatId)
+        : await this.store.create(invocation.sessionId, request.chatId);
+      log.reconcile();
+      invocation.cancellation.signal.throwIfAborted();
+      const format = literalInputFormat(SHELL_INPUT_FORMATS, request.model);
+      const input = createNativeInput(request, invocation.startedAt, format);
+      log.append(crypto.randomUUID(), input, { kind: 'note', version: 1, format, completed: true });
+      sessionPublished = this.#emit(invocation.binding, {
+        type: 'session',
+        session: { agentSessionId: invocation.sessionId, nativeSession: this.store.reference(invocation.sessionId), nativeSeedReceipt: null },
+      });
+      this.#emit(invocation.binding, { type: 'started', runId: request.runId });
+      return { type: 'run-ended', runId: request.runId, outcome: 'finished', finalResponse: { type: 'literal-text', text: '' } };
+    } catch (error) {
+      return invocation.cancellation.signal.aborted
+        ? { type: 'run-ended', runId: request.runId, outcome: 'interrupted' }
+        : { type: 'run-ended', runId: request.runId, outcome: 'failed', error: failureDetail(error) };
+    } finally {
+      log?.close();
+      if (log && !('nativeSession' in request) && !sessionPublished) await this.store.remove(invocation.sessionId);
+    }
   }
 
   async #run(
@@ -167,10 +202,7 @@ export class ShellExecution {
       log = commandLog;
       commandLog.reconcile();
       invocation.cancellation.signal.throwIfAborted();
-      const input = new UserMessage(request.submission?.timestamp ?? invocation.startedAt, request.prompt, undefined, {
-        contentMode: 'literal',
-        ...(request.submission?.clientMessageId ? { clientMessageId: request.submission.clientMessageId } : {}),
-      }, request.submission?.presentation);
+      const input = createNativeInput(request, invocation.startedAt, 'plain');
       commandLog.append(commandId, input, {
         ...parsed,
         family: shell.family,
@@ -289,6 +321,17 @@ export class ShellExecution {
     await Promise.all(active.map(invocation => invocation.settled));
     this.#bindings.clear();
   }
+}
+
+function createNativeInput(
+  request: AgentStartRequestV5 | AgentResumeRequestV5,
+  startedAt: string,
+  contentFormat: InputFormat,
+): UserMessage {
+  return new UserMessage(request.submission?.timestamp ?? startedAt, request.prompt, undefined, {
+    contentMode: 'literal', contentFormat,
+    ...(request.submission?.clientMessageId ? { clientMessageId: request.submission.clientMessageId } : {}),
+  }, request.submission?.presentation);
 }
 
 function busy(): AgentIntegrationError {

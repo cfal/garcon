@@ -4,17 +4,25 @@
 
 	interface KeyboardShortcutsProps {
 		onToggleCommandMenu?: () => void;
+		authSuspended?: boolean;
 	}
 
-	let { onToggleCommandMenu }: KeyboardShortcutsProps = $props();
+	let { onToggleCommandMenu, authSuspended = false }: KeyboardShortcutsProps = $props();
 
 	const shortcuts = getWorkspaceShortcuts();
 	const handleKeydown = (event: KeyboardEvent) => {
+		if (authSuspended) {
+			event.stopImmediatePropagation();
+			return;
+		}
 		shortcuts.noteUserInteraction();
 		shortcuts.handle(event);
 	};
-	const noteFocusInteraction = (event: FocusEvent) =>
-		shortcuts.noteScrollRegionInteraction(event.target, 'focus');
+	const noteFocusInteraction = (event: FocusEvent) => {
+		// Prevents retained portal focus traps from stealing the native sign-in dialog's focus.
+		if (authSuspended) event.stopImmediatePropagation();
+		else shortcuts.noteScrollRegionInteraction(event.target, 'focus');
+	};
 	const notePointerInteraction = (event: PointerEvent) => {
 		shortcuts.noteUserInteraction();
 		shortcuts.noteScrollRegionInteraction(event.target, 'pointer');

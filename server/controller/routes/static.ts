@@ -5,6 +5,8 @@ import { markRouteNoAuth } from '../lib/http-route.js';
 import { jsonError } from '../../common/http-error.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import { createLogger } from '../../common/log.js';
+import { getBasePath } from '../config.js';
+import { renderRuntimeShell } from '../../../common/runtime-shell.js';
 import {
   applyManifestTitle,
   injectAppTitleIntoShell,
@@ -151,6 +153,11 @@ export async function loadStaticText(pathname: string): Promise<string | null> {
   return response.text();
 }
 
+export async function loadSpaShell(): Promise<string | null> {
+  const template = await loadStaticText('/index.html');
+  return template === null ? null : renderRuntimeShell(template, getBasePath());
+}
+
 function noauthServeStatic(filename: string): RouteHandler {
   const pathname = `/${filename}`;
   return markRouteNoAuth(async function noauthServeStaticWrapper() {
@@ -160,7 +167,7 @@ function noauthServeStatic(filename: string): RouteHandler {
 
 function noauthServeSpaShell(settings: StaticSettingsDep): RouteHandler {
   return markRouteNoAuth(async function noauthServeSpaShellHandler() {
-    const shell = await loadStaticText('/index.html');
+    const shell = await loadSpaShell();
     if (!shell) return notFoundResponse();
     const appTitle = resolvePublicAppTitle(
       settings.getUiSettings(),

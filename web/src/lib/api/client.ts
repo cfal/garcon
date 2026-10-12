@@ -2,31 +2,21 @@
 
 import type { HttpErrorResponse } from '$shared/http-error';
 import { isRecord } from '$shared/json';
-import {
-	getLocalStorageItem,
-	LOCAL_STORAGE_KEYS,
-	removeLocalStorageItem,
-	setLocalStorageItem,
-} from '$lib/utils/local-persistence';
+import { getAuthToken, canDispatchAuthenticated, notifyAuthRejection } from '$lib/auth/session';
+import { appPath } from '$lib/deployment/paths';
+export { getAuthToken, setAuthToken, clearAuthToken } from '$lib/auth/session';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-export function getAuthToken(): string | null {
-	return getLocalStorageItem(LOCAL_STORAGE_KEYS.authToken);
-}
-
-export function setAuthToken(token: string): void {
-	setLocalStorageItem(LOCAL_STORAGE_KEYS.authToken, token);
-}
-
-export function clearAuthToken(): void {
-	removeLocalStorageItem(LOCAL_STORAGE_KEYS.authToken);
-}
+const responseTokens = new WeakMap<Response, string | null>();
 
 export type ApiFetchOptions = RequestInit & { timeoutMs?: number | null };
 
 /** Merges a default timeout signal with any caller-provided signal unless disabled. */
-function withTimeout(options: RequestInit, timeoutMs: number | null = DEFAULT_TIMEOUT_MS): RequestInit {
+function withTimeout(
+	options: RequestInit,
+	timeoutMs: number | null = DEFAULT_TIMEOUT_MS,
+): RequestInit {
 	if (timeoutMs === null) return options;
 	const timeoutSignal = AbortSignal.timeout(timeoutMs);
 	const callerSignal = options.signal;
@@ -38,7 +28,9 @@ function withTimeout(options: RequestInit, timeoutMs: number | null = DEFAULT_TI
 
 /** Wraps fetch with Authorization header, JSON content type (unless FormData),
  *  and a configurable timeout (default 30s). */
-export function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Response> {
+export async function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Response> {
+	if (!canDispatchAuthenticated())
+		throw new ApiError(401, 'Sign in to continue.', 'AUTH_SESSION_INVALID');
 	const { timeoutMs, ...fetchOptions } = options;
 	const token = getAuthToken();
 
@@ -50,8 +42,8 @@ export function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Re
 		headers.set('Authorization', `Bearer ${token}`);
 	}
 
-	return globalThis.fetch(
-		url,
+	const response = await globalThis.fetch(
+		appPath(url),
 		withTimeout(
 			{
 				...fetchOptions,
@@ -60,12 +52,14 @@ export function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Re
 			timeoutMs,
 		),
 	);
+	responseTokens.set(response, headers.get('Authorization')?.replace(/^Bearer /, '') ?? null);
+	return response;
 }
 
 /** Wraps an unauthenticated fetch with the standard configurable timeout. */
 export function publicApiFetch(url: string, options: ApiFetchOptions = {}): Promise<Response> {
 	const { timeoutMs, ...fetchOptions } = options;
-	return globalThis.fetch(url, withTimeout(fetchOptions, timeoutMs));
+	return globalThis.fetch(appPath(url), withTimeout(fetchOptions, timeoutMs));
 }
 
 export class ApiError extends Error {
@@ -143,6 +137,8 @@ export async function parseApiResponse<T>(response: Response): Promise<T> {
 		} catch {
 			// Uses statusText as fallback.
 		}
+		if (responseTokens.has(response))
+			notifyAuthRejection(responseTokens.get(response) ?? null, errorCode);
 		throw new ApiError(response.status, message, errorCode, details, retryable, payload);
 	}
 	return response.json() as Promise<T>;

@@ -4,6 +4,7 @@ import type {
 } from '$lib/stores/local-settings.svelte.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { indexedDbRequest, indexedDbTransactionCompletion } from '$lib/utils/indexed-db.js';
+import { canPersistBrowserData } from '$lib/utils/browser-data-lifetime';
 
 const DATABASE_NAME = 'garcon-local-media';
 const DATABASE_VERSION = 1;
@@ -72,6 +73,7 @@ async function runStoreRequest<T>(
 ): Promise<T> {
 	const database = await openDatabase();
 	try {
+		if (mode === 'readwrite' && !canPersistBrowserData()) throw new Error('Browser session ended');
 		const transaction = database.transaction(STORE_NAME, mode);
 		const completion = indexedDbTransactionCompletion(transaction);
 		const request = operation(transaction.objectStore(STORE_NAME));

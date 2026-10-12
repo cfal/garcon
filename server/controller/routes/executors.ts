@@ -4,15 +4,16 @@ import { DomainError, ValidationDomainError } from '../../common/domain-error.js
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
 import type { HttpRouteContext, RouteMap } from '../lib/http-route-types.js';
 import { withJsonBody } from '../lib/json-route.js';
-import { getPublicUrl } from '../config.js';
+import { getBasePath, getPublicUrl } from '../config.js';
 import { requestPublicUrl } from '../executors/public-url.js';
 
 export function createExecutorRoutes(executors: ExecutorManager, publicUrl: string | null = getPublicUrl()): RouteMap {
+  const basePath = getBasePath();
   const resolvePublicBase = (request: Request, context?: HttpRouteContext): string => {
     if (context?.principal?.mode === 'executor' && publicUrl === null) {
       throw new ValidationDomainError('Executor CLI requests have no public Host; configure GARCON_PUBLIC_URL / --public-url on the controller or set an explicit executor advertised URL');
     }
-    return requestPublicUrl(request, publicUrl);
+    return requestPublicUrl(request, publicUrl, basePath);
   };
   const noStore = (response: Response) => {
     response.headers.set('Cache-Control', 'no-store');

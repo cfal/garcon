@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { getAuth } from '$lib/context';
@@ -55,7 +56,7 @@
 			error = result.error || m.auth_setup_errors_registration_failed();
 		} else {
 			setLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered, '1');
-			goto('/');
+			goto(resolve('/'));
 		}
 		isSubmitting = false;
 	}

@@ -7,6 +7,7 @@ import os from 'os';
 import { resolveConfigDirectory } from '@garcon/common/config-dir';
 import { defaultUserShell } from '../common/user-shell.js';
 import { parsePublicUrl } from './executors/public-url.js';
+import { parseBasePath } from '@garcon/common/base-path';
 
 const CLI_VALUE_FLAGS = {
   '--config-dir': '<directory>',
@@ -16,6 +17,7 @@ const CLI_VALUE_FLAGS = {
   '--bind-address': '<hostname-or-ip>',
   '--project-base-dir': '<directory>',
   '--public-url': '<url>',
+  '--base-path': '<path>',
 } as const;
 
 type CliValueFlag = keyof typeof CLI_VALUE_FLAGS;
@@ -27,6 +29,7 @@ export interface ServerConfig {
   port: number;
   bindAddress: string;
   publicUrl: string | null;
+  basePath: string;
   jwtTokenExpiry: string;
   testEnvironment: boolean;
   projectBasePath: string;
@@ -112,6 +115,11 @@ function parseServerConfig(): ServerConfig {
   const workspace = parseWorkspace(configDir);
   const maxWsClients = envInt('MAX_WS_CLIENTS', 128);
   const publicUrl = cliValue('--public-url') ?? envValue('GARCON_PUBLIC_URL');
+  const basePath = parseBasePath(cliValue('--base-path') ?? envValue('GARCON_BASE_PATH') ?? '');
+  const parsedPublicUrl = publicUrl === null ? null : parsePublicUrl(publicUrl);
+  if (parsedPublicUrl !== null && new URL(parsedPublicUrl).pathname !== `${basePath}/`) {
+    throw new Error('Public URL path must match --base-path / GARCON_BASE_PATH');
+  }
   if (maxWsClients < 1) {
     throw new Error('Invalid GARCON_MAX_WS_CLIENTS value: must be at least 1.');
   }
@@ -121,7 +129,8 @@ function parseServerConfig(): ServerConfig {
     workspaceName: workspace.workspaceName,
     port: parsePortConfig(),
     bindAddress: parseBindAddress(),
-    publicUrl: publicUrl === null ? null : parsePublicUrl(publicUrl),
+    publicUrl: parsedPublicUrl,
+    basePath,
     jwtTokenExpiry: envValue('GARCON_JWT_TOKEN_EXPIRY') ?? '30d',
     testEnvironment: envValue('NODE_ENV') === 'test',
     projectBasePath: parseProjectBasePath(),
@@ -224,6 +233,10 @@ export function getPort(): number {
 
 export function getPublicUrl(): string | null {
   return currentConfig().publicUrl;
+}
+
+export function getBasePath(): string {
+  return currentConfig().basePath;
 }
 
 // JWT token expiry (secret is managed by auth/store).

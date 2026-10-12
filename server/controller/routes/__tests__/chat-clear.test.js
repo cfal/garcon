@@ -2,7 +2,7 @@ import { expect, it, mock } from 'bun:test';
 import { createChatClearRoutes } from '../chat-clear.ts';
 import { DomainError } from '../../../common/domain-error.ts';
 
-const target = { chatId: '1780000000000001', transcriptViewId: 'view-1', lastOrdinal: 4 };
+const target = { chatId: '1780000000000001', transcriptViewId: 'view-1', lastOrdinal: 4, target: { kind: 'all' } };
 const url = new URL('http://localhost/api/v1/chats/clear');
 function send(service, body) {
   return createChatClearRoutes(service)[url.pathname].POST(new Request(url, {

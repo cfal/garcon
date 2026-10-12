@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { parseAgentTurnReceipt } from '../../../common/agent-turn-receipt.js';
+import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import {
   assistantContents,
   messagesOfType,
@@ -36,16 +39,49 @@ describe('scripted Pi provider failures', () => {
     environment = undefined;
   });
 
-  test('surfaces an HTTP 500 as an error message, fails the turn, and recovers', async () => {
+  test.each(['server_busy', 'servers are currently busy', 'The pending stream has been canceled'])(
+    'keeps the turn active while retrying %s and publishes only the recovered final response', async (message) => {
+      const testEnvironment = requireEnvironment();
+      const reply = marker('RETRY_REPLY');
+      const requestCursor = testEnvironment.model.markRequests();
+      testEnvironment.model.scriptFault({ kind: 'http-error', status: 400, message });
+      const retry = testEnvironment.model.scriptHeldTurn([chatCompletionsText(reply)]);
+
+      await withIntegrationFixture('pi-scripted-retry-classification', async (fixture) => {
+        const chatId = fixture.newChatId();
+        const cursor = fixture.client.markEvents();
+        const turn = await fixture.client.startChat(scriptedPiStartRequest({
+          chatId, projectPath: fixture.dirs.project, command: marker('RETRY_PROMPT'),
+        }));
+        try {
+          await retry.requested;
+          expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(2);
+          expect(fixture.client.eventsSince(cursor).some((event) =>
+            (event.type === 'agent-run-finished' || event.type === 'agent-run-failed')
+            && event.chatId === chatId)).toBe(false);
+        } finally {
+          retry.release();
+        }
+        await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor });
+        expect(JSON.stringify(messagesOfType((await fixture.client.getMessages(chatId)).messages, 'error')))
+          .toContain(message);
+        testEnvironment.model.assertSettled();
+      }, withScriptedPi());
+    }, 120_000,
+  );
+
+  test.each([
+    [500, 'scripted http failure'],
+    [400, 'server_busy'],
+  ] as const)('surfaces exhausted HTTP %i retries (%s), fails the turn, and recovers', async (status, faultMessage) => {
     const testEnvironment = requireEnvironment();
     const prompt = marker('HTTP500_PROMPT');
-    const faultMessage = 'scripted http failure';
     const recoveryReply = marker('HTTP500_RECOVERY_REPLY');
     const requestCursor = testEnvironment.model.markRequests();
     for (let attempt = 0; attempt < PI_ATTEMPTS_PER_PROCESS; attempt += 1) {
       testEnvironment.model.scriptFault({
         kind: 'http-error',
-        status: 500,
+        status,
         message: faultMessage,
       });
     }
@@ -98,6 +134,55 @@ describe('scripted Pi provider failures', () => {
       testEnvironment.model.assertSettled();
     }, withScriptedPi());
   }, 240_000);
+
+  test('kills a retrying process during backoff and admits a clean successor', async () => {
+    const testEnvironment = requireEnvironment();
+    const initialReply = marker('BEFORE_RETRY');
+    const recoveryReply = marker('AFTER_RETRY_STOP');
+    testEnvironment.model.scriptTurn([chatCompletionsText(initialReply)]);
+    await withIntegrationFixture('pi-scripted-retry-stop', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const initialCursor = fixture.client.markEvents();
+      const initial = await fixture.client.startChat(scriptedPiStartRequest({
+        chatId, projectPath: fixture.dirs.project, command: marker('BOOTSTRAP'),
+      }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: initial.turnId, marker: initialReply, afterIndex: initialCursor });
+
+      const requestCursor = testEnvironment.model.markRequests();
+      testEnvironment.model.scriptFault({ kind: 'http-error', status: 400, message: 'server_busy' });
+      const cursor = fixture.client.markEvents();
+      const retrying = await fixture.client.runChat(scriptedPiRunRequest({ chatId, command: marker('RETRY_STOP') }));
+      await fixture.client.waitForEvent(
+        (event): event is ChatMessagesMessage => event.type === 'chat-messages'
+          && event.chatId === chatId
+          && event.messages.some((entry) => entry.message.type === 'error'
+            && JSON.stringify(entry.message).includes('server_busy')),
+        'retryable provider error', { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(1);
+      const stopped = await fixture.client.stopChat({ clientRequestId: crypto.randomUUID(), chatId });
+      expect(stopped.outcome).toBe('interrupt-requested');
+      await fixture.client.waitForProcessing(chatId, false, { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS });
+      expect(fixture.client.eventsSince(cursor)).not.toContainEqual(expect.objectContaining({
+        type: 'agent-run-failed', chatId, turnId: retrying.turnId,
+      }));
+
+      testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
+      const recoveryCursor = fixture.client.markEvents();
+      const recovery = await fixture.client.runChat(scriptedPiRunRequest({ chatId, command: marker('RETRY_STOP_RECOVERY') }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: recovery.turnId, marker: recoveryReply, afterIndex: recoveryCursor });
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(2);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+      async prepareWorkspace(directories) {
+        await testEnvironment.prepareWorkspace(directories);
+        await writeFile(join(directories.home, '.pi', 'agent', 'settings.json'), JSON.stringify({
+          retry: { baseDelayMs: 60_000 },
+        }));
+      },
+    });
+  }, 120_000);
 
   test('surfaces a truncated stream the same way and recovers', async () => {
     const testEnvironment = requireEnvironment();

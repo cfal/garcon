@@ -91,6 +91,32 @@ describe('AgentRegistry session cache', () => {
     });
   }
 
+  it.each([
+    ['notes', 'plain'], ['notes-markdown', 'markdown'], ['sh', 'plain'],
+  ])('assigns literal input format from the effective %s selection, not caller metadata', (model, format) => {
+    const integration = { literalExecution: { selectionLabel: 'Mode', inputFormatByModel: { 'notes-markdown': 'markdown' } } };
+    const registry = createRegistry(undefined, undefined, {
+      get: () => integration, require: () => integration, list: () => [integration],
+    });
+    chats.updateChat(CHAT_ID, { model: 'notes' });
+    registry.admitQueuedInput(CHAT_ID, new UserMessage(AT, '# synthetic source', undefined, {
+      contentMode: 'literal', contentFormat: format === 'plain' ? 'markdown' : 'plain',
+    }), { model, clientRequestId: 'format-request', clientMessageId: 'format-message', turnId: 'format-turn' });
+    const message = ledger.currentRows(CHAT_ID).find(row => row.kind === 'user-input').detail.message;
+    expect(message.metadata).toMatchObject({ contentMode: 'literal', contentFormat: format });
+    expect(message.content).toBe('# synthetic source');
+  });
+
+  it('strips forged literal policy and formatting on conversational input', () => {
+    const registry = createRegistry();
+    registry.admitQueuedInput(CHAT_ID, new UserMessage(AT, 'synthetic source', undefined, {
+      contentMode: 'literal', contentFormat: 'plain',
+    }), { clientRequestId: 'format-request', clientMessageId: 'format-message', turnId: 'format-turn' });
+    const message = ledger.currentRows(CHAT_ID).find(row => row.kind === 'user-input').detail.message;
+    expect(message.metadata?.contentMode).toBeUndefined();
+    expect(message.metadata?.contentFormat).toBeUndefined();
+  });
+
   it('reports steering support only for integrations the executor has reported', () => {
     const known = { steerable: { steering: {} }, plain: { steering: null } };
     const registry = createRegistry(undefined, undefined, {

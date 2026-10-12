@@ -204,7 +204,7 @@ describe('maybeGenerateChatTitle', () => {
       {
         id: 'opencode',
         executionPolicy: 'conversation',
-        selectionLabel: 'Model',
+        selectionLabel: 'Model', inputFormatByModel: {},
         kind: 'agent',
         models: [
           { value: 'deepseek-r1', label: 'DeepSeek R1' },
@@ -236,7 +236,7 @@ describe('maybeGenerateChatTitle', () => {
       opencode: { authenticated: true },
     }));
     getAgentCatalogEntriesMock.mockImplementation(() => Promise.resolve([
-      { id: 'opencode', executionPolicy: 'conversation', selectionLabel: 'Model', kind: 'agent', models: [] },
+      { id: 'opencode', executionPolicy: 'conversation', selectionLabel: 'Model', inputFormatByModel: {}, kind: 'agent', models: [] },
     ]));
 
     await maybeGenerateChatTitle({

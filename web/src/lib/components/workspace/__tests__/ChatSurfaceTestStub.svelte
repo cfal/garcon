@@ -32,6 +32,7 @@
 		decidePermission: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'permission'),
 		exitPlanMode: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'plan'),
 		fork: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'fork'),
+		clearBefore: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'clear-before'),
 		appendToDraft: (surfaceId, chatId, block) =>
 			recordPanelAction(surfaceId, chatId, `append-draft:${block}`),
 		generateTitle: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'title'),

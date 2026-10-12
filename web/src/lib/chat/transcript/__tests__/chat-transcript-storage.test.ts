@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LocalChatTranscriptStorage } from '$lib/chat/transcript/chat-transcript-storage.js';
+import * as lifetime from '$lib/utils/browser-data-lifetime';
 import { TranscriptNoticeMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 
@@ -35,6 +36,28 @@ describe('LocalChatTranscriptStorage', () => {
 
 	afterEach(() => {
 		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	it('retired documents cannot mutate, prune or restore a newer lifetime\'s cache', () => {
+		for (let i = 0; i < 25; i += 1) {
+			persist(storage, `fresh-${i}`, [entry(1, `Synthetic message ${i}`)]);
+		}
+		const snapshot = () =>
+			Object.fromEntries(Object.keys(localStorage).map((key) => [key, localStorage.getItem(key)]));
+		const before = snapshot();
+		vi.spyOn(lifetime, 'canPersistBrowserData').mockReturnValue(false);
+
+		persist(storage, 'retired-chat', [entry(1, 'Synthetic retired checkpoint')]);
+		expect(snapshot()).toEqual(before);
+		storage.remove('fresh-0');
+		storage.markStale('fresh-1');
+		storage.markValidated('fresh-2');
+		expect(storage.restore('fresh-3')).toBeNull();
+		expect(storage.listCursors()).toEqual([]);
+		storage.clearAll();
+
+		expect(snapshot()).toEqual(before);
 	});
 
 	it('persists and restores entries with generation cursor metadata', () => {

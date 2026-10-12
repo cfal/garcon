@@ -33,6 +33,7 @@
 		forkUpToSeq?: number;
 		openNewChatDialog?: (opts: { prefill: string }) => void;
 		onForkChat?: (upToSeq?: number) => void;
+		onClearBefore?: (ordinal: number) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;
 		alwaysExpandCliMessages?: boolean;
@@ -56,6 +57,7 @@
 		forkUpToSeq,
 		openNewChatDialog = () => {},
 		onForkChat,
+		onClearBefore,
 		onGenerateTitleFromMessage,
 		canForkAtMessageNow = true,
 		alwaysExpandCliMessages = false,
@@ -141,6 +143,7 @@
 	{rowId}
 	{forkUpToSeq}
 	{onForkChat}
+	{onClearBefore}
 	onAppendToDraft={(block) => (draftPreview += block)}
 	{onGenerateTitleFromMessage}
 	{canForkAtMessageNow}

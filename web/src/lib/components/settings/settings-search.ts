@@ -12,6 +12,16 @@ export interface SettingsSearchEntry {
 export function settingsSearchEntries(): SettingsSearchEntry[] {
 	return [
 		...[
+			m.settings_tab_authentication(),
+			m.auth_logout(),
+			m.auth_change_username(),
+			m.auth_change_password(),
+		].map((label) => ({
+			tab: 'authentication' as const,
+			label,
+			section: m.settings_tab_authentication(),
+		})),
+		...[
 			m.settings_tab_interface(),
 			m.settings_highlight_active_window(),
 			m.settings_fullscreen_covers_sidebar(),

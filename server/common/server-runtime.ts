@@ -55,10 +55,10 @@ export function listeningServerUrl(bindAddress: string, port: number): string {
 
 export function logServerReady(
   logger: Pick<Logger, 'info' | 'warn'>,
-  listener: { bindAddress: string; port: number; authDisabled: boolean },
+  listener: { bindAddress: string; port: number; authDisabled: boolean; basePath?: string },
 ): void {
   const { bindAddress, port, authDisabled } = listener;
-  logger.info(`Started at ${listeningServerUrl(bindAddress, port)}`);
+  logger.info(`Started at ${listeningServerUrl(bindAddress, port)}${listener.basePath ?? ''}`);
   logger.info(`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`);
   if (authDisabled && bindAddress !== '127.0.0.1' && bindAddress !== 'localhost') {
     logger.warn('WARNING: authentication is disabled while bound to a non-localhost address.');

@@ -358,8 +358,9 @@ export class GarconTestClient {
   }
 
   fetch(path: string, init: RequestInit = {}): Promise<Response> {
-    const url = new URL(path, this.#baseUrl);
-    if (url.origin !== this.#baseUrl) throw new Error('Fixture requests must stay on the controller origin');
+    if (!path.startsWith('/') || path.startsWith('//')) throw new Error('Fixture requests require an app-relative path');
+    const url = new URL(this.#baseUrl + path);
+    if (url.origin !== new URL(this.#baseUrl).origin) throw new Error('Fixture requests must stay on the controller origin');
     const headers = new Headers(init.headers);
     if (this.#authToken && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${this.#authToken}`);
     const timeout = AbortSignal.timeout(this.#requestTimeoutMs);

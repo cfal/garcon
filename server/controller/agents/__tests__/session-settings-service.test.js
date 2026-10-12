@@ -43,7 +43,15 @@ function makeService(thinkingMode = 'high') {
     resolveEndpointReference: () => null,
   };
   const onCommitted = mock(() => undefined);
+  const control = { entries: [], controlEntries: [], pause: null };
+  const execution = {
+    reserveTranscriptSnapshot: mock(chatId => ({ chatId, reservationId: 'settings-reservation' })),
+    releaseTranscriptSnapshot: mock(async () => {}),
+    readChatExecutionControl: mock(async () => control),
+    withChatExecutionControl: mock(async (_chatId, operation) => operation(control)),
+  };
   const service = new AgentSessionSettingsService({
+    execution,
     onCommitted,
     registry: {
       getChat: () => entry,
@@ -52,10 +60,83 @@ function makeService(thinkingMode = 'high') {
     directory: { require: () => integration },
     endpointResolver,
   });
-  return { service, updateChat, entry, integration, endpointResolver, onCommitted };
+  return { service, updateChat, entry, integration, endpointResolver, onCommitted, execution, control };
 }
 
 describe('AgentSessionSettingsService', () => {
+  it.each(['entries', 'controlEntries'])('rejects literal mode changes with pending %s', async lane => {
+    const f = makeService('none');
+    f.integration.literalExecution = { selectionLabel: 'Mode', inputFormatByModel: {} };
+    f.control[lane].push({ id: 'pending-input' });
+    await expect(f.service.updateSessionSettings('chat-1', { model: 'next-mode' }))
+      .rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409 });
+    expect(f.updateChat).not.toHaveBeenCalled();
+    expect(f.execution.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects late control input before live application and releases outside the queue lock', async () => {
+    const f = makeService('none');
+    f.entry.agentSessionId = 'native-1';
+    f.integration.literalExecution = { selectionLabel: 'Mode', inputFormatByModel: {} };
+    f.integration.configurationValidation = { validate: mock(async () => { f.control.controlEntries.push({ id: 'late' }); }) };
+    f.integration.sessionConfiguration = { apply: mock(async () => {}) };
+    let locked = false;
+    f.execution.withChatExecutionControl.mockImplementation(async (_chatId, operation) => {
+      locked = true;
+      try { return await operation(f.control); } finally { locked = false; }
+    });
+    f.execution.releaseTranscriptSnapshot.mockImplementation(async () => { expect(locked).toBe(false); });
+    await expect(f.service.updateSessionSettings('chat-1', { model: 'next-mode' }))
+      .rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    expect(f.integration.sessionConfiguration.apply).not.toHaveBeenCalled();
+    expect(f.updateChat).not.toHaveBeenCalled();
+    expect(f.execution.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds exclusive ownership and queue control through literal settings persistence', async () => {
+    const f = makeService('none');
+    f.integration.literalExecution = { selectionLabel: 'Mode', inputFormatByModel: {} };
+    f.control.pause = { id: 'pause-1' };
+    let locked = false;
+    f.execution.withChatExecutionControl.mockImplementation(async (_chatId, operation) => {
+      locked = true;
+      try { return await operation(f.control); } finally { locked = false; }
+    });
+    f.integration.configurationValidation = { validate: mock(async () => {
+      expect(f.execution.reserveTranscriptSnapshot).toHaveBeenCalledTimes(1);
+    }) };
+    f.updateChat.mockImplementation(async (_chatId, patch) => {
+      expect(locked).toBe(true);
+      expect(f.execution.releaseTranscriptSnapshot).not.toHaveBeenCalled();
+      return { ...f.entry, ...patch };
+    });
+    await f.service.updateSessionSettings('chat-1', { model: 'next-mode' });
+    expect(f.execution.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['validation', 'application', 'persistence'])('releases a mode reservation after %s failure', async phase => {
+    const f = makeService('none');
+    f.integration.literalExecution = { selectionLabel: 'Mode', inputFormatByModel: {} };
+    const fail = mock(async () => { throw new Error('synthetic failure'); });
+    if (phase === 'validation') f.integration.configurationValidation = { validate: fail };
+    if (phase === 'application') {
+      f.entry.agentSessionId = 'native-1';
+      f.integration.sessionConfiguration = { apply: fail };
+    }
+    if (phase === 'persistence') f.updateChat.mockImplementation(fail);
+    await expect(f.service.updateSessionSettings('chat-1', { model: 'next-mode' })).rejects.toThrow('synthetic failure');
+    expect(f.execution.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reserve unchanged literal modes or conversational settings', async () => {
+    const f = makeService('none');
+    await f.service.updateSessionSettings('chat-1', { model: 'other' });
+    f.integration.literalExecution = { selectionLabel: 'Mode', inputFormatByModel: {} };
+    f.control.entries.push({ id: 'pending' });
+    await f.service.updateSessionSettings('chat-1', { model: f.entry.model });
+    expect(f.execution.reserveTranscriptSnapshot).not.toHaveBeenCalled();
+  });
+
   it('publishes settings only after their durable write succeeds', async () => {
     const { service, updateChat, entry, onCommitted } = makeService('none');
     const saved = Promise.withResolvers();

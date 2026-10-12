@@ -13,6 +13,7 @@ import {
 import { createLogger } from '../../common/log.js';
 import { trackActivity } from '../../common/event-loop-stalls.js';
 import { CLI_SERVER_INSTANCE_HEADER } from '@garcon/common/server-runtime';
+import { stripBasePath } from '@garcon/common/base-path';
 
 const logger = createLogger('lib:http-route');
 
@@ -24,6 +25,7 @@ type WrappedRouteHandler = (request: Request, server?: unknown) => Promise<Respo
 type WrappedRouteMap = Record<string, Record<string, WrappedRouteHandler>>;
 
 export interface HttpRouteAuthOptions {
+  basePath?: string;
   localCapability?: string;
   serverInstanceId?: string;
   isShuttingDown?: () => boolean;
@@ -83,8 +85,12 @@ export async function invokeRawRouteHandler(
   req: Request,
   server: unknown,
   context: HttpRouteContext,
+  basePath = '',
 ): Promise<Response> {
   const url = new URL(req.url);
+  const pathname = stripBasePath(url.pathname, basePath);
+  if (pathname === null) return new Response('Not found', { status: 404 });
+  url.pathname = pathname;
   try {
     const response = (await handler(req, url, server, context)) || new Response('Not found', { status: 404 });
     return response;
@@ -103,10 +109,11 @@ async function invokeRouteHandler(
   server: unknown,
   context: HttpRouteContext,
   activity: string,
+  basePath: string,
 ): Promise<Response> {
   const finish = trackActivity(activity);
   try {
-    return compressHttpResponse(req, await invokeRawRouteHandler(handler, req, server, context));
+    return compressHttpResponse(req, await invokeRawRouteHandler(handler, req, server, context, basePath));
   } finally {
     finish();
   }
@@ -131,7 +138,7 @@ export function wrapRoute(
       if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
       const mismatch = cliInstanceMismatch(req, authOptions.serverInstanceId);
       if (mismatch) return mismatch;
-      return invokeRouteHandler(handler, req, server, { principal: LOCAL_SERVER_PRINCIPAL }, activity);
+      return invokeRouteHandler(handler, req, server, { principal: LOCAL_SERVER_PRINCIPAL }, activity, authOptions.basePath ?? '');
     };
   }
 
@@ -139,7 +146,7 @@ export function wrapRoute(
     logger.debug(`Skipping auth wrapping for ${method} ${routePath}`);
     return async (req: Request, server?: unknown): Promise<Response> => {
       if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
-      return invokeRouteHandler(handler, req, server, { principal: null }, activity);
+      return invokeRouteHandler(handler, req, server, { principal: null }, activity, authOptions.basePath ?? '');
     };
   }
 
@@ -153,7 +160,7 @@ export function wrapRoute(
     }
     const mismatch = cliInstanceMismatch(req, authOptions.serverInstanceId);
     if (mismatch) return mismatch;
-    return invokeRouteHandler(handler, req, server, { principal }, activity);
+    return invokeRouteHandler(handler, req, server, { principal }, activity, authOptions.basePath ?? '');
   };
 }
 
@@ -162,15 +169,28 @@ export function wrapRoutes(
   rawRoutes: RouteMap,
   authOptions: HttpRouteAuthOptions = {},
 ): WrappedRouteMap {
-  return Object.fromEntries(
-    Object.entries(rawRoutes).map(([routePath, methods]) => [
-      routePath,
-      Object.fromEntries(
+  const basePath = authOptions.basePath ?? '';
+  const mountedRoutes: WrappedRouteMap = Object.fromEntries(
+    Object.entries(rawRoutes).map(([routePath, methods]) => {
+      const wrappedMethods = Object.fromEntries(
         Object.entries(methods).map(([method, handler]) => [
           method,
           wrapRoute(handler, routePath, method, authOptions),
-        ])
-      ),
-    ])
+        ]),
+      );
+      return [`${basePath}${routePath}`, wrappedMethods];
+    }),
   );
+  if (basePath) {
+    mountedRoutes[basePath] = {
+      GET: async request => {
+        if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
+        return new Response(null, {
+          status: 308,
+          headers: { Location: `${basePath}/${new URL(request.url).search}` },
+        });
+      },
+    };
+  }
+  return mountedRoutes;
 }

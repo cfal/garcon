@@ -30,6 +30,7 @@
 		return {
 			executionPolicy: 'conversation',
 			selectionLabel: 'Model',
+			inputFormatByModel: {},
 			id,
 			label,
 			supportsCompact: false,

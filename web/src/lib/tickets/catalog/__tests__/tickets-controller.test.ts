@@ -158,7 +158,7 @@ describe('Tickets controller', () => {
 	it.each([
 		undefined,
 		'unassigned',
-		{ kind: 'user', username: 'synthetic-user' },
+		{ kind: 'user', ownerKey: 'synthetic-user' },
 		{ kind: 'chat', chatId: '1000000000000001' },
 	] satisfies TicketListQuery['assignee'][])(
 		'preserves an equal in-flight query with assignee %j',
@@ -451,7 +451,11 @@ describe('Tickets controller', () => {
 		await controller.refresh();
 		for (let number = 1; number <= 25; number++) {
 			const target = ticket(number);
-			await controller.mutate(target, { action: 'claim', ticketId: target.id, expectedRevision: 1 });
+			await controller.mutate(target, {
+				action: 'claim',
+				ticketId: target.id,
+				expectedRevision: 1,
+			});
 			await controller.refresh();
 		}
 		expect(api.mutate).toHaveBeenCalledTimes(25);
@@ -736,6 +740,32 @@ describe('Tickets controller', () => {
 		).not.toThrow();
 		expect(controller.drafts.oldEntries[0]?.entry.draft?.fields.title).toBe('Old-store text');
 		expect(draft.canRetry).toBe(false);
+	});
+
+	it('retains mounted detail and drafts during same-owner auth repair without admitting mutations', async () => {
+		const { controller, api, invalidations } = harness();
+		controller.setPresentationVisible(true);
+		await controller.refresh();
+		controller.select('G-1');
+		await controller.refresh();
+		await controller.beginCreate(null);
+		const draft = controller.createDraft!;
+		draft.setField('title', 'Retained draft');
+		const detail = controller.detail.current;
+		const collection = controller.collection;
+		invalidations.publishAvailability(false);
+		expect(controller.detail.current).toBe(detail);
+		expect(controller.collection).toBe(collection);
+		expect(controller.createDraft).toBe(draft);
+		expect(draft.canEdit).toBe(false);
+		await draft.submit({ action: 'create', input: { title: 'No admission', project: 'Release' } });
+		expect(api.mutate).not.toHaveBeenCalled();
+		invalidations.publishAvailability(true);
+		await controller.refresh();
+		expect(controller.createDraft).toBe(draft);
+		expect(draft.field('title')).toBe('Retained draft');
+		expect(controller.detail.selectedId).toBe('G-1');
+		expect(draft.canEdit).toBe(true);
 	});
 
 	it('hides old-account drafts immediately and rejects their writes while a new authority bootstraps', async () => {

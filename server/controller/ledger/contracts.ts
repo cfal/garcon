@@ -29,7 +29,7 @@ import {
 } from '../../../common/preambles.js';
 import type { PreamblePrefixReceipt } from '../../../common/preamble-prefix.js';
 import { parseAgentCommandOutcome, type AgentCommandOutcomeNoticeDetail } from '../../../common/garcon-command-results.js';
-import { parseTicketCommandOutcome, type TicketCommandOutcome } from '../../../common/garcon-ticket-result.js';
+import { parseStoredTicketCommandOutcome, type TicketCommandOutcome } from '../../../common/garcon-ticket-result.js';
 
 export type LedgerTicketCommandOutcomeDetail = TicketCommandOutcome & {
   readonly nativeResultInput?: true;
@@ -38,7 +38,7 @@ export type LedgerTicketCommandOutcomeDetail = TicketCommandOutcome & {
 
 export function projectLedgerTicketCommandOutcome(detail: JsonObject): TicketCommandOutcome | null {
   const publicFields = ['type', 'command', 'ref', 'ticketId', 'requestViewId', 'requestOrdinal', 'status', 'revision', 'errorCode', 'context'];
-  return parseTicketCommandOutcome(Object.fromEntries(publicFields
+  return parseStoredTicketCommandOutcome(Object.fromEntries(publicFields
     .filter((key) => Object.hasOwn(detail, key)).map((key) => [key, detail[key]])));
 }
 

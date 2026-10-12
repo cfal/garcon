@@ -6,8 +6,26 @@ import { CommandResultMessage, parseChatMessage, type ChatMessage } from '@garco
 import { AgentIntegrationError, type AgentHost, type AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import { syncDirectory } from '@garcon/server-agent-common/lib/json-file-store';
 import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
+import { isRecord } from '@garcon/common/json';
+import type { InputFormat } from '@garcon/common/input-format';
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+interface CompletedNoteReceipt {
+  readonly kind: 'note';
+  readonly version: 1;
+  readonly format: InputFormat;
+  readonly completed: true;
+}
+
+function isCompletedNote(message: ChatMessage, execution: string | null): boolean {
+  if (!execution) return false;
+  const receipt: unknown = JSON.parse(execution);
+  return isRecord(receipt) && receipt.kind === 'note' && receipt.version === 1 && receipt.completed === true
+    && (receipt.format === 'plain' || receipt.format === 'markdown')
+    && message.type === 'user-message' && message.metadata?.contentMode === 'literal'
+    && message.metadata.contentFormat === receipt.format;
+}
 
 export class ShellNativeStore {
   #directory: Promise<string> | undefined;
@@ -108,7 +126,7 @@ export class NativeLog {
 
   append(commandId: string, message: ChatMessage, execution?: {
     source: string; family: string; executable: string; projectPath: string; executorId: string; format: 'plain' | 'markdown';
-  }): void {
+  } | CompletedNoteReceipt): void {
     const json = JSON.stringify(message);
     const executionJson = execution ? JSON.stringify(execution) : null;
     this.db.query('INSERT INTO records (command_id, message, execution) VALUES (?, ?, ?)')
@@ -116,11 +134,11 @@ export class NativeLog {
   }
 
   reconcile(): void {
-    const tail = this.db.query<{ command_id: string; message: string }, []>('SELECT command_id, message FROM records ORDER BY seq DESC LIMIT 1').get();
+    const tail = this.db.query<{ command_id: string; message: string; execution: string | null }, []>('SELECT command_id, message, execution FROM records ORDER BY seq DESC LIMIT 1').get();
     if (!tail) return;
     const message = parseChatMessage(JSON.parse(tail.message));
     if (!message) throw unavailable();
-    if (message.type !== 'command-result') {
+    if (message.type !== 'command-result' && !isCompletedNote(message, tail.execution)) {
       this.append(tail.command_id, new CommandResultMessage(new Date().toISOString(), tail.command_id, {
         outcome: 'unknown', exitCode: null, signal: null, capture: 'incomplete',
         cwd: { kind: 'unavailable', reason: 'The executor found a command without a recorded outcome.' },

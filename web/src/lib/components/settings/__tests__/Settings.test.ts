@@ -236,6 +236,7 @@ describe('Settings', () => {
 				'Interface',
 				'Shortcuts',
 				'Providers',
+				'Authentication',
 				'Other Agents',
 				'General',
 				'Automation',
