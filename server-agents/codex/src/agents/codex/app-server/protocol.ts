@@ -94,12 +94,14 @@ export interface CodexTurnError {
   misalignment?: {
     errorType?: string | null;
     detailedExplanation?: string | null;
+    reviewTarget?: string | null;
     steer?: { message: string } | null;
   } | null;
 }
 
 export interface CodexTurn {
   id: string;
+  rootTurnId?: string | null;
   items: CodexThreadItem[];
   itemsView: 'notLoaded' | 'summary' | 'full';
   status: 'completed' | 'interrupted' | 'failed' | 'inProgress';
@@ -186,10 +188,12 @@ export type CodexFunctionCallOutputContentItem =
   | { type: 'input_audio'; audio_url: string }
   | { type: 'encrypted_content'; encrypted_content: string };
 
+export type CodexMessagePhase = 'commentary' | 'partial_answer' | 'final_answer';
+
 export type CodexThreadItem =
   | { type: 'userMessage'; id: string; content: CodexUserInput[]; clientId?: string | null }
   | { type: 'hookPrompt'; id: string; fragments: unknown[] }
-  | { type: 'agentMessage'; id: string; text: string; phase: string | null; memoryCitation: unknown }
+  | { type: 'agentMessage'; id: string; text: string; phase?: CodexMessagePhase | null; memoryCitation: unknown }
   | { type: 'plan'; id: string; text: string }
   | { type: 'reasoning'; id: string; summary: string[]; content: string[] }
   | {
@@ -253,6 +257,8 @@ export type CodexThreadItem =
       kind: 'started' | 'interacted' | 'interrupted' | 'completed';
       agentThreadId: string;
       agentPath: string;
+      model?: string | null;
+      reasoningEffort?: string | null;
     }
   | { type: 'webSearch'; id: string; query: string; action: CodexWebSearchAction | null }
   | { type: 'imageView'; id: string; path: string }
@@ -345,6 +351,9 @@ function parseCodexTurn(value: unknown, index: number): CodexTurn {
   const error = parseCodexTurnError(turn.error, `Codex turn ${turn.id} error`);
   return {
     id: turn.id,
+    ...(turn.rootTurnId === undefined ? {} : {
+      rootTurnId: nullableProtocolString(turn.rootTurnId, `turn ${turn.id} rootTurnId`),
+    }),
     items,
     itemsView: turn.itemsView as CodexTurn['itemsView'],
     status: turn.status as CodexTurn['status'],
@@ -364,6 +373,7 @@ function parseCodexTurnError(value: unknown, label: string): CodexTurnError | nu
   if (error.misalignment !== null && error.misalignment !== undefined) {
     const misalignment = protocolRecord(error.misalignment, `${label} misalignment`);
     nullableProtocolString(misalignment.errorType, `${label} misalignment errorType`);
+    nullableProtocolString(misalignment.reviewTarget, `${label} misalignment reviewTarget`);
     nullableProtocolString(
       misalignment.detailedExplanation,
       `${label} misalignment detailedExplanation`,
@@ -444,6 +454,13 @@ function validateCodexThreadItem(item: Record<string, unknown>, label: string): 
       protocolArray(item.fragments, `${label} fragments`);
       return;
     case 'agentMessage':
+      if (
+        item.phase !== undefined
+        && item.phase !== null
+        && (typeof item.phase !== 'string' || !['commentary', 'partial_answer', 'final_answer'].includes(item.phase))
+      ) throw new Error(`Invalid ${label} phase`);
+      protocolString(item.text, `${label} text`);
+      return;
     case 'plan':
       protocolString(item.text, `${label} text`);
       return;
@@ -510,6 +527,10 @@ function validateCodexThreadItem(item: Record<string, unknown>, label: string): 
       }
       protocolString(item.agentThreadId, `${label} agentThreadId`);
       protocolString(item.agentPath, `${label} agentPath`);
+      nullableProtocolString(item.model, `${label} model`);
+      if (nullableProtocolString(item.reasoningEffort, `${label} reasoningEffort`) === '') {
+        throw new Error(`Invalid ${label} reasoningEffort`);
+      }
       return;
     case 'webSearch':
       protocolString(item.query, `${label} query`);
