@@ -260,6 +260,14 @@ describe('ClaudeTurnSteeringState', () => {
 
 describe('buildClaudeCLIArgs', () => {
 
+  it('pins default permission mode instead of inheriting Claude auto mode', () => {
+    for (const permissionMode of [undefined, 'default', 'manualBypass']) {
+      const args = buildClaudeCLIArgs({ permissionMode, prompt: '', streamJson: true });
+      expect(args[args.indexOf('--permission-mode') + 1]).toBe('default');
+      expect(args).not.toContain('--dangerously-skip-permissions');
+    }
+  });
+
   it('forwards explicit canonical effort exactly and omits Default', () => {
     for (const thinkingMode of ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']) {
       const args = buildClaudeCLIArgs({ thinkingMode, prompt: 'hi' });
@@ -327,6 +335,7 @@ describe('buildClaudeCLIArgs', () => {
 
     expect(args).toContain('--permission-prompt-tool');
     expect(args).toContain('stdio');
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('default');
     expect(args).not.toContain('--dangerously-skip-permissions');
     expect(args).not.toContain('manualBypass');
   });
