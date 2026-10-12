@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { buildClaudeEndpointRuntime } from '../endpoint-runtime.ts';
+import { createClaudeConfig } from '../../../config.ts';
+import { buildClaudeEndpointRuntime, buildClaudeHostEnvironment } from '../endpoint-runtime.ts';
 
 function selection(endpoint = {}) {
   return {
@@ -46,5 +47,21 @@ describe('buildClaudeEndpointRuntime', () => {
         CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1',
       },
     });
+  });
+});
+
+describe('buildClaudeHostEnvironment', () => {
+  it('does not force a subagent model for ordinary first-party usage', () => {
+    const config = createClaudeConfig({
+      get: (name) => name === 'ANTHROPIC_API_KEY' ? 'synthetic-first-party-key' : undefined,
+    });
+    expect(buildClaudeHostEnvironment(config)).toEqual({
+      ANTHROPIC_API_KEY: 'synthetic-first-party-key',
+    });
+  });
+
+  it('leaves native authentication and model selection unchanged without host overrides', () => {
+    expect(buildClaudeHostEnvironment(createClaudeConfig({ get: () => undefined })))
+      .toBeUndefined();
   });
 });
