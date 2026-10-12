@@ -5,7 +5,7 @@
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 	import {
 		setAppShell,
-		setChatDrafts,
+		setNewChatPromptDrafts,
 		setModelCatalog,
 		setLocalSettings,
 		setRemoteSettings,
@@ -16,7 +16,7 @@
 		setTransientLayers,
 	} from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
+	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
 	import type { PreamblesSnapshot } from '$shared/preambles';
 	import type { ChatId } from '$shared/chat-id';
@@ -37,7 +37,7 @@
 		modelValueForSelection,
 		resolveModelSelection,
 	} from '../../../../../test/model-catalog';
-	import { onDestroy, untrack } from 'svelte';
+	import { untrack } from 'svelte';
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '$shared/attachments';
 
 	interface Props {
@@ -119,9 +119,7 @@
 		},
 	} as never;
 	setAppShell(appShell);
-	const chatDrafts = new ChatDraftStore();
-	setChatDrafts(chatDrafts);
-	onDestroy(() => chatDrafts.destroy());
+	setNewChatPromptDrafts(new NewChatPromptDraftStore());
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
 

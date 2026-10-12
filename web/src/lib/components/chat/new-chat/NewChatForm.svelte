@@ -41,7 +41,7 @@
 	import {
 		getLocalSettings,
 		getAppShell,
-		getChatDrafts,
+		getNewChatPromptDrafts,
 		getModelCatalog,
 		getExecutors,
 		getRemoteSettings,
@@ -107,7 +107,7 @@
 	const transientLayers = getTransientLayers();
 	const workspaceLayout = getWorkspaceLayout();
 	const newChatSurfaceId = $derived(chatViewSurfaceId(workspaceLayout.defaultWindowId));
-	const promptDraft = new NewChatPromptDraft(getChatDrafts());
+	const promptDraft = new NewChatPromptDraft(getNewChatPromptDrafts());
 	const form: NewChatFormState = new NewChatFormState({
 		modelCatalog: rootModelCatalog,
 		executors,

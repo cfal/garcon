@@ -15,6 +15,7 @@ import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { ChatProcessingPresentationRegistry } from '$lib/ws/chat-processing-reconciler.svelte.js';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import type { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
+import type { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 import type { ConversationLifecyclePort } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
 import type { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
@@ -146,6 +147,8 @@ export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettin
 // Chat-level contexts (set in ConversationWorkspace.svelte)
 export const [getComposerState, setComposerState] = createContext<ComposerState>();
 export const [getChatDrafts, setChatDrafts] = createContext<ChatDraftStore>();
+export const [getNewChatPromptDrafts, setNewChatPromptDrafts] =
+	createContext<NewChatPromptDraftStore>();
 export const [getAgentState, setAgentState] = createContext<AgentState>();
 export const [getConversationUi, setConversationUi] = createContext<ConversationUiPort>();
 export const [getConversationLifecycles, setConversationLifecycles] =

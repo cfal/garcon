@@ -1,122 +1,147 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte';
-import { NewChatPromptDraft } from '../new-chat-prompt-draft';
+import { NewChatPromptDraft, NewChatPromptDraftStore } from '../new-chat-prompt-draft';
 
 function image(name: string): File {
 	return new File(['image'], name, { type: 'image/png' });
 }
 
-// Stands in for the page-hide flush and a fresh page load.
-function reload(drafts: ChatDraftStore): ChatDraftStore {
-	drafts.destroy();
-	return new ChatDraftStore();
+// Each store is one tab, or one page load of the same tab; each draft is one mount of the form.
+function openForm(tab: NewChatPromptDraftStore, prefill = '') {
+	const draft = new NewChatPromptDraft(tab);
+	return { draft, seeded: draft.seed(prefill) };
 }
 
 describe('NewChatPromptDraft', () => {
-	let drafts: ChatDraftStore;
+	let tab: NewChatPromptDraftStore;
 
 	beforeEach(() => {
 		localStorage.clear();
-		drafts = new ChatDraftStore();
+		tab = new NewChatPromptDraftStore();
 	});
 
 	it('seeds an empty form when nothing is retained', () => {
-		expect(new NewChatPromptDraft(drafts).seed('')).toEqual({ text: '', attachments: [] });
+		expect(openForm(tab).seeded).toEqual({ text: '', attachments: [] });
 	});
 
 	it('restores retained text and attachments when the dialog reopens', () => {
-		const closed = new NewChatPromptDraft(drafts);
-		closed.seed('');
 		const attachment = image('diagram.png');
-		closed.retain('Unsent prompt', [attachment]);
+		openForm(tab).draft.retain('Unsent prompt', [attachment]);
 
-		expect(new NewChatPromptDraft(drafts).seed('')).toEqual({
-			text: 'Unsent prompt',
-			attachments: [attachment],
-		});
+		expect(openForm(tab).seeded).toEqual({ text: 'Unsent prompt', attachments: [attachment] });
 	});
 
 	it('restores retained text, but not attachments, after a page reload', () => {
-		const closed = new NewChatPromptDraft(drafts);
-		closed.seed('');
-		closed.retain('Unsent prompt', [image('diagram.png')]);
+		openForm(tab).draft.retain('Unsent prompt', [image('diagram.png')]);
 
-		expect(new NewChatPromptDraft(reload(drafts)).seed('')).toEqual({
+		expect(openForm(new NewChatPromptDraftStore()).seeded).toEqual({
 			text: 'Unsent prompt',
 			attachments: [],
 		});
 	});
 
 	it('discards the draft once its content starts a chat', () => {
-		const submitted = new NewChatPromptDraft(drafts);
-		submitted.seed('');
-		submitted.retain('Sent prompt', [image('diagram.png')]);
-		submitted.discardSubmitted();
+		const { draft } = openForm(tab);
+		draft.retain('Sent prompt', [image('diagram.png')]);
+		draft.discardSubmitted();
 
-		expect(new NewChatPromptDraft(drafts).seed('')).toEqual({ text: '', attachments: [] });
-		expect(new NewChatPromptDraft(reload(drafts)).seed('')?.text).toBe('');
+		expect(openForm(tab).seeded).toEqual({ text: '', attachments: [] });
+		expect(openForm(new NewChatPromptDraftStore()).seeded?.text).toBe('');
 	});
 
 	it('ignores content changes that arrive after the chat has started', () => {
-		const submitted = new NewChatPromptDraft(drafts);
-		submitted.seed('');
-		submitted.retain('Sent prompt', []);
-		submitted.discardSubmitted();
-		submitted.retain('Sent prompt, late keystroke', []);
+		const { draft } = openForm(tab);
+		draft.retain('Sent prompt', []);
+		draft.discardSubmitted();
+		draft.retain('Sent prompt, late keystroke', []);
 
-		expect(new NewChatPromptDraft(reload(drafts)).seed('')?.text).toBe('');
+		expect(openForm(tab).seeded?.text).toBe('');
 	});
 
-	it('drops the draft when the prompt is emptied', () => {
-		const closed = new NewChatPromptDraft(drafts);
-		closed.seed('');
-		closed.retain('Unsent prompt', []);
-		closed.retain('', []);
+	it('drops the stored text when the prompt is emptied', () => {
+		const { draft } = openForm(tab);
+		draft.retain('Unsent prompt', []);
+		draft.retain('', []);
 
-		expect(new NewChatPromptDraft(reload(drafts)).seed('')?.text).toBe('');
+		expect(openForm(new NewChatPromptDraftStore()).seeded?.text).toBe('');
 	});
 
 	it('keeps an older unsent draft when a prefilled dialog is edited and submitted', () => {
-		const closed = new NewChatPromptDraft(drafts);
-		closed.seed('');
 		const attachment = image('diagram.png');
-		closed.retain('Unsent prompt', [attachment]);
+		openForm(tab).draft.retain('Unsent prompt', [attachment]);
 
-		const prefilled = new NewChatPromptDraft(drafts);
-		expect(prefilled.seed('Prefilled prompt')).toBeNull();
-		prefilled.retain('Prefilled prompt, edited', []);
-		prefilled.discardSubmitted();
+		const prefilled = openForm(tab, 'Prefilled prompt');
+		expect(prefilled.seeded).toBeNull();
+		prefilled.draft.retain('Prefilled prompt, edited', []);
+		prefilled.draft.discardSubmitted();
 
-		expect(new NewChatPromptDraft(drafts).seed('')).toEqual({
-			text: 'Unsent prompt',
-			attachments: [attachment],
-		});
+		expect(openForm(tab).seeded).toEqual({ text: 'Unsent prompt', attachments: [attachment] });
 	});
 
 	it('retains an edited prefill when no older draft exists', () => {
-		const prefilled = new NewChatPromptDraft(drafts);
-		prefilled.seed('Prefilled prompt');
-		prefilled.retain('Prefilled prompt, edited', []);
+		openForm(tab, 'Prefilled prompt').draft.retain('Prefilled prompt, edited', []);
 
-		expect(new NewChatPromptDraft(reload(drafts)).seed('')?.text).toBe('Prefilled prompt, edited');
+		expect(openForm(tab).seeded?.text).toBe('Prefilled prompt, edited');
 	});
 
 	it('does not retain a prefill that was never edited', () => {
-		new NewChatPromptDraft(drafts).seed('Prefilled prompt');
+		openForm(tab, 'Prefilled prompt');
 
-		expect(new NewChatPromptDraft(reload(drafts)).seed('')?.text).toBe('');
+		expect(openForm(tab).seeded?.text).toBe('');
 	});
 
-	it('leaves a draft written by another tab alone when this tab opens and closes untouched', () => {
-		new NewChatPromptDraft(drafts).seed('');
-		const otherTab = new ChatDraftStore();
-		const typedElsewhere = new NewChatPromptDraft(otherTab);
-		typedElsewhere.seed('');
-		typedElsewhere.retain('Typed in another tab', []);
-		otherTab.destroy();
+	describe('with a second tab', () => {
+		let otherTab: NewChatPromptDraftStore;
 
-		new NewChatPromptDraft(drafts).seed('');
+		beforeEach(() => {
+			otherTab = new NewChatPromptDraftStore();
+		});
 
-		expect(new NewChatPromptDraft(reload(drafts)).seed('')?.text).toBe('Typed in another tab');
+		it('shows a draft typed in the other tab without a reload', () => {
+			openForm(tab);
+			openForm(otherTab).draft.retain('Typed in the other tab', []);
+
+			expect(openForm(tab).seeded?.text).toBe('Typed in the other tab');
+		});
+
+		it('does not erase a newer draft from the other tab when an empty-seeded form submits', () => {
+			const { draft } = openForm(tab);
+			openForm(otherTab).draft.retain('Typed in the other tab', []);
+			draft.discardSubmitted();
+
+			expect(openForm(otherTab).seeded?.text).toBe('Typed in the other tab');
+		});
+
+		it('does not erase a newer draft from the other tab when a prefilled form submits', () => {
+			const { draft } = openForm(tab, 'Prefilled prompt');
+			openForm(otherTab).draft.retain('Typed in the other tab', []);
+			draft.discardSubmitted();
+
+			expect(openForm(otherTab).seeded?.text).toBe('Typed in the other tab');
+		});
+
+		it('does not replace or erase a newer draft from the other tab by typing and submitting', () => {
+			const { draft } = openForm(tab);
+			draft.retain('Typed here first', []);
+			openForm(otherTab).draft.retain('Typed in the other tab', []);
+			draft.retain('Typed here first, continued', []);
+			expect(openForm(otherTab).seeded?.text).toBe('Typed in the other tab');
+
+			draft.discardSubmitted();
+			expect(openForm(otherTab).seeded?.text).toBe('Typed in the other tab');
+		});
+
+		it('does not pair attachments held by this tab with text from the other tab', () => {
+			openForm(tab).draft.retain('Typed here', [image('diagram.png')]);
+			openForm(otherTab).draft.retain('Typed in the other tab', []);
+
+			expect(openForm(tab).seeded).toEqual({ text: 'Typed in the other tab', attachments: [] });
+		});
+
+		it('clears a draft seeded from the other tab once this tab sends it', () => {
+			openForm(otherTab).draft.retain('Typed in the other tab', []);
+			openForm(tab).draft.discardSubmitted();
+
+			expect(openForm(otherTab).seeded?.text).toBe('');
+		});
 	});
 });

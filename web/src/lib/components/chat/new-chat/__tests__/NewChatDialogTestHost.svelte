@@ -1,11 +1,10 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
 	import NewChatDialog from '../NewChatDialog.svelte';
 	import {
 		setAppShell,
-		setChatDrafts,
+		setNewChatPromptDrafts,
 		setChatSessions,
 		setLocalSettings,
 		setModelCatalog,
@@ -20,7 +19,7 @@
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
+	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
@@ -39,9 +38,7 @@
 	appShell.openNewChatDialog();
 
 	setAppShell(appShell);
-	const chatDrafts = new ChatDraftStore();
-	setChatDrafts(chatDrafts);
-	onDestroy(() => chatDrafts.destroy());
+	setNewChatPromptDrafts(new NewChatPromptDraftStore());
 	setLocalSettings({
 		sendByShiftEnter: false,
 		showQuickCommitTray: true,

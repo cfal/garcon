@@ -48,6 +48,7 @@ vi.mock('$lib/context', () => ({
 	getTransientLayers: () => testContext.current?.transientLayers,
 	getWs: () => testContext.current?.ws,
 	setChatDrafts: chatDraftContext.set,
+	setNewChatPromptDrafts: vi.fn(),
 }));
 
 vi.mock('$lib/components/workspace/WorkspaceRoot.svelte', async () => ({

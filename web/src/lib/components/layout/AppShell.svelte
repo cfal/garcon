@@ -43,6 +43,7 @@
 		getSingletonSurfaces,
 		getTransientLayers,
 		setChatDrafts,
+		setNewChatPromptDrafts,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
@@ -73,6 +74,7 @@
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
+	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
 	import { ChatListAutohideState } from './chat-list-autohide-state.svelte.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
@@ -97,6 +99,7 @@
 	const hoverCapability = new MediaQuery(HOVER_CAPABLE_MEDIA_QUERY);
 	const chatDrafts = new ChatDraftStore();
 	setChatDrafts(chatDrafts);
+	setNewChatPromptDrafts(new NewChatPromptDraftStore());
 	const wsConnectionNotifications = new WsConnectionNotificationPresenter({
 		notifications,
 	});

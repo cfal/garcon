@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NewChatFormState } from '../new-chat-form-state.svelte';
-import { NewChatPromptDraft } from '../new-chat-prompt-draft';
-import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte';
+import { NewChatPromptDraft, NewChatPromptDraftStore } from '../new-chat-prompt-draft';
 import * as chatsApi from '$lib/api/chats';
 import * as preamblesApi from '$lib/api/chat-preambles';
 import * as gitApi from '$lib/api/git';
@@ -1842,7 +1841,7 @@ describe('NewChatFormState prompt draft', () => {
 	}
 
 	it('seeds the reopened form from the prompt and attachments retained by the closed one', () => {
-		const drafts = new ChatDraftStore();
+		const drafts = new NewChatPromptDraftStore();
 		const closed = createFormState(['claude'], new NewChatPromptDraft(drafts));
 		closed.reseed('');
 		closed.firstMessage = 'Unsent prompt';
@@ -1858,7 +1857,7 @@ describe('NewChatFormState prompt draft', () => {
 	});
 
 	it('shows an explicit prefill instead of the retained draft', () => {
-		const drafts = new ChatDraftStore();
+		const drafts = new NewChatPromptDraftStore();
 		const closed = createFormState(['claude'], new NewChatPromptDraft(drafts));
 		closed.reseed('');
 		closed.firstMessage = 'Unsent prompt';
