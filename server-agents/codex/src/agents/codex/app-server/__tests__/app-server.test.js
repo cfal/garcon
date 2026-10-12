@@ -1752,7 +1752,11 @@ describe('Codex app-server converter', () => {
     expect(messages[1]).toMatchObject({ type: 'tool-result', isError: false });
   });
 
-  it('maps subagent activity and exact v2 terminal response items', () => {
+  it.each([
+    {},
+    { model: null, reasoningEffort: null },
+    { model: 'synthetic-model', reasoningEffort: 'low' },
+  ])('maps subagent activity and exact v2 terminal response items with settings %j', (settings) => {
     const envelope = 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nReview complete';
     const activity = convertCodexAppServerLiveItem({
       type: 'subAgentActivity',
@@ -1760,6 +1764,7 @@ describe('Codex app-server converter', () => {
       kind: 'started',
       agentThreadId: 'worker-thread-1',
       agentPath: '/root/reviewer',
+      ...settings,
     }, '2026-02-21T10:00:00.000Z');
     const completion = convertCodexRawCodeModeItem({
       type: 'agent_message',
@@ -4216,8 +4221,10 @@ describe('CodexAppServerRuntime', () => {
   it.each([
     ['completed', 'final_answer', 'Final A.\n\nFinal B.\r'],
     ['completed', null, 'Unlabelled final.'],
+    ['completed', undefined, 'Legacy final.'],
     ['completed', 'final_answer', ''],
     ['completed', 'commentary', 'Progress only.'],
+    ['completed', 'partial_answer', 'Nonterminal answer.'],
     ['failed', 'final_answer', 'Failed draft.'],
     ['interrupted', 'final_answer', 'Interrupted draft.'],
   ])('selects the complete terminal message without commentary: %s %s %j', async (status, phase, text) => {
@@ -4232,12 +4239,12 @@ describe('CodexAppServerRuntime', () => {
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1',
       turn: makeTurn({ id: 'turn-1', status, items: [commentary, final], itemsView: 'summary' }) } });
     await finished;
-    expect(published.events.at(-1).finalResponse).toEqual(status === 'completed' && phase !== 'commentary'
+    expect(published.events.at(-1).finalResponse).toEqual(status === 'completed' && (phase === undefined || phase === null || phase === 'final_answer')
       ? { type: 'text', text } : undefined);
     expect(publishedMessages(published.events).map((message) => message.content)).toEqual(['Earlier progress.', text].filter(Boolean));
   });
 
-  it('retains the latest final answer when the terminal payload ends with commentary', async () => {
+  it.each(['commentary', 'partial_answer'])('retains the latest final answer before trailing %s', async (phase) => {
     const fake = new FakeClient();
     const provider = createRuntime({ createClient: () => fake });
     const published = collectOperation();
@@ -4246,14 +4253,14 @@ describe('CodexAppServerRuntime', () => {
     const items = [
       { type: 'agentMessage', id: 'earlier-final', text: 'Earlier final.', phase: 'final_answer', memoryCitation: null },
       { type: 'agentMessage', id: 'latest-final', text: 'Latest final.', phase: 'final_answer', memoryCitation: null },
-      { type: 'agentMessage', id: 'commentary', text: 'Trailing commentary.', phase: 'commentary', memoryCitation: null },
+      { type: 'agentMessage', id: 'trailing', text: 'Trailing nonterminal text.', phase, memoryCitation: null },
     ];
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1',
       turn: makeTurn({ id: 'turn-1', status: 'completed', items, itemsView: 'summary' }) } });
     await finished;
     expect(published.events.at(-1).finalResponse).toEqual({ type: 'text', text: 'Latest final.' });
     expect(publishedMessages(published.events).map((message) => message.content))
-      .toEqual(['Earlier final.', 'Latest final.', 'Trailing commentary.']);
+      .toEqual(['Earlier final.', 'Latest final.', 'Trailing nonterminal text.']);
   });
 
   it('does not append native-only interrupted tools behind live assistant output', async () => {
