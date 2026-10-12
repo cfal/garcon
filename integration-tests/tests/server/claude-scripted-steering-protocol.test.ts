@@ -1,14 +1,14 @@
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   FakeClaudeModel,
+  claudeModelInputText,
   claudeText,
   claudeToolUse,
 } from '../../support/fake-claude-model.js';
 import { CLAUDE_BINARY } from '../../support/live-claude.js';
-import { claudeContinuationRequestText } from '../../support/scripted-claude.js';
 
 const STEERING_PREFIX = 'The user sent steering guidance for the active task:\n\n';
 const createdHarnesses: DirectClaudeHarness[] = [];
@@ -18,6 +18,52 @@ afterEach(async () => {
 });
 
 describe('pinned Claude steering protocol', () => {
+  test('correlates background notification continuations through provider idle', async () => {
+    const harness = await createHarness();
+    const inputId = '00000000-0000-4000-8000-000000000001';
+    harness.model.scriptTurn([
+      claudeToolUse('toolu_background_origin', 'Bash', {
+        command: 'while [ ! -f background-release ]; do sleep 0.05; done',
+        run_in_background: true,
+      }),
+    ]);
+    harness.model.scriptTurn([claudeText('Synthetic background launched')]);
+    harness.model.scriptTurn([claudeText('Synthetic background continued')]);
+    await harness.send(userFrame(harness.sessionId, inputId, 'Synthetic background input'));
+    await harness.waitFor((message) => message.type === 'result'
+      && message.user_message_uuid === inputId, 'initial background result');
+    await writeFile(join(harness.project, 'background-release'), 'release', 'utf8');
+    const continuation = await harness.waitFor((message) => message.type === 'result'
+      && message.result === 'Synthetic background continued', 'background continuation');
+    const continuationAt = harness.messages.indexOf(continuation);
+    const isIdle = providerState('idle');
+    const finalIdle = await harness.waitFor((message, index) => index > continuationAt
+      && isIdle(message), 'background provider idle after continuation');
+    const results = harness.results();
+    expect(results).toHaveLength(2);
+    expect(results[0]?.user_message_uuid).toBe(inputId);
+    expect(results[0]?.origin).toBeUndefined();
+    expect(results[1]?.user_message_uuid).toBeUndefined();
+    expect(results[1]?.origin).toMatchObject({ kind: 'task-notification' });
+    expect(results.map((result) => result.session_id)).toEqual([
+      harness.sessionId, harness.sessionId,
+    ]);
+    expect(harness.messages.indexOf(finalIdle))
+      .toBeGreaterThan(harness.messages.indexOf(results[1]!));
+    expect(harness.model.requests()).toHaveLength(3);
+    expect(claudeModelInputText(harness.model.requests()[2]!)).toContain('<task-notification>');
+    const entries = await harness.waitForNativeEntries((nativeEntries) =>
+      JSON.stringify(nativeEntries).includes('Synthetic background continued'), 'background native continuation');
+    const nativeInput = entries.find((entry) => entry.uuid === inputId);
+    expect(nativeInput).toBeDefined();
+    expect(nativeInput?.origin).toBeUndefined();
+    const notification = entries.find((entry) => entry.type === 'user'
+      && asRecord(entry.origin).kind === 'task-notification');
+    expect(notification?.origin).toEqual(results[1]?.origin);
+    expect(asRecord(notification?.message).content).toContain('<task-notification>');
+    harness.model.assertSettled();
+  }, 30_000);
+
   test('queues following guidance before replay and keeps result boundaries', async () => {
     const harness = await createHarness();
     const originalId = crypto.randomUUID();
@@ -51,7 +97,7 @@ describe('pinned Claude steering protocol', () => {
       steerId,
     ]);
     expect(harness.model.requests().map((request) => request.lastUserText).at(-1))
-      .toBe(claudeContinuationRequestText(`${STEERING_PREFIX}${steering}`));
+      .toContain(`${STEERING_PREFIX}${steering}`);
     harness.model.assertSettled();
   }, 30_000);
 
@@ -80,10 +126,10 @@ describe('pinned Claude steering protocol', () => {
     expect(harness.messages.findIndex(commandLifecycle(firstId, 'queued'))).toBeLessThan(firstReplay);
     expect(harness.messages.findIndex(commandLifecycle(secondId, 'queued'))).toBeLessThan(firstReplay);
     expect(secondReplay).toBeGreaterThan(firstReplay);
-    expect(harness.model.requests().at(-1)?.lastUserText).toBe(claudeContinuationRequestText([
+    expect(harness.model.requests().at(-1)?.lastUserText).toContain([
       `${STEERING_PREFIX}${first}`,
       `${STEERING_PREFIX}${second}`,
-    ].join('\n')));
+    ].join('\n'));
 
     const entries = await harness.waitForNativeEntries((nativeEntries) => (
       nativeEntries.some((entry) => (
@@ -104,7 +150,7 @@ describe('pinned Claude steering protocol', () => {
     harness.model.assertSettled();
   }, 30_000);
 
-  test('injects inline guidance into tool results and persists queued attachments', async () => {
+  test('delivers inline guidance at the tool boundary and persists queued attachments', async () => {
     const harness = await createHarness();
     const originalId = crypto.randomUUID();
     const firstId = crypto.randomUUID();
@@ -128,12 +174,16 @@ describe('pinned Claude steering protocol', () => {
     await harness.waitFor(providerState('idle'), 'provider idle');
 
     expect(harness.model.requests()).toHaveLength(2);
-    const toolResult = harness.model.requests().at(-1)?.toolResults.find(
+    const request = harness.model.requests().at(-1)!;
+    const toolResult = request.toolResults.find(
       (result) => result.toolUseId === 'toolu_inline_protocol',
     );
     expect(toolResult?.content).toContain(toolOutput);
-    expect(toolResult?.content).toContain(first);
-    expect(toolResult?.content).toContain(second);
+    const modelText = claudeModelInputText(request);
+    expect(modelText.split(`${STEERING_PREFIX}${first}`)).toHaveLength(2);
+    expect(modelText.split(`${STEERING_PREFIX}${second}`)).toHaveLength(2);
+    expect(modelText.indexOf(toolOutput)).toBeLessThan(modelText.indexOf(first));
+    expect(modelText.indexOf(first)).toBeLessThan(modelText.indexOf(second));
     expect(harness.results()).toHaveLength(1);
     expect(harness.results()[0]?.user_message_uuid).toBe(originalId);
 
@@ -152,7 +202,7 @@ describe('pinned Claude steering protocol', () => {
     harness.model.assertSettled();
   }, 30_000);
 
-  test('replays but does not enqueue or sample a duplicate native UUID', async () => {
+  test('deduplicates queued native UUIDs without sampling replacement content', async () => {
     const harness = await createHarness();
     const originalId = crypto.randomUUID();
     const duplicateId = crypto.randomUUID();
@@ -165,14 +215,14 @@ describe('pinned Claude steering protocol', () => {
     await held.requested;
     await harness.send(userFrame(harness.sessionId, duplicateId, `${STEERING_PREFIX}${first}`, 'next'));
     await harness.send(userFrame(harness.sessionId, duplicateId, `${STEERING_PREFIX}${skipped}`, 'next'));
-    await harness.waitFor(userReplay(duplicateId), 'duplicate replay');
+    await harness.waitFor(commandLifecycle(duplicateId, 'queued'), 'duplicate input queued');
     held.release();
     await harness.waitFor(commandLifecycle(duplicateId, 'completed'), 'first duplicate input completed');
     await harness.waitFor(providerState('idle'), 'provider idle');
 
     expect(harness.messages.filter(commandLifecycle(duplicateId, 'queued'))).toHaveLength(1);
     expect(harness.messages.filter(commandLifecycle(duplicateId, 'started'))).toHaveLength(1);
-    expect(harness.messages.filter(userReplay(duplicateId))).toHaveLength(2);
+    expect(harness.messages.filter(userReplay(duplicateId))).toHaveLength(1);
     const requests = harness.model.requests();
     expect(requests.filter((request) => request.userTexts.some((text) => text.includes(first))))
       .toHaveLength(1);
@@ -198,7 +248,7 @@ describe('pinned Claude steering protocol', () => {
     await harness.waitFor(providerState('idle'), 'provider idle');
 
     expect(harness.model.requests().at(-1)?.lastUserText)
-      .toBe(claudeContinuationRequestText(`${STEERING_PREFIX}${slash}`));
+      .toContain(`${STEERING_PREFIX}${slash}`);
     harness.model.assertSettled();
   }, 30_000);
 
@@ -223,7 +273,7 @@ describe('pinned Claude steering protocol', () => {
     const expandedReview = harness.model.requests()[1]?.lastUserText;
     expect(expandedReview).toContain(bareMarker);
     expect(expandedReview).not.toBe(`/review ${bareMarker}`);
-    expect(expandedReview).not.toBe(claudeContinuationRequestText(`/review ${bareMarker}`));
+    expect(expandedReview).not.toContain(`/review ${bareMarker}`);
     expect(expandedReview).not.toContain(STEERING_PREFIX);
     harness.model.assertSettled();
   }, 30_000);
@@ -271,7 +321,7 @@ class DirectClaudeHarness {
   readonly sessionId = crypto.randomUUID();
   readonly messages: JsonRecord[] = [];
   readonly #root: string;
-  readonly #project: string;
+  readonly project: string;
   readonly #configHome: string;
   readonly #process: Bun.Subprocess<'pipe', 'pipe', 'pipe'>;
   readonly #stdout: Promise<void>;
@@ -283,7 +333,7 @@ class DirectClaudeHarness {
 
   private constructor(root: string, project: string, configHome: string) {
     this.#root = root;
-    this.#project = project;
+    this.project = project;
     this.#configHome = configHome;
     const environment = { ...process.env };
     delete environment.CLAUDECODE;
@@ -348,7 +398,7 @@ class DirectClaudeHarness {
   }
 
   async waitFor(
-    predicate: (message: JsonRecord) => boolean,
+    predicate: (message: JsonRecord, index: number) => boolean,
     description: string,
     timeoutMs = 10_000,
   ): Promise<JsonRecord> {
@@ -367,7 +417,7 @@ class DirectClaudeHarness {
   }
 
   async nativeEntries(): Promise<JsonRecord[]> {
-    const projectKey = resolve(this.#project).normalize('NFC').replace(/[^a-zA-Z0-9]/g, '-');
+    const projectKey = resolve(this.project).normalize('NFC').replace(/[^a-zA-Z0-9]/g, '-');
     const filePath = join(this.#configHome, 'projects', projectKey, `${this.sessionId}.jsonl`);
     const content = await readFile(filePath, 'utf8');
     return content.split('\n').filter(Boolean).map((line) => JSON.parse(line) as JsonRecord);

@@ -102,12 +102,10 @@ export function buildClaudeCLIArgs({
 
   const effectiveMode = permissionMode || 'default';
   const providerMode = providerStartupPermissionMode(effectiveMode);
-  if (providerMode !== 'default') {
-    if (providerMode === 'bypassPermissions') {
-      args.push('--dangerously-skip-permissions');
-    } else {
-      args.push('--permission-mode', providerMode);
-    }
+  if (providerMode === 'bypassPermissions') {
+    args.push('--dangerously-skip-permissions');
+  } else {
+    args.push('--permission-mode', providerMode);
   }
 
   if (streamJson) {
