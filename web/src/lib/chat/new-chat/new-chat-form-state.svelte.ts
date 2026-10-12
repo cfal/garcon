@@ -26,6 +26,7 @@ import type {
 import { NewChatAgentSettingsState } from './new-chat-agent-settings-state.svelte';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
 import { firstSelectableExecutorRecent, newChatExecutorPreferences } from './new-chat-executor-preferences';
+import type { NewChatPromptDraft } from './new-chat-prompt-draft';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import {
@@ -49,6 +50,8 @@ export interface NewChatFormStateOptions {
 	executors?: ExecutorsStore;
 	remoteSettings: RemoteSettingsStore;
 	get selectableAgentIds(): readonly SessionAgentId[];
+	/** Retains the unsent prompt across reseeds. Omitted where the prompt is persisted elsewhere. */
+	promptDraft?: NewChatPromptDraft;
 }
 
 export class NewChatFormState {
@@ -225,7 +228,12 @@ export class NewChatFormState {
 
 	set firstMessage(value: string) {
 		this.#firstMessage = value;
+		this.#contentChanged();
+	}
+
+	#contentChanged(): void {
 		this.#contentRevision += 1;
+		this.#options.promptDraft?.retain(this.#firstMessage, this.#images.images);
 	}
 
 	get contentRevision(): number {
@@ -478,7 +486,7 @@ export class NewChatFormState {
 
 	set attachedImages(files: File[]) {
 		this.#images.images = files;
-		this.#contentRevision += 1;
+		this.#contentChanged();
 	}
 
 	imageUrlFor(file: File, idx: number): string | undefined {
@@ -488,13 +496,13 @@ export class NewChatFormState {
 	addImages(files: File[], support?: ChatAttachmentSupport): void {
 		const previousImages = this.#images.images;
 		this.#images.add(files, support);
-		if (this.#images.images !== previousImages) this.#contentRevision += 1;
+		if (this.#images.images !== previousImages) this.#contentChanged();
 	}
 
 	removeImage(index: number): void {
 		const previousImages = this.#images.images;
 		this.#images.remove(index);
-		if (this.#images.images !== previousImages) this.#contentRevision += 1;
+		if (this.#images.images !== previousImages) this.#contentChanged();
 	}
 
 	reconcileImageUrls(): void {
@@ -816,11 +824,13 @@ export class NewChatFormState {
 
 	// Reseed / reset
 
-	/** Resets form state when the dialog opens. */
+	/** Resets form state when the dialog opens. An explicit prefill wins over the retained draft. */
 	reseed(prefill: string): void {
 		this.#pathCompletion.reset();
-		this.firstMessage = prefill;
-		this.attachedImages = [];
+		const retained = this.#options.promptDraft?.seed(prefill);
+		this.#firstMessage = retained?.text ?? prefill;
+		this.#images.images = [...(retained?.attachments ?? [])];
+		this.#contentRevision += 1;
 		this.error = null;
 		this.showBrowser = false;
 		this.hasAutoOpened = false;

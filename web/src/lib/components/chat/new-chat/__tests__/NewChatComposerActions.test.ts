@@ -153,6 +153,7 @@ describe('NewChatForm composer actions', () => {
 
 	afterEach(() => {
 		cleanup();
+		localStorage.clear();
 		restoreResizeObserver();
 		resetPromptEditorStub();
 		vi.mocked(refinementApi.refinePrompt).mockReset();

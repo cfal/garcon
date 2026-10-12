@@ -237,6 +237,9 @@ describe('NewChatForm', () => {
 	});
 
 	afterEach(() => {
+		// Unmounts first so the draft store's final flush cannot outlive the reset.
+		cleanup();
+		localStorage.clear();
 		vi.unstubAllGlobals();
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		vi.mocked(clientChatId.createClientChatId).mockReset();

@@ -6,6 +6,7 @@
 	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
 	import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
+	import { NewChatPromptDraft } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import {
 		chatAttachmentAccept,
 		isImageAttachment,
@@ -40,6 +41,7 @@
 	import {
 		getLocalSettings,
 		getAppShell,
+		getChatDrafts,
 		getModelCatalog,
 		getExecutors,
 		getRemoteSettings,
@@ -105,6 +107,7 @@
 	const transientLayers = getTransientLayers();
 	const workspaceLayout = getWorkspaceLayout();
 	const newChatSurfaceId = $derived(chatViewSurfaceId(workspaceLayout.defaultWindowId));
+	const promptDraft = new NewChatPromptDraft(getChatDrafts());
 	const form: NewChatFormState = new NewChatFormState({
 		modelCatalog: rootModelCatalog,
 		executors,
@@ -112,6 +115,7 @@
 		get selectableAgentIds() {
 			return newChatAgentIds;
 		},
+		promptDraft,
 	});
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(form.executorId));
 	const executionAgent = $derived(modelCatalog.getAgent(form.agentId));
@@ -508,7 +512,9 @@
 			return;
 		}
 		const config = form.buildConfig();
-		if (config) onStartChat(config, ensureProspectiveChatId());
+		if (!config) return;
+		onStartChat(config, ensureProspectiveChatId());
+		promptDraft.discardSubmitted();
 	}
 
 	function shouldSubmitMessageOnEnter(event: KeyboardEvent): boolean {
