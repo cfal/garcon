@@ -241,19 +241,26 @@ describe('Codex against a scripted model', () => {
 
   for (const fault of [
     { kind: 'http-error', status: 500, message: 'transient scripted HTTP failure' },
+    {
+      kind: 'http-error',
+      status: 429,
+      message: 'transient scripted rate limit',
+      headers: { 'Retry-After': '1' },
+    },
     { kind: 'stream-error', message: 'transient scripted SSE failure' },
     { kind: 'truncated-stream' },
   ] satisfies CodexScriptedFault[]) {
-    test(`retries a transient ${fault.kind}`, async () => {
+    const faultName = fault.kind === 'http-error' ? `${fault.kind}-${fault.status}` : fault.kind;
+    test(`retries a transient ${faultName}`, async () => {
       if (!environment) throw new Error('Scripted Codex environment was not initialized.');
       const testEnvironment = environment;
       const reply = `SCRIPTED_FAULT_RECOVERY_${crypto.randomUUID().replaceAll('-', '')}`;
-      const prompt = `Recover from the ${fault.kind} response.`;
+      const prompt = `Recover from the ${faultName} response.`;
       const requestStart = testEnvironment.model.requests().length;
       testEnvironment.model.scriptFault(fault);
       testEnvironment.model.scriptTurn([codexAssistantMessage(reply)]);
 
-      await withIntegrationFixture(`codex-scripted-${fault.kind}`, async (fixture) => {
+      await withIntegrationFixture(`codex-scripted-${faultName}`, async (fixture) => {
         const chatId = fixture.newChatId();
         const cursor = fixture.client.markEvents();
         const turn = await fixture.client.startChat(liveCodexStartRequest({
