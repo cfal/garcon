@@ -5,7 +5,7 @@ import { configureComposerMarkdown, serializeComposerMarkdown } from './composer
 import { joinComposerMarkdownBlocks, type ComposerMarkdownBlock } from './composer-markdown-blocks.js';
 import {
 	isComposerMarkdownSized,
-	isMarkdownTableCandidate,
+	isMarkdownCandidate,
 	MAX_COMPOSER_MARKDOWN_NODES,
 } from './composer-markdown-limits.js';
 
@@ -15,6 +15,28 @@ const manager = new MarkdownManager({
 });
 configureComposerMarkdown(manager);
 const marked = manager.instance;
+
+// Tokens that make pasted text worth showing formatted. Thematic breaks and indented code are
+// left out because plain text produces them by accident.
+const FORMATTING_TOKENS = new Set([
+	'table',
+	'list',
+	'taskList',
+	'heading',
+	'blockquote',
+	'strong',
+	'em',
+	'del',
+	'codespan',
+	'image',
+]);
+
+function isFormattingToken(token: { type: string; raw: string; codeBlockStyle?: string }): boolean {
+	if (token.type === 'code') return token.codeBlockStyle !== 'indented';
+	// A bare address is a link token too; only a written `[label](url)` counts.
+	if (token.type === 'link') return token.raw.startsWith('[');
+	return FORMATTING_TOKENS.has(token.type);
+}
 
 // The Markdown parser lifts a lone image out of its paragraph, but draft images are inline.
 const IMAGE_BLOCK_PARENTS = new Set(['doc', 'blockquote', 'listItem', 'taskItem']);
@@ -110,12 +132,12 @@ export function parseComposerMarkdown({
 }: ComposerMarkdownRequest): ComposerMarkdownDocument | null {
 	if (!isComposerMarkdownSized(source)) return null;
 	if (pastedText !== undefined) {
-		if (!isMarkdownTableCandidate(pastedText)) return null;
-		let hasTable = false;
+		if (!isMarkdownCandidate(pastedText)) return null;
+		let formatted = false;
 		marked.walkTokens(marked.lexer(pastedText), (token) => {
-			if (token.type === 'table') hasTable = true;
+			if (isFormattingToken(token)) formatted = true;
 		});
-		if (!hasTable) return null;
+		if (!formatted) return null;
 	}
 	const parsed = parseBlocks(source);
 	const pending = [parsed.document];

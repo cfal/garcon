@@ -53,9 +53,37 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
         });
         await page.screenshot({ path: join(artifacts, name) });
       };
+      // Emptying a formatted draft is the way back to the plain editor.
+      const clear = async () => {
+        if (await editor.isVisible()) {
+          await editor.focus();
+          await page.keyboard.press("Control+A");
+          await page.keyboard.press("Backspace");
+        } else await textarea.fill("");
+        await browserExpect(textarea).toBeVisible();
+        await browserExpect(textarea).toHaveValue("");
+      };
+      const prose = "Ship **two** things:\n\n1. first\n2. second\n\n- [ ] follow up";
+      await textarea.focus();
+      await paste(prose);
+      await browserExpect(editor).toBeFocused();
+      await browserExpect(editor.locator("strong")).toHaveText("two");
+      await browserExpect(editor.locator("ol > li")).toHaveCount(2);
+      await browserExpect(textarea).toHaveValue(prose);
+      await browserExpect(
+        page.getByRole("button", { name: "Edit Markdown source" }),
+      ).toHaveCount(0);
+      await screenshot("composer-markdown-prose-1440.png");
+      await editor.locator("ol > li").first().click();
+      await page.keyboard.press("End");
+      await page.keyboard.type(" step");
+      await browserExpect(textarea).toHaveValue(
+        prose.replace("1. first", "1. first step"),
+      );
+      await clear();
       for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: 900 });
-        await textarea.fill("");
+        await clear();
         await textarea.focus();
         await paste(table);
         await browserExpect(editor).toBeVisible();
@@ -73,20 +101,11 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
         await page.keyboard.type(" edited");
         await browserExpect(textarea).toHaveValue(/Startup ready.*edited/);
         await browserExpect(textarea).toHaveValue(/`a  b`/);
-        if (width === 390) {
-          await page
-            .getByRole("button", { name: "More composer actions" })
-            .click();
-          await page
-            .getByRole("menuitem", { name: "Edit Markdown source" })
-            .click();
-        } else
-          await page
-            .getByRole("button", { name: "Edit Markdown source" })
-            .click();
-        await browserExpect(textarea).toBeVisible();
+        const edited = await textarea.inputValue();
+        await clear();
         await browserExpect(textarea).toBeFocused();
         if (width === 390) {
+          await textarea.fill(edited);
           await page
             .getByRole("button", { name: "More composer actions" })
             .click();
@@ -108,15 +127,10 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
           await browserExpect(textarea).toHaveValue(
             /\*\*Startup ready edited\*\*<br>\*\*next paragraph\*\*/,
           );
-          await page
-            .getByRole("button", { name: "More composer actions" })
-            .click();
-          await page
-            .getByRole("menuitem", { name: "Edit Markdown source" })
-            .click();
         }
       }
       await page.setViewportSize({ width: 1440, height: 900 });
+      await clear();
       await textarea.fill("Prefix\n\n");
       await textarea.focus();
       await paste(table);
@@ -155,7 +169,7 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await browserExpect(editor).toHaveCount(0);
       await browserExpect(textarea).toBeFocused();
       const large = "synthetic log entry\n".repeat(55_189);
-      await textarea.fill("");
+      await clear();
       await textarea.focus();
       const start = performance.now();
       await paste(large);
@@ -175,7 +189,7 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       expect(elapsed).toBeLessThan(3_000);
       await browserExpect(editor).toHaveCount(0);
       await browserExpect(textarea).toBeFocused();
-      await textarea.fill("");
+      await clear();
       await textarea.focus();
       await paste(table);
       await browserExpect(editor).toBeFocused();
@@ -204,13 +218,10 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
             .split("\n")
             .map((line) => prefix + line)
             .join("\n");
-        await textarea.fill("");
+        await clear();
         await textarea.focus();
         await paste(nested);
         await browserExpect(editor.locator("table")).toHaveCount(1);
-        await page
-          .getByRole("button", { name: "Edit Markdown source" })
-          .click();
         await browserExpect(textarea).toHaveValue(nested);
       }
       const draft = await textarea.inputValue();
@@ -248,11 +259,7 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await page.reload();
       await browserExpect(editor.locator("table")).toHaveCount(1);
       await browserExpect(textarea).toHaveValue(draft);
-      await page
-        .getByRole("button", { name: "Edit Markdown source" })
-        .click();
-      await browserExpect(textarea).toBeVisible();
-      await textarea.fill("");
+      await clear();
       await textarea.focus();
       await paste(table);
       await browserExpect(editor).toBeFocused();
@@ -267,7 +274,7 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await integration.client.waitForProcessing(ids[0], false);
       await page.emulateMedia({ colorScheme: "dark" });
       await browserExpect(page.locator("html")).toHaveClass(/dark/);
-      await textarea.fill("");
+      await clear();
       await textarea.focus();
       await paste(table);
       await browserExpect(editor).toBeFocused();

@@ -153,7 +153,7 @@ describe('formatted composer lifecycle', () => {
 		expect(options.composer.inputText).toBe('edited Markdown');
 		controller.destroy();
 	});
-	it('restores the formatted view of a loaded table draft without changing it', async () => {
+	it('restores the formatted view of a loaded Markdown draft without changing it', async () => {
 		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
 		const { ui, options, controller } = fixture();
 		controller.restore();
@@ -167,9 +167,9 @@ describe('formatted composer lifecycle', () => {
 		expect(options.onChange).not.toHaveBeenCalled();
 		controller.destroy();
 	});
-	it('leaves a loaded draft without a table in source without reporting it', async () => {
+	it('leaves a loaded plain draft in source without reporting it', async () => {
 		const { ui, options, controller } = fixture();
-		options.composer.inputText = '# Notes\n\n- plain list';
+		options.composer.inputText = 'plain notes\nwith two lines';
 		controller.restore();
 		await Promise.resolve();
 		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();

@@ -1,7 +1,7 @@
 import { tick } from 'svelte';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import type { PromptComposerUiState } from './prompt-composer-state.svelte.js';
-import { isComposerMarkdownSized, isMarkdownTableCandidate } from './composer-markdown-limits.js';
+import { isComposerMarkdownSized, isMarkdownCandidate } from './composer-markdown-limits.js';
 import {
 	parseComposerMarkdownInWorker,
 	serializeComposerMarkdownPasteInWorker,
@@ -32,7 +32,7 @@ export class PromptComposerMarkdownController {
 		this.#pastedText = null;
 		if (event.target !== this.options.textarea) return;
 		const text = event.clipboardData?.getData('text/plain') ?? '';
-		if (isMarkdownTableCandidate(text)) this.#pastedText = text;
+		if (isMarkdownCandidate(text)) this.#pastedText = text;
 	}
 
 	input(event: InputEvent): void {
@@ -45,10 +45,10 @@ export class PromptComposerMarkdownController {
 		void this.#format();
 	}
 
-	/** Shows a loaded draft that contains a table formatted, as it was when pasted. */
+	/** Shows a loaded Markdown draft formatted, as it was when pasted. */
 	restore(): void {
 		const source = this.options.composer.inputText;
-		if (this.options.ui.formattedDraft || !isMarkdownTableCandidate(source)) return;
+		if (this.options.ui.formattedDraft || !isMarkdownCandidate(source)) return;
 		void this.#format(source);
 	}
 

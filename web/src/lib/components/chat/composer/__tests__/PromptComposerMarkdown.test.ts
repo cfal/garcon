@@ -102,6 +102,33 @@ describe('formatted composer integration', () => {
 		await screen.findByRole('textbox', { name: 'Formatted message' });
 		expect(textarea.value).toBe(table);
 	});
+	it('formats pasted bold text and lists without a source toggle', async () => {
+		const source = 'Ship **two** things:\n\n1. first\n2. second';
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) =>
+			parseComposerMarkdown(request),
+		);
+		render(PromptComposerTestHost, { selectedChatId: 'markdown-paste', selectedStatus: 'running' });
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', source);
+		await fireEvent.paste(textarea, { clipboardData: transfer });
+		await fireEvent.input(textarea, { target: { value: source }, inputType: 'insertFromPaste' });
+		const editor = await screen.findByRole('textbox', { name: 'Formatted message' });
+		expect(editor.querySelector('strong')?.textContent).toBe('two');
+		expect(editor.querySelectorAll('ol > li')).toHaveLength(2);
+		expect(textarea.value).toBe(source);
+		expect(screen.queryByRole('button', { name: 'Edit Markdown source' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Format Markdown' })).toBeNull();
+	});
+	it('returns to the plain editor when a formatted draft is emptied', async () => {
+		const { editor, textarea } = await formatted();
+		richEditor(editor).commands.clearContent(true);
+		await waitFor(() =>
+			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
+		);
+		expect(textarea.value).toBe('');
+		await waitFor(() => expect(document.activeElement).toBe(textarea));
+	});
 	it('returns to source when another surface changes a formatted draft', async () => {
 		const { textarea } = await formatted();
 		await fireEvent.click(screen.getByTestId('append-draft'));

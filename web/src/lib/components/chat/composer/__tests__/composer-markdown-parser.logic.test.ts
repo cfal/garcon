@@ -11,6 +11,7 @@ import {
 } from '../composer-markdown-blocks.js';
 import { composerMarkdownEditorExtensions } from '../composer-markdown-extensions.js';
 import {
+	isMarkdownCandidate,
 	isMarkdownTableCandidate,
 	MAX_COMPOSER_MARKDOWN_LENGTH,
 } from '../composer-markdown-limits.js';
@@ -84,6 +85,39 @@ describe('composer Markdown parsing', () => {
 	});
 	it('does not mistake fenced table syntax for a table', () => {
 		const source = '```\n' + table + '\n```';
+		const content = nodes(parseComposerMarkdown({ source, pastedText: source })!.document);
+		expect(content.some((node) => node.type === 'codeBlock')).toBe(true);
+		expect(content.some((node) => node.type === 'table')).toBe(false);
+	});
+	it.each([
+		['bold text', 'Ship the **first** change', 'bold'],
+		['italic text', 'Ship the *first* change', 'italic'],
+		['inline code', 'Run `bun test` first', 'code'],
+	])('formats pasted %s', (_name, source, mark) => {
+		const parsed = parseComposerMarkdown({ source, pastedText: source });
+		expect(
+			nodes(parsed!.document).some((node) => node.marks?.some((entry) => entry.type === mark)),
+		).toBe(true);
+	});
+	it.each([
+		['a numbered list', '1. first\n2. second', 'orderedList'],
+		['a bullet list', '- first\n- second', 'bulletList'],
+		['a task list', '- [ ] first\n- [x] second', 'taskList'],
+		['a heading', '## Plan\n\nnotes', 'heading'],
+		['a block quote', '> quoted', 'blockquote'],
+		['a fenced code block', '```ts\nconst a = 1;\n```', 'codeBlock'],
+	])('formats pasted %s', (_name, source, type) => {
+		const parsed = parseComposerMarkdown({ source, pastedText: source });
+		expect(nodes(parsed!.document).some((node) => node.type === type)).toBe(true);
+	});
+	it.each([
+		['plain prose', 'plain notes\nwith two lines'],
+		['identifiers and paths', 'my_var in ~/cfg and C:\\Users\\me'],
+		['a bare link', 'see https://example.test/a_b for details'],
+		['spaced operators', '2 * 3 * 4 and a _ b'],
+		['indented text', '    indented continuation\n    of a log line'],
+		['a divider', 'above\n\n---\n\nbelow'],
+	])('leaves pasted %s in the plain editor', (_name, source) => {
 		expect(parseComposerMarkdown({ source, pastedText: source })).toBeNull();
 	});
 	it.each([
@@ -291,6 +325,16 @@ describe('composer Markdown source preservation', () => {
 		expect(output).toBe(
 			prompt.replace('| - | - |\n| max_tokens |', '| --- | --- |\n| a\\|b<br>my_var |'),
 		);
+	});
+});
+
+describe('Markdown detection', () => {
+	it('screens long input in linear time', () => {
+		const started = performance.now();
+		isMarkdownCandidate(' '.repeat(30_000) + 'x');
+		isMarkdownCandidate('1'.repeat(30_000));
+		isMarkdownCandidate(('\t'.repeat(300) + 'x\n').repeat(100));
+		expect(performance.now() - started).toBeLessThan(250);
 	});
 });
 

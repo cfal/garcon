@@ -340,7 +340,7 @@
 	$effect(() => {
 		if (ui.formattedDraft && !formattedDraft) untrack(() => markdown.reset());
 	});
-	// Restores the formatted view of a table draft when its chat is selected or reloaded.
+	// Restores the formatted view of a Markdown draft when its chat is selected or reloaded.
 	$effect(() => {
 		const restored = composerState.draftRestoreRequest?.chatId === sessions.selectedChatId;
 		if (restored && isVisible && isPresented) untrack(() => markdown.restore());
@@ -882,11 +882,9 @@
 			</div>
 
 			<ComposerBottomBar
-				markdownAction={formattedDraft
-					? { label: m.chat_composer_edit_markdown_source(), onclick: () => void markdown.edit() }
-					: composerState.inputText.trim()
-						? { label: m.chat_composer_format_markdown(), onclick: () => markdown.open() }
-						: undefined}
+				markdownAction={!formattedDraft && composerState.inputText.trim()
+					? { label: m.chat_composer_format_markdown(), onclick: () => markdown.open() }
+					: undefined}
 				canAttachImages={canAttachAttachments}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={() => attachmentController.pick()}

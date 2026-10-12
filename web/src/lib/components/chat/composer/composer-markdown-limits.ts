@@ -6,6 +6,18 @@ export function isComposerMarkdownSized(source: string): boolean {
 	return source.length > 0 && source.length <= MAX_COMPOSER_MARKDOWN_LENGTH;
 }
 
+// Cheap main-thread screen for block markers and inline delimiters; the Worker's lexer decides
+// whether the text really is formatted. Every quantifier is bounded or anchored.
+const MARKDOWN_SYNTAX =
+	/^[ \t]{0,3}(?:#{1,6}[ \t]|>|[-*+][ \t]|\d{1,9}[.)][ \t]|`{3}|~{3})|[*_`~]\S|\]\(/m;
+
+export function isMarkdownCandidate(source: string): boolean {
+	return (
+		isComposerMarkdownSized(source) &&
+		(MARKDOWN_SYNTAX.test(source) || isMarkdownTableCandidate(source))
+	);
+}
+
 export function isMarkdownTableCandidate(source: string): boolean {
 	return (
 		isComposerMarkdownSized(source) &&
