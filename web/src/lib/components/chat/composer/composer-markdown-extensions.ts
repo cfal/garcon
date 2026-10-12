@@ -3,6 +3,21 @@ import { Table, TableKit } from '@tiptap/extension-table';
 import Image from '@tiptap/extension-image';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
+import { Extension } from '@tiptap/core';
+
+// The stock renderer always writes a three-backtick fence, which a body line of three or more
+// backticks would close early. The serializer hands code blocks to this renderer instead.
+export const DRAFT_CODE_BLOCK = 'draftCodeBlock';
+const DraftCodeBlock = Extension.create({
+	name: DRAFT_CODE_BLOCK,
+	renderMarkdown(node) {
+		const text = typeof node.attrs?.text === 'string' ? node.attrs.text : '';
+		const language = typeof node.attrs?.language === 'string' ? node.attrs.language : '';
+		const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+		const fence = '`'.repeat(Math.max(3, longest + 1));
+		return `${fence}${language}\n${text}\n${fence}`;
+	},
+});
 
 // Draft resources remain visible as text without fetching or navigating them.
 const DraftImage = Image.extend({
@@ -53,6 +68,7 @@ export function composerMarkdownEditorExtensions() {
 			// Its `++text++` syntax would swallow increments such as `i++ and j++`.
 			underline: false,
 		}),
+		DraftCodeBlock,
 		TableKit.configure({ table: false }),
 		DraftTable.configure({ resizable: false }),
 		DraftImage.configure({ inline: true }),

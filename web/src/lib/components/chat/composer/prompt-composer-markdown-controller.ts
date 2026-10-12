@@ -94,10 +94,14 @@ export class PromptComposerMarkdownController {
 		)
 			return;
 		if (text === null) {
+			// The paste was intercepted, so its text survives only if it is written here. Its
+			// position in the document is unknown without serialization; it goes to the end.
+			const separator = /\n\n$|^$/.test(draft.source) ? '' : draft.source.endsWith('\n') ? '\n' : '\n\n';
+			this.options.onChange(draft.source + separator + request.text);
 			this.options.onUnavailable();
-			return;
+		} else {
+			this.options.onChange(text);
 		}
-		this.options.onChange(text);
 		if (generation === this.options.interactionGeneration) void this.edit();
 		else this.reset();
 	}

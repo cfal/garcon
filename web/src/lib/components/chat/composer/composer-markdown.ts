@@ -1,5 +1,6 @@
 import type { MarkdownManager } from '@tiptap/markdown';
 import type { JSONContent } from '@tiptap/core';
+import { DRAFT_CODE_BLOCK } from './composer-markdown-extensions.js';
 import { createTextProtection, type TextProtection } from './composer-markdown-text.js';
 
 type Mark = NonNullable<JSONContent['marks']>[number];
@@ -59,6 +60,11 @@ function normalize(
 		const previous = node.content?.[index - 1];
 		if (child.type === 'hardBreak') {
 			content.push(lineBreak(child.marks));
+		} else if (child.type === 'codeBlock') {
+			content.push({
+				type: DRAFT_CODE_BLOCK,
+				attrs: { language: child.attrs?.language ?? '', text: draftText(child) },
+			});
 		} else if (child.type !== 'text') {
 			// The serializer marks a repeated empty paragraph with a literal `&nbsp;`.
 			if (isEmptyParagraph(child) && isEmptyParagraph(previous)) return;

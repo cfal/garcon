@@ -5,6 +5,7 @@
 	import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
 	import { MAX_COMPOSER_MARKDOWN_LENGTH } from './composer-markdown-limits.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { createRandomId } from '$lib/utils/random-id.js';
 	import type { ComposerMarkdownPasteRequest } from './composer-markdown-parser.js';
 	import { serializeComposerMarkdown } from './composer-markdown.js';
 	import {
@@ -58,7 +59,8 @@
 				return;
 			}
 			// Carries the bounded selection and its marks into off-thread serialization.
-			const marker = `garconClipboard${crypto.randomUUID().replaceAll('-', '')}`;
+			// `crypto.randomUUID` is unavailable on the plain HTTP origins Garcon supports.
+			const marker = `garconClipboard${createRandomId().replaceAll('-', '')}`;
 			onLargePaste({
 				blocks: blocks(view.state.tr.insertText(marker, position).doc),
 				originalCount: original.length,

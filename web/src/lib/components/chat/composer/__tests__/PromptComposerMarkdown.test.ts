@@ -189,6 +189,31 @@ describe('formatted composer integration', () => {
 			).toBe(original + text);
 		},
 	);
+	it('keeps an oversized paste where secure-context random identifiers are unavailable', async () => {
+		const { editor, textarea } = await formatted();
+		richEditor(editor).commands.setTextSelection(2);
+		// Plain HTTP origins other than loopback expose `crypto` without `randomUUID`.
+		const randomUUID = vi.spyOn(crypto, 'randomUUID').mockImplementation(() => {
+			throw new TypeError('crypto.randomUUID is not a function');
+		});
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', 'synthetic log\n'.repeat(3_000));
+		await fireEvent.paste(editor, { clipboardData: transfer });
+		await waitFor(() => expect(textarea.value).toContain('synthetic log'));
+		expect(randomUUID).not.toHaveBeenCalled();
+		randomUUID.mockRestore();
+	});
+	it('moves an oversized paste into source when its serialization fails', async () => {
+		vi.mocked(serializeComposerMarkdownPasteInWorker).mockResolvedValueOnce(null);
+		const { editor, textarea } = await formatted();
+		const text = 'synthetic log\n'.repeat(3_000);
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', text);
+		await fireEvent.paste(editor, { clipboardData: transfer });
+		await waitFor(() => expect(textarea.value).toBe(table + '\n\n' + text));
+		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+		expect(screen.getByTestId('notification').textContent).toContain('cannot use formatted editing');
+	});
 	it.each(['paste', 'drop'])(
 		'keeps oversized %s text in source before HTML parsing',
 		async (type) => {

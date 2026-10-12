@@ -231,6 +231,27 @@ describe('composer Markdown source preservation', () => {
 			expect(manager.parse(output)).toEqual(paragraph(text));
 		}
 	});
+	it.each([
+		['a code block', '````md\n```\ninner\n```\n````'],
+		[
+			'a table and a code block in one block quote',
+			'> | a |\n> | --- |\n> | 1 |\n>\n> ````\n> ```\n> x_y <b>\n> ````',
+		],
+	])('fences %s past every backtick run in its body', (_name, source) => {
+		const manager = editingManager();
+		const document = parseDocument(source);
+		const output = serializeComposerMarkdown(manager, document);
+		expect(output).toBe(source);
+		expect(manager.parse(output)).toEqual(manager.parse(source));
+	});
+	it('lengthens the fence when an edit adds a longer backtick run', () => {
+		const manager = editingManager();
+		const document = parseDocument('```\ncode\n```');
+		document.content![0].content = [{ type: 'text', text: 'before\n````\nafter' }];
+		const output = serializeComposerMarkdown(manager, document);
+		expect(output).toBe('`````\nbefore\n````\nafter\n`````');
+		expect(manager.parse(output).content).toHaveLength(1);
+	});
 	it('does not write a placeholder for repeated empty paragraphs', () => {
 		const manager = editingManager();
 		const empty = { type: 'paragraph' };

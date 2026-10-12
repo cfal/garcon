@@ -14,7 +14,7 @@ export async function parseComposerMarkdownInWorker(
 	request: ComposerMarkdownRequest,
 	signal: AbortSignal,
 ): Promise<ComposerMarkdownDocument | null> {
-	const result = await runComposerMarkdownWorker({ type: 'parse', request }, signal);
+	const result = await runComposerMarkdownWorker({ type: 'parse', request }, signal, 3_000);
 	return result?.type === 'parsed' ? result.document : null;
 }
 
@@ -26,9 +26,12 @@ export async function serializeComposerMarkdownPasteInWorker(
 	return result?.type === 'pasted' ? result.source : null;
 }
 
+// A paste runs without a deadline: the browser paste was already prevented, so giving up
+// would drop the clipboard text. The pending paste blocks submission and stays cancellable.
 function runComposerMarkdownWorker(
 	request: ComposerMarkdownTask,
 	signal: AbortSignal,
+	deadlineMs?: number,
 ): Promise<ComposerMarkdownResult | null> {
 	if (signal.aborted) return Promise.resolve(null);
 	return new Promise((resolve) => {
@@ -42,7 +45,7 @@ function runComposerMarkdownWorker(
 			resolve(result);
 		};
 		const cancel = () => finish(null);
-		const timeout = setTimeout(cancel, 3_000);
+		const timeout = deadlineMs === undefined ? undefined : setTimeout(cancel, deadlineMs);
 		signal.addEventListener('abort', cancel, { once: true });
 		worker.onmessage = (event: MessageEvent<ComposerMarkdownResult | null>) => finish(event.data);
 		worker.onerror = cancel;

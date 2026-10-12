@@ -77,15 +77,16 @@ describe('formatted composer lifecycle', () => {
 		expect(ui.formattedDraft).toBeNull();
 		controller.destroy();
 	});
-	it.each(['null', 'error'])('preserves the draft and unlocks submission on Worker %s', async (failure) => {
+	it.each(['null', 'error'])('keeps the pasted text in source and unlocks submission on Worker %s', async (failure) => {
 		if (failure === 'null') vi.mocked(serializeComposerMarkdownPasteInWorker).mockResolvedValue(null);
 		else vi.mocked(serializeComposerMarkdownPasteInWorker).mockRejectedValue(new Error('Worker failed'));
 		const { ui, options, controller } = fixture();
 		ui.formattedDraft = { source: table, ...parsed };
 		await controller.pasteSource(pasteRequest);
 		expect(ui.formattedPastePending).toBe(false);
-		expect(options.composer.inputText).toBe(table);
+		expect(options.composer.inputText).toBe(table + '\n\nlarge');
 		expect(options.onUnavailable).toHaveBeenCalledOnce();
+		expect(ui.formattedDraft).toBeNull();
 		controller.destroy();
 	});
 	it('does not unlock a newer paste when an aborted Worker completes', async () => {
