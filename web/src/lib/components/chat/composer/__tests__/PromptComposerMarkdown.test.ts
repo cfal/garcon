@@ -72,6 +72,57 @@ describe('formatted composer integration', () => {
 		await fireEvent.keyDown(editor, { key: 'Enter' });
 		expect(onsubmit).toHaveBeenCalledOnce();
 	});
+	it('rewrites only the edited table and leaves the rest of the prompt as typed', async () => {
+		const prompt =
+			'<context>\nUse my_var in C:\\Users\\me, a < b && c\n</context>\n\n\n' +
+			'| Setting | Value |\n| - | - |\n| max_tokens | <1ms |\n\n' +
+			'[`run()`](https://example.test/docs)  \n';
+		const { editor, textarea } = await formatted({ source: prompt });
+		const rich = richEditor(editor);
+		let position = 0;
+		rich.state.doc.descendants((node, offset) => {
+			if (node.type.name === 'text' && node.text === 'max_tokens') position = offset + node.nodeSize;
+		});
+		rich.commands.insertContentAt(position, '_limit');
+		const edited = prompt.replace('| - | - |\n| max_tokens |', '| --- | --- |\n| max_tokens_limit |');
+		await waitFor(() => expect(textarea.value).toBe(edited));
+		rich.commands.undo();
+		await waitFor(() => expect(textarea.value).toBe(prompt));
+	});
+	it('shows a restored table draft formatted and leaves other restored drafts in source', async () => {
+		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parseComposerMarkdown({ source: table }));
+		render(PromptComposerTestHost, { selectedChatId: 'markdown-restore', selectedStatus: 'running' });
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.input(textarea, { target: { value: 'plain notes' } });
+		await fireEvent.click(screen.getByTestId('restore-draft'));
+		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		await fireEvent.input(textarea, { target: { value: table } });
+		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+		await fireEvent.click(screen.getByTestId('restore-draft'));
+		await screen.findByRole('textbox', { name: 'Formatted message' });
+		expect(textarea.value).toBe(table);
+	});
+	it('returns to source when another surface changes a formatted draft', async () => {
+		const { textarea } = await formatted();
+		await fireEvent.click(screen.getByTestId('append-draft'));
+		await waitFor(() =>
+			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
+		);
+		expect(textarea.value).toBe(table + '\n\nAppended review block');
+		expect(screen.getByRole('button', { name: 'Format Markdown' })).toBeTruthy();
+	});
+	it('does not submit a replayed Enter that lost its Shift modifier', async () => {
+		const { editor, onsubmit } = await formatted();
+		const rich = richEditor(editor);
+		// iOS delivers the real key event to the DOM and replays it to key handlers without modifiers.
+		editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', shiftKey: true, bubbles: true }));
+		const replayed = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
+		rich.view.someProp('handleKeyDown', (handler) => handler(rich.view, replayed));
+		expect(onsubmit).not.toHaveBeenCalled();
+		editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }));
+		rich.view.someProp('handleKeyDown', (handler) => handler(rich.view, replayed));
+		expect(onsubmit).toHaveBeenCalledOnce();
+	});
 	it('opens the expanded source editor with the exact original draft', async () => {
 		const { textarea } = await formatted();
 		await fireEvent.click(screen.getByRole('button', { name: 'Open expanded composer' }));
@@ -151,7 +202,7 @@ describe('formatted composer integration', () => {
 			if (type === 'paste') await fireEvent.paste(editor, { clipboardData: transfer });
 			else await fireEvent.drop(editor, { dataTransfer: transfer, clientX: 0, clientY: 0 });
 			await waitFor(() => expect(textarea.value).toContain('synthetic log'));
-			expect(textarea.value).toContain('$&amp; synthetic log');
+			expect(textarea.value).toContain('$& synthetic log');
 			expect(reads).not.toHaveBeenCalledWith('text/html');
 			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
 			await waitFor(() => expect(document.activeElement).toBe(textarea));
@@ -215,7 +266,7 @@ describe('formatted composer integration', () => {
 				table +
 				'\n\n![Synthetic alt](https://example.test/image.png)\n\n[Link](https://example.test)',
 		});
-		expect(editor.querySelector('img')).toBeNull();
+		expect(editor.querySelector('img[src]')).toBeNull();
 		expect(editor.textContent).toContain('Synthetic alt');
 		const link = editor.querySelector('a')!;
 		const event = new MouseEvent('click', { bubbles: true, cancelable: true });

@@ -1,11 +1,12 @@
 <script lang="ts">
-	import type { JSONContent } from '@tiptap/core';
 	import { lazyRenderer } from '$lib/utils/lazy-renderer.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { ComposerMarkdownPasteRequest } from './composer-markdown-parser.js';
+	import type {
+		ComposerMarkdownDocument,
+		ComposerMarkdownPasteRequest,
+	} from './composer-markdown-parser.js';
 	let {
-		source,
-		document,
+		draft,
 		readOnly,
 		onChange,
 		onEditSource,
@@ -13,8 +14,7 @@
 		onReady,
 		onLargePaste,
 	}: {
-		source: string;
-		document: JSONContent;
+		draft: { source: string } & ComposerMarkdownDocument;
 		readOnly: boolean;
 		onChange: (source: string) => void;
 		onEditSource: () => void;
@@ -27,9 +27,9 @@
 
 {#await renderer()}
 	<pre
-		class="max-h-[min(40dvh,150px)] overflow-auto whitespace-pre-wrap px-4 py-3 text-base text-composer-foreground sm:max-h-[min(40dvh,300px)] sm:px-5">{source}</pre>
+		class="max-h-[min(40dvh,150px)] overflow-auto whitespace-pre-wrap px-4 py-3 text-base text-composer-foreground sm:max-h-[min(40dvh,300px)] sm:px-5">{draft.source}</pre>
 {:then MarkdownEditor}
-	<MarkdownEditor {document} {readOnly} {onChange} {onSubmitKeydown} {onReady} {onLargePaste} />
+	<MarkdownEditor document={draft.document} sources={draft.sources} {readOnly} {onChange} {onSubmitKeydown} {onReady} {onLargePaste} />
 {:catch}
 	<button type="button" onclick={onEditSource} class="px-4 py-3 text-sm text-muted-foreground"
 		>{m.chat_composer_format_unavailable()}</button

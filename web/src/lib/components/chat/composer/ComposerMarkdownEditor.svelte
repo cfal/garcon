@@ -7,9 +7,17 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import type { ComposerMarkdownPasteRequest } from './composer-markdown-parser.js';
 	import { serializeComposerMarkdown } from './composer-markdown.js';
+	import {
+		joinComposerMarkdownBlocks,
+		planComposerMarkdownBlocks,
+		type ComposerMarkdownBlock,
+	} from './composer-markdown-blocks.js';
+
+	type DocumentNode = Editor['state']['doc'];
 
 	let {
 		document: documentContent,
+		sources,
 		readOnly,
 		onChange,
 		onSubmitKeydown,
@@ -17,6 +25,7 @@
 		onLargePaste,
 	}: {
 		document: JSONContent;
+		sources: (string | null)[];
 		readOnly: boolean;
 		onChange: (source: string) => void;
 		onSubmitKeydown: (event: KeyboardEvent) => void;
@@ -28,6 +37,21 @@
 	onMount(() => {
 		const extensions = composerMarkdownEditorExtensions();
 		const markdown = new MarkdownManager({ extensions });
+		const topLevel = (doc: DocumentNode) =>
+			Array.from({ length: doc.childCount }, (_, index) => doc.child(index));
+		let original: DocumentNode[] = [];
+		let originalSources: (string | null)[] = [];
+		const blocks = (doc: DocumentNode): ComposerMarkdownBlock<JSONContent>[] =>
+			planComposerMarkdownBlocks(
+				original,
+				originalSources,
+				topLevel(doc),
+				(a, b) => a === b || a.eq(b),
+			).map((block) =>
+				'nodes' in block ? { nodes: block.nodes.map((node) => node.toJSON()) } : block,
+			);
+		// Records Shift from real key events for the synthetic Enter described below.
+		let shiftHeld = false;
 		const insertText = (view: Editor['view'], text: string, position?: number) => {
 			if (view.state.doc.textContent.length + text.length <= MAX_COMPOSER_MARKDOWN_LENGTH) {
 				view.dispatch(view.state.tr.insertText(text, position));
@@ -36,7 +60,8 @@
 			// Carries the bounded selection and its marks into off-thread serialization.
 			const marker = `garconClipboard${crypto.randomUUID().replaceAll('-', '')}`;
 			onLargePaste({
-				document: view.state.tr.insertText(marker, position).doc.toJSON(),
+				blocks: blocks(view.state.tr.insertText(marker, position).doc),
+				originalCount: original.length,
 				marker,
 				text,
 			});
@@ -49,7 +74,11 @@
 			enableInputRules: false,
 			enablePasteRules: false,
 			onUpdate: ({ editor: current }) =>
-				onChange(serializeComposerMarkdown(markdown, current.getJSON())),
+				onChange(
+					joinComposerMarkdownBlocks(blocks(current.state.doc), original.length, (nodes) =>
+						serializeComposerMarkdown(markdown, { type: 'doc', content: nodes }),
+					),
+				),
 			editorProps: {
 				attributes: {
 					role: 'textbox',
@@ -61,10 +90,30 @@
 						event.preventDefault();
 						return true;
 					}
+					// iOS replays Enter as a synthetic event without modifiers, so Shift+Enter
+					// would read as Enter:
+					// https://github.com/ProseMirror/prosemirror-view/blob/17af0f4b25933933f644a655ad6bb9a0249d7cb5/src/input.ts#L118-L127
+					if (event.key === 'Enter' && !event.isTrusted && shiftHeld && !event.shiftKey) {
+						return false;
+					}
 					if (event.key === 'Enter') onSubmitKeydown(event);
 					return event.defaultPrevented;
 				},
 				handleDOMEvents: {
+					// ProseMirror applies its selection 20 ms after focus; until then the browser's
+					// caret sits at the document start and immediate input would land there.
+					focus(view) {
+						view.focus();
+						return false;
+					},
+					keydown(_view, event) {
+						shiftHeld = event.shiftKey;
+						return false;
+					},
+					keyup(_view, event) {
+						if (event.key === 'Shift') shiftHeld = false;
+						return false;
+					},
 					paste(view, event) {
 						event.preventDefault();
 						const text = event.clipboardData?.getData('text/plain');
@@ -89,6 +138,9 @@
 			},
 		});
 		editor = mountedEditor;
+		original = topLevel(mountedEditor.state.doc);
+		originalSources =
+			sources.length === original.length ? sources : original.map(() => null);
 		const selection = resolveFocusPosition(mountedEditor.state.doc, 'end');
 		if (selection) mountedEditor.view.dispatch(mountedEditor.state.tr.setSelection(selection));
 		onReady(mountedEditor.view.dom);
@@ -108,7 +160,8 @@
 <style>
 	.composer-markdown-editor :global(.tiptap) {
 		outline: none;
-		overflow-wrap: anywhere;
+		/* Keeps whole words in table columns; `anywhere` would let columns shrink mid-word. */
+		overflow-wrap: break-word;
 		white-space: pre-wrap;
 	}
 	.composer-markdown-editor :global(p) {
@@ -159,16 +212,24 @@
 	.composer-markdown-editor :global(table) {
 		border-collapse: collapse;
 		width: 100%;
-		min-width: 32rem;
-		table-layout: fixed;
+		/* Sizes columns by content so short columns leave room for prose. */
+		table-layout: auto;
 	}
 	.composer-markdown-editor :global(th),
 	.composer-markdown-editor :global(td) {
 		border: 0;
 		border-bottom: 1px solid hsl(var(--border));
-		padding: 0.75rem 0.5rem;
+		min-width: 2.5rem;
+		padding: 0.625rem 0.75rem;
 		vertical-align: top;
 		text-align: left;
+	}
+	/* Aligns the table's text with the surrounding paragraphs. */
+	.composer-markdown-editor :global(:is(th, td):first-child) {
+		padding-left: 0;
+	}
+	.composer-markdown-editor :global(:is(th, td):last-child) {
+		padding-right: 0;
 	}
 	.composer-markdown-editor :global(tr:last-child td) {
 		border-bottom: 0;
@@ -183,11 +244,14 @@
 		list-style: none;
 		padding-left: 0;
 	}
-	.composer-markdown-editor :global(li[data-type='taskItem']) {
+	/* The task item node view renders a bare `li` holding a label and a content block. */
+	.composer-markdown-editor :global(ul[data-type='taskList'] > li) {
 		display: flex;
+		align-items: baseline;
 		gap: 0.5rem;
 	}
-	.composer-markdown-editor :global(li[data-type='taskItem'] > div) {
+	.composer-markdown-editor :global(ul[data-type='taskList'] > li > div) {
 		flex: 1;
+		min-width: 0;
 	}
 </style>

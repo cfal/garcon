@@ -1,5 +1,5 @@
-import type { JSONContent } from '@tiptap/core';
 import type {
+	ComposerMarkdownDocument,
 	ComposerMarkdownRequest,
 	ComposerMarkdownPasteRequest,
 } from './composer-markdown-parser.js';
@@ -8,12 +8,12 @@ export type ComposerMarkdownTask =
 	| { type: 'parse'; request: ComposerMarkdownRequest }
 	| { type: 'paste'; request: ComposerMarkdownPasteRequest };
 export type ComposerMarkdownResult =
-	{ type: 'parsed'; document: JSONContent | null } | { type: 'pasted'; source: string };
+	{ type: 'parsed'; document: ComposerMarkdownDocument | null } | { type: 'pasted'; source: string };
 
 export async function parseComposerMarkdownInWorker(
 	request: ComposerMarkdownRequest,
 	signal: AbortSignal,
-): Promise<JSONContent | null> {
+): Promise<ComposerMarkdownDocument | null> {
 	const result = await runComposerMarkdownWorker({ type: 'parse', request }, signal);
 	return result?.type === 'parsed' ? result.document : null;
 }

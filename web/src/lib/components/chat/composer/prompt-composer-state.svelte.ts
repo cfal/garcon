@@ -13,7 +13,7 @@ import {
 import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
 import { findSnippetTrigger } from '$lib/chat/composer/snippet-trigger.js';
 import type { PromptEditorSelection } from '$lib/prompt-editor/prompt-editor-selection.js';
-import type { JSONContent } from '@tiptap/core';
+import type { ComposerMarkdownDocument } from './composer-markdown-parser.js';
 
 export class PromptComposerUiState {
 	showFileMenu = $state(false);
@@ -25,7 +25,7 @@ export class PromptComposerUiState {
 	readonly snippetPalette = new SnippetPaletteTriggerState();
 	previousChatId = $state<string | null>(null);
 	composerEditorOpen = $state(false);
-	formattedDraft = $state.raw<{ source: string; document: JSONContent } | null>(null);
+	formattedDraft = $state.raw<({ source: string } & ComposerMarkdownDocument) | null>(null);
 	formattedPastePending = $state(false);
 	formattedTarget = $state.raw<HTMLElement>();
 	composerEditorChatId = $state<string | null>(null);

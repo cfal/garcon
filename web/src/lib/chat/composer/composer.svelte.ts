@@ -19,6 +19,9 @@ export class ComposerState {
 	isDragActive = $state(false);
 	draftAppendRequest = $state<{ chatId: string; requestId: number } | null>(null);
 	#nextDraftAppendRequestId = 0;
+	/** Marks each time a chat's saved draft becomes the composer's content. */
+	draftRestoreRequest = $state<{ chatId: string; requestId: number } | null>(null);
+	#nextDraftRestoreRequestId = 0;
 
 	constructor(
 		private readonly drafts: ChatDraftStore,
@@ -72,6 +75,8 @@ export class ComposerState {
 
 	restoreDraft(chatId: string): void {
 		this.drafts.load(chatId);
+		this.#nextDraftRestoreRequestId += 1;
+		this.draftRestoreRequest = { chatId, requestId: this.#nextDraftRestoreRequestId };
 	}
 
 	draftSnapshot(chatId: string): ChatDraftSnapshot {

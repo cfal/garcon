@@ -125,6 +125,14 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await browserExpect(textarea).toHaveValue(
         /Prefix[\s\S]*Code.*a  b.*at end/,
       );
+      // Input in the same task as focus must land at the caret, not the document start.
+      await editor.evaluate((element: HTMLElement) => {
+        element.blur();
+        getSelection()?.removeAllRanges();
+        element.focus();
+        document.execCommand("insertText", false, " synced");
+      });
+      await browserExpect(textarea).toHaveValue(/a  b at end synced` \|$/);
       await editor.locator("p").first().click();
       const beforeSnippet = await textarea.inputValue();
       await page.getByRole("button", { name: "Add to prompt" }).click();
@@ -205,28 +213,45 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
           .click();
         await browserExpect(textarea).toHaveValue(nested);
       }
-      const composerElement = await page
-        .locator("[data-composer]")
-        .elementHandle();
-      const bounds = await page.locator("[data-composer]").boundingBox();
-      for (const id of [ids[1], ids[0], ids[1], ids[0]]) {
+      const draft = await textarea.inputValue();
+      const selectChat = async (id: string) => {
         await page
           .locator(`[data-sidebar-virtual-row="${id}"]`)
           .locator("button")
           .first()
           .click();
         await page.waitForURL(`**/chat/${id}`);
+      };
+      // A table draft returns formatted, so the switch is measured between restored states.
+      await selectChat(ids[1]);
+      await browserExpect(editor).toHaveCount(0);
+      await selectChat(ids[0]);
+      await browserExpect(editor.locator("table")).toHaveCount(1);
+      const composerElement = await page
+        .locator("[data-composer]")
+        .elementHandle();
+      const bounds = await page.locator("[data-composer]").boundingBox();
+      for (const id of [ids[1], ids[0], ids[1], ids[0]]) {
+        await selectChat(id);
         expect(
           await page.evaluate(
             (element) => document.querySelector("[data-composer]") === element,
             composerElement,
           ),
         ).toBe(true);
-        await browserExpect(editor).toHaveCount(0);
+        await browserExpect(editor).toHaveCount(id === ids[0] ? 1 : 0);
       }
       expect((await page.locator("[data-composer]").boundingBox())?.y).toBe(
         bounds?.y,
       );
+      await browserExpect(textarea).toHaveValue(draft);
+      await page.reload();
+      await browserExpect(editor.locator("table")).toHaveCount(1);
+      await browserExpect(textarea).toHaveValue(draft);
+      await page
+        .getByRole("button", { name: "Edit Markdown source" })
+        .click();
+      await browserExpect(textarea).toBeVisible();
       await textarea.fill("");
       await textarea.focus();
       await paste(table);

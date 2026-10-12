@@ -329,12 +329,21 @@
 	// Explicit navigation owns focus requests; pane focus must remain on the control the user chose.
 	$effect(() => {
 		const chatId = sessions.selectedChatId;
-		const changed = ui.resetOnChatSwitch(chatId);
-		if (changed) markdown.reset();
-		if (!changed) return;
+		if (!ui.resetOnChatSwitch(chatId)) return;
+		markdown.reset();
 		snippetExpansion.cancel();
 		promptRefinement.abort();
 		attachmentController.resetDrag();
+	});
+
+	// Drops a formatted view that another surface made stale by changing the draft.
+	$effect(() => {
+		if (ui.formattedDraft && !formattedDraft) untrack(() => markdown.reset());
+	});
+	// Restores the formatted view of a table draft when its chat is selected or reloaded.
+	$effect(() => {
+		const restored = composerState.draftRestoreRequest?.chatId === sessions.selectedChatId;
+		if (restored && isVisible && isPresented) untrack(() => markdown.restore());
 	});
 
 	// Cancels path-bound expansion when a selected chat moves to another project.
@@ -846,8 +855,7 @@
 			<div class="relative overflow-hidden bg-transparent focus-within:ring-0">
 				{#if formattedDraft}
 					<ComposerFormattedDraft
-						source={formattedDraft.source}
-						document={formattedDraft.document}
+						draft={formattedDraft}
 						readOnly={isDisabled || promptTransformPending}
 						onChange={(text) => markdown.change(text)}
 						onEditSource={() => void markdown.edit()}

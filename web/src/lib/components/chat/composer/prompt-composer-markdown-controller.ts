@@ -45,6 +45,13 @@ export class PromptComposerMarkdownController {
 		void this.#format();
 	}
 
+	/** Shows a loaded draft that contains a table formatted, as it was when pasted. */
+	restore(): void {
+		const source = this.options.composer.inputText;
+		if (this.options.ui.formattedDraft || !isMarkdownTableCandidate(source)) return;
+		void this.#format(source);
+	}
+
 	reset(): void {
 		this.#workerAbort?.abort();
 		this.#workerAbort = null;
@@ -148,7 +155,7 @@ export class PromptComposerMarkdownController {
 		const chatId = this.options.chatId;
 		const generation = this.options.interactionGeneration;
 		const focusOrigin = document.activeElement;
-		const documentContent = await parseComposerMarkdownInWorker(
+		const parsed = await parseComposerMarkdownInWorker(
 			{ source, pastedText },
 			abort.signal,
 		).catch(() => null);
@@ -161,13 +168,13 @@ export class PromptComposerMarkdownController {
 			this.options.interactionGeneration !== generation
 		)
 			return;
-		if (!documentContent) {
+		if (!parsed) {
 			if (pastedText === undefined) this.options.onUnavailable();
 			return;
 		}
 		this.#focusOrigin = focusOrigin;
 		this.#focusGeneration = generation;
-		this.options.ui.formattedDraft = { source, document: documentContent };
+		this.options.ui.formattedDraft = { source, ...parsed };
 		this.options.ui.closeFileMenu();
 		this.options.ui.closeSlashMenu();
 		this.options.ui.snippetPalette.dismiss();

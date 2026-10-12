@@ -10,6 +10,8 @@ export function isMarkdownTableCandidate(source: string): boolean {
 	return (
 		isComposerMarkdownSized(source) &&
 		/\|/.test(source) &&
-		/(?:^|\n)[ \t>]*(?:[-*+] |\d+[.)] )?[ \t]*\|?[ \t]*:?-+:?[ \t]*\|/.test(source)
+		// Each optional part starts with a distinct character, so a long run of leading
+		// whitespace is scanned once instead of being split between them.
+		/^[ \t>]*(?:(?:[-*+]|\d+[.)]) [ \t]*)?(?:\|[ \t]*)?:?-+:?[ \t]*\|/m.test(source)
 	);
 }

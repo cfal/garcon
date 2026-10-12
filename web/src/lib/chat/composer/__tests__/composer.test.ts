@@ -31,6 +31,14 @@ describe('ComposerState', () => {
 		localStorage.clear();
 	});
 
+	it('announces each restore of a saved draft', () => {
+		const { composer: state } = createComposer(null);
+		expect(state.draftRestoreRequest).toBeNull();
+		state.restoreDraft('chat-1');
+		state.restoreDraft('chat-1');
+		expect(state.draftRestoreRequest).toEqual({ chatId: 'chat-1', requestId: 2 });
+	});
+
 	it('starts with empty state', () => {
 		const { composer: state } = createComposer();
 		expect(state.inputText).toBe('');
