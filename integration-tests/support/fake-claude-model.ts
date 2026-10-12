@@ -71,6 +71,16 @@ function textFromContent(content: unknown): string {
     .join('\n');
 }
 
+export function claudeModelInputText(request: Pick<RecordedClaudeModelRequest, 'body'>): string {
+  if (!Array.isArray(request.body.messages)) return '';
+  return request.body.messages.filter(isRecord).map((message) => {
+    if (!Array.isArray(message.content)) return textFromContent(message.content);
+    return message.content.filter(isRecord).map((block) => textFromContent(
+      block.type === 'tool_result' ? block.content : [block],
+    )).join('\n');
+  }).join('\n');
+}
+
 function userTexts(body: Record<string, unknown>): string[] {
   if (!Array.isArray(body.messages)) return [];
   const texts: string[] = [];
