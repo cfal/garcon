@@ -12,6 +12,8 @@
 		isSupportedChatAttachment,
 		isVideoChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
+	import { CollapsedPasteState } from '$lib/chat/composer/collapsed-paste-state.svelte.js';
+	import { isLargePaste, normalizePastedText } from '$lib/chat/composer/collapsed-pastes.js';
 	import { shouldSubmitOnEnter } from '$lib/chat/composer/composer-shortcuts.js';
 	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
 	import {
@@ -162,6 +164,15 @@
 	);
 
 	const snippetPalette = new SnippetPaletteTriggerState();
+	// The textarea shows and edits this projection; the form keeps the full text.
+	const collapsedPastes = new CollapsedPasteState({
+		get text() {
+			return form.firstMessage;
+		},
+		setText: (text) => {
+			form.firstMessage = text;
+		},
+	});
 	const composerEditor = new NewChatComposerEditorState();
 	const promptRefinement = new NewChatPromptRefinementController({
 		form,
@@ -308,10 +319,8 @@
 
 	function handleMessagePaste(event: ClipboardEvent): void {
 		if (promptRefinement.pending) return;
-		const items = event.clipboardData?.items;
-		if (!items) return;
 		const pastedImages: File[] = [];
-		for (const item of items) {
+		for (const item of event.clipboardData?.items ?? []) {
 			if (!item.type.startsWith('image/')) continue;
 			const file = item.getAsFile();
 			if (file && isSupportedChatAttachment(file, attachmentSupport)) pastedImages.push(file);
@@ -320,22 +329,40 @@
 			snippetExpansion.cancel();
 			form.addImages(pastedImages, attachmentSupport);
 		}
+		const pasted = normalizePastedText(event.clipboardData?.getData('text/plain') ?? '');
+		if (!isLargePaste(pasted)) return;
+		event.preventDefault();
+		if (snippetExpansion.pending) snippetExpansion.cancel();
+		const input = event.currentTarget as HTMLTextAreaElement;
+		const caret = collapsedPastes.paste(pasted, {
+			start: input.selectionStart,
+			end: input.selectionEnd,
+		});
+		snippetPalette.dismiss();
+		void settleTextareaAfterSnippet(caret);
 	}
 
-	const contentSizing = contentSizedTextarea(() => form.firstMessage);
+	const contentSizing = contentSizedTextarea(() => collapsedPastes.displayText);
 
 	function handleMessageInput(event: Event): void {
 		const input = event.currentTarget as HTMLTextAreaElement;
 		if (promptRefinement.pending) {
-			input.value = form.firstMessage;
+			input.value = collapsedPastes.displayText;
 			return;
 		}
 		if (snippetExpansion.pending) snippetExpansion.cancel();
-		form.firstMessage = input.value;
+		const rewrittenCaret = collapsedPastes.applyDisplayEdit(input.value, input.selectionStart);
+		// The rewritten value reaches the textarea on the next render, which resets its caret.
+		if (rewrittenCaret !== null) void settleTextareaAfterSnippet(rewrittenCaret);
 		if (!conversationInput || (event as InputEvent).isComposing) return;
+		const displayText = collapsedPastes.displayText;
 		snippetPalette.updateDetectedTrigger(
-			findSnippetTrigger(input.value, input.selectionStart, localSettings.snippetTrigger),
-			input.value,
+			findSnippetTrigger(
+				displayText,
+				rewrittenCaret ?? input.selectionStart,
+				localSettings.snippetTrigger,
+			),
+			displayText,
 		);
 	}
 
@@ -351,7 +378,13 @@
 	function openExpandedEditor(): void {
 		if (promptTransformPending || !textareaRef) return;
 		snippetPalette.dismiss();
-		const selection = promptEditorSelectionFromTextarea(textareaRef);
+		// The expanded editor edits the full text, as Codex's external editor does.
+		const displaySelection = promptEditorSelectionFromTextarea(textareaRef);
+		const selection = {
+			anchor: collapsedPastes.expandedOffset(displaySelection.anchor),
+			head: collapsedPastes.expandedOffset(displaySelection.head),
+		};
+		collapsedPastes.expandAll();
 		textareaRef.focus({ preventScroll: true });
 		composerEditor.show(selection);
 	}
@@ -406,6 +439,7 @@
 			return 'cancelled';
 		}
 		const sourceText = form.firstMessage;
+		const sourceDisplayText = collapsedPastes.displayText;
 		const projectPath = context.projectPath;
 		const start = range?.start ?? textareaRef.selectionStart;
 		const end = range?.end ?? textareaRef.selectionEnd;
@@ -431,13 +465,16 @@
 			)
 				return 'cancelled';
 			const replacement = range
-				? applySnippetTriggerReplacement(sourceText, range, result.response.expandedText)
+				? applySnippetTriggerReplacement(sourceDisplayText, range, result.response.expandedText)
 				: {
-						text: sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end),
+						text:
+							sourceDisplayText.slice(0, start) +
+							result.response.expandedText +
+							sourceDisplayText.slice(end),
 						caret: start + result.response.expandedText.length,
 					};
-			form.firstMessage = replacement.text;
-			await settleTextareaAfterSnippet(replacement.caret);
+			const rewrittenCaret = collapsedPastes.applyDisplayEdit(replacement.text, replacement.caret);
+			await settleTextareaAfterSnippet(rewrittenCaret ?? replacement.caret);
 			return 'inserted';
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) {
@@ -743,7 +780,7 @@
 				<textarea
 					{@attach contentSizing}
 					bind:this={textareaRef}
-					value={form.firstMessage}
+					value={collapsedPastes.displayText}
 					onkeydown={handleKeyDown}
 					oninput={handleMessageInput}
 					onpaste={handleMessagePaste}

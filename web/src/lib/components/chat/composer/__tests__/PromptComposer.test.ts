@@ -1031,6 +1031,68 @@ describe('PromptComposer focus', () => {
 		expect(screen.getByTestId('composer-attachment-count').textContent).toBe('0');
 	});
 
+	it('collapses a large paste into an atomic label while the draft keeps the full text', async () => {
+		const chatId = 'chat-collapsed-paste';
+		localStorage.removeItem(chatDraftStorageKey(chatId));
+		const { rerender } = render(PromptComposerTestHost, { selectedChatId: chatId });
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		const draftText = () => screen.getByTestId('composer-draft-text').dataset.text;
+		const table = `| a | b |\r\n${'| 1 | 2 |\r\n'.repeat(119)}`;
+		const pastedTable = table.replaceAll('\r\n', '\n');
+		const label = '[Pasted Content 1200 chars]';
+		const paste = (text: string) => {
+			const clipboardData = new DataTransfer();
+			clipboardData.setData('text/plain', text);
+			return fireEvent.paste(textarea, { clipboardData });
+		};
+
+		await inputAtCaret(textarea, 'review: ', 8);
+		expect(await paste('| a | b |')).toBe(true);
+		expect(await paste(table)).toBe(false);
+
+		await waitFor(() => expect(textarea.value).toBe(`review: ${label}`));
+		expect(draftText()).toBe(`review: ${pastedTable}`);
+		await waitFor(() => expect(textarea.selectionStart).toBe(8 + label.length));
+
+		await inputAtCaret(textarea, `review: ${label} thanks`, 15 + label.length);
+		expect(draftText()).toBe(`review: ${pastedTable} thanks`);
+
+		await rerender({ selectedChatId: 'chat-collapsed-paste-other' });
+		expect(textarea.value).toBe('');
+		await rerender({ selectedChatId: chatId });
+		expect(textarea.value).toBe(`review: ${label} thanks`);
+
+		await inputAtCaret(textarea, `review: ${label.slice(0, -1)} thanks`, 7 + label.length);
+		await waitFor(() => expect(textarea.value).toBe('review:  thanks'));
+		expect(draftText()).toBe('review:  thanks');
+		await waitFor(() => expect(textarea.selectionStart).toBe(8));
+	});
+
+	it('expands collapsed pastes when the expanded editor opens', async () => {
+		const chatId = 'chat-collapsed-paste-editor';
+		localStorage.removeItem(chatDraftStorageKey(chatId));
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: chatId,
+			composerEditorOpenRequestId: 0,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		const content = 'x'.repeat(1001);
+		const clipboardData = new DataTransfer();
+		clipboardData.setData('text/plain', content);
+		await fireEvent.paste(textarea, { clipboardData });
+		await waitFor(() => expect(textarea.value).toBe('[Pasted Content 1001 chars]'));
+		await waitFor(() => expect(textarea.selectionStart).toBe(textarea.value.length));
+
+		await rerender({ selectedChatId: chatId, composerEditorOpenRequestId: 1 });
+		const editor = (await screen.findByRole('textbox', {
+			name: 'Expanded composer text',
+		})) as HTMLTextAreaElement;
+
+		expect(editor.value).toBe(content);
+		expect(editor.selectionStart).toBe(content.length);
+		expect(textarea.value).toBe(content);
+	});
+
 	it('admits picker, paste, and drop attachments when submission requires the queue', async () => {
 		const { container } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-queued-attachments',

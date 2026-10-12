@@ -1,4 +1,5 @@
 import { tick } from 'svelte';
+import type { CollapsedPasteState } from '$lib/chat/composer/collapsed-paste-state.svelte.js';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import {
 	promptEditorSelectionFromTextarea,
@@ -10,6 +11,7 @@ import type { PromptComposerUiState } from './prompt-composer-state.svelte.js';
 interface PromptComposerEditorControllerOptions {
 	get ui(): PromptComposerUiState;
 	composer: Pick<ComposerState, 'inputText' | 'queueDraftSave'>;
+	get collapsedPastes(): Pick<CollapsedPasteState, 'expandedOffset' | 'expandAll'>;
 	get selectedChatId(): string | null;
 	get textarea(): HTMLTextAreaElement | undefined;
 	get isVisible(): boolean;
@@ -45,7 +47,14 @@ export class PromptComposerEditorController {
 		ui.closeFileMenu();
 		ui.closeSlashMenu();
 		ui.snippetPalette.dismiss();
-		const selection = promptEditorSelectionFromTextarea(textarea);
+		// The expanded editor edits the full text, as Codex's external editor does.
+		const { collapsedPastes } = this.options;
+		const displaySelection = promptEditorSelectionFromTextarea(textarea);
+		const selection = {
+			anchor: collapsedPastes.expandedOffset(displaySelection.anchor),
+			head: collapsedPastes.expandedOffset(displaySelection.head),
+		};
+		collapsedPastes.expandAll();
 		textarea.focus({ preventScroll: true });
 		ui.openComposerEditor(chatId, selection);
 		return true;

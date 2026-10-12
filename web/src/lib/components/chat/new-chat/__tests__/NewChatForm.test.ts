@@ -250,6 +250,27 @@ describe('NewChatForm', () => {
 		}));
 	});
 
+	it('collapses a large paste into a label and starts the chat with the full text', async () => {
+		stubMatchMedia(false);
+		const onStartChat = vi.fn();
+		const input = await renderSubmittableForm(onStartChat);
+		const content = `| a | b |\n${'| 1 | 2 |\n'.repeat(119)}`;
+		const label = '[Pasted Content 1200 chars]';
+		await fireEvent.input(input, { target: { value: 'Summarize ' } });
+		input.setSelectionRange(10, 10);
+		const clipboardData = new DataTransfer();
+		clipboardData.setData('text/plain', content);
+
+		expect(await fireEvent.paste(input, { clipboardData })).toBe(false);
+
+		await waitFor(() => expect(input.value).toBe(`Summarize ${label}`));
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		expect(onStartChat).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({ firstMessage: `Summarize ${content}` }),
+			PROSPECTIVE_CHAT_ID,
+		);
+	});
+
 	it('retains explicit helpers and submits literal slash source unchanged', async () => {
 		stubMatchMedia(false);
 		const onStartChat = vi.fn();

@@ -83,6 +83,8 @@
 	import { PromptComposerProjectState } from './prompt-composer-project-state.svelte.js';
 	import type { PromptComposerProps } from './prompt-composer-props.js';
 	import { PromptComposerRecallController } from './prompt-composer-recall-controller';
+	import { CollapsedPasteState } from '$lib/chat/composer/collapsed-paste-state.svelte.js';
+	import { isLargePaste, normalizePastedText } from '$lib/chat/composer/collapsed-pastes.js';
 
 	let {
 		onsubmit,
@@ -138,6 +140,16 @@
 	const workspaceShortcuts = getWorkspaceShortcuts();
 	const projectResolution = getProjectResolution();
 	const ui = new PromptComposerUiState();
+	// The textarea shows and edits this projection; the draft keeps the full text.
+	const collapsedPastes = new CollapsedPasteState({
+		get text() {
+			return composerState.inputText;
+		},
+		setText: (text) => {
+			composerState.inputText = text;
+			queueCurrentDraft(text);
+		},
+	});
 	const promptRecall = new PromptComposerRecallController({
 		getIdentity: () => recallIdentity,
 		getPrompts: () => recallPrompts,
@@ -363,7 +375,7 @@
 	});
 
 	const contentSizing = contentSizedTextarea(() =>
-		isVisible ? composerState.inputText : undefined,
+		isVisible ? collapsedPastes.displayText : undefined,
 	);
 
 	// Reveals blocks appended from another surface without moving focus away from that surface.
@@ -406,16 +418,15 @@
 		const trigger =
 			ui.slashCommandTrigger ??
 			findSlashCommandTrigger(
-				composerState.inputText,
-				textarea?.selectionStart ?? composerState.inputText.length,
+				collapsedPastes.displayText,
+				textarea?.selectionStart ?? collapsedPastes.displayText.length,
 			);
 		if (!trigger) {
 			ui.closeSlashMenu();
 			return;
 		}
-		const replacement = applySlashCommand(composerState.inputText, trigger, name);
-		composerState.inputText = replacement.text;
-		queueCurrentDraft(replacement.text);
+		const replacement = applySlashCommand(collapsedPastes.displayText, trigger, name);
+		collapsedPastes.applyDisplayEdit(replacement.text, replacement.caret);
 		ui.closeSlashMenu();
 		await tick();
 		textarea?.focus();
@@ -427,16 +438,15 @@
 		const trigger =
 			ui.fileMentionTrigger ??
 			findFileMentionTrigger(
-				composerState.inputText,
-				textarea?.selectionStart ?? composerState.inputText.length,
+				collapsedPastes.displayText,
+				textarea?.selectionStart ?? collapsedPastes.displayText.length,
 			);
 		if (!trigger) {
 			ui.closeFileMenu();
 			return;
 		}
-		const replacement = applyFileMention(composerState.inputText, trigger, path);
-		composerState.inputText = replacement.text;
-		queueCurrentDraft(replacement.text);
+		const replacement = applyFileMention(collapsedPastes.displayText, trigger, path);
+		collapsedPastes.applyDisplayEdit(replacement.text, replacement.caret);
 		ui.closeFileMenu();
 		await tick();
 		textarea?.focus();
@@ -465,6 +475,7 @@
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
 		const sourceText = composerState.inputText;
+		const sourceDisplayText = collapsedPastes.displayText;
 		const start = range?.start ?? textarea.selectionStart;
 		const end = range?.end ?? textarea.selectionEnd;
 		try {
@@ -494,14 +505,16 @@
 			)
 				return 'cancelled';
 			const replacement = range
-				? applySnippetTriggerReplacement(sourceText, range, result.response.expandedText)
+				? applySnippetTriggerReplacement(sourceDisplayText, range, result.response.expandedText)
 				: {
-						text: sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end),
+						text:
+							sourceDisplayText.slice(0, start) +
+							result.response.expandedText +
+							sourceDisplayText.slice(end),
 						caret: start + result.response.expandedText.length,
 					};
-			composerState.inputText = replacement.text;
-			queueCurrentDraft(replacement.text);
-			await settleComposerAfterSnippet(replacement.caret);
+			const rewrittenCaret = collapsedPastes.applyDisplayEdit(replacement.text, replacement.caret);
+			await settleComposerAfterSnippet(rewrittenCaret ?? replacement.caret);
 			return 'inserted';
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) {
@@ -620,20 +633,51 @@
 		promptRecall.reset();
 		const target = event.currentTarget as HTMLTextAreaElement;
 		if (isDisabled || promptRefinement.pending) {
-			target.value = composerState.inputText;
+			target.value = collapsedPastes.displayText;
 			return;
 		}
 		if (snippetExpansion.pending) snippetExpansion.cancel();
-		const value = target.value;
-		composerState.inputText = value;
+		const rewrittenCaret = collapsedPastes.applyDisplayEdit(target.value, target.selectionStart);
+		if (rewrittenCaret !== null) void restoreDisplayCaret(rewrittenCaret);
 		ui.updateTriggers(
-			value,
-			textarea?.selectionStart ?? value.length,
+			collapsedPastes.displayText,
+			rewrittenCaret ?? target.selectionStart,
 			localSettings.snippetTrigger,
 			(event as InputEvent).isComposing,
 			conversationInput ? 'conversation' : 'literal',
 		);
-		queueCurrentDraft(value);
+	}
+
+	// The rewritten value reaches the textarea on the next render, which resets its caret.
+	async function restoreDisplayCaret(caret: number): Promise<void> {
+		const target = textarea;
+		const displayText = collapsedPastes.displayText;
+		await tick();
+		if (destroyed || target !== textarea || collapsedPastes.displayText !== displayText) return;
+		target?.setSelectionRange(caret, caret);
+	}
+
+	function handlePaste(event: ClipboardEvent) {
+		attachmentController.handlePaste(event);
+		if (isDisabled || promptRefinement.pending) return;
+		const pasted = normalizePastedText(event.clipboardData?.getData('text/plain') ?? '');
+		if (!isLargePaste(pasted)) return;
+		event.preventDefault();
+		promptRecall.reset();
+		if (snippetExpansion.pending) snippetExpansion.cancel();
+		const target = event.currentTarget as HTMLTextAreaElement;
+		const caret = collapsedPastes.paste(pasted, {
+			start: target.selectionStart,
+			end: target.selectionEnd,
+		});
+		ui.updateTriggers(
+			collapsedPastes.displayText,
+			caret,
+			localSettings.snippetTrigger,
+			false,
+			conversationInput ? 'conversation' : 'literal',
+		);
+		void restoreDisplayCaret(caret);
 	}
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
@@ -821,11 +865,11 @@
 						{@attach contentSizing}
 						rows="1"
 						bind:this={textarea}
-						value={composerState.inputText}
+						value={collapsedPastes.displayText}
 						onkeydown={handleKeyDown}
 						onpointerdown={() => promptRecall.reset()}
 						oninput={handleInput}
-						onpaste={(event) => attachmentController.handlePaste(event)}
+						onpaste={handlePaste}
 						placeholder={m.chat_composer_reply_placeholder()}
 						disabled={isDisabled}
 						readonly={promptRefinement.pending}
@@ -937,6 +981,7 @@
 	{isPresented}
 	{isDisabled}
 	{promptTransformPending}
+	{collapsedPastes}
 	isPromptRefinementPending={promptRefinement.pending}
 	canRefinePrompt={promptRefinement.canStart}
 	onRefinePrompt={() => promptRefinement.handleAction()}

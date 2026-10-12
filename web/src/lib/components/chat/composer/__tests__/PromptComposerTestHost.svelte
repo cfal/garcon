@@ -548,6 +548,7 @@
 
 <div data-testid="snippet-load-count">{snippetLoadCount}</div>
 <div data-testid="composer-attachment-count">{composer.images.length}</div>
+<div data-testid="composer-draft-text" data-text={composer.inputText}></div>
 <div data-testid="sidebar-recenter-request-count">{sidebarRecenterRequestCount}</div>
 {#each notifications.items as notification (notification.id)}
 	<div data-testid="notification">{notification.message}</div>

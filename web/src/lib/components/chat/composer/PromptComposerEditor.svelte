@@ -8,6 +8,7 @@
 		getWorkspaceCoordinator,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { CollapsedPasteState } from '$lib/chat/composer/collapsed-paste-state.svelte.js';
 	import ComposerAttachmentBadge from './ComposerAttachmentBadge.svelte';
 	import { PromptComposerEditorController } from './prompt-composer-editor-controller.js';
 	import type { PromptComposerUiState } from './prompt-composer-state.svelte.js';
@@ -20,6 +21,7 @@
 		isPresented: boolean;
 		isDisabled: boolean;
 		promptTransformPending: boolean;
+		collapsedPastes: CollapsedPasteState;
 		isPromptRefinementPending: boolean;
 		canRefinePrompt: boolean;
 		openRequestId: number;
@@ -34,6 +36,7 @@
 		isPresented,
 		isDisabled,
 		promptTransformPending,
+		collapsedPastes,
 		isPromptRefinementPending,
 		canRefinePrompt,
 		openRequestId,
@@ -49,6 +52,9 @@
 			return ui;
 		},
 		composer,
+		get collapsedPastes() {
+			return collapsedPastes;
+		},
 		get selectedChatId() {
 			return sessions.selectedChatId;
 		},
