@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
+import { withTimeout } from '../../support/deferred.js';
 import {
   codexAssistantMessage,
   codexExecCommandCall,
@@ -36,15 +37,17 @@ describe('scripted Codex strict steering', () => {
     const firstPrompt = marker('FIRST_PROMPT');
     const steerPrompt = marker('STEER_PROMPT');
     const futurePrompt = marker('FUTURE_PROMPT');
+    const publishedReply = marker('PUBLISHED_REPLY');
     const firstReply = marker('FIRST_REPLY');
     const steerReply = marker('STEER_REPLY');
     const futureReply = marker('FUTURE_REPLY');
     const toolMarker = marker('TOOL_OUTPUT');
     testEnvironment.model.scriptTurn([
+      { ...codexAssistantMessage(publishedReply), phase: 'commentary' },
       codexExecCommandCall('call_steer_context', `printf ${toolMarker}`),
     ]);
-    const held = testEnvironment.model.scriptHeldTurn([codexAssistantMessage(firstReply)]);
-    testEnvironment.model.scriptTurn([codexAssistantMessage(steerReply)]);
+    const held = testEnvironment.model.scriptHeldStreamTurn([codexAssistantMessage(firstReply)]);
+    const steeredHeld = testEnvironment.model.scriptHeldTurn([codexAssistantMessage(steerReply)]);
     testEnvironment.model.scriptTurn([codexAssistantMessage(futureReply)]);
 
     await withIntegrationFixture('codex-scripted-steer', async (fixture) => {
@@ -59,6 +62,13 @@ describe('scripted Codex strict steering', () => {
       const firstTurnId = first.turnId;
       if (!firstTurnId) throw new Error('Scripted Codex start did not return a turn identity.');
       await held.requested;
+      await fixture.client.waitForEvent(
+        (event): event is ChatMessagesMessage => event.type === 'chat-messages'
+          && event.chatId === chatId
+          && assistantContents(event.messages).includes(publishedReply),
+        'completed assistant output before steering',
+        { afterIndex: firstCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
 
       await fixture.client.enqueueNew(chatId, futurePrompt);
       const paused = await fixture.client.pauseQueue(chatId);
@@ -79,7 +89,10 @@ describe('scripted Codex strict steering', () => {
       expect(duplicate).toMatchObject({ status: 'duplicate', turnId: firstTurnId });
       expect(await fixture.client.getExecutionControl(chatId)).toEqual(beforeSteer);
 
+      await withTimeout(steeredHeld.requested, 10_000,
+        () => 'Codex did not preempt the original held HTTP response.');
       held.release();
+      steeredHeld.release();
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, firstTurnId, {
         afterIndex: firstCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
@@ -115,13 +128,23 @@ describe('scripted Codex strict steering', () => {
       const transcript = await fixture.client.getMessages(chatId);
       expect(userContents(transcript.messages)).toEqual([firstPrompt, steerPrompt, futurePrompt]);
       const assistants = assistantContents(transcript.messages);
-      expect(assistants.some((content) => content.includes(firstReply))).toBe(true);
-      expect(assistants.some((content) => content.includes(steerReply))).toBe(true);
-      expect(assistants.some((content) => content.includes(futureReply))).toBe(true);
+      expect(assistants.filter((content) => content === publishedReply)).toHaveLength(1);
+      expect(assistants).not.toContain(firstReply);
+      expect(assistants.filter((content) => content === steerReply)).toHaveLength(1);
+      expect(assistants.filter((content) => content === futureReply)).toHaveLength(1);
+      await reloadUntilNativeContains(fixture, chatId, futureReply);
+      const reloaded = assistantContents((await fixture.client.getMessages(chatId)).messages);
+      expect(reloaded.filter((content) => content === publishedReply)).toHaveLength(1);
+      expect(reloaded).not.toContain(firstReply);
+      expect(reloaded.filter((content) => content === steerReply)).toHaveLength(1);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
       prepareWorkspace: testEnvironment.prepareWorkspace,
+    }).finally(() => {
+      held.release();
+      steeredHeld.release();
+      testEnvironment.model.reset();
     });
   }, 120_000);
 
@@ -252,8 +275,9 @@ describe('scripted Codex strict steering', () => {
     const firstReply = marker('BATCH_FIRST_REPLY');
     const steeredReply = marker('BATCH_STEERED_REPLY');
     const requestCursor = testEnvironment.model.markRequests();
+    // Holds HTTP startup so both committed steers precede replacement sampling.
     const held = testEnvironment.model.scriptHeldTurn([codexAssistantMessage(firstReply)]);
-    testEnvironment.model.scriptTurn([codexAssistantMessage(steeredReply)]);
+    const steeredHeld = testEnvironment.model.scriptHeldTurn([codexAssistantMessage(steeredReply)]);
 
     await withIntegrationFixture('codex-scripted-steer-batch', async (fixture) => {
       const chatId = fixture.newChatId();
@@ -285,6 +309,9 @@ describe('scripted Codex strict steering', () => {
       expect(secondResult).toMatchObject({ status: 'accepted', turnId: first.turnId });
 
       held.release();
+      await withTimeout(steeredHeld.requested, 10_000,
+        () => 'Codex did not sample the committed concurrent steers.');
+      steeredHeld.release();
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
         afterIndex: eventCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
@@ -303,12 +330,17 @@ describe('scripted Codex strict steering', () => {
         text === firstSteer || text === secondSteer
       ))).toEqual(committedSteers);
       const assistants = assistantContents(transcript.messages);
-      expect(assistants.some((content) => content.includes(firstReply))).toBe(true);
-      expect(assistants.some((content) => content.includes(steeredReply))).toBe(true);
+      // Buffered output may win the native preemption race without reordering input.
+      expect(assistants.filter((content) => content === firstReply).length).toBeLessThanOrEqual(1);
+      expect(assistants.filter((content) => content === steeredReply)).toHaveLength(1);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
       prepareWorkspace: testEnvironment.prepareWorkspace,
+    }).finally(() => {
+      held.release();
+      steeredHeld.release();
+      testEnvironment.model.reset();
     });
   }, 120_000);
 });

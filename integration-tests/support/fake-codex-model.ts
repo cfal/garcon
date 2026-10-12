@@ -23,8 +23,20 @@ interface RoutedCodexScriptedTurn {
   readonly turn: CodexScriptedTurn;
 }
 
+interface HeldCodexStream {
+  readonly kind: 'held-stream';
+  readonly items: CodexScriptedItem[];
+  readonly gate: Promise<void>;
+  requested(request: RecordedCodexModelRequest): void;
+}
+
 export type CodexScriptedFault =
-  | { readonly kind: 'http-error'; readonly status: number; readonly message: string }
+  | {
+      readonly kind: 'http-error';
+      readonly status: number;
+      readonly message: string;
+      readonly headers?: Readonly<Record<string, string>>;
+    }
   | { readonly kind: 'stream-error'; readonly message: string }
   | { readonly kind: 'truncated-stream' };
 
@@ -160,6 +172,27 @@ function sseResponse(events: Array<Record<string, unknown>>): Response {
   });
 }
 
+function heldSseResponse(events: Array<Record<string, unknown>>, gate: Promise<void>): Response {
+  const encoder = new TextEncoder();
+  let cancelled = false;
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      // Flushes the credential proxy's chunk buffer before the item gate.
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify(events[0])}\n\n:${' '.repeat(16_384)}\n\n`));
+      void gate.then(() => {
+        if (cancelled) return;
+        for (const event of events.slice(1)) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        }
+        controller.close();
+      });
+    },
+    cancel() { cancelled = true; },
+  }), {
+    headers: { 'cache-control': 'no-cache', 'content-type': 'text/event-stream; charset=utf-8' },
+  });
+}
+
 function turnEvents(items: CodexScriptedItem[], responseId: string): Array<Record<string, unknown>> {
   // Codex keeps sampling until the model signals it is done: tool outputs queue pending input,
   // and end_turn tells the loop whether the model expects another round.
@@ -209,7 +242,7 @@ function scriptFailureMessage(error: unknown, request: RecordedCodexModelRequest
 
 export class FakeCodexModel {
   readonly #server: Bun.Server<undefined>;
-  readonly #turns: Array<CodexScriptedTurn | CodexScriptedFault | RoutedCodexScriptedTurn> = [];
+  readonly #turns: Array<CodexScriptedTurn | CodexScriptedFault | HeldCodexStream | RoutedCodexScriptedTurn> = [];
   readonly #requests: RecordedCodexModelRequest[] = [];
   readonly #issues: string[] = [];
   readonly #pendingReleases = new Set<() => void>();
@@ -253,6 +286,21 @@ export class FakeCodexModel {
   // callers release the turn within tens of seconds.
   scriptHeldTurn(turn: CodexScriptedTurn): HeldCodexTurn {
     return this.#scriptHeldTurn(turn);
+  }
+
+  // Starts HTTP/SSE before holding items, allowing native sampling preemption.
+  scriptHeldStreamTurn(items: CodexScriptedItem[]): HeldCodexTurn {
+    let resolveRequested!: (request: RecordedCodexModelRequest) => void;
+    const requested = new Promise<RecordedCodexModelRequest>((resolve) => { resolveRequested = resolve; });
+    let resolveGate!: () => void;
+    const gate = new Promise<void>((resolve) => { resolveGate = resolve; });
+    const release = () => {
+      this.#pendingReleases.delete(release);
+      resolveGate();
+    };
+    this.#pendingReleases.add(release);
+    this.#turns.push({ kind: 'held-stream', items, gate, requested: resolveRequested });
+    return { requested, release };
   }
 
   scriptHeldTurnMatching(
@@ -372,7 +420,7 @@ export class FakeCodexModel {
       receivedAt: Date.now(),
     };
     this.#requests.push(recorded);
-    let turn: CodexScriptedTurn | CodexScriptedFault | undefined;
+    let turn: CodexScriptedTurn | CodexScriptedFault | HeldCodexStream | undefined;
     try {
       const orderedIndex = this.#turns.findIndex((entry) => !isRoutedTurn(entry));
       const routedIndex = this.#turns.findIndex((entry, index) => (
@@ -399,8 +447,15 @@ export class FakeCodexModel {
       return sseResponse(failedEvents('no scripted turn available'));
     }
     if (!Array.isArray(turn) && typeof turn !== 'function') {
+      if (turn.kind === 'held-stream') {
+        turn.requested(recorded);
+        return heldSseResponse(turnEvents(turn.items, `resp_fake_${recorded.id}`), turn.gate);
+      }
       if (turn.kind === 'http-error') {
-        return Response.json({ error: { message: turn.message } }, { status: turn.status });
+        return Response.json({ error: { message: turn.message } }, {
+          status: turn.status,
+          headers: turn.headers,
+        });
       }
       if (turn.kind === 'stream-error') {
         return sseResponse(failedEvents(turn.message));
@@ -420,7 +475,7 @@ export class FakeCodexModel {
 }
 
 function isRoutedTurn(
-  turn: CodexScriptedTurn | CodexScriptedFault | RoutedCodexScriptedTurn,
+  turn: CodexScriptedTurn | CodexScriptedFault | HeldCodexStream | RoutedCodexScriptedTurn,
 ): turn is RoutedCodexScriptedTurn {
   return !Array.isArray(turn)
     && typeof turn === 'object'
