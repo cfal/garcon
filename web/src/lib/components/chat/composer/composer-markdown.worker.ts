@@ -2,7 +2,11 @@ import {
 	parseComposerMarkdown,
 	serializeComposerMarkdownPaste,
 } from './composer-markdown-parser.js';
-import type { ComposerMarkdownTask, ComposerMarkdownResult } from './composer-markdown-worker.js';
+import type {
+	ComposerMarkdownReady,
+	ComposerMarkdownResult,
+	ComposerMarkdownTask,
+} from './composer-markdown-worker.js';
 
 self.onmessage = (event: MessageEvent<ComposerMarkdownTask>) => {
 	try {
@@ -16,3 +20,4 @@ self.onmessage = (event: MessageEvent<ComposerMarkdownTask>) => {
 		self.postMessage(null);
 	}
 };
+self.postMessage({ type: 'ready' } satisfies ComposerMarkdownReady);

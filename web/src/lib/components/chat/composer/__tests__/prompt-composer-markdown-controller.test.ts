@@ -10,6 +10,9 @@ import type {
 	ComposerMarkdownPasteRequest,
 } from '../composer-markdown-parser.js';
 
+vi.mock('../composer-markdown-editor-loader.js', () => ({
+	loadComposerMarkdownEditor: vi.fn(async () => null),
+}));
 vi.mock('../composer-markdown-worker.js', () => ({
 	parseComposerMarkdownInWorker: vi.fn(),
 	serializeComposerMarkdownPasteInWorker: vi.fn(),
@@ -41,6 +44,7 @@ function fixture() {
 		onChange: vi.fn((text: string) => {
 			composer.inputText = text;
 		}),
+		onSourceCaret: vi.fn(),
 		onUnavailable: vi.fn(),
 	};
 	const controller = new PromptComposerMarkdownController(options);
@@ -175,6 +179,33 @@ describe('formatted composer lifecycle', () => {
 		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
 		expect(ui.formattedDraft).toBeNull();
 		expect(options.onUnavailable).not.toHaveBeenCalled();
+		controller.destroy();
+	});
+	it('opens the file menu for a mention typed in the formatted editor and inserts the choice', () => {
+		const { ui, controller } = fixture();
+		ui.formattedDraft = { source: table, ...parsed };
+		const insert = vi.fn();
+		controller.mention({ query: 'src', insert });
+		expect(ui.showFileMenu).toBe(true);
+		expect(ui.fileQuery).toBe('src');
+		controller.insertFileMention('src/app.ts');
+		expect(insert).toHaveBeenCalledExactlyOnceWith('src/app.ts');
+		expect(ui.showFileMenu).toBe(false);
+		controller.mention({ query: 'a', insert });
+		controller.reset();
+		expect(ui.showFileMenu).toBe(false);
+		controller.destroy();
+	});
+	it('returns a draft without formatting to the plain editor at the same caret', async () => {
+		const { ui, options, controller } = fixture();
+		ui.formattedDraft = { source: table, ...parsed };
+		controller.plain('/cl', 2);
+		expect(options.composer.inputText).toBe('/cl');
+		expect(ui.formattedDraft).toBeNull();
+		options.textarea.value = '/cl';
+		await vi.waitFor(() => expect(options.onSourceCaret).toHaveBeenCalledExactlyOnceWith('/cl', 2));
+		expect(options.textarea.selectionStart).toBe(2);
+		expect(document.activeElement).toBe(options.textarea);
 		controller.destroy();
 	});
 	it('formats after menu focus restoration without taking focus from unrelated controls', async () => {

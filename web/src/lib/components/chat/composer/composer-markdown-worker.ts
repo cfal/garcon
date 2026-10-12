@@ -7,6 +7,10 @@ import type {
 export type ComposerMarkdownTask =
 	| { type: 'parse'; request: ComposerMarkdownRequest }
 	| { type: 'paste'; request: ComposerMarkdownPasteRequest };
+/** Sent once the Worker's script has loaded and it can start on the queued task. */
+export interface ComposerMarkdownReady {
+	type: 'ready';
+}
 export type ComposerMarkdownResult =
 	{ type: 'parsed'; document: ComposerMarkdownDocument | null } | { type: 'pasted'; source: string };
 
@@ -38,6 +42,7 @@ function runComposerMarkdownWorker(
 		const worker = new Worker(new URL('./composer-markdown.worker.ts', import.meta.url), {
 			type: 'module',
 		});
+		let timeout: ReturnType<typeof setTimeout> | undefined;
 		const finish = (result: ComposerMarkdownResult | null) => {
 			clearTimeout(timeout);
 			signal.removeEventListener('abort', cancel);
@@ -45,9 +50,14 @@ function runComposerMarkdownWorker(
 			resolve(result);
 		};
 		const cancel = () => finish(null);
-		const timeout = deadlineMs === undefined ? undefined : setTimeout(cancel, deadlineMs);
 		signal.addEventListener('abort', cancel, { once: true });
-		worker.onmessage = (event: MessageEvent<ComposerMarkdownResult | null>) => finish(event.data);
+		worker.onmessage = (
+			event: MessageEvent<ComposerMarkdownResult | ComposerMarkdownReady | null>,
+		) => {
+			if (event.data?.type !== 'ready') return finish(event.data);
+			// The deadline bounds the work, not the time a cold cache takes to fetch the script.
+			if (deadlineMs !== undefined) timeout = setTimeout(cancel, deadlineMs);
+		};
 		worker.onerror = cancel;
 		worker.postMessage(request);
 	});

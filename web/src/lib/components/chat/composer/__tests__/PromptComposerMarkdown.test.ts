@@ -11,6 +11,7 @@ import { MarkdownManager } from '@tiptap/markdown';
 import { composerMarkdownEditorExtensions } from '../composer-markdown-extensions.js';
 import { configureComposerMarkdown } from '../composer-markdown.js';
 import * as snippetsApi from '$lib/api/snippets';
+import * as commandsApi from '$lib/api/commands.js';
 
 vi.mock('../composer-markdown-worker.js', () => ({
 	parseComposerMarkdownInWorker: vi.fn(),
@@ -128,6 +129,40 @@ describe('formatted composer integration', () => {
 		);
 		expect(textarea.value).toBe('');
 		await waitFor(() => expect(document.activeElement).toBe(textarea));
+	});
+	it('hands a draft with no formatting left to the plain editor with its commands', async () => {
+		const commands = vi.spyOn(commandsApi, 'getSlashCommands').mockResolvedValue([]);
+		const { editor, textarea } = await formatted({ selectedStatus: 'draft' });
+		const rich = richEditor(editor);
+		rich.chain().selectAll().insertContent('/in').run();
+		await waitFor(() =>
+			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
+		);
+		expect(textarea.value).toBe('/in');
+		await waitFor(() => expect(document.activeElement).toBe(textarea));
+		expect(textarea.selectionStart).toBe(3);
+		// The slash menu loads its commands once the plain editor reports the trigger.
+		await waitFor(() => expect(commands).toHaveBeenCalled());
+		commands.mockRestore();
+	});
+	it('steps out of the formatted view when undo has nothing to undo', async () => {
+		const { editor, textarea } = await formatted();
+		await fireEvent.keyDown(editor, { key: 'z', ctrlKey: true });
+		await waitFor(() =>
+			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
+		);
+		expect(textarea.value).toBe(table);
+		await waitFor(() => expect(document.activeElement).toBe(textarea));
+	});
+	it('keeps undo inside the formatted view once the draft was edited', async () => {
+		const { editor, textarea } = await formatted();
+		const rich = richEditor(editor);
+		rich.commands.insertContentAt(2, 'x');
+		await waitFor(() => expect(textarea.value).not.toBe(table));
+		rich.commands.undo();
+		await fireEvent.keyDown(editor, { key: 'z', ctrlKey: true });
+		expect(screen.getByRole('textbox', { name: 'Formatted message' })).toBe(editor);
+		expect(textarea.value).toBe(table);
 	});
 	it('returns to source when another surface changes a formatted draft', async () => {
 		const { textarea } = await formatted();

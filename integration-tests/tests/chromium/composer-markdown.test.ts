@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { expect as browserExpect } from "playwright/test";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
 import type { SnippetsSnapshot } from "../../../common/snippets.js";
@@ -74,12 +74,46 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
         page.getByRole("button", { name: "Edit Markdown source" }),
       ).toHaveCount(0);
       await screenshot("composer-markdown-prose-1440.png");
+      // Undo straight after the paste steps out of the formatted view, then undoes the paste.
+      await page.keyboard.press("Control+Z");
+      await browserExpect(editor).toHaveCount(0);
+      await browserExpect(textarea).toBeFocused();
+      await browserExpect(textarea).toHaveValue(prose);
+      await page.keyboard.press("Control+Z");
+      await browserExpect(textarea).toHaveValue("");
+      await paste(prose);
+      await browserExpect(editor).toBeFocused();
       await editor.locator("ol > li").first().click();
       await page.keyboard.press("End");
       await page.keyboard.type(" step");
       await browserExpect(textarea).toHaveValue(
         prose.replace("1. first", "1. first step"),
       );
+      await writeFile(
+        join(integration.dirs.project, "mention-target.md"),
+        "Synthetic mention target",
+      );
+      await page.keyboard.type(" @mention-t");
+      await browserExpect(
+        page.getByRole("option", { name: /mention-target\.md/ }),
+      ).toBeVisible();
+      await page.keyboard.press("Enter");
+      await browserExpect(textarea).toHaveValue(
+        prose.replace("1. first", "1. first step @mention-target.md "),
+      );
+      await browserExpect(editor).toBeFocused();
+      await page.keyboard.type("done");
+      await browserExpect(textarea).toHaveValue(
+        prose.replace("1. first", "1. first step @mention-target.md done"),
+      );
+      // A draft with no formatting left returns to the plain editor, where commands work.
+      await page.keyboard.press("Control+A");
+      await page.keyboard.type("/");
+      await browserExpect(editor).toHaveCount(0);
+      await browserExpect(textarea).toBeFocused();
+      await browserExpect(textarea).toHaveValue("/");
+      await browserExpect(page.getByRole("listbox")).toBeVisible();
+      await page.keyboard.press("Backspace");
       await clear();
       for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: 900 });

@@ -7,6 +7,13 @@ import {
 	serializeComposerMarkdownPasteInWorker,
 } from './composer-markdown-worker.js';
 import type { ComposerMarkdownPasteRequest } from './composer-markdown-parser.js';
+import { loadComposerMarkdownEditor } from './composer-markdown-editor-loader.js';
+
+/** An `@` file mention being typed in the formatted editor. */
+export interface ComposerMarkdownMention {
+	query: string;
+	insert(path: string): void;
+}
 
 interface PromptComposerMarkdownOptions {
 	ui: PromptComposerUiState;
@@ -16,6 +23,8 @@ interface PromptComposerMarkdownOptions {
 	get canFormat(): boolean;
 	get interactionGeneration(): number;
 	onChange(text: string): void;
+	/** Reports the caret after a draft returns to the plain editor mid-edit. */
+	onSourceCaret(text: string, caret: number): void;
 	onUnavailable(): void;
 }
 
@@ -25,6 +34,7 @@ export class PromptComposerMarkdownController {
 	#destroyed = false;
 	#focusGeneration = -1;
 	#focusOrigin: Element | null = null;
+	#mention: ComposerMarkdownMention | null = null;
 
 	constructor(private readonly options: PromptComposerMarkdownOptions) {}
 
@@ -58,6 +68,30 @@ export class PromptComposerMarkdownController {
 		this.#pastedText = null;
 		this.options.ui.closeFormattedDraft();
 		this.#focusGeneration = -1;
+		if (this.#mention) this.mention(null);
+	}
+
+	/** Shows the file menu for a mention typed in the formatted editor. */
+	mention(mention: ComposerMarkdownMention | null): void {
+		this.#mention = mention;
+		// The menu reads only the query; the editor owns the range the mention replaces.
+		this.options.ui.setFileMentionTrigger(
+			mention ? { start: 0, end: 0, query: mention.query } : null,
+		);
+	}
+
+	insertFileMention(path: string): void {
+		const mention = this.#mention;
+		this.mention(null);
+		mention?.insert(path);
+	}
+
+	/** Returns a draft with no formatting left to the plain editor at the same caret. */
+	plain(text: string, caret: number): void {
+		if (!this.options.canFormat || !this.options.ui.formattedDraft) return;
+		this.#workerAbort?.abort();
+		this.options.onChange(text);
+		void this.edit(caret);
 	}
 
 	change(text: string): void {
@@ -121,7 +155,7 @@ export class PromptComposerMarkdownController {
 			target.focus({ preventScroll: true });
 	}
 
-	async edit(): Promise<void> {
+	async edit(caret?: number): Promise<void> {
 		const chatId = this.options.chatId;
 		const generation = this.options.interactionGeneration;
 		this.reset();
@@ -133,8 +167,11 @@ export class PromptComposerMarkdownController {
 			generation === this.options.interactionGeneration
 		) {
 			const textarea = this.options.textarea;
-			textarea?.focus({ preventScroll: true });
-			textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
+			if (!textarea) return;
+			const position = caret ?? textarea.value.length;
+			textarea.focus({ preventScroll: true });
+			textarea.setSelectionRange(position, position);
+			if (caret !== undefined) this.options.onSourceCaret(textarea.value, position);
 		}
 	}
 
@@ -159,10 +196,11 @@ export class PromptComposerMarkdownController {
 		const chatId = this.options.chatId;
 		const generation = this.options.interactionGeneration;
 		const focusOrigin = document.activeElement;
-		const parsed = await parseComposerMarkdownInWorker(
-			{ source, pastedText },
-			abort.signal,
-		).catch(() => null);
+		// The editor loads before the swap so keys typed meanwhile still reach the textarea.
+		const [parsed] = await Promise.all([
+			parseComposerMarkdownInWorker({ source, pastedText }, abort.signal).catch(() => null),
+			loadComposerMarkdownEditor().catch(() => null),
+		]);
 		if (
 			this.#destroyed ||
 			abort.signal.aborted ||

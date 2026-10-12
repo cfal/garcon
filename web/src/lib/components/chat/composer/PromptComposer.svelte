@@ -161,6 +161,7 @@
 			return workspaceShortcuts.userInteractionGeneration;
 		},
 		onChange: updateDraft,
+		onSourceCaret: updateTriggers,
 		onUnavailable() {
 			notifications.error(m.chat_composer_format_unavailable());
 		},
@@ -459,6 +460,7 @@
 
 	async function insertFileMention(path: string) {
 		if (promptTransformPending) return;
+		if (formattedDraft) return markdown.insertFileMention(path);
 		const trigger =
 			ui.fileMentionTrigger ??
 			findFileMentionTrigger(
@@ -650,6 +652,11 @@
 		else onsubmit();
 	}
 
+	function updateTriggers(value: string, caret: number, composing = false): void {
+		const mode = conversationInput ? 'conversation' : 'literal';
+		ui.updateTriggers(value, caret, localSettings.snippetTrigger, composing, mode);
+	}
+
 	function handleInput(event: Event) {
 		promptRecall.reset();
 		const target = event.currentTarget as HTMLTextAreaElement;
@@ -661,13 +668,7 @@
 		if (snippetExpansion.pending) snippetExpansion.cancel();
 		const value = target.value;
 		updateDraft(value);
-		ui.updateTriggers(
-			value,
-			textarea?.selectionStart ?? value.length,
-			localSettings.snippetTrigger,
-			(event as InputEvent).isComposing,
-			conversationInput ? 'conversation' : 'literal',
-		);
+		updateTriggers(value, target.selectionStart, (event as InputEvent).isComposing);
 		markdown.input(event as InputEvent);
 	}
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
@@ -857,11 +858,9 @@
 					<ComposerFormattedDraft
 						draft={formattedDraft}
 						readOnly={isDisabled || promptTransformPending}
-						onChange={(text) => markdown.change(text)}
-						onEditSource={() => void markdown.edit()}
+						controller={markdown}
 						onSubmitKeydown={handleKeyDown}
-						onReady={(target) => markdown.focus(target)}
-						onLargePaste={(request) => void markdown.pasteSource(request)}
+						onCompletionKeydown={handleCompletionKeyDown}
 					/>
 				{/if}
 				<div class="relative z-10" hidden={Boolean(formattedDraft)}>

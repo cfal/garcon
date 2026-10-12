@@ -7,6 +7,11 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { createRandomId } from '$lib/utils/random-id.js';
 	import type { ComposerMarkdownPasteRequest } from './composer-markdown-parser.js';
+	import type { ComposerMarkdownMention } from './prompt-composer-markdown-controller.js';
+	import {
+		findFileMentionTrigger,
+		formatFileMentionPath,
+	} from '$lib/chat/composer/file-mentions.js';
 	import { serializeComposerMarkdown } from './composer-markdown.js';
 	import {
 		joinComposerMarkdownBlocks,
@@ -21,16 +26,24 @@
 		sources,
 		readOnly,
 		onChange,
+		onPlain,
+		onEditSource,
 		onSubmitKeydown,
+		onCompletionKeydown,
 		onReady,
+		onMention,
 		onLargePaste,
 	}: {
 		document: JSONContent;
 		sources: (string | null)[];
 		readOnly: boolean;
 		onChange: (source: string) => void;
+		onPlain: (text: string, caret: number) => void;
+		onEditSource: () => void;
 		onSubmitKeydown: (event: KeyboardEvent) => void;
+		onCompletionKeydown: (event: KeyboardEvent) => boolean;
 		onReady: (target: HTMLElement) => void;
+		onMention: (mention: ComposerMarkdownMention | null) => void;
 		onLargePaste: (request: ComposerMarkdownPasteRequest) => void;
 	} = $props();
 	let container: HTMLDivElement;
@@ -53,6 +66,45 @@
 			);
 		// Records Shift from real key events for the synthetic Enter described below.
 		let shiftHeld = false;
+		let mentionOpen = false;
+		const reportMention = (current: Editor) => {
+			const { selection } = current.state;
+			const head = selection.$from;
+			const block = head.parent;
+			const inCode = block.type.spec.code || head.marks().some((mark) => mark.type.name === 'code');
+			// Inline leaves take one position each, so text offsets line up with document positions.
+			const text = block.textBetween(0, block.content.size, undefined, (leaf) =>
+				leaf.type.name === 'hardBreak' ? '\n' : '\ufffc',
+			);
+			const trigger =
+				current.isEditable && selection.empty && block.isTextblock && !inCode
+					? findFileMentionTrigger(text, head.parentOffset)
+					: null;
+			if (!trigger) {
+				if (mentionOpen) onMention(null);
+				mentionOpen = false;
+				return;
+			}
+			mentionOpen = true;
+			const start = head.start();
+			onMention({
+				query: trigger.query,
+				insert(path) {
+					// Mirrors the plain editor: one space follows the mention unless the line ends there.
+					const after = text.slice(trigger.end);
+					const lineEnd = after.startsWith('\n');
+					const skipped = lineEnd ? 0 : (/^[ \t]*/.exec(after)?.[0].length ?? 0);
+					current
+						.chain()
+						.insertContentAt(
+							{ from: start + trigger.start, to: start + trigger.end + skipped },
+							{ type: 'text', text: `@${formatFileMentionPath(path)}${lineEnd ? '' : ' '}` },
+						)
+						.focus()
+						.run();
+				},
+			});
+		};
 		const insertText = (view: Editor['view'], text: string, position?: number) => {
 			if (view.state.doc.textContent.length + text.length <= MAX_COMPOSER_MARKDOWN_LENGTH) {
 				view.dispatch(view.state.tr.insertText(text, position));
@@ -75,12 +127,22 @@
 			editable: !readOnly,
 			enableInputRules: false,
 			enablePasteRules: false,
-			onUpdate: ({ editor: current }) =>
-				onChange(
-					joinComposerMarkdownBlocks(blocks(current.state.doc), original.length, (nodes) =>
-						serializeComposerMarkdown(markdown, { type: 'doc', content: nodes }),
-					),
-				),
+			onUpdate: ({ editor: current }) => {
+				const { doc, selection } = current.state;
+				const source = joinComposerMarkdownBlocks(blocks(doc), original.length, (nodes) =>
+					serializeComposerMarkdown(markdown, { type: 'doc', content: nodes }),
+				);
+				const only = doc.childCount === 1 ? doc.firstChild : null;
+				// With no formatting left the plain editor takes over, where commands and recall work.
+				const plain =
+					only?.type.name === 'paragraph' && only.textContent === source && !current.view.composing;
+				if (plain) onPlain(source, selection.empty ? selection.$from.parentOffset : source.length);
+				else onChange(source);
+			},
+			onTransaction: ({ editor: current, transaction }) => {
+				// Typing opens the menu; a restored draft that ends in a mention does not.
+				if (transaction.docChanged || mentionOpen) reportMention(current);
+			},
 			editorProps: {
 				attributes: {
 					role: 'textbox',
@@ -97,6 +159,18 @@
 					// https://github.com/ProseMirror/prosemirror-view/blob/17af0f4b25933933f644a655ad6bb9a0249d7cb5/src/input.ts#L118-L127
 					if (event.key === 'Enter' && !event.isTrusted && shiftHeld && !event.shiftKey) {
 						return false;
+					}
+					if (onCompletionKeydown(event)) return true;
+					const undo =
+						(event.ctrlKey || event.metaKey) &&
+						!event.shiftKey &&
+						!event.altKey &&
+						event.key.toLowerCase() === 'z';
+					// With no edit to undo, undo steps out of the formatted view to the paste behind it.
+					if (undo && !mountedEditor.can().undo() && !mountedEditor.can().redo()) {
+						event.preventDefault();
+						onEditSource();
+						return true;
 					}
 					if (event.key === 'Enter') onSubmitKeydown(event);
 					return event.defaultPrevented;
