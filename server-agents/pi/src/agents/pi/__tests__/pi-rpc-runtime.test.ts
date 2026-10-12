@@ -892,12 +892,14 @@ describe('PiRpcRuntime', () => {
       toolCallId: 'call-1',
       result: { content: [{ type: 'text', text: 'hi' }] },
       isError: false,
+      durationMs: 42,
     });
     fake.pushEvent({
       type: 'message_end',
       message: {
         role: 'toolResult',
         toolCallId: 'call-1',
+        durationMs: 42,
         content: [{ type: 'text', text: 'hi' }],
         timestamp: 0,
       },
@@ -919,7 +921,7 @@ describe('PiRpcRuntime', () => {
     await settleIo();
     expect(published.events.filter((event) => event.type === 'run-ended')).toEqual([]);
 
-    fake.pushEvent({ type: 'agent_settled' });
+    fake.pushEvent({ type: 'agent_settled', aborted: false });
     await turn;
     expect(published.events.filter((event) => event.type === 'run-ended')).toEqual([{
       type: 'run-ended',
@@ -945,7 +947,7 @@ describe('PiRpcRuntime', () => {
       fake.pushEvent({ type: 'message_end', message: { role: 'assistant', stopReason,
         content: [{ type: 'text', text: 'Final A.' }, { type: 'thinking', thinking: 'Private reasoning.' },
           { type: 'text', text: 'Final B.\r' }] } });
-      fake.pushEvent({ type: 'agent_settled' });
+      fake.pushEvent({ type: 'agent_settled', aborted: stopReason === 'aborted' });
       await turn;
       const terminal = published.events.at(-1)!;
       expect(terminal).toMatchObject({ type: 'run-ended', outcome: stopReason === 'error' || stopReason === 'aborted' ? 'failed' : 'finished' });
