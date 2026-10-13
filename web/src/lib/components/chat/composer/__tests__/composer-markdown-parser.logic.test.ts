@@ -340,10 +340,45 @@ describe('Markdown detection', () => {
 		expect(parsed.selection).toBe(10);
 		expect(parsed.selectionMarks).toEqual([{ type: 'bold' }]);
 	});
-	it('places a caret after closing delimiters that end the draft', () => {
+	it('places a caret after closing underscores that end the draft', () => {
 		const parsed = parseComposerMarkdown({ source: '__bold__', pastedText: '__bold__', caret: 8 })!;
 		expect(parsed.selection).toBe(5);
 		expect(parsed.selectionMarks).toEqual([]);
+	});
+	it.each([
+		['a bold closer missing its last delimiter', '**Note*'],
+		['an underscore closer missing its last delimiter', 'This is __very important_'],
+		['a list started under a line of text', 'my_var is broken:\n-'],
+		['an underline started under a line of text', 'a_b = c\n='],
+		['a nested list marker', '- one **x**\n  -'],
+		['a quote marker on a new line', '> quote **x**\n>'],
+		['a delimiter row with fewer columns than its header', '| a | b |\n|---|'],
+		['a table row missing its closing pipe', '| a | b |\n|---|---|\n| 1 | 2'],
+		['a table row missing a cell', '| a | b |\n|---|---|\n| 1 |'],
+		['a task marker missing its closing bracket', '- ['],
+		['a task marker missing its space', '- [ ]'],
+		['a checked task marker being typed', '1. [x'],
+	])('keeps %s in source', (_name, source) => {
+		expect(parseComposerMarkdown({ source, pastedText: source, caret: source.length })).toBeNull();
+	});
+	it.each([
+		['x **y**\n\n| a | b |\n|---|---|', 15],
+		['| a | b |\n|---|---|\n| 1 | 2 |', 22],
+	])('takes the caret in the last cell of a table that ends the draft: %j', (source, selection) => {
+		const parsed = parseComposerMarkdown({ source, pastedText: source, caret: source.length })!;
+		expect(parsed.document.content?.at(-1)?.type).toBe('table');
+		expect(parsed.selection).toBe(selection);
+	});
+	it('maps a caret inside a table cell that is followed by more of its row', () => {
+		const source = '| a | b |\n|---|---|\n| 1 | 2 |';
+		expect(parseComposerMarkdown({ source, pastedText: source, caret: 23 })?.selection).toBe(17);
+	});
+	it('formats a completed task marker and a bracket that opens a link label', () => {
+		for (const source of ['- [ ] ', '- [l']) {
+			expect(
+				parseComposerMarkdown({ source, pastedText: source, caret: source.length }),
+			).not.toBeNull();
+		}
 	});
 	it.each(['**bold**\n\n', '**bold**\n', '- item\n\n', '```\ncode\n```', '```\ncode\n```\n'])(
 		'defers a draft whose end has no position in the document: %j',

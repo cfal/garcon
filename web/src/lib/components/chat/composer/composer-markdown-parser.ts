@@ -137,12 +137,11 @@ function parseBlocks(source: string): ComposerMarkdownDocument & { ended: boolea
 	};
 }
 
-// Locates the end of the last line of text, where typing continues a draft. Code is excluded
-// because its closing fence leaves nowhere outside the block to type.
+// Locates the end of the last line of text in the document.
 function trailingSelection(document: JSONContent): number | undefined {
 	let position = (document.content ?? []).reduce((size, child) => size + jsonNodeSize(child), 0);
 	let node = document.content?.at(-1);
-	while (node && node.type !== 'codeBlock') {
+	while (node) {
 		const last = node.content?.at(-1);
 		if (!last) return undefined;
 		position -= 1;
@@ -150,6 +149,81 @@ function trailingSelection(document: JSONContent): number | undefined {
 		node = last;
 	}
 	return undefined;
+}
+
+interface CaretPlacement {
+	selection: number;
+	marks: JSONContent['marks'];
+	/** Ancestors of the text holding the caret, outermost first. */
+	path: JSONContent[];
+	/** Position of that text among its siblings. */
+	index: number;
+	/** The part of that text before the caret. */
+	before: string;
+}
+
+// Maps a source caret through Markdown delimiters by inserting marker text there and reading
+// back where it lands. Returns null when the marker changes the document's structure.
+function placeCaret(
+	source: string,
+	caret: number,
+	document: JSONContent,
+	marker: string,
+): CaretPlacement | null {
+	const marked = parseBlocks(source.slice(0, caret) + marker + source.slice(caret)).document;
+	let placement: CaretPlacement | null = null;
+	const strip = (
+		node: JSONContent,
+		position: number,
+		path: JSONContent[],
+		index: number,
+	): JSONContent => {
+		if (node.text !== undefined) {
+			const offset = node.text.indexOf(marker);
+			if (offset < 0) return node;
+			placement = {
+				selection: position + offset,
+				marks: node.marks ?? [],
+				path,
+				index,
+				before: node.text.slice(0, offset),
+			};
+			return { ...node, text: node.text.replace(marker, '') };
+		}
+		if (!node.content) return node;
+		let next = position + (node.type === 'doc' ? 0 : 1);
+		const inner = [...path, node];
+		const content = node.content
+			.map((child, childIndex) => {
+				const result = strip(child, next, inner, childIndex);
+				next += jsonNodeSize(result);
+				return result;
+			})
+			.filter((child) => child.text !== '');
+		return { ...node, content };
+	};
+	const same = JSON.stringify(strip(marked, 0, [], 0)) === JSON.stringify(document);
+	return same ? placement : null;
+}
+
+// Reports syntax that parses as complete but is usually a longer construct still being typed.
+// It stays in source, where the rest of it can be written.
+function isUnfinished({ path, index, before }: CaretPlacement, atEnd: boolean): boolean {
+	const parent = path.at(-1);
+	// A row without its closing pipe would take the rest of its cells as text in one cell.
+	if (atEnd && path.some((node) => node.type === 'table')) return true;
+	// A closing fence cannot be typed inside a formatted code block.
+	if (parent?.type === 'codeBlock') return true;
+	const siblings = parent?.content ?? [];
+	// `**bold*` reads as a literal `*` and italic text until its last delimiter arrives.
+	if (
+		before === '' &&
+		siblings[index - 1]?.marks?.length &&
+		/[*_~]$/.test(siblings[index - 2]?.text ?? '')
+	)
+		return true;
+	// `- [` and `- [ ]` are a task marker that is missing its space.
+	return path.at(-2)?.type === 'listItem' && index === 0 && /^\[[ xX]?\]?$/.test(before);
 }
 
 export function parseComposerMarkdown({
@@ -175,50 +249,25 @@ export function parseComposerMarkdown({
 	}
 	if (caret !== undefined) {
 		parsed.selectionMarks = [];
-		// A synthetic text marker maps a source caret through Markdown delimiters off-thread.
-		// Conversion is deferred if inserting it changes the document's structure.
 		let marker = 'garconComposerCaret';
 		while (source.includes(marker)) marker += 'X';
-		const marked = parseBlocks(source.slice(0, caret) + marker + source.slice(caret)).document;
-		let selection: number | undefined;
-		let selectionMarks: JSONContent['marks'] = [];
-		let inCode = false;
-		const stripMarker = (
-			node: JSONContent,
-			position: number,
-			parent?: JSONContent,
-		): JSONContent => {
-			if (node.text !== undefined) {
-				const offset = node.text.indexOf(marker);
-				if (offset >= 0) {
-					selection = position + offset;
-					selectionMarks = node.marks ?? [];
-					inCode = parent?.type === 'codeBlock';
-				}
-				return { ...node, text: node.text.replace(marker, '') };
-			}
-			if (!node.content) return node;
-			let next = position + (node.type === 'doc' ? 0 : 1);
-			const content = node.content
-				.map((child) => {
-					const result = stripMarker(child, next, node);
-					next += jsonNodeSize(result);
-					return result;
-				})
-				.filter((child) => child.text !== '');
-			return { ...node, content };
-		};
-		const sameDocument = JSON.stringify(stripMarker(marked, 0)) === JSON.stringify(parsed.document);
-		// Code being typed stays in source, where its closing fence can still be written.
-		if (inCode) return null;
-		if (sameDocument && selection !== undefined) {
-			parsed.selection = selection;
-			parsed.selectionMarks = selectionMarks;
+		// Word characters after a closing `_` keep it from closing, so punctuation leads a second try.
+		const placement =
+			placeCaret(source, caret, parsed.document, marker) ??
+			placeCaret(source, caret, parsed.document, '\u2e31' + marker);
+		if (placement) {
+			if (isUnfinished(placement, caret === source.length)) return null;
+			parsed.selection = placement.selection;
+			parsed.selectionMarks = placement.marks;
 		} else {
-			// A caret the marker cannot place is taken only at the end of a draft that stops on
-			// a line of text; trailing blank lines and closed code have no position to map to.
-			const trailing =
-				caret === source.length && ended ? trailingSelection(parsed.document) : undefined;
+			// No marker survives after a table row's closing pipe, so a table that ends the
+			// draft takes the caret in its last cell.
+			const complete =
+				caret === source.length &&
+				ended &&
+				parsed.document.content?.at(-1)?.type === 'table' &&
+				parsed.sources.at(-1) !== null;
+			const trailing = complete ? trailingSelection(parsed.document) : undefined;
 			if (trailing === undefined) return null;
 			parsed.selection = trailing;
 		}

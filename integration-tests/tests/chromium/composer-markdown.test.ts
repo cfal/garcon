@@ -256,6 +256,27 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await browserExpect(textarea).toHaveValue(
         "**context**  appended snippet",
       );
+      // Syntax paused partway through stays in source until it is finished.
+      await clear();
+      await textarea.focus();
+      await page.keyboard.type("**Note*");
+      await page.waitForTimeout(600);
+      await browserExpect(editor).toHaveCount(0);
+      await page.keyboard.type("*");
+      await browserExpect(editor.locator("strong")).toHaveText("Note");
+      await browserExpect(textarea).toHaveValue("**Note**");
+      await clear();
+      await textarea.focus();
+      await page.keyboard.type("my_var is broken:");
+      await page.keyboard.press("Shift+Enter");
+      await page.keyboard.type("-");
+      await page.waitForTimeout(600);
+      await browserExpect(editor).toHaveCount(0);
+      await page.keyboard.type(" first item");
+      await browserExpect(editor.locator("ul > li")).toHaveText("first item");
+      await browserExpect(textarea).toHaveValue(
+        "my_var is broken:\n- first item",
+      );
       await clear();
       await textarea.fill("plain notes");
       await paste("\nplain notes");

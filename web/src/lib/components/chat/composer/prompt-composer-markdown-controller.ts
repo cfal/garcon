@@ -137,6 +137,8 @@ export class PromptComposerMarkdownController {
 		if (!this.options.canFormat || !this.options.ui.formattedDraft) return;
 		this.#workerAbort?.abort();
 		this.options.onChange(text);
+		// Forgets a dismissed snippet trigger once it is deleted, as plain editing does.
+		this.options.ui.snippetPalette.updateDetectedTrigger(null, text);
 		this.options.ui.formattedDraft = { ...this.options.ui.formattedDraft, source: text };
 		if (!isComposerMarkdownSized(text)) void this.edit();
 	}

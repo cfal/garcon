@@ -125,6 +125,15 @@ describe('formatted composer snippet triggers', () => {
 		expect(ui.formattedDraft).not.toBeNull();
 		controller.destroy();
 	});
+	it('hands over a trigger typed again where a dismissed one was deleted', () => {
+		const { controller, ui } = fixture();
+		ui.formattedDraft = { source: table, ...parsed };
+		ui.snippetPalette.updateDetectedTrigger({ start: 12, end: 14, query: '' }, '**context** ;;');
+		ui.snippetPalette.dismiss();
+		controller.change('**context** ');
+		expect(controller.snippet('**context** ;;', 14)).toBe(true);
+		controller.destroy();
+	});
 });
 
 describe('formatted composer lifecycle', () => {
