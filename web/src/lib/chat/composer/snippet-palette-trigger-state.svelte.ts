@@ -20,6 +20,18 @@ export class SnippetPaletteTriggerState {
 		this.#open(trigger, sourceText);
 	}
 
+	/** Reports whether detecting this trigger would open the palette. */
+	opensFor(trigger: SnippetTrigger, sourceText: string): boolean {
+		const dismissed = this.#dismissedOccurrence;
+		return (
+			!this.isOpen &&
+			!(
+				dismissed?.start === trigger.start &&
+				sourceText.startsWith(dismissed.prefix, dismissed.start)
+			)
+		);
+	}
+
 	// Modal inertness prevents composer input or menu opens while a hidden trigger backs the argument chain.
 	hide(): void {
 		this.isOpen = false;

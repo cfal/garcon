@@ -131,6 +131,59 @@ describe('formatted composer integration', () => {
 		expect(screen.queryByRole('button', { name: 'Edit Markdown source' })).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Format Markdown' })).toBeNull();
 	});
+	it.each([
+		['sh', false],
+		['notes-markdown', true],
+	])('formats literal input in mode %s only when it declares Markdown', async (model, formats) => {
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) =>
+			parseComposerMarkdown(request),
+		);
+		const props = {
+			selectedChatId: 'markdown-literal',
+			executionPolicy: 'literal' as const,
+			inputFormatByModel: { 'notes-markdown': 'markdown' as const },
+		};
+		const { rerender } = render(PromptComposerTestHost, { ...props, model });
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		const source = "printf '%s\\n' _target_";
+		await fireEvent.input(textarea, { target: { value: source } });
+		if (formats) {
+			const editor = await screen.findByRole('textbox', { name: 'Formatted message' });
+			expect(editor.querySelector('em')?.textContent).toBe('target');
+			// A mode that takes its input verbatim gets the draft back exactly as typed.
+			await rerender({ ...props, model: 'sh' });
+			await waitFor(() =>
+				expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
+			);
+		} else {
+			await new Promise((done) => setTimeout(done, 300));
+			expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+		}
+		expect(textarea.value).toBe(source);
+	});
+	it('opens the snippet palette for a trigger typed after formatted content', async () => {
+		const source = '**context** then';
+		const { editor, textarea } = await formatted({ source });
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValue({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'appended',
+		});
+		richEditor(editor).chain().focus('end').insertContent(' ;;').run();
+		await waitFor(() =>
+			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
+		);
+		expect(textarea.value).toBe(source + ' ;;');
+		expect(textarea.selectionStart).toBe(source.length + 3);
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
+		await waitFor(() => expect(textarea.value).toBe(source + ' appended'));
+	});
 	it('returns to the plain editor when a formatted draft is emptied', async () => {
 		const { editor, textarea } = await formatted();
 		richEditor(editor).commands.clearContent(true);

@@ -237,6 +237,25 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await browserExpect(textarea).toHaveValue(
         beforeSnippet + " appended snippet",
       );
+      // A trigger typed after formatted content opens the palette, which replaces it in source.
+      await clear();
+      await textarea.focus();
+      await page.keyboard.type("**context**");
+      await browserExpect(editor).toBeFocused();
+      await browserExpect(editor.locator("strong")).toHaveText("context");
+      await page.keyboard.type(" ;;");
+      const palette = page.getByRole("dialog", {
+        name: "Insert Snippet",
+        exact: true,
+      });
+      await browserExpect(palette).toBeVisible();
+      await browserExpect(editor).toHaveCount(0);
+      await browserExpect(textarea).toHaveValue("**context** ;;");
+      await page.keyboard.type("rev");
+      await palette.getByRole("option", { name: /^review/ }).click();
+      await browserExpect(textarea).toHaveValue(
+        "**context**  appended snippet",
+      );
       await clear();
       await textarea.fill("plain notes");
       await paste("\nplain notes");
@@ -363,3 +382,84 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
     },
   );
 }, 180_000);
+
+test("literal Shell input is formatted only in a mode that declares Markdown input", async () => {
+  await withChromiumFixture(
+    "composer-markdown-literal",
+    async ({ page, integration, assertNoBrowserErrors }) => {
+      const { client, executionDirs } = integration;
+      const start = async (model: string, command: string) => {
+        const chatId = integration.newChatId();
+        const started = await client.startChat({
+          chatId,
+          agentId: "shell",
+          model,
+          projectPath: executionDirs.project,
+          permissionMode: "default",
+          thinkingMode: "none",
+          agentSettings: { ownerId: "shell", schemaVersion: 1, values: {} },
+          origin: "interactive",
+          clientRequestId: crypto.randomUUID(),
+          clientMessageId: crypto.randomUUID(),
+          command,
+        });
+        await client.waitForTurnTerminal(chatId, started.turnId);
+        await client.waitForProcessing(chatId, false);
+        return chatId;
+      };
+      const commandChat = await start("sh", "printf 'synthetic start'");
+      const notesChat = await start("notes-markdown", "Synthetic note");
+      const textarea = page.locator("[data-composer] textarea");
+      const editor = page.getByRole("textbox", { name: "Formatted message" });
+      const selectChat = async (id: string) => {
+        await page
+          .locator(`[data-sidebar-virtual-row="${id}"]`)
+          .locator("button")
+          .first()
+          .click();
+        await page.waitForURL(`**/chat/${id}`);
+      };
+
+      await page.goto(`${integration.garcon.baseUrl}/chat/${commandChat}`);
+      await textarea.focus();
+      const command = "printf '%s\\n' _target_";
+      await page.keyboard.type(command);
+      // Conversion would start 150 ms after typing settles.
+      await page.waitForTimeout(600);
+      await browserExpect(editor).toHaveCount(0);
+      await page.keyboard.type(" __init__.py");
+      await page.waitForTimeout(600);
+      await browserExpect(editor).toHaveCount(0);
+      await browserExpect(textarea).toHaveValue(`${command} __init__.py`);
+
+      // A restored draft follows the mode of the chat it belongs to.
+      await selectChat(notesChat);
+      await browserExpect(textarea).toHaveValue("");
+      await page.keyboard.type("Keep **this** and _target_");
+      await browserExpect(editor).toBeFocused();
+      await browserExpect(editor.locator("strong")).toHaveText("this");
+      await browserExpect(editor.locator("em")).toHaveText("target");
+      await selectChat(commandChat);
+      await browserExpect(editor).toHaveCount(0);
+      await browserExpect(textarea).toHaveValue(`${command} __init__.py`);
+      await selectChat(notesChat);
+      await browserExpect(editor.locator("strong")).toHaveText("this");
+      await selectChat(commandChat);
+      await browserExpect(editor).toHaveCount(0);
+
+      await textarea.press("Enter");
+      await browserExpect(textarea).toHaveValue("");
+      await browserExpect
+        .poll(async () =>
+          (await client.getMessages(commandChat)).messages.flatMap((row) =>
+            row.message.type === "user-message" ? [row.message.content] : [],
+          ),
+        )
+        .toContain(`${command} __init__.py`);
+      await browserExpect(
+        page.locator(".markdown-code-block pre").filter({ hasText: "_target_" }),
+      ).toBeVisible();
+      assertNoBrowserErrors();
+    },
+  );
+}, 120_000);

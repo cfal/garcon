@@ -98,11 +98,13 @@ function wrapBlockImages(node: JSONContent): JSONContent {
 }
 
 // Parses each top-level token on its own so every node maps to the source that produced it.
-function parseBlocks(source: string): ComposerMarkdownDocument {
+// `ended` reports that the source stops where its last node does, with nothing left after it.
+function parseBlocks(source: string): ComposerMarkdownDocument & { ended: boolean } {
 	const content: JSONContent[] = [];
 	const sources: (string | null)[] = [];
 	let leading = '';
 	let lexed = '';
+	let ended = false;
 	for (const token of marked.lexer(source)) {
 		lexed += token.raw;
 		const nodes =
@@ -116,8 +118,10 @@ function parseBlocks(source: string): ComposerMarkdownDocument {
 			const last = sources.length - 1;
 			if (last < 0) leading += token.raw;
 			else if (sources[last] !== null) sources[last] += token.raw;
+			ended = false;
 			continue;
 		}
+		ended = !/\s$/.test(token.raw);
 		for (const node of nodes) {
 			content.push(node);
 			sources.push(nodes.length === 1 ? leading + token.raw : null);
@@ -129,7 +133,23 @@ function parseBlocks(source: string): ComposerMarkdownDocument {
 	return {
 		document: { type: 'doc', content },
 		sources: traceable ? sources : sources.map(() => null),
+		ended,
 	};
+}
+
+// Locates the end of the last line of text, where typing continues a draft. Code is excluded
+// because its closing fence leaves nowhere outside the block to type.
+function trailingSelection(document: JSONContent): number | undefined {
+	let position = (document.content ?? []).reduce((size, child) => size + jsonNodeSize(child), 0);
+	let node = document.content?.at(-1);
+	while (node && node.type !== 'codeBlock') {
+		const last = node.content?.at(-1);
+		if (!last) return undefined;
+		position -= 1;
+		if (last.text !== undefined) return position;
+		node = last;
+	}
+	return undefined;
 }
 
 export function parseComposerMarkdown({
@@ -146,7 +166,7 @@ export function parseComposerMarkdown({
 		});
 		if (!formatted) return null;
 	}
-	const parsed = parseBlocks(source);
+	const { ended, ...parsed } = parseBlocks(source);
 	const pending = [parsed.document];
 	let count = 0;
 	while (pending.length) {
@@ -162,12 +182,18 @@ export function parseComposerMarkdown({
 		const marked = parseBlocks(source.slice(0, caret) + marker + source.slice(caret)).document;
 		let selection: number | undefined;
 		let selectionMarks: JSONContent['marks'] = [];
-		const stripMarker = (node: JSONContent, position: number): JSONContent => {
+		let inCode = false;
+		const stripMarker = (
+			node: JSONContent,
+			position: number,
+			parent?: JSONContent,
+		): JSONContent => {
 			if (node.text !== undefined) {
 				const offset = node.text.indexOf(marker);
 				if (offset >= 0) {
 					selection = position + offset;
 					selectionMarks = node.marks ?? [];
+					inCode = parent?.type === 'codeBlock';
 				}
 				return { ...node, text: node.text.replace(marker, '') };
 			}
@@ -175,7 +201,7 @@ export function parseComposerMarkdown({
 			let next = position + (node.type === 'doc' ? 0 : 1);
 			const content = node.content
 				.map((child) => {
-					const result = stripMarker(child, next);
+					const result = stripMarker(child, next, node);
 					next += jsonNodeSize(result);
 					return result;
 				})
@@ -183,10 +209,19 @@ export function parseComposerMarkdown({
 			return { ...node, content };
 		};
 		const sameDocument = JSON.stringify(stripMarker(marked, 0)) === JSON.stringify(parsed.document);
+		// Code being typed stays in source, where its closing fence can still be written.
+		if (inCode) return null;
 		if (sameDocument && selection !== undefined) {
 			parsed.selection = selection;
 			parsed.selectionMarks = selectionMarks;
-		} else if (caret < source.length) return null;
+		} else {
+			// A caret the marker cannot place is taken only at the end of a draft that stops on
+			// a line of text; trailing blank lines and closed code have no position to map to.
+			const trailing =
+				caret === source.length && ended ? trailingSelection(parsed.document) : undefined;
+			if (trailing === undefined) return null;
+			parsed.selection = trailing;
+		}
 	}
 	return parsed;
 }

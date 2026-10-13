@@ -340,6 +340,29 @@ describe('Markdown detection', () => {
 		expect(parsed.selection).toBe(10);
 		expect(parsed.selectionMarks).toEqual([{ type: 'bold' }]);
 	});
+	it('places a caret after closing delimiters that end the draft', () => {
+		const parsed = parseComposerMarkdown({ source: '__bold__', pastedText: '__bold__', caret: 8 })!;
+		expect(parsed.selection).toBe(5);
+		expect(parsed.selectionMarks).toEqual([]);
+	});
+	it.each(['**bold**\n\n', '**bold**\n', '- item\n\n', '```\ncode\n```', '```\ncode\n```\n'])(
+		'defers a draft whose end has no position in the document: %j',
+		(source) => {
+			expect(parseComposerMarkdown({ source, pastedText: source, caret: source.length })).toBeNull();
+		},
+	);
+	it('places text typed after a closed fence in its own paragraph', () => {
+		const source = '```\ncode\n```\nx';
+		const parsed = parseComposerMarkdown({ source, pastedText: source, caret: source.length })!;
+		expect(parsed.document.content?.map((node) => node.type)).toEqual(['codeBlock', 'paragraph']);
+		expect(parsed.selection).toBe(8);
+	});
+	it.each(['```js\n', '```js\nconst a', 'Intro **x**\n\n```\ncode'])(
+		'keeps code that is still being typed in source: %j',
+		(source) => {
+			expect(parseComposerMarkdown({ source, pastedText: source, caret: source.length })).toBeNull();
+		},
+	);
 	it('screens long input in linear time', () => {
 		const started = performance.now();
 		isMarkdownCandidate(' '.repeat(30_000) + 'x');

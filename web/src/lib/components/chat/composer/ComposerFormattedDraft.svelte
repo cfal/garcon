@@ -28,10 +28,12 @@
 		selection={draft.selection}
 		selectionMarks={draft.selectionMarks}
 		{readOnly}
+		snippetTrigger={controller.snippetTrigger}
 		{onSubmitKeydown}
 		{onCompletionKeydown}
 		onChange={(text) => controller.change(text)}
 		onPlain={(text, caret) => controller.plain(text, caret)}
+		onSnippet={(text, caret) => controller.snippet(text, caret)}
 		onEditSource={() => void controller.edit()}
 		onReady={(target) => controller.focus(target)}
 		onMention={(mention) => controller.mention(mention)}

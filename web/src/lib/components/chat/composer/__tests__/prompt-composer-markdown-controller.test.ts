@@ -40,7 +40,9 @@ function fixture() {
 		textarea,
 		chatId: 'one',
 		canFormat: true,
+		acceptsMarkdown: true,
 		interactionGeneration: 0,
+		snippetTrigger: ';;',
 		onChange: vi.fn((text: string) => {
 			composer.inputText = text;
 		}),
@@ -61,6 +63,68 @@ function fixture() {
 afterEach(() => {
 	document.body.replaceChildren();
 	vi.resetAllMocks();
+});
+
+describe('formatted composer input format', () => {
+	it('leaves typed, pasted, and restored Markdown as source where Markdown is not accepted', async () => {
+		const { controller, ui, options, paste } = fixture();
+		options.acceptsMarkdown = false;
+		options.textarea.value = table;
+		controller.input(new InputEvent('input', { inputType: 'insertText' }));
+		await new Promise((done) => setTimeout(done, 180));
+		paste(table);
+		controller.restore();
+		await Promise.resolve();
+		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		expect(ui.formattedDraft).toBeNull();
+		controller.destroy();
+	});
+	it('abandons a conversion when the model stops accepting Markdown meanwhile', async () => {
+		let resolve!: (document: ComposerMarkdownDocument | null) => void;
+		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(
+			new Promise((done) => {
+				resolve = done;
+			}),
+		);
+		const { controller, ui, options } = fixture();
+		controller.restore();
+		await vi.waitFor(() => expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce());
+		options.acceptsMarkdown = false;
+		resolve(parsed);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(ui.formattedDraft).toBeNull();
+		controller.destroy();
+	});
+});
+
+describe('formatted composer snippet triggers', () => {
+	it('returns a typed trigger to the plain editor at its caret, where the palette opens', async () => {
+		const { controller, ui, options } = fixture();
+		ui.formattedDraft = { source: table, ...parsed };
+		const text = '**context** ;;re';
+		expect(controller.snippet(text, text.length)).toBe(true);
+		expect(options.onChange).toHaveBeenCalledExactlyOnceWith(text);
+		options.textarea.value = text;
+		await vi.waitFor(() =>
+			expect(options.onSourceCaret).toHaveBeenCalledExactlyOnceWith(text, text.length),
+		);
+		expect(ui.formattedDraft).toBeNull();
+		expect(document.activeElement).toBe(options.textarea);
+		controller.destroy();
+	});
+	it('leaves a dismissed trigger and plain prose in the formatted editor', () => {
+		const { controller, ui, options } = fixture();
+		ui.formattedDraft = { source: table, ...parsed };
+		const text = '**context** ;;re';
+		ui.snippetPalette.updateDetectedTrigger({ start: 12, end: 14, query: '' }, '**context** ;;');
+		ui.snippetPalette.dismiss();
+		expect(controller.snippet(text, text.length)).toBe(false);
+		expect(controller.snippet('**context** more', 16)).toBe(false);
+		expect(options.onChange).not.toHaveBeenCalled();
+		expect(ui.formattedDraft).not.toBeNull();
+		controller.destroy();
+	});
 });
 
 describe('formatted composer lifecycle', () => {

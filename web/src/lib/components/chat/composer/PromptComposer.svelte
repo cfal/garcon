@@ -72,6 +72,7 @@
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 	import PromptComposerModelSelector from './PromptComposerModelSelector.svelte';
 	import { snippetTemplateUsesArguments } from '$shared/snippets';
+	import { acceptsMarkdownInput } from '$lib/chat/composer/markdown-input.js';
 	import {
 		matchesSelectableSnippetExpansion,
 		type SelectableSnippet,
@@ -118,6 +119,7 @@
 	const executionAgent = $derived(modelCatalog.getAgent(agentState.agentId));
 	const conversationInput = $derived(Boolean(executionAgent && executionAgent.executionPolicy !== 'literal'));
 	const executionKey = $derived(JSON.stringify([agentState.executorId, agentState.agentId, executionAgent?.executionPolicy]));
+	const markdownInput = $derived(acceptsMarkdownInput(executionAgent, agentState.model));
 	const attachmentError = $derived(
 		executionAgent && composerState.images.some(file => !isSupportedChatAttachment(file, attachmentSupport))
 			? m.chat_composer_remove_attachments({ agent: executionAgent.label })
@@ -157,9 +159,11 @@
 				isVisible && isPresented && !isDisabled && !promptTransformPending && !ui.composerEditorOpen
 			);
 		},
+		get acceptsMarkdown() { return markdownInput; },
 		get interactionGeneration() {
 			return workspaceShortcuts.userInteractionGeneration;
 		},
+		get snippetTrigger() { return conversationInput ? localSettings.snippetTrigger : ''; },
 		onChange: updateDraft,
 		onSourceCaret: updateTriggers,
 		onUnavailable() {
@@ -337,14 +341,14 @@
 		attachmentController.resetDrag();
 	});
 
-	// Drops a formatted view that another surface made stale by changing the draft.
+	// Drops a formatted view once another surface changed the draft or its model stopped accepting Markdown.
 	$effect(() => {
-		if (ui.formattedDraft && !formattedDraft) untrack(() => markdown.reset());
+		if (ui.formattedDraft && (!formattedDraft || !markdownInput)) untrack(() => markdown.reset());
 	});
-	// Restores the formatted view of a Markdown draft when its chat is selected or reloaded.
+	// Restores the formatted view of a Markdown draft when its chat is selected or reloaded and its model accepts Markdown.
 	$effect(() => {
 		const restored = composerState.draftRestoreRequest?.chatId === sessions.selectedChatId;
-		if (restored && isVisible && isPresented) untrack(() => markdown.restore());
+		if (restored && markdownInput && isVisible && isPresented) untrack(() => markdown.restore());
 	});
 
 	// Cancels path-bound expansion when a selected chat moves to another project.

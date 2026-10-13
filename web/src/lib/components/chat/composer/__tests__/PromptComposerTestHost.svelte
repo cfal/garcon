@@ -60,6 +60,7 @@
 	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
 	import type { RecallPrompt } from '$lib/chat/composer/prompt-recall';
+	import type { InputFormatByModel } from '$shared/input-format';
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '$shared/attachments';
 
 	interface Props {
@@ -73,6 +74,8 @@
 		selectedThinkingMode?: ChatSessionRecord['thinkingMode'];
 		selectedStatus?: ChatStatus;
 		executionPolicy?: 'conversation' | 'literal';
+		inputFormatByModel?: InputFormatByModel;
+		model?: string;
 		fileAttachmentMimeTypes?: readonly string[];
 		selectedIsProcessing?: boolean;
 		isVisible?: boolean;
@@ -114,6 +117,8 @@
 		selectedThinkingMode = 'none',
 		selectedStatus = 'running',
 		executionPolicy = 'conversation',
+		inputFormatByModel = {},
+		model,
 		fileAttachmentMimeTypes = CHAT_FILE_ATTACHMENT_MIME_TYPES,
 		selectedIsProcessing = false,
 		isVisible = true,
@@ -209,7 +214,7 @@
 		codex: 'Codex',
 		amp: 'Amp',
 	};
-	const selectedModel = $derived(modelOptionsFor(selectedAgentId)[0]?.value ?? 'opus');
+	const selectedModel = $derived(model ?? modelOptionsFor(selectedAgentId)[0]?.value ?? 'opus');
 	const requiresQueuedSubmission = $derived(
 		requiresQueuedSubmissionOverride ?? selectedIsProcessing,
 	);
@@ -362,6 +367,7 @@
 		getAgent: (agentId: string) => ({
 			id: agentId,
 			executionPolicy,
+			inputFormatByModel,
 			label: labelForAgent(agentId),
 			description: '',
 			supportsFork: agentId !== 'amp',

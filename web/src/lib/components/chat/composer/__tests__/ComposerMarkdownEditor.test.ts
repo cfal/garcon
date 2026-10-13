@@ -7,15 +7,18 @@ import type { ComposerMarkdownMention } from '../prompt-composer-markdown-contro
 
 afterEach(cleanup);
 
-function mount(source: string, caret?: number) {
+function mount(source: string, caret?: number, { handsOverSnippets = true } = {}) {
 	const parsed = parseComposerMarkdown({ source, caret })!;
 	const onChange = vi.fn<(source: string) => void>();
 	const onMention = vi.fn<(mention: ComposerMarkdownMention | null) => void>();
+	const onSnippet = vi.fn<(text: string, caret: number) => boolean>(() => handsOverSnippets);
 	render(ComposerMarkdownEditor, {
 		...parsed,
 		readOnly: false,
+		snippetTrigger: ';;',
 		onChange,
 		onMention,
+		onSnippet,
 		onPlain: vi.fn(),
 		onEditSource: vi.fn(),
 		onSubmitKeydown: vi.fn(),
@@ -24,7 +27,17 @@ function mount(source: string, caret?: number) {
 		onLargePaste: vi.fn(),
 	});
 	const editor = (screen.getByRole('textbox') as TiptapEditorHTMLElement).editor!;
-	return { editor, onChange, onMention };
+	return { editor, onChange, onMention, onSnippet };
+}
+
+function type(editor: ReturnType<typeof mount>['editor'], text: string) {
+	for (const character of text) {
+		const { from, to } = editor.state.selection;
+		const handled = editor.view.someProp('handleTextInput', (handler) =>
+			handler(editor.view, from, to, character, () => editor.state.tr.insertText(character)),
+		);
+		if (!handled) editor.view.dispatch(editor.state.tr.insertText(character, from, to));
+	}
 }
 
 describe('formatted editor file mentions', () => {
@@ -68,15 +81,29 @@ describe('formatted editor file mentions on load', () => {
 	});
 });
 
-function type(editor: ReturnType<typeof mount>['editor'], text: string) {
-	for (const character of text) {
-		const { from, to } = editor.state.selection;
-		const handled = editor.view.someProp('handleTextInput', (handler) =>
-			handler(editor.view, from, to, character, () => editor.state.tr.insertText(character)),
-		);
-		if (!handled) editor.view.dispatch(editor.state.tr.insertText(character, from, to));
-	}
-}
+describe('formatted editor snippet triggers', () => {
+	it('hands over the serialized draft with the caret after a typed trigger', () => {
+		const { editor, onChange, onSnippet } = mount('Use **context** here\n\n- one\n- two');
+		editor.commands.setTextSelection(17);
+		type(editor, ' ;;re');
+		const source = 'Use **context** here ;;re\n\n- one\n- two';
+		expect(onSnippet).toHaveBeenLastCalledWith(source, 'Use **context** here ;;re'.length);
+		expect(onChange).not.toHaveBeenCalledWith(source);
+	});
+	it('keeps editing formatted when the trigger is not handed over', () => {
+		const { editor, onChange, onSnippet } = mount('Use **context**', 15, {
+			handsOverSnippets: false,
+		});
+		type(editor, ' ;;');
+		expect(onSnippet).toHaveBeenCalledOnce();
+		expect(onChange).toHaveBeenLastCalledWith('Use **context** ;;');
+	});
+	it('ignores a prefix typed mid-word', () => {
+		const { editor, onSnippet } = mount('Use **context**', 15);
+		type(editor, 'x;;');
+		expect(onSnippet).not.toHaveBeenCalled();
+	});
+});
 
 describe('live formatted editor typing', () => {
 	it('formats explicit links while keeping bare addresses and identifiers literal', () => {

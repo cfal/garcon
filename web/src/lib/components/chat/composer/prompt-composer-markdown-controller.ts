@@ -1,5 +1,6 @@
 import { tick } from 'svelte';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
+import { findSnippetTrigger } from '$lib/chat/composer/snippet-trigger.js';
 import type { PromptComposerUiState } from './prompt-composer-state.svelte.js';
 import { isComposerMarkdownSized, isMarkdownCandidate } from './composer-markdown-limits.js';
 import {
@@ -21,7 +22,11 @@ interface PromptComposerMarkdownOptions {
 	get chatId(): string | null;
 	get textarea(): HTMLTextAreaElement | undefined;
 	get canFormat(): boolean;
+	/** Whether the selected agent and model take Markdown; other input stays as typed. */
+	get acceptsMarkdown(): boolean;
 	get interactionGeneration(): number;
+	/** Prefix that opens the snippet palette; empty where snippets do not apply. */
+	get snippetTrigger(): string;
 	onChange(text: string): void;
 	/** Reports the caret after a draft returns to the plain editor mid-edit. */
 	onSourceCaret(text: string, caret: number): void;
@@ -111,6 +116,21 @@ export class PromptComposerMarkdownController {
 		this.#workerAbort?.abort();
 		this.options.onChange(text);
 		void this.edit(caret);
+	}
+
+	get snippetTrigger(): string {
+		return this.options.snippetTrigger;
+	}
+
+	/**
+	 * Hands a snippet trigger typed in the formatted editor to the plain editor, whose palette
+	 * replaces a range of the source. Reports whether the draft was handed over.
+	 */
+	snippet(text: string, caret: number): boolean {
+		const trigger = findSnippetTrigger(text, caret, this.options.snippetTrigger);
+		if (!trigger || !this.options.ui.snippetPalette.opensFor(trigger, text)) return false;
+		this.plain(text, caret);
+		return true;
 	}
 
 	change(text: string): void {
@@ -208,7 +228,7 @@ export class PromptComposerMarkdownController {
 
 	async #format(pastedText: string, caret?: number): Promise<void> {
 		const source = this.options.composer.inputText;
-		if (!this.options.canFormat || !source.trim()) return;
+		if (!this.options.canFormat || !this.options.acceptsMarkdown || !source.trim()) return;
 		if (!isComposerMarkdownSized(source)) return;
 		this.#workerAbort?.abort();
 		const abort = new AbortController();
@@ -228,6 +248,7 @@ export class PromptComposerMarkdownController {
 			this.#destroyed ||
 			abort.signal.aborted ||
 			!this.options.canFormat ||
+			!this.options.acceptsMarkdown ||
 			this.options.chatId !== chatId ||
 			this.options.composer.inputText !== source ||
 			(caret !== undefined &&
