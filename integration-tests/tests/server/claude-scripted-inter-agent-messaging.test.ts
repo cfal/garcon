@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
-import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
+import { claudeModelInputText, claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import {
   expectFinished,
@@ -101,8 +101,10 @@ describe('scripted Claude inter-agent messaging', () => {
 
         await writeFile(releasePath, 'release', 'utf8');
         const steeredRequest = await continuation.requested;
-        expect(steeredRequest.toolResults.some((result) => result.content.includes(envelope)))
-          .toBe(true);
+        expect(steeredRequest.toolResults).toContainEqual(expect.objectContaining({
+          toolUseId: 'toolu_inter_agent_gate',
+        }));
+        expect(claudeModelInputText(steeredRequest).split(envelope)).toHaveLength(2);
         continuation.release();
 
         expectFinished((await fixture.client.waitForTurnTerminal(

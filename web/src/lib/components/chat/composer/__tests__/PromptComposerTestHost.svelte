@@ -542,6 +542,11 @@
 >
 <button
 	type="button"
+	data-testid="restore-draft"
+	onclick={() => composer.restoreDraft(selectedChatId)}>Restore draft</button
+>
+<button
+	type="button"
 	data-testid="clear-draft"
 	onclick={() => composer.clearAfterSubmit(selectedChatId)}>Clear draft</button
 >

@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import {
   claudeText,
@@ -6,6 +8,7 @@ import {
 } from '../../support/fake-claude-model.js';
 import {
   forkAtMessageWhenPersisted,
+  forkWhenTranscriptPersists,
 } from '../../support/fork-test-support.js';
 import {
   type IntegrationFixture,
@@ -34,12 +37,12 @@ describe('scripted Claude fork while running', () => {
     environment?.dispose();
   });
 
-  test('forks streamed ledger points before and after native settlement', async () => {
+  test('forks streamed ledger points during a gated turn and after settlement', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     const prompt = `SCRIPTED_CLAUDE_FORK_PROMPT_${crypto.randomUUID().replaceAll('-', '')}`;
     const reply = `SCRIPTED_CLAUDE_FORK_REPLY_${crypto.randomUUID().replaceAll('-', '')}`;
-    const command = 'sleep 5';
+    const command = 'while [ ! -f fork-release ]; do sleep 0.05; done';
     testEnvironment.model.scriptTurn([
       claudeToolUse('toolu_scripted_sleep', 'Bash', { command }),
     ]);
@@ -62,28 +65,25 @@ describe('scripted Claude fork while running', () => {
       expect(testEnvironment.model.requests()).toHaveLength(1);
 
       const wholeForkId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: wholeForkId });
-      const wholeFork = await fixture.client.getMessages(wholeForkId);
-      expect(userContents(wholeFork.messages)).toEqual([prompt]);
-      expect(messagesOfType(wholeFork.messages, 'assistant-message')
-        .some((message) => message.content.includes(reply))).toBe(false);
-
-      // A provider-native position is optional. The frozen ledger prefix is
-      // immediately forkable while the provider is still settling the turn.
       const streamedForkId = fixture.newChatId();
-      await fixture.client.forkChat({
-        sourceChatId,
-        chatId: streamedForkId,
-        transcriptViewId: (await fixture.client.getMessages(sourceChatId, { limit: 1 }))
-          .transcriptViewId,
-        upToOrdinal: streamedBash.ordinal,
-      });
-      const streamedFork = await fixture.client.getMessages(streamedForkId);
-      expect(userContents(streamedFork.messages)).toEqual([prompt]);
-      expect(messagesOfType(streamedFork.messages, 'bash-tool-use')
-        .some((message) => message.command === command)).toBe(true);
-      expect(messagesOfType(streamedFork.messages, 'assistant-message')
-        .some((message) => message.content.includes(reply))).toBe(false);
+      try {
+        await forkWhenTranscriptPersists(fixture, sourceChatId, wholeForkId);
+        const wholeFork = await fixture.client.getMessages(wholeForkId);
+        expect(userContents(wholeFork.messages)).toEqual([prompt]);
+        expect(messagesOfType(wholeFork.messages, 'assistant-message')
+          .some((message) => message.content.includes(reply))).toBe(false);
+
+        await forkAtMessageWhenPersisted(fixture, sourceChatId, streamedForkId, streamedBash.ordinal);
+        const streamedFork = await fixture.client.getMessages(streamedForkId);
+        expect(userContents(streamedFork.messages)).toEqual([prompt]);
+        expect(messagesOfType(streamedFork.messages, 'bash-tool-use')
+          .some((message) => message.command === command)).toBe(true);
+        expect(messagesOfType(streamedFork.messages, 'assistant-message')
+          .some((message) => message.content.includes(reply))).toBe(false);
+        expect(testEnvironment.model.requests()).toHaveLength(1);
+      } finally {
+        await writeFile(join(fixture.dirs.project, 'fork-release'), 'release', 'utf8');
+      }
 
       await waitForVisibleResponse({
         fixture,

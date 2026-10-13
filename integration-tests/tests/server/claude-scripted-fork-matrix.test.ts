@@ -8,6 +8,7 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
+import { isRecord } from '../../../common/json.js';
 import {
   assistantContents,
   countUserContent,
@@ -457,7 +458,10 @@ describe('scripted Claude fork lifecycle matrix', () => {
 
       testEnvironment.model.scriptTurn((request) => {
         expect(request.lastUserText).toContain(childPrompt);
-        expect(request.body.messages).toHaveLength(1);
+        const messages = Array.isArray(request.body.messages) ? request.body.messages : [];
+        expect(messages.filter((message) => isRecord(message)
+          && (message.role === 'user' || message.role === 'assistant'))).toHaveLength(1);
+        expect(request.toolResults).toEqual([]);
         return [claudeText(childReply)];
       });
       const childCursor = fixture.client.markEvents();

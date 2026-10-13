@@ -39,6 +39,12 @@ export default function (pi) {
         baseUrl: 'http://127.0.0.1:1/v1', reasoning: false, input: ['text'],
         contextWindow: 8192, maxTokens: 1024, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }];
     },
+    getAllModels() {
+      return [...this.getModels(),
+        { type: 'classifier', id: 'classifier-only', name: 'Classifier', api: 'openai-decisions',
+          provider: 'garcon-native', baseUrl: 'http://127.0.0.1:1/v1', input: ['text'],
+          contextWindow: 8192, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }];
+    },
     stream() { throw new Error('Discovery must not perform inference'); },
     streamSimple() { throw new Error('Discovery must not perform inference'); },
   });

@@ -898,7 +898,9 @@
 			onClose={closeQueueEditor}
 			onFocusComposer={(chatId) => {
 				if (sessions.selectedChatId === chatId && isPresented)
-					composerHost?.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true });
+					composerHost
+						?.querySelector<HTMLElement>('[data-composer-markdown-editor] [role="textbox"], textarea')
+						?.focus({ preventScroll: true });
 			}}
 			onCreate={async (content) => {
 				if (!queueEditorChatId) return;

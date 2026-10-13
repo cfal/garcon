@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import {
+  claudeModelInputText,
   claudeText,
   claudeToolUse,
 } from '../../support/fake-claude-model.js';
@@ -8,7 +9,6 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { expectFinished, LIVE_TURN_TIMEOUT_MS } from '../../support/live-agent.js';
 import { liveClaudeStartRequest } from '../../support/live-claude.js';
 import {
-  claudeContinuationRequestText,
   startScriptedClaudeTestEnvironment,
   type ScriptedClaudeTestEnvironment,
 } from '../../support/scripted-claude.js';
@@ -98,11 +98,12 @@ describe('scripted Claude strict steering', () => {
       );
       if (!steeredToolResult) throw new Error('Claude omitted the steering tool result.');
       expect(steeredToolResult.content).toContain(toolMarker);
-      expect(steeredToolResult.content).toContain(`${STEERING_PREFIX}${steerPrompt}`);
-      expect(steeredToolResult.content.indexOf(toolMarker))
-        .toBeLessThan(steeredToolResult.content.indexOf(`${STEERING_PREFIX}${steerPrompt}`));
+      const steeredText = claudeModelInputText(steeredModelRequest);
+      expect(steeredText.split(`${STEERING_PREFIX}${steerPrompt}`)).toHaveLength(2);
+      expect(steeredText.indexOf(toolMarker))
+        .toBeLessThan(steeredText.indexOf(`${STEERING_PREFIX}${steerPrompt}`));
       expect(activeRequests.filter((record) =>
-        record.toolResults.some((result) => result.content.includes(steerPrompt)))).toHaveLength(1);
+        claudeModelInputText(record).includes(steerPrompt))).toHaveLength(1);
 
       const stillPaused = await fixture.client.getExecutionControl(chatId);
       expect(stillPaused).toEqual(beforeSteer);
@@ -191,10 +192,10 @@ describe('scripted Claude strict steering', () => {
       expect(requests).toHaveLength(2);
       const steeredRequest = requests.at(-1);
       if (!steeredRequest) throw new Error('Claude did not make the batched steering request.');
-      expect(steeredRequest.lastUserText).toBe(claudeContinuationRequestText([
-        `${STEERING_PREFIX}${firstSteer}`,
-        `${STEERING_PREFIX}${secondSteer}`,
-      ].join('\n')));
+      expect(steeredRequest.lastUserText).toContain(`${STEERING_PREFIX}${firstSteer}`);
+      expect(steeredRequest.lastUserText).toContain(`${STEERING_PREFIX}${secondSteer}`);
+      expect(steeredRequest.lastUserText.split(firstSteer)).toHaveLength(2);
+      expect(steeredRequest.lastUserText.split(secondSteer)).toHaveLength(2);
       expect(steeredRequest.lastUserText.indexOf(firstSteer))
         .toBeLessThan(steeredRequest.lastUserText.indexOf(secondSteer));
 

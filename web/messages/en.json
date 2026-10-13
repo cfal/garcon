@@ -265,6 +265,7 @@
 	"chat_composer_open_expanded_editor": "Open expanded composer",
 	"chat_composer_permission_mode": "Permission mode",
 	"chat_composer_refining_prompt": "Refining prompt...",
+	"chat_composer_pasting": "Pasting text...",
 	"prompt_editor_close": "Close expanded editor",
 	"prompt_editor_load_failed": "The expanded editor could not be loaded.",
 	"prompt_editor_loading": "Loading expanded editor",
@@ -2989,5 +2990,8 @@
 	"command_recent_chat": "Recent chat",
 	"command_chat_running": "Running",
 	"command_chat_unread": "Unread",
-	"command_chat_location": "{executor}: {path} · #{chatId}"
+	"command_chat_location": "{executor}: {path} · #{chatId}",
+	"chat_composer_format_markdown": "Format Markdown",
+	"chat_composer_formatted_markdown": "Formatted message",
+	"chat_composer_format_unavailable": "This draft cannot use formatted editing. Continue in Markdown source."
 }

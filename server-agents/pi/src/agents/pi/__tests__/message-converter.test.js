@@ -43,13 +43,14 @@ describe('convertPiMessage', () => {
     expect(messages[2].content).toBe('done');
   });
 
-  it('converts persisted tool results', () => {
+  it.each([undefined, 42])('converts persisted tool results with durationMs=%s', (durationMs) => {
     const messages = convertPiMessage({
       role: 'toolResult',
       timestamp: '2026-01-01T00:00:02.000Z',
       toolCallId: 'tool-1',
       content: { stdout: 'ok' },
       isError: false,
+      ...(durationMs === undefined ? {} : { durationMs }),
     });
 
     expect(messages).toHaveLength(1);

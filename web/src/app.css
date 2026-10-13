@@ -16,6 +16,11 @@
 @theme inline {
 	--color-background: hsl(var(--background));
 	--color-foreground: hsl(var(--foreground));
+	--color-composer-foreground: color-mix(
+		in oklab,
+		hsl(var(--foreground)) 80%,
+		hsl(var(--muted-foreground))
+	);
 	--color-card: hsl(var(--card));
 	--color-card-foreground: hsl(var(--card-foreground));
 	--color-popover: hsl(var(--popover));

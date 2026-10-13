@@ -13,6 +13,7 @@ import {
 import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
 import { findSnippetTrigger } from '$lib/chat/composer/snippet-trigger.js';
 import type { PromptEditorSelection } from '$lib/prompt-editor/prompt-editor-selection.js';
+import type { ComposerMarkdownDocument } from './composer-markdown-parser.js';
 
 export class PromptComposerUiState {
 	showFileMenu = $state(false);
@@ -24,6 +25,9 @@ export class PromptComposerUiState {
 	readonly snippetPalette = new SnippetPaletteTriggerState();
 	previousChatId = $state<string | null>(null);
 	composerEditorOpen = $state(false);
+	formattedDraft = $state.raw<({ source: string } & ComposerMarkdownDocument) | null>(null);
+	formattedPastePending = $state(false);
+	formattedTarget = $state.raw<HTMLElement>();
 	composerEditorChatId = $state<string | null>(null);
 	composerEditorFocusRequestId = $state(0);
 	composerEditorSelection = $state<PromptEditorSelection>({ anchor: 0, head: 0 });
@@ -38,6 +42,12 @@ export class PromptComposerUiState {
 		this.setFileMentionTrigger(null);
 	}
 
+	closeFormattedDraft(): void {
+		this.formattedPastePending = false;
+		this.formattedDraft = null;
+		this.formattedTarget = undefined;
+	}
+
 	setSlashCommandTrigger(trigger: SlashCommandTrigger | null): void {
 		this.slashCommandTrigger = trigger;
 		this.showSlashMenu = Boolean(trigger);
@@ -48,7 +58,13 @@ export class PromptComposerUiState {
 		this.setSlashCommandTrigger(null);
 	}
 
-	updateTriggers(value: string, caret: number, snippetTrigger: unknown, isComposing: boolean, mode: 'conversation' | 'literal'): void {
+	updateTriggers(
+		value: string,
+		caret: number,
+		snippetTrigger: unknown,
+		isComposing: boolean,
+		mode: 'conversation' | 'literal',
+	): void {
 		if (mode === 'literal') {
 			this.closeFileMenu();
 			const trigger = findSlashCommandTrigger(value, caret);
@@ -112,6 +128,7 @@ export class PromptComposerUiState {
 		this.closeSlashMenu();
 		this.snippetPalette.reset();
 		this.closeComposerEditor();
+		this.closeFormattedDraft();
 		return true;
 	}
 }
