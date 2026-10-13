@@ -211,9 +211,7 @@ describe('composer Markdown source preservation', () => {
 		const output = serializeAfterEdit(prompt, (content) =>
 			content.map((node) => (node.type === 'table' ? editFirstCell(node, 'top_p') : node)),
 		);
-		expect(output).toBe(
-			prompt.replace('| - | - |\n| max_tokens |', '| --- | --- |\n| top_p |'),
-		);
+		expect(output).toBe(prompt.replace('| - | - |\n| max_tokens |', '| --- | --- |\n| top_p |'));
 	});
 	it('restores the exact draft when an edit is undone', () => {
 		// Undo yields nodes equal to the parsed ones that are no longer the same objects.
@@ -329,6 +327,19 @@ describe('composer Markdown source preservation', () => {
 });
 
 describe('Markdown detection', () => {
+	it('maps a caret after completed bold in the middle of a draft without changing source', () => {
+		const source = 'Before **bold** after';
+		const parsed = parseComposerMarkdown({ source, pastedText: source, caret: 15 })!;
+		expect(parsed.selection).toBe(12);
+		expect(parsed.selectionMarks).toEqual([]);
+		expect(parsed.sources.join('')).toBe(source);
+	});
+	it('preserves the active mark when conversion happens inside bold text', () => {
+		const source = 'Before **bold** after';
+		const parsed = parseComposerMarkdown({ source, pastedText: source, caret: 11 })!;
+		expect(parsed.selection).toBe(10);
+		expect(parsed.selectionMarks).toEqual([{ type: 'bold' }]);
+	});
 	it('screens long input in linear time', () => {
 		const started = performance.now();
 		isMarkdownCandidate(' '.repeat(30_000) + 'x');

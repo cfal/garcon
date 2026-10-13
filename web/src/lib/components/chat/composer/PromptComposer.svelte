@@ -872,6 +872,7 @@
 						onkeydown={handleKeyDown}
 						onpointerdown={() => promptRecall.reset()}
 						oninput={handleInput}
+						oncompositionend={() => markdown.input(new InputEvent("input"))}
 						placeholder={m.chat_composer_reply_placeholder()}
 						disabled={isDisabled}
 						readonly={promptRefinement.pending}
@@ -881,9 +882,6 @@
 			</div>
 
 			<ComposerBottomBar
-				markdownAction={!formattedDraft && composerState.inputText.trim()
-					? { label: m.chat_composer_format_markdown(), onclick: () => markdown.open() }
-					: undefined}
 				canAttachImages={canAttachAttachments}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={() => attachmentController.pick()}

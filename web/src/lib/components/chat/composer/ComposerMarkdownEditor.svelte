@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Editor, resolveFocusPosition, type JSONContent } from '@tiptap/core';
+	import { TextSelection } from '@tiptap/pm/state';
 	import { MarkdownManager } from '@tiptap/markdown';
 	import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
+	import { composerMarkdownTableInput } from './composer-markdown-table-input.js';
 	import { MAX_COMPOSER_MARKDOWN_LENGTH } from './composer-markdown-limits.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createRandomId } from '$lib/utils/random-id.js';
@@ -12,7 +14,7 @@
 		findFileMentionTrigger,
 		formatFileMentionPath,
 	} from '$lib/chat/composer/file-mentions.js';
-	import { serializeComposerMarkdown } from './composer-markdown.js';
+	import { configureComposerMarkdown, serializeComposerMarkdown } from './composer-markdown.js';
 	import {
 		joinComposerMarkdownBlocks,
 		planComposerMarkdownBlocks,
@@ -24,6 +26,8 @@
 	let {
 		document: documentContent,
 		sources,
+		selection: initialSelection,
+		selectionMarks,
 		readOnly,
 		onChange,
 		onPlain,
@@ -36,6 +40,8 @@
 	}: {
 		document: JSONContent;
 		sources: (string | null)[];
+		selection?: number;
+		selectionMarks?: JSONContent['marks'];
 		readOnly: boolean;
 		onChange: (source: string) => void;
 		onPlain: (text: string, caret: number) => void;
@@ -51,6 +57,7 @@
 	onMount(() => {
 		const extensions = composerMarkdownEditorExtensions();
 		const markdown = new MarkdownManager({ extensions });
+		configureComposerMarkdown(markdown);
 		const topLevel = (doc: DocumentNode) =>
 			Array.from({ length: doc.childCount }, (_, index) => doc.child(index));
 		let original: DocumentNode[] = [];
@@ -122,10 +129,23 @@
 		};
 		const mountedEditor = new Editor({
 			element: container,
-			extensions,
+			extensions: [...extensions, composerMarkdownTableInput((source) => markdown.parse(source))],
 			content: documentContent,
 			editable: !readOnly,
-			enableInputRules: false,
+			enableInputRules: [
+				'bold',
+				'italic',
+				'strike',
+				'code',
+				'link',
+				'image',
+				'heading',
+				'blockquote',
+				'bulletList',
+				'orderedList',
+				'taskItem',
+				'codeBlock',
+			],
 			enablePasteRules: false,
 			onUpdate: ({ editor: current }) => {
 				const { doc, selection } = current.state;
@@ -172,7 +192,14 @@
 						onEditSource();
 						return true;
 					}
-					if (event.key === 'Enter') onSubmitKeydown(event);
+					if (event.key === 'Enter') {
+						onSubmitKeydown(event);
+						if (!event.defaultPrevented) {
+							const item = mountedEditor.isActive('taskItem') ? 'taskItem' : 'listItem';
+							if (mountedEditor.isActive(item) && mountedEditor.commands.splitListItem(item))
+								return true;
+						}
+					}
 					return event.defaultPrevented;
 				},
 				handleDOMEvents: {
@@ -215,10 +242,18 @@
 		});
 		editor = mountedEditor;
 		original = topLevel(mountedEditor.state.doc);
-		originalSources =
-			sources.length === original.length ? sources : original.map(() => null);
-		const selection = resolveFocusPosition(mountedEditor.state.doc, 'end');
+		originalSources = sources.length === original.length ? sources : original.map(() => null);
+		const selection =
+			initialSelection === undefined
+				? resolveFocusPosition(mountedEditor.state.doc, 'end')
+				: TextSelection.create(mountedEditor.state.doc, initialSelection);
 		if (selection) mountedEditor.view.dispatch(mountedEditor.state.tr.setSelection(selection));
+		if (selectionMarks)
+			mountedEditor.view.dispatch(
+				mountedEditor.state.tr.setStoredMarks(
+					selectionMarks.map((mark) => mountedEditor.schema.markFromJSON(mark)),
+				),
+			);
 		onReady(mountedEditor.view.dom);
 		return () => mountedEditor.destroy();
 	});

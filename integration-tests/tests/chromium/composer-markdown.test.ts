@@ -64,6 +64,50 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
         await browserExpect(textarea).toHaveValue("");
       };
       const prose = "Ship **two** things:\n\n1. first\n2. second\n\n- [ ] follow up";
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await clear();
+        await textarea.focus();
+        await page.keyboard.type("Ship **two**");
+        await browserExpect(editor).toBeFocused();
+        await browserExpect(editor.locator("strong")).toHaveText("two");
+        await page.keyboard.type(" and **three** now");
+        await browserExpect(editor.locator("strong")).toHaveCount(2);
+        await browserExpect(textarea).toHaveValue("Ship **two** and **three** now");
+        await page.keyboard.press("Shift+Enter");
+        await page.keyboard.press("Shift+Enter");
+        await page.keyboard.type("| Name | Value |");
+        await page.keyboard.press("Shift+Enter");
+        await page.keyboard.type("| --- | --- |");
+        await browserExpect(editor.locator("table")).toHaveCount(1);
+        await page.keyboard.press("Tab");
+        await page.keyboard.type("Synthetic item");
+        await page.keyboard.press("Tab");
+        await page.keyboard.type("Ready");
+        await browserExpect(editor.locator("td")).toHaveCount(2);
+        await browserExpect(textarea).toHaveValue(/Ship \*\*two\*\* and \*\*three\*\* now[\s\S]*Synthetic item.*Ready/);
+        await screenshot(`composer-live-markdown-${width}.png`);
+        await clear();
+        await page.keyboard.type(`1. first ${width}`);
+        await browserExpect(editor).toBeFocused();
+        await page.keyboard.press("Shift+Enter");
+        await page.keyboard.type("second");
+        await browserExpect(editor.locator("ol > li")).toHaveCount(2);
+        await browserExpect(textarea).toHaveValue(`1. first ${width}\n2. second`);
+        const typed = await textarea.inputValue();
+        if (width === 390) await page.getByRole("button", { name: "Send message", exact: true }).click();
+        else await editor.press("Enter");
+        await integration.client.waitForCommittedUserInput(ids[0], typed);
+        await browserExpect(textarea).toHaveValue("");
+        await integration.client.waitForProcessing(ids[0], false);
+        await page.keyboard.type("| Name | Value |");
+        await page.keyboard.press("Shift+Enter");
+        await page.keyboard.type("| --- | --- |");
+        await browserExpect(editor.locator("table")).toHaveCount(1);
+        await browserExpect(page.getByRole("button", { name: "Format Markdown" })).toHaveCount(0);
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await clear();
       await textarea.focus();
       await paste(prose);
       await browserExpect(editor).toBeFocused();
@@ -140,10 +184,6 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
         await browserExpect(textarea).toBeFocused();
         if (width === 390) {
           await textarea.fill(edited);
-          await page
-            .getByRole("button", { name: "More composer actions" })
-            .click();
-          await page.getByRole("menuitem", { name: "Format Markdown" }).click();
           await browserExpect(editor).toBeVisible();
           await browserExpect(editor).toBeFocused();
           await editor.locator("td").first().locator("p").click();
@@ -197,8 +237,8 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await browserExpect(textarea).toHaveValue(
         beforeSnippet + " appended snippet",
       );
-      await textarea.fill(table);
-      await textarea.focus();
+      await clear();
+      await textarea.fill("plain notes");
       await paste("\nplain notes");
       await browserExpect(editor).toHaveCount(0);
       await browserExpect(textarea).toBeFocused();

@@ -63,7 +63,7 @@ const DraftTable = Table.extend({
 export function composerMarkdownEditorExtensions() {
 	return [
 		StarterKit.configure({
-			link: { openOnClick: false, autolink: false, linkOnPaste: false },
+			link: { openOnClick: false, autolink: false, linkOnPaste: false, markdownLinks: true },
 			trailingNode: false,
 			// Its `++text++` syntax would swallow increments such as `i++ and j++`.
 			underline: false,

@@ -2991,7 +2991,6 @@
 	"command_chat_running": "Running",
 	"command_chat_unread": "Unread",
 	"command_chat_location": "{executor}: {path} · #{chatId}",
-	"chat_composer_format_markdown": "Format Markdown",
 	"chat_composer_formatted_markdown": "Formatted message",
 	"chat_composer_format_unavailable": "This draft cannot use formatted editing. Continue in Markdown source."
 }

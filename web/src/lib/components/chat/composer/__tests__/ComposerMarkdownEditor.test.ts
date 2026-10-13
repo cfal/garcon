@@ -7,8 +7,8 @@ import type { ComposerMarkdownMention } from '../prompt-composer-markdown-contro
 
 afterEach(cleanup);
 
-function mount(source: string) {
-	const parsed = parseComposerMarkdown({ source })!;
+function mount(source: string, caret?: number) {
+	const parsed = parseComposerMarkdown({ source, caret })!;
 	const onChange = vi.fn<(source: string) => void>();
 	const onMention = vi.fn<(mention: ComposerMarkdownMention | null) => void>();
 	render(ComposerMarkdownEditor, {
@@ -65,5 +65,65 @@ describe('formatted editor file mentions on load', () => {
 		expect(onMention).not.toHaveBeenCalled();
 		editor.commands.insertContent('/a');
 		expect(onMention.mock.lastCall?.[0]?.query).toBe('src/a');
+	});
+});
+
+function type(editor: ReturnType<typeof mount>['editor'], text: string) {
+	for (const character of text) {
+		const { from, to } = editor.state.selection;
+		const handled = editor.view.someProp('handleTextInput', (handler) =>
+			handler(editor.view, from, to, character, () => editor.state.tr.insertText(character)),
+		);
+		if (!handled) editor.view.dispatch(editor.state.tr.insertText(character, from, to));
+	}
+}
+
+describe('live formatted editor typing', () => {
+	it('formats explicit links while keeping bare addresses and identifiers literal', () => {
+		const { editor, onChange } = mount('Review **this** now');
+		type(editor, ' my_var https://example.test [guide](https://example.test)');
+		expect(editor.view.dom.querySelectorAll('a')).toHaveLength(1);
+		expect(editor.view.dom.querySelector('a')?.textContent).toBe('guide');
+		expect(onChange).toHaveBeenLastCalledWith('Review **this** now my_var https://example.test [guide](https://example.test)');
+	});
+	it('ends a typed bold mark at its closing delimiters before accepting subsequent prose', () => {
+		const { editor, onChange } = mount('Ship **two**', 12);
+		type(editor, ' and **three** now');
+		expect(Array.from(editor.view.dom.querySelectorAll('strong'), (element) => element.textContent)).toEqual(['two', 'three']);
+		expect(onChange).toHaveBeenLastCalledWith('Ship **two** and **three** now');
+	});
+	it('formats subsequent bold syntax and lets undo restore the typed delimiters', () => {
+		const { editor, onChange } = mount('Review **this** now');
+		type(editor, ' **more**');
+		expect(editor.view.dom.querySelectorAll('strong')).toHaveLength(2);
+		expect(onChange).toHaveBeenLastCalledWith('Review **this** now **more**');
+		editor.commands.undoInputRule();
+		expect(editor.state.doc.textContent).toContain('**more**');
+	});
+	it('converts a completed table within a rich draft and preserves surrounding bold', () => {
+		const { editor, onChange } = mount('Review **this** now');
+		editor.commands.insertContent({
+			type: 'paragraph',
+			content: [
+			{ type: 'text', text: '| <tag> | Value |' },
+				{ type: 'hardBreak' },
+				{ type: 'text', text: '| --- | --- ' },
+			],
+		});
+		type(editor, '|');
+		expect(editor.view.dom.querySelectorAll('table')).toHaveLength(1);
+		expect(editor.view.dom.querySelector('strong')?.textContent).toBe('this');
+		expect(onChange.mock.lastCall?.[0]).toContain('| <tag> | Value |\n| --- | --- |');
+		editor.commands.undo();
+		expect(editor.view.dom.querySelectorAll('table')).toHaveLength(0);
+	});
+	it('continues a numbered list when Enter is accepted as a newline', () => {
+		const { editor, onChange } = mount('1. first');
+		editor.view.someProp('handleKeyDown', (handler) =>
+			handler(editor.view, new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true })),
+		);
+		type(editor, 'second');
+		expect(editor.view.dom.querySelectorAll('ol > li')).toHaveLength(2);
+		expect(onChange).toHaveBeenLastCalledWith('1. first\n2. second');
 	});
 });

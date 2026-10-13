@@ -64,10 +64,50 @@ afterEach(() => {
 });
 
 describe('formatted composer lifecycle', () => {
+	it('formats typed Markdown after typing settles without changing its source', async () => {
+		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
+		const { controller, ui, options } = fixture();
+		options.composer.inputText = '**bold**';
+		options.textarea.value = '**bold**';
+		options.textarea.setSelectionRange(8, 8);
+		controller.input(new InputEvent('input', { inputType: 'insertText' }));
+		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe('**bold**'));
+		expect(parseComposerMarkdownInWorker).toHaveBeenCalledExactlyOnceWith(
+			{ source: '**bold**', pastedText: '**bold**', caret: 8 },
+			expect.any(AbortSignal),
+		);
+		expect(options.onChange).not.toHaveBeenCalled();
+		controller.destroy();
+	});
+	it('defers composition and abandons a conversion when the caret moves', async () => {
+		let resolve!: (document: ComposerMarkdownDocument | null) => void;
+		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(
+			new Promise((done) => {
+				resolve = done;
+			}),
+		);
+		const { controller, ui, options } = fixture();
+		controller.input(new InputEvent('input', { isComposing: true }));
+		await new Promise((done) => setTimeout(done, 180));
+		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		options.textarea.value = table;
+		options.textarea.setSelectionRange(table.length, table.length);
+		controller.input(new InputEvent('input'));
+		await vi.waitFor(() => expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce());
+		options.textarea.setSelectionRange(1, 1);
+		resolve(parsed);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(ui.formattedDraft).toBeNull();
+		controller.destroy();
+	});
 	it('applies oversized paste after releasing the shared submission gate', async () => {
 		let resolve!: (text: string) => void;
 		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValue(
-			new Promise((done) => { resolve = done; }),
+			new Promise((done) => {
+				resolve = done;
+			}),
 		);
 		const { ui, options, controller } = fixture();
 		Object.defineProperty(options, 'canFormat', { get: () => !ui.formattedPastePending });
@@ -81,23 +121,34 @@ describe('formatted composer lifecycle', () => {
 		expect(ui.formattedDraft).toBeNull();
 		controller.destroy();
 	});
-	it.each(['null', 'error'])('keeps the pasted text in source and unlocks submission on Worker %s', async (failure) => {
-		if (failure === 'null') vi.mocked(serializeComposerMarkdownPasteInWorker).mockResolvedValue(null);
-		else vi.mocked(serializeComposerMarkdownPasteInWorker).mockRejectedValue(new Error('Worker failed'));
-		const { ui, options, controller } = fixture();
-		ui.formattedDraft = { source: table, ...parsed };
-		await controller.pasteSource(pasteRequest);
-		expect(ui.formattedPastePending).toBe(false);
-		expect(options.composer.inputText).toBe(table + '\n\nlarge');
-		expect(options.onUnavailable).toHaveBeenCalledOnce();
-		expect(ui.formattedDraft).toBeNull();
-		controller.destroy();
-	});
+	it.each(['null', 'error'])(
+		'keeps the pasted text in source and unlocks submission on Worker %s',
+		async (failure) => {
+			if (failure === 'null')
+				vi.mocked(serializeComposerMarkdownPasteInWorker).mockResolvedValue(null);
+			else
+				vi.mocked(serializeComposerMarkdownPasteInWorker).mockRejectedValue(
+					new Error('Worker failed'),
+				);
+			const { ui, options, controller } = fixture();
+			ui.formattedDraft = { source: table, ...parsed };
+			await controller.pasteSource(pasteRequest);
+			expect(ui.formattedPastePending).toBe(false);
+			expect(options.composer.inputText).toBe(table + '\n\nlarge');
+			expect(options.onUnavailable).toHaveBeenCalledOnce();
+			expect(ui.formattedDraft).toBeNull();
+			controller.destroy();
+		},
+	);
 	it('does not unlock a newer paste when an aborted Worker completes', async () => {
 		let resolve!: (text: string) => void;
-		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValueOnce(
-			new Promise((done) => { resolve = done; }),
-		).mockReturnValueOnce(new Promise(() => {}));
+		vi.mocked(serializeComposerMarkdownPasteInWorker)
+			.mockReturnValueOnce(
+				new Promise((done) => {
+					resolve = done;
+				}),
+			)
+			.mockReturnValueOnce(new Promise(() => {}));
 		const { ui, controller } = fixture();
 		ui.formattedDraft = { source: table, ...parsed };
 		const request = pasteRequest;
@@ -216,7 +267,7 @@ describe('formatted composer lifecycle', () => {
 			}),
 		);
 		const { ui, controller } = fixture();
-		controller.open();
+		controller.restore();
 		const button = document.createElement('button');
 		document.body.append(button);
 		button.focus();

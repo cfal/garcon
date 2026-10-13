@@ -2,7 +2,10 @@ import { MarkdownManager } from '@tiptap/markdown';
 import type { JSONContent } from '@tiptap/core';
 import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
 import { configureComposerMarkdown, serializeComposerMarkdown } from './composer-markdown.js';
-import { joinComposerMarkdownBlocks, type ComposerMarkdownBlock } from './composer-markdown-blocks.js';
+import {
+	joinComposerMarkdownBlocks,
+	type ComposerMarkdownBlock,
+} from './composer-markdown-blocks.js';
 import {
 	isComposerMarkdownSized,
 	isMarkdownCandidate,
@@ -44,10 +47,13 @@ const IMAGE_BLOCK_PARENTS = new Set(['doc', 'blockquote', 'listItem', 'taskItem'
 export interface ComposerMarkdownRequest {
 	source: string;
 	pastedText?: string;
+	caret?: number;
 }
 
 export interface ComposerMarkdownDocument {
 	document: JSONContent;
+	selection?: number;
+	selectionMarks?: JSONContent['marks'];
 	/**
 	 * Exact source of each top-level node with the whitespace that follows it; null where a node
 	 * cannot be traced to its own source.
@@ -129,6 +135,7 @@ function parseBlocks(source: string): ComposerMarkdownDocument {
 export function parseComposerMarkdown({
 	source,
 	pastedText,
+	caret,
 }: ComposerMarkdownRequest): ComposerMarkdownDocument | null {
 	if (!isComposerMarkdownSized(source)) return null;
 	if (pastedText !== undefined) {
@@ -146,5 +153,45 @@ export function parseComposerMarkdown({
 		if (++count > MAX_COMPOSER_MARKDOWN_NODES) return null;
 		pending.push(...(pending.pop()?.content ?? []));
 	}
+	if (caret !== undefined) {
+		parsed.selectionMarks = [];
+		// A synthetic text marker maps a source caret through Markdown delimiters off-thread.
+		// Conversion is deferred if inserting it changes the document's structure.
+		let marker = 'garconComposerCaret';
+		while (source.includes(marker)) marker += 'X';
+		const marked = parseBlocks(source.slice(0, caret) + marker + source.slice(caret)).document;
+		let selection: number | undefined;
+		let selectionMarks: JSONContent['marks'] = [];
+		const stripMarker = (node: JSONContent, position: number): JSONContent => {
+			if (node.text !== undefined) {
+				const offset = node.text.indexOf(marker);
+				if (offset >= 0) {
+					selection = position + offset;
+					selectionMarks = node.marks ?? [];
+				}
+				return { ...node, text: node.text.replace(marker, '') };
+			}
+			if (!node.content) return node;
+			let next = position + (node.type === 'doc' ? 0 : 1);
+			const content = node.content
+				.map((child) => {
+					const result = stripMarker(child, next);
+					next += jsonNodeSize(result);
+					return result;
+				})
+				.filter((child) => child.text !== '');
+			return { ...node, content };
+		};
+		const sameDocument = JSON.stringify(stripMarker(marked, 0)) === JSON.stringify(parsed.document);
+		if (sameDocument && selection !== undefined) {
+			parsed.selection = selection;
+			parsed.selectionMarks = selectionMarks;
+		} else if (caret < source.length) return null;
+	}
 	return parsed;
+}
+
+function jsonNodeSize(node: JSONContent): number {
+	if (node.text !== undefined) return node.text.length;
+	return node.content ? 2 + node.content.reduce((sum, child) => sum + jsonNodeSize(child), 0) : 1;
 }

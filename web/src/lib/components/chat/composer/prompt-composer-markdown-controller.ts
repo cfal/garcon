@@ -35,6 +35,7 @@ export class PromptComposerMarkdownController {
 	#focusGeneration = -1;
 	#focusOrigin: Element | null = null;
 	#mention: ComposerMarkdownMention | null = null;
+	#typingTimer: ReturnType<typeof setTimeout> | undefined;
 
 	constructor(private readonly options: PromptComposerMarkdownOptions) {}
 
@@ -48,11 +49,27 @@ export class PromptComposerMarkdownController {
 	input(event: InputEvent): void {
 		const pastedText = this.#pastedText;
 		this.reset();
-		if (event.inputType === 'insertFromPaste' && pastedText !== null) void this.#format(pastedText);
-	}
-
-	open(): void {
-		void this.#format();
+		if (event.isComposing) return;
+		if (event.inputType === 'insertFromPaste') {
+			if (pastedText !== null) void this.#format(pastedText);
+			return;
+		}
+		const source = this.options.composer.inputText;
+		if (!isMarkdownCandidate(source)) return;
+		// Batches typing before loading the parser; input remains in the textarea until ready.
+		this.#typingTimer = setTimeout(() => {
+			this.#typingTimer = undefined;
+			const textarea = this.options.textarea;
+			if (
+				this.options.composer.inputText !== source ||
+				this.options.ui.showFileMenu ||
+				this.options.ui.showSlashMenu ||
+				this.options.ui.snippetPalette.isOpen
+			)
+				return;
+			if (textarea?.selectionStart !== textarea?.selectionEnd) return;
+			void this.#format(source, textarea?.selectionStart);
+		}, 150);
 	}
 
 	/** Shows a loaded Markdown draft formatted, as it was when pasted. */
@@ -63,6 +80,8 @@ export class PromptComposerMarkdownController {
 	}
 
 	reset(): void {
+		clearTimeout(this.#typingTimer);
+		this.#typingTimer = undefined;
 		this.#workerAbort?.abort();
 		this.#workerAbort = null;
 		this.#pastedText = null;
@@ -130,7 +149,11 @@ export class PromptComposerMarkdownController {
 		if (text === null) {
 			// The paste was intercepted, so its text survives only if it is written here. Its
 			// position in the document is unknown without serialization; it goes to the end.
-			const separator = /\n\n$|^$/.test(draft.source) ? '' : draft.source.endsWith('\n') ? '\n' : '\n\n';
+			const separator = /\n\n$|^$/.test(draft.source)
+				? ''
+				: draft.source.endsWith('\n')
+					? '\n'
+					: '\n\n';
 			this.options.onChange(draft.source + separator + request.text);
 			this.options.onUnavailable();
 		} else {
@@ -183,22 +206,22 @@ export class PromptComposerMarkdownController {
 		}
 	}
 
-	async #format(pastedText?: string): Promise<void> {
+	async #format(pastedText: string, caret?: number): Promise<void> {
 		const source = this.options.composer.inputText;
 		if (!this.options.canFormat || !source.trim()) return;
-		if (!isComposerMarkdownSized(source)) {
-			if (pastedText === undefined) this.options.onUnavailable();
-			return;
-		}
+		if (!isComposerMarkdownSized(source)) return;
 		this.#workerAbort?.abort();
 		const abort = new AbortController();
 		this.#workerAbort = abort;
 		const chatId = this.options.chatId;
 		const generation = this.options.interactionGeneration;
-		const focusOrigin = document.activeElement;
+		const focusOrigin = caret === undefined ? document.activeElement : (this.options.textarea ?? null);
 		// The editor loads before the swap so keys typed meanwhile still reach the textarea.
 		const [parsed] = await Promise.all([
-			parseComposerMarkdownInWorker({ source, pastedText }, abort.signal).catch(() => null),
+			parseComposerMarkdownInWorker(
+				{ source, pastedText, ...(caret !== undefined ? { caret } : {}) },
+				abort.signal,
+			).catch(() => null),
 			loadComposerMarkdownEditor().catch(() => null),
 		]);
 		if (
@@ -207,13 +230,13 @@ export class PromptComposerMarkdownController {
 			!this.options.canFormat ||
 			this.options.chatId !== chatId ||
 			this.options.composer.inputText !== source ||
+			(caret !== undefined &&
+				(this.options.textarea?.selectionStart !== caret ||
+					this.options.textarea?.selectionEnd !== caret)) ||
 			this.options.interactionGeneration !== generation
 		)
 			return;
-		if (!parsed) {
-			if (pastedText === undefined) this.options.onUnavailable();
-			return;
-		}
+		if (!parsed) return;
 		this.#focusOrigin = focusOrigin;
 		this.#focusGeneration = generation;
 		this.options.ui.formattedDraft = { source, ...parsed };

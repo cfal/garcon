@@ -25,6 +25,8 @@
 	<MarkdownEditor
 		document={draft.document}
 		sources={draft.sources}
+		selection={draft.selection}
+		selectionMarks={draft.selectionMarks}
 		{readOnly}
 		{onSubmitKeydown}
 		{onCompletionKeydown}
