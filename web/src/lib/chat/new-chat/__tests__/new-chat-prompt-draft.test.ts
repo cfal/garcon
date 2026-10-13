@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as persistence from '$lib/utils/local-persistence';
 import { NewChatPromptDraft, NewChatPromptDraftStore } from '../new-chat-prompt-draft';
 
 function image(name: string): File {
@@ -12,6 +13,7 @@ function openForm(tab: NewChatPromptDraftStore, prefill = '') {
 }
 
 describe('NewChatPromptDraft', () => {
+	afterEach(() => vi.restoreAllMocks());
 	let tab: NewChatPromptDraftStore;
 
 	beforeEach(() => {
@@ -89,11 +91,49 @@ describe('NewChatPromptDraft', () => {
 		expect(openForm(tab).seeded?.text).toBe('');
 	});
 
+	it('retains text and attachments in memory when storage writes fail', () => {
+		vi.spyOn(persistence, 'setLocalStorageItem').mockImplementation(() => {});
+		const attachment = image('diagram.png');
+		openForm(tab).draft.retain('Unsent prompt', [attachment]);
+		expect(openForm(tab).seeded).toEqual({ text: 'Unsent prompt', attachments: [attachment] });
+	});
+
+	it('keeps submitted content cleared in memory when storage removal fails', () => {
+		const { draft } = openForm(tab);
+		draft.retain('Sent prompt', []);
+		vi.spyOn(persistence, 'removeLocalStorageItem').mockImplementation(() => {});
+		draft.discardSubmitted();
+		expect(openForm(tab).seeded).toEqual({ text: '', attachments: [] });
+	});
+
 	describe('with a second tab', () => {
 		let otherTab: NewChatPromptDraftStore;
 
 		beforeEach(() => {
 			otherTab = new NewChatPromptDraftStore();
+		});
+
+		it('does not erase another tab replacing the draft with identical text', () => {
+			const { draft } = openForm(tab);
+			draft.retain('Same prompt', [image('first.png')]);
+			const attachment = image('second.png');
+			openForm(otherTab).draft.retain('Same prompt', [attachment]);
+			draft.discardSubmitted();
+			expect(openForm(otherTab).seeded).toEqual({ text: 'Same prompt', attachments: [attachment] });
+		});
+
+		it('drops stale attachments when another tab writes identical text', () => {
+			openForm(tab).draft.retain('Same prompt', [image('first.png')]);
+			openForm(otherTab).draft.retain('Same prompt', [image('second.png')]);
+			expect(openForm(tab).seeded).toEqual({ text: 'Same prompt', attachments: [] });
+		});
+
+		it('protects an attachment-only draft from a stale empty form submitting', () => {
+			const { draft } = openForm(tab);
+			const attachment = image('diagram.png');
+			openForm(otherTab).draft.retain('', [attachment]);
+			draft.discardSubmitted();
+			expect(openForm(otherTab).seeded).toEqual({ text: '', attachments: [attachment] });
 		});
 
 		it('shows a draft typed in the other tab without a reload', () => {

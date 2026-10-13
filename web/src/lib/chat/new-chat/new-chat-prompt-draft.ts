@@ -2,6 +2,7 @@
 // Text persists in this browser's localStorage; attachments are File handles
 // and survive only for the page lifetime.
 
+import { createRandomId } from '$lib/utils/random-id';
 import {
 	chatDraftStorageKey,
 	getLocalStorageItem,
@@ -18,34 +19,48 @@ export interface NewChatPromptDraftContent {
 	readonly attachments: readonly File[];
 }
 
-function persistedText(): string {
-	return getLocalStorageItem(SLOT_KEY) ?? '';
+function storedText(slot: string | null): string {
+	if (!slot) return '';
+	try {
+		const value: unknown = JSON.parse(slot);
+		return value !== null && typeof value === 'object' && 'text' in value &&
+			typeof value.text === 'string' ? value.text : '';
+	} catch {
+		return '';
+	}
 }
 
-/**
- * Owns the one slot every tab shares. Reads are always fresh, and a tab writes
- * only while the slot still holds what that tab last read or wrote, so it can
- * never replace or clear a newer draft from another tab.
- */
+/** Owns the shared slot and retains page-local content when storage is unavailable. */
 export class NewChatPromptDraftStore {
-	#knownText = '';
+	#knownSlot: string | null = null;
+	#text = '';
 	#attachments: readonly File[] = [];
 
 	read(): NewChatPromptDraftContent {
-		const text = persistedText();
-		// Attachments held here belong to the text this tab wrote, not to another tab's draft.
-		if (text !== this.#knownText) this.#attachments = [];
-		this.#knownText = text;
-		return { text, attachments: this.#attachments };
+		const slot = getLocalStorageItem(SLOT_KEY);
+		if (slot !== this.#knownSlot) {
+			this.#text = storedText(slot);
+			this.#attachments = [];
+		}
+		this.#knownSlot = slot;
+		return { text: this.#text, attachments: this.#attachments };
 	}
 
-	/** Returns false when another tab's draft holds the slot and the content was not written. */
+	/** Returns false when another tab has replaced the last observed revision. */
 	write(text: string, attachments: readonly File[]): boolean {
-		if (persistedText() !== this.#knownText) return false;
-		if (text.trim()) setLocalStorageItem(SLOT_KEY, text);
-		else removeLocalStorageItem(SLOT_KEY);
-		// Re-read rather than assume, so a refused or failed write leaves the slot unowned.
-		this.#knownText = persistedText();
+		const previous = getLocalStorageItem(SLOT_KEY);
+		if (previous !== this.#knownSlot) return false;
+		// Each edit changes identity even when only the page-local attachments change.
+		const next = text.trim() || attachments.length
+			? JSON.stringify({ revision: createRandomId(), text })
+			: null;
+		if (next === null) removeLocalStorageItem(SLOT_KEY);
+		else setLocalStorageItem(SLOT_KEY, next);
+		const observed = getLocalStorageItem(SLOT_KEY);
+		if (observed !== next && observed !== previous) return false;
+		this.#knownSlot = observed;
+		// Failed persistence still retains the unsent content for this page's lifetime.
+		this.#text = text;
 		this.#attachments = [...attachments];
 		return true;
 	}
