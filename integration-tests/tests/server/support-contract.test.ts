@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import * as filesystem from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -227,6 +228,28 @@ describe('integration support contracts', () => {
       ANTHROPIC_AUTH_TOKEN: 'auth-testing-secret',
       HOME: '/tmp/test-home',
     })).toBe('key=[REDACTED] token=[REDACTED] path=/tmp/test-home');
+  });
+
+  test('audits persisted credentials while provider temporary files disappear', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-sensitive-race-'));
+    const temporary = join(root, 'temporary-index');
+    const sensitive = 'synthetic-persisted-credential';
+    await writeFile(temporary, 'temporary data');
+    const read = spyOn(filesystem, 'readFile').mockRejectedValueOnce(
+      Object.assign(new Error('Synthetic expired temporary index'), { code: 'ENOENT' }),
+    );
+    try {
+      await assertSensitiveValuesNotPersisted({ directory: root, diagnostics: {}, values: [sensitive] });
+      expect(read).toHaveBeenCalledWith(temporary);
+      await rm(temporary);
+      expect(await rejectionOf(access(temporary))).toMatchObject({ code: 'ENOENT' });
+      await writeFile(join(root, 'persisted'), sensitive);
+      expect(await rejectionOf(assertSensitiveValuesNotPersisted({ directory: root, diagnostics: {}, values: [sensitive] })))
+        .toMatchObject({ message: 'A sensitive integration credential was persisted by the test workflow.' });
+      read.mockRejectedValueOnce(Object.assign(new Error('Synthetic read denied'), { code: 'EACCES' }));
+      expect(await rejectionOf(assertSensitiveValuesNotPersisted({ directory: root, diagnostics: {}, values: [sensitive] })))
+        .toMatchObject({ code: 'EACCES' });
+    } finally { read.mockRestore(); await rm(root, { recursive: true, force: true }); }
   });
 
   test('rejects persisted sensitive values without echoing them', async () => {
