@@ -7,6 +7,23 @@ export interface ExecutorPinnedPathGroup {
 	paths: string[];
 }
 
+export function filterExecutorPinnedPathGroups(
+	groups: readonly ExecutorPinnedPathGroup[],
+	executors: readonly ExecutorSnapshot[],
+	query: string,
+): ExecutorPinnedPathGroup[] {
+	const search = query.trim().toLowerCase();
+	if (!search) return [...groups];
+	const labels = new Map(executors.map((executor) => [executor.id, executor.label.toLowerCase()]));
+	return groups.flatMap((group) => {
+		const label = labels.get(group.executorId) ?? group.executorId.toLowerCase();
+		const matches = label.includes(search)
+			? group.paths
+			: group.paths.filter((path) => path.toLowerCase().includes(search));
+		return matches.length ? [{ ...group, paths: matches }] : [];
+	});
+}
+
 export function executorPinnedPathGroups(
 	paths: RemoteSettingsSnapshot['paths'] | undefined,
 	executors: readonly ExecutorSnapshot[],

@@ -57,6 +57,26 @@ test('busy executor histories cannot evict other executors across recording, res
   expect(restarted.getRecentAgentSettings()).toHaveLength(20);
 });
 
+test('removing an executor preserves bookmarks while pruning startup preferences through restart', async () => {
+  const root = await mkdtemp(join(homedir(), 'garcon-retained-executor-pins-'));
+  roots.push(root);
+  const settings = new SettingsStore(root);
+  await settings.init();
+  await settings.recordChatStartup({ agentId: 'test', model: 'synthetic', executorId: EXECUTOR, projectPath: '/remote/recent' });
+  await settings.setPathSettings({
+    pinnedProjectPaths: ['/local/pin'],
+    byExecutor: { [EXECUTOR]: { defaultPath: '/remote/default', pinnedPaths: ['/remote/Space Project '] } },
+  });
+  await settings.forgetExecutor(EXECUTOR);
+  const expected = { [EXECUTOR]: { recentPaths: [], pinnedPaths: ['/remote/Space Project '] } };
+  expect(settings.getPathSettings().byExecutor).toEqual(expected);
+  expect(settings.getPathSettings().pinnedProjectPaths).toEqual(['/local/pin']);
+  expect(settings.getRecentAgentSettings()).toEqual([]);
+  const restarted = new SettingsStore(root);
+  await restarted.init();
+  expect(restarted.getPathSettings().byExecutor).toEqual(expected);
+});
+
 test('all generation selections persist their explicit target and reject invalid identities', async () => {
   const root = await mkdtemp(join(homedir(), 'garcon-executor-generation-'));
   roots.push(root);

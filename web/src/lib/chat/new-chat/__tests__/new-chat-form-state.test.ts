@@ -340,6 +340,33 @@ describe('NewChatFormState', () => {
 		expect(formState.projectPath).toBe('/original');
 	});
 
+	it.each(['local', remoteExecutor.id])('uses current settings for %s bookmarks except during a pending pin write', (executorId) => {
+		const snapshot = (path: string, version: number) => makeSnapshot({ version, paths: {
+			pinnedProjectPaths: executorId === 'local' ? [path] : [],
+			byExecutor: { [remoteExecutor.id]: { pinnedPaths: executorId === remoteExecutor.id ? [path] : [], recentPaths: [] } },
+		} });
+		mockRemoteSettings.snapshot = snapshot('/old', 1);
+		formState.selectExecutor(executorId);
+		formState.pinnedProjectPaths = ['/old'];
+		formState.projectPath = '/draft-path';
+		formState.firstMessage = 'Synthetic draft';
+		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
+		mockRemoteSettings.snapshot = snapshot('/new', 2);
+		expect(formState.pinnedProjectPaths).toEqual(['/new']);
+		expect(pins.groups).toEqual([{ executorId, paths: ['/new'] }]);
+		pins.select(executorId, '/old');
+		expect(formState.projectPath).toBe('/draft-path');
+		formState.pinnedProjectPaths = ['/optimistic'];
+		formState.isUpdatingPinnedPath = true;
+		mockRemoteSettings.snapshot = snapshot('/latest', 3);
+		expect(pins.groups).toEqual([{ executorId, paths: ['/optimistic'] }]);
+		pins.select(executorId, '/optimistic');
+		expect(formState.projectPath).toBe('/draft-path');
+		formState.isUpdatingPinnedPath = false;
+		expect(pins.groups).toEqual([{ executorId, paths: ['/latest'] }]);
+		expect(formState.firstMessage).toBe('Synthetic draft');
+	});
+
 	it('preserves compatible models, prompt and attachments while adopting destination path preferences', async () => {
 		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byExecutor: {
 			[remoteExecutor.id]: { defaultPath: '/worker/default', recentPaths: ['/worker/recent'], pinnedPaths: ['/worker/pin'] },

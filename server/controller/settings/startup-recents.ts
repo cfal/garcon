@@ -85,7 +85,11 @@ export function withoutExecutorStartupPreferences(
   executorId: string,
 ): Pick<ProjectSettings, 'paths' | 'recentAgentSettings'> {
   const byExecutor = parseExecutorProjectPreferences(settings.paths.byExecutor);
-  if (byExecutor) delete byExecutor[executorId];
+  if (byExecutor) {
+    const pinnedPaths = byExecutor[executorId]?.pinnedPaths ?? [];
+    if (pinnedPaths.length) byExecutor[executorId] = { recentPaths: [], pinnedPaths };
+    else delete byExecutor[executorId];
+  }
   return {
     paths: byExecutor ? { ...settings.paths, byExecutor } : settings.paths,
     recentAgentSettings: settings.recentAgentSettings.filter((entry) => entry.executorId !== executorId),

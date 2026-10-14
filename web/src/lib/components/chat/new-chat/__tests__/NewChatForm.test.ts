@@ -824,6 +824,52 @@ describe('NewChatForm', () => {
 		expect(screen.getByRole('button', { name: '/same' })).toBeTruthy();
 	});
 
+	it('searches many bookmarks by machine or path, announces unavailable targets and clears without changing the draft', async () => {
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({
+				paths: {
+					pinnedProjectPaths: Array.from({ length: 8 }, (_, index) => `/local/project-${index}`),
+					recentProjectPaths: ['/local/project-0'],
+					byExecutor: {
+						[remoteExecutor.id]: { pinnedPaths: ['/remote/Space Project '], recentPaths: [] },
+					},
+				},
+			}),
+		);
+		render(NewChatFormTestHost, {
+			executorSnapshots: [localExecutor, { ...remoteExecutor, availability: 'offline' }],
+		});
+		await fireEvent.click(await screen.findByRole('button', { name: 'All machines' }));
+		const prompt = screen.getByPlaceholderText('How can I help you today?');
+		await fireEvent.input(prompt, { target: { value: 'Synthetic draft' } });
+		const search = screen.getByRole('searchbox', { name: 'Search pinned paths' });
+		await fireEvent.input(search, { target: { value: 'worker' } });
+		expect(screen.queryByRole('button', { name: 'Local: /local/project-0' })).toBeNull();
+		const unavailable = screen.getByRole('button', {
+			name: 'Worker: /remote/Space Project',
+		}) as HTMLButtonElement;
+		expect(unavailable.disabled).toBe(true);
+		expect(unavailable.getAttribute('aria-label')).toBe('Worker: /remote/Space Project ');
+		expect(
+			document.getElementById(unavailable.getAttribute('aria-describedby')!)?.textContent,
+		).toBe('Waiting for connection');
+		await fireEvent.input(search, { target: { value: ' SPACE ' } });
+		expect(screen.getByRole('button', { name: 'Worker: /remote/Space Project' })).toBeTruthy();
+		await fireEvent.input(search, { target: { value: 'no-match' } });
+		expect(screen.getByText('No pinned paths match your search.').getAttribute('role')).toBe('status');
+		await fireEvent.click(screen.getByRole('button', { name: 'Clear pinned path search' }));
+		expect((search as HTMLInputElement).value).toBe('');
+		expect(
+			screen.getByRole('button', { name: 'Local: /local/project-0' }).getAttribute('aria-pressed'),
+		).toBe('true');
+		expect(document.activeElement).toBe(search);
+		expect(screen.getByRole('button', { name: 'Worker: /remote/Space Project' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Executor: Local' })).toBeTruthy();
+		expect((prompt as HTMLTextAreaElement).value).toBe('Synthetic draft');
+	});
+
 	it('opens the worktree picker as a separate dialog when the project is a git repo', async () => {
 		const chatsApi = await import('$lib/api/chats');
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
