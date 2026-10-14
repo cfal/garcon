@@ -19,7 +19,8 @@
 		currentTime: Date;
 		onSendToChat: (message: string) => Promise<boolean>;
 		onOpenChat: (chatId: string) => void;
-		onClose: () => void;
+		// Absent in narrow layouts, where the back link closes the detail.
+		onClose?: () => void;
 		onAfterSend?: () => void;
 	}
 
@@ -77,7 +78,9 @@
 					tabindex={selected ? 0 : -1}
 					class={cn(
 						'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-						selected ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
+						selected
+							? 'bg-muted font-medium text-foreground'
+							: 'text-muted-foreground hover:text-foreground',
 					)}
 					data-pr-tab={tab.id}
 					onclick={() => (pullRequests.tab = tab.id)}

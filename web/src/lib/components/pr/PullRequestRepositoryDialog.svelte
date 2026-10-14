@@ -12,6 +12,7 @@
 		getRemoteSettings,
 	} from '$lib/context';
 	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
+	import { agentLabelFor } from '$lib/agents/agent-labels';
 	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 	import {
 		PULL_REQUEST_REVIEW_PROMPT_TOKENS,
@@ -56,6 +57,7 @@
 		Array.from(new Set(sessions.orderedChats.flatMap((chat) => chat.tags))).sort(),
 	);
 	let isMobile = $state(false);
+	let content = $state<HTMLElement | null>(null);
 
 	void untrack(() =>
 		form.initialize(repository).catch((error: unknown) => {
@@ -127,11 +129,28 @@
 		{ key: 'trustedAuthorsOnly', label: m.pull_request_repository_filter_trusted },
 		{ key: 'includeForks', label: m.pull_request_repository_filter_forks },
 	] as const;
+	const promptVariables = {
+		tokens: Object.values(PULL_REQUEST_REVIEW_PROMPT_TOKENS),
+		help: m.pull_request_repository_prompt_hint({
+			repository: PULL_REQUEST_REVIEW_PROMPT_TOKENS.repository,
+			number: PULL_REQUEST_REVIEW_PROMPT_TOKENS.pullRequestNumber,
+			path: PULL_REQUEST_REVIEW_PROMPT_TOKENS.projectPath,
+		}),
+	};
 	const sectionClass = 'space-y-3 rounded-lg border border-border p-3';
 </script>
 
 <Dialog.Root open onOpenChange={(value) => !value && onClose()}>
-	<Dialog.Content class="flex max-h-[90dvh] flex-col sm:max-w-2xl" data-pr-repository-dialog>
+	<Dialog.Content
+		bind:ref={content}
+		class="flex max-h-[90dvh] flex-col sm:max-w-2xl"
+		data-pr-repository-dialog
+		onOpenAutoFocus={(event) => {
+			// Focusing the folder field would open its browser before the executor's settings load.
+			event.preventDefault();
+			content?.focus();
+		}}
+	>
 		<Dialog.Header>
 			<Dialog.Title>
 				{repository ? repository.nameWithOwner : m.pull_request_repository_connect()}
@@ -145,7 +164,7 @@
 						{m.pull_request_repository_offline_settings()}
 					</p>
 					<p class="truncate text-sm font-medium">
-						{repository?.target.agentId} · {repository?.target.model}
+						{agentLabelFor(repository?.target.agentId ?? '')} · {repository?.target.model}
 					</p>
 					<p class="break-all font-mono text-xs text-muted-foreground">
 						{repository?.target.projectPath}
@@ -156,6 +175,7 @@
 							class="min-h-32 w-full rounded-md border border-border bg-background p-2 text-base pointer-fine:text-sm"
 							bind:value={form.prompt}></textarea>
 					</label>
+					<p class="text-xs text-muted-foreground">{promptVariables.help}</p>
 				{:else}
 					<ScheduledNewChatComposer
 						conversationInput
@@ -164,6 +184,7 @@
 						{remoteSettings}
 						getSelectableAgentIds={selectableAgentsForExecutor}
 						prompt={form.prompt}
+						{promptVariables}
 						promptError={form.promptError}
 						{knownTags}
 						{isMobile}
@@ -172,13 +193,6 @@
 						onSnippetPendingChange={(pending) => (form.promptTransformPending = pending)}
 					/>
 				{/if}
-				<p class="text-xs text-muted-foreground">
-					{m.pull_request_repository_prompt_hint({
-						repository: PULL_REQUEST_REVIEW_PROMPT_TOKENS.repository,
-						number: PULL_REQUEST_REVIEW_PROMPT_TOKENS.pullRequestNumber,
-						path: PULL_REQUEST_REVIEW_PROMPT_TOKENS.projectPath,
-					})}
-				</p>
 			</section>
 			<section class={sectionClass}>
 				<div class="flex items-start justify-between gap-3">

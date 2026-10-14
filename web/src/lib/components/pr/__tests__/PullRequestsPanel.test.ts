@@ -236,6 +236,25 @@ describe('PullRequestsPanel', () => {
 		expect(authored.textContent).toContain('Skipped: draft');
 	});
 
+	it('shows a requested scan as pending until the repository is scanned again', async () => {
+		const { controller } = setup();
+		await screen.findByText('Needs my review');
+		await fireEvent.click(screen.getByRole('button', { name: 'Refresh pull requests' }));
+		await screen.findByText('Checking GitHub...');
+		const current = controller.reviews.snapshot!;
+		controller.reviews.apply({
+			...current,
+			revision: 2,
+			repositories: [
+				{
+					...current.repositories[0],
+					scan: { status: 'ok', scannedAt: '2026-01-01T00:10:00Z', message: null },
+				},
+			],
+		});
+		await waitFor(() => expect(screen.queryByText('Checking GitHub...')).toBeNull());
+	});
+
 	it('opens the review chat and posts the stored review from its Review tab', async () => {
 		const { api, onOpenChat } = setup();
 		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);

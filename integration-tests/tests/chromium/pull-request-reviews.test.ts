@@ -51,6 +51,30 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
       if (screenshots) await page.screenshot({ path: join(screenshots, `${name}.png`) });
     };
 
+    phase('open Pull Requests from GitHub Views before connecting');
+    // Wide enough for the inbox list and detail to stay side by side next to the review chat.
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto(integration.garcon.baseUrl);
+    await page.locator('[data-workspace-window-add-group-trigger="github-views"]').first().waitFor({ timeout: 30_000 });
+    await collapseCanonicalFilesWindow(page);
+    await page.locator('[data-workspace-window-add-group-trigger="github-views"]').first().click();
+    await page.locator('[data-workspace-window-group-menu="github-views"]').getByRole('menuitem', { name: 'Open Pull Requests' }).waitFor();
+    await capture('github-views-menu');
+    await page.keyboard.press('Escape');
+    await clickWorkspaceWindowAddAction(page, 'Open Pull Requests');
+    const panel = page.locator('[data-workspace-surface-id="singleton:pull-requests"][aria-hidden="false"]');
+    await panel.locator('[data-pr-inbox-empty]').waitFor();
+    await capture('inbox-empty-desktop');
+    await panel.locator('[data-pr-inbox-connect]').click();
+    const connectForm = page.locator('[data-pr-repository-dialog]');
+    await connectForm.getByText('Review automatically', { exact: true }).waitFor();
+    // Review prompts offer their own tokens, not the scheduled-prompt chat ID.
+    await browserExpect(connectForm.getByRole('button', { name: 'Insert {{pull_request_number}}' })).toBeVisible();
+    await browserExpect(connectForm.getByRole('button', { name: 'Insert {{chat_id}}' })).toHaveCount(0);
+    await capture('connect-repository-desktop');
+    await page.keyboard.press('Escape');
+    await browserExpect(connectForm).toHaveCount(0);
+
     phase('connect the repository with automatic review');
     await client.post('/api/v1/pull-request-reviews/repositories', {
       target: {
@@ -71,24 +95,14 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     }
     expect(snapshot.inbox.find((entry) => entry.pull.number === 128)?.latestRun).toMatchObject({ state: 'completed', reviewedSha: HEAD });
 
-    phase('open Pull Requests from GitHub Views');
-    // Wide enough for the inbox list and detail to stay side by side next to the review chat.
-    await page.setViewportSize({ width: 1920, height: 1080 });
-    await page.goto(integration.garcon.baseUrl);
-    await page.getByText('Review acme/app#128', { exact: true }).first().waitFor({ timeout: 30_000 });
-    await collapseCanonicalFilesWindow(page);
-    await page.locator('[data-workspace-window-add-group-trigger="github-views"]').first().click();
-    await page.locator('[data-workspace-window-group-menu="github-views"]').getByRole('menuitem', { name: 'Open Pull Requests' }).waitFor();
-    await capture('github-views-menu');
-    await page.keyboard.press('Escape');
-    await clickWorkspaceWindowAddAction(page, 'Open Pull Requests');
-    const panel = page.locator('[data-workspace-surface-id="singleton:pull-requests"][aria-hidden="false"]');
+    phase('the inbox fills in once the repository is connected');
     const needsReview = panel.locator('[data-pr-inbox-group="needs-my-review"]');
     await browserExpect(needsReview.locator('[data-pr-inbox-row]')).toHaveCount(2);
     await browserExpect(needsReview.locator('[data-pr-inbox-row="' + snapshot.repositories[0].id + '#131"]')).toContainText('Reviewing');
     await browserExpect(panel.locator('[data-pr-inbox-group="authored-by-me"]')).toContainText('Document executor reconnect limits');
     await browserExpect(panel.locator('[data-pr-inbox-group="needs-team-review"]')).toContainText('Speed up transcript paging');
-    await browserExpect(panel.locator('[data-pr-inbox-group="all-open"]')).toContainText('Skipped: bot author');
+    await browserExpect(panel.locator('[data-pr-inbox-group="other-open"] [data-pr-inbox-row]')).toHaveCount(1);
+    await browserExpect(panel.locator('[data-pr-inbox-group="other-open"]')).toContainText('Skipped: bot author');
 
     phase('select a reviewed pull request');
     await needsReview.getByText('Keep queue controls stable during reconnect').click();
@@ -104,6 +118,7 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     await capture('inbox-changes-desktop');
     await panel.locator('[data-pr-tab="checks"]').click();
     await panel.getByText('Unit tests', { exact: true }).waitFor();
+    await browserExpect(panel.locator('[data-pr-checks-summary]')).toHaveText('2 passed');
     await capture('inbox-checks-desktop');
 
     phase('repositories');

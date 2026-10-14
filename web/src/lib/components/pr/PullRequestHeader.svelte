@@ -15,10 +15,11 @@
 		body: string;
 		currentTime: Date;
 		onRefresh: () => void;
-		onClose: () => void;
+		onClose?: () => void;
 	}
 
-	let { pull, repositoryName, body, currentTime, onRefresh, onClose }: PullRequestHeaderProps = $props();
+	let { pull, repositoryName, body, currentTime, onRefresh, onClose }: PullRequestHeaderProps =
+		$props();
 
 	const stateBadge = $derived(prStateBadge(pull.state, pull.isDraft));
 	const checksLabel = $derived(checksStateLabel(pull.checksState));
@@ -27,7 +28,9 @@
 
 <div class="border-b border-border px-4 pt-3 pb-3">
 	<div class="flex items-center gap-2 text-xs text-muted-foreground">
-		<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium {stateBadge.class}">
+		<span
+			class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium {stateBadge.class}"
+		>
 			<GitPullRequest class="h-3.5 w-3.5" />
 			{stateBadge.label}
 		</span>
@@ -53,14 +56,16 @@
 			>
 				<ExternalLink class="h-3.5 w-3.5" />
 			</a>
-			<button
-				type="button"
-				class="rounded-md p-1 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-				onclick={onClose}
-				aria-label={m.pull_request_close()}
-			>
-				<X class="h-4 w-4" />
-			</button>
+			{#if onClose}
+				<button
+					type="button"
+					class="rounded-md p-1 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+					onclick={onClose}
+					aria-label={m.pull_request_close()}
+				>
+					<X class="h-4 w-4" />
+				</button>
+			{/if}
 		</div>
 	</div>
 	<h2 class="mt-2 text-lg leading-snug font-semibold text-foreground">{pull.title}</h2>

@@ -18,7 +18,11 @@
 
 	const chip = $derived(inboxReviewChip(entry));
 	const age = $derived(formatRelativeTimestamp(entry.pull.updatedAt, currentTime));
-	const shortName = $derived(repositoryName.split('/').at(-1) ?? repositoryName);
+	const reference = $derived(
+		repositoryName
+			? `${repositoryName.split('/').at(-1)} #${entry.pull.number}`
+			: `#${entry.pull.number}`,
+	);
 </script>
 
 <button
@@ -37,13 +41,14 @@
 			<span class="text-xs text-muted-foreground">({m.pull_request_draft()})</span>
 		{/if}
 	</span>
-	<span class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-		<span class="min-w-0 truncate"
-			>{shortName} #{entry.pull.number} · {entry.pull.author}{#if age}<span class="mx-1">·</span><time
-					datetime={entry.pull.updatedAt}
-					title={age.tooltip}>{age.label}</time
-				>{/if}</span
-		>
+	<span class="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+		<span class="shrink-0 tabular-nums">{reference}</span>
+		<span aria-hidden="true">·</span>
+		<span class="min-w-0 truncate">{entry.pull.author}</span>
+		{#if age}
+			<span aria-hidden="true">·</span>
+			<time class="shrink-0" datetime={entry.pull.updatedAt} title={age.tooltip}>{age.label}</time>
+		{/if}
 		{#if chip}
 			<PullRequestReviewChip {chip} class="ml-auto" />
 		{/if}

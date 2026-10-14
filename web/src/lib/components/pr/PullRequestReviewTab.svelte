@@ -6,7 +6,10 @@
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import Markdown from '$lib/components/rich-text/Markdown.svelte';
 	import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
-	import { isActivePullRequestReviewRun, type PullRequestReviewRunDetail } from '$shared/pull-request-reviews';
+	import {
+		isActivePullRequestReviewRun,
+		type PullRequestReviewRunDetail,
+	} from '$shared/pull-request-reviews';
 	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp';
 	import { errorMessage } from '$lib/utils/error-message.js';
 	import { cn } from '$lib/utils/cn';
@@ -26,7 +29,9 @@
 	const repository = $derived(controller.selectedRepository);
 	const run = $derived(controller.shownRun);
 	const head = $derived(entry?.pull.headRefOid ?? '');
-	const active = $derived(entry?.latestRun ? isActivePullRequestReviewRun(entry.latestRun.state) : false);
+	const active = $derived(
+		entry?.latestRun ? isActivePullRequestReviewRun(entry.latestRun.state) : false,
+	);
 	const canPost = $derived(
 		repository?.settings.posting !== 'off' &&
 			run?.state === 'completed' &&
@@ -53,7 +58,11 @@
 	}
 
 	function runSummary(candidate: PullRequestReviewRunDetail): string {
-		const age = formatRelativeTimestamp(candidate.finishedAt ?? candidate.startedAt ?? candidate.createdAt, currentTime)?.label ?? '';
+		const age =
+			formatRelativeTimestamp(
+				candidate.finishedAt ?? candidate.startedAt ?? candidate.createdAt,
+				currentTime,
+			)?.label ?? '';
 		const commit = shortSha(candidate.reviewedSha ?? candidate.headSha);
 		return candidate.reviewedSha === head || (!candidate.reviewedSha && candidate.headSha === head)
 			? m.pull_request_review_run_summary_head({ commit, age })
@@ -92,7 +101,6 @@
 						class="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
 						disabled={pending !== null}
 						onclick={() => act('post', () => controller.reviews.post(run.id))}
-						title={repository.viewerLogin ? m.pull_request_review_posts_as({ login: `@${repository.viewerLogin}` }) : undefined}
 					>
 						<Send class="h-3.5 w-3.5" />
 						{pending === 'post' ? m.pull_request_review_posting() : m.pull_request_review_post()}
@@ -114,10 +122,13 @@
 						type="button"
 						class={cn(
 							'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60',
-							run ? 'border border-border text-foreground hover:bg-accent' : 'bg-primary text-primary-foreground hover:bg-primary/90',
+							run
+								? 'border border-border text-foreground hover:bg-accent'
+								: 'bg-primary text-primary-foreground hover:bg-primary/90',
 						)}
 						disabled={pending !== null}
-						onclick={() => act('review', () => controller.reviews.review(entry.repositoryId, entry.pull.number))}
+						onclick={() =>
+							act('review', () => controller.reviews.review(entry.repositoryId, entry.pull.number))}
 						data-pr-review-start
 					>
 						<RotateCw class="h-3.5 w-3.5" />
@@ -125,15 +136,26 @@
 					</button>
 				{/if}
 			</div>
+			{#if repository.settings.posting === 'off'}
+				<p class="text-xs text-muted-foreground">{m.pull_request_review_posting_off_hint()}</p>
+			{:else if canPost && repository.viewerLogin}
+				<p class="text-xs text-muted-foreground">
+					{m.pull_request_review_posts_as({ login: `@${repository.viewerLogin}` })}
+				</p>
+			{/if}
 			{#if actionError}
 				<p class="text-xs text-status-error-foreground" role="alert">{actionError}</p>
 			{/if}
 			{#if run?.state === 'needs-input'}
-				<p class="rounded-md border border-status-warning-border bg-status-warning px-3 py-2 text-xs text-status-warning-foreground">
+				<p
+					class="rounded-md border border-status-warning-border bg-status-warning px-3 py-2 text-xs text-status-warning-foreground"
+				>
 					{m.pull_request_review_needs_input()}
 				</p>
 			{:else if run?.message && run.state !== 'completed'}
-				<p class="rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">{run.message}</p>
+				<p class="rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
+					{run.message}
+				</p>
 			{/if}
 			{#if run && run.post.status !== 'none'}
 				<p class="text-xs text-muted-foreground" data-pr-post-status={run.post.status}>
@@ -157,7 +179,9 @@
 			{/if}
 			{#if controller.runs.length > 1}
 				<section class="border-t border-border pt-3">
-					<h3 class="mb-1 text-xs font-medium text-muted-foreground">{m.pull_request_review_history()}</h3>
+					<h3 class="mb-1 text-xs font-medium text-muted-foreground">
+						{m.pull_request_review_history()}
+					</h3>
 					<ul class="flex flex-col">
 						{#each controller.runs as candidate (candidate.id)}
 							{@const chip = reviewRunChip(candidate)}
@@ -171,7 +195,9 @@
 									aria-current={candidate.id === run?.id}
 									onclick={() => (controller.selectedRunId = candidate.id)}
 								>
-									<span class="min-w-0 flex-1 truncate text-muted-foreground">{runSummary(candidate)}</span>
+									<span class="min-w-0 flex-1 truncate text-muted-foreground"
+										>{runSummary(candidate)}</span
+									>
 									{#if chip}<PullRequestReviewChip {chip} />{/if}
 								</button>
 							</li>

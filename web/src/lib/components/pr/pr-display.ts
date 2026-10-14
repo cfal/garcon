@@ -170,15 +170,52 @@ export function reviewRunChip(run: PullRequestReviewRun): ReviewChip | null {
 export function inboxReviewChip(entry: PullRequestReviewInboxEntry): ReviewChip | null {
 	const run = entry.latestRun;
 	const head = entry.pull.headRefOid;
-	if (run && (isActivePullRequestReviewRun(run.state) || run.headSha === head || run.reviewedSha === head)) {
+	if (
+		run &&
+		(isActivePullRequestReviewRun(run.state) || run.headSha === head || run.reviewedSha === head)
+	) {
 		const chip = reviewRunChip(run);
 		if (chip) return chip;
 	}
 	if (entry.autoReview.kind === 'skipped') {
-		return { label: m.pull_request_review_skipped({ reason: skipReasonLabel(entry.autoReview.reason) }), tone: 'neutral' };
+		return {
+			label: m.pull_request_review_skipped({ reason: skipReasonLabel(entry.autoReview.reason) }),
+			tone: 'neutral',
+		};
 	}
-	if (run && run.state !== 'interrupted') return { label: m.pull_request_review_state_outdated(), tone: 'warning' };
+	if (run && run.state !== 'interrupted')
+		return { label: m.pull_request_review_state_outdated(), tone: 'warning' };
 	return null;
+}
+
+const CHECK_ORDER: Record<PullRequestCheck['state'], number> = {
+	failure: 0,
+	pending: 1,
+	success: 2,
+	neutral: 3,
+	skipped: 3,
+};
+
+// Failing checks first, then running ones, so what needs attention is on top.
+export function sortChecksForReview(checks: readonly PullRequestCheck[]): PullRequestCheck[] {
+	return checks.toSorted((left, right) => CHECK_ORDER[left.state] - CHECK_ORDER[right.state]);
+}
+
+export function checksSummary(checks: readonly PullRequestCheck[]): string {
+	const groups: [number, (inputs: { count: number }) => string][] = [
+		[CHECK_ORDER.failure, m.pull_request_checks_failing],
+		[CHECK_ORDER.pending, m.pull_request_checks_running],
+		[CHECK_ORDER.success, m.pull_request_checks_passed],
+		[CHECK_ORDER.skipped, m.pull_request_checks_skipped],
+	];
+	return groups
+		.map(([order, label]) => ({
+			label,
+			count: checks.filter((check) => CHECK_ORDER[check.state] === order).length,
+		}))
+		.filter((group) => group.count > 0)
+		.map((group) => group.label({ count: group.count }))
+		.join(' · ');
 }
 
 export function checkStateClass(state: PullRequestCheck['state']): string {
