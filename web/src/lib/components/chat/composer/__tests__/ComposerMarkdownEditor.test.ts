@@ -105,6 +105,25 @@ describe('formatted editor snippet triggers', () => {
 	});
 });
 
+describe('formatted editor emphasis delimiters', () => {
+	it('keeps written underscores when their paragraph is edited', () => {
+		const { editor, onChange } = mount('edit __init__.py and _private_ names', 36);
+		type(editor, ' now');
+		expect(editor.view.dom.querySelector('strong')?.textContent).toBe('init');
+		expect(onChange).toHaveBeenLastCalledWith('edit __init__.py and _private_ names now');
+	});
+	it('keeps underscores typed in the formatted editor', () => {
+		const { editor, onChange } = mount('Review **this** now');
+		type(editor, ' __name__ and _other_ too');
+		expect(onChange).toHaveBeenLastCalledWith('Review **this** now __name__ and _other_ too');
+	});
+	it('writes asterisks where a letter typed beside the mark would stop underscores parsing', () => {
+		const { editor, onChange } = mount('see _this_', 10);
+		type(editor, 's');
+		expect(onChange).toHaveBeenLastCalledWith('see *this*s');
+	});
+});
+
 describe('live formatted editor typing', () => {
 	it('formats explicit links while keeping bare addresses and identifiers literal', () => {
 		const { editor, onChange } = mount('Review **this** now');

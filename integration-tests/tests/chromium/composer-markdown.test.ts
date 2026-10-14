@@ -265,6 +265,15 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await page.keyboard.type("*");
       await browserExpect(editor.locator("strong")).toHaveText("Note");
       await browserExpect(textarea).toHaveValue("**Note**");
+      // Written delimiters and references survive an edit of their paragraph.
+      await clear();
+      await textarea.focus();
+      await page.keyboard.type("edit __init__.py and &lt; in _private_");
+      await browserExpect(editor.locator("strong")).toHaveText("init");
+      await page.keyboard.type(" now");
+      await browserExpect(textarea).toHaveValue(
+        "edit __init__.py and &lt; in _private_ now",
+      );
       await clear();
       await textarea.focus();
       await page.keyboard.type("my_var is broken:");

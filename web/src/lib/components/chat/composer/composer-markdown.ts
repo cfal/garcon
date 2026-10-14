@@ -32,6 +32,53 @@ function isAutolink(text: string, mark: Mark): boolean {
 	);
 }
 
+const DELIMITED_MARKS = ['bold', 'italic', 'strike'];
+// A word character or the delimiter itself beside `_`, and a tilde beside or inside `~`, keep
+// that delimiter from opening or closing.
+const UNDERSCORE_NEIGHBOUR = /[\p{L}\p{N}_]/u;
+
+function hasMark(node: JSONContent | undefined, type: string): boolean {
+	return Boolean(node?.marks?.some((mark) => mark.type === type));
+}
+
+/**
+ * Gives every run of a mark one delimiter, the one its first node was written with, and falls
+ * back to the stock delimiter where the written one would no longer parse after an edit.
+ */
+function settleDelimiters(content: JSONContent[]): JSONContent[] {
+	let nodes = content;
+	for (const type of DELIMITED_MARKS) {
+		if (!nodes.some((node) => hasMark(node, type))) continue;
+		const settled = [...nodes];
+		for (let start = 0; start < settled.length; start += 1) {
+			if (!hasMark(settled[start], type)) continue;
+			let end = start;
+			while (hasMark(settled[end + 1], type)) end += 1;
+			const written = settled[start].marks?.find((mark) => mark.type === type)?.attrs?.delimiter;
+			const before = settled[start - 1]?.text?.at(-1) ?? '';
+			const after = settled[end + 1]?.text?.[0] ?? '';
+			const inside = settled.slice(start, end + 1).map((node) => node.text ?? '');
+			const parses =
+				typeof written !== 'string' ||
+				(written.startsWith('_')
+					? !UNDERSCORE_NEIGHBOUR.test(before) && !UNDERSCORE_NEIGHBOUR.test(after)
+					: before !== '~' && after !== '~' && !inside.some((text) => text.includes('~')));
+			const delimiter = parses && typeof written === 'string' ? written : null;
+			for (let index = start; index <= end; index += 1) {
+				settled[index] = {
+					...settled[index],
+					marks: settled[index].marks?.map((mark) =>
+						mark.type === type ? { type, ...(delimiter ? { attrs: { delimiter } } : {}) } : mark,
+					),
+				};
+			}
+			start = end;
+		}
+		nodes = settled;
+	}
+	return nodes;
+}
+
 function isEmptyParagraph(node: JSONContent | undefined): boolean {
 	return node?.type === 'paragraph' && !node.content?.length;
 }
@@ -56,10 +103,17 @@ function normalize(
 	const lineBreak = (marks?: Mark[]): JSONContent =>
 		// Table cells keep the node so the table renderer can write `<br>`.
 		table ? { type: 'hardBreak' } : { type: 'text', text: '\n', ...(marks ? { marks } : {}) };
-	node.content.forEach((child, index) => {
-		const previous = node.content?.[index - 1];
+	const children = settleDelimiters(node.content);
+	children.forEach((child, index) => {
+		const previous = children[index - 1];
 		if (child.type === 'hardBreak') {
-			content.push(lineBreak(child.marks));
+			if (!table && child.attrs?.html && protection) {
+				content.push({
+					type: 'text',
+					text: protection.verbatim('<br>'),
+					...(child.marks ? { marks: child.marks } : {}),
+				});
+			} else content.push(lineBreak(child.marks));
 		} else if (child.type === 'codeBlock') {
 			content.push({
 				type: DRAFT_CODE_BLOCK,
@@ -133,7 +187,9 @@ function tableCode(
 	return fragments;
 }
 
-/** Keeps draft HTML visible as text, except for plain line breaks. */
+const CHARACTER_REFERENCE = /^&(?:#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|lt|gt|quot|amp);/;
+
+/** Keeps draft HTML and character references visible as text, except for plain line breaks. */
 export function configureComposerMarkdown(manager: MarkdownManager): void {
 	const tag = manager.instance.Lexer.rules.inline.gfm.tag;
 	manager.instance.use({
@@ -142,9 +198,15 @@ export function configureComposerMarkdown(manager: MarkdownManager): void {
 			{
 				name: 'text',
 				level: 'inline',
+				start: (source) => source.indexOf('&'),
 				tokenizer(source) {
 					const match = tag.exec(source);
 					if (match) return { type: 'text', raw: match[0], text: match[0] };
+					// The editor decodes these references in text; an encoded ampersand keeps a
+					// reference such as `&lt;` as it was written.
+					const reference = CHARACTER_REFERENCE.exec(source);
+					if (reference)
+						return { type: 'text', raw: reference[0], text: `&amp;${reference[0].slice(1)}` };
 				},
 			},
 			{

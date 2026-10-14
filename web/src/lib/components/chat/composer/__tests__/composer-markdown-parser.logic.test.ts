@@ -246,6 +246,12 @@ describe('composer Markdown source preservation', () => {
 		['brackets', 'see [x] and arr[0]'],
 		['an escaped emphasis marker', 'not \\*emphasis\\*'],
 		['an escaped entity', 'literal &amp;lt; text'],
+		['character references', 'Replace &lt; with &amp;, &#60; and &copy;'],
+		['an ampersand in prose', 'AT&T and a & b'],
+		['a line break tag in prose', 'Use flex instead of <br> tags'],
+		['underscore emphasis in an identifier', 'edit __init__.py and _private_ names'],
+		['mixed emphasis delimiters', '__a _b_ c__ then **d** and *e*'],
+		['single-tilde strikethrough', '~~x~~ and ~y~'],
 		['an escaped link', '\\[label](https://x.test)'],
 		['a soft line break', 'line one\nline two'],
 	])('writes %s back as it was typed', (_name, source) => {
