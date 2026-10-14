@@ -14,6 +14,7 @@
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 	import ScheduledPromptField from '../ScheduledPromptField.svelte';
+	import { scheduledPromptVariables } from '../prompt-template-variables';
 
 	let { snippets, preambles }: { snippets: SnippetsStore; preambles: PreamblesStore } = $props();
 	let prompt = $state('Before ');
@@ -32,7 +33,7 @@
 	<ScheduledPromptField
 		{prompt}
 		promptError={null}
-		targetType="new-chat"
+		variables={scheduledPromptVariables('new-chat')}
 		surface="composer"
 		onPromptChange={(value) => (prompt = value)}
 		onPromptKeydown={() => {}}

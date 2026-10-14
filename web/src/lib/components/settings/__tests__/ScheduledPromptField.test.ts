@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import ScheduledPromptField from '../ScheduledPromptField.svelte';
+import { scheduledPromptVariables } from '../prompt-template-variables';
 
 function renderField(
 	overrides: Partial<{
@@ -15,7 +16,7 @@ function renderField(
 	const result = render(ScheduledPromptField, {
 		prompt: overrides.prompt ?? 'Review this section',
 		promptError: overrides.promptError ?? null,
-		targetType: overrides.targetType ?? 'new-chat',
+		variables: scheduledPromptVariables(overrides.targetType ?? 'new-chat'),
 		surface: overrides.surface ?? 'standalone',
 		onPromptChange,
 		onPromptKeydown,
@@ -53,7 +54,7 @@ describe('ScheduledPromptField', () => {
 		rerender({
 			prompt: 'Review this section',
 			promptError: null,
-			targetType: 'existing-chat',
+			variables: scheduledPromptVariables('existing-chat'),
 			surface: 'standalone',
 			onPromptChange: vi.fn(),
 			onPromptKeydown: vi.fn(),

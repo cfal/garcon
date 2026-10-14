@@ -9,13 +9,14 @@
 	import type { ScheduledSnippetExpansionContext } from '$shared/snippets';
 	import { Button } from '$lib/components/ui/button';
 	import { SCHEDULED_PROMPT_CHAT_ID_TOKEN } from '$shared/scheduled-prompts';
+	import type { PromptTemplateVariables } from './prompt-template-variables';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		ref?: HTMLTextAreaElement | null;
 		prompt: string;
 		promptError: string | null;
-		targetType: 'new-chat' | 'existing-chat';
+		variables: PromptTemplateVariables;
 		surface: 'composer' | 'standalone';
 		onPromptChange: (value: string) => void;
 		onPromptKeydown: (event: KeyboardEvent) => void;
@@ -31,7 +32,7 @@
 		ref = $bindable(null),
 		prompt,
 		promptError,
-		targetType,
+		variables,
 		surface,
 		onPromptChange,
 		onPromptKeydown,
@@ -104,12 +105,12 @@
 		}
 	}
 
-	async function insertChatId(): Promise<void> {
+	async function insertToken(token: string): Promise<void> {
 		if (!ref) return;
 		const start = ref.selectionStart;
 		const end = ref.selectionEnd;
-		const nextPrompt = `${ref.value.slice(0, start)}${SCHEDULED_PROMPT_CHAT_ID_TOKEN}${ref.value.slice(end)}`;
-		const nextCaret = start + SCHEDULED_PROMPT_CHAT_ID_TOKEN.length;
+		const nextPrompt = `${ref.value.slice(0, start)}${token}${ref.value.slice(end)}`;
+		const nextCaret = start + token.length;
 		ref.value = nextPrompt;
 		onPromptChange(nextPrompt);
 		await tick();
@@ -165,23 +166,21 @@
 				<FileText class="size-4" />{m.snippets_picker_title()}
 			</Button>
 		{/if}
-		<Button
-			variant="ghost"
-			size="sm"
-			class="h-9 px-2 text-xs"
-			disabled={snippets.expansion.pending}
-			onclick={() => void insertChatId()}
-		>
-			<Braces class="size-4" />{m.scheduled_prompts_insert_chat_id({
-				token: SCHEDULED_PROMPT_CHAT_ID_TOKEN,
-			})}
-		</Button>
+		{#each variables.tokens as token (token)}
+			<Button
+				variant="ghost"
+				size="sm"
+				class="h-9 px-2 text-xs"
+				disabled={snippets.expansion.pending}
+				onclick={() => void insertToken(token)}
+			>
+				<Braces class="size-4" />{m.scheduled_prompts_insert_chat_id({ token })}
+			</Button>
+		{/each}
 	</div>
 	<div>
 		<p id={variableHelpId} class="text-xs text-muted-foreground">
-			{targetType === 'new-chat'
-				? m.scheduled_prompts_new_chat_id_help({ token: SCHEDULED_PROMPT_CHAT_ID_TOKEN })
-				: m.scheduled_prompts_existing_chat_id_help({ token: SCHEDULED_PROMPT_CHAT_ID_TOKEN })}
+			{variables.help}
 		</p>
 	</div>
 

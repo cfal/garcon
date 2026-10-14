@@ -8,6 +8,8 @@
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import type { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte.js';
 	import { getExecutors } from '$lib/context';
+	import { agentLabelFor } from '$lib/agents/agent-labels';
+	import { cn } from '$lib/utils/cn';
 	import { effectiveExecutorId } from '$shared/executors';
 	import type { PullRequestReviewRepository } from '$shared/pull-request-reviews';
 	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp';
@@ -47,7 +49,10 @@
 		const { scan } = repository;
 		if (scan.status === 'executor-unavailable') return m.pull_request_repository_scan_offline();
 		if (scan.status === 'failed') return scan.message ?? m.pull_request_repository_scan_failed();
-		return formatRelativeTimestamp(scan.scannedAt, currentTime)?.label ?? m.pull_request_repository_scan_pending();
+		return (
+			formatRelativeTimestamp(scan.scannedAt, currentTime)?.label ??
+			m.pull_request_repository_scan_pending()
+		);
 	}
 
 	async function run(action: () => Promise<void>): Promise<void> {
@@ -59,7 +64,10 @@
 		}
 	}
 
-	function setAutoReview(repository: PullRequestReviewRepository, autoReview: boolean): Promise<void> {
+	function setAutoReview(
+		repository: PullRequestReviewRepository,
+		autoReview: boolean,
+	): Promise<void> {
 		return run(() =>
 			reviews.update(repository.id, {
 				target: repository.target,
@@ -81,7 +89,11 @@
 		</Dialog.Header>
 		<div class="min-h-0 flex-1 space-y-4 overflow-y-auto">
 			<div class="flex items-center justify-end">
-				<Button size="sm" onclick={() => (editing = { repository: null })} data-pr-connect-repository>
+				<Button
+					size="sm"
+					onclick={() => (editing = { repository: null })}
+					data-pr-connect-repository
+				>
 					<Plus class="mr-1.5 h-4 w-4" />
 					{m.pull_request_repository_connect()}
 				</Button>
@@ -90,7 +102,9 @@
 				<p class="text-sm text-status-error-foreground" role="alert">{error}</p>
 			{/if}
 			{#if reviews.repositories.length === 0}
-				<p class="rounded-md border border-border px-3 py-8 text-center text-sm text-muted-foreground">
+				<p
+					class="rounded-md border border-border px-3 py-8 text-center text-sm text-muted-foreground"
+				>
 					{m.pull_request_inbox_no_repositories()}
 				</p>
 			{:else}
@@ -98,13 +112,20 @@
 					<table class="w-full text-left text-sm" data-pr-repositories-table>
 						<thead class="border-b border-border bg-muted/50 text-xs text-muted-foreground">
 							<tr>
-								<th class="px-3 py-2 font-medium">{m.pull_request_repository_column_repository()}</th>
+								<th class="px-3 py-2 font-medium"
+									>{m.pull_request_repository_column_repository()}</th
+								>
 								<th class="px-3 py-2 font-medium">{m.pull_request_repository_column_executor()}</th>
-								<th class="px-3 py-2 font-medium">{m.pull_request_repository_column_auto_review()}</th>
+								<th class="px-3 py-2 font-medium"
+									>{m.pull_request_repository_column_auto_review()}</th
+								>
 								<th class="px-3 py-2 font-medium">{m.pull_request_repository_column_reviewer()}</th>
 								<th class="px-3 py-2 font-medium">{m.pull_request_repository_column_posting()}</th>
-								<th class="px-3 py-2 font-medium">{m.pull_request_repository_column_last_scan()}</th>
-								<th class="px-3 py-2"><span class="sr-only">{m.workspace_surface_actions()}</span></th>
+								<th class="px-3 py-2 font-medium">{m.pull_request_repository_column_last_scan()}</th
+								>
+								<th class="px-3 py-2"
+									><span class="sr-only">{m.workspace_surface_actions()}</span></th
+								>
 							</tr>
 						</thead>
 						<tbody class="divide-y divide-border">
@@ -112,7 +133,10 @@
 								<tr data-pr-repository={repository.nameWithOwner}>
 									<td class="max-w-56 px-3 py-2">
 										<p class="truncate font-medium text-foreground">{repository.nameWithOwner}</p>
-										<p class="truncate font-mono text-xs text-muted-foreground" title={repository.target.projectPath}>
+										<p
+											class="truncate font-mono text-xs text-muted-foreground"
+											title={repository.target.projectPath}
+										>
 											{repository.target.projectPath}
 										</p>
 									</td>
@@ -124,16 +148,22 @@
 										<Switch
 											checked={repository.settings.autoReview}
 											onCheckedChange={(next) => setAutoReview(repository, Boolean(next))}
-											aria-label={m.pull_request_repository_auto_review_for({ repository: repository.nameWithOwner })}
+											aria-label={m.pull_request_repository_auto_review_for({
+												repository: repository.nameWithOwner,
+											})}
 										/>
 									</td>
 									<td class="px-3 py-2 text-xs text-muted-foreground">
-										<p class="truncate">{repository.target.agentId}</p>
+										<p class="truncate">{agentLabelFor(repository.target.agentId)}</p>
 										<p class="truncate">{repository.target.model}</p>
 									</td>
-									<td class="px-3 py-2 text-xs text-muted-foreground">{postingLabels[repository.settings.posting]()}</td>
+									<td class="px-3 py-2 text-xs text-muted-foreground"
+										>{postingLabels[repository.settings.posting]()}</td
+									>
 									<td class="max-w-40 px-3 py-2 text-xs text-muted-foreground">
-										<p class="line-clamp-2" title={repository.scan.message ?? undefined}>{scanLabel(repository)}</p>
+										<p class="line-clamp-2" title={repository.scan.message ?? undefined}>
+											{scanLabel(repository)}
+										</p>
 									</td>
 									<td class="px-2 py-2">
 										<div class="flex items-center justify-end gap-0.5">
@@ -141,26 +171,37 @@
 												<Button
 													size="sm"
 													variant="destructive"
-													onclick={() => run(async () => {
-														await reviews.remove(repository.id);
-														removing = null;
-													})}>{m.pull_request_repository_disconnect()}</Button
+													onclick={() =>
+														run(async () => {
+															await reviews.remove(repository.id);
+															removing = null;
+														})}>{m.pull_request_repository_disconnect()}</Button
 												>
-												<Button size="sm" variant="ghost" onclick={() => (removing = null)}>{m.common_cancel()}</Button>
+												<Button size="sm" variant="ghost" onclick={() => (removing = null)}
+													>{m.common_cancel()}</Button
+												>
 											{:else}
 												<Button
 													size="icon-sm"
 													variant="ghost"
 													aria-label={m.pull_request_repository_scan_now()}
 													title={m.pull_request_repository_scan_now()}
+													disabled={reviews.isScanningRepository(repository.id)}
 													onclick={() => run(() => reviews.scan(repository.id))}
 												>
-													<RefreshCw class="h-4 w-4" />
+													<RefreshCw
+														class={cn(
+															'h-4 w-4',
+															reviews.isScanningRepository(repository.id) && 'animate-spin',
+														)}
+													/>
 												</Button>
 												<Button
 													size="icon-sm"
 													variant="ghost"
-													aria-label={m.pull_request_repository_edit({ repository: repository.nameWithOwner })}
+													aria-label={m.pull_request_repository_edit({
+														repository: repository.nameWithOwner,
+													})}
 													onclick={() => (editing = { repository })}
 												>
 													<Pencil class="h-4 w-4" />
@@ -168,7 +209,9 @@
 												<Button
 													size="icon-sm"
 													variant="ghost"
-													aria-label={m.pull_request_repository_disconnect_named({ repository: repository.nameWithOwner })}
+													aria-label={m.pull_request_repository_disconnect_named({
+														repository: repository.nameWithOwner,
+													})}
 													onclick={() => (removing = repository.id)}
 												>
 													<Trash2 class="h-4 w-4" />
@@ -183,9 +226,13 @@
 				</div>
 			{/if}
 			<section>
-				<h3 class="mb-2 text-sm font-medium text-foreground">{m.pull_request_repository_recent_runs()}</h3>
+				<h3 class="mb-2 text-sm font-medium text-foreground">
+					{m.pull_request_repository_recent_runs()}
+				</h3>
 				{#if reviews.recentRuns.length === 0}
-					<p class="text-sm text-muted-foreground">{m.pull_request_repository_recent_runs_empty()}</p>
+					<p class="text-sm text-muted-foreground">
+						{m.pull_request_repository_recent_runs_empty()}
+					</p>
 				{:else}
 					<ol class="divide-y divide-border rounded-md border border-border" data-pr-run-log>
 						{#each reviews.recentRuns.slice(0, 20) as entry (entry.id)}
@@ -197,11 +244,16 @@
 									{repositoryName(entry.repositoryId)} #{entry.number} · {entry.title}
 								</span>
 								{#if entry.message && entry.state !== 'completed'}
-									<span class="hidden max-w-60 truncate text-muted-foreground sm:inline" title={entry.message}>
+									<span
+										class="hidden max-w-60 truncate text-muted-foreground sm:inline"
+										title={entry.message}
+									>
 										{entry.message}
 									</span>
 								{/if}
-								{#if age}<time class="shrink-0 text-muted-foreground" datetime={entry.createdAt}>{age.label}</time>{/if}
+								{#if age}<time class="shrink-0 text-muted-foreground" datetime={entry.createdAt}
+										>{age.label}</time
+									>{/if}
 								{#if entry.chatId && entry.chatAvailable}
 									{@const chatId = entry.chatId}
 									<Button size="sm" variant="ghost" onclick={() => onOpenChat(chatId)}>
@@ -221,9 +273,7 @@
 	<PullRequestRepositoryDialog
 		repository={editing.repository}
 		onSave={(input) =>
-			editing?.repository
-				? reviews.update(editing.repository.id, input)
-				: reviews.connect(input)}
+			editing?.repository ? reviews.update(editing.repository.id, input) : reviews.connect(input)}
 		onClose={() => (editing = null)}
 	/>
 {/if}

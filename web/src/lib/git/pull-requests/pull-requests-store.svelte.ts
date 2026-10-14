@@ -88,6 +88,15 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.syncSelection();
 	}
 
+	// Asks the server to read every connected repository's pull requests now.
+	async scan(): Promise<void> {
+		try {
+			await this.reviews.scan();
+		} catch (error) {
+			this.#deps.notifyError?.(errorMessage(error, m.pull_request_review_action_failed()));
+		}
+	}
+
 	select(entry: PullRequestReviewInboxEntry): void {
 		const key = inboxEntryKey(entry);
 		if (key === this.selectedKey) return;

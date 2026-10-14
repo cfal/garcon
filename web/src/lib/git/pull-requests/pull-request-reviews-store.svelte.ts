@@ -22,6 +22,9 @@ import { errorMessage } from '$lib/utils/error-message.js';
 
 export type PullRequestReviewsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
+// A requested scan that publishes no change, such as a repeated identical failure, stops showing as pending after this.
+const SCAN_FEEDBACK_TIMEOUT_MS = 30_000;
+
 export interface PullRequestReviewsApi {
 	get: typeof getPullRequestReviews;
 	connect: typeof connectPullRequestReviewRepository;
@@ -49,6 +52,9 @@ export class PullRequestReviewsStore {
 	snapshot = $state<PullRequestReviewsSnapshot | null>(null);
 	error = $state<string | null>(null);
 	isRefreshing = $state(false);
+	// Repositories with a requested scan, keyed to their scan state when it was requested.
+	scanning = $state<ReadonlyMap<string, string>>(new Map());
+	#scanTimer: ReturnType<typeof setTimeout> | null = null;
 	#refreshing: Promise<void> | null = null;
 	#refreshAgain = false;
 
@@ -64,6 +70,14 @@ export class PullRequestReviewsStore {
 
 	get recentRuns() {
 		return this.snapshot?.recentRuns ?? [];
+	}
+
+	get isScanning(): boolean {
+		return this.scanning.size > 0;
+	}
+
+	isScanningRepository(id: string): boolean {
+		return this.scanning.has(id);
 	}
 
 	repository(id: string): PullRequestReviewRepository | null {
@@ -112,6 +126,7 @@ export class PullRequestReviewsStore {
 		if (this.snapshot && snapshot.revision < this.snapshot.revision) return;
 		this.snapshot = snapshot;
 		this.status = 'ready';
+		this.#settleScans();
 	}
 
 	async connect(input: PullRequestReviewRepositoryInput): Promise<void> {
@@ -126,8 +141,42 @@ export class PullRequestReviewsStore {
 		this.apply(await this.api.remove(id));
 	}
 
+	// The server scans in the background; a repository stays pending until its scan state changes.
 	async scan(repositoryId?: string): Promise<void> {
-		await this.api.scan(repositoryId);
+		const requested = repositoryId
+			? this.repositories.filter((repository) => repository.id === repositoryId)
+			: this.repositories;
+		const scanning = new Map(this.scanning);
+		for (const repository of requested)
+			scanning.set(repository.id, JSON.stringify(repository.scan));
+		this.scanning = scanning;
+		if (this.#scanTimer) clearTimeout(this.#scanTimer);
+		this.#scanTimer = setTimeout(() => this.#clearScans(), SCAN_FEEDBACK_TIMEOUT_MS);
+		try {
+			await this.api.scan(repositoryId);
+		} catch (error) {
+			this.#clearScans();
+			throw error;
+		}
+	}
+
+	#settleScans(): void {
+		if (this.scanning.size === 0) return;
+		const pending = new Map(
+			[...this.scanning].filter(([id, scan]) => {
+				const repository = this.repository(id);
+				return repository !== null && JSON.stringify(repository.scan) === scan;
+			}),
+		);
+		if (pending.size === this.scanning.size) return;
+		if (pending.size === 0) this.#clearScans();
+		else this.scanning = pending;
+	}
+
+	#clearScans(): void {
+		if (this.#scanTimer) clearTimeout(this.#scanTimer);
+		this.#scanTimer = null;
+		this.scanning = new Map();
 	}
 
 	async review(repositoryId: string, number: number): Promise<void> {
