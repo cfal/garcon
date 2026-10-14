@@ -1,131 +1,95 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PullRequestSummary } from '$lib/api/pull-requests';
-import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import PullRequestsPanel from '../PullRequestsPanel.svelte';
 import {
-	installResizeObserverHarness,
-	ResizeObserverHarness,
-} from '$lib/components/shared/__tests__/resize-observer-harness';
-import PullRequestsPanelTestHost from './PullRequestsPanelTestHost.svelte';
-import * as m from '$lib/paraglide/messages.js';
+	PullRequestReviewsStore,
+	type PullRequestReviewsApi,
+} from '$lib/git/pull-requests/pull-request-reviews-store.svelte.js';
+import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
+import { DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, type PullRequestReviewRunDetail, type PullRequestReviewsSnapshot } from '$shared/pull-request-reviews';
+import type { PullRequestSummary } from '$shared/gh';
 
-function summary(number: number): PullRequestSummary {
+afterEach(cleanup);
+
+const HEAD = 'a'.repeat(40);
+
+function pull(number: number, overrides: Partial<PullRequestSummary>): PullRequestSummary {
 	return {
-		number,
-		title: `PR ${number}`,
-		state: 'open',
-		isDraft: false,
-		author: 'octocat',
-		headRefName: 'feat/container-layout',
-		baseRefName: 'main',
-		additions: 1,
-		deletions: 0,
-		changedFiles: 1,
-		updatedAt: '2026-07-13T00:00:00Z',
-		url: `https://example.test/pull/${number}`,
-		reviewDecision: null,
-		checksState: 'none',
+		number, title: `Change ${number}`, state: 'open', isDraft: false, author: 'author', headRefName: 'feature',
+		baseRefName: 'main', additions: 3, deletions: 1, changedFiles: 1, createdAt: '2026-01-01T00:00:00Z',
+		updatedAt: '2026-01-01T00:00:00Z', url: `https://github.com/acme/app/pull/${number}`, reviewDecision: null,
+		checksState: 'passing', headRefOid: HEAD, isCrossRepository: false, authorAssociation: 'member', authorIsBot: false,
+		authoredByViewer: false, labels: [], reviewRequest: null, ...overrides,
 	};
 }
 
-function makeController(): PullRequestsStore {
-	const controller = new PullRequestsStore();
-	controller.setCapability('local', true, true);
-	controller.setProjectState({
-		kind: 'available',
-		project: {
-			target: {
-				kind: 'chat' as const,
-				chatId: 'chat',
-				projectPath: '/project',
-				executorId: 'local',
-			},
-			chatId: 'chat',
-			executorId: 'local',
-			projectPath: '/project',
-			effectiveProjectKey: 'project-key',
+const run: PullRequestReviewRunDetail = {
+	id: 'run-1', repositoryId: 'repo', number: 7, title: 'Change 7', headSha: HEAD, reviewedSha: HEAD, state: 'completed',
+	trigger: 'auto', message: null, chatId: 'chat-1', chatAvailable: true, createdAt: '2026-01-01T00:00:00Z',
+	startedAt: '2026-01-01T00:00:00Z', finishedAt: '2026-01-01T00:05:00Z',
+	post: { status: 'none', commentUrl: null, postedAt: null, message: null },
+	review: `No actionable findings.\n\nReviewed commit: ${HEAD}`,
+};
+
+const snapshot: PullRequestReviewsSnapshot = {
+	revision: 1,
+	repositories: [{
+		id: 'repo', nameWithOwner: 'acme/app', url: 'https://github.com/acme/app', viewerLogin: 'viewer',
+		createdAt: '', updatedAt: '', scan: { status: 'ok', scannedAt: '2026-01-01T00:00:00Z', message: null },
+		settings: DEFAULT_PULL_REQUEST_REVIEW_SETTINGS,
+		target: {
+			type: 'new-chat', agentId: 'claude', projectPath: '/work/app', model: 'model', apiProviderId: null, modelEndpointId: null,
+			modelProtocol: null, permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {}, tags: [], preambleChoice: { mode: 'defaults' },
 		},
+	}],
+	inbox: [
+		{ repositoryId: 'repo', pull: pull(7, { reviewRequest: 'me' }), latestRun: run, autoReview: { kind: 'eligible' } },
+		{ repositoryId: 'repo', pull: pull(8, { authoredByViewer: true, isDraft: true }), latestRun: null, autoReview: { kind: 'skipped', reason: 'draft' } },
+	],
+	recentRuns: [run],
+};
+
+function setup() {
+	const api = {
+		get: vi.fn(async () => snapshot),
+		connect: vi.fn(),
+		update: vi.fn(),
+		remove: vi.fn(),
+		scan: vi.fn(),
+		review: vi.fn(),
+		stop: vi.fn(),
+		post: vi.fn(async () => snapshot),
+	} satisfies PullRequestReviewsApi;
+	const controller = new PullRequestsStore({
+		reviews: new PullRequestReviewsStore(api),
+		getDetail: vi.fn(() => new Promise<never>(() => {})),
+		getRuns: vi.fn(async () => [run]),
 	});
-	controller.pulls = [summary(1), summary(2)];
-	controller.hasLoaded = true;
-	return controller;
+	controller.setPresentationVisible(true);
+	const onOpenChat = vi.fn();
+	render(PullRequestsPanel, { controller, onOpenChat, onSendToChat: vi.fn(), onNavigateToChat: vi.fn() });
+	return { api, onOpenChat };
 }
 
-describe('PullRequestsPanel container presentation', () => {
-	let restoreResizeObserver: () => void;
-
-	beforeEach(() => {
-		restoreResizeObserver = installResizeObserverHarness();
+describe('PullRequestsPanel', () => {
+	it('shows each pull request in the groups it belongs to, with its review state', async () => {
+		setup();
+		await screen.findByText('Needs my review');
+		const needsReview = document.querySelector('[data-pr-inbox-group="needs-my-review"]')!;
+		const authored = document.querySelector('[data-pr-inbox-group="authored-by-me"]')!;
+		expect(needsReview.textContent).toContain('Change 7');
+		expect(needsReview.textContent).toContain('Reviewed');
+		expect(authored.textContent).toContain('Change 8');
+		expect(authored.textContent).toContain('Skipped: draft');
 	});
 
-	afterEach(() => {
-		restoreResizeObserver();
-	});
+	it('opens the review chat and posts the stored review from its Review tab', async () => {
+		const { api, onOpenChat } = setup();
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
 
-	it('retries GitHub capability through its own controller', async () => {
-		const controller = makeController();
-		controller.setCapability('local', true, false);
-		const retry = vi.spyOn(controller, 'retryCapability').mockImplementation(() => undefined);
-		const { unmount } = render(PullRequestsPanelTestHost, {
-			props: {
-				props: {
-					controller,
-					onSendToChat: vi.fn().mockResolvedValue(true),
-					onNavigateToChat: vi.fn(),
-				},
-			},
-		});
-		try {
-			await fireEvent.click(screen.getByRole('button', { name: m.common_retry() }));
-			expect(retry).toHaveBeenCalledOnce();
-		} finally {
-			unmount();
-			controller.dispose();
-		}
-	});
-
-	it('uses host width for wide, compact, and list-to-detail layouts', async () => {
-		const controller = makeController();
-		const { container } = render(PullRequestsPanelTestHost, {
-			props: {
-				props: {
-					controller,
-					isMobile: false,
-					onSendToChat: vi.fn().mockResolvedValue(true),
-					onNavigateToChat: vi.fn(),
-				},
-			},
-		});
-		const panel = container.querySelector('[data-pr-panel]');
-		const list = container.querySelector('[data-pr-list]');
-		const detail = container.querySelector('[data-pr-detail]');
-		const listViewport = list?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
-		expect(panel).toBeTruthy();
-		expect(list).toBeTruthy();
-		expect(detail).toBeTruthy();
-		expect(listViewport?.dataset.workspaceScrollRegion).toBe('contextual');
-		if (!panel || !list || !detail) return;
-
-		ResizeObserverHarness.emit(panel, 1_100);
-		await waitFor(() => expect(panel.getAttribute('data-pr-layout')).toBe('wide'));
-		expect(list.classList.contains('w-80')).toBe(true);
-
-		ResizeObserverHarness.emit(panel, 800);
-		await waitFor(() => expect(panel.getAttribute('data-pr-layout')).toBe('compact'));
-		expect(list.classList.contains('w-60')).toBe(true);
-		expect(list.classList.contains('hidden')).toBe(false);
-		expect(detail.classList.contains('hidden')).toBe(false);
-
-		ResizeObserverHarness.emit(panel, 480);
-		await waitFor(() => expect(panel.getAttribute('data-pr-layout')).toBe('narrow'));
-		expect(detail.classList.contains('hidden')).toBe(true);
-		await fireEvent.click(screen.getByRole('button', { name: /#1 PR 1/ }));
-		await waitFor(() => expect(list.classList.contains('hidden')).toBe(true));
-		expect(detail.classList.contains('hidden')).toBe(false);
-		expect(screen.getByRole('button', { name: 'All pull requests' })).toBeTruthy();
-
-		await fireEvent.click(screen.getByRole('button', { name: 'All pull requests' }));
-		await waitFor(() => expect(list.classList.contains('hidden')).toBe(false));
-		expect(detail.classList.contains('hidden')).toBe(true);
+		expect(onOpenChat).toHaveBeenCalledWith('chat-1');
+		await screen.findByText('No actionable findings.');
+		await fireEvent.click(screen.getByRole('button', { name: 'Post to GitHub' }));
+		await waitFor(() => expect(api.post).toHaveBeenCalledWith('run-1'));
 	});
 });

@@ -1281,11 +1281,11 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
 			m.workspace_open_git_history(),
 			m.workspace_open_git_compare(),
-			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
 			m.workspace_open_surface({ surface: m.tickets_title() }),
 			m.workspace_chat_views(),
+			m.workspace_github_views(),
 			m.workspace_new_terminal(),
 		];
 
@@ -1639,11 +1639,11 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
 			m.workspace_open_git_history(),
 			m.workspace_open_git_compare(),
-			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
 			m.workspace_open_surface({ surface: m.tickets_title() }),
 			m.workspace_chat_views(),
+			m.workspace_github_views(),
 		];
 		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));
 		const newTerminal = screen.getByRole('menuitem', { name: m.workspace_new_terminal() });

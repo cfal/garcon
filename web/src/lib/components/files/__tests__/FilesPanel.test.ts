@@ -5,6 +5,7 @@ import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.s
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
+import { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import FilesPanelTestHost from './FilesPanelTestHost.svelte';
 import { setFilesPanelTestContext } from './files-panel-test-context.js';
@@ -104,7 +105,7 @@ describe('FilesPanel', () => {
 		...unusedSingletonFactories,
 				...gitSurfaceDeps,
 				createCommit: () => new CommitController(gitSurfaceDeps),
-				createPullRequests: () => new PullRequestsStore(),
+				createPullRequests: () => new PullRequestsStore({ reviews: new PullRequestReviewsStore() }),
 			});
 			setFilesPanelTestContext({ fileSessions, singletonSurfaces, notifications, executors });
 			try {
@@ -209,7 +210,7 @@ describe('FilesPanel', () => {
 		...unusedSingletonFactories,
 				...gitSurfaceDeps,
 				createCommit: () => new CommitController(gitSurfaceDeps),
-				createPullRequests: () => new PullRequestsStore(),
+				createPullRequests: () => new PullRequestsStore({ reviews: new PullRequestReviewsStore() }),
 			});
 			const tree = singletonSurfaces.files().tree;
 			tree.navigation = {

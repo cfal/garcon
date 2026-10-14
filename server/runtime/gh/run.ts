@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs';
-import { gitOperationOptions, trackGitProcess } from '../git/operation-context.js';
+import { gitOperationOptions, markGitMutationDispatched, trackGitProcess } from '../git/operation-context.js';
 import { readTextStreamPrefix, readTextStreamWithLimit } from '../../common/bounded-text-stream.js';
 import type { GhCommandOptions, GhCommandResult, GhProcessError } from './gh-types.js';
 
@@ -72,6 +72,7 @@ async function runGhProcess(cwd: string, args: string[], options: GhCommandOptio
   try {
     proc = Bun.spawn(['gh', ...args], {
       cwd,
+      ...(options.stdin === undefined ? {} : { stdin: Buffer.from(options.stdin) }),
       stdout: 'pipe',
       stderr: 'pipe',
       signal,
@@ -124,6 +125,25 @@ async function runGhProcess(cwd: string, args: string[], options: GhCommandOptio
   });
 }
 
+// Runs a `gh` command that changes GitHub state. An interruption after this
+// point leaves the outcome unknown, so the enclosing operation reports it as such.
+export async function runGhMutation(
+  cwd: string,
+  args: string[],
+  options: GhCommandOptions = {},
+): Promise<GhCommandResult> {
+  markGitMutationDispatched();
+  return runGh(cwd, args, options);
+}
+
+export function parseGhJson<T>(stdout: string, command: string): T {
+  try {
+    return JSON.parse(stdout) as T;
+  } catch {
+    throw new Error(`gh ${command} returned malformed JSON output.`);
+  }
+}
+
 // Runs `gh` and parses its stdout as JSON, throwing a descriptive error when
 // the output is not valid JSON.
 export async function runGhJson<T>(
@@ -132,11 +152,7 @@ export async function runGhJson<T>(
   options: GhCommandOptions = {},
 ): Promise<T> {
   const { stdout } = await runGh(cwd, args, options);
-  try {
-    return JSON.parse(stdout) as T;
-  } catch {
-    throw new Error(`gh ${args[0] ?? ''} returned malformed JSON output.`);
-  }
+  return parseGhJson<T>(stdout, args[0] ?? '');
 }
 
 // Asserts the given path is an accessible directory before shelling out.

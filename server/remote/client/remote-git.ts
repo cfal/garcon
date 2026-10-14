@@ -1,6 +1,7 @@
 import { AgentCallError, type ExecutionGitService, type ExecutionGhService, type ExecutorCallOptions } from '@garcon/server-agent-interface';
 import type { GitMethod } from '../../../common/git.js';
-import { GIT_OPERATION_TIMEOUT_MS, GH_DETAIL_TIMEOUT_MS, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults } from '../../../common/git-execution.js';
+import { isGhMutation, type GhRequests } from '../../../common/gh.js';
+import { GIT_OPERATION_TIMEOUT_MS, ghOperationTimeoutMs, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults } from '../../../common/git-execution.js';
 import { validateGitRequest, validateGhRequest } from '../../../common/git-request-validation.js';
 import { validateGitResult, validateGhResult } from '../../../common/git-result-validation.js';
 import { GitServiceError } from '../../../common/git-error.js';
@@ -63,6 +64,9 @@ export class RemoteGitServices {
       getStatus: (options) => this.#ghCall('getStatus', {}, options),
       listPullRequests: (request, options) => this.#ghCall('listPullRequests', request, options),
       getPullRequest: (request, options) => this.#ghCall('getPullRequest', request, options),
+      getPullRequestReviewTarget: (request, options) => this.#ghCall('getPullRequestReviewTarget', request, options),
+      createPullRequestComment: (request, options) => this.#ghCall('createPullRequestComment', request, options),
+      minimizePullRequestComment: (request, options) => this.#ghCall('minimizePullRequestComment', request, options),
     };
   }
 
@@ -88,22 +92,27 @@ export class RemoteGitServices {
     }
   }
 
-  async #ghCall<K extends keyof ExecutionGhResults>(method: K, request: { projectPath?: string; number?: number }, options?: ExecutorCallOptions): Promise<ExecutionGhResults[K]> {
+  async #ghCall<K extends keyof GhRequests>(method: K, request: GhRequests[K], options?: ExecutorCallOptions): Promise<ExecutionGhResults[K]> {
     validateGhRequest(method, request);
     if (!this.sessions.latest().info.services.gh) throw new AgentCallError('not-dispatched', 'GitHub CLI is unavailable on this executor', 'OPERATION_UNSUPPORTED');
-    return withDeadline(options, method === 'getPullRequest' ? GH_DETAIL_TIMEOUT_MS : GIT_OPERATION_TIMEOUT_MS, async (callOptions) => {
-      const { backing, timeoutMs } = await this.sessions.acquire('bulk', callOptions);
-      const budgetMs = timeoutMs ?? callOptions.timeoutMs;
-      const rpcOptions = { ...callOptions, timeoutMs: budgetMs };
-      let result: unknown;
-      try {
-        if (method === 'getStatus') result = await backing.rpc.call('', 'gh.getStatus', { input: {}, budgetMs }, rpcOptions);
-        else if (method === 'listPullRequests') result = await backing.rpc.call('', 'gh.listPullRequests', { input: { projectPath: request.projectPath! }, budgetMs }, rpcOptions);
-        else result = await backing.rpc.call('', 'gh.getPullRequest', { input: { projectPath: request.projectPath!, number: request.number! }, budgetMs }, rpcOptions);
-      } catch (error) { throw readFailure(error, callOptions.signal); }
-      validateGhResult(method, result, backing.info);
-      return result;
-    });
+    const mutation = isGhMutation(method);
+    try {
+      return await withDeadline(options, ghOperationTimeoutMs(method), async (callOptions) => {
+        const { backing, timeoutMs } = await this.sessions.acquire('bulk', callOptions);
+        const budgetMs = timeoutMs ?? callOptions.timeoutMs;
+        const call = backing.rpc.call as (integrationId: string, method: string, request: unknown, options: ExecutorCallOptions) => Promise<unknown>;
+        const result = await call.call(backing.rpc, '', `gh.${method}`, { input: request, budgetMs }, { ...callOptions, timeoutMs: budgetMs })
+          .catch(error => { throw mutation ? error : readFailure(error, callOptions.signal); });
+        validateGhResult(method, result, backing.info);
+        return result;
+      });
+    } catch (error) {
+      if (mutation && (error instanceof AgentCallError && error.outcome === 'unknown'
+        || error instanceof GitServiceError && error.code === 'GIT_INVALID_RESULT')) {
+        throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'GitHub change could not be confirmed. Check the pull request before trying again.');
+      }
+      throw error;
+    }
   }
 }
 

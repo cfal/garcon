@@ -23,7 +23,21 @@ for (const dialer of ['controller', 'worker'] as const) {
       const gh = await fixture.executor.getGhService();
       const { executorId, instanceId } = await fixture.executor.getInfo();
       expect(await gh.getStatus()).toMatchObject({ executorId, instanceId, available: true, login: config.label, host: 'git.example.invalid' });
-      expect(await gh.listPullRequests({ projectPath: fixture.projectPath })).toMatchObject({ executorId, instanceId, repo: { nameWithOwner: `${config.label}/repository` } });
+      expect(await gh.listPullRequests({ projectPath: fixture.projectPath })).toMatchObject({
+        executorId, instanceId, repo: { nameWithOwner: `${config.label}/repository` }, viewerLogin: config.label,
+        pulls: [{ number: 1, headRefOid: 'a'.repeat(40), authorAssociation: 'member', reviewRequest: null }],
+      });
+      const marker = `garcon-review ${config.label}/repository#1 `;
+      const created = await gh.createPullRequestComment({ projectPath: fixture.projectPath, number: 1, body: `Synthetic review\n<!-- ${marker}${'a'.repeat(40)} -->` });
+      expect(created).toMatchObject({ executorId, instanceId, id: 'comment-1' });
+      expect(await gh.getPullRequestReviewTarget({ projectPath: fixture.projectPath, number: 1, marker })).toMatchObject({
+        executorId, instanceId, state: 'open', headRefOid: 'a'.repeat(40), markedComments: [{ id: created.id, isMinimized: false }],
+      });
+      expect(await gh.minimizePullRequestComment({ projectPath: fixture.projectPath, commentId: created.id })).toMatchObject({ executorId, instanceId, minimized: true });
+      await expect(gh.createPullRequestComment({ projectPath: fixture.projectPath, number: 1, body: 'x'.repeat(65_537) }))
+        .rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
+      await expect(gh.createPullRequestComment({ projectPath: fixture.projectPath, number: 9, body: 'Synthetic review' }))
+        .rejects.toMatchObject({ code: 'GH_NOT_FOUND' });
       const detail = await gh.getPullRequest({ projectPath: fixture.projectPath, number: 1 });
       expect(detail).toMatchObject({ executorId, instanceId });
       expect(detail.body.length).toBe(config.bodyBytes);

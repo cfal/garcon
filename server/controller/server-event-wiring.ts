@@ -3,6 +3,7 @@ import type { ExecutorManager } from './executors/manager.js';
 import { effectiveExecutorId } from '../../common/executors.js';
 import type { TranscriptSearchStatusV1 } from '../../common/chat-search.js';
 import { isChatListInvalidationReason } from '../../common/ws-events.ts';
+import { PullRequestReviewsInvalidatedMessage, TicketsInvalidatedMessage } from '../../common/ws-revision-invalidations.ts';
 import { isErrorCode } from '../../common/error-codes.ts';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import { wireExecutorAvailability } from './executors/availability-wiring.js';
@@ -53,7 +54,6 @@ import {
   PreamblesInvalidatedMessage,
   ChatPreamblesInvalidatedMessage,
   ChatBoardsInvalidatedMessage,
-  TicketsInvalidatedMessage,
 } from '../../common/ws-events.ts';
 
 const logger = createLogger('server-events');
@@ -125,6 +125,7 @@ export interface ServerEventWiring {
   notifyChatPreamblesInvalidated(chatId: string, revision: number): void;
   broadcastTranscriptSearchStatus(status: TranscriptSearchStatusV1): void;
   broadcastTicketsInvalidated(revision: number): void;
+  broadcastPullRequestReviewsInvalidated(revision: number): void;
   broadcastApiProvidersInvalidated(): void;
   waitForIdle(): Promise<void>;
 }
@@ -710,6 +711,9 @@ export function wireServerEvents({
     },
     broadcastTicketsInvalidated(revision: number): void {
       broadcast(new TicketsInvalidatedMessage(revision));
+    },
+    broadcastPullRequestReviewsInvalidated(revision: number): void {
+      broadcast(new PullRequestReviewsInvalidatedMessage(revision));
     },
     broadcastApiProvidersInvalidated(): void {
       broadcast(new ApiProvidersInvalidatedMessage());

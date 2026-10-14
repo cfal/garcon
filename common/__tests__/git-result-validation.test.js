@@ -34,7 +34,10 @@ test('comparison failures validate only the fields required by their status', ()
 test('GitHub status and list results do not require detail fields', () => {
   for (const [method, result] of [
     ['getStatus', { available: true, authenticated: false, reason: 'unauthenticated' }],
-    ['listPullRequests', { pulls: [], repo: null }],
+    ['listPullRequests', { pulls: [], repo: null, viewerLogin: null }],
+    ['getPullRequestReviewTarget', { number: 1, state: 'open', headRefOid: 'a'.repeat(40), markedComments: [] }],
+    ['createPullRequestComment', { id: 'comment-1', url: 'https://git.example.invalid/pull/1#comment-1' }],
+    ['minimizePullRequestComment', { minimized: true }],
   ]) {
     expect(() => validateGhResult(method, { ...scope, ...result }, scope)).not.toThrow();
     for (const field of Object.keys(result)) {
@@ -74,7 +77,7 @@ const cases = [
     validate: file => validateGhResult('getPullRequest', {
       ...scope, number: 1, title: 'Synthetic change', state: 'open', isDraft: false, author: 'test',
       headRefName: 'feature', baseRefName: 'main', additions: 1, deletions: 0, changedFiles: 1,
-      updatedAt: '2026-01-01', createdAt: '2026-01-01', url: 'https://git.example.invalid/pull/1',
+      updatedAt: '2026-01-01', createdAt: '2026-01-01', url: 'https://git.example.invalid/pull/1', headRefOid: 'a'.repeat(40),
       reviewDecision: null, body: '', mergeable: 'mergeable', files: [file], fileBodies: {}, checks: [], threads: [],
     }, scope),
   },

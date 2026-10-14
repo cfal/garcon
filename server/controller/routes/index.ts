@@ -30,9 +30,11 @@ import { createNativeSessionLookupRoutes } from './native-session-lookup.js';
 import { createProjectResolutionRoutes } from './project-resolution.js';
 import { createChatBoardRoutes } from './chat-boards.js';
 import { createTicketRoutes } from './tickets.js';
+import createPullRequestReviewRoutes from './pull-request-reviews.js';
 import { createChatTicketSourceRoutes } from './chat-ticket-source.js';
 import type { TicketSourceReader } from '../chats/chat-message-reader.js';
 import type { TicketRuntime } from '../tickets/setup.js';
+import type { PullRequestReviewsRuntime } from '../pull-request-reviews/setup.js';
 import { createChatTagRoutes } from './chat-tags.js';
 import type { ServerRuntimeState } from '../../common/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
@@ -95,6 +97,7 @@ export default function createAllRoutes(workspaceDir: string, {
   modelCatalogResponseCache,
   lastSelectedChat,
   scheduledPrompts,
+  pullRequestReviews,
   snippets,
   preambles,
   chatPreambleSelection,
@@ -136,6 +139,7 @@ export default function createAllRoutes(workspaceDir: string, {
   modelCatalogResponseCache: ModelCatalogResponseCache;
   lastSelectedChat: LastSelectedChatState;
   scheduledPrompts: ScheduledPromptScheduler;
+  pullRequestReviews: PullRequestReviewsRuntime;
   snippets: SnippetService;
   preambles: PreambleService;
   chatPreambleSelection: ChatPreambleSelectionService;
@@ -223,6 +227,7 @@ export default function createAllRoutes(workspaceDir: string, {
       responseCache: modelCatalogResponseCache,
     }),
     createScheduledPromptRoutes(scheduledPrompts),
+    createPullRequestReviewRoutes(pullRequestReviews),
     createSnippetRoutes(snippets),
     createCanvasRoutes(canvases),
     createPreambleRoutes(preambles),

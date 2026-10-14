@@ -3,15 +3,6 @@
 
 import type { PullRequestDetail, PullRequestThread } from '$lib/api/pull-requests';
 
-export function buildReviewPrompt(pr: PullRequestDetail): string {
-	return [
-		`Review pull request #${pr.number} "${pr.title}" (${pr.headRefName} → ${pr.baseRefName}).`,
-		pr.url,
-		'',
-		`Run \`gh pr diff ${pr.number}\` to see the full change, then give a thorough code review focused on correctness, bugs, edge cases, and clarity. Call out anything that should block merge.`,
-	].join('\n');
-}
-
 export function buildAddressThreadPrompt(
 	pr: PullRequestDetail,
 	thread: PullRequestThread,

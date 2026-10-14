@@ -173,6 +173,10 @@
 				isMobile={presentation === 'mobile'}
 				{onSendToChat}
 				onNavigateToChat={() => void workspace.focusChat()}
+				onOpenChat={(chatId) => {
+					if (presentation === 'mobile') void workspace.showChatInCurrentWindow(chatId);
+					else void workspace.openChatBeside(chatId, presentation);
+				}}
 			/>
 		{/await}
 	{:else if surface.type === 'singleton' && surface.kind === 'commit'}

@@ -19,6 +19,7 @@ import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.j
 import type { NavigationStore } from '$lib/stores/navigation.js';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import { createPullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
+import type { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte.js';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
@@ -96,6 +97,7 @@ export interface WorkspaceRootDependencies {
 	appShell: AppShellStore;
 	chatSessions: ChatSessionsStore;
 	ghCapability: GhCapabilityStore;
+	pullRequestReviews: PullRequestReviewsStore;
 	localProjectBasePath(): string | null;
 	localSettings: LocalSettingsStore;
 	modelCatalog: ModelCatalogStore;
@@ -361,8 +363,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			}),
 		createPullRequests: () =>
 			createPullRequestsStore({
-				projectSelection,
-				ghCapability: deps.ghCapability,
+				reviews: deps.pullRequestReviews,
 				notifyError: (message) => deps.notifications.error(message),
 			}),
 		createGitBranchSelector,
