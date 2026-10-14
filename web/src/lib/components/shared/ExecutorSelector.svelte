@@ -1,10 +1,13 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import Network from '@lucide/svelte/icons/network';
+	import Monitor from '@lucide/svelte/icons/monitor';
+	import Server from '@lucide/svelte/icons/server';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
+		DropdownMenuLabel,
 		DropdownMenuRadioGroup,
 		DropdownMenuRadioItem,
 		DropdownMenuTrigger,
@@ -77,7 +80,8 @@
 				aria-hidden="true"
 			/>
 		</DropdownMenuTrigger>
-		<DropdownMenuContent align="start" class="max-w-[calc(100vw-1rem)]">
+		<DropdownMenuContent align="start" class="w-72 max-w-[calc(100vw-1rem)]">
+			<DropdownMenuLabel class="text-xs text-muted-foreground">Executor</DropdownMenuLabel>
 			<DropdownMenuRadioGroup value={executorId}>
 				{#if !executors.get(executorId)}
 					<DropdownMenuRadioItem value={executorId} disabled class="text-sm" title={executorId}>
@@ -92,18 +96,27 @@
 						{@const executorAvailable = available(executor.id)}
 						<DropdownMenuRadioItem
 							value={executor.id}
+							aria-label={executor.label}
+							aria-describedby={`executor-status-${executor.id}`}
 							disabled={!executorAvailable}
 							onSelect={() => {
 								if (available(executor.id)) onSelect(executor.id);
 							}}
-							class="min-h-9 text-sm"
+							class="min-h-11 gap-3 py-2 text-sm"
 						>
-							<span class="min-w-0 max-w-64 break-words">{executor.label}</span>
-							{#if !executorAvailable}
-								<span class="text-muted-foreground">
-									{unavailableLabel(executor)}
-								</span>
+							{#if executor.kind === 'local'}
+								<Monitor class="size-4 text-file-icon-folder" aria-hidden="true" />
+							{:else}
+								<Server class="size-4 text-file-icon-folder" aria-hidden="true" />
 							{/if}
+							<span class="min-w-0 flex-1">
+								<span class="block break-words font-medium">{executor.label}</span>
+								<span id={`executor-status-${executor.id}`} class="block text-xs text-muted-foreground">
+									{executor.kind === 'local' ? 'Local machine' : 'Remote machine'}
+									<span aria-hidden="true"> · </span>
+									{executorAvailable ? 'Ready' : unavailableLabel(executor)}
+								</span>
+							</span>
 						</DropdownMenuRadioItem>
 						{#snippet failed()}{/snippet}
 					</svelte:boundary>
