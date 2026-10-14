@@ -5,6 +5,7 @@
 	import { MarkdownManager } from '@tiptap/markdown';
 	import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
 	import { composerMarkdownTableInput } from './composer-markdown-table-input.js';
+	import { composerMarkdownCaretMarks } from './composer-markdown-caret-marks.js';
 	import { MAX_COMPOSER_MARKDOWN_LENGTH } from './composer-markdown-limits.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createRandomId } from '$lib/utils/random-id.js';
@@ -159,7 +160,13 @@
 		};
 		const mountedEditor = new Editor({
 			element: container,
-			extensions: [...extensions, composerMarkdownTableInput((source) => markdown.parse(source))],
+			extensions: [
+				...extensions,
+				composerMarkdownTableInput((source) => markdown.parse(source)),
+				...(initialSelection !== undefined && selectionMarks
+					? [composerMarkdownCaretMarks(initialSelection, selectionMarks)]
+					: []),
+			],
 			content: documentContent,
 			editable: !readOnly,
 			enableInputRules: [

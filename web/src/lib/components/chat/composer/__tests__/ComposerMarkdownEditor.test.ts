@@ -138,6 +138,22 @@ describe('live formatted editor typing', () => {
 		expect(Array.from(editor.view.dom.querySelectorAll('strong'), (element) => element.textContent)).toEqual(['two', 'three']);
 		expect(onChange).toHaveBeenLastCalledWith('Ship **two** and **three** now');
 	});
+	it('ends a typed bold mark even when the caret marks were dropped before the first input', () => {
+		const { editor, onChange } = mount('Ship **two**', 12);
+		// A selection sync straight after focus discards stored marks.
+		editor.view.dispatch(editor.state.tr.setStoredMarks(null));
+		type(editor, ' and **three** now');
+		expect(
+			Array.from(editor.view.dom.querySelectorAll('strong'), (element) => element.textContent),
+		).toEqual(['two', 'three']);
+		expect(onChange).toHaveBeenLastCalledWith('Ship **two** and **three** now');
+	});
+	it('keeps typing inside a mark when the draft was converted with the caret inside it', () => {
+		const { editor, onChange } = mount('Ship **two** now', 9);
+		editor.view.dispatch(editor.state.tr.setStoredMarks(null));
+		type(editor, 'X');
+		expect(onChange).toHaveBeenLastCalledWith('Ship **twXo** now');
+	});
 	it('formats subsequent bold syntax and lets undo restore the typed delimiters', () => {
 		const { editor, onChange } = mount('Review **this** now');
 		type(editor, ' **more**');
