@@ -10,6 +10,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hasNodeErrorCode } from '../../server/common/errors.js';
 import {
   DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
@@ -94,13 +95,18 @@ async function directoryContainsAnyValue(
 ): Promise<boolean> {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      if (await directoryContainsAnyValue(path, values)) return true;
-      continue;
+    try {
+      if (entry.isDirectory()) {
+        if (await directoryContainsAnyValue(path, values)) return true;
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const contents = await readFile(path);
+      if (values.some((value) => contents.indexOf(value) >= 0)) return true;
+    } catch (error) {
+      // Provider subprocesses can retire temporary entries after enumeration.
+      if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
     }
-    if (!entry.isFile()) continue;
-    const contents = await readFile(path);
-    if (values.some((value) => contents.indexOf(value) >= 0)) return true;
   }
   return false;
 }
