@@ -54,7 +54,9 @@ request changes.
 
 `pull-request-reviews.sqlite` in the workspace directory holds connected
 repositories, their last pull request list and scan status, and review runs
-with their review text. Running work is not durable: a run that was queued or
+with their review text. Schema version 2 adds normalized executor/repository
+identities with a unique index; existing version 1 databases migrate on startup.
+Running work is not durable: a run that was queued or
 running when the controller stopped is marked interrupted when it starts again,
 and the next scan decides afresh. Runs of pull requests closed for 30 days are
 dropped. A permission request in a review chat shows the run as Needs you; one
@@ -62,6 +64,12 @@ left unanswered for 30 minutes stops the review as failed.
 
 The saved executor and provider selections join the executor and provider
 reference guards, as scheduled prompts do.
+
+Saved settings can be edited while the executor is offline, including turning
+off automatic reviews or posting. The saved review target stays fixed until the
+executor is ready. Failed scans keep the last saved list and show its status in
+the inbox. Policy and posting reads paginate all GitHub connections; incomplete
+reads fail instead of publishing a truncated successful scan.
 
 ## Safety
 

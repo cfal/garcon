@@ -43,6 +43,7 @@ export class PullRequestReviewScanner {
   // When each repository's pull request was first seen at its current head; restarts reset it.
   readonly #headObserved = new Map<string, { sha: string; at: number }>();
   readonly #status = new Map<string, Map<number, PullRequestAutoReviewStatus>>();
+  readonly #archiving = new Set<string>();
 
   constructor(private readonly deps: PullRequestReviewScannerDeps) {}
 
@@ -188,11 +189,16 @@ export class PullRequestReviewScanner {
   // Review chats of merged or closed pull requests leave the active sidebar.
   #archiveClosed(runs: readonly StoredRun[], open: ReadonlySet<number>): void {
     for (const run of runs) {
-      if (open.has(run.number) || !run.chatId || run.chatArchived || isActivePullRequestReviewRun(run.state)) continue;
+      if (open.has(run.number) || !run.chatId || run.chatArchived || this.#archiving.has(run.id) || isActivePullRequestReviewRun(run.state)) continue;
       const chatId = run.chatId;
-      this.deps.store.updateRun(run.id, (current) => ({ ...current, chatArchived: true }));
+      this.#archiving.add(run.id);
       void this.deps.archiveChat(chatId)
-        .catch((error) => logger.warn('Could not archive a review chat.', { error: errorMessage(error) }));
+        .then(() => {
+          if (!this.deps.store.available) return;
+          if (this.deps.store.updateRun(run.id, (current) => ({ ...current, chatArchived: true }))) this.deps.changed();
+        })
+        .catch((error) => logger.warn('Could not archive a review chat.', { error: errorMessage(error) }))
+        .finally(() => this.#archiving.delete(run.id));
     }
   }
 }

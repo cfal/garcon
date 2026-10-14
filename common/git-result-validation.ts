@@ -156,11 +156,11 @@ export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, 
   } else if (method === 'listPullRequests') {
     valid = shape(value, { pulls: array(x => shape(x, { ...identity, checksState: oneOf('passing', 'failing', 'pending', 'none'),
       isCrossRepository: bool, authorAssociation: oneOf(...PULL_REQUEST_AUTHOR_ASSOCIATIONS), authorIsBot: bool, authoredByViewer: bool,
-      labels: array(str, 20), reviewRequest: oneOf('me', 'team', null) }), 100),
+      labels: array(str), reviewRequest: oneOf('me', 'team', null) })),
       repo: nullable(x => shape(x, { nameWithOwner: str, url: str })), viewerLogin: nullable(str) });
   } else if (method === 'getPullRequestReviewTarget') {
     valid = shape(value, { number: num, state, headRefOid: str,
-      markedComments: array(x => shape(x, { id: str, url: str, marker: str, isMinimized: bool }), 100) });
+      markedComments: array(x => shape(x, { id: str, url: str, marker: str, isMinimized: bool })) });
   } else if (method === 'createPullRequestComment') {
     valid = shape(value, { id: str, url: str });
   } else if (method === 'minimizePullRequestComment') {

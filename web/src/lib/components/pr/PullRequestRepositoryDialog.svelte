@@ -48,7 +48,9 @@
 			return selectableAgentIds;
 		},
 	});
-	const selectableAgentIds: readonly SessionAgentId[] = $derived(selectableAgentsForExecutor(form.startup.executorId));
+	const selectableAgentIds: readonly SessionAgentId[] = $derived(
+		selectableAgentsForExecutor(form.startup.executorId),
+	);
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(form.startup.executorId));
 	const knownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((chat) => chat.tags))).sort(),
@@ -71,17 +73,25 @@
 	$effect(() => {
 		const executorId = form.startup.executorId;
 		if (!executors.isReady(executorId)) return;
+		untrack(
+			() =>
+				void form.loadStartupWhenReady().catch((error: unknown) => {
+					form.error = errorMessage(error, m.pull_request_review_action_failed());
+				}),
+		);
 		const catalog = rootModelCatalog.forExecutor(executorId);
 		void catalog.version;
 		untrack(() => void catalog.refreshIfStale());
 	});
 
 	$effect(() => {
+		if (!form.startup.executorReady) return;
 		void modelCatalog.version;
 		form.startup.validateAllModelsAgainstLive();
 	});
 
 	$effect(() => {
+		if (!form.startup.executorReady) return;
 		const eligibleAgentIds = selectableAgentIds;
 		untrack(() => form.startup.reconcileAgentSelection(eligibleAgentIds));
 	});
@@ -130,31 +140,55 @@
 		</Dialog.Header>
 		<div class="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
 			<section class={sectionClass}>
-				<ScheduledNewChatComposer
-					conversationInput
-					startup={form.startup}
-					{modelCatalog}
-					{remoteSettings}
-					getSelectableAgentIds={selectableAgentsForExecutor}
-					prompt={form.prompt}
-					promptError={form.promptError}
-					{knownTags}
-					{isMobile}
-					onPromptChange={(value) => (form.prompt = value)}
-					onPromptKeydown={() => {}}
-					onSnippetPendingChange={(pending) => (form.promptTransformPending = pending)}
-				/>
-				<p class="text-xs text-muted-foreground">{m.pull_request_repository_prompt_hint({
+				{#if form.settingsOnlyOffline}
+					<p class="text-sm text-muted-foreground" role="status">
+						{m.pull_request_repository_offline_settings()}
+					</p>
+					<p class="truncate text-sm font-medium">
+						{repository?.target.agentId} · {repository?.target.model}
+					</p>
+					<p class="break-all font-mono text-xs text-muted-foreground">
+						{repository?.target.projectPath}
+					</p>
+					<label class="flex flex-col gap-2 text-sm">
+						{m.pull_request_repository_prompt_label()}
+						<textarea
+							class="min-h-32 w-full rounded-md border border-border bg-background p-2 text-base pointer-fine:text-sm"
+							bind:value={form.prompt}></textarea>
+					</label>
+				{:else}
+					<ScheduledNewChatComposer
+						conversationInput
+						startup={form.startup}
+						{modelCatalog}
+						{remoteSettings}
+						getSelectableAgentIds={selectableAgentsForExecutor}
+						prompt={form.prompt}
+						promptError={form.promptError}
+						{knownTags}
+						{isMobile}
+						onPromptChange={(value) => (form.prompt = value)}
+						onPromptKeydown={() => {}}
+						onSnippetPendingChange={(pending) => (form.promptTransformPending = pending)}
+					/>
+				{/if}
+				<p class="text-xs text-muted-foreground">
+					{m.pull_request_repository_prompt_hint({
 						repository: PULL_REQUEST_REVIEW_PROMPT_TOKENS.repository,
 						number: PULL_REQUEST_REVIEW_PROMPT_TOKENS.pullRequestNumber,
 						path: PULL_REQUEST_REVIEW_PROMPT_TOKENS.projectPath,
-					})}</p>
+					})}
+				</p>
 			</section>
 			<section class={sectionClass}>
 				<div class="flex items-start justify-between gap-3">
 					<div>
-						<p class="text-sm font-medium text-foreground">{m.pull_request_repository_auto_review()}</p>
-						<p class="text-xs text-muted-foreground">{m.pull_request_repository_auto_review_description()}</p>
+						<p class="text-sm font-medium text-foreground">
+							{m.pull_request_repository_auto_review()}
+						</p>
+						<p class="text-xs text-muted-foreground">
+							{m.pull_request_repository_auto_review_description()}
+						</p>
 					</div>
 					<Switch
 						checked={form.autoReview}
@@ -175,7 +209,9 @@
 					</label>
 				</div>
 				{#if form.filters.includeForks || !form.filters.trustedAuthorsOnly}
-					<p class="rounded-md border border-status-warning-border bg-status-warning px-3 py-2 text-xs text-status-warning-foreground">
+					<p
+						class="rounded-md border border-status-warning-border bg-status-warning px-3 py-2 text-xs text-status-warning-foreground"
+					>
 						{m.pull_request_repository_untrusted_warning()}
 					</p>
 				{/if}
@@ -212,7 +248,11 @@
 		<Dialog.Footer>
 			<Button variant="ghost" onclick={onClose}>{m.common_cancel()}</Button>
 			<Button disabled={!form.canSave} onclick={save} data-pr-repository-save>
-				{form.saving ? m.common_saving() : repository ? m.common_save() : m.pull_request_repository_connect()}
+				{form.saving
+					? m.common_saving()
+					: repository
+						? m.common_save()
+						: m.pull_request_repository_connect()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

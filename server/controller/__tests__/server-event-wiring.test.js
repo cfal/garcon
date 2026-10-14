@@ -455,6 +455,39 @@ function observeTelegram({ agents, execution }, directory, send, enabled = true)
 }
 
 describe('server event wiring', () => {
+  it('keeps Stop behind transcript fanout with multiple synchronous observers', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'stop-observer-wiring-'));
+    const fixture = createExecutionFixture(directory, undefined, () => undefined, {
+      beforeWiring: ({ agents }) => agents.onTranscriptCommitted(() => undefined),
+    });
+    const { execution, agents, ledger, transcripts } = fixture;
+    const startedTurn = { turnId: 'turn-1', commandType: 'chat-start', clientRequestId: 'request-1' };
+    try {
+      const accepted = await ledger.accept({ ...startedTurn, chatId: 'chat-1', payload: {} });
+      await execution.scheduleDirectInput({
+        command: { key: accepted.record.key, ...startedTurn, chatId: 'chat-1' },
+        content: 'Synthetic task', options: startedTurn, settlement: new ChatCommandSettlement(ledger),
+        dispatch: (executionAdmission) => agents.startSession('chat-1', 'Synthetic task', { ...startedTurn, executionAdmission }),
+      });
+      await execution.waitForDispatches();
+      await fixture.wiring.waitForIdle();
+      const cursor = fixture.published.length;
+      await execution.stopActiveTurn('chat-1');
+      await ledger.waitForTurnTerminal('chat-1', 'turn-1', new AbortController().signal);
+      await fixture.wiring.waitForIdle();
+      const events = fixture.published.slice(cursor);
+      const messages = events.findIndex((event) => event.type === 'chat-messages' && event.turnId === 'turn-1');
+      const stopped = events.findIndex((event) => event.type === 'chat-session-stopped');
+      const idle = events.findIndex((event) => event.type === 'chat-processing-updated' && event.phase === null);
+      expect(messages).toBeGreaterThanOrEqual(0);
+      expect(stopped).toBeGreaterThan(messages);
+      expect(idle).toBeGreaterThan(stopped);
+    } finally {
+      transcripts.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   for (const outcome of ['finished', 'failed']) {
     it.each(['unavailable', 'write-rejected', 'write-unknown'])(
       `retains %s cwd failure after ${outcome} and publishes its notice before terminal UI`, async failure => {

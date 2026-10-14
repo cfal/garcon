@@ -1,11 +1,16 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, type PullRequestReviewSettings } from '../../../../common/pull-request-reviews.js';
+import { Database } from 'bun:sqlite';
+import { DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, PULL_REQUEST_REVIEW_MAX_REPOSITORIES, type PullRequestReviewSettings } from '../../../../common/pull-request-reviews.js';
 import type { PullRequestSummary } from '../../../../common/gh.js';
 import { PullRequestReviews, type PullRequestReviewsDeps } from '../setup.js';
 import { PullRequestReviewStore } from '../store.js';
+import { PULL_REQUEST_REVIEW_SCHEMA_V1 } from '../schema.js';
+import { BashToolUseMessage } from '../../../../common/chat-types.js';
+import { transcriptViewId } from '../../ledger/contracts.js';
+import type { CommandLedgerRecord } from '../../commands/command-ledger.js';
 
 const HEAD = 'a'.repeat(40);
 const directories: string[] = [];
@@ -28,6 +33,8 @@ function harness(directory = mkdtempSync(join(tmpdir(), 'garcon-reviews-'))) {
   const starts: { chatId: string; command: string; tags: string[] }[] = [];
   const scope = { executorId: 'local', instanceId: 'instance' };
   const gh = {
+    async getStatus() { throw new Error('Unused status read'); },
+    async getPullRequest() { throw new Error('Unused detail read'); },
     async listPullRequests() {
       return { ...scope, pulls: github.pulls, repo: { nameWithOwner: 'acme/app', url: 'https://github.com/acme/app' }, viewerLogin: 'viewer' };
     },
@@ -51,19 +58,20 @@ function harness(directory = mkdtempSync(join(tmpdir(), 'garcon-reviews-'))) {
   let chatCount = 0;
   const deps = {
     executors: { requireExecutor: () => ({ getGhService: async () => gh }) },
-    agents: { hasAgent: () => true, assertExecutorReady() {}, assertExecutionModeSelectionSupported() {}, executionPolicy: () => 'conversation' },
+    agents: { hasAgent: () => true, assertExecutorReady() {}, assertExecutionModeSelectionSupported() {}, executionPolicy: () => 'conversation' as const },
     chats: { hasChat: () => true },
     commands: {
       async submitScheduledStart(input: { chatId: string; command: string; tags: string[] }) {
         starts.push(input);
-        return { chatId: input.chatId, turnId: `turn-${input.chatId}` };
+        return { success: true as const, commandType: 'chat-start', clientRequestId: 'request', status: 'accepted' as const, acceptedAt: '', chat: null, chatId: input.chatId, turnId: `turn-${input.chatId}` };
       },
-      async submitStop() { return {}; },
+      async submitStop() { return { success: true as const, commandType: 'chat-stop', clientRequestId: 'stop', status: 'accepted' as const, acceptedAt: '' }; },
     },
     chatIds: { allocate: () => `chat-${++chatCount}` },
     turns: {
-      waitForTurnTerminal: (chatId: string, turnId: string) => new Promise((resolve) => {
+      waitForTurnTerminal: (chatId: string, turnId: string) => new Promise<CommandLedgerRecord | null>((resolve) => {
         turns.set(chatId, (text) => resolve({
+          key: 'key', commandType: 'chat-start', payloadHash: 'hash', payload: {},
           chatId, turnId, clientRequestId: 'request', acceptedAt: '', updatedAt: '', publicTerminalAt: '2026-01-01T00:00:00Z',
           status: 'finished', turnResult: { availability: 'available', text, bytes: text.length },
         }));
@@ -72,9 +80,9 @@ function harness(directory = mkdtempSync(join(tmpdir(), 'garcon-reviews-'))) {
     chatNames: { setSessionName: async () => ({}) },
     archiveChat: async () => {},
     onInvalidated() {},
-  } as unknown as PullRequestReviewsDeps;
+  } satisfies PullRequestReviewsDeps;
   const reviews = new PullRequestReviews(new PullRequestReviewStore(directory), deps);
-  return { reviews, github, turns, starts, directory };
+  return { reviews, github, turns, starts, directory, deps };
 }
 
 const target = {
@@ -108,6 +116,57 @@ test('reviews a new pull request automatically and posts the review as a comment
   expect(latestRun(reviews)).toMatchObject({ state: 'completed', reviewedSha: HEAD, chatId: 'chat-1' });
   expect(github.comments.map((comment) => comment.body)).toEqual([`No findings.\n\nReviewed commit: ${HEAD}\n\n<!-- garcon-review acme/app#7 ${HEAD} -->`]);
   reviews.stop();
+});
+
+test('tracks a permission committed before startup returns and arms its timeout', async () => {
+  const { reviews, deps, turns } = harness();
+  const repository = await connect(reviews, {});
+  const submit = deps.commands.submitScheduledStart;
+  deps.commands.submitScheduledStart = async (input) => {
+    const viewId = transcriptViewId('synthetic-view');
+    reviews.handleTranscriptCommit({
+      type: 'permission', chatId: input.chatId, runId: 'run', viewId,
+      row: { kind: 'permission-requested', viewId, ordinal: 1, at: '', providerMeta: null,
+        lifecycle: { kind: 'requested', permissionOccurrenceId: '11111111-1111-4111-8111-111111111111', requestedTool: new BashToolUseMessage('', 'tool', 'pwd'), options: [] } },
+    });
+    return submit(input);
+  };
+  const timer = spyOn(globalThis, 'setTimeout');
+  try {
+    reviews.start();
+    reviews.review(repository.id, 7);
+    await until(() => turns.has('chat-1'));
+    expect(latestRun(reviews)?.state).toBe('needs-input');
+    expect(timer).toHaveBeenCalledWith(expect.any(Function), 30 * 60_000);
+    turns.get('chat-1')!(`Reviewed commit: ${HEAD}`);
+    await until(() => latestRun(reviews)?.state === 'completed');
+  } finally { timer.mockRestore(); reviews.stop(); reviews.close(); }
+});
+
+test('retries failed archival on the next successful scan', async () => {
+  const { reviews, github, turns, deps } = harness();
+  const repository = await connect(reviews, {});
+  let attempts = 0;
+  deps.archiveChat = async () => { if (++attempts === 1) throw new Error('Transient archive failure'); };
+  // The scanner captures this port during construction.
+  reviews.close();
+  const store = new PullRequestReviewStore(directories.at(-1)!);
+  const service = new PullRequestReviews(store, deps);
+  service.start();
+  service.review(repository.id, 7);
+  await until(() => turns.has('chat-1'));
+  turns.get('chat-1')!(`Reviewed commit: ${HEAD}`);
+  await until(() => latestRun(service)?.state === 'completed');
+  github.pulls = [];
+  service.scan(repository.id);
+  await until(() => attempts === 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  const run = store.runsForRepository(repository.id)[0];
+  expect(run.chatArchived).toBe(false);
+  service.scan(repository.id);
+  await until(() => store.getRun(run.id)?.chatArchived === true);
+  expect(attempts).toBe(2);
+  service.stop(); service.close();
 });
 
 test('keeps a draft review until it is posted, and refuses to post after new commits', async () => {
@@ -153,4 +212,96 @@ test('marks reviews that were running when the controller stopped as interrupted
   restarted.reviews.start();
   expect(latestRun(restarted.reviews)?.state).toBe('interrupted');
   restarted.reviews.stop();
+});
+
+test('posts a review of the live head even when the scanner cached the preceding head', async () => {
+  const { reviews, github, turns } = harness();
+  const repository = await connect(reviews, { posting: 'comment' });
+  reviews.start();
+  reviews.review(repository.id, 7);
+  await until(() => turns.has('chat-1'));
+  const liveHead = 'b'.repeat(40);
+  github.pulls = [pull({ headRefOid: liveHead })];
+  turns.get('chat-1')!(`Reviewed commit: ${liveHead}`);
+  await until(() => latestRun(reviews)?.post.status === 'posted');
+  expect(latestRun(reviews)?.state).toBe('completed');
+  expect(github.comments).toHaveLength(1);
+  reviews.stop();
+});
+
+test('allows disabling reviews and posting while the preserved executor is offline', async () => {
+  const { reviews, deps } = harness();
+  const repository = await connect(reviews, { autoReview: true, posting: 'comment' });
+  deps.agents.assertExecutorReady = () => { throw new Error('Executor offline'); };
+  const updated = await reviews.update(repository.id, {
+    target: repository.target,
+    settings: { ...repository.settings, autoReview: false, posting: 'off' },
+  });
+  expect(updated.settings).toMatchObject({ autoReview: false, posting: 'off' });
+  await expect(reviews.update(repository.id, {
+    target: { ...repository.target, projectPath: '/work/other' }, settings: updated.settings,
+  })).rejects.toThrow('Executor offline');
+  reviews.close();
+});
+
+test('rejects slash commands when updating a preserved conversation target', async () => {
+  const { reviews } = harness();
+  const repository = await connect(reviews, {});
+  await expect(reviews.update(repository.id, {
+    target: repository.target, settings: { ...repository.settings, prompt: '/compact' },
+  })).rejects.toThrow('cannot start with a slash command');
+  expect(reviews.snapshot().repositories[0].settings.prompt).toBe(repository.settings.prompt);
+  reviews.close();
+});
+
+test('refuses to move a connection onto an executor that already owns this repository', async () => {
+  const { reviews } = harness();
+  const local = await connect(reviews, {});
+  const remote = await reviews.connect({
+    target: { ...target, executorId: '11111111-1111-4111-8111-111111111111' }, settings: DEFAULT_PULL_REQUEST_REVIEW_SETTINGS,
+  });
+  await expect(reviews.update(remote.id, { target: local.target, settings: remote.settings })).rejects.toThrow('already connected');
+  expect(reviews.snapshot().repositories).toHaveLength(2);
+  reviews.close();
+});
+
+test('serializes concurrent connects at the repository limit', async () => {
+  const { reviews, directory } = harness();
+  const database = new Database(join(directory, 'pull-request-reviews.sqlite'));
+  try {
+    database.transaction(() => {
+      const insert = database.query('INSERT INTO review_repositories VALUES (?, ?, ?, ?, ?, ?)');
+      for (let index = 0; index < PULL_REQUEST_REVIEW_MAX_REPOSITORIES - 1; index++) {
+        const repository = { id: `seed-${index}`, nameWithOwner: `acme/seed-${index}`, target, settings: DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, viewerLogin: 'viewer', url: '', createdAt: '', updatedAt: '' };
+        insert.run(repository.id, JSON.stringify(repository), JSON.stringify({ status: 'ok', scannedAt: null, message: null }), '[]', 'local', repository.nameWithOwner);
+      }
+    }).immediate();
+  } finally { database.close(); }
+  const results = await Promise.allSettled([
+    connect(reviews, {}),
+    reviews.connect({ target: { ...target, executorId: '11111111-1111-4111-8111-111111111111' }, settings: DEFAULT_PULL_REQUEST_REVIEW_SETTINGS }),
+  ]);
+  expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+  const failure = results.find((result) => result.status === 'rejected');
+  expect(failure?.status === 'rejected' && failure.reason.message).toContain('At most 50');
+  expect(reviews.snapshot().repositories).toHaveLength(50);
+  reviews.close();
+});
+
+test('migrates existing repository identities and rejects case-insensitive duplicates', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'garcon-review-upgrade-'));
+  directories.push(directory);
+  const database = new Database(join(directory, 'pull-request-reviews.sqlite'));
+  const repository = { id: 'existing', nameWithOwner: 'Acme/App', target, settings: DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, viewerLogin: 'viewer', url: '', createdAt: '', updatedAt: '' };
+  try {
+    for (const statement of PULL_REQUEST_REVIEW_SCHEMA_V1) database.exec(statement);
+    database.exec('INSERT INTO review_meta VALUES (1, 3)');
+    database.query('INSERT INTO review_repositories VALUES (?, ?, ?, ?)').run(repository.id, JSON.stringify(repository), JSON.stringify({ status: 'ok', scannedAt: null, message: null }), '[]');
+  } finally { database.close(); }
+  const store = new PullRequestReviewStore(directory);
+  try {
+    expect(store.listRepositories()[0].nameWithOwner).toBe('Acme/App');
+    expect(() => store.insertRepository({ ...repository, id: 'duplicate', nameWithOwner: 'acme/app' }, { status: 'ok', scannedAt: null, message: null }, [])).toThrow('already connected');
+    expect(store.listRepositories()).toHaveLength(1);
+  } finally { store.close(); }
 });

@@ -6,13 +6,9 @@ import { assertAccessibleDirectory, parseGhJson, runGh, runGhJson, runGhMutation
 import { deriveGhStatus, type GhAuthStatusJson } from './gh-status.js';
 import {
   buildDetail,
-  buildPullRequestList,
-  buildReviewTarget,
   buildThreads,
   type GhRawPullRequest,
-  type GhRawPullRequestList,
   type GhRawReviewComment,
-  type GhRawReviewTarget,
 } from './gh-mappers.js';
 import {
   GhDomainError,
@@ -27,36 +23,8 @@ const logger = createLogger('gh:service');
 
 const VIEW_FIELDS =
   'number,title,body,state,isDraft,author,headRefName,headRefOid,baseRefName,additions,deletions,changedFiles,createdAt,updatedAt,url,mergeable,reviewDecision,statusCheckRollup,files';
-// `gh api` fills {owner} and {repo} in field values from the project's repository.
-const REPOSITORY_FIELDS = ['-F', 'owner={owner}', '-F', 'name={repo}'];
-// One request carries the viewer, the open pull requests, and the pull requests
-// whose review is requested from the viewer directly or through a team.
-const LIST_QUERY = `query($owner:String!,$name:String!,$requested:String!){
-  viewer{login}
-  repository(owner:$owner,name:$name){
-    nameWithOwner url
-    pullRequests(states:OPEN,first:100,orderBy:{field:UPDATED_AT,direction:DESC}){
-      nodes{
-        number title url isDraft state createdAt updatedAt
-        author{login __typename}
-        authorAssociation headRefName baseRefName headRefOid isCrossRepository
-        additions deletions changedFiles reviewDecision
-        labels(first:20){nodes{name}}
-        reviewRequests(first:20){nodes{requestedReviewer{__typename ... on User{login}}}}
-        commits(last:1){nodes{commit{statusCheckRollup{state}}}}
-      }
-    }
-  }
-  requested:search(query:$requested,type:ISSUE,first:100){nodes{... on PullRequest{number}}}
-}`;
-const REVIEW_TARGET_QUERY = `query($owner:String!,$name:String!,$number:Int!){
-  repository(owner:$owner,name:$name){
-    pullRequest(number:$number){
-      number state headRefOid
-      comments(last:100){nodes{id url isMinimized viewerDidAuthor body}}
-    }
-  }
-}`;
+import { readPullRequestList, readReviewTarget } from './gh-review-reads.js';
+
 const MINIMIZE_MUTATION = `mutation($id:ID!){
   minimizeComment(input:{subjectId:$id,classifier:OUTDATED}){minimizedComment{isMinimized}}
 }`;
@@ -140,16 +108,7 @@ export function createGhOperations(statusDirectory = process.cwd()): GhOperation
 
     async listPullRequests({ projectPath, signal }): Promise<PullRequestListResult> {
       await assertAccessibleDirectory(projectPath);
-      const raw = await runGhJson<GhRawPullRequestList>(
-        projectPath,
-        [
-          'api', 'graphql', ...REPOSITORY_FIELDS,
-          '-F', 'requested=repo:{owner}/{repo} is:pr is:open review-requested:@me',
-          '-f', `query=${LIST_QUERY}`,
-        ],
-        { signal },
-      );
-      return buildPullRequestList(raw);
+      return readPullRequestList(projectPath, signal);
     },
 
     async getPullRequest({ projectPath, number, signal }): Promise<PullRequestDetail> {
@@ -177,14 +136,7 @@ export function createGhOperations(statusDirectory = process.cwd()): GhOperation
     async getPullRequestReviewTarget({ projectPath, number, marker, signal }): Promise<PullRequestReviewTarget> {
       assertPullRequestNumber(number);
       await assertAccessibleDirectory(projectPath);
-      const raw = await runGhJson<GhRawReviewTarget>(
-        projectPath,
-        ['api', 'graphql', ...REPOSITORY_FIELDS, '-F', `number=${number}`, '-f', `query=${REVIEW_TARGET_QUERY}`],
-        { signal },
-      );
-      const target = buildReviewTarget(raw, marker);
-      if (!target) throw new GhDomainError('NOT_FOUND', 'Pull request not found.');
-      return target;
+      return readReviewTarget(projectPath, number, marker, signal);
     },
 
     async createPullRequestComment({ projectPath, number, body, signal }): Promise<PullRequestCommentRef> {

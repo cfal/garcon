@@ -63,7 +63,37 @@ it('reports a pull request that does not exist', async () => {
     .rejects.toThrow(/could not resolve to a pullrequest/i);
 });
 
+it('reads 101 open pull requests and all policy connections', async () => {
+  const labels = Array.from({ length: 101 }, (_, index) => `label-${index}`);
+  const reviewers = Array.from({ length: 101 }, (_, index) => `reviewer-${index}`);
+  reviewers[100] = 'viewer';
+  await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({
+    label: 'synthetic', login: 'viewer',
+    pulls: Array.from({ length: 101 }, (_, index) => ({ number: index + 1, labels: index === 100 ? labels : [], reviewRequests: index === 100 ? reviewers : ['viewer'] })),
+  }));
+  const list = await createGhOperations(root).listPullRequests({ projectPath: root });
+  expect(list.pulls).toHaveLength(101);
+  expect(list.pulls[100]).toMatchObject({ number: 101, labels, reviewRequest: 'me' });
+}, 30_000);
+
+it('finds an idempotency marker outside the newest 100 comments', async () => {
+  const marker = `<!-- garcon-review synthetic/repository#3 ${'a'.repeat(40)} -->`;
+  await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({
+    label: 'synthetic', pulls: [{ number: 3 }],
+    comments: Array.from({ length: 101 }, (_, index) => ({ id: `comment-${index}`, number: 3, body: index === 0 ? marker : 'Unrelated' })),
+  }));
+  const target = await createGhOperations(root).getPullRequestReviewTarget({ projectPath: root, number: 3, marker: 'garcon-review synthetic/repository#3 ' });
+  expect(target.markedComments).toMatchObject([{ id: 'comment-0', marker }]);
+});
+
 const first = { id: 1, path: 'example.txt', line: 1, side: 'RIGHT', body: 'first page' };
+it('rejects incomplete connections rather than returning a partial list or posting target', async () => {
+  await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic', incompleteConnection: true }));
+  const gh = createGhOperations(root);
+  await expect(gh.listPullRequests({ projectPath: root })).rejects.toThrow('incomplete connection');
+  await expect(gh.getPullRequestReviewTarget({ projectPath: root, number: 1, marker: 'garcon-review ' })).rejects.toThrow('incomplete connection');
+});
+
 const second = { id: 2, path: 'example.txt', line: 2, side: 'RIGHT', body: 'second page' };
 for (const [label, commentPages, bodies] of [
   ['no pages', [], []],

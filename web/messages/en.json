@@ -3093,5 +3093,10 @@
 	"pull_request_review_state_posted": "Posted",
 	"pull_request_review_state_outdated": "Outdated",
 	"pull_request_review_state_failed": "Failed",
-	"pull_request_review_state_stopped": "Stopped"
+	"pull_request_review_state_stopped": "Stopped",
+	"pull_request_repository_offline_settings": "Executor offline. You can save review settings now. Reconnect to change the reviewer or folder.",
+	"pull_request_repository_prompt_label": "Review prompt",
+	"pull_request_inbox_scan_attention": "Some repositories could not be scanned. Showing their last saved pull requests.",
+	"pull_request_inbox_no_matches": "No pull requests match your search.",
+	"pull_request_inbox_clear_filters": "Clear filters"
 }

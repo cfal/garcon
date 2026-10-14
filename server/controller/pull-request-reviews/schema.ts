@@ -24,3 +24,13 @@ export const PULL_REQUEST_REVIEW_SCHEMA_V1 = [
 `CREATE INDEX review_runs_state ON review_runs(state)`,
 `PRAGMA user_version = 1`,
 ] as const;
+
+export const PULL_REQUEST_REVIEW_SCHEMA_V2 = [
+  `ALTER TABLE review_repositories ADD COLUMN executor_id TEXT NOT NULL DEFAULT 'local'`,
+  `ALTER TABLE review_repositories ADD COLUMN repository_name TEXT NOT NULL DEFAULT ''`,
+  `UPDATE review_repositories SET
+    executor_id = coalesce(json_extract(payload_json, '$.target.executorId'), 'local'),
+    repository_name = lower(json_extract(payload_json, '$.nameWithOwner'))`,
+  `CREATE UNIQUE INDEX review_repositories_identity ON review_repositories(executor_id, repository_name)`,
+  `PRAGMA user_version = 2`,
+] as const;

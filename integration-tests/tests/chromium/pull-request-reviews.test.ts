@@ -75,6 +75,7 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     // Wide enough for the inbox list and detail to stay side by side next to the review chat.
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto(integration.garcon.baseUrl);
+    await page.getByText('Review acme/app#128', { exact: true }).first().waitFor({ timeout: 30_000 });
     await collapseCanonicalFilesWindow(page);
     await page.locator('[data-workspace-window-add-group-trigger="github-views"]').first().click();
     await page.locator('[data-workspace-window-group-menu="github-views"]').getByRole('menuitem', { name: 'Open Pull Requests' }).waitFor();
@@ -101,6 +102,9 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     await panel.locator('[data-pr-tab="changes"]').click();
     await panel.locator('[data-pr-detail]').getByText('example.txt').first().waitFor();
     await capture('inbox-changes-desktop');
+    await panel.locator('[data-pr-tab="checks"]').click();
+    await panel.getByText('Unit tests', { exact: true }).waitFor();
+    await capture('inbox-checks-desktop');
 
     phase('repositories');
     await panel.locator('[data-pr-repositories-button]').click();
@@ -112,7 +116,13 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
 
     phase('mobile inbox');
     await page.setViewportSize({ width: 390, height: 844 });
-    await panel.getByRole('button', { name: 'All pull requests' }).click().catch(() => undefined);
+    await browserExpect(panel.locator('[data-pr-repositories-button]')).toBeVisible();
+    await capture('inbox-detail-mobile');
+    await panel.locator('[data-pr-repositories-button]').click();
+    await page.locator('[data-pr-repositories-dialog]').waitFor();
+    await page.keyboard.press('Escape');
+    await panel.getByRole('button', { name: 'All pull requests' }).click();
+    await browserExpect(needsReview).toBeVisible();
     await capture('inbox-mobile');
     assertNoBrowserErrors();
   }, undefined, {
@@ -126,6 +136,10 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
       await symlink(process.execPath, join(bin, 'bun'));
       await writeFile(join(dirs.project, 'gh-fixture.json'), JSON.stringify({
         label: 'synthetic-viewer', owner: 'acme', repository: 'app', pulls: PULLS,
+        statusChecks: [
+          { __typename: 'CheckRun', name: 'Unit tests', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://git.example.invalid/acme/app/actions/unit-tests' },
+          { __typename: 'CheckRun', name: 'Type check', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://git.example.invalid/acme/app/actions/type-check' },
+        ],
       }));
     },
   });

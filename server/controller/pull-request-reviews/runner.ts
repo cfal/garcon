@@ -60,6 +60,9 @@ export class PullRequestReviewRunner {
     this.#abort.abort();
     for (const timer of this.#permissionTimers.values()) clearTimeout(timer);
     this.#permissionTimers.clear();
+    this.#runByChat.clear();
+    this.#pendingPermissions.clear();
+    this.#permissionTimedOut.clear();
   }
 
   enqueue(repositoryId: string, pull: PullRequestSummary, trigger: 'auto' | 'manual'): StoredRun {
@@ -119,7 +122,7 @@ export class PullRequestReviewRunner {
   }
 
   handleTranscriptCommit(event: TranscriptCommitEvent): void {
-    if (event.type !== 'permission') return;
+    if (this.#abort.signal.aborted || event.type !== 'permission') return;
     const runId = this.#runByChat.get(event.chatId);
     if (!runId) return;
     const pending = this.#pendingPermissions.get(runId) ?? new Set<string>();
@@ -169,6 +172,7 @@ export class PullRequestReviewRunner {
       ? { ...run, state: 'reviewing', chatId, startedAt: new Date(this.deps.now()).toISOString() }
       : null);
     if (!started) return;
+    this.#runByChat.set(chatId, queued.id);
     this.deps.changed();
     const { target } = repository;
     let turnId: string | null;
@@ -198,14 +202,15 @@ export class PullRequestReviewRunner {
       const result = await this.deps.commands.submitScheduledStart(input);
       turnId = result.turnId ?? null;
     } catch (error) {
+      this.#runByChat.delete(chatId);
       this.#settle(queued.id, { state: 'failed', message: errorMessage(error, 'The review chat could not start.'), reviewedSha: null });
       return;
     }
     if (!turnId) {
+      this.#runByChat.delete(chatId);
       this.#settle(queued.id, { state: 'failed', message: 'The review chat started without a turn to follow.', reviewedSha: null });
       return;
     }
-    this.#runByChat.set(chatId, queued.id);
     store.updateRun(queued.id, (run) => ({ ...run, turnId }));
     void this.deps.chatNames.setSessionName(chatId, `Review ${repository.nameWithOwner}#${queued.number}`)
       .catch((error) => logger.warn('Could not name a review chat.', { error: errorMessage(error) }));
@@ -221,18 +226,9 @@ export class PullRequestReviewRunner {
     this.#settle(queued.id, this.#settlement(queued.id, record));
     const settled = store.getRun(queued.id);
     if (settled?.state !== 'completed') return;
-    if (this.#reviewedHeadMoved(settled)) {
-      this.#settle(queued.id, { state: 'outdated', message: 'The pull request has new commits.', reviewedSha: settled.reviewedSha });
-      return;
-    }
     if (repository.settings.posting === 'comment' && store.getRepository(queued.repositoryId)?.settings.posting === 'comment') {
       await this.deps.poster.post(queued.id).catch((error) => logger.warn('Automatic review posting failed.', { error: errorMessage(error) }));
     }
-  }
-
-  #reviewedHeadMoved(run: StoredRun): boolean {
-    const pull = this.deps.store.pulls(run.repositoryId).find((entry) => entry.number === run.number);
-    return pull !== undefined && pull.headRefOid !== run.reviewedSha;
   }
 
   #settlement(runId: string, record: CommandLedgerRecord | null): Settlement {
@@ -266,6 +262,9 @@ export class PullRequestReviewRunner {
   }
 
   #settle(runId: string, settlement: Settlement): void {
+    this.#clearPermissionTimer(runId);
+    this.#pendingPermissions.delete(runId);
+    this.#permissionTimedOut.delete(runId);
     const { review, ...fields } = settlement;
     const updated = this.deps.store.updateRun(runId, (run) => ({
       ...run,
