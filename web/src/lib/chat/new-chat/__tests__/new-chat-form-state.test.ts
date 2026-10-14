@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NewChatFormState } from '../new-chat-form-state.svelte';
+import { NewChatPinnedPathsController } from '../new-chat-pinned-paths-controller';
 import { NewChatPromptDraft, NewChatPromptDraftStore } from '../new-chat-prompt-draft';
 import * as chatsApi from '$lib/api/chats';
 import * as preamblesApi from '$lib/api/chat-preambles';
@@ -304,6 +305,39 @@ describe('NewChatFormState', () => {
 		expect(formState.agentId).toBe('claude');
 		expect(formState.validationStatus).toBe('idle');
 		expect(formState.canSubmit).toBe(false);
+	});
+
+	it('selects a bookmark with its machine and validates that target while retaining the prompt', async () => {
+		mockRemoteSettings.snapshot = makeSnapshot({ paths: { pinnedProjectPaths: ['/same'], byExecutor: {
+			[remoteExecutor.id]: { pinnedPaths: ['/same'], recentPaths: ['/other'] },
+		} } });
+		formState.pinnedProjectPaths = ['/same'];
+		formState.projectPath = '/same';
+		formState.firstMessage = 'Synthetic draft';
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings).select(remoteExecutor.id, '/same');
+		expect(formState.executorId).toBe(remoteExecutor.id);
+		expect(formState.projectPath).toBe('/same');
+		expect(formState.firstMessage).toBe('Synthetic draft');
+		await vi.advanceTimersByTimeAsync(500);
+		expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/same', expect.objectContaining({ executorId: remoteExecutor.id }));
+	});
+
+	it('rechecks bookmark membership, readiness and pending pin writes before changing machines', () => {
+		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byExecutor: {
+			[remoteExecutor.id]: { pinnedPaths: ['/worker'], recentPaths: [] },
+		} } });
+		formState.projectPath = '/original';
+		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
+		pins.select(remoteExecutor.id, '/removed-pin');
+		executors.applySnapshot([localExecutor, { ...remoteExecutor, availability: 'offline' }]);
+		pins.select(remoteExecutor.id, '/worker');
+		pins.select('removed-executor', '/worker');
+		executors.applySnapshot([localExecutor, remoteExecutor]);
+		formState.isUpdatingPinnedPath = true;
+		pins.select(remoteExecutor.id, '/worker');
+		expect(formState.executorId).toBe('local');
+		expect(formState.projectPath).toBe('/original');
 	});
 
 	it('preserves compatible models, prompt and attachments while adopting destination path preferences', async () => {

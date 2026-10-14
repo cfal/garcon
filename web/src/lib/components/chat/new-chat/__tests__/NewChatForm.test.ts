@@ -12,6 +12,7 @@ import { parseChatId } from '$shared/chat-id';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
 import type { PreamblesSnapshot } from '$shared/preambles';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 const PROSPECTIVE_CHAT_ID = parseChatId('1787471053739199');
 const RESEEDED_CHAT_ID = parseChatId('1787471053739200');
@@ -797,6 +798,30 @@ describe('NewChatForm', () => {
 		await waitFor(() => {
 			expect(toggleButton.getAttribute('aria-busy')).toBe('false');
 		});
+	});
+
+	it('browses all machine pins and selects the owning machine without losing the prompt', async () => {
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({ paths: {
+			pinnedProjectPaths: ['/same'], recentProjectPaths: ['/same'], byExecutor: {
+				[remoteExecutor.id]: { pinnedPaths: ['/same'], recentPaths: [] },
+			},
+		} }));
+		render(NewChatFormTestHost, { executorSnapshots: [localExecutor, remoteExecutor] });
+		const scope = await screen.findByRole('button', { name: 'All machines' });
+		const prompt = screen.getByPlaceholderText('How can I help you today?');
+		await fireEvent.input(prompt, { target: { value: 'Synthetic draft' } });
+		await fireEvent.click(scope);
+		expect(scope.getAttribute('aria-pressed')).toBe('true');
+		expect(screen.getByRole('button', { name: 'Local: /same' }).getAttribute('aria-pressed')).toBe('true');
+		await fireEvent.click(screen.getByRole('button', { name: 'Worker: /same' }));
+		expect(screen.getByRole('button', { name: 'Executor: Worker' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Worker: /same' }).getAttribute('aria-pressed')).toBe('true');
+		expect((prompt as HTMLTextAreaElement).value).toBe('Synthetic draft');
+		await fireEvent.click(screen.getByRole('button', { name: 'This machine' }));
+		expect(screen.queryByRole('button', { name: 'Local: /same' })).toBeNull();
+		expect(screen.getByRole('button', { name: '/same' })).toBeTruthy();
 	});
 
 	it('opens the worktree picker as a separate dialog when the project is a git repo', async () => {
