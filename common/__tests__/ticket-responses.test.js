@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { parseTicketBootstrap, parseTicketCommentsPage, parseTicketCounts, parseTicketDetail,
   parseTicketFacets, parseTicketHistoryPage, parseTicketPage, parseTicketProjectDefault } from '../ticket-responses.js';
-import { TicketsInvalidatedMessage, parseServerWsMessage } from '../ws-events.js';
+import { parseServerWsMessage } from '../ws-events.js';
+import { TicketsInvalidatedMessage } from '../ws-revision-invalidations.ts';
 
 const version = { storeId: '11111111-1111-4111-8111-111111111111', collectionRevision: 3 };
 const actor = { kind: 'user', username: 'local', principalMode: 'local', declaredChatId: null };

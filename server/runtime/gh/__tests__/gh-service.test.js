@@ -20,6 +20,49 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
+it('lists open pull requests with the inputs review selection needs', async () => {
+  await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({
+    label: 'synthetic', login: 'viewer-one',
+    pulls: [
+      { number: 3, reviewRequests: ['viewer-one'], labels: ['bug'], checks: 'SUCCESS' },
+      { number: 4, author: { login: 'author-two', __typename: 'Bot' }, authorAssociation: 'NONE', isCrossRepository: true, teamReviewRequested: true },
+      { number: 5, state: 'CLOSED' },
+    ],
+  }));
+  const list = await createGhOperations(root).listPullRequests({ projectPath: root });
+  expect(list.repo).toEqual({ nameWithOwner: 'synthetic/repository', url: 'https://git.example.invalid/synthetic/repository' });
+  expect(list.viewerLogin).toBe('viewer-one');
+  expect(list.pulls).toMatchObject([
+    { number: 3, reviewRequest: 'me', authoredByViewer: true, authorAssociation: 'member', labels: ['bug'], checksState: 'passing', headRefOid: 'a'.repeat(40) },
+    { number: 4, reviewRequest: 'team', authoredByViewer: false, authorIsBot: true, authorAssociation: 'none', isCrossRepository: true },
+  ]);
+});
+
+it('posts a comment, finds it by marker, and minimizes it', async () => {
+  await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic', pulls: [{ number: 3, headRefOid: 'c'.repeat(40) }] }));
+  const gh = createGhOperations(root);
+  // Longer than one argument may be, so it can only arrive through standard input.
+  const body = `${'review line\n'.repeat(5_000)}\n<!-- garcon-review synthetic/repository#3 ${'c'.repeat(40)} -->`;
+  const created = await gh.createPullRequestComment({ projectPath: root, number: 3, body });
+  expect(created.url).toContain('/pull/3#issuecomment-');
+
+  const target = await gh.getPullRequestReviewTarget({ projectPath: root, number: 3, marker: 'garcon-review synthetic/repository#3 ' });
+  expect(target).toMatchObject({ number: 3, state: 'open', headRefOid: 'c'.repeat(40) });
+  expect(target.markedComments).toEqual([
+    { id: created.id, url: created.url, marker: `<!-- garcon-review synthetic/repository#3 ${'c'.repeat(40)} -->`, isMinimized: false },
+  ]);
+
+  expect(await gh.minimizePullRequestComment({ projectPath: root, commentId: created.id })).toEqual({ minimized: true });
+  const after = await gh.getPullRequestReviewTarget({ projectPath: root, number: 3, marker: 'garcon-review ' });
+  expect(after.markedComments.map((comment) => comment.isMinimized)).toEqual([true]);
+});
+
+it('reports a pull request that does not exist', async () => {
+  await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic' }));
+  await expect(createGhOperations(root).getPullRequestReviewTarget({ projectPath: root, number: 99, marker: 'garcon-review ' }))
+    .rejects.toThrow(/could not resolve to a pullrequest/i);
+});
+
 const first = { id: 1, path: 'example.txt', line: 1, side: 'RIGHT', body: 'first page' };
 const second = { id: 2, path: 'example.txt', line: 2, side: 'RIGHT', body: 'second page' };
 for (const [label, commentPages, bodies] of [

@@ -1,78 +1,109 @@
 import { describe, it, expect } from 'bun:test';
 import {
   buildPatchFileSet,
+  buildPullRequestList,
+  buildReviewTarget,
   buildThreads,
-  mapChecksState,
   mapMergeable,
   mapReviewDecision,
   mapSummary,
 } from '../gh-mappers.js';
 
-describe('mapSummary', () => {
-  it('maps a raw open PR with a failing check', () => {
-    const summary = mapSummary({
-      number: 42,
-      title: 'Add feature',
-      state: 'OPEN',
-      isDraft: false,
-      author: { login: 'octocat' },
-      headRefName: 'feat/x',
-      baseRefName: 'main',
-      additions: 10,
-      deletions: 3,
-      changedFiles: 2,
-      updatedAt: '2024-01-01T00:00:00Z',
-      url: 'https://github.com/o/r/pull/42',
-      reviewDecision: 'CHANGES_REQUESTED',
-      statusCheckRollup: [{ status: 'COMPLETED', conclusion: 'FAILURE', name: 'ci' }],
-    });
+const rawPull = {
+  number: 42,
+  title: 'Add feature',
+  state: 'OPEN',
+  isDraft: false,
+  author: { login: 'author-one', __typename: 'User' },
+  authorAssociation: 'COLLABORATOR',
+  headRefName: 'feat/x',
+  baseRefName: 'main',
+  headRefOid: 'a'.repeat(40),
+  isCrossRepository: true,
+  additions: 10,
+  deletions: 3,
+  changedFiles: 2,
+  createdAt: '2024-01-01T00:00:00Z',
+  updatedAt: '2024-01-02T00:00:00Z',
+  url: 'https://git.example.invalid/o/r/pull/42',
+  reviewDecision: 'CHANGES_REQUESTED',
+  labels: { nodes: [{ name: 'bug' }, null] },
+  reviewRequests: { nodes: [{ requestedReviewer: { __typename: 'User', login: 'viewer-one' } }] },
+  commits: { nodes: [{ commit: { statusCheckRollup: { state: 'FAILURE' } } }] },
+};
 
-    expect(summary.number).toBe(42);
-    expect(summary.state).toBe('open');
-    expect(summary.author).toBe('octocat');
-    expect(summary.reviewDecision).toBe('changes_requested');
-    expect(summary.checksState).toBe('failing');
+describe('mapSummary', () => {
+  it('maps the review inputs of an open pull request', () => {
+    expect(mapSummary(rawPull, 'viewer-one', new Set([42]))).toMatchObject({
+      number: 42,
+      state: 'open',
+      author: 'author-one',
+      authorAssociation: 'collaborator',
+      authorIsBot: false,
+      authoredByViewer: false,
+      headRefOid: 'a'.repeat(40),
+      isCrossRepository: true,
+      labels: ['bug'],
+      reviewDecision: 'changes_requested',
+      checksState: 'failing',
+      reviewRequest: 'me',
+    });
   });
 
-  it('keeps draft PRs in the open state', () => {
-    const summary = mapSummary({ number: 1, isDraft: true, state: 'OPEN' });
-    expect(summary.isDraft).toBe(true);
-    expect(summary.state).toBe('open');
+  it('attributes a request the viewer only matches through search to a team', () => {
+    const viaTeam = { ...rawPull, reviewRequests: { nodes: [{ requestedReviewer: { __typename: 'Team' } }] } };
+    expect(mapSummary(viaTeam, 'viewer-one', new Set([42])).reviewRequest).toBe('team');
+    expect(mapSummary(viaTeam, 'viewer-one', new Set()).reviewRequest).toBe(null);
+  });
+
+  it('treats unknown associations as untrusted and recognizes bots and the viewer', () => {
+    const summary = mapSummary({ number: 1, author: { login: 'viewer-one', __typename: 'Bot' }, authorAssociation: 'NEW_KIND' }, 'viewer-one', new Set());
+    expect(summary).toMatchObject({ authorAssociation: 'none', authorIsBot: true, authoredByViewer: true, checksState: 'none' });
   });
 });
 
-describe('mapChecksState', () => {
-  it('returns none for empty rollups', () => {
-    expect(mapChecksState([])).toBe('none');
-    expect(mapChecksState(null)).toBe('none');
+describe('buildPullRequestList', () => {
+  it('carries the repository and the acting login', () => {
+    const list = buildPullRequestList({ data: {
+      viewer: { login: 'viewer-one' },
+      repository: { nameWithOwner: 'o/r', url: 'https://git.example.invalid/o/r', pullRequests: { nodes: [rawPull] } },
+      requested: { nodes: [{ number: 42 }] },
+    } });
+    expect(list.repo).toEqual({ nameWithOwner: 'o/r', url: 'https://git.example.invalid/o/r' });
+    expect(list.viewerLogin).toBe('viewer-one');
+    expect(list.pulls.map((pull) => [pull.number, pull.reviewRequest])).toEqual([[42, 'me']]);
   });
 
-  it('prioritizes failing over pending', () => {
-    expect(
-      mapChecksState([
-        { status: 'COMPLETED', conclusion: 'SUCCESS' },
-        { status: 'IN_PROGRESS' },
-        { status: 'COMPLETED', conclusion: 'FAILURE' },
-      ]),
-    ).toBe('failing');
+  it('rejects a response without a repository', () => {
+    expect(() => buildPullRequestList({ data: { viewer: { login: 'viewer-one' }, repository: null } })).toThrow();
+  });
+});
+
+describe('buildReviewTarget', () => {
+  const comment = (id, body, overrides = {}) => ({ id, url: `https://git.example.invalid/c/${id}`, isMinimized: false, viewerDidAuthor: true, body, ...overrides });
+  const raw = (comments) => ({ data: { repository: { pullRequest: { number: 7, state: 'OPEN', headRefOid: 'b'.repeat(40), comments: { nodes: comments } } } } });
+
+  it('returns only the viewer comments that carry the marker', () => {
+    const target = buildReviewTarget(raw([
+      comment('one', 'Review\n<!-- garcon-review o/r#7 abc -->'),
+      comment('two', 'Unrelated <!-- other -->'),
+      comment('three', '<!-- garcon-review o/r#7 def -->', { viewerDidAuthor: false }),
+      comment('four', '<!--   garcon-review o/r#7 def -->', { isMinimized: true }),
+    ]), 'garcon-review o/r#7 ');
+    expect(target).toMatchObject({ number: 7, state: 'open', headRefOid: 'b'.repeat(40) });
+    expect(target.markedComments).toEqual([
+      { id: 'one', url: 'https://git.example.invalid/c/one', marker: '<!-- garcon-review o/r#7 abc -->', isMinimized: false },
+      { id: 'four', url: 'https://git.example.invalid/c/four', marker: '<!--   garcon-review o/r#7 def -->', isMinimized: true },
+    ]);
   });
 
-  it('returns pending when a check is still running', () => {
-    expect(
-      mapChecksState([
-        { status: 'COMPLETED', conclusion: 'SUCCESS' },
-        { status: 'QUEUED' },
-      ]),
-    ).toBe('pending');
+  it('matches the marker prefix literally', () => {
+    const target = buildReviewTarget(raw([comment('one', '<!-- garcon-review oXr#7 abc -->')]), 'garcon-review o.r#7 ');
+    expect(target.markedComments).toEqual([]);
   });
 
-  it('returns passing when all checks succeed', () => {
-    expect(
-      mapChecksState([
-        { status: 'COMPLETED', conclusion: 'SUCCESS' },
-        { state: 'SUCCESS' },
-      ]),
-    ).toBe('passing');
+  it('reports a missing pull request', () => {
+    expect(buildReviewTarget({ data: { repository: { pullRequest: null } } }, 'x')).toBe(null);
   });
 });
 

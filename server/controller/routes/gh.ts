@@ -6,16 +6,19 @@ import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import { executorIdFromValue } from './executor-target.js';
 import { gitRouteFailure } from './git-executor-service.js';
 
-export type GhServiceResolver = (executorId: string) => Promise<ExecutionGhService>;
+// The browser reads GitHub through these methods; review posting stays inside the controller.
+type BrowserGhMethod = 'getStatus' | 'listPullRequests' | 'getPullRequest';
+
+export type GhServiceResolver = (executorId: string) => Promise<Pick<ExecutionGhService, BrowserGhMethod>>;
 
 const REQUEST_FIELDS = {
   getStatus: ['executorId'],
   listPullRequests: ['executorId', 'project'],
   getPullRequest: ['executorId', 'project', 'number'],
-} satisfies Record<keyof ExecutionGhService, readonly string[]>;
+} satisfies Record<BrowserGhMethod, readonly string[]>;
 
 export default function createGhRoutes(resolve: GhServiceResolver, timeoutMs = GH_DETAIL_TIMEOUT_MS): RouteMap {
-  function route(method: keyof ExecutionGhService): RouteHandler {
+  function route(method: BrowserGhMethod): RouteHandler {
     return async (request, url) => {
       try {
         const fields = REQUEST_FIELDS[method];

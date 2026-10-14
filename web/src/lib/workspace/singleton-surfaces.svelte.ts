@@ -9,7 +9,7 @@ import { GitWorkbenchSurfaceController } from '$lib/git/workbench/git-workbench-
 import { GitHistorySurfaceController } from '$lib/git/history/git-history-surface.svelte.js';
 import { GitCompareSurfaceController } from '$lib/git/review/git-compare-surface.svelte.js';
 import type { GitComparisonPreferences } from '$lib/git/review/git-comparison-preferences.js';
-import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
+import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { ChatMapController } from '$lib/chat-map/chat-map-controller.svelte.js';
 import { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte.js';
@@ -162,8 +162,7 @@ export class SingletonSurfaceRegistry {
 		for (const { controller } of this.#controllers.values()) {
 			if (
 				controller instanceof GitWorkbenchSurfaceController ||
-				controller instanceof CommitController ||
-				controller instanceof PullRequestsStore
+				controller instanceof CommitController
 			)
 				controller.pruneExecutors(executorIds);
 			else if (
@@ -214,6 +213,7 @@ export class SingletonSurfaceRegistry {
 				candidate !== 'chat-canvas' &&
 				candidate !== 'chat-board' &&
 				candidate !== 'tickets' &&
+				candidate !== 'pull-requests' &&
 				this.#visible[candidate],
 		);
 	}

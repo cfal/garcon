@@ -1,5 +1,6 @@
 import type { GitMethod } from '@garcon/common/git';
 import type { ExecutionGitRequests, ExecutionGitResults, ExecutionGhResults } from '@garcon/common/git-execution';
+import type { GhRequests } from '@garcon/common/gh';
 import type { ExecutorCallOptions } from './resources.js';
 
 export type ExecutionGitService = {
@@ -10,4 +11,7 @@ export interface ExecutionGhService {
   getStatus(options?: ExecutorCallOptions): Promise<ExecutionGhResults['getStatus']>;
   listPullRequests(request: { projectPath: string }, options?: ExecutorCallOptions): Promise<ExecutionGhResults['listPullRequests']>;
   getPullRequest(request: { projectPath: string; number: number }, options?: ExecutorCallOptions): Promise<ExecutionGhResults['getPullRequest']>;
+  getPullRequestReviewTarget(request: GhRequests['getPullRequestReviewTarget'], options?: ExecutorCallOptions): Promise<ExecutionGhResults['getPullRequestReviewTarget']>;
+  createPullRequestComment(request: GhRequests['createPullRequestComment'], options?: ExecutorCallOptions): Promise<ExecutionGhResults['createPullRequestComment']>;
+  minimizePullRequestComment(request: GhRequests['minimizePullRequestComment'], options?: ExecutorCallOptions): Promise<ExecutionGhResults['minimizePullRequestComment']>;
 }
