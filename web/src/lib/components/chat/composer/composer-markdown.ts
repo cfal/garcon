@@ -32,6 +32,55 @@ function isAutolink(text: string, mark: Mark): boolean {
 	);
 }
 
+// Backslashes that would escape the punctuation after them once written.
+const ESCAPING_BACKSLASH = /\\(?=[!-/:-@[-`{-~])/g;
+
+function balancedParentheses(text: string): boolean {
+	let depth = 0;
+	for (const character of text) {
+		if (character === '(') depth += 1;
+		else if (character === ')' && --depth < 0) return false;
+	}
+	return depth === 0;
+}
+
+// The stock link and image renderers write a destination as it is; one with whitespace, angle
+// brackets, or unbalanced parentheses parses only inside `<...>`.
+function writableDestination(href: string): string {
+	const escaped = href.replace(ESCAPING_BACKSLASH, '\\$&');
+	return /[\s<>]/.test(href) || !balancedParentheses(href)
+		? `<${escaped.replace(/[<>]/g, '\\$&')}>`
+		: escaped;
+}
+
+function writableTitle(title: unknown): string | null {
+	return typeof title === 'string' && title
+		? title.replace(ESCAPING_BACKSLASH, '\\$&').replace(/"/g, '\\"')
+		: null;
+}
+
+function writableResource(node: JSONContent): JSONContent {
+	if (node.type === 'image') {
+		const src = typeof node.attrs?.src === 'string' ? node.attrs.src : '';
+		return {
+			...node,
+			attrs: { ...node.attrs, src: writableDestination(src), title: writableTitle(node.attrs?.title) },
+		};
+	}
+	if (!node.marks?.some((mark) => mark.type === 'link')) return node;
+	return {
+		...node,
+		marks: node.marks.map((mark) => {
+			if (mark.type !== 'link') return mark;
+			const href = typeof mark.attrs?.href === 'string' ? mark.attrs.href : '';
+			return {
+				...mark,
+				attrs: { ...mark.attrs, href: writableDestination(href), title: writableTitle(mark.attrs?.title) },
+			};
+		}),
+	};
+}
+
 const DELIMITED_MARKS = ['bold', 'italic', 'strike'];
 // A word character or the delimiter itself beside `_`, and a tilde beside or inside `~`, keep
 // that delimiter from opening or closing.
@@ -103,7 +152,7 @@ function normalize(
 	const lineBreak = (marks?: Mark[]): JSONContent =>
 		// Table cells keep the node so the table renderer can write `<br>`.
 		table ? { type: 'hardBreak' } : { type: 'text', text: '\n', ...(marks ? { marks } : {}) };
-	const children = settleDelimiters(node.content);
+	const children = settleDelimiters(node.content).map(writableResource);
 	children.forEach((child, index) => {
 		const previous = children[index - 1];
 		if (child.type === 'hardBreak') {

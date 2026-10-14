@@ -77,7 +77,7 @@ export class PromptComposerMarkdownController {
 		}, 150);
 	}
 
-	/** Shows a loaded Markdown draft formatted, as it was when pasted. */
+	/** Shows a loaded Markdown draft formatted. */
 	restore(): void {
 		const source = this.options.composer.inputText;
 		if (this.options.ui.formattedDraft || !isMarkdownCandidate(source)) return;

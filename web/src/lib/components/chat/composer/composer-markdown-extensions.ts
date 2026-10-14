@@ -3,14 +3,26 @@ import { Table, TableKit } from '@tiptap/extension-table';
 import Image from '@tiptap/extension-image';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
-import { Bold, underscoreInputRegex as boldUnderscoreInputRegex } from '@tiptap/extension-bold';
+import {
+	Bold,
+	starInputRegex as boldStarInputRegex,
+	underscoreInputRegex as boldUnderscoreInputRegex,
+} from '@tiptap/extension-bold';
 import {
 	Italic,
+	starInputRegex as italicStarInputRegex,
 	underscoreInputRegex as italicUnderscoreInputRegex,
 } from '@tiptap/extension-italic';
 import { Strike } from '@tiptap/extension-strike';
 import { HardBreak } from '@tiptap/extension-hard-break';
-import { Extension, markInputRule } from '@tiptap/core';
+import {
+	Extension,
+	markInputRule,
+	type JSONContent,
+	type MarkdownParseHelpers,
+	type MarkdownRendererHelpers,
+	type MarkdownToken,
+} from '@tiptap/core';
 
 // The stock renderer always writes a three-backtick fence, which a body line of three or more
 // backticks would close early. The serializer hands code blocks to this renderer instead.
@@ -27,70 +39,54 @@ const DraftCodeBlock = Extension.create({
 });
 
 // Emphasis keeps the delimiter it was written with, so an identifier such as `__init__.py` is
-// not rewritten to `**init**.py` when its block is edited. Null selects the stock delimiter.
-const delimiterAttribute = { delimiter: { default: null, rendered: false } };
+// not rewritten to `**init**.py` when its block is edited.
+function writtenDelimiter(name: string, stock: string, alternate: string) {
+	return {
+		addAttributes: () => ({ delimiter: { default: null, rendered: false } }),
+		parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers) =>
+			helpers.applyMark(
+				name,
+				helpers.parseInline(token.tokens ?? []),
+				token.raw?.startsWith(alternate) && !token.raw.startsWith(stock)
+					? { delimiter: alternate }
+					: undefined,
+			),
+		renderMarkdown(node: JSONContent, helpers: MarkdownRendererHelpers) {
+			const delimiter = node.attrs?.delimiter === alternate ? alternate : stock;
+			return `${delimiter}${helpers.renderChildren(node)}${delimiter}`;
+		},
+	};
+}
 
 const DraftBold = Bold.extend({
-	addAttributes: () => delimiterAttribute,
-	parseMarkdown: (token, helpers) =>
-		helpers.applyMark(
-			'bold',
-			helpers.parseInline(token.tokens ?? []),
-			token.raw?.startsWith('__') ? { delimiter: '__' } : undefined,
-		),
-	renderMarkdown(node, helpers) {
-		const delimiter = node.attrs?.delimiter === '__' ? '__' : '**';
-		return `${delimiter}${helpers.renderChildren(node)}${delimiter}`;
-	},
+	...writtenDelimiter('bold', '**', '__'),
 	addInputRules() {
 		return [
-			...(this.parent?.() ?? []).slice(0, 1),
+			markInputRule({ find: boldStarInputRegex, type: this.type }),
 			markInputRule({
 				find: boldUnderscoreInputRegex,
 				type: this.type,
-				getAttributes: () => ({ delimiter: '__' }),
+				getAttributes: { delimiter: '__' },
 			}),
 		];
 	},
 });
 
 const DraftItalic = Italic.extend({
-	addAttributes: () => delimiterAttribute,
-	parseMarkdown: (token, helpers) =>
-		helpers.applyMark(
-			'italic',
-			helpers.parseInline(token.tokens ?? []),
-			token.raw?.startsWith('_') ? { delimiter: '_' } : undefined,
-		),
-	renderMarkdown(node, helpers) {
-		const delimiter = node.attrs?.delimiter === '_' ? '_' : '*';
-		return `${delimiter}${helpers.renderChildren(node)}${delimiter}`;
-	},
+	...writtenDelimiter('italic', '*', '_'),
 	addInputRules() {
 		return [
-			...(this.parent?.() ?? []).slice(0, 1),
+			markInputRule({ find: italicStarInputRegex, type: this.type }),
 			markInputRule({
 				find: italicUnderscoreInputRegex,
 				type: this.type,
-				getAttributes: () => ({ delimiter: '_' }),
+				getAttributes: { delimiter: '_' },
 			}),
 		];
 	},
 });
 
-const DraftStrike = Strike.extend({
-	addAttributes: () => delimiterAttribute,
-	parseMarkdown: (token, helpers) =>
-		helpers.applyMark(
-			'strike',
-			helpers.parseInline(token.tokens ?? []),
-			token.raw && !token.raw.startsWith('~~') ? { delimiter: '~' } : undefined,
-		),
-	renderMarkdown(node, helpers) {
-		const delimiter = node.attrs?.delimiter === '~' ? '~' : '~~';
-		return `${delimiter}${helpers.renderChildren(node)}${delimiter}`;
-	},
-});
+const DraftStrike = Strike.extend(writtenDelimiter('strike', '~~', '~'));
 
 // Records a break written as `<br>`, which prose keeps as written and a table cell requires.
 const DraftHardBreak = HardBreak.extend({

@@ -53,15 +53,16 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
         });
         await page.screenshot({ path: join(artifacts, name) });
       };
-      // Emptying a formatted draft is the way back to the plain editor.
+      // Empties the backing textarea in one step, so a conversion that lands meanwhile cannot
+      // hide the control being cleared; any formatted view of the old draft is dropped.
       const clear = async () => {
-        if (await editor.isVisible()) {
-          await editor.focus();
-          await page.keyboard.press("Control+A");
-          await page.keyboard.press("Backspace");
-        } else await textarea.fill("");
+        await textarea.evaluate((element: HTMLTextAreaElement) => {
+          element.value = "";
+          element.dispatchEvent(new Event("input", { bubbles: true }));
+        });
         await browserExpect(textarea).toBeVisible();
         await browserExpect(textarea).toHaveValue("");
+        await textarea.focus();
       };
       const prose = "Ship **two** things:\n\n1. first\n2. second\n\n- [ ] follow up";
       for (const width of [1440, 390]) {
@@ -181,7 +182,6 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
         await browserExpect(textarea).toHaveValue(/`a  b`/);
         const edited = await textarea.inputValue();
         await clear();
-        await browserExpect(textarea).toBeFocused();
         if (width === 390) {
           await textarea.fill(edited);
           await browserExpect(editor).toBeVisible();

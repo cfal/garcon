@@ -105,6 +105,36 @@ describe('formatted editor snippet triggers', () => {
 	});
 });
 
+describe('formatted editor links and images', () => {
+	it('keeps destinations that need angle brackets when their paragraph is edited', () => {
+		const source = 'See [file](</path/with space.md> "a \\"quoted\\" title") and ![alt](<a b>)';
+		const { editor, onChange } = mount(source, source.length);
+		type(editor, ' now');
+		const written = onChange.mock.lastCall![0];
+		expect(written).toBe(`${source} now`);
+		const reparsed = parseComposerMarkdown({ source: written })!.document;
+		const [paragraph] = reparsed.content!;
+		const link = paragraph.content!.find((node) => node.marks?.[0]?.type === 'link')!;
+		expect(link.marks![0].attrs).toMatchObject({
+			href: '/path/with space.md',
+			title: 'a "quoted" title',
+		});
+		expect(paragraph.content!.find((node) => node.type === 'image')?.attrs?.src).toBe('a b');
+	});
+	it('wraps a destination that an edit leaves unable to stand bare', () => {
+		const { editor, onChange } = mount('Read [docs](https://example.test/a) first', 41);
+		const { from } = editor.state.selection;
+		editor.view.dispatch(
+			editor.state.tr.addMark(
+				from - ' first'.length - 'docs'.length,
+				from - ' first'.length,
+				editor.schema.marks.link.create({ href: 'https://example.test/a (b' }),
+			),
+		);
+		expect(onChange).toHaveBeenLastCalledWith('Read [docs](<https://example.test/a (b>) first');
+	});
+});
+
 describe('formatted editor emphasis delimiters', () => {
 	it('keeps written underscores when their paragraph is edited', () => {
 		const { editor, onChange } = mount('edit __init__.py and _private_ names', 36);
