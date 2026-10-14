@@ -85,21 +85,31 @@ describe('buildReviewTarget', () => {
 
   it('returns only the viewer comments that carry the marker', () => {
     const target = buildReviewTarget(raw([
-      comment('one', 'Review\n<!-- garcon-review o/r#7 abc -->'),
+      comment('one', 'Review\n<!-- garcon-review o/r#7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->'),
       comment('two', 'Unrelated <!-- other -->'),
-      comment('three', '<!-- garcon-review o/r#7 def -->', { viewerDidAuthor: false }),
-      comment('four', '<!--   garcon-review o/r#7 def -->', { isMinimized: true }),
+      comment('three', '<!-- garcon-review o/r#7 dddddddddddddddddddddddddddddddddddddddd -->', { viewerDidAuthor: false }),
+      comment('four', '<!-- garcon-review o/r#7 dddddddddddddddddddddddddddddddddddddddd -->', { isMinimized: true }),
     ]), 'garcon-review o/r#7 ');
     expect(target).toMatchObject({ number: 7, state: 'open', headRefOid: 'b'.repeat(40) });
     expect(target.markedComments).toEqual([
-      { id: 'one', url: 'https://git.example.invalid/c/one', marker: '<!-- garcon-review o/r#7 abc -->', isMinimized: false },
-      { id: 'four', url: 'https://git.example.invalid/c/four', marker: '<!--   garcon-review o/r#7 def -->', isMinimized: true },
+      { id: 'one', url: 'https://git.example.invalid/c/one', marker: '<!-- garcon-review o/r#7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->', isMinimized: false },
+      { id: 'four', url: 'https://git.example.invalid/c/four', marker: '<!-- garcon-review o/r#7 dddddddddddddddddddddddddddddddddddddddd -->', isMinimized: true },
     ]);
   });
 
   it('matches the marker prefix literally', () => {
     const target = buildReviewTarget(raw([comment('one', '<!-- garcon-review oXr#7 abc -->')]), 'garcon-review o.r#7 ');
     expect(target.markedComments).toEqual([]);
+  });
+
+  it('uses the final canonical marker rather than quoted or malformed markers', () => {
+    const canonical = '<!-- garcon-review o/r#7 '+ 'b'.repeat(40) +' -->';
+    const target = buildReviewTarget(raw([
+      comment('one', '<!-- garcon-review o/r#7 '+ 'a'.repeat(40) +' -->\nQuoted text\n' + canonical + '\n'),
+      comment('two', '<!-- garcon-review o/r#7 abc -->'),
+      comment('three', canonical + '\nAgent text after the marker'),
+    ]), 'garcon-review o/r#7 ');
+    expect(target.markedComments).toMatchObject([{ id: 'one', marker: canonical }]);
   });
 
   it('reports a missing pull request', () => {

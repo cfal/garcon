@@ -31,6 +31,7 @@ export class PullRequestsStore implements PortableSingletonController {
 	readonly #deps: PullRequestsStoreDeps;
 	#visible = false;
 	#detailController: AbortController | null = null;
+	#detailVersion: string | null = null;
 	#runsController: AbortController | null = null;
 	// What the loaded runs reflect, so a changed latest run reloads them.
 	#runsVersion: string | null = null;
@@ -53,7 +54,10 @@ export class PullRequestsStore implements PortableSingletonController {
 	}
 
 	get groups(): PullRequestInboxGroup[] {
-		return groupInbox(this.reviews.inbox, { query: this.query, repositoryId: this.repositoryFilter });
+		return groupInbox(this.reviews.inbox, {
+			query: this.query,
+			repositoryId: this.repositoryFilter,
+		});
 	}
 
 	get selectedEntry(): PullRequestReviewInboxEntry | null {
@@ -96,6 +100,7 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.#detailController?.abort();
 		this.#runsController?.abort();
 		this.#detailController = null;
+		this.#detailVersion = null;
 		this.#runsController = null;
 		this.#runsVersion = null;
 		this.selectedKey = null;
@@ -107,11 +112,18 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.runsError = null;
 	}
 
-	// Loads what the selection needs: the detail once, and the runs whenever its latest run changes.
+	// Follows scanner changes without publishing detail from an earlier head or executor.
 	syncSelection(): void {
 		const entry = this.selectedEntry;
+		if (this.selectedKey && (!entry || !this.selectedRepository)) {
+			this.clearSelection();
+			return;
+		}
 		if (!this.#visible || !entry) return;
-		if (!this.detail && !this.isDetailLoading && !this.detailError) void this.loadDetail();
+		if (this.#selectedDetailVersion() !== this.#detailVersion) {
+			this.detail = null;
+			void this.loadDetail();
+		}
 		const latest = entry.latestRun;
 		const version = latest ? `${latest.id}:${latest.state}:${latest.post.status}` : 'none';
 		if (version !== this.#runsVersion) void this.#loadRuns(entry, version);
@@ -121,6 +133,8 @@ export class PullRequestsStore implements PortableSingletonController {
 		const entry = this.selectedEntry;
 		const repository = this.selectedRepository;
 		if (!entry || !repository) return;
+		const version = this.#selectedDetailVersion();
+		this.#detailVersion = version;
 		this.#detailController?.abort();
 		const controller = new AbortController();
 		this.#detailController = controller;
@@ -128,14 +142,17 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.detailError = null;
 		try {
 			const detail = await (this.#deps.getDetail ?? getPullRequest)(
-				{ executorId: effectiveExecutorId(repository.target.executorId), projectPath: repository.target.projectPath },
+				{
+					executorId: effectiveExecutorId(repository.target.executorId),
+					projectPath: repository.target.projectPath,
+				},
 				entry.pull.number,
 				{ signal: controller.signal },
 			);
-			if (controller.signal.aborted) return;
+			if (controller.signal.aborted || version !== this.#selectedDetailVersion()) return;
 			this.detail = detail;
 		} catch (error) {
-			if (controller.signal.aborted) return;
+			if (controller.signal.aborted || version !== this.#selectedDetailVersion()) return;
 			const message = errorMessage(error, m.pull_request_load_failed());
 			this.detail = null;
 			this.detailError = message;
@@ -148,15 +165,35 @@ export class PullRequestsStore implements PortableSingletonController {
 		}
 	}
 
+	#selectedDetailVersion(): string | null {
+		const entry = this.selectedEntry;
+		const repository = this.selectedRepository;
+		if (!entry || !repository) return null;
+		return JSON.stringify([
+			entry.repositoryId,
+			entry.pull.number,
+			effectiveExecutorId(repository.target.executorId),
+			repository.target.projectPath,
+			entry.pull.headRefOid,
+			entry.pull.updatedAt,
+			entry.pull.checksState,
+			entry.pull.reviewDecision,
+		]);
+	}
+
 	async #loadRuns(entry: PullRequestReviewInboxEntry, version: string): Promise<void> {
 		this.#runsController?.abort();
 		const controller = new AbortController();
 		this.#runsController = controller;
 		this.#runsVersion = version;
 		try {
-			const runs = await (this.#deps.getRuns ?? getPullRequestReviewRuns)(entry.repositoryId, entry.pull.number, {
-				signal: controller.signal,
-			});
+			const runs = await (this.#deps.getRuns ?? getPullRequestReviewRuns)(
+				entry.repositoryId,
+				entry.pull.number,
+				{
+					signal: controller.signal,
+				},
+			);
 			if (controller.signal.aborted) return;
 			this.runs = runs;
 			this.runsError = null;

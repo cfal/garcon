@@ -44,6 +44,10 @@
 
 	const reviews = $derived(pullRequests.reviews);
 	const groups = $derived(pullRequests.groups);
+	const hasMatches = $derived(groups.some((group) => group.entries.length > 0));
+	const hasScanFailures = $derived(
+		reviews.repositories.some((repository) => repository.scan.status !== 'ok'),
+	);
 	const hasSelection = $derived(pullRequests.hasSelection);
 	const groupLabels: Record<PullRequestInboxGroupId, () => string> = {
 		'needs-my-review': m.pull_request_inbox_needs_my_review,
@@ -111,7 +115,32 @@
 	data-pr-layout={containerPresentation}
 	{@attach observePanelWidth}
 >
-	<div class="flex h-full min-h-0 min-w-0">
+	<div class="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
+		<h2 class="min-w-0 flex-1 truncate text-base font-semibold text-foreground">
+			{m.pull_requests_title()}
+		</h2>
+		<button
+			type="button"
+			class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+			aria-label={m.pull_requests_refresh()}
+			title={m.pull_requests_refresh()}
+			disabled={reviews.repositories.length === 0}
+			onclick={() => void reviews.scan()}
+		>
+			<RefreshCw class={cn('h-4 w-4', reviews.isRefreshing && 'animate-spin')} />
+		</button>
+		<button
+			type="button"
+			class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+			aria-label={m.pull_request_repositories()}
+			title={m.pull_request_repositories()}
+			onclick={() => (repositoriesOpen = true)}
+			data-pr-repositories-button
+		>
+			<Settings2 class="h-4 w-4" />
+		</button>
+	</div>
+	<div class="flex min-h-0 min-w-0 flex-1">
 		<div
 			class={cn(
 				'flex h-full min-h-0 flex-col border-border',
@@ -124,42 +153,41 @@
 			inert={listHidden}
 			data-pr-list
 		>
-			<div class="flex shrink-0 items-center gap-1 px-3 pt-3 pb-2">
-				<h2 class="min-w-0 flex-1 truncate text-base font-semibold text-foreground">
-					{m.pull_requests_title()}
-				</h2>
-				<button
-					type="button"
-					class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-					aria-label={m.pull_requests_refresh()}
-					title={m.pull_requests_refresh()}
-					disabled={reviews.repositories.length === 0}
-					onclick={() => void reviews.scan()}
-				>
-					<RefreshCw class={cn('h-4 w-4', reviews.isRefreshing && 'animate-spin')} />
-				</button>
-				<button
-					type="button"
-					class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-					aria-label={m.pull_request_repositories()}
-					title={m.pull_request_repositories()}
-					onclick={() => (repositoriesOpen = true)}
-					data-pr-repositories-button
-				>
-					<Settings2 class="h-4 w-4" />
-				</button>
-			</div>
-			<label class="mx-3 mb-2 flex shrink-0 items-center gap-2 rounded-full bg-muted px-3 py-1.5">
+			<label
+				class="mx-3 mt-3 mb-2 flex shrink-0 items-center gap-2 rounded-full bg-muted px-3 py-1.5"
+			>
 				<Search class="h-4 w-4 shrink-0 text-muted-foreground" />
 				<input
-					class="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+					class="min-w-0 flex-1 bg-transparent text-base text-foreground pointer-fine:text-sm outline-none placeholder:text-muted-foreground"
 					placeholder={m.pull_request_inbox_search()}
 					aria-label={m.pull_request_inbox_search()}
 					bind:value={pullRequests.query}
 				/>
 			</label>
+			<div class="mx-3 mb-2">
+				{#if reviews.repositories.length > 1}
+					<select
+						class="select-native w-full text-base pointer-fine:text-sm"
+						aria-label={m.pull_request_inbox_repository_filter()}
+						bind:value={pullRequests.repositoryFilter}
+					>
+						<option value={null}>{m.pull_request_inbox_all_repositories()}</option>
+						{#each reviews.repositories as repository (repository.id)}
+							<option value={repository.id}>{repository.nameWithOwner}</option>
+						{/each}
+					</select>
+				{/if}
+			</div>
 			<ScrollArea bind:viewportRef={listViewportRef} class="min-h-0 flex-1">
 				<div class="flex flex-col gap-3 px-2 pb-3">
+					{#if hasScanFailures}
+						<p
+							class="rounded-md border border-status-warning-border bg-status-warning p-2 text-xs text-status-warning-foreground"
+							role="status"
+						>
+							{m.pull_request_inbox_scan_attention()}
+						</p>
+					{/if}
 					{#if reviews.status === 'loading' || reviews.status === 'idle'}
 						<p class="px-2 py-3 text-xs text-muted-foreground">{m.pull_requests_loading()}</p>
 					{:else if reviews.status === 'error'}
@@ -177,8 +205,23 @@
 							<button
 								type="button"
 								class="mt-3 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring"
-								onclick={() => (repositoriesOpen = true)}>{m.pull_request_repository_connect()}</button
+								onclick={() => (repositoriesOpen = true)}
+								>{m.pull_request_repository_connect()}</button
 							>
+						</div>
+					{:else if !hasMatches && (pullRequests.query || pullRequests.repositoryFilter)}
+						<div class="px-2 py-3 text-sm text-muted-foreground">
+							<p>{m.pull_request_inbox_no_matches()}</p>
+							<button
+								type="button"
+								class="mt-2 rounded-md border border-border px-3 py-1.5 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+								onclick={() => {
+									pullRequests.query = '';
+									pullRequests.repositoryFilter = null;
+								}}
+							>
+								{m.pull_request_inbox_clear_filters()}
+							</button>
 						</div>
 					{:else}
 						{#each groups as group (group.id)}
@@ -192,25 +235,20 @@
 										onclick={() => toggleGroup(group.id)}
 									>
 										<span class="truncate">{groupLabels[group.id]()}</span>
-										<ChevronDown class={cn('h-3.5 w-3.5 shrink-0 transition-transform', collapsed && '-rotate-90')} />
+										<ChevronDown
+											class={cn(
+												'h-3.5 w-3.5 shrink-0 transition-transform',
+												collapsed && '-rotate-90',
+											)}
+										/>
 										<span class="ml-auto text-xs tabular-nums">{group.entries.length}</span>
 									</button>
-									{#if group.id === 'all-open' && reviews.repositories.length > 1}
-										<select
-											class="select-native max-w-32 text-xs"
-											aria-label={m.pull_request_inbox_repository_filter()}
-											bind:value={pullRequests.repositoryFilter}
-										>
-											<option value={null}>{m.pull_request_inbox_all_repositories()}</option>
-											{#each reviews.repositories as repository (repository.id)}
-												<option value={repository.id}>{repository.nameWithOwner}</option>
-											{/each}
-										</select>
-									{/if}
 								</div>
 								{#if !collapsed}
 									{#if group.entries.length === 0}
-										<p class="px-2 pb-1 text-sm text-muted-foreground/80">{m.pull_requests_none()}</p>
+										<p class="px-2 pb-1 text-sm text-muted-foreground/80">
+											{m.pull_requests_none()}
+										</p>
 									{:else}
 										<div class="flex flex-col gap-0.5">
 											{#each group.entries as entry (inboxEntryKey(entry))}
@@ -223,7 +261,9 @@
 														onSelect={() => selectEntry(entry)}
 													/>
 													{#snippet failed()}
-														<p class="px-2 text-xs text-muted-foreground">{m.pull_request_load_failed()}</p>
+														<p class="px-2 text-xs text-muted-foreground">
+															{m.pull_request_load_failed()}
+														</p>
 													{/snippet}
 												</svelte:boundary>
 											{/each}
@@ -276,5 +316,10 @@
 </div>
 
 {#if repositoriesOpen}
-	<PullRequestRepositoriesDialog {reviews} {currentTime} {onOpenChat} onClose={() => (repositoriesOpen = false)} />
+	<PullRequestRepositoriesDialog
+		{reviews}
+		{currentTime}
+		{onOpenChat}
+		onClose={() => (repositoriesOpen = false)}
+	/>
 {/if}

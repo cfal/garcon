@@ -35,6 +35,17 @@ const print = (value) => console.log(JSON.stringify(value));
 const fail = (message) => { console.error(message); process.exit(1); };
 const findPull = (number) => pulls.find(pull => pull.number === Number(number)) ?? fail('GraphQL: Could not resolve to a PullRequest with the number.');
 
+const page = (values, cursor = Number(field('endCursor') ?? 0), limit = config.pageSize ?? 100) => ({
+  nodes: values.slice(cursor, cursor + limit),
+  pageInfo: config.incompleteConnection ? null : { hasNextPage: cursor + limit < values.length, endCursor: String(cursor + limit) },
+});
+const listPull = ({ files, body, labels, reviewRequests, checks, teamReviewRequested, ...pull }) => ({
+  ...pull,
+  labels: page(labels.map(name => ({ name })), 0),
+  reviewRequests: page(reviewRequests.map(reviewer => ({ requestedReviewer: { __typename: 'User', login: reviewer } })), 0),
+  commits: { nodes: [{ commit: { statusCheckRollup: checks ? { state: checks } : null } }] },
+});
+
 if (config.fail?.[`${command} ${action}`] || config.fail?.[command]) fail(config.fail[`${command} ${action}`] ?? config.fail[command]);
 if (command === 'auth') print({ hosts: { 'git.example.invalid': [{ active: true, state: 'success', login }] } });
 else if (command === 'repo') print({ nameWithOwner: `${owner}/${repository}` });
@@ -48,20 +59,24 @@ else if (command === 'api' && action === 'graphql') {
     print({ data: { minimizeComment: { minimizedComment: { isMinimized: true } } } });
   } else if (query.includes('pullRequest(number:')) {
     const pull = findPull(field('number'));
-    const comments = (await readComments()).filter(comment => comment.number === pull.number);
-    print({ data: { repository: { pullRequest: { number: pull.number, state: pull.state, headRefOid: pull.headRefOid,
-      comments: { nodes: comments.map(({ number, ...comment }) => ({ viewerDidAuthor: true, isMinimized: false, ...comment })) } } } } });
+    let connections;
+    if (query.includes('comments(first:')) {
+      const comments = (await readComments()).filter(comment => comment.number === pull.number);
+      connections = { comments: page(comments.map(({ number, ...comment }) => ({ viewerDidAuthor: true, isMinimized: false, ...comment }))) };
+    } else if (query.includes('labels(first:')) {
+      connections = { labels: page(pull.labels.map(name => ({ name }))) };
+    } else {
+      connections = { reviewRequests: page(pull.reviewRequests.map(reviewer => ({ requestedReviewer: { __typename: 'User', login: reviewer } }))) };
+    }
+    print({ data: { repository: { pullRequest: { number: pull.number, state: pull.state, headRefOid: pull.headRefOid, ...connections } } } });
+  } else if (query.includes('requested:search')) {
+    const requested = pulls.filter(pull => pull.state === 'OPEN' && (pull.teamReviewRequested || pull.reviewRequests.includes(login))).map(pull => ({ number: pull.number }));
+    print({ data: { requested: { ...page(requested), issueCount: requested.length } } });
   } else {
     print({ data: {
       viewer: { login },
-      repository: { nameWithOwner: `${owner}/${repository}`, url: `https://git.example.invalid/${owner}/${repository}`,
-        pullRequests: { nodes: pulls.filter(pull => pull.state === 'OPEN').map(({ files, body, labels, reviewRequests, checks, teamReviewRequested, ...pull }) => ({
-          ...pull,
-          labels: { nodes: labels.map(name => ({ name })) },
-          reviewRequests: { nodes: reviewRequests.map(reviewer => ({ requestedReviewer: { __typename: 'User', login: reviewer } })) },
-          commits: { nodes: [{ commit: { statusCheckRollup: checks ? { state: checks } : null } }] },
-        })) } },
-      requested: { nodes: pulls.filter(pull => pull.teamReviewRequested || pull.reviewRequests.includes(login)).map(pull => ({ number: pull.number })) },
+      repository: { nameWithOwner: owner + '/' + repository, url: 'https://git.example.invalid/' + owner + '/' + repository,
+        pullRequests: page(pulls.filter(pull => pull.state === 'OPEN').map(listPull)) },
     } });
   }
 } else if (command === 'api' && args.includes('POST')) {

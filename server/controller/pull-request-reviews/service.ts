@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { ExecutionGhService } from '@garcon/server-agent-interface';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import type { PullRequestListResult, PullRequestSummary } from '../../../common/gh.js';
 import {
-  PULL_REQUEST_REVIEW_MAX_REPOSITORIES,
   PULL_REQUEST_REVIEW_RECENT_RUN_LIMIT,
   normalizePullRequestReviewRepositoryInput,
   type PullRequestAutoReviewStatus,
@@ -110,16 +110,9 @@ export class PullRequestReviewRepositories {
   // Resolves the folder's GitHub repository with its executor's `gh` before saving it.
   async connect(value: unknown): Promise<PullRequestReviewRepository> {
     const input = this.#validate(value);
-    if (this.deps.store.listRepositories().length >= PULL_REQUEST_REVIEW_MAX_REPOSITORIES) {
-      throw reviewConflict(`At most ${PULL_REQUEST_REVIEW_MAX_REPOSITORIES} repositories can be connected.`);
-    }
     const list = await this.#readRepository(input);
     if (!list.repo) throw reviewInvalid('This folder has no GitHub repository.');
     const repo = list.repo;
-    const executorId = effectiveExecutorId(input.target.executorId);
-    const duplicate = this.deps.store.listRepositories().find((entry) =>
-      entry.nameWithOwner === repo.nameWithOwner && effectiveExecutorId(entry.target.executorId) === executorId);
-    if (duplicate) throw reviewConflict(`${repo.nameWithOwner} is already connected on this executor.`);
     const now = new Date(this.deps.now()).toISOString();
     const repository: StoredRepository = {
       id: crypto.randomUUID(),
@@ -141,14 +134,18 @@ export class PullRequestReviewRepositories {
 
   async update(id: string, value: unknown): Promise<PullRequestReviewRepository> {
     const current = this.require(id);
-    const input = this.#validate(value);
+    const normalized = normalizePullRequestReviewRepositoryInput(value);
+    if (!normalized) throw reviewInvalid('Repository settings are invalid.');
+    const preservedTarget = isDeepStrictEqual(normalized.target, current.target);
+    const input = preservedTarget ? normalized : this.#validate(value);
+    if (preservedTarget) this.#validatePrompt(input);
     const moved = effectiveExecutorId(input.target.executorId) !== effectiveExecutorId(current.target.executorId)
       || input.target.projectPath !== current.target.projectPath;
     let viewerLogin = current.viewerLogin;
     if (moved) {
       // A new folder must still be a checkout of the same repository.
       const list = await this.#readRepository(input);
-      if (list.repo?.nameWithOwner !== current.nameWithOwner) {
+      if (list.repo?.nameWithOwner.toLowerCase() !== current.nameWithOwner.toLowerCase()) {
         throw reviewInvalid(`This folder is not a checkout of ${current.nameWithOwner}.`);
       }
       viewerLogin = list.viewerLogin;
@@ -196,11 +193,15 @@ export class PullRequestReviewRepositories {
       permissionMode: target.permissionMode,
       thinkingMode: target.thinkingMode,
     });
-    if (this.deps.agents.executionPolicy(target.agentId, target.executorId) === 'conversation'
-      && hasLeadingSlashCommand(input.settings.prompt.trim())) {
+    this.#validatePrompt(input);
+    return input;
+  }
+
+  #validatePrompt(input: PullRequestReviewRepositoryInput): void {
+    if (hasLeadingSlashCommand(input.settings.prompt.trim())
+      && this.deps.agents.executionPolicy(input.target.agentId, input.target.executorId) === 'conversation') {
       throw reviewInvalid('The review prompt cannot start with a slash command.');
     }
-    return input;
   }
 
   async #readRepository(input: PullRequestReviewRepositoryInput): Promise<PullRequestListResult> {

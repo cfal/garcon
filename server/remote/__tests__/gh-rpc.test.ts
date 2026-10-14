@@ -63,6 +63,21 @@ for (const dialer of ['controller', 'worker'] as const) {
       await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({ ...config, bodyBytes: 4 * 1024 * 1024 }));
       await expect(gh.getPullRequest({ projectPath: fixture.projectPath, number: 1 })).rejects.toMatchObject({ code: 'GIT_RESULT_TOO_LARGE' });
       expect(fixture.executor.availability).toBe('ready');
+      const labels = Array.from({ length: 101 }, (_, index) => `label-${index}`);
+      await fs.rm(path.join(fixture.projectPath, 'gh-comments.json'));
+      await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({
+        label: config.label,
+        pulls: Array.from({ length: 101 }, (_, index) => ({ number: index + 1, labels: index === 100 ? labels : [] })),
+        comments: Array.from({ length: 101 }, (_, index) => ({ id: `comment-${index}`, number: 1, body: `<!-- ${marker}${'a'.repeat(40)} -->` })),
+      }));
+      // Both paths validate the complete result after the runtime has read every page.
+      for (const service of [await fixture.local.getGhService(), gh]) {
+        const list = await service.listPullRequests({ projectPath: fixture.projectPath });
+        expect(list.pulls).toHaveLength(101);
+        expect(list.pulls[100].labels).toEqual(labels);
+        const target = await service.getPullRequestReviewTarget({ projectPath: fixture.projectPath, number: 1, marker });
+        expect(target.markedComments).toHaveLength(101);
+      }
       await fs.rm(path.join(bin, 'gh'));
       expect(await gh.getStatus()).toMatchObject({ available: false, reason: 'gh_missing' });
     } finally { process.env.PATH = originalPath; await fixture.dispose(); }

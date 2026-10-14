@@ -1,8 +1,10 @@
 import type { Database } from 'bun:sqlite';
 import { join } from 'node:path';
 import type { PullRequestSummary } from '../../../common/gh.js';
+import { effectiveExecutorId } from '../../../common/executors.js';
 import {
   isActivePullRequestReviewRun,
+  PULL_REQUEST_REVIEW_MAX_REPOSITORIES,
   type PullRequestReviewPost,
   type PullRequestReviewRepository,
   type PullRequestReviewRunState,
@@ -12,8 +14,8 @@ import { DomainError } from '../../common/domain-error.js';
 import { diagnosticErrorCode } from '../../common/errors.js';
 import { createLogger } from '../../common/log.js';
 import { configureDurableSqlite, openPrivateSqliteDatabase, securePrivateSqliteSidecars } from '../lib/private-sqlite.js';
-import { reviewStorageUnavailable } from './errors.js';
-import { PULL_REQUEST_REVIEW_SCHEMA_V1 } from './schema.js';
+import { reviewConflict, reviewStorageUnavailable } from './errors.js';
+import { PULL_REQUEST_REVIEW_SCHEMA_V1, PULL_REQUEST_REVIEW_SCHEMA_V2 } from './schema.js';
 
 const logger = createLogger('pull-request-review-store');
 
@@ -88,7 +90,7 @@ export class PullRequestReviewStore {
           "SELECT count(*) AS count FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
         ).get();
         if (existing?.count !== 0) throw new Error('Unrecognized pull request review database.');
-      } else if (version !== 1) {
+      } else if (version !== 1 && version !== 2) {
         throw new Error('Unsupported pull request review database version.');
       }
       configureDurableSqlite(database);
@@ -97,6 +99,9 @@ export class PullRequestReviewStore {
           database.exec(PULL_REQUEST_REVIEW_SCHEMA_V1.join(';\n'));
           database.query('INSERT INTO review_meta VALUES (1, 0)').run();
         }).immediate();
+      }
+      if (version === 0 || version === 1) {
+        database.transaction(() => database.exec(PULL_REQUEST_REVIEW_SCHEMA_V2.join(';\n'))).immediate();
       }
       securePrivateSqliteSidecars(path);
     } catch (error) {
@@ -160,14 +165,28 @@ export class PullRequestReviewStore {
 
   insertRepository(repository: StoredRepository, scan: PullRequestReviewScan, pulls: PullRequestSummary[]): void {
     this.#write((database) => {
-      database.query('INSERT INTO review_repositories VALUES (?, ?, ?, ?)')
-        .run(repository.id, JSON.stringify(repository), JSON.stringify(scan), JSON.stringify(pulls));
+      const count = database.query<{ count: number }, []>('SELECT count(*) AS count FROM review_repositories').get()!.count;
+      if (count >= PULL_REQUEST_REVIEW_MAX_REPOSITORIES) throw reviewConflict(`At most ${PULL_REQUEST_REVIEW_MAX_REPOSITORIES} repositories can be connected.`);
+      this.#assertRepositoryIdentity(database, repository);
+      database.query('INSERT INTO review_repositories (id, payload_json, scan_json, pulls_json, executor_id, repository_name) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(repository.id, JSON.stringify(repository), JSON.stringify(scan), JSON.stringify(pulls), effectiveExecutorId(repository.target.executorId), repository.nameWithOwner.toLowerCase());
     });
   }
 
   updateRepository(repository: StoredRepository): boolean {
-    return this.#write((database) => database.query('UPDATE review_repositories SET payload_json = ? WHERE id = ?')
-      .run(JSON.stringify(repository), repository.id).changes > 0);
+    return this.#write((database) => {
+      this.#assertRepositoryIdentity(database, repository);
+      return database.query('UPDATE review_repositories SET payload_json = ?, executor_id = ?, repository_name = ? WHERE id = ?')
+        .run(JSON.stringify(repository), effectiveExecutorId(repository.target.executorId), repository.nameWithOwner.toLowerCase(), repository.id).changes > 0;
+    });
+  }
+
+  // Checks identity under the same immediate transaction as the write; the index also enforces it.
+  #assertRepositoryIdentity(database: Database, repository: StoredRepository): void {
+    const existing = database.query<{ id: string }, [string, string, string]>(
+      'SELECT id FROM review_repositories WHERE executor_id = ? AND repository_name = ? AND id != ?',
+    ).get(effectiveExecutorId(repository.target.executorId), repository.nameWithOwner.toLowerCase(), repository.id);
+    if (existing) throw reviewConflict(`${repository.nameWithOwner} is already connected on this executor.`);
   }
 
   deleteRepository(id: string): boolean {

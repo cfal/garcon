@@ -31,6 +31,10 @@ export class PullRequestRepositoryFormState {
 	filters = $state({ ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.filters });
 	debounceMinutes = $state(DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.debounceMinutes);
 	#retained = { ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS };
+	#savedTarget = $state<PullRequestReviewRepositoryInput['target'] | null>(null);
+	#savedDraft = '';
+	#startupLoad: Promise<void> | null = null;
+	#disposed = false;
 	saving = $state(false);
 	promptTransformPending = $state(false);
 	error = $state<string | null>(null);
@@ -47,7 +51,8 @@ export class PullRequestRepositoryFormState {
 	}
 
 	get promptError(): string | null {
-		if (this.prompt.length > PULL_REQUEST_REVIEW_PROMPT_MAX_LENGTH) return m.pull_request_repository_prompt_too_long();
+		if (this.prompt.length > PULL_REQUEST_REVIEW_PROMPT_MAX_LENGTH)
+			return m.pull_request_repository_prompt_too_long();
 		return null;
 	}
 
@@ -56,18 +61,42 @@ export class PullRequestRepositoryFormState {
 			!this.saving &&
 			!this.promptTransformPending &&
 			this.promptError === null &&
-			this.startup.settingsLoaded &&
-			this.startup.executorReady &&
-			this.options.selectableAgentIds.includes(this.startup.agentId) &&
-			this.startup.validationStatus === 'valid' &&
-			this.startup.resolvedModelSelection !== null
+			(this.settingsOnlyOffline ||
+				(this.startup.settingsLoaded &&
+					this.startup.executorReady &&
+					this.options.selectableAgentIds.includes(this.startup.agentId) &&
+					this.startup.validationStatus === 'valid' &&
+					this.startup.resolvedModelSelection !== null))
 		);
+	}
+
+	get settingsOnlyOffline(): boolean {
+		return (
+			this.#savedTarget !== null &&
+			!this.startup.executorReady &&
+			this.#savedDraft === this.#startupDraft()
+		);
+	}
+
+	#startupDraft(): string {
+		return JSON.stringify([
+			this.startup.executorId,
+			this.startup.agentId,
+			this.startup.nonblankPath,
+			this.startup.modelValue,
+			this.startup.modelSelectionTarget,
+			this.startup.permissionMode,
+			this.startup.thinkingMode,
+			this.startup.agentSettingsById,
+			this.startup.chatTags,
+			this.startup.preambles.choiceSnapshot,
+		]);
 	}
 
 	async initialize(repository: PullRequestReviewRepository | null): Promise<void> {
 		if (!repository) {
 			// A new repository starts from the new-chat defaults, permission mode included.
-			await this.startup.loadSettingsAndModels();
+			await this.#loadStartup();
 			return;
 		}
 		const { target, settings } = repository;
@@ -92,29 +121,50 @@ export class PullRequestRepositoryFormState {
 		this.startup.chatTags = [...target.tags];
 		this.startup.showTagInput = false;
 		this.startup.preambles.restoreChoice(target.preambleChoice);
-		await this.startup.loadSettingsAndModels();
-		this.startup.validatePath();
+		this.#savedTarget = target;
+		this.#savedDraft = this.#startupDraft();
+		await this.loadStartupWhenReady();
+	}
+
+	loadStartupWhenReady(): Promise<void> {
+		if (this.#disposed || !this.startup.executorReady || this.startup.settingsLoaded)
+			return Promise.resolve();
+		return this.#loadStartup();
+	}
+
+	#loadStartup(): Promise<void> {
+		this.#startupLoad ??= this.startup
+			.loadSettingsAndModels()
+			.then(() => {
+				if (!this.#disposed) this.startup.validatePath();
+			})
+			.finally(() => {
+				this.#startupLoad = null;
+			});
+		return this.#startupLoad;
 	}
 
 	buildInput(): PullRequestReviewRepositoryInput | null {
 		const selection = this.startup.resolvedModelSelection;
-		if (!this.canSave || !selection) return null;
+		if (!this.canSave || (!this.settingsOnlyOffline && !selection)) return null;
 		return {
-			target: {
-				type: 'new-chat',
-				...(this.startup.executorId === 'local' ? {} : { executorId: this.startup.executorId }),
-				agentId: this.startup.agentId,
-				projectPath: this.startup.nonblankPath,
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-				permissionMode: this.startup.permissionMode,
-				thinkingMode: this.startup.thinkingMode,
-				agentSettingsById: this.startup.agentSettingsById,
-				tags: [...this.startup.chatTags],
-				preambleChoice: this.startup.preambles.choiceSnapshot,
-			},
+			target: this.settingsOnlyOffline
+				? this.#savedTarget!
+				: {
+						type: 'new-chat',
+						...(this.startup.executorId === 'local' ? {} : { executorId: this.startup.executorId }),
+						agentId: this.startup.agentId,
+						projectPath: this.startup.nonblankPath,
+						model: selection!.model,
+						apiProviderId: selection!.apiProviderId,
+						modelEndpointId: selection!.modelEndpointId,
+						modelProtocol: selection!.modelProtocol,
+						permissionMode: this.startup.permissionMode,
+						thinkingMode: this.startup.thinkingMode,
+						agentSettingsById: this.startup.agentSettingsById,
+						tags: [...this.startup.chatTags],
+						preambleChoice: this.startup.preambles.choiceSnapshot,
+					},
 			settings: {
 				...this.#retained,
 				autoReview: this.autoReview,
@@ -129,6 +179,7 @@ export class PullRequestRepositoryFormState {
 	}
 
 	dispose(): void {
+		this.#disposed = true;
 		this.startup.dispose();
 	}
 }

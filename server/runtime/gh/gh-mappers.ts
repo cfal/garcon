@@ -133,8 +133,10 @@ export function mapChecks(rollup: GhRawStatusCheck[] | null | undefined): PullRe
   }));
 }
 
-interface GhRawNodes<T> {
+export interface GhRawNodes<T> {
   nodes?: (T | null)[] | null;
+  pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  issueCount?: number;
 }
 
 export interface GhRawListPullRequest {
@@ -251,20 +253,16 @@ export function buildPullRequestList(raw: GhRawPullRequestList): PullRequestList
   };
 }
 
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-// Keeps only the viewer's comments whose hidden HTML marker starts with the prefix.
+// Only the final canonical marker identifies a posted review; quoted markers are untrusted text.
 export function buildReviewTarget(raw: GhRawReviewTarget, markerPrefix: string): PullRequestReviewTarget | null {
   const pull = raw.data?.repository?.pullRequest;
   if (!pull || typeof pull.number !== 'number') return null;
-  const pattern = new RegExp(`<!--\\s*${escapeRegExp(markerPrefix)}[^>]*-->`);
+  const pattern = /<!-- garcon-review [^\s#]+\/[^\s#]+#[1-9]\d* [a-f0-9]{40} -->\s*$/;
   const markedComments: PullRequestMarkedComment[] = [];
   for (const comment of nodes(pull.comments)) {
     if (!comment.viewerDidAuthor || !comment.id) continue;
-    const marker = pattern.exec(comment.body ?? '')?.[0];
-    if (!marker) continue;
+    const marker = pattern.exec(comment.body ?? '')?.[0].trimEnd();
+    if (!marker?.startsWith(`<!-- ${markerPrefix}`)) continue;
     markedComments.push({ id: comment.id, url: comment.url ?? '', marker, isMinimized: Boolean(comment.isMinimized) });
   }
   return {
