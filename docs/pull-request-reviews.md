@@ -54,12 +54,17 @@ request changes.
 
 `pull-request-reviews.sqlite` in the workspace directory holds connected
 repositories, their last pull request list and scan status, and review runs
-with their review text. Schema version 2 adds normalized executor/repository
-identities with a unique index; existing version 1 databases migrate on startup.
+with their review text. The initial schema enforces unique normalized
+executor/repository identities. Databases created from earlier revisions of
+this unmerged feature must be recreated.
 Running work is not durable: a run that was queued or
 running when the controller stopped is marked interrupted when it starts again,
-and the next scan decides afresh. Runs of pull requests closed for 30 days are
-dropped. A permission request in a review chat shows the run as Needs you; one
+and the next scan decides afresh. Runs are dropped 30 days after a successful
+scan first observes the pull request closed, once its chat has been archived
+(or no chat exists). Reopening resets that retention period. Failed archival
+is retried on later successful scans. A scan that overlaps a change to a
+review run is discarded and repeated before it can invalidate that review.
+A permission request in a review chat shows the run as Needs you; one
 left unanswered for 30 minutes stops the review as failed.
 
 The saved executor and provider selections join the executor and provider
