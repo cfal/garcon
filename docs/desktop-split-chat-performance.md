@@ -12,6 +12,13 @@ remain immutable. No history is trimmed and no paging, executor, or wire contrac
 changes. Svelte documents raw state for large arrays that are replaced rather
 than mutated: <https://svelte.dev/docs/svelte/$state#$state.raw>.
 
+The review pass also makes message-array projections lazy Svelte derivations,
+shared by readers until their inputs change. Previously each getter read built
+another array. Optimistic-input projection now avoids the full transcript echo
+scan when no input is pending or when viewing an older window. Its filtering
+lives with the owning state instead of a single-use helper. These derivations
+follow the panel lifetime and require no new cache registry or eviction policy.
+
 ## Reproduction and comparison
 
 The baseline was origin/main `28f8e679` with the diagnostic workload added.
@@ -53,7 +60,8 @@ It uses synthetic chats, an isolated controller, and a fake model.
 Before injecting transcript traffic, it exercises real Send and Enter turns,
 rapid panel switching while another turn is held, and independent draft
 preservation. After sustained delivery it checks bounded mounted rows, tool
-disclosure interaction, scrolling, and the compact viewport. Injected rows are
+disclosure interaction, actual scroll movement, typing, and preservation of the
+typed draft at the compact viewport. Injected rows are
 browser-side diagnostic traffic, not committed ledger history; real-turn checks
 therefore run first, while browser and server frontiers agree.
 
@@ -63,6 +71,14 @@ visible row addresses advance. It fails on the deeply reactive field and passes
 on raw state. Existing transcript and panel-registry tests cover paging,
 replacement, reconnect, and split-panel fanout.
 
+Two additional regressions failed on `1a8f8668` and passed after the review pass:
+repeated message projection reads reuse their arrays until an append, and
+visible-tail projection does not read an older row solely to check for echoes
+when no input is pending. An already-echoed input still stays hidden when
+submission requires that check. These are deterministic work-count and
+invalidation checks; the earlier latency table measures the raw-state change,
+not the additional projection optimization.
+
 ## Validation and evidence
 
 The focused transcript/panel checks passed 162 tests, and the final Chromium
@@ -70,6 +86,16 @@ scenario passed with real turns, 6,000 injected rows, disclosures, scrolling, an
 compact layout. `bun run check` passed with zero Svelte errors or warnings.
 The CLI suite passed 715 tests. The complete frontend run passed 7,948 tests and
 failed one composer focus test under load; that test passed on isolated retry.
+
+After the review optimization, 192 focused tests and all 7,951 frontend tests
+passed. Lint, all type checks, and the build passed, and a new isolated startup
+served successfully on a fresh port. The strengthened Chromium scenario passed
+with 59 mounted rows throughout delivery, typing after 6,000 rows, earlier-row
+scrolling, tool disclosures, and mobile draft preservation. The root command
+again stopped at the repository-inventory test's five-second deadline; its
+isolated retry passed.
+The original `1a8f8668` head passed every hosted check, including Chromium;
+the updated head requires its own hosted validation.
 
 `bun run test` stopped at two unrelated 5-second filesystem-scanning timeouts;
 both passed on targeted retry with a larger local deadline. Continuing provider
@@ -86,5 +112,6 @@ as a latency comparison.
 
 [Desktop capture](qa/desktop-split-chat-performance/desktop.png) and
 [mobile capture](qa/desktop-split-chat-performance/mobile.png) are deterministic
-synthetic application captures. Litterbox returned HTTP 500 on upload, so
-external screenshot embedding remains blocked until that service recovers.
+synthetic application captures committed for durable evidence. The PR description
+embeds temporary review copies on Litterbox with a 72-hour lifetime; those links
+require refreshing before review or merge if they expire.

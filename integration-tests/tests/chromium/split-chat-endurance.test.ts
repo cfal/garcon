@@ -121,22 +121,36 @@ test('keeps split chats virtualized during sustained delivery and responsive thr
         batchP95Ms: batchTimes[Math.floor(batchTimes.length * 0.95)],
         metrics: Object.fromEntries(metrics.metrics.map(({ name, value }) => [name, value])),
         counters, mountedRows: await page.locator('[data-chat-virtual-item]').count() });
+      expect(samples.at(-1)!.mountedRows).toBeLessThan(100);
       console.log(JSON.stringify(samples.at(-1)));
       await writeFile(join(OUTPUT, 'metrics.json'), JSON.stringify(samples, null, 2));
     }
     await page.screenshot({ path: join(OUTPUT, 'desktop.png') });
-    expect(await page.locator('[data-chat-virtual-item]').count()).toBeLessThan(100);
 
     phase('checking disclosure, scrolling, and responsive layout after sustained delivery');
+    const editor = page.locator('[data-composer] textarea');
+    await editor.fill('Synthetic draft after sustained delivery');
+    await editor.press('End');
+    await editor.press('!');
+    expect(await editor.inputValue()).toBe('Synthetic draft after sustained delivery!');
     const disclosure = left.locator('[data-chat-tool-group]').last();
     await disclosure.click();
     await page.waitForFunction(() => document.querySelector('[data-chat-tool-group][aria-expanded="true"]'));
     await disclosure.click();
     const viewport = left.locator('[data-chat-scroll-viewport]');
+    const firstRowId = await viewport.locator('[data-chat-row-id]').first().getAttribute('data-chat-row-id');
+    const firstOrdinal = Number(firstRowId?.split(':').at(-1));
+    expect(Number.isFinite(firstOrdinal)).toBe(true);
     await viewport.hover();
     await page.mouse.wheel(0, -400);
+    // Revealing earlier rows can increase the physical offset while the reader moves upward.
+    await page.waitForFunction(({ selector, firstOrdinal }) => {
+      const rowId = document.querySelector(selector)?.getAttribute('data-chat-row-id');
+      return Number(rowId?.split(':').at(-1)) < firstOrdinal;
+    }, { selector: '[data-conversation-panel="chat-view:window-main"] [data-chat-row-id]', firstOrdinal });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.locator('[data-composer] textarea').waitFor({ state: 'visible' });
+    await editor.waitFor({ state: 'visible' });
+    expect(await editor.inputValue()).toBe('Synthetic draft after sustained delivery!');
     await page.screenshot({ path: join(OUTPUT, 'mobile.png') });
 
     fixture.assertNoBrowserErrors();
