@@ -672,6 +672,8 @@ describe('Chromium preambles', () => {
           height: 568,
           touch: true,
         });
+        // The responsive handoff must finish before measuring the notice.
+        await notice.scrollIntoViewIfNeeded();
         const noticeLayout = await notice.evaluate((element) => {
           const root = element as HTMLElement;
           const rootRect = root.getBoundingClientRect();
