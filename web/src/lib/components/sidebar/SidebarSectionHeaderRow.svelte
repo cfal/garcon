@@ -25,7 +25,7 @@
 
 	let { row, containsSelectedChat = false, onToggle }: SidebarSectionHeaderRowProps = $props();
 
-	let sectionKey = $derived(sidebarSectionKey(row.section));
+	let sectionKey = $derived(sidebarSectionKey(row.section, row.executorId));
 	let label = $derived(sectionLabels[row.section]());
 
 	function handleToggle(): void {
@@ -38,6 +38,7 @@
 		type="button"
 		class={cn(
 			'flex h-full w-full items-center gap-2 px-2.5 text-left text-xs font-semibold text-muted-foreground transition-colors hover:bg-sidebar-chat-item-hover-bg hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+			row.executorId !== undefined && 'pl-8',
 			containsSelectedChat &&
 				'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
 		)}

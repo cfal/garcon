@@ -7,11 +7,13 @@ import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatList
 import { SidebarVirtualChatListController } from '../SidebarVirtualChatListController.svelte.js';
 import {
 	CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
+	MACHINE_HEADER_ROW_HEIGHT,
 	PROJECT_HEADER_ROW_HEIGHT,
 	type SidebarVirtualChatRow,
 	type SidebarVirtualRow,
 } from '../sidebar-virtual-chat-list';
 import { sidebarProjectKey } from '../sidebar-row-model';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { SidebarChatReorderState } from '../sidebar-chat-reorder-state.svelte';
 import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
@@ -272,9 +274,16 @@ describe('SidebarVirtualSortableChatList', () => {
 
 	it('keeps chat props coherent when regrouping inserts a header at the old index', async () => {
 		const rows = makeRows(2);
-		const view = render(SidebarVirtualSortableChatListHost, { rows, rowHeight, selectedChatId: 'chat-1', displayOptions: { chatItemLayout: 'detailed' } });
+		const view = render(SidebarVirtualSortableChatListHost, {
+			rows,
+			rowHeight,
+			selectedChatId: 'chat-1',
+			displayOptions: { chatItemLayout: 'detailed' },
+		});
 		await tick();
-		const update = vi.spyOn(SidebarVirtualChatListController.prototype, 'update').mockImplementation(() => {});
+		const update = vi
+			.spyOn(SidebarVirtualChatListController.prototype, 'update')
+			.mockImplementation(() => {});
 		await view.rerender({
 			rows: [makeProjectHeader('/tmp/project', 2), ...rows],
 			rowHeight,
@@ -282,12 +291,20 @@ describe('SidebarVirtualSortableChatList', () => {
 		});
 		await tick();
 		expect(screen.getByText('Chat 0')).toBeTruthy();
-		const selected = document.querySelector<HTMLElement>('[data-sidebar-virtual-list-selected-background]');
+		const selected = document.querySelector<HTMLElement>(
+			'[data-sidebar-virtual-list-selected-background]',
+		);
 		expect(selected?.dataset.sidebarVirtualListSelectedBackground).toBe('normal:chat-1');
 		expect(selected?.style.top).toBe(`${rowHeight - CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px`);
 		expect(selected?.style.height).toBe(`${rowHeight + CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px`);
-		expect(document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="normal:chat-0"]')?.style.top).toBe('87px');
-		expect(document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="normal:chat-1"]')?.style.top).toBe('175px');
+		expect(
+			document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="normal:chat-0"]')
+				?.style.top,
+		).toBe('87px');
+		expect(
+			document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="normal:chat-1"]')
+				?.style.top,
+		).toBe('175px');
 		update.mockRestore();
 		await view.rerender({ rows, rowHeight });
 		await tick();
@@ -346,6 +363,59 @@ describe('SidebarVirtualSortableChatList', () => {
 		).toBeGreaterThan(0);
 		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
 		expect(screen.queryByText('Chat 119')).toBeNull();
+	});
+
+	it('keeps removed machine history collapsible and identifies its executor', async () => {
+		const onToggleProjectCollapsed = vi.fn();
+		render(SidebarVirtualSortableChatListHost, {
+			executors: [localExecutor],
+			selectedChatId: 'hidden-chat',
+			onToggleProjectCollapsed,
+			rows: [
+				{
+					type: 'machine-header',
+					key: 'machine:removed',
+					executorId: remoteExecutor.id,
+					collapseKey: 'machine:removed',
+					count: 1,
+					chatIds: ['hidden-chat'],
+					isCollapsed: true,
+				},
+			],
+		});
+		const button = screen.getByRole('button', {
+			name: 'Executor unavailable (22222222), Unavailable',
+		});
+		expect(button.getAttribute('aria-expanded')).toBe('false');
+		expect(button.classList.contains('bg-sidebar-chat-item-selected-bg')).toBe(true);
+		expect(button.getAttribute('title')).toContain(remoteExecutor.id);
+		await fireEvent.click(button);
+		expect(onToggleProjectCollapsed).toHaveBeenCalledWith('machine:removed');
+	});
+
+	it('renders machine headers with readiness and machine-sized geometry', () => {
+		render(SidebarVirtualSortableChatListHost, {
+			executors: [localExecutor, remoteExecutor],
+			rows: [
+				{
+					type: 'machine-header',
+					key: 'machine-header:machine:local',
+					executorId: 'local',
+					collapseKey: 'machine:local',
+					count: 2,
+					chatIds: ['chat-0', 'chat-1'],
+					isCollapsed: false,
+				},
+			],
+		});
+
+		expect(screen.getByRole('button', { name: 'Local, Ready' })).toBeTruthy();
+		expect(document.querySelector('[data-sidebar-machine-header="local"]')).toBeTruthy();
+		expect(document.querySelector('[data-sidebar-machine-count]')?.textContent?.trim()).toBe('2');
+		const machineItem = document.querySelector<HTMLElement>(
+			'[data-sidebar-virtual-item="machine-header"]',
+		);
+		expect(machineItem?.style.height).toBe(`${MACHINE_HEADER_ROW_HEIGHT}px`);
 	});
 
 	it('places disclosure arrows after group labels and replaces header borders with inline dividers', () => {

@@ -26,6 +26,7 @@
 		RelativeChatOrderPlacement,
 	} from '$shared/chat-order-contracts';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
+	import { getExecutors } from '$lib/context';
 
 	interface SidebarChatListProps {
 		viewportRef?: HTMLElement | null;
@@ -102,6 +103,8 @@
 		onQuickMove,
 		onSortChatOrder,
 	}: SidebarChatListProps = $props();
+	const executors = getExecutors();
+	const executorOrder = $derived(executors.executors.map((executor) => executor.id));
 
 	let isFiltered = $derived(searchFilter.trim().length > 0);
 	let sortByRecent = $derived(displayOptions.sortMode === 'recent');
@@ -126,6 +129,7 @@
 			inactivityDuration: displayOptions.inactivityDuration,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys,
+			executorOrder,
 		}),
 	);
 
@@ -149,6 +153,7 @@
 			inactivityDuration: displayOptions.inactivityDuration,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys,
+			executorOrder,
 		});
 	});
 

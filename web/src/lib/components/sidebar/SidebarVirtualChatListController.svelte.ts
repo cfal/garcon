@@ -10,6 +10,7 @@ import {
 } from '$lib/virt/virtual-list-types.js';
 import {
 	DEFAULT_CHAT_ROW_OVERSCAN,
+	MACHINE_HEADER_ROW_HEIGHT,
 	estimateSidebarVirtualRowSize,
 	PROJECT_HEADER_ROW_HEIGHT,
 	type SidebarVirtualRow,
@@ -118,6 +119,9 @@ export class SidebarVirtualChatListController {
 	}
 
 	#estimateRow(row: SidebarVirtualRow, input: SidebarVirtualGeometryUpdate): number {
+		if (row.type === 'machine-header') {
+			return MACHINE_HEADER_ROW_HEIGHT;
+		}
 		if (row.type === 'project-header' || row.type === 'section-header') {
 			return PROJECT_HEADER_ROW_HEIGHT;
 		}

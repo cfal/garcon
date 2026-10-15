@@ -12,6 +12,7 @@
 		getSidebarProjectCollapse,
 		getSidebarSearch,
 		getRemoteSettings,
+		getExecutors,
 	} from '$lib/context';
 	import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
@@ -25,7 +26,11 @@
 	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
 	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
 	import { addTagToQuery } from '$shared/chat-filter-query';
-	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
+	import {
+		buildSidebarDisplayChatIds,
+		buildSidebarExecutorCollapseKeys,
+		buildSidebarProjectKeys,
+	} from './sidebar-row-model';
 	import {
 		SIDEBAR_SECTION_COLLAPSE_KEYS,
 		sidebarSectionProjectKey,
@@ -122,6 +127,7 @@
 	const projectCollapse = getSidebarProjectCollapse();
 	const sidebarSearch = getSidebarSearch();
 	const remoteSettings = getRemoteSettings();
+	const executors = getExecutors();
 	const controller = new SidebarController({
 		get onQuietRefresh() {
 			return onQuietRefresh;
@@ -171,6 +177,7 @@
 			optimisticArchiveOrder: chats,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
+			executorOrder: executors.executors.map((executor) => executor.id),
 		}),
 	);
 	let displayedChatIdSet = $derived(new Set(displayedChatIds));
@@ -182,6 +189,7 @@
 		projectKeys.push(
 			...projectKeys.map((projectKey) => sidebarSectionProjectKey('inactive', projectKey)),
 		);
+		projectKeys.push(...buildSidebarExecutorCollapseKeys({ displayedChats: chats }));
 		// Cross-project sections collapse through the same store; their keys stay in
 		// the pruning allowlist regardless of mode so section collapse
 		// preferences survive grouping-mode switches, like project keys do.
