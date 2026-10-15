@@ -12,7 +12,7 @@ export type AutoReviewDecision =
   | { kind: 'review' }
   // Waiting for pushes to settle; reviewed on a later scan.
   | { kind: 'wait' }
-  // In progress or already reviewed at this head.
+  // A review is in progress, or this head has already been reviewed.
   | { kind: 'settled' }
   | { kind: 'skip'; reason: PullRequestReviewSkipReason };
 
@@ -46,8 +46,8 @@ function filterReason(settings: PullRequestReviewSettings, pull: PullRequestSumm
 export function decideAutoReview(input: AutoReviewInput): AutoReviewDecision {
   const { settings, pull } = input;
   const head = pull.headRefOid;
+  if (input.runs.some((run) => isActivePullRequestReviewRun(run.state))) return { kind: 'settled' };
   const atHead = input.runs.filter((run) => run.headSha === head || run.reviewedSha === head);
-  if (atHead.some((run) => isActivePullRequestReviewRun(run.state))) return { kind: 'settled' };
   if (atHead.some((run) => run.state === 'completed' && run.reviewedSha === head)) return { kind: 'settled' };
   const filtered = filterReason(settings, pull);
   if (filtered) return { kind: 'skip', reason: filtered };

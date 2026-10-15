@@ -13,11 +13,11 @@ import { initializeFixtureRepository } from '../../support/git-fixture.js';
 const HEAD = 'a'.repeat(40);
 const NEXT_HEAD = 'b'.repeat(40);
 
-async function latestRun(fixture: IntegrationFixture, until: (run: PullRequestReviewRun | null) => boolean): Promise<PullRequestReviewRun | null> {
+async function latestRun(fixture: IntegrationFixture, until: (run: PullRequestReviewRun | null) => boolean, number = 7): Promise<PullRequestReviewRun | null> {
   const deadline = Date.now() + 30_000;
   for (;;) {
     const snapshot = await fixture.client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews');
-    const run = snapshot.inbox.find((entry) => entry.pull.number === 7)?.latestRun ?? null;
+    const run = snapshot.inbox.find((entry) => entry.pull.number === number)?.latestRun ?? null;
     if (until(run) || Date.now() > deadline) return run;
     await Bun.sleep(100);
   }
@@ -61,6 +61,29 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await writeFile(fixturePath, JSON.stringify({ label: 'synthetic-worker', pulls: [{ number: 7, headRefOid: NEXT_HEAD }] }));
       await fixture.client.post('/api/v1/pull-request-reviews/scan', { repositoryId: repository.id });
       expect(await latestRun(fixture, (run) => run?.state === 'outdated')).toMatchObject({ state: 'outdated', post: { status: 'posted' } });
+
+      // A file barrier keeps the next review active across a push and scan.
+      await fixture.client.put('/api/v1/pull-request-reviews/repositories', {
+        id: repository.id,
+        repository: {
+          target: repository.target,
+          settings: {
+            ...repository.settings, autoReview: true, debounceMinutes: 0, posting: 'draft',
+            prompt: `while [ ! -f review-release ]; do sleep 0.05; done\nprintf 'Reviewed commit: ${NEXT_HEAD}\\n'`,
+          },
+        },
+      });
+      const running = await latestRun(fixture, (run) => run?.state === 'reviewing');
+      expect(running).toMatchObject({ state: 'reviewing', headSha: NEXT_HEAD });
+      const pushedHead = 'c'.repeat(40);
+      await writeFile(fixturePath, JSON.stringify({ label: 'synthetic-worker', pulls: [
+        { number: 7, headRefOid: pushedHead }, { number: 8, headRefOid: NEXT_HEAD },
+      ] }));
+      await fixture.client.post('/api/v1/pull-request-reviews/scan', { repositoryId: repository.id });
+      expect(await latestRun(fixture, (run) => run !== null, 8)).toMatchObject({ state: 'queued', chatId: null });
+      expect(await latestRun(fixture, () => true)).toMatchObject({ id: running!.id, state: 'reviewing' });
+      await writeFile(join(project, 'review-release'), 'ready');
+      expect(await latestRun(fixture, (run) => run?.state === 'completed', 8)).toMatchObject({ state: 'completed' });
     }, {
       executionBackend, projectRoots: 'separate',
       resolveServerEnvironment: dirs => ({ PATH: `${join(dirs.root, 'gh-bin')}:${process.env.PATH}` }),

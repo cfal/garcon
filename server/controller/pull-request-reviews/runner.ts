@@ -45,7 +45,6 @@ export class PullRequestReviewRunner {
   readonly #pendingPermissions = new Map<string, Set<string>>();
   readonly #permissionTimers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #permissionTimedOut = new Set<string>();
-  readonly #starting = new Set<string>();
 
   constructor(private readonly deps: PullRequestReviewRunnerDeps) {}
 
@@ -95,24 +94,21 @@ export class PullRequestReviewRunner {
   pump(): void {
     if (!this.#started || this.#abort.signal.aborted) return;
     const active = this.deps.store.activeRuns();
-    const running = active.filter((run) => run.state !== 'queued' || this.#starting.has(run.id));
+    const running = active.filter((run) => run.state !== 'queued');
     for (const run of active) {
-      if (run.state !== 'queued' || this.#starting.has(run.id)) continue;
+      if (run.state !== 'queued') continue;
       if (running.length >= PULL_REQUEST_REVIEW_MAX_RUNNING) return;
       if (running.some((entry) => entry.repositoryId === run.repositoryId)) continue;
       running.push(run);
-      this.#starting.add(run.id);
-      void this.#start(run).finally(() => {
-        this.#starting.delete(run.id);
-        this.pump();
-      });
+      // Claims the queued run synchronously before awaiting chat startup.
+      void this.#start(run).finally(() => this.pump());
     }
   }
 
   async stopRun(runId: string): Promise<void> {
     const run = this.deps.store.getRun(runId);
     if (!run || !isActivePullRequestReviewRun(run.state)) throw reviewConflict('This review is not running.');
-    if (run.state === 'queued' && !this.#starting.has(runId)) {
+    if (run.state === 'queued') {
       this.#settle(runId, { state: 'stopped', message: 'Stopped before it started.', reviewedSha: null });
       return;
     }

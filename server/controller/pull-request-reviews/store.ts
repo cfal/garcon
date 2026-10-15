@@ -5,8 +5,8 @@ import { effectiveExecutorId } from '../../../common/executors.js';
 import {
   isActivePullRequestReviewRun,
   PULL_REQUEST_REVIEW_MAX_REPOSITORIES,
-  type PullRequestReviewPost,
   type PullRequestReviewRepository,
+  type PullRequestReviewRun,
   type PullRequestReviewRunState,
   type PullRequestReviewScan,
 } from '../../../common/pull-request-reviews.js';
@@ -22,22 +22,8 @@ const logger = createLogger('pull-request-review-store');
 export type StoredRepository = Omit<PullRequestReviewRepository, 'scan'>;
 
 // A review run as stored. Projection to the browser contract adds chat availability.
-export interface StoredRun {
-  id: string;
-  repositoryId: string;
-  number: number;
-  headSha: string;
-  state: PullRequestReviewRunState;
-  createdAt: string;
-  title: string;
-  reviewedSha: string | null;
-  trigger: 'auto' | 'manual';
-  message: string | null;
-  chatId: string | null;
+export interface StoredRun extends Omit<PullRequestReviewRun, 'chatAvailable'> {
   turnId: string | null;
-  startedAt: string | null;
-  finishedAt: string | null;
-  post: PullRequestReviewPost;
   // Set once the review chat was archived because its pull request left the open list.
   chatArchived: boolean;
 }
