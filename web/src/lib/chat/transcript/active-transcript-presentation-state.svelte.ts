@@ -25,7 +25,8 @@ export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 
 export class ActiveTranscriptPresentationState {
 	activeChatId = $state<string | null>(null);
-	entries = $state<TranscriptMessage[]>([]);
+	// Ledger rows are immutable; only interval replacement needs reactive publication.
+	entries = $state.raw<TranscriptMessage[]>([]);
 	transcriptViewId = $state('');
 	windowRevision = $state(0);
 	lastOrdinal = $state(0);

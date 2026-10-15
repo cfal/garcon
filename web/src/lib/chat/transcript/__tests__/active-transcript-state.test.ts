@@ -116,6 +116,27 @@ describe('ActiveTranscriptState', () => {
 
 	afterEach(() => vi.restoreAllMocks());
 
+	it('shares immutable ledger entries across split panels without per-panel proxies', () => {
+		const first = new ActiveTranscriptState();
+		const second = new ActiveTranscriptState();
+		const original = entry(1, assistant('Synthetic first response'));
+		const appended = entry(2, assistant('Synthetic second response'));
+		for (const chat of [first, second]) {
+			chat.replaceGeneration('chat-1', 'generation-1', [original], {
+				lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+			});
+			const previous = chat.entries;
+			expect(applyMessages(chat, 'chat-1', 'generation-1', [appended])).toBe('applied');
+			expect(previous).toHaveLength(1);
+			expect(chat.entries).not.toBe(previous);
+			expect(chat.entries[0]).toBe(original);
+			expect(chat.entries[1]).toBe(appended);
+			expect(chat.visibleRows.map((row) => row.id)).toEqual(['generation-1:1', 'generation-1:2']);
+			chat.transcriptCache.flush();
+		}
+		expect(first.entries[0]).toBe(second.entries[0]);
+	});
+
 	it('starts with an empty generation cursor', () => {
 		const chat = new ActiveTranscriptState();
 
