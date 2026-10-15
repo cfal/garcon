@@ -62,3 +62,29 @@ that appending replaces the interval without modifying its predecessor, and that
 visible row addresses advance. It fails on the deeply reactive field and passes
 on raw state. Existing transcript and panel-registry tests cover paging,
 replacement, reconnect, and split-panel fanout.
+
+## Validation and evidence
+
+The focused transcript/panel checks passed 162 tests, and the final Chromium
+scenario passed with real turns, 6,000 injected rows, disclosures, scrolling, and
+compact layout. `bun run check` passed with zero Svelte errors or warnings.
+The CLI suite passed 715 tests. The complete frontend run passed 7,948 tests and
+failed one composer focus test under load; that test passed on isolated retry.
+
+`bun run test` stopped at two unrelated 5-second filesystem-scanning timeouts;
+both passed on targeted retry with a larger local deadline. Continuing provider
+tests reached an unrelated native Codex shutdown test timeout. The full root
+suite was therefore not green. The isolated startup command served successfully
+on a fresh random port before its intentional timeout.
+
+Cold browser setup exceeded the normal fixture deadline under heavy shared-machine
+disk contention. Baseline and final QA used temporarily extended local startup
+allowances; those helper changes were restored and are not part of this PR.
+The matched performance comparison ran before the additional real-turn QA was
+added; the final QA repeat ran alongside the full frontend suite and is not used
+as a latency comparison.
+
+[Desktop capture](qa/desktop-split-chat-performance/desktop.png) and
+[mobile capture](qa/desktop-split-chat-performance/mobile.png) are deterministic
+synthetic application captures. Litterbox returned HTTP 500 on upload, so
+external screenshot embedding remains blocked until that service recovers.
