@@ -7,7 +7,6 @@ import { DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, PULL_REQUEST_REVIEW_MAX_REPOSITOR
 import type { PullRequestSummary } from '../../../../common/gh.js';
 import { PullRequestReviews, type PullRequestReviewsDeps } from '../setup.js';
 import { PullRequestReviewStore } from '../store.js';
-import { PULL_REQUEST_REVIEW_SCHEMA_V1 } from '../schema.js';
 import { BashToolUseMessage } from '../../../../common/chat-types.js';
 import { transcriptViewId } from '../../ledger/contracts.js';
 import type { CommandLedgerRecord } from '../../commands/command-ledger.js';
@@ -286,22 +285,4 @@ test('serializes concurrent connects at the repository limit', async () => {
   expect(failure?.status === 'rejected' && failure.reason.message).toContain('At most 50');
   expect(reviews.snapshot().repositories).toHaveLength(50);
   reviews.close();
-});
-
-test('migrates existing repository identities and rejects case-insensitive duplicates', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'garcon-review-upgrade-'));
-  directories.push(directory);
-  const database = new Database(join(directory, 'pull-request-reviews.sqlite'));
-  const repository = { id: 'existing', nameWithOwner: 'Acme/App', target, settings: DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, viewerLogin: 'viewer', url: '', createdAt: '', updatedAt: '' };
-  try {
-    for (const statement of PULL_REQUEST_REVIEW_SCHEMA_V1) database.exec(statement);
-    database.exec('INSERT INTO review_meta VALUES (1, 3)');
-    database.query('INSERT INTO review_repositories VALUES (?, ?, ?, ?)').run(repository.id, JSON.stringify(repository), JSON.stringify({ status: 'ok', scannedAt: null, message: null }), '[]');
-  } finally { database.close(); }
-  const store = new PullRequestReviewStore(directory);
-  try {
-    expect(store.listRepositories()[0].nameWithOwner).toBe('Acme/App');
-    expect(() => store.insertRepository({ ...repository, id: 'duplicate', nameWithOwner: 'acme/app' }, { status: 'ok', scannedAt: null, message: null }, [])).toThrow('already connected');
-    expect(store.listRepositories()).toHaveLength(1);
-  } finally { store.close(); }
 });

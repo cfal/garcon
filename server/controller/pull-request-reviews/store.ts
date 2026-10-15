@@ -15,7 +15,7 @@ import { diagnosticErrorCode } from '../../common/errors.js';
 import { createLogger } from '../../common/log.js';
 import { configureDurableSqlite, openPrivateSqliteDatabase, securePrivateSqliteSidecars } from '../lib/private-sqlite.js';
 import { reviewConflict, reviewStorageUnavailable } from './errors.js';
-import { PULL_REQUEST_REVIEW_SCHEMA_V1, PULL_REQUEST_REVIEW_SCHEMA_V2 } from './schema.js';
+import { PULL_REQUEST_REVIEW_SCHEMA } from './schema.js';
 
 const logger = createLogger('pull-request-review-store');
 
@@ -90,18 +90,15 @@ export class PullRequestReviewStore {
           "SELECT count(*) AS count FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
         ).get();
         if (existing?.count !== 0) throw new Error('Unrecognized pull request review database.');
-      } else if (version !== 1 && version !== 2) {
+      } else if (version !== 1) {
         throw new Error('Unsupported pull request review database version.');
       }
       configureDurableSqlite(database);
       if (version === 0) {
         database.transaction(() => {
-          database.exec(PULL_REQUEST_REVIEW_SCHEMA_V1.join(';\n'));
+          database.exec(PULL_REQUEST_REVIEW_SCHEMA.join(';\n'));
           database.query('INSERT INTO review_meta VALUES (1, 0)').run();
         }).immediate();
-      }
-      if (version === 0 || version === 1) {
-        database.transaction(() => database.exec(PULL_REQUEST_REVIEW_SCHEMA_V2.join(';\n'))).immediate();
       }
       securePrivateSqliteSidecars(path);
     } catch (error) {
@@ -195,10 +192,22 @@ export class PullRequestReviewStore {
 
   // Records a scan result. A failed scan passes no pulls and keeps the last list.
   recordScan(id: string, scan: PullRequestReviewScan, pulls?: PullRequestSummary[]): boolean {
-    return this.#write((database) => (pulls
-      ? database.query('UPDATE review_repositories SET scan_json = ?, pulls_json = ? WHERE id = ?').run(JSON.stringify(scan), JSON.stringify(pulls), id)
-      : database.query('UPDATE review_repositories SET scan_json = ? WHERE id = ?').run(JSON.stringify(scan), id)
-    ).changes > 0);
+    return this.#write((database) => {
+      if (pulls === undefined) {
+        return database.query('UPDATE review_repositories SET scan_json = ? WHERE id = ?').run(JSON.stringify(scan), id).changes > 0;
+      }
+      const changed = database.query('UPDATE review_repositories SET scan_json = ?, pulls_json = ? WHERE id = ?')
+        .run(JSON.stringify(scan), JSON.stringify(pulls), id).changes > 0;
+      if (changed) {
+        // Retention starts at observed closure; a reopened pull request starts afresh.
+        database.query(`UPDATE review_runs SET closed_at = CASE
+          WHEN number IN (SELECT json_extract(value, '$.number') FROM json_each(
+            (SELECT pulls_json FROM review_repositories WHERE id = ?)
+          )) THEN NULL ELSE coalesce(closed_at, ?) END WHERE repository_id = ?`)
+          .run(id, scan.scannedAt, id);
+      }
+      return changed;
+    });
   }
 
   pulls(repositoryId: string): PullRequestSummary[] {
@@ -210,7 +219,7 @@ export class PullRequestReviewStore {
 
   insertRun(run: StoredRun): void {
     this.#write((database) => {
-      database.query('INSERT INTO review_runs VALUES (?, ?, ?, ?, ?, ?, ?, NULL)')
+      database.query(`INSERT INTO review_runs (${RUN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?)`)
         .run(run.id, run.repositoryId, run.number, run.headSha, run.state, run.createdAt, runPayload(run));
     });
   }
@@ -273,17 +282,12 @@ export class PullRequestReviewStore {
     return active.length;
   }
 
-  // Drops runs of pull requests that left the open list before the cutoff.
-  pruneClosedRuns(repositoryId: string, openNumbers: readonly number[], before: string): void {
-    this.#read((database) => {
-      const open = new Set(openNumbers);
-      const stale = database.query<{ number: number }, [string, string]>(
-        'SELECT number FROM review_runs WHERE repository_id = ? GROUP BY number HAVING max(created_at) < ?',
-      ).all(repositoryId, before).map((row) => row.number).filter((number) => !open.has(number));
-      if (stale.length === 0) return;
-      database.transaction(() => {
-        for (const number of stale) database.query('DELETE FROM review_runs WHERE repository_id = ? AND number = ?').run(repositoryId, number);
-      }).immediate();
-    });
+  // Preserves active work and archival retries even after closure retention expires.
+  pruneClosedRuns(repositoryId: string, before: string): void {
+    this.#write((database) => database.query(`DELETE FROM review_runs
+      WHERE repository_id = ? AND closed_at < ?
+        AND state NOT IN ('queued', 'reviewing', 'needs-input')
+        AND (json_extract(payload_json, '$.chatId') IS NULL OR json_extract(payload_json, '$.chatArchived') = 1)`)
+      .run(repositoryId, before));
   }
 }

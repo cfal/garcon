@@ -104,6 +104,7 @@ export class PullRequestReviewScanner {
 
   async #scan(repository: PullRequestReviewRepository): Promise<void> {
     this.#lastAttempt.set(repository.id, this.deps.now());
+    const before = new Map(this.deps.store.runsForRepository(repository.id).map((run) => [run.id, run]));
     let scan: PullRequestReviewScan;
     try {
       const gh = await this.deps.executors.requireExecutor(effectiveExecutorId(repository.target.executorId)).getGhService();
@@ -111,6 +112,16 @@ export class PullRequestReviewScanner {
       // A repository edited or removed during the read is scanned again under its new settings.
       const current = this.deps.store.getRepository(repository.id);
       if (!current || current.updatedAt !== repository.updatedAt) return;
+      const runs = this.deps.store.runsForRepository(repository.id);
+      // A read begun before a review changed cannot invalidate it or enqueue an older head.
+      if (runs.length !== before.size || runs.some((run) => {
+        const previous = before.get(run.id);
+        return !previous || previous.state !== run.state || previous.reviewedSha !== run.reviewedSha;
+      })) {
+        this.#forced.add(repository.id);
+        this.#rescan = true;
+        return;
+      }
       if (list.repo?.nameWithOwner !== repository.nameWithOwner) {
         scan = { ...repository.scan, status: 'failed', message: `The folder is no longer a checkout of ${repository.nameWithOwner}.` };
         if (this.deps.store.recordScan(repository.id, scan)) this.deps.changed();
@@ -140,7 +151,11 @@ export class PullRequestReviewScanner {
     const pulls = store.pulls(repository.id);
     const runs = store.runsForRepository(repository.id);
     const byNumber = new Map<number, StoredRun[]>();
-    for (const run of runs) byNumber.set(run.number, [...byNumber.get(run.number) ?? [], run]);
+    for (const run of runs) {
+      const group = byNumber.get(run.number) ?? [];
+      group.push(run);
+      byNumber.set(run.number, group);
+    }
     const statuses = new Map<number, PullRequestAutoReviewStatus>();
     let startedInLastDay = runs.filter((run) => run.trigger === 'auto' && now - Date.parse(run.createdAt) < DAY_MS).length;
     const open = new Set(pulls.map((pull) => pull.number));
@@ -173,7 +188,7 @@ export class PullRequestReviewScanner {
     }
     this.#status.set(repository.id, statuses);
     this.#archiveClosed(runs, open);
-    store.pruneClosedRuns(repository.id, [...open], new Date(now - CLOSED_RUN_RETENTION_MS).toISOString());
+    store.pruneClosedRuns(repository.id, new Date(now - CLOSED_RUN_RETENTION_MS).toISOString());
   }
 
   // A finished review of an older head no longer describes the pull request.
