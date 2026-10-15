@@ -40,7 +40,7 @@ describe('snippet management search', () => {
         await pickerSearch.fill('  REVIEW  ');
         await page.waitForFunction(() => document.querySelectorAll('[role="option"]').length === 3);
         const pickerNames = await palette.getByRole('option').evaluateAll((options) =>
-          options.map((option) => option.querySelector('.font-medium')?.textContent),
+          options.map((option) => option.querySelector('.font-medium')?.textContent ?? ''),
         );
         expect(pickerNames).toEqual(['review', 'review_api', 'audit']);
         const pickerFont = await pickerSearch.evaluate((input) => getComputedStyle(input).fontSize);
