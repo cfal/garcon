@@ -1,8 +1,6 @@
 <script lang="ts">
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import Monitor from '@lucide/svelte/icons/monitor';
-	import Server from '@lucide/svelte/icons/server';
 	import { cn } from '$lib/utils/cn';
 	import { getExecutors } from '$lib/context';
 	import { executorStatus } from '$lib/executors/executors-store.svelte';
@@ -39,7 +37,7 @@
 	<button
 		type="button"
 		class={cn(
-			'flex h-full w-full items-center gap-2 px-2.5 text-left transition-colors hover:bg-sidebar-chat-item-hover-bg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+			'flex h-full w-full items-center gap-1.5 px-2.5 text-left transition-colors hover:bg-sidebar-chat-item-hover-bg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
 			containsSelectedChat && 'bg-sidebar-chat-item-selected-bg',
 		)}
 		title={`${label} · ${status}${executor ? '' : ` · ${row.executorId}`}`}
@@ -50,23 +48,18 @@
 		data-sidebar-machine-collapse-key={row.collapseKey}
 		data-sidebar-machine-collapsed={row.isCollapsed ? 'true' : 'false'}
 	>
-		{#if row.executorId !== 'local'}
-			<Server class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-		{:else}
-			<Monitor class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-		{/if}
 		<span class="min-w-0 flex-1">
-			<span class="block truncate text-sm font-semibold text-foreground">{label}</span>
-			<span class={cn('block truncate text-[11px]', statusClass)}>{status}</span>
+			<span class="block truncate text-xs font-semibold text-foreground">{label}</span>
+			<span class={cn('block truncate text-[10px]', statusClass)}>{status}</span>
 		</span>
 		{#if row.isCollapsed}
-			<ChevronRight class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+			<ChevronRight class="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
 		{:else}
-			<ChevronDown class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+			<ChevronDown class="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
 		{/if}
 		<span
 			class={cn(
-				'shrink-0 rounded border border-border px-1 text-[10px] font-medium text-muted-foreground',
+				'shrink-0 rounded border border-border px-1 text-[9px] font-medium text-muted-foreground',
 				containsSelectedChat && 'text-sidebar-chat-item-selected-foreground/80',
 			)}
 			data-sidebar-machine-count

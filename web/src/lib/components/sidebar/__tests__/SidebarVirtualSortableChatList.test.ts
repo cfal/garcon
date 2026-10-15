@@ -393,6 +393,26 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(onToggleProjectCollapsed).toHaveBeenCalledWith('machine:removed');
 	});
 
+	it('keeps the Local machine group when filtering history from a removed executor', () => {
+		const localChat = makeChat(0, { id: 'local-chat', executorId: 'local' });
+		const removedChat = makeChat(1, { id: 'removed-chat', executorId: remoteExecutor.id });
+		render(SidebarChatListHost, {
+			executors: [localExecutor],
+			chats: [localChat, removedChat],
+			filteredChats: [localChat],
+			searchFilter: 'local',
+			collapsedProjectKeys: new Set(['machine:local']),
+			displayOptions: { grouping: 'project' },
+		});
+
+		expect(screen.getByRole('button', { name: 'Local, Ready' }).getAttribute('aria-expanded')).toBe(
+			'false',
+		);
+		expect(screen.queryByText('Chat 0')).toBeNull();
+		expect(document.querySelector('[data-sidebar-machine-header="local"]')).toBeTruthy();
+		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBe(0);
+	});
+
 	it('renders machine headers with readiness and machine-sized geometry', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			executors: [localExecutor, remoteExecutor],

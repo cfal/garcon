@@ -30,6 +30,7 @@
 		buildSidebarDisplayChatIds,
 		buildSidebarExecutorCollapseKeys,
 		buildSidebarProjectKeys,
+		shouldGroupSidebarByExecutor,
 	} from './sidebar-row-model';
 	import {
 		SIDEBAR_SECTION_COLLAPSE_KEYS,
@@ -160,6 +161,8 @@
 		sortMode: localSettings.sidebarSortMode,
 		pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
 	});
+	let executorOrder = $derived(executors.executors.map((executor) => executor.id));
+	let groupByExecutor = $derived(shouldGroupSidebarByExecutor({ allChats: chats, executorOrder }));
 	let visibleUnreadChatIds = $derived.by(() =>
 		sidebarSearch.filteredChats
 			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
@@ -173,11 +176,12 @@
 			inactivityDuration: displayOptions.inactivityDuration,
 			sortMode: displayOptions.sortMode,
 			pinnedInsertPosition: displayOptions.pinnedInsertPosition,
+			executorOrder,
+			groupByExecutor,
 			isChatOptimisticallyArchived,
 			optimisticArchiveOrder: chats,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
-			executorOrder: executors.executors.map((executor) => executor.id),
 		}),
 	);
 	let displayedChatIdSet = $derived(new Set(displayedChatIds));

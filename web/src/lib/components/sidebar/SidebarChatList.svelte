@@ -12,6 +12,7 @@
 		buildSidebarChatOrderMap,
 		buildSidebarRowModel,
 		partitionSidebarChats,
+		shouldGroupSidebarByExecutor,
 	} from './sidebar-row-model';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
@@ -105,6 +106,9 @@
 	}: SidebarChatListProps = $props();
 	const executors = getExecutors();
 	const executorOrder = $derived(executors.executors.map((executor) => executor.id));
+	const groupByExecutor = $derived(
+		shouldGroupSidebarByExecutor({ allChats: chats, executorOrder }),
+	);
 
 	let isFiltered = $derived(searchFilter.trim().length > 0);
 	let sortByRecent = $derived(displayOptions.sortMode === 'recent');
@@ -130,6 +134,7 @@
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys,
 			executorOrder,
+			groupByExecutor,
 		}),
 	);
 
@@ -154,6 +159,7 @@
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys,
 			executorOrder,
+			groupByExecutor,
 		});
 	});
 

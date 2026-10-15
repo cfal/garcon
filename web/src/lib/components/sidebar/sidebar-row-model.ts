@@ -39,6 +39,8 @@ export interface SidebarRowModelInput {
 	groupNestedProjectPaths?: boolean;
 	collapsedProjectKeys?: ReadonlySet<string>;
 	executorOrder?: readonly string[];
+	/** Keeps machine ownership visible when filtering hides other machines. */
+	groupByExecutor?: boolean;
 }
 
 function emptyOrderMap(): SidebarChatOrderMap {
@@ -288,6 +290,16 @@ export function sidebarExecutorKey(executorId?: string | null): string {
 	return `machine:${effectiveExecutorId(executorId)}`;
 }
 
+export function shouldGroupSidebarByExecutor(input: {
+	allChats: readonly ChatSessionRecord[];
+	executorOrder?: readonly string[];
+}): boolean {
+	return Boolean(
+		input.executorOrder?.some((executorId) => effectiveExecutorId(executorId) !== 'local') ||
+		input.allChats.some((chat) => effectiveExecutorId(chat.executorId) !== 'local'),
+	);
+}
+
 export function buildSidebarExecutorCollapseKeys(input: {
 	displayedChats: readonly ChatSessionRecord[];
 }): string[] {
@@ -311,11 +323,11 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		chatsByExecutor.set(executorId, chats);
 	}
 	// A remote-only filtered result still needs an explicit machine identity.
-	if (
-		input.grouping === 'none' ||
-		(!input.executorOrder?.some((id) => id !== 'local') &&
-			!Array.from(chatsByExecutor.keys()).some((id) => id !== 'local'))
-	) {
+	const groupByExecutor =
+		input.groupByExecutor ??
+		((input.executorOrder?.some((id) => id !== 'local') ?? false) ||
+			Array.from(chatsByExecutor.keys()).some((id) => id !== 'local'));
+	if (input.grouping === 'none' || !groupByExecutor) {
 		return buildSidebarRows(input);
 	}
 	const configuredOrder = new Map((input.executorOrder ?? []).map((id, index) => [id, index]));
@@ -711,6 +723,7 @@ export function buildSidebarDisplayChatIds(input: {
 	groupNestedProjectPaths?: boolean;
 	collapsedProjectKeys?: ReadonlySet<string>;
 	executorOrder?: readonly string[];
+	groupByExecutor?: boolean;
 }): string[] {
 	const sortedChats =
 		input.sortMode === 'recent'
@@ -733,5 +746,6 @@ export function buildSidebarDisplayChatIds(input: {
 		groupNestedProjectPaths: input.groupNestedProjectPaths,
 		collapsedProjectKeys: input.collapsedProjectKeys,
 		executorOrder: input.executorOrder,
+		groupByExecutor: input.groupByExecutor,
 	}).visibleChatIds;
 }
