@@ -4,6 +4,7 @@ import type {
 	SnippetInsertionResult,
 } from '$lib/chat/composer/snippet-insertion.js';
 import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
+import { searchSnippets } from '$lib/snippets/search-snippets.js';
 import { snippetTemplateUsesArguments, type Snippet } from '$shared/snippets';
 
 interface ComposerSnippetPaletteStateOptions {
@@ -31,24 +32,9 @@ export class ComposerSnippetPaletteState {
 	argumentsDraftIsFreshDefault = $state(false);
 	argumentsDialogOpen = $state(false);
 
-	#filteredSnippets = $derived.by(() => {
-		const normalized = this.query.trim().toLowerCase();
-		if (!normalized) return [...this.#options.snippets];
-		const exact: SelectableSnippet[] = [];
-		const prefix: SelectableSnippet[] = [];
-		const contains: SelectableSnippet[] = [];
-		const templateMatches: SelectableSnippet[] = [];
-		for (const snippet of this.#options.snippets) {
-			const name = snippet.shortName.toLowerCase();
-			if (name === normalized) exact.push(snippet);
-			else if (name.startsWith(normalized)) prefix.push(snippet);
-			else if (name.includes(normalized)) contains.push(snippet);
-			else if (snippet.body.toLowerCase().includes(normalized)) {
-				templateMatches.push(snippet);
-			}
-		}
-		return [...exact, ...prefix, ...contains, ...templateMatches];
-	});
+	#filteredSnippets = $derived.by(() =>
+		searchSnippets(this.#options.snippets, this.query, (snippet) => snippet.body),
+	);
 
 	#highlightedIndex = $derived.by(() => {
 		const selectedIndex = this.#filteredSnippets.findIndex(

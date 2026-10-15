@@ -5,6 +5,51 @@ import SnippetsSectionTestHost from './SnippetsSectionTestHost.svelte';
 describe('SnippetsSection', () => {
 	afterEach(cleanup);
 
+	it('searches names and text, shows no matches, and restores the catalog when cleared', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+		const search = screen.getByRole('searchbox', { name: 'Search snippets' });
+		await fireEvent.input(search, { target: { value: '  REVIEW  ' } });
+		expect(screen.getByRole('button', { name: 'Edit review' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Edit summarize' })).toBeNull();
+
+		await fireEvent.input(search, { target: { value: 'this' } });
+		expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(2);
+		await fireEvent.input(search, { target: { value: 'missing' } });
+		expect(screen.getByText('No snippets match your search.')).toBeTruthy();
+		expect(screen.queryAllByRole('heading', { level: 3 })).toHaveLength(0);
+		expect(
+			(screen.getByRole('button', { name: 'Add snippet' }) as HTMLButtonElement).disabled,
+		).toBe(false);
+
+		await fireEvent.input(search, { target: { value: '' } });
+		expect(screen.queryByText('No snippets match your search.')).toBeNull();
+		expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(2);
+	});
+
+	it('keeps the search while editing and updates matches after saving and removing', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+		const search = screen.getByRole('searchbox', { name: 'Search snippets' }) as HTMLInputElement;
+		await fireEvent.input(search, { target: { value: 'review' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Short name' }), {
+			target: { value: 'audit' },
+		});
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Snippet text' }), {
+			target: { value: 'Audit this' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull());
+		expect(search.value).toBe('review');
+		expect(screen.getByText('No snippets match your search.')).toBeTruthy();
+		await fireEvent.input(search, { target: { value: 'audit' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove audit' }));
+		await fireEvent.click(screen.getByRole('button', { name: /^Remove$/ }));
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'Edit audit' })).toBeNull());
+		expect(screen.getByText('No snippets match your search.')).toBeTruthy();
+	});
+
 	it('adds and edits multiline snippets without normalizing names or text', async () => {
 		render(SnippetsSectionTestHost);
 		const add = await screen.findByRole('button', { name: 'Add snippet' });

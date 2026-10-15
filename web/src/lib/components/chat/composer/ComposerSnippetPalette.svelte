@@ -1,6 +1,6 @@
 <script lang="ts">
 	import FileText from '@lucide/svelte/icons/file-text';
-	import Search from '@lucide/svelte/icons/search';
+	import SnippetSearchField from '$lib/components/snippets/SnippetSearchField.svelte';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Settings2 from '@lucide/svelte/icons/settings-2';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -58,8 +58,9 @@
 	const localSettings = getLocalSettings();
 	const uid = $props.id();
 	const listId = `${uid}-list`;
-	const searchId = `${uid}-search`;
-	const triggerHint = $derived(triggerPrefix ?? normalizeSnippetTrigger(localSettings.snippetTrigger));
+	const triggerHint = $derived(
+		triggerPrefix ?? normalizeSnippetTrigger(localSettings.snippetTrigger),
+	);
 	const mobileKeyboardVisible = $derived(appShell.isMobile && appShell.keyboardHeight > 0);
 	const catalogsLoading = $derived(
 		(snippets.status === 'loading' && !snippets.hasLoaded) ||
@@ -130,28 +131,18 @@
 		</Dialog.Header>
 
 		<div class="shrink-0 border-b border-border px-4 py-3">
-			<label class="sr-only" for={searchId}>{m.snippets_search_label()}</label>
-			<div class="relative">
-				<Search
-					class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-				/>
-				<input
-					id={searchId}
-					bind:value={palette.query}
-					type="search"
-					role="combobox"
-					aria-expanded="true"
-					aria-controls={listId}
-					aria-autocomplete="list"
-					aria-activedescendant={palette.highlightedSnippet
-						? palette.optionIdFor(palette.highlightedSnippet.key)
-						: undefined}
-					oninput={() => palette.resetHighlight()}
-					onkeydown={(event) => palette.handleSearchKeyDown(event)}
-					placeholder={m.snippets_search_placeholder()}
-					class="h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
-				/>
-			</div>
+			<SnippetSearchField
+				bind:value={palette.query}
+				role="combobox"
+				aria-expanded="true"
+				aria-controls={listId}
+				aria-autocomplete="list"
+				aria-activedescendant={palette.highlightedSnippet
+					? palette.optionIdFor(palette.highlightedSnippet.key)
+					: undefined}
+				oninput={() => palette.resetHighlight()}
+				onkeydown={(event) => palette.handleSearchKeyDown(event)}
+			/>
 		</div>
 
 		<div id={listId} role="listbox" class="min-h-0 flex-1 overflow-y-auto p-2">
