@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import type { ExecutorSnapshot } from '$shared/executors';
+	import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 	import { localExecutor } from '$lib/executors/__tests__/fixtures';
 	import NewChatForm from '../NewChatForm.svelte';
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
@@ -43,6 +44,7 @@
 
 	interface Props {
 		executorSnapshots?: readonly ExecutorSnapshot[];
+		onExecutors?: (store: ExecutorsStore) => void;
 		executionPolicy?: 'conversation' | 'literal';
 		allowDirectChats?: boolean;
 		catalogVersion?: number;
@@ -64,6 +66,7 @@
 
 	let {
 		executorSnapshots = [localExecutor],
+		onExecutors,
 		executionPolicy = 'conversation',
 		allowDirectChats = false,
 		catalogVersion = 0,
@@ -82,7 +85,8 @@
 		loadPreambles,
 		onPreambles,
 	}: Props = $props();
-	setExecutorsTestContext(untrack(() => executorSnapshots));
+	const executors = setExecutorsTestContext(untrack(() => executorSnapshots));
+	untrack(() => onExecutors?.(executors));
 	const notifications = createNotificationsStore();
 	let snippetLoadCount = $state(0);
 

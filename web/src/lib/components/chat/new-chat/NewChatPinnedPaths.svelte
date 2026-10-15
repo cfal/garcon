@@ -3,7 +3,6 @@
 	import { NewChatPinnedPathsController } from '$lib/chat/new-chat/new-chat-pinned-paths-controller';
 	import { executorStatus } from '$lib/executors/executors-store.svelte';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte';
-	import ProjectPinnedPathList from '$lib/components/project-paths/ProjectPinnedPathList.svelte';
 	import { filterExecutorPinnedPathGroups } from '$lib/project-paths/executor-pinned-paths';
 	import Check from '@lucide/svelte/icons/check';
 	import Search from '@lucide/svelte/icons/search';
@@ -19,9 +18,15 @@
 	let searchInput = $state<HTMLInputElement | null>(null);
 	const groups = $derived(pins.groups);
 	const totalPaths = $derived(groups.reduce((count, group) => count + group.paths.length, 0));
-	const searchAvailable = $derived(totalPaths > 8 || searchQuery.length > 0);
+	const scopedGroups = $derived(
+		showAll ? groups : groups.filter((group) => group.executorId === form.executorId),
+	);
+	const scopedPathCount = $derived(
+		scopedGroups.reduce((count, group) => count + group.paths.length, 0),
+	);
+	const searchAvailable = $derived(scopedPathCount > 8 || searchQuery.length > 0);
 	const filteredGroups = $derived(
-		filterExecutorPinnedPathGroups(groups, executors.executors, searchQuery),
+		filterExecutorPinnedPathGroups(scopedGroups, executors.executors, searchQuery),
 	);
 	const hasOtherPins = $derived(groups.some((group) => group.executorId !== form.executorId));
 </script>
@@ -55,94 +60,88 @@
 			</div>
 		</div>
 	{/if}
-	{#if showAll}
-		{#if searchAvailable}
-			<div class="relative">
-				<Search
-					class="pointer-events-none absolute top-3 left-3 size-4 text-muted-foreground"
-					aria-hidden="true"
-				/>
-				<input
-					type="search"
-					aria-label="Search pinned paths"
-					placeholder="Search paths or machines"
-					bind:value={searchQuery}
-					bind:this={searchInput}
-					class="h-11 w-full rounded-md border border-border bg-background pr-11 pl-9 text-base placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-fine:text-sm"
-				/>
-				{#if searchQuery}
-					<button
-						type="button"
-						aria-label="Clear pinned path search"
-						class="absolute top-0 right-0 flex size-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-						onclick={() => {
-							searchQuery = '';
-							searchInput?.focus();
-						}}
-					>
-						<X class="size-4" aria-hidden="true" />
-					</button>
-				{/if}
-			</div>
-		{/if}
-		<div
-			class="max-h-56 space-y-3 overflow-y-auto overscroll-contain rounded-md border border-border p-2 sm:max-h-64 {searchAvailable
-				? 'h-56 sm:h-64'
-				: ''}"
-		>
-			{#each filteredGroups as group, groupIndex (group.executorId)}
-				{@const executor = executors.get(group.executorId)}
-				{@const ready = executors.isReady(group.executorId)}
-				<div role="group" aria-label={executor?.label ?? group.executorId} class="space-y-1">
-					<div class="flex flex-wrap items-center gap-x-2 px-1 text-xs text-muted-foreground">
-						<span class="break-all font-medium text-foreground"
-							>{executor?.label ?? group.executorId}</span
-						>
-						<span class="tabular-nums"
-							>{group.paths.length} {group.paths.length === 1 ? 'path' : 'paths'}</span
-						>
-						<span id={`${id}-${groupIndex}-status`}
-							>{executor ? executorStatus(executor) : 'Unavailable executor'}</span
-						>
-					</div>
-					<div class="grid gap-1 sm:grid-cols-2">
-						{#each group.paths as path (path)}
-							{@const selected = form.executorId === group.executorId && form.projectPath === path}
-							<button
-								type="button"
-								disabled={!ready || form.isUpdatingPinnedPath}
-								aria-label={`${executor?.label ?? group.executorId}: ${path}`}
-								aria-describedby={`${id}-${groupIndex}-status`}
-								aria-pressed={selected}
-								class="flex min-h-11 w-full items-center gap-2 rounded border px-2 py-2 text-left text-xs break-all hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 {selected
-									? 'border-border bg-accent text-accent-foreground'
-									: 'border-transparent text-muted-foreground'}"
-								onclick={() => pins.select(group.executorId, path)}
-								><span class="min-w-0 flex-1">{path}</span>{#if selected}<Check
-										class="size-4 shrink-0"
-										aria-hidden="true"
-									/>{/if}</button
-							>
-						{/each}
-					</div>
-				</div>
-			{:else}
-				<p role="status" class="p-2 text-xs text-muted-foreground">
-					{searchQuery.trim()
-						? 'No pinned paths match your search.'
-						: m.chat_new_chat_star_bookmark()}
-				</p>
-			{/each}
+	{#if searchAvailable}
+		<div class="relative">
+			<Search
+				class="pointer-events-none absolute top-3 left-3 size-4 text-muted-foreground"
+				aria-hidden="true"
+			/>
+			<input
+				type="search"
+				aria-label="Search pinned paths"
+				placeholder="Search paths or machines"
+				bind:value={searchQuery}
+				bind:this={searchInput}
+				class="h-11 w-full rounded-md border border-border bg-background pr-11 pl-9 text-base placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-fine:text-sm"
+			/>
+			{#if searchQuery}
+				<button
+					type="button"
+					aria-label="Clear pinned path search"
+					class="absolute top-0 right-0 flex size-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					onclick={() => {
+						searchQuery = '';
+						searchInput?.focus();
+					}}
+				>
+					<X class="size-4" aria-hidden="true" />
+				</button>
+			{/if}
 		</div>
-	{:else}
-		<ProjectPinnedPathList
-			pinnedProjectPaths={form.pinnedProjectPaths}
-			selectedPath={form.projectPath}
-			emptyLabel={m.chat_new_chat_star_bookmark()}
-			disabled={form.isUpdatingPinnedPath || !form.executorReady}
-			onSelect={(path) => pins.select(form.executorId, path)}
-		/>
 	{/if}
+	<div
+		class="max-h-56 space-y-3 overflow-y-auto overscroll-contain sm:max-h-64 {showAll
+			? 'rounded-md border border-border p-2'
+			: ''} {searchAvailable ? 'h-56 sm:h-64' : ''}"
+	>
+		{#each filteredGroups as group (group.executorId)}
+			{@const executor = executors.get(group.executorId)}
+			{@const ready = executors.isReady(group.executorId)}
+			<div role="group" aria-label={executor?.label ?? group.executorId} class="space-y-1">
+				<div
+					class={showAll || !ready
+						? 'flex flex-wrap items-center gap-x-2 px-1 text-xs text-muted-foreground'
+						: 'sr-only'}
+				>
+					<span class="break-all font-medium text-foreground"
+						>{executor?.label ?? group.executorId}</span
+					>
+					<span class="tabular-nums"
+						>{group.paths.length} {group.paths.length === 1 ? 'path' : 'paths'}</span
+					>
+					<span id={`${id}-${group.executorId}-status`}
+						>{executor ? executorStatus(executor) : 'Unavailable executor'}</span
+					>
+				</div>
+				<div class="grid gap-1 sm:grid-cols-2">
+					{#each group.paths as path (path)}
+						{@const selected = form.executorId === group.executorId && form.projectPath === path}
+						<button
+							type="button"
+							disabled={!ready || form.isUpdatingPinnedPath}
+							aria-label={showAll ? `${executor?.label ?? group.executorId}: ${path}` : path}
+							aria-describedby={`${id}-${group.executorId}-status`}
+							aria-pressed={selected}
+							class="flex min-h-11 w-full items-center gap-2 rounded border px-2 py-2 text-left text-xs break-all hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 {selected
+								? 'border-border bg-accent text-accent-foreground'
+								: 'border-border/70 bg-muted/40 text-muted-foreground'}"
+							onclick={() => pins.select(group.executorId, path)}
+							><span class="min-w-0 flex-1">{path}</span>{#if selected}<Check
+									class="size-4 shrink-0"
+									aria-hidden="true"
+								/>{/if}</button
+						>
+					{/each}
+				</div>
+			</div>
+		{:else}
+			<p role="status" class="p-2 text-xs text-muted-foreground">
+				{searchQuery.trim()
+					? 'No pinned paths match your search.'
+					: m.chat_new_chat_star_bookmark()}
+			</p>
+		{/each}
+	</div>
 </section>
 
 <style>

@@ -9,7 +9,7 @@ test('New Chat reconciles live bookmarks and retains disabled pins after executo
     const executor = await client.post<{ id: string }>('/api/v1/executors', {
       label: 'Synthetic worker', direction: 'executor-connects',
     });
-    const localPins = [dirs.project, ...Array.from({ length: 7 }, (_, index) => `/synthetic/project-${index}`)];
+    const localPins = [dirs.project, ...Array.from({ length: 8 }, (_, index) => `/synthetic/project-${index}`)];
     const remotePath = '/synthetic/Space Project ';
     await client.put('/api/v1/app/settings', { paths: {
       pinnedProjectPaths: localPins,
@@ -19,6 +19,14 @@ test('New Chat reconciles live bookmarks and retains disabled pins after executo
     await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
     const prompt = page.getByPlaceholder('How can I help you today?');
     await prompt.fill('Synthetic retained draft');
+    const pins = page.getByRole('region', { name: 'Pinned paths' });
+    const currentSearch = pins.getByRole('searchbox', { name: 'Search pinned paths' });
+    await currentSearch.fill('project-7');
+    await browserExpect(pins.getByRole('button', { name: '/synthetic/project-7', exact: true })).toBeVisible();
+    await browserExpect(pins.getByRole('button', { name: dirs.project, exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Clear pinned path search' }).click();
+    await browserExpect(currentSearch).toBeFocused();
+    await browserExpect(pins.getByRole('button', { name: dirs.project, exact: true })).toHaveAttribute('aria-pressed', 'true');
     await page.getByRole('button', { name: 'All machines', exact: true }).click();
     await browserExpect(page.getByRole('button', { name: `Synthetic worker: ${remotePath.trim()}`, exact: true })).toBeDisabled();
     await client.delete(`/api/v1/executors/${executor.id}`);
@@ -48,8 +56,8 @@ test('New Chat reconciles live bookmarks and retains disabled pins after executo
     await page.getByRole('button', { name: 'This machine', exact: true }).click();
     const replacement = '/synthetic/replacement';
     await client.put('/api/v1/app/settings', { paths: { pinnedProjectPaths: [replacement] } });
-    await browserExpect(page.getByRole('button', { name: replacement, exact: true })).toBeVisible();
-    await browserExpect(page.getByRole('button', { name: dirs.project, exact: true })).toHaveCount(0);
+    await browserExpect(pins.getByRole('button', { name: replacement, exact: true })).toBeVisible();
+    await browserExpect(pins.getByRole('button', { name: dirs.project, exact: true })).toHaveCount(0);
     await browserExpect(page.getByRole('button', { name: 'Pin project path', exact: true })).toBeVisible();
     await browserExpect(prompt).toHaveValue('Synthetic retained draft');
     expect((await client.listChats()).sessions).toEqual([]);

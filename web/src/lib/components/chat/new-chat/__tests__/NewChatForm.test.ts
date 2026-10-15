@@ -13,6 +13,7 @@ import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agen
 import type { PreamblesSnapshot } from '$shared/preambles';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 
 const PROSPECTIVE_CHAT_ID = parseChatId('1787471053739199');
 const RESEEDED_CHAT_ID = parseChatId('1787471053739200');
@@ -822,6 +823,57 @@ describe('NewChatForm', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'This machine' }));
 		expect(screen.queryByRole('button', { name: 'Local: /same' })).toBeNull();
 		expect(screen.getByRole('button', { name: '/same' })).toBeTruthy();
+	});
+
+	it('describes current-machine bookmarks as their executor disconnects or is removed without another pin group', async () => {
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({ paths: {
+			byExecutor: { [remoteExecutor.id]: { pinnedPaths: ['/remote/project'], recentPaths: [] } },
+		} }));
+		let executors!: ExecutorsStore;
+		render(NewChatFormTestHost, {
+			executorSnapshots: [localExecutor, remoteExecutor],
+			onExecutors: (store) => { executors = store; },
+		});
+		await waitFor(() => expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull());
+		await fireEvent.click(screen.getByRole('button', { name: 'Executor: Local' }));
+		await fireEvent.click(screen.getByRole('menuitemradio', { name: 'Worker' }));
+		const pin = await screen.findByRole('button', { name: '/remote/project' });
+		expect(screen.queryByRole('button', { name: 'All machines' })).toBeNull();
+		for (const [snapshot, status] of [
+			[{ ...remoteExecutor, availability: 'reconnecting' as const }, 'Reconnecting'],
+			[{ ...remoteExecutor, availability: 'offline' as const }, 'Waiting for connection'],
+			[{ ...remoteExecutor, availability: 'offline' as const, direction: 'controller-connects' as const }, 'Offline'],
+			[{ ...remoteExecutor, enabled: false }, 'Disabled'],
+			[null, 'Unavailable executor'],
+		] as const) {
+			executors.applySnapshot(snapshot ? [localExecutor, snapshot] : [localExecutor]);
+			await waitFor(() => {
+				expect((pin as HTMLButtonElement).disabled).toBe(true);
+				expect(document.getElementById(pin.getAttribute('aria-describedby')!)?.textContent).toBe(status);
+			});
+			expect(screen.queryByRole('button', { name: 'All machines' })).toBeNull();
+		}
+	});
+
+	it('searches a large current-machine collection without switching scope or losing its selection', async () => {
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({ paths: {
+			pinnedProjectPaths: Array.from({ length: 9 }, (_, index) => `/workspace/project-${index}`),
+			recentProjectPaths: ['/workspace/project-0'],
+		} }));
+		render(NewChatFormTestHost);
+		const search = await screen.findByRole('searchbox', { name: 'Search pinned paths' });
+		expect(screen.queryByRole('button', { name: 'All machines' })).toBeNull();
+		await fireEvent.input(search, { target: { value: 'project-8' } });
+		expect(screen.queryByRole('button', { name: '/workspace/project-0' })).toBeNull();
+		expect(screen.getByRole('button', { name: '/workspace/project-8' })).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Clear pinned path search' }));
+		expect(document.activeElement).toBe(search);
+		expect(screen.getByRole('button', { name: '/workspace/project-0' }).getAttribute('aria-pressed')).toBe('true');
+		expect((screen.getByRole('textbox', { name: 'Project Path' }) as HTMLInputElement).value).toBe('/workspace/project-0');
 	});
 
 	it('searches many bookmarks by machine or path, announces unavailable targets and clears without changing the draft', async () => {
