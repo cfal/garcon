@@ -7,11 +7,13 @@ import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatList
 import { SidebarVirtualChatListController } from '../SidebarVirtualChatListController.svelte.js';
 import {
 	CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
+	MACHINE_HEADER_ROW_HEIGHT,
 	PROJECT_HEADER_ROW_HEIGHT,
 	type SidebarVirtualChatRow,
 	type SidebarVirtualRow,
 } from '../sidebar-virtual-chat-list';
 import { sidebarProjectKey } from '../sidebar-row-model';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { SidebarChatReorderState } from '../sidebar-chat-reorder-state.svelte';
 import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
@@ -346,6 +348,29 @@ describe('SidebarVirtualSortableChatList', () => {
 		).toBeGreaterThan(0);
 		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
 		expect(screen.queryByText('Chat 119')).toBeNull();
+	});
+
+	it('renders machine headers with readiness and machine-sized geometry', () => {
+		render(SidebarVirtualSortableChatListHost, {
+			executors: [localExecutor, remoteExecutor],
+			rows: [
+				{
+					type: 'machine-header',
+					key: 'machine-header:machine:local',
+					executorId: 'local',
+					collapseKey: 'machine:local',
+					count: 2,
+					chatIds: ['chat-0', 'chat-1'],
+					isCollapsed: false,
+				},
+			],
+		});
+
+		expect(screen.getByRole('button', { name: 'Local, Ready' })).toBeTruthy();
+		expect(document.querySelector('[data-sidebar-machine-header="local"]')).toBeTruthy();
+		expect(document.querySelector('[data-sidebar-machine-count]')?.textContent?.trim()).toBe('2');
+		const machineItem = document.querySelector<HTMLElement>('[data-sidebar-virtual-item="machine-header"]');
+		expect(machineItem?.style.height).toBe(`${MACHINE_HEADER_ROW_HEIGHT}px`);
 	});
 
 	it('places disclosure arrows after group labels and replaces header borders with inline dividers', () => {

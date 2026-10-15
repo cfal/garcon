@@ -39,6 +39,7 @@ vi.mock('$lib/context', () => ({
 	getNavigation: () => testContext.current?.navigation,
 	getNotifications: () => testContext.current?.notifications,
 	getRemoteSettings: () => testContext.current?.remoteSettings,
+	getExecutors: () => ({ executors: [{ id: 'local' }] }),
 	getSidebarProjectCollapse: () => testContext.current?.projectCollapse,
 	getSidebarSearch: () => testContext.current?.sidebarSearch,
 	getTerminalRegistry: () => testContext.current?.terminals,

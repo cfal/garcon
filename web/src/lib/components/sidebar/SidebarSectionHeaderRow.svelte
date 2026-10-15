@@ -25,7 +25,7 @@
 
 	let { row, containsSelectedChat = false, onToggle }: SidebarSectionHeaderRowProps = $props();
 
-	let sectionKey = $derived(sidebarSectionKey(row.section));
+	let sectionKey = $derived(sidebarSectionKey(row.section, row.executorId));
 	let label = $derived(sectionLabels[row.section]());
 
 	function handleToggle(): void {

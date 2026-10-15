@@ -200,6 +200,7 @@
 	<div
 		class={cn(
 			'overflow-hidden',
+			row.machineGrouped && 'pl-8',
 			isActiveChat ? 'bg-sidebar-chat-item-selected-bg' : 'bg-sidebar-chat-item-bg',
 		)}
 		style={`height:${

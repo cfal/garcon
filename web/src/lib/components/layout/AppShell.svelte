@@ -35,6 +35,7 @@
 		getWs,
 		getLocalSettings,
 		getRemoteSettings,
+		getExecutors,
 		getMinuteClock,
 		getNotifications,
 		getSidebarSearch,
@@ -87,6 +88,7 @@
 	const ws = getWs();
 	const localSettings = getLocalSettings();
 	const remoteSettings = getRemoteSettings();
+	const executors = getExecutors();
 	const notifications = getNotifications();
 	const singletonSurfaces = getSingletonSurfaces();
 	const routeTicketId = $derived(selectedTicketFromUrl(page.url));
@@ -116,6 +118,7 @@
 			optimisticArchiveOrder: sessions.orderedChats,
 			groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
+			executorOrder: executors.executors.map((executor) => executor.id),
 		}),
 	);
 	let mobileSidebarFocusReturnTarget: HTMLElement | null = null;

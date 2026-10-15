@@ -11,6 +11,55 @@ import {
 } from '../sidebar-virtual-chat-list';
 
 describe('sidebar chat scroll targets', () => {
+	it('anchors the selected chat to its collapsed machine', () => {
+		const collapseKey = 'machine:local';
+		const rows: SidebarVirtualRow[] = [
+			{
+				type: 'machine-header',
+				key: collapseKey,
+				collapseKey,
+				executorId: 'local',
+				count: 1,
+				chatIds: ['hidden-chat'],
+				isCollapsed: true,
+			},
+		];
+		const target = sidebarScrollTargetForChat(rows, 'hidden-chat');
+		expect(target).toEqual({ index: 0, machineCollapseKey: collapseKey });
+		const viewport = document.createElement('div');
+		const header = document.createElement('button');
+		header.dataset.sidebarMachineCollapseKey = collapseKey;
+		viewport.append(header);
+		expect(target && mountedElementForScrollTarget(viewport, target)).toBe(header);
+	});
+
+	it('anchors a collapsed section inside an expanded machine', () => {
+		const rows: SidebarVirtualRow[] = [
+			{
+				type: 'machine-header',
+				key: 'machine:local',
+				collapseKey: 'machine:local',
+				executorId: 'local',
+				count: 1,
+				chatIds: ['hidden'],
+				isCollapsed: false,
+			},
+			{
+				type: 'section-header',
+				key: sidebarSectionKey('inactive', 'local'),
+				executorId: 'local',
+				section: 'inactive',
+				count: 1,
+				chatIds: ['hidden'],
+				isCollapsed: true,
+			},
+		];
+		expect(sidebarScrollTargetForChat(rows, 'hidden')).toEqual({
+			index: 1,
+			sectionKey: sidebarSectionKey('inactive', 'local'),
+		});
+	});
+
 	it('anchors a collapsed inactive project instead of its duplicate active or section header', () => {
 		const projectKey = sidebarProjectKey('/tmp/shared-project');
 		const inactiveProjectCollapseKey = sidebarSectionProjectKey('inactive', projectKey);
