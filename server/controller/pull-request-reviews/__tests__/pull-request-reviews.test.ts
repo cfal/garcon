@@ -213,6 +213,53 @@ test('marks reviews that were running when the controller stopped as interrupted
   restarted.reviews.stop();
 });
 
+test('reopens saved repositories and review text without schema version metadata', async () => {
+  const first = harness();
+  const repository = await connect(first.reviews, {});
+  first.reviews.start();
+  const run = first.reviews.review(repository.id, 7);
+  await until(() => first.turns.has('chat-1'));
+  const text = `No findings.\n\nReviewed commit: ${HEAD}`;
+  first.turns.get('chat-1')!(text);
+  await until(() => latestRun(first.reviews)?.state === 'completed');
+  const revision = first.reviews.snapshot().revision;
+  first.reviews.stop();
+  first.reviews.close();
+
+  const database = new Database(join(first.directory, 'pull-request-reviews.sqlite'));
+  try {
+    expect(database.query('PRAGMA user_version').get()).toEqual({ user_version: 0 });
+  } finally { database.close(); }
+
+  const reopened = harness(first.directory);
+  try {
+    expect(reopened.reviews.snapshot()).toMatchObject({ revision, repositories: [{ id: repository.id }] });
+    expect(reopened.reviews.runs(repository.id, 7)).toMatchObject([{ id: run.id, state: 'completed', review: text }]);
+  } finally { reopened.reviews.close(); }
+});
+
+test('runs one review per repository within the workspace concurrency limit', async () => {
+  const { reviews, github, turns, starts } = harness();
+  github.pulls.push(pull({ number: 8 }));
+  const local = await connect(reviews, {});
+  const remote = await reviews.connect({
+    target: { ...target, executorId: '11111111-1111-4111-8111-111111111111' }, settings: DEFAULT_PULL_REQUEST_REVIEW_SETTINGS,
+  });
+  reviews.start();
+  try {
+    const first = reviews.review(local.id, 7);
+    const queued = reviews.review(local.id, 8);
+    reviews.review(remote.id, 7);
+    await until(() => turns.size === 2);
+    expect(starts).toHaveLength(2);
+    expect(reviews.runs(local.id, 8)[0]).toMatchObject({ id: queued.id, state: 'queued', chatId: null });
+    turns.get('chat-1')!(`Reviewed commit: ${HEAD}`);
+    await until(() => starts.length === 3);
+    expect(reviews.runs(local.id, 7)[0]).toMatchObject({ id: first.id, state: 'completed' });
+    expect(reviews.runs(local.id, 8)[0]).toMatchObject({ id: queued.id, state: 'reviewing', chatId: 'chat-3' });
+  } finally { reviews.stop(); reviews.close(); }
+});
+
 test('posts a review of the live head even when the scanner cached the preceding head', async () => {
   const { reviews, github, turns } = harness();
   const repository = await connect(reviews, { posting: 'comment' });

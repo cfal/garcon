@@ -2,7 +2,6 @@ import crypto from 'node:crypto';
 import type { PullRequestSummary } from '../../../common/gh.js';
 import {
   PULL_REQUEST_REVIEW_MAX_RUNNING,
-  PULL_REQUEST_REVIEW_MAX_RUNNING_PER_REPOSITORY,
   PULL_REQUEST_REVIEW_PERMISSION_TIMEOUT_MINUTES,
   PULL_REQUEST_REVIEW_TAG,
   isActivePullRequestReviewRun,
@@ -100,7 +99,7 @@ export class PullRequestReviewRunner {
     for (const run of active) {
       if (run.state !== 'queued' || this.#starting.has(run.id)) continue;
       if (running.length >= PULL_REQUEST_REVIEW_MAX_RUNNING) return;
-      if (running.filter((entry) => entry.repositoryId === run.repositoryId).length >= PULL_REQUEST_REVIEW_MAX_RUNNING_PER_REPOSITORY) continue;
+      if (running.some((entry) => entry.repositoryId === run.repositoryId)) continue;
       running.push(run);
       this.#starting.add(run.id);
       void this.#start(run).finally(() => {
@@ -232,9 +231,7 @@ export class PullRequestReviewRunner {
   }
 
   #settlement(runId: string, record: CommandLedgerRecord | null): Settlement {
-    const timedOut = this.#permissionTimedOut.delete(runId);
-    this.#clearPermissionTimer(runId);
-    this.#pendingPermissions.delete(runId);
+    const timedOut = this.#permissionTimedOut.has(runId);
     if (!record) return { state: 'failed', message: 'The review result is no longer available.', reviewedSha: null };
     const projection = projectAgentTurnReceipt(record);
     if (projection.kind === 'expired' || projection.receipt.state === 'pending') {
