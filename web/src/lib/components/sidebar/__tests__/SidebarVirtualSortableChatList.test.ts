@@ -384,7 +384,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			],
 		});
 		const button = screen.getByRole('button', {
-			name: 'Executor unavailable (22222222), Unavailable',
+			name: 'Executor unavailable (22222222)',
 		});
 		expect(button.getAttribute('aria-expanded')).toBe('false');
 		expect(button.classList.contains('bg-sidebar-chat-item-selected-bg')).toBe(true);
@@ -405,7 +405,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: { grouping: 'project' },
 		});
 
-		expect(screen.getByRole('button', { name: 'Local, Ready' }).getAttribute('aria-expanded')).toBe(
+		expect(screen.getByRole('button', { name: 'Local' }).getAttribute('aria-expanded')).toBe(
 			'false',
 		);
 		expect(screen.queryByText('Chat 0')).toBeNull();
@@ -413,7 +413,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBe(0);
 	});
 
-	it('renders machine headers with readiness and machine-sized geometry', () => {
+	it('renders compact machine headers with machine-sized geometry', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			executors: [localExecutor, remoteExecutor],
 			rows: [
@@ -429,7 +429,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			],
 		});
 
-		expect(screen.getByRole('button', { name: 'Local, Ready' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Local' })).toBeTruthy();
 		expect(document.querySelector('[data-sidebar-machine-header="local"]')).toBeTruthy();
 		expect(document.querySelector('[data-sidebar-machine-count]')?.textContent?.trim()).toBe('2');
 		const machineItem = document.querySelector<HTMLElement>(

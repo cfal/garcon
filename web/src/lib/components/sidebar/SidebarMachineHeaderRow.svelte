@@ -3,7 +3,6 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import { cn } from '$lib/utils/cn';
 	import { getExecutors } from '$lib/context';
-	import { executorStatus } from '$lib/executors/executors-store.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { SidebarVirtualMachineHeaderRow } from './sidebar-virtual-chat-list';
 
@@ -19,14 +18,6 @@
 	const label = $derived(
 		executor?.label ?? `${m.workspace_executor_unavailable()} (${row.executorId.slice(0, 8)})`,
 	);
-	const status = $derived(executor ? executorStatus(executor) : m.common_unavailable());
-	const statusClass = $derived(
-		!executor || executor.availability === 'offline' || !executor.enabled
-			? 'text-status-error-foreground'
-			: executor.availability === 'ready'
-				? 'text-status-success-foreground'
-				: 'text-status-warning-muted-foreground',
-	);
 
 	function handleToggle(): void {
 		onToggle?.(row.collapseKey);
@@ -40,18 +31,15 @@
 			'flex h-full w-full items-center gap-1.5 px-2.5 text-left transition-colors hover:bg-sidebar-chat-item-hover-bg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
 			containsSelectedChat && 'bg-sidebar-chat-item-selected-bg',
 		)}
-		title={`${label} · ${status}${executor ? '' : ` · ${row.executorId}`}`}
-		aria-label={`${label}, ${status}`}
+		title={`${label}${executor ? '' : ` · ${row.executorId}`}`}
+		aria-label={label}
 		aria-expanded={!row.isCollapsed}
 		onclick={handleToggle}
 		data-sidebar-machine-header={row.executorId}
 		data-sidebar-machine-collapse-key={row.collapseKey}
 		data-sidebar-machine-collapsed={row.isCollapsed ? 'true' : 'false'}
 	>
-		<span class="min-w-0 flex-1">
-			<span class="block truncate text-xs font-semibold text-foreground">{label}</span>
-			<span class={cn('block truncate text-[10px]', statusClass)}>{status}</span>
-		</span>
+		<span class="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{label}</span>
 		{#if row.isCollapsed}
 			<ChevronRight class="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
 		{:else}
