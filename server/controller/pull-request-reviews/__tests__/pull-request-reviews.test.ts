@@ -275,6 +275,30 @@ test('posts a review of the live head even when the scanner cached the preceding
   reviews.stop();
 });
 
+test('continues scanning other pull requests when a push arrives during a review', async () => {
+  const { reviews, github, turns, starts } = harness();
+  const repository = await connect(reviews, { autoReview: true });
+  reviews.start();
+  try {
+    await until(() => turns.has('chat-1'));
+    const nextHead = 'b'.repeat(40);
+    github.pulls = [pull({ headRefOid: nextHead }), pull({ number: 8 })];
+    reviews.scan(repository.id);
+    await until(() => reviews.runs(repository.id, 8).length === 1);
+    expect(reviews.runs(repository.id, 7)).toMatchObject([{ state: 'reviewing', headSha: HEAD }]);
+    expect(reviews.runs(repository.id, 8)).toMatchObject([{ state: 'queued' }]);
+    expect(starts).toHaveLength(1);
+
+    turns.get('chat-1')!(`Reviewed commit: ${HEAD}`);
+    await until(() => turns.has('chat-2'));
+    reviews.scan(repository.id);
+    await until(() => reviews.runs(repository.id, 7).length === 2);
+    expect(reviews.runs(repository.id, 7)).toMatchObject([
+      { state: 'queued', headSha: nextHead }, { state: 'outdated', reviewedSha: HEAD },
+    ]);
+  } finally { reviews.stop(); reviews.close(); }
+});
+
 test('allows disabling reviews and posting while the preserved executor is offline', async () => {
   const { reviews, deps } = harness();
   const repository = await connect(reviews, { autoReview: true, posting: 'comment' });

@@ -25,7 +25,9 @@ describes what milestones 1 and 2 of that issue implement.
    counts automatic reviews started in the last 24 hours.
 4. **Start.** At most two reviews run at once, one per repository. A review is
    a new chat in the repository's folder, tagged `auto-review` and named
-   `Review owner/name#N`, started with the repository's prompt.
+   `Review owner/name#N`, started with the repository's prompt. A push during
+   an active review waits for that review to finish before another is queued;
+   other pull requests continue through selection on that scan.
 5. **Collect.** When the turn ends, its final response is stored as the
    review. The review must contain exactly one `Reviewed commit: <sha>` line;
    without one the run fails and keeps the text. A review whose commit is no
