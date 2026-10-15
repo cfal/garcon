@@ -1,8 +1,8 @@
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { GitServiceError } from '../../../common/git-error.js';
+import { GH_COMMENT_BODY_MAX_LENGTH } from '../../../common/gh.js';
 import {
   pullRequestReviewCommentBody,
-  pullRequestReviewCommentFits,
   pullRequestReviewMarkerPrefix,
   type PullRequestReviewPost,
 } from '../../../common/pull-request-reviews.js';
@@ -39,7 +39,7 @@ export class PullRequestReviewPoster {
     if (repository.settings.posting === 'off') throw reviewConflict('Posting is off for this repository.');
     if (this.#posting.has(runId)) throw reviewConflict('This review is already being posted.');
     const body = pullRequestReviewCommentBody(run.review, repository.nameWithOwner, run.number, run.reviewedSha);
-    if (!pullRequestReviewCommentFits(body)) {
+    if (body.length > GH_COMMENT_BODY_MAX_LENGTH) {
       this.#record(runId, { status: 'too-long', message: 'The review is longer than a GitHub comment allows.' });
       return;
     }

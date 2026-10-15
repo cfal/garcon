@@ -3,7 +3,7 @@
 // review to the commit it describes.
 
 import { isRecord } from './json.js';
-import { GH_COMMENT_BODY_MAX_LENGTH, type PullRequestSummary } from './gh.js';
+import type { PullRequestSummary } from './gh.js';
 import {
   normalizeScheduledPromptTarget,
   type NewChatScheduledPromptTarget,
@@ -16,10 +16,8 @@ export const PULL_REQUEST_REVIEW_TAG = 'auto-review';
 export const PULL_REQUEST_REVIEW_POSTING_MODES = ['off', 'draft', 'comment'] as const;
 export type PullRequestReviewPostingMode = typeof PULL_REQUEST_REVIEW_POSTING_MODES[number];
 
-export const PULL_REQUEST_REVIEW_RUN_STATES = [
-  'queued', 'reviewing', 'needs-input', 'completed', 'outdated', 'failed', 'stopped', 'interrupted',
-] as const;
-export type PullRequestReviewRunState = typeof PULL_REQUEST_REVIEW_RUN_STATES[number];
+export type PullRequestReviewRunState =
+  | 'queued' | 'reviewing' | 'needs-input' | 'completed' | 'outdated' | 'failed' | 'stopped' | 'interrupted';
 
 const ACTIVE_RUN_STATES: readonly PullRequestReviewRunState[] = ['queued', 'reviewing', 'needs-input'];
 
@@ -27,20 +25,17 @@ export function isActivePullRequestReviewRun(state: PullRequestReviewRunState): 
   return ACTIVE_RUN_STATES.includes(state);
 }
 
-export const PULL_REQUEST_REVIEW_SKIP_REASONS = [
-  'draft', 'bot-author', 'untrusted-author', 'fork', 'base-branch', 'label', 'too-large',
-  'review-not-requested', 'attempts-exhausted', 'daily-limit', 'stopped',
-] as const;
-export type PullRequestReviewSkipReason = typeof PULL_REQUEST_REVIEW_SKIP_REASONS[number];
+export type PullRequestReviewSkipReason =
+  | 'draft' | 'bot-author' | 'untrusted-author' | 'fork' | 'base-branch' | 'label' | 'too-large'
+  | 'review-not-requested' | 'attempts-exhausted' | 'daily-limit' | 'stopped';
 
 export const PULL_REQUEST_REVIEW_PROMPT_MAX_LENGTH = 32_000;
 export const PULL_REQUEST_REVIEW_MAX_REPOSITORIES = 50;
 export const PULL_REQUEST_REVIEW_MAX_FILTER_VALUES = 20;
 export const PULL_REQUEST_REVIEW_RECENT_RUN_LIMIT = 100;
 export const PULL_REQUEST_REVIEW_SCAN_INTERVAL_MINUTES = 5;
-// Reviews running at once: across the workspace, and in one repository.
+// Reviews running at once across the workspace; each repository runs one at a time.
 export const PULL_REQUEST_REVIEW_MAX_RUNNING = 2;
-export const PULL_REQUEST_REVIEW_MAX_RUNNING_PER_REPOSITORY = 1;
 // An unattended review that waits this long on a permission request fails.
 export const PULL_REQUEST_REVIEW_PERMISSION_TIMEOUT_MINUTES = 30;
 
@@ -244,10 +239,6 @@ export function pullRequestReviewMarkerPrefix(nameWithOwner: string, number: num
 
 export function pullRequestReviewCommentBody(review: string, nameWithOwner: string, number: number, commit: string): string {
   return `${review.trimEnd()}\n\n<!-- ${pullRequestReviewMarkerPrefix(nameWithOwner, number)}${commit} -->`;
-}
-
-export function pullRequestReviewCommentFits(body: string): boolean {
-  return body.length <= GH_COMMENT_BODY_MAX_LENGTH;
 }
 
 const bool = (value: unknown): value is boolean => typeof value === 'boolean';

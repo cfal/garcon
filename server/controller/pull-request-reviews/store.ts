@@ -84,22 +84,11 @@ export class PullRequestReviewStore {
     try {
       const database = openPrivateSqliteDatabase(path);
       this.#database = database;
-      const version = database.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version;
-      if (version === 0) {
-        const existing = database.query<{ count: number }, []>(
-          "SELECT count(*) AS count FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
-        ).get();
-        if (existing?.count !== 0) throw new Error('Unrecognized pull request review database.');
-      } else if (version !== 1) {
-        throw new Error('Unsupported pull request review database version.');
-      }
       configureDurableSqlite(database);
-      if (version === 0) {
-        database.transaction(() => {
-          database.exec(PULL_REQUEST_REVIEW_SCHEMA.join(';\n'));
-          database.query('INSERT INTO review_meta VALUES (1, 0)').run();
-        }).immediate();
-      }
+      database.transaction(() => {
+        database.exec(PULL_REQUEST_REVIEW_SCHEMA.join(';\n'));
+        database.query('INSERT OR IGNORE INTO review_meta VALUES (1, 0)').run();
+      }).immediate();
       securePrivateSqliteSidecars(path);
     } catch (error) {
       logger.warn('Pull request review storage open failed.', { errorCode: diagnosticErrorCode(error) });

@@ -1,9 +1,9 @@
 export const PULL_REQUEST_REVIEW_SCHEMA = [
-`CREATE TABLE review_meta (
+`CREATE TABLE IF NOT EXISTS review_meta (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   revision INTEGER NOT NULL
 ) STRICT`,
-`CREATE TABLE review_repositories (
+`CREATE TABLE IF NOT EXISTS review_repositories (
   id TEXT PRIMARY KEY,
   payload_json TEXT NOT NULL,
   scan_json TEXT NOT NULL,
@@ -11,8 +11,8 @@ export const PULL_REQUEST_REVIEW_SCHEMA = [
   executor_id TEXT NOT NULL,
   repository_name TEXT NOT NULL
 ) STRICT`,
-`CREATE UNIQUE INDEX review_repositories_identity ON review_repositories(executor_id, repository_name)`,
-`CREATE TABLE review_runs (
+`CREATE UNIQUE INDEX IF NOT EXISTS review_repositories_identity ON review_repositories(executor_id, repository_name)`,
+`CREATE TABLE IF NOT EXISTS review_runs (
   id TEXT PRIMARY KEY,
   repository_id TEXT NOT NULL REFERENCES review_repositories(id) ON DELETE CASCADE,
   number INTEGER NOT NULL,
@@ -23,8 +23,7 @@ export const PULL_REQUEST_REVIEW_SCHEMA = [
   review TEXT,
   closed_at TEXT
 ) STRICT`,
-`CREATE INDEX review_runs_pull ON review_runs(repository_id, number, created_at DESC)`,
-`CREATE INDEX review_runs_recent ON review_runs(created_at DESC)`,
-`CREATE INDEX review_runs_state ON review_runs(state)`,
-`PRAGMA user_version = 1`,
+`CREATE INDEX IF NOT EXISTS review_runs_pull ON review_runs(repository_id, number, created_at DESC)`,
+`CREATE INDEX IF NOT EXISTS review_runs_recent ON review_runs(created_at DESC)`,
+`CREATE INDEX IF NOT EXISTS review_runs_state ON review_runs(state)`,
 ] as const;

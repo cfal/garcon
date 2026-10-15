@@ -54,7 +54,8 @@ request changes.
 
 `pull-request-reviews.sqlite` in the workspace directory holds connected
 repositories, their last pull request list and scan status, and review runs
-with their review text. The initial schema enforces unique normalized
+with their review text. Startup creates missing tables and indexes without
+schema versions or migrations. The schema enforces unique normalized
 executor/repository identities. Databases created from earlier revisions of
 this unmerged feature must be recreated.
 Running work is not durable: a run that was queued or
