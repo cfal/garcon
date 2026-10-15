@@ -4,7 +4,12 @@
 	import { executorStatus } from '$lib/executors/executors-store.svelte';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte';
 	import { filterExecutorPinnedPathGroups } from '$lib/project-paths/executor-pinned-paths';
+	import { pinnedProjectPathName } from '$lib/project-paths/project-pinned-paths';
 	import Check from '@lucide/svelte/icons/check';
+	import Folder from '@lucide/svelte/icons/folder';
+	import Monitor from '@lucide/svelte/icons/monitor';
+	import Pin from '@lucide/svelte/icons/pin';
+	import Server from '@lucide/svelte/icons/server';
 	import Search from '@lucide/svelte/icons/search';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
@@ -43,11 +48,13 @@
 	]);
 </script>
 
-<section aria-label={m.chat_new_chat_pinned_paths()} class="min-w-0 space-y-2">
-	{#if hasOtherPins || showAll}
-		<div class="flex flex-wrap items-center justify-between gap-2">
-			<span class="text-xs font-medium text-muted-foreground">{m.chat_new_chat_pinned_paths()}</span
-			>
+<section aria-label={m.chat_new_chat_pinned_paths()} class="min-w-0 space-y-2.5">
+	<div class="flex flex-wrap items-center justify-between gap-2">
+		<span class="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+			<Pin class="size-3.5" aria-hidden="true" />
+			{m.chat_new_chat_pinned_paths()}
+		</span>
+		{#if hasOtherPins || showAll}
 			<div
 				role="group"
 				aria-label={m.chat_new_chat_pinned_paths()}
@@ -58,21 +65,22 @@
 						type="button"
 						aria-label={scope.label}
 						aria-pressed={showAll === scope.all}
-						class="inline-flex min-h-11 items-center gap-1.5 rounded px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {showAll ===
+						class="inline-flex min-h-11 items-center gap-2 rounded-md px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {showAll ===
 						scope.all
 							? 'bg-background text-foreground shadow-sm'
 							: 'text-muted-foreground hover:text-foreground'}"
 						onclick={() => {
 							showAll = scope.all;
 						}}
-						>{scope.label}<span class="tabular-nums text-muted-foreground" aria-hidden="true"
-							>{scope.count}</span
+						>{scope.label}<span
+							class="min-w-5 rounded-full bg-background/70 px-1.5 py-0.5 text-center text-[10px] tabular-nums text-muted-foreground"
+							aria-hidden="true">{scope.count}</span
 						></button
 					>
 				{/each}
 			</div>
-		</div>
-	{/if}
+		{/if}
+	</div>
 	{#if searchAvailable}
 		<div class="relative">
 			<Search
@@ -103,28 +111,35 @@
 		</div>
 	{/if}
 	<div
-		class="max-h-56 space-y-3 overflow-y-auto overscroll-contain sm:max-h-64 {showAll
+		class="max-h-56 space-y-4 overflow-y-auto overscroll-contain sm:max-h-64 {showAll
 			? 'rounded-md border border-border p-2'
 			: ''} {searchAvailable ? 'h-56 sm:h-64' : ''}"
 	>
 		{#each filteredGroups as group (group.executorId)}
 			{@const executor = executors.get(group.executorId)}
 			{@const ready = executors.isReady(group.executorId)}
-			<div role="group" aria-label={executor?.label ?? group.executorId} class="space-y-1">
+			<div role="group" aria-label={executor?.label ?? group.executorId} class="space-y-1.5">
 				<div
 					class={showAll || !ready
-						? 'flex flex-wrap items-center gap-x-2 px-1 text-xs text-muted-foreground'
+						? 'sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-background px-1 py-1 text-xs text-muted-foreground'
 						: 'sr-only'}
 				>
-					<span class="break-all font-medium text-foreground"
+					{#if group.executorId === 'local'}
+						<Monitor class="size-3.5 shrink-0" aria-hidden="true" />
+					{:else}
+						<Server class="size-3.5 shrink-0" aria-hidden="true" />
+					{/if}
+					<span class="min-w-0 flex-1 break-all font-semibold text-foreground"
 						>{executor?.label ?? group.executorId}</span
 					>
-					<span class="tabular-nums"
+					<span class="text-[11px] tabular-nums"
 						>{group.paths.length === 1
 							? m.chat_new_chat_pinned_paths_count_singular({ count: group.paths.length })
 							: m.chat_new_chat_pinned_paths_count_plural({ count: group.paths.length })}</span
 					>
-					<span id={`${id}-${group.executorId}-status`}
+					<span
+						id={`${id}-${group.executorId}-status`}
+						class="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium"
 						>{executor
 							? executorStatus(executor)
 							: m.chat_new_chat_pinned_paths_unavailable_executor()}</span
@@ -133,20 +148,26 @@
 				<div class="grid gap-1 sm:grid-cols-2">
 					{#each group.paths as path (path)}
 						{@const selected = form.executorId === group.executorId && form.projectPath === path}
+						{@const name = pinnedProjectPathName(path)}
 						<button
 							type="button"
 							disabled={!ready || form.isUpdatingPinnedPath}
 							aria-label={showAll ? `${executor?.label ?? group.executorId}: ${path}` : path}
 							aria-describedby={`${id}-${group.executorId}-status`}
 							aria-pressed={selected}
-							class="flex min-h-11 w-full items-center gap-2 rounded border px-2 py-2 text-left text-xs break-all hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 {selected
+							title={path}
+							class="flex min-h-11 w-full scroll-mt-10 items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 {selected
 								? 'border-border bg-accent text-accent-foreground'
-								: 'border-border/70 bg-muted/40 text-muted-foreground'}"
+								: 'border-transparent bg-muted/30 text-foreground'}"
 							onclick={() => pins.select(group.executorId, path)}
-							><span class="min-w-0 flex-1">{path}</span>{#if selected}<Check
-									class="size-4 shrink-0"
-									aria-hidden="true"
-								/>{/if}</button
+						>
+							<Folder class="size-4 shrink-0 text-file-icon-folder" aria-hidden="true" />
+							<span class="min-w-0 flex-1">
+								<span class="block truncate text-sm font-medium leading-5">{name}</span>
+								{#if name !== path}<span
+										class="block text-[11px] leading-4 break-all text-muted-foreground">{path}</span
+									>{/if}
+							</span>{#if selected}<Check class="size-4 shrink-0" aria-hidden="true" />{/if}</button
 						>
 					{/each}
 				</div>
