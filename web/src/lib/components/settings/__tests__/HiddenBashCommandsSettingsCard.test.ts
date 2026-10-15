@@ -101,6 +101,34 @@ describe('HiddenBashCommandsSettingsCard', () => {
 		]);
 	});
 
+	it('closes the preset menu while its save is pending and opens it again afterward', async () => {
+		const store = renderCard();
+		let resolveUpdate!: (response: UpdateRemoteSettingsResponse) => void;
+		vi.mocked(updateRemoteSettings).mockImplementationOnce(
+			() => new Promise((resolve) => (resolveUpdate = resolve)),
+		);
+
+		await selectGarconAmpPreset();
+
+		const trigger = screen.getByRole('button', { name: 'Add preset' }) as HTMLButtonElement;
+		expect(trigger.disabled).toBe(true);
+		expect(trigger.getAttribute('aria-expanded')).toBe('false');
+		resolveUpdate({
+			success: true,
+			settings: makeRemoteSettingsSnapshot({
+				version: (store.snapshot?.version ?? 1) + 1,
+				ui: {
+					hiddenBashCommandPatterns: HIDDEN_BASH_COMMAND_PATTERN_PRESETS[0].patterns.map(
+						(entry) => ({ ...entry }),
+					),
+				},
+			}),
+		});
+		await waitFor(() => expect(trigger.disabled).toBe(false));
+		await fireEvent.click(trigger);
+		expect(screen.getByRole('menuitem', { name: 'Garcon-amp rules' })).toBeTruthy();
+	});
+
 	it('skips a preset when every entry is already present', async () => {
 		renderCard(HIDDEN_BASH_COMMAND_PATTERN_PRESETS[0].patterns.map((entry) => ({ ...entry })));
 

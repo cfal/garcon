@@ -149,7 +149,7 @@
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
 				{#each HIDDEN_BASH_COMMAND_PATTERN_PRESETS as preset (preset.id)}
-					<DropdownMenuItem onclick={() => addPreset(preset)} disabled={isSaving}>
+					<DropdownMenuItem onSelect={() => addPreset(preset)} disabled={isSaving}>
 						{presetLabel(preset)}
 					</DropdownMenuItem>
 				{/each}
