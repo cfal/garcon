@@ -55,11 +55,7 @@
 			{m.chat_new_chat_pinned_paths()}
 		</span>
 		{#if hasOtherPins || showAll}
-			<div
-				role="group"
-				aria-label={m.chat_new_chat_pinned_paths()}
-				class="inline-flex rounded-md bg-muted/40 p-0.5"
-			>
+			<div role="group" aria-label={m.chat_new_chat_pinned_paths()} class="inline-flex gap-0.5">
 				{#each scopeOptions as scope (scope.label)}
 					<button
 						type="button"
@@ -67,14 +63,16 @@
 						aria-pressed={showAll === scope.all}
 						class="inline-flex min-h-11 items-center gap-2 rounded-md px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {showAll ===
 						scope.all
-							? 'bg-background text-foreground shadow-sm'
+							? 'font-medium text-foreground'
 							: 'text-muted-foreground hover:text-foreground'}"
 						onclick={() => {
 							showAll = scope.all;
 						}}
-						>{scope.label}<span
-							class="min-w-5 rounded-full bg-background/70 px-1.5 py-0.5 text-center text-[10px] tabular-nums text-muted-foreground"
-							aria-hidden="true">{scope.count}</span
+					>
+						<span class={showAll === scope.all ? 'underline decoration-2 underline-offset-8' : ''}
+							>{scope.label}</span
+						><span class="text-[10px] tabular-nums text-muted-foreground" aria-hidden="true"
+							>{scope.count}</span
 						></button
 					>
 				{/each}
@@ -93,7 +91,7 @@
 				placeholder={m.chat_new_chat_pinned_paths_search_placeholder()}
 				bind:value={searchQuery}
 				bind:this={searchInput}
-				class="h-11 w-full rounded-md border border-border bg-background pr-11 pl-9 text-base placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-fine:text-sm"
+				class="h-11 w-full rounded-md border-0 bg-muted/40 pr-11 pl-9 text-base placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-fine:text-sm"
 			/>
 			{#if searchQuery}
 				<button
@@ -111,17 +109,17 @@
 		</div>
 	{/if}
 	<div
-		class="max-h-56 space-y-4 overflow-y-auto overscroll-contain sm:max-h-64 {showAll
-			? 'rounded-md border border-border p-2'
-			: ''} {searchAvailable ? 'h-56 sm:h-64' : ''}"
+		class="max-h-56 space-y-2 overflow-y-auto overscroll-contain p-1 sm:max-h-64 {searchAvailable
+			? 'h-56 sm:h-64'
+			: ''}"
 	>
 		{#each filteredGroups as group (group.executorId)}
 			{@const executor = executors.get(group.executorId)}
 			{@const ready = executors.isReady(group.executorId)}
-			<div role="group" aria-label={executor?.label ?? group.executorId} class="space-y-1.5">
+			<div role="group" aria-label={executor?.label ?? group.executorId} class="space-y-1">
 				<div
 					class={showAll || !ready
-						? 'sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-background px-1 py-1 text-xs text-muted-foreground'
+						? 'sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-(color:--dialog-surface) px-2.5 py-0.5 text-xs text-muted-foreground'
 						: 'sr-only'}
 				>
 					{#if group.executorId === 'local'}
@@ -137,9 +135,7 @@
 							? m.chat_new_chat_pinned_paths_count_singular({ count: group.paths.length })
 							: m.chat_new_chat_pinned_paths_count_plural({ count: group.paths.length })}</span
 					>
-					<span
-						id={`${id}-${group.executorId}-status`}
-						class="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium"
+					<span id={`${id}-${group.executorId}-status`} class="text-[10px] font-medium"
 						>{executor
 							? executorStatus(executor)
 							: m.chat_new_chat_pinned_paths_unavailable_executor()}</span
@@ -156,9 +152,9 @@
 							aria-describedby={`${id}-${group.executorId}-status`}
 							aria-pressed={selected}
 							title={path}
-							class="flex min-h-11 w-full scroll-mt-10 items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 {selected
-								? 'border-border bg-accent text-accent-foreground'
-								: 'border-transparent bg-muted/30 text-foreground'}"
+							class="flex min-h-11 w-full scroll-mt-10 items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 {selected
+								? 'bg-accent/60 text-accent-foreground'
+								: 'text-foreground'}"
 							onclick={() => pins.select(group.executorId, path)}
 						>
 							<Folder class="size-4 shrink-0 text-file-icon-folder" aria-hidden="true" />
