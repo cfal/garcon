@@ -144,9 +144,6 @@
 	const formattedDraft = $derived(
 		ui.formattedDraft?.source === composerState.inputText ? ui.formattedDraft : null,
 	);
-	const canFormat = $derived(
-		isVisible && isPresented && !isDisabled && !promptTransformPending && !ui.composerEditorOpen,
-	);
 	const markdown = new PromptComposerMarkdownController({
 		ui,
 		composer: composerState,
@@ -483,7 +480,10 @@
 	function returnComposerFocus(): void {
 		if (destroyed || !isVisible) return;
 		if (formattedDraft) void markdown.edit();
-		else textarea?.focus({ preventScroll: true });
+		else {
+			markdown.reset();
+			textarea?.focus({ preventScroll: true });
+		}
 	}
 
 	async function settleComposerAfterSnippet(caret?: number): Promise<void> {
@@ -625,7 +625,7 @@
 		}
 		if (handleCompletionKeyDown(event)) return;
 		if (promptRecall.handleKeyDown(event)) {
-			if (ui.formattedDraft) void markdown.edit();
+			void markdown.edit();
 			return;
 		}
 		if (event.key !== 'Enter') return;
@@ -680,6 +680,9 @@
 	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
 	const capabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
 	const isDisabled = $derived(directAdmissionPending && sessions.selectedChat?.status === 'draft');
+	const canFormat = $derived(
+		isVisible && isPresented && !isDisabled && !promptTransformPending && !ui.composerEditorOpen,
+	);
 	const controllerCommand = $derived.by(() => {
 		if (sessions.selectedChat?.status !== 'running') return false;
 		if (isClearCommand(composerState.inputText)) return true;
@@ -875,7 +878,7 @@
 				onOpenSnippetPalette={() => void markdown.openSnippets()}
 				onOpenExpandedEditor={() => expandedEditor?.open()}
 				onRefinePrompt={() => {
-					if (formattedDraft) void markdown.edit();
+					returnComposerFocus();
 					promptRefinement.handleAction();
 				}}
 				canRefinePrompt={promptRefinement.canStart}
@@ -977,5 +980,6 @@
 	isPromptRefinementPending={promptRefinement.pending}
 	canRefinePrompt={promptRefinement.canStart}
 	onRefinePrompt={() => promptRefinement.handleAction()}
+	onSourceEditing={() => markdown.reset()}
 	openRequestId={composerEditorOpenRequestId}
 />

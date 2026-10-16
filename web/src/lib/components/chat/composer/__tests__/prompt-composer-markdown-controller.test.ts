@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { loadComposerMarkdownEditor } from '../composer-markdown-editor-loader.js';
 import { PromptComposerMarkdownController } from '../prompt-composer-markdown-controller.js';
 import { PromptComposerUiState } from '../prompt-composer-state.svelte.js';
 import {
@@ -19,6 +20,9 @@ vi.mock('../composer-markdown-worker.js', () => ({
 	parseComposerMarkdownInWorker: vi.fn(),
 	serializeComposerMarkdownPasteInWorker: vi.fn(),
 }));
+beforeAll(async () => {
+	await loadComposerMarkdownEditor();
+});
 const table = '| A | B |\n| - | - |\n| first | second |';
 const parsed: ComposerMarkdownDocument = {
 	document: { type: 'doc', content: [{ type: 'paragraph' }] },
@@ -169,6 +173,86 @@ describe('formatted composer snippet triggers', () => {
 });
 
 describe('formatted composer lifecycle', () => {
+	it.each(['explicit', 'restore'])('follows the source caret and focus during a pending %s', async (intent) => {
+		const { controller, options, ui } = fixture();
+		options.textarea.value = table;
+		options.textarea.setSelectionRange(1, 1);
+		let complete!: (value: ComposerMarkdownDocument) => void;
+		vi.mocked(parseComposerMarkdownInWorker)
+			.mockReturnValueOnce(new Promise((resolve) => { complete = resolve; }))
+			.mockResolvedValueOnce(parsed);
+		if (intent === 'explicit') controller.selectMode('formatted');
+		else controller.restore();
+		options.textarea.setSelectionRange(4, 4);
+		options.interactionGeneration++;
+		complete(parsed);
+		await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(table));
+		expect(parseComposerMarkdownInWorker).toHaveBeenLastCalledWith(
+			{ source: table, caret: 4 }, expect.any(AbortSignal),
+		);
+		const target = document.createElement('div');
+		target.tabIndex = 0;
+		document.body.append(target);
+		controller.focus(target);
+		expect(document.activeElement).toBe(target);
+		controller.destroy();
+	});
+	it('transfers focus after a non-editing key while source remains focused', async () => {
+		const { controller, options, ui } = fixture();
+		let complete!: (value: ComposerMarkdownDocument) => void;
+		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(new Promise((resolve) => {
+			complete = resolve;
+		}));
+		controller.selectMode('formatted');
+		options.interactionGeneration++;
+		complete(parsed);
+		await vi.waitFor(() => expect(ui.formattedDraft).not.toBeNull());
+		const target = document.createElement('div');
+		target.tabIndex = 0;
+		document.body.append(target);
+		controller.focus(target);
+		expect(document.activeElement).toBe(target);
+		controller.destroy();
+	});
+	it('cancels pending conversion and intent when opening snippets', async () => {
+		const { controller, options, ui } = fixture();
+		options.textarea.value = table;
+		options.textarea.setSelectionRange(2, 5);
+		let complete!: (value: ComposerMarkdownDocument) => void;
+		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(new Promise((resolve) => {
+			complete = resolve;
+		}));
+		controller.restore();
+		const signal = vi.mocked(parseComposerMarkdownInWorker).mock.calls[0][1];
+		await controller.openSnippets();
+		expect(signal?.aborted).toBe(true);
+		complete(parsed);
+		await Promise.resolve();
+		await Promise.resolve();
+		controller.restore();
+		expect(ui.formattedDraft).toBeNull();
+		expect(ui.snippetPalette.isOpen).toBe(true);
+		expect(options.textarea.selectionStart).toBe(2);
+		expect(options.textarea.selectionEnd).toBe(5);
+		expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
+		controller.destroy();
+	});
+	it('forgets conversion intent after an external source replacement', async () => {
+		const { controller, options, ui } = fixture();
+		let complete!: (value: ComposerMarkdownDocument) => void;
+		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(new Promise((resolve) => {
+			complete = resolve;
+		}));
+		controller.restore();
+		options.composer.inputText = 'external replacement';
+		complete(parsed);
+		await vi.waitFor(() => expect(ui.formatPending).toBe(false));
+		controller.restore();
+		controller.input(new InputEvent('input'));
+		expect(ui.formattedDraft).toBeNull();
+		expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
+		controller.destroy();
+	});
 	it('retries a blocked restore, but does not override a later source handoff', async () => {
 		const { controller, options, ui } = fixture();
 		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
@@ -423,7 +507,7 @@ describe('formatted composer lifecycle', () => {
 		controller.restore();
 		await vi.waitFor(() => expect(ui.formattedDraft).toEqual({ source: table, ...parsed }));
 		expect(parseComposerMarkdownInWorker).toHaveBeenCalledExactlyOnceWith(
-			{ source: table },
+			{ source: table, caret: 0 },
 			expect.any(AbortSignal),
 		);
 		controller.restore();

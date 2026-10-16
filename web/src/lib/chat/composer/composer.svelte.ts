@@ -101,7 +101,7 @@ export class ComposerState {
 			text,
 			attachments: images,
 		});
-		if (restored) this.#requestRestore(chatId);
+		if (restored && chatId === this.options.activeChatId) this.#requestRestore(chatId);
 		return restored;
 	}
 
@@ -133,7 +133,7 @@ export class ComposerState {
 
 	clearAfterSubmit(chatId: string): number {
 		const revision = this.drafts.clear(chatId);
-		this.#requestRestore(chatId);
+		if (chatId === this.options.activeChatId) this.#requestRestore(chatId);
 		return revision;
 	}
 }

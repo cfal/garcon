@@ -56,14 +56,14 @@ export class PromptComposerMarkdownController {
 		this.reset();
 		this.#formatIntent = intent;
 		this.#composing = event.isComposing;
-		if (intent) void this.#format(this.options.textarea?.selectionStart);
+		if (intent) void this.#format();
 	}
 
 	selectMode(mode: ComposerInputMode): void {
 		if (mode === 'source') void this.edit();
 		else if (!this.options.ui.formattedDraft) {
 			this.#formatIntent = 'explicit';
-			void this.#format(this.options.textarea?.selectionStart);
+			void this.#format();
 		}
 	}
 
@@ -222,12 +222,13 @@ export class PromptComposerMarkdownController {
 	async openSnippets(): Promise<void> {
 		const chatId = this.options.chatId;
 		if (this.options.ui.formattedDraft) await this.edit();
+		else this.reset();
 		if (!this.#destroyed && this.options.canFormat && this.options.chatId === chatId) {
 			this.options.ui.snippetPalette.openFromMenu();
 		}
 	}
 
-	async #format(caret?: number): Promise<void> {
+	async #format(): Promise<void> {
 		const source = this.options.composer.inputText;
 		if (!this.options.canFormat || !this.options.acceptsMarkdown || this.#composing) return;
 		if (!isComposerMarkdownSized(source)) {
@@ -240,8 +241,8 @@ export class PromptComposerMarkdownController {
 		this.options.ui.formatPending = true;
 		const chatId = this.options.chatId;
 		const generation = this.options.interactionGeneration;
-		const focusOrigin =
-			caret === undefined ? document.activeElement : (this.options.textarea ?? null);
+		const focusOrigin = document.activeElement;
+		const caret = this.options.textarea?.selectionStart;
 		const selectionEnd = this.options.textarea?.selectionEnd;
 		const empty: ComposerMarkdownDocument = {
 			document: { type: 'doc', content: [{ type: 'paragraph' }] },
@@ -267,15 +268,15 @@ export class PromptComposerMarkdownController {
 			this.#workerAbort = null;
 			this.options.ui.formatPending = false;
 		}
+		if (this.#destroyed || abort.signal.aborted) return;
 		if (
-			this.#destroyed ||
-			abort.signal.aborted ||
-			!this.options.canFormat ||
-			!this.options.acceptsMarkdown ||
 			this.options.chatId !== chatId ||
 			this.options.composer.inputText !== source
-		)
+		) {
+			this.#formatIntent = null;
 			return;
+		}
+		if (!this.options.canFormat || !this.options.acceptsMarkdown) return;
 		if (!parsed || !editor) {
 			this.#formatUnavailable();
 			return;
@@ -286,7 +287,7 @@ export class PromptComposerMarkdownController {
 			(this.options.textarea?.selectionStart !== caret ||
 				this.options.textarea?.selectionEnd !== selectionEnd)
 		) {
-			void this.#format(this.options.textarea?.selectionStart);
+			void this.#format();
 			return;
 		}
 		this.#showFormatted(source, parsed, generation, focusOrigin);
@@ -307,7 +308,10 @@ export class PromptComposerMarkdownController {
 		this.#formatIntent = null;
 		this.options.ui.formatPending = false;
 		this.#focusOrigin = focusOrigin;
-		this.#focusGeneration = generation;
+		this.#focusGeneration =
+			document.activeElement === this.options.textarea
+				? this.options.interactionGeneration
+				: generation;
 		this.options.ui.formattedDraft = { source, ...parsed };
 		this.options.ui.closeFileMenu();
 		this.options.ui.closeSlashMenu();

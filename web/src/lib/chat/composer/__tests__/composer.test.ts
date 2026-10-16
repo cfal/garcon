@@ -71,6 +71,19 @@ describe('ComposerState', () => {
 		expect(state.images).toHaveLength(3);
 		expect(state.images.map((f) => f.name)).toEqual(['a.png', 'notes.md', 'a.png']);
 	});
+	it('keeps the selected restore request when a background submission settles', () => {
+		const { composer, selectChat } = createComposer('background');
+		composer.inputText = 'rejected prompt';
+		selectChat('selected');
+		const selectedRestore = composer.draftRestoreRequest;
+		const revision = composer.clearAfterSubmit('background');
+		expect(composer.draftRestoreRequest).toBe(selectedRestore);
+		expect(composer.restoreDraftIfRevision('background', revision, 'rejected prompt', [])).toBe(true);
+		expect(composer.draftRestoreRequest).toBe(selectedRestore);
+		selectChat('background');
+		expect(composer.inputText).toBe('rejected prompt');
+		expect(composer.draftRestoreRequest?.chatId).toBe('background');
+	});
 
 	it('removeImage removes at index', () => {
 		const { composer: state } = createComposer();

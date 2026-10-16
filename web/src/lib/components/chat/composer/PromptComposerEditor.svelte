@@ -24,6 +24,7 @@
 		canRefinePrompt: boolean;
 		openRequestId: number;
 		onRefinePrompt: () => void;
+		onSourceEditing: () => void;
 	}
 
 	let {
@@ -38,6 +39,7 @@
 		canRefinePrompt,
 		openRequestId,
 		onRefinePrompt,
+		onSourceEditing,
 	}: Props = $props();
 	const composer = getComposerState();
 	const sessions = getChatSessions();
@@ -70,6 +72,7 @@
 		get conversationInput() {
 			return conversationInput;
 		},
+		onSourceEditing: () => onSourceEditing(),
 	});
 
 	onDestroy(() => controller.destroy());

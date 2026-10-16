@@ -62,6 +62,43 @@ async function formatted({
 }
 
 describe('formatted composer integration', () => {
+	it.each(['deleted text', 'hard break'])('resets rich history and focus delivery after clearing an empty draft with %s', async (content) => {
+		const { editor, textarea, rerender } = await formatted({ source: 'old draft' });
+		const previous = richEditor(editor);
+		previous.commands.clearContent(true);
+		if (content === 'hard break') previous.commands.setHardBreak();
+		await fireEvent.click(screen.getByRole('button', { name: 'Clear draft' }));
+		const current = screen.getByRole('textbox', { name: 'Formatted message' });
+		expect(current).not.toBe(editor);
+		expect(previous.isDestroyed).toBe(true);
+		expect(richEditor(current).commands.undo()).toBe(false);
+		expect(richEditor(current).getJSON()).toEqual({ type: 'doc', content: [{ type: 'paragraph' }] });
+		expect(textarea.value).toBe('');
+		expect(document.querySelector('textarea')).toBe(textarea);
+		screen.getByRole('button', { name: 'Clear draft' }).focus();
+		await rerender({ focusRequestToken: 1 });
+		await waitFor(() => expect(document.activeElement).toBe(current));
+	});
+	it.each(['button', 'request'])('cancels pending formatting through expanded-editor %s entry', async (entry) => {
+		const { textarea, rerender } = await formatted();
+		await fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+		let complete!: (value: ReturnType<typeof parseComposerMarkdown>) => void;
+		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(new Promise((resolve) => { complete = resolve; }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Formatted' }));
+		const calls = vi.mocked(parseComposerMarkdownInWorker).mock.calls;
+		const callCount = calls.length;
+		const signal = calls[callCount - 1][1];
+		if (entry === 'button') await fireEvent.click(screen.getByRole('button', { name: 'Open expanded composer' }));
+		else await rerender({ composerEditorOpenRequestId: 1 });
+		await screen.findByRole('dialog');
+		expect(signal?.aborted).toBe(true);
+		complete(parseComposerMarkdown({ source: table }));
+		await fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+		expect(textarea.value).toBe(table);
+		expect(parseComposerMarkdownInWorker).toHaveBeenCalledTimes(callCount);
+	});
 	it.each([false, true])('restores an empty formatted draft after clearing (admission blocked=%s)', async (blocked) => {
 		const { rerender, textarea } = await formatted({ selectedStatus: 'draft' });
 		if (blocked) await rerender({ directAdmissionPending: true });

@@ -59,23 +59,25 @@
 			<pre
 				class="max-h-[min(40dvh,150px)] overflow-auto whitespace-pre-wrap px-4 py-3 text-base text-composer-foreground sm:max-h-[min(40dvh,300px)] sm:px-5">{draft.source}</pre>
 		{:then MarkdownEditor}
-			<MarkdownEditor
-				document={draft.document}
-				sources={draft.sources}
-				selection={draft.selection}
-				selectionMarks={draft.selectionMarks}
-				readOnly={disabled || busy}
-				snippetTrigger={controller.snippetTrigger}
-				{onComposerKeydown}
-				{onCompletionKeydown}
-				onChange={(text) => controller.change(text)}
-				onSourceAction={(text, caret) => controller.plain(text, caret)}
-				onSnippet={(text, caret) => controller.snippet(text, caret)}
-				onReady={(target) => controller.focus(target)}
-				onMention={(mention) => controller.mention(mention)}
-				onLargePaste={(request) => void controller.pasteSource(request)}
-				onOverflow={(source) => controller.overflow(source)}
-			/>
+			{#key draft.document}
+				<MarkdownEditor
+					document={draft.document}
+					sources={draft.sources}
+					selection={draft.selection}
+					selectionMarks={draft.selectionMarks}
+					readOnly={disabled || busy}
+					snippetTrigger={controller.snippetTrigger}
+					{onComposerKeydown}
+					{onCompletionKeydown}
+					onChange={(text) => controller.change(text)}
+					onSourceAction={(text, caret) => controller.plain(text, caret)}
+					onSnippet={(text, caret) => controller.snippet(text, caret)}
+					onReady={(target) => controller.focus(target)}
+					onMention={(mention) => controller.mention(mention)}
+					onLargePaste={(request) => void controller.pasteSource(request)}
+					onOverflow={(source) => controller.overflow(source)}
+				/>
+			{/key}
 		{:catch}
 			<button
 				type="button"
