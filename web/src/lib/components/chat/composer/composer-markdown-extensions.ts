@@ -1,3 +1,4 @@
+import { HorizontalRule } from '@tiptap/extension-horizontal-rule';
 import { Link } from '@tiptap/extension-link';
 import { ListKeymap } from '@tiptap/extension-list/keymap';
 import { Dropcursor } from '@tiptap/extensions/drop-cursor';
@@ -15,6 +16,9 @@ export function composerMarkdownEditorExtensions() {
 				return [extension, Dropcursor, Gapcursor];
 			case 'heading':
 				return [extension, UndoRedo];
+			case 'horizontalRule':
+				// Typed dividers stay literal; other extensions use their native input rules.
+				return [HorizontalRule.extend({ addInputRules: () => [] })];
 			case 'listItem':
 				return [extension, ListKeymap];
 			case 'link':

@@ -76,6 +76,13 @@ describe('composer newline intent', () => {
 		expect(editor.state.doc.child(0).type.name).toBe('horizontalRule');
 		expect(editor.state.selection.$from.parent.type.name).toBe('paragraph');
 	});
+	it.each(['---', '*** ', '___ '])('keeps typed divider syntax literal: %s', (text) => {
+		const { editor } = mount('');
+		type(editor, text);
+		expect(editor.state.doc.childCount).toBe(1);
+		expect(editor.state.doc.firstChild?.type.name).toBe('paragraph');
+		expect(editor.state.doc.textContent).toBe(text);
+	});
 	it.each(['', '  \n\n'])('mounts a valid editable empty draft: %j', (source) => {
 		const { editor } = mount(source);
 		expect(() => editor.state.doc.check()).not.toThrow();

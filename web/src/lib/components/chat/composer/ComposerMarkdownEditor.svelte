@@ -83,7 +83,7 @@
 			Array.from({ length: doc.childCount }, (_, index) => doc.child(index));
 		let original: DocumentNode[] = [];
 		let originalSources: (string | null)[] = [];
-		// Whole-document history steps retain content fragments; weak keys share their lifetime.
+		// Native history retains fragments; their source baselines avoid lossy reserialization on Undo.
 		const sourceHistory = new WeakMap<
 			DocumentNode['content'],
 			{ original: DocumentNode[]; sources: (string | null)[] }
@@ -241,20 +241,6 @@
 			],
 			content: documentContent,
 			editable: !readOnly,
-			enableInputRules: [
-				'bold',
-				'italic',
-				'strike',
-				'code',
-				'link',
-				'image',
-				'heading',
-				'blockquote',
-				'bulletList',
-				'orderedList',
-				'taskItem',
-				'codeBlock',
-			],
 			enablePasteRules: false,
 			onUpdate: ({ editor: current }) => {
 				const { doc, selection } = current.state;

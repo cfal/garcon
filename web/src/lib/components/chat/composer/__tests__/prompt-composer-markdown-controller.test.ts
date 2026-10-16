@@ -422,6 +422,25 @@ describe('formatted composer lifecycle', () => {
 		expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
 		controller.destroy();
 	});
+	it.each([false, true])('keeps Source usable until the editor loads (failure=%s)', async (failure) => {
+		const Editor = await loadComposerMarkdownEditor();
+		const pending = Promise.withResolvers<typeof Editor>();
+		vi.mocked(loadComposerMarkdownEditor).mockReturnValueOnce(pending.promise);
+		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
+		const { controller, ui, options } = fixture();
+		selectFormatted(controller, options);
+		await new Promise((done) => setTimeout(done, 0));
+		expect(ui.formattedDraft).toBeNull();
+		if (failure) {
+			pending.reject(new Error('Import failed'));
+			await vi.waitFor(() => expect(options.onUnavailable).toHaveBeenCalledOnce());
+			expect(ui.formattedDraft).toBeNull();
+		} else {
+			pending.resolve(Editor);
+			await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(table));
+		}
+		controller.destroy();
+	});
 	it.each([false, true])(
 		'restores a rejected draft after an empty conversion (completed=%s)',
 		async (completed) => {

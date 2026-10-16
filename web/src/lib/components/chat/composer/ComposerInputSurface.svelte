@@ -36,10 +36,8 @@
 
 <div class="relative overflow-hidden bg-transparent focus-within:ring-0">
 	{#if draft}
-		{#await loadComposerMarkdownEditor()}
-			<pre
-				class="max-h-[min(40dvh,150px)] overflow-auto whitespace-pre-wrap px-4 py-3 text-base text-composer-foreground sm:max-h-[min(40dvh,300px)] sm:px-5">{draft.source}</pre>
-		{:then MarkdownEditor}
+		<!-- The controller publishes a draft only after this cached import succeeds. -->
+		{#await loadComposerMarkdownEditor() then MarkdownEditor}
 			{#key draft.document}
 				<MarkdownEditor
 					document={draft.document}
@@ -60,13 +58,6 @@
 					onOverflow={(source) => controller.overflow(source)}
 				/>
 			{/key}
-		{:catch}
-			<button
-				type="button"
-				onclick={() => void controller.edit()}
-				class="px-4 py-3 text-sm text-muted-foreground"
-				>{m.chat_composer_format_unavailable()}</button
-			>
 		{/await}
 	{/if}
 	<div class="relative z-10" hidden={Boolean(draft)}>
