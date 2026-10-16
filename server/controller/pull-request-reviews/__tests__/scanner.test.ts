@@ -67,7 +67,12 @@ function harness() {
   const list = (pulls: PullRequestSummary[]) => ({
     executorId: 'local', instanceId: 'instance', pulls, repo: { nameWithOwner: repository.nameWithOwner, url: repository.url }, viewerLogin: 'viewer',
   });
-  return { directory, store, clock, run, repository, scanner, list, queued };
+  const repositories = new PullRequestReviewRepositories({
+    store, executors: { requireExecutor() { throw new Error('Unused'); } },
+    agents: { hasAgent: () => true, assertExecutorReady() {}, assertExecutionModeSelectionSupported() {}, executionPolicy: () => 'conversation' },
+    chats: { hasChat: () => true }, autoReviewStatus: () => null, isPostingRepository: () => false, changed() {}, now: () => clock.now,
+  });
+  return { directory, store, clock, run, repository, repositories, scanner, list, queued };
 }
 
 async function until(check: () => boolean): Promise<void> {
@@ -158,6 +163,53 @@ test('does not continue a closed-history archive batch after shutdown and a pend
   expect(store.getRun('second-run')?.chatArchived).toBe(false);
 });
 
+test.each(['reopen', 'disconnect'] as const)('does not dispatch remaining archives after %s while an admitted archive completes', async (change) => {
+  const { store, run, repository, repositories, scanner, list, clock } = harness();
+  store.insertRun({ ...run, id: 'second-run', chatId: 'second-chat' });
+  const pending = Promise.withResolvers<void>();
+  const maintained = Promise.withResolvers<void>();
+  const archived: string[] = [];
+  let pulls: PullRequestSummary[] = [];
+  const scanning = scanner(async () => list(pulls), async (chatId) => {
+    archived.push(chatId);
+    if (archived.length === 1) await pending.promise;
+  });
+  const prune = store.pruneClosedPulls.bind(store);
+  const maintenance = spyOn(store, 'pruneClosedPulls').mockImplementation((...args) => {
+    const removed = prune(...args);
+    maintained.resolve();
+    return removed;
+  });
+  try {
+    scanning.start();
+    await until(() => archived.length === 1);
+    if (change === 'reopen') {
+      pulls = [pull()];
+      clock.now++;
+      scanning.requestScan();
+      await until(() => store.pulls(repository.id).length === 1);
+      expect(store.closedPulls(repository.id, 0)).toEqual([]);
+    } else {
+      repositories.remove(repository.id);
+      scanning.forget(repository.id);
+      expect(store.getRepository(repository.id)).toBeNull();
+    }
+    pending.resolve();
+    await maintained.promise;
+    expect(archived).toEqual([run.chatId!]);
+    if (change === 'reopen') {
+      expect(store.getRun(run.id)?.chatArchived).toBe(true);
+      expect(store.getRun('second-run')?.chatArchived).toBe(false);
+    } else {
+      expect(store.getRun(run.id)).toBeNull();
+      expect(store.getRun('second-run')).toBeNull();
+    }
+  } finally {
+    pending.resolve();
+    maintenance.mockRestore();
+  }
+});
+
 test('the initial schema rejects normalized duplicate repository identities', () => {
   const { store, repository } = harness();
   expect(() => store.insertRepository(
@@ -228,7 +280,7 @@ test('prunes closed runs without chats while preserving active work', async () =
 });
 
 test('snapshots and scans read bounded payloads with a large retained review history', async () => {
-  const { directory, store, run, scanner, list, repository } = harness();
+  const { directory, store, run, scanner, list, repository, repositories } = harness();
   const database = new Database(join(directory, 'pull-request-reviews.sqlite'));
   try {
     const historical = { ...run, title: `Synthetic historical review ${'x'.repeat(512)}`, chatId: null, reviewedSha: null, trigger: 'auto' as const };
@@ -238,11 +290,6 @@ test('snapshots and scans read bounded payloads with a large retained review his
       for (let index = 0; index < 12_000; index++) insert.run(`history-${index}`, repository.id, 7, NEXT_HEAD, 'failed', '2025-01-01T00:00:00Z', JSON.stringify(payload));
     }).immediate();
   } finally { database.close(); }
-  const repositories = new PullRequestReviewRepositories({
-    store, executors: { requireExecutor() { throw new Error('Unused'); } },
-    agents: { hasAgent: () => true, assertExecutorReady() {}, assertExecutionModeSelectionSupported() {}, executionPolicy: () => 'conversation' },
-    chats: { hasChat: () => true }, autoReviewStatus: () => null, isPostingRepository: () => false, changed() {}, now: Date.now,
-  });
   const parse = JSON.parse;
   let parsedBytes = 0;
   const parsing = spyOn(JSON, 'parse').mockImplementation((text, reviver) => {
