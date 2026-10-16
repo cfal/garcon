@@ -48,6 +48,13 @@ function selectMode(mode: 'source' | 'formatted') {
 	return fireEvent.change(screen.getByTestId('composer-input-mode'), { target: { value: mode } });
 }
 
+async function pasteAndSettle(editor: HTMLElement, text: string) {
+	const transfer = new DataTransfer();
+	transfer.setData('text/plain', text);
+	await fireEvent.paste(editor, { clipboardData: transfer });
+	await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+}
+
 async function formatted({
 	selectedStatus = 'running',
 	source = table,
@@ -148,13 +155,7 @@ describe('formatted composer integration', () => {
 				parseComposerMarkdown(request),
 			);
 			const rich = richEditor(editor);
-			const paste = async (text: string) => {
-				const transfer = new DataTransfer();
-				transfer.setData('text/plain', text);
-				await fireEvent.paste(editor, { clipboardData: transfer });
-				await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-			};
-			await paste('\n\n* one\n* two');
+			await pasteAndSettle(editor, '\n\n* one\n* two');
 			const firstPaste = `${source}\n\n* one\n* two`;
 			expect(textarea.value).toBe(firstPaste);
 			rich.commands.setTextSelection(secondPaste ? 12 : 6);
@@ -162,7 +163,7 @@ describe('formatted composer integration', () => {
 			await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 			const typed = `${source} typed\n\n* one\n* two`;
 			expect(textarea.value).toBe(typed);
-			if (secondPaste) await paste(' more');
+			if (secondPaste) await pasteAndSettle(editor, ' more');
 			const final = textarea.value;
 			if (secondPaste) {
 				expect(final).toBe(`${source} typed more\n\n* one\n* two`);
@@ -183,36 +184,36 @@ describe('formatted composer integration', () => {
 			}
 		},
 	);
-	it.each([6, 12])('retains pasted source after undoing a corrected typo at position %s', async (position) => {
-		const source = 'Intro\n\nlast';
-		const { editor, textarea } = await formatted({ source });
-		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) =>
-			parseComposerMarkdown(request),
-		);
-		const rich = richEditor(editor);
-		const transfer = new DataTransfer();
-		transfer.setData('text/plain', '\n\n* one\n* two');
-		await fireEvent.paste(editor, { clipboardData: transfer });
-		await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-		const pasted = `${source}\n\n* one\n* two`;
-		expect(textarea.value).toBe(pasted);
-		rich.commands.setTextSelection(position);
-		// The typo and correction share a history entry with no net document change.
-		rich.commands.insertContent('x');
-		rich.commands.deleteRange({ from: position, to: position + 1 });
-		await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-		expect(textarea.value).toBe(pasted);
-		expect(rich.commands.undo()).toBe(true);
-		await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-		expect(textarea.value).toBe(pasted);
-		expect(rich.commands.undo()).toBe(true);
-		await waitFor(() => expect(textarea.value).toBe(source));
-		expect(rich.commands.redo()).toBe(true);
-		await waitFor(() => expect(textarea.value).toBe(pasted));
-		expect(rich.commands.redo()).toBe(true);
-		await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-		expect(textarea.value).toBe(pasted);
-	});
+	it.each([6, 12])(
+		'retains pasted source after undoing a corrected typo at position %s',
+		async (position) => {
+			const source = 'Intro\n\nlast';
+			const { editor, textarea } = await formatted({ source });
+			vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) =>
+				parseComposerMarkdown(request),
+			);
+			const rich = richEditor(editor);
+			await pasteAndSettle(editor, '\n\n* one\n* two');
+			const pasted = `${source}\n\n* one\n* two`;
+			expect(textarea.value).toBe(pasted);
+			rich.commands.setTextSelection(position);
+			// The typo and correction share a history entry with no net document change.
+			rich.commands.insertContent('x');
+			rich.commands.deleteRange({ from: position, to: position + 1 });
+			await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+			expect(textarea.value).toBe(pasted);
+			expect(rich.commands.undo()).toBe(true);
+			await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+			expect(textarea.value).toBe(pasted);
+			expect(rich.commands.undo()).toBe(true);
+			await waitFor(() => expect(textarea.value).toBe(source));
+			expect(rich.commands.redo()).toBe(true);
+			await waitFor(() => expect(textarea.value).toBe(pasted));
+			expect(rich.commands.redo()).toBe(true);
+			await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+			expect(textarea.value).toBe(pasted);
+		},
+	);
 	it.each(['restore', 'append', 'source', 'hidden', 'outside'])(
 		'keeps raw clipboard text during a pending parse and a later %s', async (action) => {
 			const { editor, textarea, rerender } = await formatted({ source: 'before' });
