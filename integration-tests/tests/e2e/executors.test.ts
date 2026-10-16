@@ -250,8 +250,11 @@ test('normal app onboarding supports both directions and sends remote chat input
       await app.waitForText('local-only.txt');
       await app.clickWorkspaceWindowAddAction('New Terminal');
       await app.waitForMenuItemEnabled('Local');
+      const terminalCreated = fixture.page.waitForResponse((response) =>
+        new URL(response.url()).pathname === '/api/v1/terminals' && response.request().method() === 'POST');
       await app.clickMenuItem('Local');
       await app.waitForText('Local 1');
+      expect((await terminalCreated).status()).toBe(201);
       expect((await fixture.integration.client.get<{ terminals: unknown[] }>('/api/v1/terminals')).terminals).toHaveLength(1);
       fixture.assertNoBrowserErrors();
     } finally {
