@@ -1,6 +1,6 @@
 import type { MarkdownManager } from '@tiptap/markdown';
 import type { JSONContent } from '@tiptap/core';
-import { DRAFT_CODE_BLOCK } from './composer-markdown-extensions.js';
+import { DRAFT_CODE_BLOCK } from './composer-markdown-codec-extensions.js';
 import { createTextProtection, type TextProtection } from './composer-markdown-text.js';
 
 type Mark = NonNullable<JSONContent['marks']>[number];

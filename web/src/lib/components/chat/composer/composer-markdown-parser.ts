@@ -1,7 +1,5 @@
-import { MarkdownManager } from '@tiptap/markdown';
 import type { JSONContent } from '@tiptap/core';
-import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
-import { configureComposerMarkdown, serializeComposerMarkdown } from './composer-markdown.js';
+import { composerMarkdownCodec } from './composer-markdown-codec.js';
 import {
 	joinComposerMarkdownBlocks,
 	type ComposerMarkdownBlock,
@@ -10,13 +8,6 @@ import {
 	isComposerMarkdownSized,
 	MAX_COMPOSER_MARKDOWN_NODES,
 } from './composer-markdown-limits.js';
-
-const manager = new MarkdownManager({
-	extensions: composerMarkdownEditorExtensions(),
-	markedOptions: { breaks: true },
-});
-configureComposerMarkdown(manager);
-const marked = manager.instance;
 
 // The Markdown parser lifts a lone image out of its paragraph, but draft images are inline.
 const IMAGE_BLOCK_PARENTS = new Set(['doc', 'blockquote', 'listItem', 'taskItem']);
@@ -56,7 +47,7 @@ export function serializeComposerMarkdownPaste({
 		...(node.content ? { content: node.content.map(replaceMarker) } : {}),
 	});
 	return joinComposerMarkdownBlocks(blocks, originalCount, (nodes) =>
-		serializeComposerMarkdown(manager, { type: 'doc', content: nodes.map(replaceMarker) }),
+		composerMarkdownCodec.serialize({ type: 'doc', content: nodes.map(replaceMarker) }),
 	);
 }
 
@@ -81,12 +72,12 @@ function parseBlocks(source: string): ComposerMarkdownDocument & { ended: boolea
 	let leading = '';
 	let lexed = '';
 	let ended = false;
-	for (const token of marked.lexer(source)) {
+	for (const token of composerMarkdownCodec.lex(source)) {
 		lexed += token.raw;
 		const nodes =
 			token.type === 'space'
 				? []
-				: (wrapBlockImages(manager.parse(token.raw)).content ?? []).filter(
+				: (wrapBlockImages(composerMarkdownCodec.parse(token.raw)).content ?? []).filter(
 						// Blank lines stay in the source instead of becoming empty paragraphs.
 						(node) => node.type !== 'paragraph' || Boolean(node.content?.length),
 					);
@@ -142,10 +133,7 @@ function placeCaret(
 ): CaretPlacement | null {
 	const marked = parseBlocks(source.slice(0, caret) + marker + source.slice(caret)).document;
 	let placement: CaretPlacement | null = null;
-	const strip = (
-		node: JSONContent,
-		position: number,
-	): JSONContent => {
+	const strip = (node: JSONContent, position: number): JSONContent => {
 		if (node.text !== undefined) {
 			const offset = node.text.indexOf(marker);
 			if (offset < 0) return node;
