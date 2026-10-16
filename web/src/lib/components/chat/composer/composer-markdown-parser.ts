@@ -66,13 +66,16 @@ function wrapBlockImages(node: JSONContent): JSONContent {
 
 // Parses each top-level token on its own so every node maps to the source that produced it.
 // `ended` reports that the source stops where its last node does, with nothing left after it.
-function parseBlocks(source: string): ComposerMarkdownDocument & { ended: boolean } {
+function parseBlocks(source: string): (ComposerMarkdownDocument & { ended: boolean }) | null {
+	const tokens = composerMarkdownCodec.lex(source);
+	// Reference definitions have no editable node and would disappear when their block changes.
+	if (Object.keys(tokens.links).length > 0) return null;
 	const content: JSONContent[] = [];
 	const sources: (string | null)[] = [];
 	let leading = '';
 	let lexed = '';
 	let ended = false;
-	for (const token of composerMarkdownCodec.lex(source)) {
+	for (const token of tokens) {
 		lexed += token.raw;
 		const nodes =
 			token.type === 'space'
@@ -135,7 +138,8 @@ function placeCaret(
 	document: JSONContent,
 	marker: string,
 ): CaretPlacement | null {
-	const marked = parseBlocks(source.slice(0, caret) + marker + source.slice(caret)).document;
+	const marked = parseBlocks(source.slice(0, caret) + marker + source.slice(caret))?.document;
+	if (!marked) return null;
 	let placement: CaretPlacement | null = null;
 	const strip = (node: JSONContent, position: number): JSONContent => {
 		if (node.text !== undefined) {
@@ -167,7 +171,9 @@ export function parseComposerMarkdown({
 	caret,
 }: ComposerMarkdownRequest): ComposerMarkdownDocument | null {
 	if (!isComposerMarkdownSized(source)) return null;
-	const { ended, ...parsed } = parseBlocks(source);
+	const blocks = parseBlocks(source);
+	if (!blocks) return null;
+	const { ended, ...parsed } = blocks;
 	const pending = [parsed.document];
 	let count = 0;
 	while (pending.length) {

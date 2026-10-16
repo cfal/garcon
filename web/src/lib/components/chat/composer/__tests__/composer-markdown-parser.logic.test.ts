@@ -54,6 +54,18 @@ function editFirstCell(table: JSONContent, text: string): JSONContent {
 
 describe('composer Markdown parsing', () => {
 	it.each([
+		'[destination]: https://example.test/resource',
+		'Review this\n\n[destination]: https://example.test/resource',
+		'[Read][destination]\n\n[destination]: https://example.test/resource',
+		'> [destination]: https://example.test/resource',
+		'- item\n\n  [destination]: https://example.test/resource',
+	])('keeps unrepresented reference definitions in Source: %s', (source) => {
+		expect(parseComposerMarkdown({ source })).toBeNull();
+	});
+	it('does not reject reference-like text in code', () => {
+		expect(parseComposerMarkdown({ source: '```\n[destination]: https://example.test/resource\n```' })).not.toBeNull();
+	});
+	it.each([
 		'[label](https://example.test/\ue000 "title\ue001")',
 		'![alt\ue002](https://example.test/\ue000 "title\ue001")',
 		'| Resource |\n| --- |\n| [label](https://example.test/\ue000 "title\ue001") |',
