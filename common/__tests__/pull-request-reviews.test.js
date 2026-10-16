@@ -27,3 +27,15 @@ test('requires an explicit boolean to opt into automatic posting', () => {
     expect(normalizePullRequestReviewSettings({ ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, autoPost })).toBeNull();
   }
 });
+
+test('normalizes repository filters without bot or fork preferences', () => {
+  const filters = {
+    skipDrafts: true,
+    trustedAuthorsOnly: true,
+    baseBranches: [],
+    includeLabels: [],
+    excludeLabels: [],
+    maxChangedLines: 5_000,
+  };
+  expect(normalizePullRequestReviewSettings({ ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, filters })?.filters).toEqual(filters);
+});

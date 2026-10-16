@@ -129,7 +129,6 @@ export function reviewChipClass(tone: ReviewChipTone): string {
 export function skipReasonLabel(reason: PullRequestReviewSkipReason): string {
 	const labels: Record<PullRequestReviewSkipReason, () => string> = {
 		draft: m.pull_request_review_skip_draft,
-		'bot-author': m.pull_request_review_skip_bot_author,
 		'untrusted-author': m.pull_request_review_skip_untrusted_author,
 		fork: m.pull_request_review_skip_fork,
 		'base-branch': m.pull_request_review_skip_base_branch,

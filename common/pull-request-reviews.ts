@@ -23,7 +23,7 @@ export function isActivePullRequestReviewRun(state: PullRequestReviewRunState): 
 }
 
 export type PullRequestReviewSkipReason =
-  | 'draft' | 'bot-author' | 'untrusted-author' | 'fork' | 'base-branch' | 'label' | 'too-large'
+  | 'draft' | 'untrusted-author' | 'fork' | 'base-branch' | 'label' | 'too-large'
   | 'review-not-requested' | 'attempts-exhausted' | 'daily-limit' | 'stopped';
 
 export const PULL_REQUEST_REVIEW_PROMPT_MAX_LENGTH = 32_000;
@@ -59,10 +59,8 @@ export const DEFAULT_PULL_REQUEST_REVIEW_PROMPT = [
 
 export interface PullRequestReviewFilters {
   skipDrafts: boolean;
-  skipBots: boolean;
   // Limits automatic review to owners, members, and collaborators.
   trustedAuthorsOnly: boolean;
-  includeForks: boolean;
   // Empty lists place no restriction.
   baseBranches: string[];
   includeLabels: string[];
@@ -89,9 +87,7 @@ export const DEFAULT_PULL_REQUEST_REVIEW_SETTINGS: PullRequestReviewSettings = {
   onlyWhenReviewRequested: false,
   filters: {
     skipDrafts: true,
-    skipBots: true,
     trustedAuthorsOnly: true,
-    includeForks: false,
     baseBranches: [],
     includeLabels: [],
     excludeLabels: [],
@@ -260,15 +256,13 @@ function normalizeFilters(value: unknown): PullRequestReviewFilters | null {
   const includeLabels = filterValues(value.includeLabels);
   const excludeLabels = filterValues(value.excludeLabels);
   if (
-    !bool(value.skipDrafts) || !bool(value.skipBots) || !bool(value.trustedAuthorsOnly) || !bool(value.includeForks)
+    !bool(value.skipDrafts) || !bool(value.trustedAuthorsOnly)
     || !baseBranches || !includeLabels || !excludeLabels
     || value.maxChangedLines !== null && !integerBetween(value.maxChangedLines, 1, 1_000_000)
   ) return null;
   return {
     skipDrafts: value.skipDrafts,
-    skipBots: value.skipBots,
     trustedAuthorsOnly: value.trustedAuthorsOnly,
-    includeForks: value.includeForks,
     baseBranches,
     includeLabels,
     excludeLabels,

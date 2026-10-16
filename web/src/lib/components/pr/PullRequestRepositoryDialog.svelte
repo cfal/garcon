@@ -125,9 +125,7 @@
 
 	const filterToggles = [
 		{ key: 'skipDrafts', label: m.pull_request_repository_filter_skip_drafts },
-		{ key: 'skipBots', label: m.pull_request_repository_filter_skip_bots },
 		{ key: 'trustedAuthorsOnly', label: m.pull_request_repository_filter_trusted },
-		{ key: 'includeForks', label: m.pull_request_repository_filter_forks },
 	] as const;
 	const promptVariables = {
 		tokens: Object.values(PULL_REQUEST_REVIEW_PROMPT_TOKENS),
@@ -222,7 +220,7 @@
 						{m.pull_request_repository_only_requested()}
 					</label>
 				</div>
-				{#if form.filters.includeForks || !form.filters.trustedAuthorsOnly}
+				{#if !form.filters.trustedAuthorsOnly}
 					<p
 						class="rounded-md border border-status-warning-border bg-status-warning px-3 py-2 text-xs text-status-warning-foreground"
 					>

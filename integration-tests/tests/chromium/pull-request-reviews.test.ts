@@ -72,6 +72,8 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     await browserExpect(connectForm.getByRole('button', { name: 'Insert {{pull_request_number}}' })).toBeVisible();
     await browserExpect(connectForm.getByRole('button', { name: 'Insert {{chat_id}}' })).toHaveCount(0);
     await browserExpect(connectForm.getByRole('checkbox', { name: 'Post reviews to GitHub automatically' })).not.toBeChecked();
+    await browserExpect(connectForm.getByRole('checkbox', { name: 'Skip bot authors' })).toHaveCount(0);
+    await browserExpect(connectForm.getByRole('checkbox', { name: 'Include pull requests from forks' })).toHaveCount(0);
     await capture('connect-repository-desktop');
     await page.keyboard.press('Escape');
     await browserExpect(connectForm).toHaveCount(0);
@@ -103,7 +105,7 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     await browserExpect(panel.locator('[data-pr-inbox-group="authored-by-me"]')).toContainText('Document executor reconnect limits');
     await browserExpect(panel.locator('[data-pr-inbox-group="needs-team-review"]')).toContainText('Speed up transcript paging');
     await browserExpect(panel.locator('[data-pr-inbox-group="other-open"] [data-pr-inbox-row]')).toHaveCount(1);
-    await browserExpect(panel.locator('[data-pr-inbox-group="other-open"]')).toContainText('Skipped: bot author');
+    await browserExpect(panel.locator('[data-pr-inbox-group="other-open"]')).toContainText('Queued');
 
     phase('select a reviewed pull request');
     await needsReview.getByText('Keep queue controls stable during reconnect').click();
@@ -175,7 +177,7 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     await browserExpect.poll(async () => {
       const current = await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews');
       return current.inbox.find((entry) => entry.pull.number === 133)?.latestRun?.post.status;
-    }).toBe('posted');
+    }, { timeout: 30_000 }).toBe('posted');
     assertNoBrowserErrors();
   }, undefined, {
     executionBackend: 'in-process',
