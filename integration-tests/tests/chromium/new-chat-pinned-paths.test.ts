@@ -27,6 +27,36 @@ test('New Chat reconciles live bookmarks and retains disabled pins after executo
     await page.getByRole('button', { name: 'Clear pinned path search' }).click();
     await browserExpect(currentSearch).toBeFocused();
     await browserExpect(pins.getByRole('button', { name: dirs.project, exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      await currentSearch.focus();
+      const beforeUpdate = await currentSearch.boundingBox();
+      await client.put('/api/v1/app/settings', { paths: { pinnedProjectPaths: localPins.slice(0, 8) } });
+      await browserExpect(pins.getByRole('button', { name: localPins[8], exact: true })).toHaveCount(0);
+      await browserExpect(currentSearch).toBeFocused();
+      await browserExpect(currentSearch).toHaveValue('');
+      const afterUpdate = await currentSearch.boundingBox();
+      expect(beforeUpdate).not.toBeNull();
+      expect(afterUpdate).not.toBeNull();
+      expect(Math.abs(afterUpdate!.y - beforeUpdate!.y)).toBeLessThanOrEqual(1);
+
+      await page.getByRole('button', { name: 'All machines', exact: true }).click();
+      await currentSearch.fill('project');
+      await page.getByRole('button', { name: 'This machine', exact: true }).click();
+      const beforeClear = await currentSearch.boundingBox();
+      await page.getByRole('button', { name: 'Clear pinned path search' }).click();
+      await browserExpect(currentSearch).toBeFocused();
+      await browserExpect(currentSearch).toHaveValue('');
+      const afterClear = await currentSearch.boundingBox();
+      expect(beforeClear).not.toBeNull();
+      expect(afterClear).not.toBeNull();
+      expect(Math.abs(afterClear!.y - beforeClear!.y)).toBeLessThanOrEqual(1);
+      await browserExpect(pins.getByRole('button', { name: dirs.project, exact: true })).toBeVisible();
+      await client.put('/api/v1/app/settings', { paths: { pinnedProjectPaths: localPins } });
+      await browserExpect(pins.getByRole('button', { name: localPins[8], exact: true })).toBeVisible();
+    }
     await page.getByRole('button', { name: 'All machines', exact: true }).click();
     await browserExpect(page.getByRole('button', { name: `Synthetic worker: ${remotePath.trim()}`, exact: true })).toBeDisabled();
     await client.delete(`/api/v1/executors/${executor.id}`);

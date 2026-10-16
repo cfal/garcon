@@ -17,7 +17,7 @@
 		setSnippets,
 		setTransientLayers,
 	} from '$lib/context';
-	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+	import { createRemoteSettingsStore, type RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
 	import type { PreamblesSnapshot } from '$shared/preambles';
@@ -45,6 +45,7 @@
 	interface Props {
 		executorSnapshots?: readonly ExecutorSnapshot[];
 		onExecutors?: (store: ExecutorsStore) => void;
+		onRemoteSettings?: (store: RemoteSettingsStore) => void;
 		executionPolicy?: 'conversation' | 'literal';
 		allowDirectChats?: boolean;
 		catalogVersion?: number;
@@ -67,6 +68,7 @@
 	let {
 		executorSnapshots = [localExecutor],
 		onExecutors,
+		onRemoteSettings,
 		executionPolicy = 'conversation',
 		allowDirectChats = false,
 		catalogVersion = 0,
@@ -101,7 +103,9 @@
 		},
 	} as never);
 
-	setRemoteSettings(createRemoteSettingsStore());
+	const remoteSettings = createRemoteSettingsStore();
+	setRemoteSettings(remoteSettings);
+	untrack(() => onRemoteSettings?.(remoteSettings));
 
 	setChatSessions({
 		orderedChats: [],

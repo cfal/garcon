@@ -14,6 +14,7 @@ import type { PreamblesSnapshot } from '$shared/preambles';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
+import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 
 const PROSPECTIVE_CHAT_ID = parseChatId('1787471053739199');
 const RESEEDED_CHAT_ID = parseChatId('1787471053739200');
@@ -874,6 +875,46 @@ describe('NewChatForm', () => {
 		expect(document.activeElement).toBe(search);
 		expect(screen.getByRole('button', { name: '/workspace/project-0' }).getAttribute('aria-pressed')).toBe('true');
 		expect((screen.getByRole('textbox', { name: 'Project Path' }) as HTMLInputElement).value).toBe('/workspace/project-0');
+	});
+
+	it('retains the focused empty search after a live nine-to-eight bookmark update', async () => {
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const paths = Array.from({ length: 9 }, (_, index) => `/workspace/project-${index}`);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({ paths: {
+			pinnedProjectPaths: paths,
+		} }));
+		let remoteSettings!: RemoteSettingsStore;
+		render(NewChatFormTestHost, { onRemoteSettings: (store) => { remoteSettings = store; } });
+		const search = await screen.findByRole('searchbox', { name: 'Search pinned paths' });
+		search.focus();
+		await fireEvent.focus(search);
+		remoteSettings.applySnapshot(makeSnapshot({ version: 2, paths: { pinnedProjectPaths: paths.slice(0, 8) } }));
+		await waitFor(() => expect(screen.queryByRole('button', { name: paths[8] })).toBeNull());
+		expect(screen.getByRole('searchbox', { name: 'Search pinned paths' })).toBe(search);
+		expect(document.activeElement).toBe(search);
+		await fireEvent.input(search, { target: { value: 'project-7' } });
+		expect(screen.getByRole('button', { name: paths[7] })).toBeTruthy();
+	});
+
+	it('clears an all-machine search in a compact current scope without removing its focused input', async () => {
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({ paths: {
+			pinnedProjectPaths: Array.from({ length: 8 }, (_, index) => `/workspace/project-${index}`),
+			byExecutor: { [remoteExecutor.id]: { pinnedPaths: ['/remote/project'], recentPaths: [] } },
+		} }));
+		render(NewChatFormTestHost, { executorSnapshots: [localExecutor, remoteExecutor] });
+		await fireEvent.click(await screen.findByRole('button', { name: 'All machines' }));
+		const search = screen.getByRole('searchbox', { name: 'Search pinned paths' });
+		await fireEvent.input(search, { target: { value: 'project' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'This machine' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Clear pinned path search' }));
+		expect(screen.getByRole('searchbox', { name: 'Search pinned paths' })).toBe(search);
+		expect(document.activeElement).toBe(search);
+		expect((search as HTMLInputElement).value).toBe('');
+		expect(screen.getByRole('button', { name: '/workspace/project-7' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Executor: Local' })).toBeTruthy();
 	});
 
 	it('searches many bookmarks by machine or path, announces unavailable targets and clears without changing the draft', async () => {

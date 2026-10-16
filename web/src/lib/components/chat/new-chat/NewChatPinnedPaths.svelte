@@ -20,6 +20,7 @@
 	const pins = new NewChatPinnedPathsController(() => form, executors, getRemoteSettings());
 	let showAll = $state(false);
 	let searchQuery = $state('');
+	let searchEngaged = $state(false);
 	let searchInput = $state<HTMLInputElement | null>(null);
 	const groups = $derived(pins.groups);
 	const totalPaths = $derived(groups.reduce((count, group) => count + group.paths.length, 0));
@@ -29,7 +30,7 @@
 	const scopedPathCount = $derived(
 		scopedGroups.reduce((count, group) => count + group.paths.length, 0),
 	);
-	const searchAvailable = $derived(scopedPathCount > 8 || searchQuery.length > 0);
+	const searchAvailable = $derived(searchEngaged || scopedPathCount > 8 || searchQuery.length > 0);
 	const filteredGroups = $derived(
 		filterExecutorPinnedPathGroups(scopedGroups, executors.executors, searchQuery),
 	);
@@ -91,6 +92,9 @@
 				placeholder={m.chat_new_chat_pinned_paths_search_placeholder()}
 				bind:value={searchQuery}
 				bind:this={searchInput}
+				onfocus={() => {
+					searchEngaged = true;
+				}}
 				class="h-11 w-full rounded-md border-0 bg-muted/40 pr-11 pl-9 text-base placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-fine:text-sm"
 			/>
 			{#if searchQuery}
