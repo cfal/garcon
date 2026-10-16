@@ -1,14 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const deployment = vi.hoisted(() => ({ base: '' }));
-vi.mock('$service-worker', () => ({
-	get base() {
-		return deployment.base;
-	},
-	build: [],
-	files: [],
-	version: 'test',
-}));
+vi.mock('$app/env', () => ({ version: 'test' }));
+vi.mock('$app/manifest', () => ({ immutable: [], assets: [] }));
 
 interface FetchEventPort {
 	request: Request;
@@ -17,7 +11,7 @@ interface FetchEventPort {
 }
 
 // Keeps the worker's global declarations outside the application's DOM type environment.
-const installWorker = () => vi.importActual('../service-worker');
+const installWorker = () => vi.importActual('../service-worker/index.js');
 
 function harness() {
 	const scope = new EventTarget();
@@ -36,6 +30,7 @@ function harness() {
 	} satisfies Pick<CacheStorage, 'open' | 'match'>;
 	const network = vi.fn<typeof fetch>();
 	vi.stubGlobal('self', {
+		registration: { scope: `https://garcon.test${deployment.base}/` },
 		addEventListener: scope.addEventListener.bind(scope),
 		location: { origin: 'https://garcon.test' },
 	});

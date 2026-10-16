@@ -1,23 +1,25 @@
-/// <reference types="@sveltejs/kit" />
-/// <reference no-default-lib="true"/>
-/// <reference lib="esnext" />
-/// <reference lib="webworker" />
 declare const self: ServiceWorkerGlobalScope;
 
-import { openNotificationChat } from './service-worker-notifications.js';
-import { base, build, files, version } from '$service-worker';
-import { stripBasePath } from '../../common/base-path.js';
+import { openNotificationChat } from '../service-worker-notifications.js';
+import { version } from '$app/env';
+import { immutable, assets } from '$app/manifest';
+import { stripBasePath } from '../../../common/base-path.js';
 import {
 	withNavigationTimeout,
 	isManifestPath,
 	precacheAppShell,
 	shouldCacheNavigationResponse,
 	type ServiceWorkerPrecacheManifest,
-} from './service-worker-helpers';
+} from '../service-worker-helpers.js';
 
+// The same build can be served at different runtime mounts.
+const base = new URL(self.registration.scope).pathname.replace(/\/$/, '');
 const CACHE_PREFIX = `garcon:${encodeURIComponent(base)}:`;
 const CACHE_NAME = `${CACHE_PREFIX}${version}`;
-const PRECACHE_MANIFEST: ServiceWorkerPrecacheManifest = { build, files };
+const PRECACHE_MANIFEST: ServiceWorkerPrecacheManifest = {
+	build: immutable.map(({ path }) => `${base}/${path}`),
+	files: assets.map(({ path }) => `${base}/${path}`),
+};
 
 self.addEventListener('notificationclick', (event) => {
 	event.notification.close();

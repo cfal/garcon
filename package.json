@@ -76,8 +76,7 @@
   "author": "Alex Lau <github@alau.ca>",
   "license": "GPL-3.0",
   "overrides": {
-    "@codemirror/view": "6.43.12",
-    "cookie": "0.7.2"
+    "@codemirror/view": "6.43.12"
   },
   "patchedDependencies": {
     "d3-drag@3.0.0": "patches/d3-drag@3.0.0.patch",

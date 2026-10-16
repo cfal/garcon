@@ -1,8 +1,15 @@
 import { afterEach, expect, it, vi } from 'vitest';
-vi.mock('$app/paths', () => ({ base: '/tools/garcon' }));
+vi.mock('$app/paths', () => ({ resolve: () => '/tools/garcon/' }));
 import { appPath, appPathname } from '../paths';
 import { apiFetch, clearAuthToken, publicApiFetch, setAuthToken } from '$lib/api/client';
-import { changePassword, changeUsername, getAuthStatus, getUser, login, register } from '$lib/api/auth';
+import {
+	changePassword,
+	changeUsername,
+	getAuthStatus,
+	getUser,
+	login,
+	register,
+} from '$lib/api/auth';
 import type { AuthSessionResponse, AuthStatusResponse, AuthUserResponse } from '$shared/auth';
 
 const user = { id: 'synthetic-owner', username: 'synthetic' };
@@ -60,7 +67,10 @@ it('mounts credential operations with their captured bearer', async () => {
 	setAuthToken('different-stored-token');
 	fetcher.mockResolvedValueOnce(Response.json({ user } satisfies AuthUserResponse));
 	await getUser('captured-token');
-	await changeUsername({ currentPassword: 'synthetic-password', username: 'next' }, 'captured-token');
+	await changeUsername(
+		{ currentPassword: 'synthetic-password', username: 'next' },
+		'captured-token',
+	);
 	await changePassword(
 		{ currentPassword: 'synthetic-password', newPassword: 'next-password' },
 		'captured-token',

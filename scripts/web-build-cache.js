@@ -32,7 +32,6 @@ export const webBuildInputs = [
   path.join(repoRoot, 'web', 'project.inlang', 'settings.json'),
   path.join(repoRoot, 'web', 'scripts', 'eager-assets.ts'),
   path.join(repoRoot, 'web', 'scripts', 'report-eager-assets.ts'),
-  path.join(repoRoot, 'web', 'svelte.config.js'),
   path.join(repoRoot, 'web', 'tsconfig.json'),
   path.join(repoRoot, 'web', 'vite.config.ts'),
 ];

@@ -1,5 +1,6 @@
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { sveltekit } from '@sveltejs/kit/vite';
+import adapter from '@sveltejs/adapter-static';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import path from 'node:path';
@@ -9,7 +10,12 @@ import { codeMirrorLanguageChunk } from './codemirror-chunks.ts';
 export default defineConfig({
 	plugins: [
 		tailwindcss(),
-		sveltekit(),
+		sveltekit({
+			compilerOptions: { runes: true },
+			adapter: adapter({ fallback: 'index.html' }),
+			prerender: { entries: [] },
+			version: { pollInterval: 0 },
+		}),
 		paraglideVitePlugin({
 			project: './project.inlang',
 			outdir: './src/lib/paraglide',
@@ -19,6 +25,7 @@ export default defineConfig({
 	],
 	resolve: {
 		alias: {
+			$lib: path.resolve(import.meta.dirname, 'src/lib'),
 			$shared: path.resolve(import.meta.dirname, '../common'),
 		},
 		// CodeMirror extensions rely on instanceof checks from @codemirror/state.

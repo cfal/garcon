@@ -13,7 +13,7 @@ const IMPORT_AUDIT_ENABLED = process.env.VITEST_IMPORT_AUDIT === '1';
 const TESTS_RUN_ON_BUN = 'bun' in process.versions;
 
 export default defineConfig({
-	plugins: [svelte()],
+	plugins: [svelte({ configFile: false, compilerOptions: { runes: true } })],
 	optimizeDeps: {
 		include: TEST_OPTIMIZED_DEPENDENCIES,
 	},
@@ -62,7 +62,6 @@ export default defineConfig({
 			},
 		},
 		alias: {
-			'$service-worker': new URL('./src/lib/mocks/service-worker.ts', import.meta.url).pathname,
 			$lib: new URL('./src/lib', import.meta.url).pathname,
 			$app: new URL('./src/lib/mocks/app', import.meta.url).pathname,
 			$shared: new URL('../common', import.meta.url).pathname,
