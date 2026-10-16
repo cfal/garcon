@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
-	setExecutorsTestContext();
+	import type { ExecutorSnapshot } from '$shared/executors';
+	import { localExecutor } from '$lib/executors/__tests__/fixtures';
 	import SidebarChatList from '../SidebarChatList.svelte';
 	import { setAppShell, setModelCatalog } from '$lib/context';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
@@ -18,6 +20,7 @@
 
 	interface SidebarChatListHostProps {
 		chats: ChatSessionRecord[];
+		executors?: readonly ExecutorSnapshot[];
 		filteredChats?: ChatSessionRecord[];
 		searchFilter?: string;
 		onNewChat?: () => void;
@@ -38,6 +41,7 @@
 
 	let {
 		chats,
+		executors,
 		filteredChats = chats,
 		searchFilter = '',
 		onNewChat,
@@ -49,6 +53,7 @@
 		onQuickMove = () => {},
 		onSortChatOrder = () => {},
 	}: SidebarChatListHostProps = $props();
+	untrack(() => setExecutorsTestContext(executors ?? [localExecutor]));
 
 	let viewportRef = $state<HTMLElement | null>(null);
 	let displayOptions = $derived({
@@ -79,7 +84,9 @@
 	} as never);
 
 	setModelCatalog({
-		forExecutor() { return this; },
+		forExecutor() {
+			return this;
+		},
 		supportsFork() {
 			return true;
 		},

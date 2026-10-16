@@ -11,6 +11,47 @@ import {
 } from '../sidebar-virtual-chat-list';
 
 describe('sidebar chat scroll targets', () => {
+	it.each([false, true])(
+		'anchors the closest visible collapsed ancestor with machine collapsed=%s',
+		(isCollapsed) => {
+			const rows: SidebarVirtualRow[] = [
+				{
+					type: 'machine-header',
+					key: 'machine:worker',
+					collapseKey: 'machine:worker',
+					executorId: 'worker',
+					count: 1,
+					chatIds: ['hidden'],
+					isCollapsed,
+				},
+			];
+			const sectionKey = sidebarSectionKey('inactive', 'worker');
+			if (!isCollapsed)
+				rows.push({
+					type: 'section-header',
+					key: sectionKey,
+					section: 'inactive',
+					executorId: 'worker',
+					count: 1,
+					chatIds: ['hidden'],
+					isCollapsed: true,
+				});
+			const target = sidebarScrollTargetForChat(rows, 'hidden');
+			expect(target).toEqual(
+				isCollapsed ? { index: 0, machineCollapseKey: 'machine:worker' } : { index: 1, sectionKey },
+			);
+			const viewport = document.createElement('div');
+			const machine = document.createElement('button');
+			machine.dataset.sidebarMachineCollapseKey = 'machine:worker';
+			const section = document.createElement('button');
+			section.dataset.sidebarSectionKey = sectionKey;
+			viewport.append(machine, section);
+			expect(target && mountedElementForScrollTarget(viewport, target)).toBe(
+				isCollapsed ? machine : section,
+			);
+		},
+	);
+
 	it('anchors a collapsed inactive project instead of its duplicate active or section header', () => {
 		const projectKey = sidebarProjectKey('/tmp/shared-project');
 		const inactiveProjectCollapseKey = sidebarSectionProjectKey('inactive', projectKey);

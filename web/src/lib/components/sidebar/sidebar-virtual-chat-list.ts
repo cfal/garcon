@@ -8,6 +8,7 @@ export const COMPACT_CHAT_ROW_HEIGHT = 62;
 export const DESKTOP_CHAT_ROW_HEIGHT = 76;
 export const PROJECT_PATH_LINE_HEIGHT = 18;
 export const PROJECT_HEADER_ROW_HEIGHT = 32;
+export const MACHINE_HEADER_ROW_HEIGHT = 34;
 export const DEFAULT_CHAT_ROW_OVERSCAN = 8;
 export const CHAT_ROW_SEPARATOR_SLOT_HEIGHT = 2;
 
@@ -21,14 +22,28 @@ export interface SidebarVirtualProjectHeaderRow {
 	count: number;
 	chatIds: string[];
 	isCollapsed: boolean;
+	/** True when a machine header already identifies the executor above this project. */
+	machineGrouped?: boolean;
+}
+
+export interface SidebarVirtualMachineHeaderRow {
+	type: 'machine-header';
+	key: string;
+	executorId: string;
+	collapseKey: string;
+	count: number;
+	chatIds: string[];
+	isCollapsed: boolean;
 }
 
 export type SidebarChatSection =
 	'active' | 'inactive' | 'archived' | 'in-progress' | 'ready-for-review' | 'caught-up';
 
 // Cross-project sections share the project collapse store's key space.
-export function sidebarSectionKey(section: SidebarChatSection): string {
-	return `section:${section}`;
+export function sidebarSectionKey(section: SidebarChatSection, executorId?: string): string {
+	return executorId === undefined
+		? `section:${section}`
+		: `machine:${executorId}:section:${section}`;
 }
 
 export function sidebarSectionProjectKey(section: SidebarChatSection, projectKey: string): string {
@@ -46,6 +61,7 @@ export const SIDEBAR_SECTION_COLLAPSE_KEYS: readonly string[] = [
 
 export interface SidebarVirtualSectionHeaderRow {
 	type: 'section-header';
+	executorId?: string;
 	key: string;
 	section: SidebarChatSection;
 	count: number;
@@ -68,7 +84,10 @@ export interface SidebarVirtualChatRow {
 }
 
 export type SidebarVirtualRow =
-	SidebarVirtualProjectHeaderRow | SidebarVirtualSectionHeaderRow | SidebarVirtualChatRow;
+	| SidebarVirtualMachineHeaderRow
+	| SidebarVirtualProjectHeaderRow
+	| SidebarVirtualSectionHeaderRow
+	| SidebarVirtualChatRow;
 
 export type SidebarChatOrderMap = Record<PersistedChatOrderGroup, string[]>;
 
@@ -85,6 +104,9 @@ export function estimateSidebarVirtualRowSize(
 	chatItemLayout: ChatItemLayout,
 	showProjectPath = false,
 ): number {
+	if (row?.type === 'machine-header') {
+		return MACHINE_HEADER_ROW_HEIGHT;
+	}
 	if (row?.type === 'project-header' || row?.type === 'section-header') {
 		return PROJECT_HEADER_ROW_HEIGHT;
 	}

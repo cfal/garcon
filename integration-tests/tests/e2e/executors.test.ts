@@ -205,7 +205,16 @@ test('normal app onboarding supports both directions and sends remote chat input
         if (!(button instanceof HTMLButtonElement)) throw new Error('Generation model selector is unavailable');
         button.click();
       });
-      await app.clickButton('Inbound Worker');
+      await fixture.page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('[data-slot="model-selector-executors"] button')]
+        .some((button) => button.textContent?.trim() === 'Inbound Worker' && !button.disabled));
+      await fixture.page.evaluate(() => {
+        const button = [...document.querySelectorAll<HTMLButtonElement>('[data-slot="model-selector-executors"] button')]
+          .find((entry) => entry.textContent?.trim() === 'Inbound Worker');
+        if (!button || button.disabled) throw new Error('Inbound Worker model executor is unavailable');
+        button.click();
+      });
+      await fixture.page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('[data-slot="model-selector-executors"] button')]
+        .some((button) => button.textContent?.trim() === 'Inbound Worker' && button.getAttribute('aria-pressed') === 'true'));
       await app.waitForButton('Chat Completions');
       await app.clickButton('Chat Completions');
       await app.waitForButton('Integration Echo');
@@ -241,8 +250,11 @@ test('normal app onboarding supports both directions and sends remote chat input
       await app.waitForText('local-only.txt');
       await app.clickWorkspaceWindowAddAction('New Terminal');
       await app.waitForMenuItemEnabled('Local');
+      const terminalCreated = fixture.page.waitForResponse((response) =>
+        new URL(response.url()).pathname === '/api/v1/terminals' && response.request().method() === 'POST');
       await app.clickMenuItem('Local');
       await app.waitForText('Local 1');
+      expect((await terminalCreated).status()).toBe(201);
       expect((await fixture.integration.client.get<{ terminals: unknown[] }>('/api/v1/terminals')).terminals).toHaveLength(1);
       fixture.assertNoBrowserErrors();
     } finally {
