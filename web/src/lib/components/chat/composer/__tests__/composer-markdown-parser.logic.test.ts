@@ -14,6 +14,7 @@ import {
 	MAX_COMPOSER_MARKDOWN_LENGTH,
 } from '../composer-markdown-limits.js';
 import { configureComposerMarkdown, serializeComposerMarkdown } from '../composer-markdown.js';
+import { composerMarkdownCodec } from '../composer-markdown-codec.js';
 
 const table = '| Check | Example |\n| - | - |\n| **Ready** | First<br>Second |';
 function nodes(document: JSONContent): JSONContent[] {
@@ -288,6 +289,13 @@ describe('composer Markdown source preservation', () => {
 			const output = serializeComposerMarkdown(manager, paragraph(text));
 			expect(manager.parse(output)).toEqual(paragraph(text));
 		}
+	});
+	it('does not turn an exclamation before a link into an image', () => {
+		const document = parseDocument('Wow[x](https://example.test)');
+		document.content![0].content![0].text = 'Wow!';
+		const source = composerMarkdownCodec.serialize(document);
+		expect(source).toBe('Wow\\![x](https://example.test)');
+		expect(parseDocument(source)).toEqual(document);
 	});
 	it.each([
 		['a code block', '````md\n```\ninner\n```\n````'],

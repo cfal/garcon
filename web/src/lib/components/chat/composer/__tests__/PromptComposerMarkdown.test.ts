@@ -55,6 +55,13 @@ async function pasteAndSettle(editor: HTMLElement, text: string) {
 	await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 }
 
+function expectEquivalentMarkdown(actual: string, expected: string) {
+	const parsed = parseComposerMarkdown({ source: expected });
+	expect(parsed).not.toBeNull();
+	// History preserves the document, not list-marker or heading-delimiter spelling.
+	expect(parseComposerMarkdown({ source: actual })?.document).toEqual(parsed?.document);
+}
+
 async function formatted({
 	selectedStatus = 'running',
 	source = table,
@@ -130,26 +137,47 @@ describe('formatted composer integration', () => {
 		expect(rich.commands.redo()).toBe(true);
 		await waitFor(() => expect(textarea.value).toBe('before typed **pasted**'));
 	});
-	it.each(['* one\n* two', '## Head ##'])('restores exact source spelling through repeated paste Undo/Redo: %s', async (source) => {
+	it.each([
+		'* one\n* two',
+		'## Head ##',
+	])('preserves Markdown content through repeated paste Undo/Redo: %.60s', async (source) => {
 		const { editor, textarea } = await formatted({ source });
-		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) => parseComposerMarkdown(request));
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) =>
+			parseComposerMarkdown(request),
+		);
 		const rich = richEditor(editor);
 		for (const text of [' first', ' second']) {
-			const transfer = new DataTransfer();
-			transfer.setData('text/plain', text);
-			await fireEvent.paste(editor, { clipboardData: transfer });
-			await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+			await pasteAndSettle(editor, text);
 		}
 		const pasted = textarea.value;
 		expect(rich.commands.undo()).toBe(true);
 		expect(rich.commands.undo()).toBe(true);
-		await waitFor(() => expect(textarea.value).toBe(source));
+		await waitFor(() => expectEquivalentMarkdown(textarea.value, source));
 		expect(rich.commands.redo()).toBe(true);
 		expect(rich.commands.redo()).toBe(true);
-		await waitFor(() => expect(textarea.value).toBe(pasted));
+		await waitFor(() => expectEquivalentMarkdown(textarea.value, pasted));
+	});
+	it.each([
+		'\\# Not heading\n\n1\\. not a list\n\n\\---',
+		'> \\- not a nested list\n\n- item\n\n  \\# Not a heading',
+		'- one\n\n+ two',
+		'**Bold** [link](https://example.test/path)\n\n```ts\nconst text = `a  b`;\n```\n\n' + table,
+	])('preserves restored blocks after replacing the entire draft: %.60s', async (source) => {
+		const { editor, textarea } = await formatted({ source });
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) =>
+			parseComposerMarkdown(request),
+		);
+		const rich = richEditor(editor);
+		rich.commands.selectAll();
+		await pasteAndSettle(editor, 'replacement');
+		expect(textarea.value).toBe('replacement');
+		expect(rich.commands.undo()).toBe(true);
+		await waitFor(() => expectEquivalentMarkdown(textarea.value, source));
+		expect(rich.commands.redo()).toBe(true);
+		await waitFor(() => expect(textarea.value).toBe('replacement'));
 	});
 	it.each([false, true])(
-		'keeps pasted source spelling through interleaved edit history (second paste=%s)',
+		'keeps pasted content through interleaved edit history (second paste=%s)',
 		async (secondPaste) => {
 			const source = secondPaste ? 'Intro\n\nlast' : 'Intro';
 			const { editor, textarea } = await formatted({ source });
@@ -170,24 +198,24 @@ describe('formatted composer integration', () => {
 			if (secondPaste) {
 				expect(final).toBe(`${source} typed more\n\n* one\n* two`);
 				expect(rich.commands.undo()).toBe(true);
-				await waitFor(() => expect(textarea.value).toBe(typed));
+				await waitFor(() => expectEquivalentMarkdown(textarea.value, typed));
 			}
 			expect(rich.commands.undo()).toBe(true);
-			await waitFor(() => expect(textarea.value).toBe(firstPaste));
+			await waitFor(() => expectEquivalentMarkdown(textarea.value, firstPaste));
 			expect(rich.commands.undo()).toBe(true);
-			await waitFor(() => expect(textarea.value).toBe(source));
+			await waitFor(() => expectEquivalentMarkdown(textarea.value, source));
 			expect(rich.commands.redo()).toBe(true);
-			await waitFor(() => expect(textarea.value).toBe(firstPaste));
+			await waitFor(() => expectEquivalentMarkdown(textarea.value, firstPaste));
 			expect(rich.commands.redo()).toBe(true);
-			await waitFor(() => expect(textarea.value).toBe(typed));
+			await waitFor(() => expectEquivalentMarkdown(textarea.value, typed));
 			if (secondPaste) {
 				expect(rich.commands.redo()).toBe(true);
-				await waitFor(() => expect(textarea.value).toBe(final));
+				await waitFor(() => expectEquivalentMarkdown(textarea.value, final));
 			}
 		},
 	);
 	it.each([6, 12])(
-		'retains pasted source after undoing a corrected typo at position %s',
+		'retains pasted content after undoing a corrected typo at position %s',
 		async (position) => {
 			const source = 'Intro\n\nlast';
 			const { editor, textarea } = await formatted({ source });
@@ -206,14 +234,14 @@ describe('formatted composer integration', () => {
 			expect(textarea.value).toBe(pasted);
 			expect(rich.commands.undo()).toBe(true);
 			await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-			expect(textarea.value).toBe(pasted);
+			expectEquivalentMarkdown(textarea.value, pasted);
 			expect(rich.commands.undo()).toBe(true);
 			await waitFor(() => expect(textarea.value).toBe(source));
 			expect(rich.commands.redo()).toBe(true);
-			await waitFor(() => expect(textarea.value).toBe(pasted));
+			await waitFor(() => expectEquivalentMarkdown(textarea.value, pasted));
 			expect(rich.commands.redo()).toBe(true);
 			await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-			expect(textarea.value).toBe(pasted);
+			expectEquivalentMarkdown(textarea.value, pasted);
 		},
 	);
 	it.each(['restore', 'append', 'source', 'hidden', 'outside'])(

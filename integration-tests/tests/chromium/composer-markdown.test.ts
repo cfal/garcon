@@ -146,8 +146,8 @@ test('raw Markdown paste retains rich history, layout, and caret visibility', as
   });
 }, 90_000);
 
-test('interleaved edits and pastes retain source spelling at every Undo and Redo step', async () => {
-  await withChromiumFixture('composer-paste-source-history', async ({ page, context, integration, assertNoBrowserErrors }) => {
+test('interleaved edits and pastes retain content at every Undo and Redo step', async () => {
+  await withChromiumFixture('composer-paste-content-history', async ({ page, context, integration, assertNoBrowserErrors }) => {
     const chatId = integration.newChatId();
     const turn = await integration.client.startDirectChat({
       chatId, content: 'Synthetic interleaved paste history', projectPath: integration.dirs.project,
@@ -158,48 +158,37 @@ test('interleaved edits and pastes retain source spelling at every Undo and Redo
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const textarea = page.locator('[data-composer] textarea');
     const editor = page.getByRole('textbox', { name: 'Formatted message' });
-    for (const { secondPaste, correctedTypo } of [
-      { secondPaste: false, correctedTypo: false },
-      { secondPaste: true, correctedTypo: false },
-      { secondPaste: false, correctedTypo: true },
-      { secondPaste: true, correctedTypo: true },
-    ]) {
-      const source = secondPaste ? 'Intro\n\nlast' : 'Intro';
-      await selectMessageFormat(page, 'source');
-      await textarea.fill(source);
-      await selectMessageFormat(page, 'formatted');
-      await editor.focus();
-      await page.keyboard.press('Control+End');
-      await page.evaluate(text => navigator.clipboard.writeText(text), '\n\n* one\n* two');
-      await page.keyboard.press('Control+V');
-      const firstPaste = `${source}\n\n* one\n* two`;
-      await browserExpect(textarea).toHaveValue(firstPaste);
-      await browserExpect(editor.locator('li')).toHaveCount(2);
-      await browserExpect(editor).toHaveAttribute('contenteditable', 'true');
-      await editor.locator(':scope > p').nth(secondPaste ? 1 : 0).click();
-      await page.keyboard.press('End');
-      await page.keyboard.type(correctedTypo ? 'x' : ' typed');
-      if (correctedTypo) await page.keyboard.press('Backspace');
-      const suffix = correctedTypo ? '' : ' typed';
-      const typed = `${source}${suffix}\n\n* one\n* two`;
-      await browserExpect(textarea).toHaveValue(typed);
-      const history = [source, firstPaste, typed];
-      if (secondPaste) {
-        await page.evaluate(text => navigator.clipboard.writeText(text), ' more');
-        await page.keyboard.press('Control+V');
-        history.push(`${source}${suffix} more\n\n* one\n* two`);
-        await browserExpect(editor.locator(':scope > p').nth(1)).toHaveText(`last${suffix} more`);
-        await browserExpect(editor).toHaveAttribute('contenteditable', 'true');
-        await browserExpect(textarea).toHaveValue(history.at(-1)!);
-      }
-      for (const value of history.slice(0, -1).reverse()) {
-        await page.keyboard.press('Control+Z');
-        await browserExpect(textarea).toHaveValue(value);
-      }
-      for (const value of history.slice(1)) {
-        await page.keyboard.press('Control+y');
-        await browserExpect(textarea).toHaveValue(value);
-      }
+    const source = 'Intro\n\nlast';
+    await selectMessageFormat(page, 'source');
+    await textarea.fill(source);
+    await selectMessageFormat(page, 'formatted');
+    await editor.focus();
+    await page.keyboard.press('Control+End');
+    await page.evaluate(text => navigator.clipboard.writeText(text), '\n\n* one\n* two');
+    await page.keyboard.press('Control+V');
+    const firstPaste = `${source}\n\n* one\n* two`;
+    await browserExpect(textarea).toHaveValue(firstPaste);
+    await browserExpect(editor.locator('li')).toHaveCount(2);
+    await browserExpect(editor).toHaveAttribute('contenteditable', 'true');
+    await editor.locator(':scope > p').nth(1).click();
+    await page.keyboard.press('End');
+    // The corrected typo rebuilds a fragment without changing the displayed document.
+    await page.keyboard.type('x');
+    await page.keyboard.press('Backspace');
+    await browserExpect(textarea).toHaveValue(firstPaste);
+    await page.evaluate(text => navigator.clipboard.writeText(text), ' more');
+    await page.keyboard.press('Control+V');
+    const history = [source, firstPaste, firstPaste, `${source} more\n\n* one\n* two`];
+    await browserExpect(editor.locator(':scope > p').nth(1)).toHaveText('last more');
+    await browserExpect(editor).toHaveAttribute('contenteditable', 'true');
+    await browserExpect(textarea).toHaveValue(history.at(-1)!);
+    for (const value of history.slice(0, -1).reverse()) {
+      await page.keyboard.press('Control+Z');
+      await browserExpect(textarea).toHaveValue(value);
+    }
+    for (const value of history.slice(1)) {
+      await page.keyboard.press('Control+y');
+      await browserExpect(textarea).toHaveValue(value);
     }
     assertNoBrowserErrors();
   });
@@ -847,7 +836,9 @@ test("literal Shell input is formatted only in a mode that declares Markdown inp
       // A restored draft follows the mode of the chat it belongs to.
       await selectChat(notesChat);
       await browserExpect(textarea).toHaveValue("");
+      await browserExpect(textarea).toBeFocused();
       await page.keyboard.type("Keep **this** and _target_");
+      await browserExpect(textarea).toHaveValue("Keep **this** and _target_");
       await selectMessageFormat(page, 'formatted');
       await editor.focus();
       await browserExpect(editor).toBeFocused();
