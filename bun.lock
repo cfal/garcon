@@ -315,7 +315,7 @@
         "happy-dom": "^20.14.5",
         "prettier": "^3.9.8",
         "prettier-plugin-svelte": "^4.1.1",
-        "svelte": "5.57.1",
+        "svelte": "5.57.2",
         "svelte-check": "^4.7.6",
         "tailwindcss": "^4.3.3",
         "typescript": "^6.0.3",
@@ -327,12 +327,11 @@
   },
   "patchedDependencies": {
     "@xyflow/system@0.0.82": "patches/@xyflow%2Fsystem@0.0.82.patch",
-    "@replit/codemirror-vim-core@0.1.0": "patches/@replit%2Fcodemirror-vim-core@0.1.0.patch",
-    "svelte@5.57.1": "patches/svelte@5.57.1.patch",
-    "d3-drag@3.0.0": "patches/d3-drag@3.0.0.patch",
-    "bits-ui@2.19.2": "patches/bits-ui@2.19.2.patch",
     "@replit/codemirror-vim@6.4.0": "patches/@replit%2Fcodemirror-vim@6.4.0.patch",
+    "bits-ui@2.19.2": "patches/bits-ui@2.19.2.patch",
+    "@replit/codemirror-vim-core@0.1.0": "patches/@replit%2Fcodemirror-vim-core@0.1.0.patch",
     "@xyflow/svelte@1.6.6": "patches/@xyflow%2Fsvelte@1.6.6.patch",
+    "d3-drag@3.0.0": "patches/d3-drag@3.0.0.patch",
   },
   "overrides": {
     "@codemirror/view": "6.43.12",
@@ -1689,7 +1688,7 @@
 
     "stylis": ["stylis@4.4.0", "", {}, "sha512-5Z9ZpRzfuH6l/UAvCPAPUo3665Nk2wLaZU3x+TLHKVzIz33+sbJqbtrYoC3KD4/uVOr2Zp+L0LySezP9OHV9yA=="],
 
-    "svelte": ["svelte@5.57.1", "", { "dependencies": { "@jridgewell/remapping": "^2.3.5", "@jridgewell/sourcemap-codec": "^1.6.0", "@sveltejs/acorn-typescript": "^1.0.13", "@types/estree": "^1.0.9", "acorn": "^8.18.0", "aria-query": "5.3.1", "axobject-query": "^4.1.0", "clsx": "^2.1.1", "devalue": "^5.9.2", "esm-env": "^1.2.1", "esrap": "^2.3.6", "is-reference": "^3.0.3", "locate-character": "^3.0.0", "magic-string": "^0.30.11", "zimmerframe": "^1.1.2" } }, "sha512-Uqj49lWKB+iSSnneuwiYYJ7MZgkB+eXr0LXBhv4uDuAkXqnWmq65Sxflfvp0Lc6MdKjMUxGaeOKWJqz5SNiVIA=="],
+    "svelte": ["svelte@5.57.2", "", { "dependencies": { "@jridgewell/remapping": "^2.3.5", "@jridgewell/sourcemap-codec": "^1.6.0", "@sveltejs/acorn-typescript": "^1.0.13", "@types/estree": "^1.0.9", "acorn": "^8.18.0", "aria-query": "5.3.1", "axobject-query": "^4.1.0", "clsx": "^2.1.1", "devalue": "^5.9.2", "esm-env": "^1.2.1", "esrap": "^2.3.6", "is-reference": "^3.0.3", "locate-character": "^3.0.0", "magic-string": "^0.30.11", "zimmerframe": "^1.1.2" } }, "sha512-1YiPCAXT0Ct6g1vOMmSLa0Nsc3QRMvtDF32ihgglGVrugIuIK38RyDiFNXVDhtQ81TJjSO57NdMw6DyYLqSGDQ=="],
 
     "svelte-check": ["svelte-check@4.7.6", "", { "dependencies": { "@jridgewell/trace-mapping": "^0.3.25", "@sveltejs/load-config": "^0.2.3", "chokidar": "^4.0.1", "fdir": "^6.2.0", "picocolors": "^1.0.0", "sade": "^1.7.4" }, "peerDependencies": { "svelte": "^4.0.0 || ^5.0.0-next.0", "typescript": "^5.0.0 || ^6.0.0" }, "bin": { "svelte-check": "bin/svelte-check" } }, "sha512-t2scM//ZuVbSY/T2w6FSBw1v9s2NEmh/g+sy1lqtosW5ylBV5AF4wFb1Ts9Kf3MbfPDUDJDZ9L436YT0SPTdvw=="],
 
