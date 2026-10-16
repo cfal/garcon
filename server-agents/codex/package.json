@@ -10,11 +10,11 @@
     "@garcon/server-agent-common": "workspace:*",
     "@garcon/server-agent-interface": "workspace:*",
     "@openai/codex": "0.162.1",
-    "acorn": "^8.18.0",
-    "bun-pty": "^0.4.10",
-    "shell-quote": "^1.10.0"
+    "acorn": "^8.19.0",
+    "bun-pty": "^0.5.1",
+    "shell-quote": "^1.12.0"
   },
-  "devDependencies": { "@types/bun": "^1.4.2", "typescript": "^6.0.3" },
+  "devDependencies": { "@types/bun": "^1.4.3", "typescript": "^6.0.3" },
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "codex",

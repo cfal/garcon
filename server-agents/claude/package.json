@@ -9,9 +9,9 @@
     "@garcon/common": "workspace:*",
     "@garcon/server-agent-common": "workspace:*",
     "@garcon/server-agent-interface": "workspace:*",
-    "bun-pty": "^0.4.10"
+    "bun-pty": "^0.5.1"
   },
-  "devDependencies": { "@types/bun": "^1.4.2", "typescript": "^6.0.3" },
+  "devDependencies": { "@types/bun": "^1.4.3", "typescript": "^6.0.3" },
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "claude",

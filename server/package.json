@@ -8,7 +8,7 @@
     "typecheck": "bunx tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@cfal/noise-ws": "github:cfal/noise-ws#536eb503e81a1f9d90436006d3821e2080630488",
+    "@cfal/noise-ws": "github:cfal/noise-ws#6cf4a4b2ab25d300316a21c23cbcef1bb3558556",
     "@garcon/common": "workspace:*",
     "@garcon/server-agent-amp": "workspace:*",
     "@garcon/server-agent-claude": "workspace:*",
@@ -23,16 +23,16 @@
     "@garcon/server-agent-opencode": "workspace:*",
     "@garcon/server-agent-pi": "workspace:*",
     "@garcon/server-agent-shell": "workspace:*",
-    "bun-pty": "^0.4.10",
+    "bun-pty": "^0.5.1",
     "emoji-regex": "^11.0.0",
     "jsonwebtoken": "^9.0.3",
     "mime-types": "^3.0.2",
     "proper-lockfile": "4.1.2",
-    "shell-quote": "^1.10.0",
-    "tokenx": "2.1.0"
+    "shell-quote": "^1.12.0",
+    "tokenx": "2.1.1"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.2",
+    "@types/bun": "^1.4.3",
     "@types/mime-types": "^3.0.1",
     "@types/proper-lockfile": "4.1.4"
   }
