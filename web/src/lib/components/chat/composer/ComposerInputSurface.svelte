@@ -42,17 +42,20 @@
 </script>
 
 <div class="relative overflow-hidden bg-transparent focus-within:ring-0">
-	{#if markdownInput}
-		<ComposerFormatSelector
-			mode={draft || pending ? 'formatted' : 'source'}
-			{pending}
-			disabled={disabled || busy}
-			onSelect={(mode) => {
-				localSettings.set('composerInputMode', mode);
-				controller.selectMode(mode);
-			}}
-		/>
-	{/if}
+	<!-- Reserves the selector row across model capability changes and catalog recovery. -->
+	<div class="h-11">
+		{#if markdownInput}
+			<ComposerFormatSelector
+				mode={draft || pending ? 'formatted' : 'source'}
+				{pending}
+				disabled={disabled || busy}
+				onSelect={(mode) => {
+					localSettings.set('composerInputMode', mode);
+					controller.selectMode(mode);
+				}}
+			/>
+		{/if}
+	</div>
 
 	{#if draft}
 		{#await loadComposerMarkdownEditor()}

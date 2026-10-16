@@ -342,6 +342,7 @@ describe('formatted composer integration', () => {
 			expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
 			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
 		}
+		expect(screen.queryByRole('button', { name: 'Formatted' })).toBeNull();
 		expect(textarea.value).toBe(source);
 	});
 	it('opens the snippet palette for a trigger typed after formatted content', async () => {
