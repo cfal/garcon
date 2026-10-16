@@ -110,9 +110,15 @@ const snapshot: PullRequestReviewsSnapshot = {
 	recentRuns: [run],
 };
 
-function setup() {
+function setup(
+	options: {
+		getRuns?: () => Promise<PullRequestReviewRunDetail[]>;
+		getDetail?: () => Promise<PullRequestDetail>;
+		snapshot?: PullRequestReviewsSnapshot;
+	} = {},
+) {
 	const api = {
-		get: vi.fn(async () => snapshot),
+		get: vi.fn(async () => options.snapshot ?? snapshot),
 		connect: vi.fn(),
 		update: vi.fn(),
 		remove: vi.fn(),
@@ -121,11 +127,12 @@ function setup() {
 		stop: vi.fn(),
 		post: vi.fn(async () => snapshot),
 	} satisfies PullRequestReviewsApi;
-	const getDetail = vi.fn(() => new Promise<never>(() => {}));
+	const getDetail = vi.fn(options.getDetail ?? (() => new Promise<never>(() => {})));
+	const getRuns = vi.fn(options.getRuns ?? (async () => [run]));
 	const controller = new PullRequestsStore({
 		reviews: new PullRequestReviewsStore(api),
 		getDetail,
-		getRuns: vi.fn(async () => [run]),
+		getRuns,
 	});
 	controller.setPresentationVisible(true);
 	const onOpenChat = vi.fn();
@@ -135,10 +142,165 @@ function setup() {
 		onSendToChat: vi.fn(),
 		onNavigateToChat: vi.fn(),
 	});
-	return { api, onOpenChat, controller, getDetail };
+	return { api, onOpenChat, controller, getDetail, getRuns };
 }
 
 describe('PullRequestsPanel', () => {
+	it('keeps the inbox review summary while history loads and gates review actions', async () => {
+		const history = Promise.withResolvers<PullRequestReviewRunDetail[]>();
+		const { controller } = setup({ getRuns: () => history.promise });
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await screen.findByText('Loading review history...');
+		expect(controller.shownRun?.id).toBe(run.id);
+		expect(screen.queryByText('Not reviewed yet.')).toBeNull();
+		expect(screen.getByRole('button', { name: 'Re-run' })).toHaveProperty('disabled', true);
+		expect(screen.getByRole('button', { name: 'Post to GitHub' })).toHaveProperty('disabled', true);
+		history.resolve([run]);
+		await screen.findByText('No actionable findings.');
+		expect(screen.getByRole('button', { name: 'Re-run' })).toHaveProperty('disabled', false);
+		expect(screen.getByRole('button', { name: 'Post to GitHub' })).toHaveProperty(
+			'disabled',
+			false,
+		);
+	});
+
+	it.each(['run-1', 'run-next'])(
+		'keeps the latest run status during a failed history refresh (%s)',
+		async (latestId) => {
+			const history = Promise.withResolvers<PullRequestReviewRunDetail[]>();
+			const getRuns = vi
+				.fn<() => Promise<PullRequestReviewRunDetail[]>>()
+				.mockResolvedValueOnce([run])
+				.mockReturnValue(history.promise);
+			const { controller } = setup({ getRuns });
+			await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+			await screen.findByText('No actionable findings.');
+			const waiting: PullRequestReviewRunDetail = {
+				...run,
+				id: latestId,
+				state: 'needs-input',
+				review: null,
+				message: 'The review could not be stopped after a permission request timed out. Retrying.',
+			};
+			controller.reviews.apply({
+				...snapshot,
+				revision: 2,
+				inbox: [{ ...snapshot.inbox[0], latestRun: waiting }],
+			});
+			await screen.findByText('Loading review history...');
+			expect(controller.shownRun).toMatchObject({ id: latestId, state: 'needs-input' });
+			await screen.findByText(waiting.message!);
+			history.reject(new Error('History refresh failed.'));
+			await screen.findByText('History refresh failed.');
+			expect(controller.shownRun).toMatchObject({ id: latestId, state: 'needs-input' });
+			if (latestId !== run.id) {
+				expect(screen.queryByText('No actionable findings.')).toBeNull();
+				controller.selectedRunId = run.id;
+				await screen.findByText('No actionable findings.');
+			}
+		},
+	);
+
+	it('shows a history error with retry instead of offering an unreviewed state', async () => {
+		const getRuns = vi
+			.fn<() => Promise<PullRequestReviewRunDetail[]>>()
+			.mockRejectedValueOnce(new Error('Review history is unavailable.'))
+			.mockResolvedValue([run]);
+		setup({ getRuns });
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await screen.findByText('Review history is unavailable.');
+		expect(screen.queryByText('Not reviewed yet.')).toBeNull();
+		expect(screen.getByRole('button', { name: 'Re-run' })).toHaveProperty('disabled', true);
+		expect(screen.getByRole('button', { name: 'Post to GitHub' })).toHaveProperty('disabled', true);
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		await screen.findByText('No actionable findings.');
+		expect(getRuns).toHaveBeenCalledTimes(2);
+		expect(screen.queryByText('Review history is unavailable.')).toBeNull();
+		expect(screen.getByRole('button', { name: 'Re-run' })).toHaveProperty('disabled', false);
+	});
+
+	it('enables a first review only after an empty history read succeeds', async () => {
+		const history = Promise.withResolvers<PullRequestReviewRunDetail[]>();
+		setup({ getRuns: () => history.promise });
+		await fireEvent.click((await screen.findAllByText('Change 8'))[0]);
+		await screen.findByText('Loading review history...');
+		expect(screen.queryByText('Not reviewed yet.')).toBeNull();
+		expect(screen.getByRole('button', { name: 'Review' })).toHaveProperty('disabled', true);
+		history.resolve([]);
+		await screen.findByText('Not reviewed yet.');
+		expect(screen.getByRole('button', { name: 'Review' })).toHaveProperty('disabled', false);
+	});
+
+	it('shows timeout delivery diagnostics and surfaces a failed Stop without hiding the running review', async () => {
+		const waiting: PullRequestReviewRunDetail = {
+			...run,
+			state: 'needs-input',
+			message: 'The review could not be stopped after a permission request timed out. Retrying.',
+		};
+		const { api } = setup({
+			snapshot: { ...snapshot, inbox: [{ ...snapshot.inbox[0], latestRun: waiting }] },
+			getRuns: async () => [waiting],
+		});
+		api.stop.mockRejectedValueOnce(new Error('The review could not be stopped. Try again.'));
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await screen.findByText(waiting.message!);
+		await fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+		await screen.findByText('The review could not be stopped. Try again.');
+		expect(screen.getByRole('button', { name: 'Stop' })).toHaveProperty('disabled', false);
+		expect(screen.queryByRole('button', { name: 'Re-run' })).toBeNull();
+	});
+
+	it('refreshes an older selected review after posting even when the latest run is unchanged', async () => {
+		const latest = { ...run, id: 'run-latest', review: 'Latest review.' };
+		let older: PullRequestReviewRunDetail = { ...run, review: 'Earlier review.' };
+		const initial = { ...snapshot, inbox: [{ ...snapshot.inbox[0], latestRun: latest }] };
+		const { api, controller, getRuns } = setup({
+			snapshot: initial,
+			getRuns: async () => [latest, older],
+		});
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await screen.findByText('Latest review.');
+		controller.selectedRunId = run.id;
+		await screen.findByText('Earlier review.');
+		api.post.mockImplementationOnce(async () => {
+			older = {
+				...older,
+				post: {
+					...older.post,
+					status: 'posted',
+					commentUrl: 'https://github.com/acme/app/pull/7#issuecomment-1',
+				},
+			};
+			return { ...initial, revision: 2 };
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Post to GitHub' }));
+		await screen.findByRole('link', { name: 'View the posted comment' });
+		expect(controller.shownRun?.post.status).toBe('posted');
+		expect(getRuns).toHaveBeenCalledTimes(2);
+		expect(screen.queryByRole('button', { name: 'Post to GitHub' })).toBeNull();
+	});
+
+	it('counts neutral and skipped checks separately', async () => {
+		setup({
+			getDetail: async () => ({
+				...snapshot.inbox[0].pull,
+				documentId: 'document',
+				body: '',
+				mergeable: 'mergeable',
+				checks: [
+					{ name: 'Advisory', state: 'neutral' },
+					{ name: 'Optional', state: 'skipped' },
+				],
+				files: [],
+				fileBodies: {},
+				threads: [],
+			}),
+		});
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await fireEvent.click(screen.getByRole('tab', { name: 'Checks' }));
+		await screen.findByText('1 neutral · 1 skipped');
+	});
+
 	it('aborts stale detail after a push and clears a closed selection', async () => {
 		const reviews = new PullRequestReviewsStore();
 		reviews.apply(snapshot);

@@ -1,10 +1,9 @@
 import type { PullRequestSummary } from '../../../common/gh.js';
 import {
-  isActivePullRequestReviewRun,
   type PullRequestReviewSettings,
   type PullRequestReviewSkipReason,
 } from '../../../common/pull-request-reviews.js';
-import type { StoredRun } from './store.js';
+import type { ReviewSelectionHistory } from './store.js';
 
 const TRUSTED_ASSOCIATIONS = new Set(['owner', 'member', 'collaborator']);
 
@@ -19,8 +18,7 @@ export type AutoReviewDecision =
 export interface AutoReviewInput {
   settings: PullRequestReviewSettings;
   pull: PullRequestSummary;
-  // Runs of this pull request, in any order.
-  runs: readonly StoredRun[];
+  history: ReviewSelectionHistory;
   // When the scanner first saw the current head commit.
   headObservedAt: number;
   // Automatic reviews this repository started in the last day.
@@ -44,15 +42,11 @@ function filterReason(settings: PullRequestReviewSettings, pull: PullRequestSumm
 // Decides whether a scan should start an automatic review of a pull request's current head.
 export function decideAutoReview(input: AutoReviewInput): AutoReviewDecision {
   const { settings, pull } = input;
-  const head = pull.headRefOid;
-  if (input.runs.some((run) => isActivePullRequestReviewRun(run.state))) return { kind: 'settled' };
-  const atHead = input.runs.filter((run) => run.headSha === head || run.reviewedSha === head);
-  if (atHead.some((run) => run.state === 'completed' && run.reviewedSha === head)) return { kind: 'settled' };
+  if (input.history.active || input.history.completed) return { kind: 'settled' };
   const filtered = filterReason(settings, pull);
   if (filtered) return { kind: 'skip', reason: filtered };
-  if (atHead.some((run) => run.state === 'stopped')) return { kind: 'skip', reason: 'stopped' };
-  const attempts = atHead.filter((run) => run.trigger === 'auto').length;
-  if (attempts >= settings.maxAttemptsPerCommit) return { kind: 'skip', reason: 'attempts-exhausted' };
+  if (input.history.stopped) return { kind: 'skip', reason: 'stopped' };
+  if (input.history.attempts >= settings.maxAttemptsPerCommit) return { kind: 'skip', reason: 'attempts-exhausted' };
   if (input.now - input.headObservedAt < settings.debounceMinutes * 60_000) return { kind: 'wait' };
   if (input.startedInLastDay >= settings.dailyReviewLimit) return { kind: 'skip', reason: 'daily-limit' };
   return { kind: 'review' };

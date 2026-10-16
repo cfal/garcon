@@ -63,6 +63,15 @@ it('reports a pull request that does not exist', async () => {
     .rejects.toThrow(/could not resolve to a pullrequest/i);
 });
 
+it('recovers a delivered SHA-256 review comment after repository casing changes', async () => {
+  const head = 'c'.repeat(64);
+  await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'Synthetic', repository: 'Repository', pulls: [{ number: 3, headRefOid: head }] }));
+  const gh = createGhOperations(root);
+  const created = await gh.createPullRequestComment({ projectPath: root, number: 3, body: `Review\n<!-- garcon-review Synthetic/Repository#3 ${head} -->` });
+  const retry = await gh.getPullRequestReviewTarget({ projectPath: root, number: 3, marker: 'garcon-review synthetic/repository#3 ' });
+  expect(retry.markedComments).toMatchObject([{ id: created.id, marker: expect.stringContaining(head) }]);
+});
+
 it('reads 101 open pull requests and all policy connections', async () => {
   const labels = Array.from({ length: 101 }, (_, index) => `label-${index}`);
   const reviewers = Array.from({ length: 101 }, (_, index) => `reviewer-${index}`);

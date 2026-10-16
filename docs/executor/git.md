@@ -203,6 +203,13 @@ Mutation replies are also inline. A result that exceeds the size limit after a m
 
 Propagate the operation deadline through RPC, subprocesses, and lock waits. Cancellation stops undispatched work and requests interruption of dispatched subprocesses; it is not rollback. Temporary-index cleanup and repository locks remain executor-owned until native operations settle. Connection loss alone never permits mutation replay.
 
+`ghOperationTimeoutMs` in `common/git-execution.ts` owns the per-method GitHub
+budget. Pull request lists, details, and review posting targets each share
+60 seconds across all pages; status and GitHub mutations
+receive 30 seconds. Local admission, the remote facade, and worker envelope
+validation use that same policy, and callers may shorten it. Executor protocol
+revision 28 requires both peers to accept the paginated read budgets together.
+
 Bulk Git traffic cannot occupy primary's socket queue, but host and network resources remain shared. Fixed size/admission bounds are not a traffic scheduler or an end-to-end latency promise. Larger results require a separate product decision.
 
 ## Mutation Ordering And Uncertain Results

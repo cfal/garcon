@@ -35,6 +35,7 @@ export interface PullRequestReviewRepositoriesDeps {
   retainExecutorReferences?: RetainExecutorReferences;
   retainProviderReferences?: RetainProviderReferences;
   autoReviewStatus(repositoryId: string, number: number): PullRequestAutoReviewStatus | null;
+  isPostingRepository(repositoryId: string): boolean;
   changed(): void;
   now(): number;
 }
@@ -49,9 +50,7 @@ export class PullRequestReviewRepositories {
     const inbox: PullRequestReviewInboxEntry[] = [];
     for (const repository of repositories) {
       const latest = new Map<number, StoredRun>();
-      for (const run of store.runsForRepository(repository.id)) {
-        if (!latest.has(run.number)) latest.set(run.number, run);
-      }
+      for (const run of store.latestRunsForOpenPulls(repository.id)) latest.set(run.number, run);
       for (const pull of store.pulls(repository.id)) {
         const run = latest.get(pull.number);
         inbox.push({
@@ -168,7 +167,8 @@ export class PullRequestReviewRepositories {
 
   remove(id: string): void {
     const current = this.require(id);
-    if (this.deps.store.runsForRepository(id).some((run) => run.state === 'reviewing' || run.state === 'needs-input')) {
+    if (this.deps.isPostingRepository(id)) throw reviewConflict('A review is being posted. Wait before disconnecting this repository.');
+    if (this.deps.store.activeRuns().some((run) => run.repositoryId === id && run.state !== 'queued')) {
       throw reviewConflict('Stop the running review before disconnecting this repository.');
     }
     this.#publish(null, current, () => this.deps.store.deleteRepository(id));

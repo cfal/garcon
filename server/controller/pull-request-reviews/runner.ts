@@ -9,6 +9,7 @@ import {
   renderPullRequestReviewPrompt,
 } from '../../../common/pull-request-reviews.js';
 import { normalizeTags } from '../../../common/tags.js';
+import { isStopSatisfied } from '../../../common/chat-stop.js';
 import { errorMessage } from '../../common/errors.js';
 import { createLogger } from '../../common/log.js';
 import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
@@ -22,6 +23,7 @@ import type { PullRequestReviewPoster } from './poster.js';
 import type { PullRequestReviewStore, StoredRun } from './store.js';
 
 const logger = createLogger('pull-request-review-runner');
+const PERMISSION_STOP_RETRY_MS = 30_000;
 
 export interface PullRequestReviewRunnerDeps {
   store: PullRequestReviewStore;
@@ -64,9 +66,7 @@ export class PullRequestReviewRunner {
   }
 
   enqueue(repositoryId: string, pull: PullRequestSummary, trigger: 'auto' | 'manual'): StoredRun {
-    const active = this.deps.store.runsForRepository(repositoryId)
-      .find((run) => run.number === pull.number && isActivePullRequestReviewRun(run.state));
-    if (active) throw reviewConflict('This pull request is already being reviewed.');
+    if (this.deps.store.hasActiveRun(repositoryId, pull.number)) throw reviewConflict('This pull request is already being reviewed.');
     const run: StoredRun = {
       id: crypto.randomUUID(),
       repositoryId,
@@ -113,7 +113,8 @@ export class PullRequestReviewRunner {
       return;
     }
     if (!run.chatId) throw reviewConflict('This review is still starting. Try again in a moment.');
-    await this.deps.commands.submitStop({ chatId: run.chatId, clientRequestId: `pull-request-review-stop:${crypto.randomUUID()}` });
+    const result = await this.deps.commands.submitStop({ chatId: run.chatId, clientRequestId: `pull-request-review-stop:${crypto.randomUUID()}` });
+    if (!isStopSatisfied(result.outcome)) throw reviewConflict('The review could not be stopped. Try again.');
   }
 
   handleTranscriptCommit(event: TranscriptCommitEvent): void {
@@ -132,23 +133,34 @@ export class PullRequestReviewRunner {
         ? (run.state === next ? null : { ...run, state: next })
         : null;
     });
-    if (needsInput && !this.#permissionTimers.has(runId)) {
+    if (needsInput && !this.#permissionTimedOut.has(runId) && !this.#permissionTimers.has(runId)) {
       const timer = setTimeout(() => void this.#expirePermission(runId, event.chatId), PULL_REQUEST_REVIEW_PERMISSION_TIMEOUT_MINUTES * 60_000);
       timer.unref?.();
       this.#permissionTimers.set(runId, timer);
-    } else if (!needsInput) {
+    } else if (!needsInput && !this.#permissionTimedOut.has(runId)) {
       this.#clearPermissionTimer(runId);
     }
     if (updated) this.deps.changed();
   }
 
   async #expirePermission(runId: string, chatId: string): Promise<void> {
-    this.#permissionTimers.delete(runId);
+    this.#clearPermissionTimer(runId);
+    if (this.#abort.signal.aborted || this.#runByChat.get(chatId) !== runId) return;
     this.#permissionTimedOut.add(runId);
     try {
-      await this.deps.commands.submitStop({ chatId, clientRequestId: `pull-request-review-timeout:${runId}` });
+      const result = await this.deps.commands.submitStop({ chatId, clientRequestId: `pull-request-review-timeout:${crypto.randomUUID()}` });
+      if (!isStopSatisfied(result.outcome)) throw reviewConflict('The review could not be stopped.');
     } catch (error) {
       logger.warn('Could not stop a review waiting on a permission request.', { error: errorMessage(error) });
+      if (!this.#abort.signal.aborted && this.deps.store.updateRun(runId, (run) => isActivePullRequestReviewRun(run.state)
+        ? { ...run, message: 'The review could not be stopped after a permission request timed out. Retrying.' }
+        : null)) this.deps.changed();
+    } finally {
+      if (!this.#abort.signal.aborted && this.#runByChat.get(chatId) === runId) {
+        const timer = setTimeout(() => void this.#expirePermission(runId, chatId), PERMISSION_STOP_RETRY_MS);
+        timer.unref?.();
+        this.#permissionTimers.set(runId, timer);
+      }
     }
   }
 
@@ -228,6 +240,7 @@ export class PullRequestReviewRunner {
 
   #settlement(runId: string, record: CommandLedgerRecord | null): Settlement {
     const timedOut = this.#permissionTimedOut.has(runId);
+    if (timedOut) return { state: 'failed', message: 'A permission request timed out, so this review cannot be published.', reviewedSha: null };
     if (!record) return { state: 'failed', message: 'The review result is no longer available.', reviewedSha: null };
     const projection = projectAgentTurnReceipt(record);
     if (projection.kind === 'expired' || projection.receipt.state === 'pending') {
@@ -235,7 +248,6 @@ export class PullRequestReviewRunner {
     }
     const { receipt } = projection;
     if (receipt.state === 'interrupted') {
-      if (timedOut) return { state: 'failed', message: 'A permission request went unanswered, so the review was stopped.', reviewedSha: null };
       return {
         state: 'stopped',
         message: receipt.reason === 'chat-deleted' ? 'The review chat was deleted.' : 'Stopped by the user.',

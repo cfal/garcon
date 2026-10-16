@@ -54,6 +54,13 @@ request are minimized as outdated. A review longer than a GitHub comment is
 kept and reported as too long, never truncated. Reviews never approve or
 request changes.
 
+Markers use a normalized repository identity and accept full 40- or 64-character
+commit hashes. A case-only repository rename refreshes the displayed name while
+preserving comment recovery. Posts for one pull request cannot overlap; other
+pull requests in the repository can post independently. Disconnecting a
+repository is refused while its posts are in flight and can be retried after
+they finish.
+
 ## State
 
 `pull-request-reviews.sqlite` in the workspace directory holds connected
@@ -72,6 +79,19 @@ review run is discarded and repeated before it can invalidate that review.
 A permission request in a review chat shows the run as Needs you; one
 left unanswered for 30 minutes stops the review as failed.
 
+Inbox snapshots read only the newest run for each open pull request and a
+bounded recent-run list. Selection reads indexed active/current-head summaries
+and the last 24 hours' automatic-review count. A process-local per-repository
+run revision fences pending scans without loading their history. Closure is
+recorded once per pull request, so a repeated scan does not rewrite every run.
+Archival and expired-history deletion use bounded batches separated by event
+loop turns; unsuccessful archival remains eligible on a later successful scan.
+
+A failed Stop outcome is reported even when its command resolves normally.
+After a permission timeout, delivery failures remain visible and Stop is
+retried every 30 seconds with a fresh command identity until the turn ends.
+Timed-out reviews cannot publish a subsequently completed response.
+
 The saved executor and provider selections join the executor and provider
 reference guards, as scheduled prompts do.
 
@@ -80,6 +100,11 @@ off automatic reviews or automatic posting. The saved review target stays fixed
 until the executor is ready. Failed scans keep the last saved list and show its
 status in the inbox. Policy and posting reads paginate all GitHub connections; incomplete
 reads fail instead of publishing a truncated successful scan.
+
+The Review tab keeps the inbox's run summary while history loads and shows
+history read failures with Retry. Review and Post remain disabled until that
+read succeeds. Snapshot revisions also refresh older selected history entries
+after a posting result changes.
 
 ## Safety
 

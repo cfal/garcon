@@ -3,7 +3,7 @@ import { stat } from 'node:fs/promises';
 import type { ExecutionGitService, ExecutionGhService, ExecutorCallOptions } from '@garcon/server-agent-interface';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import type { GitMethod } from '../../../common/git.js';
-import { GIT_MAX_CONCURRENT_QUERIES, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults, type GitExecutorScope } from '../../../common/git-execution.js';
+import { GIT_MAX_CONCURRENT_QUERIES, ghOperationTimeoutMs, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults, type GitExecutorScope } from '../../../common/git-execution.js';
 import { GitServiceError } from '../../../common/git-error.js';
 import { isGhMutation, type GhRequests, type GhResults } from '../../../common/gh.js';
 import { validateGitRequest, validateGhRequest } from '../../../common/git-request-validation.js';
@@ -234,7 +234,8 @@ export class GitRuntime {
     validateGhRequest(method, request);
     const mutation = isGhMutation(method);
     try {
-      const payload = await this.#admit(`gh.${method}`, mutation, options, async (callOptions) => {
+      const timeoutMs = Math.max(1, Math.min(options?.timeoutMs ?? ghOperationTimeoutMs(method), ghOperationTimeoutMs(method)));
+      const payload = await this.#admit(`gh.${method}`, mutation, { ...options, timeoutMs }, async (callOptions) => {
         if (method === 'getStatus') return this.#gh.getStatus(callOptions.signal);
         const input = request as Exclude<GhRequests[keyof GhRequests], Record<string, never>>;
         const projectPath = await this.#repository(input.projectPath, callOptions);

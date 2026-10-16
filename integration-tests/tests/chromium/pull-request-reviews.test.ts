@@ -4,6 +4,7 @@ import { chmod, copyFile, mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   DEFAULT_PULL_REQUEST_REVIEW_SETTINGS,
+  type PullRequestReviewRunsResponse,
   type PullRequestReviewsSnapshot,
 } from '../../../common/pull-request-reviews.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
@@ -40,7 +41,7 @@ REVIEW
 `;
 
 test('reviews pull requests in chats and shows them in the GitHub Views inbox', async () => {
-  await withChromiumFixture('pull-request-reviews', async ({ page, integration, assertNoBrowserErrors }, phase) => {
+  await withChromiumFixture('pull-request-reviews', async ({ page, integration, browserErrors }, phase) => {
     const { client, dirs } = integration;
     const project = dirs.project;
     await initializeFixtureRepository(project);
@@ -108,9 +109,33 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     await browserExpect(panel.locator('[data-pr-inbox-group="other-open"]')).toContainText('Queued');
 
     phase('select a reviewed pull request');
+    const historyRead = Promise.withResolvers<void>();
+    let rejectHistory = true;
+    await page.route('**/api/v1/pull-request-reviews/runs?*', async route => {
+      if (!rejectHistory) return route.continue();
+      await historyRead.promise;
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Review history temporarily unavailable.' }) });
+    });
     await needsReview.getByText('Keep queue controls stable during reconnect').click();
+    await browserExpect(panel.locator('[data-pr-review-loading]')).toBeVisible();
+    await browserExpect(panel.getByRole('button', { name: 'Re-run', exact: true })).toBeDisabled();
+    await browserExpect(panel.getByRole('button', { name: 'Post to GitHub' })).toBeDisabled();
+    await browserExpect(panel.getByText('Not reviewed yet.', { exact: true })).toHaveCount(0);
+    await capture('review-history-loading-desktop');
+    historyRead.resolve();
+    await browserExpect(panel.locator('[data-pr-review-history-error]')).toContainText('Review history temporarily unavailable.');
+    await browserExpect(panel.getByRole('button', { name: 'Re-run', exact: true })).toBeDisabled();
+    await capture('review-history-error-desktop');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('[data-mobile-current-chat-menu]').getByRole('button').click();
+    await page.getByRole('menuitem', { name: 'Open PRs', exact: true }).click();
+    await browserExpect(panel.locator('[data-pr-review-history-error]')).toBeVisible();
+    await capture('review-history-error-mobile');
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    rejectHistory = false;
+    await panel.locator('[data-pr-review-history-error]').getByRole('button', { name: 'Retry' }).click();
     await panel.locator('[data-pr-review-tab]').getByText('Queue pause is lost on reconnect.').waitFor();
-    await browserExpect(panel.getByRole('button', { name: 'Post to GitHub' })).toBeVisible();
+    await browserExpect(panel.getByRole('button', { name: 'Post to GitHub' })).toBeEnabled();
     // Desktop shows the review chat beside the inbox.
     await page.locator('[data-workspace-surface-id^="chat-view:"]').getByText('Reviewed commit:', { exact: false }).last().waitFor();
     await capture('inbox-review-desktop');
@@ -121,7 +146,7 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     await capture('inbox-changes-desktop');
     await panel.locator('[data-pr-tab="checks"]').click();
     await panel.getByText('Unit tests', { exact: true }).waitFor();
-    await browserExpect(panel.locator('[data-pr-checks-summary]')).toHaveText('2 passed');
+    await browserExpect(panel.locator('[data-pr-checks-summary]')).toHaveText('2 passed · 1 neutral · 1 skipped');
     await capture('inbox-checks-desktop');
 
     phase('repositories');
@@ -178,7 +203,35 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
       const current = await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews');
       return current.inbox.find((entry) => entry.pull.number === 133)?.latestRun?.post.status;
     }, { timeout: 30_000 }).toBe('posted');
-    assertNoBrowserErrors();
+    phase('post an earlier review without changing the latest run');
+    const repositoryId = snapshot.repositories[0].id;
+    const earlierRun = snapshot.inbox.find(entry => entry.pull.number === 128)!.latestRun!;
+    const current = await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews');
+    const connected = current.repositories[0];
+    await client.put('/api/v1/pull-request-reviews/repositories', {
+      id: connected.id, repository: { target: connected.target, settings: { ...connected.settings, autoReview: false, autoPost: false } },
+    });
+    await client.post('/api/v1/pull-request-reviews/runs', { repositoryId, number: 128 });
+    await browserExpect.poll(async () => {
+      const current = await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews');
+      const latest = current.inbox.find(entry => entry.pull.number === 128)!.latestRun!;
+      return latest.id !== earlierRun.id && latest.state === 'completed';
+    }, { timeout: 30_000 }).toBe(true);
+    await needsReview.getByText('Keep queue controls stable during reconnect').click();
+    await panel.locator('[data-pr-tab="review"]').click();
+    await panel.locator(`[data-pr-review-run="${earlierRun.id}"]`).click();
+    await browserExpect(panel.getByRole('button', { name: 'Post to GitHub' })).toBeEnabled();
+    await panel.getByRole('button', { name: 'Post to GitHub' }).click();
+    await browserExpect(panel.getByRole('link', { name: 'View the posted comment' })).toBeVisible();
+    await browserExpect(panel.getByRole('button', { name: 'Post to GitHub' })).toHaveCount(0);
+    const postedHistory = await client.get<PullRequestReviewRunsResponse>(`/api/v1/pull-request-reviews/runs?repositoryId=${repositoryId}&number=128`);
+    expect(postedHistory.runs[0].post.status).toBe('none');
+    expect(postedHistory.runs.find(run => run.id === earlierRun.id)?.post.status).toBe('posted');
+    await capture('older-review-posted-mobile');
+
+    expect(browserErrors).toEqual([
+      'console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)',
+    ]);
   }, undefined, {
     executionBackend: 'in-process',
     resolveServerEnvironment: dirs => ({ PATH: `${join(dirs.root, 'gh-bin')}:${process.env.PATH}` }),
@@ -193,6 +246,8 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
         statusChecks: [
           { __typename: 'CheckRun', name: 'Unit tests', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://git.example.invalid/acme/app/actions/unit-tests' },
           { __typename: 'CheckRun', name: 'Type check', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://git.example.invalid/acme/app/actions/type-check' },
+          { __typename: 'CheckRun', name: 'Advisory', status: 'COMPLETED', conclusion: 'NEUTRAL', detailsUrl: 'https://git.example.invalid/acme/app/actions/advisory' },
+          { __typename: 'CheckRun', name: 'Optional', status: 'COMPLETED', conclusion: 'SKIPPED', detailsUrl: 'https://git.example.invalid/acme/app/actions/optional' },
         ],
       }));
     },

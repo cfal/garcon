@@ -257,12 +257,12 @@ export function buildPullRequestList(raw: GhRawPullRequestList): PullRequestList
 export function buildReviewTarget(raw: GhRawReviewTarget, markerPrefix: string): PullRequestReviewTarget | null {
   const pull = raw.data?.repository?.pullRequest;
   if (!pull || typeof pull.number !== 'number') return null;
-  const pattern = /<!-- garcon-review [^\s#]+\/[^\s#]+#[1-9]\d* [a-f0-9]{40} -->\s*$/;
+  const pattern = /<!-- garcon-review [^\s#]+\/[^\s#]+#[1-9]\d* (?:[a-f0-9]{40}|[a-f0-9]{64}) -->\s*$/;
   const markedComments: PullRequestMarkedComment[] = [];
   for (const comment of nodes(pull.comments)) {
     if (!comment.viewerDidAuthor || !comment.id) continue;
     const marker = pattern.exec(comment.body ?? '')?.[0].trimEnd();
-    if (!marker?.startsWith(`<!-- ${markerPrefix}`)) continue;
+    if (!marker?.toLowerCase().startsWith(`<!-- ${markerPrefix.toLowerCase()}`)) continue;
     markedComments.push({ id: comment.id, url: comment.url ?? '', marker, isMinimized: Boolean(comment.isMinimized) });
   }
   return {

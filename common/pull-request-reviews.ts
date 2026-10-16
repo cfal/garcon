@@ -227,7 +227,7 @@ export function parseReviewedCommit(review: string): string | null {
 
 // Prefix of the hidden marker that identifies Garcon's review comments on one pull request.
 export function pullRequestReviewMarkerPrefix(nameWithOwner: string, number: number): string {
-  return `garcon-review ${nameWithOwner}#${number} `;
+  return `garcon-review ${nameWithOwner.toLowerCase()}#${number} `;
 }
 
 export function pullRequestReviewCommentBody(review: string, nameWithOwner: string, number: number, commit: string): string {

@@ -1,9 +1,9 @@
 import { AgentCallError } from '@garcon/server-agent-interface';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { GH_DETAIL_TIMEOUT_MS } from '../../../common/git-execution.js';
 import {
   PULL_REQUEST_REVIEW_SCAN_INTERVAL_MINUTES,
-  isActivePullRequestReviewRun,
   type PullRequestAutoReviewStatus,
   type PullRequestReviewRepository,
   type PullRequestReviewScan,
@@ -14,7 +14,7 @@ import { createLogger } from '../../common/log.js';
 import { decideAutoReview } from './selection.js';
 import type { PullRequestReviewRunner } from './runner.js';
 import type { GhServiceSource } from './service.js';
-import type { PullRequestReviewStore, StoredRun } from './store.js';
+import { REVIEW_HISTORY_BATCH_SIZE, type PullRequestReviewStore } from './store.js';
 
 const logger = createLogger('pull-request-review-scanner');
 
@@ -43,7 +43,8 @@ export class PullRequestReviewScanner {
   // When each repository's pull request was first seen at its current head; restarts reset it.
   readonly #headObserved = new Map<string, { sha: string; at: number }>();
   readonly #status = new Map<string, Map<number, PullRequestAutoReviewStatus>>();
-  readonly #archiving = new Set<string>();
+  readonly #maintaining = new Set<string>();
+  readonly #maintenanceRequested = new Map<string, string>();
 
   constructor(private readonly deps: PullRequestReviewScannerDeps) {}
 
@@ -56,6 +57,7 @@ export class PullRequestReviewScanner {
   stop(): void {
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = null;
+    this.#maintenanceRequested.clear();
   }
 
   autoReviewStatus(repositoryId: string, number: number): PullRequestAutoReviewStatus | null {
@@ -104,7 +106,7 @@ export class PullRequestReviewScanner {
 
   async #scan(repository: PullRequestReviewRepository): Promise<void> {
     this.#lastAttempt.set(repository.id, this.deps.now());
-    const before = new Map(this.deps.store.runsForRepository(repository.id).map((run) => [run.id, run]));
+    const before = this.deps.store.runsRevision(repository.id);
     let scan: PullRequestReviewScan;
     try {
       const gh = await this.deps.executors.requireExecutor(effectiveExecutorId(repository.target.executorId)).getGhService();
@@ -112,20 +114,19 @@ export class PullRequestReviewScanner {
       // A repository edited or removed during the read is scanned again under its new settings.
       const current = this.deps.store.getRepository(repository.id);
       if (!current || current.updatedAt !== repository.updatedAt) return;
-      const runs = this.deps.store.runsForRepository(repository.id);
       // A read begun before a review changed cannot invalidate it or enqueue an older head.
-      if (runs.length !== before.size || runs.some((run) => {
-        const previous = before.get(run.id);
-        return !previous || previous.state !== run.state || previous.reviewedSha !== run.reviewedSha;
-      })) {
-        this.#forced.add(repository.id);
-        this.#rescan = true;
+      if (this.deps.store.runsRevision(repository.id) !== before) {
+        this.#repeat(repository.id);
         return;
       }
-      if (list.repo?.nameWithOwner !== repository.nameWithOwner) {
+      if (list.repo?.nameWithOwner.toLowerCase() !== repository.nameWithOwner.toLowerCase()) {
         scan = { ...repository.scan, status: 'failed', message: `The folder is no longer a checkout of ${repository.nameWithOwner}.` };
         if (this.deps.store.recordScan(repository.id, scan)) this.deps.changed();
         return;
+      }
+      if (list.repo.nameWithOwner !== current.nameWithOwner || list.repo.url !== current.url || list.viewerLogin !== current.viewerLogin) {
+        const { scan: _scan, ...stored } = current;
+        this.deps.store.updateRepository({ ...stored, nameWithOwner: list.repo.nameWithOwner, url: list.repo.url, viewerLogin: list.viewerLogin });
       }
       scan = { status: 'ok', scannedAt: new Date(this.deps.now()).toISOString(), message: null };
       if (!this.deps.store.recordScan(repository.id, scan, list.pulls)) return;
@@ -140,31 +141,40 @@ export class PullRequestReviewScanner {
       if (this.deps.store.recordScan(repository.id, scan)) this.deps.changed();
       return;
     }
-    this.#evaluate(this.deps.store.getRepository(repository.id) ?? repository);
+    await this.#evaluate(this.deps.store.getRepository(repository.id) ?? repository);
     this.deps.changed();
     this.deps.runner.pump();
   }
 
-  #evaluate(repository: PullRequestReviewRepository): void {
+  #repeat(repositoryId: string): void {
+    this.#forced.add(repositoryId);
+    this.#rescan = true;
+  }
+
+  async #evaluate(repository: PullRequestReviewRepository): Promise<void> {
     const { store } = this.deps;
     const now = this.deps.now();
     const pulls = store.pulls(repository.id);
-    const runs = store.runsForRepository(repository.id);
-    const byNumber = new Map<number, StoredRun[]>();
-    for (const run of runs) {
-      const group = byNumber.get(run.number) ?? [];
-      group.push(run);
-      byNumber.set(run.number, group);
-    }
+    const steps = new EventLoopSteps('pull-request-review-evaluate');
+    let revision = store.runsRevision(repository.id);
+    const isCurrent = () => this.#timer !== null && store.getRepository(repository.id)?.updatedAt === repository.updatedAt
+      && store.runsRevision(repository.id) === revision;
     const statuses = new Map<number, PullRequestAutoReviewStatus>();
-    let startedInLastDay = runs.filter((run) => run.trigger === 'auto' && now - Date.parse(run.createdAt) < DAY_MS).length;
+    let startedInLastDay = store.automaticRunsSince(repository.id, new Date(now - DAY_MS).toISOString());
     const open = new Set(pulls.map((pull) => pull.number));
     for (const pull of pulls) {
       const key = `${repository.id}:${pull.number}`;
       const observed = this.#headObserved.get(key);
       if (observed?.sha !== pull.headRefOid) this.#headObserved.set(key, { sha: pull.headRefOid, at: now });
-      const pullRuns = byNumber.get(pull.number) ?? [];
-      this.#markOutdated(pullRuns, pull.headRefOid);
+      let outdated: number;
+      do {
+        outdated = store.markOutdated(repository.id, pull.number, pull.headRefOid);
+        revision = store.runsRevision(repository.id);
+        if (steps.due) {
+          await steps.next();
+          if (!isCurrent()) { this.#repeat(repository.id); return; }
+        }
+      } while (outdated === REVIEW_HISTORY_BATCH_SIZE);
       if (!repository.settings.autoReview) {
         statuses.set(pull.number, { kind: 'off' });
         continue;
@@ -172,7 +182,7 @@ export class PullRequestReviewScanner {
       const decision = decideAutoReview({
         settings: repository.settings,
         pull,
-        runs: pullRuns,
+        history: store.selectionHistory(repository.id, pull.number, pull.headRefOid),
         headObservedAt: this.#headObserved.get(key)!.at,
         startedInLastDay,
         now,
@@ -180,6 +190,7 @@ export class PullRequestReviewScanner {
       statuses.set(pull.number, decision.kind === 'skip' ? { kind: 'skipped', reason: decision.reason } : { kind: 'eligible' });
       if (decision.kind !== 'review') continue;
       this.deps.runner.enqueue(repository.id, pull, 'auto');
+      revision = store.runsRevision(repository.id);
       startedInLastDay += 1;
     }
     for (const key of this.#headObserved.keys()) {
@@ -187,33 +198,64 @@ export class PullRequestReviewScanner {
       if (repositoryId === repository.id && !open.has(Number(number))) this.#headObserved.delete(key);
     }
     this.#status.set(repository.id, statuses);
-    this.#archiveClosed(runs, open);
-    store.pruneClosedRuns(repository.id, new Date(now - CLOSED_RUN_RETENTION_MS).toISOString());
+    this.#requestMaintenance(repository.id, new Date(now - CLOSED_RUN_RETENTION_MS).toISOString());
   }
 
-  // A finished review of an older head no longer describes the pull request.
-  #markOutdated(runs: readonly StoredRun[], head: string): void {
-    for (const run of runs) {
-      if (run.state !== 'completed' || run.reviewedSha === head) continue;
-      this.deps.store.updateRun(run.id, (current) => current.state === 'completed' && current.reviewedSha !== head
-        ? { ...current, state: 'outdated', message: 'The pull request has new commits.' }
-        : null);
-    }
+  #requestMaintenance(repositoryId: string, before: string): void {
+    this.#maintenanceRequested.set(repositoryId, before);
+    if (this.#maintaining.has(repositoryId)) return;
+    this.#maintaining.add(repositoryId);
+    void (async () => {
+      while (this.#timer && this.#maintenanceRequested.has(repositoryId)) {
+        const cutoff = this.#maintenanceRequested.get(repositoryId)!;
+        this.#maintenanceRequested.delete(repositoryId);
+        await this.#maintainClosed(repositoryId, cutoff);
+      }
+    })().catch((error) => logger.warn('Review history maintenance failed.', { error: errorMessage(error) }))
+      .finally(() => this.#maintaining.delete(repositoryId));
   }
 
   // Review chats of merged or closed pull requests leave the active sidebar.
-  #archiveClosed(runs: readonly StoredRun[], open: ReadonlySet<number>): void {
-    for (const run of runs) {
-      if (open.has(run.number) || !run.chatId || run.chatArchived || this.#archiving.has(run.id) || isActivePullRequestReviewRun(run.state)) continue;
-      const chatId = run.chatId;
-      this.#archiving.add(run.id);
-      void this.deps.archiveChat(chatId)
-        .then(() => {
-          if (!this.deps.store.available) return;
-          if (this.deps.store.updateRun(run.id, (current) => ({ ...current, chatArchived: true }))) this.deps.changed();
-        })
-        .catch((error) => logger.warn('Could not archive a review chat.', { error: errorMessage(error) }))
-        .finally(() => this.#archiving.delete(run.id));
+  async #maintainClosed(repositoryId: string, before: string): Promise<void> {
+    const { store } = this.deps;
+    const steps = new EventLoopSteps('pull-request-review-history-maintenance');
+    let number = 0;
+    while (this.#timer && store.available) {
+      const closed = store.closedPulls(repositoryId, number);
+      for (const pullNumber of closed) {
+        number = pullNumber;
+        let sequence = 0;
+        while (this.#timer && store.available) {
+          const runs = store.runsToArchive(repositoryId, number, sequence);
+          for (const run of runs) {
+            if (!this.#timer || !store.available) return;
+            sequence = run.sequence;
+            try {
+              await this.deps.archiveChat(run.chatId!);
+              if (!this.#timer || !store.available) return;
+              if (store.updateRun(run.id, (current) => ({ ...current, chatArchived: true }))) this.deps.changed();
+            } catch (error) {
+              logger.warn('Could not archive a review chat.', { error: errorMessage(error) });
+            }
+            if (steps.due) await steps.next();
+          }
+          if (runs.length < REVIEW_HISTORY_BATCH_SIZE) break;
+        }
+        if (steps.due) await steps.next();
+      }
+      if (closed.length < REVIEW_HISTORY_BATCH_SIZE) break;
+    }
+    while (this.#timer && store.available) {
+      const removed = store.pruneClosedRuns(repositoryId, before);
+      if (removed) this.deps.changed();
+      if (steps.due) await steps.next();
+      if (removed < REVIEW_HISTORY_BATCH_SIZE) break;
+    }
+    while (this.#timer && store.available) {
+      const removed = store.pruneClosedPulls(repositoryId, before);
+      if (removed) this.deps.changed();
+      if (steps.due) await steps.next();
+      if (removed < REVIEW_HISTORY_BATCH_SIZE) break;
     }
   }
 }

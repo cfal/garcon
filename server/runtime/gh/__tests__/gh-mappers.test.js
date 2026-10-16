@@ -115,6 +115,12 @@ describe('buildReviewTarget', () => {
   it('reports a missing pull request', () => {
     expect(buildReviewTarget({ data: { repository: { pullRequest: null } } }, 'x')).toBe(null);
   });
+
+  it('recognizes full SHA-256 markers across a repository casing change', () => {
+    const marker = `<!-- garcon-review Acme/App#7 ${'c'.repeat(64)} -->`;
+    const target = buildReviewTarget(raw([comment('sha256', marker)]), 'garcon-review acme/app#7 ');
+    expect(target.markedComments).toMatchObject([{ id: 'sha256', marker }]);
+  });
 });
 
 describe('mapReviewDecision / mapMergeable', () => {

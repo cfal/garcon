@@ -3036,6 +3036,7 @@
 	"pull_request_repository_recent_runs_empty": "No reviews have run yet.",
 	"pull_request_reviews_load_failed": "Reviews of this pull request could not be loaded.",
 	"pull_request_review_none": "Not reviewed yet.",
+	"pull_request_review_history_loading": "Loading review history...",
 	"pull_request_review_start": "Review",
 	"pull_request_review_rerun": "Re-run",
 	"pull_request_review_stop": "Stop",
@@ -3079,5 +3080,6 @@
 	"pull_request_checks_failing": "{count} failing",
 	"pull_request_checks_running": "{count} running",
 	"pull_request_checks_passed": "{count} passed",
+	"pull_request_checks_neutral": "{count} neutral",
 	"pull_request_checks_skipped": "{count} skipped"
 }

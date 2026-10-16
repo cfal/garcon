@@ -23,9 +23,13 @@ export interface PullRequestReviewPosterDeps {
 
 // Posts a finished review as one pull request comment under the executor's `gh` login.
 export class PullRequestReviewPoster {
-  readonly #posting = new Set<string>();
+  readonly #postingPulls = new Map<string, string>();
 
   constructor(private readonly deps: PullRequestReviewPosterDeps) {}
+
+  isPostingRepository(repositoryId: string): boolean {
+    return [...this.#postingPulls.values()].includes(repositoryId);
+  }
 
   async post(runId: string): Promise<void> {
     const { store } = this.deps;
@@ -36,17 +40,18 @@ export class PullRequestReviewPoster {
     if (run.post.status === 'posted') throw reviewConflict('This review is already posted.');
     const repository = store.getRepository(run.repositoryId);
     if (!repository) throw reviewConflict('The repository is no longer connected.');
-    if (this.#posting.has(runId)) throw reviewConflict('This review is already being posted.');
+    const pullKey = `${run.repositoryId}:${run.number}`;
+    if (this.#postingPulls.has(pullKey)) throw reviewConflict('A review of this pull request is already being posted.');
     const body = pullRequestReviewCommentBody(run.review, repository.nameWithOwner, run.number, run.reviewedSha);
     if (body.length > GH_COMMENT_BODY_MAX_LENGTH) {
       this.#record(runId, { status: 'too-long', message: 'The review is longer than a GitHub comment allows.' });
       return;
     }
-    this.#posting.add(runId);
+    this.#postingPulls.set(pullKey, run.repositoryId);
     try {
       await this.#post(run, repository.nameWithOwner, effectiveExecutorId(repository.target.executorId), repository.target.projectPath, body);
     } finally {
-      this.#posting.delete(runId);
+      this.#postingPulls.delete(pullKey);
     }
   }
 
