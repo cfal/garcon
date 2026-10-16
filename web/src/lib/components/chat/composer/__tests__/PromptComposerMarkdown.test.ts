@@ -17,6 +17,7 @@ import { configureComposerMarkdown } from '../composer-markdown.js';
 import * as snippetsApi from '$lib/api/snippets';
 import * as commandsApi from '$lib/api/commands.js';
 import * as filesApi from '$lib/api/files.js';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures.js';
 
 vi.mock('../composer-markdown-worker.js', () => ({
 	parseComposerMarkdownInWorker: vi.fn(),
@@ -63,6 +64,44 @@ async function formatted({
 }
 
 describe('formatted composer integration', () => {
+	it.each([
+		{ source: 'Review @alice', executor: remoteExecutor },
+		{ source: '/cl', executor: { ...remoteExecutor, availability: 'offline' as const } },
+	])('retries pending formatting when the palette for $source is hidden', async ({ source, executor }) => {
+		let complete!: (value: ReturnType<typeof parseComposerMarkdown>) => void;
+		vi.mocked(parseComposerMarkdownInWorker)
+			.mockReturnValueOnce(new Promise((resolve) => { complete = resolve; }))
+			.mockImplementation(async (request) => parseComposerMarkdown(request));
+		render(PromptComposerTestHost, {
+			selectedChatId: 'hidden-palette',
+			selectedStatus: 'draft',
+			selectedExecutorId: executor.id,
+			executors: [localExecutor, executor],
+		});
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.input(textarea, { target: { value: 'Review' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Formatted' }));
+		await fireEvent.input(textarea, { target: { value: source } });
+		expect(screen.queryByRole('listbox')).toBeNull();
+		expect(vi.mocked(parseComposerMarkdownInWorker).mock.calls.map(([request]) => request.source))
+			.toEqual(['Review', source]);
+		complete(parseComposerMarkdown({ source: 'Review' }));
+		await screen.findByRole('textbox', { name: 'Formatted message' });
+		expect(textarea.value).toBe(source);
+	});
+	it('does not cancel a newer restore when revealing a postponed append', async () => {
+		const { textarea, rerender } = await formatted({ source: 'Review' });
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) => parseComposerMarkdown(request));
+		await rerender({ isVisible: false });
+		await fireEvent.click(screen.getByTestId('append-draft'));
+		await fireEvent.click(screen.getByTestId('restore-draft'));
+		await rerender({ isVisible: true });
+		await screen.findByRole('textbox', { name: 'Formatted message' });
+		expect(textarea.value).toBe('Review\n\nAppended review block');
+		const lastCall = vi.mocked(parseComposerMarkdownInWorker).mock.calls.at(-1)!;
+		expect(lastCall[0].source).toBe(textarea.value);
+		expect(lastCall[1]?.aborted).toBe(false);
+	});
 	it.each(['/', 'Review ;;', 'Review @src'])(
 		'keeps the source palette open after typing %j during conversion',
 		async (source) => {

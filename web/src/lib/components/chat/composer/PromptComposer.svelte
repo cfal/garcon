@@ -156,6 +156,9 @@
 		get canFormat() {
 			return canFormat;
 		},
+		get sourcePaletteOpen() {
+			return fileMenuVisible || slashMenuVisible || ui.snippetPalette.isOpen;
+		},
 		get acceptsMarkdown() { return markdownInput; },
 		get preferredMode() { return localSettings.composerInputMode; },
 		get interactionGeneration() {
@@ -233,6 +236,10 @@
 		}),
 	);
 	const showProjectNotice = $derived(availabilityNotice?.kind === 'project-unavailable');
+	const fileMenuVisible = $derived(conversationInput && filesAvailable && ui.showFileMenu && !showProjectNotice);
+	const slashMenuVisible = $derived(
+		ui.showSlashMenu && (!conversationInput || executors.isReady(agentState.executorId)) && !showProjectNotice,
+	);
 	const completionProjectPath = $derived(projectState.completionProjectPath);
 	const canChooseProjectFolder = $derived(
 		Boolean(
@@ -339,6 +346,12 @@
 		attachmentController.resetDrag();
 	});
 
+	$effect(() => {
+		const request = composerState.draftAppendRequest;
+		untrack(() => {
+			if (request?.chatId === sessions.selectedChatId) markdown.reset();
+		});
+	});
 	// Drops a formatted view once another surface changed the draft or its model stopped accepting Markdown.
 	$effect(() => {
 		if (ui.formattedDraft && (!formattedDraft || !markdownInput)) untrack(() => markdown.reset());
@@ -415,7 +428,6 @@
 		) {
 			return;
 		}
-		untrack(() => markdown.reset());
 		const frameId = requestAnimationFrame(() => {
 			if (
 				composerState.draftAppendRequest?.requestId !== request.requestId ||
@@ -598,11 +610,10 @@
 	}
 
 	function handleCompletionKeyDown(event: KeyboardEvent): boolean {
-		const showFileMenu = conversationInput && filesAvailable && ui.showFileMenu;
-		if (!showFileMenu && !ui.showSlashMenu) return false;
-		const menu = showFileMenu ? fileMentionMenu : slashCommandMenu;
+		if (!fileMenuVisible && !slashMenuVisible) return false;
+		const menu = fileMenuVisible ? fileMentionMenu : slashCommandMenu;
 		if (menu?.handleKeyDown(event)) return true;
-		if (menu && !showFileMenu && event.key === 'Enter') return false;
+		if (menu && !fileMenuVisible && event.key === 'Enter') return false;
 		if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) return false;
 		event.preventDefault();
 		return true;
@@ -774,7 +785,7 @@
 				executorId={agentState.executorId}
 				bind:this={fileMentionMenu}
 				projectPath={completionProjectPath}
-				isVisible={conversationInput && ui.showFileMenu && !showProjectNotice}
+				isVisible={fileMenuVisible}
 				projectPending={Boolean(
 					selectedProjectTarget &&
 					(selectedProjectResolution.kind === 'unchecked' ||
@@ -941,7 +952,7 @@
 			executorId={agentState.executorId}
 			projectPath={completionProjectPath}
 			chatId={selectedProjectTarget?.kind === 'chat' ? sessions.selectedChatId : null}
-			isVisible={ui.showSlashMenu && (!conversationInput || executors.isReady(agentState.executorId)) && !showProjectNotice}
+			isVisible={slashMenuVisible}
 			{conversationInput}
 			canClear={executionAgent?.executionPolicy === 'literal' && Boolean(sessions.selectedChat && sessions.selectedChat.status !== 'draft')}
 			projectPending={Boolean(

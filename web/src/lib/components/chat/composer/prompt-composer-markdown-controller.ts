@@ -26,6 +26,7 @@ interface PromptComposerMarkdownOptions {
 	get chatId(): string | null;
 	get textarea(): HTMLTextAreaElement | undefined;
 	get canFormat(): boolean;
+	get sourcePaletteOpen(): boolean;
 	/** Whether the selected agent and model take Markdown; other input stays as typed. */
 	get acceptsMarkdown(): boolean;
 	get preferredMode(): ComposerInputMode;
@@ -52,9 +53,7 @@ export class PromptComposerMarkdownController {
 	constructor(private readonly options: PromptComposerMarkdownOptions) {}
 
 	input(event: InputEvent): void {
-		const { ui } = this.options;
-		const sourcePaletteOpen = ui.showSlashMenu || ui.showFileMenu || ui.snippetPalette.isOpen;
-		const intent = sourcePaletteOpen ? null : this.#formatIntent;
+		const intent = this.options.sourcePaletteOpen ? null : this.#formatIntent;
 		this.reset();
 		this.#formatIntent = intent;
 		this.#composing = event.isComposing;

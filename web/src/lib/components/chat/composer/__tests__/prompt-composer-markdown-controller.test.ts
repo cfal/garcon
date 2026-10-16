@@ -46,6 +46,9 @@ function fixture() {
 		textarea,
 		chatId: 'one',
 		canFormat: true,
+		get sourcePaletteOpen() {
+			return ui.showSlashMenu || ui.showFileMenu || ui.snippetPalette.isOpen;
+		},
 		acceptsMarkdown: true,
 		preferredMode: 'formatted' as 'source' | 'formatted',
 		interactionGeneration: 0,
