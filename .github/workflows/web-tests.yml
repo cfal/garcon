@@ -26,8 +26,7 @@ jobs:
         with:
           bun-version: canary
 
-      # Node backs the vitest step (vitest crashes under Bun's runtime) and any
-      # node-shebang tooling; 24 is current and runs TypeScript 7 cleanly.
+      # Node backs Vitest's thread pools and node-shebang tooling.
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -41,8 +40,7 @@ jobs:
         working-directory: web
         run: bun run i18n:compile
 
-      # svelte-check and eslint run under Bun (faster, and Bun's runtime handles
-      # the TypeScript 7 API that breaks under older Node). vitest stays on Node.
+      # Svelte checks and ESLint run under Bun; Vitest stays on Node.
       - name: Run web checks
         working-directory: web
         run: bun run --bun check
