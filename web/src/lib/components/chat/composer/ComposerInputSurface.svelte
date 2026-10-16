@@ -1,0 +1,105 @@
+<script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
+	import { getLocalSettings } from '$lib/context';
+	import ComposerFormatSelector from './ComposerFormatSelector.svelte';
+	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
+	import { loadComposerMarkdownEditor } from './composer-markdown-editor-loader.js';
+	import type { ComposerMarkdownDocument } from './composer-markdown-parser.js';
+	import type { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
+	let {
+		draft,
+		pending,
+		markdownInput,
+		disabled,
+		busy,
+		sourceReadOnly,
+		visible,
+		text,
+		textarea = $bindable(),
+		controller,
+		onComposerKeydown,
+		onCompletionKeydown,
+		onInput,
+		onRecallReset,
+	}: {
+		draft: ({ source: string } & ComposerMarkdownDocument) | null;
+		pending: boolean;
+		markdownInput: boolean;
+		disabled: boolean;
+		busy: boolean;
+		sourceReadOnly: boolean;
+		visible: boolean;
+		text: string;
+		textarea: HTMLTextAreaElement | undefined;
+		controller: PromptComposerMarkdownController;
+		onComposerKeydown: (event: KeyboardEvent) => void;
+		onCompletionKeydown: (event: KeyboardEvent) => boolean;
+		onInput: (event: Event) => void;
+		onRecallReset: () => void;
+	} = $props();
+	const localSettings = getLocalSettings();
+	const contentSizing = contentSizedTextarea(() => (visible ? text : undefined));
+</script>
+
+<div class="relative overflow-hidden bg-transparent focus-within:ring-0">
+	{#if markdownInput}
+		<ComposerFormatSelector
+			mode={draft || pending ? 'formatted' : 'source'}
+			{pending}
+			disabled={disabled || busy}
+			onSelect={(mode) => {
+				localSettings.set('composerInputMode', mode);
+				controller.selectMode(mode);
+			}}
+		/>
+	{/if}
+
+	{#if draft}
+		{#await loadComposerMarkdownEditor()}
+			<pre
+				class="max-h-[min(40dvh,150px)] overflow-auto whitespace-pre-wrap px-4 py-3 text-base text-composer-foreground sm:max-h-[min(40dvh,300px)] sm:px-5">{draft.source}</pre>
+		{:then MarkdownEditor}
+			<MarkdownEditor
+				document={draft.document}
+				sources={draft.sources}
+				selection={draft.selection}
+				selectionMarks={draft.selectionMarks}
+				readOnly={disabled || busy}
+				snippetTrigger={controller.snippetTrigger}
+				{onComposerKeydown}
+				{onCompletionKeydown}
+				onChange={(text) => controller.change(text)}
+				onSourceAction={(text, caret) => controller.plain(text, caret)}
+				onSnippet={(text, caret) => controller.snippet(text, caret)}
+				onReady={(target) => controller.focus(target)}
+				onMention={(mention) => controller.mention(mention)}
+				onLargePaste={(request) => void controller.pasteSource(request)}
+				onOverflow={(source) => controller.overflow(source)}
+			/>
+		{:catch}
+			<button
+				type="button"
+				onclick={() => void controller.edit()}
+				class="px-4 py-3 text-sm text-muted-foreground"
+				>{m.chat_composer_format_unavailable()}</button
+			>
+		{/await}
+	{/if}
+	<div class="relative z-10" hidden={Boolean(draft)}>
+		<textarea
+			{@attach contentSizing}
+			rows="1"
+			bind:this={textarea}
+			value={text}
+			onkeydown={onComposerKeydown}
+			onpointerdown={onRecallReset}
+			oninput={onInput}
+			oncompositionend={() => controller.input(new InputEvent('input'))}
+			placeholder={m.chat_composer_reply_placeholder()}
+			{disabled}
+			readonly={sourceReadOnly}
+			aria-busy={busy}
+			class="content-sized-textarea block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-composer-foreground placeholder:text-muted-foreground disabled:opacity-50 max-h-[min(40dvh,150px)] sm:max-h-[min(40dvh,300px)] text-base leading-6 transition-colors duration-200 px-4 py-3 sm:px-5 sm:py-3.5 min-h-[48px]"
+		></textarea>
+	</div>
+</div>

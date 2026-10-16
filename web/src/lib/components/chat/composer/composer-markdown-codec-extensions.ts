@@ -157,14 +157,16 @@ const DraftTable = Table.extend({
 				.join(' | ')} |`;
 		const header = rows[0].content ?? [];
 		const delimiter = header.map((cell) => {
-			const align = cell.attrs?.align;
-			return align === 'left'
-				? ':---'
-				: align === 'right'
-					? '---:'
-					: align === 'center'
-						? ':---:'
-						: '---';
+			switch (cell.attrs?.align) {
+				case 'left':
+					return ':---';
+				case 'right':
+					return '---:';
+				case 'center':
+					return ':---:';
+				default:
+					return '---';
+			}
 		});
 		return [
 			renderRow(header),

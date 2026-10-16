@@ -1,9 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
-	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
-	import ComposerFormattedDraft from './ComposerFormattedDraft.svelte';
+	import ComposerInputSurface from './ComposerInputSurface.svelte';
 	import { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
-	import ComposerFormatSelector from './ComposerFormatSelector.svelte';
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
@@ -405,10 +403,6 @@
 		imageAttachments.revokeAll();
 	});
 
-	const contentSizing = contentSizedTextarea(() =>
-		isVisible ? composerState.inputText : undefined,
-	);
-
 	// Reveals blocks appended from another surface without moving focus away from that surface.
 	$effect(() => {
 		const request = composerState.draftAppendRequest;
@@ -747,12 +741,6 @@
 	const composerFrameWrapperClass = $derived(chatDockFrameClass(localSettings.chatMaxWidth));
 	const composerSurfaceClass = cn('relative z-20', CHAT_DOCK_SURFACE_CLASS, 'shadow-none');
 	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
-	const textareaClass = $derived(
-		cn(
-			'content-sized-textarea block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-composer-foreground placeholder:text-muted-foreground disabled:opacity-50 max-h-[min(40dvh,150px)] sm:max-h-[min(40dvh,300px)] text-base leading-6 transition-colors duration-200',
-			'px-4 py-3 sm:px-5 sm:py-3.5 min-h-[48px]',
-		),
-	);
 </script>
 
 {#snippet composerSurface()}
@@ -863,44 +851,22 @@
 				onchange={(event) => attachmentController.handleFileChange(event)}
 			/>
 
-			<div class="relative overflow-hidden bg-transparent focus-within:ring-0">
-				{#if markdownInput}
-					<ComposerFormatSelector
-						mode={formattedDraft || ui.formatPending ? 'formatted' : 'source'}
-						pending={ui.formatPending}
-						disabled={isDisabled || promptTransformPending}
-						onSelect={(mode) => {
-							localSettings.set('composerInputMode', mode);
-							markdown.selectMode(mode);
-						}}
-					/>
-				{/if}
-				{#if formattedDraft}
-					<ComposerFormattedDraft
-						draft={formattedDraft}
-						readOnly={isDisabled || promptTransformPending}
-						controller={markdown}
-						onComposerKeydown={handleKeyDown}
-						onCompletionKeydown={handleCompletionKeyDown}
-					/>
-				{/if}
-				<div class="relative z-10" hidden={Boolean(formattedDraft)}>
-					<textarea
-						{@attach contentSizing}
-						rows="1"
-						bind:this={textarea}
-						value={composerState.inputText}
-						onkeydown={handleKeyDown}
-						onpointerdown={() => promptRecall.reset()}
-						oninput={handleInput}
-						oncompositionend={() => markdown.input(new InputEvent("input"))}
-						placeholder={m.chat_composer_reply_placeholder()}
-						disabled={isDisabled}
-						readonly={promptRefinement.pending}
-						aria-busy={promptTransformPending}
-						class={textareaClass}></textarea>
-				</div>
-			</div>
+			<ComposerInputSurface
+				bind:textarea
+				text={composerState.inputText}
+				draft={formattedDraft}
+				pending={ui.formatPending}
+				{markdownInput}
+				disabled={isDisabled}
+				busy={promptTransformPending}
+				sourceReadOnly={promptRefinement.pending}
+				visible={isVisible}
+				controller={markdown}
+				onComposerKeydown={handleKeyDown}
+				onCompletionKeydown={handleCompletionKeyDown}
+				onInput={handleInput}
+				onRecallReset={() => promptRecall.reset()}
+			/>
 
 			<ComposerBottomBar
 				canAttachImages={canAttachAttachments}
