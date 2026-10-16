@@ -116,6 +116,69 @@ describe('ActiveTranscriptState', () => {
 
 	afterEach(() => vi.restoreAllMocks());
 
+	it('reuses message projections until their transcript changes', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('Synthetic first response'))], {
+			lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		const messages = chat.chatMessages;
+		const display = chat.displayMessages;
+		const visible = chat.visibleMessages;
+		expect(chat.chatMessages).toBe(messages);
+		expect(chat.displayMessages).toBe(display);
+		expect(chat.visibleMessages).toBe(visible);
+		expect(applyMessages(chat, 'chat-1', 'generation-1', [entry(2, assistant('Synthetic second response'))])).toBe('applied');
+		expect(chat.chatMessages).toHaveLength(2);
+		expect(chat.displayMessages).toHaveLength(2);
+		expect(chat.visibleMessages).toHaveLength(2);
+		expect(messages).toHaveLength(1);
+		expect(display).toHaveLength(1);
+		expect(visible).toHaveLength(1);
+		chat.transcriptCache.flush();
+	});
+
+	it('does not scan earlier history for optimistic echoes when no input is pending', () => {
+		const chat = new ActiveTranscriptState();
+		const message = user('Synthetic earlier input', { clientMessageId: 'earlier-input' });
+		const readEarlierMessage = vi.fn(() => message);
+		const messages = [
+			{ ordinal: 1, get message() { return readEarlierMessage(); } },
+			...assistantEntries(2, INITIAL_VISIBLE_MESSAGES + 1),
+		];
+		chat.replaceGeneration('chat-1', 'generation-1', messages, {
+			lastOrdinal: messages.length, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		readEarlierMessage.mockClear();
+		expect(chat.visibleRows).toHaveLength(INITIAL_VISIBLE_MESSAGES);
+		expect(chat.displayMessageCount).toBe(messages.length);
+		expect(readEarlierMessage).not.toHaveBeenCalled();
+		chat.upsertOptimisticUserInput(optimisticInput({ clientMessageId: 'earlier-input' }));
+		expect(chat.visibleOptimisticInputs).toEqual([]);
+		expect(readEarlierMessage).toHaveBeenCalled();
+		chat.transcriptCache.flush();
+	});
+
+	it('shares immutable ledger entries across split panels without per-panel proxies', () => {
+		const first = new ActiveTranscriptState();
+		const second = new ActiveTranscriptState();
+		const original = entry(1, assistant('Synthetic first response'));
+		const appended = entry(2, assistant('Synthetic second response'));
+		for (const chat of [first, second]) {
+			chat.replaceGeneration('chat-1', 'generation-1', [original], {
+				lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+			});
+			const previous = chat.entries;
+			expect(applyMessages(chat, 'chat-1', 'generation-1', [appended])).toBe('applied');
+			expect(previous).toHaveLength(1);
+			expect(chat.entries).not.toBe(previous);
+			expect(chat.entries[0]).toBe(original);
+			expect(chat.entries[1]).toBe(appended);
+			expect(chat.visibleRows.map((row) => row.id)).toEqual(['generation-1:1', 'generation-1:2']);
+			chat.transcriptCache.flush();
+		}
+		expect(first.entries[0]).toBe(second.entries[0]);
+	});
+
 	it('starts with an empty generation cursor', () => {
 		const chat = new ActiveTranscriptState();
 

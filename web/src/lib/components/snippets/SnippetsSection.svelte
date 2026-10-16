@@ -7,11 +7,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import { ApiError } from '$lib/api/client.js';
 	import { getSnippets } from '$lib/context';
+	import { searchSnippets } from '$lib/snippets/search-snippets.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { SNIPPET_MAX_COUNT, type Snippet, type SnippetDefinitionInput } from '$shared/snippets';
 	import SnippetFormDialog from './SnippetFormDialog.svelte';
 	import SnippetRemoveDialog from './SnippetRemoveDialog.svelte';
 	import SnippetRow from './SnippetRow.svelte';
+	import SnippetSearchField from './SnippetSearchField.svelte';
 
 	interface Props {
 		active: boolean;
@@ -19,6 +21,10 @@
 
 	let { active }: Props = $props();
 	const snippets = getSnippets();
+	let query = $state('');
+	const filteredSnippets = $derived(
+		searchSnippets(snippets.snippets, query, (snippet) => snippet.template),
+	);
 	let formOpen = $state(false);
 	let editingSnippet = $state<Snippet | null>(null);
 	let removeSnippet = $state<Snippet | null>(null);
@@ -92,6 +98,8 @@
 		{/if}
 	</div>
 
+	<SnippetSearchField bind:value={query} />
+
 	{#if snippets.hasLoaded && snippets.snippets.length >= SNIPPET_MAX_COUNT}
 		<p class="text-xs text-muted-foreground">{m.snippets_limit_reached()}</p>
 	{/if}
@@ -126,7 +134,10 @@
 		</div>
 	{:else}
 		<div class="space-y-2" aria-live="polite">
-			{#each snippets.snippets as snippet (snippet.id)}
+			{#if filteredSnippets.length === 0}
+				<p class="py-8 text-center text-sm text-muted-foreground">{m.snippets_search_empty()}</p>
+			{/if}
+			{#each filteredSnippets as snippet (snippet.id)}
 				<svelte:boundary>
 					<SnippetRow
 						{snippet}
