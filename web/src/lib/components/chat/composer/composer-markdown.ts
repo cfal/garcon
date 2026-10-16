@@ -137,7 +137,8 @@ function isEmptyParagraph(node: JSONContent | undefined): boolean {
  * its literal punctuation, code spans keep their marks, and bare links stay bare.
  */
 export function serializeComposerMarkdown(manager: MarkdownManager, document: JSONContent): string {
-	const protection = createTextProtection(draftText(document));
+	// Restoration covers the entire output, including resource attributes and mark metadata.
+	const protection = createTextProtection(JSON.stringify(document));
 	const output = manager.serialize(normalize(document, false, protection));
 	return protection ? protection.restore(output) : output;
 }

@@ -28,6 +28,8 @@ describe('synchronous Markdown identity cache', () => {
 		'private \ue000 text\n\n| A |\n| --- |\n| \ue001 &lt; |',
 		'\ue000\n\n[my_var](https://example.test/\ue000)',
 		'\ue000\n\n![my_var](https://example.test/\ue000)',
+		'[label](https://example.test/\ue000 "title\ue001")\n\nmy_var',
+		'![alt\ue002](https://example.test/\ue000 "title\ue001")\n\nmy_var',
 	])('matches the uncached codec: %s', (source) => {
 		const content = nodes(source);
 		const cache = new ComposerMarkdownCache(serialize);
@@ -67,6 +69,27 @@ describe('synchronous Markdown identity cache', () => {
 		expect(new ComposerMarkdownCache(serialize).run(content)).toBe(
 			serialize({ type: 'doc', content: content.map((node) => node.toJSON()) }),
 		);
+	});
+
+	it('shares the whole-run policy when resource attributes exhaust the sentinel space', () => {
+		const privateUse = String.fromCharCode(...Array.from({ length: 0x1900 }, (_, i) => 0xe000 + i));
+		const content = [
+			...nodes('my_var'),
+			schema.nodes.paragraph.create(
+				null,
+				schema.text('label', [
+					schema.marks.link.create({ href: 'https://example.test/' + privateUse.slice(0, 0xc80) }),
+				]),
+			),
+			schema.nodes.paragraph.create(
+				null,
+				schema.nodes.image.create({ src: 'https://example.test/' + privateUse.slice(0xc80) }),
+			),
+		];
+		const cache = new ComposerMarkdownCache(serialize);
+		const expected = serialize({ type: 'doc', content: content.map((node) => node.toJSON()) });
+		expect(cache.run(content)).toBe(expected);
+		expect(cache.run(content)).toBe(expected);
 	});
 
 	it('reserializes only changed rows and blocks, including header alignment and undo', () => {

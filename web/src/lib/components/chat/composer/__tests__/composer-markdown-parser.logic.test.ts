@@ -54,6 +54,16 @@ function editFirstCell(table: JSONContent, text: string): JSONContent {
 
 describe('composer Markdown parsing', () => {
 	it.each([
+		'[label](https://example.test/\ue000 "title\ue001")',
+		'![alt\ue002](https://example.test/\ue000 "title\ue001")',
+		'| Resource |\n| --- |\n| [label](https://example.test/\ue000 "title\ue001") |',
+	])('preserves private-use resource attributes: %s', (source) => {
+		const document = parseDocument(source);
+		const serialized = serializeComposerMarkdown(editingManager(), document);
+		expect(serialized).toBe(source);
+		expect(parseDocument(serialized)).toEqual(document);
+	});
+	it.each([
 		table,
 		table
 			.split('\n')
