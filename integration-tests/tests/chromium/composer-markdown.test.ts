@@ -158,7 +158,12 @@ test('interleaved edits and pastes retain source spelling at every Undo and Redo
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const textarea = page.locator('[data-composer] textarea');
     const editor = page.getByRole('textbox', { name: 'Formatted message' });
-    for (const secondPaste of [false, true]) {
+    for (const { secondPaste, correctedTypo } of [
+      { secondPaste: false, correctedTypo: false },
+      { secondPaste: true, correctedTypo: false },
+      { secondPaste: false, correctedTypo: true },
+      { secondPaste: true, correctedTypo: true },
+    ]) {
       const source = secondPaste ? 'Intro\n\nlast' : 'Intro';
       await selectMessageFormat(page, 'source');
       await textarea.fill(source);
@@ -173,15 +178,17 @@ test('interleaved edits and pastes retain source spelling at every Undo and Redo
       await browserExpect(editor).toHaveAttribute('contenteditable', 'true');
       await editor.locator(':scope > p').nth(secondPaste ? 1 : 0).click();
       await page.keyboard.press('End');
-      await page.keyboard.type(' typed');
-      const typed = `${source} typed\n\n* one\n* two`;
+      await page.keyboard.type(correctedTypo ? 'x' : ' typed');
+      if (correctedTypo) await page.keyboard.press('Backspace');
+      const suffix = correctedTypo ? '' : ' typed';
+      const typed = `${source}${suffix}\n\n* one\n* two`;
       await browserExpect(textarea).toHaveValue(typed);
       const history = [source, firstPaste, typed];
       if (secondPaste) {
         await page.evaluate(text => navigator.clipboard.writeText(text), ' more');
         await page.keyboard.press('Control+V');
-        history.push(`${source} typed more\n\n* one\n* two`);
-        await browserExpect(editor.locator(':scope > p').nth(1)).toHaveText('last typed more');
+        history.push(`${source}${suffix} more\n\n* one\n* two`);
+        await browserExpect(editor.locator(':scope > p').nth(1)).toHaveText(`last${suffix} more`);
         await browserExpect(editor).toHaveAttribute('contenteditable', 'true');
         await browserExpect(textarea).toHaveValue(history.at(-1)!);
       }

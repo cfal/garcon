@@ -258,12 +258,6 @@
 			enablePasteRules: false,
 			onUpdate: ({ editor: current }) => {
 				const { doc, selection } = current.state;
-				const snapshot = sourceHistory.get(doc.content);
-				if (snapshot) {
-					original = snapshot.original;
-					originalSources = snapshot.sources;
-				}
-				rememberSource(doc);
 				const source = serialize(doc);
 				let nodeCount = 1;
 				doc.descendants(() => {
@@ -292,6 +286,14 @@
 				if (!snippet || !onSnippet(snippet.text, snippet.caret)) onChange(source);
 			},
 			onTransaction: ({ editor: current, transaction }) => {
+				// Runs before onUpdate, including history steps that leave an equal document.
+				const snapshot = sourceHistory.get(current.state.doc.content);
+				if (snapshot) {
+					original = snapshot.original;
+					originalSources = snapshot.sources;
+				} else {
+					rememberSource(current.state.doc);
+				}
 				// Typing opens the menu; a restored draft that ends in a mention does not.
 				if (transaction.docChanged || mentionOpen) reportMention(current);
 			},
