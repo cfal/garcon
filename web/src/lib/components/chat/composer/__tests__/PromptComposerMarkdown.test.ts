@@ -69,6 +69,53 @@ async function formatted({
 
 describe('formatted composer integration', () => {
 	it.each([
+		'def f(*args):',
+		'2*3*4',
+		'## Plan\n- step one\n- step **two**',
+		'for file in src/**/*.ts; do echo "x*y"; done\n'.repeat(800),
+		'[destination]: https://example.test/resource',
+	])('preserves raw pasted source through submission: %.60s', async (text) => {
+		const { editor, textarea, onsubmit } = await formatted({ source: '' });
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) => parseComposerMarkdown(request));
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', text);
+		await fireEvent.paste(editor, { clipboardData: transfer });
+		await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+		expect(textarea.value).toBe(text);
+		expect(serializeComposerMarkdownPasteInWorker).not.toHaveBeenCalled();
+		const expected = parseComposerMarkdown({ source: text });
+		if (expected) expect(screen.getByRole('textbox', { name: 'Formatted message' }).isConnected).toBe(true);
+		else expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+		expect(onsubmit).toHaveBeenCalledOnce();
+		expect(textarea.value).toBe(text);
+	});
+	it('places the caret after a raw paste replacing the rich selection', async () => {
+		const { editor, textarea } = await formatted({ source: 'before old after' });
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) => parseComposerMarkdown(request));
+		richEditor(editor).commands.setTextSelection({ from: 8, to: 11 });
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', '**new**');
+		await fireEvent.paste(editor, { clipboardData: transfer });
+		await waitFor(() => expect(screen.getByRole('textbox', { name: 'Formatted message' })).not.toBe(editor));
+		const rich = richEditor(screen.getByRole('textbox', { name: 'Formatted message' }));
+		expect(textarea.value).toBe('before **new** after');
+		expect(rich.state.selection.$from.parentOffset).toBe(10);
+	});
+	it.each(['[destination]: https://example.test/resource', 'Review this\n\n[destination]: https://example.test/resource'])(
+		'keeps a restored reference definition in Source: %s', async (source) => {
+			vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) => parseComposerMarkdown(request));
+			render(PromptComposerTestHost, { selectedChatId: 'markdown-reference', selectedStatus: 'running' });
+			const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+			await fireEvent.input(textarea, { target: { value: source } });
+			await selectMode('formatted');
+			await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+			expect(textarea.value).toBe(source);
+			expect(screen.getByTestId<HTMLSelectElement>('composer-input-mode').value).toBe('formatted');
+		},
+	);
+	it.each([
 		{ source: 'Review @alice', executor: remoteExecutor },
 		{ source: '/cl', executor: { ...remoteExecutor, availability: 'offline' as const } },
 	])('retries pending formatting when the palette for $source is hidden', async ({ source, executor }) => {
@@ -636,17 +683,17 @@ describe('formatted composer integration', () => {
 		await fireEvent.keyDown(textarea, { key: 'Enter' });
 		expect(onsubmit).toHaveBeenCalledOnce();
 	});
-	it.each(['restore', 'clear'])('keeps an oversized paste through a same-text %s request', async (action) => {
+	it('keeps an oversized literal paste through a same-text restore request', async () => {
 		const pendingPaste = Promise.withResolvers<string>();
 		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValueOnce(pendingPaste.promise);
-		const source = action === 'clear' ? '' : table;
+		const source = table;
 		const { editor, textarea } = await formatted({ source });
 		const text = 'large clipboard '.repeat(3_000);
 		const transfer = new DataTransfer();
 		transfer.setData('text/plain', text);
 		await fireEvent.paste(editor, { clipboardData: transfer });
 		const signal = vi.mocked(serializeComposerMarkdownPasteInWorker).mock.calls.at(-1)![1];
-		await fireEvent.click(screen.getByTestId(`${action}-draft`));
+		await fireEvent.click(screen.getByTestId('restore-draft'));
 		expect(signal?.aborted).toBe(false);
 		const pasted = source + '\n\n' + text;
 		pendingPaste.resolve(pasted);
@@ -676,11 +723,12 @@ describe('formatted composer integration', () => {
 	it('keeps a short selection-replacement paste in Source after a same-text restore', async () => {
 		const pendingPaste = Promise.withResolvers<string | null>();
 		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValueOnce(pendingPaste.promise);
-		const source = 'x'.repeat(32_760);
+		const content = 'x'.repeat(32_752);
+		const source = '```\n' + content + '\n```';
 		const replacement = 'short replacement';
 		const { editor, textarea } = await formatted({ source });
 		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) => parseComposerMarkdown(request));
-		richEditor(editor).commands.setTextSelection({ from: 1, to: source.length + 1 });
+		richEditor(editor).commands.setTextSelection({ from: 1, to: content.length + 1 });
 		const transfer = new DataTransfer();
 		transfer.setData('text/plain', replacement);
 		await fireEvent.paste(editor, { clipboardData: transfer });
@@ -688,10 +736,10 @@ describe('formatted composer integration', () => {
 		await fireEvent.click(screen.getByTestId('restore-draft'));
 		expect(signal?.aborted).toBe(false);
 		const pasted = serializeComposerMarkdownPaste(request);
-		expect(pasted).toBe(replacement);
+		expect(pasted).toBe('```\n' + replacement + '\n```');
 		await act(() => pendingPaste.resolve(pasted));
 		await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-		expect(textarea.value).toBe(replacement);
+		expect(textarea.value).toBe(pasted);
 		expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
 		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
 	});

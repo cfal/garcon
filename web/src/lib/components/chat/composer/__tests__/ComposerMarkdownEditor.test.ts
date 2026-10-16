@@ -13,6 +13,7 @@ function mount(source: string, caret?: number, { handsOverSnippets = true } = {}
 	const onMention = vi.fn<(mention: ComposerMarkdownMention | null) => void>();
 	const onSnippet = vi.fn<(text: string, caret: number) => boolean>(() => handsOverSnippets);
 	const onOverflow = vi.fn<(source: string) => void>();
+	const onMarkdownPaste = vi.fn<(source: string, caret: number) => void>();
 	render(ComposerMarkdownEditor, {
 		...parsed,
 		readOnly: false,
@@ -25,10 +26,11 @@ function mount(source: string, caret?: number, { handsOverSnippets = true } = {}
 		onCompletionKeydown: () => false,
 		onReady: vi.fn(),
 		onLargePaste: vi.fn(),
+		onMarkdownPaste,
 		onOverflow,
 	});
 	const editor = (screen.getByRole('textbox') as TiptapEditorHTMLElement).editor!;
-	return { editor, onChange, onMention, onSnippet, onOverflow };
+	return { editor, onChange, onMention, onSnippet, onOverflow, onMarkdownPaste };
 }
 
 function type(editor: ReturnType<typeof mount>['editor'], text: string) {
@@ -48,6 +50,14 @@ function newline(editor: ReturnType<typeof mount>['editor'], shiftKey = true) {
 }
 
 describe('composer newline intent', () => {
+	it('shows the existing Reply placeholder only while empty', () => {
+		const { editor } = mount('');
+		expect(editor.view.dom.querySelector('p.is-editor-empty')?.getAttribute('data-placeholder')).toBe(
+			'Reply...',
+		);
+		type(editor, 'message');
+		expect(editor.view.dom.querySelector('p.is-editor-empty')).toBeNull();
+	});
 	it.each(['- ', '1. ', '- [ ] ', '> - '])('replaces only selected list text: %s', (prefix) => {
 		const { editor, onChange } = mount(prefix + 'abcdefgh');
 		const end = editor.state.selection.to;
@@ -157,6 +167,22 @@ describe('composer newline intent', () => {
 		);
 		expect(onChange).not.toHaveBeenCalled();
 	});
+});
+
+describe('formatted editor clipboard contexts', () => {
+	it.each(['```\ncode\n```', '| Cell |\n| --- |\n| text |'])(
+		'keeps clipboard text literal inside %s',
+		(source) => {
+			const { editor, onChange, onMarkdownPaste } = mount(source);
+			const text = ' **literal** `code`';
+			const clipboardData = new DataTransfer();
+			clipboardData.setData('text/plain', text);
+			editor.view.dom.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true }));
+			expect(onMarkdownPaste).not.toHaveBeenCalled();
+			expect(editor.state.selection.$from.parent.textContent).toContain(text);
+			expect(onChange).toHaveBeenCalledOnce();
+		},
+	);
 });
 
 describe('formatted editor file mentions', () => {

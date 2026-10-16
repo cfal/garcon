@@ -18,7 +18,7 @@ async function selectMessageFormat(page: Page, mode: 'source' | 'formatted') {
 }
 
 test('message format defaults to Formatted and is controlled only by persisted Interface settings', async () => {
-  await withChromiumFixture('composer-format-setting', async ({ page, integration, assertNoBrowserErrors }) => {
+  await withChromiumFixture('composer-format-setting', async ({ page, context, integration, assertNoBrowserErrors }) => {
     const chatId = integration.newChatId();
     const turn = await integration.client.startDirectChat({
       chatId, content: 'Synthetic format preference', projectPath: integration.dirs.project,
@@ -43,6 +43,10 @@ test('message format defaults to Formatted and is controlled only by persisted I
         return { frameTop: element.getBoundingClientRect().top, inputTop: input.getBoundingClientRect().top };
       });
       expect(geometry.inputTop - geometry.frameTop).toBe(1);
+      await browserExpect(editor.locator('p.is-editor-empty')).toHaveAttribute('data-placeholder', 'Reply...');
+      expect(await editor.locator('p').evaluate(element => getComputedStyle(element, '::before').content)).toBe('"Reply..."');
+      const formattedBounds = await composer.boundingBox();
+      const formattedInputBounds = await composer.locator('[data-composer-markdown-editor]').boundingBox();
       await page.screenshot({ path: join(artifacts, `composer-settings-only-${width}.png`) });
       await page.keyboard.press('Control+,');
       const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
@@ -53,6 +57,8 @@ test('message format defaults to Formatted and is controlled only by persisted I
       await format.focus();
       await format.selectOption('source');
       await browserExpect(editor).toHaveCount(0);
+      expect(await composer.boundingBox()).toEqual(formattedBounds);
+      expect(await textarea.boundingBox()).toEqual(formattedInputBounds);
       await browserExpect(format).toBeFocused();
       await format.selectOption('formatted');
       await browserExpect(editor).toBeAttached();
@@ -61,6 +67,20 @@ test('message format defaults to Formatted and is controlled only by persisted I
       await page.screenshot({ path: join(artifacts, `composer-interface-setting-${width}.png`) });
       await dialog.getByRole('button', { name: 'Close', exact: true }).click();
     }
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const clipboard = 'def f(*args):\n    return args[0] * 2';
+    await page.evaluate(text => navigator.clipboard.writeText(text), clipboard);
+    await editor.focus();
+    await page.keyboard.press('Control+V');
+    await browserExpect(textarea).toHaveValue(clipboard);
+    await browserExpect(editor).toBeFocused();
+    await composer.getByRole('button', { name: 'Send message', exact: true }).click();
+    await browserExpect.poll(async () =>
+      (await integration.client.getMessages(chatId)).messages.flatMap(row =>
+        row.message.type === 'user-message' ? [row.message.content] : []),
+    ).toContain(clipboard);
+    await browserExpect(editor.locator('p.is-editor-empty')).toHaveAttribute('data-placeholder', 'Reply...');
+    await integration.client.waitForProcessing(chatId, false);
     await selectMessageFormat(page, 'source');
     await textarea.fill('**Source stays literal**');
     await page.reload();

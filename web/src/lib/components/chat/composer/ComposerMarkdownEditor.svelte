@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { Editor, resolveFocusPosition, type JSONContent } from '@tiptap/core';
 	import { TextSelection } from '@tiptap/pm/state';
+	import { Placeholder } from '@tiptap/extensions/placeholder';
 	import { composerMarkdownCodec } from './composer-markdown-codec.js';
 	import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
 	import { composerMarkdownTableInput } from './composer-markdown-table-input.js';
@@ -45,6 +46,7 @@
 		onReady,
 		onMention,
 		onLargePaste,
+		onMarkdownPaste,
 		onOverflow,
 	}: {
 		document: JSONContent;
@@ -61,6 +63,7 @@
 		onReady: (target: HTMLElement) => void;
 		onMention: (mention: ComposerMarkdownMention | null) => void;
 		onLargePaste: (request: ComposerMarkdownPasteRequest) => void;
+		onMarkdownPaste: (source: string, caret: number) => void;
 		onOverflow: (source: string) => void;
 	} = $props();
 	let container: HTMLDivElement;
@@ -143,6 +146,29 @@
 			});
 		};
 		const insertText = (view: Editor['view'], text: string, position?: number) => {
+			const head =
+				position === undefined ? view.state.selection.$from : view.state.doc.resolve(position);
+			let literal = false;
+			for (let depth = head.depth; depth > 0; depth--) {
+				const node = head.node(depth);
+				if (
+					node.type.spec.code ||
+					node.type.name === 'tableCell' ||
+					node.type.name === 'tableHeader'
+				) {
+					literal = true;
+					break;
+				}
+			}
+			if (!literal) {
+				const marker = sourceMarker('garconClipboard');
+				const marked = serialize(view.state.tr.insertText(marker, position).doc);
+				const start = marked.indexOf(marker);
+				if (start >= 0) {
+					onMarkdownPaste(marked.replace(marker, () => text), start + text.length);
+					return;
+				}
+			}
 			if (serialize(view.state.doc).length + text.length <= MAX_COMPOSER_MARKDOWN_LENGTH) {
 				view.dispatch(view.state.tr.insertText(text, position));
 				return;
@@ -162,6 +188,7 @@
 			element: container,
 			extensions: [
 				...extensions,
+				Placeholder.configure({ placeholder: m.chat_composer_reply_placeholder() }),
 				composerMarkdownTableInput(composerMarkdownCodec.parse),
 				...(initialSelection !== undefined && selectionMarks
 					? [composerMarkdownCaretMarks(initialSelection, selectionMarks)]
@@ -314,6 +341,13 @@
 	}
 	.composer-markdown-editor :global(p) {
 		margin: 0;
+	}
+	.composer-markdown-editor :global(p.is-editor-empty:first-child::before) {
+		content: attr(data-placeholder);
+		color: hsl(var(--muted-foreground));
+		float: left;
+		height: 0;
+		pointer-events: none;
 	}
 	.composer-markdown-editor :global(.tiptap > * + *) {
 		margin-top: 0.75rem;

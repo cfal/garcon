@@ -149,6 +149,27 @@ export class PromptComposerMarkdownController {
 		void this.edit();
 	}
 
+	async pasteMarkdown(text: string, caret: number): Promise<void> {
+		if (!this.options.canFormat || !this.options.ui.formattedDraft) return;
+		const chatId = this.options.chatId;
+		this.options.onChange(text);
+		const editing = this.edit(caret);
+		this.#formatIntent = 'restore';
+		await editing;
+		if (
+			this.options.chatId !== chatId ||
+			this.options.composer.inputText !== text ||
+			!this.#formatIntent ||
+			this.#workerAbort
+		)
+			return;
+		if (this.options.sourcePaletteOpen || this.options.preferredMode === 'source') {
+			this.#formatIntent = null;
+			return;
+		}
+		await this.#format();
+	}
+
 	async pasteSource(request: ComposerMarkdownPasteRequest): Promise<void> {
 		const draft = this.options.ui.formattedDraft;
 		if (!this.options.canFormat || !draft) return;

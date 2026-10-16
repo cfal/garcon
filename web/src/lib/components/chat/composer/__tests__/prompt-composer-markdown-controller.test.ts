@@ -82,6 +82,28 @@ afterEach(() => {
 });
 
 describe('formatted composer input format', () => {
+	it('keeps raw clipboard text when a later Source handoff cancels formatting', async () => {
+		const { controller, ui, options } = fixture();
+		ui.formattedDraft = { source: table, ...parsed };
+		const pasted = controller.pasteMarkdown('def f(*args):', 13);
+		controller.reset();
+		await pasted;
+		expect(options.composer.inputText).toBe('def f(*args):');
+		expect(ui.formattedDraft).toBeNull();
+		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		controller.destroy();
+	});
+	it('does not reformat a raw paste that opens a Source palette', async () => {
+		const { controller, ui, options } = fixture();
+		ui.formattedDraft = { source: table, ...parsed };
+		const pasted = controller.pasteMarkdown('/cl', 3);
+		ui.showSlashMenu = true;
+		await pasted;
+		expect(options.composer.inputText).toBe('/cl');
+		expect(ui.showSlashMenu).toBe(true);
+		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		controller.destroy();
+	});
 	it('allows explicit formatting while a source range is selected', async () => {
 		const { controller, ui, options } = fixture();
 		options.textarea.value = table;
