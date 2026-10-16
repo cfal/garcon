@@ -76,7 +76,7 @@ export class PromptComposerMarkdownController {
 	restore(): void {
 		const request = this.options.composer.draftRestoreRequest;
 		if (request !== this.#restoreRequest) {
-			this.reset();
+			if (!this.options.ui.formattedPastePending) this.reset();
 			this.#restoreRequest = request;
 			if (this.options.preferredMode === 'formatted') this.#formatIntent = 'restore';
 		}

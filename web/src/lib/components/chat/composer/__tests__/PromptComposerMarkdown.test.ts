@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadComposerMarkdownEditor } from '../composer-markdown-editor-loader.js';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
@@ -651,6 +651,70 @@ describe('formatted composer integration', () => {
 		complete(pasted);
 		await waitFor(() => expect(textarea.value).toBe(pasted));
 		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+	});
+	it.each([false, true])('keeps an append after a pending paste restore in Source (hidden=%s)', async (hidden) => {
+		let complete!: (source: string) => void;
+		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValueOnce(
+			new Promise((resolve) => { complete = resolve; }),
+		);
+		const { editor, textarea, rerender } = await formatted();
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) => parseComposerMarkdown(request));
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', 'large clipboard '.repeat(3_000));
+		await fireEvent.paste(editor, { clipboardData: transfer });
+		const signal = vi.mocked(serializeComposerMarkdownPasteInWorker).mock.calls.at(-1)![1];
+		await fireEvent.click(screen.getByTestId('restore-draft'));
+		if (hidden) await rerender({ isVisible: false });
+		await fireEvent.click(screen.getByTestId('append-draft'));
+		expect(signal?.aborted).toBe(true);
+		await act(() => complete('stale paste'));
+		if (hidden) await rerender({ isVisible: true });
+		await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+		expect(textarea.value).toBe(table + '\n\nAppended review block');
+		expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
+		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+	});
+	it('keeps a short selection-replacement paste in Source after a same-text restore', async () => {
+		let complete!: (source: string | null) => void;
+		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValueOnce(
+			new Promise((resolve) => { complete = resolve; }),
+		);
+		const source = 'x'.repeat(32_760);
+		const replacement = 'short replacement';
+		const { editor, textarea } = await formatted({ source });
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) => parseComposerMarkdown(request));
+		richEditor(editor).commands.setTextSelection({ from: 1, to: source.length + 1 });
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', replacement);
+		await fireEvent.paste(editor, { clipboardData: transfer });
+		const [request, signal] = vi.mocked(serializeComposerMarkdownPasteInWorker).mock.calls.at(-1)!;
+		await fireEvent.click(screen.getByTestId('restore-draft'));
+		expect(signal?.aborted).toBe(false);
+		const pasted = serializeComposerMarkdownPaste(request);
+		expect(pasted).toBe(replacement);
+		await act(() => complete(pasted));
+		await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+		expect(textarea.value).toBe(replacement);
+		expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
+		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+	});
+	it('discards a stale pending paste when clearing a nonempty draft', async () => {
+		let complete!: (source: string) => void;
+		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValueOnce(
+			new Promise((resolve) => { complete = resolve; }),
+		);
+		const { editor, textarea } = await formatted();
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', 'large clipboard '.repeat(3_000));
+		await fireEvent.paste(editor, { clipboardData: transfer });
+		const signal = vi.mocked(serializeComposerMarkdownPasteInWorker).mock.calls.at(-1)![1];
+		await fireEvent.click(screen.getByTestId('clear-draft'));
+		expect(signal?.aborted).toBe(true);
+		await act(() => complete('stale paste'));
+		const emptyEditor = await screen.findByRole('textbox', { name: 'Formatted message' });
+		expect(emptyEditor).not.toBe(editor);
+		expect(emptyEditor.textContent).toBe('');
+		expect(textarea.value).toBe('');
 	});
 	it.each(['paste', 'drop'])(
 		'routes image %s to attachments while retaining the rich draft',
