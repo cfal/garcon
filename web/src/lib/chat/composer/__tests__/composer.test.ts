@@ -45,6 +45,17 @@ describe('ComposerState', () => {
 		expect(state.images).toEqual([]);
 		expect(state.isDragActive).toBe(false);
 	});
+	it('requests mode restoration only when a rejected submission restores its draft', () => {
+		const { composer } = createComposer();
+		composer.inputText = 'rejected prompt';
+		const revision = composer.clearAfterSubmit('chat-1');
+		const cleared = composer.draftRestoreRequest;
+		expect(composer.restoreDraftIfRevision('chat-1', revision, 'rejected prompt', [])).toBe(true);
+		expect(composer.draftRestoreRequest?.requestId).toBe(cleared!.requestId + 1);
+		const restored = composer.draftRestoreRequest;
+		expect(composer.restoreDraftIfRevision('chat-1', revision, 'stale', [])).toBe(false);
+		expect(composer.draftRestoreRequest).toBe(restored);
+	});
 
 	it('addImages appends supported non-duplicate attachments', () => {
 		const { composer: state } = createComposer();

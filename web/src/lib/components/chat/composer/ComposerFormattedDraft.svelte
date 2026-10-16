@@ -7,13 +7,13 @@
 		draft,
 		readOnly,
 		controller,
-		onSubmitKeydown,
+		onComposerKeydown,
 		onCompletionKeydown,
 	}: {
 		draft: { source: string } & ComposerMarkdownDocument;
 		readOnly: boolean;
 		controller: PromptComposerMarkdownController;
-		onSubmitKeydown: (event: KeyboardEvent) => void;
+		onComposerKeydown: (event: KeyboardEvent) => void;
 		onCompletionKeydown: (event: KeyboardEvent) => boolean;
 	} = $props();
 </script>
@@ -29,7 +29,7 @@
 		selectionMarks={draft.selectionMarks}
 		{readOnly}
 		snippetTrigger={controller.snippetTrigger}
-		{onSubmitKeydown}
+		{onComposerKeydown}
 		{onCompletionKeydown}
 		onChange={(text) => controller.change(text)}
 		onSourceAction={(text, caret) => controller.plain(text, caret)}

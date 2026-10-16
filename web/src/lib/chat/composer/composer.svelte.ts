@@ -75,6 +75,10 @@ export class ComposerState {
 
 	restoreDraft(chatId: string): void {
 		this.drafts.load(chatId);
+		this.#requestRestore(chatId);
+	}
+
+	#requestRestore(chatId: string): void {
 		this.#nextDraftRestoreRequestId += 1;
 		this.draftRestoreRequest = { chatId, requestId: this.#nextDraftRestoreRequestId };
 	}
@@ -93,10 +97,12 @@ export class ComposerState {
 		text: string,
 		images: readonly File[],
 	): boolean {
-		return this.drafts.restoreIfRevision(chatId, expectedRevision, {
+		const restored = this.drafts.restoreIfRevision(chatId, expectedRevision, {
 			text,
 			attachments: images,
 		});
+		if (restored) this.#requestRestore(chatId);
+		return restored;
 	}
 
 	isDraftEmpty(chatId: string): boolean {
@@ -127,8 +133,7 @@ export class ComposerState {
 
 	clearAfterSubmit(chatId: string): number {
 		const revision = this.drafts.clear(chatId);
-		this.#nextDraftRestoreRequestId += 1;
-		this.draftRestoreRequest = { chatId, requestId: this.#nextDraftRestoreRequestId };
+		this.#requestRestore(chatId);
 		return revision;
 	}
 }

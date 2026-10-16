@@ -11,7 +11,9 @@ import type {
 } from '../composer-markdown-parser.js';
 
 vi.mock('../composer-markdown-editor-loader.js', () => ({
-	loadComposerMarkdownEditor: vi.fn(async () => (await import('../ComposerMarkdownEditor.svelte')).default),
+	loadComposerMarkdownEditor: vi.fn(
+		async () => (await import('../ComposerMarkdownEditor.svelte')).default,
+	),
 }));
 vi.mock('../composer-markdown-worker.js', () => ({
 	parseComposerMarkdownInWorker: vi.fn(),
@@ -33,7 +35,7 @@ function fixture() {
 	const textarea = document.createElement('textarea');
 	document.body.append(textarea);
 	textarea.focus();
-	const composer = { inputText: table };
+	const composer = { inputText: table, draftRestoreRequest: { chatId: 'one', requestId: 1 } };
 	const options = {
 		ui,
 		composer,
@@ -64,6 +66,38 @@ afterEach(() => {
 });
 
 describe('formatted composer input format', () => {
+	it('allows explicit formatting while a source range is selected', async () => {
+		const { controller, ui, options } = fixture();
+		options.textarea.value = table;
+		options.textarea.setSelectionRange(0, 4);
+		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
+		controller.selectMode('formatted');
+		await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(table));
+		controller.destroy();
+	});
+	it('replaces pending conversion when submission starts a fresh draft', async () => {
+		const { controller, ui, options } = fixture();
+		let complete!: (value: ComposerMarkdownDocument) => void;
+		vi.mocked(parseComposerMarkdownInWorker)
+			.mockReturnValueOnce(
+				new Promise((resolve) => {
+					complete = resolve;
+				}),
+			)
+			.mockResolvedValueOnce(parsed);
+		controller.restore();
+		const signal = vi.mocked(parseComposerMarkdownInWorker).mock.calls[0][1];
+		options.composer.inputText = '';
+		options.textarea.value = '';
+		options.composer.draftRestoreRequest = { chatId: 'one', requestId: 2 };
+		controller.restore();
+		expect(signal?.aborted).toBe(true);
+		await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(''));
+		complete(parsed);
+		await Promise.resolve();
+		expect(ui.formattedDraft?.source).toBe('');
+		controller.destroy();
+	});
 	it('leaves typed, pasted, and restored Markdown as source where Markdown is not accepted', async () => {
 		const { controller, ui, options, paste } = fixture();
 		options.acceptsMarkdown = false;
@@ -135,6 +169,103 @@ describe('formatted composer snippet triggers', () => {
 });
 
 describe('formatted composer lifecycle', () => {
+	it('retries a blocked restore, but does not override a later source handoff', async () => {
+		const { controller, options, ui } = fixture();
+		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
+		options.canFormat = false;
+		controller.restore();
+		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		options.canFormat = true;
+		controller.restore();
+		await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(table));
+		await controller.edit();
+		controller.restore();
+		expect(ui.formattedDraft).toBeNull();
+		expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
+		controller.destroy();
+	});
+	it('keeps a requested mode through typing while its conversion is pending', async () => {
+		const { controller, options, ui } = fixture();
+		let complete!: (value: ComposerMarkdownDocument) => void;
+		vi.mocked(parseComposerMarkdownInWorker)
+			.mockReturnValueOnce(
+				new Promise((resolve) => {
+					complete = resolve;
+				}),
+			)
+			.mockResolvedValueOnce(parsed);
+		controller.selectMode('formatted');
+		const signal = vi.mocked(parseComposerMarkdownInWorker).mock.calls[0][1];
+		options.composer.inputText = 'new text';
+		options.textarea.value = 'new text';
+		controller.input(new InputEvent('input'));
+		expect(signal?.aborted).toBe(true);
+		await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe('new text'));
+		complete(parsed);
+		await Promise.resolve();
+		expect(ui.formattedDraft?.source).toBe('new text');
+		controller.destroy();
+	});
+	it('applies a requested mode after unrelated interaction without moving focus', async () => {
+		const { controller, options, ui } = fixture();
+		let complete!: (value: ComposerMarkdownDocument) => void;
+		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(
+			new Promise((resolve) => {
+				complete = resolve;
+			}),
+		);
+		controller.selectMode('formatted');
+		options.interactionGeneration++;
+		const button = document.createElement('button');
+		document.body.append(button);
+		button.focus();
+		complete(parsed);
+		await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(table));
+		const target = document.createElement('div');
+		target.tabIndex = 0;
+		document.body.append(target);
+		controller.focus(target);
+		expect(document.activeElement).toBe(button);
+		controller.destroy();
+	});
+	it('restores an empty draft synchronously once the editor is loaded', async () => {
+		const { controller, options, ui } = fixture();
+		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
+		controller.restore();
+		await vi.waitFor(() => expect(ui.formattedDraft).not.toBeNull());
+		options.composer.inputText = '';
+		options.composer.draftRestoreRequest = { chatId: 'one', requestId: 2 };
+		controller.restore();
+		expect(ui.formattedDraft?.source).toBe('');
+		expect(ui.formattedDraft?.document.content).toEqual([{ type: 'paragraph' }]);
+		expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
+		controller.destroy();
+	});
+	it.each([false, true])(
+		'restores a rejected draft after an empty conversion (completed=%s)',
+		async (completed) => {
+			const { controller, options, ui } = fixture();
+			vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
+			options.composer.inputText = '';
+			controller.restore();
+			if (completed) await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(''));
+			options.composer.inputText = table;
+			options.composer.draftRestoreRequest = { chatId: 'one', requestId: 2 };
+			controller.restore();
+			await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(table));
+			controller.destroy();
+		},
+	);
+	it('notifies only explicit formatting requests about unsupported content', async () => {
+		const { controller, options } = fixture();
+		options.composer.inputText = 'x'.repeat(40_000);
+		controller.restore();
+		controller.restore();
+		expect(options.onUnavailable).not.toHaveBeenCalled();
+		controller.selectMode('formatted');
+		expect(options.onUnavailable).toHaveBeenCalledOnce();
+		controller.destroy();
+	});
 	it('formats only on explicit selection, without changing its source', async () => {
 		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
 		const { controller, ui, options } = fixture();
@@ -153,7 +284,7 @@ describe('formatted composer lifecycle', () => {
 		expect(options.onChange).not.toHaveBeenCalled();
 		controller.destroy();
 	});
-	it('defers composition and abandons a conversion when the caret moves', async () => {
+	it('defers composition and reparses at the new caret without dropping the mode request', async () => {
 		let resolve!: (document: ComposerMarkdownDocument | null) => void;
 		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(
 			new Promise((done) => {
@@ -170,10 +301,13 @@ describe('formatted composer lifecycle', () => {
 		controller.selectMode('formatted');
 		await vi.waitFor(() => expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce());
 		options.textarea.setSelectionRange(1, 1);
+		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
 		resolve(parsed);
-		await Promise.resolve();
-		await Promise.resolve();
-		expect(ui.formattedDraft).toBeNull();
+		await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(table));
+		expect(parseComposerMarkdownInWorker).toHaveBeenLastCalledWith(
+			{ source: table, caret: 1 },
+			expect.any(AbortSignal),
+		);
 		controller.destroy();
 	});
 	it('applies oversized paste after releasing the shared submission gate', async () => {
@@ -356,7 +490,7 @@ describe('formatted composer lifecycle', () => {
 		expect(document.activeElement).toBe(button);
 		controller.destroy();
 	});
-	it.each(['chat', 'text', 'interaction', 'hidden', 'reset', 'destroy'])(
+	it.each(['chat', 'text', 'hidden', 'reset', 'destroy'])(
 		'ignores stale worker completion after %s changes',
 		async (change) => {
 			let resolve!: (document: ComposerMarkdownDocument | null) => void;
@@ -370,7 +504,6 @@ describe('formatted composer lifecycle', () => {
 			controller.selectMode('formatted');
 			if (change === 'chat') options.chatId = 'two';
 			if (change === 'text') options.composer.inputText = 'new draft';
-			if (change === 'interaction') options.interactionGeneration++;
 			if (change === 'hidden') options.canFormat = false;
 			if (change === 'reset') controller.reset();
 			if (change === 'destroy') controller.destroy();

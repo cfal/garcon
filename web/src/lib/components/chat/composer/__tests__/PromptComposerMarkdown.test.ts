@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { loadComposerMarkdownEditor } from '../composer-markdown-editor-loader.js';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
 import {
 	parseComposerMarkdownInWorker,
@@ -27,6 +28,9 @@ vi.mock('$lib/api/snippets', async (importOriginal) => {
 	return { ...actual, expandSnippet: vi.fn() };
 });
 const table = '| Check | Example |\n| --- | --- |\n| **Ready** | `a  b` |';
+beforeAll(async () => {
+	await loadComposerMarkdownEditor();
+});
 afterEach(() => {
 	cleanup();
 	vi.clearAllMocks();
@@ -58,14 +62,43 @@ async function formatted({
 }
 
 describe('formatted composer integration', () => {
-	it.each(['', 'ordinary prose', '> quoted\r\n\r\n'])('switches modes without rewriting %j', async (source) => {
-		const { editor, textarea } = await formatted({ source });
-		expect(editor.isConnected).toBe(true);
-		expect(textarea.value).toBe(source);
-		await fireEvent.click(screen.getByRole('button', { name: 'Source' }));
-		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
-		expect(textarea.value).toBe(source);
+	it.each([false, true])('restores an empty formatted draft after clearing (admission blocked=%s)', async (blocked) => {
+		const { rerender, textarea } = await formatted({ selectedStatus: 'draft' });
+		if (blocked) await rerender({ directAdmissionPending: true });
+		await fireEvent.click(screen.getByRole('button', { name: 'Clear draft' }));
+		expect(textarea.value).toBe('');
+		if (blocked) await rerender({ directAdmissionPending: false });
+		await waitFor(() => expect(screen.getByRole('textbox', { name: 'Formatted message' }).textContent).toBe(''));
 	});
+	it('hands prompt recall from an empty formatted draft to Source without losing navigation', async () => {
+		const { editor, textarea, rerender } = await formatted({ source: '' });
+		await rerender({
+			recallPrompts: [
+				{ ordinal: 2, content: 'newest prompt' },
+				{ ordinal: 1, content: 'older prompt' },
+			],
+		});
+		await fireEvent.keyDown(editor, { key: 'ArrowUp' });
+		await waitFor(() => expect(document.activeElement).toBe(textarea));
+		expect(textarea.value).toBe('newest prompt');
+		await fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+		expect(textarea.value).toBe('older prompt');
+		await fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+		expect(textarea.value).toBe('newest prompt');
+		await fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+		expect(textarea.value).toBe('');
+	});
+	it.each(['', 'ordinary prose', '> quoted\r\n\r\n'])(
+		'switches modes without rewriting %j',
+		async (source) => {
+			const { editor, textarea } = await formatted({ source });
+			expect(editor.isConnected).toBe(true);
+			expect(textarea.value).toBe(source);
+			await fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+			expect(textarea.value).toBe(source);
+		},
+	);
 
 	it('honors explicit shell focus requests without losing the Markdown draft', async () => {
 		const { rerender, textarea, editor } = await formatted();
@@ -83,6 +116,8 @@ describe('formatted composer integration', () => {
 		await waitFor(() => expect(textarea.value).toContain('edited'));
 		expect(textarea.value).toContain('`a  b`');
 		await fireEvent.keyDown(editor, { key: 'Enter' });
+		expect(onsubmit).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 		expect(onsubmit).toHaveBeenCalledOnce();
 	});
 	it('rewrites only the edited table and leaves the rest of the prompt as typed', async () => {
@@ -244,7 +279,7 @@ describe('formatted composer integration', () => {
 		expect(textarea.value).toBe(table + '\n\nAppended review block');
 		expect(screen.queryByRole('button', { name: 'Format Markdown' })).toBeNull();
 	});
-	it('does not submit a replayed Enter that lost its Shift modifier', async () => {
+	it('never submits a replayed Enter, with or without a preceding Shift key', async () => {
 		const { editor, onsubmit } = await formatted();
 		const rich = richEditor(editor);
 		// iOS delivers the real key event to the DOM and replays it to key handlers without modifiers.
@@ -256,7 +291,7 @@ describe('formatted composer integration', () => {
 		expect(onsubmit).not.toHaveBeenCalled();
 		editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }));
 		rich.view.someProp('handleKeyDown', (handler) => handler(rich.view, replayed));
-		expect(onsubmit).toHaveBeenCalledOnce();
+		expect(onsubmit).not.toHaveBeenCalled();
 	});
 	it('opens the expanded source editor with the exact original draft', async () => {
 		const { textarea } = await formatted();

@@ -21,7 +21,7 @@ function mount(source: string, caret?: number, { handsOverSnippets = true } = {}
 		onMention,
 		onSnippet,
 		onSourceAction: vi.fn(),
-		onSubmitKeydown: vi.fn(),
+		onComposerKeydown: vi.fn(),
 		onCompletionKeydown: () => false,
 		onReady: vi.fn(),
 		onLargePaste: vi.fn(),

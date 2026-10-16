@@ -40,7 +40,7 @@
 		onChange,
 		onSourceAction,
 		onSnippet,
-		onSubmitKeydown,
+		onComposerKeydown,
 		onCompletionKeydown,
 		onReady,
 		onMention,
@@ -56,7 +56,7 @@
 		onChange: (source: string) => void;
 		onSourceAction: (text: string, caret: number) => void;
 		onSnippet: (text: string, caret: number) => boolean;
-		onSubmitKeydown: (event: KeyboardEvent) => void;
+		onComposerKeydown: (event: KeyboardEvent) => void;
 		onCompletionKeydown: (event: KeyboardEvent) => boolean;
 		onReady: (target: HTMLElement) => void;
 		onMention: (mention: ComposerMarkdownMention | null) => void;
@@ -79,8 +79,6 @@
 				topLevel(doc),
 				(a, b) => a === b || a.eq(b),
 			);
-		// Records Shift from real key events for the synthetic Enter described below.
-		let shiftHeld = false;
 		let mentionOpen = false;
 		// Inline leaves take one position each, so text offsets line up with document positions.
 		const blockText = (block: DocumentNode) =>
@@ -231,18 +229,16 @@
 						return true;
 					}
 					if (event.isComposing || _view.composing || event.keyCode === 229) return false;
-					// iOS replays Enter as a synthetic event without modifiers, so Shift+Enter
-					// would read as Enter:
+					if (onCompletionKeydown(event)) return true;
+					// Virtual keyboards replay Enter without reliable modifiers. A replay edits,
+					// but never submits or steers:
 					// https://github.com/ProseMirror/prosemirror-view/blob/17af0f4b25933933f644a655ad6bb9a0249d7cb5/src/input.ts#L118-L127
-					if (event.key === 'Enter' && !event.isTrusted && shiftHeld && !event.shiftKey) {
+					if (event.key === 'Enter' && !event.isTrusted) {
 						return mountedEditor.commands.command(composerMarkdownNewline);
 					}
-					if (onCompletionKeydown(event)) return true;
-					if (event.key === 'Enter') {
-						onSubmitKeydown(event);
-						if (!event.defaultPrevented) {
-							return mountedEditor.commands.command(composerMarkdownNewline);
-						}
+					onComposerKeydown(event);
+					if (event.key === 'Enter' && !event.defaultPrevented) {
+						return mountedEditor.commands.command(composerMarkdownNewline);
 					}
 					return event.defaultPrevented;
 				},
@@ -256,11 +252,6 @@
 					keydown(_view, event) {
 						// Leaves native IME input alone without running editor keymaps or preventing it.
 						if (event.isComposing || _view.composing || event.keyCode === 229) return true;
-						shiftHeld = event.shiftKey;
-						return false;
-					},
-					keyup(_view, event) {
-						if (event.key === 'Shift') shiftHeld = false;
 						return false;
 					},
 					paste(view, event) {

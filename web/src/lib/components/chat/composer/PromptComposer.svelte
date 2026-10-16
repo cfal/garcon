@@ -146,6 +146,9 @@
 	const formattedDraft = $derived(
 		ui.formattedDraft?.source === composerState.inputText ? ui.formattedDraft : null,
 	);
+	const canFormat = $derived(
+		isVisible && isPresented && !isDisabled && !promptTransformPending && !ui.composerEditorOpen,
+	);
 	const markdown = new PromptComposerMarkdownController({
 		ui,
 		composer: composerState,
@@ -156,9 +159,7 @@
 			return textarea;
 		},
 		get canFormat() {
-			return (
-				isVisible && isPresented && !isDisabled && !promptTransformPending && !ui.composerEditorOpen
-			);
+			return canFormat;
 		},
 		get acceptsMarkdown() { return markdownInput; },
 		get preferredMode() { return localSettings.composerInputMode; },
@@ -350,7 +351,7 @@
 	// Restores the formatted view of a Markdown draft when its chat is selected or reloaded and its model accepts Markdown.
 	$effect(() => {
 		const restored = composerState.draftRestoreRequest?.chatId === sessions.selectedChatId;
-		if (restored && markdownInput && isVisible && isPresented) untrack(() => markdown.restore());
+		if (restored && markdownInput && canFormat) untrack(() => markdown.restore());
 	});
 
 	// Cancels path-bound expansion when a selected chat moves to another project.
@@ -621,6 +622,7 @@
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
+		if (event.isComposing || event.keyCode === 229) return;
 		if (promptTransformPending) {
 			if (event.key === 'Enter' && resolveKeydownAction(event) !== 'newline') {
 				event.preventDefault();
@@ -628,7 +630,10 @@
 			return;
 		}
 		if (handleCompletionKeyDown(event)) return;
-		if (promptRecall.handleKeyDown(event)) return;
+		if (promptRecall.handleKeyDown(event)) {
+			if (ui.formattedDraft) void markdown.edit();
+			return;
+		}
 		if (event.key !== 'Enter') return;
 		const action = resolveKeydownAction(event);
 		if (action === 'newline') return;
@@ -875,7 +880,7 @@
 						draft={formattedDraft}
 						readOnly={isDisabled || promptTransformPending}
 						controller={markdown}
-						onSubmitKeydown={handleKeyDown}
+						onComposerKeydown={handleKeyDown}
 						onCompletionKeydown={handleCompletionKeyDown}
 					/>
 				{/if}
