@@ -1,5 +1,7 @@
 import { literalInputFormat, type InputFormatByModel } from '$shared/input-format';
 
+export type ComposerInputMode = 'source' | 'formatted';
+
 interface MarkdownInputAgent {
 	executionPolicy: 'conversation' | 'literal';
 	inputFormatByModel: InputFormatByModel;

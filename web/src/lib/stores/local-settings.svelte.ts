@@ -1,6 +1,7 @@
 // Reactive local settings store using Svelte 5 runes. Persists
 // browser-only preferences to persisted storage.
 
+import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
 import {
 	getLocalStorageItem,
 	LOCAL_STORAGE_KEYS,
@@ -145,6 +146,7 @@ export interface LocalSettingsSnapshot {
 	showQuickCommitTray: boolean;
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
+	composerInputMode: ComposerInputMode;
 	steerWithCtrlEnter: boolean;
 	snippetTrigger: string;
 	chatMaxWidth: ChatMaxWidth;
@@ -219,6 +221,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	showQuickCommitTray: true,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
+	composerInputMode: 'source',
 	steerWithCtrlEnter: true,
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
@@ -411,6 +414,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		showQuickCommitTray: parseBoolean(parsed.showQuickCommitTray, DEFAULTS.showQuickCommitTray),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
+		composerInputMode: parsed.composerInputMode === 'formatted' ? 'formatted' : 'source',
 		steerWithCtrlEnter: parseBoolean(parsed.steerWithCtrlEnter, DEFAULTS.steerWithCtrlEnter),
 		snippetTrigger: normalizeSnippetTrigger(parsed.snippetTrigger),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
@@ -522,6 +526,7 @@ export class LocalSettingsStore {
 	showQuickCommitTray = $state(DEFAULTS.showQuickCommitTray);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
+	composerInputMode = $state<ComposerInputMode>(DEFAULTS.composerInputMode);
 	steerWithCtrlEnter = $state(DEFAULTS.steerWithCtrlEnter);
 	snippetTrigger = $state(DEFAULTS.snippetTrigger);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
@@ -650,6 +655,7 @@ export class LocalSettingsStore {
 			showQuickCommitTray: this.showQuickCommitTray,
 			autoScrollToBottom: this.autoScrollToBottom,
 			sendByShiftEnter: this.sendByShiftEnter,
+			composerInputMode: this.composerInputMode,
 			steerWithCtrlEnter: this.steerWithCtrlEnter,
 			snippetTrigger: this.snippetTrigger,
 			chatMaxWidth: this.chatMaxWidth,
@@ -703,6 +709,7 @@ export class LocalSettingsStore {
 		this.showQuickCommitTray = snap.showQuickCommitTray;
 		this.autoScrollToBottom = snap.autoScrollToBottom;
 		this.sendByShiftEnter = snap.sendByShiftEnter;
+		this.composerInputMode = snap.composerInputMode;
 		this.steerWithCtrlEnter = snap.steerWithCtrlEnter;
 		this.snippetTrigger = snap.snippetTrigger;
 		this.chatMaxWidth = snap.chatMaxWidth;

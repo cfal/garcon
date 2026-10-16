@@ -8,7 +8,6 @@ import {
 } from './composer-markdown-blocks.js';
 import {
 	isComposerMarkdownSized,
-	isMarkdownCandidate,
 	MAX_COMPOSER_MARKDOWN_NODES,
 } from './composer-markdown-limits.js';
 
@@ -19,34 +18,11 @@ const manager = new MarkdownManager({
 configureComposerMarkdown(manager);
 const marked = manager.instance;
 
-// Tokens that make pasted text worth showing formatted. Thematic breaks and indented code are
-// left out because plain text produces them by accident.
-const FORMATTING_TOKENS = new Set([
-	'table',
-	'list',
-	'taskList',
-	'heading',
-	'blockquote',
-	'strong',
-	'em',
-	'del',
-	'codespan',
-	'image',
-]);
-
-function isFormattingToken(token: { type: string; raw: string; codeBlockStyle?: string }): boolean {
-	if (token.type === 'code') return token.codeBlockStyle !== 'indented';
-	// A bare address is a link token too; only a written `[label](url)` counts.
-	if (token.type === 'link') return token.raw.startsWith('[');
-	return FORMATTING_TOKENS.has(token.type);
-}
-
 // The Markdown parser lifts a lone image out of its paragraph, but draft images are inline.
 const IMAGE_BLOCK_PARENTS = new Set(['doc', 'blockquote', 'listItem', 'taskItem']);
 
 export interface ComposerMarkdownRequest {
 	source: string;
-	pastedText?: string;
 	caret?: number;
 }
 
@@ -154,12 +130,6 @@ function trailingSelection(document: JSONContent): number | undefined {
 interface CaretPlacement {
 	selection: number;
 	marks: JSONContent['marks'];
-	/** Ancestors of the text holding the caret, outermost first. */
-	path: JSONContent[];
-	/** Position of that text among its siblings. */
-	index: number;
-	/** The part of that text before the caret. */
-	before: string;
 }
 
 // Maps a source caret through Markdown delimiters by inserting marker text there and reading
@@ -175,8 +145,6 @@ function placeCaret(
 	const strip = (
 		node: JSONContent,
 		position: number,
-		path: JSONContent[],
-		index: number,
 	): JSONContent => {
 		if (node.text !== undefined) {
 			const offset = node.text.indexOf(marker);
@@ -184,62 +152,29 @@ function placeCaret(
 			placement = {
 				selection: position + offset,
 				marks: node.marks ?? [],
-				path,
-				index,
-				before: node.text.slice(0, offset),
 			};
 			return { ...node, text: node.text.replace(marker, '') };
 		}
 		if (!node.content) return node;
 		let next = position + (node.type === 'doc' ? 0 : 1);
-		const inner = [...path, node];
 		const content = node.content
-			.map((child, childIndex) => {
-				const result = strip(child, next, inner, childIndex);
+			.map((child) => {
+				const result = strip(child, next);
 				next += jsonNodeSize(result);
 				return result;
 			})
 			.filter((child) => child.text !== '');
 		return { ...node, content };
 	};
-	const same = JSON.stringify(strip(marked, 0, [], 0)) === JSON.stringify(document);
+	const same = JSON.stringify(strip(marked, 0)) === JSON.stringify(document);
 	return same ? placement : null;
-}
-
-// Reports syntax that parses as complete but is usually a longer construct still being typed.
-// It stays in source, where the rest of it can be written.
-function isUnfinished({ path, index, before }: CaretPlacement, atEnd: boolean): boolean {
-	const parent = path.at(-1);
-	// A row without its closing pipe would take the rest of its cells as text in one cell.
-	if (atEnd && path.some((node) => node.type === 'table')) return true;
-	// A closing fence cannot be typed inside a formatted code block.
-	if (parent?.type === 'codeBlock') return true;
-	const siblings = parent?.content ?? [];
-	// `**bold*` reads as a literal `*` and italic text until its last delimiter arrives.
-	if (
-		before === '' &&
-		siblings[index - 1]?.marks?.length &&
-		/[*_~]$/.test(siblings[index - 2]?.text ?? '')
-	)
-		return true;
-	// `- [` and `- [ ]` are a task marker that is missing its space.
-	return path.at(-2)?.type === 'listItem' && index === 0 && /^\[[ xX]?\]?$/.test(before);
 }
 
 export function parseComposerMarkdown({
 	source,
-	pastedText,
 	caret,
 }: ComposerMarkdownRequest): ComposerMarkdownDocument | null {
 	if (!isComposerMarkdownSized(source)) return null;
-	if (pastedText !== undefined) {
-		if (!isMarkdownCandidate(pastedText)) return null;
-		let formatted = false;
-		marked.walkTokens(marked.lexer(pastedText), (token) => {
-			if (isFormattingToken(token)) formatted = true;
-		});
-		if (!formatted) return null;
-	}
 	const { ended, ...parsed } = parseBlocks(source);
 	const pending = [parsed.document];
 	let count = 0;
@@ -256,7 +191,6 @@ export function parseComposerMarkdown({
 			placeCaret(source, caret, parsed.document, marker) ??
 			placeCaret(source, caret, parsed.document, '\u2e31' + marker);
 		if (placement) {
-			if (isUnfinished(placement, caret === source.length)) return null;
 			parsed.selection = placement.selection;
 			parsed.selectionMarks = placement.marks;
 		} else {
@@ -268,7 +202,6 @@ export function parseComposerMarkdown({
 				parsed.document.content?.at(-1)?.type === 'table' &&
 				parsed.sources.at(-1) !== null;
 			const trailing = complete ? trailingSelection(parsed.document) : undefined;
-			if (trailing === undefined) return null;
 			parsed.selection = trailing;
 		}
 	}

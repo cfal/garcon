@@ -17,6 +17,7 @@
 		formatFileMentionPath,
 	} from '$lib/chat/composer/file-mentions.js';
 	import { findSnippetTrigger } from '$lib/chat/composer/snippet-trigger.js';
+	import { findSlashCommandTrigger } from '$lib/chat/composer/slash-commands.js';
 	import { configureComposerMarkdown, serializeComposerMarkdown } from './composer-markdown.js';
 	import {
 		joinComposerMarkdownBlocks,
@@ -34,9 +35,8 @@
 		readOnly,
 		snippetTrigger,
 		onChange,
-		onPlain,
+		onSourceAction,
 		onSnippet,
-		onEditSource,
 		onSubmitKeydown,
 		onCompletionKeydown,
 		onReady,
@@ -50,9 +50,8 @@
 		readOnly: boolean;
 		snippetTrigger: string;
 		onChange: (source: string) => void;
-		onPlain: (text: string, caret: number) => void;
+		onSourceAction: (text: string, caret: number) => void;
 		onSnippet: (text: string, caret: number) => boolean;
-		onEditSource: () => void;
 		onSubmitKeydown: (event: KeyboardEvent) => void;
 		onCompletionKeydown: (event: KeyboardEvent) => boolean;
 		onReady: (target: HTMLElement) => void;
@@ -159,7 +158,7 @@
 				text,
 			});
 		};
-		const mountedEditor = new Editor({
+		const mountedEditor: Editor = new Editor({
 			element: container,
 			extensions: [
 				...extensions,
@@ -189,11 +188,10 @@
 				const { doc, selection } = current.state;
 				const source = serialize(doc);
 				const only = doc.childCount === 1 ? doc.firstChild : null;
-				// With no formatting left the plain editor takes over, where commands and recall work.
-				const plain =
+				const sourceCommand =
 					only?.type.name === 'paragraph' && only.textContent === source && !current.view.composing;
-				if (plain) {
-					onPlain(source, selection.empty ? selection.$from.parentOffset : source.length);
+				if (sourceCommand && selection.empty && findSlashCommandTrigger(source, selection.$from.parentOffset)) {
+					onSourceAction(source, selection.$from.parentOffset);
 					return;
 				}
 				const snippet = snippetSource(current);
@@ -222,17 +220,6 @@
 						return mountedEditor.commands.command(composerMarkdownNewline);
 					}
 					if (onCompletionKeydown(event)) return true;
-					const undo =
-						(event.ctrlKey || event.metaKey) &&
-						!event.shiftKey &&
-						!event.altKey &&
-						event.key.toLowerCase() === 'z';
-					// With no edit to undo, undo steps out of the formatted view to the paste behind it.
-					if (undo && !mountedEditor.can().undo() && !mountedEditor.can().redo()) {
-						event.preventDefault();
-						onEditSource();
-						return true;
-					}
 					if (event.key === 'Enter') {
 						onSubmitKeydown(event);
 						if (!event.defaultPrevented) {

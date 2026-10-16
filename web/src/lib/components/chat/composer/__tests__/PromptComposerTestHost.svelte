@@ -61,6 +61,7 @@
 	import type { ProjectTarget } from '$shared/project-resolution';
 	import type { RecallPrompt } from '$lib/chat/composer/prompt-recall';
 	import type { InputFormatByModel } from '$shared/input-format';
+	import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '$shared/attachments';
 
 	interface Props {
@@ -321,7 +322,12 @@
 	setChatDrafts(chatDrafts);
 	setAgentState(agent);
 	setAppShell(appShell);
+	let composerInputMode = $state<ComposerInputMode>('source');
 	setLocalSettings({
+		get composerInputMode() { return composerInputMode; },
+		set(key: string, mode: ComposerInputMode) {
+			if (key === 'composerInputMode') composerInputMode = mode;
+		},
 		get sendByShiftEnter() {
 			return false;
 		},

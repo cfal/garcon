@@ -19,7 +19,7 @@ export class ComposerState {
 	isDragActive = $state(false);
 	draftAppendRequest = $state<{ chatId: string; requestId: number } | null>(null);
 	#nextDraftAppendRequestId = 0;
-	/** Marks each time a chat's saved draft becomes the composer's content. */
+	/** Marks a loaded draft or the fresh draft after submission. */
 	draftRestoreRequest = $state<{ chatId: string; requestId: number } | null>(null);
 	#nextDraftRestoreRequestId = 0;
 
@@ -126,6 +126,9 @@ export class ComposerState {
 	}
 
 	clearAfterSubmit(chatId: string): number {
-		return this.drafts.clear(chatId);
+		const revision = this.drafts.clear(chatId);
+		this.#nextDraftRestoreRequestId += 1;
+		this.draftRestoreRequest = { chatId, requestId: this.#nextDraftRestoreRequestId };
+		return revision;
 	}
 }

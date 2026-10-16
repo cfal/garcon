@@ -11,7 +11,7 @@ import type {
 } from '../composer-markdown-parser.js';
 
 vi.mock('../composer-markdown-editor-loader.js', () => ({
-	loadComposerMarkdownEditor: vi.fn(async () => null),
+	loadComposerMarkdownEditor: vi.fn(async () => (await import('../ComposerMarkdownEditor.svelte')).default),
 }));
 vi.mock('../composer-markdown-worker.js', () => ({
 	parseComposerMarkdownInWorker: vi.fn(),
@@ -41,6 +41,7 @@ function fixture() {
 		chatId: 'one',
 		canFormat: true,
 		acceptsMarkdown: true,
+		preferredMode: 'formatted' as 'source' | 'formatted',
 		interactionGeneration: 0,
 		snippetTrigger: ';;',
 		onChange: vi.fn((text: string) => {
@@ -51,11 +52,8 @@ function fixture() {
 	};
 	const controller = new PromptComposerMarkdownController(options);
 	function paste(text: string) {
-		const data = new DataTransfer();
-		data.setData('text/plain', text);
-		const event = new ClipboardEvent('paste', { clipboardData: data });
-		Object.defineProperty(event, 'target', { value: textarea });
-		controller.capturePaste(event);
+		composer.inputText = text;
+		textarea.value = text;
 		controller.input(new InputEvent('input', { inputType: 'insertFromPaste' }));
 	}
 	return { ui, options, controller, paste };
@@ -137,17 +135,19 @@ describe('formatted composer snippet triggers', () => {
 });
 
 describe('formatted composer lifecycle', () => {
-	it('formats typed Markdown after typing settles without changing its source', async () => {
+	it('formats only on explicit selection, without changing its source', async () => {
 		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
 		const { controller, ui, options } = fixture();
 		options.composer.inputText = '**bold**';
 		options.textarea.value = '**bold**';
 		options.textarea.setSelectionRange(8, 8);
 		controller.input(new InputEvent('input', { inputType: 'insertText' }));
+		await new Promise((done) => setTimeout(done, 180));
 		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		controller.selectMode('formatted');
 		await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe('**bold**'));
 		expect(parseComposerMarkdownInWorker).toHaveBeenCalledExactlyOnceWith(
-			{ source: '**bold**', pastedText: '**bold**', caret: 8 },
+			{ source: '**bold**', caret: 8 },
 			expect.any(AbortSignal),
 		);
 		expect(options.onChange).not.toHaveBeenCalled();
@@ -167,6 +167,7 @@ describe('formatted composer lifecycle', () => {
 		options.textarea.value = table;
 		options.textarea.setSelectionRange(table.length, table.length);
 		controller.input(new InputEvent('input'));
+		controller.selectMode('formatted');
 		await vi.waitFor(() => expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce());
 		options.textarea.setSelectionRange(1, 1);
 		resolve(parsed);
@@ -274,6 +275,7 @@ describe('formatted composer lifecycle', () => {
 		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
 		const { ui, paste, options, controller } = fixture();
 		paste(table);
+		controller.selectMode('formatted');
 		await vi.waitFor(() => expect(ui.formattedDraft?.document).toEqual(parsed.document));
 		expect(options.onChange).not.toHaveBeenCalled();
 		expect(options.composer.inputText).toBe(table);
@@ -287,7 +289,7 @@ describe('formatted composer lifecycle', () => {
 		controller.restore();
 		await vi.waitFor(() => expect(ui.formattedDraft).toEqual({ source: table, ...parsed }));
 		expect(parseComposerMarkdownInWorker).toHaveBeenCalledExactlyOnceWith(
-			{ source: table, pastedText: table },
+			{ source: table },
 			expect.any(AbortSignal),
 		);
 		controller.restore();
@@ -295,8 +297,9 @@ describe('formatted composer lifecycle', () => {
 		expect(options.onChange).not.toHaveBeenCalled();
 		controller.destroy();
 	});
-	it('leaves a loaded plain draft in source without reporting it', async () => {
+	it('leaves a restored draft in Source when Source is preferred', async () => {
 		const { ui, options, controller } = fixture();
+		options.preferredMode = 'source';
 		options.composer.inputText = 'plain notes\nwith two lines';
 		controller.restore();
 		await Promise.resolve();
@@ -364,6 +367,7 @@ describe('formatted composer lifecycle', () => {
 			);
 			const { ui, paste, options, controller } = fixture();
 			paste(table);
+			controller.selectMode('formatted');
 			if (change === 'chat') options.chatId = 'two';
 			if (change === 'text') options.composer.inputText = 'new draft';
 			if (change === 'interaction') options.interactionGeneration++;

@@ -52,11 +52,21 @@ async function formatted({
 	});
 	const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
 	await fireEvent.input(textarea, { target: { value: source } });
+	await fireEvent.click(screen.getByRole('button', { name: 'Formatted' }));
 	const editor = await screen.findByRole('textbox', { name: 'Formatted message' });
 	return { ...rendered, textarea, editor, onsubmit };
 }
 
 describe('formatted composer integration', () => {
+	it.each(['', 'ordinary prose', '> quoted\r\n\r\n'])('switches modes without rewriting %j', async (source) => {
+		const { editor, textarea } = await formatted({ source });
+		expect(editor.isConnected).toBe(true);
+		expect(textarea.value).toBe(source);
+		await fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+		expect(textarea.value).toBe(source);
+	});
+
 	it('honors explicit shell focus requests without losing the Markdown draft', async () => {
 		const { rerender, textarea, editor } = await formatted();
 		await rerender({ selectedChatId: 'markdown-test', focusRequestToken: 1 });
@@ -96,7 +106,7 @@ describe('formatted composer integration', () => {
 		rich.commands.undo();
 		await waitFor(() => expect(textarea.value).toBe(prompt));
 	});
-	it('shows a restored table draft formatted and leaves other restored drafts in source', async () => {
+	it('restores according to the explicit preference rather than Markdown detection', async () => {
 		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(
 			parseComposerMarkdown({ source: table }),
 		);
@@ -110,10 +120,12 @@ describe('formatted composer integration', () => {
 		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
 		await fireEvent.input(textarea, { target: { value: table } });
 		await fireEvent.click(screen.getByTestId('restore-draft'));
+		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Formatted' }));
 		await screen.findByRole('textbox', { name: 'Formatted message' });
 		expect(textarea.value).toBe(table);
 	});
-	it('formats pasted bold text and lists without a source toggle', async () => {
+	it('leaves pasted Markdown literal until Formatted is selected', async () => {
 		const source = 'Ship **two** things:\n\n1. first\n2. second';
 		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) =>
 			parseComposerMarkdown(request),
@@ -124,12 +136,13 @@ describe('formatted composer integration', () => {
 		transfer.setData('text/plain', source);
 		await fireEvent.paste(textarea, { clipboardData: transfer });
 		await fireEvent.input(textarea, { target: { value: source }, inputType: 'insertFromPaste' });
+		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Formatted' }));
 		const editor = await screen.findByRole('textbox', { name: 'Formatted message' });
 		expect(editor.querySelector('strong')?.textContent).toBe('two');
 		expect(editor.querySelectorAll('ol > li')).toHaveLength(2);
 		expect(textarea.value).toBe(source);
-		expect(screen.queryByRole('button', { name: 'Edit Markdown source' })).toBeNull();
-		expect(screen.queryByRole('button', { name: 'Format Markdown' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Source' })).toBeTruthy();
 	});
 	it.each([
 		['sh', false],
@@ -148,6 +161,7 @@ describe('formatted composer integration', () => {
 		const source = "printf '%s\\n' _target_";
 		await fireEvent.input(textarea, { target: { value: source } });
 		if (formats) {
+			await fireEvent.click(screen.getByRole('button', { name: 'Formatted' }));
 			const editor = await screen.findByRole('textbox', { name: 'Formatted message' });
 			expect(editor.querySelector('em')?.textContent).toBe('target');
 			// A mode that takes its input verbatim gets the draft back exactly as typed.
@@ -184,14 +198,11 @@ describe('formatted composer integration', () => {
 		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		await waitFor(() => expect(textarea.value).toBe(source + ' appended'));
 	});
-	it('returns to the plain editor when a formatted draft is emptied', async () => {
+	it('keeps Formatted mode when a draft is emptied', async () => {
 		const { editor, textarea } = await formatted();
 		richEditor(editor).commands.clearContent(true);
-		await waitFor(() =>
-			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
-		);
-		expect(textarea.value).toBe('');
-		await waitFor(() => expect(document.activeElement).toBe(textarea));
+		await waitFor(() => expect(textarea.value).toBe(''));
+		expect(screen.getByRole('textbox', { name: 'Formatted message' })).toBe(editor);
 	});
 	it('hands a draft with no formatting left to the plain editor with its commands', async () => {
 		const commands = vi.spyOn(commandsApi, 'getSlashCommands').mockResolvedValue([]);
@@ -208,14 +219,11 @@ describe('formatted composer integration', () => {
 		await waitFor(() => expect(commands).toHaveBeenCalled());
 		commands.mockRestore();
 	});
-	it('steps out of the formatted view when undo has nothing to undo', async () => {
+	it('keeps an empty undo history inside Formatted mode', async () => {
 		const { editor, textarea } = await formatted();
 		await fireEvent.keyDown(editor, { key: 'z', ctrlKey: true });
-		await waitFor(() =>
-			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
-		);
+		expect(screen.getByRole('textbox', { name: 'Formatted message' })).toBe(editor);
 		expect(textarea.value).toBe(table);
-		await waitFor(() => expect(document.activeElement).toBe(textarea));
 	});
 	it('keeps undo inside the formatted view once the draft was edited', async () => {
 		const { editor, textarea } = await formatted();

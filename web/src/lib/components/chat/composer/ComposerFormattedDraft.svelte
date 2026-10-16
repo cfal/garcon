@@ -32,9 +32,8 @@
 		{onSubmitKeydown}
 		{onCompletionKeydown}
 		onChange={(text) => controller.change(text)}
-		onPlain={(text, caret) => controller.plain(text, caret)}
+		onSourceAction={(text, caret) => controller.plain(text, caret)}
 		onSnippet={(text, caret) => controller.snippet(text, caret)}
-		onEditSource={() => void controller.edit()}
 		onReady={(target) => controller.focus(target)}
 		onMention={(mention) => controller.mention(mention)}
 		onLargePaste={(request) => void controller.pasteSource(request)}

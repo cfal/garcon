@@ -3,6 +3,7 @@
 	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import ComposerFormattedDraft from './ComposerFormattedDraft.svelte';
 	import { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
+	import ComposerFormatSelector from './ComposerFormatSelector.svelte';
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
@@ -160,6 +161,7 @@
 			);
 		},
 		get acceptsMarkdown() { return markdownInput; },
+		get preferredMode() { return localSettings.composerInputMode; },
 		get interactionGeneration() {
 			return workspaceShortcuts.userInteractionGeneration;
 		},
@@ -761,7 +763,6 @@
 		ondrop={(event) => attachmentController.handleDrop(event)}
 		onpaste={(event) => {
 			attachmentController.handlePaste(event);
-			markdown.capturePaste(event);
 		}}
 		{@attach attachProcessingPulse}
 		{@attach snippetExpansion.pending && snippetExpansionLayer}
@@ -858,6 +859,17 @@
 			/>
 
 			<div class="relative overflow-hidden bg-transparent focus-within:ring-0">
+				{#if markdownInput}
+					<ComposerFormatSelector
+						mode={formattedDraft || ui.formatPending ? 'formatted' : 'source'}
+						pending={ui.formatPending}
+						disabled={isDisabled || promptTransformPending}
+						onSelect={(mode) => {
+							localSettings.set('composerInputMode', mode);
+							markdown.selectMode(mode);
+						}}
+					/>
+				{/if}
 				{#if formattedDraft}
 					<ComposerFormattedDraft
 						draft={formattedDraft}

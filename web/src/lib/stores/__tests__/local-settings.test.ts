@@ -88,6 +88,23 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
+	it('defaults to Source and persists an explicit Formatted preference', () => {
+		const store = createLocalSettingsStore();
+		expect(store.composerInputMode).toBe('source');
+		store.set('composerInputMode', 'formatted');
+		const restored = createLocalSettingsStore();
+		expect(restored.composerInputMode).toBe('formatted');
+		store.destroy();
+		restored.destroy();
+	});
+
+	it.each(['automatic', '', null, true, {}])('rejects invalid composer mode %j', (mode) => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ composerInputMode: mode }));
+		const store = createLocalSettingsStore();
+		expect(store.composerInputMode).toBe('source');
+		store.destroy();
+	});
+
 	it('ignores the unused language key in saved settings', () => {
 		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ language: 'fr', codeEditorVimMode: true }));
 		const store = createLocalSettingsStore();

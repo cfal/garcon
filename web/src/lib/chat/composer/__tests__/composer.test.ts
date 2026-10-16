@@ -86,6 +86,7 @@ describe('ComposerState', () => {
 		state.addImages([new File(['a'], 'a.png', { type: 'image/png' })]);
 
 		state.clearAfterSubmit('chat-1');
+		expect(state.draftRestoreRequest).toEqual({ chatId: 'chat-1', requestId: 2 });
 
 		expect(state.inputText).toBe('');
 		expect(state.images).toEqual([]);
