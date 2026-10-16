@@ -315,20 +315,20 @@ export function buildSidebarExecutorCollapseKeys(input: {
 }
 
 export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowModel {
+	const groupByExecutor =
+		input.groupByExecutor ??
+		shouldGroupSidebarByExecutor({
+			allChats: input.displayedChats,
+			executorOrder: input.executorOrder,
+		});
+	if (input.grouping === 'none' || !groupByExecutor) return buildSidebarRows(input);
+
 	const chatsByExecutor = new Map<string, ChatSessionRecord[]>();
 	for (const chat of input.displayedChats) {
 		const executorId = effectiveExecutorId(chat.executorId);
 		const chats = chatsByExecutor.get(executorId) ?? [];
 		chats.push(chat);
 		chatsByExecutor.set(executorId, chats);
-	}
-	// A remote-only filtered result still needs an explicit machine identity.
-	const groupByExecutor =
-		input.groupByExecutor ??
-		((input.executorOrder?.some((id) => id !== 'local') ?? false) ||
-			Array.from(chatsByExecutor.keys()).some((id) => id !== 'local'));
-	if (input.grouping === 'none' || !groupByExecutor) {
-		return buildSidebarRows(input);
 	}
 	const configuredOrder = new Map((input.executorOrder ?? []).map((id, index) => [id, index]));
 	const executorIds = Array.from(chatsByExecutor.keys()).sort((left, right) => {

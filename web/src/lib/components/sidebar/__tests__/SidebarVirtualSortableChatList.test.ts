@@ -181,19 +181,15 @@ function querySummaryProjectPath(projectPath: string): HTMLElement | null {
 	);
 }
 
-function expectInlineGroupHeaderDivider(header: HTMLElement): void {
+function expectCompactGroupHeader(header: HTMLElement): void {
 	const label = header.querySelector<HTMLElement>('[data-sidebar-group-header-label]');
-	const divider = header.querySelector<HTMLElement>('[data-sidebar-group-header-divider]');
 	const count = header.querySelector<HTMLElement>('[data-sidebar-group-header-count]');
-	const disclosureIcon = label?.nextElementSibling;
+	const disclosureIcon = label?.previousElementSibling;
 
 	expect(label).toBeTruthy();
 	expect(disclosureIcon?.tagName.toLowerCase()).toBe('svg');
-	expect(disclosureIcon?.nextElementSibling).toBe(divider);
-	expect(divider?.nextElementSibling).toBe(count);
-	expect(divider?.className).toContain('h-px');
-	expect(divider?.className).toContain('flex-1');
-	expect(header.parentElement?.className ?? '').not.toMatch(/\bborder-b\b/);
+	expect(disclosureIcon?.getAttribute('aria-hidden')).toBe('true');
+	expect(label?.nextElementSibling).toBe(count);
 }
 
 function isSidebarViewport(element: HTMLElement): boolean {
@@ -429,16 +425,15 @@ describe('SidebarVirtualSortableChatList', () => {
 			],
 		});
 
-		expect(screen.getByRole('button', { name: 'Local 2' })).toBeTruthy();
+		expectCompactGroupHeader(screen.getByRole('button', { name: 'Local 2' }));
 		expect(document.querySelector('[data-sidebar-machine-header="local"]')).toBeTruthy();
-		expect(document.querySelector('[data-sidebar-machine-count]')?.textContent?.trim()).toBe('2');
 		const machineItem = document.querySelector<HTMLElement>(
 			'[data-sidebar-virtual-item="machine-header"]',
 		);
 		expect(machineItem?.style.height).toBe(`${MACHINE_HEADER_ROW_HEIGHT}px`);
 	});
 
-	it('places disclosure arrows after group labels and replaces header borders with inline dividers', () => {
+	it('places disclosure arrows before group labels and keeps counts at the end', () => {
 		const sectionHeader: SidebarVirtualRow = {
 			type: 'section-header',
 			key: 'section:inactive',
@@ -460,8 +455,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		);
 		if (!projectHeader || !activityHeader) throw new Error('expected both group header types');
 
-		expectInlineGroupHeaderDivider(projectHeader);
-		expectInlineGroupHeaderDivider(activityHeader);
+		expectCompactGroupHeader(projectHeader);
+		expectCompactGroupHeader(activityHeader);
 	});
 
 	it('renders collapsed project groups as header-only virtual rows', () => {
