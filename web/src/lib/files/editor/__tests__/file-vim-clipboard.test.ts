@@ -1,15 +1,22 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { Vim, getCM, type CodeMirror, type CodeMirrorV } from '@replit/codemirror-vim';
 import { FileVimMode } from '../file-vim-mode.svelte.js';
+import { deferDocumentSelectionChanges } from '../../../../test/selection-change.js';
 
 const cleanups: (() => void)[] = [];
+let restoreSelectionChanges: () => void;
+
+beforeEach(() => {
+	restoreSelectionChanges = deferDocumentSelectionChanges();
+});
 
 afterEach(() => {
 	for (const cleanup of cleanups.splice(0)) cleanup();
 	vi.restoreAllMocks();
 	Vim.resetVimGlobalState_();
+	restoreSelectionChanges();
 });
 
 async function editor(readOnly = false) {

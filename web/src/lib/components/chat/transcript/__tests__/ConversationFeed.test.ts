@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConversationFeedTestHost from './ConversationFeedTestHost.svelte';
 import {
@@ -62,6 +62,13 @@ describe('ConversationFeed', () => {
 		HTMLElement.prototype,
 		'clientHeight',
 	);
+
+	let restoreResizeObserver: () => void;
+	beforeAll(() => {
+		// Bits UI retains one shared observer for the lifetime of its module.
+		restoreResizeObserver = installResizeObserverHarness();
+	});
+	afterAll(() => restoreResizeObserver());
 
 	beforeEach(() => {
 		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -312,95 +319,75 @@ describe('ConversationFeed', () => {
 	});
 
 	it('widens the draggable scrollbar for fine pointers', async () => {
-		const restoreResizeObserver = installResizeObserverHarness();
-		try {
-			const { container } = render(ConversationFeedTestHost, {
-				transcriptScenario: 'twenty-thousand',
-			});
-			const { scrollbar } = await showFeedScrollbar(container);
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'twenty-thousand',
+		});
+		const { scrollbar } = await showFeedScrollbar(container);
 
-			expect(scrollbar.classList.contains('w-1.5')).toBe(true);
-			expect(scrollbar.classList.contains('pointer-fine:w-3')).toBe(true);
-		} finally {
-			restoreResizeObserver();
-		}
+		expect(scrollbar.classList.contains('w-1.5')).toBe(true);
+		expect(scrollbar.classList.contains('pointer-fine:w-3')).toBe(true);
 	});
 
 	it('reports an immediate scrollbar track jump from its committed offset', async () => {
-		const restoreResizeObserver = installResizeObserverHarness();
 		let feedViewport: HTMLElement | null = null;
 		const observedScrollTops: number[] = [];
 		const onUserScrollIntent = vi.fn(() => observedScrollTops.push(feedViewport?.scrollTop ?? -1));
-		try {
-			const { container } = render(ConversationFeedTestHost, {
-				onUserScrollIntent,
-				transcriptScenario: 'twenty-thousand',
-			});
-			const { scrollbar, thumb, viewport } = await showFeedScrollbar(container);
-			feedViewport = viewport;
-			viewport.scrollTop = 500;
-			vi.spyOn(thumb, 'getBoundingClientRect').mockReturnValue({ top: 80, bottom: 120 } as DOMRect);
-			document.addEventListener('pointerdown', () => (viewport.scrollTop = 0), { once: true });
+		const { container } = render(ConversationFeedTestHost, {
+			onUserScrollIntent,
+			transcriptScenario: 'twenty-thousand',
+		});
+		const { scrollbar, thumb, viewport } = await showFeedScrollbar(container);
+		feedViewport = viewport;
+		viewport.scrollTop = 500;
+		vi.spyOn(thumb, 'getBoundingClientRect').mockReturnValue({ top: 80, bottom: 120 } as DOMRect);
+		document.addEventListener('pointerdown', () => (viewport.scrollTop = 0), { once: true });
 
-			await fireEvent.pointerDown(scrollbar, { button: 0, clientY: 90, pointerId: 1 });
+		await fireEvent.pointerDown(scrollbar, { button: 0, clientY: 90, pointerId: 1 });
 
-			expect(onUserScrollIntent.mock.calls).toEqual([['earlier']]);
-			expect(observedScrollTops).toEqual([500]);
-			expect(viewport.scrollTop).toBe(0);
-		} finally {
-			restoreResizeObserver();
-		}
+		expect(onUserScrollIntent.mock.calls).toEqual([['earlier']]);
+		expect(observedScrollTops).toEqual([500]);
+		expect(viewport.scrollTop).toBe(0);
 	});
 
 	it('reports wheel direction over the custom scrollbar before it scrolls', async () => {
-		const restoreResizeObserver = installResizeObserverHarness();
 		let feedViewport: HTMLElement | null = null;
 		const observedScrollTops: number[] = [];
 		const onUserScrollIntent = vi.fn(() => observedScrollTops.push(feedViewport?.scrollTop ?? -1));
-		try {
-			const { container } = render(ConversationFeedTestHost, {
-				onUserScrollIntent,
-				transcriptScenario: 'twenty-thousand',
-			});
-			const { scrollbar, viewport } = await showFeedScrollbar(container);
-			feedViewport = viewport;
-			viewport.scrollTop = 500;
-			document.addEventListener('wheel', () => (viewport.scrollTop = 0), { once: true });
+		const { container } = render(ConversationFeedTestHost, {
+			onUserScrollIntent,
+			transcriptScenario: 'twenty-thousand',
+		});
+		const { scrollbar, viewport } = await showFeedScrollbar(container);
+		feedViewport = viewport;
+		viewport.scrollTop = 500;
+		document.addEventListener('wheel', () => (viewport.scrollTop = 0), { once: true });
 
-			await fireEvent.wheel(scrollbar, { deltaY: -40 });
-			expect(viewport.scrollTop).toBe(0);
-			viewport.scrollTop = 500;
-			await fireEvent.wheel(scrollbar, { deltaY: 40 });
+		await fireEvent.wheel(scrollbar, { deltaY: -40 });
+		expect(viewport.scrollTop).toBe(0);
+		viewport.scrollTop = 500;
+		await fireEvent.wheel(scrollbar, { deltaY: 40 });
 
-			expect(onUserScrollIntent.mock.calls).toEqual([['earlier'], ['later']]);
-			expect(observedScrollTops).toEqual([500, 500]);
-		} finally {
-			restoreResizeObserver();
-		}
+		expect(onUserScrollIntent.mock.calls).toEqual([['earlier'], ['later']]);
+		expect(observedScrollTops).toEqual([500, 500]);
 	});
 
 	it('defers thumb pickup until pointer movement establishes direction', async () => {
-		const restoreResizeObserver = installResizeObserverHarness();
 		const onUserScrollIntent = vi.fn();
-		try {
-			const { container } = render(ConversationFeedTestHost, {
-				onUserScrollIntent,
-				transcriptScenario: 'twenty-thousand',
-			});
-			const { thumb, viewport } = await showFeedScrollbar(container);
-			viewport.scrollTop = 500;
-			thumb.addEventListener('pointerdown', () => (viewport.scrollTop = 499.5), { once: true });
+		const { container } = render(ConversationFeedTestHost, {
+			onUserScrollIntent,
+			transcriptScenario: 'twenty-thousand',
+		});
+		const { thumb, viewport } = await showFeedScrollbar(container);
+		viewport.scrollTop = 500;
+		thumb.addEventListener('pointerdown', () => (viewport.scrollTop = 499.5), { once: true });
 
-			await fireEvent.pointerDown(thumb, { button: 0, clientY: 100, pointerId: 2 });
-			expect(onUserScrollIntent.mock.calls).toEqual([[null]]);
-			await fireEvent.pointerMove(thumb, { buttons: 1, clientY: 80, pointerId: 2 });
-			await fireEvent.pointerMove(thumb, { buttons: 1, clientY: 120, pointerId: 2 });
-			await fireEvent.pointerUp(thumb, { button: 0, clientY: 120, pointerId: 2 });
+		await fireEvent.pointerDown(thumb, { button: 0, clientY: 100, pointerId: 2 });
+		expect(onUserScrollIntent.mock.calls).toEqual([[null]]);
+		await fireEvent.pointerMove(thumb, { buttons: 1, clientY: 80, pointerId: 2 });
+		await fireEvent.pointerMove(thumb, { buttons: 1, clientY: 120, pointerId: 2 });
+		await fireEvent.pointerUp(thumb, { button: 0, clientY: 120, pointerId: 2 });
 
-			expect(onUserScrollIntent.mock.calls).toEqual([[null], ['earlier'], ['later']]);
-		} finally {
-			restoreResizeObserver();
-		}
+		expect(onUserScrollIntent.mock.calls).toEqual([[null], ['earlier'], ['later']]);
 	});
 
 	it('keeps the automatic earlier-history boundary out of the transcript', () => {
@@ -550,7 +537,6 @@ describe('ConversationFeed', () => {
 	});
 
 	it('ignores a connected stale row measurement after the item count shrinks', async () => {
-		const restoreResizeObserver = installResizeObserverHarness();
 		let staleRow: HTMLElement | null = null;
 		try {
 			const { container } = render(ConversationFeedTestHost, {
@@ -604,61 +590,55 @@ describe('ConversationFeed', () => {
 			});
 		} finally {
 			staleRow?.remove();
-			restoreResizeObserver();
 		}
 	});
 
 	it('preserves measured survivor geometry across count shrink and a later publication', async () => {
-		const restoreResizeObserver = installResizeObserverHarness();
-		try {
-			const { container } = render(ConversationFeedTestHost, {
-				transcriptScenario: 'count-shrink-survivors',
-			});
-			await waitFor(() =>
-				expect(
-					container
-						.querySelector('[data-chat-virtual-sizer]')
-						?.getAttribute('data-chat-virtual-model-count'),
-				).toBe('122'),
-			);
-			const measuredRow = container
-				.querySelector('[data-chat-row-id="generation-1:120"]')
-				?.closest<HTMLElement>('[data-chat-virtual-item]');
-			const followingRow = measuredRow?.nextElementSibling as HTMLElement | null;
-			if (!measuredRow || !followingRow) {
-				throw new Error('Expected the mounted tail row and end spacer');
-			}
-			const survivorKey = measuredRow.dataset.chatVirtualItem;
-			expect(survivorKey).toBeTruthy();
-			const viewport = container.querySelector<HTMLElement>('[data-chat-scroll-viewport]');
-			if (!viewport) throw new Error('Expected the Chat viewport');
-			ResizeObserverHarness.emit(viewport, 900, 720);
-			ResizeObserverHarness.emit(measuredRow, 900, 600);
-			viewport.scrollTop += 37;
-			await fireEvent.scroll(viewport);
-
-			await fireEvent.click(screen.getByRole('button', { name: 'Shrink transcript keeping tail' }));
-			await tick();
-			await fireEvent.click(screen.getByRole('button', { name: 'Show earlier error' }));
-			await tick();
-			await waitFor(() =>
-				expect(
-					container
-						.querySelector('[data-chat-virtual-sizer]')
-						?.getAttribute('data-chat-virtual-model-count'),
-				).toBe('23'),
-			);
-			expect(measuredRow.isConnected).toBe(true);
-			expect(followingRow.isConnected).toBe(true);
-			expect(measuredRow.dataset.chatVirtualItem).toBe(survivorKey);
-			await waitFor(() => {
-				const start = (element: HTMLElement): number =>
-					Number(element.style.transform.match(/translateY\(([-\d.]+)px\)/)?.[1] ?? Number.NaN);
-				expect(start(followingRow) - start(measuredRow)).toBe(600);
-			});
-		} finally {
-			restoreResizeObserver();
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'count-shrink-survivors',
+		});
+		await waitFor(() =>
+			expect(
+				container
+					.querySelector('[data-chat-virtual-sizer]')
+					?.getAttribute('data-chat-virtual-model-count'),
+			).toBe('122'),
+		);
+		const measuredRow = container
+			.querySelector('[data-chat-row-id="generation-1:120"]')
+			?.closest<HTMLElement>('[data-chat-virtual-item]');
+		const followingRow = measuredRow?.nextElementSibling as HTMLElement | null;
+		if (!measuredRow || !followingRow) {
+			throw new Error('Expected the mounted tail row and end spacer');
 		}
+		const survivorKey = measuredRow.dataset.chatVirtualItem;
+		expect(survivorKey).toBeTruthy();
+		const viewport = container.querySelector<HTMLElement>('[data-chat-scroll-viewport]');
+		if (!viewport) throw new Error('Expected the Chat viewport');
+		ResizeObserverHarness.emit(viewport, 900, 720);
+		ResizeObserverHarness.emit(measuredRow, 900, 600);
+		viewport.scrollTop += 37;
+		await fireEvent.scroll(viewport);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Shrink transcript keeping tail' }));
+		await tick();
+		await fireEvent.click(screen.getByRole('button', { name: 'Show earlier error' }));
+		await tick();
+		await waitFor(() =>
+			expect(
+				container
+					.querySelector('[data-chat-virtual-sizer]')
+					?.getAttribute('data-chat-virtual-model-count'),
+			).toBe('23'),
+		);
+		expect(measuredRow.isConnected).toBe(true);
+		expect(followingRow.isConnected).toBe(true);
+		expect(measuredRow.dataset.chatVirtualItem).toBe(survivorKey);
+		await waitFor(() => {
+			const start = (element: HTMLElement): number =>
+				Number(element.style.transform.match(/translateY\(([-\d.]+)px\)/)?.[1] ?? Number.NaN);
+			expect(start(followingRow) - start(measuredRow)).toBe(600);
+		});
 	});
 
 	it('updates Bash filtering from remote settings snapshots', async () => {

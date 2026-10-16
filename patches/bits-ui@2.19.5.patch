@@ -11,15 +11,3 @@ index a3941823aa76e34dabffbb2fa6ce1443787d17a2..3eba84bc84312f8d5ceb5f549b1615c1
          if (this.#container) {
              this.unmount();
          }
-@@ -56,7 +58,10 @@ export class FocusScope {
-         this.#opts.onOpenAutoFocus.current(event);
-         if (!event.defaultPrevented) {
-             requestAnimationFrame(() => {
--                if (!this.#container)
-+                if (!this.#container ||
-+                    this.#paused ||
-+                    !this.#manager.isActiveScope(this) ||
-+                    this.#container.contains(this.#container.ownerDocument.activeElement))
-                     return;
-                 const firstTabbable = this.#getFirstTabbable();
-                 if (firstTabbable) {
