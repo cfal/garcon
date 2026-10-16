@@ -173,6 +173,44 @@ describe('formatted composer snippet triggers', () => {
 });
 
 describe('formatted composer lifecycle', () => {
+	describe.each(['explicit', 'restore'])('pending %s conversion', (intent) => {
+		it.each(['/', 'Review ;;', 'Review @src'])(
+			'cancels conversion and intent for the source palette in %j',
+			async (source) => {
+				const { controller, options, ui } = fixture();
+				let complete!: (value: ComposerMarkdownDocument) => void;
+				const pending = new Promise<ComposerMarkdownDocument>((resolve) => {
+					complete = resolve;
+				});
+				vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(pending);
+				if (intent === 'explicit') controller.selectMode('formatted');
+				else controller.restore();
+				const signal = vi.mocked(parseComposerMarkdownInWorker).mock.calls[0][1];
+				options.composer.inputText = source;
+				options.textarea.value = source;
+				options.textarea.setSelectionRange(source.length, source.length);
+				ui.updateTriggers(source, source.length, ';;', false, 'conversation');
+				const menus = [ui.showSlashMenu, ui.showFileMenu, ui.snippetPalette.isOpen];
+				expect(menus.filter(Boolean)).toHaveLength(1);
+				controller.input(new InputEvent('input'));
+				expect(signal?.aborted).toBe(true);
+				expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
+				complete(parsed);
+				await pending;
+				await loadComposerMarkdownEditor();
+				expect(ui.formattedDraft).toBeNull();
+				expect([ui.showSlashMenu, ui.showFileMenu, ui.snippetPalette.isOpen]).toEqual(menus);
+				expect(options.textarea.selectionStart).toBe(source.length);
+				expect(options.preferredMode).toBe('formatted');
+				ui.closeSlashMenu();
+				ui.closeFileMenu();
+				ui.snippetPalette.dismiss();
+				controller.input(new InputEvent('input'));
+				expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
+				controller.destroy();
+			},
+		);
+	});
 	it.each(['explicit', 'restore'])('follows the source caret and focus during a pending %s', async (intent) => {
 		const { controller, options, ui } = fixture();
 		options.textarea.value = table;

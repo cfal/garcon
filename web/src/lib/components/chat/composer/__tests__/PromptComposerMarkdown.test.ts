@@ -16,6 +16,7 @@ import { composerMarkdownEditorExtensions } from '../composer-markdown-extension
 import { configureComposerMarkdown } from '../composer-markdown.js';
 import * as snippetsApi from '$lib/api/snippets';
 import * as commandsApi from '$lib/api/commands.js';
+import * as filesApi from '$lib/api/files.js';
 
 vi.mock('../composer-markdown-worker.js', () => ({
 	parseComposerMarkdownInWorker: vi.fn(),
@@ -62,6 +63,62 @@ async function formatted({
 }
 
 describe('formatted composer integration', () => {
+	it.each(['/', 'Review ;;', 'Review @src'])(
+		'keeps the source palette open after typing %j during conversion',
+		async (source) => {
+			const commands = vi.spyOn(commandsApi, 'getSlashCommands').mockResolvedValue([]);
+			const files = vi.spyOn(filesApi, 'getFileList').mockResolvedValue([]);
+			let complete!: (value: ReturnType<typeof parseComposerMarkdown>) => void;
+			const pending = new Promise<ReturnType<typeof parseComposerMarkdown>>((resolve) => {
+				complete = resolve;
+			});
+			vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(pending);
+			render(PromptComposerTestHost, { selectedChatId: 'pending-palette', selectedStatus: 'draft' });
+			const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+			await fireEvent.input(textarea, { target: { value: 'Review' } });
+			await fireEvent.click(screen.getByRole('button', { name: 'Formatted' }));
+			textarea.focus();
+			await fireEvent.input(textarea, { target: { value: source } });
+			const palette = await screen.findByRole('listbox');
+			expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
+			expect(vi.mocked(parseComposerMarkdownInWorker).mock.calls[0][1]?.aborted).toBe(true);
+			complete(parseComposerMarkdown({ source: 'Review' }));
+			await pending;
+			await loadComposerMarkdownEditor();
+			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+			expect(screen.getByRole('listbox')).toBe(palette);
+			expect(textarea.value).toBe(source);
+			expect(textarea.selectionStart).toBe(source.length);
+			commands.mockRestore();
+			files.mockRestore();
+		},
+	);
+	it('cancels pending conversion before typing into an externally appended draft', async () => {
+		let complete!: (value: ReturnType<typeof parseComposerMarkdown>) => void;
+		const pending = new Promise<ReturnType<typeof parseComposerMarkdown>>((resolve) => {
+			complete = resolve;
+		});
+		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(pending);
+		render(PromptComposerTestHost, { selectedChatId: 'pending-append' });
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.input(textarea, { target: { value: 'Review' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Formatted' }));
+		const append = screen.getByTestId('append-draft');
+		append.focus();
+		await fireEvent.click(append);
+		expect(document.activeElement).toBe(append);
+		expect(textarea.value).toBe('Review\n\nAppended review block');
+		expect(vi.mocked(parseComposerMarkdownInWorker).mock.calls[0][1]?.aborted).toBe(true);
+		textarea.focus();
+		await fireEvent.input(textarea, { target: { value: textarea.value + '!' } });
+		expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
+		complete(parseComposerMarkdown({ source: 'Review' }));
+		await pending;
+		await loadComposerMarkdownEditor();
+		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+		expect(textarea.value).toBe('Review\n\nAppended review block!');
+		expect(document.activeElement).toBe(textarea);
+	});
 	it.each(['deleted text', 'hard break'])('resets rich history and focus delivery after clearing an empty draft with %s', async (content) => {
 		const { editor, textarea, rerender } = await formatted({ source: 'old draft' });
 		const previous = richEditor(editor);

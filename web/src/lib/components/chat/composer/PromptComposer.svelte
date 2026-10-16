@@ -415,6 +415,7 @@
 		) {
 			return;
 		}
+		untrack(() => markdown.reset());
 		const frameId = requestAnimationFrame(() => {
 			if (
 				composerState.draftAppendRequest?.requestId !== request.requestId ||

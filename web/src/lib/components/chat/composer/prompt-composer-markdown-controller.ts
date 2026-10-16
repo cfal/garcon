@@ -52,7 +52,9 @@ export class PromptComposerMarkdownController {
 	constructor(private readonly options: PromptComposerMarkdownOptions) {}
 
 	input(event: InputEvent): void {
-		const intent = this.#formatIntent;
+		const { ui } = this.options;
+		const sourcePaletteOpen = ui.showSlashMenu || ui.showFileMenu || ui.snippetPalette.isOpen;
+		const intent = sourcePaletteOpen ? null : this.#formatIntent;
 		this.reset();
 		this.#formatIntent = intent;
 		this.#composing = event.isComposing;
