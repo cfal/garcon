@@ -215,10 +215,10 @@ export class PromptComposerMarkdownController {
 			this.#workerAbort = null;
 			this.options.ui.formattedPastePending = false;
 		}
+		// Readiness gates presentation, not completion of an owned paste.
 		if (
 			this.#destroyed ||
 			abort.signal.aborted ||
-			!this.options.canFormat ||
 			this.options.chatId !== chatId ||
 			this.options.ui.formattedDraft !== draft ||
 			this.options.composer.inputText !== draft.source
@@ -236,8 +236,12 @@ export class PromptComposerMarkdownController {
 		} else {
 			this.options.onChange(text);
 		}
-		if (generation === this.options.interactionGeneration) void this.edit();
-		else this.reset();
+		if (
+			generation === this.options.interactionGeneration ||
+			document.activeElement === this.options.ui.formattedTarget
+		) {
+			void this.edit();
+		} else this.reset();
 	}
 
 	focus(target: HTMLElement): void {
@@ -340,6 +344,15 @@ export class PromptComposerMarkdownController {
 				this.options.textarea?.selectionEnd !== selectionEnd)
 		) {
 			void this.#format();
+			return;
+		}
+		// Textarea coordinates normalize CRLF; only an interior caret needs mapping.
+		if (
+			parsed.selection === undefined &&
+			caret !== this.options.textarea?.value.length &&
+			document.activeElement === this.options.textarea
+		) {
+			this.#formatUnavailable();
 			return;
 		}
 		this.#showFormatted(source, parsed, generation);

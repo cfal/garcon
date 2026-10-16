@@ -59,7 +59,9 @@ async function formatted({
 	selectedStatus = 'running',
 	source = table,
 }: { selectedStatus?: 'running' | 'draft'; source?: string } = {}) {
-	vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parseComposerMarkdown({ source }));
+	vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(
+		parseComposerMarkdown({ source, caret: source.length }),
+	);
 	const onsubmit = vi.fn();
 	const rendered = render(PromptComposerTestHost, {
 		selectedChatId: 'markdown-test',
@@ -242,6 +244,21 @@ describe('formatted composer integration', () => {
 			else expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
 			if (action === 'outside') expect(document.activeElement).toBe(outside);
 			outside.remove();
+		},
+	);
+	it.each(['hidden', 'admission'])(
+		'preserves an oversized literal paste completed while %s',
+		async (blocker) => {
+			const pending = Promise.withResolvers<string>();
+			vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValueOnce(pending.promise);
+			const { editor, textarea, rerender } = await formatted({ selectedStatus: 'draft' });
+			await pasteAndSettle(editor, 'x'.repeat(40_000));
+			expect(serializeComposerMarkdownPasteInWorker).toHaveBeenCalledOnce();
+			await rerender(blocker === 'hidden' ? { isVisible: false } : { directAdmissionPending: true });
+			await act(() => pending.resolve('completed paste'));
+			await rerender(blocker === 'hidden' ? { isVisible: true } : { directAdmissionPending: false });
+			await waitFor(() => expect(textarea.value).toBe('completed paste'));
+			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
 		},
 	);
 	it('retains the Source caret when a multiline paste cannot map into the rich document', async () => {

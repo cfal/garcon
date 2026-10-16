@@ -10,6 +10,7 @@ import type {
 	ComposerMarkdownDocument,
 	ComposerMarkdownPasteRequest,
 } from '../composer-markdown-parser.js';
+import { parseComposerMarkdown } from '../composer-markdown-parser.js';
 
 vi.mock('../composer-markdown-editor-loader.js', () => ({
 	loadComposerMarkdownEditor: vi.fn(
@@ -27,6 +28,7 @@ const table = '| A | B |\n| - | - |\n| first | second |';
 const parsed: ComposerMarkdownDocument = {
 	document: { type: 'doc', content: [{ type: 'paragraph' }] },
 	sources: [null],
+	selection: 1,
 };
 const pasteRequest: ComposerMarkdownPasteRequest = {
 	blocks: [],
@@ -119,6 +121,47 @@ describe('formatted composer input format', () => {
 		await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(table));
 		controller.destroy();
 	});
+	it('keeps a focused unmapped caret in Source', async () => {
+		const { controller, ui, options } = fixture();
+		const source = '```js\nconst value = 1;\n```\n\nlast';
+		const caret = 2;
+		const unmapped = parseComposerMarkdown({ source, caret });
+		expect(unmapped).not.toBeNull();
+		expect(unmapped?.selection).toBeUndefined();
+		options.composer.inputText = source;
+		options.textarea.value = source;
+		options.textarea.setSelectionRange(caret, caret);
+		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(unmapped);
+		selectFormatted(controller, options);
+		await vi.waitFor(() => expect(options.onUnavailable).toHaveBeenCalledOnce());
+		expect(ui.formattedDraft).toBeNull();
+		expect(document.activeElement).toBe(options.textarea);
+		expect(options.textarea.selectionStart).toBe(caret);
+		options.textarea.setRangeText('x', caret, caret, 'end');
+		expect(options.textarea.value).toBe(source.slice(0, caret) + 'x' + source.slice(caret));
+		controller.destroy();
+	});
+	it.each(['\n', '\r\n'])(
+		'formats a focused draft when only its end caret is unmapped (line ending=%j)',
+		async (lineEnding) => {
+			const { controller, ui, options } = fixture();
+			const text = '```js\nconst value = 1;\n```';
+			const source = text.replace(/\n/g, lineEnding);
+			const caret = text.length;
+			const unmapped = parseComposerMarkdown({ source, caret });
+			expect(unmapped).not.toBeNull();
+			expect(unmapped?.selection).toBeUndefined();
+			options.composer.inputText = source;
+			// Happy DOM needs the LF normalization that browsers apply to textarea values.
+			options.textarea.value = text;
+			options.textarea.setSelectionRange(caret, caret);
+			vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(unmapped);
+			selectFormatted(controller, options);
+			await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(source));
+			expect(options.onUnavailable).not.toHaveBeenCalled();
+			controller.destroy();
+		},
+	);
 	it('replaces pending conversion when submission starts a fresh draft', async () => {
 		const { controller, ui, options } = fixture();
 		let complete!: (value: ComposerMarkdownDocument) => void;
@@ -525,6 +568,52 @@ describe('formatted composer lifecycle', () => {
 		resolve('completed paste');
 		await completion;
 		expect(ui.formattedPastePending).toBe(false);
+		expect(options.composer.inputText).toBe('completed paste');
+		expect(ui.formattedDraft).toBeNull();
+		controller.destroy();
+	});
+	it.each(['success', 'null', 'error'])(
+		'preserves an owned paste while formatting is blocked on Worker %s',
+		async (result) => {
+			const pending = Promise.withResolvers<string | null>();
+			vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValue(pending.promise);
+			const { ui, options, controller } = fixture();
+			ui.formattedDraft = { source: table, ...parsed };
+			const completion = controller.pasteSource(pasteRequest);
+			options.canFormat = false;
+			const outside = document.createElement('button');
+			document.body.append(outside);
+			outside.focus();
+			if (result === 'error') pending.reject(new Error('Worker failed'));
+			else pending.resolve(result === 'success' ? 'completed paste' : null);
+			await completion;
+			expect(options.composer.inputText).toBe(
+				result === 'success' ? 'completed paste' : table + '\n\nlarge',
+			);
+			expect(ui.formattedPastePending).toBe(false);
+			expect(ui.formattedDraft).toBeNull();
+			expect(document.activeElement).toBe(outside);
+			controller.destroy();
+		},
+	);
+	it.each([false, true])('respects focus after a pending paste key (outside=%s)', async (outside) => {
+		const pending = Promise.withResolvers<string>();
+		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValue(pending.promise);
+		const { ui, options, controller } = fixture();
+		const target = document.createElement('div');
+		target.tabIndex = -1;
+		document.body.append(target);
+		ui.formattedTarget = target;
+		ui.formattedDraft = { source: table, ...parsed };
+		target.focus();
+		const completion = controller.pasteSource(pasteRequest);
+		options.interactionGeneration++;
+		const button = document.createElement('button');
+		document.body.append(button);
+		if (outside) button.focus();
+		pending.resolve('completed paste');
+		await completion;
+		await vi.waitFor(() => expect(document.activeElement).toBe(outside ? button : options.textarea));
 		expect(options.composer.inputText).toBe('completed paste');
 		expect(ui.formattedDraft).toBeNull();
 		controller.destroy();
