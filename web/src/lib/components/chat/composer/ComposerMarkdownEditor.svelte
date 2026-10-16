@@ -6,6 +6,7 @@
 	import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
 	import { composerMarkdownTableInput } from './composer-markdown-table-input.js';
 	import { composerMarkdownCaretMarks } from './composer-markdown-caret-marks.js';
+	import { composerMarkdownNewline } from './composer-markdown-newline.js';
 	import { MAX_COMPOSER_MARKDOWN_LENGTH } from './composer-markdown-limits.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createRandomId } from '$lib/utils/random-id.js';
@@ -213,11 +214,12 @@
 						event.preventDefault();
 						return true;
 					}
+					if (event.isComposing || _view.composing || event.keyCode === 229) return false;
 					// iOS replays Enter as a synthetic event without modifiers, so Shift+Enter
 					// would read as Enter:
 					// https://github.com/ProseMirror/prosemirror-view/blob/17af0f4b25933933f644a655ad6bb9a0249d7cb5/src/input.ts#L118-L127
 					if (event.key === 'Enter' && !event.isTrusted && shiftHeld && !event.shiftKey) {
-						return false;
+						return mountedEditor.commands.command(composerMarkdownNewline);
 					}
 					if (onCompletionKeydown(event)) return true;
 					const undo =
@@ -234,9 +236,7 @@
 					if (event.key === 'Enter') {
 						onSubmitKeydown(event);
 						if (!event.defaultPrevented) {
-							const item = mountedEditor.isActive('taskItem') ? 'taskItem' : 'listItem';
-							if (mountedEditor.isActive(item) && mountedEditor.commands.splitListItem(item))
-								return true;
+							return mountedEditor.commands.command(composerMarkdownNewline);
 						}
 					}
 					return event.defaultPrevented;
@@ -249,6 +249,8 @@
 						return false;
 					},
 					keydown(_view, event) {
+						// Leaves native IME input alone without running editor keymaps or preventing it.
+						if (event.isComposing || _view.composing || event.keyCode === 229) return true;
 						shiftHeld = event.shiftKey;
 						return false;
 					},

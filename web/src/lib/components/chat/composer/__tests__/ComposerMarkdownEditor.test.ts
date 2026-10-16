@@ -40,6 +40,78 @@ function type(editor: ReturnType<typeof mount>['editor'], text: string) {
 	}
 }
 
+function newline(editor: ReturnType<typeof mount>['editor'], shiftKey = true) {
+	return editor.view.someProp('handleKeyDown', (handler) =>
+		handler(editor.view, new KeyboardEvent('keydown', { key: 'Enter', shiftKey })),
+	);
+}
+
+describe('composer newline intent', () => {
+	it.each([true, false])('leaves a quote without removing it (shift=%s)', (shift) => {
+		const { editor, onChange } = mount('> abc');
+		newline(editor, shift);
+		newline(editor, shift);
+		type(editor, 'outside');
+		expect(onChange).toHaveBeenLastCalledWith('> abc\n\noutside');
+		expect(editor.state.doc.child(0).type.name).toBe('blockquote');
+		expect(editor.state.doc.child(1).type.name).toBe('paragraph');
+	});
+	it.each(['- item', '1. item', '- [ ] item'])('leaves an empty list item: %s', (source) => {
+		const { editor, onChange } = mount(source);
+		newline(editor);
+		newline(editor);
+		type(editor, 'outside');
+		expect(onChange).toHaveBeenLastCalledWith(`${source}\n\noutside`);
+	});
+	it('continues a heading as prose', () => {
+		const { editor, onChange } = mount('# Title');
+		newline(editor);
+		type(editor, 'body');
+		expect(onChange).toHaveBeenLastCalledWith('# Title\n\nbody');
+	});
+	it('adds code lines and exits on the third trailing newline', () => {
+		const { editor, onChange } = mount('```js\nlet a\n```');
+		newline(editor);
+		type(editor, 'let b');
+		expect(onChange).toHaveBeenLastCalledWith('```js\nlet a\nlet b\n```');
+		newline(editor);
+		newline(editor);
+		newline(editor);
+		type(editor, 'after');
+		expect(onChange).toHaveBeenLastCalledWith('```js\nlet a\nlet b\n```\n\nafter');
+	});
+	it('preserves cell breaks inside a quote', () => {
+		const source = '> | A | B |\n> | --- | --- |\n> | x | y |';
+		const { editor, onChange } = mount(source);
+		newline(editor);
+		type(editor, 'z');
+		expect(onChange).toHaveBeenLastCalledWith(source.replace('y |', 'y<br>z |'));
+	});
+	it('replaces selected cell text with an inline break', () => {
+		const { editor, onChange } = mount('| A |\n| --- |\n| word |');
+		const end = editor.state.selection.to;
+		editor.commands.setTextSelection({ from: end - 4, to: end });
+		newline(editor);
+		type(editor, 'z');
+		expect(onChange).toHaveBeenLastCalledWith('| A |\n| --- |\n| <br>z |');
+	});
+	it('leaves the nearest quote rather than splitting its outer list', () => {
+		const { editor } = mount('- item\n\n  > inner');
+		newline(editor);
+		newline(editor);
+		type(editor, 'after');
+		expect(editor.state.doc.child(0).childCount).toBe(1);
+		expect(editor.state.selection.$from.node(-1).type.name).toBe('listItem');
+	});
+	it('does not edit or submit composition Enter', () => {
+		const { editor, onChange } = mount('> abc');
+		editor.view.dom.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: true, bubbles: true }),
+		);
+		expect(onChange).not.toHaveBeenCalled();
+	});
+});
+
 describe('formatted editor file mentions', () => {
 	it('reports a mention at the caret and replaces it with the chosen path', () => {
 		const { editor, onChange, onMention } = mount('Review **this** now');
