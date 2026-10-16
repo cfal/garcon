@@ -48,6 +48,30 @@ function newline(editor: ReturnType<typeof mount>['editor'], shiftKey = true) {
 }
 
 describe('composer newline intent', () => {
+	it.each(['- ', '1. ', '- [ ] ', '> - '])('replaces only selected list text: %s', (prefix) => {
+		const { editor, onChange } = mount(prefix + 'abcdefgh');
+		const end = editor.state.selection.to;
+		editor.commands.setTextSelection({ from: end - 6, to: end - 4 });
+		expect(newline(editor)).toBe(true);
+		expect(editor.state.doc.textContent).toBe('abefgh');
+		expect(editor.state.selection.$from.parent.textContent).toBe('efgh');
+		editor.commands.undo();
+		expect(onChange).toHaveBeenLastCalledWith(prefix + 'abcdefgh');
+	});
+	it('creates prose beside a selected block without deleting it', () => {
+		const { editor } = mount('---');
+		editor.commands.setNodeSelection(0);
+		expect(newline(editor)).toBe(true);
+		expect(editor.state.doc.childCount).toBe(2);
+		expect(editor.state.doc.child(0).type.name).toBe('horizontalRule');
+		expect(editor.state.selection.$from.parent.type.name).toBe('paragraph');
+	});
+	it.each(['', '  \n\n'])('mounts a valid editable empty draft: %j', (source) => {
+		const { editor } = mount(source);
+		expect(() => editor.state.doc.check()).not.toThrow();
+		expect(newline(editor, false)).toBe(true);
+		expect(editor.state.doc.firstChild?.firstChild?.type.name).toBe('hardBreak');
+	});
 	it('hands interactive length growth back to Source without truncation', () => {
 		const source = 'x'.repeat(32_760);
 		const { editor, onOverflow } = mount(source);

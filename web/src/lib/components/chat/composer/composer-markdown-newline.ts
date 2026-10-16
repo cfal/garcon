@@ -1,13 +1,24 @@
 import type { Command } from '@tiptap/core';
+import { NodeSelection } from '@tiptap/pm/state';
 
 /** Applies the composer's newline intent without replaying its submission shortcut. */
 export const composerMarkdownNewline: Command = ({ state, commands, chain }) => {
-	if (!state.selection.empty) commands.deleteSelection();
-	const { $from } = state.selection;
+	const { selection } = state;
+	if (selection instanceof NodeSelection && selection.node.isBlock) {
+		return commands.createParagraphNear() || commands.splitBlock();
+	}
+	const { $from } = selection;
 	const parent = $from.parent;
 	if (parent.type.spec.code) {
-		if ($from.parentOffset === parent.content.size && parent.textContent.endsWith('\n\n')) {
-			return chain().deleteRange({ from: $from.pos - 2, to: $from.pos }).exitCode().run();
+		if (
+			selection.empty &&
+			$from.parentOffset === parent.content.size &&
+			parent.textContent.endsWith('\n\n')
+		) {
+			return chain()
+				.deleteRange({ from: $from.pos - 2, to: $from.pos })
+				.exitCode()
+				.run();
 		}
 		return commands.newlineInCode();
 	}
@@ -20,7 +31,8 @@ export const composerMarkdownNewline: Command = ({ state, commands, chain }) => 
 	if (commands.liftEmptyBlock()) return true;
 	if (parent.type.name === 'heading') return commands.splitBlock();
 	if (parent.isTextblock) {
-		if ($from.nodeBefore?.type.name !== 'hardBreak') return commands.setHardBreak();
+		if (!selection.empty || $from.nodeBefore?.type.name !== 'hardBreak')
+			return commands.setHardBreak();
 		commands.deleteRange({ from: $from.pos - 1, to: $from.pos });
 		if (!commands.splitBlock()) return false;
 		commands.liftEmptyBlock();

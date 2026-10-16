@@ -97,6 +97,10 @@ function parseBlocks(source: string): ComposerMarkdownDocument & { ended: boolea
 	}
 	// Tokens that do not add up to the draft cannot be used to write it back.
 	const traceable = lexed === source.replace(/\r\n?/g, '\n');
+	if (content.length === 0) {
+		content.push({ type: 'paragraph' });
+		sources.push(source);
+	}
 	return {
 		document: { type: 'doc', content },
 		sources: traceable ? sources : sources.map(() => null),
