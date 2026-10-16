@@ -139,6 +139,50 @@ describe('formatted composer integration', () => {
 		expect(rich.commands.redo()).toBe(true);
 		await waitFor(() => expect(textarea.value).toBe(pasted));
 	});
+	it.each([false, true])(
+		'keeps pasted source spelling through interleaved edit history (second paste=%s)',
+		async (secondPaste) => {
+			const source = secondPaste ? 'Intro\n\nlast' : 'Intro';
+			const { editor, textarea } = await formatted({ source });
+			vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) =>
+				parseComposerMarkdown(request),
+			);
+			const rich = richEditor(editor);
+			const paste = async (text: string) => {
+				const transfer = new DataTransfer();
+				transfer.setData('text/plain', text);
+				await fireEvent.paste(editor, { clipboardData: transfer });
+				await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+			};
+			await paste('\n\n* one\n* two');
+			const firstPaste = `${source}\n\n* one\n* two`;
+			expect(textarea.value).toBe(firstPaste);
+			rich.commands.setTextSelection(secondPaste ? 12 : 6);
+			rich.commands.insertContent(' typed');
+			await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+			const typed = `${source} typed\n\n* one\n* two`;
+			expect(textarea.value).toBe(typed);
+			if (secondPaste) await paste(' more');
+			const final = textarea.value;
+			if (secondPaste) {
+				expect(final).toBe(`${source} typed more\n\n* one\n* two`);
+				expect(rich.commands.undo()).toBe(true);
+				await waitFor(() => expect(textarea.value).toBe(typed));
+			}
+			expect(rich.commands.undo()).toBe(true);
+			await waitFor(() => expect(textarea.value).toBe(firstPaste));
+			expect(rich.commands.undo()).toBe(true);
+			await waitFor(() => expect(textarea.value).toBe(source));
+			expect(rich.commands.redo()).toBe(true);
+			await waitFor(() => expect(textarea.value).toBe(firstPaste));
+			expect(rich.commands.redo()).toBe(true);
+			await waitFor(() => expect(textarea.value).toBe(typed));
+			if (secondPaste) {
+				expect(rich.commands.redo()).toBe(true);
+				await waitFor(() => expect(textarea.value).toBe(final));
+			}
+		},
+	);
 	it.each(['restore', 'append', 'source', 'hidden', 'outside'])(
 		'keeps raw clipboard text during a pending parse and a later %s', async (action) => {
 			const { editor, textarea, rerender } = await formatted({ source: 'before' });

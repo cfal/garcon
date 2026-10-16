@@ -83,15 +83,13 @@
 			Array.from({ length: doc.childCount }, (_, index) => doc.child(index));
 		let original: DocumentNode[] = [];
 		let originalSources: (string | null)[] = [];
-		// History retains the replaced nodes; weak keys release their source maps with it.
+		// Whole-document history steps retain content fragments; weak keys share their lifetime.
 		const sourceHistory = new WeakMap<
-			DocumentNode,
-			{ document: DocumentNode; original: DocumentNode[]; sources: (string | null)[] }
+			DocumentNode['content'],
+			{ original: DocumentNode[]; sources: (string | null)[] }
 		>();
 		const rememberSource = (doc: DocumentNode) => {
-			if (doc.firstChild) {
-				sourceHistory.set(doc.firstChild, { document: doc, original, sources: originalSources });
-			}
+			sourceHistory.set(doc.content, { original, sources: originalSources });
 		};
 		const blocks = (doc: DocumentNode): ComposerMarkdownBlock<DocumentNode>[] =>
 			planComposerMarkdownBlocks(
@@ -260,11 +258,12 @@
 			enablePasteRules: false,
 			onUpdate: ({ editor: current }) => {
 				const { doc, selection } = current.state;
-				const snapshot = doc.firstChild ? sourceHistory.get(doc.firstChild) : undefined;
-				if (snapshot?.document.eq(doc)) {
+				const snapshot = sourceHistory.get(doc.content);
+				if (snapshot) {
 					original = snapshot.original;
 					originalSources = snapshot.sources;
 				}
+				rememberSource(doc);
 				const source = serialize(doc);
 				let nodeCount = 1;
 				doc.descendants(() => {
