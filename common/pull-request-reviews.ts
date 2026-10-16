@@ -13,9 +13,6 @@ import { expandTemplate, TemplateExpansionTooLongError } from './template-tokens
 // Marks review chats so the sidebar can filter them.
 export const PULL_REQUEST_REVIEW_TAG = 'auto-review';
 
-export const PULL_REQUEST_REVIEW_POSTING_MODES = ['off', 'draft', 'comment'] as const;
-export type PullRequestReviewPostingMode = typeof PULL_REQUEST_REVIEW_POSTING_MODES[number];
-
 export type PullRequestReviewRunState =
   | 'queued' | 'reviewing' | 'needs-input' | 'completed' | 'outdated' | 'failed' | 'stopped' | 'interrupted';
 
@@ -80,7 +77,7 @@ export interface PullRequestReviewSettings {
   filters: PullRequestReviewFilters;
   // Minutes a head commit must stay unchanged before it is reviewed.
   debounceMinutes: number;
-  posting: PullRequestReviewPostingMode;
+  autoPost: boolean;
   // Empty uses the built-in prompt.
   prompt: string;
   maxAttemptsPerCommit: number;
@@ -101,7 +98,7 @@ export const DEFAULT_PULL_REQUEST_REVIEW_SETTINGS: PullRequestReviewSettings = {
     maxChangedLines: 5_000,
   },
   debounceMinutes: 5,
-  posting: 'draft',
+  autoPost: false,
   prompt: '',
   maxAttemptsPerCommit: 2,
   dailyReviewLimit: 20,
@@ -285,7 +282,7 @@ export function normalizePullRequestReviewSettings(value: unknown): PullRequestR
   if (
     !filters || !bool(value.autoReview) || !bool(value.onlyWhenReviewRequested)
     || !integerBetween(value.debounceMinutes, 0, 1_440)
-    || !(PULL_REQUEST_REVIEW_POSTING_MODES as readonly unknown[]).includes(value.posting)
+    || !bool(value.autoPost)
     || typeof value.prompt !== 'string' || value.prompt.length > PULL_REQUEST_REVIEW_PROMPT_MAX_LENGTH
     || !integerBetween(value.maxAttemptsPerCommit, 1, 5)
     || !integerBetween(value.dailyReviewLimit, 1, 500)
@@ -295,7 +292,7 @@ export function normalizePullRequestReviewSettings(value: unknown): PullRequestR
     onlyWhenReviewRequested: value.onlyWhenReviewRequested,
     filters,
     debounceMinutes: value.debounceMinutes,
-    posting: value.posting as PullRequestReviewPostingMode,
+    autoPost: value.autoPost,
     prompt: value.prompt,
     maxAttemptsPerCommit: value.maxAttemptsPerCommit,
     dailyReviewLimit: value.dailyReviewLimit,

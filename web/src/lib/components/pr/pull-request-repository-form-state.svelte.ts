@@ -7,7 +7,6 @@ import {
 	DEFAULT_PULL_REQUEST_REVIEW_PROMPT,
 	DEFAULT_PULL_REQUEST_REVIEW_SETTINGS,
 	PULL_REQUEST_REVIEW_PROMPT_MAX_LENGTH,
-	type PullRequestReviewPostingMode,
 	type PullRequestReviewRepository,
 	type PullRequestReviewRepositoryInput,
 } from '$shared/pull-request-reviews';
@@ -26,7 +25,7 @@ export class PullRequestRepositoryFormState {
 	repositoryId = $state<string | null>(null);
 	prompt = $state(DEFAULT_PULL_REQUEST_REVIEW_PROMPT);
 	autoReview = $state(DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.autoReview);
-	posting = $state<PullRequestReviewPostingMode>(DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.posting);
+	autoPost = $state(DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.autoPost);
 	onlyWhenReviewRequested = $state(DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.onlyWhenReviewRequested);
 	filters = $state({ ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.filters });
 	debounceMinutes = $state(DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.debounceMinutes);
@@ -104,7 +103,7 @@ export class PullRequestRepositoryFormState {
 		this.#retained = settings;
 		this.prompt = settings.prompt || DEFAULT_PULL_REQUEST_REVIEW_PROMPT;
 		this.autoReview = settings.autoReview;
-		this.posting = settings.posting;
+		this.autoPost = settings.autoPost;
 		this.onlyWhenReviewRequested = settings.onlyWhenReviewRequested;
 		this.filters = { ...settings.filters };
 		this.debounceMinutes = settings.debounceMinutes;
@@ -171,7 +170,7 @@ export class PullRequestRepositoryFormState {
 				onlyWhenReviewRequested: this.onlyWhenReviewRequested,
 				filters: { ...this.filters },
 				debounceMinutes: this.debounceMinutes,
-				posting: this.posting,
+				autoPost: this.autoPost,
 				// The built-in prompt is stored as empty so it follows later improvements.
 				prompt: this.prompt.trim() === DEFAULT_PULL_REQUEST_REVIEW_PROMPT ? '' : this.prompt,
 			},

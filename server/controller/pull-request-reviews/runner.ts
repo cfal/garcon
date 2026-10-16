@@ -221,7 +221,7 @@ export class PullRequestReviewRunner {
     this.#settle(queued.id, this.#settlement(queued.id, record));
     const settled = store.getRun(queued.id);
     if (settled?.state !== 'completed') return;
-    if (repository.settings.posting === 'comment' && store.getRepository(queued.repositoryId)?.settings.posting === 'comment') {
+    if (repository.settings.autoPost && store.getRepository(queued.repositoryId)?.settings.autoPost) {
       await this.deps.poster.post(queued.id).catch((error) => logger.warn('Automatic review posting failed.', { error: errorMessage(error) }));
     }
   }

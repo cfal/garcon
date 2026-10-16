@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { parseReviewedCommit, renderPullRequestReviewPrompt } from '../pull-request-reviews.ts';
+import { DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, normalizePullRequestReviewSettings, parseReviewedCommit, renderPullRequestReviewPrompt } from '../pull-request-reviews.ts';
 
 const SHA = '0123456789abcdef0123456789abcdef01234567';
 
@@ -18,4 +18,12 @@ test('renders the built-in prompt when the template is blank', () => {
   const prompt = renderPullRequestReviewPrompt('  ', { repository: 'o/r', number: 12, projectPath: '/work/r' });
   expect(prompt).toContain('Review o/r#12 comprehensively.');
   expect(prompt).toContain('Perform all work in exactly: /work/r');
+});
+
+test('requires an explicit boolean to opt into automatic posting', () => {
+  expect(normalizePullRequestReviewSettings(DEFAULT_PULL_REQUEST_REVIEW_SETTINGS)?.autoPost).toBe(false);
+  expect(normalizePullRequestReviewSettings({ ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, autoPost: true })?.autoPost).toBe(true);
+  for (const autoPost of [undefined, null, 'true', 1]) {
+    expect(normalizePullRequestReviewSettings({ ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, autoPost })).toBeNull();
+  }
 });

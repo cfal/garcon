@@ -33,10 +33,7 @@
 		entry?.latestRun ? isActivePullRequestReviewRun(entry.latestRun.state) : false,
 	);
 	const canPost = $derived(
-		repository?.settings.posting !== 'off' &&
-			run?.state === 'completed' &&
-			run.post.status !== 'posted' &&
-			run.post.status !== 'too-long',
+		run?.state === 'completed' && run.post.status !== 'posted' && run.post.status !== 'too-long',
 	);
 	let pending = $state<'review' | 'stop' | 'post' | null>(null);
 	let actionError = $state<string | null>(null);
@@ -136,9 +133,7 @@
 					</button>
 				{/if}
 			</div>
-			{#if repository.settings.posting === 'off'}
-				<p class="text-xs text-muted-foreground">{m.pull_request_review_posting_off_hint()}</p>
-			{:else if canPost && repository.viewerLogin}
+			{#if canPost && repository.viewerLogin}
 				<p class="text-xs text-muted-foreground">
 					{m.pull_request_review_posts_as({ login: `@${repository.viewerLogin}` })}
 				</p>
