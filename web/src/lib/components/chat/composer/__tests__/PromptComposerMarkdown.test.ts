@@ -633,6 +633,25 @@ describe('formatted composer integration', () => {
 		await fireEvent.keyDown(textarea, { key: 'Enter' });
 		expect(onsubmit).toHaveBeenCalledOnce();
 	});
+	it.each(['restore', 'clear'])('keeps an oversized paste through a same-text %s request', async (action) => {
+		let complete!: (source: string) => void;
+		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValueOnce(
+			new Promise((resolve) => { complete = resolve; }),
+		);
+		const source = action === 'clear' ? '' : table;
+		const { editor, textarea } = await formatted({ source });
+		const text = 'large clipboard '.repeat(3_000);
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', text);
+		await fireEvent.paste(editor, { clipboardData: transfer });
+		const signal = vi.mocked(serializeComposerMarkdownPasteInWorker).mock.calls.at(-1)![1];
+		await fireEvent.click(screen.getByTestId(`${action}-draft`));
+		expect(signal?.aborted).toBe(false);
+		const pasted = source + '\n\n' + text;
+		complete(pasted);
+		await waitFor(() => expect(textarea.value).toBe(pasted));
+		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+	});
 	it.each(['paste', 'drop'])(
 		'routes image %s to attachments while retaining the rich draft',
 		async (type) => {

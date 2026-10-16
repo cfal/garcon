@@ -287,7 +287,6 @@
 		);
 	}
 
-	// Auto-focus textarea when the composer mounts (new chat or chat switch).
 	onMount(() => {
 		tick().then(() => requestComposerFocusForChat(sessions.selectedChatId));
 	});
@@ -362,7 +361,7 @@
 	$effect(() => {
 		const restored = composerState.draftRestoreRequest?.chatId === sessions.selectedChatId;
 		canFormat;
-		if (restored && markdownInput) untrack(() => markdown.restore());
+		if (restored && markdownInput && !ui.formattedPastePending) untrack(() => markdown.restore());
 	});
 
 	// Cancels path-bound expansion when a selected chat moves to another project.
