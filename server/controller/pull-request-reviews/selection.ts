@@ -31,9 +31,8 @@ export interface AutoReviewInput {
 function filterReason(settings: PullRequestReviewSettings, pull: PullRequestSummary): PullRequestReviewSkipReason | null {
   const { filters } = settings;
   if (filters.skipDrafts && pull.isDraft) return 'draft';
-  if (filters.skipBots && pull.authorIsBot) return 'bot-author';
   if (filters.trustedAuthorsOnly && !pull.authoredByViewer && !TRUSTED_ASSOCIATIONS.has(pull.authorAssociation)) return 'untrusted-author';
-  if (!filters.includeForks && pull.isCrossRepository) return 'fork';
+  if (pull.isCrossRepository) return 'fork';
   if (filters.baseBranches.length > 0 && !filters.baseBranches.includes(pull.baseRefName)) return 'base-branch';
   if (pull.labels.some((label) => filters.excludeLabels.includes(label))) return 'label';
   if (filters.includeLabels.length > 0 && !pull.labels.some((label) => filters.includeLabels.includes(label))) return 'label';

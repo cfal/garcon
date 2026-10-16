@@ -84,9 +84,10 @@ reads fail instead of publishing a truncated successful scan.
 ## Safety
 
 A pull request is untrusted input to an agent Garcon does not sandbox. By
-default, automatic review skips drafts, bots, authors who are not owners,
-members, or collaborators (the viewer always counts), and pull requests from
-forks. Widening either author filter shows a warning. A manual
+default, automatic review skips drafts and authors who are not owners,
+members, or collaborators (the viewer always counts). Bots follow the same
+author rules as other pull requests. Automatic review always excludes forks.
+Allowing outside contributors shows a warning. A manual
 Review is always allowed. The permission mode is the repository's choice and
 starts from the new-chat default; which mode lets each agent run `gh` and
 `git fetch` unattended is open decision 4 in the issue.
