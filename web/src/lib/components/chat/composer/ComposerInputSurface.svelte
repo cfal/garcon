@@ -56,7 +56,7 @@
 					onReady={(target) => controller.focus(target)}
 					onMention={(mention) => controller.mention(mention)}
 					onLargePaste={(request) => void controller.pasteSource(request)}
-					onMarkdownPaste={(source, caret) => void controller.pasteMarkdown(source, caret)}
+					onMarkdownPaste={(source, caret, apply) => void controller.pasteMarkdown(source, caret, apply)}
 					onOverflow={(source) => controller.overflow(source)}
 				/>
 			{/key}

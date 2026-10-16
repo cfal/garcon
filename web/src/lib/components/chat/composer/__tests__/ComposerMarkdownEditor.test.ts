@@ -170,6 +170,14 @@ describe('composer newline intent', () => {
 });
 
 describe('formatted editor clipboard contexts', () => {
+	it('keeps backticks literal when pasting inside inline code', () => {
+		const { editor, onChange, onMarkdownPaste } = mount('Use `code` here', 7);
+		const clipboardData = new DataTransfer();
+		clipboardData.setData('text/plain', 'a`b');
+		editor.view.dom.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true }));
+		expect(onMarkdownPaste).not.toHaveBeenCalled();
+		expect(onChange).toHaveBeenLastCalledWith('Use ``coa`bde`` here');
+	});
 	it.each(['```\ncode\n```', '| Cell |\n| --- |\n| text |'])(
 		'keeps clipboard text literal inside %s',
 		(source) => {

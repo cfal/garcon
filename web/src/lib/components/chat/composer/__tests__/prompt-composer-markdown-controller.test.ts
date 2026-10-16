@@ -85,23 +85,29 @@ describe('formatted composer input format', () => {
 	it('keeps raw clipboard text when a later Source handoff cancels formatting', async () => {
 		const { controller, ui, options } = fixture();
 		ui.formattedDraft = { source: table, ...parsed };
-		const pasted = controller.pasteMarkdown('def f(*args):', 13);
+		const pending = Promise.withResolvers<ComposerMarkdownDocument | null>();
+		vi.mocked(parseComposerMarkdownInWorker).mockReturnValueOnce(pending.promise);
+		const apply = vi.fn();
+		const pasted = controller.pasteMarkdown('def f(*args):', 13, apply);
 		controller.reset();
+		pending.resolve(parsed);
 		await pasted;
 		expect(options.composer.inputText).toBe('def f(*args):');
 		expect(ui.formattedDraft).toBeNull();
-		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		expect(apply).not.toHaveBeenCalled();
 		controller.destroy();
 	});
-	it('does not reformat a raw paste that opens a Source palette', async () => {
+	it('keeps a raw file mention paste in the mounted rich editor', async () => {
 		const { controller, ui, options } = fixture();
 		ui.formattedDraft = { source: table, ...parsed };
-		const pasted = controller.pasteMarkdown('/cl', 3);
-		ui.showSlashMenu = true;
+		const apply = vi.fn();
+		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValueOnce({ ...parsed, selection: 3 });
+		const pasted = controller.pasteMarkdown(' @src', 5, apply);
+		ui.showFileMenu = true;
 		await pasted;
-		expect(options.composer.inputText).toBe('/cl');
-		expect(ui.showSlashMenu).toBe(true);
-		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		expect(options.composer.inputText).toBe(' @src');
+		expect(ui.showFileMenu).toBe(true);
+		expect(apply).toHaveBeenCalledOnce();
 		controller.destroy();
 	});
 	it('allows explicit formatting while a source range is selected', async () => {

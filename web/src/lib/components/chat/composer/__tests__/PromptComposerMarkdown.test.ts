@@ -97,10 +97,72 @@ describe('formatted composer integration', () => {
 		const transfer = new DataTransfer();
 		transfer.setData('text/plain', '**new**');
 		await fireEvent.paste(editor, { clipboardData: transfer });
-		await waitFor(() => expect(screen.getByRole('textbox', { name: 'Formatted message' })).not.toBe(editor));
+		await waitFor(() => expect(editor.querySelector('strong')?.textContent).toBe('new'));
 		const rich = richEditor(screen.getByRole('textbox', { name: 'Formatted message' }));
 		expect(textarea.value).toBe('before **new** after');
 		expect(rich.state.selection.$from.parentOffset).toBe(10);
+	});
+	it('keeps raw paste and earlier edits undoable without remounting', async () => {
+		const { editor, textarea } = await formatted({ source: 'before' });
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) => parseComposerMarkdown(request));
+		const rich = richEditor(editor);
+		rich.commands.insertContent(' typed');
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', ' **pasted**');
+		await fireEvent.paste(editor, { clipboardData: transfer });
+		await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+		expect(screen.getByRole('textbox', { name: 'Formatted message' })).toBe(editor);
+		expect(textarea.value).toBe('before typed **pasted**');
+		expect(rich.commands.undo()).toBe(true);
+		await waitFor(() => expect(textarea.value).toBe('before typed'));
+		expect(rich.commands.undo()).toBe(true);
+		await waitFor(() => expect(textarea.value).toBe('before'));
+		expect(rich.commands.redo()).toBe(true);
+		expect(rich.commands.redo()).toBe(true);
+		await waitFor(() => expect(textarea.value).toBe('before typed **pasted**'));
+	});
+	it.each(['restore', 'append', 'source', 'hidden', 'outside'])(
+		'keeps raw clipboard text during a pending parse and a later %s', async (action) => {
+			const { editor, textarea, rerender } = await formatted({ source: 'before' });
+			const outside = document.createElement('button');
+			document.body.append(outside);
+			const pending = Promise.withResolvers<ReturnType<typeof parseComposerMarkdown>>();
+			vi.mocked(parseComposerMarkdownInWorker).mockReturnValueOnce(pending.promise);
+			const transfer = new DataTransfer();
+			transfer.setData('text/plain', ' **pasted**');
+			await fireEvent.paste(editor, { clipboardData: transfer });
+			expect(screen.getByRole('textbox', { name: 'Formatted message' })).toBe(editor);
+			expect(textarea.value).toBe('before **pasted**');
+			expect(screen.getByRole('button', { name: 'Pasting text...' }).hasAttribute('disabled')).toBe(true);
+			if (action === 'restore' || action === 'append') await fireEvent.click(screen.getByTestId(`${action}-draft`));
+			else if (action === 'source') await selectMode('source');
+			else if (action === 'hidden') await rerender({ isVisible: false });
+			else {
+				await fireEvent.pointerDown(outside);
+				outside.focus();
+			}
+			await act(() => pending.resolve(parseComposerMarkdown({ source: 'before **pasted**', caret: 17 })));
+			if (action === 'hidden') await rerender({ isVisible: true });
+			await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+			expect(textarea.value).toBe('before **pasted**' + (action === 'append' ? '\n\nAppended review block' : ''));
+			if (action === 'restore' || action === 'outside') expect(screen.getByRole('textbox', { name: 'Formatted message' })).toBe(editor);
+			else expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+			if (action === 'outside') expect(document.activeElement).toBe(outside);
+			outside.remove();
+		},
+	);
+	it('retains the Source caret when a multiline paste cannot map into the rich document', async () => {
+		const { editor, textarea } = await formatted({ source: 'first\n\nsecond\n\nthird' });
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) => parseComposerMarkdown(request));
+		richEditor(editor).commands.setTextSelection(6);
+		const text = '\n\n- one\n- two\n\n';
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', text);
+		await fireEvent.paste(editor, { clipboardData: transfer });
+		await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+		expect(textarea.selectionStart).toBe('first'.length + text.length);
+		expect(textarea.selectionEnd).toBe(textarea.selectionStart);
 	});
 	it.each(['[destination]: https://example.test/resource', 'Review this\n\n[destination]: https://example.test/resource'])(
 		'keeps a restored reference definition in Source: %s', async (source) => {

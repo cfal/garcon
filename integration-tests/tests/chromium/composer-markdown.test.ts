@@ -57,8 +57,8 @@ test('message format defaults to Formatted and is controlled only by persisted I
       await format.focus();
       await format.selectOption('source');
       await browserExpect(editor).toHaveCount(0);
-      expect(await composer.boundingBox()).toEqual(formattedBounds);
-      expect(await textarea.boundingBox()).toEqual(formattedInputBounds);
+      await browserExpect.poll(() => composer.boundingBox()).toEqual(formattedBounds);
+      await browserExpect.poll(() => textarea.boundingBox()).toEqual(formattedInputBounds);
       await browserExpect(format).toBeFocused();
       await format.selectOption('formatted');
       await browserExpect(editor).toBeAttached();
@@ -93,6 +93,57 @@ test('message format defaults to Formatted and is controlled only by persisted I
     await browserExpect(editor.locator('strong')).toHaveText('Source stays literal');
     assertNoBrowserErrors();
   }, undefined, { composerInputMode: null });
+}, 90_000);
+
+test('raw Markdown paste retains rich history, layout, and caret visibility', async () => {
+  await withChromiumFixture('composer-paste-history', async ({ page, context, integration, assertNoBrowserErrors }) => {
+    const chatId = integration.newChatId();
+    const turn = await integration.client.startDirectChat({
+      chatId, content: 'Synthetic paste history', projectPath: integration.dirs.project,
+      agent: integration.directAgents.anthropic,
+    });
+    await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const composer = page.locator('[data-composer]');
+    const textarea = composer.locator('textarea');
+    const editor = page.getByRole('textbox', { name: 'Formatted message' });
+    const source = Array.from({ length: 24 }, (_, index) => `Paragraph ${index} with **context**`).join('\n\n');
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await selectMessageFormat(page, 'source');
+      await textarea.fill(source);
+      await selectMessageFormat(page, 'formatted');
+      await editor.focus();
+      await page.keyboard.press('Control+End');
+      await page.keyboard.type(' typed');
+      const original = await editor.elementHandle();
+      const box = await composer.boundingBox();
+      await page.evaluate(text => navigator.clipboard.writeText(text), ' **pasted**');
+      await page.keyboard.press('Control+V');
+      await browserExpect(textarea).toHaveValue(source + ' typed **pasted**');
+      await browserExpect(editor.locator('strong').last()).toHaveText('pasted');
+      expect(await editor.evaluate((element, previous) => element === previous, original)).toBe(true);
+      expect(await composer.boundingBox()).toEqual(box);
+      await browserExpect.poll(() => editor.evaluate(element => {
+        const selection = window.getSelection();
+        if (!selection?.rangeCount) return false;
+        const caret = selection.getRangeAt(0).getBoundingClientRect();
+        const surface = element.closest('[data-composer-markdown-editor]')!;
+        const bounds = surface.getBoundingClientRect();
+        return surface.scrollTop > 0 && caret.top >= bounds.top && caret.bottom <= bounds.bottom;
+      })).toBe(true);
+      await page.keyboard.press('Control+Z');
+      await browserExpect(textarea).toHaveValue(source + ' typed');
+      await page.keyboard.press('Control+Z');
+      await browserExpect(textarea).toHaveValue(source);
+      await page.keyboard.press('Control+y');
+      await page.keyboard.press('Control+y');
+      await browserExpect(textarea).toHaveValue(source + ' typed **pasted**');
+      await original?.dispose();
+    }
+    assertNoBrowserErrors();
+  });
 }, 90_000);
 
 test("editable Markdown tables preserve drafts, focus, submission, and responsive layout", async () => {

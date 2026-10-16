@@ -149,25 +149,51 @@ export class PromptComposerMarkdownController {
 		void this.edit();
 	}
 
-	async pasteMarkdown(text: string, caret: number): Promise<void> {
+	async pasteMarkdown(
+		text: string,
+		caret: number,
+		apply: (parsed: ComposerMarkdownDocument) => void,
+	): Promise<void> {
 		if (!this.options.canFormat || !this.options.ui.formattedDraft) return;
 		const chatId = this.options.chatId;
+		const generation = this.options.interactionGeneration;
+		const hadFocus = document.activeElement === this.options.ui.formattedTarget;
+		this.#workerAbort?.abort();
+		const abort = new AbortController();
+		this.#workerAbort = abort;
+		const draft = { ...this.options.ui.formattedDraft, source: text };
+		this.options.ui.formattedDraft = draft;
 		this.options.onChange(text);
-		const editing = this.edit(caret);
-		this.#formatIntent = 'restore';
-		await editing;
+		this.options.ui.formattedPastePending = true;
+		const parsed = isComposerMarkdownSized(text)
+			? await parseComposerMarkdownInWorker({ source: text, caret }, abort.signal).catch(() => null)
+			: null;
+		if (this.#workerAbort === abort) {
+			this.#workerAbort = null;
+			this.options.ui.formattedPastePending = false;
+		}
 		if (
+			this.#destroyed ||
+			abort.signal.aborted ||
 			this.options.chatId !== chatId ||
 			this.options.composer.inputText !== text ||
-			!this.#formatIntent ||
-			this.#workerAbort
+			this.options.ui.formattedDraft !== draft
 		)
 			return;
-		if (this.options.sourcePaletteOpen || this.options.preferredMode === 'source') {
-			this.#formatIntent = null;
-			return;
+		this.#formatIntent = null;
+		if (
+			parsed?.selection !== undefined &&
+			this.options.canFormat &&
+			this.options.preferredMode === 'formatted'
+		) {
+			this.#focusGeneration = hadFocus ? generation : -1;
+			apply(parsed);
+		} else if (generation === this.options.interactionGeneration) {
+			// Textarea values normalize CRLF, so the fallback caret uses the same coordinates.
+			void this.edit(text.slice(0, caret).replace(/\r\n?/g, '\n').length);
+		} else {
+			this.reset();
 		}
-		await this.#format();
 	}
 
 	async pasteSource(request: ComposerMarkdownPasteRequest): Promise<void> {

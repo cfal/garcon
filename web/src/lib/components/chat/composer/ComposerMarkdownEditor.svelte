@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { Editor, resolveFocusPosition, type JSONContent } from '@tiptap/core';
 	import { TextSelection } from '@tiptap/pm/state';
+	import { closeHistory } from '@tiptap/pm/history';
 	import { Placeholder } from '@tiptap/extensions/placeholder';
 	import { composerMarkdownCodec } from './composer-markdown-codec.js';
 	import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
@@ -15,7 +16,10 @@
 	} from './composer-markdown-limits.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createRandomId } from '$lib/utils/random-id.js';
-	import type { ComposerMarkdownPasteRequest } from './composer-markdown-parser.js';
+	import type {
+		ComposerMarkdownDocument,
+		ComposerMarkdownPasteRequest,
+	} from './composer-markdown-parser.js';
 	import type { ComposerMarkdownMention } from './prompt-composer-markdown-controller.js';
 	import {
 		findFileMentionTrigger,
@@ -63,7 +67,11 @@
 		onReady: (target: HTMLElement) => void;
 		onMention: (mention: ComposerMarkdownMention | null) => void;
 		onLargePaste: (request: ComposerMarkdownPasteRequest) => void;
-		onMarkdownPaste: (source: string, caret: number) => void;
+		onMarkdownPaste: (
+			source: string,
+			caret: number,
+			apply: (parsed: ComposerMarkdownDocument) => void,
+		) => void;
 		onOverflow: (source: string) => void;
 	} = $props();
 	let container: HTMLDivElement;
@@ -145,10 +153,31 @@
 				},
 			});
 		};
+		const applyMarkdownPaste = (parsed: ComposerMarkdownDocument) => {
+			if (mountedEditor.isDestroyed || parsed.selection === undefined) return;
+			mountedEditor.setEditable(true, false);
+			const document = mountedEditor.schema.nodeFromJSON(parsed.document);
+			const transaction = closeHistory(mountedEditor.state.tr).replaceWith(
+				0,
+				mountedEditor.state.doc.content.size,
+				document.content,
+			);
+			transaction.setSelection(TextSelection.create(transaction.doc, parsed.selection));
+			transaction.setStoredMarks(
+				(parsed.selectionMarks ?? []).map((mark) => mountedEditor.schema.markFromJSON(mark)),
+			);
+			original = topLevel(transaction.doc);
+			originalSources = parsed.sources;
+			mountedEditor.view.dispatch(transaction.scrollIntoView());
+			onReady(mountedEditor.view.dom);
+			const boundary = closeHistory(mountedEditor.state.tr);
+			if (mountedEditor.view.hasFocus()) boundary.scrollIntoView();
+			mountedEditor.view.dispatch(boundary);
+		};
 		const insertText = (view: Editor['view'], text: string, position?: number) => {
 			const head =
 				position === undefined ? view.state.selection.$from : view.state.doc.resolve(position);
-			let literal = false;
+			let literal = head.marks().some((mark) => mark.type.name === 'code');
 			for (let depth = head.depth; depth > 0; depth--) {
 				const node = head.node(depth);
 				if (
@@ -165,7 +194,7 @@
 				const marked = serialize(view.state.tr.insertText(marker, position).doc);
 				const start = marked.indexOf(marker);
 				if (start >= 0) {
-					onMarkdownPaste(marked.replace(marker, () => text), start + text.length);
+					onMarkdownPaste(marked.replace(marker, () => text), start + text.length, applyMarkdownPaste);
 					return;
 				}
 			}
