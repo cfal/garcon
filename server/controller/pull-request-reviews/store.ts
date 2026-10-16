@@ -53,6 +53,8 @@ interface RunRow {
 type RunPayload = Omit<StoredRun, 'id' | 'repositoryId' | 'number' | 'headSha' | 'state' | 'createdAt'>;
 
 const RUN_COLUMNS = 'id, repository_id, number, head_sha, state, created_at, payload_json';
+const PENDING_ARCHIVAL = `chat_id IS NOT NULL AND chat_archived = 0 AND state NOT IN ('queued','reviewing','needs-input')
+  AND EXISTS (SELECT 1 FROM review_pulls WHERE repository_id = review_runs.repository_id AND number = review_runs.number AND closed_at IS NOT NULL)`;
 
 function runFromRow(row: RunRow): StoredRun {
   return {
@@ -336,10 +338,15 @@ export class PullRequestReviewStore {
   runsToArchive(repositoryId: string, number: number, afterSequence: number): (StoredRun & { sequence: number })[] {
     return this.#read((database) => database.query<RunRow & { sequence: number }, [string, number, number, number]>(
       `SELECT ${RUN_COLUMNS}, rowid AS sequence FROM review_runs WHERE repository_id = ? AND number = ? AND rowid > ?
-        AND chat_id IS NOT NULL AND chat_archived = 0 AND state NOT IN ('queued','reviewing','needs-input')
-        AND EXISTS (SELECT 1 FROM review_pulls WHERE repository_id = review_runs.repository_id AND number = review_runs.number AND closed_at IS NOT NULL)
+        AND ${PENDING_ARCHIVAL}
         ORDER BY rowid LIMIT ?`,
     ).all(repositoryId, number, afterSequence, REVIEW_HISTORY_BATCH_SIZE).map((row) => ({ ...runFromRow(row), sequence: row.sequence })));
+  }
+
+  isRunPendingArchival(id: string, chatId: string): boolean {
+    return this.#read((database) => database.query<{ found: number }, [string, string]>(
+      `SELECT 1 AS found FROM review_runs WHERE id = ? AND chat_id = ? AND ${PENDING_ARCHIVAL}`,
+    ).get(id, chatId) !== null);
   }
 
   // Preserves active work and archival retries, deleting at most one bounded batch.

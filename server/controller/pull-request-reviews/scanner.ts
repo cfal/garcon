@@ -231,9 +231,12 @@ export class PullRequestReviewScanner {
             if (!this.#timer || !store.available) return;
             sequence = run.sequence;
             try {
-              await this.deps.archiveChat(run.chatId!);
-              if (!this.#timer || !store.available) return;
-              if (store.updateRun(run.id, (current) => ({ ...current, chatArchived: true }))) this.deps.changed();
+              // A batch may outlive its pull request's closure or repository connection.
+              if (store.isRunPendingArchival(run.id, run.chatId!)) {
+                await this.deps.archiveChat(run.chatId!);
+                if (!this.#timer || !store.available) return;
+                if (store.updateRun(run.id, (current) => ({ ...current, chatArchived: true }))) this.deps.changed();
+              }
             } catch (error) {
               logger.warn('Could not archive a review chat.', { error: errorMessage(error) });
             }
