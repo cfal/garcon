@@ -1,26 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
 	nextPinnedProjectPaths,
-	pinnedProjectPathName,
 	sortedPinnedProjectPaths,
 } from '$lib/project-paths/project-pinned-paths.js';
 
 describe('project pinned paths', () => {
-	it.each([
-		['/workspace/dashboard', 'dashboard'],
-		['/workspace/Space Project ', 'Space Project '],
-		['/workspace/a\\b', 'a\\b'],
-		['/workspace/dashboard/', 'dashboard'],
-		['/', '/'],
-		['C:\\', 'C:\\'],
-		['C:/', 'C:/'],
-		['C:\\work\\dashboard', 'dashboard'],
-		['C:\\work/dashboard\\', 'dashboard'],
-		['\\\\server\\share\\dashboard', 'dashboard'],
-	])('labels %s without changing path identity', (path, name) => {
-		expect(pinnedProjectPathName(path)).toBe(name);
-	});
-
 	it('sorts and dedupes exact nonblank pinned project paths', () => {
 		expect(
 			sortedPinnedProjectPaths([

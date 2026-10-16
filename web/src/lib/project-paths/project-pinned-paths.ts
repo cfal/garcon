@@ -2,19 +2,6 @@ export function normalizedPinnedProjectPath(path: string): string {
 	return path.trim() ? path : '';
 }
 
-export function pinnedProjectPathName(path: string): string {
-	const windowsPath = /^[a-z]:[\\/]/i.test(path) || path.startsWith('\\\\');
-	const withoutTrailingSeparators = path.replace(windowsPath ? /[\\/]+$/ : /\/+$/, '');
-	if (!withoutTrailingSeparators || /^[a-z]:$/i.test(withoutTrailingSeparators)) return path;
-	const separatorIndex = windowsPath
-		? Math.max(
-				withoutTrailingSeparators.lastIndexOf('/'),
-				withoutTrailingSeparators.lastIndexOf('\\'),
-			)
-		: withoutTrailingSeparators.lastIndexOf('/');
-	return withoutTrailingSeparators.slice(separatorIndex + 1);
-}
-
 function comparePinnedProjectPaths(left: string, right: string): number {
 	if (left === right) return 0;
 	return left < right ? -1 : 1;

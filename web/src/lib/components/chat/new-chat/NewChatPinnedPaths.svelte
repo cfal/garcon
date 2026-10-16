@@ -4,9 +4,6 @@
 	import { executorStatus } from '$lib/executors/executors-store.svelte';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte';
 	import { filterExecutorPinnedPathGroups } from '$lib/project-paths/executor-pinned-paths';
-	import { pinnedProjectPathName } from '$lib/project-paths/project-pinned-paths';
-	import Check from '@lucide/svelte/icons/check';
-	import Folder from '@lucide/svelte/icons/folder';
 	import Monitor from '@lucide/svelte/icons/monitor';
 	import Pin from '@lucide/svelte/icons/pin';
 	import Server from '@lucide/svelte/icons/server';
@@ -49,7 +46,7 @@
 	]);
 </script>
 
-<section aria-label={m.chat_new_chat_pinned_paths()} class="min-w-0 space-y-2.5">
+<section aria-label={m.chat_new_chat_pinned_paths()} class="min-w-0 space-y-2">
 	<div class="flex flex-wrap items-center justify-between gap-2">
 		<span class="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
 			<Pin class="size-3.5" aria-hidden="true" />
@@ -62,18 +59,17 @@
 						type="button"
 						aria-label={scope.label}
 						aria-pressed={showAll === scope.all}
-						class="inline-flex min-h-11 items-center gap-2 rounded-md px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {showAll ===
+						class="inline-flex min-h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-11 {showAll ===
 						scope.all
-							? 'font-medium text-foreground'
-							: 'text-muted-foreground hover:text-foreground'}"
+							? 'bg-accent font-medium text-accent-foreground'
+							: 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'}"
 						onclick={() => {
 							showAll = scope.all;
 						}}
 					>
-						<span class={showAll === scope.all ? 'underline decoration-2 underline-offset-8' : ''}
-							>{scope.label}</span
-						><span class="text-[10px] tabular-nums text-muted-foreground" aria-hidden="true"
-							>{scope.count}</span
+						<span>{scope.label}</span><span
+							class="text-[10px] tabular-nums text-muted-foreground"
+							aria-hidden="true">{scope.count}</span
 						></button
 					>
 				{/each}
@@ -123,7 +119,7 @@
 			<div role="group" aria-label={executor?.label ?? group.executorId} class="space-y-1">
 				<div
 					class={showAll || !ready
-						? 'sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-(color:--dialog-surface) px-2.5 py-0.5 text-xs text-muted-foreground'
+						? 'sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-(color:--dialog-surface) py-1 text-xs text-muted-foreground'
 						: 'sr-only'}
 				>
 					{#if group.executorId === 'local'}
@@ -145,10 +141,9 @@
 							: m.chat_new_chat_pinned_paths_unavailable_executor()}</span
 					>
 				</div>
-				<div class="grid gap-1 sm:grid-cols-2">
+				<div class="flex flex-wrap gap-2">
 					{#each group.paths as path (path)}
 						{@const selected = form.executorId === group.executorId && form.projectPath === path}
-						{@const name = pinnedProjectPathName(path)}
 						<button
 							type="button"
 							disabled={!ready || form.isUpdatingPinnedPath}
@@ -156,19 +151,13 @@
 							aria-describedby={`${id}-${group.executorId}-status`}
 							aria-pressed={selected}
 							title={path}
-							class="flex min-h-11 w-full scroll-mt-10 items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 {selected
-								? 'bg-accent/60 text-accent-foreground'
-								: 'text-foreground'}"
+							class="min-h-7 min-w-0 max-w-full scroll-mt-10 rounded-md border px-2.5 py-1 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 pointer-coarse:min-h-11 {selected
+								? 'border-border bg-accent text-accent-foreground'
+								: 'border-border/70 bg-muted/40 text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'}"
 							onclick={() => pins.select(group.executorId, path)}
 						>
-							<Folder class="size-4 shrink-0 text-file-icon-folder" aria-hidden="true" />
-							<span class="min-w-0 flex-1">
-								<span class="block truncate text-sm font-medium leading-5">{name}</span>
-								{#if name !== path}<span
-										class="block text-[11px] leading-4 break-all text-muted-foreground">{path}</span
-									>{/if}
-							</span>{#if selected}<Check class="size-4 shrink-0" aria-hidden="true" />{/if}</button
-						>
+							<span class="block max-w-[70vw] truncate sm:max-w-[24rem]">{path}</span>
+						</button>
 					{/each}
 				</div>
 			</div>
