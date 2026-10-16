@@ -26,6 +26,8 @@ describe('synchronous Markdown identity cache', () => {
 		'- [ ] task\n\n  > quote\n\n- [x] done',
 		'```js\n``` inside\n````\n\n![alt](https://example.test/image.png)',
 		'private \ue000 text\n\n| A |\n| --- |\n| \ue001 &lt; |',
+		'\ue000\n\n[my_var](https://example.test/\ue000)',
+		'\ue000\n\n![my_var](https://example.test/\ue000)',
 	])('matches the uncached codec: %s', (source) => {
 		const content = nodes(source);
 		const cache = new ComposerMarkdownCache(serialize);

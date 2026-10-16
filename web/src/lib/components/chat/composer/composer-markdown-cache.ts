@@ -1,6 +1,5 @@
 import type { JSONContent } from '@tiptap/core';
 import type { Node } from '@tiptap/pm/model';
-import { createTextProtection } from './composer-markdown-text.js';
 
 /** Caches fully restored Markdown, never per-serialization protection sentinels. */
 export class ComposerMarkdownCache {
@@ -10,8 +9,8 @@ export class ComposerMarkdownCache {
 	constructor(private readonly serialize: (document: JSONContent) => string) {}
 
 	run(nodes: readonly Node[]): string {
-		// Exhausted sentinel space changes the codec's escaping policy for the entire run.
-		if (!createTextProtection(nodes.map((node) => node.textContent).join(''))) {
+		// Private-use text determines protection sentinels shared with resource destinations.
+		if (nodes.some((node) => /[\uE000-\uF8FF]/.test(node.textContent))) {
 			return this.serialize({ type: 'doc', content: nodes.map((node) => node.toJSON()) });
 		}
 		const blocks = nodes.filter(
