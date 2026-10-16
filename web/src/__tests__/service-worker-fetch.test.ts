@@ -141,13 +141,16 @@ describe('installed service worker fetch handler', () => {
 		expect(cache.put).not.toHaveBeenCalled();
 	});
 
-	it.each(['/api/v1/chats', '/ws', '/site.webmanifest'])('does not intercept %s', async (path) => {
-		const { dispatch } = harness();
-		await installWorker();
-		const event = dispatch(path);
-		expect(event.response).toBeUndefined();
-		expect(event.lifetimes).toEqual([]);
-	});
+	it.each(['/api/v1/chats', '/ws', '/site.webmanifest', '/_app/version.json'])(
+		'does not intercept %s',
+		async (path) => {
+			const { dispatch } = harness();
+			await installWorker();
+			const event = dispatch(path);
+			expect(event.response).toBeUndefined();
+			expect(event.lifetimes).toEqual([]);
+		},
+	);
 
 	it('limits interception and offline lookup to the configured mount', async () => {
 		deployment.base = '/tools/garcon';
@@ -160,6 +163,7 @@ describe('installed service worker fetch handler', () => {
 			'/tools/garcon/api/v1/chats',
 			'/tools/garcon/ws',
 			'/tools/garcon/site.webmanifest',
+			'/tools/garcon/_app/version.json',
 		]) {
 			expect(dispatch(path).response).toBeUndefined();
 		}

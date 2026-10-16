@@ -89,7 +89,7 @@ self.addEventListener('fetch', (event) => {
 
 	// Non-GET requests (form POSTs, etc.) go straight to network.
 	if (event.request.method !== 'GET') return;
-	if (isManifestPath(pathname)) return;
+	if (isManifestPath(pathname) || pathname === '/_app/version.json') return;
 
 	// Navigation requests (HTML): network-first so the latest deploy is picked up,
 	// falling back to the cached app shell for offline/flaky-network scenarios.

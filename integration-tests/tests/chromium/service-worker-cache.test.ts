@@ -34,11 +34,13 @@ test("service worker caches late navigation and isolates cache-write failures", 
   const workerSource = await bundle.outputs[0]!.text();
   const lateRequest = new Deferred<void>();
   const lateResponse = new Deferred<Response>();
+  let buildVersion = 'first';
   const server = Bun.serve({
     hostname: "0.0.0.0",
     port: 0,
     fetch(request) {
       const path = new URL(request.url).pathname;
+      if (path === "/_app/version.json") return Response.json({ version: buildVersion });
       if (path === "/service-worker.js") {
         return new Response(workerSource, {
           headers: { "Content-Type": "text/javascript" },
@@ -69,6 +71,13 @@ test("service worker caches late navigation and isolates cache-write failures", 
     await page.waitForFunction(
       () => navigator.serviceWorker.controller !== null,
     );
+
+    const readBuildVersion = () => page.evaluate(async () =>
+      (await fetch('/_app/version.json')).json(),
+    );
+    expect(await readBuildVersion()).toEqual({ version: 'first' });
+    buildVersion = 'second';
+    expect(await readBuildVersion()).toEqual({ version: 'second' });
 
     const navigation = page.goto(`${origin}/late`);
     await withTimeout(
