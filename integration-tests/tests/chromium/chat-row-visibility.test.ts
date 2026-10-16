@@ -65,10 +65,11 @@ async function installSocketTracker(context: BrowserContext): Promise<void> {
 
 async function allowDirectChats(context: BrowserContext): Promise<void> {
   await context.addInitScript(() => {
+    const settings = JSON.parse(globalThis.localStorage.getItem('pref_local_settings') ?? '{}');
     globalThis.localStorage.setItem(
       'pref_local_settings',
       // The sidebar-preview assertions need the detailed chat-item layout.
-      JSON.stringify({ allowDirectChats: true, sidebarChatItemLayout: 'detailed' }),
+      JSON.stringify({ ...settings, allowDirectChats: true, sidebarChatItemLayout: 'detailed' }),
     );
   });
 }
