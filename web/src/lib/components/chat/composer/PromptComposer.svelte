@@ -361,7 +361,8 @@
 	});
 	$effect(() => {
 		const restored = composerState.draftRestoreRequest?.chatId === sessions.selectedChatId;
-		if (restored && markdownInput && canFormat) untrack(() => markdown.restore());
+		canFormat;
+		if (restored && markdownInput) untrack(() => markdown.restore());
 	});
 
 	// Cancels path-bound expansion when a selected chat moves to another project.

@@ -371,6 +371,35 @@ describe('formatted composer integration', () => {
 			.toBe(String(mode === 'formatted'));
 		expect(textarea.value).toBe('**retained** draft');
 	});
+	it.each([
+		{ name: 'hidden', blocked: { isVisible: false }, ready: { isVisible: true } },
+		{ name: 'unpresented', blocked: { isPresented: false }, ready: { isPresented: true } },
+		{ name: 'admission', blocked: { directAdmissionPending: true }, ready: { directAdmissionPending: false } },
+	])('keeps a later append in Source after capability returns during $name', async ({ blocked, ready }) => {
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) =>
+			parseComposerMarkdown(request),
+		);
+		const props = {
+			selectedChatId: 'blocked-capability',
+			selectedStatus: 'draft' as const,
+			executionPolicy: 'literal' as const,
+			inputFormatByModel: { 'notes-markdown': 'markdown' as const },
+		};
+		const { rerender } = render(PromptComposerTestHost, { ...props, model: 'notes-markdown' });
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.click(screen.getByTestId('restore-draft'));
+		await fireEvent.input(textarea, { target: { value: '**retained** draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Formatted' }));
+		await screen.findByRole('textbox', { name: 'Formatted message' });
+		await rerender({ ...props, ...blocked, model: 'sh' });
+		await rerender({ ...props, ...blocked, model: 'notes-markdown' });
+		expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
+		await fireEvent.click(screen.getByTestId('append-draft'));
+		await rerender({ ...props, ...ready, model: 'notes-markdown' });
+		expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce();
+		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+		expect(textarea.value).toBe('**retained** draft\n\nAppended review block');
+	});
 	it('opens the snippet palette for a trigger typed after formatted content', async () => {
 		const source = '**context** then';
 		const { editor, textarea } = await formatted({ source });
