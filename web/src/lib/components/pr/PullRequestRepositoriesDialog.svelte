@@ -34,12 +34,6 @@
 	let removing = $state<string | null>(null);
 	let error = $state<string | null>(null);
 
-	const postingLabels = {
-		off: m.pull_request_repository_posting_off,
-		draft: m.pull_request_repository_posting_draft,
-		comment: m.pull_request_repository_posting_comment,
-	} as const;
-
 	function executorLabel(repository: PullRequestReviewRepository): string {
 		const id = effectiveExecutorId(repository.target.executorId);
 		return executors.get(id)?.label ?? id;
@@ -158,7 +152,9 @@
 										<p class="truncate">{repository.target.model}</p>
 									</td>
 									<td class="px-3 py-2 text-xs text-muted-foreground"
-										>{postingLabels[repository.settings.posting]()}</td
+										>{repository.settings.autoPost
+											? m.pull_request_repository_posting_automatic()
+											: m.pull_request_repository_posting_manual()}</td
 									>
 									<td class="max-w-40 px-3 py-2 text-xs text-muted-foreground">
 										<p class="line-clamp-2" title={repository.scan.message ?? undefined}>

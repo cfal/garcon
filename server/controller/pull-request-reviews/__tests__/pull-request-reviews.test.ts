@@ -102,7 +102,7 @@ const latestRun = (reviews: PullRequestReviews) => reviews.snapshot().inbox[0].l
 
 test('reviews a new pull request automatically and posts the review as a comment', async () => {
   const { reviews, github, turns, starts } = harness();
-  await connect(reviews, { autoReview: true, posting: 'comment' });
+  await connect(reviews, { autoReview: true, autoPost: true });
   reviews.start();
   await until(() => turns.has('chat-1'));
   expect(starts[0].command).toContain('Review acme/app#7 comprehensively.');
@@ -168,9 +168,9 @@ test('retries failed archival on the next successful scan', async () => {
   service.stop(); service.close();
 });
 
-test('keeps a draft review until it is posted, and refuses to post after new commits', async () => {
+test('keeps an unpublished review until it is posted, and refuses to post after new commits', async () => {
   const { reviews, github, turns } = harness();
-  const repository = await connect(reviews, { posting: 'draft' });
+  const repository = await connect(reviews, { autoPost: false });
   reviews.start();
   const run = reviews.review(repository.id, 7);
   await until(() => turns.has('chat-1'));
@@ -184,6 +184,38 @@ test('keeps a draft review until it is posted, and refuses to post after new com
   expect(latestRun(reviews)).toMatchObject({ state: 'outdated', post: { status: 'stale' } });
   expect(github.comments).toEqual([]);
   reviews.stop();
+});
+
+test('keeps reviews unpublished by default and allows an explicit manual post', async () => {
+  const { reviews, github, turns } = harness();
+  const repository = await connect(reviews, {});
+  reviews.start();
+  try {
+    const run = reviews.review(repository.id, 7);
+    await until(() => turns.has('chat-1'));
+    turns.get('chat-1')!(`Reviewed commit: ${HEAD}`);
+    await until(() => latestRun(reviews)?.state === 'completed');
+    expect(latestRun(reviews)?.post.status).toBe('none');
+    expect(github.comments).toEqual([]);
+    await reviews.postRun(run.id);
+    expect(latestRun(reviews)?.post.status).toBe('posted');
+    expect(github.comments).toHaveLength(1);
+  } finally { reviews.stop(); reviews.close(); }
+});
+
+test('does not automatically post when the repository checkbox is cleared during a review', async () => {
+  const { reviews, github, turns } = harness();
+  const repository = await connect(reviews, { autoPost: true });
+  reviews.start();
+  try {
+    reviews.review(repository.id, 7);
+    await until(() => turns.has('chat-1'));
+    await reviews.update(repository.id, { target: repository.target, settings: { ...repository.settings, autoPost: false } });
+    turns.get('chat-1')!(`Reviewed commit: ${HEAD}`);
+    await until(() => latestRun(reviews)?.state === 'completed');
+    expect(latestRun(reviews)?.post.status).toBe('none');
+    expect(github.comments).toEqual([]);
+  } finally { reviews.stop(); reviews.close(); }
 });
 
 test('fails a review whose response names no commit', async () => {
@@ -262,7 +294,7 @@ test('runs one review per repository within the workspace concurrency limit', as
 
 test('posts a review of the live head even when the scanner cached the preceding head', async () => {
   const { reviews, github, turns } = harness();
-  const repository = await connect(reviews, { posting: 'comment' });
+  const repository = await connect(reviews, { autoPost: true });
   reviews.start();
   reviews.review(repository.id, 7);
   await until(() => turns.has('chat-1'));
@@ -299,15 +331,15 @@ test('continues scanning other pull requests when a push arrives during a review
   } finally { reviews.stop(); reviews.close(); }
 });
 
-test('allows disabling reviews and posting while the preserved executor is offline', async () => {
+test('allows disabling reviews and automatic posting while the preserved executor is offline', async () => {
   const { reviews, deps } = harness();
-  const repository = await connect(reviews, { autoReview: true, posting: 'comment' });
+  const repository = await connect(reviews, { autoReview: true, autoPost: true });
   deps.agents.assertExecutorReady = () => { throw new Error('Executor offline'); };
   const updated = await reviews.update(repository.id, {
     target: repository.target,
-    settings: { ...repository.settings, autoReview: false, posting: 'off' },
+    settings: { ...repository.settings, autoReview: false, autoPost: false },
   });
-  expect(updated.settings).toMatchObject({ autoReview: false, posting: 'off' });
+  expect(updated.settings).toMatchObject({ autoReview: false, autoPost: false });
   await expect(reviews.update(repository.id, {
     target: { ...repository.target, projectPath: '/work/other' }, settings: updated.settings,
   })).rejects.toThrow('Executor offline');

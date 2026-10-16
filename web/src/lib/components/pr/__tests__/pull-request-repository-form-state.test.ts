@@ -39,7 +39,7 @@ it('saves settings against the preserved offline target without a model catalog'
 		createdAt: '',
 		updatedAt: '',
 		scan: { status: 'executor-unavailable', scannedAt: null, message: null },
-		settings: { ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, autoReview: true, posting: 'comment' },
+		settings: { ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, autoReview: true, autoPost: true },
 		target: {
 			type: 'new-chat',
 			executorId: id,
@@ -62,11 +62,11 @@ it('saves settings against the preserved offline target without a model catalog'
 		expect(load).not.toHaveBeenCalled();
 		expect(form.startup.resolvedModelSelection).toBeNull();
 		form.autoReview = false;
-		form.posting = 'off';
+		form.autoPost = false;
 		expect(form.canSave).toBe(true);
 		expect(form.buildInput()).toMatchObject({
 			target: repository.target,
-			settings: { autoReview: false, posting: 'off' },
+			settings: { autoReview: false, autoPost: false },
 		});
 		form.startup.projectPath = '/work/other';
 		expect(form.canSave).toBe(false);

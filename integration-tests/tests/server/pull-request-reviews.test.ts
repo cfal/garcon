@@ -39,7 +39,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           apiProviderId: null, modelEndpointId: null, modelProtocol: null, permissionMode: 'default', thinkingMode: 'none',
           agentSettingsById: { shell: { ownerId: 'shell', schemaVersion: 1, values: {} } }, tags: [], preambleChoice: { mode: 'defaults' },
         },
-        settings: { ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, posting: 'comment', prompt: `printf 'No findings.\\n\\nReviewed commit: ${HEAD}\\n'` },
+        settings: { ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, autoPost: true, prompt: `printf 'No findings.\\n\\nReviewed commit: ${HEAD}\\n'` },
       });
       const [repository] = connected.snapshot.repositories;
       expect(repository).toMatchObject({ nameWithOwner: 'synthetic-worker/repository', viewerLogin: 'synthetic-worker', scan: { status: 'ok' } });
@@ -68,7 +68,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         repository: {
           target: repository.target,
           settings: {
-            ...repository.settings, autoReview: true, debounceMinutes: 0, posting: 'draft',
+            ...repository.settings, autoReview: true, debounceMinutes: 0, autoPost: false,
             prompt: `while [ ! -f review-release ]; do sleep 0.05; done\nprintf 'Reviewed commit: ${NEXT_HEAD}\\n'`,
           },
         },

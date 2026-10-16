@@ -17,7 +17,7 @@ const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).
 const PULLS = [
   { number: 128, title: 'Keep queue controls stable during reconnect', author: { login: 'author-one', __typename: 'User' }, reviewRequests: ['synthetic-viewer'], checks: 'SUCCESS', additions: 1465, deletions: 599, headRefOid: HEAD, headRefName: 'fix/queue', createdAt: minutesAgo(26), updatedAt: minutesAgo(20) },
   { number: 131, title: 'Add search to the project picker', author: { login: 'author-two', __typename: 'User' }, reviewRequests: ['synthetic-viewer'], checks: 'PENDING', headRefName: 'feat/picker-search', createdAt: minutesAgo(130), updatedAt: minutesAgo(90) },
-  { number: 133, title: 'Document executor reconnect limits', author: { login: 'synthetic-viewer', __typename: 'User' }, checks: 'SUCCESS', headRefName: 'docs/reconnect', createdAt: minutesAgo(300), updatedAt: minutesAgo(240) },
+  { number: 133, title: 'Document executor reconnect limits', author: { login: 'synthetic-viewer', __typename: 'User' }, checks: 'SUCCESS', headRefOid: HEAD, headRefName: 'docs/reconnect', createdAt: minutesAgo(300), updatedAt: minutesAgo(240) },
   { number: 135, title: 'Speed up transcript paging', author: { login: 'author-three', __typename: 'User' }, teamReviewRequested: true, checks: 'FAILURE', headRefName: 'perf/paging', createdAt: minutesAgo(1500), updatedAt: minutesAgo(600) },
   { number: 136, title: 'Bump synthetic dependencies', author: { login: 'synthetic-bot', __typename: 'Bot' }, headRefName: 'deps/bump', createdAt: minutesAgo(2900), updatedAt: minutesAgo(2800) },
 ];
@@ -71,6 +71,7 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     // Review prompts offer their own tokens, not the scheduled-prompt chat ID.
     await browserExpect(connectForm.getByRole('button', { name: 'Insert {{pull_request_number}}' })).toBeVisible();
     await browserExpect(connectForm.getByRole('button', { name: 'Insert {{chat_id}}' })).toHaveCount(0);
+    await browserExpect(connectForm.getByRole('checkbox', { name: 'Post reviews to GitHub automatically' })).not.toBeChecked();
     await capture('connect-repository-desktop');
     await page.keyboard.press('Escape');
     await browserExpect(connectForm).toHaveCount(0);
@@ -139,6 +140,42 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     await panel.getByRole('button', { name: 'All pull requests' }).click();
     await browserExpect(needsReview).toBeVisible();
     await capture('inbox-mobile');
+
+    phase('opt into automatic posting for the repository');
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await panel.locator('[data-pr-repositories-button]').click();
+    await repositories.locator('[data-pr-repository="acme/app"]').getByRole('button', { name: 'Edit acme/app' }).click();
+    const autoPost = connectForm.getByRole('checkbox', { name: 'Post reviews to GitHub automatically' });
+    await browserExpect(autoPost).not.toBeChecked();
+    await browserExpect(connectForm.locator('[data-pr-repository-save]')).toBeEnabled();
+    await connectForm.getByText('Applies to every review for this repository.', { exact: false }).scrollIntoViewIfNeeded();
+    await capture('posting-settings-desktop');
+    await autoPost.check();
+    await connectForm.locator('[data-pr-repository-save]').click();
+    await browserExpect(connectForm).toHaveCount(0);
+    await browserExpect(repositories.locator('[data-pr-repository="acme/app"]')).toContainText('Automatic');
+    const saved = await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews');
+    expect(saved.repositories[0].settings.autoPost).toBe(true);
+    await page.keyboard.press('Escape');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await panel.locator('[data-pr-repositories-button]').click();
+    await repositories.locator('[data-pr-repository="acme/app"]').getByRole('button', { name: 'Edit acme/app' }).click();
+    await browserExpect(autoPost).toBeChecked();
+    await browserExpect(connectForm.locator('[data-pr-repository-save]')).toBeEnabled();
+    await connectForm.getByText('Applies to every review for this repository.', { exact: false }).scrollIntoViewIfNeeded();
+    await capture('posting-settings-mobile');
+    await page.keyboard.press('Escape');
+    await browserExpect(connectForm).toHaveCount(0);
+    await page.keyboard.press('Escape');
+
+    // The repository setting applies to subsequent reviews, not just the selected pull request.
+    const activeRun = saved.inbox.find((entry) => entry.pull.number === 131)!.latestRun!;
+    await client.post('/api/v1/pull-request-reviews/runs/stop', { runId: activeRun.id });
+    await browserExpect.poll(async () => {
+      const current = await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews');
+      return current.inbox.find((entry) => entry.pull.number === 133)?.latestRun?.post.status;
+    }).toBe('posted');
     assertNoBrowserErrors();
   }, undefined, {
     executionBackend: 'in-process',

@@ -36,7 +36,6 @@ export class PullRequestReviewPoster {
     if (run.post.status === 'posted') throw reviewConflict('This review is already posted.');
     const repository = store.getRepository(run.repositoryId);
     if (!repository) throw reviewConflict('The repository is no longer connected.');
-    if (repository.settings.posting === 'off') throw reviewConflict('Posting is off for this repository.');
     if (this.#posting.has(runId)) throw reviewConflict('This review is already being posted.');
     const body = pullRequestReviewCommentBody(run.review, repository.nameWithOwner, run.number, run.reviewedSha);
     if (body.length > GH_COMMENT_BODY_MAX_LENGTH) {

@@ -32,8 +32,10 @@ describes what milestones 1 and 2 of that issue implement.
    review. The review must contain exactly one `Reviewed commit: <sha>` line;
    without one the run fails and keeps the text. A review whose commit is no
    longer the head is outdated.
-6. **Post.** Off keeps reviews in Garcon. Draft waits for Post to GitHub.
-   Comment posts automatically.
+6. **Post.** Reviews stay in Garcon by default. The repository's
+   **Post reviews to GitHub automatically** checkbox starts unchecked. Checking
+   it publishes completed reviews for that repository automatically; leaving
+   it unchecked keeps the **Post to GitHub** button available on each review.
 
 Review chats are ordinary chats. Stopping one stops its review; deleting one
 ends it. When a pull request leaves the open list, its review chats are
@@ -74,9 +76,9 @@ The saved executor and provider selections join the executor and provider
 reference guards, as scheduled prompts do.
 
 Saved settings can be edited while the executor is offline, including turning
-off automatic reviews or posting. The saved review target stays fixed until the
-executor is ready. Failed scans keep the last saved list and show its status in
-the inbox. Policy and posting reads paginate all GitHub connections; incomplete
+off automatic reviews or automatic posting. The saved review target stays fixed
+until the executor is ready. Failed scans keep the last saved list and show its
+status in the inbox. Policy and posting reads paginate all GitHub connections; incomplete
 reads fail instead of publishing a truncated successful scan.
 
 ## Safety

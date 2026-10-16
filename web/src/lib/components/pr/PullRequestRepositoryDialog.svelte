@@ -241,14 +241,13 @@
 				</label>
 			</section>
 			<section class={sectionClass}>
-				<label class="flex flex-col gap-1 text-sm">
-					<span class="font-medium text-foreground">{m.pull_request_repository_posting()}</span>
-					<select class="select-native text-base pointer-fine:text-sm" bind:value={form.posting}>
-						<option value="off">{m.pull_request_repository_posting_off()}</option>
-						<option value="draft">{m.pull_request_repository_posting_draft()}</option>
-						<option value="comment">{m.pull_request_repository_posting_comment()}</option>
-					</select>
+				<label class="flex items-start gap-2 text-sm font-medium text-foreground">
+					<input type="checkbox" class="mt-0.5" bind:checked={form.autoPost} />
+					{m.pull_request_repository_auto_post()}
 				</label>
+				<p class="text-xs text-muted-foreground">
+					{m.pull_request_repository_auto_post_description()}
+				</p>
 				<p class="text-xs text-muted-foreground">
 					{repository?.viewerLogin
 						? m.pull_request_review_posts_as({ login: `@${repository.viewerLogin}` })
