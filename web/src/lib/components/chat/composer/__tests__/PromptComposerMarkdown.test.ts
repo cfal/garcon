@@ -121,6 +121,24 @@ describe('formatted composer integration', () => {
 		expect(rich.commands.redo()).toBe(true);
 		await waitFor(() => expect(textarea.value).toBe('before typed **pasted**'));
 	});
+	it.each(['* one\n* two', '## Head ##'])('restores exact source spelling through repeated paste Undo/Redo: %s', async (source) => {
+		const { editor, textarea } = await formatted({ source });
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) => parseComposerMarkdown(request));
+		const rich = richEditor(editor);
+		for (const text of [' first', ' second']) {
+			const transfer = new DataTransfer();
+			transfer.setData('text/plain', text);
+			await fireEvent.paste(editor, { clipboardData: transfer });
+			await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+		}
+		const pasted = textarea.value;
+		expect(rich.commands.undo()).toBe(true);
+		expect(rich.commands.undo()).toBe(true);
+		await waitFor(() => expect(textarea.value).toBe(source));
+		expect(rich.commands.redo()).toBe(true);
+		expect(rich.commands.redo()).toBe(true);
+		await waitFor(() => expect(textarea.value).toBe(pasted));
+	});
 	it.each(['restore', 'append', 'source', 'hidden', 'outside'])(
 		'keeps raw clipboard text during a pending parse and a later %s', async (action) => {
 			const { editor, textarea, rerender } = await formatted({ source: 'before' });

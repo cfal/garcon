@@ -146,6 +146,58 @@ test('raw Markdown paste retains rich history, layout, and caret visibility', as
   });
 }, 90_000);
 
+test('pending raw paste keeps keyboard focus and respects outside scrolling', async () => {
+  await withChromiumFixture('composer-paste-focus', async ({ page, context, integration, assertNoBrowserErrors }) => {
+    const chatId = integration.newChatId();
+    const turn = await integration.client.startDirectChat({
+      chatId, content: 'Synthetic paste focus', projectPath: integration.dirs.project,
+      agent: integration.directAgents.anthropic,
+    });
+    await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const composer = page.locator('[data-composer]');
+    const textarea = composer.locator('textarea');
+    const editor = page.getByRole('textbox', { name: 'Formatted message' });
+    const source = Array.from({ length: 24 }, (_, index) => `Paragraph ${index}`).join('\n\n');
+    const outside = page.getByRole('button', { name: 'New Chat', exact: true });
+    const worker = '**/composer-markdown.worker-*.js';
+    for (const scenario of ['mapped', 'unmapped', 'outside']) {
+      await selectMessageFormat(page, 'source');
+      await textarea.fill(source);
+      await selectMessageFormat(page, 'formatted');
+      await editor.focus();
+      await page.keyboard.press('Control+End');
+      const release = Promise.withResolvers<void>();
+      await context.route(worker, async route => { await release.promise; await route.continue(); });
+      const clipboard = scenario === 'unmapped' ? '\n\n- item\n\n' : ' **pasted**';
+      await page.evaluate(text => navigator.clipboard.writeText(text), clipboard);
+      await page.keyboard.press('Control+V');
+      await browserExpect(editor).toHaveAttribute('contenteditable', 'false');
+      if (scenario === 'outside') {
+        await outside.dispatchEvent('pointerdown');
+        await outside.focus();
+        await composer.locator('[data-composer-markdown-editor]').evaluate(element => { element.scrollTop = 0; });
+      } else {
+        await page.keyboard.press('Shift');
+        await browserExpect(editor).toBeFocused();
+      }
+      release.resolve();
+      await browserExpect(composer.getByRole('button', { name: 'Pasting text...' })).toHaveCount(0);
+      await context.unroute(worker);
+      if (scenario === 'outside') {
+        await browserExpect(outside).toBeFocused();
+        expect(await composer.locator('[data-composer-markdown-editor]').evaluate(element => element.scrollTop)).toBe(0);
+      } else {
+        await browserExpect(scenario === 'mapped' ? editor : textarea).toBeFocused();
+        await page.keyboard.type('y');
+        await browserExpect(textarea).toHaveValue(source + clipboard + 'y');
+      }
+    }
+    assertNoBrowserErrors();
+  });
+}, 90_000);
+
 test("editable Markdown tables preserve drafts, focus, submission, and responsive layout", async () => {
   await withChromiumFixture(
     "composer-markdown",

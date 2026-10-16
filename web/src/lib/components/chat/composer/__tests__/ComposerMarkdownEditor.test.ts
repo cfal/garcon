@@ -170,6 +170,31 @@ describe('composer newline intent', () => {
 });
 
 describe('formatted editor clipboard contexts', () => {
+	it.each([4, 10])('uses the restored inline-code marks at source caret %s', (caret) => {
+		const { editor, onChange, onMarkdownPaste } = mount('Use `code` here', caret);
+		const clipboardData = new DataTransfer();
+		clipboardData.setData('text/plain', '**bold**');
+		editor.view.dom.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true }));
+		expect(onMarkdownPaste).toHaveBeenCalledOnce();
+		expect(onChange).not.toHaveBeenCalled();
+	});
+	it('uses the code marks across a selected code span', () => {
+		const { editor, onChange, onMarkdownPaste } = mount('Use `code` here');
+		editor.commands.setTextSelection({ from: 5, to: 9 });
+		const clipboardData = new DataTransfer();
+		clipboardData.setData('text/plain', 'a`b');
+		editor.view.dom.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true }));
+		expect(onMarkdownPaste).not.toHaveBeenCalled();
+		expect(onChange).toHaveBeenLastCalledWith('Use ``a`b`` here');
+	});
+	it('uses an explicitly stored code mark at the opening delimiter', () => {
+		const { editor, onChange, onMarkdownPaste } = mount('Use `code` here', 5);
+		const clipboardData = new DataTransfer();
+		clipboardData.setData('text/plain', 'a`b');
+		editor.view.dom.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true }));
+		expect(onMarkdownPaste).not.toHaveBeenCalled();
+		expect(onChange).toHaveBeenLastCalledWith('Use ``a`bcode`` here');
+	});
 	it('keeps backticks literal when pasting inside inline code', () => {
 		const { editor, onChange, onMarkdownPaste } = mount('Use `code` here', 7);
 		const clipboardData = new DataTransfer();

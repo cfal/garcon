@@ -188,7 +188,10 @@ export class PromptComposerMarkdownController {
 		) {
 			this.#focusGeneration = hadFocus ? generation : -1;
 			apply(parsed);
-		} else if (generation === this.options.interactionGeneration) {
+		} else if (
+			generation === this.options.interactionGeneration ||
+			document.activeElement === this.options.ui.formattedTarget
+		) {
 			// Textarea values normalize CRLF, so the fallback caret uses the same coordinates.
 			void this.edit(text.slice(0, caret).replace(/\r\n?/g, '\n').length);
 		} else {

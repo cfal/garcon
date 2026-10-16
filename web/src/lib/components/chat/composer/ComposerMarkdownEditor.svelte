@@ -83,6 +83,16 @@
 			Array.from({ length: doc.childCount }, (_, index) => doc.child(index));
 		let original: DocumentNode[] = [];
 		let originalSources: (string | null)[] = [];
+		// History retains the replaced nodes; weak keys release their source maps with it.
+		const sourceHistory = new WeakMap<
+			DocumentNode,
+			{ document: DocumentNode; original: DocumentNode[]; sources: (string | null)[] }
+		>();
+		const rememberSource = (doc: DocumentNode) => {
+			if (doc.firstChild) {
+				sourceHistory.set(doc.firstChild, { document: doc, original, sources: originalSources });
+			}
+		};
 		const blocks = (doc: DocumentNode): ComposerMarkdownBlock<DocumentNode>[] =>
 			planComposerMarkdownBlocks(
 				original,
@@ -166,9 +176,11 @@
 			transaction.setStoredMarks(
 				(parsed.selectionMarks ?? []).map((mark) => mountedEditor.schema.markFromJSON(mark)),
 			);
+			rememberSource(mountedEditor.state.doc);
 			original = topLevel(transaction.doc);
 			originalSources = parsed.sources;
-			mountedEditor.view.dispatch(transaction.scrollIntoView());
+			rememberSource(transaction.doc);
+			mountedEditor.view.dispatch(transaction);
 			onReady(mountedEditor.view.dom);
 			const boundary = closeHistory(mountedEditor.state.tr);
 			if (mountedEditor.view.hasFocus()) boundary.scrollIntoView();
@@ -177,7 +189,13 @@
 		const insertText = (view: Editor['view'], text: string, position?: number) => {
 			const head =
 				position === undefined ? view.state.selection.$from : view.state.doc.resolve(position);
-			let literal = head.marks().some((mark) => mark.type.name === 'code');
+			let marks = head.marks();
+			if (position === undefined) {
+				const { selection, storedMarks } = view.state;
+				marks =
+					storedMarks ?? (selection.empty ? head.marks() : head.marksAcross(selection.$to) ?? []);
+			}
+			let literal = marks.some((mark) => mark.type.name === 'code');
 			for (let depth = head.depth; depth > 0; depth--) {
 				const node = head.node(depth);
 				if (
@@ -242,6 +260,11 @@
 			enablePasteRules: false,
 			onUpdate: ({ editor: current }) => {
 				const { doc, selection } = current.state;
+				const snapshot = doc.firstChild ? sourceHistory.get(doc.firstChild) : undefined;
+				if (snapshot?.document.eq(doc)) {
+					original = snapshot.original;
+					originalSources = snapshot.sources;
+				}
 				const source = serialize(doc);
 				let nodeCount = 1;
 				doc.descendants(() => {
@@ -274,11 +297,12 @@
 				if (transaction.docChanged || mentionOpen) reportMention(current);
 			},
 			editorProps: {
-				attributes: {
+				attributes: () => ({
 					role: 'textbox',
+					tabindex: readOnly ? '-1' : '0',
 					'aria-label': m.chat_composer_formatted_markdown(),
 					'aria-multiline': 'true',
-				},
+				}),
 				handleKeyDown(_view, event) {
 					if (readOnly && event.key === 'Enter') {
 						event.preventDefault();
