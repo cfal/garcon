@@ -345,6 +345,32 @@ describe('formatted composer integration', () => {
 		expect(screen.queryByRole('button', { name: 'Formatted' })).toBeNull();
 		expect(textarea.value).toBe(source);
 	});
+	it.each(['source', 'formatted'])('restores the %s preference when Markdown capability returns', async (mode) => {
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) =>
+			parseComposerMarkdown(request),
+		);
+		const props = {
+			selectedChatId: 'markdown-capability',
+			executionPolicy: 'literal' as const,
+			inputFormatByModel: { 'notes-markdown': 'markdown' as const },
+		};
+		const { rerender } = render(PromptComposerTestHost, { ...props, model: 'notes-markdown' });
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.click(screen.getByTestId('restore-draft'));
+		await fireEvent.input(textarea, { target: { value: '**retained** draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Formatted' }));
+		await screen.findByRole('textbox', { name: 'Formatted message' });
+		if (mode === 'source') await fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+		await rerender({ ...props, model: 'sh' });
+		expect(screen.queryByRole('button', { name: 'Formatted' })).toBeNull();
+		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+		await rerender({ ...props, model: 'notes-markdown' });
+		if (mode === 'formatted') await screen.findByRole('textbox', { name: 'Formatted message' });
+		else expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Formatted' }).getAttribute('aria-pressed'))
+			.toBe(String(mode === 'formatted'));
+		expect(textarea.value).toBe('**retained** draft');
+	});
 	it('opens the snippet palette for a trigger typed after formatted content', async () => {
 		const source = '**context** then';
 		const { editor, textarea } = await formatted({ source });

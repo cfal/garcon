@@ -67,6 +67,11 @@ export class PromptComposerMarkdownController {
 		}
 	}
 
+	inputFormatChanged(): void {
+		this.reset();
+		this.#restoreRequest = undefined;
+	}
+
 	/** Retries an unfulfilled restore when editing becomes available. */
 	restore(): void {
 		const request = this.options.composer.draftRestoreRequest;

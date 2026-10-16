@@ -352,11 +352,13 @@
 			if (request?.chatId === sessions.selectedChatId) markdown.reset();
 		});
 	});
-	// Drops a formatted view once another surface changed the draft or its model stopped accepting Markdown.
 	$effect(() => {
-		if (ui.formattedDraft && (!formattedDraft || !markdownInput)) untrack(() => markdown.reset());
+		markdownInput;
+		untrack(() => markdown.inputFormatChanged());
 	});
-	// Restores the formatted view of a Markdown draft when its chat is selected or reloaded and its model accepts Markdown.
+	$effect(() => {
+		if (ui.formattedDraft && !formattedDraft) untrack(() => markdown.reset());
+	});
 	$effect(() => {
 		const restored = composerState.draftRestoreRequest?.chatId === sessions.selectedChatId;
 		if (restored && markdownInput && canFormat) untrack(() => markdown.restore());
