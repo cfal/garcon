@@ -361,6 +361,7 @@
 	$effect(() => {
 		const restored = composerState.draftRestoreRequest?.chatId === sessions.selectedChatId;
 		canFormat;
+		localSettings.composerInputMode;
 		if (restored && markdownInput) untrack(() => markdown.restore());
 	});
 
@@ -872,8 +873,6 @@
 				bind:textarea
 				text={composerState.inputText}
 				draft={formattedDraft}
-				pending={ui.formatPending}
-				{markdownInput}
 				disabled={isDisabled}
 				busy={promptTransformPending}
 				sourceReadOnly={promptRefinement.pending}

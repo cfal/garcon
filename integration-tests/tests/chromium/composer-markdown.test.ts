@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { expect as browserExpect } from "playwright/test";
+import { expect as browserExpect, type Page } from "playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
@@ -7,6 +7,72 @@ import type { SnippetsSnapshot } from "../../../common/snippets.js";
 
 const table =
   "| Check | Example |\n| --- | --- |\n| **Startup ready** | Resolve earlier work before submitting. |\n| **Current data** | Use the latest observation.<br>Keep context current. |\n| **Code** | `a  b` |";
+
+async function selectMessageFormat(page: Page, mode: 'source' | 'formatted') {
+  await page.keyboard.press('Control+,');
+  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
+  await dialog.getByRole('tab', { name: 'Interface', exact: true }).click();
+  await dialog.getByRole('combobox', { name: 'Message format', exact: true }).selectOption(mode);
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+}
+
+test('message format defaults to Formatted and is controlled only by persisted Interface settings', async () => {
+  await withChromiumFixture('composer-format-setting', async ({ page, integration, assertNoBrowserErrors }) => {
+    const chatId = integration.newChatId();
+    const turn = await integration.client.startDirectChat({
+      chatId, content: 'Synthetic format preference', projectPath: integration.dirs.project,
+      agent: integration.directAgents.anthropic,
+    });
+    await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    const composer = page.locator('[data-composer]');
+    const editor = page.getByRole('textbox', { name: 'Formatted message' });
+    const textarea = composer.locator('textarea');
+    await browserExpect(editor).toBeVisible();
+    await browserExpect(composer.getByRole('group', { name: 'Message format' })).toHaveCount(0);
+    await browserExpect(composer.getByRole('button', { name: /^(Source|Formatted)$/ })).toHaveCount(0);
+
+    const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
+    await mkdir(artifacts, { recursive: true });
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      // No selector or spacer sits above the original input surface.
+      const geometry = await composer.evaluate(element => {
+        const input = element.querySelector('[data-composer-markdown-editor]')!;
+        return { frameTop: element.getBoundingClientRect().top, inputTop: input.getBoundingClientRect().top };
+      });
+      expect(geometry.inputTop - geometry.frameTop).toBe(1);
+      await page.screenshot({ path: join(artifacts, `composer-settings-only-${width}.png`) });
+      await page.keyboard.press('Control+,');
+      const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
+      await dialog.getByRole('tab', { name: 'Interface', exact: true }).click();
+      const format = dialog.getByRole('combobox', { name: 'Message format', exact: true });
+      await browserExpect(format).toHaveValue('formatted');
+      await format.scrollIntoViewIfNeeded();
+      await format.focus();
+      await format.selectOption('source');
+      await browserExpect(editor).toHaveCount(0);
+      await browserExpect(format).toBeFocused();
+      await format.selectOption('formatted');
+      await browserExpect(editor).toBeAttached();
+      await browserExpect(format).toBeFocused();
+      expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+      await page.screenshot({ path: join(artifacts, `composer-interface-setting-${width}.png`) });
+      await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    }
+    await selectMessageFormat(page, 'source');
+    await textarea.fill('**Source stays literal**');
+    await page.reload();
+    await browserExpect(textarea).toBeVisible();
+    await browserExpect(textarea).toHaveValue('**Source stays literal**');
+    await browserExpect(editor).toHaveCount(0);
+    await selectMessageFormat(page, 'formatted');
+    await browserExpect(editor.locator('strong')).toHaveText('Source stays literal');
+    await page.reload();
+    await browserExpect(editor.locator('strong')).toHaveText('Source stays literal');
+    assertNoBrowserErrors();
+  }, undefined, { composerInputMode: null });
+}, 90_000);
 
 test("editable Markdown tables preserve drafts, focus, submission, and responsive layout", async () => {
   await withChromiumFixture(
@@ -38,7 +104,8 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       const textarea = page.getByPlaceholder("Reply...", { exact: true });
       const editor = page.getByRole("textbox", { name: "Formatted message" });
       const format = async () => {
-        await page.getByRole("button", { name: "Formatted", exact: true }).click();
+        await selectMessageFormat(page, 'formatted');
+        await editor.focus();
         await browserExpect(editor).toBeFocused();
       };
       const paste = async (text: string) => {
@@ -58,7 +125,7 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
         await page.screenshot({ path: join(artifacts, name) });
       };
       const clear = async () => {
-        await page.getByRole("button", { name: "Source", exact: true }).click();
+        await selectMessageFormat(page, 'source');
         await textarea.evaluate((element: HTMLTextAreaElement) => {
           element.value = "";
           element.dispatchEvent(new Event("input", { bubbles: true }));
@@ -441,9 +508,10 @@ test("formatted newline intent escapes containers under either submission prefer
     const textarea = page.locator('[data-composer] textarea');
     const editor = page.getByRole('textbox', { name: 'Formatted message' });
     const open = async (source: string) => {
-      await page.getByRole('button', { name: 'Source', exact: true }).click();
+      await selectMessageFormat(page, 'source');
       await textarea.fill(source);
-      await page.getByRole('button', { name: 'Formatted', exact: true }).click();
+      await selectMessageFormat(page, 'formatted');
+      await editor.focus();
       await browserExpect(editor).toBeFocused();
     };
     for (const sendByShiftEnter of [false, true]) {
@@ -535,7 +603,7 @@ test("formatted newline intent escapes containers under either submission prefer
     expect((await textarea.inputValue()).match(/draft/g)).toHaveLength(1);
     expect((await integration.client.getMessages(chatId)).messages.filter(row => row.message.type === 'user-message').length).toBe(submittedBeforeComposition);
     await cdp.detach();
-    await page.getByRole('button', { name: 'Source', exact: true }).click();
+    await selectMessageFormat(page, 'source');
     await textarea.fill('> source remains literal');
     await page.reload();
     await browserExpect(textarea).toHaveValue('> source remains literal');
@@ -597,7 +665,8 @@ test("literal Shell input is formatted only in a mode that declares Markdown inp
       await selectChat(notesChat);
       await browserExpect(textarea).toHaveValue("");
       await page.keyboard.type("Keep **this** and _target_");
-      await page.getByRole("button", { name: "Formatted", exact: true }).click();
+      await selectMessageFormat(page, 'formatted');
+      await editor.focus();
       await browserExpect(editor).toBeFocused();
       await browserExpect(editor.locator("strong")).toHaveText("this");
       await browserExpect(editor.locator("em")).toHaveText("target");

@@ -39,6 +39,7 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			m.settings_chat_hidden_tools(),
 			m.settings_chat_show_quick_commit_tray(),
 			m.settings_chat_auto_scroll_to_bottom(),
+			m.chat_composer_input_mode(),
 			m.settings_snippet_trigger_label(),
 			m.settings_text_editor_open_placement(),
 			m.settings_image_viewer_open_placement(),

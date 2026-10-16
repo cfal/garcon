@@ -46,6 +46,7 @@ export class PromptComposerMarkdownController {
 	#mention: ComposerMarkdownMention | null = null;
 	#composing = false;
 	#restoreRequest: ComposerState['draftRestoreRequest'] | undefined;
+	#restoreMode: ComposerInputMode | undefined;
 	#formatIntent: 'explicit' | 'restore' | null = null;
 	#editorLoaded = false;
 
@@ -59,14 +60,6 @@ export class PromptComposerMarkdownController {
 		if (intent) void this.#format();
 	}
 
-	selectMode(mode: ComposerInputMode): void {
-		if (mode === 'source') void this.edit();
-		else if (!this.options.ui.formattedDraft) {
-			this.#formatIntent = 'explicit';
-			void this.#format();
-		}
-	}
-
 	inputFormatChanged(): void {
 		this.reset();
 		this.#restoreRequest = undefined;
@@ -75,10 +68,18 @@ export class PromptComposerMarkdownController {
 	/** Retries an unfulfilled restore when editing becomes available. */
 	restore(): void {
 		const request = this.options.composer.draftRestoreRequest;
-		if (request !== this.#restoreRequest) {
+		const mode = this.options.preferredMode;
+		if (request !== this.#restoreRequest || mode !== this.#restoreMode) {
+			const modeChanged = this.#restoreMode !== undefined && mode !== this.#restoreMode;
 			if (!this.options.ui.formattedPastePending) this.reset();
 			this.#restoreRequest = request;
-			if (this.options.preferredMode === 'formatted') this.#formatIntent = 'restore';
+			this.#restoreMode = mode;
+			this.#formatIntent = null;
+			if (mode === 'formatted') this.#formatIntent = modeChanged ? 'explicit' : 'restore';
+		}
+		if (mode === 'source') {
+			if (this.options.ui.formattedDraft && !this.options.ui.formattedPastePending) this.reset();
+			return;
 		}
 		if (this.#formatIntent && !this.options.ui.formattedDraft && !this.#workerAbort) {
 			void this.#format();
@@ -242,7 +243,6 @@ export class PromptComposerMarkdownController {
 		this.#workerAbort?.abort();
 		const abort = new AbortController();
 		this.#workerAbort = abort;
-		this.options.ui.formatPending = true;
 		const chatId = this.options.chatId;
 		const generation = this.options.interactionGeneration;
 		const caret = this.options.textarea?.selectionStart;
@@ -269,7 +269,6 @@ export class PromptComposerMarkdownController {
 		]);
 		if (this.#workerAbort === abort) {
 			this.#workerAbort = null;
-			this.options.ui.formatPending = false;
 		}
 		if (this.#destroyed || abort.signal.aborted) return;
 		if (
@@ -308,7 +307,6 @@ export class PromptComposerMarkdownController {
 		generation: number,
 	): void {
 		this.#formatIntent = null;
-		this.options.ui.formatPending = false;
 		this.#focusGeneration =
 			document.activeElement === this.options.textarea
 				? this.options.interactionGeneration

@@ -44,6 +44,26 @@ const completionSound = await import('$lib/notifications/completion-sound.js');
 const SettingsTestHost = (await import('./SettingsTestHost.svelte')).default;
 
 describe('Settings', () => {
+	it('stores the message format in App Interface and restores it on remount', async () => {
+		localStorage.clear();
+		const appShell = createAppShellStore();
+		appShell.openSettings('interface');
+		const props = { appShell, remoteSettings: new RemoteSettingsStore() };
+		let rendered = render(SettingsTestHost, props);
+		try {
+			const format = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Message format' });
+			expect(format.value).toBe('formatted');
+			await fireEvent.change(format, { target: { value: 'source' } });
+			expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!))
+				.toMatchObject({ composerInputMode: 'source' });
+			rendered.unmount();
+			rendered = render(SettingsTestHost, props);
+			expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Message format' }).value)
+				.toBe('source');
+		} finally {
+			rendered.unmount();
+		}
+	});
 	it('reviews a detected key in the existing endpoint editor and rejects unknown keys', async () => {
 		const appShell = createAppShellStore();
 		appShell.openSettings('providers');

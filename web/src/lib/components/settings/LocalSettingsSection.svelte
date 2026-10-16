@@ -344,6 +344,23 @@
 				ls.toggle('autoScrollToBottom'),
 			)}
 			<div class="flex items-center justify-between gap-4 py-2">
+				<label class="min-w-0 text-sm font-medium text-foreground" for="local-composer-input-mode">
+					{m.chat_composer_input_mode()}
+				</label>
+				<select
+					id="local-composer-input-mode"
+					class="select-native"
+					value={ls.composerInputMode}
+					onchange={(event) => {
+						const mode = event.currentTarget.value;
+						if (mode === 'source' || mode === 'formatted') ls.set('composerInputMode', mode);
+					}}
+				>
+					<option value="formatted">{m.chat_composer_formatted_mode()}</option>
+					<option value="source">{m.chat_composer_source_mode()}</option>
+				</select>
+			</div>
+			<div class="flex items-center justify-between gap-4 py-2">
 				<div class="min-w-0">
 					<label class="text-sm font-medium text-foreground" for="local-snippet-trigger">
 						{m.settings_snippet_trigger_label()}

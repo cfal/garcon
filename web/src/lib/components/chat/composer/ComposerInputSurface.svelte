@@ -1,15 +1,11 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import { getLocalSettings } from '$lib/context';
-	import ComposerFormatSelector from './ComposerFormatSelector.svelte';
 	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import { loadComposerMarkdownEditor } from './composer-markdown-editor-loader.js';
 	import type { ComposerMarkdownDocument } from './composer-markdown-parser.js';
 	import type { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
 	let {
 		draft,
-		pending,
-		markdownInput,
 		disabled,
 		busy,
 		sourceReadOnly,
@@ -23,8 +19,6 @@
 		onRecallReset,
 	}: {
 		draft: ({ source: string } & ComposerMarkdownDocument) | null;
-		pending: boolean;
-		markdownInput: boolean;
 		disabled: boolean;
 		busy: boolean;
 		sourceReadOnly: boolean;
@@ -37,26 +31,10 @@
 		onInput: (event: Event) => void;
 		onRecallReset: () => void;
 	} = $props();
-	const localSettings = getLocalSettings();
 	const contentSizing = contentSizedTextarea(() => (visible ? text : undefined));
 </script>
 
 <div class="relative overflow-hidden bg-transparent focus-within:ring-0">
-	<!-- Reserves the selector row across model capability changes and catalog recovery. -->
-	<div class="h-11">
-		{#if markdownInput}
-			<ComposerFormatSelector
-				mode={draft || pending ? 'formatted' : 'source'}
-				{pending}
-				disabled={disabled || busy}
-				onSelect={(mode) => {
-					localSettings.set('composerInputMode', mode);
-					controller.selectMode(mode);
-				}}
-			/>
-		{/if}
-	</div>
-
 	{#if draft}
 		{#await loadComposerMarkdownEditor()}
 			<pre

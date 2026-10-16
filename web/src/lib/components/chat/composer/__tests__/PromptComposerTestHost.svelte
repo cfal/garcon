@@ -157,6 +157,15 @@
 			return selectedChatId;
 		},
 	});
+	let restoredChatId: string | undefined;
+	$effect(() => {
+		const chatId = selectedChatId;
+		if (restoredChatId === chatId) return;
+		restoredChatId = chatId;
+		untrack(() => {
+			composer.draftRestoreRequest = { chatId, requestId: 0 };
+		});
+	});
 	const transcript = new ActiveTranscriptState();
 
 	export function getComposerContentRevision(): number {
@@ -505,6 +514,19 @@
 </script>
 
 <KeyboardShortcuts />
+<select
+	hidden
+	data-testid="composer-input-mode"
+	aria-label="Test message format"
+	value={composerInputMode}
+	onchange={(event) => {
+		const mode = event.currentTarget.value;
+		if (mode === 'source' || mode === 'formatted') composerInputMode = mode;
+	}}
+>
+	<option value="source">Source</option>
+	<option value="formatted">Formatted</option>
+</select>
 {#if composerNotice}
 	<div class={chatDockFrameClass(chatMaxWidth)}>
 		<ComposerAvailabilityNotice {...composerNotice} />

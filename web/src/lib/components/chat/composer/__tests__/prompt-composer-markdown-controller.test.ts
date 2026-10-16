@@ -67,6 +67,15 @@ function fixture() {
 	}
 	return { ui, options, controller, paste };
 }
+function selectFormatted(
+	controller: PromptComposerMarkdownController,
+	options: ReturnType<typeof fixture>['options'],
+): void {
+	options.preferredMode = 'source';
+	controller.restore();
+	options.preferredMode = 'formatted';
+	controller.restore();
+}
 afterEach(() => {
 	document.body.replaceChildren();
 	vi.resetAllMocks();
@@ -78,7 +87,7 @@ describe('formatted composer input format', () => {
 		options.textarea.value = table;
 		options.textarea.setSelectionRange(0, 4);
 		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
-		controller.selectMode('formatted');
+		selectFormatted(controller, options);
 		await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(table));
 		controller.destroy();
 	});
@@ -186,7 +195,7 @@ describe('formatted composer lifecycle', () => {
 			button.focus();
 			options.interactionGeneration++;
 			if (intent === 'restore') controller.restore();
-			else controller.selectMode('formatted');
+			else selectFormatted(controller, options);
 			await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(source));
 			const target = document.createElement('div');
 			target.tabIndex = 0;
@@ -207,7 +216,7 @@ describe('formatted composer lifecycle', () => {
 					complete = resolve;
 				});
 				vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(pending);
-				if (intent === 'explicit') controller.selectMode('formatted');
+				if (intent === 'explicit') selectFormatted(controller, options);
 				else controller.restore();
 				const signal = vi.mocked(parseComposerMarkdownInWorker).mock.calls[0][1];
 				options.composer.inputText = source;
@@ -243,7 +252,7 @@ describe('formatted composer lifecycle', () => {
 		vi.mocked(parseComposerMarkdownInWorker)
 			.mockReturnValueOnce(new Promise((resolve) => { complete = resolve; }))
 			.mockResolvedValueOnce(parsed);
-		if (intent === 'explicit') controller.selectMode('formatted');
+		if (intent === 'explicit') selectFormatted(controller, options);
 		else controller.restore();
 		options.textarea.setSelectionRange(4, 4);
 		options.interactionGeneration++;
@@ -265,7 +274,7 @@ describe('formatted composer lifecycle', () => {
 		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(new Promise((resolve) => {
 			complete = resolve;
 		}));
-		controller.selectMode('formatted');
+		selectFormatted(controller, options);
 		options.interactionGeneration++;
 		complete(parsed);
 		await vi.waitFor(() => expect(ui.formattedDraft).not.toBeNull());
@@ -301,14 +310,12 @@ describe('formatted composer lifecycle', () => {
 	});
 	it('forgets conversion intent after an external source replacement', async () => {
 		const { controller, options, ui } = fixture();
-		let complete!: (value: ComposerMarkdownDocument) => void;
-		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(new Promise((resolve) => {
-			complete = resolve;
-		}));
+		const pending = Promise.withResolvers<ComposerMarkdownDocument>();
+		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(pending.promise);
 		controller.restore();
 		options.composer.inputText = 'external replacement';
-		complete(parsed);
-		await vi.waitFor(() => expect(ui.formatPending).toBe(false));
+		pending.resolve(parsed);
+		await new Promise((resolve) => setTimeout(resolve, 0));
 		controller.restore();
 		controller.input(new InputEvent('input'));
 		expect(ui.formattedDraft).toBeNull();
@@ -340,7 +347,7 @@ describe('formatted composer lifecycle', () => {
 				}),
 			)
 			.mockResolvedValueOnce(parsed);
-		controller.selectMode('formatted');
+		selectFormatted(controller, options);
 		const signal = vi.mocked(parseComposerMarkdownInWorker).mock.calls[0][1];
 		options.composer.inputText = 'new text';
 		options.textarea.value = 'new text';
@@ -360,7 +367,7 @@ describe('formatted composer lifecycle', () => {
 				complete = resolve;
 			}),
 		);
-		controller.selectMode('formatted');
+		selectFormatted(controller, options);
 		options.interactionGeneration++;
 		const button = document.createElement('button');
 		document.body.append(button);
@@ -408,7 +415,7 @@ describe('formatted composer lifecycle', () => {
 		controller.restore();
 		controller.restore();
 		expect(options.onUnavailable).not.toHaveBeenCalled();
-		controller.selectMode('formatted');
+		selectFormatted(controller, options);
 		expect(options.onUnavailable).toHaveBeenCalledOnce();
 		controller.destroy();
 	});
@@ -421,7 +428,7 @@ describe('formatted composer lifecycle', () => {
 		controller.input(new InputEvent('input', { inputType: 'insertText' }));
 		await new Promise((done) => setTimeout(done, 180));
 		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
-		controller.selectMode('formatted');
+		selectFormatted(controller, options);
 		await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe('**bold**'));
 		expect(parseComposerMarkdownInWorker).toHaveBeenCalledExactlyOnceWith(
 			{ source: '**bold**', caret: 8 },
@@ -444,7 +451,7 @@ describe('formatted composer lifecycle', () => {
 		options.textarea.value = table;
 		options.textarea.setSelectionRange(table.length, table.length);
 		controller.input(new InputEvent('input'));
-		controller.selectMode('formatted');
+		selectFormatted(controller, options);
 		await vi.waitFor(() => expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce());
 		options.textarea.setSelectionRange(1, 1);
 		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
@@ -555,7 +562,7 @@ describe('formatted composer lifecycle', () => {
 		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
 		const { ui, paste, options, controller } = fixture();
 		paste(table);
-		controller.selectMode('formatted');
+		selectFormatted(controller, options);
 		await vi.waitFor(() => expect(ui.formattedDraft?.document).toEqual(parsed.document));
 		expect(options.onChange).not.toHaveBeenCalled();
 		expect(options.composer.inputText).toBe(table);
@@ -647,7 +654,7 @@ describe('formatted composer lifecycle', () => {
 			);
 			const { ui, paste, options, controller } = fixture();
 			paste(table);
-			controller.selectMode('formatted');
+			selectFormatted(controller, options);
 			if (change === 'chat') options.chatId = 'two';
 			if (change === 'text') options.composer.inputText = 'new draft';
 			if (change === 'hidden') options.canFormat = false;

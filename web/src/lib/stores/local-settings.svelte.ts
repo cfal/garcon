@@ -221,7 +221,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	showQuickCommitTray: true,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
-	composerInputMode: 'source',
+	composerInputMode: 'formatted',
 	steerWithCtrlEnter: true,
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
@@ -414,7 +414,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		showQuickCommitTray: parseBoolean(parsed.showQuickCommitTray, DEFAULTS.showQuickCommitTray),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
-		composerInputMode: parsed.composerInputMode === 'formatted' ? 'formatted' : 'source',
+		composerInputMode:
+			parsed.composerInputMode === 'source' || parsed.composerInputMode === 'formatted'
+				? parsed.composerInputMode
+				: DEFAULTS.composerInputMode,
 		steerWithCtrlEnter: parseBoolean(parsed.steerWithCtrlEnter, DEFAULTS.steerWithCtrlEnter),
 		snippetTrigger: normalizeSnippetTrigger(parsed.snippetTrigger),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),

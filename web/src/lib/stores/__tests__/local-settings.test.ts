@@ -88,20 +88,20 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it('defaults to Source and persists an explicit Formatted preference', () => {
+	it.each(['source', 'formatted'] as const)('defaults to Formatted and persists an explicit %s preference', (mode) => {
 		const store = createLocalSettingsStore();
-		expect(store.composerInputMode).toBe('source');
-		store.set('composerInputMode', 'formatted');
+		expect(store.composerInputMode).toBe('formatted');
+		store.set('composerInputMode', mode);
 		const restored = createLocalSettingsStore();
-		expect(restored.composerInputMode).toBe('formatted');
+		expect(restored.composerInputMode).toBe(mode);
 		store.destroy();
 		restored.destroy();
 	});
 
-	it.each(['automatic', '', null, true, {}])('rejects invalid composer mode %j', (mode) => {
+	it.each([undefined, 'automatic', '', null, true, {}])('defaults missing or invalid composer mode %j to Formatted', (mode) => {
 		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ composerInputMode: mode }));
 		const store = createLocalSettingsStore();
-		expect(store.composerInputMode).toBe('source');
+		expect(store.composerInputMode).toBe('formatted');
 		store.destroy();
 	});
 
