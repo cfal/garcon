@@ -9,6 +9,7 @@ const table =
   "| Check | Example |\n| --- | --- |\n| **Startup ready** | Resolve earlier work before submitting. |\n| **Current data** | Use the latest observation.<br>Keep context current. |\n| **Code** | `a  b` |";
 
 async function selectMessageFormat(page: Page, mode: 'source' | 'formatted') {
+  await browserExpect(page.locator('[data-composer]')).toBeVisible();
   await page.keyboard.press('Control+,');
   const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
   await dialog.getByRole('tab', { name: 'Interface', exact: true }).click();
