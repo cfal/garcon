@@ -34,7 +34,13 @@ export default defineConfig({
 	optimizeDeps: {
 		include: [...CODEMIRROR_PACKAGES],
 	},
+	environments: {
+		client: { build: { sourcemap: false } },
+		serviceWorker: { build: { sourcemap: false } },
+	},
 	build: {
+		// Vite's CSS URL transform reads the global flag even when Kit enables maps only for SSR.
+		sourcemap: true,
 		rollupOptions: {
 			output: {
 				codeSplitting: {
