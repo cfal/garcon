@@ -384,7 +384,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			],
 		});
 		const button = screen.getByRole('button', {
-			name: 'Executor unavailable (22222222)',
+			name: 'Executor unavailable (22222222) 1',
 		});
 		expect(button.getAttribute('aria-expanded')).toBe('false');
 		expect(button.classList.contains('bg-sidebar-chat-item-selected-bg')).toBe(true);
@@ -405,7 +405,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: { grouping: 'project' },
 		});
 
-		expect(screen.getByRole('button', { name: 'Local' }).getAttribute('aria-expanded')).toBe(
+		expect(screen.getByRole('button', { name: 'Local 1' }).getAttribute('aria-expanded')).toBe(
 			'false',
 		);
 		expect(screen.queryByText('Chat 0')).toBeNull();
@@ -429,7 +429,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			],
 		});
 
-		expect(screen.getByRole('button', { name: 'Local' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Local 2' })).toBeTruthy();
 		expect(document.querySelector('[data-sidebar-machine-header="local"]')).toBeTruthy();
 		expect(document.querySelector('[data-sidebar-machine-count]')?.textContent?.trim()).toBe('2');
 		const machineItem = document.querySelector<HTMLElement>(

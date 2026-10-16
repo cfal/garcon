@@ -32,7 +32,6 @@
 			containsSelectedChat && 'bg-sidebar-chat-item-selected-bg',
 		)}
 		title={`${label}${executor ? '' : ` · ${row.executorId}`}`}
-		aria-label={label}
 		aria-expanded={!row.isCollapsed}
 		onclick={handleToggle}
 		data-sidebar-machine-header={row.executorId}

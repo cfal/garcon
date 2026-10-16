@@ -205,7 +205,16 @@ test('normal app onboarding supports both directions and sends remote chat input
         if (!(button instanceof HTMLButtonElement)) throw new Error('Generation model selector is unavailable');
         button.click();
       });
-      await app.clickButton('Inbound Worker');
+      await fixture.page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('[data-slot="model-selector-executors"] button')]
+        .some((button) => button.textContent?.trim() === 'Inbound Worker' && !button.disabled));
+      await fixture.page.evaluate(() => {
+        const button = [...document.querySelectorAll<HTMLButtonElement>('[data-slot="model-selector-executors"] button')]
+          .find((entry) => entry.textContent?.trim() === 'Inbound Worker');
+        if (!button || button.disabled) throw new Error('Inbound Worker model executor is unavailable');
+        button.click();
+      });
+      await fixture.page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('[data-slot="model-selector-executors"] button')]
+        .some((button) => button.textContent?.trim() === 'Inbound Worker' && button.getAttribute('aria-pressed') === 'true'));
       await app.waitForButton('Chat Completions');
       await app.clickButton('Chat Completions');
       await app.waitForButton('Integration Echo');
