@@ -1,7 +1,6 @@
 import type { JSONContent } from '@tiptap/core';
 import type { Node } from '@tiptap/pm/model';
-
-const PRIVATE_USE_CHARACTER = /[\uE000-\uF8FF]/;
+import { MarkdownPrivateUseCharacters } from './composer-markdown-text.js';
 
 /** Caches fully restored Markdown, never per-serialization protection sentinels. */
 export class ComposerMarkdownCache {
@@ -13,7 +12,8 @@ export class ComposerMarkdownCache {
 
 	run(nodes: readonly Node[]): string {
 		// Text and attributes share one protection-sentinel space for the whole run.
-		if (nodes.some((node) => this.#containsPrivateUse(node))) {
+		const characters = new MarkdownPrivateUseCharacters();
+		if (nodes.some((node) => this.#containsPrivateUse(node, characters))) {
 			return this.serialize({ type: 'doc', content: nodes.map((node) => node.toJSON()) });
 		}
 		const blocks = nodes.filter(
@@ -27,14 +27,14 @@ export class ComposerMarkdownCache {
 		return rendered.join('\n\n');
 	}
 
-	#containsPrivateUse(node: Node): boolean {
+	#containsPrivateUse(node: Node, characters: MarkdownPrivateUseCharacters): boolean {
 		const cached = this.#privateUseContent.get(node);
 		if (cached !== undefined) return cached;
 		const contains =
-			PRIVATE_USE_CHARACTER.test(node.text ?? '') ||
-			PRIVATE_USE_CHARACTER.test(JSON.stringify(node.attrs)) ||
-			node.marks.some((mark) => PRIVATE_USE_CHARACTER.test(JSON.stringify(mark.attrs))) ||
-			node.children.some((child) => this.#containsPrivateUse(child));
+			characters.scan(node.text) ||
+			characters.scan(node.attrs) ||
+			node.marks.some((mark) => characters.scan(mark.attrs)) ||
+			node.children.some((child) => this.#containsPrivateUse(child, characters));
 		this.#privateUseContent.set(node, contains);
 		return contains;
 	}

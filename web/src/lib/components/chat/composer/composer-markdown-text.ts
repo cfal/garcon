@@ -1,3 +1,5 @@
+import type { JSONContent } from '@tiptap/core';
+
 // The Markdown serializer backslash-escapes or entity-encodes every one of these characters in
 // text, which turns `my_var`, `<tag>`, and `C:\dir` into `my\_var`, `&lt;tag&gt;`, and `C:\\dir`
 // in the prompt. Characters that cannot change the parse are swapped for private-use sentinels
@@ -14,6 +16,39 @@ const WORD_CHARACTER = /[\p{L}\p{N}]/u;
 const AUTOLINK = /^<(?:[a-z][a-z0-9+.-]{1,31}:|[^\s<>@]+@)/i;
 const LINK_CLOSE = /^\[[^\]]*\][([:]/;
 const TASK_MARKER = /^\[[ xX]\](?:\s|$)/;
+
+/** Scans repeated mark attributes once per pass without expanding them into JSON strings. */
+export class MarkdownPrivateUseCharacters {
+	readonly used = new Set<number>();
+	#strings = new Map<string, boolean>();
+	#objects = new WeakMap<object, boolean>();
+
+	scan(value: unknown): boolean {
+		if (typeof value === 'string') {
+			const cached = this.#strings.get(value);
+			if (cached !== undefined) return cached;
+			let found = false;
+			for (let index = 0; index < value.length; index++) {
+				const unit = value.charCodeAt(index);
+				if (unit >= PRIVATE_USE_START && unit <= PRIVATE_USE_END) {
+					this.used.add(unit);
+					found = true;
+				}
+			}
+			this.#strings.set(value, found);
+			return found;
+		}
+		if (value === null || typeof value !== 'object') return false;
+		const cached = this.#objects.get(value);
+		if (cached !== undefined) return cached;
+		let found = false;
+		for (const child of Object.values(value)) {
+			if (this.scan(child)) found = true;
+		}
+		this.#objects.set(value, found);
+		return found;
+	}
+}
 
 export interface TextContext {
 	/** The text begins a line, where `>`, `*`, and task markers open a block. */
@@ -71,16 +106,13 @@ export interface TextProtection {
  * Picks sentinels the draft does not use. Returns null when the draft occupies the whole
  * private-use area, in which case the serializer's own escaping applies unchanged.
  */
-export function createTextProtection(draftText: string): TextProtection | null {
-	const used = new Set<number>();
-	for (let index = 0; index < draftText.length; index += 1) {
-		const unit = draftText.charCodeAt(index);
-		if (unit >= PRIVATE_USE_START && unit <= PRIVATE_USE_END) used.add(unit);
-	}
+export function createTextProtection(draft: JSONContent | string): TextProtection | null {
+	const characters = new MarkdownPrivateUseCharacters();
+	characters.scan(draft);
 	const width = SPECIAL_CHARACTERS.length + BACKSLASH_ESCAPED.length;
 	let base = PRIVATE_USE_START;
 	const occupied = (start: number) => {
-		for (let offset = 0; offset < width; offset += 1) if (used.has(start + offset)) return true;
+		for (let offset = 0; offset < width; offset += 1) if (characters.used.has(start + offset)) return true;
 		return false;
 	};
 	while (base + width - 1 <= PRIVATE_USE_END && occupied(base)) base += width;
