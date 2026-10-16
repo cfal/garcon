@@ -2,12 +2,16 @@
 	import { onMount } from 'svelte';
 	import { Editor, resolveFocusPosition, type JSONContent } from '@tiptap/core';
 	import { TextSelection } from '@tiptap/pm/state';
-	import { MarkdownManager } from '@tiptap/markdown';
+	import { composerMarkdownCodec } from './composer-markdown-codec.js';
 	import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
 	import { composerMarkdownTableInput } from './composer-markdown-table-input.js';
 	import { composerMarkdownCaretMarks } from './composer-markdown-caret-marks.js';
 	import { composerMarkdownNewline } from './composer-markdown-newline.js';
-	import { MAX_COMPOSER_MARKDOWN_LENGTH } from './composer-markdown-limits.js';
+	import { ComposerMarkdownCache } from './composer-markdown-cache.js';
+	import {
+		MAX_COMPOSER_MARKDOWN_LENGTH,
+		MAX_COMPOSER_MARKDOWN_NODES,
+	} from './composer-markdown-limits.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createRandomId } from '$lib/utils/random-id.js';
 	import type { ComposerMarkdownPasteRequest } from './composer-markdown-parser.js';
@@ -18,7 +22,6 @@
 	} from '$lib/chat/composer/file-mentions.js';
 	import { findSnippetTrigger } from '$lib/chat/composer/snippet-trigger.js';
 	import { findSlashCommandTrigger } from '$lib/chat/composer/slash-commands.js';
-	import { configureComposerMarkdown, serializeComposerMarkdown } from './composer-markdown.js';
 	import {
 		joinComposerMarkdownBlocks,
 		planComposerMarkdownBlocks,
@@ -42,6 +45,7 @@
 		onReady,
 		onMention,
 		onLargePaste,
+		onOverflow,
 	}: {
 		document: JSONContent;
 		sources: (string | null)[];
@@ -57,25 +61,23 @@
 		onReady: (target: HTMLElement) => void;
 		onMention: (mention: ComposerMarkdownMention | null) => void;
 		onLargePaste: (request: ComposerMarkdownPasteRequest) => void;
+		onOverflow: (source: string) => void;
 	} = $props();
 	let container: HTMLDivElement;
 	let editor: Editor | undefined = $state.raw();
 	onMount(() => {
 		const extensions = composerMarkdownEditorExtensions();
-		const markdown = new MarkdownManager({ extensions });
-		configureComposerMarkdown(markdown);
+		const cache = new ComposerMarkdownCache(composerMarkdownCodec.serialize);
 		const topLevel = (doc: DocumentNode) =>
 			Array.from({ length: doc.childCount }, (_, index) => doc.child(index));
 		let original: DocumentNode[] = [];
 		let originalSources: (string | null)[] = [];
-		const blocks = (doc: DocumentNode): ComposerMarkdownBlock<JSONContent>[] =>
+		const blocks = (doc: DocumentNode): ComposerMarkdownBlock<DocumentNode>[] =>
 			planComposerMarkdownBlocks(
 				original,
 				originalSources,
 				topLevel(doc),
 				(a, b) => a === b || a.eq(b),
-			).map((block) =>
-				'nodes' in block ? { nodes: block.nodes.map((node) => node.toJSON()) } : block,
 			);
 		// Records Shift from real key events for the synthetic Enter described below.
 		let shiftHeld = false;
@@ -86,9 +88,7 @@
 				leaf.type.name === 'hardBreak' ? '\n' : '\ufffc',
 			);
 		const serialize = (doc: DocumentNode) =>
-			joinComposerMarkdownBlocks(blocks(doc), original.length, (nodes) =>
-				serializeComposerMarkdown(markdown, { type: 'doc', content: nodes }),
-			);
+			joinComposerMarkdownBlocks(blocks(doc), original.length, (nodes) => cache.run(nodes));
 		// `crypto.randomUUID` is unavailable on the plain HTTP origins Garcon supports.
 		const sourceMarker = (prefix: string) => `${prefix}${createRandomId().replaceAll('-', '')}`;
 		// The snippet palette replaces a range of the source, which only the plain editor can
@@ -145,14 +145,16 @@
 			});
 		};
 		const insertText = (view: Editor['view'], text: string, position?: number) => {
-			if (view.state.doc.textContent.length + text.length <= MAX_COMPOSER_MARKDOWN_LENGTH) {
+			if (serialize(view.state.doc).length + text.length <= MAX_COMPOSER_MARKDOWN_LENGTH) {
 				view.dispatch(view.state.tr.insertText(text, position));
 				return;
 			}
 			// Carries the bounded selection and its marks into off-thread serialization.
 			const marker = sourceMarker('garconClipboard');
 			onLargePaste({
-				blocks: blocks(view.state.tr.insertText(marker, position).doc),
+				blocks: blocks(view.state.tr.insertText(marker, position).doc).map((block) =>
+					'nodes' in block ? { nodes: block.nodes.map((node) => node.toJSON()) } : block,
+				),
 				originalCount: original.length,
 				marker,
 				text,
@@ -162,7 +164,7 @@
 			element: container,
 			extensions: [
 				...extensions,
-				composerMarkdownTableInput((source) => markdown.parse(source)),
+				composerMarkdownTableInput(composerMarkdownCodec.parse),
 				...(initialSelection !== undefined && selectionMarks
 					? [composerMarkdownCaretMarks(initialSelection, selectionMarks)]
 					: []),
@@ -187,10 +189,26 @@
 			onUpdate: ({ editor: current }) => {
 				const { doc, selection } = current.state;
 				const source = serialize(doc);
+				let nodeCount = 1;
+				doc.descendants(() => {
+					nodeCount++;
+					return nodeCount <= MAX_COMPOSER_MARKDOWN_NODES;
+				});
+				if (
+					source.length > MAX_COMPOSER_MARKDOWN_LENGTH ||
+					nodeCount > MAX_COMPOSER_MARKDOWN_NODES
+				) {
+					onOverflow(source);
+					return;
+				}
 				const only = doc.childCount === 1 ? doc.firstChild : null;
 				const sourceCommand =
 					only?.type.name === 'paragraph' && only.textContent === source && !current.view.composing;
-				if (sourceCommand && selection.empty && findSlashCommandTrigger(source, selection.$from.parentOffset)) {
+				if (
+					sourceCommand &&
+					selection.empty &&
+					findSlashCommandTrigger(source, selection.$from.parentOffset)
+				) {
 					onSourceAction(source, selection.$from.parentOffset);
 					return;
 				}

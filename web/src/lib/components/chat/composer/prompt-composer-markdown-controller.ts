@@ -117,7 +117,12 @@ export class PromptComposerMarkdownController {
 		// Forgets a dismissed snippet trigger once it is deleted, as plain editing does.
 		this.options.ui.snippetPalette.updateDetectedTrigger(null, text);
 		this.options.ui.formattedDraft = { ...this.options.ui.formattedDraft, source: text };
-		if (!isComposerMarkdownSized(text)) void this.edit();
+	}
+
+	overflow(text: string): void {
+		this.change(text);
+		this.options.onUnavailable();
+		void this.edit();
 	}
 
 	async pasteSource(request: ComposerMarkdownPasteRequest): Promise<void> {

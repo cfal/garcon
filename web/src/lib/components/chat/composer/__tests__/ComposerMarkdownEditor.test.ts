@@ -12,6 +12,7 @@ function mount(source: string, caret?: number, { handsOverSnippets = true } = {}
 	const onChange = vi.fn<(source: string) => void>();
 	const onMention = vi.fn<(mention: ComposerMarkdownMention | null) => void>();
 	const onSnippet = vi.fn<(text: string, caret: number) => boolean>(() => handsOverSnippets);
+	const onOverflow = vi.fn<(source: string) => void>();
 	render(ComposerMarkdownEditor, {
 		...parsed,
 		readOnly: false,
@@ -24,9 +25,10 @@ function mount(source: string, caret?: number, { handsOverSnippets = true } = {}
 		onCompletionKeydown: () => false,
 		onReady: vi.fn(),
 		onLargePaste: vi.fn(),
+		onOverflow,
 	});
 	const editor = (screen.getByRole('textbox') as TiptapEditorHTMLElement).editor!;
-	return { editor, onChange, onMention, onSnippet };
+	return { editor, onChange, onMention, onSnippet, onOverflow };
 }
 
 function type(editor: ReturnType<typeof mount>['editor'], text: string) {
@@ -46,6 +48,23 @@ function newline(editor: ReturnType<typeof mount>['editor'], shiftKey = true) {
 }
 
 describe('composer newline intent', () => {
+	it('hands interactive length growth back to Source without truncation', () => {
+		const source = 'x'.repeat(32_760);
+		const { editor, onOverflow } = mount(source);
+		editor.commands.insertContent('additional text');
+		expect(onOverflow).toHaveBeenLastCalledWith(source + 'additional text');
+	});
+	it('bounds interactive node growth even when the Markdown is short', () => {
+		const { editor, onOverflow } = mount('start');
+		editor.commands.setContent({
+			type: 'doc',
+			content: Array.from({ length: 1_001 }, () => ({
+				type: 'paragraph',
+				content: [{ type: 'text', text: 'item' }],
+			})),
+		});
+		expect(onOverflow).toHaveBeenLastCalledWith(Array(1_001).fill('item').join('\n\n'));
+	});
 	it.each([true, false])('leaves a quote without removing it (shift=%s)', (shift) => {
 		const { editor, onChange } = mount('> abc');
 		newline(editor, shift);
@@ -105,7 +124,12 @@ describe('composer newline intent', () => {
 	it('does not edit or submit composition Enter', () => {
 		const { editor, onChange } = mount('> abc');
 		editor.view.dom.dispatchEvent(
-			new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: true, bubbles: true }),
+			new KeyboardEvent('keydown', {
+				key: 'Enter',
+				keyCode: 229,
+				isComposing: true,
+				bubbles: true,
+			}),
 		);
 		expect(onChange).not.toHaveBeenCalled();
 	});
@@ -231,12 +255,16 @@ describe('live formatted editor typing', () => {
 		type(editor, ' my_var https://example.test [guide](https://example.test)');
 		expect(editor.view.dom.querySelectorAll('a')).toHaveLength(1);
 		expect(editor.view.dom.querySelector('a')?.textContent).toBe('guide');
-		expect(onChange).toHaveBeenLastCalledWith('Review **this** now my_var https://example.test [guide](https://example.test)');
+		expect(onChange).toHaveBeenLastCalledWith(
+			'Review **this** now my_var https://example.test [guide](https://example.test)',
+		);
 	});
 	it('ends a typed bold mark at its closing delimiters before accepting subsequent prose', () => {
 		const { editor, onChange } = mount('Ship **two**', 12);
 		type(editor, ' and **three** now');
-		expect(Array.from(editor.view.dom.querySelectorAll('strong'), (element) => element.textContent)).toEqual(['two', 'three']);
+		expect(
+			Array.from(editor.view.dom.querySelectorAll('strong'), (element) => element.textContent),
+		).toEqual(['two', 'three']);
 		expect(onChange).toHaveBeenLastCalledWith('Ship **two** and **three** now');
 	});
 	it('ends a typed bold mark even when the caret marks were dropped before the first input', () => {
@@ -268,7 +296,7 @@ describe('live formatted editor typing', () => {
 		editor.commands.insertContent({
 			type: 'paragraph',
 			content: [
-			{ type: 'text', text: '| <tag> | Value |' },
+				{ type: 'text', text: '| <tag> | Value |' },
 				{ type: 'hardBreak' },
 				{ type: 'text', text: '| --- | --- ' },
 			],

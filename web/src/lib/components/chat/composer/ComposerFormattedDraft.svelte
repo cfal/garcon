@@ -37,6 +37,7 @@
 		onReady={(target) => controller.focus(target)}
 		onMention={(mention) => controller.mention(mention)}
 		onLargePaste={(request) => void controller.pasteSource(request)}
+		onOverflow={(source) => controller.overflow(source)}
 	/>
 {:catch}
 	<button
