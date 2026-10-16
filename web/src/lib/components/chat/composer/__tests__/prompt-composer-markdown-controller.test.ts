@@ -176,6 +176,27 @@ describe('formatted composer snippet triggers', () => {
 });
 
 describe('formatted composer lifecycle', () => {
+	describe.each(['explicit', 'restore'])('%s focus ownership', (intent) => {
+		it.each(['', table])('keeps focus outside the composer when formatting %j', async (source) => {
+			vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
+			const { controller, options, ui } = fixture();
+			options.composer.inputText = source;
+			const button = document.createElement('button');
+			document.body.append(button);
+			button.focus();
+			options.interactionGeneration++;
+			if (intent === 'restore') controller.restore();
+			else controller.selectMode('formatted');
+			await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe(source));
+			const target = document.createElement('div');
+			target.tabIndex = 0;
+			document.body.append(target);
+			controller.focus(target);
+			expect(ui.formattedTarget).toBe(target);
+			expect(document.activeElement).toBe(button);
+			controller.destroy();
+		});
+	});
 	describe.each(['explicit', 'restore'])('pending %s conversion', (intent) => {
 		it.each(['/', 'Review ;;', 'Review @src'])(
 			'cancels conversion and intent for the source palette in %j',

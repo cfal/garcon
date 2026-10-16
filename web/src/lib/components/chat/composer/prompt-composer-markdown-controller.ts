@@ -43,7 +43,6 @@ export class PromptComposerMarkdownController {
 	#workerAbort: AbortController | null = null;
 	#destroyed = false;
 	#focusGeneration = -1;
-	#focusOrigin: Element | null = null;
 	#mention: ComposerMarkdownMention | null = null;
 	#composing = false;
 	#restoreRequest: ComposerState['draftRestoreRequest'] | undefined;
@@ -194,7 +193,6 @@ export class PromptComposerMarkdownController {
 			this.#focusGeneration === this.options.interactionGeneration &&
 			(document.activeElement === document.body ||
 				document.activeElement === this.options.textarea ||
-				document.activeElement === this.#focusOrigin ||
 				this.options.textarea?.closest('[data-composer]')?.contains(document.activeElement))
 		)
 			target.focus({ preventScroll: true });
@@ -242,7 +240,6 @@ export class PromptComposerMarkdownController {
 		this.options.ui.formatPending = true;
 		const chatId = this.options.chatId;
 		const generation = this.options.interactionGeneration;
-		const focusOrigin = document.activeElement;
 		const caret = this.options.textarea?.selectionStart;
 		const selectionEnd = this.options.textarea?.selectionEnd;
 		const empty: ComposerMarkdownDocument = {
@@ -252,7 +249,7 @@ export class PromptComposerMarkdownController {
 		};
 		if (source === '' && this.#editorLoaded) {
 			this.#workerAbort = null;
-			this.#showFormatted(source, empty, generation, focusOrigin);
+			this.#showFormatted(source, empty, generation);
 			return;
 		}
 		// The editor loads before the swap so keys typed meanwhile still reach the textarea.
@@ -291,7 +288,7 @@ export class PromptComposerMarkdownController {
 			void this.#format();
 			return;
 		}
-		this.#showFormatted(source, parsed, generation, focusOrigin);
+		this.#showFormatted(source, parsed, generation);
 	}
 
 	#formatUnavailable(): void {
@@ -304,11 +301,9 @@ export class PromptComposerMarkdownController {
 		source: string,
 		parsed: ComposerMarkdownDocument,
 		generation: number,
-		focusOrigin: Element | null,
 	): void {
 		this.#formatIntent = null;
 		this.options.ui.formatPending = false;
-		this.#focusOrigin = focusOrigin;
 		this.#focusGeneration =
 			document.activeElement === this.options.textarea
 				? this.options.interactionGeneration
