@@ -12,6 +12,14 @@ export const PULL_REQUEST_REVIEW_SCHEMA = [
   repository_name TEXT NOT NULL
 ) STRICT`,
 `CREATE UNIQUE INDEX IF NOT EXISTS review_repositories_identity ON review_repositories(executor_id, repository_name)`,
+`CREATE TABLE IF NOT EXISTS review_pulls (
+  repository_id TEXT NOT NULL REFERENCES review_repositories(id) ON DELETE CASCADE,
+  number INTEGER NOT NULL,
+  closed_at TEXT,
+  PRIMARY KEY (repository_id, number)
+) STRICT`,
+`CREATE INDEX IF NOT EXISTS review_pulls_open ON review_pulls(repository_id, number) WHERE closed_at IS NULL`,
+`CREATE INDEX IF NOT EXISTS review_pulls_closed ON review_pulls(repository_id, closed_at, number) WHERE closed_at IS NOT NULL`,
 `CREATE TABLE IF NOT EXISTS review_runs (
   id TEXT PRIMARY KEY,
   repository_id TEXT NOT NULL REFERENCES review_repositories(id) ON DELETE CASCADE,
@@ -21,9 +29,21 @@ export const PULL_REQUEST_REVIEW_SCHEMA = [
   created_at TEXT NOT NULL,
   payload_json TEXT NOT NULL,
   review TEXT,
-  closed_at TEXT
+  reviewed_sha TEXT GENERATED ALWAYS AS (json_extract(payload_json, '$.reviewedSha')) VIRTUAL,
+  trigger TEXT GENERATED ALWAYS AS (json_extract(payload_json, '$.trigger')) VIRTUAL,
+  chat_id TEXT GENERATED ALWAYS AS (json_extract(payload_json, '$.chatId')) VIRTUAL,
+  chat_archived INTEGER GENERATED ALWAYS AS (json_extract(payload_json, '$.chatArchived')) VIRTUAL
 ) STRICT`,
-`CREATE INDEX IF NOT EXISTS review_runs_pull ON review_runs(repository_id, number, created_at DESC)`,
-`CREATE INDEX IF NOT EXISTS review_runs_recent ON review_runs(created_at DESC)`,
+`CREATE INDEX IF NOT EXISTS review_runs_pull ON review_runs(repository_id, number, created_at)`,
+`CREATE INDEX IF NOT EXISTS review_runs_head ON review_runs(repository_id, number, head_sha)`,
+`CREATE INDEX IF NOT EXISTS review_runs_reviewed ON review_runs(repository_id, number, reviewed_sha)`,
+`CREATE INDEX IF NOT EXISTS review_runs_recent ON review_runs(created_at)`,
 `CREATE INDEX IF NOT EXISTS review_runs_state ON review_runs(state)`,
+`CREATE INDEX IF NOT EXISTS review_runs_active ON review_runs(repository_id, number) WHERE state IN ('queued','reviewing','needs-input')`,
+`CREATE INDEX IF NOT EXISTS review_runs_completed ON review_runs(repository_id, number, reviewed_sha) WHERE state = 'completed'`,
+`CREATE INDEX IF NOT EXISTS review_runs_auto ON review_runs(repository_id, created_at) WHERE trigger = 'auto'`,
+`CREATE INDEX IF NOT EXISTS review_runs_archive ON review_runs(repository_id, number)
+  WHERE chat_id IS NOT NULL AND chat_archived = 0 AND state NOT IN ('queued','reviewing','needs-input')`,
+`CREATE INDEX IF NOT EXISTS review_runs_prunable ON review_runs(repository_id, number)
+  WHERE (chat_id IS NULL OR chat_archived = 1) AND state NOT IN ('queued','reviewing','needs-input')`,
 ] as const;

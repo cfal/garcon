@@ -4,6 +4,32 @@ import { watch } from 'node:fs';
 import path from 'node:path';
 import { gitRpcFixture } from './git-rpc-fixture.js';
 
+test('paginated GitHub policy reads retain their detail budget on Local and remote', async () => {
+  const fixture = await gitRpcFixture();
+  const originalPath = process.env.PATH;
+  const originalTimeout = globalThis.setTimeout;
+  const timer = spyOn(globalThis, 'setTimeout');
+  try {
+    const bin = path.join(fixture.root, 'bin');
+    await fs.mkdir(bin);
+    await fs.copyFile(new URL('./fixtures/fake-gh.js', import.meta.url), path.join(bin, 'gh'));
+    await fs.chmod(path.join(bin, 'gh'), 0o755);
+    process.env.PATH = `${bin}:${originalPath}`;
+    await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({
+      label: 'synthetic', pageSize: 1, delayMs: 50, pulls: [{ number: 1 }, { number: 2 }],
+    }));
+    // Accelerates only operation deadlines; subprocess pages still take real time.
+    timer.mockImplementation((callback, delay, ...args) => originalTimeout(callback,
+      delay && delay > 59_000 && delay <= 60_000 ? 2_000
+        : delay && delay > 29_000 && delay <= 30_000 ? 25 : delay, ...args));
+    for (const service of [await fixture.local.getGhService(), await fixture.executor.getGhService()]) {
+      const list = await service.listPullRequests({ projectPath: fixture.projectPath }, { timeoutMs: 60_000 });
+      expect(list.pulls.map(pull => pull.number)).toEqual([1, 2]);
+      expect((await service.getPullRequestReviewTarget({ projectPath: fixture.projectPath, number: 1, marker: 'garcon-review synthetic/repository#1 ' })).state).toBe('open');
+    }
+  } finally { timer.mockRestore(); process.env.PATH = originalPath; await fixture.dispose(); }
+}, 10_000);
+
 for (const dialer of ['controller', 'worker'] as const) {
   test(`GitHub queries enforce the inline result limit with ${dialer} dialing`, async () => {
     const fixture = await gitRpcFixture(dialer);

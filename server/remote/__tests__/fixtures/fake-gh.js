@@ -5,6 +5,7 @@ const cwd = process.cwd();
 const config = await Bun.file(`${cwd}/gh-fixture.json`).json();
 const args = process.argv.slice(2);
 const [command, action] = args;
+if (config.delayMs) await new Promise(resolve => setTimeout(resolve, config.delayMs));
 if (config.wait) {
   await Bun.write(`${cwd}/gh-started`, 'ready');
   await new Promise(resolve => setTimeout(resolve, 60_000));

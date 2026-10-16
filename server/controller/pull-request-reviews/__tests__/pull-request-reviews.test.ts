@@ -10,6 +10,8 @@ import { PullRequestReviewStore } from '../store.js';
 import { BashToolUseMessage } from '../../../../common/chat-types.js';
 import { transcriptViewId } from '../../ledger/contracts.js';
 import type { CommandLedgerRecord } from '../../commands/command-ledger.js';
+import type { AgentStopResponse } from '../../../../common/chat-command-contracts.js';
+import { emptyChatExecutionControlState } from '../../../../common/chat-execution-control.js';
 
 const HEAD = 'a'.repeat(40);
 const directories: string[] = [];
@@ -64,7 +66,9 @@ function harness(directory = mkdtempSync(join(tmpdir(), 'garcon-reviews-'))) {
         starts.push(input);
         return { success: true as const, commandType: 'chat-start', clientRequestId: 'request', status: 'accepted' as const, acceptedAt: '', chat: null, chatId: input.chatId, turnId: `turn-${input.chatId}` };
       },
-      async submitStop() { return { success: true as const, commandType: 'chat-stop', clientRequestId: 'stop', status: 'accepted' as const, acceptedAt: '' }; },
+      async submitStop(_input: { chatId: string; clientRequestId: string }): Promise<AgentStopResponse> {
+        return { success: true, commandType: 'chat-stop', clientRequestId: 'stop', status: 'accepted', acceptedAt: '', outcome: 'interrupt-requested', control: emptyChatExecutionControlState('instance') };
+      },
     },
     chatIds: { allocate: () => `chat-${++chatCount}` },
     turns: {
@@ -142,6 +146,93 @@ test('tracks a permission committed before startup returns and arms its timeout'
   } finally { timer.mockRestore(); reviews.stop(); reviews.close(); }
 });
 
+test('surfaces a resolved failed stop and permits a fresh manual retry', async () => {
+  const { reviews, deps, turns } = harness();
+  const repository = await connect(reviews, {});
+  const stop = spyOn(deps.commands, 'submitStop');
+  stop.mockResolvedValueOnce({ success: true, commandType: 'chat-stop', clientRequestId: 'stop', status: 'accepted', acceptedAt: '', outcome: 'failed', control: emptyChatExecutionControlState('instance') });
+  reviews.start();
+  try {
+    const run = reviews.review(repository.id, 7);
+    await until(() => turns.has('chat-1'));
+    await expect(reviews.stopRun(run.id)).rejects.toThrow('could not be stopped');
+    expect(latestRun(reviews)?.state).toBe('reviewing');
+    await reviews.stopRun(run.id);
+    expect(stop.mock.calls[0][0].clientRequestId).not.toBe(stop.mock.calls[1][0].clientRequestId);
+  } finally { stop.mockRestore(); reviews.stop(); reviews.close(); }
+});
+
+for (const failure of ['failed-outcome', 'throw'] as const) {
+  test(`retries permission-timeout Stop after ${failure} with a fresh identity until terminal`, async () => {
+    const { reviews, deps, turns } = harness();
+    const repository = await connect(reviews, { autoPost: true });
+    const stop = spyOn(deps.commands, 'submitStop');
+    if (failure === 'throw') stop.mockRejectedValueOnce(new Error('Executor unavailable'));
+    else stop.mockResolvedValueOnce({ success: true, commandType: 'chat-stop', clientRequestId: 'stop', status: 'accepted', acceptedAt: '', outcome: 'failed', control: emptyChatExecutionControlState('instance') });
+    const timer = spyOn(globalThis, 'setTimeout');
+    reviews.start();
+    try {
+      reviews.review(repository.id, 7);
+      await until(() => turns.has('chat-1'));
+      const viewId = transcriptViewId('synthetic-view');
+      reviews.handleTranscriptCommit({
+        type: 'permission', chatId: 'chat-1', runId: 'native-run', viewId,
+        row: { kind: 'permission-requested', viewId, ordinal: 1, at: '', providerMeta: null,
+          lifecycle: { kind: 'requested', permissionOccurrenceId: '11111111-1111-4111-8111-111111111111', requestedTool: new BashToolUseMessage('', 'tool', 'pwd'), options: [] } },
+      });
+      const expire = timer.mock.calls.find((call) => call[1] === 30 * 60_000)![0] as () => void;
+      expire();
+      await until(() => stop.mock.calls.length === 1);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(latestRun(reviews)?.message).toContain('could not be stopped');
+      const retry = timer.mock.calls.findLast((call) => call[1] === 30_000)?.[0] as (() => void) | undefined;
+      expect(retry).toBeDefined();
+      retry!();
+      await until(() => stop.mock.calls.length === 2);
+      expect(stop.mock.calls[0][0].clientRequestId).not.toBe(stop.mock.calls[1][0].clientRequestId);
+      turns.get('chat-1')!(`Reviewed commit: ${HEAD}`);
+      await until(() => latestRun(reviews)?.state === 'failed');
+      expect(latestRun(reviews)?.post.status).toBe('none');
+      const calls = stop.mock.calls.length;
+      retry!();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(stop).toHaveBeenCalledTimes(calls);
+    } finally { timer.mockRestore(); stop.mockRestore(); reviews.stop(); reviews.close(); }
+  });
+}
+
+test('retains a repository and its review while a comment is being delivered', async () => {
+  const { reviews, deps, turns, github } = harness();
+  github.pulls.push(pull({ number: 8 }));
+  const repository = await connect(reviews, {});
+  const gh = await deps.executors.requireExecutor().getGhService();
+  const create = spyOn(gh, 'createPullRequestComment');
+  const pending = Promise.withResolvers<Awaited<ReturnType<typeof gh.createPullRequestComment>>>();
+  create.mockImplementationOnce(() => pending.promise);
+  reviews.start();
+  try {
+    const run = reviews.review(repository.id, 7);
+    await until(() => turns.has('chat-1'));
+    turns.get('chat-1')!(`Reviewed commit: ${HEAD}`);
+    await until(() => latestRun(reviews)?.state === 'completed');
+    const posting = reviews.postRun(run.id);
+    await until(() => create.mock.calls.length === 1);
+    expect(() => reviews.remove(repository.id)).toThrow('being posted');
+    expect(reviews.runs(repository.id, 7)).toHaveLength(1);
+    await expect(reviews.postRun(run.id)).rejects.toThrow('already being posted');
+    const another = reviews.review(repository.id, 8);
+    await until(() => turns.has('chat-2'));
+    turns.get('chat-2')!(`Reviewed commit: ${HEAD}`);
+    await until(() => reviews.runs(repository.id, 8)[0]?.state === 'completed');
+    await expect(reviews.postRun(another.id)).resolves.toMatchObject({ post: { status: 'posted' } });
+    expect(() => reviews.remove(repository.id)).toThrow('being posted');
+    pending.resolve({ executorId: 'local', instanceId: 'instance', id: 'comment', url: 'https://git.example.invalid/comment' });
+    await expect(posting).resolves.toMatchObject({ post: { status: 'posted' } });
+    reviews.remove(repository.id);
+    expect(reviews.snapshot().repositories).toEqual([]);
+  } finally { create.mockRestore(); reviews.stop(); reviews.close(); }
+});
+
 test('retries failed archival on the next successful scan', async () => {
   const { reviews, github, turns, deps } = harness();
   const repository = await connect(reviews, {});
@@ -160,7 +251,7 @@ test('retries failed archival on the next successful scan', async () => {
   service.scan(repository.id);
   await until(() => attempts === 1);
   await new Promise((resolve) => setImmediate(resolve));
-  const run = store.runsForRepository(repository.id)[0];
+  const run = store.runsForPull(repository.id, 7)[0];
   expect(run.chatArchived).toBe(false);
   service.scan(repository.id);
   await until(() => store.getRun(run.id)?.chatArchived === true);

@@ -9,7 +9,7 @@ import { PullRequestReviewRepositories, type PullRequestReviewRepositoriesDeps }
 import { PullRequestReviewStore } from './store.js';
 
 export interface PullRequestReviewsDeps
-  extends Omit<PullRequestReviewRepositoriesDeps, 'store' | 'autoReviewStatus' | 'changed' | 'now'>,
+  extends Omit<PullRequestReviewRepositoriesDeps, 'store' | 'autoReviewStatus' | 'isPostingRepository' | 'changed' | 'now'>,
     Omit<PullRequestReviewRunnerDeps, 'store' | 'poster' | 'changed' | 'now'> {
   archiveChat(chatId: string): Promise<void>;
   onInvalidated(revision: number): void;
@@ -38,6 +38,7 @@ export class PullRequestReviews {
       ...deps,
       store,
       autoReviewStatus: (repositoryId, number) => this.#scanner.autoReviewStatus(repositoryId, number),
+      isPostingRepository: (repositoryId) => this.#poster.isPostingRepository(repositoryId),
       changed,
       now,
     });

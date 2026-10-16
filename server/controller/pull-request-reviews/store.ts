@@ -30,6 +30,15 @@ export interface StoredRun extends Omit<PullRequestReviewRun, 'chatAvailable'> {
 
 export type StoredRunDetail = StoredRun & { review: string | null };
 
+export interface ReviewSelectionHistory {
+  active: boolean;
+  completed: boolean;
+  stopped: boolean;
+  attempts: number;
+}
+
+export const REVIEW_HISTORY_BATCH_SIZE = 100;
+
 interface RunRow {
   id: string;
   repository_id: string;
@@ -64,6 +73,8 @@ function runPayload(run: StoredRun): string {
 
 export class PullRequestReviewStore {
   #database: Database | null = null;
+  // Only in-flight reads use this fence; it has no meaning across controller lifetimes.
+  readonly #runRevisions = new Map<string, number>();
 
   constructor(workspaceDir: string) {
     const path = join(workspaceDir, 'pull-request-reviews.sqlite');
@@ -108,8 +119,10 @@ export class PullRequestReviewStore {
   // Runs one change and advances the revision clients compare snapshots by.
   #write<T>(operation: (database: Database) => T): T {
     return this.#read((database) => database.transaction(() => {
+      const changes = database.query<{ count: number }, []>('SELECT total_changes() AS count');
+      const before = changes.get()!.count;
       const result = operation(database);
-      database.query('UPDATE review_meta SET revision = revision + 1 WHERE singleton = 1').run();
+      if (changes.get()!.count !== before) database.query('UPDATE review_meta SET revision = revision + 1 WHERE singleton = 1').run();
       return result;
     }).immediate());
   }
@@ -162,7 +175,9 @@ export class PullRequestReviewStore {
   }
 
   deleteRepository(id: string): boolean {
-    return this.#write((database) => database.query('DELETE FROM review_repositories WHERE id = ?').run(id).changes > 0);
+    const deleted = this.#write((database) => database.query('DELETE FROM review_repositories WHERE id = ?').run(id).changes > 0);
+    if (deleted) this.#runRevisions.delete(id);
+    return deleted;
   }
 
   // Records a scan result. A failed scan passes no pulls and keeps the last list.
@@ -175,11 +190,12 @@ export class PullRequestReviewStore {
         .run(JSON.stringify(scan), JSON.stringify(pulls), id).changes > 0;
       if (changed) {
         // Retention starts at observed closure; a reopened pull request starts afresh.
-        database.query(`UPDATE review_runs SET closed_at = CASE
-          WHEN number IN (SELECT json_extract(value, '$.number') FROM json_each(
-            (SELECT pulls_json FROM review_repositories WHERE id = ?)
-          )) THEN NULL ELSE coalesce(closed_at, ?) END WHERE repository_id = ?`)
-          .run(id, scan.scannedAt, id);
+        database.query(`UPDATE review_pulls SET closed_at = ? WHERE repository_id = ? AND closed_at IS NULL
+          AND number NOT IN (SELECT json_extract(value, '$.number') FROM json_each(?))`)
+          .run(scan.scannedAt, id, JSON.stringify(pulls));
+        database.query(`UPDATE review_pulls SET closed_at = NULL WHERE repository_id = ? AND closed_at IS NOT NULL
+          AND number IN (SELECT json_extract(value, '$.number') FROM json_each(?))`)
+          .run(id, JSON.stringify(pulls));
       }
       return changed;
     });
@@ -194,14 +210,16 @@ export class PullRequestReviewStore {
 
   insertRun(run: StoredRun): void {
     this.#write((database) => {
+      database.query('INSERT OR IGNORE INTO review_pulls (repository_id, number) VALUES (?, ?)').run(run.repositoryId, run.number);
       database.query(`INSERT INTO review_runs (${RUN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?)`)
         .run(run.id, run.repositoryId, run.number, run.headSha, run.state, run.createdAt, runPayload(run));
     });
+    this.#touchRuns(run.repositoryId);
   }
 
   // Applies a change to a run that still exists; the review text changes only when given.
   updateRun(id: string, change: (run: StoredRun) => StoredRun | null, review?: string | null): StoredRun | null {
-    return this.#write((database) => {
+    const updated = this.#write((database) => {
       const row = database.query<RunRow, [string]>(`SELECT ${RUN_COLUMNS} FROM review_runs WHERE id = ?`).get(id);
       if (!row) return null;
       const next = change(runFromRow(row));
@@ -213,6 +231,8 @@ export class PullRequestReviewStore {
       }
       return next;
     });
+    if (updated) this.#touchRuns(updated.repositoryId);
+    return updated;
   }
 
   getRun(id: string): StoredRunDetail | null {
@@ -228,10 +248,60 @@ export class PullRequestReviewStore {
     ).all(repositoryId, number, limit).map((row) => ({ ...runFromRow(row), review: row.review ?? null })));
   }
 
-  runsForRepository(repositoryId: string): StoredRun[] {
-    return this.#read((database) => database.query<RunRow, [string]>(
-      `SELECT ${RUN_COLUMNS} FROM review_runs WHERE repository_id = ? ORDER BY created_at DESC, rowid DESC`,
-    ).all(repositoryId).map(runFromRow));
+  runsRevision(repositoryId: string): number {
+    return this.#runRevisions.get(repositoryId) ?? 0;
+  }
+
+  #touchRuns(repositoryId: string): void {
+    this.#runRevisions.set(repositoryId, this.runsRevision(repositoryId) + 1);
+  }
+
+  latestRunsForOpenPulls(repositoryId: string): StoredRun[] {
+    return this.#read((database) => database.query<RunRow, [string, string]>(
+      `SELECT ${RUN_COLUMNS} FROM review_runs WHERE rowid IN (
+        SELECT (SELECT rowid FROM review_runs WHERE repository_id = ? AND number = json_extract(pull.value, '$.number')
+          ORDER BY created_at DESC, rowid DESC LIMIT 1)
+        FROM json_each((SELECT pulls_json FROM review_repositories WHERE id = ?)) AS pull
+      )`,
+    ).all(repositoryId, repositoryId).map(runFromRow));
+  }
+
+  hasActiveRun(repositoryId: string, number: number): boolean {
+    return this.#read((database) => database.query<{ found: number }, [string, number]>(
+      `SELECT 1 AS found FROM review_runs WHERE repository_id = ? AND number = ?
+        AND state IN ('queued','reviewing','needs-input') LIMIT 1`,
+    ).get(repositoryId, number) !== null);
+  }
+
+  selectionHistory(repositoryId: string, number: number, head: string): ReviewSelectionHistory {
+    return this.#read((database) => {
+      const atHead = `SELECT rowid FROM review_runs WHERE repository_id = ? AND number = ? AND head_sha = ?
+        UNION SELECT rowid FROM review_runs WHERE repository_id = ? AND number = ? AND reviewed_sha = ?`;
+      const counts = database.query<{ stopped: number; attempts: number }, [string, number, string, string, number, string]>(
+        `SELECT coalesce(max(state = 'stopped'), 0) AS stopped, coalesce(sum(trigger = 'auto'), 0) AS attempts
+          FROM review_runs WHERE rowid IN (${atHead})`,
+      ).get(repositoryId, number, head, repositoryId, number, head)!;
+      const completed = database.query<{ found: number }, [string, number, string]>(
+        `SELECT 1 AS found FROM review_runs WHERE repository_id = ? AND number = ? AND reviewed_sha = ? AND state = 'completed' LIMIT 1`,
+      ).get(repositoryId, number, head) !== null;
+      return { active: this.hasActiveRun(repositoryId, number), completed, stopped: counts.stopped > 0, attempts: counts.attempts };
+    });
+  }
+
+  automaticRunsSince(repositoryId: string, since: string): number {
+    return this.#read((database) => database.query<{ count: number }, [string, string]>(
+      `SELECT count(*) AS count FROM review_runs WHERE repository_id = ? AND trigger = 'auto' AND created_at > ?`,
+    ).get(repositoryId, since)!.count);
+  }
+
+  markOutdated(repositoryId: string, number: number, head: string): number {
+    const count = this.#write((database) => database.query(`UPDATE review_runs SET state = 'outdated',
+      payload_json = json_set(payload_json, '$.message', 'The pull request has new commits.') WHERE rowid IN (
+        SELECT rowid FROM review_runs WHERE repository_id = ? AND number = ? AND state = 'completed'
+          AND reviewed_sha != ? LIMIT ?
+      )`).run(repositoryId, number, head, REVIEW_HISTORY_BATCH_SIZE).changes);
+    if (count) this.#touchRuns(repositoryId);
+    return count;
   }
 
   recentRuns(limit: number): StoredRun[] {
@@ -257,12 +327,37 @@ export class PullRequestReviewStore {
     return active.length;
   }
 
-  // Preserves active work and archival retries even after closure retention expires.
-  pruneClosedRuns(repositoryId: string, before: string): void {
-    this.#write((database) => database.query(`DELETE FROM review_runs
-      WHERE repository_id = ? AND closed_at < ?
-        AND state NOT IN ('queued', 'reviewing', 'needs-input')
-        AND (json_extract(payload_json, '$.chatId') IS NULL OR json_extract(payload_json, '$.chatArchived') = 1)`)
-      .run(repositoryId, before));
+  closedPulls(repositoryId: string, afterNumber: number): number[] {
+    return this.#read((database) => database.query<{ number: number }, [string, number, number]>(
+      `SELECT number FROM review_pulls WHERE repository_id = ? AND closed_at IS NOT NULL AND number > ? ORDER BY number LIMIT ?`,
+    ).all(repositoryId, afterNumber, REVIEW_HISTORY_BATCH_SIZE).map((row) => row.number));
+  }
+
+  runsToArchive(repositoryId: string, number: number, afterSequence: number): (StoredRun & { sequence: number })[] {
+    return this.#read((database) => database.query<RunRow & { sequence: number }, [string, number, number, number]>(
+      `SELECT ${RUN_COLUMNS}, rowid AS sequence FROM review_runs WHERE repository_id = ? AND number = ? AND rowid > ?
+        AND chat_id IS NOT NULL AND chat_archived = 0 AND state NOT IN ('queued','reviewing','needs-input')
+        AND EXISTS (SELECT 1 FROM review_pulls WHERE repository_id = review_runs.repository_id AND number = review_runs.number AND closed_at IS NOT NULL)
+        ORDER BY rowid LIMIT ?`,
+    ).all(repositoryId, number, afterSequence, REVIEW_HISTORY_BATCH_SIZE).map((row) => ({ ...runFromRow(row), sequence: row.sequence })));
+  }
+
+  // Preserves active work and archival retries, deleting at most one bounded batch.
+  pruneClosedRuns(repositoryId: string, before: string): number {
+    const count = this.#write((database) => database.query(`DELETE FROM review_runs WHERE rowid IN (
+      SELECT run.rowid FROM review_pulls AS pull INDEXED BY review_pulls_closed
+      CROSS JOIN review_runs AS run INDEXED BY review_runs_prunable
+      WHERE pull.repository_id = ? AND pull.closed_at < ? AND run.repository_id = pull.repository_id AND run.number = pull.number
+        AND run.state NOT IN ('queued','reviewing','needs-input') AND (run.chat_id IS NULL OR run.chat_archived = 1) LIMIT ?
+    )`).run(repositoryId, before, REVIEW_HISTORY_BATCH_SIZE).changes);
+    if (count) this.#touchRuns(repositoryId);
+    return count;
+  }
+
+  pruneClosedPulls(repositoryId: string, before: string): number {
+    return this.#write((database) => database.query(`DELETE FROM review_pulls WHERE rowid IN (
+      SELECT rowid FROM review_pulls WHERE repository_id = ? AND closed_at < ?
+        AND NOT EXISTS (SELECT 1 FROM review_runs WHERE repository_id = review_pulls.repository_id AND number = review_pulls.number) LIMIT ?
+    )`).run(repositoryId, before, REVIEW_HISTORY_BATCH_SIZE).changes);
   }
 }

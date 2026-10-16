@@ -33,8 +33,8 @@ export class PullRequestsStore implements PortableSingletonController {
 	#detailController: AbortController | null = null;
 	#detailVersion: string | null = null;
 	#runsController: AbortController | null = null;
-	// What the loaded runs reflect, so a changed latest run reloads them.
-	#runsVersion: string | null = null;
+	// A snapshot revision also changes when an older history entry is posted.
+	#runsVersion: number | null = null;
 
 	query = $state('');
 	repositoryFilter = $state<string | null>(null);
@@ -44,6 +44,7 @@ export class PullRequestsStore implements PortableSingletonController {
 	isDetailLoading = $state(false);
 	detailError = $state<string | null>(null);
 	runs = $state<PullRequestReviewRunDetail[]>([]);
+	isRunsLoading = $state(false);
 	runsError = $state<string | null>(null);
 	// The run shown in the Review tab; null shows the latest.
 	selectedRunId = $state<string | null>(null);
@@ -74,7 +75,16 @@ export class PullRequestsStore implements PortableSingletonController {
 	}
 
 	get shownRun(): PullRequestReviewRunDetail | null {
-		return this.runs.find((run) => run.id === this.selectedRunId) ?? this.runs[0] ?? null;
+		const latest = this.selectedEntry?.latestRun;
+		const selected = this.runs.find((run) => run.id === this.selectedRunId);
+		if (
+			latest &&
+			(this.isRunsLoading || this.runsError !== null) &&
+			(!selected || selected.id === latest.id)
+		) {
+			return { ...latest, review: this.runs.find((run) => run.id === latest.id)?.review ?? null };
+		}
+		return selected ?? this.runs[0] ?? (latest ? { ...latest, review: null } : null);
 	}
 
 	// The inbox does not follow the chat's project.
@@ -118,6 +128,7 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.detailError = null;
 		this.isDetailLoading = false;
 		this.runs = [];
+		this.isRunsLoading = false;
 		this.runsError = null;
 	}
 
@@ -133,9 +144,12 @@ export class PullRequestsStore implements PortableSingletonController {
 			this.detail = null;
 			void this.loadDetail();
 		}
-		const latest = entry.latestRun;
-		const version = latest ? `${latest.id}:${latest.state}:${latest.post.status}` : 'none';
-		if (version !== this.#runsVersion) void this.#loadRuns(entry, version);
+		if (this.reviews.snapshot?.revision !== this.#runsVersion) void this.loadRuns();
+	}
+
+	async loadRuns(): Promise<void> {
+		const entry = this.selectedEntry;
+		if (entry) await this.#loadRuns(entry, this.reviews.snapshot?.revision ?? 0);
 	}
 
 	async loadDetail(): Promise<void> {
@@ -190,11 +204,13 @@ export class PullRequestsStore implements PortableSingletonController {
 		]);
 	}
 
-	async #loadRuns(entry: PullRequestReviewInboxEntry, version: string): Promise<void> {
+	async #loadRuns(entry: PullRequestReviewInboxEntry, version: number): Promise<void> {
 		this.#runsController?.abort();
 		const controller = new AbortController();
 		this.#runsController = controller;
 		this.#runsVersion = version;
+		this.isRunsLoading = true;
+		this.runsError = null;
 		try {
 			const runs = await (this.#deps.getRuns ?? getPullRequestReviewRuns)(
 				entry.repositoryId,
@@ -208,10 +224,12 @@ export class PullRequestsStore implements PortableSingletonController {
 			this.runsError = null;
 		} catch (error) {
 			if (controller.signal.aborted) return;
-			this.#runsVersion = null;
 			this.runsError = errorMessage(error, m.pull_request_reviews_load_failed());
 		} finally {
-			if (this.#runsController === controller) this.#runsController = null;
+			if (this.#runsController === controller) {
+				this.#runsController = null;
+				this.isRunsLoading = false;
+			}
 		}
 	}
 

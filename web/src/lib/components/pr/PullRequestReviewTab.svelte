@@ -35,6 +35,7 @@
 	const canPost = $derived(
 		run?.state === 'completed' && run.post.status !== 'posted' && run.post.status !== 'too-long',
 	);
+	const historyUnavailable = $derived(controller.isRunsLoading || controller.runsError !== null);
 	let pending = $state<'review' | 'stop' | 'post' | null>(null);
 	let actionError = $state<string | null>(null);
 
@@ -77,7 +78,7 @@
 					{@const chip = reviewRunChip(run)}
 					{#if chip}<PullRequestReviewChip {chip} />{/if}
 					<span class="text-xs text-muted-foreground">{runSummary(run)}</span>
-				{:else}
+				{:else if !historyUnavailable}
 					<span class="text-sm text-muted-foreground">{m.pull_request_review_none()}</span>
 				{/if}
 			</div>
@@ -96,7 +97,7 @@
 					<button
 						type="button"
 						class="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
-						disabled={pending !== null}
+						disabled={pending !== null || historyUnavailable}
 						onclick={() => act('post', () => controller.reviews.post(run.id))}
 					>
 						<Send class="h-3.5 w-3.5" />
@@ -123,7 +124,7 @@
 								? 'border border-border text-foreground hover:bg-accent'
 								: 'bg-primary text-primary-foreground hover:bg-primary/90',
 						)}
-						disabled={pending !== null}
+						disabled={pending !== null || historyUnavailable}
 						onclick={() =>
 							act('review', () => controller.reviews.review(entry.repositoryId, entry.pull.number))}
 						data-pr-review-start
@@ -133,6 +134,20 @@
 					</button>
 				{/if}
 			</div>
+			{#if controller.isRunsLoading}
+				<p class="text-xs text-muted-foreground" role="status" data-pr-review-loading>
+					{m.pull_request_review_history_loading()}
+				</p>
+			{:else if controller.runsError}
+				<div class="flex flex-wrap items-center gap-2" data-pr-review-history-error>
+					<p class="text-xs text-status-error-foreground" role="alert">{controller.runsError}</p>
+					<button
+						type="button"
+						class="rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+						onclick={() => void controller.loadRuns()}>{m.common_retry()}</button
+					>
+				</div>
+			{/if}
 			{#if canPost && repository.viewerLogin}
 				<p class="text-xs text-muted-foreground">
 					{m.pull_request_review_posts_as({ login: `@${repository.viewerLogin}` })}
@@ -145,7 +160,7 @@
 				<p
 					class="rounded-md border border-status-warning-border bg-status-warning px-3 py-2 text-xs text-status-warning-foreground"
 				>
-					{m.pull_request_review_needs_input()}
+					{run.message ?? m.pull_request_review_needs_input()}
 				</p>
 			{:else if run?.message && run.state !== 'completed'}
 				<p class="rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
@@ -188,6 +203,7 @@
 										candidate.id === run?.id && 'bg-accent',
 									)}
 									aria-current={candidate.id === run?.id}
+									data-pr-review-run={candidate.id}
 									onclick={() => (controller.selectedRunId = candidate.id)}
 								>
 									<span class="min-w-0 flex-1 truncate text-muted-foreground"

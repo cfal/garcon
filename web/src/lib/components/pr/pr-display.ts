@@ -192,7 +192,7 @@ const CHECK_ORDER: Record<PullRequestCheck['state'], number> = {
 	pending: 1,
 	success: 2,
 	neutral: 3,
-	skipped: 3,
+	skipped: 4,
 };
 
 // Failing checks first, then running ones, so what needs attention is on top.
@@ -205,6 +205,7 @@ export function checksSummary(checks: readonly PullRequestCheck[]): string {
 		[CHECK_ORDER.failure, m.pull_request_checks_failing],
 		[CHECK_ORDER.pending, m.pull_request_checks_running],
 		[CHECK_ORDER.success, m.pull_request_checks_passed],
+		[CHECK_ORDER.neutral, m.pull_request_checks_neutral],
 		[CHECK_ORDER.skipped, m.pull_request_checks_skipped],
 	];
 	return groups
