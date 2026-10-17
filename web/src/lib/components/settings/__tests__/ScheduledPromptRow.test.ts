@@ -51,6 +51,12 @@ function slotText(container: HTMLElement, slot: string): string {
 }
 
 describe('ScheduledPromptRow', () => {
+	it('uses a static task name as the heading and retains a muted prompt preview', () => {
+		const prompt = { ...makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:00:00.000Z' }), name: 'Daily {{current_date}} review' };
+		renderRow(prompt, new Date('2030-01-01T00:00:00.000Z'));
+		expect(screen.getByRole('heading', { name: prompt.name })).toBeTruthy();
+		expect(screen.getByText(prompt.prompt).className).toContain('text-muted-foreground');
+	});
 	it.each([
 		['<garcon-schedule-action />', 'Scheduled action'],
 		[
