@@ -101,7 +101,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await browserExpect(toggle).toBeFocused();
         await page.keyboard.press('Tab');
         await browserExpect(pins.getByRole('button', { name: '/projects/garcon', exact: true })).toBeFocused();
-        await browserExpect(toggle).toHaveCount(0);
+        await browserExpect(toggle).toHaveAttribute('aria-pressed', 'false');
       }
       expect((await client.listChats()).sessions).toEqual([]);
       assertNoBrowserErrors();
@@ -146,7 +146,7 @@ test('machine pins retain touch targets with a fine primary pointer and secondar
       await browserExpect(toggle).toBeFocused();
       await page.keyboard.press('Tab');
       await browserExpect(pin).toBeFocused();
-      await browserExpect(toggle).toHaveCount(0);
+      await browserExpect(toggle).toHaveAttribute('aria-pressed', 'false');
       assertNoBrowserErrors();
     }, undefined, {}, browser);
   } finally {

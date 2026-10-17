@@ -11,7 +11,7 @@
 	const executors = getExecutors();
 	const pins = new NewChatPinnedPathsController(() => form, executors, getRemoteSettings());
 	let showAll = $state(false);
-	let scopeFocused = $state(false);
+	let scopeVisited = $state(false);
 	const groups = $derived(pins.groups);
 	const hasOtherPins = $derived(groups.some((group) => group.executorId !== form.executorId));
 	const visibleGroups = $derived(
@@ -20,15 +20,12 @@
 </script>
 
 <section aria-label={m.chat_new_chat_pinned_paths()} class="min-w-0 space-y-2">
-	{#if hasOtherPins || showAll || scopeFocused}
+	{#if hasOtherPins || showAll || scopeVisited}
 		<button
 			type="button"
 			aria-pressed={showAll}
 			onfocus={() => {
-				scopeFocused = true;
-			}}
-			onblur={() => {
-				scopeFocused = false;
+				scopeVisited = true;
 			}}
 			class="min-h-7 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring any-pointer-coarse:min-h-11 {showAll
 				? 'bg-accent text-accent-foreground'

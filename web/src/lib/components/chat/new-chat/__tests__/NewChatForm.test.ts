@@ -1751,6 +1751,7 @@ describe('New Chat machine pin scope', () => {
 		executors.applySnapshot([localExecutor]);
 		await screen.findByRole('button', { name: remoteExecutor.id + ': /worker/pin' });
 	});
+
 	it('retains the focused scope control after selecting the only machine with pins and collapsing', async () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({ paths: {
 			byExecutor: { [remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/pin'] } },
@@ -1769,7 +1770,7 @@ describe('New Chat machine pin scope', () => {
 		expect(toggle.getAttribute('aria-pressed')).toBe('false');
 		const path = screen.getByLabelText('Project Path');
 		path.focus();
-		await waitFor(() => expect(screen.queryByRole('button', { name: 'All machines' })).toBeNull());
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'All machines' })).toBe(toggle));
 		expect(document.activeElement).toBe(path);
 	});
 
@@ -1791,7 +1792,7 @@ describe('New Chat machine pin scope', () => {
 		expect(document.activeElement).toBe(toggle);
 		const path = screen.getByLabelText('Project Path');
 		path.focus();
-		await waitFor(() => expect(screen.queryByRole('button', { name: 'All machines' })).toBeNull());
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'All machines' })).toBe(toggle));
 		expect(document.activeElement).toBe(path);
 	});
 
