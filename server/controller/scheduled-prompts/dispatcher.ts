@@ -1,5 +1,6 @@
 import {
   renderScheduledPrompt,
+  renderScheduledChatTitle,
   scheduledPromptFitsRenderedLimit,
   type ScheduledPrompt,
   type ScheduledPromptRunOutcome,
@@ -7,6 +8,7 @@ import {
 import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import type { ScheduledChatStartInput } from '../commands/command-support.js';
+import { runtimeTemplateValues } from '../../../common/template-tokens.js';
 
 export interface ScheduledPromptDispatchOutcome {
   outcome: Exclude<ScheduledPromptRunOutcome, 'missed' | 'failed'>;
@@ -19,10 +21,12 @@ export class ScheduledPromptDispatcher {
     private readonly deps: {
       commands: Pick<ChatCommandService, 'submitScheduledStart' | 'submitScheduledExistingChat'>;
       chatIds: Pick<ChatIdAllocator, 'allocate'>;
+      now?: () => Date;
     },
   ) {}
 
   async dispatch(scheduledPrompt: ScheduledPrompt, scheduledFor: string): Promise<ScheduledPromptDispatchOutcome> {
+    const at = (this.deps.now ?? (() => new Date()))();
     const requestId = `scheduled:${scheduledPrompt.id}:${scheduledFor}`;
     const messageId = `scheduled-message:${scheduledPrompt.id}:${scheduledFor}`;
     const fitsRenderedLimit = scheduledPrompt.target.type === 'existing-chat'
@@ -34,7 +38,7 @@ export class ScheduledPromptDispatcher {
     if (scheduledPrompt.target.type === 'existing-chat') {
       const outcome = await this.deps.commands.submitScheduledExistingChat({
         chatId: scheduledPrompt.target.chatId,
-        command: renderScheduledPrompt(scheduledPrompt.prompt, scheduledPrompt.target.chatId),
+        command: renderScheduledPrompt(scheduledPrompt.prompt, runtimeTemplateValues(scheduledPrompt.target.chatId, at)),
         busyBehavior: scheduledPrompt.target.busyBehavior,
         clientRequestId: requestId,
         clientMessageId: messageId,
@@ -57,6 +61,7 @@ export class ScheduledPromptDispatcher {
     }
 
     const chatId = this.deps.chatIds.allocate();
+    const values = runtimeTemplateValues(chatId, at);
     const startInput: ScheduledChatStartInput = {
       chatId,
       clientRequestId: requestId,
@@ -64,7 +69,10 @@ export class ScheduledPromptDispatcher {
       agentId: scheduledPrompt.target.agentId,
       executorId: scheduledPrompt.target.executorId,
       projectPath: scheduledPrompt.target.projectPath,
-      command: renderScheduledPrompt(scheduledPrompt.prompt, chatId),
+      command: renderScheduledPrompt(scheduledPrompt.prompt, values),
+      ...(scheduledPrompt.target.chatTitleTemplate === undefined ? {} : {
+        title: renderScheduledChatTitle(scheduledPrompt.target.chatTitleTemplate, values),
+      }),
       model: scheduledPrompt.target.model,
       apiProviderId: scheduledPrompt.target.apiProviderId,
       modelEndpointId: scheduledPrompt.target.modelEndpointId,

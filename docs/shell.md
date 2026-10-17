@@ -54,7 +54,9 @@ Automatic chat titles use the same configured generation model and settings as
 other chats. Title generation sends the first command to that model; it does not
 rewrite the command or run the Shell integration as an AI model.
 
-Schedules substitute `{{chat_id}}` using the usual template escaping rules.
+Schedules substitute `{{chat_id}}`, `{{current_date}}` (UTC), and
+`{{current_date_local}}` (controller-local timezone) using the usual template
+escaping rules. Both dates use `YYYY-MM-DD` at dispatch, not the executor's clock.
 Agent-created tasks and incoming automation are allowed without additional
 Shell-specific checks. The user is responsible for supplying valid commands.
 Printed output remains inert even when it contains Garcon control envelopes.

@@ -1,5 +1,5 @@
 import { renderPreamblePrefix } from '../../../common/preamble-prefix.js';
-import { CHAT_ID_LENGTH } from '../../../common/chat-id.js';
+import { TEMPLATE_VALIDATION_VALUES } from '../../../common/template-tokens.js';
 import {
   PREAMBLE_COMBINED_MAX_LENGTH,
   PREAMBLE_FILE_CONTEXT_SEPARATOR,
@@ -18,7 +18,7 @@ import {
   type NewChatPreambleContext,
 } from './matching.js';
 
-const CHAT_ID_VALIDATION_SAMPLE = '1'.repeat(CHAT_ID_LENGTH);
+const CHAT_ID_VALIDATION_SAMPLE = TEMPLATE_VALIDATION_VALUES.chat_id;
 
 export const PREAMBLE_SELECTION_COMPOSITION_INVALID_MESSAGE =
   'Selected preambles can\u2019t be applied in this order. Reconfigure this chat\u2019s preambles and try again.';
@@ -85,7 +85,7 @@ export function assertPreambleSelectionComposition(
 ): void {
   if (eligible.length === 0) return;
   const prefix = renderPreamblePrefix(eligible.map((preamble) =>
-    renderPreambleContent(preamble.content, chatId)));
+    renderPreambleContent(preamble.content, { ...TEMPLATE_VALIDATION_VALUES, chat_id: chatId })));
   if (
     prefix.includes(PREAMBLE_FILE_CONTEXT_SEPARATOR)
     || prefix.length > PREAMBLE_COMBINED_MAX_LENGTH

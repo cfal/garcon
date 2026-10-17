@@ -1,15 +1,13 @@
 import { parentExecutorPath } from '../../common/portable-path.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { renderPreamblePrefix } from '../../../common/preamble-prefix.js';
-import { CHAT_ID_LENGTH } from '../../../common/chat-id.js';
+import { TEMPLATE_VALIDATION_VALUES } from '../../../common/template-tokens.js';
 import {
   PREAMBLE_COMBINED_MAX_LENGTH,
   PREAMBLE_FILE_CONTEXT_SEPARATOR,
   renderPreambleContent,
   type Preamble,
 } from '../../../common/preambles.js';
-
-const CHAT_ID_LENGTH_SAMPLE = '1'.repeat(CHAT_ID_LENGTH);
 
 interface RenderedPreamble {
   readonly bit: bigint;
@@ -44,7 +42,7 @@ export function preambleCatalogCompositionViolation(
   for (const [index, preamble] of preambles.entries()) {
     if (!preamble.enabled) continue;
     const bit = 1n << BigInt(index);
-    rendered.push({ bit, content: renderPreambleContent(preamble.content, CHAT_ID_LENGTH_SAMPLE) });
+    rendered.push({ bit, content: renderPreambleContent(preamble.content, TEMPLATE_VALIDATION_VALUES) });
     if (preamble.scope.type === 'global') {
       globalMask |= bit;
       continue;

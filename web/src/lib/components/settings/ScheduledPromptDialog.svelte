@@ -5,6 +5,7 @@
 	import ScheduledChatPickerDialog from './ScheduledChatPickerDialog.svelte';
 	import ScheduledNewChatComposer from './ScheduledNewChatComposer.svelte';
 	import ScheduledPromptField from './ScheduledPromptField.svelte';
+	import ScheduledChatTitleField from './ScheduledChatTitleField.svelte';
 	import ScheduledPromptOption from './ScheduledPromptOption.svelte';
 	import ScheduledPromptHeader from './ScheduledPromptHeader.svelte';
 	import ScheduledPromptSchedulePreview from './ScheduledPromptSchedulePreview.svelte';
@@ -238,6 +239,21 @@
 		/>
 
 		<div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+			<div class="space-y-1">
+				<label for="scheduled-prompt-name" class="text-sm font-medium">{m.scheduled_prompts_task_name()}</label>
+				<input
+					id="scheduled-prompt-name"
+					bind:value={form.taskName}
+					disabled={form.saving}
+					aria-invalid={form.nameError ? 'true' : undefined}
+					aria-describedby={form.nameError ? 'scheduled-prompt-name-error' : undefined}
+					onkeydown={handlePromptKeydown}
+					class="h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 text-base focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
+				/>
+				{#if form.nameError}
+					<p id="scheduled-prompt-name-error" class="text-xs text-destructive">{form.nameError}</p>
+				{/if}
+			</div>
 			<section
 				class={sectionClass}
 				aria-labelledby="scheduled-prompt-cadence"
@@ -413,6 +429,7 @@
 				</fieldset>
 
 				{#if form.targetType === 'new-chat'}
+					<ScheduledChatTitleField {form} onkeydown={handlePromptKeydown} />
 					<ScheduledNewChatComposer
 						conversationInput={form.executionPolicy === 'conversation'}
 						startup={form.startup}

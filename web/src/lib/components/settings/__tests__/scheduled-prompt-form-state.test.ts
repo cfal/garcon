@@ -143,6 +143,60 @@ function newChatPrompt(
 }
 
 describe('ScheduledPromptFormState', () => {
+	it('restores names and custom titles while omitting disabled or hidden drafts', async () => {
+		const form = createForm();
+		form.startup.validatePath = vi.fn();
+		const prompt = newChatPrompt({
+			type: 'new-chat', agentId: 'codex', projectPath: '/workspace/project', model: 'gpt-5',
+			apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+			permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {}, tags: [],
+			chatTitleTemplate: 'Review {{current_date}} {{current_date_local}}',
+		});
+		prompt.name = 'Private {{current_date}} label';
+		await form.initialize(prompt);
+		form.startup.settingsLoaded = true;
+		form.startup.validationStatus = 'valid';
+		const now = new Date('2029-12-01T00:00:00.000Z');
+		expect(form.taskName).toBe(prompt.name);
+		expect(form.customTitleEnabled).toBe(true);
+		expect(form.buildDefinition(now)).toMatchObject({ name: prompt.name, prompt: prompt.prompt,
+			target: { chatTitleTemplate: 'Review {{current_date}} {{current_date_local}}' } });
+		form.customTitleTemplate = '';
+		expect(form.canSaveAt(now)).toBe(false);
+		expect(form.buildDefinition(now)).toBeNull();
+		form.customTitleEnabled = false;
+		expect(form.canSaveAt(now)).toBe(true);
+		expect(form.buildDefinition(now)?.target).not.toHaveProperty('chatTitleTemplate');
+		form.customTitleEnabled = true;
+		form.targetType = 'existing-chat';
+		form.existingChatId = '123';
+		expect(form.canSaveAt(now)).toBe(true);
+		expect(form.buildDefinition(now)).toMatchObject({ name: prompt.name, target: { type: 'existing-chat' } });
+		expect(form.buildDefinition(now)?.target).not.toHaveProperty('chatTitleTemplate');
+		form.targetType = 'new-chat';
+		expect(form.canSaveAt(now)).toBe(false);
+		form.customTitleTemplate = '  Valid {{chat_id}} title  ';
+		expect(form.buildDefinition(now)?.target).toMatchObject({ chatTitleTemplate: 'Valid {{chat_id}} title' });
+		form.taskName = 'a'.repeat(121);
+		expect(form.canSaveAt(now)).toBe(false);
+		expect(form.buildDefinition(now)).toBeNull();
+		form.taskName = '   ';
+		expect(form.canSaveAt(now)).toBe(true);
+		expect(form.buildDefinition(now)).not.toHaveProperty('name');
+	});
+
+	it('hydrates and validates static task names on existing-chat schedules', async () => {
+		const form = createForm();
+		const prompt = existingPrompt({ type: 'once', nextRunAt: '2030-01-02T09:00:00.000Z' });
+		prompt.name = 'Daily review';
+		await form.initialize(prompt);
+		expect(form.taskName).toBe(prompt.name);
+		form.taskName = ' Changed name ';
+		expect(form.buildDefinition()?.name).toBe('Changed name');
+		form.taskName = 'two\nlines';
+		expect(form.canSave).toBe(false);
+		expect(form.buildDefinition()).toBeNull();
+	});
 	it('does not restore the old scheduled target over edits made during catalog discovery', async () => {
 		const discovery = Promise.withResolvers<void>();
 		const form = createForm(undefined, undefined, {
@@ -339,7 +393,7 @@ describe('ScheduledPromptFormState', () => {
 		)}${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`;
 
 		expect(form.prompt).toHaveLength(SCHEDULED_PROMPT_MAX_LENGTH);
-		expect(form.promptError).toBe('The prompt is too long after chat IDs are inserted.');
+		expect(form.promptError).toBe('The prompt is too long after variables are inserted.');
 		expect(form.canSave).toBe(false);
 
 		form.prompt = `${'x'.repeat(SCHEDULED_PROMPT_MAX_LENGTH - 16)}${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`;

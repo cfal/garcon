@@ -69,7 +69,8 @@
 	}: Props = $props();
 
 	const headingId = $props.id();
-	let title = $derived(scheduledPromptTitle(scheduledPrompt.prompt));
+	let promptPreview = $derived(scheduledPromptTitle(scheduledPrompt.prompt));
+	let title = $derived(scheduledPrompt.name ?? promptPreview);
 	let schedule = $derived(scheduledPrompt.schedule);
 	let timeUntilRun = $derived(formatCompactTimeUntil(schedule.nextRunAt, currentTime));
 	let nextRunLabel = $derived(scheduledInstantLabel(schedule.nextRunAt, currentTime));
@@ -184,6 +185,9 @@
 	>
 		{title}
 	</h3>
+	{#if scheduledPrompt.name}
+		<p class="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{promptPreview}</p>
+	{/if}
 
 	<div class="mt-2 flex min-w-0 items-center text-xs text-muted-foreground">
 		{#if newChatTarget}

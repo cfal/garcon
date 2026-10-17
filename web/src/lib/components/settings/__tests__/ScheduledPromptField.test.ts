@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import ScheduledPromptField from '../ScheduledPromptField.svelte';
 
@@ -24,19 +24,28 @@ function renderField(
 }
 
 describe('ScheduledPromptField', () => {
-	it('inserts the chat ID token at the selection and restores the caret and focus', async () => {
+	it('does not insert into a draft that changed while the variable menu was open', async () => {
+		const { rerender, onPromptChange, onPromptKeydown } = renderField();
+		await fireEvent.click(screen.getByRole('button', { name: 'Insert variable' }));
+		await rerender({ prompt: 'A newer draft', promptError: null, targetType: 'new-chat', surface: 'standalone', onPromptChange, onPromptKeydown });
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Current date \(UTC\)/ }));
+		expect(onPromptChange).not.toHaveBeenCalled();
+		expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe('A newer draft');
+	});
+	it.each(['chat_id', 'current_date', 'current_date_local'])('inserts %s at the selection and restores the caret and focus', async (variable) => {
 		const { onPromptChange } = renderField({ prompt: 'Review this section' });
 		const textarea = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
 		textarea.focus();
 		textarea.setSelectionRange(7, 11);
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Insert {{chat_id}}' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Insert variable' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: new RegExp(`\\{\\{${variable}\\}\\}`) }));
 
-		expect(onPromptChange).toHaveBeenCalledWith('Review {{chat_id}} section');
-		expect(textarea.value).toBe('Review {{chat_id}} section');
-		expect(document.activeElement).toBe(textarea);
-		expect(textarea.selectionStart).toBe('Review {{chat_id}}'.length);
-		expect(textarea.selectionEnd).toBe('Review {{chat_id}}'.length);
+		expect(onPromptChange).toHaveBeenCalledWith(`Review {{${variable}}} section`);
+		expect(textarea.value).toBe(`Review {{${variable}}} section`);
+		await waitFor(() => expect(document.activeElement).toBe(textarea));
+		expect(textarea.selectionStart).toBe(`Review {{${variable}}}`.length);
+		expect(textarea.selectionEnd).toBe(`Review {{${variable}}}`.length);
 	});
 
 	it('describes the selected target and keeps touch text at 16px on both surfaces', () => {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { scheduleChatPrompt } from '../scheduled-prompts';
+import { createScheduledPrompt, getScheduledPrompts, updateScheduledPrompt, scheduleChatPrompt } from '../scheduled-prompts';
 import {
 	SCHEDULED_PROMPT_LABEL_MAX_LENGTH,
 	normalizeScheduledPromptTarget,
@@ -63,6 +63,28 @@ describe('scheduled prompts API contract', () => {
 			duration: '2h30m',
 			prompt: 'Continue the work',
 		});
+	});
+
+	it('retains task names and custom titles in both mutation and GET responses', async () => {
+		const target = {
+			type: 'new-chat' as const, agentId: 'codex', projectPath: '/workspace/project', model: 'gpt-5',
+			apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+			permissionMode: 'default' as const, thinkingMode: 'none' as const, agentSettingsById: {}, tags: [],
+			preambleChoice: { mode: 'defaults' as const }, chatTitleTemplate: 'Review {{current_date}}',
+		};
+		const prompt = { ...scheduledPrompt, name: 'Daily review', target };
+		const snapshot = { revision: 1, prompts: [prompt], runLog: [] };
+		fetchMock.mockImplementation(async (_url, options) => Response.json(
+			(options.method ?? 'GET') === 'GET' ? snapshot : { success: true, snapshot },
+		));
+		const request = { expectedRevision: 0, scheduledPrompt: {
+			schedule: { type: 'once' as const, runAtUtc: prompt.schedule.nextRunAt },
+			name: prompt.name, target, prompt: prompt.prompt,
+		} };
+		expect((await createScheduledPrompt(request)).snapshot).toEqual(snapshot);
+		expect(await getScheduledPrompts()).toEqual(snapshot);
+		expect((await updateScheduledPrompt({ ...request, id: prompt.id })).snapshot).toEqual(snapshot);
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(request);
 	});
 
 	it('rejects malformed responses and snapshots that omit the scheduled prompt', async () => {

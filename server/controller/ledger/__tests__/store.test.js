@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn, setSystemTime } from 'bun:test';
+import { preamblePrefixSha256 } from '../../../../common/preamble-prefix.js';
 import { Database } from 'bun:sqlite';
 import { AssistantMessage, BashToolUseMessage, UserMessage } from '../../../../common/chat-types.ts';
 import { randomUUID } from 'node:crypto';
@@ -582,6 +583,41 @@ describe('TranscriptLedgerStore', () => {
     );
     expect(JSON.stringify(store.currentRows(chatId))).not.toContain(chatId);
     expect(JSON.stringify(store.currentRows(chatId))).not.toContain('Use {{chat_id}}');
+  });
+
+  it('uses the input timestamp for preamble dates and never re-renders duplicates', () => {
+    const originalTimezone = process.env.TZ;
+    try {
+      process.env.TZ = 'America/Los_Angeles';
+      setSystemTime(new Date('2030-01-02T00:30:00.000Z'));
+      const chatId = '1000000000000001';
+      const view = store.initializeCurrentView(chatId, { viewId: transcriptViewId('view-one'), contentStartOrdinal: 1 });
+      const request = {
+        viewId: view.viewId,
+        at: '2030-01-01T00:30:00.000Z',
+        detail: inputDetail('message-one', 'Already rendered scheduled body for 2030-01-01'),
+        preambleBoundary: { kind: 'new-chat', ownershipEpoch: 'epoch-one' },
+        preambles: [
+          preamble('a', 'First', 'First {{current_date}} / {{current_date_local}}'),
+          preamble('b', 'Second', 'Second {{current_date}} / {{current_date_local}}'),
+        ],
+      };
+      const result = store.appendInputAndCompose(chatId, request);
+      expect(result.providerPrefix).toContain('First 2030-01-01 / 2029-12-31');
+      expect(result.providerPrefix).toContain('Second 2030-01-01 / 2029-12-31');
+      expect(result.input.at).toBe(request.at);
+      expect(result.input.detail.preamblePrefixReceipt.sha256).toBe(preamblePrefixSha256(result.providerPrefix));
+      setSystemTime(new Date('2030-02-01T00:30:00.000Z'));
+      const duplicate = store.appendInputAndCompose(chatId, request);
+      expect(duplicate.inserted).toBe(false);
+      expect(duplicate.providerPrefix).toBe('');
+      expect(duplicate.committedRows).toEqual([]);
+      expect(duplicate.input.detail.preamblePrefixReceipt).toEqual(result.input.detail.preamblePrefixReceipt);
+    } finally {
+      setSystemTime();
+      if (originalTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimezone;
+    }
   });
 
   it('consumes a zero-match boundary without creating a notice or provider prefix', () => {
