@@ -18,6 +18,14 @@ const PROSPECTIVE_CHAT_ID = '1787471053739200';
 const MISSING_CHAT_ID = '1787471053739201';
 
 describe('scheduled snippet expansion', () => {
+  it('returns a typed validation failure for ambiguous replacement boundaries', async () => {
+    const { service } = await serviceFixture();
+    await service.create({ expectedRevision: 0, snippet: { shortName: 'review',
+      template: '{{arguments}}{{current_date}}', defaultArguments: 'report\\' } });
+    await expect(service.expand({ shortName: 'review', arguments: { type: 'default' }, context: {
+      type: 'scheduled-prompt', target: { type: 'new-chat', projectPath: '/repo' },
+    } })).rejects.toMatchObject({ code: 'SNIPPET_VALIDATION_FAILED', status: 422 });
+  });
   it('resolves Local and remote paths without creating a prospective chat', async () => {
     const { service, chatLookups } = await serviceFixture();
     await service.create({ expectedRevision: 0, snippet: { shortName: 'review',

@@ -9,6 +9,9 @@ import {
   matchTemplateTokens,
   TemplateExpansionTooLongError,
 } from '../../../common/template-tokens.js';
+import { SnippetDomainError } from './errors.js';
+
+const INSERTION_VARIABLES = ['arguments', 'project_path'] as const;
 
 export interface SnippetTemplateValues {
   arguments: string;
@@ -32,13 +35,46 @@ export function expandScheduledSnippetTemplate(
     return result + value.slice(cursor);
   };
   try {
-    return expandTemplate(template, ['arguments', 'project_path'], {
+    const replacements = {
       arguments: literalValue(values.arguments),
       project_path: literalValue(values.projectPath),
-    }, SNIPPET_EXPANDED_MAX_LENGTH);
+    };
+    const expanded = expandTemplate(template, INSERTION_VARIABLES, replacements, SNIPPET_EXPANDED_MAX_LENGTH);
+    assertDeferredTokenBoundaries(template, replacements, expanded);
+    return expanded;
   } catch (error) {
     if (error instanceof TemplateExpansionTooLongError) throw new SnippetExpansionError();
     throw error;
+  }
+}
+
+function assertDeferredTokenBoundaries(
+  template: string,
+  replacements: Record<(typeof INSERTION_VARIABLES)[number], string>,
+  expanded: string,
+): void {
+  const expected: Array<{ index: number; raw: string }> = [];
+  let offset = 0;
+  const append = (fragment: string): void => {
+    for (const match of matchTemplateTokens(fragment, RUNTIME_TEMPLATE_VARIABLES)) {
+      expected.push({ index: offset + match.index, raw: match.raw });
+    }
+    offset += fragment.length;
+  };
+  let cursor = 0;
+  for (const match of matchTemplateTokens(template, INSERTION_VARIABLES)) {
+    append(template.slice(cursor, match.index));
+    append(match.escaped ? match.raw.slice(1) : replacements[match.variable]);
+    cursor = match.index + match.raw.length;
+  }
+  append(template.slice(cursor));
+  const actual = [...matchTemplateTokens(expanded, RUNTIME_TEMPLATE_VARIABLES)];
+  // Joined fragments must not synthesize tokens or change an existing token's escape.
+  if (actual.length !== expected.length || actual.some((match, index) => (
+    match.index !== expected[index]?.index || match.raw !== expected[index]?.raw
+  ))) {
+    throw new SnippetDomainError('SNIPPET_VALIDATION_FAILED',
+      'Scheduled snippet replacements must not create or escape adjacent template variables. Add a separator.', 422);
   }
 }
 

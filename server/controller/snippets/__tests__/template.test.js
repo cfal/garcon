@@ -53,6 +53,24 @@ describe('snippet template expansion', () => {
 });
 
 describe('scheduled snippet template expansion', () => {
+  it.each(RUNTIME_TEMPLATE_VARIABLES)('rejects joins that create or escape %s', (variable) => {
+    for (const [template, argumentsText, projectPath] of [
+      [`{{arguments}}{{${variable}}}`, 'report\\', '/repo'],
+      [`{{project_path}}{{${variable}}}`, '', 'C:\\'],
+      ['{{arguments}}{{project_path}}', '{{', `${variable}}}`],
+      [`{{{{arguments}}}}`, variable, '/repo'],
+      [`{{${variable}{{arguments}}}}`, '', '/repo'],
+      [`{{arguments}}${variable}}}`, '{{', '/repo'],
+    ]) {
+      expect(() => expandScheduledSnippetTemplate(template, { arguments: argumentsText, projectPath }))
+        .toThrow('Add a separator');
+    }
+    for (const template of [`{{arguments}} {{${variable}}}`, `{{arguments}}\\{{${variable}}}`]) {
+      const values = { arguments: 'report\\', projectPath: '/repo', context: TEMPLATE_VALIDATION_VALUES };
+      expect(renderScheduledPrompt(expandScheduledSnippetTemplate(template, values), values.context))
+        .toBe(expandSnippetTemplate(template, values));
+    }
+  });
   it('defers both dates, including escapes, until each occurrence', () => {
     const template = '{{current_date}} {{current_date_local}} \\{{current_date}} \\{{current_date_local}} {{current_time}}';
     const text = expandScheduledSnippetTemplate(template, { arguments: '', projectPath: '/repo' });
