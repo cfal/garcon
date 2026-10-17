@@ -31,7 +31,7 @@
 	type="button"
 	class={cn(
 		buttonVariants({ variant: 'outline', size: 'sm' }),
-		'grid w-16 grid-cols-[1fr_0.75rem] gap-1 px-2 text-xs',
+		'relative px-2 text-xs has-[>svg]:px-2',
 		mode !== 'inactive' &&
 			'border-interactive-accent bg-interactive-accent text-interactive-accent-foreground hover:bg-interactive-accent',
 	)}
@@ -43,6 +43,9 @@
 	onclick={onToggle}
 >
 	{label}
-	<Lock class={['size-3', mode !== 'locked' && 'invisible']} aria-hidden="true" />
+	<Lock
+		class={['absolute right-0.5 top-0.5 size-2', mode !== 'locked' && 'invisible']}
+		aria-hidden="true"
+	/>
 </button>
 <span id={modeId} class="sr-only">{modeLabel}</span>

@@ -24,6 +24,7 @@
 	import TerminalSettingsMenu from './TerminalSettingsMenu.svelte';
 	import TerminalModifierButton from './TerminalModifierButton.svelte';
 	import { buttonVariants } from '$lib/components/ui/button';
+	import { cn } from '$lib/utils/cn.js';
 	import TerminalRenameDialog from './TerminalRenameDialog.svelte';
 	import TerminalCreateAction from './TerminalCreateAction.svelte';
 	import type {
@@ -406,7 +407,7 @@
 				{#each toolbarKeys as item (item.key)}
 					<button
 						type="button"
-						class={[buttonVariants({ variant: 'outline', size: 'sm' }), 'min-w-8 px-2 text-xs']}
+						class={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'min-w-8 px-2 text-xs')}
 						onclick={() => sendToolbarKey(item.key)}
 						aria-label={item.label}>{item.label}</button
 					>
