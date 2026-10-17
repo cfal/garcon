@@ -48,6 +48,8 @@ describe('theme profiles', () => {
 			'lagoon-light',
 			'rose-light',
 			'moss-light',
+			'paper-light',
+			'slate-light',
 		]);
 		expect(THEME_PROFILES.filter(({ id }) => isDarkThemeId(id)).map(({ id }) => id)).toEqual([
 			'classic-dark',
@@ -58,6 +60,8 @@ describe('theme profiles', () => {
 			'lagoon-dark',
 			'rose-dark',
 			'moss-dark',
+			'paper-dark',
+			'slate-dark',
 		]);
 	});
 

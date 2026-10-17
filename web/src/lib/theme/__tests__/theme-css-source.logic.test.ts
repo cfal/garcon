@@ -172,6 +172,23 @@ describe('theme profile CSS sources', () => {
 		expect.soft(profileSource('phosphor-dark')).toContain('--background: 222 33% 5%;');
 	});
 
+	it('keeps Paper surfaces warm and Slate dark visibly lifted', () => {
+		const paper = propertyValues(profileSource('paper-light'));
+		for (const role of ['background', 'card', 'popover']) {
+			const [red, green, blue] = hslToSrgbChannels(paper[role]);
+			expect(red).toBeGreaterThan(green);
+			expect(green).toBeGreaterThan(blue);
+			expect(red).toBeLessThan(1);
+		}
+		const neko = propertyValues(profileSource('neko-dark'));
+		for (const id of ['paper-dark', 'slate-dark'] as const) {
+			const values = propertyValues(profileSource(id));
+			expect(relativeLuminanceFromChannels(hslToSrgbChannels(values.background))).toBeGreaterThan(
+				relativeLuminanceFromChannels(hslToSrgbChannels(neko.background)),
+			);
+		}
+	});
+
 	it('keeps native painting shared and profile files token-only', () => {
 		const application = readFileSync(new URL('../../../app.css', import.meta.url), 'utf8');
 		expect.soft(application).toContain('scrollbar-color: var(--scroll-area-thumb) transparent;');

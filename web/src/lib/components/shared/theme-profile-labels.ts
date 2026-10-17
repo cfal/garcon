@@ -18,4 +18,8 @@ export const THEME_PROFILE_LABELS: Record<ThemeId, () => string> = {
 	'rose-dark': m.settings_theme_profile_rose_dark,
 	'moss-light': m.settings_theme_profile_moss_light,
 	'moss-dark': m.settings_theme_profile_moss_dark,
+	'paper-light': m.settings_theme_profile_paper_light,
+	'paper-dark': m.settings_theme_profile_paper_dark,
+	'slate-light': m.settings_theme_profile_slate_light,
+	'slate-dark': m.settings_theme_profile_slate_dark,
 };

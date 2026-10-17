@@ -15,6 +15,10 @@
 @import './lib/theme/profiles/rose-dark.css';
 @import './lib/theme/profiles/moss-light.css';
 @import './lib/theme/profiles/moss-dark.css';
+@import './lib/theme/profiles/paper-light.css';
+@import './lib/theme/profiles/paper-dark.css';
+@import './lib/theme/profiles/slate-light.css';
+@import './lib/theme/profiles/slate-dark.css';
 @plugin '@tailwindcss/typography';
 
 @custom-variant dark (&:where(.dark, .dark *));

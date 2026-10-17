@@ -118,6 +118,30 @@ export const THEME_PROFILES = [
 		browserThemeColor: '#141b13',
 		rendererPalette: 'semantic',
 	},
+	{
+		id: 'paper-light',
+		colorScheme: 'light',
+		browserThemeColor: '#f7f1e3',
+		rendererPalette: 'semantic',
+	},
+	{
+		id: 'paper-dark',
+		colorScheme: 'dark',
+		browserThemeColor: '#272420',
+		rendererPalette: 'semantic',
+	},
+	{
+		id: 'slate-light',
+		colorScheme: 'light',
+		browserThemeColor: '#f6f7f9',
+		rendererPalette: 'semantic',
+	},
+	{
+		id: 'slate-dark',
+		colorScheme: 'dark',
+		browserThemeColor: '#282c34',
+		rendererPalette: 'semantic',
+	},
 ] as const satisfies readonly ThemeProfileDescriptor[];
 
 export type ThemeProfile = (typeof THEME_PROFILES)[number];
@@ -154,6 +178,8 @@ export const THEME_FAMILIES = [
 	{ id: 'lagoon', lightThemeId: 'lagoon-light', darkThemeId: 'lagoon-dark' },
 	{ id: 'rose', lightThemeId: 'rose-light', darkThemeId: 'rose-dark' },
 	{ id: 'moss', lightThemeId: 'moss-light', darkThemeId: 'moss-dark' },
+	{ id: 'paper', lightThemeId: 'paper-light', darkThemeId: 'paper-dark' },
+	{ id: 'slate', lightThemeId: 'slate-light', darkThemeId: 'slate-dark' },
 ] as const satisfies readonly {
 	readonly id: string;
 	readonly lightThemeId: LightThemeId;

@@ -354,6 +354,8 @@ describe("CodeMirror theme contrast", () => {
           "lagoon-dark",
           "rose-dark",
           "moss-dark",
+          "paper-dark",
+          "slate-dark",
           "lagoon-dark",
         ];
         const samples = [];
@@ -377,15 +379,15 @@ describe("CodeMirror theme contrast", () => {
         view.destroy();
         return { samples, cursors };
       });
-      expect(retained.samples[0]).toEqual(retained.samples[3]);
+      expect(retained.samples[0]).toEqual(retained.samples.at(-1)!);
       expect(
         new Set(retained.samples.map((sample) => sample.background)).size,
-      ).toBe(3);
-      expect(new Set(retained.cursors).size).toBe(3);
-      expect(retained.cursors[0]).toBe(retained.cursors[3]);
+      ).toBe(5);
+      expect(new Set(retained.cursors).size).toBe(5);
+      expect(retained.cursors[0]).toBe(retained.cursors.at(-1)!);
       expect(
         new Set(retained.samples.map((sample) => sample.selection)).size,
-      ).toBe(3);
+      ).toBe(5);
       expect(retained.samples.every((sample) => sample.focused)).toBe(true);
 
       for (const profile of THEME_PROFILES.filter(
