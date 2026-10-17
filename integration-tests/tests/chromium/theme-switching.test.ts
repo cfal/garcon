@@ -48,10 +48,9 @@ describe("theme switching", () => {
         name: "Theme",
         exact: true,
       });
+      const previewColors = new Map<string, string[]>();
       for (const profile of [
-        ...THEME_PROFILES.filter(
-          (profile) => profile.rendererPalette === "semantic",
-        ),
+        ...THEME_PROFILES,
         THEME_PROFILES.find((profile) => profile.id === "rose-dark")!,
       ]) {
         await themeSelect.focus();
@@ -74,7 +73,47 @@ describe("theme switching", () => {
         expect(
           await page.locator(`[data-theme-preview="${profile.id}"]`).count(),
         ).toBe(1);
+        const colors = await page
+          .locator(`[data-theme-preview="${profile.id}"]`)
+          .evaluate((preview) => {
+            const roles = [
+              "background",
+              "card",
+              "primary",
+              "interactive-accent",
+              "diff-add-bg",
+              "diff-del-bg",
+            ];
+            return Array.from(preview.children).map((swatch, index) => {
+              const expected = document.createElement("span");
+              expected.style.backgroundColor = `hsl(var(--${roles[index]}))`;
+              preview.append(expected);
+              const result = {
+                actual: getComputedStyle(swatch).backgroundColor,
+                expected: getComputedStyle(expected).backgroundColor,
+              };
+              expected.remove();
+              return result;
+            });
+          });
+        expect(colors).toHaveLength(6);
+        for (const color of colors) {
+          expect(color.actual, `${profile.id} preview swatch`).toBe(
+            color.expected,
+          );
+          expect(color.actual).not.toBe("rgba(0, 0, 0, 0)");
+        }
+        previewColors.set(
+          profile.id,
+          colors.map((color) => color.actual),
+        );
       }
+      expect(previewColors.get("classic-light")!.slice(0, 4)).toEqual(
+        previewColors.get("colorblind-light")!.slice(0, 4),
+      );
+      expect(previewColors.get("classic-light")!.slice(4)).not.toEqual(
+        previewColors.get("colorblind-light")!.slice(4),
+      );
       await page
         .getByRole("combobox", { name: "Theme", exact: true })
         .selectOption("colorblind-dark");

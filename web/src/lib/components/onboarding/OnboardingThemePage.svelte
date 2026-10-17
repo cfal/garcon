@@ -2,14 +2,8 @@
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import { getLocalSettings, getThemeRuntime } from '$lib/context';
-	import { THEME_PROFILE_LABELS } from '$lib/components/shared/theme-profile-labels.js';
-	import ThemePalettePreview from '$lib/components/shared/ThemePalettePreview.svelte';
-	import {
-		DARK_THEME_PROFILES,
-		LIGHT_THEME_PROFILES,
-		THEME_PROFILES,
-		type ThemePreference,
-	} from '$lib/theme/themes.js';
+	import ThemePreferenceFields from '$lib/components/shared/ThemePreferenceFields.svelte';
+	import type { ThemePreference } from '$lib/theme/themes.js';
 	import { createThemePreferenceSelection } from '$lib/theme/theme-preference-selection.js';
 	import { ONBOARDING_OPTION_CARD_CLASS } from './onboarding-option-card.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -58,53 +52,6 @@
 	</label>
 </fieldset>
 
-{#if localSettings.themePreference.mode === 'fixed'}
-	<label class="mt-4 grid gap-1.5 text-sm text-foreground">
-		<span class="flex items-center justify-between gap-3">
-			<span>{m.settings_theme_fixed_label()}</span>
-			<ThemePalettePreview themeId={localSettings.themePreference.themeId} />
-		</span>
-		<select
-			class="select-native select-native-surface w-full"
-			value={localSettings.themePreference.themeId}
-			onchange={(event) => selection.selectFixedTheme(event.currentTarget.value)}
-		>
-			{#each THEME_PROFILES as profile (profile.id)}
-				<option value={profile.id}>{THEME_PROFILE_LABELS[profile.id]()}</option>
-			{/each}
-		</select>
-	</label>
-{:else}
-	<div class="mt-4 grid gap-3 sm:grid-cols-2">
-		<label class="grid gap-1.5 text-sm text-foreground">
-			<span class="flex items-center justify-between gap-3">
-				<span>{m.settings_theme_system_light_label()}</span>
-				<ThemePalettePreview themeId={localSettings.themePreference.lightThemeId} />
-			</span>
-			<select
-				class="select-native select-native-surface w-full"
-				value={localSettings.themePreference.lightThemeId}
-				onchange={(event) => selection.selectSystemLightTheme(event.currentTarget.value)}
-			>
-				{#each LIGHT_THEME_PROFILES as profile (profile.id)}
-					<option value={profile.id}>{THEME_PROFILE_LABELS[profile.id]()}</option>
-				{/each}
-			</select>
-		</label>
-		<label class="grid gap-1.5 text-sm text-foreground">
-			<span class="flex items-center justify-between gap-3">
-				<span>{m.settings_theme_system_dark_label()}</span>
-				<ThemePalettePreview themeId={localSettings.themePreference.darkThemeId} />
-			</span>
-			<select
-				class="select-native select-native-surface w-full"
-				value={localSettings.themePreference.darkThemeId}
-				onchange={(event) => selection.selectSystemDarkTheme(event.currentTarget.value)}
-			>
-				{#each DARK_THEME_PROFILES as profile (profile.id)}
-					<option value={profile.id}>{THEME_PROFILE_LABELS[profile.id]()}</option>
-				{/each}
-			</select>
-		</label>
-	</div>
-{/if}
+<div class="mt-4">
+	<ThemePreferenceFields preference={localSettings.themePreference} {selection} />
+</div>

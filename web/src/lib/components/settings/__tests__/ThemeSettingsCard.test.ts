@@ -17,6 +17,11 @@ describe('ThemeSettingsCard', () => {
 
 		const lightSelect = screen.getByRole('combobox', { name: 'Light theme' });
 		const darkSelect = screen.getByRole('combobox', { name: 'Dark theme' });
+		const preview = lightSelect.closest('label')!.querySelector('[data-theme-preview]')!;
+		expect(preview.getAttribute('data-theme-preview')).toBe('phosphor-light');
+		expect(preview.children).toHaveLength(6);
+		expect(preview.querySelector('.bg-diff-add')).toBeTruthy();
+		expect(preview.querySelector('.bg-diff-del')).toBeTruthy();
 		expect([...lightSelect.querySelectorAll('option')].map((option) => option.textContent)).toEqual(
 			[
 				'Classic Light',
@@ -72,6 +77,9 @@ describe('ThemeSettingsCard', () => {
 			mode: 'fixed',
 			themeId: 'colorblind-dark',
 		});
+		expect(document.querySelector('[data-theme-preview]')?.getAttribute('data-theme-preview')).toBe(
+			'colorblind-dark',
+		);
 
 		await fireEvent.click(screen.getByRole('radio', { name: 'Follow system' }));
 		expect(localSettings.themePreference).toEqual({
