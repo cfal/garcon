@@ -1,4 +1,5 @@
-:root:where([data-theme='neko-dark']) {
+:root:where([data-theme='neko-dark']),
+:where([data-theme-preview='neko-dark']) {
 	--background: 240 21% 15%;
 	--foreground: 226 64% 92%;
 	--card: 240 21% 17%;

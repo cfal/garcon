@@ -1,8 +1,8 @@
 import {
-	DEFAULT_THEME_PREFERENCE,
 	isDarkThemeId,
 	isLightThemeId,
 	isThemeId,
+	systemPreferenceForTheme,
 	type ThemeId,
 	type ThemePreference,
 } from './themes.js';
@@ -29,7 +29,9 @@ export function createThemePreferenceSelection(
 			options.onSelect({ mode: 'fixed', themeId: options.getResolvedThemeId() });
 		},
 		selectSystemMode() {
-			options.onSelect(DEFAULT_THEME_PREFERENCE);
+			const preference = options.getPreference();
+			if (preference.mode === 'system') return;
+			options.onSelect(systemPreferenceForTheme(preference.themeId));
 		},
 		selectFixedTheme(themeId) {
 			if (isThemeId(themeId)) options.onSelect({ mode: 'fixed', themeId });

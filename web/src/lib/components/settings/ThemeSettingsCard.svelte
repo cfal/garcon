@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getLocalSettings, getThemeRuntime } from '$lib/context';
 	import { THEME_PROFILE_LABELS } from '$lib/components/shared/theme-profile-labels.js';
+	import ThemePalettePreview from '$lib/components/shared/ThemePalettePreview.svelte';
 	import {
 		DARK_THEME_PROFILES,
 		LIGHT_THEME_PROFILES,
@@ -52,10 +53,13 @@
 	</fieldset>
 
 	{#if localSettings.themePreference.mode === 'fixed'}
-		<label class="mt-3 flex items-center justify-between gap-4 text-sm text-foreground">
-			<span>{m.settings_theme_fixed_label()}</span>
+		<label class="mt-3 grid gap-1.5 text-sm text-foreground">
+			<span class="flex items-center justify-between gap-3">
+				<span>{m.settings_theme_fixed_label()}</span>
+				<ThemePalettePreview themeId={localSettings.themePreference.themeId} />
+			</span>
 			<select
-				class="select-native w-48 max-w-[60%] shrink-0"
+				class="select-native w-full"
 				value={localSettings.themePreference.themeId}
 				onchange={(event) => selection.selectFixedTheme(event.currentTarget.value)}
 			>
@@ -67,7 +71,10 @@
 	{:else}
 		<div class="mt-3 grid gap-3 sm:grid-cols-2">
 			<label class="grid gap-1.5 text-sm text-foreground">
-				<span>{m.settings_theme_system_light_label()}</span>
+				<span class="flex items-center justify-between gap-3">
+					<span>{m.settings_theme_system_light_label()}</span>
+					<ThemePalettePreview themeId={localSettings.themePreference.lightThemeId} />
+				</span>
 				<select
 					class="select-native w-full"
 					value={localSettings.themePreference.lightThemeId}
@@ -79,7 +86,10 @@
 				</select>
 			</label>
 			<label class="grid gap-1.5 text-sm text-foreground">
-				<span>{m.settings_theme_system_dark_label()}</span>
+				<span class="flex items-center justify-between gap-3">
+					<span>{m.settings_theme_system_dark_label()}</span>
+					<ThemePalettePreview themeId={localSettings.themePreference.darkThemeId} />
+				</span>
 				<select
 					class="select-native w-full"
 					value={localSettings.themePreference.darkThemeId}

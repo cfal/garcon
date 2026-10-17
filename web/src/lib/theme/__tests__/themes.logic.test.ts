@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
 	DEFAULT_THEME_PREFERENCE,
 	THEME_PROFILES,
+	THEME_FAMILIES,
 	getThemeProfile,
 	isDarkThemeId,
 	isLightThemeId,
 	parseThemePreference,
 	rendererThemeIdFor,
 	resolveThemeId,
+	systemPreferenceForTheme,
 } from '../themes.js';
 
 describe('theme profiles', () => {
@@ -22,6 +24,20 @@ describe('theme profiles', () => {
 		}
 	});
 
+	it('pairs every profile exactly once and resolves both schemes to the same family', () => {
+		const pairedIds = THEME_FAMILIES.flatMap((family) => [family.lightThemeId, family.darkThemeId]);
+		expect([...pairedIds].sort()).toEqual(THEME_PROFILES.map(({ id }) => id).sort());
+		for (const family of THEME_FAMILIES) {
+			const preference = {
+				mode: 'system',
+				lightThemeId: family.lightThemeId,
+				darkThemeId: family.darkThemeId,
+			};
+			expect(systemPreferenceForTheme(family.lightThemeId)).toEqual(preference);
+			expect(systemPreferenceForTheme(family.darkThemeId)).toEqual(preference);
+		}
+	});
+
 	it('classifies profile IDs by their declared scheme', () => {
 		expect(THEME_PROFILES.filter(({ id }) => isLightThemeId(id)).map(({ id }) => id)).toEqual([
 			'classic-light',
@@ -29,6 +45,9 @@ describe('theme profiles', () => {
 			'colorblind-light',
 			'owl-light',
 			'neko-light',
+			'lagoon-light',
+			'rose-light',
+			'moss-light',
 		]);
 		expect(THEME_PROFILES.filter(({ id }) => isDarkThemeId(id)).map(({ id }) => id)).toEqual([
 			'classic-dark',
@@ -36,6 +55,9 @@ describe('theme profiles', () => {
 			'colorblind-dark',
 			'owl-dark',
 			'neko-dark',
+			'lagoon-dark',
+			'rose-dark',
+			'moss-dark',
 		]);
 	});
 

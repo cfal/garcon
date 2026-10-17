@@ -12,4 +12,10 @@ export const THEME_PROFILE_LABELS: Record<ThemeId, () => string> = {
 	'owl-dark': m.settings_theme_profile_owl_dark,
 	'neko-light': m.settings_theme_profile_neko_light,
 	'neko-dark': m.settings_theme_profile_neko_dark,
+	'lagoon-light': m.settings_theme_profile_lagoon_light,
+	'lagoon-dark': m.settings_theme_profile_lagoon_dark,
+	'rose-light': m.settings_theme_profile_rose_light,
+	'rose-dark': m.settings_theme_profile_rose_dark,
+	'moss-light': m.settings_theme_profile_moss_light,
+	'moss-dark': m.settings_theme_profile_moss_dark,
 };

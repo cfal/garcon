@@ -9,6 +9,12 @@
 @import './lib/theme/profiles/owl-dark.css';
 @import './lib/theme/profiles/neko-light.css';
 @import './lib/theme/profiles/neko-dark.css';
+@import './lib/theme/profiles/lagoon-light.css';
+@import './lib/theme/profiles/lagoon-dark.css';
+@import './lib/theme/profiles/rose-light.css';
+@import './lib/theme/profiles/rose-dark.css';
+@import './lib/theme/profiles/moss-light.css';
+@import './lib/theme/profiles/moss-dark.css';
 @plugin '@tailwindcss/typography';
 
 @custom-variant dark (&:where(.dark, .dark *));

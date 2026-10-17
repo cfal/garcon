@@ -1,4 +1,5 @@
-:root:where([data-theme='owl-light']) {
+:root:where([data-theme='owl-light']),
+:where([data-theme-preview='owl-light']) {
 	--background: 0 0% 98.4%;
 	--foreground: 243 15% 15%;
 	--card: 0 0% 100%;

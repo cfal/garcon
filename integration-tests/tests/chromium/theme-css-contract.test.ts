@@ -231,6 +231,23 @@ describe("compiled theme CSS", () => {
         for (const property of profileProperties) {
           expect(values[property], `${profile.id} ${property}`).not.toBe("");
         }
+        const preview = await page.evaluate((themeId) => {
+          const root = document.documentElement;
+          const activeBackground =
+            getComputedStyle(root).getPropertyValue("--background");
+          root.dataset.theme =
+            themeId === "classic-dark" ? "classic-light" : "classic-dark";
+          const element = document.createElement("span");
+          element.dataset.themePreview = themeId;
+          document.body.append(element);
+          const previewBackground =
+            getComputedStyle(element).getPropertyValue("--background");
+          element.remove();
+          return { activeBackground, previewBackground };
+        }, profile.id);
+        expect(preview.previewBackground, `${profile.id} scoped preview`).toBe(
+          preview.activeBackground,
+        );
       }
 
       const colorblindValues = await page.evaluate(() => {
@@ -497,7 +514,10 @@ describe("compiled theme CSS", () => {
             pseudoElement: "::placeholder",
           }),
         ]);
-        if (profile.startsWith("phosphor-")) {
+        if (
+          profile.startsWith("phosphor-") ||
+          descriptor.rendererPalette === "semantic"
+        ) {
           expect(
             contrastRatio(input.border, dialogSurface.background),
             `${profile} input boundary`,
@@ -539,5 +559,5 @@ describe("compiled theme CSS", () => {
       await context.close();
       await browser.close();
     }
-  }, 20_000);
+  }, 60_000);
 });

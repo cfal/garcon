@@ -130,25 +130,26 @@ describe('theme profile CSS sources', () => {
 		const referenceProperties = [...declaredProperties(profileSource(reference.id))].sort();
 
 		for (const profile of rest) {
-			expect([...declaredProperties(profileSource(profile.id))].sort()).toEqual(
-				referenceProperties,
-			);
+			expect
+				.soft([...declaredProperties(profileSource(profile.id))].sort())
+				.toEqual(referenceProperties);
 		}
 	});
 
 	it('keeps viewport geometry outside visual profiles', () => {
 		for (const profile of THEME_PROFILES) {
 			const properties = declaredProperties(profileSource(profile.id));
-			expect(properties.has('--safe-area-inset-top')).toBe(false);
-			expect(properties.has('--mobile-nav-height')).toBe(false);
-			expect(properties.has('--app-height')).toBe(false);
+			expect.soft(properties.has('--safe-area-inset-top')).toBe(false);
+			expect.soft(properties.has('--mobile-nav-height')).toBe(false);
+			expect.soft(properties.has('--app-height')).toBe(false);
 		}
 	});
 
 	it('defines every primitive appearance role in every profile', () => {
 		for (const profile of THEME_PROFILES) {
 			const properties = declaredProperties(profileSource(profile.id));
-			for (const property of PROFILE_ROLE_PROPERTIES) expect(properties.has(property)).toBe(true);
+			for (const property of PROFILE_ROLE_PROPERTIES)
+				expect.soft(properties.has(property)).toBe(true);
 		}
 	});
 
@@ -156,28 +157,30 @@ describe('theme profile CSS sources', () => {
 		const light = profileSource('colorblind-light');
 		const dark = profileSource('colorblind-dark');
 
-		expect(light).toContain('--git-added: 210 80% 30%;');
-		expect(light).toContain('--git-deleted: 30 90% 26%;');
-		expect(dark).toContain('--git-added: 210 85% 77%;');
-		expect(dark).toContain('--git-deleted: 30 92% 68%;');
-		expect(light).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
-		expect(dark).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
+		expect.soft(light).toContain('--git-added: 210 80% 30%;');
+		expect.soft(light).toContain('--git-deleted: 30 90% 26%;');
+		expect.soft(dark).toContain('--git-added: 210 85% 77%;');
+		expect.soft(dark).toContain('--git-deleted: 30 92% 68%;');
+		expect.soft(light).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
+		expect.soft(dark).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
 	});
 
 	it('pins the distinct Classic and Phosphor foundations', () => {
-		expect(profileSource('classic-light')).toContain('--radius: 0.5rem;');
-		expect(profileSource('classic-dark')).toContain('--background: 0 0% 10%;');
-		expect(profileSource('phosphor-light')).toContain('--radius: 0.75rem;');
-		expect(profileSource('phosphor-dark')).toContain('--background: 222 33% 5%;');
+		expect.soft(profileSource('classic-light')).toContain('--radius: 0.5rem;');
+		expect.soft(profileSource('classic-dark')).toContain('--background: 0 0% 10%;');
+		expect.soft(profileSource('phosphor-light')).toContain('--radius: 0.75rem;');
+		expect.soft(profileSource('phosphor-dark')).toContain('--background: 222 33% 5%;');
 	});
 
 	it('keeps native painting shared and profile files token-only', () => {
 		const application = readFileSync(new URL('../../../app.css', import.meta.url), 'utf8');
-		expect(application).toContain('scrollbar-color: var(--scroll-area-thumb) transparent;');
-		expect(application).toContain('background: var(--scroll-area-thumb);');
-		expect(application).toContain('background: var(--scroll-area-thumb-hover);');
+		expect.soft(application).toContain('scrollbar-color: var(--scroll-area-thumb) transparent;');
+		expect.soft(application).toContain('background: var(--scroll-area-thumb);');
+		expect.soft(application).toContain('background: var(--scroll-area-thumb-hover);');
 		for (const profile of THEME_PROFILES) {
-			expect(profileSource(profile.id)).not.toMatch(/::selection|::-webkit-scrollbar|accent-color/);
+			expect
+				.soft(profileSource(profile.id))
+				.not.toMatch(/::selection|::-webkit-scrollbar|accent-color/);
 		}
 	});
 
@@ -189,17 +192,18 @@ describe('theme profile CSS sources', () => {
 					const color = values[`ticket-${role}`]
 						.replace(/var\(--([a-z-]+)\)/g, (_match, name: string) => values[name])
 						.replace(/^hsl\((.*)\)$/, '$1');
-					expect(
-						contrastRatio(values[surface], color),
-						`${profile.id} ticket ${role} on ${surface}`,
-					).toBeGreaterThanOrEqual(4.5);
+					expect
+						.soft(
+							contrastRatio(values[surface], color),
+							`${profile.id} ticket ${role} on ${surface}`,
+						)
+						.toBeGreaterThanOrEqual(4.5);
 				}
 			}
 			for (const surface of ['background', 'card', 'popover']) {
-				expect(
-					contrastRatio(values[surface], values.ring),
-					`${profile.id} focus on ${surface}`,
-				).toBeGreaterThanOrEqual(3);
+				expect
+					.soft(contrastRatio(values[surface], values.ring), `${profile.id} focus on ${surface}`)
+					.toBeGreaterThanOrEqual(3);
 			}
 		}
 	});
@@ -297,25 +301,36 @@ describe('theme profile CSS sources', () => {
 				0.4,
 			);
 			for (const [background, foreground] of pairs) {
-				expect(
-					contrastRatio(values[background], values[foreground]),
-					`${profile.id}: ${background}/${foreground}`,
-				).toBeGreaterThanOrEqual(4.5);
+				expect
+					.soft(
+						contrastRatio(values[background], values[foreground]),
+						`${profile.id}: ${background}/${foreground}`,
+					)
+					.toBeGreaterThanOrEqual(4.5);
 			}
 			for (const foreground of foregrounds) {
 				for (const surface of surfaces) {
-					expect(
-						contrastRatio(values[surface], values[foreground]),
-						`${profile.id}: ${foreground} on ${surface}`,
-					).toBeGreaterThanOrEqual(4.5);
+					expect
+						.soft(
+							contrastRatio(values[surface], values[foreground]),
+							`${profile.id}: ${foreground} on ${surface}`,
+						)
+						.toBeGreaterThanOrEqual(4.5);
 				}
 			}
 			for (const foreground of selfTintedForegrounds) {
 				for (const opacity of [0.2, 0.3]) {
-					expect(
-						contrastRatioOnTint(values.background, values[foreground], values[foreground], opacity),
-						`${profile.id}: ${foreground} on ${opacity * 100}% self tint`,
-					).toBeGreaterThanOrEqual(4.5);
+					expect
+						.soft(
+							contrastRatioOnTint(
+								values.background,
+								values[foreground],
+								values[foreground],
+								opacity,
+							),
+							`${profile.id}: ${foreground} on ${opacity * 100}% self tint`,
+						)
+						.toBeGreaterThanOrEqual(4.5);
 				}
 			}
 			for (const foreground of selectedDiffForegrounds) {
@@ -323,10 +338,12 @@ describe('theme profile CSS sources', () => {
 					['composer', composerSurface],
 					['selected', selectedSurface],
 				] as const) {
-					expect(
-						contrastRatioFromChannels(diffSurface, hslToSrgbChannels(values[foreground])),
-						`${profile.id}: ${foreground} on ${selection} diff`,
-					).toBeGreaterThanOrEqual(4.5);
+					expect
+						.soft(
+							contrastRatioFromChannels(diffSurface, hslToSrgbChannels(values[foreground])),
+							`${profile.id}: ${foreground} on ${selection} diff`,
+						)
+						.toBeGreaterThanOrEqual(4.5);
 				}
 			}
 			for (const [selection, diffSurface] of [
@@ -334,13 +351,15 @@ describe('theme profile CSS sources', () => {
 				['composer', composerSurface],
 				['selected', selectedSurface],
 			] as const) {
-				expect(
-					contrastRatioFromChannels(
-						diffSurface,
-						blendChannels(diffSurface, hslToSrgbChannels(values.foreground), 0.7),
-					),
-					`${profile.id}: context line number on ${selection} diff`,
-				).toBeGreaterThanOrEqual(4.5);
+				expect
+					.soft(
+						contrastRatioFromChannels(
+							diffSurface,
+							blendChannels(diffSurface, hslToSrgbChannels(values.foreground), 0.7),
+						),
+						`${profile.id}: context line number on ${selection} diff`,
+					)
+					.toBeGreaterThanOrEqual(4.5);
 			}
 			for (const foreground of syntaxForegrounds) {
 				const syntaxColor = hslToSrgbChannels(values[foreground]);
@@ -354,30 +373,38 @@ describe('theme profile CSS sources', () => {
 					['inline tool', hslToSrgbChannels(values.card)],
 					['plain-text tool', mutedToolSurface],
 				] as const) {
-					expect(
-						contrastRatioFromChannels(syntaxSurface, syntaxColor),
-						`${profile.id}: ${foreground} on ${surfaceName} diff`,
-					).toBeGreaterThanOrEqual(4.5);
+					expect
+						.soft(
+							contrastRatioFromChannels(syntaxSurface, syntaxColor),
+							`${profile.id}: ${foreground} on ${surfaceName} diff`,
+						)
+						.toBeGreaterThanOrEqual(4.5);
 				}
-				expect(
-					contrastRatio(values['markdown-code-background'], values[foreground]),
-					`${profile.id}: ${foreground} on markdown code`,
-				).toBeGreaterThanOrEqual(4.5);
+				expect
+					.soft(
+						contrastRatio(values['markdown-code-background'], values[foreground]),
+						`${profile.id}: ${foreground} on markdown code`,
+					)
+					.toBeGreaterThanOrEqual(4.5);
 			}
 			for (const background of ['diff-add-bg', 'diff-del-bg'] as const) {
-				expect(
-					contrastRatio(values[background], values['muted-foreground']),
-					`${profile.id}: line action on ${background}`,
-				).toBeGreaterThanOrEqual(3);
+				expect
+					.soft(
+						contrastRatio(values[background], values['muted-foreground']),
+						`${profile.id}: line action on ${background}`,
+					)
+					.toBeGreaterThanOrEqual(3);
 			}
 			for (const [selection, diffSurface] of [
 				['composer', composerSurface],
 				['selected', selectedSurface],
 			] as const) {
-				expect(
-					contrastRatioFromChannels(diffSurface, hslToSrgbChannels(values['muted-foreground'])),
-					`${profile.id}: line action on ${selection} diff`,
-				).toBeGreaterThanOrEqual(3);
+				expect
+					.soft(
+						contrastRatioFromChannels(diffSurface, hslToSrgbChannels(values['muted-foreground'])),
+						`${profile.id}: line action on ${selection} diff`,
+					)
+					.toBeGreaterThanOrEqual(3);
 			}
 		}
 	});

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Page } from "playwright";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
+import { THEME_PROFILES } from "../../../web/src/lib/theme/themes";
 
 interface RootThemeProjection {
   themeId: string | undefined;
@@ -34,11 +35,46 @@ describe("theme switching", () => {
         () => document.documentElement.dataset.theme === "phosphor-light",
       );
       await page.getByRole("button", { name: "More actions" }).click();
-      await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
-      await page.getByRole("dialog", { name: "Settings", exact: true }).waitFor();
+      await page
+        .getByRole("menuitem", { name: "Settings", exact: true })
+        .click();
+      await page
+        .getByRole("dialog", { name: "Settings", exact: true })
+        .waitFor();
 
       markPhase("selecting a fixed dark profile");
       await page.getByRole("radio", { name: "Use one theme" }).click();
+      const themeSelect = page.getByRole("combobox", {
+        name: "Theme",
+        exact: true,
+      });
+      for (const profile of [
+        ...THEME_PROFILES.filter(
+          (profile) => profile.rendererPalette === "semantic",
+        ),
+        THEME_PROFILES.find((profile) => profile.id === "rose-dark")!,
+      ]) {
+        await themeSelect.focus();
+        await themeSelect.selectOption(profile.id);
+        await page.waitForFunction(
+          (id) => document.documentElement.dataset.theme === id,
+          profile.id,
+        );
+        expect(await rootThemeProjection(page)).toEqual({
+          themeId: profile.id,
+          dark: profile.colorScheme === "dark",
+          colorScheme: profile.colorScheme,
+          themeColor: profile.browserThemeColor,
+        });
+        expect(
+          await themeSelect.evaluate(
+            (element) => element === document.activeElement,
+          ),
+        ).toBe(true);
+        expect(
+          await page.locator(`[data-theme-preview="${profile.id}"]`).count(),
+        ).toBe(1);
+      }
       await page
         .getByRole("combobox", { name: "Theme", exact: true })
         .selectOption("colorblind-dark");
@@ -56,6 +92,12 @@ describe("theme switching", () => {
 
       markPhase("configuring a mixed System pair");
       await page.getByRole("radio", { name: "Follow system" }).click();
+      expect(
+        await page.getByRole("combobox", { name: "Light theme" }).inputValue(),
+      ).toBe("colorblind-light");
+      expect(
+        await page.getByRole("combobox", { name: "Dark theme" }).inputValue(),
+      ).toBe("colorblind-dark");
       await page
         .getByRole("combobox", { name: "Light theme" })
         .selectOption("classic-light");

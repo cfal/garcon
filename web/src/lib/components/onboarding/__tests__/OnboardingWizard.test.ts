@@ -85,8 +85,8 @@ describe('OnboardingWizard', () => {
 
 		const lightSelect = screen.getByRole('combobox', { name: 'Light theme' });
 		const darkSelect = screen.getByRole('combobox', { name: 'Dark theme' });
-		expect(lightSelect.querySelectorAll('option')).toHaveLength(5);
-		expect(darkSelect.querySelectorAll('option')).toHaveLength(5);
+		expect(lightSelect.querySelectorAll('option')).toHaveLength(8);
+		expect(darkSelect.querySelectorAll('option')).toHaveLength(8);
 
 		await fireEvent.change(lightSelect, { target: { value: 'classic-light' } });
 		await fireEvent.change(darkSelect, { target: { value: 'colorblind-dark' } });
@@ -96,6 +96,29 @@ describe('OnboardingWizard', () => {
 			lightThemeId: 'classic-light',
 			darkThemeId: 'colorblind-dark',
 		});
+	});
+
+	it('previews a fixed family and pairs it when following System', async () => {
+		const { localSettings } = renderWizard();
+		await screen.findByRole('heading', { name: 'Choose your theme' });
+		await fireEvent.click(screen.getByRole('radio', { name: /Use one theme/ }));
+		await fireEvent.change(screen.getByRole('combobox', { name: 'Theme' }), {
+			target: { value: 'rose-dark' },
+		});
+		expect(
+			document.querySelector('[data-theme-preview="rose-dark"][aria-hidden="true"]'),
+		).toBeTruthy();
+		await fireEvent.click(screen.getByRole('radio', { name: /Follow system/ }));
+		expect(localSettings.themePreference).toEqual({
+			mode: 'system',
+			lightThemeId: 'rose-light',
+			darkThemeId: 'rose-dark',
+		});
+		expect(
+			[...document.querySelectorAll('[data-theme-preview]')].map((element) =>
+				element.getAttribute('data-theme-preview'),
+			),
+		).toEqual(['rose-light', 'rose-dark']);
 	});
 
 	it('renders real sidebar previews for each layout option and tracks the selection', async () => {

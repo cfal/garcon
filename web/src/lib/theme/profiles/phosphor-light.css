@@ -1,5 +1,6 @@
 :root:where([data-theme='phosphor-light']),
-:root:where(:not([data-theme])) {
+:root:where(:not([data-theme])),
+:where([data-theme-preview='phosphor-light']) {
 	--background: 220 25% 97%;
 	--foreground: 222 32% 11%;
 	--card: 0 0% 100%;

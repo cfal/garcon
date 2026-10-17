@@ -1,7 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
-import { DEFAULT_THEME_PREFERENCE } from '$lib/theme/themes.js';
 import ThemeSettingsCardTestHost from './ThemeSettingsCardTestHost.svelte';
 
 describe('ThemeSettingsCard', () => {
@@ -19,7 +18,16 @@ describe('ThemeSettingsCard', () => {
 		const lightSelect = screen.getByRole('combobox', { name: 'Light theme' });
 		const darkSelect = screen.getByRole('combobox', { name: 'Dark theme' });
 		expect([...lightSelect.querySelectorAll('option')].map((option) => option.textContent)).toEqual(
-			['Classic Light', 'Phosphor Light', 'Colorblind Light', 'Owl Daybreak', 'Neko Frost'],
+			[
+				'Classic Light',
+				'Phosphor Light',
+				'Colorblind Light',
+				'Owl Daybreak',
+				'Neko Frost',
+				'Lagoon Light',
+				'Rose Light',
+				'Moss Light',
+			],
 		);
 		expect([...darkSelect.querySelectorAll('option')].map((option) => option.textContent)).toEqual([
 			'Classic Dark',
@@ -27,6 +35,9 @@ describe('ThemeSettingsCard', () => {
 			'Colorblind Dark',
 			'Owl Nightfall',
 			'Neko Velvet',
+			'Lagoon Dark',
+			'Rose Dark',
+			'Moss Dark',
 		]);
 		localSettings.destroy();
 	});
@@ -46,7 +57,7 @@ describe('ThemeSettingsCard', () => {
 		localSettings.destroy();
 	});
 
-	it('updates a concrete profile and restores the default System pair atomically', async () => {
+	it('updates a concrete profile and follows its family in System mode', async () => {
 		const localSettings = createLocalSettingsStore();
 		localSettings.set('themePreference', { mode: 'fixed', themeId: 'classic-light' });
 		render(ThemeSettingsCardTestHost, {
@@ -63,7 +74,11 @@ describe('ThemeSettingsCard', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('radio', { name: 'Follow system' }));
-		expect(localSettings.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+		expect(localSettings.themePreference).toEqual({
+			mode: 'system',
+			lightThemeId: 'colorblind-light',
+			darkThemeId: 'colorblind-dark',
+		});
 		localSettings.destroy();
 	});
 });

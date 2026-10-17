@@ -278,8 +278,60 @@ describe("CodeMirror theme contrast", () => {
             selectionFailures,
             `${label} selected text on ${colors.selectionBackground}`,
           ).toEqual([]);
+          if (profile.rendererPalette === "semantic" && editorKind === "file") {
+            for (const foreground of colors.foregrounds) {
+              expect(
+                contrastRatio(foreground, colors.selectionBackground),
+                `${label} selected syntax ${foreground}`,
+              ).toBeGreaterThanOrEqual(4.5);
+            }
+          }
         }
       }
+
+      const retained = await page.evaluate(async () => {
+        const root = document.querySelector<HTMLElement>("#editor")!;
+        const scope = globalThis as typeof globalThis & {
+          mountEditor: (
+            parent: HTMLElement,
+            themeId: RendererThemeId,
+          ) => {
+            dom: HTMLElement;
+            focus(): void;
+            destroy(): void;
+          };
+        };
+        root.replaceChildren();
+        document.documentElement.dataset.theme = "lagoon-dark";
+        const view = scope.mountEditor(root, "semantic-dark");
+        view.focus();
+        await new Promise(requestAnimationFrame);
+        const samples = [];
+        for (const themeId of [
+          "lagoon-dark",
+          "rose-dark",
+          "moss-dark",
+          "lagoon-dark",
+        ]) {
+          document.documentElement.dataset.theme = themeId;
+          samples.push({
+            background: getComputedStyle(view.dom).backgroundColor,
+            caret: getComputedStyle(view.dom.querySelector(".cm-content")!)
+              .caretColor,
+            selection: getComputedStyle(
+              view.dom.querySelector(".cm-selectionBackground")!,
+            ).backgroundColor,
+            focused: view.dom.contains(document.activeElement),
+          });
+        }
+        view.destroy();
+        return samples;
+      });
+      expect(retained[0]).toEqual(retained[3]);
+      expect(new Set(retained.map((sample) => sample.background)).size).toBe(3);
+      expect(new Set(retained.map((sample) => sample.caret)).size).toBe(3);
+      expect(new Set(retained.map((sample) => sample.selection)).size).toBe(3);
+      expect(retained.every((sample) => sample.focused)).toBe(true);
     } finally {
       await context.close();
       await browser.close();
