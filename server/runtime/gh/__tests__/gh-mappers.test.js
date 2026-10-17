@@ -80,20 +80,23 @@ describe('buildPullRequestList', () => {
 });
 
 describe('buildReviewTarget', () => {
-  const comment = (id, body, overrides = {}) => ({ id, url: `https://git.example.invalid/c/${id}`, isMinimized: false, viewerDidAuthor: true, body, ...overrides });
-  const raw = (comments) => ({ data: { repository: { pullRequest: { number: 7, state: 'OPEN', headRefOid: 'b'.repeat(40), comments: { nodes: comments } } } } });
+  const actor = { id: "actor:viewer", login: "viewer" };
+  const other = { id: "actor:other", login: "other" };
+  const comment = (id, body, overrides = {}) => ({ author: actor, id, url: `https://git.example.invalid/c/${id}`, isMinimized: false, viewerDidAuthor: true, body, ...overrides });
+  const raw = (comments) => ({ data: { viewer: actor, repository: { nameWithOwner: "o/r", url: "https://git.example.invalid/o/r", pullRequest: { number: 7, state: 'OPEN', headRefOid: 'b'.repeat(40), comments: { nodes: comments } } } } });
 
-  it('returns only the viewer comments that carry the marker', () => {
+  it('returns marked comments with their stable authors across account switches', () => {
     const target = buildReviewTarget(raw([
       comment('one', 'Review\n<!-- garcon-review o/r#7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->'),
       comment('two', 'Unrelated <!-- other -->'),
-      comment('three', '<!-- garcon-review o/r#7 dddddddddddddddddddddddddddddddddddddddd -->', { viewerDidAuthor: false }),
+      comment('three', '<!-- garcon-review o/r#7 dddddddddddddddddddddddddddddddddddddddd -->', { author: other }),
       comment('four', '<!-- garcon-review o/r#7 dddddddddddddddddddddddddddddddddddddddd -->', { isMinimized: true }),
     ]), 'garcon-review o/r#7 ');
     expect(target).toMatchObject({ number: 7, state: 'open', headRefOid: 'b'.repeat(40) });
     expect(target.markedComments).toEqual([
-      { id: 'one', url: 'https://git.example.invalid/c/one', marker: '<!-- garcon-review o/r#7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->', isMinimized: false },
-      { id: 'four', url: 'https://git.example.invalid/c/four', marker: '<!-- garcon-review o/r#7 dddddddddddddddddddddddddddddddddddddddd -->', isMinimized: true },
+      { author: actor, id: 'one', url: 'https://git.example.invalid/c/one', marker: '<!-- garcon-review o/r#7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->', isMinimized: false },
+      { author: other, id: 'three', url: 'https://git.example.invalid/c/three', marker: '<!-- garcon-review o/r#7 dddddddddddddddddddddddddddddddddddddddd -->', isMinimized: false },
+      { author: actor, id: 'four', url: 'https://git.example.invalid/c/four', marker: '<!-- garcon-review o/r#7 dddddddddddddddddddddddddddddddddddddddd -->', isMinimized: true },
     ]);
   });
 

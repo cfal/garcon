@@ -49,7 +49,11 @@ describe('gh API contract', () => {
 		async (operation) => {
 			const deadline = new AbortController();
 			const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadline.signal);
-			const target = { executorId: 'remote-executor', projectPath: '/project' };
+			const target = {
+				executorId: 'remote-executor',
+				projectPath: '/project',
+				repository: { host: 'github.example.com', nameWithOwner: 'acme/app' },
+			};
 			fetchMock.mockResolvedValue(
 				new Response(
 					JSON.stringify({
@@ -67,6 +71,11 @@ describe('gh API contract', () => {
 			expect(timeout).toHaveBeenCalledWith(GH_DETAIL_TIMEOUT_MS);
 			expect(fetchMock.mock.calls[0][1].signal).toBe(deadline.signal);
 			expect(fetchMock.mock.calls[0][0]).toContain('executorId=remote-executor');
+			if (operation === 'detail') {
+				const url = new URL(fetchMock.mock.calls[0][0], 'http://localhost');
+				expect(url.searchParams.get('repositoryHost')).toBe('github.example.com');
+				expect(url.searchParams.get('repositoryName')).toBe('acme/app');
+			}
 		},
 	);
 
@@ -75,7 +84,11 @@ describe('gh API contract', () => {
 		async (operation) => {
 			const timeout = vi.spyOn(AbortSignal, 'timeout');
 			const caller = new AbortController();
-			const target = { executorId: 'local', projectPath: '/project' };
+			const target = {
+				executorId: 'local',
+				projectPath: '/project',
+				repository: { host: 'github.com', nameWithOwner: 'acme/app' },
+			};
 			fetchMock.mockResolvedValue(
 				new Response(
 					JSON.stringify({

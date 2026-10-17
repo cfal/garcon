@@ -2800,8 +2800,6 @@
 	"common_refresh": "Refresh",
 	"pull_request_other_comments": "Comments not on the current diff",
 	"pull_request_outdated": "Outdated",
-	"pull_request_address_with_agent_hint": "Send this comment to the agent to fix",
-	"pull_request_address_with_agent": "Address with agent",
 	"pull_request_draft": "Draft",
 	"git_worktree_none": "No worktrees found",
 	"git_revert_title": "Revert commit",
@@ -3095,5 +3093,6 @@
 	"pull_request_repository_daily_limit_hint": "1–500 automatic reviews in the last 24 hours.",
 	"pull_request_repository_debounce_hint": "0–1,440 minutes. Set 0 to review immediately.",
 	"pull_request_repository_settings_invalid": "Use whole numbers within the shown ranges and at most 20 filter values of 255 characters per list.",
-	"pull_request_review_retry_cleanup": "Retry cleanup"
+	"pull_request_review_retry_cleanup": "Retry cleanup",
+	"pull_request_review_reconcile_post": "Reconcile post"
 }

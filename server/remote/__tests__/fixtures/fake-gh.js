@@ -5,6 +5,7 @@ const cwd = process.cwd();
 const config = await Bun.file(`${cwd}/gh-fixture.json`).json();
 const args = process.argv.slice(2);
 const [command, action] = args;
+await import('node:fs/promises').then(fs => fs.appendFile(`${cwd}/gh-calls.jsonl`, `${JSON.stringify(args)}\n`));
 if (config.delayMs) await new Promise(resolve => setTimeout(resolve, config.delayMs));
 if (config.wait) {
   await Bun.write(`${cwd}/gh-started`, 'ready');
@@ -13,6 +14,9 @@ if (config.wait) {
 const owner = config.owner ?? config.label;
 const repository = config.repository ?? 'repository';
 const login = config.login ?? config.label;
+const actor = { id: config.viewerId ?? `actor:${login}`, login };
+const host = config.host ?? 'git.example.invalid';
+const repo = { nameWithOwner: `${owner}/${repository}`, url: `https://${host}/${owner}/${repository}` };
 const defaultPull = { number: 1, title: config.label, author: { login: config.label } };
 const pulls = (config.pulls ?? [defaultPull]).map(pull => ({
   title: `Pull request ${pull.number}`, body: 'x'.repeat(config.bodyBytes ?? 0), state: 'OPEN', isDraft: false,
@@ -48,8 +52,8 @@ const listPull = ({ files, body, labels, reviewRequests, checks, teamReviewReque
 });
 
 if (config.fail?.[`${command} ${action}`] || config.fail?.[command]) fail(config.fail[`${command} ${action}`] ?? config.fail[command]);
-if (command === 'auth') print({ hosts: { 'git.example.invalid': [{ active: true, state: 'success', login }] } });
-else if (command === 'repo') print({ nameWithOwner: `${owner}/${repository}` });
+if (command === 'auth') print({ hosts: { [host]: [{ active: true, state: 'success', login }] } });
+else if (command === 'repo') print(repo);
 else if (command === 'api' && action === 'graphql') {
   const query = field('query') ?? '';
   if (query.startsWith('mutation')) {
@@ -58,25 +62,28 @@ else if (command === 'api' && action === 'graphql') {
     comment.isMinimized = true;
     await Bun.write(commentsFile, JSON.stringify(comments));
     print({ data: { minimizeComment: { minimizedComment: { isMinimized: true } } } });
+  } else if (query.includes('node(id:')) {
+    const comment = (await readComments()).find(entry => entry.id === field('id')) ?? fail('GraphQL: Could not resolve to a node with the global id.');
+    print({ data: { viewer: actor, node: { author: comment.author ?? actor, repository: comment.repository ?? repo } } });
   } else if (query.includes('pullRequest(number:')) {
     const pull = findPull(field('number'));
     let connections;
     if (query.includes('comments(first:')) {
       const comments = (await readComments()).filter(comment => comment.number === pull.number);
-      connections = { comments: page(comments.map(({ number, ...comment }) => ({ viewerDidAuthor: true, isMinimized: false, ...comment }))) };
+      connections = { comments: page(comments.map(({ number, ...comment }) => ({ author: actor, isMinimized: false, ...comment }))) };
     } else if (query.includes('labels(first:')) {
       connections = { labels: page(pull.labels.map(name => ({ name }))) };
     } else {
       connections = { reviewRequests: page(pull.reviewRequests.map(reviewer => ({ requestedReviewer: { __typename: 'User', login: reviewer } }))) };
     }
-    print({ data: { repository: { pullRequest: { number: pull.number, state: pull.state, headRefOid: pull.headRefOid, ...connections } } } });
+    print({ data: { viewer: actor, repository: { ...repo, pullRequest: { number: pull.number, state: pull.state, headRefOid: pull.headRefOid, ...connections } } } });
   } else if (query.includes('requested:search')) {
     const requested = pulls.filter(pull => pull.state === 'OPEN' && (pull.teamReviewRequested || pull.reviewRequests.includes(login))).map(pull => ({ number: pull.number }));
-    print({ data: { requested: { ...page(requested), issueCount: requested.length } } });
+    print({ data: { viewer: actor, requested: { ...page(requested), issueCount: requested.length } } });
   } else {
     print({ data: {
-      viewer: { login },
-      repository: { nameWithOwner: owner + '/' + repository, url: 'https://git.example.invalid/' + owner + '/' + repository,
+      viewer: actor,
+      repository: { ...repo,
         pullRequests: page(pulls.filter(pull => pull.state === 'OPEN').map(listPull)) },
     } });
   }
@@ -85,10 +92,12 @@ else if (command === 'api' && action === 'graphql') {
   findPull(number);
   const comments = await readComments();
   const id = `comment-${comments.length + 1}`;
+  const commentActor = config.commentAuthor ?? actor;
   const url = `https://git.example.invalid/${owner}/${repository}/pull/${number}#issuecomment-${comments.length + 1}`;
-  comments.push({ id, url, number, body: await Bun.stdin.text() });
+  comments.push({ id, url, number, body: await Bun.stdin.text(), author: commentActor });
   await Bun.write(commentsFile, JSON.stringify(comments));
-  print({ node_id: id, html_url: url });
+  if (config.commentResponse !== undefined) process.stdout.write(config.commentResponse);
+  else print({ node_id: id, html_url: url, user: { node_id: commentActor.id, login: commentActor.login } });
 } else if (command === 'api') {
   if (config.commentsFail) fail('HTTP 403: forbidden');
   const pages = config.commentPages ?? [[{ id: 1, path: 'example.txt', line: 1, side: 'RIGHT', body: 'synthetic comment' }]];

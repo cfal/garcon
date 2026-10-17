@@ -30,7 +30,10 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const project = fixture.executionDirs.project;
       await initializeFixtureRepository(project);
       const fixturePath = join(project, 'gh-fixture.json');
-      await writeFile(fixturePath, JSON.stringify({ label: 'synthetic-worker', pulls: [{ number: 7, headRefOid: HEAD, reviewRequests: ['synthetic-worker'] }] }));
+      await writeFile(fixturePath, JSON.stringify({
+        label: 'synthetic-worker', commentResponse: '{',
+        pulls: [{ number: 7, headRefOid: HEAD, reviewRequests: ['synthetic-worker'] }],
+      }));
 
       // The shell agent's output is its final response, so the "review" is deterministic.
       const connected = await fixture.client.post<PullRequestReviewMutationResponse>('/api/v1/pull-request-reviews/repositories', {
@@ -46,13 +49,30 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       expect(connected.snapshot.inbox.map((entry) => [entry.pull.number, entry.pull.reviewRequest])).toEqual([[7, 'me']]);
 
       await fixture.client.post('/api/v1/pull-request-reviews/runs', { repositoryId: repository.id, number: 7 });
+      const unconfirmed = await latestRun(fixture, (run) => run?.post.status === 'unknown' && Boolean(run.post.message?.includes('Post again'))
+        || run?.post.status === 'failed' || run?.state === 'failed');
+      expect(unconfirmed).toMatchObject({ state: 'completed', reviewedSha: HEAD, post: { status: 'unknown' } });
+      expect(unconfirmed!.post.actor?.id).toBeString();
+      await writeFile(fixturePath, JSON.stringify({
+        label: 'synthetic-worker', login: 'other-viewer', commentResponse: '{',
+        pulls: [{ number: 7, headRefOid: HEAD }],
+      }));
+      await fixture.client.post('/api/v1/pull-request-reviews/runs/post', { runId: unconfirmed!.id });
+      const switched = await latestRun(fixture, () => true);
+      expect(switched?.post).toMatchObject({ status: 'posted', actor: unconfirmed!.post.actor });
+      expect(JSON.parse(await readFile(join(project, 'gh-comments.json'), 'utf8'))).toHaveLength(1);
+      await writeFile(fixturePath, JSON.stringify({
+        label: 'synthetic-worker', commentResponse: '{', pulls: [{ number: 7, headRefOid: HEAD }],
+      }));
+      await fixture.client.post('/api/v1/pull-request-reviews/runs/post', { runId: unconfirmed!.id });
       const posted = await latestRun(fixture, (run) => run?.post.status === 'posted' || run?.state === 'failed');
       expect(posted).toMatchObject({ state: 'completed', reviewedSha: HEAD, chatAvailable: true, post: { status: 'posted' } });
       const comments = JSON.parse(await readFile(join(project, 'gh-comments.json'), 'utf8')) as { id: string; url: string; number: number; body: string }[];
-      expect(comments).toEqual([{
+      expect(comments).toHaveLength(1);
+      expect(comments[0]).toMatchObject({
         id: 'comment-1', url: expect.any(String), number: 7,
         body: `No findings.\n\nReviewed commit: ${HEAD}\n\n<!-- garcon-review synthetic-worker/repository#7 ${HEAD} -->`,
-      }]);
+      });
       const [stored] = (await fixture.client.get<{ runs: { review: string }[] }>(
         `/api/v1/pull-request-reviews/runs?repositoryId=${repository.id}&number=7`,
       )).runs;

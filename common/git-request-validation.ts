@@ -1,4 +1,5 @@
 import { isRecord } from './json.js';
+import { isGhActorIdentity, isGhRepositoryIdentity } from './gh-identity.js';
 import type { GitMethod } from './git.js';
 import type { ExecutionGitRequests, GitReviewDocumentRef } from './git-execution.js';
 import { GIT_MAX_REQUEST_BYTES, GIT_MAX_REQUEST_PATHS } from './git-execution.js';
@@ -58,11 +59,11 @@ export function isGitMethod(value: unknown): value is GitMethod {
 
 export const GH_REQUEST_FIELDS = {
   getStatus: [],
-  listPullRequests: ['projectPath'],
-  getPullRequest: ['projectPath', 'number'],
-  getPullRequestReviewTarget: ['projectPath', 'number', 'marker'],
-  createPullRequestComment: ['projectPath', 'number', 'body'],
-  minimizePullRequestComment: ['projectPath', 'commentId'],
+  listPullRequests: ['projectPath', 'repository'],
+  getPullRequest: ['projectPath', 'repository', 'number'],
+  getPullRequestReviewTarget: ['projectPath', 'repository', 'number', 'marker'],
+  createPullRequestComment: ['projectPath', 'repository', 'actor', 'number', 'body'],
+  minimizePullRequestComment: ['projectPath', 'repository', 'actor', 'commentId'],
 } as const satisfies Record<keyof GhRequests, readonly string[]>;
 
 export function isGhMethod(value: unknown): value is keyof GhRequests {
@@ -75,6 +76,8 @@ export function validateGhRequest<K extends keyof GhRequests>(method: K, request
   const keys: readonly string[] = GH_REQUEST_FIELDS[method];
   const valid = isRecord(request) && fields(request, keys)
     && (!keys.includes('projectPath') || path(request.projectPath))
+    && (!keys.includes('repository') || method === 'listPullRequests' && request.repository === undefined || isGhRepositoryIdentity(request.repository))
+    && (!keys.includes('actor') || isGhActorIdentity(request.actor))
     && (!keys.includes('number') || integer(request.number, Number.MAX_SAFE_INTEGER) && request.number !== 0)
     && (!keys.includes('marker') || bounded(request.marker, GH_COMMENT_MARKER_MAX_LENGTH))
     && (!keys.includes('body') || bounded(request.body, GH_COMMENT_BODY_MAX_LENGTH))

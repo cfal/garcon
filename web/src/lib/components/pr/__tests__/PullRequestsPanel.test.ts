@@ -61,7 +61,7 @@ const run: PullRequestReviewRunDetail = {
 	createdAt: '2026-01-01T00:00:00Z',
 	startedAt: '2026-01-01T00:00:00Z',
 	finishedAt: '2026-01-01T00:05:00Z',
-	post: { status: 'none', commentUrl: null, postedAt: null, message: null },
+	post: { actor: null, status: 'none', commentUrl: null, postedAt: null, message: null },
 	review: `No actionable findings.\n\nReviewed commit: ${HEAD}`,
 };
 
@@ -139,8 +139,6 @@ function setup(
 	render(PullRequestsPanel, {
 		controller,
 		onOpenChat,
-		onSendToChat: vi.fn(),
-		onNavigateToChat: vi.fn(),
 	});
 	return { api, onOpenChat, controller, getDetail, getRuns };
 }
@@ -370,7 +368,11 @@ describe('PullRequestsPanel', () => {
 		});
 		await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(2));
 		expect(getDetail).toHaveBeenLastCalledWith(
-			{ executorId: '11111111-1111-4111-8111-111111111111', projectPath: '/remote/app' },
+			{
+				executorId: '11111111-1111-4111-8111-111111111111',
+				projectPath: '/remote/app',
+				repository: { host: 'github.com', nameWithOwner: 'acme/app' },
+			},
 			7,
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
@@ -433,6 +435,7 @@ describe('PullRequestsPanel', () => {
 				...run,
 				state: 'outdated',
 				post: {
+					actor: null,
 					status,
 					commentUrl: null,
 					postedAt: null,

@@ -11,7 +11,7 @@ Make the existing Git and read-only pull-request experience work on the reposito
 - Status, workbench, staged/unstaged review, partial staging, commit, branch/ref selection, history, comparisons, blame, graph, conflict resolution, stashes, remotes, fetch/pull/push, and worktrees.
 - Remote worktree selection/creation from New Chat and the sidebar project-path dialog.
 - GitHub CLI availability/auth status and existing pull-request list/detail views, including diffs and best-effort review threads.
-- The three GitHub writes that [automatic pull request review](../pull-request-reviews.md) needs: create a pull request comment, find the viewer's marked comments, and minimize one.
+- The review-target read and two comment writes that [automatic pull request review](../pull-request-reviews.md) needs: find marked comments, create a pull request comment, and minimize one.
 - Commit-message generation that reads the correct executor's repository while retaining independently selected one-shot generation settings.
 - Local uses the same service implementation and behavioral contract as remote executors.
 
@@ -149,15 +149,17 @@ git.collectCommitMessageContext({ projectPath, files }, callOptions)
   -> bounded selected-file diff context
 
 gh.getStatus(callOptions)
-gh.listPullRequests({ projectPath }, callOptions)
-gh.getPullRequest({ projectPath, number }, callOptions)
-gh.getPullRequestReviewTarget({ projectPath, number, marker }, callOptions)
-  -> head commit, state, and the viewer's comments whose hidden marker starts with `marker`
-gh.createPullRequestComment({ projectPath, number, body }, callOptions)
-gh.minimizePullRequestComment({ projectPath, commentId }, callOptions)
+gh.listPullRequests({ projectPath, repository? }, callOptions)
+gh.getPullRequest({ projectPath, repository, number }, callOptions)
+gh.getPullRequestReviewTarget({ projectPath, repository, number, marker }, callOptions)
+  -> repository identity, viewer identity, head commit, state, and marked comments with their authors
+gh.createPullRequestComment({ projectPath, repository, actor, number, body }, callOptions)
+gh.minimizePullRequestComment({ projectPath, repository, actor, commentId }, callOptions)
 ```
 
 `listPullRequests` reads the viewer's login and paginates open pull requests, labels, and review requests. Each pull request includes its head commit, fork flag, author association, and whether review is requested from the viewer directly or through a team. Incomplete pagination fails the read. Comment bodies, at most GitHub's 65,536 characters, reach `gh` on standard input. The comment writes are GitHub mutations: they take the mutation admission pool, and an interruption or unconfirmed result after dispatch is `GIT_MUTATION_OUTCOME_UNKNOWN`, never a retry. The controller resolves an unknown post by looking for its marker before posting again.
+
+`repository` binds the GitHub host and owner/name; `actor` carries a stable GitHub user ID and login. Connected reads and mutations address that host/repository explicitly and reject a different live checkout identity. Mutation admission also rechecks the actor. The controller saves the posting actor before dispatch and retains it through reconciliation, so changing the executor's `gh` login cannot duplicate an uncertain post. Browser detail requests carry `repositoryHost` and `repositoryName` alongside the executor, project, and PR number.
 
 The service is already acquired from a selected executor. Validate returned executor identity against that selection rather than letting a response retarget a call. `ExecutorCallOptions` carries local abort/deadline plumbing; do not serialize `AbortSignal`, callbacks, `Response`, mutable trace arrays, Maps, or filesystem handles. Return serializable optional diagnostics if needed, and keep HTTP serialization metrics at the controller.
 

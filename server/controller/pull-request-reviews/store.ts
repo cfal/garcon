@@ -15,7 +15,7 @@ import { diagnosticErrorCode } from '../../common/errors.js';
 import { createLogger } from '../../common/log.js';
 import { configureDurableSqlite, openPrivateSqliteDatabase, securePrivateSqliteSidecars } from '../lib/private-sqlite.js';
 import { reviewConflict, reviewStorageUnavailable } from './errors.js';
-import { PULL_REQUEST_REVIEW_SCHEMA } from './schema.js';
+import { PENDING_REVIEW_POST_RECOVERY, PULL_REQUEST_REVIEW_SCHEMA } from './schema.js';
 
 const logger = createLogger('pull-request-review-store');
 
@@ -333,9 +333,16 @@ export class PullRequestReviewStore {
   }
 
   recentRuns(limit: number): StoredRun[] {
-    return this.#read((database) => database.query<RunRow, [number]>(
-      `SELECT ${RUN_COLUMNS} FROM review_runs ORDER BY created_at DESC, rowid DESC LIMIT ?`,
-    ).all(limit).map(runFromRow));
+    return this.#read((database) => {
+      // Unresolved posts stay reachable after closure and newer reviews, without reading full history.
+      const recovery = database.query<RunRow, [number]>(
+        `SELECT ${RUN_COLUMNS} FROM review_runs WHERE ${PENDING_REVIEW_POST_RECOVERY} ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+      ).all(limit);
+      const recent = database.query<RunRow, [number]>(
+        `SELECT ${RUN_COLUMNS} FROM review_runs ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+      ).all(limit);
+      return [...new Map([...recovery, ...recent].map(row => [row.id, row])).values()].slice(0, limit).map(runFromRow);
+    });
   }
 
   activeRuns(): StoredRun[] {
@@ -383,13 +390,14 @@ export class PullRequestReviewStore {
     ).get(id, chatId) !== null);
   }
 
-  // Preserves active work and archival retries, deleting at most one bounded batch.
+  // Preserves active work, archival retries, and unresolved posts within one bounded batch.
   pruneClosedRuns(repositoryId: string, before: string): number {
     const count = this.#write((database) => database.query(`DELETE FROM review_runs WHERE rowid IN (
       SELECT run.rowid FROM review_pulls AS pull INDEXED BY review_pulls_closed
       CROSS JOIN review_runs AS run INDEXED BY review_runs_prunable
       WHERE pull.repository_id = ? AND pull.closed_at < ? AND run.repository_id = pull.repository_id AND run.number = pull.number
-        AND run.state NOT IN ('queued','reviewing','needs-input') AND (run.chat_id IS NULL OR run.chat_archived = 1) LIMIT ?
+        AND run.state NOT IN ('queued','reviewing','needs-input') AND (run.chat_id IS NULL OR run.chat_archived = 1)
+        AND NOT ${PENDING_REVIEW_POST_RECOVERY} LIMIT ?
     )`).run(repositoryId, before, REVIEW_HISTORY_BATCH_SIZE).changes);
     if (count) this.#touchRuns(repositoryId);
     return count;

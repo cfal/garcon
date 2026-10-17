@@ -2,6 +2,7 @@ import type { ExecutionGhService } from '@garcon/server-agent-interface';
 import { GH_DETAIL_TIMEOUT_MS, ghOperationTimeoutMs } from '../../../common/git-execution.js';
 import { validateGhRequest } from '../../../common/git-request-validation.js';
 import { GitServiceError } from '../../../common/git-error.js';
+import type { GhRepositoryIdentity } from '../../../common/gh.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import { executorIdFromValue } from './executor-target.js';
 import { gitRouteFailure } from './git-executor-service.js';
@@ -14,7 +15,7 @@ export type GhServiceResolver = (executorId: string) => Promise<Pick<ExecutionGh
 const REQUEST_FIELDS = {
   getStatus: ['executorId'],
   listPullRequests: ['executorId', 'project'],
-  getPullRequest: ['executorId', 'project', 'number'],
+  getPullRequest: ['executorId', 'project', 'number', 'repositoryHost', 'repositoryName'],
 } satisfies Record<BrowserGhMethod, readonly string[]>;
 
 export default function createGhRoutes(resolve: GhServiceResolver, timeoutMs = GH_DETAIL_TIMEOUT_MS): RouteMap {
@@ -28,9 +29,16 @@ export default function createGhRoutes(resolve: GhServiceResolver, timeoutMs = G
         const executorId = executorIdFromValue(url.searchParams.get('executorId'));
         const projectPath = url.searchParams.get('project') ?? '';
         const number = Number(url.searchParams.get('number'));
-        const input: { projectPath?: string; number?: number } = {};
+        const input: { projectPath?: string; number?: number; repository?: GhRepositoryIdentity } = {};
         if (method !== 'getStatus') input.projectPath = projectPath;
-        if (method === 'getPullRequest') input.number = number;
+        const repository = {
+          host: url.searchParams.get('repositoryHost') ?? '',
+          nameWithOwner: url.searchParams.get('repositoryName') ?? '',
+        };
+        if (method === 'getPullRequest') {
+          input.number = number;
+          input.repository = repository;
+        }
         validateGhRequest(method, input);
         const service = await resolve(executorId);
         const options = { signal: request.signal, timeoutMs: Math.min(timeoutMs, ghOperationTimeoutMs(method)) };
@@ -43,7 +51,7 @@ export default function createGhRoutes(resolve: GhServiceResolver, timeoutMs = G
             result = await service.listPullRequests({ projectPath }, options);
             break;
           case 'getPullRequest':
-            result = await service.getPullRequest({ projectPath, number }, options);
+            result = await service.getPullRequest({ projectPath, number, repository }, options);
             break;
         }
         if (result.executorId !== executorId || typeof result.instanceId !== 'string' || !result.instanceId) {

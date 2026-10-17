@@ -1,6 +1,7 @@
 import { AgentCallError } from '@garcon/server-agent-interface';
 import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { effectiveExecutorId } from '../../../common/executors.js';
+import { ghRepositoryIdentity, sameGhRepository } from '../../../common/gh-identity.js';
 import { GH_DETAIL_TIMEOUT_MS } from '../../../common/git-execution.js';
 import {
   PULL_REQUEST_REVIEW_SCAN_INTERVAL_MINUTES,
@@ -20,6 +21,7 @@ const logger = createLogger('pull-request-review-scanner');
 
 const TICK_MS = 30_000;
 const SCAN_INTERVAL_MS = PULL_REQUEST_REVIEW_SCAN_INTERVAL_MINUTES * 60_000;
+const MAX_CONCURRENT_SCANS = 4;
 const DAY_MS = 24 * 60 * 60_000;
 // Runs of pull requests that have been closed this long are dropped.
 const CLOSED_RUN_RETENTION_MS = 30 * DAY_MS;
@@ -36,8 +38,7 @@ export interface PullRequestReviewScannerDeps {
 // Polls each connected repository's open pull requests and queues the automatic reviews they need.
 export class PullRequestReviewScanner {
   #timer: ReturnType<typeof setInterval> | null = null;
-  #scanning = false;
-  #rescan = false;
+  readonly #scanning = new Set<string>();
   readonly #forced = new Set<string>();
   readonly #lastAttempt = new Map<string, number>();
   // When each repository's pull request was first seen at its current head; restarts reset it.
@@ -80,27 +81,27 @@ export class PullRequestReviewScanner {
   }
 
   async scanDue(): Promise<void> {
-    if (!this.#timer) return;
-    if (this.#scanning) {
-      this.#rescan = true;
-      return;
-    }
-    this.#scanning = true;
+    if (!this.#timer || !this.deps.store.available) return;
     try {
-      do {
-        this.#rescan = false;
-        if (!this.deps.store.available) return;
-        const now = this.deps.now();
-        for (const repository of this.deps.store.listRepositories()) {
-          const forced = this.#forced.delete(repository.id);
-          if (!forced && now - (this.#lastAttempt.get(repository.id) ?? -Infinity) < SCAN_INTERVAL_MS) continue;
-          await this.#scan(repository);
-        }
-      } while (this.#rescan);
+      const now = this.deps.now();
+      const repositories = this.deps.store.listRepositories()
+        .sort((a, b) => Number(this.#forced.has(b.id)) - Number(this.#forced.has(a.id)));
+      for (const repository of repositories) {
+        if (this.#scanning.size >= MAX_CONCURRENT_SCANS) return;
+        if (this.#scanning.has(repository.id)) continue;
+        const forced = this.#forced.has(repository.id);
+        if (!forced && now - (this.#lastAttempt.get(repository.id) ?? -Infinity) < SCAN_INTERVAL_MS) continue;
+        this.#forced.delete(repository.id);
+        this.#scanning.add(repository.id);
+        void this.#scan(repository)
+          .catch((error) => logger.warn('Pull request review scan stopped.', { error: errorMessage(error) }))
+          .finally(() => {
+            this.#scanning.delete(repository.id);
+            void this.scanDue();
+          });
+      }
     } catch (error) {
       logger.warn('Pull request review scan stopped.', { error: errorMessage(error) });
-    } finally {
-      this.#scanning = false;
     }
   }
 
@@ -109,9 +110,14 @@ export class PullRequestReviewScanner {
     const before = this.deps.store.runsRevision(repository.id);
     let scan: PullRequestReviewScan;
     try {
+      const expected = ghRepositoryIdentity(repository);
+      if (!expected) throw new Error('The connected GitHub repository identity is invalid.');
       const gh = await this.deps.executors.requireExecutor(effectiveExecutorId(repository.target.executorId)).getGhService();
-      const list = await gh.listPullRequests({ projectPath: repository.target.projectPath }, { timeoutMs: GH_DETAIL_TIMEOUT_MS });
+      if (!this.#timer || !this.deps.store.available
+        || this.deps.store.getRepository(repository.id)?.updatedAt !== repository.updatedAt) return;
+      const list = await gh.listPullRequests({ projectPath: repository.target.projectPath, repository: expected }, { timeoutMs: GH_DETAIL_TIMEOUT_MS });
       // A repository edited or removed during the read is scanned again under its new settings.
+      if (!this.#timer || !this.deps.store.available) return;
       const current = this.deps.store.getRepository(repository.id);
       if (!current || current.updatedAt !== repository.updatedAt) return;
       // A read begun before a review changed cannot invalidate it or enqueue an older head.
@@ -119,7 +125,8 @@ export class PullRequestReviewScanner {
         this.#repeat(repository.id);
         return;
       }
-      if (list.repo?.nameWithOwner.toLowerCase() !== repository.nameWithOwner.toLowerCase()) {
+      const actual = list.repo && ghRepositoryIdentity(list.repo);
+      if (!list.repo || !actual || !sameGhRepository(expected, actual)) {
         scan = { ...repository.scan, status: 'failed', message: `The folder is no longer a checkout of ${repository.nameWithOwner}.` };
         if (this.deps.store.recordScan(repository.id, scan)) this.deps.changed();
         return;
@@ -131,6 +138,8 @@ export class PullRequestReviewScanner {
       scan = { status: 'ok', scannedAt: new Date(this.deps.now()).toISOString(), message: null };
       if (!this.deps.store.recordScan(repository.id, scan, list.pulls)) return;
     } catch (error) {
+      if (!this.#timer || !this.deps.store.available
+        || this.deps.store.getRepository(repository.id)?.updatedAt !== repository.updatedAt) return;
       const unavailable = isDomainError(error) && error.code === 'EXECUTOR_UNAVAILABLE' || error instanceof AgentCallError;
       // An unreachable executor keeps the last list rather than reporting no pull requests.
       scan = {
@@ -148,7 +157,6 @@ export class PullRequestReviewScanner {
 
   #repeat(repositoryId: string): void {
     this.#forced.add(repositoryId);
-    this.#rescan = true;
   }
 
   async #evaluate(repository: PullRequestReviewRepository): Promise<void> {

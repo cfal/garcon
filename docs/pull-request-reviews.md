@@ -17,6 +17,9 @@ describes what milestones 1 and 2 of that issue implement.
    the controller lists the repository's open pull requests through the
    executor's `gh`. An unreachable executor marks the repository paused and
    keeps its last list; it is never shown as having no pull requests.
+   Up to four repositories scan independently, with one scan per repository.
+   Scan now requests take the next available slot and coalesce while that
+   repository is already scanning.
 3. **Select.** With automatic review on, a pull request is reviewed when it
    passes the repository's filters, has no finished or running review of its
    current head, has not used its attempts at that head, was not stopped by
@@ -49,7 +52,9 @@ archived.
 ## Posting
 
 The controller posts, never the agent, through the repository executor's `gh`
-login. Before creating a comment it re-reads the pull request and checks that
+login. The saved GitHub host and owner/name identify every detail read and post;
+a checkout retargeted to another repository or host is rejected. Before creating
+a comment it re-reads the pull request and checks that
 the saved review is still current: a closed pull request or a
 moved head posts nothing and marks the review outdated. The comment ends with a
 hidden marker naming the repository, pull request, and commit. A marker for the
@@ -57,7 +62,12 @@ same commit already on the pull request counts as posted, so a post whose reply
 was lost is never sent twice; an unconfirmed post is reported as unknown and
 resolves the same way on the next attempt, even after a push or closure. Earlier
 Garcon comments on the pull request are minimized as outdated. A failed
-minimization exposes Retry cleanup, which never creates another comment. A review longer than a GitHub comment is
+minimization exposes Retry cleanup, which never creates another comment.
+Recent reviews keeps unresolved posts and cleanup failures ahead of newer runs.
+Its Reconcile post and Retry cleanup actions stay available after closure and
+show their outcome on that review row. An unreadable
+comment-creation reply also leaves the outcome unknown until marker recovery.
+A review longer than a GitHub comment is
 kept and reported as too long, never truncated. Reviews never approve or
 request changes.
 
@@ -65,9 +75,12 @@ Markers use a normalized repository identity and accept full 40- or 64-character
 commit hashes. A case-only repository rename refreshes the displayed name while
 preserving comment recovery. Posts for one pull request cannot overlap; other
 pull requests in the repository can post independently. Disconnecting a
-repository is refused while its posts are in flight and can be retried after
-they finish. Its executor and folder also remain fixed during posting and
-until an unknown posting outcome has been reconciled.
+repository is refused while its posts are in flight or have an unknown outcome.
+Its executor and folder also remain fixed during posting and until an unknown
+posting outcome has been reconciled.
+The controller records the posting actor's stable GitHub identity before
+dispatch and retains it through recovery, so changing `gh` accounts cannot
+send a duplicate comment.
 
 ## State
 
@@ -81,11 +94,14 @@ Running work is not durable: a run that was queued or
 running when the controller stopped is marked interrupted when it starts again,
 and the next scan decides afresh. Runs are dropped 30 days after a successful
 scan first observes the pull request closed, once its chat has been archived
-(or no chat exists). Reopening resets that retention period. Failed archival
+(or no chat exists). Unresolved posts and failed cleanup are retained until
+reconciled. Reopening resets that retention period. Failed archival
 is retried on later successful scans. A scan that overlaps a change to a
 review run is discarded and repeated before it can invalidate that review.
 A permission request in a review chat shows the run as Needs you; one
 left unanswered for 30 minutes stops the review as failed.
+Overlapping requests retain separate deadlines; answering one never shortens
+another request's remaining time.
 
 Inbox snapshots read only the newest run for each open pull request and a
 bounded recent-run list. Selection reads indexed active/current-head summaries
@@ -105,7 +121,8 @@ reference guards, as scheduled prompts do.
 
 Saved settings can be edited while the executor is offline, including turning
 off automatic reviews or automatic posting. The saved review target stays fixed
-until the executor is ready. Failed scans keep the last saved list and show its
+until the executor is ready. An unchanged validated prompt does not require the
+offline integration to be rediscovered. Failed scans keep the last saved list and show its
 status in the inbox. Policy and posting reads paginate all GitHub connections; incomplete
 reads fail instead of publishing a truncated successful scan.
 
@@ -144,5 +161,6 @@ starts from the new-chat default; which mode lets each agent run `gh` and
 
 Findings parsed from the review, inline GitHub review comments, a reaction for
 clean reviews, reviewing in a worktree at the head commit, pull requests from
-repositories that are not connected, and GitHub Issues are later milestones of
+repositories that are not connected, addressing comments with an agent, and
+GitHub Issues are later milestones of
 the issue.

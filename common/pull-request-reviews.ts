@@ -3,7 +3,7 @@
 // review to the commit it describes.
 
 import { isRecord } from './json.js';
-import type { PullRequestSummary } from './gh.js';
+import type { GhActorIdentity, PullRequestSummary } from './gh.js';
 import {
   normalizeScheduledPromptTarget,
   type NewChatScheduledPromptTarget,
@@ -129,6 +129,8 @@ export interface PullRequestReviewRepository extends PullRequestReviewRepository
 export type PullRequestReviewPostStatus = 'none' | 'posted' | 'too-long' | 'stale' | 'failed' | 'unknown';
 
 export interface PullRequestReviewPost {
+  // Captured durably before dispatch so unknown outcomes retain their author.
+  actor: GhActorIdentity | null;
   status: PullRequestReviewPostStatus;
   commentUrl: string | null;
   postedAt: string | null;

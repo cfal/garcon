@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { ExecutionGhService } from '@garcon/server-agent-interface';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import type { PullRequestListResult, PullRequestSummary } from '../../../common/gh.js';
+import { ghRepositoryIdentity, sameGhRepository } from '../../../common/gh-identity.js';
 import {
   PULL_REQUEST_REVIEW_RECENT_RUN_LIMIT,
   normalizePullRequestReviewRepositoryInput,
@@ -138,22 +139,24 @@ export class PullRequestReviewRepositories {
     if (!normalized) throw reviewInvalid('Repository settings are invalid.');
     const preservedTarget = isDeepStrictEqual(normalized.target, current.target);
     const input = preservedTarget ? normalized : this.#validate(value);
-    if (preservedTarget) this.#validatePrompt(input);
+    if (preservedTarget && input.settings.prompt !== current.settings.prompt) this.#validatePrompt(input);
     const moved = effectiveExecutorId(input.target.executorId) !== effectiveExecutorId(current.target.executorId)
       || input.target.projectPath !== current.target.projectPath;
     let viewerLogin = current.viewerLogin;
     if (moved) {
-      this.#assertPostingTargetAvailable(id);
+      this.#assertNoUnsettledPost(id);
       // A new folder must still be a checkout of the same repository.
       const list = await this.#readRepository(input);
-      if (list.repo?.nameWithOwner.toLowerCase() !== current.nameWithOwner.toLowerCase()) {
+      const expected = ghRepositoryIdentity(current);
+      const actual = list.repo && ghRepositoryIdentity(list.repo);
+      if (!expected || !actual || !sameGhRepository(expected, actual)) {
         throw reviewInvalid(`This folder is not a checkout of ${current.nameWithOwner}.`);
       }
       viewerLogin = list.viewerLogin;
     }
     const latest = this.require(id);
     if (latest.updatedAt !== current.updatedAt) throw reviewConflict('The repository changed while it was being saved. Try again.');
-    if (moved) this.#assertPostingTargetAvailable(id);
+    if (moved) this.#assertNoUnsettledPost(id);
     const { scan: _scan, ...stored } = latest;
     const next: StoredRepository = {
       ...stored,
@@ -169,15 +172,15 @@ export class PullRequestReviewRepositories {
     return this.require(id);
   }
 
-  #assertPostingTargetAvailable(id: string): void {
+  #assertNoUnsettledPost(id: string): void {
     if (this.deps.isPostingRepository(id) || this.deps.store.hasUnknownPost(id)) {
-      throw reviewConflict('A review is being posted or has an unconfirmed post. Reconcile it before changing the repository executor or folder.');
+      throw reviewConflict('A review is being posted or has an unconfirmed post. Reconcile it before changing the repository target or disconnecting it.');
     }
   }
 
   remove(id: string): void {
     const current = this.require(id);
-    if (this.deps.isPostingRepository(id)) throw reviewConflict('A review is being posted. Wait before disconnecting this repository.');
+    this.#assertNoUnsettledPost(id);
     if (this.deps.store.activeRuns().some((run) => run.repositoryId === id && run.state !== 'queued')) {
       throw reviewConflict('Stop the running review before disconnecting this repository.');
     }

@@ -46,7 +46,7 @@ export class PullRequestReviewRunner {
   #started = false;
   // Active review chats, so permission events can be matched to their runs.
   readonly #runByChat = new Map<string, string>();
-  readonly #pendingPermissions = new Map<string, Set<string>>();
+  readonly #pendingPermissions = new Map<string, Map<string, number>>();
   readonly #permissionTimers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #permissionTimedOut = new Set<string>();
 
@@ -84,7 +84,7 @@ export class PullRequestReviewRunner {
       turnId: null,
       startedAt: null,
       finishedAt: null,
-      post: { status: 'none', commentUrl: null, postedAt: null, message: null },
+      post: { actor: null, status: 'none', commentUrl: null, postedAt: null, message: null },
       chatArchived: false,
     };
     this.deps.store.insertRun(run);
@@ -127,10 +127,13 @@ export class PullRequestReviewRunner {
     if (this.#abort.signal.aborted || event.type !== 'permission') return;
     const runId = this.#runByChat.get(event.chatId);
     if (!runId) return;
-    const pending = this.#pendingPermissions.get(runId) ?? new Set<string>();
+    const pending = this.#pendingPermissions.get(runId) ?? new Map<string, number>();
     const lifecycle = event.row.lifecycle;
-    if (lifecycle.kind === 'requested') pending.add(lifecycle.permissionOccurrenceId);
-    else pending.delete(lifecycle.permissionOccurrenceId);
+    if (lifecycle.kind === 'requested') {
+      if (!pending.has(lifecycle.permissionOccurrenceId)) {
+        pending.set(lifecycle.permissionOccurrenceId, this.deps.now() + PULL_REQUEST_REVIEW_PERMISSION_TIMEOUT_MINUTES * 60_000);
+      }
+    } else pending.delete(lifecycle.permissionOccurrenceId);
     this.#pendingPermissions.set(runId, pending);
     const needsInput = pending.size > 0;
     const updated = this.deps.store.updateRun(runId, (run) => {
@@ -139,14 +142,19 @@ export class PullRequestReviewRunner {
         ? (run.state === next ? null : { ...run, state: next })
         : null;
     });
-    if (needsInput && !this.#permissionTimedOut.has(runId) && !this.#permissionTimers.has(runId)) {
-      const timer = setTimeout(() => void this.#expirePermission(runId, event.chatId), PULL_REQUEST_REVIEW_PERMISSION_TIMEOUT_MINUTES * 60_000);
-      timer.unref?.();
-      this.#permissionTimers.set(runId, timer);
-    } else if (!needsInput && !this.#permissionTimedOut.has(runId)) {
-      this.#clearPermissionTimer(runId);
-    }
+    this.#armPermissionTimeout(runId, event.chatId, pending);
     if (updated) this.deps.changed();
+  }
+
+  #armPermissionTimeout(runId: string, chatId: string, pending: ReadonlyMap<string, number>): void {
+    if (this.#permissionTimedOut.has(runId)) return;
+    this.#clearPermissionTimer(runId);
+    if (pending.size === 0) return;
+    let expiresAt = Infinity;
+    for (const deadline of pending.values()) expiresAt = Math.min(expiresAt, deadline);
+    const timer = setTimeout(() => void this.#expirePermission(runId, chatId), Math.max(0, expiresAt - this.deps.now()));
+    timer.unref?.();
+    this.#permissionTimers.set(runId, timer);
   }
 
   async #expirePermission(runId: string, chatId: string): Promise<void> {

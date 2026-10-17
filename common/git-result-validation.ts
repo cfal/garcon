@@ -3,6 +3,7 @@ import { GitServiceError } from './git-error.js';
 import { GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitResults, type ExecutionGhResults, type GitExecutorScope } from './git-execution.js';
 import type { GitMethod } from './git.js';
 import { PULL_REQUEST_AUTHOR_ASSOCIATIONS } from './gh.js';
+import { isGhActorIdentity, isGhRepositoryIdentity } from './gh-identity.js';
 
 type Check = (value: unknown) => boolean;
 const str: Check = v => typeof v === 'string';
@@ -159,8 +160,8 @@ export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, 
       labels: array(str), reviewRequest: oneOf('me', 'team', null) })),
       repo: nullable(x => shape(x, { nameWithOwner: str, url: str })), viewerLogin: nullable(str) });
   } else if (method === 'getPullRequestReviewTarget') {
-    valid = shape(value, { number: num, state, headRefOid: str,
-      markedComments: array(x => shape(x, { id: str, url: str, marker: str, isMinimized: bool })) });
+    valid = shape(value, { repository: isGhRepositoryIdentity, viewer: isGhActorIdentity, number: num, state, headRefOid: str,
+      markedComments: array(x => shape(x, { id: str, url: str, marker: str, isMinimized: bool, author: nullable(isGhActorIdentity) })) });
   } else if (method === 'createPullRequestComment') {
     valid = shape(value, { id: str, url: str });
   } else if (method === 'minimizePullRequestComment') {
