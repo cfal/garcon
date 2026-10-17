@@ -73,7 +73,7 @@ describe('GET /api/v1/gh/status', () => {
 describe('GitHub route dispatch', () => {
   const operations = [
     ['status', 'getStatus', '', undefined, GIT_OPERATION_TIMEOUT_MS],
-    ['pull-requests', 'listPullRequests', 'project=%2Fproject', { projectPath: '/project' }, GIT_OPERATION_TIMEOUT_MS],
+    ['pull-requests', 'listPullRequests', 'project=%2Fproject', { projectPath: '/project' }, GH_DETAIL_TIMEOUT_MS],
     ['pull-request', 'getPullRequest', 'project=%2Fproject&number=42', { projectPath: '/project', number: 42 }, GH_DETAIL_TIMEOUT_MS],
   ];
 

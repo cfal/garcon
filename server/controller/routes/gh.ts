@@ -1,5 +1,5 @@
 import type { ExecutionGhService } from '@garcon/server-agent-interface';
-import { GH_DETAIL_TIMEOUT_MS, GIT_OPERATION_TIMEOUT_MS } from '../../../common/git-execution.js';
+import { GH_DETAIL_TIMEOUT_MS, ghOperationTimeoutMs } from '../../../common/git-execution.js';
 import { validateGhRequest } from '../../../common/git-request-validation.js';
 import { GitServiceError } from '../../../common/git-error.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
@@ -33,7 +33,7 @@ export default function createGhRoutes(resolve: GhServiceResolver, timeoutMs = G
         if (method === 'getPullRequest') input.number = number;
         validateGhRequest(method, input);
         const service = await resolve(executorId);
-        const options = { signal: request.signal, timeoutMs: Math.min(timeoutMs, method === 'getPullRequest' ? GH_DETAIL_TIMEOUT_MS : GIT_OPERATION_TIMEOUT_MS) };
+        const options = { signal: request.signal, timeoutMs: Math.min(timeoutMs, ghOperationTimeoutMs(method)) };
         let result;
         switch (method) {
           case 'getStatus':

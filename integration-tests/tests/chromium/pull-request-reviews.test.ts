@@ -175,6 +175,14 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     const autoPost = connectForm.getByRole('checkbox', { name: 'Post reviews to GitHub automatically' });
     await browserExpect(autoPost).not.toBeChecked();
     await browserExpect(connectForm.locator('[data-pr-repository-save]')).toBeEnabled();
+    await connectForm.getByText('Filters and limits', { exact: true }).click();
+    await connectForm.getByRole('textbox', { name: 'Base branches', exact: true }).fill('main');
+    await connectForm.getByRole('textbox', { name: 'Exclude these labels', exact: true }).fill('hold-review');
+    await connectForm.getByRole('spinbutton', { name: 'Maximum changed lines', exact: true }).fill('');
+    await connectForm.getByRole('spinbutton', { name: 'Attempts per head commit', exact: true }).fill('3');
+    await connectForm.getByRole('spinbutton', { name: 'Daily review limit', exact: true }).fill('25');
+    await connectForm.getByRole('spinbutton', { name: 'Daily review limit', exact: true }).scrollIntoViewIfNeeded();
+    await capture('filters-limits-desktop');
     await connectForm.getByText('Applies to every review for this repository.', { exact: false }).scrollIntoViewIfNeeded();
     await capture('posting-settings-desktop');
     await autoPost.check();
@@ -183,6 +191,10 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     await browserExpect(repositories.locator('[data-pr-repository="acme/app"]')).toContainText('Automatic');
     const saved = await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews');
     expect(saved.repositories[0].settings.autoPost).toBe(true);
+    expect(saved.repositories[0].settings).toMatchObject({
+      filters: { baseBranches: ['main'], excludeLabels: ['hold-review'], maxChangedLines: null },
+      maxAttemptsPerCommit: 3, dailyReviewLimit: 25,
+    });
     await page.keyboard.press('Escape');
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -192,6 +204,14 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     await browserExpect(connectForm.locator('[data-pr-repository-save]')).toBeEnabled();
     await connectForm.getByText('Applies to every review for this repository.', { exact: false }).scrollIntoViewIfNeeded();
     await capture('posting-settings-mobile');
+    await connectForm.getByText('Filters and limits', { exact: true }).click();
+    await browserExpect(connectForm.getByRole('textbox', { name: 'Base branches', exact: true })).toHaveValue('main');
+    await browserExpect(connectForm.getByRole('textbox', { name: 'Exclude these labels', exact: true })).toHaveValue('hold-review');
+    await browserExpect(connectForm.getByRole('spinbutton', { name: 'Maximum changed lines', exact: true })).toHaveValue('');
+    await browserExpect(connectForm.getByRole('spinbutton', { name: 'Attempts per head commit', exact: true })).toHaveValue('3');
+    await browserExpect(connectForm.getByRole('spinbutton', { name: 'Daily review limit', exact: true })).toHaveValue('25');
+    await connectForm.getByRole('spinbutton', { name: 'Daily review limit', exact: true }).scrollIntoViewIfNeeded();
+    await capture('filters-limits-mobile');
     await page.keyboard.press('Escape');
     await browserExpect(connectForm).toHaveCount(0);
     await page.keyboard.press('Escape');

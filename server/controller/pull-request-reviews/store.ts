@@ -275,12 +275,32 @@ export class PullRequestReviewStore {
     ).get(repositoryId, number) !== null);
   }
 
+  hasUnknownPost(repositoryId: string): boolean {
+    return this.#read((database) => database.query<{ found: number }, [string]>(
+      `SELECT 1 AS found FROM review_runs WHERE repository_id = ? AND json_extract(payload_json, '$.post.status') = 'unknown' LIMIT 1`,
+    ).get(repositoryId) !== null);
+  }
+
+  markChatRemoved(chatId: string): boolean {
+    const repositories = this.#write((database) => {
+      const affected = database.query<{ repository_id: string }, [string]>(
+        'SELECT DISTINCT repository_id FROM review_runs WHERE chat_id = ?',
+      ).all(chatId);
+      database.query(`UPDATE review_runs SET payload_json = json_set(payload_json, '$.chatId', NULL, '$.chatArchived', json('true'))
+        WHERE chat_id = ?`).run(chatId);
+      return affected;
+    });
+    for (const { repository_id } of repositories) this.#touchRuns(repository_id);
+    return repositories.length > 0;
+  }
+
   selectionHistory(repositoryId: string, number: number, head: string): ReviewSelectionHistory {
     return this.#read((database) => {
       const atHead = `SELECT rowid FROM review_runs WHERE repository_id = ? AND number = ? AND head_sha = ?
         UNION SELECT rowid FROM review_runs WHERE repository_id = ? AND number = ? AND reviewed_sha = ?`;
       const counts = database.query<{ stopped: number; attempts: number }, [string, number, string, string, number, string]>(
-        `SELECT coalesce(max(state = 'stopped'), 0) AS stopped, coalesce(sum(trigger = 'auto'), 0) AS attempts
+        `SELECT coalesce(max(state = 'stopped'), 0) AS stopped,
+          coalesce(sum(trigger = 'auto' AND json_extract(payload_json, '$.startedAt') IS NOT NULL), 0) AS attempts
           FROM review_runs WHERE rowid IN (${atHead})`,
       ).get(repositoryId, number, head, repositoryId, number, head)!;
       const completed = database.query<{ found: number }, [string, number, string]>(
@@ -292,8 +312,14 @@ export class PullRequestReviewStore {
 
   automaticRunsSince(repositoryId: string, since: string): number {
     return this.#read((database) => database.query<{ count: number }, [string, string]>(
-      `SELECT count(*) AS count FROM review_runs WHERE repository_id = ? AND trigger = 'auto' AND created_at > ?`,
+      `SELECT count(*) AS count FROM review_runs WHERE repository_id = ? AND trigger = 'auto' AND json_extract(payload_json, '$.startedAt') > ?`,
     ).get(repositoryId, since)!.count);
+  }
+
+  queuedAutomaticRunCount(repositoryId: string): number {
+    return this.#read((database) => database.query<{ count: number }, [string]>(
+      "SELECT count(*) AS count FROM review_runs WHERE repository_id = ? AND trigger = 'auto' AND state = 'queued'",
+    ).get(repositoryId)!.count);
   }
 
   markOutdated(repositoryId: string, number: number, head: string): number {
@@ -316,6 +342,14 @@ export class PullRequestReviewStore {
     return this.#read((database) => database.query<RunRow, []>(
       `SELECT ${RUN_COLUMNS} FROM review_runs WHERE state IN ('queued','reviewing','needs-input') ORDER BY created_at, rowid`,
     ).all().map(runFromRow));
+  }
+
+  interruptQueuedAutomaticRuns(repositoryId: string, now: string): number {
+    const count = this.#write((database) => database.query(`UPDATE review_runs SET state = 'interrupted',
+      payload_json = json_set(payload_json, '$.finishedAt', ?, '$.message', 'Repository settings changed before the automatic review started.')
+      WHERE repository_id = ? AND trigger = 'auto' AND state = 'queued'`).run(now, repositoryId).changes);
+    if (count) this.#touchRuns(repositoryId);
+    return count;
   }
 
   // Running work does not survive a restart, so every unfinished run ends here.

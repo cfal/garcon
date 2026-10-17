@@ -39,15 +39,35 @@ function filterReason(settings: PullRequestReviewSettings, pull: PullRequestSumm
   return null;
 }
 
-// Decides whether a scan should start an automatic review of a pull request's current head.
-export function decideAutoReview(input: AutoReviewInput): AutoReviewDecision {
+type ReviewEligibilityInput = Omit<AutoReviewInput, 'headObservedAt' | 'now'>;
+
+function eligibilityDecision(input: ReviewEligibilityInput): AutoReviewDecision {
   const { settings, pull } = input;
   if (input.history.active || input.history.completed) return { kind: 'settled' };
   const filtered = filterReason(settings, pull);
   if (filtered) return { kind: 'skip', reason: filtered };
   if (input.history.stopped) return { kind: 'skip', reason: 'stopped' };
   if (input.history.attempts >= settings.maxAttemptsPerCommit) return { kind: 'skip', reason: 'attempts-exhausted' };
-  if (input.now - input.headObservedAt < settings.debounceMinutes * 60_000) return { kind: 'wait' };
-  if (input.startedInLastDay >= settings.dailyReviewLimit) return { kind: 'skip', reason: 'daily-limit' };
   return { kind: 'review' };
+}
+
+// Rechecks current policy before a previously eligible queued run claims a chat.
+export function decideQueuedAutoReview(input: ReviewEligibilityInput): AutoReviewDecision {
+  const eligible = eligibilityDecision(input);
+  if (eligible.kind !== 'review') return eligible;
+  return dailyLimitDecision(input);
+}
+
+function dailyLimitDecision(input: ReviewEligibilityInput): AutoReviewDecision {
+  return input.startedInLastDay >= input.settings.dailyReviewLimit
+    ? { kind: 'skip', reason: 'daily-limit' }
+    : { kind: 'review' };
+}
+
+// Decides whether a scan should start an automatic review of a pull request's current head.
+export function decideAutoReview(input: AutoReviewInput): AutoReviewDecision {
+  const eligible = eligibilityDecision(input);
+  if (eligible.kind !== 'review') return eligible;
+  if (input.now - input.headObservedAt < input.settings.debounceMinutes * 60_000) return { kind: 'wait' };
+  return dailyLimitDecision(input);
 }

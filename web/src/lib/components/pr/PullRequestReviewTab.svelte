@@ -33,7 +33,12 @@
 		entry?.latestRun ? isActivePullRequestReviewRun(entry.latestRun.state) : false,
 	);
 	const canPost = $derived(
-		run?.state === 'completed' && run.post.status !== 'posted' && run.post.status !== 'too-long',
+		run &&
+			(run.post.status === 'unknown' ||
+				(run.post.status === 'posted' && run.post.message !== null) ||
+				(run.state === 'completed' &&
+					run.post.status !== 'posted' &&
+					run.post.status !== 'too-long')),
 	);
 	const historyUnavailable = $derived(controller.isRunsLoading || controller.runsError !== null);
 	let pending = $state<'review' | 'stop' | 'post' | null>(null);
@@ -101,7 +106,11 @@
 						onclick={() => act('post', () => controller.reviews.post(run.id))}
 					>
 						<Send class="h-3.5 w-3.5" />
-						{pending === 'post' ? m.pull_request_review_posting() : m.pull_request_review_post()}
+						{pending === 'post'
+							? m.pull_request_review_posting()
+							: run.post.status === 'posted'
+								? m.pull_request_review_retry_cleanup()
+								: m.pull_request_review_post()}
 					</button>
 				{/if}
 				{#if active && entry.latestRun}
@@ -182,6 +191,9 @@
 					{:else}
 						{run.post.message}
 					{/if}
+					{#if run.post.status === 'posted' && run.post.message}<span class="block"
+							>{run.post.message}</span
+						>{/if}
 				</p>
 			{/if}
 			{#if run?.review}

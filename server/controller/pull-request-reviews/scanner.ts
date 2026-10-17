@@ -160,7 +160,8 @@ export class PullRequestReviewScanner {
     const isCurrent = () => this.#timer !== null && store.getRepository(repository.id)?.updatedAt === repository.updatedAt
       && store.runsRevision(repository.id) === revision;
     const statuses = new Map<number, PullRequestAutoReviewStatus>();
-    let startedInLastDay = store.automaticRunsSince(repository.id, new Date(now - DAY_MS).toISOString());
+    let startedInLastDay = store.automaticRunsSince(repository.id, new Date(now - DAY_MS).toISOString())
+      + store.queuedAutomaticRunCount(repository.id);
     const open = new Set(pulls.map((pull) => pull.number));
     for (const pull of pulls) {
       const key = `${repository.id}:${pull.number}`;

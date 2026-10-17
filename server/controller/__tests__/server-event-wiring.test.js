@@ -305,6 +305,7 @@ function createFixture(overrides = {}) {
       on: mock((_event, callback) => { chatBoards.invalidated = callback; }),
       ...overrides.chatBoards,
     },
+    pullRequestReviews: overrides.pullRequestReviews ?? { handleChatRemoved: mock(() => undefined) },
     searchIndex,
   });
   return {
@@ -1498,6 +1499,19 @@ describe('server event wiring', () => {
       'chat-1',
       'chat-deleted',
     );
+  });
+
+  it('notifies review snapshots when an idle completed review chat is removed', async () => {
+    const handleChatRemoved = mock(() => undefined);
+    const fixture = createFixture({ pullRequestReviews: { handleChatRemoved } });
+    fixture.removeChat();
+
+    fixture.chats.removed('chat-1', 'user-deletion');
+    await fixture.wiring.waitForIdle();
+
+    expect(handleChatRemoved).toHaveBeenCalledWith('chat-1');
+    expect(handleChatRemoved).toHaveBeenCalledTimes(1);
+    expect(fixture.commandLedger.markChatInterrupted).toHaveBeenCalledWith('chat-1', 'chat-deleted');
   });
 
   it('broadcasts operational notices without entering transcript sequence space', () => {

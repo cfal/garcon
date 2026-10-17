@@ -7,8 +7,10 @@ import {
 	DEFAULT_PULL_REQUEST_REVIEW_PROMPT,
 	DEFAULT_PULL_REQUEST_REVIEW_SETTINGS,
 	PULL_REQUEST_REVIEW_PROMPT_MAX_LENGTH,
+	normalizePullRequestReviewSettings,
 	type PullRequestReviewRepository,
 	type PullRequestReviewRepositoryInput,
+	type PullRequestReviewSettings,
 } from '$shared/pull-request-reviews';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -27,9 +29,25 @@ export class PullRequestRepositoryFormState {
 	autoReview = $state(DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.autoReview);
 	autoPost = $state(DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.autoPost);
 	onlyWhenReviewRequested = $state(DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.onlyWhenReviewRequested);
-	filters = $state({ ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.filters });
-	debounceMinutes = $state(DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.debounceMinutes);
-	#retained = { ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS };
+	filters = $state({
+		skipDrafts: DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.filters.skipDrafts,
+		trustedAuthorsOnly: DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.filters.trustedAuthorsOnly,
+	});
+	baseBranches = $state('');
+	includeLabels = $state('');
+	excludeLabels = $state('');
+	maxChangedLines = $state<number | undefined>(
+		DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.filters.maxChangedLines ?? undefined,
+	);
+	debounceMinutes = $state<number | undefined>(
+		DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.debounceMinutes,
+	);
+	maxAttemptsPerCommit = $state<number | undefined>(
+		DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.maxAttemptsPerCommit,
+	);
+	dailyReviewLimit = $state<number | undefined>(
+		DEFAULT_PULL_REQUEST_REVIEW_SETTINGS.dailyReviewLimit,
+	);
 	#savedTarget = $state<PullRequestReviewRepositoryInput['target'] | null>(null);
 	#savedDraft = '';
 	#startupLoad: Promise<void> | null = null;
@@ -60,6 +78,7 @@ export class PullRequestRepositoryFormState {
 			!this.saving &&
 			!this.promptTransformPending &&
 			this.promptError === null &&
+			this.#settings() !== null &&
 			(this.settingsOnlyOffline ||
 				(this.startup.settingsLoaded &&
 					this.startup.executorReady &&
@@ -67,6 +86,30 @@ export class PullRequestRepositoryFormState {
 					this.startup.validationStatus === 'valid' &&
 					this.startup.resolvedModelSelection !== null))
 		);
+	}
+
+	get settingsError(): string | null {
+		return this.#settings() ? null : m.pull_request_repository_settings_invalid();
+	}
+
+	#settings(): PullRequestReviewSettings | null {
+		return normalizePullRequestReviewSettings({
+			autoReview: this.autoReview,
+			onlyWhenReviewRequested: this.onlyWhenReviewRequested,
+			filters: {
+				...this.filters,
+				baseBranches: filterLines(this.baseBranches),
+				includeLabels: filterLines(this.includeLabels),
+				excludeLabels: filterLines(this.excludeLabels),
+				maxChangedLines: this.maxChangedLines ?? null,
+			},
+			debounceMinutes: this.debounceMinutes,
+			maxAttemptsPerCommit: this.maxAttemptsPerCommit,
+			dailyReviewLimit: this.dailyReviewLimit,
+			autoPost: this.autoPost,
+			// The built-in prompt is stored as empty so it follows later improvements.
+			prompt: this.prompt.trim() === DEFAULT_PULL_REQUEST_REVIEW_PROMPT ? '' : this.prompt,
+		});
 	}
 
 	get settingsOnlyOffline(): boolean {
@@ -100,13 +143,21 @@ export class PullRequestRepositoryFormState {
 		}
 		const { target, settings } = repository;
 		this.repositoryId = repository.id;
-		this.#retained = settings;
 		this.prompt = settings.prompt || DEFAULT_PULL_REQUEST_REVIEW_PROMPT;
 		this.autoReview = settings.autoReview;
 		this.autoPost = settings.autoPost;
 		this.onlyWhenReviewRequested = settings.onlyWhenReviewRequested;
-		this.filters = { ...settings.filters };
+		this.filters = {
+			skipDrafts: settings.filters.skipDrafts,
+			trustedAuthorsOnly: settings.filters.trustedAuthorsOnly,
+		};
+		this.baseBranches = settings.filters.baseBranches.join('\n');
+		this.includeLabels = settings.filters.includeLabels.join('\n');
+		this.excludeLabels = settings.filters.excludeLabels.join('\n');
+		this.maxChangedLines = settings.filters.maxChangedLines ?? undefined;
 		this.debounceMinutes = settings.debounceMinutes;
+		this.maxAttemptsPerCommit = settings.maxAttemptsPerCommit;
+		this.dailyReviewLimit = settings.dailyReviewLimit;
 		this.startup.selectExecutor(target.executorId);
 		this.startup.restoreSelection(target.agentId, {
 			model: target.model,
@@ -145,7 +196,8 @@ export class PullRequestRepositoryFormState {
 
 	buildInput(): PullRequestReviewRepositoryInput | null {
 		const selection = this.startup.resolvedModelSelection;
-		if (!this.canSave || (!this.settingsOnlyOffline && !selection)) return null;
+		const settings = this.#settings();
+		if (!this.canSave || !settings || (!this.settingsOnlyOffline && !selection)) return null;
 		return {
 			target: this.settingsOnlyOffline
 				? this.#savedTarget!
@@ -164,16 +216,7 @@ export class PullRequestRepositoryFormState {
 						tags: [...this.startup.chatTags],
 						preambleChoice: this.startup.preambles.choiceSnapshot,
 					},
-			settings: {
-				...this.#retained,
-				autoReview: this.autoReview,
-				onlyWhenReviewRequested: this.onlyWhenReviewRequested,
-				filters: { ...this.filters },
-				debounceMinutes: this.debounceMinutes,
-				autoPost: this.autoPost,
-				// The built-in prompt is stored as empty so it follows later improvements.
-				prompt: this.prompt.trim() === DEFAULT_PULL_REQUEST_REVIEW_PROMPT ? '' : this.prompt,
-			},
+			settings,
 		};
 	}
 
@@ -181,4 +224,11 @@ export class PullRequestRepositoryFormState {
 		this.#disposed = true;
 		this.startup.dispose();
 	}
+}
+
+function filterLines(value: string): string[] {
+	return value
+		.split('\n')
+		.map((line) => line.trim())
+		.filter(Boolean);
 }

@@ -2,6 +2,7 @@ import type { ApiFetchOptions } from './client.js';
 import { ghApiGet } from './gh.js';
 import { gitDocumentKey, gitProjectQuery, type GitProjectTarget } from './git-client.js';
 import type { PullRequestDetail as PullRequestDetailWire, PullRequestListResult } from '$shared/gh';
+import { ghOperationTimeoutMs } from '$shared/git-execution';
 import type { GitReviewFileBody } from './git.js';
 import { createIndexedGitReviewFileBody } from '$lib/git/review/git-review-body-index.js';
 export type {
@@ -27,7 +28,10 @@ export async function getPullRequests(
 	target: GitProjectTarget,
 	options?: ApiFetchOptions,
 ): Promise<PullRequestListResult> {
-	return ghApiGet(target.executorId, `/api/v1/gh/pull-requests?${gitProjectQuery(target)}`, options);
+	return ghApiGet(target.executorId, `/api/v1/gh/pull-requests?${gitProjectQuery(target)}`, {
+		timeoutMs: ghOperationTimeoutMs('listPullRequests'),
+		...options,
+	});
 }
 
 export async function getPullRequest(
@@ -38,7 +42,7 @@ export async function getPullRequest(
 	const detail = await ghApiGet<PullRequestDetailWire>(
 		target.executorId,
 		`/api/v1/gh/pull-request?${gitProjectQuery(target)}&number=${encodeURIComponent(number)}`,
-		{ timeoutMs: 60_000, ...options },
+		{ timeoutMs: ghOperationTimeoutMs('getPullRequest'), ...options },
 	);
 	return {
 		...detail,

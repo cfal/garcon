@@ -41,7 +41,10 @@ export const PULL_REQUEST_REVIEW_SCHEMA = [
 `CREATE INDEX IF NOT EXISTS review_runs_state ON review_runs(state)`,
 `CREATE INDEX IF NOT EXISTS review_runs_active ON review_runs(repository_id, number) WHERE state IN ('queued','reviewing','needs-input')`,
 `CREATE INDEX IF NOT EXISTS review_runs_completed ON review_runs(repository_id, number, reviewed_sha) WHERE state = 'completed'`,
-`CREATE INDEX IF NOT EXISTS review_runs_auto ON review_runs(repository_id, created_at) WHERE trigger = 'auto'`,
+`CREATE INDEX IF NOT EXISTS review_runs_auto ON review_runs(repository_id, json_extract(payload_json, '$.startedAt')) WHERE trigger = 'auto'`,
+`CREATE INDEX IF NOT EXISTS review_runs_queued_auto ON review_runs(repository_id) WHERE trigger = 'auto' AND state = 'queued'`,
+`CREATE INDEX IF NOT EXISTS review_runs_chat ON review_runs(chat_id) WHERE chat_id IS NOT NULL`,
+`CREATE INDEX IF NOT EXISTS review_runs_unknown_post ON review_runs(repository_id) WHERE json_extract(payload_json, '$.post.status') = 'unknown'`,
 `CREATE INDEX IF NOT EXISTS review_runs_archive ON review_runs(repository_id, number)
   WHERE chat_id IS NOT NULL AND chat_archived = 0 AND state NOT IN ('queued','reviewing','needs-input')`,
 `CREATE INDEX IF NOT EXISTS review_runs_prunable ON review_runs(repository_id, number)
