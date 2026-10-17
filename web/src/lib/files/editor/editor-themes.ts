@@ -287,6 +287,8 @@ function semanticEditorTheme(colorScheme: ColorScheme): Extension {
 				'.cm-activeLine, .cm-activeLineGutter': {
 					backgroundColor: 'hsl(var(--foreground) / 0.04)',
 				},
+				// Keeps diff syntax from covering the drawn selection layer.
+				'.cm-code-addition, .cm-code-deletion': { backgroundColor: 'transparent' },
 				'.cm-gutters': {
 					color: 'hsl(var(--muted-foreground))',
 					backgroundColor: 'hsl(var(--background))',

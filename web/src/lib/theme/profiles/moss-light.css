@@ -166,9 +166,9 @@
 	--markdown-code-name: 134 60% 25%;
 	--markdown-code-section: 211 100% 35%;
 	--markdown-code-addition-bg: 138 76% 97%;
-	--markdown-code-addition-fg: 134 60% 31%;
+	--markdown-code-addition-fg: 134 60% 25%;
 	--markdown-code-deletion-bg: 353 100% 97%;
-	--markdown-code-deletion-fg: 355 72% 41%;
+	--markdown-code-deletion-fg: 355 72% 35%;
 	--diff-modified: 48 88% 93%;
 	--diff-modified-foreground: 33 78% 32%;
 	--diff-modified-border: 48 50% 78%;

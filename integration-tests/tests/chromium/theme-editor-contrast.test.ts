@@ -11,8 +11,14 @@ import {
 } from "../../../web/src/lib/theme/themes";
 import { buildWebBrowserEntry } from "../../support/web-browser-bundle";
 import { contrastRatio } from "../../support/color-contrast";
+import type { mountDiffEditor } from "../../../web/src/lib/files/editor/__tests__/editor-contrast-fixture";
 
 const APP_URL = "http://theme-editor-contrast.test/";
+
+type DiffEditorScope = typeof globalThis & {
+  mountDiffEditor: typeof mountDiffEditor;
+  diffEditor: Awaited<ReturnType<typeof mountDiffEditor>>;
+};
 
 interface ManifestEntry {
   readonly name?: string;
@@ -250,7 +256,7 @@ describe("CodeMirror theme contrast", () => {
       }
       await route.fulfill({
         contentType: "text/html",
-        body: '<!doctype html><link rel="stylesheet" href="/theme.css"><div id="editor"></div><script type="module">import { mountEditor } from "/editor-fixture.js"; import { mountPromptEditor } from "/prompt-fixture.js"; globalThis.mountEditor = mountEditor; globalThis.mountPromptEditor = mountPromptEditor;</script>',
+        body: '<!doctype html><link rel="stylesheet" href="/theme.css"><input id="other-control" aria-label="Other control"><div id="editor"></div><div class="markdown-code-block"><span class="cm-code-addition">Static addition</span><span class="cm-code-deletion">Static deletion</span></div><script type="module">import { mountEditor, mountDiffEditor } from "/editor-fixture.js"; import { mountPromptEditor } from "/prompt-fixture.js"; globalThis.mountEditor = mountEditor; globalThis.mountDiffEditor = mountDiffEditor; globalThis.mountPromptEditor = mountPromptEditor;</script>',
       });
     });
 
@@ -381,6 +387,117 @@ describe("CodeMirror theme contrast", () => {
         new Set(retained.samples.map((sample) => sample.selection)).size,
       ).toBe(3);
       expect(retained.samples.every((sample) => sample.focused)).toBe(true);
+
+      for (const profile of THEME_PROFILES.filter(
+        (profile) => profile.rendererPalette === "semantic",
+      )) {
+        await page.evaluate(async (profile) => {
+          document.documentElement.dataset.theme = profile.id;
+          document.documentElement.classList.toggle(
+            "dark",
+            profile.colorScheme === "dark",
+          );
+          const root = document.querySelector<HTMLElement>("#editor")!;
+          root.replaceChildren();
+          const scope = globalThis as DiffEditorScope;
+          scope.diffEditor = await scope.mountDiffEditor(
+            root,
+            `${profile.rendererPalette}-${profile.colorScheme}`,
+          );
+        }, profile);
+
+        for (const lineNumber of [1, 2]) {
+          const clip = await page.evaluate(async (lineNumber) => {
+            const view = (globalThis as DiffEditorScope).diffEditor;
+            const line = view.state.doc.line(lineNumber);
+            view.dispatch({ selection: { anchor: line.from + 2 } });
+            view.focus();
+            document.querySelector<HTMLInputElement>("#other-control")!.focus();
+            await new Promise(requestAnimationFrame);
+            await new Promise(requestAnimationFrame);
+            const start = view.coordsAtPos(line.from + 2)!;
+            const end = view.coordsAtPos(line.from + 18)!;
+            return {
+              x: start.left,
+              y: start.top,
+              width: end.left - start.left,
+              height: start.bottom - start.top,
+            };
+          }, lineNumber);
+          const unselected = await page.screenshot({ clip });
+          const selection = await page.evaluate(async (lineNumber) => {
+            const view = (globalThis as DiffEditorScope).diffEditor;
+            const line = view.state.doc.line(lineNumber);
+            view.focus();
+            view.dispatch({
+              selection: { anchor: line.from + 2, head: line.from + 18 },
+            });
+            document.querySelector<HTMLInputElement>("#other-control")!.focus();
+            await new Promise(requestAnimationFrame);
+            await new Promise(requestAnimationFrame);
+            const lineElement =
+              view.dom.querySelectorAll<HTMLElement>(".cm-line")[
+                lineNumber - 1
+              ]!;
+            const marker = view.dom.querySelector<HTMLElement>(
+              ".cm-selectionBackground",
+            )!;
+            const canvas = document.createElement("canvas");
+            canvas.width = canvas.height = 1;
+            const context = canvas.getContext("2d")!;
+            for (const layer of [view.dom, marker, lineElement]) {
+              context.fillStyle = getComputedStyle(layer).backgroundColor;
+              context.fillRect(0, 0, 1, 1);
+            }
+            const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+            return {
+              text: view.state.sliceDoc(
+                view.state.selection.main.from,
+                view.state.selection.main.to,
+              ),
+              focused: view.hasFocus,
+              markers: view.dom.querySelectorAll(".cm-selectionBackground")
+                .length,
+              foreground: getComputedStyle(lineElement.querySelector("span")!)
+                .color,
+              background: `rgb(${red}, ${green}, ${blue})`,
+            };
+          }, lineNumber);
+          expect(selection.text, `${profile.id} retained diff text`).toBe(
+            lineNumber === 1 ? "dded content is " : "eleted content i",
+          );
+          expect(selection.focused, `${profile.id} blurred diff editor`).toBe(
+            false,
+          );
+          expect(
+            selection.markers,
+            `${profile.id} retained selection layer`,
+          ).toBeGreaterThan(0);
+          const selected = await page.screenshot({ clip });
+          expect(
+            selected.equals(unselected),
+            `${profile.id} line ${lineNumber} visible retained selection`,
+          ).toBe(false);
+          expect(
+            contrastRatio(selection.foreground, selection.background),
+            `${profile.id} line ${lineNumber} selected diff text`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+        const staticBackgrounds = await page
+          .locator(".markdown-code-block span")
+          .evaluateAll((elements) =>
+            elements.map(
+              (element) => getComputedStyle(element).backgroundColor,
+            ),
+          );
+        expect(
+          staticBackgrounds.every((color) => color !== "rgba(0, 0, 0, 0)"),
+          `${profile.id} static diff backgrounds`,
+        ).toBe(true);
+        await page.evaluate(() =>
+          (globalThis as DiffEditorScope).diffEditor.destroy(),
+        );
+      }
     } finally {
       await context.close();
       await browser.close();
