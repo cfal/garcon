@@ -49,6 +49,93 @@ function newline(editor: ReturnType<typeof mount>['editor'], shiftKey = true) {
 	);
 }
 
+// Mirrors the browser deletion path, which preserves marks for subsequent typing.
+function deleteText(editor: ReturnType<typeof mount>['editor'], from: number, to: number) {
+	const marks = editor.state.doc.resolve(from).marksAcross(editor.state.doc.resolve(to));
+	const transaction = editor.state.tr.delete(from, to);
+	if (marks) transaction.ensureMarks(marks);
+	editor.view.dispatch(transaction);
+}
+
+describe('formatted editor cleared drafts', () => {
+	it.each(['`ab`', '**ab**', '_ab_', '~~ab~~', '**_ab_**', '[ab](https://example.test)'])(
+		'starts unformatted after deleting the last text in %s',
+		(source) => {
+			const { editor, onChange } = mount(source);
+			deleteText(editor, 2, 3);
+			deleteText(editor, 1, 2);
+			expect(editor.state.doc.toJSON()).toEqual({
+				type: 'doc',
+				content: [{ type: 'paragraph' }],
+			});
+			expect(editor.state.storedMarks ?? []).toEqual([]);
+			expect(onChange).toHaveBeenLastCalledWith('');
+			type(editor, 'new');
+			expect(onChange).toHaveBeenLastCalledWith('new');
+		},
+	);
+	it('clears marks from typed code after deleting its trailing space and contents', () => {
+		const { editor, onChange } = mount('');
+		type(editor, '`ab` ');
+		for (let end = 4; end > 1; end--) deleteText(editor, end - 1, end);
+		type(editor, 'new');
+		expect(onChange).toHaveBeenLastCalledWith('new');
+	});
+	it('restores deleted formatting with Undo and clears it again with Redo', () => {
+		const { editor, onChange } = mount('`ab`');
+		deleteText(editor, 1, 3);
+		expect(editor.commands.undo()).toBe(true);
+		expect(onChange).toHaveBeenLastCalledWith('`ab`');
+		expect(editor.view.dom.querySelector('code')?.textContent).toBe('ab');
+		expect(editor.commands.redo()).toBe(true);
+		expect(onChange).toHaveBeenLastCalledWith('');
+		type(editor, 'new');
+		expect(onChange).toHaveBeenLastCalledWith('new');
+	});
+	it('retains formatting when deletion leaves text in the draft', () => {
+		const { editor, onChange } = mount('`ab`');
+		deleteText(editor, 2, 3);
+		type(editor, 'new');
+		expect(onChange).toHaveBeenLastCalledWith('`anew`');
+	});
+	it.each(['> `ab`', '- `ab`', 'before\n\n`ab`'])(
+		'retains formatting when only a nested or later paragraph is emptied: %s',
+		(source) => {
+			const { editor, onChange } = mount(source);
+			const end = editor.state.selection.to;
+			deleteText(editor, end - 2, end);
+			type(editor, 'new');
+			expect(onChange).toHaveBeenLastCalledWith(source.replace('ab', 'new'));
+		},
+	);
+	it('preserves intentional formatting enabled in an empty draft', () => {
+		const { editor, onChange } = mount('`ab`');
+		deleteText(editor, 1, 3);
+		editor.commands.toggleCode();
+		type(editor, 'new');
+		expect(onChange).toHaveBeenLastCalledWith('`new`');
+	});
+	it('does not mistake an image-only paragraph for a cleared draft', () => {
+		const { editor } = mount('![alt](https://example.test/image.png)**ab**');
+		const end = editor.state.selection.to;
+		deleteText(editor, end - 2, end);
+		type(editor, 'new');
+		expect(editor.view.dom.querySelector('img')).not.toBeNull();
+		expect(editor.view.dom.querySelector('strong')?.textContent).toBe('new');
+	});
+	it('keeps marks during a temporary empty IME replacement', () => {
+		const { editor, onChange } = mount('`ab`');
+		editor.view.dispatch(
+			editor.state.tr
+				.delete(1, 3)
+				.ensureMarks([editor.schema.marks.code.create()])
+				.setMeta('composition', 1),
+		);
+		type(editor, 'new');
+		expect(onChange).toHaveBeenLastCalledWith('`new`');
+	});
+});
+
 describe('composer newline intent', () => {
 	it('shows the existing Reply placeholder only while empty', () => {
 		const { editor } = mount('');

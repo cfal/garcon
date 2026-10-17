@@ -8,6 +8,7 @@
 	import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
 	import { composerMarkdownTableInput } from './composer-markdown-table-input.js';
 	import { composerMarkdownCaretMarks } from './composer-markdown-caret-marks.js';
+	import { composerMarkdownEmptyMarks } from './composer-markdown-empty-marks.js';
 	import { composerMarkdownNewline } from './composer-markdown-newline.js';
 	import { ComposerMarkdownCache } from './composer-markdown-cache.js';
 	import {
@@ -233,6 +234,7 @@
 			element: container,
 			extensions: [
 				...extensions,
+				composerMarkdownEmptyMarks,
 				Placeholder.configure({ placeholder: m.chat_composer_reply_placeholder() }),
 				composerMarkdownTableInput(composerMarkdownCodec.parse),
 				...(initialSelection !== undefined && selectionMarks

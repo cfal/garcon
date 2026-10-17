@@ -95,6 +95,91 @@ test('message format defaults to Formatted and is controlled only by persisted I
   }, undefined, { composerInputMode: null });
 }, 90_000);
 
+test('deleting the last formatted text resets typing and paste marks', async () => {
+  await withChromiumFixture('composer-cleared-marks', async ({ page, context, integration, assertNoBrowserErrors }) => {
+    const chatId = integration.newChatId();
+    const turn = await integration.client.startDirectChat({
+      chatId, content: 'Synthetic cleared formatting', projectPath: integration.dirs.project,
+      agent: integration.directAgents.anthropic,
+    });
+    await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const editor = page.getByRole('textbox', { name: 'Formatted message' });
+    const textarea = page.locator('[data-composer] textarea');
+    await browserExpect(editor).toBeVisible();
+    await editor.focus();
+    const original = await editor.elementHandle();
+
+    for (const [source, tag] of [
+      ['`hello` ', 'code'], ['**hello** ', 'strong'],
+      ['_hello_ ', 'em'], ['~~hello~~ ', 's'],
+    ]) {
+      for (const deletion of ['Backspace', 'Delete', 'select-all', 'cut']) {
+        await editor.press('Control+A');
+        await editor.press('Backspace');
+        const typed = deletion === 'Delete' ? source.trimEnd() : source;
+        const text = deletion === 'Delete' ? 'hello' : 'hello ';
+        await page.keyboard.type(typed);
+        await browserExpect(editor.locator(tag)).toHaveText('hello');
+        await browserExpect.poll(() => editor.evaluate(element => {
+          const rich = (element as HTMLElement & { editor: { state: {
+            doc: { textContent: string }; selection: { from: number };
+          } } }).editor;
+          return { text: rich.state.doc.textContent, caret: rich.state.selection.from };
+        })).toEqual({ text, caret: text.length + 1 });
+        // Separates the typing and deletion history groups for real keyboard Undo/Redo.
+        if (tag === 'code' && deletion === 'Backspace') await page.waitForTimeout(550);
+        if (deletion === 'Backspace' || deletion === 'Delete') {
+          if (deletion === 'Delete') {
+            await editor.press('Home');
+            await browserExpect.poll(() => editor.evaluate(element =>
+              (element as HTMLElement & { editor: { state: { selection: { from: number } } } })
+                .editor.state.selection.from,
+            )).toBe(1);
+          }
+          for (let count = text.length; count > 0; count--) {
+            await editor.press(deletion);
+            await browserExpect.poll(() => editor.textContent()).toHaveLength(count - 1);
+          }
+        } else {
+          await editor.press('Control+A');
+          await editor.press(deletion === 'cut' ? 'Control+X' : 'Backspace');
+        }
+        await browserExpect(editor.locator('p.is-editor-empty')).toBeVisible();
+        await browserExpect(textarea).toHaveValue('');
+        await browserExpect(editor).toBeFocused();
+        expect(await editor.evaluate((element, previous) => element === previous, original)).toBe(true);
+        if (tag === 'code' && deletion === 'Backspace') {
+          await editor.press('Control+z');
+          await browserExpect(textarea).toHaveValue(source);
+          await editor.press('Control+Shift+z');
+          await browserExpect(textarea).toHaveValue('');
+        }
+        await page.keyboard.type('new');
+        await browserExpect(textarea).toHaveValue('new');
+        await browserExpect(editor.locator('code, strong, em, s')).toHaveCount(0);
+      }
+    }
+
+    await editor.press('Control+A');
+    await editor.press('Backspace');
+    await page.keyboard.type('`hello` ');
+    await browserExpect.poll(() => editor.textContent()).toBe('hello ');
+    for (let count = 6; count > 0; count--) {
+      await editor.press('Backspace');
+      await browserExpect.poll(() => editor.textContent()).toHaveLength(count - 1);
+    }
+    await browserExpect(editor.locator('p.is-editor-empty')).toBeVisible();
+    await browserExpect(textarea).toHaveValue('');
+    await page.evaluate(() => navigator.clipboard.writeText('**pasted**'));
+    await editor.press('Control+V');
+    await browserExpect(editor.locator('strong')).toHaveText('pasted');
+    await browserExpect(textarea).toHaveValue('**pasted**');
+    assertNoBrowserErrors();
+  }, undefined, { composerInputMode: 'formatted' });
+}, 120_000);
+
 test('raw Markdown paste retains rich history, layout, and caret visibility', async () => {
   await withChromiumFixture('composer-paste-history', async ({ page, context, integration, assertNoBrowserErrors }) => {
     const chatId = integration.newChatId();
