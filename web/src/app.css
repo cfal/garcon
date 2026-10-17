@@ -654,6 +654,8 @@
 .markdown-body thead ::selection,
 .markdown-link-alert::selection,
 .markdown-link-alert ::selection,
+.mermaid-container svg::selection,
+.mermaid-container svg ::selection,
 .user-message-attachment::selection,
 .user-message-attachment ::selection {
 	background-color: hsl(var(--primary));
