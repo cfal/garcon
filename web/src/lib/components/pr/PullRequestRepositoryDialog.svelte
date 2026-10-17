@@ -164,8 +164,6 @@
 		}),
 	};
 	const sectionClass = 'space-y-3 rounded-lg border border-border p-3';
-	const inputClass =
-		'w-full rounded-md border border-border bg-background px-2 py-1 text-base pointer-fine:text-sm';
 </script>
 
 <Dialog.Root open onOpenChange={(value) => !value && onClose()}>
@@ -283,7 +281,7 @@
 							<label class="flex flex-col gap-1 text-sm">
 								{filter.label()}
 								<textarea
-									class={inputClass}
+									class="w-full rounded-md border border-border bg-background px-2 py-1 text-base pointer-fine:text-sm"
 									rows="2"
 									aria-describedby="pr-filter-lists-hint"
 									bind:value={form[filter.key]}></textarea>
@@ -300,7 +298,7 @@
 									min={limit.min}
 									max={limit.max}
 									step="1"
-									class={inputClass}
+									class="w-full rounded-md border border-border bg-background px-2 py-1 text-base pointer-fine:text-sm"
 									aria-describedby={`pr-limit-${limit.key}-hint`}
 									bind:value={form[limit.key]}
 								/>
