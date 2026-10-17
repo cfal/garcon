@@ -36,6 +36,7 @@ export interface PullRequestReviewRepositoriesDeps {
   retainProviderReferences?: RetainProviderReferences;
   autoReviewStatus(repositoryId: string, number: number): PullRequestAutoReviewStatus | null;
   isPostingRepository(repositoryId: string): boolean;
+  repositoryUpdated(repositoryId: string): void;
   changed(): void;
   now(): number;
 }
@@ -142,6 +143,7 @@ export class PullRequestReviewRepositories {
       || input.target.projectPath !== current.target.projectPath;
     let viewerLogin = current.viewerLogin;
     if (moved) {
+      this.#assertPostingTargetAvailable(id);
       // A new folder must still be a checkout of the same repository.
       const list = await this.#readRepository(input);
       if (list.repo?.nameWithOwner.toLowerCase() !== current.nameWithOwner.toLowerCase()) {
@@ -151,6 +153,7 @@ export class PullRequestReviewRepositories {
     }
     const latest = this.require(id);
     if (latest.updatedAt !== current.updatedAt) throw reviewConflict('The repository changed while it was being saved. Try again.');
+    if (moved) this.#assertPostingTargetAvailable(id);
     const { scan: _scan, ...stored } = latest;
     const next: StoredRepository = {
       ...stored,
@@ -162,7 +165,14 @@ export class PullRequestReviewRepositories {
     this.#publish(next, latest, () => {
       if (!this.deps.store.updateRepository(next)) throw reviewNotFound('Repository');
     });
+    this.deps.repositoryUpdated(id);
     return this.require(id);
+  }
+
+  #assertPostingTargetAvailable(id: string): void {
+    if (this.deps.isPostingRepository(id) || this.deps.store.hasUnknownPost(id)) {
+      throw reviewConflict('A review is being posted or has an unconfirmed post. Reconcile it before changing the repository executor or folder.');
+    }
   }
 
   remove(id: string): void {

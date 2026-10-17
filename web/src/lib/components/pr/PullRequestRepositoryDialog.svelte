@@ -127,6 +127,34 @@
 		{ key: 'skipDrafts', label: m.pull_request_repository_filter_skip_drafts },
 		{ key: 'trustedAuthorsOnly', label: m.pull_request_repository_filter_trusted },
 	] as const;
+	const filterLists = [
+		{ key: 'baseBranches', label: m.pull_request_repository_base_branches },
+		{ key: 'includeLabels', label: m.pull_request_repository_include_labels },
+		{ key: 'excludeLabels', label: m.pull_request_repository_exclude_labels },
+	] as const;
+	const reviewLimits = [
+		{
+			key: 'maxChangedLines',
+			label: m.pull_request_repository_max_changed_lines,
+			hint: m.pull_request_repository_max_changed_lines_hint,
+			min: 1,
+			max: 1_000_000,
+		},
+		{
+			key: 'maxAttemptsPerCommit',
+			label: m.pull_request_repository_max_attempts,
+			hint: m.pull_request_repository_max_attempts_hint,
+			min: 1,
+			max: 5,
+		},
+		{
+			key: 'dailyReviewLimit',
+			label: m.pull_request_repository_daily_limit,
+			hint: m.pull_request_repository_daily_limit_hint,
+			min: 1,
+			max: 500,
+		},
+	] as const;
 	const promptVariables = {
 		tokens: Object.values(PULL_REQUEST_REVIEW_PROMPT_TOKENS),
 		help: m.pull_request_repository_prompt_hint({
@@ -136,6 +164,8 @@
 		}),
 	};
 	const sectionClass = 'space-y-3 rounded-lg border border-border p-3';
+	const inputClass =
+		'w-full rounded-md border border-border bg-background px-2 py-1 text-base pointer-fine:text-sm';
 </script>
 
 <Dialog.Root open onOpenChange={(value) => !value && onClose()}>
@@ -233,10 +263,57 @@
 						type="number"
 						min="0"
 						max="1440"
+						step="1"
 						class="w-20 rounded-md border border-border bg-background px-2 py-1 text-base pointer-fine:text-sm"
 						bind:value={form.debounceMinutes}
 					/>
 				</label>
+				<p class="text-xs text-muted-foreground">
+					{m.pull_request_repository_debounce_hint()}
+				</p>
+				<details class="space-y-3">
+					<summary class="cursor-pointer text-sm font-medium">
+						{m.pull_request_repository_filters_and_limits()}
+					</summary>
+					<p id="pr-filter-lists-hint" class="text-xs text-muted-foreground">
+						{m.pull_request_repository_filter_lists_hint()}
+					</p>
+					<div class="grid gap-3 sm:grid-cols-3">
+						{#each filterLists as filter (filter.key)}
+							<label class="flex flex-col gap-1 text-sm">
+								{filter.label()}
+								<textarea
+									class={inputClass}
+									rows="2"
+									aria-describedby="pr-filter-lists-hint"
+									bind:value={form[filter.key]}></textarea>
+							</label>
+						{/each}
+					</div>
+					<div class="grid gap-3 sm:grid-cols-3">
+						{#each reviewLimits as limit (limit.key)}
+							<div class="flex flex-col gap-1 text-sm">
+								<label for={`pr-limit-${limit.key}`}>{limit.label()}</label>
+								<input
+									id={`pr-limit-${limit.key}`}
+									type="number"
+									min={limit.min}
+									max={limit.max}
+									step="1"
+									class={inputClass}
+									aria-describedby={`pr-limit-${limit.key}-hint`}
+									bind:value={form[limit.key]}
+								/>
+								<p id={`pr-limit-${limit.key}-hint`} class="text-xs text-muted-foreground">
+									{limit.hint()}
+								</p>
+							</div>
+						{/each}
+					</div>
+				</details>
+				{#if form.settingsError}
+					<p class="text-sm text-status-error-foreground" role="alert">{form.settingsError}</p>
+				{/if}
 			</section>
 			<section class={sectionClass}>
 				<label class="flex items-start gap-2 text-sm font-medium text-foreground">

@@ -12,6 +12,7 @@ import { transcriptViewId } from '../../ledger/contracts.js';
 import type { CommandLedgerRecord } from '../../commands/command-ledger.js';
 import type { AgentStopResponse } from '../../../../common/chat-command-contracts.js';
 import { emptyChatExecutionControlState } from '../../../../common/chat-execution-control.js';
+import { GitServiceError } from '../../../../common/git-error.js';
 
 const HEAD = 'a'.repeat(40);
 const directories: string[] = [];
@@ -121,6 +122,42 @@ test('reviews a new pull request automatically and posts the review as a comment
   reviews.stop();
 });
 
+test('invalidates a completed review immediately when its chat is deleted', async () => {
+  const { reviews, deps, turns } = harness();
+  const repository = await connect(reviews, {});
+  const invalidated = spyOn(deps, 'onInvalidated');
+  try {
+    reviews.start();
+    reviews.review(repository.id, 7);
+    await until(() => turns.has('chat-1'));
+    turns.get('chat-1')!(`No findings.\n\nReviewed commit: ${HEAD}`);
+    await until(() => latestRun(reviews)?.state === 'completed');
+    await Promise.resolve();
+    const before = reviews.snapshot();
+    expect(before.inbox[0].latestRun?.chatAvailable).toBe(true);
+    invalidated.mockClear();
+
+    deps.chats.hasChat = () => false;
+    reviews.handleChatRemoved('chat-1');
+    await until(() => invalidated.mock.calls.length > 0);
+
+    const after = reviews.snapshot();
+    expect(after.revision).toBeGreaterThan(before.revision);
+    expect(invalidated).toHaveBeenCalledWith(after.revision);
+    expect(after.inbox[0].latestRun).toMatchObject({ state: 'completed', chatId: null, chatAvailable: false });
+    expect(reviews.runs(repository.id, 7)[0]).toMatchObject({
+      chatId: null, chatAvailable: false, review: `No findings.\n\nReviewed commit: ${HEAD}`,
+    });
+
+    invalidated.mockClear();
+    reviews.handleChatRemoved('unrelated-chat');
+    reviews.handleChatRemoved('chat-1');
+    await Promise.resolve();
+    expect(invalidated).not.toHaveBeenCalled();
+    expect(reviews.snapshot().revision).toBe(after.revision);
+  } finally { invalidated.mockRestore(); reviews.stop(); reviews.close(); }
+});
+
 test('tracks a permission committed before startup returns and arms its timeout', async () => {
   const { reviews, deps, turns } = harness();
   const repository = await connect(reviews, {});
@@ -218,6 +255,10 @@ test('retains a repository and its review while a comment is being delivered', a
     const posting = reviews.postRun(run.id);
     await until(() => create.mock.calls.length === 1);
     expect(() => reviews.remove(repository.id)).toThrow('being posted');
+    await expect(reviews.update(repository.id, {
+      target: { ...repository.target, executorId: '11111111-1111-4111-8111-111111111111' }, settings: repository.settings,
+    })).rejects.toThrow('being posted');
+    expect(reviews.snapshot().repositories[0].target).toEqual(repository.target);
     expect(reviews.runs(repository.id, 7)).toHaveLength(1);
     await expect(reviews.postRun(run.id)).rejects.toThrow('already being posted');
     const another = reviews.review(repository.id, 8);
@@ -230,6 +271,28 @@ test('retains a repository and its review while a comment is being delivered', a
     await expect(posting).resolves.toMatchObject({ post: { status: 'posted' } });
     reviews.remove(repository.id);
     expect(reviews.snapshot().repositories).toEqual([]);
+  } finally { create.mockRestore(); reviews.stop(); reviews.close(); }
+});
+
+test('keeps an unknown post on its original executor until reconciliation', async () => {
+  const { reviews, deps, turns } = harness();
+  const repository = await connect(reviews, {});
+  const gh = await deps.executors.requireExecutor().getGhService();
+  const create = spyOn(gh, 'createPullRequestComment');
+  create.mockRejectedValueOnce(new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Reply lost'));
+  reviews.start();
+  try {
+    const run = reviews.review(repository.id, 7);
+    await until(() => turns.has('chat-1'));
+    turns.get('chat-1')!(`Reviewed commit: ${HEAD}`);
+    await until(() => latestRun(reviews)?.state === 'completed');
+    await reviews.postRun(run.id);
+    await expect(reviews.update(repository.id, {
+      target: { ...repository.target, projectPath: '/work/other' }, settings: repository.settings,
+    })).rejects.toThrow('unconfirmed post');
+    await expect(reviews.update(repository.id, {
+      target: repository.target, settings: { ...repository.settings, autoPost: false },
+    })).resolves.toMatchObject({ settings: { autoPost: false } });
   } finally { create.mockRestore(); reviews.stop(); reviews.close(); }
 });
 

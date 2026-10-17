@@ -3104,5 +3104,19 @@
 	"pull_request_checks_running": "{count} running",
 	"pull_request_checks_passed": "{count} passed",
 	"pull_request_checks_neutral": "{count} neutral",
-	"pull_request_checks_skipped": "{count} skipped"
+	"pull_request_checks_skipped": "{count} skipped",
+	"pull_request_repository_filters_and_limits": "Filters and limits",
+	"pull_request_repository_filter_lists_hint": "Applies to automatic reviews. Enter one exact value per line; leave blank for no restriction. Up to 20 values per list, 255 characters each.",
+	"pull_request_repository_base_branches": "Base branches",
+	"pull_request_repository_include_labels": "Require any of these labels",
+	"pull_request_repository_exclude_labels": "Exclude these labels",
+	"pull_request_repository_max_changed_lines": "Maximum changed lines",
+	"pull_request_repository_max_changed_lines_hint": "Additions + deletions, 1–1,000,000. Leave blank for no limit.",
+	"pull_request_repository_max_attempts": "Attempts per head commit",
+	"pull_request_repository_max_attempts_hint": "1–5 attempts for each head commit.",
+	"pull_request_repository_daily_limit": "Daily review limit",
+	"pull_request_repository_daily_limit_hint": "1–500 automatic reviews in the last 24 hours.",
+	"pull_request_repository_debounce_hint": "0–1,440 minutes. Set 0 to review immediately.",
+	"pull_request_repository_settings_invalid": "Use whole numbers within the shown ranges and at most 20 filter values of 255 characters per list.",
+	"pull_request_review_retry_cleanup": "Retry cleanup"
 }

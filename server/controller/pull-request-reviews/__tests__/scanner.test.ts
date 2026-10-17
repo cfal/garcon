@@ -70,7 +70,7 @@ function harness() {
   const repositories = new PullRequestReviewRepositories({
     store, executors: { requireExecutor() { throw new Error('Unused'); } },
     agents: { hasAgent: () => true, assertExecutorReady() {}, assertExecutionModeSelectionSupported() {}, executionPolicy: () => 'conversation' },
-    chats: { hasChat: () => true }, autoReviewStatus: () => null, isPostingRepository: () => false, changed() {}, now: () => clock.now,
+    chats: { hasChat: () => true }, autoReviewStatus: () => null, isPostingRepository: () => false, repositoryUpdated() {}, changed() {}, now: () => clock.now,
   });
   return { directory, store, clock, run, repository, repositories, scanner, list, queued };
 }
@@ -222,12 +222,13 @@ test('the initial schema rejects normalized duplicate repository identities', ()
 
 test('indexed selection preserves head aliases, attempt counts, and active reviews after a push', () => {
   const { store, repository, run, clock } = harness();
-  store.insertRun({ ...run, id: 'reviewed-alias', headSha: NEXT_HEAD, reviewedSha: HEAD, state: 'failed', createdAt: new Date(clock.now).toISOString() });
+  store.insertRun({ ...run, id: 'reviewed-alias', headSha: NEXT_HEAD, reviewedSha: HEAD, state: 'failed',
+    createdAt: new Date(clock.now).toISOString(), startedAt: new Date(clock.now).toISOString() });
   store.insertRun({ ...run, id: 'manual-stop', trigger: 'manual', state: 'stopped' });
-  store.insertRun({ ...run, id: 'queued-next-head', headSha: NEXT_HEAD, reviewedSha: null, state: 'queued' });
+  store.insertRun({ ...run, id: 'queued-next-head', headSha: NEXT_HEAD, reviewedSha: null, state: 'queued', startedAt: null, chatId: null, turnId: null });
   store.insertRun({ ...run, id: 'unrelated-pull', number: 8, state: 'reviewing' });
   expect(store.selectionHistory(repository.id, 7, HEAD)).toEqual({ active: true, completed: true, stopped: true, attempts: 2 });
-  expect(store.selectionHistory(repository.id, 7, NEXT_HEAD)).toEqual({ active: true, completed: false, stopped: false, attempts: 2 });
+  expect(store.selectionHistory(repository.id, 7, NEXT_HEAD)).toEqual({ active: true, completed: false, stopped: false, attempts: 1 });
   expect(store.selectionHistory(repository.id, 9, HEAD)).toEqual({ active: false, completed: false, stopped: false, attempts: 0 });
   expect(store.automaticRunsSince(repository.id, new Date(clock.now - DAY_MS).toISOString())).toBe(1);
 });

@@ -9,7 +9,7 @@ import { PullRequestReviewRepositories, type PullRequestReviewRepositoriesDeps }
 import { PullRequestReviewStore } from './store.js';
 
 export interface PullRequestReviewsDeps
-  extends Omit<PullRequestReviewRepositoriesDeps, 'store' | 'autoReviewStatus' | 'isPostingRepository' | 'changed' | 'now'>,
+  extends Omit<PullRequestReviewRepositoriesDeps, 'store' | 'autoReviewStatus' | 'isPostingRepository' | 'repositoryUpdated' | 'changed' | 'now'>,
     Omit<PullRequestReviewRunnerDeps, 'store' | 'poster' | 'changed' | 'now'> {
   archiveChat(chatId: string): Promise<void>;
   onInvalidated(revision: number): void;
@@ -39,6 +39,7 @@ export class PullRequestReviews {
       store,
       autoReviewStatus: (repositoryId, number) => this.#scanner.autoReviewStatus(repositoryId, number),
       isPostingRepository: (repositoryId) => this.#poster.isPostingRepository(repositoryId),
+      repositoryUpdated: (repositoryId) => this.#runner.cancelQueuedAutomaticRuns(repositoryId),
       changed,
       now,
     });
@@ -68,6 +69,11 @@ export class PullRequestReviews {
 
   handleTranscriptCommit(event: TranscriptCommitEvent): void {
     this.#runner.handleTranscriptCommit(event);
+  }
+
+  handleChatRemoved(chatId: string): void {
+    if (!this.store.available) return;
+    if (this.store.markChatRemoved(chatId)) this.#scheduleInvalidation();
   }
 
   async connect(body: unknown): Promise<PullRequestReviewRepository> {
@@ -134,6 +140,7 @@ export interface PullRequestReviewsRuntime {
   // Throws while storage is unavailable.
   readonly service: PullRequestReviews;
   referencesApiProvider(id: string): boolean;
+  handleChatRemoved(chatId: string): void;
   start(): void;
   stop(): void;
   close(): void;
@@ -153,6 +160,7 @@ export function initializePullRequestReviews(workspaceDir: string, deps: PullReq
     },
     // Unreadable storage may still hold saved selections, so it keeps protecting them.
     referencesApiProvider: (id) => service?.referencesApiProvider(id) ?? true,
+    handleChatRemoved(chatId) { service?.handleChatRemoved(chatId); },
     start() { service?.start(); },
     stop() { service?.stop(); },
     close() { service?.close(); },

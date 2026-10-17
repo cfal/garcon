@@ -736,6 +736,7 @@ export async function startServer(): Promise<void> {
         snippets,
         preambles,
         chatBoards: chatBoardRuntime.chatBoards,
+        pullRequestReviews,
         searchIndex: chatSearch,
       }),
       startDispatchers: async () => {

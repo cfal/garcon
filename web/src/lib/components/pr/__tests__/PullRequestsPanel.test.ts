@@ -426,4 +426,32 @@ describe('PullRequestsPanel', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Post to GitHub' }));
 		await waitFor(() => expect(api.post).toHaveBeenCalledWith('run-1'));
 	});
+
+	for (const status of ['unknown', 'posted'] as const) {
+		it(`allows ${status === 'unknown' ? 'unknown-post reconciliation' : 'cleanup retry'} for an outdated review`, async () => {
+			const older: PullRequestReviewRunDetail = {
+				...run,
+				state: 'outdated',
+				post: {
+					status,
+					commentUrl: null,
+					postedAt: null,
+					message: 'Older comments need cleanup.',
+				},
+			};
+			const { api } = setup({
+				snapshot: { ...snapshot, inbox: [{ ...snapshot.inbox[0], latestRun: older }] },
+				getRuns: async () => [older],
+			});
+			await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+			await screen.findByText('No actionable findings.');
+			await screen.findByText('Older comments need cleanup.');
+			await fireEvent.click(
+				screen.getByRole('button', {
+					name: status === 'posted' ? 'Retry cleanup' : 'Post to GitHub',
+				}),
+			);
+			await waitFor(() => expect(api.post).toHaveBeenCalledWith(run.id));
+		});
+	}
 });

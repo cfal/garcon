@@ -22,7 +22,11 @@ describes what milestones 1 and 2 of that issue implement.
    current head, has not used its attempts at that head, was not stopped by
    the user at that head, and its head has been unchanged for the debounce
    period, measured from when the scanner first saw it. The daily limit
-   counts automatic reviews started in the last 24 hours.
+   counts automatic reviews started in the last 24 hours, with queued reviews
+   reserving available starts. Interrupted reviews that never started use no
+   attempts or daily allowance. Saving repository settings cancels queued
+   automatic reviews; each automatic review also rechecks the current policy
+   immediately before starting. Manual reviews remain independent of filters.
 4. **Start.** At most two reviews run at once, one per repository. A review is
    a new chat in the repository's folder, tagged `auto-review` and named
    `Review owner/name#N`, started with the repository's prompt. A push during
@@ -38,19 +42,22 @@ describes what milestones 1 and 2 of that issue implement.
    it unchecked keeps the **Post to GitHub** button available on each review.
 
 Review chats are ordinary chats. Stopping one stops its review; deleting one
-ends it. When a pull request leaves the open list, its review chats are
+ends it. Deleting a completed review chat removes its Open Chat action while
+preserving the saved review. When a pull request leaves the open list, its review chats are
 archived.
 
 ## Posting
 
 The controller posts, never the agent, through the repository executor's `gh`
-login. Before posting it re-reads the pull request: a closed pull request or a
+login. Before creating a comment it re-reads the pull request and checks that
+the saved review is still current: a closed pull request or a
 moved head posts nothing and marks the review outdated. The comment ends with a
 hidden marker naming the repository, pull request, and commit. A marker for the
 same commit already on the pull request counts as posted, so a post whose reply
 was lost is never sent twice; an unconfirmed post is reported as unknown and
-resolves the same way on the next attempt. Earlier Garcon comments on the pull
-request are minimized as outdated. A review longer than a GitHub comment is
+resolves the same way on the next attempt, even after a push or closure. Earlier
+Garcon comments on the pull request are minimized as outdated. A failed
+minimization exposes Retry cleanup, which never creates another comment. A review longer than a GitHub comment is
 kept and reported as too long, never truncated. Reviews never approve or
 request changes.
 
@@ -59,7 +66,8 @@ commit hashes. A case-only repository rename refreshes the displayed name while
 preserving comment recovery. Posts for one pull request cannot overlap; other
 pull requests in the repository can post independently. Disconnecting a
 repository is refused while its posts are in flight and can be retried after
-they finish.
+they finish. Its executor and folder also remain fixed during posting and
+until an unknown posting outcome has been reconciled.
 
 ## State
 
@@ -100,6 +108,11 @@ off automatic reviews or automatic posting. The saved review target stays fixed
 until the executor is ready. Failed scans keep the last saved list and show its
 status in the inbox. Policy and posting reads paginate all GitHub connections; incomplete
 reads fail instead of publishing a truncated successful scan.
+
+The repository form's Filters and limits section configures base branches,
+included and excluded labels, maximum changed lines (blank allows any size),
+attempts per head commit, and daily starts. Branches and labels are entered
+one per line. All supported limits can also be edited offline.
 
 The Review tab keeps the inbox's run summary while history loads and shows
 history read failures with Retry. Review and Post remain disabled until that

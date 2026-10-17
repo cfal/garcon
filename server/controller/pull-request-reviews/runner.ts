@@ -19,11 +19,13 @@ import { projectAgentTurnReceipt } from '../commands/agent-turn-receipt-projecto
 import type { ScheduledChatStartInput } from '../commands/command-support.js';
 import type { TranscriptCommitEvent } from '../ledger/service.js';
 import { reviewConflict } from './errors.js';
+import { decideQueuedAutoReview } from './selection.js';
 import type { PullRequestReviewPoster } from './poster.js';
 import type { PullRequestReviewStore, StoredRun } from './store.js';
 
 const logger = createLogger('pull-request-review-runner');
 const PERMISSION_STOP_RETRY_MS = 30_000;
+const DAY_MS = 24 * 60 * 60_000;
 
 export interface PullRequestReviewRunnerDeps {
   store: PullRequestReviewStore;
@@ -105,6 +107,10 @@ export class PullRequestReviewRunner {
     }
   }
 
+  cancelQueuedAutomaticRuns(repositoryId: string): void {
+    if (this.deps.store.interruptQueuedAutomaticRuns(repositoryId, new Date(this.deps.now()).toISOString())) this.deps.changed();
+  }
+
   async stopRun(runId: string): Promise<void> {
     const run = this.deps.store.getRun(runId);
     if (!run || !isActivePullRequestReviewRun(run.state)) throw reviewConflict('This review is not running.');
@@ -174,6 +180,21 @@ export class PullRequestReviewRunner {
     const { store } = this.deps;
     const repository = store.getRepository(queued.repositoryId);
     if (!repository) return;
+    if (queued.trigger === 'auto') {
+      const pull = store.pulls(repository.id).find((entry) => entry.number === queued.number);
+      const history = store.selectionHistory(repository.id, queued.number, queued.headSha);
+      // The queued run owns the active slot, but has not consumed a start or attempt.
+      const decision = pull && decideQueuedAutoReview({
+        settings: repository.settings,
+        pull,
+        history: { ...history, active: false },
+        startedInLastDay: store.automaticRunsSince(repository.id, new Date(this.deps.now() - DAY_MS).toISOString()),
+      });
+      if (!repository.settings.autoReview || !pull || pull.headRefOid !== queued.headSha || decision?.kind !== 'review') {
+        this.#settle(queued.id, { state: 'interrupted', message: 'The automatic review is no longer eligible to start.', reviewedSha: null });
+        return;
+      }
+    }
     const chatId = this.deps.chatIds.allocate();
     const started = store.updateRun(queued.id, (run) => run.state === 'queued'
       ? { ...run, state: 'reviewing', chatId, startedAt: new Date(this.deps.now()).toISOString() }
