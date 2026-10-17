@@ -20,52 +20,63 @@
 	}
 	let { variables, getInput, onInsert, disabled = false }: Props = $props();
 	let selection: { input: TextInput; text: string; start: number; end: number } | null = null;
-	let inserted: { input: TextInput; text: string; caret: number } | null = null;
+	let pendingInsertion: { input: TextInput; text: string; caret: number } | null = null;
 
-	function capture(open: boolean): void {
+	function captureSelection(open: boolean): void {
 		if (!open) return;
-		inserted = null;
+		pendingInsertion = null;
 		const input = getInput();
-		selection = input ? {
-			input, text: input.value,
+		if (!input) {
+			selection = null;
+			return;
+		}
+		selection = {
+			input,
+			text: input.value,
 			start: input.selectionStart ?? input.value.length,
 			end: input.selectionEnd ?? input.value.length,
-		} : null;
+		};
 	}
 
-	function insert(variable: SnippetTemplateVariable): void {
-		if (disabled || !selection || selection.input !== getInput() || selection.input.value !== selection.text) return;
+	function insertVariable(variable: SnippetTemplateVariable): void {
+		if (disabled || !selection) return;
 		const { input, text, start, end } = selection;
+		if (input !== getInput() || input.value !== text) return;
 		const token = `{{${variable}}}`;
-		const next = text.slice(0, start) + token + text.slice(end);
-		inserted = { input, text: next, caret: start + token.length };
-		input.value = next;
-		onInsert(next);
+		const nextText = text.slice(0, start) + token + text.slice(end);
+		pendingInsertion = { input, text: nextText, caret: start + token.length };
+		input.value = nextText;
+		onInsert(nextText);
 	}
 
-	async function restoreFocus(event: Event): Promise<void> {
-		const target = inserted;
-		if (!target) return;
+	async function restoreInputFocus(event: Event): Promise<void> {
+		if (!pendingInsertion) return;
+		const { input, text, caret } = pendingInsertion;
 		event.preventDefault();
-		inserted = null;
+		pendingInsertion = null;
 		await tick();
-		if (target.input !== getInput() || !target.input.isConnected || target.input.value !== target.text) return;
-		target.input.focus({ preventScroll: true });
-		target.input.setSelectionRange(target.caret, target.caret);
+		if (input !== getInput() || !input.isConnected || input.value !== text) return;
+		input.focus({ preventScroll: true });
+		input.setSelectionRange(caret, caret);
 	}
 
-	function label(variable: SnippetTemplateVariable): string {
+	function variableLabel(variable: SnippetTemplateVariable): string {
 		switch (variable) {
-			case 'chat_id': return m.template_variable_chat_id();
-			case 'current_date': return m.template_variable_date_utc();
-			case 'current_date_local': return m.template_variable_date_local();
-			case 'arguments': return m.template_variable_arguments();
-			case 'project_path': return m.template_variable_project_path();
+			case 'chat_id':
+				return m.template_variable_chat_id();
+			case 'current_date':
+				return m.template_variable_date_utc();
+			case 'current_date_local':
+				return m.template_variable_date_local();
+			case 'arguments':
+				return m.template_variable_arguments();
+			case 'project_path':
+				return m.template_variable_project_path();
 		}
 	}
 </script>
 
-<DropdownMenu onOpenChange={capture}>
+<DropdownMenu onOpenChange={captureSelection}>
 	<DropdownMenuTrigger
 		class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
 		{disabled}
@@ -74,11 +85,11 @@
 	>
 		<Braces class="size-4" />
 	</DropdownMenuTrigger>
-	<DropdownMenuContent align="end" onCloseAutoFocus={(event) => void restoreFocus(event)}>
+	<DropdownMenuContent align="end" onCloseAutoFocus={(event) => void restoreInputFocus(event)}>
 		{#each variables as variable (variable)}
-			<DropdownMenuItem onSelect={() => insert(variable)}>
+			<DropdownMenuItem onSelect={() => insertVariable(variable)}>
 				<span class="flex min-w-0 flex-col gap-0.5">
-					<span>{label(variable)}</span>
+					<span>{variableLabel(variable)}</span>
 					<code class="text-xs text-muted-foreground">{`{{${variable}}}`}</code>
 				</span>
 			</DropdownMenuItem>

@@ -228,21 +228,24 @@ export function normalizeScheduledPromptName(value: unknown): string | undefined
   if (typeof value !== 'string') return null;
   const name = value.trim();
   if (!name) return undefined;
-  return name.isWellFormed() && !SINGLE_LINE_CONTROL.test(name)
-    && [...name].length <= SCHEDULED_PROMPT_NAME_MAX_CODE_POINTS ? name : null;
+  if (!name.isWellFormed() || SINGLE_LINE_CONTROL.test(name)) return null;
+  if ([...name].length > SCHEDULED_PROMPT_NAME_MAX_CODE_POINTS) return null;
+  return name;
 }
 
 export function normalizeScheduledChatTitle(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const title = value.trim();
-  return title && title.isWellFormed() && !SINGLE_LINE_CONTROL.test(title)
-    && isChatTitleWithinLimit(title) ? title : null;
+  if (!title || !title.isWellFormed() || SINGLE_LINE_CONTROL.test(title)) return null;
+  if (!isChatTitleWithinLimit(title)) return null;
+  return title;
 }
 
 export function renderScheduledChatTitle(template: string, values: RuntimeTemplateValues): string {
-  const title = normalizeScheduledChatTitle(expandTemplate(
+  const expanded = expandTemplate(
     template, RUNTIME_TEMPLATE_VARIABLES, values, CHAT_TITLE_MAX_BYTES,
-  ));
+  );
+  const title = normalizeScheduledChatTitle(expanded);
   if (title === null) throw new TypeError('Invalid scheduled chat title after variable expansion');
   return title;
 }

@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ScheduledPromptsInvalidatedMessage } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const MINUTE_MS = 60_000;
 
@@ -65,9 +66,10 @@ describe('scheduled prompt runtime variables', () => {
         { ...candidate, target: { ...candidate.target, chatTitleTemplate: '' } },
         { ...candidate, target: { type: 'existing-chat', chatId: '1000000000000001', busyBehavior: 'queue', chatTitleTemplate: 'No rename' } },
       ]) {
-        await expect(fixture.client.post('/api/v1/scheduled-prompts', {
+        const error = await rejectionOf(fixture.client.post('/api/v1/scheduled-prompts', {
           expectedRevision: created.snapshot.revision, scheduledPrompt: invalid,
-        })).rejects.toMatchObject({ status: 400, body: { errorCode: 'SCHEDULED_PROMPT_VALIDATION_FAILED' } });
+        }));
+        expect(error).toMatchObject({ status: 400, body: { errorCode: 'SCHEDULED_PROMPT_VALIDATION_FAILED' } });
       }
 
       const eventCursor = fixture.client.markEvents();

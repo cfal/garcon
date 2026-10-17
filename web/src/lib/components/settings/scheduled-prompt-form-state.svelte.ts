@@ -277,8 +277,9 @@ export class ScheduledPromptFormState {
 
 	buildDefinition(now = new Date()): ScheduledPromptDefinitionInput | null {
 		const { schedule } = this.#evaluateSchedule(now);
-		if (!schedule || !this.targetValid || this.promptError || this.nameError || this.titleError) return null;
+		if (!schedule || !this.targetValid || this.promptError) return null;
 		const name = normalizeScheduledPromptName(this.taskName);
+		if (name === null || this.titleError) return null;
 		if (this.targetType === 'existing-chat') {
 			if (!this.existingChatId) return null;
 			return {

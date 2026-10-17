@@ -24,20 +24,10 @@ export function expandScheduledSnippetTemplate(
   template: string,
   values: Pick<SnippetTemplateValues, 'arguments' | 'projectPath'>,
 ): string {
-  // Escapes replacement tokens once more so the scheduled pass preserves literal values.
-  const literalValue = (value: string): string => {
-    let result = '';
-    let cursor = 0;
-    for (const match of matchTemplateTokens(value, RUNTIME_TEMPLATE_VARIABLES)) {
-      result += value.slice(cursor, match.index) + `\\${match.raw}`;
-      cursor = match.index + match.raw.length;
-    }
-    return result + value.slice(cursor);
-  };
   try {
     const replacements = {
-      arguments: literalValue(values.arguments),
-      project_path: literalValue(values.projectPath),
+      arguments: escapeDeferredTokens(values.arguments),
+      project_path: escapeDeferredTokens(values.projectPath),
     };
     const expanded = expandTemplate(template, INSERTION_VARIABLES, replacements, SNIPPET_EXPANDED_MAX_LENGTH);
     assertDeferredTokenBoundaries(template, replacements, expanded);
@@ -48,33 +38,47 @@ export function expandScheduledSnippetTemplate(
   }
 }
 
+// Escapes replacement tokens once more so the scheduled pass preserves literal values.
+function escapeDeferredTokens(value: string): string {
+  let result = '';
+  let cursor = 0;
+  for (const match of matchTemplateTokens(value, RUNTIME_TEMPLATE_VARIABLES)) {
+    result += value.slice(cursor, match.index) + `\\${match.raw}`;
+    cursor = match.index + match.raw.length;
+  }
+  return result + value.slice(cursor);
+}
+
 function assertDeferredTokenBoundaries(
   template: string,
   replacements: Record<(typeof INSERTION_VARIABLES)[number], string>,
   expanded: string,
 ): void {
-  const expected: Array<{ index: number; raw: string }> = [];
+  const expectedTokens: Array<{ index: number; raw: string }> = [];
   let offset = 0;
-  const append = (fragment: string): void => {
+  const collectFragmentTokens = (fragment: string): void => {
     for (const match of matchTemplateTokens(fragment, RUNTIME_TEMPLATE_VARIABLES)) {
-      expected.push({ index: offset + match.index, raw: match.raw });
+      expectedTokens.push({ index: offset + match.index, raw: match.raw });
     }
     offset += fragment.length;
   };
   let cursor = 0;
   for (const match of matchTemplateTokens(template, INSERTION_VARIABLES)) {
-    append(template.slice(cursor, match.index));
-    append(match.escaped ? match.raw.slice(1) : replacements[match.variable]);
+    collectFragmentTokens(template.slice(cursor, match.index));
+    collectFragmentTokens(match.escaped ? match.raw.slice(1) : replacements[match.variable]);
     cursor = match.index + match.raw.length;
   }
-  append(template.slice(cursor));
-  const actual = [...matchTemplateTokens(expanded, RUNTIME_TEMPLATE_VARIABLES)];
+  collectFragmentTokens(template.slice(cursor));
+  const actualTokens = [...matchTemplateTokens(expanded, RUNTIME_TEMPLATE_VARIABLES)];
   // Joined fragments must not synthesize tokens or change an existing token's escape.
-  if (actual.length !== expected.length || actual.some((match, index) => (
-    match.index !== expected[index]?.index || match.raw !== expected[index]?.raw
+  if (actualTokens.length !== expectedTokens.length || actualTokens.some((match, index) => (
+    match.index !== expectedTokens[index]?.index || match.raw !== expectedTokens[index]?.raw
   ))) {
-    throw new SnippetDomainError('SNIPPET_VALIDATION_FAILED',
-      'Scheduled snippet replacements must not create or escape adjacent template variables. Add a separator.', 422);
+    throw new SnippetDomainError(
+      'SNIPPET_VALIDATION_FAILED',
+      'Scheduled snippet replacements must not create or escape adjacent template variables. Add a separator.',
+      422,
+    );
   }
 }
 
