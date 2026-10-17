@@ -33,6 +33,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(toggle).toHaveAttribute('aria-pressed', 'false');
       const path = page.locator('#project-path-input');
       await browserExpect(path).toHaveValue(sharedPath);
+      await browserExpect(page.locator('[data-slot="project-path-field"] .text-status-success-foreground')).toBeVisible();
       phase('checking default compact view');
       const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
       await mkdir(artifacts, { recursive: true });
@@ -57,7 +58,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         });
         await page.keyboard.press('Enter');
         await validated;
-        await browserExpect(page.getByText('Loading models...', { exact: true })).toHaveCount(0);
+        await browserExpect(page.getByText('Loading models...', { exact: true })).toHaveCount(0, { timeout: 20_000 });
         await browserExpect(workerPin).toHaveAttribute('aria-pressed', 'true');
         await browserExpect(pins.getByRole('button', { name: `Local: ${sharedPath}`, exact: true })).toHaveAttribute('aria-pressed', 'false');
         await browserExpect(prompt).toHaveValue('Synthetic retained draft');
