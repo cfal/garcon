@@ -231,6 +231,8 @@ describe("compiled theme CSS", () => {
               <button id="ticket-action" class="ticket-button">Ticket action</button>
             </div>
           </div>
+          ${["background", "card", "popover", "accent"].map((surface) => `<div class="bg-${surface}"><span id="error-${surface}" class="text-destructive">Error</span></div>`).join("")}
+          <div class="bg-card"><span id="merged-badge" class="bg-pr-merged/15 text-pr-merged">Merged</span></div>
           <div class="bg-popover">
             <div id="destructive-menu-item" data-variant="destructive" class="data-highlighted:bg-accent data-highlighted:text-accent-foreground data-[variant=destructive]:text-status-error-foreground data-[variant=destructive]:data-highlighted:bg-destructive/10 dark:data-[variant=destructive]:data-highlighted:bg-destructive/20 data-[variant=destructive]:data-highlighted:text-status-error-foreground">Delete</div>
           </div>
@@ -694,6 +696,21 @@ describe("compiled theme CSS", () => {
             contrastRatio(outline.color, dialogSurface.background),
             `${profile} ${selector} focus`,
           ).toBeGreaterThanOrEqual(3);
+        }
+        if (profile.startsWith("paper-") || profile.startsWith("slate-")) {
+          for (const selector of [
+            "#error-background",
+            "#error-card",
+            "#error-popover",
+            "#error-accent",
+            "#merged-badge",
+          ]) {
+            const colors = await readRenderedColors(page, selector);
+            expect(
+              contrastRatio(colors.foreground, colors.background),
+              `${profile} ${selector}`,
+            ).toBeGreaterThanOrEqual(4.5);
+          }
         }
         if (
           profile.startsWith("phosphor-") ||

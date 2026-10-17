@@ -16,8 +16,8 @@
 	--muted-foreground: 35 9% 69%;
 	--accent: 210 16% 24%;
 	--accent-foreground: 38 28% 88%;
-	--destructive: 0 72% 50%;
-	--destructive-foreground: 0 0% 98%;
+	--destructive: 0 90% 78%;
+	--destructive-foreground: 0 0% 9%;
 	--border: 30 7% 32%;
 	--workspace-window-titlebar: 30 9% 12%;
 	--workspace-window-titlebar-active: 30 9% 9%;
@@ -193,7 +193,7 @@
 	--git-action-foreground: 0 0% 98%;
 	--git-modified: 48 85% 78%;
 	--git-added: 142 66% 65%;
-	--pr-merged: 271 91% 71%;
+	--pr-merged: 271 91% 80%;
 	--git-deleted: 0 78% 88%;
 	--git-untracked: 200 60% 70%;
 	--git-renamed: 271 81% 78%;

@@ -255,6 +255,33 @@ describe('theme profile CSS sources', () => {
 		}
 	});
 
+	it('keeps Paper and Slate error text and merged badges readable on their surfaces', () => {
+		for (const id of ['paper-light', 'paper-dark', 'slate-light', 'slate-dark'] as const) {
+			const values = propertyValues(profileSource(id));
+			for (const surface of ['background', 'card', 'popover', 'accent']) {
+				expect
+					.soft(contrastRatio(values[surface], values.destructive), `${id} error on ${surface}`)
+					.toBeGreaterThanOrEqual(4.5);
+			}
+			expect
+				.soft(contrastRatioOnTint(values.card, values['pr-merged'], values['pr-merged'], 0.15), id)
+				.toBeGreaterThanOrEqual(4.5);
+		}
+	});
+
+	it('keeps Slate Dark hover and highlight surfaces distinct', () => {
+		const values = propertyValues(profileSource('slate-dark'));
+		for (const [surface, highlight] of [
+			['sidebar-chat-item-bg', 'sidebar-chat-item-hover-bg'],
+			['popover', 'accent'],
+			['popover', 'muted'],
+		]) {
+			expect
+				.soft(contrastRatio(values[surface], values[highlight]), highlight)
+				.toBeGreaterThan(1.12);
+		}
+	});
+
 	it('keeps application-owned semantic text pairs above minimum contrast', () => {
 		const pairs = [
 			['background', 'foreground'],
