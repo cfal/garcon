@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte';
+import { DARK_THEME_PROFILES, LIGHT_THEME_PROFILES } from '$lib/theme/themes.js';
 
 const OnboardingWizardTestHost = (await import('./OnboardingWizardTestHost.svelte')).default;
 
@@ -85,8 +86,12 @@ describe('OnboardingWizard', () => {
 
 		const lightSelect = screen.getByRole('combobox', { name: 'Light theme' });
 		const darkSelect = screen.getByRole('combobox', { name: 'Dark theme' });
-		expect(lightSelect.querySelectorAll('option')).toHaveLength(8);
-		expect(darkSelect.querySelectorAll('option')).toHaveLength(8);
+		expect([...lightSelect.querySelectorAll('option')].map((option) => option.value)).toEqual(
+			LIGHT_THEME_PROFILES.map((profile) => profile.id),
+		);
+		expect([...darkSelect.querySelectorAll('option')].map((option) => option.value)).toEqual(
+			DARK_THEME_PROFILES.map((profile) => profile.id),
+		);
 
 		await fireEvent.change(lightSelect, { target: { value: 'classic-light' } });
 		await fireEvent.change(darkSelect, { target: { value: 'colorblind-dark' } });
