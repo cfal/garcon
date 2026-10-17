@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { installResizeObserverHarness, ResizeObserverHarness } from './resize-observer-harness.js';
 import ResponsiveSurfaceActionsTestHost from './ResponsiveSurfaceActionsTestHost.svelte';
+import ResponsiveSurfaceActions from '../ResponsiveSurfaceActions.svelte';
+import Save from '@lucide/svelte/icons/save';
 
 describe('ResponsiveSurfaceActions', () => {
 	let restoreResizeObserver: () => void;
@@ -13,6 +15,32 @@ describe('ResponsiveSurfaceActions', () => {
 	afterEach(() => {
 		cleanup();
 		restoreResizeObserver();
+	});
+
+	it('uses the shared primary action, shape, and focus roles for filled actions', () => {
+		render(ResponsiveSurfaceActions, {
+			menuLabel: 'File actions',
+			actions: [
+				{
+					id: 'save',
+					label: 'Save',
+					icon: Save,
+					onclick: () => {},
+					variant: 'primary',
+					showLabel: true,
+				},
+			],
+		});
+		const button = screen.getByRole('button', { name: 'Save' });
+		for (const className of [
+			'bg-primary',
+			'text-primary-foreground',
+			'rounded-(--control-radius)',
+			'focus-visible:ring-ring',
+		]) {
+			expect(button.classList).toContain(className);
+		}
+		expect(button.classList).not.toContain('bg-interactive-accent');
 	});
 
 	it('keeps one persistent menu and moves lower-priority actions into it', async () => {
