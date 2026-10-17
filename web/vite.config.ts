@@ -68,6 +68,7 @@ export default defineConfig({
 							priority: 15,
 						},
 						{
+							debugName: 'vendor-by-package',
 							name(id) {
 								if (id.includes('@xterm/')) return 'vendor-xterm';
 								if (id.includes('@tiptap/') || id.includes('prosemirror-'))
