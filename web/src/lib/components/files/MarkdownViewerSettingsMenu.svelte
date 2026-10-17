@@ -29,28 +29,26 @@
 	</Popover.Trigger>
 
 	<Popover.Content class="w-72 p-0" align="end" sideOffset={8}>
-		<div class="bg-card text-foreground rounded-md border border-border divide-y divide-border">
-			<div class="flex items-center justify-between px-4 py-3">
-				<div class="text-sm font-medium text-foreground">
-					{m.settings_appearance_settings_code_editor_font_size_label()}
-				</div>
-				<Select.Root
-					type="single"
-					value={localSettings.markdownViewerFontSize}
-					onValueChange={(value) => {
-						if (value) setFontSize(value);
-					}}
-				>
-					<Select.Trigger class="w-[80px]" size="sm">
-						{localSettings.markdownViewerFontSize}px
-					</Select.Trigger>
-					<Select.Content>
-						{#each FONT_SIZE_OPTIONS as size (size)}
-							<Select.Item value={size} label="{size}px">{size}px</Select.Item>
-						{/each}
-					</Select.Content>
-				</Select.Root>
+		<div class="flex items-center justify-between px-4 py-3">
+			<div class="text-sm font-medium text-foreground">
+				{m.settings_appearance_settings_code_editor_font_size_label()}
 			</div>
+			<Select.Root
+				type="single"
+				value={localSettings.markdownViewerFontSize}
+				onValueChange={(value) => {
+					if (value) setFontSize(value);
+				}}
+			>
+				<Select.Trigger class="w-[80px]" size="sm">
+					{localSettings.markdownViewerFontSize}px
+				</Select.Trigger>
+				<Select.Content>
+					{#each FONT_SIZE_OPTIONS as size (size)}
+						<Select.Item value={size} label="{size}px">{size}px</Select.Item>
+					{/each}
+				</Select.Content>
+			</Select.Root>
 		</div>
 	</Popover.Content>
 </Popover.Root>

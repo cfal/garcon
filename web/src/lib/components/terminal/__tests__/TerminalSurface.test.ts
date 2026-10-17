@@ -358,6 +358,10 @@ describe('TerminalSurface', () => {
 
 		await waitFor(() => expect(onFontSize).toHaveBeenLastCalledWith(13));
 		await fireEvent.click(screen.getByRole('button', { name: 'Terminal settings' }));
+		const popover = document.querySelector('[data-slot="popover-content"]')!;
+		expect(popover.classList).toContain('bg-popover');
+		expect(popover.firstElementChild?.classList).not.toContain('border');
+		expect(popover.firstElementChild?.classList).not.toContain('bg-card');
 		await fireEvent.pointerDown(screen.getByRole('button', { name: 'Font size' }), {
 			button: 0,
 			ctrlKey: false,
