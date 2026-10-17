@@ -21,6 +21,7 @@ import { connectWithOwnRole, connectWithWrongKey, sendMalformedRecord } from '..
 import { tcpLinkProxy } from '../../../remote/__tests__/tcp-link-proxy.js';
 import type { Logger } from '../../../common/log.js';
 import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write-failure.js';
+import { rejectionOf } from '../../../../integration-tests/support/promise-assertions.js';
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -57,7 +58,7 @@ test.each(['executor-connects', 'controller-connects'] as const)(
     const rpc = await connected.promise;
     await waitReady(manager, configured.id);
     manager.setCliDispatcher(new ControllerCliDispatcher({ serverInstanceId: 'controller', workspaceName: null, routes: {}, isShuttingDown: () => false }));
-    await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+    expect(await rejectionOf(rpc.call('', 'controllerCli.describe', null))).toMatchObject({ code: 'CLI_ACCESS_DENIED' });
     const id = configured.id;
     await expect(withFailingDirectorySync(root, () => manager.update(id, { allowControllerCli: true, allowExecutorManagement: true })))
       .rejects.toMatchObject({ renamed: true });
@@ -153,7 +154,7 @@ test('reverse CLI dispatch checks initialization, executor grant, revocation lea
   const connection = await connected.promise;
   const rpc = connection.primary;
   await waitReady(manager, config.id);
-  await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+  expect(await rejectionOf(rpc.call('', 'controllerCli.describe', null))).toMatchObject({ code: 'CLI_ACCESS_DENIED' });
   await manager.update(config.id, { allowControllerCli: true });
   await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_CONTROLLER_UNAVAILABLE' });
   const entered = Promise.withResolvers<void>();
@@ -219,7 +220,7 @@ test.each(['context', 'read', 'mutation'] as const)('quiescence after handler se
       operation: operation === 'mutation' ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats',
       query: [], body: operation === 'mutation' ? {} : null,
     } });
-  await expect(pending).rejects.toMatchObject({ code: operation === 'mutation' ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_CONTROLLER_UNAVAILABLE' });
+  expect(await rejectionOf(pending)).toMatchObject({ code: operation === 'mutation' ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_CONTROLLER_UNAVAILABLE' });
 });
 
 function sharedListener(manager: ExecutorManager, limits?: NoiseServerOptions) {
