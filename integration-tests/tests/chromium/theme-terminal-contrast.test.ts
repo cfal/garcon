@@ -1,29 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { chromium } from "playwright";
-import type { ThemeRendererPresentation } from "../../../web/src/lib/theme/themes";
+import {
+  THEME_PROFILES,
+  type TerminalThemeColors,
+} from "../../../web/src/lib/theme/themes";
+import type { TerminalThemePresentation } from "../../../web/src/lib/terminal/runtime/terminal-theme";
 import { buildWebBrowserEntry } from "../../support/web-browser-bundle";
 import { contrastRatio } from "../../support/color-contrast";
 
 const APP_URL = "http://theme-terminal-contrast.test/";
-interface TerminalPresentation extends ThemeRendererPresentation {
-  readonly background: string;
-}
-
-const PRESENTATIONS: readonly TerminalPresentation[] = [
-  { colorScheme: "light", rendererPalette: "standard", background: "#ffffff" },
-  { colorScheme: "dark", rendererPalette: "standard", background: "#1e1e1e" },
-  {
-    colorScheme: "light",
-    rendererPalette: "colorblind",
-    background: "#ffffff",
-  },
-  { colorScheme: "dark", rendererPalette: "colorblind", background: "#1e1e1e" },
-  { colorScheme: "light", rendererPalette: "owl", background: "#fbfbfb" },
-  { colorScheme: "dark", rendererPalette: "owl", background: "#011627" },
-  { colorScheme: "light", rendererPalette: "neko", background: "#eff1f5" },
-  { colorScheme: "dark", rendererPalette: "neko", background: "#1e1e2e" },
-];
 const SAMPLES = [
   { name: "black foreground", sequence: "\u001b[30mblack" },
   { name: "bright white on black", sequence: "\u001b[97;40mwhite" },
@@ -44,6 +30,17 @@ describe("terminal theme contrast", () => {
         "utf8",
       ),
     ]);
+    const assets = new URL(
+      "../../../web/build/_app/immutable/assets/",
+      import.meta.url,
+    );
+    const themeCss = (
+      await Promise.all(
+        (await readdir(assets))
+          .filter((file) => file.endsWith(".css"))
+          .map((file) => readFile(new URL(file, assets), "utf8")),
+      )
+    ).join("\n");
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -57,7 +54,7 @@ describe("terminal theme contrast", () => {
       }
       await route.fulfill({
         contentType: "text/html",
-        body: `<!doctype html><style>${stylesheet}#terminal{width:640px;height:100px}</style><div id="terminal"></div><script type="module">import { renderTerminalSample } from "/fixture.js"; globalThis.renderTerminalSample = renderTerminalSample;</script>`,
+        body: `<!doctype html><style>${themeCss}\n${stylesheet}#terminal{width:640px;height:100px}</style><div id="terminal"></div><script type="module">import { renderTerminalSample, readTerminalColors } from "/fixture.js"; Object.assign(globalThis, { renderTerminalSample, readTerminalColors });</script>`,
       });
     });
 
@@ -71,14 +68,46 @@ describe("terminal theme contrast", () => {
             }
           ).renderTerminalSample === "function",
       );
-      for (const presentation of PRESENTATIONS) {
+      for (const profile of THEME_PROFILES) {
+        const presentation = await page.evaluate((profile) => {
+          const root = document.documentElement;
+          root.dataset.theme = profile.id;
+          root.classList.toggle("dark", profile.colorScheme === "dark");
+          const colors = (
+            globalThis as typeof globalThis & {
+              readTerminalColors(root: HTMLElement): TerminalThemeColors | null;
+            }
+          ).readTerminalColors(root);
+          if (!colors)
+            throw new Error(`Missing terminal colors for ${profile.id}`);
+          return {
+            colorScheme: profile.colorScheme,
+            rendererPalette: profile.rendererPalette,
+            ...colors,
+          };
+        }, profile);
+        expect(
+          contrastRatio(presentation.foreground, presentation.background),
+          `${profile.id} foreground`,
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          contrastRatio(
+            presentation.selectionForeground,
+            presentation.selectionBackground,
+          ),
+          `${profile.id} selection`,
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          contrastRatio(presentation.cursor, presentation.background),
+          `${profile.id} cursor`,
+        ).toBeGreaterThanOrEqual(3);
         for (const sample of SAMPLES) {
           const colors = await page.locator("#terminal").evaluate(
             async (root, { presentation, sequence }) => {
               const scope = globalThis as typeof globalThis & {
                 renderTerminalSample: (
                   parent: HTMLElement,
-                  theme: TerminalPresentation,
+                  theme: TerminalThemePresentation,
                   content: string,
                 ) => Promise<() => void>;
               };
@@ -110,7 +139,7 @@ describe("terminal theme contrast", () => {
           );
           expect(
             contrastRatio(colors.foreground, colors.background),
-            `${presentation.rendererPalette} ${presentation.colorScheme} ${sample.name}`,
+            `${profile.id} ${sample.name}`,
           ).toBeGreaterThanOrEqual(4.5);
         }
       }

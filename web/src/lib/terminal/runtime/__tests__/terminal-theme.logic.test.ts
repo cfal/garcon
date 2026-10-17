@@ -35,18 +35,50 @@ function contrast(first: string, second: string): number {
 	return (lighter + 0.05) / (darker + 0.05);
 }
 
-const PRESENTATIONS: TerminalThemePresentation[] = [
-	{ colorScheme: 'light', rendererPalette: 'standard', background: '#ffffff' },
-	{ colorScheme: 'dark', rendererPalette: 'standard', background: '#1e1e1e' },
-	{ colorScheme: 'light', rendererPalette: 'colorblind', background: '#ffffff' },
-	{ colorScheme: 'dark', rendererPalette: 'colorblind', background: '#1e1e1e' },
-	{ colorScheme: 'light', rendererPalette: 'owl', background: '#fbfbfb' },
-	{ colorScheme: 'dark', rendererPalette: 'owl', background: '#011627' },
-	{ colorScheme: 'light', rendererPalette: 'neko', background: '#eff1f5' },
-	{ colorScheme: 'dark', rendererPalette: 'neko', background: '#1e1e2e' },
-];
+const PRESENTATIONS: TerminalThemePresentation[] = (
+	[
+		{ colorScheme: 'light', rendererPalette: 'standard', background: '#ffffff' },
+		{ colorScheme: 'dark', rendererPalette: 'standard', background: '#1e1e1e' },
+		{ colorScheme: 'light', rendererPalette: 'colorblind', background: '#ffffff' },
+		{ colorScheme: 'dark', rendererPalette: 'colorblind', background: '#1e1e1e' },
+		{ colorScheme: 'light', rendererPalette: 'owl', background: '#fbfbfb' },
+		{ colorScheme: 'dark', rendererPalette: 'owl', background: '#011627' },
+		{ colorScheme: 'light', rendererPalette: 'neko', background: '#eff1f5' },
+		{ colorScheme: 'dark', rendererPalette: 'neko', background: '#1e1e2e' },
+	] satisfies Pick<TerminalThemePresentation, 'colorScheme' | 'rendererPalette' | 'background'>[]
+).map((presentation) => ({
+	...presentation,
+	foreground: presentation.colorScheme === 'dark' ? '#e5e5e5' : '#262626',
+	cursor: presentation.colorScheme === 'dark' ? '#e5e5e5' : '#262626',
+	selectionBackground: presentation.colorScheme === 'dark' ? '#253640' : '#dce8f0',
+	selectionForeground: presentation.colorScheme === 'dark' ? '#e5e5e5' : '#262626',
+}));
 
 describe('terminal themes', () => {
+	it.each(['foreground', 'cursor', 'selectionBackground', 'selectionForeground'] as const)(
+		'updates existing and new runtimes when only %s changes',
+		(field) => {
+			const store = new TerminalThemeStore();
+			const first = { applyTheme: vi.fn() };
+			const unregister = store.register(first);
+			store.setPresentation(PRESENTATIONS[0]);
+			const changed = { ...PRESENTATIONS[0], [field]: '#123456' };
+			store.setPresentation(changed);
+			expect(first.applyTheme).toHaveBeenLastCalledWith(
+				expect.objectContaining({ [field]: '#123456' }),
+			);
+			const count = first.applyTheme.mock.calls.length;
+			store.setPresentation({ ...changed });
+			expect(first.applyTheme).toHaveBeenCalledTimes(count);
+			const second = { applyTheme: vi.fn() };
+			store.register(second);
+			expect(second.applyTheme).toHaveBeenCalledWith(terminalThemeFor(changed));
+			unregister();
+			store.setPresentation(PRESENTATIONS[0]);
+			expect(first.applyTheme).toHaveBeenCalledTimes(count);
+		},
+	);
+
 	it('keeps configured foreground colors readable on the default background', () => {
 		for (const presentation of PRESENTATIONS) {
 			const theme = terminalThemeFor(presentation);

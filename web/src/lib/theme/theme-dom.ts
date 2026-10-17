@@ -1,4 +1,4 @@
-import type { ThemeProfile } from './themes.js';
+import type { TerminalThemeColors, ThemeProfile } from './themes.js';
 
 const HSL_CHANNELS_PATTERN =
 	/^([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s+([+-]?(?:\d+(?:\.\d+)?|\.\d+))%\s+([+-]?(?:\d+(?:\.\d+)?|\.\d+))%$/;
@@ -31,9 +31,18 @@ export function applyThemeToDocument(document: Document, profile: ThemeProfile):
 		?.setAttribute('content', profile.browserThemeColor);
 }
 
-export function readTerminalBackground(root: HTMLElement): string | null {
-	const channels = getComputedStyle(root).getPropertyValue('--terminal-bg').trim();
-	return hslChannelsToRgb(channels);
+export function readTerminalColors(root: HTMLElement): TerminalThemeColors | null {
+	const computed = getComputedStyle(root);
+	const read = (token: string) => hslChannelsToRgb(computed.getPropertyValue(token).trim());
+	const background = read('--terminal-bg');
+	const foreground = read('--terminal-foreground');
+	const cursor = read('--terminal-cursor');
+	const selectionBackground = read('--terminal-selection-bg');
+	const selectionForeground = read('--terminal-selection-foreground');
+	if (!background || !foreground || !cursor || !selectionBackground || !selectionForeground) {
+		return null;
+	}
+	return { background, foreground, cursor, selectionBackground, selectionForeground };
 }
 
 export function hasResolvedThemeStyles(root: HTMLElement): boolean {

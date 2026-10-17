@@ -1,15 +1,14 @@
 import type { ITheme } from '@xterm/xterm';
-import type { ColorScheme, RendererPalette, ThemeRendererPresentation } from '$lib/theme/themes.js';
+import type {
+	ColorScheme,
+	RendererPalette,
+	ThemeRendererPresentation,
+	TerminalThemeColors,
+} from '$lib/theme/themes.js';
 
-export interface TerminalThemePresentation extends ThemeRendererPresentation {
-	readonly background: string;
-}
+export interface TerminalThemePresentation extends ThemeRendererPresentation, TerminalThemeColors {}
 
 const STANDARD_DARK_THEME: ITheme = {
-	foreground: '#e5e5e5',
-	cursor: '#d4d4d4',
-	cursorAccent: '#1e1e1e',
-	selectionBackground: '#3f6387',
 	black: '#000000',
 	red: '#ff7b72',
 	green: '#56d88a',
@@ -29,10 +28,6 @@ const STANDARD_DARK_THEME: ITheme = {
 };
 
 const STANDARD_LIGHT_THEME: ITheme = {
-	foreground: '#262626',
-	cursor: '#000000',
-	cursorAccent: '#ffffff',
-	selectionBackground: '#a8cdf0',
 	black: '#000000',
 	red: '#9f1d1d',
 	green: '#006b3c',
@@ -84,10 +79,6 @@ const COLORBLIND_LIGHT_THEME: ITheme = {
 };
 
 const OWL_LIGHT_THEME: ITheme = {
-	foreground: '#403f53',
-	cursor: '#08757a',
-	cursorAccent: '#fbfbfb',
-	selectionBackground: '#d3e8f8',
 	black: '#111111',
 	red: '#9f2f2f',
 	green: '#176c4b',
@@ -107,10 +98,6 @@ const OWL_LIGHT_THEME: ITheme = {
 };
 
 const OWL_DARK_THEME: ITheme = {
-	foreground: '#d6deeb',
-	cursor: '#7fdbca',
-	cursorAccent: '#011627',
-	selectionBackground: '#1d3b53',
 	black: '#000000',
 	red: '#ef5350',
 	green: '#22da6e',
@@ -130,10 +117,6 @@ const OWL_DARK_THEME: ITheme = {
 };
 
 const NEKO_LIGHT_THEME: ITheme = {
-	foreground: '#4c4f69',
-	cursor: '#8839ef',
-	cursorAccent: '#eff1f5',
-	selectionBackground: '#dce0e8',
 	black: '#181825',
 	red: '#d20f39',
 	green: '#2f7d22',
@@ -153,10 +136,6 @@ const NEKO_LIGHT_THEME: ITheme = {
 };
 
 const NEKO_DARK_THEME: ITheme = {
-	foreground: '#cdd6f4',
-	cursor: '#cba6f7',
-	cursorAccent: '#1e1e2e',
-	selectionBackground: '#45475a',
 	black: '#000000',
 	red: '#f38ba8',
 	green: '#a6e3a1',
@@ -180,18 +159,28 @@ const TERMINAL_THEMES: Record<RendererPalette, Record<ColorScheme, ITheme>> = {
 	colorblind: { light: COLORBLIND_LIGHT_THEME, dark: COLORBLIND_DARK_THEME },
 	owl: { light: OWL_LIGHT_THEME, dark: OWL_DARK_THEME },
 	neko: { light: NEKO_LIGHT_THEME, dark: NEKO_DARK_THEME },
+	semantic: { light: STANDARD_LIGHT_THEME, dark: STANDARD_DARK_THEME },
 };
 
 const DEFAULT_PRESENTATION: TerminalThemePresentation = {
 	colorScheme: 'light',
 	rendererPalette: 'standard',
 	background: '#ffffff',
+	foreground: '#262626',
+	cursor: '#000000',
+	selectionBackground: '#a8cdf0',
+	selectionForeground: '#262626',
 };
 
 export function terminalThemeFor(presentation: TerminalThemePresentation): ITheme {
 	return {
 		...TERMINAL_THEMES[presentation.rendererPalette][presentation.colorScheme],
 		background: presentation.background,
+		foreground: presentation.foreground,
+		cursor: presentation.cursor,
+		cursorAccent: presentation.background,
+		selectionBackground: presentation.selectionBackground,
+		selectionForeground: presentation.selectionForeground,
 	};
 }
 
@@ -207,7 +196,11 @@ export class TerminalThemeStore {
 		if (
 			this.#presentation.colorScheme === presentation.colorScheme &&
 			this.#presentation.rendererPalette === presentation.rendererPalette &&
-			this.#presentation.background === presentation.background
+			this.#presentation.background === presentation.background &&
+			this.#presentation.foreground === presentation.foreground &&
+			this.#presentation.cursor === presentation.cursor &&
+			this.#presentation.selectionBackground === presentation.selectionBackground &&
+			this.#presentation.selectionForeground === presentation.selectionForeground
 		) {
 			return;
 		}

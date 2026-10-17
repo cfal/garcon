@@ -3,6 +3,13 @@ import { rendererThemeIdFor } from '$lib/theme/themes.js';
 import { editorThemeExtension } from '../editor-themes.js';
 
 describe('editor themes', () => {
+	it('provides token-driven light and dark extensions', () => {
+		for (const colorScheme of ['light', 'dark'] as const) {
+			expect(
+				editorThemeExtension(rendererThemeIdFor({ colorScheme, rendererPalette: 'semantic' })),
+			).toBeTruthy();
+		}
+	});
 	it('deduplicates Classic and Phosphor through renderer presentation metadata', () => {
 		expect(rendererThemeIdFor({ colorScheme: 'light', rendererPalette: 'standard' })).toBe(
 			'standard-light',

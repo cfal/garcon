@@ -1,20 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { chromium } from "playwright";
-import type { RendererThemeId } from "../../../web/src/lib/theme/themes";
+import {
+  THEME_PROFILES,
+  rendererThemeIdFor,
+} from "../../../web/src/lib/theme/themes";
 import { buildWebBrowserEntry } from "../../support/web-browser-bundle";
 import { contrastRatio } from "../../support/color-contrast";
 
 const APP_URL = "http://theme-mermaid-contrast.test/";
-const RENDERER_THEMES: readonly RendererThemeId[] = [
-  "standard-light",
-  "standard-dark",
-  "colorblind-light",
-  "colorblind-dark",
-  "owl-light",
-  "owl-dark",
-  "neko-light",
-  "neko-dark",
-];
+const RENDERER_THEMES = [...new Set(THEME_PROFILES.map(rendererThemeIdFor))];
 
 const DIAGRAMS = [
   {
@@ -94,7 +88,10 @@ describe("Mermaid theme contrast", () => {
             { source: diagram.source, themeId },
           );
           const colors = await page.locator("#diagram").evaluate(
-            (root, { backgroundSelector, labelProperty, labelSelector, svg }) => {
+            (
+              root,
+              { backgroundSelector, labelProperty, labelSelector, svg },
+            ) => {
               root.innerHTML = svg;
               const label = root.querySelector<SVGElement>(labelSelector);
               const background =
@@ -105,7 +102,9 @@ describe("Mermaid theme contrast", () => {
               const labelStyle = getComputedStyle(label);
               return {
                 foreground:
-                  labelProperty === "color" ? labelStyle.color : labelStyle.fill,
+                  labelProperty === "color"
+                    ? labelStyle.color
+                    : labelStyle.fill,
                 background: getComputedStyle(background).fill,
               };
             },

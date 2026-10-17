@@ -61,7 +61,13 @@ describe('ThemeController', () => {
 			'<meta name="theme-color" content="#000000"><meta name="apple-mobile-web-app-status-bar-style" content="default">';
 		document.documentElement.removeAttribute('data-theme');
 		document.documentElement.className = '';
-		document.documentElement.style.cssText = '--terminal-bg: 0 0% 100%';
+		document.documentElement.style.cssText = `
+			--terminal-bg: 0 0% 100%;
+			--terminal-foreground: 0 0% 10%;
+			--terminal-cursor: 0 0% 10%;
+			--terminal-selection-bg: 0 0% 90%;
+			--terminal-selection-foreground: 0 0% 10%;
+		`;
 	});
 
 	afterEach(() => {
@@ -131,6 +137,10 @@ describe('ThemeController', () => {
 			colorScheme: 'dark',
 			rendererPalette: 'standard',
 			background: 'rgb(7, 9, 14)',
+			foreground: 'rgb(7, 9, 14)',
+			cursor: 'rgb(7, 9, 14)',
+			selectionBackground: 'rgb(7, 9, 14)',
+			selectionForeground: 'rgb(7, 9, 14)',
 		});
 		expect(rendered.setEditorPresentation).toHaveBeenCalledWith({
 			colorScheme: 'dark',
@@ -139,11 +149,16 @@ describe('ThemeController', () => {
 		computedStyle.mockRestore();
 	});
 
-	it('reports an invalid terminal token once while continuing editor updates', async () => {
+	it.each([
+		'--terminal-bg',
+		'--terminal-foreground',
+		'--terminal-cursor',
+		'--terminal-selection-bg',
+		'--terminal-selection-foreground',
+	])('reports an invalid %s once while continuing editor updates', async (invalidToken) => {
 		installMatchMedia();
 		vi.spyOn(globalThis, 'getComputedStyle').mockReturnValue({
-			getPropertyValue: (property: string) =>
-				property === '--background' ? '0 0% 100%' : 'invalid',
+			getPropertyValue: (property: string) => (property === invalidToken ? 'invalid' : '0 0% 100%'),
 		} as unknown as CSSStyleDeclaration);
 		const rendered = renderController({ mode: 'fixed', themeId: 'classic-light' });
 		await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());

@@ -68,11 +68,13 @@ describe('mermaid-loader', () => {
 			'owl-dark',
 			'neko-light',
 			'neko-dark',
+			'semantic-light',
+			'semantic-dark',
 		] as const) {
 			await renderMermaid(`gantt\ntitle ${themeId}`, themeId);
 		}
 
-		expect(mermaid.initialize).toHaveBeenCalledTimes(8);
+		expect(mermaid.initialize).toHaveBeenCalledTimes(10);
 		for (const [config] of mermaid.initialize.mock.calls) {
 			expect(config).toMatchObject({
 				startOnLoad: false,

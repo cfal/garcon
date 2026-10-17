@@ -1,5 +1,13 @@
 export type ColorScheme = 'light' | 'dark';
-export type RendererPalette = 'standard' | 'colorblind' | 'owl' | 'neko';
+export type RendererPalette = 'standard' | 'colorblind' | 'owl' | 'neko' | 'semantic';
+
+export interface TerminalThemeColors {
+	readonly background: string;
+	readonly foreground: string;
+	readonly cursor: string;
+	readonly selectionBackground: string;
+	readonly selectionForeground: string;
+}
 
 export interface ThemeRendererPresentation {
 	readonly colorScheme: ColorScheme;

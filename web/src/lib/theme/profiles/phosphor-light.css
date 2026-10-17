@@ -222,6 +222,11 @@
 	--switch-thumb-checked: hsl(var(--primary-foreground));
 	--switch-thumb-unchecked: hsl(var(--foreground));
 	--native-select-muted-background: hsl(var(--muted));
+	--terminal-foreground: var(--foreground);
+	--terminal-cursor: var(--primary);
+	--terminal-selection-bg: var(--accent);
+	--terminal-selection-foreground: var(--foreground);
+	--editor-selection-background: hsl(var(--interactive-accent) / 0.16);
 	--native-select-surface-background: hsl(var(--muted));
 	--native-select-border: hsl(var(--input));
 	--native-select-radius: var(--radius);

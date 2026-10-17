@@ -21,3 +21,4 @@ export async function renderTerminalSample(
 	await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 	return () => terminal.dispose();
 }
+export { readTerminalColors } from '$lib/theme/theme-dom.js';

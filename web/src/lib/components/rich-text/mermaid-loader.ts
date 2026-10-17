@@ -15,7 +15,10 @@ const BASE_MERMAID_CONFIG = {
 	suppressErrorRendering: true,
 } as const satisfies MermaidConfig;
 
-const THEME_CONFIGS: Record<MermaidThemeId, MermaidConfig> = {
+const PALETTE_CONFIGS: Record<
+	Exclude<MermaidThemeId, 'semantic-light' | 'semantic-dark'>,
+	MermaidConfig
+> = {
 	'standard-light': {
 		...BASE_MERMAID_CONFIG,
 		theme: 'default',
@@ -230,6 +233,12 @@ const THEME_CONFIGS: Record<MermaidThemeId, MermaidConfig> = {
 			sectionBkgColor2: '#29453f',
 		},
 	},
+};
+
+const THEME_CONFIGS: Record<MermaidThemeId, MermaidConfig> = {
+	...PALETTE_CONFIGS,
+	'semantic-light': PALETTE_CONFIGS['standard-light'],
+	'semantic-dark': PALETTE_CONFIGS['standard-dark'],
 };
 
 let loadPromise: Promise<Mermaid> | null = null;
