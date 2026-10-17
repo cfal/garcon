@@ -30,7 +30,14 @@ function diffSyntaxFixture(idPrefix: string): string {
 
 function focusButtonFixture(): string {
   const surfaces = [];
-  const variants = ["default", "ghost", "link", "destructive"] as const;
+  const variants = [
+    "default",
+    "outline",
+    "secondary",
+    "ghost",
+    "link",
+    "destructive",
+  ] as const;
   for (const surface of ["background", "card", "popover"]) {
     const buttons = variants
       .map(
@@ -49,7 +56,11 @@ async function readButtonFocusColors(button: Locator) {
     const shadow = style.boxShadow.match(
       /((?:rgba?|hsla?|oklch|oklab|color)\([^)]*\)) 0px 0px 0px 3px/,
     )?.[1];
-    if (!shadow) throw new Error("Missing button focus shadow");
+    if (!shadow) {
+      throw new Error(
+        `Missing ${document.documentElement.dataset.theme} ${element.getAttribute("data-focus-probe")} focus shadow`,
+      );
+    }
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 1;
     const context = canvas.getContext("2d")!;
@@ -62,6 +73,7 @@ async function readButtonFocusColors(button: Locator) {
     return {
       label: element.getAttribute("data-focus-probe"),
       visible: element.matches(":focus-visible"),
+      hovered: element.matches(":hover"),
       ring: `rgb(${red}, ${green}, ${blue})`,
       background,
     };
@@ -598,13 +610,19 @@ describe("compiled theme CSS", () => {
         }
         await page.keyboard.press("Tab");
         for (const button of await page.locator("[data-focus-probe]").all()) {
+          await page.mouse.move(0, 0);
           await button.focus();
-          const focus = await readButtonFocusColors(button);
-          expect(focus.visible, `${profile} ${focus.label} focus`).toBe(true);
-          expect(
-            contrastRatio(focus.ring, focus.background),
-            `${profile} ${focus.label} focus ring`,
-          ).toBeGreaterThanOrEqual(3);
+          for (const hovered of [false, true]) {
+            if (hovered) await button.hover();
+            const focus = await readButtonFocusColors(button);
+            const label = `${profile} ${focus.label} ${hovered ? "hovered" : "at rest"}`;
+            expect(focus.hovered, `${label} hover`).toBe(hovered);
+            expect(focus.visible, `${label} focus`).toBe(true);
+            expect(
+              contrastRatio(focus.ring, focus.background),
+              `${label} focus ring`,
+            ).toBeGreaterThanOrEqual(3);
+          }
         }
         const scrollbarWidth = await page.evaluate(() => {
           const scrollbar = document.querySelector<HTMLElement>("#scrollbar");

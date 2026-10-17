@@ -33,7 +33,7 @@
 	--transient-backdrop-blur: 4px;
 	--elevation-menu: 0 2px 8px hsl(190 12% 4% / 0.4), 0 12px 24px hsl(190 12% 4% / 0.3);
 	--elevation-dialog: 0 8px 32px hsl(190 12% 4% / 0.5);
-	--glow-primary: none;
+	--glow-primary: 0 0 #0000;
 	--chat-header-bg: 190 28% 10%;
 	--chat-header-border: 190 28% 25%;
 	--chat-thinking-bg: 190 28% 7%;
@@ -215,7 +215,7 @@
 	--submenu-shadow: var(--elevation-menu);
 	--tooltip-shadow: var(--elevation-menu);
 	--dialog-shadow: var(--elevation-dialog);
-	--primary-hover-shadow: none;
+	--primary-hover-shadow: var(--shadow-xs);
 	--dialog-surface: hsl(var(--popover));
 	--scroll-area-thumb: hsl(var(--foreground) / 0.42);
 	--scroll-area-thumb-hover: hsl(var(--foreground) / 0.58);
