@@ -195,6 +195,12 @@ textarea.ticket-input.content-sized-textarea {
 	resize: none;
 	min-height: 44px;
 }
+.ticket-input:focus-visible {
+	border-color: hsl(var(--ring));
+	outline: 2px solid hsl(var(--ring));
+	outline-offset: 2px;
+}
+
 .ticket-input::placeholder {
 	color: hsl(var(--muted-foreground));
 }

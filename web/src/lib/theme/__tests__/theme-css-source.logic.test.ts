@@ -24,6 +24,14 @@ const PROFILE_ROLE_PROPERTIES = [
 	'--native-select-border',
 	'--native-select-radius',
 	'--native-select-compact-radius',
+	'--control-surface',
+	'--control-hover-surface',
+	'--ticket-open',
+	'--ticket-urgent',
+	'--ticket-high',
+	'--ticket-progress',
+	'--ticket-review',
+	'--ticket-done',
 ] as const;
 
 function profileSource(themeId: ThemeId): string {
@@ -158,15 +166,36 @@ describe('theme profile CSS sources', () => {
 		expect(profileSource('phosphor-dark')).toContain('--background: 222 33% 5%;');
 	});
 
-	it('keeps Phosphor scrollbar fallbacks aligned with WebKit painting', () => {
-		for (const [themeId, opacity] of [
-			['phosphor-light', '0.52'],
-			['phosphor-dark', '0.42'],
-		] as const) {
-			const source = profileSource(themeId);
-			expect(
-				source.match(new RegExp(`hsl\\(var\\(--foreground\\) / ${opacity}\\)`, 'g')),
-			).toHaveLength(3);
+	it('keeps native painting shared and profile files token-only', () => {
+		const application = readFileSync(new URL('../../../app.css', import.meta.url), 'utf8');
+		expect(application).toContain('scrollbar-color: var(--scroll-area-thumb) transparent;');
+		expect(application).toContain('background: var(--scroll-area-thumb);');
+		expect(application).toContain('background: var(--scroll-area-thumb-hover);');
+		for (const profile of THEME_PROFILES) {
+			expect(profileSource(profile.id)).not.toMatch(/::selection|::-webkit-scrollbar|accent-color/);
+		}
+	});
+
+	it('keeps ticket text and opaque focus indicators legible on application surfaces', () => {
+		for (const profile of THEME_PROFILES) {
+			const values = propertyValues(profileSource(profile.id));
+			for (const surface of ['background', 'card', 'accent']) {
+				for (const role of ['urgent', 'high', 'progress', 'review', 'done']) {
+					const color = values[`ticket-${role}`]
+						.replace(/var\(--([a-z-]+)\)/g, (_match, name: string) => values[name])
+						.replace(/^hsl\((.*)\)$/, '$1');
+					expect(
+						contrastRatio(values[surface], color),
+						`${profile.id} ticket ${role} on ${surface}`,
+					).toBeGreaterThanOrEqual(4.5);
+				}
+			}
+			for (const surface of ['background', 'card', 'popover']) {
+				expect(
+					contrastRatio(values[surface], values.ring),
+					`${profile.id} focus on ${surface}`,
+				).toBeGreaterThanOrEqual(3);
+			}
 		}
 	});
 

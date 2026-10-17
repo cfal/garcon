@@ -48,6 +48,8 @@
 		var(--workspace-window-tab-selected-inactive)
 	);
 	--color-input: hsl(var(--input));
+	--color-control-surface: var(--control-surface);
+	--color-control-hover-surface: var(--control-hover-surface);
 	--color-ring: hsl(var(--ring));
 	--color-chat-header: hsl(var(--chat-header-bg));
 	--color-chat-header-border: hsl(var(--chat-header-border));
@@ -223,12 +225,6 @@
 }
 
 :root {
-	--ticket-open: hsl(var(--muted-foreground));
-	--ticket-progress: oklch(0.52 0.14 255);
-	--ticket-review: oklch(0.5 0.16 305);
-	--ticket-done: oklch(0.46 0.1 160);
-	--ticket-urgent: hsl(var(--destructive));
-	--ticket-high: oklch(0.48 0.11 65);
 	--chat-board-shadow: 0 1px 2px color-mix(in oklab, hsl(var(--foreground)) 10%, transparent);
 	--safe-area-inset-top: env(safe-area-inset-top);
 	--safe-area-inset-right: env(safe-area-inset-right);
@@ -285,13 +281,6 @@
 	border-color: color-mix(in oklab, var(--cli-presentation-accent) 45%, hsl(var(--border)));
 	background-color: color-mix(in oklab, var(--cli-presentation-accent) 12%, hsl(var(--card)));
 	color: hsl(var(--foreground));
-}
-
-.dark {
-	--ticket-progress: oklch(0.77 0.11 255);
-	--ticket-review: oklch(0.79 0.11 305);
-	--ticket-done: oklch(0.75 0.11 160);
-	--ticket-high: oklch(0.8 0.12 65);
 }
 
 .dark .cli-presentation-custom {
@@ -587,6 +576,44 @@
 }
 
 @layer base {
+	:where(:root) ::selection {
+		background-color: hsl(var(--primary));
+		color: hsl(var(--primary-foreground));
+	}
+
+	:where(input[type='checkbox'], input[type='radio'], progress) {
+		accent-color: hsl(var(--primary));
+	}
+
+	@supports not selector(::-webkit-scrollbar) {
+		:where(:root, *) {
+			scrollbar-width: thin;
+			scrollbar-color: var(--scroll-area-thumb) transparent;
+		}
+	}
+
+	::-webkit-scrollbar {
+		width: 10px;
+		height: 10px;
+	}
+
+	::-webkit-scrollbar-track,
+	::-webkit-scrollbar-corner {
+		background: transparent;
+	}
+
+	::-webkit-scrollbar-thumb {
+		border: 2px solid transparent;
+		border-radius: 999px;
+		background: var(--scroll-area-thumb);
+		background-clip: padding-box;
+	}
+
+	::-webkit-scrollbar-thumb:hover {
+		background: var(--scroll-area-thumb-hover);
+		background-clip: padding-box;
+	}
+
 	* {
 		border-color: theme(--color-border);
 		box-sizing: border-box;

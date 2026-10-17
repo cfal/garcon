@@ -225,4 +225,12 @@
 	--native-select-border: hsl(var(--input));
 	--native-select-radius: calc(var(--radius) - 2px);
 	--native-select-compact-radius: calc(var(--radius) - 4px);
+	--control-surface: hsl(var(--background));
+	--control-hover-surface: hsl(var(--accent));
+	--ticket-open: hsl(var(--muted-foreground));
+	--ticket-urgent: hsl(var(--status-error-foreground));
+	--ticket-high: hsl(35 100% 26%);
+	--ticket-progress: hsl(213 65% 40%);
+	--ticket-review: hsl(271 43% 44%);
+	--ticket-done: hsl(156 80% 23%);
 }

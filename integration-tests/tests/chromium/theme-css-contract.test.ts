@@ -171,8 +171,8 @@ describe("compiled theme CSS", () => {
         body: `<!doctype html><html><head><link rel="stylesheet" href="/theme.css"><style>*{transition:none!important}</style></head><body class="bg-background">
           <div id="dialog-surface" style="background:var(--dialog-surface)">
             <select class="select-native"><option>Theme</option></select>
-            <input id="input-boundary" class="border border-input bg-background dark:bg-input/30 placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground" placeholder="Input placeholder">
-            <textarea id="textarea-boundary" class="border border-input bg-transparent dark:bg-input/30 placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
+            <input id="input-boundary" class="border border-input bg-control-surface placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground" placeholder="Input placeholder">
+            <textarea id="textarea-boundary" class="border border-input bg-control-surface placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
           </div>
           <div class="bg-popover">
             <div id="destructive-menu-item" data-variant="destructive" class="data-highlighted:bg-accent data-highlighted:text-accent-foreground data-[variant=destructive]:text-status-error-foreground data-[variant=destructive]:data-highlighted:bg-destructive/10 dark:data-[variant=destructive]:data-highlighted:bg-destructive/20 data-[variant=destructive]:data-highlighted:text-status-error-foreground">Delete</div>
@@ -464,11 +464,8 @@ describe("compiled theme CSS", () => {
         }
       }
 
-      for (const profile of ["phosphor-light", "phosphor-dark"] as const) {
-        const descriptor = THEME_PROFILES.find(
-          (candidate) => candidate.id === profile,
-        );
-        if (!descriptor) throw new Error(`Missing profile ${profile}`);
+      for (const descriptor of THEME_PROFILES) {
+        const profile = descriptor.id;
         await applyProfile(page, descriptor);
         const scrollbarWidth = await page.evaluate(() => {
           const scrollbar = document.querySelector<HTMLElement>("#scrollbar");
@@ -500,14 +497,16 @@ describe("compiled theme CSS", () => {
             pseudoElement: "::placeholder",
           }),
         ]);
-        expect(
-          contrastRatio(input.border, dialogSurface.background),
-          `${profile} input boundary`,
-        ).toBeGreaterThanOrEqual(3);
-        expect(
-          contrastRatio(select.border, select.background),
-          `${profile} native-select boundary`,
-        ).toBeGreaterThanOrEqual(3);
+        if (profile.startsWith("phosphor-")) {
+          expect(
+            contrastRatio(input.border, dialogSurface.background),
+            `${profile} input boundary`,
+          ).toBeGreaterThanOrEqual(3);
+          expect(
+            contrastRatio(select.border, select.background),
+            `${profile} native-select boundary`,
+          ).toBeGreaterThanOrEqual(3);
+        }
         expect(
           contrastRatio(
             inputPlaceholder.foreground,
