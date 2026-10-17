@@ -151,6 +151,42 @@ describe('TerminalSurface', () => {
 		expect(onFocus).toHaveBeenCalledTimes(2);
 	});
 
+	it.each(['Ctrl', 'Alt'])(
+		'shows pending and locked %s modifiers without moving focus',
+		async (name) => {
+			const now = vi.spyOn(Date, 'now').mockReturnValue(1000);
+			try {
+				render(TerminalSurfaceTestHost, { host: 'mobile' });
+				const button = await screen.findByRole('button', { name });
+				const lock = button.querySelector('svg')!;
+				expect(button.getAttribute('aria-pressed')).toBe('false');
+				expect(button.classList).not.toContain('bg-interactive-accent');
+				expect(lock.classList).toContain('invisible');
+
+				await fireEvent.click(button);
+				const description = document.getElementById(button.getAttribute('aria-describedby')!);
+				expect(description?.textContent).toBe('Next key');
+				expect(button.getAttribute('aria-pressed')).toBe('true');
+				expect(button.classList).toContain('bg-interactive-accent');
+				expect(lock.classList).toContain('invisible');
+				await fireEvent.click(screen.getByRole('button', { name: 'Esc' }));
+				expect(button.getAttribute('aria-pressed')).toBe('false');
+
+				await fireEvent.click(button);
+				await fireEvent.click(button);
+				expect(description?.textContent).toBe('Locked');
+				expect(lock.classList).not.toContain('invisible');
+				await fireEvent.click(screen.getByRole('button', { name: 'Esc' }));
+				expect(button.getAttribute('aria-pressed')).toBe('true');
+				await fireEvent.click(button);
+				expect(button.getAttribute('aria-pressed')).toBe('false');
+				expect(lock.classList).toContain('invisible');
+			} finally {
+				now.mockRestore();
+			}
+		},
+	);
+
 	it('shows a discoverable mobile exit control', async () => {
 		render(TerminalSurfaceTestHost, { host: 'mobile' });
 
