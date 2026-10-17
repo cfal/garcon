@@ -67,8 +67,8 @@
 	function actionClass(action: ResponsiveSurfaceAction): string {
 		return cn(
 			buttonVariants({ variant: action.variant === 'primary' ? 'default' : 'ghost', size: 'sm' }),
-			'gap-1.5 px-2 text-xs',
-			action.showLabel ? '' : 'w-8 px-0',
+			'gap-1.5 px-2 has-[>svg]:px-2 text-xs',
+			action.showLabel ? '' : 'w-8 px-0 has-[>svg]:px-0',
 			action.variant === 'destructive' &&
 				'text-destructive hover:bg-destructive/10 hover:text-destructive',
 			(!action.variant || action.variant === 'ghost') &&
