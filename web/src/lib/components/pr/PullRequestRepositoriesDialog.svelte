@@ -15,9 +15,8 @@
 	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp';
 	import { errorMessage } from '$lib/utils/error-message.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import PullRequestReviewChip from './PullRequestReviewChip.svelte';
+	import PullRequestRecentRunRow from './PullRequestRecentRunRow.svelte';
 	import PullRequestRepositoryDialog from './PullRequestRepositoryDialog.svelte';
-	import { reviewRunChip } from './pr-display';
 
 	interface Props {
 		reviews: PullRequestReviewsStore;
@@ -231,32 +230,14 @@
 					</p>
 				{:else}
 					<ol class="divide-y divide-border rounded-md border border-border" data-pr-run-log>
-						{#each reviews.recentRuns.slice(0, 20) as entry (entry.id)}
-							{@const chip = reviewRunChip(entry)}
-							{@const age = formatRelativeTimestamp(entry.createdAt, currentTime)}
-							<li class="flex min-w-0 items-center gap-2 px-3 py-2 text-xs">
-								{#if chip}<PullRequestReviewChip {chip} />{/if}
-								<span class="min-w-0 flex-1 truncate text-foreground">
-									{repositoryName(entry.repositoryId)} #{entry.number} · {entry.title}
-								</span>
-								{#if entry.message && entry.state !== 'completed'}
-									<span
-										class="hidden max-w-60 truncate text-muted-foreground sm:inline"
-										title={entry.message}
-									>
-										{entry.message}
-									</span>
-								{/if}
-								{#if age}<time class="shrink-0 text-muted-foreground" datetime={entry.createdAt}
-										>{age.label}</time
-									>{/if}
-								{#if entry.chatId && entry.chatAvailable}
-									{@const chatId = entry.chatId}
-									<Button size="sm" variant="ghost" onclick={() => onOpenChat(chatId)}>
-										{m.pull_request_review_open_chat()}
-									</Button>
-								{/if}
-							</li>
+						{#each reviews.recentRuns as entry (entry.id)}
+							<PullRequestRecentRunRow
+								run={entry}
+								repositoryName={repositoryName(entry.repositoryId)}
+								{currentTime}
+								{onOpenChat}
+								onPost={(runId) => reviews.post(runId)}
+							/>
 						{/each}
 					</ol>
 				{/if}

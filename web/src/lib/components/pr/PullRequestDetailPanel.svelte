@@ -6,31 +6,25 @@
 		PullRequestDetailTab,
 		PullRequestsStore,
 	} from '$lib/git/pull-requests/pull-requests-store.svelte.js';
-	import type { PullRequestThread } from '$lib/api/pull-requests';
 	import { cn } from '$lib/utils/cn';
 	import PullRequestHeader from './PullRequestHeader.svelte';
 	import PullRequestChangesTab from './PullRequestChangesTab.svelte';
 	import PullRequestChecksTab from './PullRequestChecksTab.svelte';
 	import PullRequestReviewTab from './PullRequestReviewTab.svelte';
-	import { buildAddressThreadPrompt } from './pr-agent-prompts';
 
 	interface PullRequestDetailPanelProps {
 		controller: PullRequestsStore;
 		currentTime: Date;
-		onSendToChat: (message: string) => Promise<boolean>;
 		onOpenChat: (chatId: string) => void;
 		// Absent in narrow layouts, where the back link closes the detail.
 		onClose?: () => void;
-		onAfterSend?: () => void;
 	}
 
 	let {
 		controller: pullRequests,
 		currentTime,
-		onSendToChat,
 		onOpenChat,
 		onClose,
-		onAfterSend,
 	}: PullRequestDetailPanelProps = $props();
 	const entry = $derived(pullRequests.selectedEntry);
 	const detail = $derived(pullRequests.detail);
@@ -39,12 +33,6 @@
 		{ id: 'changes', label: m.pull_request_tab_changes },
 		{ id: 'checks', label: m.pull_request_tab_checks },
 	];
-
-	async function handleAddressThread(thread: PullRequestThread): Promise<void> {
-		if (!detail) return;
-		const sent = await onSendToChat(buildAddressThreadPrompt(detail, thread));
-		if (sent) onAfterSend?.();
-	}
 
 	// Arrow keys move between tabs, as the tab pattern expects.
 	function handleTabKeydown(event: KeyboardEvent, index: number): void {
@@ -101,7 +89,7 @@
 				<PullRequestReviewTab controller={pullRequests} {currentTime} {onOpenChat} />
 			{:else if detail}
 				{#if pullRequests.tab === 'changes'}
-					<PullRequestChangesTab {detail} onAddressThread={handleAddressThread} />
+					<PullRequestChangesTab {detail} />
 				{:else}
 					<PullRequestChecksTab checks={detail.checks} />
 				{/if}

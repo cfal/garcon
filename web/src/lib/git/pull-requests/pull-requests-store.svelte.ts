@@ -9,6 +9,7 @@ import * as m from '$lib/paraglide/messages.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import { errorMessage } from '$lib/utils/error-message.js';
 import { effectiveExecutorId } from '$shared/executors';
+import { ghRepositoryIdentity } from '$shared/gh-identity';
 import type {
 	PullRequestReviewInboxEntry,
 	PullRequestReviewRepository,
@@ -164,10 +165,13 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.isDetailLoading = true;
 		this.detailError = null;
 		try {
+			const identity = ghRepositoryIdentity(repository);
+			if (!identity) throw new Error(m.pull_request_load_failed());
 			const detail = await (this.#deps.getDetail ?? getPullRequest)(
 				{
 					executorId: effectiveExecutorId(repository.target.executorId),
 					projectPath: repository.target.projectPath,
+					repository: identity,
 				},
 				entry.pull.number,
 				{ signal: controller.signal },
@@ -197,6 +201,8 @@ export class PullRequestsStore implements PortableSingletonController {
 			entry.pull.number,
 			effectiveExecutorId(repository.target.executorId),
 			repository.target.projectPath,
+			repository.nameWithOwner,
+			repository.url,
 			entry.pull.headRefOid,
 			entry.pull.updatedAt,
 			entry.pull.checksState,

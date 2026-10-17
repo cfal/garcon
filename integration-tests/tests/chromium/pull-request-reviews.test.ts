@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
-import { chmod, copyFile, mkdir, symlink, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   DEFAULT_PULL_REQUEST_REVIEW_SETTINGS,
+  type PullRequestReviewRunMutationResponse,
   type PullRequestReviewRunsResponse,
   type PullRequestReviewsSnapshot,
 } from '../../../common/pull-request-reviews.js';
@@ -143,6 +144,7 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     phase('changes and checks');
     await panel.locator('[data-pr-tab="changes"]').click();
     await panel.locator('[data-pr-detail]').getByText('example.txt').first().waitFor();
+    await browserExpect(panel.getByRole('button', { name: 'Address with agent' })).toHaveCount(0);
     await capture('inbox-changes-desktop');
     await panel.locator('[data-pr-tab="checks"]').click();
     await panel.getByText('Unit tests', { exact: true }).waitFor();
@@ -248,6 +250,42 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     expect(postedHistory.runs[0].post.status).toBe('none');
     expect(postedHistory.runs.find(run => run.id === earlierRun.id)?.post.status).toBe('posted');
     await capture('older-review-posted-mobile');
+
+    phase('recover an unconfirmed post after the pull request closes');
+    const githubFixturePath = join(project, 'gh-fixture.json');
+    const githubFixture = JSON.parse(await readFile(githubFixturePath, 'utf8'));
+    const recoveryPull = { number: 140, title: 'Recover a saved review after closure', headRefOid: HEAD };
+    await writeFile(githubFixturePath, JSON.stringify({ ...githubFixture, pulls: [...PULLS, recoveryPull], commentResponse: '{' }));
+    await client.post('/api/v1/pull-request-reviews/scan', { repositoryId });
+    await browserExpect.poll(async () => (await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews'))
+      .inbox.some(entry => entry.pull.number === 140)).toBe(true);
+    const recovery = await client.post<PullRequestReviewRunMutationResponse>('/api/v1/pull-request-reviews/runs', { repositoryId, number: 140 });
+    await browserExpect.poll(async () => (await client.get<PullRequestReviewRunsResponse>(
+      `/api/v1/pull-request-reviews/runs?repositoryId=${repositoryId}&number=140`,
+    )).runs[0]?.state, { timeout: 30_000 }).toBe('completed');
+    const unconfirmed = await client.post<PullRequestReviewRunMutationResponse>('/api/v1/pull-request-reviews/runs/post', { runId: recovery.run.id });
+    expect(unconfirmed.run.post.status).toBe('unknown');
+    await writeFile(githubFixturePath, JSON.stringify({ ...githubFixture, pulls: [...PULLS, { ...recoveryPull, state: 'CLOSED' }] }));
+    await client.post('/api/v1/pull-request-reviews/scan', { repositoryId });
+    await browserExpect.poll(async () => (await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews'))
+      .inbox.some(entry => entry.pull.number === 140)).toBe(false);
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await panel.locator('[data-pr-repositories-button]').click();
+    const reconcile = repositories.locator(`[data-pr-reconcile-run="${recovery.run.id}"]`);
+    await browserExpect(reconcile).toBeVisible();
+    await reconcile.scrollIntoViewIfNeeded();
+    await capture('closed-review-recovery-desktop');
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await panel.locator('[data-pr-repositories-button]').click();
+    await reconcile.scrollIntoViewIfNeeded();
+    await capture('closed-review-recovery-mobile');
+    await reconcile.click();
+    await browserExpect(reconcile).toHaveCount(0);
+    const recovered = await client.get<PullRequestReviewRunsResponse>(`/api/v1/pull-request-reviews/runs?repositoryId=${repositoryId}&number=140`);
+    expect(recovered.runs[0].post.status).toBe('posted');
+    const delivered = JSON.parse(await readFile(join(project, 'gh-comments.json'), 'utf8')) as { number: number }[];
+    expect(delivered.filter(comment => comment.number === 140)).toHaveLength(1);
 
     expect(browserErrors).toEqual([
       'console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)',

@@ -31,7 +31,7 @@ function harness() {
   cleanups.push(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   const clock = { now: Date.parse('2026-03-01T00:00:00Z') };
   const repository: StoredRepository = {
-    id: 'repository', nameWithOwner: 'acme/app', url: '', viewerLogin: 'viewer', createdAt: '', updatedAt: '',
+    id: 'repository', nameWithOwner: 'acme/app', url: 'https://github.com/acme/app', viewerLogin: 'viewer', createdAt: '', updatedAt: '',
     target: {
       type: 'new-chat', agentId: 'claude', projectPath: '/work/app', model: 'model', apiProviderId: null, modelEndpointId: null,
       modelProtocol: null, permissionMode: 'plan', thinkingMode: 'none', agentSettingsById: {}, tags: [], preambleChoice: { mode: 'defaults' },
@@ -43,7 +43,7 @@ function harness() {
     id: 'run', repositoryId: repository.id, number: 7, headSha: HEAD, reviewedSha: HEAD, state: 'completed',
     createdAt: '2026-01-01T00:00:00Z', startedAt: '2026-01-01T00:00:00Z', finishedAt: '2026-01-01T00:00:00Z',
     title: 'Synthetic change', trigger: 'auto', message: null, chatId: 'chat', turnId: 'turn', chatArchived: false,
-    post: { status: 'none', postedAt: null, commentUrl: null, message: null },
+    post: { actor: null, status: 'none', postedAt: null, commentUrl: null, message: null },
   };
   store.insertRun(run);
   const queued: string[] = [];
@@ -79,6 +79,103 @@ async function until(check: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 200 && !check(); attempt++) await new Promise((resolve) => setImmediate(resolve));
   expect(check()).toBe(true);
 }
+
+test('scans and refreshes a healthy repository while another repository read is deferred', async () => {
+  const { store, scanner, repository, list, clock } = harness();
+  const healthy: StoredRepository = {
+    ...repository, id: 'healthy', nameWithOwner: 'acme/healthy', url: 'https://github.com/acme/healthy',
+    target: { ...repository.target, projectPath: '/work/healthy' },
+    settings: { ...repository.settings, autoReview: false },
+  };
+  store.insertRepository(healthy, { status: 'pending', scannedAt: null, message: null }, []);
+  const pending = Promise.withResolvers<ReturnType<typeof list>>();
+  let deferredReads = 0;
+  let healthyReads = 0;
+  const scanning = scanner(async ({ projectPath }) => {
+    if (projectPath === repository.target.projectPath) {
+      deferredReads++;
+      return pending.promise;
+    }
+    healthyReads++;
+    return { ...list([pull(healthyReads === 1 ? HEAD : NEXT_HEAD)]), repo: { nameWithOwner: healthy.nameWithOwner, url: healthy.url } };
+  });
+  try {
+    scanning.start();
+    await until(() => store.getRepository(healthy.id)?.scan.status === 'ok');
+    expect(deferredReads).toBe(1);
+    expect(store.getRepository(repository.id)?.scan.scannedAt).toBeNull();
+    clock.now++;
+    scanning.requestScan(healthy.id);
+    await until(() => store.pulls(healthy.id)[0]?.headRefOid === NEXT_HEAD);
+    expect(healthyReads).toBe(2);
+    expect(deferredReads).toBe(1);
+  } finally {
+    scanning.stop();
+    pending.resolve(list([pull()]));
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+});
+
+test('rejects a checkout retargeted to the same owner and repository on a different host', async () => {
+  const { store, scanner, repository, list } = harness();
+  const scanning = scanner(async () => ({
+    ...list([pull(NEXT_HEAD)]), repo: { nameWithOwner: repository.nameWithOwner, url: 'https://git.example.invalid/acme/app' },
+  }));
+  scanning.start();
+  await until(() => store.getRepository(repository.id)?.scan.status === 'failed'
+    || store.getRepository(repository.id)?.url !== repository.url);
+  expect(store.getRepository(repository.id)).toMatchObject({ url: repository.url, scan: { status: 'failed' } });
+  expect(store.pulls(repository.id)[0]?.headRefOid).toBe(HEAD);
+  expect(store.getRun('run')?.state).toBe('completed');
+});
+
+test('bounds repository scans and coalesces repeated refreshes of an in-flight repository', async () => {
+  const { store, scanner, repository, list } = harness();
+  const repositories = [repository];
+  for (let index = 1; index < 6; index++) {
+    const next = {
+      ...repository, id: `repository-${index}`, nameWithOwner: `acme/app-${index}`, url: `https://github.com/acme/app-${index}`,
+      target: { ...repository.target, projectPath: `/work/app-${index}` }, settings: { ...repository.settings, autoReview: false },
+    };
+    store.insertRepository(next, { status: 'pending', scannedAt: null, message: null }, []);
+    repositories.push(next);
+  }
+  const pending: { repository: StoredRepository; resolve(value: ReturnType<typeof list>): void }[] = [];
+  let active = 0;
+  let maximum = 0;
+  const reads = new Map<string, number>();
+  const scanning = scanner(async ({ projectPath }) => {
+    const current = repositories.find((entry) => entry.target.projectPath === projectPath)!;
+    reads.set(current.id, (reads.get(current.id) ?? 0) + 1);
+    maximum = Math.max(maximum, ++active);
+    const response = Promise.withResolvers<ReturnType<typeof list>>();
+    pending.push({ repository: current, resolve: response.resolve });
+    try { return await response.promise; }
+    finally { active--; }
+  });
+  const release = (entry: typeof pending[number]) => entry.resolve({
+    ...list([pull()]), repo: { nameWithOwner: entry.repository.nameWithOwner, url: entry.repository.url },
+  });
+  try {
+    scanning.start();
+    await until(() => pending.length === 4);
+    scanning.requestScan(repository.id);
+    scanning.requestScan(repository.id);
+    expect(reads.get(repository.id)).toBe(1);
+    release(pending[0]);
+    await until(() => reads.get(repository.id) === 2);
+    expect(active).toBe(4);
+    expect(maximum).toBe(4);
+    release(pending.findLast((entry) => entry.repository.id === repository.id)!);
+    await until(() => pending.length === 6);
+    expect(reads.get(repository.id)).toBe(2);
+    expect(maximum).toBe(4);
+  } finally {
+    scanning.stop();
+    for (const entry of pending) release(entry);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+});
 
 test('discards a pending old-head list when a review settles during the read', async () => {
   const { store, scanner, list, queued, run } = harness();
@@ -242,6 +339,21 @@ test('no-op history maintenance keeps the snapshot revision stable', () => {
   expect(store.revision()).toBe(before);
 });
 
+test.each(['unknown', 'posted'] as const)('retains unresolved %s posting history past closure retention', (status) => {
+  const { store, run, repository, clock } = harness();
+  store.updateRun(run.id, current => ({
+    ...current, chatArchived: true,
+    post: { ...current.post, status, message: 'Posting needs reconciliation.' },
+  }));
+  store.recordScan(repository.id, { status: 'ok', scannedAt: new Date(clock.now).toISOString(), message: null }, []);
+  clock.now += 31 * DAY_MS;
+  const cutoff = new Date(clock.now - 30 * DAY_MS).toISOString();
+  expect(store.pruneClosedRuns(repository.id, cutoff)).toBe(0);
+  expect(store.recentRuns(1)[0]?.id).toBe(run.id);
+  store.updateRun(run.id, current => ({ ...current, post: { ...current.post, status: 'posted', message: null } }));
+  expect(store.pruneClosedRuns(repository.id, cutoff)).toBe(1);
+});
+
 test('a run update during a list read repeats the scan without losing its posting result', async () => {
   const { store, scanner, list, run } = harness();
   const pending = Promise.withResolvers<ReturnType<typeof list>>();
@@ -365,4 +477,4 @@ test('large closed-history maintenance yields during archival and deletion in bo
     archiveReads.mockRestore();
     deletion.mockRestore();
   }
-});
+}, 30_000);

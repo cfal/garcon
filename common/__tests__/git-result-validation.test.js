@@ -35,7 +35,8 @@ test('GitHub status and list results do not require detail fields', () => {
   for (const [method, result] of [
     ['getStatus', { available: true, authenticated: false, reason: 'unauthenticated' }],
     ['listPullRequests', { pulls: [], repo: null, viewerLogin: null }],
-    ['getPullRequestReviewTarget', { number: 1, state: 'open', headRefOid: 'a'.repeat(40), markedComments: [] }],
+    ['getPullRequestReviewTarget', { repository: {host: "git.example.invalid", nameWithOwner: "acme/app"}, viewer: {id: "actor:viewer", login: "viewer"}, number: 1, state: 'open', headRefOid: 'a'.repeat(40), markedComments: [],
+      repository: { host: 'git.example.invalid', nameWithOwner: 'acme/app' }, viewer: { id: 'actor-viewer', login: 'viewer' } }],
     ['createPullRequestComment', { id: 'comment-1', url: 'https://git.example.invalid/pull/1#comment-1' }],
     ['minimizePullRequestComment', { minimized: true }],
   ]) {

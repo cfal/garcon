@@ -22,7 +22,6 @@
 		presentation,
 		visible,
 		style,
-		onSendToChat,
 		onAppendToChatDraft,
 		onChooseProjectFolder,
 		frameBridge,
@@ -31,7 +30,6 @@
 		presentation: WorkspaceWindowId | 'mobile';
 		visible: boolean;
 		style: string;
-		onSendToChat: (message: string) => Promise<boolean>;
 		onAppendToChatDraft: ChatDraftAppend;
 		onChooseProjectFolder?: () => void;
 		frameBridge: SurfaceFrameBridge;
@@ -118,7 +116,6 @@
 					{surface}
 					{presentation}
 					{visible}
-					{onSendToChat}
 					{onAppendToChatDraft}
 					{onChooseProjectFolder}
 					{frameBridge}
@@ -130,7 +127,6 @@
 			{surface}
 			{presentation}
 			{visible}
-			{onSendToChat}
 			{onAppendToChatDraft}
 			{onChooseProjectFolder}
 			{frameBridge}

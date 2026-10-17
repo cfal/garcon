@@ -21,7 +21,10 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const list = await fixture.client.get<ExecutionGhResults['listPullRequests']>(`/api/v1/gh/pull-requests?${query}`);
       expect(list).toMatchObject(scope);
       expect(list.repo?.nameWithOwner).toBe('synthetic-worker/repository');
-      const detail = await fixture.client.get<ExecutionGhResults['getPullRequest']>(`/api/v1/gh/pull-request?${query}&number=1`);
+      const detailQuery = new URLSearchParams(query);
+      detailQuery.set('repositoryHost', new URL(list.repo!.url).hostname);
+      detailQuery.set('repositoryName', list.repo!.nameWithOwner);
+      const detail = await fixture.client.get<ExecutionGhResults['getPullRequest']>(`/api/v1/gh/pull-request?${detailQuery}&number=1`);
       expect(detail).toMatchObject(scope);
       expect(detail.body.length).toBe(1024 * 1024);
       expect(detail.fileBodies['example.txt'].patch).toContain('+changed');
@@ -38,17 +41,17 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         diff: 'diff --git "a/a\\tb.txt" "b/a\\tb.txt"\n--- "a/a\\tb.txt"\n+++ "b/a\\tb.txt"\n@@ -1 +1 @@\n--- i;\n+++ i;\n',
         files: [{ path: specialPath, additions: 1, deletions: 1 }],
       }));
-      const named = await fixture.client.get<ExecutionGhResults['getPullRequest']>(`/api/v1/gh/pull-request?${query}&number=1`);
+      const named = await fixture.client.get<ExecutionGhResults['getPullRequest']>(`/api/v1/gh/pull-request?${detailQuery}&number=1`);
       expect(named.files).toMatchObject([{ path: specialPath }]);
       expect(Object.keys(named.fileBodies)).toEqual([specialPath]);
       expect(named.fileBodies[specialPath].patch).toContain('+++ i;');
       expect(named.threads.flatMap(thread => thread.comments.map(comment => comment.body))).toEqual(['first page', 'second page']);
       await writeFile(configPath, JSON.stringify({ label: 'synthetic-worker', bodyBytes: 4 * 1024 * 1024 }));
-      expect(await rejectionOf(fixture.client.get(`/api/v1/gh/pull-request?${query}&number=1`))).toMatchObject({ status: 413, body: { errorCode: 'GIT_RESULT_TOO_LARGE' } });
+      expect(await rejectionOf(fixture.client.get(`/api/v1/gh/pull-request?${detailQuery}&number=1`))).toMatchObject({ status: 413, body: { errorCode: 'GIT_RESULT_TOO_LARGE' } });
       const diff = `diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -0,0 +1,350 @@\n${`+${'\t'.repeat(9999)}\n`.repeat(350)}`
         + 'diff --git a/small.txt b/small.txt\n--- a/small.txt\n+++ b/small.txt\n@@ -1 +1 @@\n-old\n+small change\n';
       await writeFile(configPath, JSON.stringify({ label: 'synthetic-worker', diff }));
-      const limited = await fixture.client.get<ExecutionGhResults['getPullRequest']>(`/api/v1/gh/pull-request?${query}&number=1`);
+      const limited = await fixture.client.get<ExecutionGhResults['getPullRequest']>(`/api/v1/gh/pull-request?${detailQuery}&number=1`);
       expect(limited.fileBodies['example.txt']).toMatchObject({ bodyState: 'too-large', limitReason: 'file-too-many-bytes', patch: null });
       expect(limited.fileBodies['small.txt'].patch).toContain('+small change');
       if (executorId !== 'local') {

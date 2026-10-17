@@ -4,6 +4,7 @@
 import type { GitDiffPatchFile } from './pull-request-diff.js';
 import type { GitReviewFilePatchBody, GitReviewFileSummary } from '../git/types.js';
 import { PULL_REQUEST_AUTHOR_ASSOCIATIONS } from '../../../common/gh.js';
+import { ghRepositoryIdentity, isGhActorIdentity } from '../../../common/gh-identity.js';
 import type {
   PullRequestAuthorAssociation,
   PullRequestMarkedComment,
@@ -164,7 +165,7 @@ export interface GhRawListPullRequest {
 
 export interface GhRawPullRequestList {
   data?: {
-    viewer?: { login?: string } | null;
+    viewer?: { id?: string; login?: string } | null;
     repository?: {
       nameWithOwner?: string;
       url?: string;
@@ -176,12 +177,15 @@ export interface GhRawPullRequestList {
 
 export interface GhRawReviewTarget {
   data?: {
+    viewer?: { id?: string; login?: string } | null;
     repository?: {
+      nameWithOwner?: string;
+      url?: string;
       pullRequest?: {
         number?: number;
         state?: string;
         headRefOid?: string;
-        comments?: GhRawNodes<{ id?: string; url?: string; isMinimized?: boolean; viewerDidAuthor?: boolean; body?: string }> | null;
+        comments?: GhRawNodes<{ id?: string; url?: string; isMinimized?: boolean; author?: { id?: string; login?: string } | null; body?: string }> | null;
       } | null;
     } | null;
   } | null;
@@ -256,16 +260,21 @@ export function buildPullRequestList(raw: GhRawPullRequestList): PullRequestList
 // Only the final canonical marker identifies a posted review; quoted markers are untrusted text.
 export function buildReviewTarget(raw: GhRawReviewTarget, markerPrefix: string): PullRequestReviewTarget | null {
   const pull = raw.data?.repository?.pullRequest;
-  if (!pull || typeof pull.number !== 'number') return null;
+  const repository = ghRepositoryIdentity({ nameWithOwner: raw.data?.repository?.nameWithOwner ?? '', url: raw.data?.repository?.url ?? '' });
+  const viewer = raw.data?.viewer;
+  if (!pull || typeof pull.number !== 'number' || !repository || !isGhActorIdentity(viewer)) return null;
   const pattern = /<!-- garcon-review [^\s#]+\/[^\s#]+#[1-9]\d* (?:[a-f0-9]{40}|[a-f0-9]{64}) -->\s*$/;
   const markedComments: PullRequestMarkedComment[] = [];
   for (const comment of nodes(pull.comments)) {
-    if (!comment.viewerDidAuthor || !comment.id) continue;
+    if (!comment.id) continue;
     const marker = pattern.exec(comment.body ?? '')?.[0].trimEnd();
     if (!marker?.toLowerCase().startsWith(`<!-- ${markerPrefix.toLowerCase()}`)) continue;
-    markedComments.push({ id: comment.id, url: comment.url ?? '', marker, isMinimized: Boolean(comment.isMinimized) });
+    markedComments.push({ id: comment.id, url: comment.url ?? '', marker, isMinimized: Boolean(comment.isMinimized),
+      author: isGhActorIdentity(comment.author) ? comment.author : null });
   }
   return {
+    repository,
+    viewer,
     number: pull.number,
     state: mapPrState(pull.state),
     headRefOid: pull.headRefOid ?? '',

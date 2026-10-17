@@ -3,11 +3,23 @@ import { buildPullRequestList, buildReviewTarget } from './gh-mappers.js';
 import { GhDomainError } from './gh-types.js';
 import { runGhJson } from './run.js';
 import { LABELS_QUERY, LIST_QUERY, REQUESTED_QUERY, REVIEW_REQUESTS_QUERY, REVIEW_TARGET_QUERY } from './gh-review-queries.js';
+import type { GhActorIdentity, GhRepositoryIdentity } from '../../../common/gh.js';
+import { ghRepositoryIdentity, sameGhRepository } from '../../../common/gh-identity.js';
+import { GitServiceError } from '../../../common/git-error.js';
+import { assertGhActor, repositoryFields, requireGhActor } from './gh-repository.js';
 
-const REPOSITORY_FIELDS = ['-F', 'owner={owner}', '-F', 'name={repo}'];
+type ReadEnvelope = { data?: { viewer?: GhActorIdentity | null; repository?: { nameWithOwner?: string; url?: string } | null } | null };
 
-function graphql<T>(projectPath: string, query: string, fields: string[], cursor: string | null, signal?: AbortSignal): Promise<T> {
-  return runGhJson<T>(projectPath, ['api', 'graphql', ...fields, '-f', `query=${query}`, ...(cursor ? ['-f', `endCursor=${cursor}`] : [])], { signal });
+async function graphql<T>(projectPath: string, repository: GhRepositoryIdentity, query: string, fields: string[], cursor: string | null, signal?: AbortSignal, viewer?: GhActorIdentity): Promise<T> {
+  const raw = await runGhJson<T>(projectPath, ['api', 'graphql', '--hostname', repository.host, ...fields, '-f', `query=${query}`, ...(cursor ? ['-f', `endCursor=${cursor}`] : [])], { signal });
+  const data = (raw as ReadEnvelope).data;
+  const actor = requireGhActor(data?.viewer);
+  if (viewer) assertGhActor(actor, viewer);
+  if (data?.repository) {
+    const actual = ghRepositoryIdentity({ nameWithOwner: data.repository.nameWithOwner ?? '', url: data.repository.url ?? '' });
+    if (!actual || !sameGhRepository(actual, repository)) throw new GitServiceError('GIT_CONFLICT', 'The GitHub repository identity changed during the read.');
+  }
+  return raw;
 }
 
 // A missing or unusable continuation fails the whole read instead of publishing a partial success.
@@ -27,35 +39,38 @@ async function completeConnection<T>(first: GhRawNodes<T> | null | undefined, ne
   }
 }
 
-export async function readPullRequestList(projectPath: string, signal?: AbortSignal) {
-  const raw = await graphql<GhRawPullRequestList>(projectPath, LIST_QUERY, REPOSITORY_FIELDS, null, signal);
+export async function readPullRequestList(projectPath: string, identity: GhRepositoryIdentity, signal?: AbortSignal) {
+  const fields = repositoryFields(identity);
+  const raw = await graphql<GhRawPullRequestList>(projectPath, identity, LIST_QUERY, fields, null, signal);
+  const viewer = requireGhActor(raw.data?.viewer);
   const repository = raw.data?.repository;
   if (!repository) throw new Error('GitHub returned no repository for this project.');
   repository.pullRequests = await completeConnection(repository.pullRequests, async (cursor) =>
-    (await graphql<GhRawPullRequestList>(projectPath, LIST_QUERY, REPOSITORY_FIELDS, cursor, signal)).data?.repository?.pullRequests);
+    (await graphql<GhRawPullRequestList>(projectPath, identity, LIST_QUERY, fields, cursor, signal, viewer)).data?.repository?.pullRequests);
   for (const pull of repository.pullRequests.nodes ?? []) {
     if (!pull) continue;
-    const fields = [...REPOSITORY_FIELDS, '-F', `number=${pull.number}`];
-    type NestedPage = { data?: { repository?: { pullRequest?: Pick<typeof pull, 'labels' | 'reviewRequests'> } } };
+    const fields = [...repositoryFields(identity), '-F', `number=${pull.number}`];
+    type NestedPage = ReadEnvelope & { data?: { repository?: { pullRequest?: Pick<typeof pull, 'labels' | 'reviewRequests'> } } };
     pull.labels = await completeConnection(pull.labels, async (cursor) =>
-      (await graphql<NestedPage>(projectPath, LABELS_QUERY, fields, cursor, signal)).data?.repository?.pullRequest?.labels);
+      (await graphql<NestedPage>(projectPath, identity, LABELS_QUERY, fields, cursor, signal, viewer)).data?.repository?.pullRequest?.labels);
     pull.reviewRequests = await completeConnection(pull.reviewRequests, async (cursor) =>
-      (await graphql<NestedPage>(projectPath, REVIEW_REQUESTS_QUERY, fields, cursor, signal)).data?.repository?.pullRequest?.reviewRequests);
+      (await graphql<NestedPage>(projectPath, identity, REVIEW_REQUESTS_QUERY, fields, cursor, signal, viewer)).data?.repository?.pullRequest?.reviewRequests);
   }
-  const requestedFields = ['-F', 'requested=repo:{owner}/{repo} is:pr is:open review-requested:@me'];
-  const requested = await graphql<GhRawPullRequestList>(projectPath, REQUESTED_QUERY, requestedFields, null, signal);
+  const requestedFields = ['-f', `requested=repo:${identity.nameWithOwner} is:pr is:open review-requested:@me`];
+  const requested = await graphql<GhRawPullRequestList>(projectPath, identity, REQUESTED_QUERY, requestedFields, null, signal, viewer);
   raw.data!.requested = await completeConnection(requested.data?.requested, async (cursor) =>
-    (await graphql<GhRawPullRequestList>(projectPath, REQUESTED_QUERY, requestedFields, cursor, signal)).data?.requested);
+    (await graphql<GhRawPullRequestList>(projectPath, identity, REQUESTED_QUERY, requestedFields, cursor, signal, viewer)).data?.requested);
   return buildPullRequestList(raw);
 }
 
-export async function readReviewTarget(projectPath: string, number: number, marker: string, signal?: AbortSignal) {
-  const fields = [...REPOSITORY_FIELDS, '-F', `number=${number}`];
-  const raw = await graphql<GhRawReviewTarget>(projectPath, REVIEW_TARGET_QUERY, fields, null, signal);
+export async function readReviewTarget(projectPath: string, identity: GhRepositoryIdentity, number: number, marker: string, signal?: AbortSignal) {
+  const fields = [...repositoryFields(identity), '-F', `number=${number}`];
+  const raw = await graphql<GhRawReviewTarget>(projectPath, identity, REVIEW_TARGET_QUERY, fields, null, signal);
+  const viewer = requireGhActor(raw.data?.viewer);
   const pull = raw.data?.repository?.pullRequest;
   if (!pull) throw new GhDomainError('NOT_FOUND', 'Pull request not found.');
   pull.comments = await completeConnection(pull.comments, async (cursor) => {
-    const current = (await graphql<GhRawReviewTarget>(projectPath, REVIEW_TARGET_QUERY, fields, cursor, signal)).data?.repository?.pullRequest;
+    const current = (await graphql<GhRawReviewTarget>(projectPath, identity, REVIEW_TARGET_QUERY, fields, cursor, signal, viewer)).data?.repository?.pullRequest;
     if (!current) throw new GhDomainError('NOT_FOUND', 'Pull request not found.');
     pull.state = current.state;
     pull.headRefOid = current.headRefOid;

@@ -1,7 +1,8 @@
 import type { ExecutionGhService } from '@garcon/server-agent-interface';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { GitServiceError } from '../../../common/git-error.js';
-import { GH_COMMENT_BODY_MAX_LENGTH, type PullRequestMarkedComment } from '../../../common/gh.js';
+import { GH_COMMENT_BODY_MAX_LENGTH, type GhActorIdentity, type GhRepositoryIdentity, type PullRequestMarkedComment } from '../../../common/gh.js';
+import { ghRepositoryIdentity, sameGhRepository } from '../../../common/gh-identity.js';
 import {
   pullRequestReviewCommentBody,
   pullRequestReviewMarkerPrefix,
@@ -41,6 +42,8 @@ export class PullRequestReviewPoster {
     }
     const repository = store.getRepository(run.repositoryId);
     if (!repository) throw reviewConflict('The repository is no longer connected.');
+    const identity = ghRepositoryIdentity(repository);
+    if (!identity) throw reviewConflict('The connected repository has an invalid GitHub identity. Reconnect it before posting.');
     const pullKey = `${run.repositoryId}:${run.number}`;
     if (this.#postingPulls.has(pullKey)) throw reviewConflict('A review of this pull request is already being posted.');
     const body = pullRequestReviewCommentBody(run.review, repository.nameWithOwner, run.number, run.reviewedSha);
@@ -50,22 +53,31 @@ export class PullRequestReviewPoster {
     }
     this.#postingPulls.set(pullKey, run.repositoryId);
     try {
-      await this.#post(run, repository.nameWithOwner, effectiveExecutorId(repository.target.executorId), repository.target.projectPath, body);
+      await this.#post(run, identity, effectiveExecutorId(repository.target.executorId), repository.target.projectPath, body);
     } finally {
       this.#postingPulls.delete(pullKey);
     }
   }
 
-  async #post(run: StoredRun, nameWithOwner: string, executorId: string, projectPath: string, body: string): Promise<void> {
+  async #post(run: StoredRun, repository: GhRepositoryIdentity, executorId: string, projectPath: string, body: string): Promise<void> {
     const reviewedSha = run.reviewedSha!;
+    const { nameWithOwner } = repository;
     try {
       const gh = await this.deps.executors.requireExecutor(executorId).getGhService();
       const target = await gh.getPullRequestReviewTarget({
-        projectPath, number: run.number, marker: pullRequestReviewMarkerPrefix(nameWithOwner, run.number),
+        projectPath, repository, number: run.number, marker: pullRequestReviewMarkerPrefix(nameWithOwner, run.number),
       });
+      if (!sameGhRepository(target.repository, repository)) throw reviewConflict('The GitHub repository has changed. Reconnect the intended repository before posting.');
+      const actor = run.post.actor ?? target.viewer;
       const marker = `<!-- ${pullRequestReviewMarkerPrefix(nameWithOwner, run.number)}${reviewedSha} -->`;
-      const existingIndex = target.markedComments.findIndex((comment) => comment.marker.toLowerCase() === marker);
-      const existing = target.markedComments[existingIndex];
+      const ownComments = target.markedComments.filter(comment => comment.author?.id === actor.id);
+      const existingIndex = ownComments.findIndex((comment) => comment.marker.toLowerCase() === marker);
+      const existing = ownComments[existingIndex];
+      if (!existing && run.post.status === 'unknown'
+        && target.markedComments.some(comment => comment.marker.toLowerCase() === marker)) {
+        this.#record(run.id, { ...run.post, message: `A matching comment has another author. Verify the original ${actor.login} posting attempt on GitHub before continuing.` });
+        return;
+      }
       // Recovery checks the marker even after a push or closure; it never creates another posted comment.
       if (existing || run.post.status === 'posted') {
         if (!existing) {
@@ -73,10 +85,20 @@ export class PullRequestReviewPoster {
           return;
         }
         this.#record(run.id, {
+          actor,
           status: 'posted', commentUrl: existing?.url || run.post.commentUrl,
           postedAt: run.post.postedAt ?? new Date(this.deps.now()).toISOString(), message: null,
         });
-        await this.#minimizeEarlier(run.id, target.markedComments.slice(0, existingIndex), gh, projectPath);
+        const earlier = ownComments.slice(0, existingIndex);
+        if (target.viewer.id !== actor.id && earlier.some(comment => !comment.isMinimized)) {
+          this.#record(run.id, { ...this.deps.store.getRun(run.id)!.post, message: `The review was posted. Switch GitHub back to ${actor.login} to hide older comments.` });
+          return;
+        }
+        await this.#minimizeEarlier(run.id, earlier, gh, projectPath, repository, actor);
+        return;
+      }
+      if (target.viewer.id !== actor.id) {
+        this.#record(run.id, { ...run.post, message: `Switch GitHub back to ${actor.login} to reconcile the original posting attempt.` });
         return;
       }
       const current = this.deps.store.getRun(run.id);
@@ -92,12 +114,15 @@ export class PullRequestReviewPoster {
         this.#record(run.id, { status: 'stale', message: 'The pull request has new commits, so this review was not posted.' }, 'outdated');
         return;
       }
-      const posted = await gh.createPullRequestComment({ projectPath, number: run.number, body });
-      this.#record(run.id, { status: 'posted', commentUrl: posted.url || null, postedAt: new Date(this.deps.now()).toISOString(), message: null });
-      await this.#minimizeEarlier(run.id, target.markedComments, gh, projectPath);
+      // An interruption after durable admission retains the identity needed for reconciliation.
+      this.#record(run.id, { status: 'unknown', actor, message: 'GitHub has not confirmed the comment yet.' });
+      const posted = await gh.createPullRequestComment({ projectPath, repository, actor, number: run.number, body });
+      this.#record(run.id, { status: 'posted', actor, commentUrl: posted.url || null, postedAt: new Date(this.deps.now()).toISOString(), message: null });
+      await this.#minimizeEarlier(run.id, ownComments, gh, projectPath, repository, actor);
     } catch (error) {
-      if (run.post.status === 'posted') {
-        this.#record(run.id, { ...run.post, message: 'The review was posted, but older comments could not be hidden. Retry cleanup.' });
+      const savedPost = this.deps.store.getRun(run.id)?.post ?? run.post;
+      if (savedPost.status === 'posted') {
+        this.#record(run.id, { ...savedPost, message: 'The review was posted, but older comments could not be hidden. Retry cleanup.' });
         return;
       }
       const unknown = run.post.status === 'unknown'
@@ -110,13 +135,13 @@ export class PullRequestReviewPoster {
 
   async #minimizeEarlier(
     runId: string, comments: PullRequestMarkedComment[],
-    gh: ExecutionGhService, projectPath: string,
+    gh: ExecutionGhService, projectPath: string, repository: GhRepositoryIdentity, actor: GhActorIdentity,
   ): Promise<void> {
     let failed = false;
     for (const previous of comments) {
-      if (previous.isMinimized) continue;
+      if (previous.isMinimized || previous.author?.id !== actor.id) continue;
       try {
-        const result = await gh.minimizePullRequestComment({ projectPath, commentId: previous.id });
+        const result = await gh.minimizePullRequestComment({ projectPath, repository, actor, commentId: previous.id });
         if (!result.minimized) failed = true;
       } catch (error) {
         failed = true;
@@ -133,7 +158,7 @@ export class PullRequestReviewPoster {
     const updated = this.deps.store.updateRun(runId, (current) => ({
       ...current,
       ...(state ? { state } : {}),
-      post: { commentUrl: null, postedAt: null, message: null, ...post },
+      post: { actor: current.post.actor, commentUrl: null, postedAt: null, message: null, ...post },
     }));
     if (updated) this.deps.changed();
   }

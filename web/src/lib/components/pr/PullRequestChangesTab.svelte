@@ -3,17 +3,16 @@
 	import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
 	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
 	import { DEFAULT_GIT_REVIEW_DOCUMENT_LIMITS } from '$lib/api/git.js';
-	import type { PullRequestDetail, PullRequestThread } from '$lib/api/pull-requests';
+	import type { PullRequestDetail } from '$lib/api/pull-requests';
 	import { buildGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 	import { buildPullRequestVirtualRowSource } from '$lib/git/pull-requests/pull-request-virtual-row-source.js';
 	import PullRequestVirtualDiffSurface from './PullRequestVirtualDiffSurface.svelte';
 
 	interface Props {
 		detail: PullRequestDetail;
-		onAddressThread: (thread: PullRequestThread) => void;
 	}
 
-	let { detail, onAddressThread }: Props = $props();
+	let { detail }: Props = $props();
 
 	let viewedFiles = $state<Set<string>>(new Set());
 	let collapsedFiles = $state<Set<string>>(new Set());
@@ -38,7 +37,8 @@
 	const threadsById = $derived(new Map(detail.threads.map((thread) => [thread.id, thread])));
 	const threadCountByFile = $derived.by(() => {
 		const counts = new Map<string, number>();
-		for (const thread of detail.threads) counts.set(thread.path, (counts.get(thread.path) ?? 0) + 1);
+		for (const thread of detail.threads)
+			counts.set(thread.path, (counts.get(thread.path) ?? 0) + 1);
 		return counts;
 	});
 	const diffSource = $derived.by(() => {
@@ -120,7 +120,10 @@
 		</div>
 	</div>
 	<div class="h-0.5 bg-muted">
-		<div class="h-full bg-git-added transition-all duration-300" style:width="{viewedPercent}%"></div>
+		<div
+			class="h-full bg-git-added transition-all duration-300"
+			style:width="{viewedPercent}%"
+		></div>
 	</div>
 </div>
 {#if detail.files.length === 0}
@@ -137,6 +140,5 @@
 		{threadCountByFile}
 		onToggleViewed={toggleViewed}
 		onToggleCollapsed={toggleCollapsed}
-		onAddressThread={onAddressThread}
 	/>
 {/if}

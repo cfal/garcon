@@ -30,7 +30,7 @@ function harness() {
   const store = new PullRequestReviewStore(directory);
   cleanups.push(() => { store.close(); rmSync(directory, { force: true, recursive: true }); });
   const repository: StoredRepository = {
-    id: 'repository', nameWithOwner: 'acme/app', url: '', viewerLogin: 'viewer',
+    id: 'repository', nameWithOwner: 'acme/app', url: 'https://github.com/acme/app', viewerLogin: 'viewer',
     createdAt: new Date(NOW).toISOString(), updatedAt: new Date(NOW).toISOString(),
     target: { type: 'new-chat', agentId: 'claude', projectPath: '/work/app', model: 'model', apiProviderId: null,
       modelEndpointId: null, modelProtocol: null, permissionMode: 'plan', thinkingMode: 'none', agentSettingsById: {},
@@ -89,7 +89,7 @@ function historicalRun(repositoryId: string, overrides: Partial<StoredRun> = {})
   return { id: 'historical', repositoryId, number: 7, headSha: HEAD, state: 'interrupted', createdAt: new Date(NOW).toISOString(),
     title: 'Synthetic change', reviewedSha: null, trigger: 'auto', message: null, chatId: null, turnId: null,
     startedAt: null, finishedAt: new Date(NOW).toISOString(), chatArchived: false,
-    post: { status: 'none', commentUrl: null, postedAt: null, message: null }, ...overrides };
+    post: { actor: null, status: 'none', commentUrl: null, postedAt: null, message: null }, ...overrides };
 }
 
 test.each([

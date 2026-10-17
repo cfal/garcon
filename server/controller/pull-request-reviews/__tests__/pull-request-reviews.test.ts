@@ -14,6 +14,8 @@ import type { AgentStopResponse } from '../../../../common/chat-command-contract
 import { emptyChatExecutionControlState } from '../../../../common/chat-execution-control.js';
 import { GitServiceError } from '../../../../common/git-error.js';
 
+const POSTING_ACTOR = { id: "actor:viewer", login: "viewer" };
+const REPOSITORY = { host: "github.com", nameWithOwner: "acme/app" };
 const HEAD = 'a'.repeat(40);
 const directories: string[] = [];
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -28,7 +30,7 @@ function pull(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
 }
 
 // A synthetic GitHub with one repository, and an agent whose turns end when the test says so.
-function harness(directory = mkdtempSync(join(tmpdir(), 'garcon-reviews-'))) {
+function harness(directory = mkdtempSync(join(tmpdir(), 'garcon-reviews-')), now = Date.now) {
   directories.push(directory);
   const github = { pulls: [pull()], comments: [] as { id: string; body: string; minimized: boolean }[] };
   const turns = new Map<string, (text: string) => void>();
@@ -43,8 +45,8 @@ function harness(directory = mkdtempSync(join(tmpdir(), 'garcon-reviews-'))) {
     async getPullRequestReviewTarget({ number }: { number: number }) {
       const current = github.pulls.find((entry) => entry.number === number)!;
       return {
-        ...scope, number, state: 'open' as const, headRefOid: current.headRefOid,
-        markedComments: github.comments.map((comment) => ({ id: comment.id, url: `https://github.com/c/${comment.id}`, marker: /<!--.*-->/.exec(comment.body)![0], isMinimized: comment.minimized })),
+        ...scope, repository: REPOSITORY, viewer: POSTING_ACTOR, number, state: 'open' as const, headRefOid: current.headRefOid,
+        markedComments: github.comments.map((comment) => ({ id: comment.id, url: `https://github.com/c/${comment.id}`, marker: /<!--.*-->/.exec(comment.body)![0], author: POSTING_ACTOR, isMinimized: comment.minimized })),
       };
     },
     async createPullRequestComment({ body }: { body: string }) {
@@ -60,7 +62,7 @@ function harness(directory = mkdtempSync(join(tmpdir(), 'garcon-reviews-'))) {
   let chatCount = 0;
   const deps = {
     executors: { requireExecutor: () => ({ getGhService: async () => gh }) },
-    agents: { hasAgent: () => true, assertExecutorReady() {}, assertExecutionModeSelectionSupported() {}, executionPolicy: () => 'conversation' as const },
+    agents: { hasAgent: () => true, assertExecutorReady() {}, assertExecutionModeSelectionSupported() {}, executionPolicy: (): 'conversation' | 'literal' => 'conversation' },
     chats: { hasChat: () => true },
     commands: {
       async submitScheduledStart(input: { chatId: string; command: string; tags: string[] }) {
@@ -84,6 +86,7 @@ function harness(directory = mkdtempSync(join(tmpdir(), 'garcon-reviews-'))) {
     chatNames: { setSessionName: async () => ({}) },
     archiveChat: async () => {},
     onInvalidated() {},
+    now,
   } satisfies PullRequestReviewsDeps;
   const reviews = new PullRequestReviews(new PullRequestReviewStore(directory), deps);
   return { reviews, github, turns, starts, directory, deps };
@@ -159,7 +162,7 @@ test('invalidates a completed review immediately when its chat is deleted', asyn
 });
 
 test('tracks a permission committed before startup returns and arms its timeout', async () => {
-  const { reviews, deps, turns } = harness();
+  const { reviews, deps, turns } = harness(undefined, () => Date.parse('2026-10-17T12:00:00Z'));
   const repository = await connect(reviews, {});
   const submit = deps.commands.submitScheduledStart;
   deps.commands.submitScheduledStart = async (input) => {
@@ -183,6 +186,74 @@ test('tracks a permission committed before startup returns and arms its timeout'
   } finally { timer.mockRestore(); reviews.stop(); reviews.close(); }
 });
 
+test('gives an overlapping permission its own timeout after the older request resolves', async () => {
+  const minute = 60_000;
+  const startedAt = Date.parse('2026-10-17T12:00:00Z');
+  let now = startedAt;
+  const { reviews, deps, turns } = harness(undefined, () => now);
+  const repository = await connect(reviews, { autoPost: true });
+  const stop = spyOn(deps.commands, 'submitStop');
+  const scheduled = new Map<ReturnType<typeof setTimeout>, { at: number; fire(): void }>();
+  const schedule = globalThis.setTimeout;
+  const cancel = globalThis.clearTimeout;
+  const timer = spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay = 0, ...args) => {
+    const handle = schedule(() => {}, 30 * minute);
+    handle.unref?.();
+    scheduled.set(handle, { at: now + delay, fire: () => callback(...args) });
+    return handle;
+  });
+  const clear = spyOn(globalThis, 'clearTimeout').mockImplementation((handle) => {
+    if (handle) scheduled.delete(handle);
+    cancel(handle);
+  });
+  const advance = (minutes: number) => {
+    now = startedAt + minutes * minute;
+    for (const [handle, task] of [...scheduled]) {
+      if (task.at > now) continue;
+      clearTimeout(handle);
+      task.fire();
+    }
+  };
+  const viewId = transcriptViewId('synthetic-view');
+  const first = '11111111-1111-4111-8111-111111111111';
+  const second = '22222222-2222-4222-8222-222222222222';
+  const request = (permissionOccurrenceId: string, ordinal: number) => reviews.handleTranscriptCommit({
+    type: 'permission', chatId: 'chat-1', runId: 'run', viewId,
+    row: { kind: 'permission-requested', viewId, ordinal, at: '', providerMeta: null,
+      lifecycle: { kind: 'requested', permissionOccurrenceId, requestedTool: new BashToolUseMessage('', 'tool', 'pwd'), options: [] } },
+  });
+  reviews.start();
+  try {
+    reviews.review(repository.id, 7);
+    await until(() => turns.has('chat-1'));
+    request(first, 1);
+    advance(20);
+    request(second, 2);
+    advance(21);
+    reviews.handleTranscriptCommit({
+      type: 'permission', chatId: 'chat-1', runId: 'run', viewId,
+      row: { kind: 'permission-resolved', viewId, ordinal: 3, at: '', providerMeta: null,
+        lifecycle: { kind: 'resolved', permissionOccurrenceId: first, decision: { allow: true } } },
+    });
+    advance(30);
+    expect(stop).not.toHaveBeenCalled();
+    expect(latestRun(reviews)?.state).toBe('needs-input');
+    advance(49);
+    expect(stop).not.toHaveBeenCalled();
+    advance(50);
+    await until(() => stop.mock.calls.length === 1);
+    turns.get('chat-1')!(`Reviewed commit: ${HEAD}`);
+    await until(() => latestRun(reviews)?.state === 'failed');
+    expect(latestRun(reviews)?.post.status).toBe('none');
+  } finally {
+    reviews.stop();
+    reviews.close();
+    timer.mockRestore();
+    clear.mockRestore();
+    stop.mockRestore();
+  }
+});
+
 test('surfaces a resolved failed stop and permits a fresh manual retry', async () => {
   const { reviews, deps, turns } = harness();
   const repository = await connect(reviews, {});
@@ -201,7 +272,7 @@ test('surfaces a resolved failed stop and permits a fresh manual retry', async (
 
 for (const failure of ['failed-outcome', 'throw'] as const) {
   test(`retries permission-timeout Stop after ${failure} with a fresh identity until terminal`, async () => {
-    const { reviews, deps, turns } = harness();
+    const { reviews, deps, turns } = harness(undefined, () => Date.parse('2026-10-17T12:00:00Z'));
     const repository = await connect(reviews, { autoPost: true });
     const stop = spyOn(deps.commands, 'submitStop');
     if (failure === 'throw') stop.mockRejectedValueOnce(new Error('Executor unavailable'));
@@ -293,6 +364,11 @@ test('keeps an unknown post on its original executor until reconciliation', asyn
     await expect(reviews.update(repository.id, {
       target: repository.target, settings: { ...repository.settings, autoPost: false },
     })).resolves.toMatchObject({ settings: { autoPost: false } });
+    expect(() => reviews.remove(repository.id)).toThrow('unconfirmed post');
+    expect(reviews.runs(repository.id, 7)[0]).toMatchObject({ id: run.id, post: { status: 'unknown' } });
+    await expect(reviews.postRun(run.id)).resolves.toMatchObject({ post: { status: 'posted' } });
+    reviews.remove(repository.id);
+    expect(reviews.snapshot().repositories).toEqual([]);
   } finally { create.mockRestore(); reviews.stop(); reviews.close(); }
 });
 
@@ -500,6 +576,31 @@ test('allows disabling reviews and automatic posting while the preserved executo
   reviews.close();
 });
 
+test('preserves a validated literal prompt when changing settings after a cold offline restart', async () => {
+  const first = harness();
+  first.deps.agents.executionPolicy = () => 'literal';
+  const repository = await first.reviews.connect({
+    target: { ...target, agentId: 'shell', executorId: '11111111-1111-4111-8111-111111111111' },
+    settings: { ...DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, prompt: '/review', autoReview: true, autoPost: true },
+  });
+  first.reviews.close();
+  first.deps.agents.assertExecutorReady = () => { throw new Error('Executor offline'); };
+  const policy = spyOn(first.deps.agents, 'executionPolicy').mockImplementation(() => { throw new Error('Unknown offline integration'); });
+  const store = new PullRequestReviewStore(first.directory);
+  const restarted = new PullRequestReviews(store, first.deps);
+  try {
+    const updated = await restarted.update(repository.id, {
+      target: repository.target,
+      settings: { ...repository.settings, autoReview: false, autoPost: false },
+    });
+    expect(updated.settings).toMatchObject({ prompt: '/review', autoReview: false, autoPost: false });
+    expect(policy).not.toHaveBeenCalled();
+    await expect(restarted.update(repository.id, {
+      target: repository.target, settings: { ...updated.settings, prompt: '/other-review' },
+    })).rejects.toThrow('Unknown offline integration');
+  } finally { policy.mockRestore(); restarted.stop(); restarted.close(); }
+});
+
 test('rejects slash commands when updating a preserved conversation target', async () => {
   const { reviews } = harness();
   const repository = await connect(reviews, {});
@@ -519,6 +620,22 @@ test('refuses to move a connection onto an executor that already owns this repos
   await expect(reviews.update(remote.id, { target: local.target, settings: remote.settings })).rejects.toThrow('already connected');
   expect(reviews.snapshot().repositories).toHaveLength(2);
   reviews.close();
+});
+
+test('refuses to move a connection to a checkout with the same repository name on another host', async () => {
+  const { reviews, deps } = harness();
+  const repository = await connect(reviews, {});
+  const gh = await deps.executors.requireExecutor().getGhService();
+  const result = await gh.listPullRequests();
+  const read = spyOn(gh, 'listPullRequests').mockResolvedValue({
+    ...result, repo: { nameWithOwner: repository.nameWithOwner, url: 'https://git.example.invalid/acme/app' },
+  });
+  try {
+    await expect(reviews.update(repository.id, {
+      target: { ...repository.target, projectPath: '/work/other' }, settings: repository.settings,
+    })).rejects.toThrow('not a checkout');
+    expect(reviews.snapshot().repositories[0].target).toEqual(repository.target);
+  } finally { read.mockRestore(); reviews.close(); }
 });
 
 test('serializes concurrent connects at the repository limit', async () => {

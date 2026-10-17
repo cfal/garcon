@@ -9,8 +9,8 @@ export type ExecutionGitService = {
 
 export interface ExecutionGhService {
   getStatus(options?: ExecutorCallOptions): Promise<ExecutionGhResults['getStatus']>;
-  listPullRequests(request: { projectPath: string }, options?: ExecutorCallOptions): Promise<ExecutionGhResults['listPullRequests']>;
-  getPullRequest(request: { projectPath: string; number: number }, options?: ExecutorCallOptions): Promise<ExecutionGhResults['getPullRequest']>;
+  listPullRequests(request: GhRequests['listPullRequests'], options?: ExecutorCallOptions): Promise<ExecutionGhResults['listPullRequests']>;
+  getPullRequest(request: GhRequests['getPullRequest'], options?: ExecutorCallOptions): Promise<ExecutionGhResults['getPullRequest']>;
   getPullRequestReviewTarget(request: GhRequests['getPullRequestReviewTarget'], options?: ExecutorCallOptions): Promise<ExecutionGhResults['getPullRequestReviewTarget']>;
   createPullRequestComment(request: GhRequests['createPullRequestComment'], options?: ExecutorCallOptions): Promise<ExecutionGhResults['createPullRequestComment']>;
   minimizePullRequestComment(request: GhRequests['minimizePullRequestComment'], options?: ExecutorCallOptions): Promise<ExecutionGhResults['minimizePullRequestComment']>;

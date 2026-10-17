@@ -30,19 +30,11 @@
 	interface PullRequestsPanelProps {
 		controller: PullRequestsStore;
 		isMobile?: boolean;
-		onSendToChat: (message: string) => Promise<boolean>;
-		onNavigateToChat: () => void;
 		// Shows a review chat; on desktop beside this view.
 		onOpenChat: (chatId: string) => void;
 	}
 
-	let {
-		controller: pullRequests,
-		isMobile = false,
-		onSendToChat,
-		onNavigateToChat,
-		onOpenChat,
-	}: PullRequestsPanelProps = $props();
+	let { controller: pullRequests, isMobile = false, onOpenChat }: PullRequestsPanelProps = $props();
 
 	const reviews = $derived(pullRequests.reviews);
 	const groups = $derived(pullRequests.groups.filter((group) => group.entries.length > 0));
@@ -329,12 +321,10 @@
 						<PullRequestDetailPanel
 							controller={pullRequests}
 							{currentTime}
-							{onSendToChat}
 							{onOpenChat}
 							onClose={containerPresentation === 'narrow'
 								? undefined
 								: () => pullRequests.clearSelection()}
-							onAfterSend={onNavigateToChat}
 						/>
 					</div>
 				{:else}

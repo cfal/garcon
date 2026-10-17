@@ -26,11 +26,21 @@ export interface GhResults {
 
 export interface GhRequests {
   getStatus: Record<string, never>;
-  listPullRequests: { projectPath: string };
-  getPullRequest: { projectPath: string; number: number };
-  getPullRequestReviewTarget: { projectPath: string; number: number; marker: string };
-  createPullRequestComment: { projectPath: string; number: number; body: string };
-  minimizePullRequestComment: { projectPath: string; commentId: string };
+  listPullRequests: { projectPath: string; repository?: GhRepositoryIdentity };
+  getPullRequest: { projectPath: string; repository: GhRepositoryIdentity; number: number };
+  getPullRequestReviewTarget: { projectPath: string; repository: GhRepositoryIdentity; number: number; marker: string };
+  createPullRequestComment: { projectPath: string; repository: GhRepositoryIdentity; actor: GhActorIdentity; number: number; body: string };
+  minimizePullRequestComment: { projectPath: string; repository: GhRepositoryIdentity; actor: GhActorIdentity; commentId: string };
+}
+
+export interface GhRepositoryIdentity {
+  host: string;
+  nameWithOwner: string;
+}
+
+export interface GhActorIdentity {
+  id: string;
+  login: string;
 }
 
 export const GH_MUTATIONS = [
@@ -106,13 +116,16 @@ export interface PullRequestCommentRef {
   url: string;
 }
 
-// A viewer-authored comment carrying a hidden marker that starts with the requested prefix.
+// A comment carrying a hidden marker that starts with the requested prefix.
 export interface PullRequestMarkedComment extends PullRequestCommentRef {
   marker: string;
   isMinimized: boolean;
+  author: GhActorIdentity | null;
 }
 
 export interface PullRequestReviewTarget {
+  repository: GhRepositoryIdentity;
+  viewer: GhActorIdentity;
   number: number;
   state: PullRequestState;
   headRefOid: string;
