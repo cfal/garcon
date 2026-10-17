@@ -469,6 +469,8 @@ describe('SharedChatPage', () => {
 			'[data-user-message-presentation="custom"]',
 		);
 		expect(bubble?.classList.contains('cli-presentation-custom')).toBe(true);
+		expect(bubble?.classList.contains('selection:bg-user-bubble-foreground')).toBe(false);
+		expect(bubble?.classList.contains('selection:text-user-bubble')).toBe(false);
 		expect(bubble?.style.getPropertyValue('--cli-presentation-accent-light')).toBe('#7c3aed');
 		expect(bubble?.style.getPropertyValue('--cli-presentation-accent-dark')).toBe('#c4b5fd');
 		expect(screen.getByText('CLI custom').className).toContain('sr-only');
@@ -494,6 +496,9 @@ describe('SharedChatPage', () => {
 
 		render(SharedChatPageTestHost);
 		await screen.findByText('Long shared prompt');
+		const bubble = screen.getByText('Long shared prompt').closest('.bg-user-bubble');
+		expect(bubble?.classList.contains('selection:bg-user-bubble-foreground')).toBe(true);
+		expect(bubble?.classList.contains('selection:text-user-bubble')).toBe(true);
 		expect(document.querySelector('.collapsible-body-tall')).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
 		expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy();

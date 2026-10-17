@@ -625,7 +625,7 @@
 		box-sizing: border-box;
 	}
 
-	/* Supplies the native fallback when CodeMirror disables drawn selections on iOS. */
+	/* Pairs native selection backgrounds and drawn-selection text with editor colors. */
 	.cm-line::selection,
 	.cm-line ::selection {
 		background-color: var(--editor-selection-background);
@@ -647,9 +647,13 @@
 	}
 }
 
-/* Keeps fenced code selections independent of surrounding message bubbles. */
+/* Keeps independently painted surfaces from inheriting bubble selection colors. */
 .markdown-code-block::selection,
-.markdown-code-block ::selection {
+.markdown-code-block ::selection,
+.markdown-body thead::selection,
+.markdown-body thead ::selection,
+.user-message-attachment::selection,
+.user-message-attachment ::selection {
 	background-color: hsl(var(--primary));
 	color: hsl(var(--primary-foreground));
 }

@@ -248,6 +248,8 @@ describe("compiled theme CSS", () => {
           <div id="user-bubble" class="bg-user-bubble text-user-bubble-foreground selection:bg-user-bubble-foreground selection:text-user-bubble">
             <span id="user-bubble-text">Selected message text</span>
             <div id="user-bubble-code" class="markdown-code-block"><pre><code class="cm-code"><span id="user-bubble-code-text">Selected code</span><span id="user-bubble-code-keyword" class="cm-code-keyword">const</span></code></pre></div>
+            <div class="markdown-body"><table><thead><tr><th id="user-bubble-header">Selected header <strong id="user-bubble-header-text">text</strong></th></tr></thead></table></div>
+            <div id="user-bubble-attachment" class="user-message-attachment bg-background/70 text-foreground"><span id="user-bubble-attachment-text">document.txt</span></div>
           </div>
           ${focusButtonFixture()}
         </body></html>`,
@@ -544,22 +546,40 @@ describe("compiled theme CSS", () => {
             `${profile} visible bubble selection`,
           ).toBeGreaterThanOrEqual(3);
         }
-        const code = await readRenderedColors(page, "#user-bubble-code");
-        for (const selector of [
-          "#user-bubble-code-text",
-          "#user-bubble-code-keyword",
+        for (const { surface, selectors, minimumSeparation } of [
+          {
+            surface: "#user-bubble-code",
+            selectors: ["#user-bubble-code-text", "#user-bubble-code-keyword"],
+            minimumSeparation: 3,
+          },
+          {
+            surface: "#user-bubble-header",
+            selectors: ["#user-bubble-header", "#user-bubble-header-text"],
+            minimumSeparation: 3,
+          },
+          {
+            surface: "#user-bubble-attachment",
+            selectors: [
+              "#user-bubble-attachment",
+              "#user-bubble-attachment-text",
+            ],
+            minimumSeparation: 2,
+          },
         ]) {
-          const selection = await readRenderedColors(page, selector, {
-            pseudoElement: "::selection",
-          });
-          expect(
-            contrastRatio(selection.foreground, selection.background),
-            `${profile} fenced code selected text`,
-          ).toBeGreaterThanOrEqual(4.5);
-          expect(
-            contrastRatio(selection.background, code.background),
-            `${profile} visible fenced code selection`,
-          ).toBeGreaterThanOrEqual(3);
+          const colors = await readRenderedColors(page, surface);
+          for (const selector of selectors) {
+            const selection = await readRenderedColors(page, selector, {
+              pseudoElement: "::selection",
+            });
+            expect(
+              contrastRatio(selection.foreground, selection.background),
+              `${profile} ${selector} selected text`,
+            ).toBeGreaterThanOrEqual(4.5);
+            expect(
+              contrastRatio(selection.background, colors.background),
+              `${profile} ${selector} visible selection`,
+            ).toBeGreaterThanOrEqual(minimumSeparation);
+          }
         }
         await page.keyboard.press("Tab");
         for (const button of await page.locator("[data-focus-probe]").all()) {
