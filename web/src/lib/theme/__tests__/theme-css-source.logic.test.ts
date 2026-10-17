@@ -263,6 +263,20 @@ describe('theme profile CSS sources', () => {
 					.soft(contrastRatio(values[surface], values.destructive), `${id} error on ${surface}`)
 					.toBeGreaterThanOrEqual(4.5);
 			}
+			const destructive = hslToSrgbChannels(values.destructive);
+			const popover = hslToSrgbChannels(values.popover);
+			const mutedPopover = blendChannels(popover, hslToSrgbChannels(values.muted), 0.5);
+			for (const [surface, channels] of [
+				['popover', popover],
+				['muted popover', mutedPopover],
+			] as const) {
+				expect
+					.soft(
+						contrastRatioFromChannels(blendChannels(channels, destructive, 0.1), destructive),
+						`${id} tinted error on ${surface}`,
+					)
+					.toBeGreaterThanOrEqual(4.5);
+			}
 			expect
 				.soft(contrastRatioOnTint(values.card, values['pr-merged'], values['pr-merged'], 0.15), id)
 				.toBeGreaterThanOrEqual(4.5);

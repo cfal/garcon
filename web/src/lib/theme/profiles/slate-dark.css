@@ -16,7 +16,7 @@
 	--muted-foreground: 214 12% 74%;
 	--accent: 220 18% 28.5%;
 	--accent-foreground: 214 25% 94%;
-	--destructive: 0 90% 78%;
+	--destructive: 0 90% 82%;
 	--destructive-foreground: 0 0% 9%;
 	--border: 220 12% 38%;
 	--workspace-window-titlebar: 220 14% 16%;
@@ -204,7 +204,7 @@
 	--diff-del-fg: 210 66.7% 96.5%;
 	--diff-del-line-num: 210 66.7% 96.5%;
 	--diff-hunk-header-bg: 214 40% 18%;
-	--select-chevron-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23848b98' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+	--select-chevron-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23949ba8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 	--control-radius: var(--radius);
 	--menu-radius: var(--radius);
 	--menu-item-radius: calc(var(--radius) - 2px);

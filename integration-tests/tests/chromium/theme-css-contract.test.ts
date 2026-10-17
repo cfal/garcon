@@ -223,7 +223,10 @@ describe("compiled theme CSS", () => {
         contentType: "text/html",
         body: `<!doctype html><html><head><link rel="stylesheet" href="/theme.css"><style>*{transition:none!important}</style></head><body class="bg-background">
           <div id="dialog-surface" style="background:var(--dialog-surface)">
-            <select class="select-native"><option>Theme</option></select>
+            <select id="native-select-muted" class="select-native"><option>Theme</option></select>
+            <select class="select-native select-native-surface"><option>Theme surface</option></select>
+            <div id="error-dialog" class="bg-destructive/10 text-destructive">Error</div>
+            <div class="bg-muted/50"><div id="error-muted-dialog" class="bg-destructive/10 text-destructive">Error</div></div>
             <input id="input-boundary" class="border border-input bg-control-surface placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground" placeholder="Input placeholder">
             <textarea id="textarea-boundary" class="border border-input bg-control-surface placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
             <div class="ticket-dialog">
@@ -283,7 +286,7 @@ describe("compiled theme CSS", () => {
 
     try {
       await page.goto(APP_URL);
-      await page.locator(".select-native").waitFor();
+      await page.locator("#native-select-muted").waitFor();
       for (const profile of THEME_PROFILES) {
         const values = await page.evaluate(
           ({ profile, properties }) => {
@@ -656,7 +659,7 @@ describe("compiled theme CSS", () => {
           textareaPlaceholder,
         ] = await Promise.all([
           readRenderedColors(page, "#dialog-surface"),
-          readRenderedColors(page, ".select-native"),
+          readRenderedColors(page, "#native-select-muted"),
           readRenderedColors(page, "#input-boundary"),
           readRenderedColors(page, "#input-boundary", {
             pseudoElement: "::placeholder",
@@ -665,6 +668,28 @@ describe("compiled theme CSS", () => {
             pseudoElement: "::placeholder",
           }),
         ]);
+        for (const nativeSelect of await page.locator(".select-native").all()) {
+          const colors = await nativeSelect.evaluate((element) => {
+            const style = getComputedStyle(element);
+            const imageUrl = style.backgroundImage.slice(5, -2);
+            const svg = new DOMParser().parseFromString(
+              decodeURIComponent(imageUrl.slice(imageUrl.indexOf(",") + 1)),
+              "image/svg+xml",
+            );
+            const stroke = svg.documentElement.getAttribute("stroke");
+            if (!stroke) throw new Error("Missing native select chevron stroke");
+            const probe = document.createElement("span");
+            probe.style.color = stroke;
+            document.body.append(probe);
+            const foreground = getComputedStyle(probe).color;
+            probe.remove();
+            return { foreground, background: style.backgroundColor };
+          });
+          expect(
+            contrastRatio(colors.foreground, colors.background),
+            `${profile} native select chevron`,
+          ).toBeGreaterThanOrEqual(3);
+        }
         const ticketField = await readRenderedColors(page, "#ticket-field");
         expect(ticketField.border, `${profile} ticket input border`).toBe(
           input.border,
@@ -749,6 +774,8 @@ describe("compiled theme CSS", () => {
             "#error-card",
             "#error-popover",
             "#error-accent",
+            "#error-dialog",
+            "#error-muted-dialog",
             "#merged-badge",
           ]) {
             const colors = await readRenderedColors(page, selector);
