@@ -618,6 +618,60 @@ describe('formatted composer lifecycle', () => {
 		expect(ui.formattedDraft).toBeNull();
 		controller.destroy();
 	});
+	it.each(['success', 'null', 'error'])(
+		'preserves an owned literal paste across a Markdown capability change on Worker %s',
+		async (result) => {
+			const pending = Promise.withResolvers<string | null>();
+			vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValueOnce(pending.promise);
+			const { ui, options, controller } = fixture();
+			ui.formattedDraft = { source: table, ...parsed };
+			const completion = controller.pasteSource(pasteRequest);
+			const signal = vi.mocked(serializeComposerMarkdownPasteInWorker).mock.calls[0][1];
+			options.acceptsMarkdown = false;
+			controller.inputFormatChanged();
+			expect(signal.aborted).toBe(false);
+			expect(ui.formattedPastePending).toBe(true);
+			if (result === 'error') pending.reject(new Error('Worker failed'));
+			else pending.resolve(result === 'success' ? 'completed paste' : null);
+			await completion;
+			expect(options.composer.inputText).toBe(
+				result === 'success' ? 'completed paste' : table + '\n\nlarge',
+			);
+			expect(ui.formattedPastePending).toBe(false);
+			expect(ui.formattedDraft).toBeNull();
+			controller.destroy();
+		},
+	);
+	it.each([false, true])(
+		'finishes raw paste in the mode the selected model supports (Markdown=%s)',
+		async (acceptsMarkdown) => {
+			const pending = Promise.withResolvers<ComposerMarkdownDocument | null>();
+			vi.mocked(parseComposerMarkdownInWorker).mockReturnValueOnce(pending.promise);
+			const { ui, options, controller } = fixture();
+			ui.formattedDraft = { source: table, ...parsed };
+			const apply = vi.fn();
+			const text = '**pasted**';
+			const completion = controller.pasteMarkdown(text, text.length, apply);
+			const signal = vi.mocked(parseComposerMarkdownInWorker).mock.calls[0][1];
+			options.acceptsMarkdown = false;
+			controller.inputFormatChanged();
+			if (acceptsMarkdown) {
+				options.acceptsMarkdown = true;
+				controller.inputFormatChanged();
+			}
+			expect(signal?.aborted).toBe(false);
+			pending.resolve(parsed);
+			await completion;
+			expect(options.composer.inputText).toBe(text);
+			expect(ui.formattedPastePending).toBe(false);
+			if (acceptsMarkdown) expect(apply).toHaveBeenCalledExactlyOnceWith(parsed);
+			else {
+				expect(apply).not.toHaveBeenCalled();
+				expect(ui.formattedDraft).toBeNull();
+			}
+			controller.destroy();
+		},
+	);
 	it.each(['null', 'error'])(
 		'keeps the pasted text in source and unlocks submission on Worker %s',
 		async (failure) => {

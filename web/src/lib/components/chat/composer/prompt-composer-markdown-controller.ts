@@ -61,7 +61,8 @@ export class PromptComposerMarkdownController {
 	}
 
 	inputFormatChanged(): void {
-		this.reset();
+		// A capability change preserves clipboard text owned by a pending paste.
+		if (!this.options.ui.formattedPastePending) this.reset();
 		this.#restoreRequest = undefined;
 	}
 
@@ -184,6 +185,7 @@ export class PromptComposerMarkdownController {
 		if (
 			parsed?.selection !== undefined &&
 			this.options.canFormat &&
+			this.options.acceptsMarkdown &&
 			this.options.preferredMode === 'formatted'
 		) {
 			this.#focusGeneration = hadFocus ? generation : -1;
