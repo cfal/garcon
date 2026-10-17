@@ -15,9 +15,16 @@ export function planComposerMarkdownBlocks<T>(
 	current: readonly T[],
 	equals: (a: T, b: T) => boolean,
 ): ComposerMarkdownBlock<T>[] {
+	const originalIndices = new Map<T, number>();
+	original.forEach((node, index) => originalIndices.set(node, index));
 	const limit = Math.min(original.length, current.length);
-	const unedited = (originalIndex: number, currentIndex: number) =>
-		sources[originalIndex] !== null && equals(original[originalIndex], current[currentIndex]);
+	const unedited = (originalIndex: number, currentIndex: number) => {
+		if (sources[originalIndex] === null) return false;
+		const retainedIndex = originalIndices.get(current[currentIndex]);
+		// Retained nodes keep their own source, even when another block is structurally equal.
+		if (retainedIndex !== undefined) return retainedIndex === originalIndex;
+		return equals(original[originalIndex], current[currentIndex]);
+	};
 	let prefix = 0;
 	while (prefix < limit && unedited(prefix, prefix)) prefix += 1;
 	let suffix = 0;
@@ -27,21 +34,16 @@ export function planComposerMarkdownBlocks<T>(
 	) {
 		suffix += 1;
 	}
-	// Between the edges, a node that moved is still the same object.
-	const moved = new Map<T, number>();
-	for (let index = prefix; index < original.length - suffix; index += 1) {
-		if (sources[index] !== null) moved.set(original[index], index);
-	}
 	const blocks: ComposerMarkdownBlock<T>[] = [];
 	current.forEach((node, position) => {
 		let index: number | undefined;
 		if (position < prefix) index = position;
 		else if (position >= current.length - suffix) {
 			index = original.length - (current.length - position);
-		} else index = moved.get(node);
+		} else index = originalIndices.get(node);
 		const source = index === undefined ? null : sources[index];
 		if (index !== undefined && source !== null) {
-			moved.delete(node);
+			originalIndices.delete(node);
 			blocks.push({ source, index });
 			return;
 		}

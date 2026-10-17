@@ -136,6 +136,19 @@ describe('formatted editor cleared drafts', () => {
 	});
 });
 
+it('preserves source of a retained equivalent paragraph through deletion and history', () => {
+	const source = 'a.b\n\na\\.b';
+	const { editor, onChange } = mount(source);
+	const retained = editor.state.doc.child(1);
+	editor.commands.deleteRange({ from: 0, to: editor.state.doc.firstChild!.nodeSize });
+	expect(editor.state.doc.firstChild).toBe(retained);
+	expect(onChange).toHaveBeenLastCalledWith('a\\.b');
+	expect(editor.commands.undo()).toBe(true);
+	expect(onChange).toHaveBeenLastCalledWith(source);
+	expect(editor.commands.redo()).toBe(true);
+	expect(onChange).toHaveBeenLastCalledWith('a\\.b');
+});
+
 describe('composer newline intent', () => {
 	it('shows the existing Reply placeholder only while empty', () => {
 		const { editor } = mount('');

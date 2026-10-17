@@ -258,6 +258,31 @@ describe('composer Markdown source preservation', () => {
 		expect(output).toBe('two_b\n\none_a\n\nthree_c');
 	});
 	it.each([
+		{ order: [1], expected: 'a\\.b' },
+		{ order: [1, 0], expected: 'a\\.b\n\na.b' },
+	])('keeps equivalent retained blocks tied to their own sources: $order', ({ order, expected }) => {
+		const output = serializeAfterEdit(
+			'a.b\n\na\\.b',
+			(content) => order.map((index) => content[index]),
+			(a, b) => JSON.stringify(a) === JSON.stringify(b),
+		);
+		expect(output).toBe(expected);
+	});
+	it('does not borrow source from an equivalent deleted suffix block', () => {
+		const output = serializeAfterEdit(
+			'head\n\na.b\n\na\\.b',
+			(content) => [{ type: 'paragraph', content: [{ type: 'text', text: 'edited' }] }, content[1]],
+			(a, b) => JSON.stringify(a) === JSON.stringify(b),
+		);
+		expect(output).toBe('edited\n\na.b');
+	});
+	it('does not borrow a source for an untraceable retained block', () => {
+		const original = [{ type: 'paragraph' }, { type: 'paragraph' }];
+		expect(
+			planComposerMarkdownBlocks(original, ['', null], [original[1]], () => true),
+		).toEqual([{ nodes: [original[1]] }]);
+	});
+	it.each([
 		['snake case, paths, and comparisons', 'my_var ~/cfg C:\\Users\\me a < b && c <tag>'],
 		['a bare link', 'see https://x.test/a_b now'],
 		['increments', 'i++ and j++'],
