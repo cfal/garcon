@@ -22,7 +22,7 @@
 	class="flex shrink-0 items-center gap-2 border-b border-status-warning-border bg-status-warning/10 px-3 py-2 text-xs text-foreground"
 	data-refresh-required-banner
 >
-	<AlertTriangle class="h-4 w-4 shrink-0 text-status-warning-foreground" />
+	<AlertTriangle class="h-4 w-4 shrink-0 text-status-warning-muted-foreground" />
 	<div class="min-w-0 flex-1">
 		<p aria-live="polite">{message}</p>
 		{#if refreshError}

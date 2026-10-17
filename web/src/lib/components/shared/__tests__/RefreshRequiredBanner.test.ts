@@ -5,7 +5,7 @@ import RefreshRequiredBanner from '../RefreshRequiredBanner.svelte';
 describe('RefreshRequiredBanner', () => {
 	it('shows an actionable message and refresh failure detail', async () => {
 		const onRefresh = vi.fn();
-		render(RefreshRequiredBanner, {
+		const { container } = render(RefreshRequiredBanner, {
 			message: 'Content changed.',
 			refreshLabel: 'Refresh',
 			isRefreshing: false,
@@ -14,6 +14,9 @@ describe('RefreshRequiredBanner', () => {
 		});
 
 		expect(screen.getByText('Content changed.')).toBeTruthy();
+		expect(container.querySelector('svg')?.classList).toContain(
+			'text-status-warning-muted-foreground',
+		);
 		expect(screen.getByRole('alert').textContent).toContain('offline');
 		await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 		expect(onRefresh).toHaveBeenCalledOnce();

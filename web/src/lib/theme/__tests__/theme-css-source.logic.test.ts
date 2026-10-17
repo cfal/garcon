@@ -208,6 +208,27 @@ describe('theme profile CSS sources', () => {
 		}
 	});
 
+	it('keeps standalone warnings legible without an opaque warning fill', () => {
+		for (const profile of THEME_PROFILES) {
+			const values = propertyValues(profileSource(profile.id));
+			for (const surface of ['background', 'card', 'popover', 'accent']) {
+				for (const opacity of [0, 0.1, 0.2]) {
+					expect
+						.soft(
+							contrastRatioOnTint(
+								values[surface],
+								values['status-warning'],
+								values['status-warning-muted-foreground'],
+								opacity,
+							),
+							`${profile.id} standalone warning on ${surface} with ${opacity} fill`,
+						)
+						.toBeGreaterThanOrEqual(4.5);
+				}
+			}
+		}
+	});
+
 	it('keeps application-owned semantic text pairs above minimum contrast', () => {
 		const pairs = [
 			['background', 'foreground'],
