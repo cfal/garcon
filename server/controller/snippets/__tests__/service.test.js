@@ -81,6 +81,20 @@ async function serviceFixture(overrides = {}) {
 }
 
 describe('snippet service', () => {
+  it('captures dates after resolving the executor-owned project path', async () => {
+    let resolved = false;
+    const { service } = await serviceFixture({
+      now: () => new Date(resolved ? '2030-01-02T00:30:00Z' : '2030-01-01T23:59:00Z'),
+      projectPaths: { async resolve(projectPath) { resolved = true; return projectPath; } },
+    });
+    await service.create({ expectedRevision: 0, snippet: {
+      shortName: 'today', template: '{{current_date}} / \\{{current_date_local}}', defaultArguments: '',
+    } });
+    await expect(service.expand({ shortName: 'today', arguments: { type: 'default' },
+      context: { type: 'new-chat', chatId: PROSPECTIVE_CHAT_ID, projectPath: '/draft/repo' },
+    })).resolves.toMatchObject({ expandedText: '2030-01-02 / {{current_date_local}}' });
+  });
+
   it('preserves exact paths through inspection, expansion and registered-chat context fencing', async () => {
     const projectPath = '/project ';
     const paths = new SnippetProjectPathService(async (requested) => {
@@ -202,7 +216,7 @@ describe('snippet service', () => {
       enabled: false,
       title: 'Manual context',
       snippetShortName: 'context',
-      content: 'Chat {{chat_id}} / {{arguments}} / {{project_path}} / \\{{chat_id}}',
+      content: 'Chat {{chat_id}} / {{arguments}} / {{project_path}} / \\{{chat_id}} / {{current_date}} / \\{{current_date_local}}',
       scope: {
         type: 'project-paths',
         rules: [{ projectPath: '/different/project', includeNested: false }],
@@ -229,7 +243,13 @@ describe('snippet service', () => {
       shortName: 'context',
       contextProjectPath: '/draft/repo',
       contextExecutorId: 'local',
-      expandedText: `Chat ${PROSPECTIVE_CHAT_ID} / {{arguments}} / {{project_path}} / {{chat_id}}`,
+      expandedText: `Chat ${PROSPECTIVE_CHAT_ID} / {{arguments}} / {{project_path}} / {{chat_id}} / 2026-01-01 / {{current_date_local}}`,
+    });
+    await expect(service.expand({
+      shortName: 'context', arguments: { type: 'default' },
+      context: { type: 'scheduled-prompt', target: { type: 'new-chat', projectPath: '/draft/repo' } },
+    })).resolves.toMatchObject({
+      expandedText: 'Chat {{chat_id}} / {{arguments}} / {{project_path}} / \\{{chat_id}} / {{current_date}} / \\{{current_date_local}}',
     });
   });
 

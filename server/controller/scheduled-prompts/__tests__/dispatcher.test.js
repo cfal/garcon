@@ -34,6 +34,33 @@ function prompt(target, text = 'Review the current work') {
 }
 
 describe('scheduled prompt dispatcher', () => {
+  it('captures dates once per actual dispatch while keeping occurrence identity stable', async () => {
+    const originalTimezone = process.env.TZ;
+    try {
+      process.env.TZ = 'America/Los_Angeles';
+      const instants = ['2030-01-02T00:30:00Z', '2030-01-03T00:30:00Z'];
+      const now = mock(() => new Date(instants.shift()));
+      const submitScheduledExistingChat = mock(async input => ({ type: 'queued', chatId: input.chatId }));
+      const dispatcher = new ScheduledPromptDispatcher({
+        now, chatIds: { allocate: () => CREATED_CHAT_ID },
+        commands: { submitScheduledExistingChat, async submitScheduledStart() { throw new Error('unexpected'); } },
+      });
+      const scheduled = prompt({ type: 'existing-chat', chatId: CREATED_CHAT_ID, busyBehavior: 'queue' },
+        '{{current_date}} / {{current_date_local}} / {{current_time}}');
+      await dispatcher.dispatch(scheduled, '2030-01-01T23:59:00.000Z');
+      await dispatcher.dispatch(scheduled, '2030-01-02T23:59:00.000Z');
+      expect(now).toHaveBeenCalledTimes(2);
+      expect(submitScheduledExistingChat.mock.calls[0][0]).toMatchObject({
+        command: '2030-01-02 / 2030-01-01 / {{current_time}}',
+        clientRequestId: 'scheduled:prompt-a:2030-01-01T23:59:00.000Z',
+      });
+      expect(submitScheduledExistingChat.mock.calls[1][0].command).toBe('2030-01-03 / 2030-01-02 / {{current_time}}');
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimezone;
+    }
+  });
+
   it('expands chat IDs without trimming executable source', async () => {
     const submitScheduledExistingChat = mock(async input => ({ type: 'sent', chatId: input.chatId }));
     const dispatcher = new ScheduledPromptDispatcher({

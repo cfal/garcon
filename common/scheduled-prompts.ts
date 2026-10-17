@@ -7,12 +7,13 @@ import {
   type ThinkingMode,
 } from './chat-modes.js';
 import { parseAgentSettingsById, type AgentSettingsEnvelope } from './agent-integration.js';
-import { CHAT_ID_LENGTH } from './chat-id.js';
 import { normalizePreambleSelectionChoice, type PreambleSelectionChoice } from './preambles.js';
 import { normalizeTags } from './tags.js';
 import {
   CHAT_ID_TEMPLATE_TOKEN,
-  CHAT_ID_TEMPLATE_VARIABLE,
+  RUNTIME_TEMPLATE_VARIABLES,
+  TEMPLATE_VALIDATION_VALUES,
+  type RuntimeTemplateValues,
   TemplateExpansionTooLongError,
   expandTemplate,
 } from './template-tokens.js';
@@ -38,9 +39,6 @@ export interface ScheduleForChatRequest {
   readonly prompt: string;
 }
 export const SCHEDULED_PROMPT_CHAT_ID_TOKEN = CHAT_ID_TEMPLATE_TOKEN;
-
-const SCHEDULED_PROMPT_TEMPLATE_VARIABLES = [CHAT_ID_TEMPLATE_VARIABLE] as const;
-const SCHEDULED_PROMPT_CHAT_ID_LENGTH_SAMPLE = '1'.repeat(CHAT_ID_LENGTH);
 
 export type ScheduledPromptBusyBehavior = 'queue' | 'skip';
 
@@ -196,21 +194,21 @@ export function hasLeadingSlashCommand(value: string): boolean {
   return LEADING_SLASH_COMMAND.test(value);
 }
 
-export function renderScheduledPrompt(prompt: string, chatId: string): string {
+export function renderScheduledPrompt(prompt: string, values: RuntimeTemplateValues): string {
   return expandTemplate(
     prompt,
-    SCHEDULED_PROMPT_TEMPLATE_VARIABLES,
-    { chat_id: chatId },
+    RUNTIME_TEMPLATE_VARIABLES,
+    values,
     SCHEDULED_PROMPT_MAX_LENGTH,
   );
 }
 
 export function scheduledPromptFitsRenderedLimit(
   prompt: string,
-  chatId = SCHEDULED_PROMPT_CHAT_ID_LENGTH_SAMPLE,
+  chatId = TEMPLATE_VALIDATION_VALUES.chat_id,
 ): boolean {
   try {
-    renderScheduledPrompt(prompt, chatId);
+    renderScheduledPrompt(prompt, { ...TEMPLATE_VALIDATION_VALUES, chat_id: chatId });
     return true;
   } catch (error) {
     if (error instanceof TemplateExpansionTooLongError) return false;

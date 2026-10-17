@@ -4,7 +4,8 @@ import {
 } from '../../../common/snippets.js';
 import {
   expandTemplate,
-  CHAT_ID_TEMPLATE_VARIABLE,
+  RUNTIME_TEMPLATE_VARIABLES,
+  type RuntimeTemplateValues,
   matchTemplateTokens,
   TemplateExpansionTooLongError,
 } from '../../../common/template-tokens.js';
@@ -12,10 +13,10 @@ import {
 export interface SnippetTemplateValues {
   arguments: string;
   projectPath: string;
-  chatId: string;
+  context: RuntimeTemplateValues;
 }
 
-// Defers chat ID substitution, including escaped tokens, to the scheduled run.
+// Defers runtime substitution, including escaped tokens, to the scheduled run.
 export function expandScheduledSnippetTemplate(
   template: string,
   values: Pick<SnippetTemplateValues, 'arguments' | 'projectPath'>,
@@ -24,7 +25,7 @@ export function expandScheduledSnippetTemplate(
   const literalValue = (value: string): string => {
     let result = '';
     let cursor = 0;
-    for (const match of matchTemplateTokens(value, [CHAT_ID_TEMPLATE_VARIABLE])) {
+    for (const match of matchTemplateTokens(value, RUNTIME_TEMPLATE_VARIABLES)) {
       result += value.slice(cursor, match.index) + `\\${match.raw}`;
       cursor = match.index + match.raw.length;
     }
@@ -61,7 +62,7 @@ export function expandSnippetTemplate(
       {
         arguments: values.arguments,
         project_path: values.projectPath,
-        chat_id: values.chatId,
+        ...values.context,
       },
       SNIPPET_EXPANDED_MAX_LENGTH,
     );

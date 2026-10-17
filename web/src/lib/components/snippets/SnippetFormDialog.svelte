@@ -5,6 +5,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
 	import PromptTextField from '$lib/components/prompt-editor/PromptTextField.svelte';
+	import TemplateVariableMenu from '$lib/components/prompt-editor/TemplateVariableMenu.svelte';
 	import { PromptEditorDialogState } from '$lib/prompt-editor/prompt-editor-dialog-state.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { getNotifications, getSnippets, getTransientLayers } from '$lib/context';
@@ -18,6 +19,7 @@
 		SNIPPET_ARGUMENTS_TOKEN,
 		SNIPPET_CHAT_ID_TOKEN,
 		SNIPPET_PROJECT_PATH_TOKEN,
+		SNIPPET_TEMPLATE_VARIABLES,
 		type Snippet,
 		type SnippetDefinitionInput,
 	} from '$shared/snippets';
@@ -168,9 +170,13 @@
 			</div>
 
 			<div class="space-y-1.5">
-				<label for="snippet-template" class="text-sm font-medium text-foreground">
-					{m.snippets_template_label()}
-				</label>
+				<div class="flex items-center justify-between gap-2">
+					<label for="snippet-template" class="text-sm font-medium text-foreground">
+						{m.snippets_template_label()}
+					</label>
+					<TemplateVariableMenu variables={SNIPPET_TEMPLATE_VARIABLES} getInput={() => templateTextarea}
+						onInsert={(value) => (form.template = value)} disabled={form.saving || refinementPending} />
+				</div>
 				<PromptTextField
 					id="snippet-template"
 					bind:ref={templateTextarea}

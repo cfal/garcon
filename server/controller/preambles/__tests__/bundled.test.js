@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { TEMPLATE_VALIDATION_VALUES } from '../../../../common/template-tokens.js';
 import { AssistantMessage } from '../../../../common/chat-types.js';
 import { extractGarconCommands } from '../../../../common/garcon-commands.js';
 import {
@@ -12,6 +13,7 @@ import { preambleCatalogCompositionViolation } from '../catalog-budget.ts';
 
 const AT = '2026-09-15T00:00:00.000Z';
 const CHAT_ID = '1000000000000001';
+const VALUES = { ...TEMPLATE_VALIDATION_VALUES, chat_id: CHAT_ID };
 
 function bundled(title) {
   const definition = BUNDLED_PREAMBLES.find((entry) => entry.title === title);
@@ -20,7 +22,7 @@ function bundled(title) {
 }
 
 function renderedExamples(title) {
-  const rendered = renderPreambleContent(bundled(title).content, CHAT_ID);
+  const rendered = renderPreambleContent(bundled(title).content, VALUES);
   return [...rendered.matchAll(/```text\n([\s\S]*?)\n```/gu)].map((match) => match[1]);
 }
 
@@ -104,7 +106,7 @@ describe('bundled preambles', () => {
     const definition = bundled('Garcon: Scheduled prompts');
     expect(definition.content.match(/\\\{\{chat_id\}\}/gu)).toHaveLength(2);
 
-    const rendered = renderPreambleContent(definition.content, CHAT_ID);
+    const rendered = renderPreambleContent(definition.content, VALUES);
     expect(rendered).not.toContain(`for ${CHAT_ID}`);
     expect(rendered.match(/\{\{chat_id\}\}/gu)).toHaveLength(2);
 

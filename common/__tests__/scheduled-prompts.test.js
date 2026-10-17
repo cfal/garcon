@@ -10,8 +10,10 @@ import {
   scheduledPromptFitsRenderedLimit,
 } from '../scheduled-prompts.js';
 import { PREAMBLE_MAX_COUNT } from '../preambles.js';
+import { TEMPLATE_VALIDATION_VALUES } from '../template-tokens.js';
 
 const CHAT_ID = '1783725900000000';
+const VALUES = { ...TEMPLATE_VALIDATION_VALUES, chat_id: CHAT_ID };
 const PREAMBLE_A = '00000000-0000-4000-8000-000000000001';
 const PREAMBLE_B = '00000000-0000-4000-8000-000000000002';
 
@@ -117,13 +119,13 @@ describe('scheduled prompt variables', () => {
     expect(
       renderScheduledPrompt(
         `Chat ${SCHEDULED_PROMPT_CHAT_ID_TOKEN}; literal \\${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`,
-        CHAT_ID,
+        VALUES,
       ),
     ).toBe(`Chat ${CHAT_ID}; literal ${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`);
   });
 
   it('leaves unsupported variables unchanged', () => {
-    expect(renderScheduledPrompt('{{arguments}} {{project_path}} {{unknown}}', CHAT_ID)).toBe(
+    expect(renderScheduledPrompt('{{arguments}} {{project_path}} {{unknown}}', VALUES)).toBe(
       '{{arguments}} {{project_path}} {{unknown}}',
     );
   });
@@ -132,7 +134,7 @@ describe('scheduled prompt variables', () => {
     const exact = `${'x'.repeat(SCHEDULED_PROMPT_MAX_LENGTH - CHAT_ID.length)}${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`;
     const tooLong = `${'x'.repeat(SCHEDULED_PROMPT_MAX_LENGTH - CHAT_ID.length + 1)}${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`;
 
-    expect(renderScheduledPrompt(exact, CHAT_ID)).toHaveLength(SCHEDULED_PROMPT_MAX_LENGTH);
+    expect(renderScheduledPrompt(exact, VALUES)).toHaveLength(SCHEDULED_PROMPT_MAX_LENGTH);
     expect(scheduledPromptFitsRenderedLimit(exact)).toBe(true);
     expect(scheduledPromptFitsRenderedLimit(tooLong)).toBe(false);
     expect(normalizeScheduledPromptDefinitionInput(definition(exact))).not.toBeNull();
