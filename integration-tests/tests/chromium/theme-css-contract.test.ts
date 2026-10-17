@@ -226,6 +226,10 @@ describe("compiled theme CSS", () => {
             <select class="select-native"><option>Theme</option></select>
             <input id="input-boundary" class="border border-input bg-control-surface placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground" placeholder="Input placeholder">
             <textarea id="textarea-boundary" class="border border-input bg-control-surface placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
+            <div class="ticket-dialog">
+              <input id="ticket-field" class="ticket-input" placeholder="Ticket title">
+              <button id="ticket-action" class="ticket-button">Ticket action</button>
+            </div>
           </div>
           <div class="bg-popover">
             <div id="destructive-menu-item" data-variant="destructive" class="data-highlighted:bg-accent data-highlighted:text-accent-foreground data-[variant=destructive]:text-status-error-foreground data-[variant=destructive]:data-highlighted:bg-destructive/10 dark:data-[variant=destructive]:data-highlighted:bg-destructive/20 data-[variant=destructive]:data-highlighted:text-status-error-foreground">Delete</div>
@@ -654,8 +658,47 @@ describe("compiled theme CSS", () => {
             pseudoElement: "::placeholder",
           }),
         ]);
+        const ticketField = await readRenderedColors(page, "#ticket-field");
+        expect(ticketField.border, `${profile} ticket input border`).toBe(
+          input.border,
+        );
+        expect(ticketField.background, `${profile} ticket input surface`).toBe(
+          input.background,
+        );
+        const ticketPlaceholder = await readRenderedColors(
+          page,
+          "#ticket-field",
+          { pseudoElement: "::placeholder" },
+        );
+        expect(
+          contrastRatio(
+            ticketPlaceholder.foreground,
+            ticketPlaceholder.background,
+          ),
+          `${profile} ticket placeholder`,
+        ).toBeGreaterThanOrEqual(4.5);
+        await page.keyboard.press("Tab");
+        for (const selector of ["#ticket-field", "#ticket-action"]) {
+          await page.locator(selector).focus();
+          const outline = await page.locator(selector).evaluate((element) => {
+            const style = getComputedStyle(element);
+            return {
+              color: style.outlineColor,
+              style: style.outlineStyle,
+              width: style.outlineWidth,
+            };
+          });
+          expect(outline.style).toBe("solid");
+          expect(outline.width).toBe("2px");
+          expect(
+            contrastRatio(outline.color, dialogSurface.background),
+            `${profile} ${selector} focus`,
+          ).toBeGreaterThanOrEqual(3);
+        }
         if (
           profile.startsWith("phosphor-") ||
+          profile === "classic-light" ||
+          profile === "colorblind-light" ||
           descriptor.rendererPalette === "semantic"
         ) {
           expect(

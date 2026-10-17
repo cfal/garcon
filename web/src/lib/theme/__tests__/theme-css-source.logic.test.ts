@@ -229,6 +229,15 @@ describe('theme profile CSS sources', () => {
 		}
 	});
 
+	it('distinguishes field boundaries from the canvas in every profile', () => {
+		for (const profile of THEME_PROFILES) {
+			const values = propertyValues(profileSource(profile.id));
+			expect
+				.soft(contrastRatio(values.background, values.input), profile.id)
+				.toBeGreaterThanOrEqual(3);
+		}
+	});
+
 	it('keeps application-owned semantic text pairs above minimum contrast', () => {
 		const pairs = [
 			['background', 'foreground'],

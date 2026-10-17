@@ -42,15 +42,17 @@
 	gap: 6px;
 	min-height: 32px;
 	padding: 6px 10px;
-	border: 1px solid hsl(var(--border));
-	border-radius: 7px;
-	background: hsl(var(--card));
+	border: 1px solid hsl(var(--input));
+	border-radius: var(--control-radius);
+	background: var(--control-surface);
 	color: hsl(var(--foreground));
 	font-size: 12px;
 	font-weight: 550;
 	cursor: pointer;
 }
-.ticket-button:hover,
+.ticket-button:hover {
+	background: var(--control-hover-surface);
+}
 .ticket-text-button:hover {
 	background: hsl(var(--accent));
 }
@@ -129,8 +131,8 @@
 	min-height: 34px;
 	padding: 6px 10px;
 	border: 1px solid hsl(var(--input));
-	border-radius: 8px;
-	background: hsl(var(--background));
+	border-radius: var(--control-radius);
+	background: var(--control-surface);
 	text-align: start;
 	cursor: pointer;
 }
@@ -155,7 +157,9 @@
 	text-align: start;
 	cursor: pointer;
 }
-.ticket-facet-picker:hover:not(:disabled),
+.ticket-facet-picker:hover:not(:disabled) {
+	background: var(--control-hover-surface);
+}
 .ticket-facet-option:hover,
 .ticket-facet-option:focus-visible {
 	background: hsl(var(--accent));
@@ -177,11 +181,11 @@
 	display: block;
 	width: 100%;
 	min-width: 0;
-	border: 1px solid hsl(var(--border));
-	border-radius: 7px;
+	border: 1px solid hsl(var(--input));
+	border-radius: var(--control-radius);
 	padding: 8px 10px;
 	min-height: 34px;
-	background: hsl(var(--background));
+	background: var(--control-surface);
 	color: hsl(var(--foreground));
 	font-size: 13px;
 	font-weight: 400;
@@ -197,6 +201,10 @@ textarea.ticket-input.content-sized-textarea {
 }
 .ticket-input:focus-visible {
 	border-color: hsl(var(--ring));
+}
+.ticket-input:focus-visible,
+.tickets-surface :where(button, summary):focus-visible,
+.ticket-dialog :where(button, summary):focus-visible {
 	outline: 2px solid hsl(var(--ring));
 	outline-offset: 2px;
 }
