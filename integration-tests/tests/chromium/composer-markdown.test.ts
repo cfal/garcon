@@ -96,6 +96,9 @@ test('message format defaults to Formatted and is controlled only by persisted I
 }, 90_000);
 
 test('deleting the last formatted text resets typing and paste marks', async () => {
+  type RichEditorElement = HTMLElement & {
+    editor: { state: { doc: { textContent: string }; selection: { from: number } } };
+  };
   await withChromiumFixture('composer-cleared-marks', async ({ page, context, integration, assertNoBrowserErrors }) => {
     const chatId = integration.newChatId();
     const turn = await integration.client.startDirectChat({
@@ -111,6 +114,14 @@ test('deleting the last formatted text resets typing and paste marks', async () 
     await editor.focus();
     const original = await editor.elementHandle();
 
+    async function deleteCharacters(key: 'Backspace' | 'Delete', length: number) {
+      // Native deletion must settle before the next key reaches ProseMirror.
+      for (let remaining = length; remaining > 0; remaining--) {
+        await editor.press(key);
+        await browserExpect.poll(() => editor.textContent()).toHaveLength(remaining - 1);
+      }
+    }
+
     for (const [source, tag] of [
       ['`hello` ', 'code'], ['**hello** ', 'strong'],
       ['_hello_ ', 'em'], ['~~hello~~ ', 's'],
@@ -123,9 +134,7 @@ test('deleting the last formatted text resets typing and paste marks', async () 
         await page.keyboard.type(typed);
         await browserExpect(editor.locator(tag)).toHaveText('hello');
         await browserExpect.poll(() => editor.evaluate(element => {
-          const rich = (element as HTMLElement & { editor: { state: {
-            doc: { textContent: string }; selection: { from: number };
-          } } }).editor;
+          const rich = (element as RichEditorElement).editor;
           return { text: rich.state.doc.textContent, caret: rich.state.selection.from };
         })).toEqual({ text, caret: text.length + 1 });
         // Separates the typing and deletion history groups for real keyboard Undo/Redo.
@@ -134,14 +143,10 @@ test('deleting the last formatted text resets typing and paste marks', async () 
           if (deletion === 'Delete') {
             await editor.press('Home');
             await browserExpect.poll(() => editor.evaluate(element =>
-              (element as HTMLElement & { editor: { state: { selection: { from: number } } } })
-                .editor.state.selection.from,
+              (element as RichEditorElement).editor.state.selection.from,
             )).toBe(1);
           }
-          for (let count = text.length; count > 0; count--) {
-            await editor.press(deletion);
-            await browserExpect.poll(() => editor.textContent()).toHaveLength(count - 1);
-          }
+          await deleteCharacters(deletion, text.length);
         } else {
           await editor.press('Control+A');
           await editor.press(deletion === 'cut' ? 'Control+X' : 'Backspace');
@@ -166,10 +171,7 @@ test('deleting the last formatted text resets typing and paste marks', async () 
     await editor.press('Backspace');
     await page.keyboard.type('`hello` ');
     await browserExpect.poll(() => editor.textContent()).toBe('hello ');
-    for (let count = 6; count > 0; count--) {
-      await editor.press('Backspace');
-      await browserExpect.poll(() => editor.textContent()).toHaveLength(count - 1);
-    }
+    await deleteCharacters('Backspace', 6);
     await browserExpect(editor.locator('p.is-editor-empty')).toBeVisible();
     await browserExpect(textarea).toHaveValue('');
     await page.evaluate(() => navigator.clipboard.writeText('**pasted**'));
