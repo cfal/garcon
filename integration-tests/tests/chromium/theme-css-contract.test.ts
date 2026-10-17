@@ -4,9 +4,11 @@ import { fileURLToPath } from "node:url";
 import { chromium, type Locator, type Page } from "playwright";
 import { THEME_PROFILES } from "../../../web/src/lib/theme/themes";
 import { buttonVariants } from "../../../web/src/lib/components/ui/button/button";
+import { buildThinkingOptions } from "../../../web/src/lib/chat/composer/composer-controls";
 import { contrastRatio } from "../../support/color-contrast";
 
 const APP_URL = "http://theme-css-contract.test/";
+const THINKING_OPTIONS = buildThinkingOptions(["xhigh", "max", "ultra"]);
 const DIFF_SYNTAX_CLASSES = [
   "cm-code-keyword",
   "cm-code-title",
@@ -26,6 +28,13 @@ function diffSyntaxFixture(idPrefix: string): string {
     (className) =>
       `<span id="${idPrefix}-${className}" class="${className}">${className}</span>`,
   ).join(" ");
+}
+
+function thinkingButtonFixture(surface: string): string {
+  return THINKING_OPTIONS.map(
+    (option) =>
+      `<button id="thinking-${surface}-${option.value}" aria-label="${option.label}" class="inline-flex size-9 items-center justify-center rounded-lg border ${option.toneClass}"><svg class="size-4" viewBox="0 0 24 24" stroke="currentColor" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8" /></svg></button>`,
+  ).join("");
 }
 
 function focusButtonFixture(): string {
@@ -159,7 +168,7 @@ async function readRenderedColors(
 }
 
 async function readNormalAndHoveredColors(page: Page, selector: string) {
-  await page.mouse.move(0, 0);
+  await page.mouse.move(-1, -1);
   const normal = await readRenderedColors(page, selector);
   await page.locator(selector).hover();
   const hovered = await readRenderedColors(page, selector);
@@ -223,6 +232,7 @@ describe("compiled theme CSS", () => {
         contentType: "text/html",
         body: `<!doctype html><html><head><link rel="stylesheet" href="/theme.css"><style>*{transition:none!important}</style></head><body class="bg-background">
           <div id="dialog-surface" style="background:var(--dialog-surface)">
+            ${thinkingButtonFixture("dialog")}
             <select id="native-select-muted" class="select-native"><option>Theme</option></select>
             <select class="select-native select-native-surface"><option>Theme surface</option></select>
             <div id="error-dialog" class="bg-destructive/10 text-destructive">Error</div>
@@ -241,6 +251,7 @@ describe("compiled theme CSS", () => {
           </div>
           ${["background", "card", "popover", "accent"].map((surface) => `<div class="bg-${surface}"><span id="error-${surface}" class="text-destructive">Error</span></div>`).join("")}
           <div class="bg-card"><span id="merged-badge" class="bg-pr-merged/15 text-pr-merged">Merged</span></div>
+          <div class="bg-card">${thinkingButtonFixture("card")}</div>
           <div class="bg-popover">
             <div id="destructive-menu-item" data-variant="destructive" class="data-highlighted:bg-accent data-highlighted:text-accent-foreground data-[variant=destructive]:text-status-error-foreground data-[variant=destructive]:data-highlighted:bg-destructive/10 dark:data-[variant=destructive]:data-highlighted:bg-destructive/20 data-[variant=destructive]:data-highlighted:text-status-error-foreground">Delete</div>
           </div>
@@ -379,6 +390,24 @@ describe("compiled theme CSS", () => {
 
       for (const profile of THEME_PROFILES) {
         await applyProfile(page, profile);
+        for (const surface of ["card", "dialog"]) {
+          for (const option of THINKING_OPTIONS) {
+            const colorsByInteraction = await readNormalAndHoveredColors(
+              page,
+              `#thinking-${surface}-${option.value} svg`,
+            );
+            expect(
+              colorsByInteraction.hovered.background,
+              `${profile.id} ${option.value} thinking hover on ${surface}`,
+            ).not.toBe(colorsByInteraction.normal.background);
+            for (const [interaction, colors] of Object.entries(colorsByInteraction)) {
+              expect(
+                contrastRatio(colors.foreground, colors.background),
+                `${profile.id} ${option.value} thinking icon ${interaction} on ${surface}`,
+              ).toBeGreaterThanOrEqual(3);
+            }
+          }
+        }
         const processingColors = await page.evaluate(() => {
           return [
             ...document.querySelectorAll<HTMLElement>(
@@ -832,5 +861,5 @@ describe("compiled theme CSS", () => {
       await context.close();
       await browser.close();
     }
-  }, 60_000);
+  }, 90_000);
 });
