@@ -587,7 +587,8 @@
 						oncontextmenucapture={captureMessageSelection}
 						class={cn(
 							'user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full',
-							!userMessagePresentation?.style && 'data-[state=open]:bg-user-bubble-selected',
+							!userMessagePresentation?.style &&
+								'data-[state=open]:bg-user-bubble-selected selection:bg-user-bubble-foreground selection:text-user-bubble',
 							userMessageSurfaceClass,
 						)}
 						data-user-message-presentation={userMessagePresentation?.style}

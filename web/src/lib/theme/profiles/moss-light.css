@@ -25,7 +25,7 @@
 	--workspace-window-tab-selected-inactive: 105 24% 89%;
 	--composer-thinking-static-start: 105 24% 65%;
 	--composer-thinking-pulse-emphasis: 100 40% 28%;
-	--input: 105 24% 51%;
+	--input: 105 24% 47%;
 	--ring: 100 40% 28%;
 	--radius: 0.5rem;
 	--transient-backdrop-color: 105 24% 4%;
@@ -157,7 +157,7 @@
 	--markdown-code-background: 105 24% 97%;
 	--markdown-code-foreground: 105 24% 12%;
 	--markdown-code-border: 105 24% 82%;
-	--markdown-code-keyword: 343 72% 40%;
+	--markdown-code-keyword: 343 72% 38%;
 	--markdown-code-title: 266 48% 44%;
 	--markdown-code-meta: 211 100% 35%;
 	--markdown-code-string: 210 94% 20%;
@@ -224,7 +224,7 @@
 	--native-select-muted-background: hsl(var(--muted));
 	--terminal-foreground: var(--foreground);
 	--terminal-cursor: var(--primary);
-	--terminal-selection-bg: var(--accent);
+	--terminal-selection-bg: 92 40% 75%;
 	--terminal-selection-foreground: var(--foreground);
 	--editor-selection-background: hsl(var(--interactive-accent) / 0.16);
 	--native-select-surface-background: hsl(var(--muted));

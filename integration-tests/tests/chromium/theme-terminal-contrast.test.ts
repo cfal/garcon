@@ -54,7 +54,7 @@ describe("terminal theme contrast", () => {
       }
       await route.fulfill({
         contentType: "text/html",
-        body: `<!doctype html><style>${themeCss}\n${stylesheet}#terminal{width:640px;height:100px}</style><div id="terminal"></div><script type="module">import { renderTerminalSample, readTerminalColors } from "/fixture.js"; Object.assign(globalThis, { renderTerminalSample, readTerminalColors });</script>`,
+        body: `<!doctype html><style>${themeCss}\n${stylesheet}#terminal{width:640px;height:100px}</style><div id="terminal"></div><script type="module">import { renderTerminalSample, renderTerminalSelection, readTerminalColors } from "/fixture.js"; Object.assign(globalThis, { renderTerminalSample, renderTerminalSelection, readTerminalColors });</script>`,
       });
     });
 
@@ -98,9 +98,50 @@ describe("terminal theme contrast", () => {
           `${profile.id} selection`,
         ).toBeGreaterThanOrEqual(4.5);
         expect(
+          contrastRatio(
+            presentation.selectionBackground,
+            presentation.background,
+          ),
+          `${profile.id} visible selection`,
+        ).toBeGreaterThanOrEqual(1.5);
+        expect(
           contrastRatio(presentation.cursor, presentation.background),
           `${profile.id} cursor`,
         ).toBeGreaterThanOrEqual(3);
+        const selection = await page
+          .locator("#terminal")
+          .evaluate(async (root, presentation) => {
+            root.replaceChildren();
+            root.style.backgroundColor = presentation.background;
+            const dispose = await (
+              globalThis as typeof globalThis & {
+                renderTerminalSelection(
+                  parent: HTMLElement,
+                  theme: TerminalThemePresentation,
+                ): Promise<() => void>;
+              }
+            ).renderTerminalSelection(root as HTMLElement, presentation);
+            const text = root.querySelector<HTMLElement>(".xterm-rows span");
+            const highlight = root.querySelector<HTMLElement>(
+              ".xterm-selection div",
+            );
+            if (!text || !highlight)
+              throw new Error("Missing selected terminal output");
+            const colors = {
+              foreground: getComputedStyle(text).color,
+              background: getComputedStyle(highlight).backgroundColor,
+            };
+            dispose();
+            return colors;
+          }, presentation);
+        expect(
+          contrastRatio(selection.foreground, selection.background),
+          `${profile.id} rendered selection text`,
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          contrastRatio(selection.background, presentation.background),
+          `${profile.id} rendered selection visibility`,
+        ).toBeGreaterThanOrEqual(1.5);
         for (const sample of SAMPLES) {
           const colors = await page.locator("#terminal").evaluate(
             async (root, { presentation, sequence }) => {

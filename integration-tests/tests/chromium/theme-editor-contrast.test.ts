@@ -35,6 +35,7 @@ function collectStaticImports(
 }
 
 type EditorKind = "file" | "prompt";
+type SelectionMode = "drawn" | "native";
 
 interface EditorThemeFixture {
   readonly editorKind: EditorKind;
@@ -53,99 +54,115 @@ interface RenderedEditorColors {
 async function readRenderedEditorColors(
   page: Page,
   editorTheme: EditorThemeFixture,
+  selectionMode: SelectionMode,
 ): Promise<RenderedEditorColors> {
-  return page.locator("#editor").evaluate(async (root, fixtureTheme) => {
-    const documentRoot = document.documentElement;
-    documentRoot.dataset.theme = fixtureTheme.profileId;
-    documentRoot.classList.toggle("dark", fixtureTheme.colorScheme === "dark");
-
-    interface MountedEditor {
-      destroy(): void;
-      focus(): void;
-    }
-
-    const scope = globalThis as typeof globalThis & {
-      mountEditor: (
-        parent: HTMLElement,
-        themeId: RendererThemeId,
-      ) => MountedEditor;
-      mountPromptEditor: (parent: HTMLElement) => MountedEditor;
-    };
-    root.replaceChildren();
-    root.setAttribute("style", "background: hsl(var(--background))");
-
-    let mountedEditor: MountedEditor;
-    if (fixtureTheme.editorKind === "file") {
-      mountedEditor = scope.mountEditor(
-        root as HTMLElement,
-        fixtureTheme.rendererThemeId,
+  return page.locator("#editor").evaluate(
+    async (root, fixtureTheme) => {
+      const documentRoot = document.documentElement;
+      documentRoot.dataset.theme = fixtureTheme.profileId;
+      documentRoot.classList.toggle(
+        "dark",
+        fixtureTheme.colorScheme === "dark",
       );
-    } else {
-      mountedEditor = scope.mountPromptEditor(root as HTMLElement);
-    }
-    mountedEditor.focus();
-    await new Promise(requestAnimationFrame);
 
-    const editor = root.querySelector<HTMLElement>(".cm-editor");
-    if (!editor) throw new Error("Missing CodeMirror editor.");
-    const editorBackground = getComputedStyle(editor).backgroundColor;
-    const background =
-      editorBackground === "rgba(0, 0, 0, 0)"
-        ? getComputedStyle(root).backgroundColor
-        : editorBackground;
-    const selection = root.querySelector<HTMLElement>(
-      ".cm-selectionBackground",
-    );
-    if (!selection) throw new Error("Missing CodeMirror selection.");
+      interface MountedEditor {
+        destroy(): void;
+        focus(): void;
+      }
 
-    const composite = (paint: string, backdrop: string): string => {
-      const canvas = document.createElement("canvas");
-      canvas.width = 1;
-      canvas.height = 1;
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("Missing canvas context.");
-      context.fillStyle = backdrop;
-      context.fillRect(0, 0, 1, 1);
-      context.fillStyle = paint;
-      context.fillRect(0, 0, 1, 1);
-      const [red, green, blue] = context
-        .getImageData(0, 0, 1, 1)
-        .data.slice(0, 3);
-      return `rgb(${red}, ${green}, ${blue})`;
-    };
+      const scope = globalThis as typeof globalThis & {
+        mountEditor: (
+          parent: HTMLElement,
+          themeId: RendererThemeId,
+        ) => MountedEditor;
+        mountPromptEditor: (parent: HTMLElement) => MountedEditor;
+      };
+      root.replaceChildren();
+      root.setAttribute("style", "background: hsl(var(--background))");
 
-    let textElements: HTMLElement[];
-    if (fixtureTheme.editorKind === "file") {
-      textElements = [
-        ...root.querySelectorAll<HTMLElement>(".cm-content span"),
-      ];
-    } else {
-      textElements = [...root.querySelectorAll<HTMLElement>(".cm-line")];
-    }
-    const foregrounds = [
-      ...new Set(
-        textElements.map((element) => getComputedStyle(element).color),
-      ),
-    ];
-    const selectionForegrounds = [
-      ...new Set(
-        textElements.map(
-          (element) => getComputedStyle(element, "::selection").color,
+      let mountedEditor: MountedEditor;
+      if (fixtureTheme.editorKind === "file") {
+        mountedEditor = scope.mountEditor(
+          root as HTMLElement,
+          fixtureTheme.rendererThemeId,
+        );
+      } else {
+        mountedEditor = scope.mountPromptEditor(root as HTMLElement);
+      }
+      mountedEditor.focus();
+      await new Promise(requestAnimationFrame);
+
+      const editor = root.querySelector<HTMLElement>(".cm-editor");
+      if (!editor) throw new Error("Missing CodeMirror editor.");
+      const editorBackground = getComputedStyle(editor).backgroundColor;
+      const background =
+        editorBackground === "rgba(0, 0, 0, 0)"
+          ? getComputedStyle(root).backgroundColor
+          : editorBackground;
+      const selection = root.querySelector<HTMLElement>(
+        ".cm-selectionBackground",
+      );
+      if (fixtureTheme.selectionMode === "drawn" && !selection)
+        throw new Error("Missing CodeMirror selection.");
+      if (fixtureTheme.selectionMode === "native") {
+        if (selection)
+          throw new Error("Expected the iOS native-selection path.");
+        if (!document.getSelection()?.toString())
+          throw new Error("Missing native CodeMirror selection.");
+      }
+
+      const composite = (paint: string, backdrop: string): string => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 1;
+        canvas.height = 1;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Missing canvas context.");
+        context.fillStyle = backdrop;
+        context.fillRect(0, 0, 1, 1);
+        context.fillStyle = paint;
+        context.fillRect(0, 0, 1, 1);
+        const [red, green, blue] = context
+          .getImageData(0, 0, 1, 1)
+          .data.slice(0, 3);
+        return `rgb(${red}, ${green}, ${blue})`;
+      };
+
+      let textElements: HTMLElement[];
+      if (fixtureTheme.editorKind === "file") {
+        textElements = [
+          ...root.querySelectorAll<HTMLElement>(".cm-content span"),
+        ];
+      } else {
+        textElements = [...root.querySelectorAll<HTMLElement>(".cm-line")];
+      }
+      const foregrounds = [
+        ...new Set(
+          textElements.map((element) => getComputedStyle(element).color),
         ),
-      ),
-    ];
-    const selectionBackground = composite(
-      getComputedStyle(selection).backgroundColor,
-      background,
-    );
-    mountedEditor.destroy();
-    return {
-      background,
-      foregrounds,
-      selectionBackground,
-      selectionForegrounds,
-    };
-  }, editorTheme);
+      ];
+      const selectionForegrounds = [
+        ...new Set(
+          textElements.map(
+            (element) => getComputedStyle(element, "::selection").color,
+          ),
+        ),
+      ];
+      const selectionBackground = composite(
+        selection
+          ? getComputedStyle(selection).backgroundColor
+          : getComputedStyle(textElements[0]!, "::selection").backgroundColor,
+        background,
+      );
+      mountedEditor.destroy();
+      return {
+        background,
+        foregrounds,
+        selectionBackground,
+        selectionForegrounds,
+      };
+    },
+    { ...editorTheme, selectionMode },
+  );
 }
 
 describe("CodeMirror theme contrast", () => {
@@ -174,7 +191,8 @@ describe("CodeMirror theme contrast", () => {
     expect(eagerEditorChunks).toEqual([]);
   });
 
-  test("keeps rendered editor text readable across every profile", async () => {
+  const selectionTest = test.each(["drawn", "native"] as const);
+  selectionTest("%s selection contrast", async (selectionMode) => {
     const [editorJavascript, promptJavascript] = await Promise.all([
       buildWebBrowserEntry(
         "src/lib/files/editor/__tests__/editor-contrast-fixture.ts",
@@ -196,7 +214,26 @@ describe("CodeMirror theme contrast", () => {
       )
     ).join("\n");
     const browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext();
+    const context = await browser.newContext(
+      selectionMode === "native"
+        ? {
+            userAgent:
+              "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+            hasTouch: true,
+            isMobile: true,
+            viewport: { width: 390, height: 844 },
+          }
+        : {},
+    );
+    if (selectionMode === "native") {
+      // Activates CodeMirror's iOS path independently of the host browser engine.
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, "vendor", {
+          get: () => "Apple Computer, Inc.",
+        });
+        Object.defineProperty(navigator, "platform", { get: () => "iPhone" });
+      });
+    }
     const page = await context.newPage();
     await page.route(`${APP_URL}**`, async (route) => {
       const pathname = new URL(route.request().url()).pathname;
@@ -244,7 +281,11 @@ describe("CodeMirror theme contrast", () => {
             profileId: profile.id,
             colorScheme: profile.colorScheme,
           } satisfies EditorThemeFixture;
-          const colors = await readRenderedEditorColors(page, theme);
+          const colors = await readRenderedEditorColors(
+            page,
+            theme,
+            selectionMode,
+          );
           const label = `${profile.id} ${editorKind} editor`;
           if (editorKind === "file") {
             expect(
@@ -278,7 +319,11 @@ describe("CodeMirror theme contrast", () => {
             selectionFailures,
             `${label} selected text on ${colors.selectionBackground}`,
           ).toEqual([]);
-          if (profile.rendererPalette === "semantic" && editorKind === "file") {
+          if (
+            selectionMode === "drawn" &&
+            profile.rendererPalette === "semantic" &&
+            editorKind === "file"
+          ) {
             for (const foreground of colors.foregrounds) {
               expect(
                 contrastRatio(foreground, colors.selectionBackground),
@@ -289,6 +334,8 @@ describe("CodeMirror theme contrast", () => {
         }
       }
 
+      if (selectionMode === "native") return;
+
       const retained = await page.evaluate(async () => {
         const root = document.querySelector<HTMLElement>("#editor")!;
         const scope = globalThis as typeof globalThis & {
@@ -298,6 +345,7 @@ describe("CodeMirror theme contrast", () => {
           ) => {
             dom: HTMLElement;
             focus(): void;
+            dispatch(transaction: { selection: { anchor: number } }): void;
             destroy(): void;
           };
         };
@@ -316,22 +364,37 @@ describe("CodeMirror theme contrast", () => {
           document.documentElement.dataset.theme = themeId;
           samples.push({
             background: getComputedStyle(view.dom).backgroundColor,
-            caret: getComputedStyle(view.dom.querySelector(".cm-content")!)
-              .caretColor,
             selection: getComputedStyle(
               view.dom.querySelector(".cm-selectionBackground")!,
             ).backgroundColor,
             focused: view.dom.contains(document.activeElement),
           });
         }
+        view.dispatch({ selection: { anchor: 0 } });
+        await new Promise(requestAnimationFrame);
+        const cursors = [
+          "lagoon-dark",
+          "rose-dark",
+          "moss-dark",
+          "lagoon-dark",
+        ].map((themeId) => {
+          document.documentElement.dataset.theme = themeId;
+          return getComputedStyle(view.dom.querySelector(".cm-cursor")!)
+            .borderLeftColor;
+        });
         view.destroy();
-        return samples;
+        return { samples, cursors };
       });
-      expect(retained[0]).toEqual(retained[3]);
-      expect(new Set(retained.map((sample) => sample.background)).size).toBe(3);
-      expect(new Set(retained.map((sample) => sample.caret)).size).toBe(3);
-      expect(new Set(retained.map((sample) => sample.selection)).size).toBe(3);
-      expect(retained.every((sample) => sample.focused)).toBe(true);
+      expect(retained.samples[0]).toEqual(retained.samples[3]);
+      expect(
+        new Set(retained.samples.map((sample) => sample.background)).size,
+      ).toBe(3);
+      expect(new Set(retained.cursors).size).toBe(3);
+      expect(retained.cursors[0]).toBe(retained.cursors[3]);
+      expect(
+        new Set(retained.samples.map((sample) => sample.selection)).size,
+      ).toBe(3);
+      expect(retained.samples.every((sample) => sample.focused)).toBe(true);
     } finally {
       await context.close();
       await browser.close();

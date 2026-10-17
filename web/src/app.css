@@ -625,9 +625,10 @@
 		box-sizing: border-box;
 	}
 
-	/* Pairs CodeMirror text with its separately painted selection layer. */
+	/* Supplies the native fallback when CodeMirror disables drawn selections on iOS. */
 	.cm-line::selection,
 	.cm-line ::selection {
+		background-color: var(--editor-selection-background);
 		color: hsl(var(--foreground));
 	}
 

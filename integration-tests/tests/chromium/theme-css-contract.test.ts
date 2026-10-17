@@ -3,6 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "playwright";
 import { THEME_PROFILES } from "../../../web/src/lib/theme/themes";
+import { buttonVariants } from "../../../web/src/lib/components/ui/button/button";
 import { contrastRatio } from "../../support/color-contrast";
 
 const APP_URL = "http://theme-css-contract.test/";
@@ -198,12 +199,26 @@ describe("compiled theme CSS", () => {
             <div id="virtual-hunk-header" class="bg-diff-hunk-header"><span id="virtual-hunk-header-text" class="text-muted-foreground">@@ hunk</span></div>
           </div>
           <div id="scroll-area-thumb" data-slot="scroll-area-thumb" class="bg-(color:--scroll-area-thumb) hover:bg-(color:--scroll-area-thumb-hover)" style="width:8px;height:32px"></div>
-          <div id="dark-utility" class="bg-transparent dark:bg-input/30"></div>
+          <div id="dark-utility" class="bg-transparent dark:bg-card"></div>
           <div data-processing-surface="sidebar" class="bg-sidebar-chat-item-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
           <div data-processing-surface="selected sidebar" class="bg-sidebar-chat-item-selected-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
           <div data-processing-surface="selected workspace tab" class="bg-workspace-window-tab-selected"><span class="workspace-chat-processing-indicator bg-status-processing"></span></div>
           <div data-processing-surface="inactive workspace tab" class="bg-workspace-window-tab-selected-inactive"><span class="workspace-chat-processing-indicator bg-status-processing"></span></div>
           <div id="scrollbar" style="width:100px;height:40px;overflow:scroll;scrollbar-gutter:stable"><div style="height:80px"></div></div>
+          <div id="user-bubble" class="bg-user-bubble text-user-bubble-foreground selection:bg-user-bubble-foreground selection:text-user-bubble"><span id="user-bubble-text">Selected message text</span></div>
+          ${["background", "card", "popover"]
+            .map(
+              (surface) =>
+                `<div class="bg-${surface}">${(
+                  ["default", "ghost", "link", "destructive"] as const
+                )
+                  .map(
+                    (variant) =>
+                      `<button data-focus-probe="${surface} ${variant}" class="${buttonVariants({ variant })}">Focus</button>`,
+                  )
+                  .join("")}</div>`,
+            )
+            .join("")}
         </body></html>`,
       });
     });
@@ -484,6 +499,53 @@ describe("compiled theme CSS", () => {
       for (const descriptor of THEME_PROFILES) {
         const profile = descriptor.id;
         await applyProfile(page, descriptor);
+        const bubble = await readRenderedColors(page, "#user-bubble");
+        for (const selector of ["#user-bubble", "#user-bubble-text"]) {
+          const selection = await readRenderedColors(page, selector, {
+            pseudoElement: "::selection",
+          });
+          expect(
+            contrastRatio(selection.foreground, selection.background),
+            `${profile} bubble selected text`,
+          ).toBeGreaterThanOrEqual(4.5);
+          expect(
+            contrastRatio(selection.background, bubble.background),
+            `${profile} visible bubble selection`,
+          ).toBeGreaterThanOrEqual(3);
+        }
+        await page.keyboard.press("Tab");
+        for (const button of await page.locator("[data-focus-probe]").all()) {
+          await button.focus();
+          const focus = await button.evaluate((element) => {
+            const style = getComputedStyle(element);
+            const shadow = style.boxShadow.match(
+              /((?:rgba?|hsla?|oklch|oklab|color)\([^)]*\)) 0px 0px 0px 3px/,
+            )?.[1];
+            if (!shadow) throw new Error("Missing button focus shadow");
+            const canvas = document.createElement("canvas");
+            canvas.width = canvas.height = 1;
+            const context = canvas.getContext("2d")!;
+            const background = getComputedStyle(
+              element.parentElement!,
+            ).backgroundColor;
+            context.fillStyle = background;
+            context.fillRect(0, 0, 1, 1);
+            context.fillStyle = shadow;
+            context.fillRect(0, 0, 1, 1);
+            const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+            return {
+              label: element.getAttribute("data-focus-probe"),
+              visible: element.matches(":focus-visible"),
+              ring: `rgb(${r}, ${g}, ${b})`,
+              background,
+            };
+          });
+          expect(focus.visible, `${profile} ${focus.label} focus`).toBe(true);
+          expect(
+            contrastRatio(focus.ring, focus.background),
+            `${profile} ${focus.label} focus ring`,
+          ).toBeGreaterThanOrEqual(3);
+        }
         const scrollbarWidth = await page.evaluate(() => {
           const scrollbar = document.querySelector<HTMLElement>("#scrollbar");
           if (!scrollbar) throw new Error("Missing scrollbar fixture");

@@ -224,7 +224,7 @@
 	--native-select-muted-background: hsl(var(--muted));
 	--terminal-foreground: var(--foreground);
 	--terminal-cursor: var(--primary);
-	--terminal-selection-bg: var(--accent);
+	--terminal-selection-bg: 205 60% 80%;
 	--terminal-selection-foreground: var(--foreground);
 	--editor-selection-background: hsl(var(--interactive-accent) / 0.16);
 	--native-select-surface-background: hsl(var(--muted));
