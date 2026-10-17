@@ -312,16 +312,17 @@ describe('NewChatFormState', () => {
 		mockRemoteSettings.snapshot = makeSnapshot({ paths: { pinnedProjectPaths: ['/same'], byExecutor: {
 			[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/same', '/exact '] },
 		} } });
+		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
 		formState.projectPath = '/same';
 		formState.firstMessage = 'Synthetic retained prompt';
 		const image = new File(['synthetic'], 'synthetic.png', { type: 'image/png' });
 		formState.attachedImages = [image];
-		new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings).select(remoteExecutor.id, '/exact ');
+		pins.select(remoteExecutor.id, '/exact ');
 		expect(formState.executorId).toBe(remoteExecutor.id);
 		expect(formState.projectPath).toBe('/exact ');
 		expect(formState.firstMessage).toBe('Synthetic retained prompt');
 		expect(formState.attachedImages).toEqual([image]);
-		new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings).select('local', '/same');
+		pins.select('local', '/same');
 		expect(formState.executorId).toBe('local');
 		expect(formState.projectPath).toBe('/same');
 	});
@@ -330,18 +331,19 @@ describe('NewChatFormState', () => {
 		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byExecutor: {
 			[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/pin'] },
 		} } });
+		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
 		formState.projectPath = '/local';
-		new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings).select(remoteExecutor.id, '/removed-pin');
+		pins.select(remoteExecutor.id, '/removed-pin');
 		expect(formState.executorId).toBe('local');
 		executors.applySnapshot([localExecutor, { ...remoteExecutor, availability: 'offline' }]);
-		new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings).select(remoteExecutor.id, '/worker/pin');
+		pins.select(remoteExecutor.id, '/worker/pin');
 		expect(formState.executorId).toBe('local');
 		executors.applySnapshot([localExecutor]);
-		new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings).select(remoteExecutor.id, '/worker/pin');
+		pins.select(remoteExecutor.id, '/worker/pin');
 		expect(formState.executorId).toBe('local');
 		executors.applySnapshot([localExecutor, remoteExecutor]);
 		formState.isUpdatingPinnedPath = true;
-		new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings).select(remoteExecutor.id, '/worker/pin');
+		pins.select(remoteExecutor.id, '/worker/pin');
 		expect(formState.executorId).toBe('local');
 		expect(formState.projectPath).toBe('/local');
 	});

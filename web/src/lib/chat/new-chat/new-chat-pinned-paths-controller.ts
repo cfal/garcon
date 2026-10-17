@@ -2,6 +2,7 @@ import type { NewChatFormState } from './new-chat-form-state.svelte';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import { executorPinnedPathGroups } from '$lib/project-paths/executor-pinned-paths';
+import { executorPinnedProjectPaths } from '$lib/project-paths/pinned-project-path-settings';
 
 type PinnedPathForm = Pick<
 	NewChatFormState,
@@ -35,8 +36,11 @@ export class NewChatPinnedPathsController {
 	select(executorId: string, path: string): void {
 		const form = this.getForm();
 		if (form.isUpdatingPinnedPath || !this.executors.isReady(executorId)) return;
-		if (!this.groups.some((group) => group.executorId === executorId && group.paths.includes(path)))
-			return;
+		const paths =
+			executorId === form.executorId
+				? form.pinnedProjectPaths
+				: executorPinnedProjectPaths(this.settings.snapshot, executorId);
+		if (!path.trim() || !paths.includes(path)) return;
 		form.selectExecutor(executorId);
 		form.projectPath = path;
 		form.showBrowser = false;

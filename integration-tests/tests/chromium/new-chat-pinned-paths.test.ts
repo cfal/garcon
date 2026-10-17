@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
+import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
@@ -85,8 +86,70 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(toggle).toHaveAttribute('aria-pressed', 'false');
       await browserExpect(prompt).toHaveValue('Synthetic retained draft');
       await browserExpect(path).toHaveValue(sharedPath);
+      if (client.executorId !== 'local') {
+        phase('collapsing to the only pinned machine without losing keyboard focus');
+        await client.put('/api/v1/app/settings', { paths: {
+          pinnedProjectPaths: [], byExecutor: { [offline.id]: { pinnedPaths: [] } },
+        } });
+        await toggle.focus();
+        await page.keyboard.press('Space');
+        await browserExpect(toggle).toHaveAttribute('aria-pressed', 'true');
+        await browserExpect(offlinePin).toHaveCount(0);
+        await browserExpect(pins.getByRole('button', { name: 'Local: /projects/replacement', exact: true })).toHaveCount(0);
+        await page.keyboard.press('Space');
+        await browserExpect(toggle).toHaveAttribute('aria-pressed', 'false');
+        await browserExpect(toggle).toBeFocused();
+        await page.keyboard.press('Tab');
+        await browserExpect(pins.getByRole('button', { name: '/projects/garcon', exact: true })).toBeFocused();
+        await browserExpect(toggle).toHaveCount(0);
+      }
       expect((await client.listChats()).sessions).toEqual([]);
       assertNoBrowserErrors();
     }, undefined, { executionBackend });
   }, 120_000);
 }
+
+test('machine pins retain touch targets with a fine primary pointer and secondary touchscreen', async () => {
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--blink-settings=primaryPointerType=4,availablePointerTypes=6'],
+  });
+  try {
+    await withChromiumFixture('new-chat-machine-pins-hybrid', async ({ page, integration, assertNoBrowserErrors }) => {
+      const { client, dirs } = integration;
+      const worker = await client.post<{ id: string }>('/api/v1/executors', {
+        label: 'Touchscreen worker', direction: 'executor-connects', noTls: true,
+      });
+      await client.put('/api/v1/app/settings', { paths: {
+        pinnedProjectPaths: [dirs.project],
+        byExecutor: { [worker.id]: { pinnedPaths: ['/projects/atlas'] } },
+      } });
+      await page.goto(integration.garcon.baseUrl);
+      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+      expect(await page.evaluate(() => ({
+        primaryFine: matchMedia('(pointer: fine)').matches,
+        primaryCoarse: matchMedia('(pointer: coarse)').matches,
+        anyCoarse: matchMedia('(any-pointer: coarse)').matches,
+      }))).toEqual({ primaryFine: true, primaryCoarse: false, anyCoarse: true });
+      const pins = page.getByRole('region', { name: 'Pinned paths' });
+      const toggle = pins.getByRole('button', { name: 'All machines', exact: true });
+      const pin = pins.getByRole('button', { name: dirs.project, exact: true });
+      for (const control of [toggle, pin]) {
+        await browserExpect.poll(() => control.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+      }
+      await toggle.click();
+      const groupedPin = pins.getByRole('button', { name: `Local: ${dirs.project}`, exact: true });
+      await browserExpect.poll(() => groupedPin.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+      await toggle.click();
+      await toggle.focus();
+      await client.put('/api/v1/app/settings', { paths: { byExecutor: { [worker.id]: { pinnedPaths: [] } } } });
+      await browserExpect(toggle).toBeFocused();
+      await page.keyboard.press('Tab');
+      await browserExpect(pin).toBeFocused();
+      await browserExpect(toggle).toHaveCount(0);
+      assertNoBrowserErrors();
+    }, undefined, {}, browser);
+  } finally {
+    await browser.close();
+  }
+}, 120_000);

@@ -1751,6 +1751,49 @@ describe('New Chat machine pin scope', () => {
 		executors.applySnapshot([localExecutor]);
 		await screen.findByRole('button', { name: remoteExecutor.id + ': /worker/pin' });
 	});
+	it('retains the focused scope control after selecting the only machine with pins and collapsing', async () => {
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({ paths: {
+			byExecutor: { [remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/pin'] } },
+		} }));
+		render(NewChatFormTestHost, { props: { executorSnapshots: [localExecutor, remoteExecutor] } });
+		const toggle = await screen.findByRole('button', { name: 'All machines' });
+		toggle.focus();
+		await fireEvent.click(toggle);
+		const pin = screen.getByRole('button', { name: 'Worker: /worker/pin' });
+		pin.focus();
+		await fireEvent.click(pin);
+		toggle.focus();
+		await fireEvent.click(toggle);
+		expect(toggle.isConnected).toBe(true);
+		expect(document.activeElement).toBe(toggle);
+		expect(toggle.getAttribute('aria-pressed')).toBe('false');
+		const path = screen.getByLabelText('Project Path');
+		path.focus();
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'All machines' })).toBeNull());
+		expect(document.activeElement).toBe(path);
+	});
+
+	it('retains the focused scope control when a live update removes the final other pin', async () => {
+		const snapshot = makeSnapshot({ paths: {
+			pinnedProjectPaths: ['/local'],
+			byExecutor: { [remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/pin'] } },
+		} });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(snapshot);
+		let settings!: RemoteSettingsStore;
+		render(NewChatFormTestHost, { props: {
+			executorSnapshots: [localExecutor, remoteExecutor],
+			onRemoteSettings: (store) => { settings = store; },
+		} });
+		const toggle = await screen.findByRole('button', { name: 'All machines' });
+		toggle.focus();
+		settings.applySnapshot({ ...snapshot, paths: { ...snapshot.paths, byExecutor: {} } });
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'All machines' })).toBe(toggle));
+		expect(document.activeElement).toBe(toggle);
+		const path = screen.getByLabelText('Project Path');
+		path.focus();
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'All machines' })).toBeNull());
+		expect(document.activeElement).toBe(path);
+	});
 
 	it('adds no scope control for a workspace with only local pins', async () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({ paths: { pinnedProjectPaths: ['/local'] } }));
