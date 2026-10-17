@@ -250,6 +250,8 @@ describe("compiled theme CSS", () => {
             <div id="user-bubble-code" class="markdown-code-block"><pre><code class="cm-code"><span id="user-bubble-code-text">Selected code</span><span id="user-bubble-code-keyword" class="cm-code-keyword">const</span></code></pre></div>
             <div class="markdown-body"><table><thead><tr><th id="user-bubble-header">Selected header <strong id="user-bubble-header-text">text</strong></th></tr></thead></table></div>
             <div id="user-bubble-attachment" class="user-message-attachment bg-background/70 text-foreground"><span id="user-bubble-attachment-text">document.txt</span></div>
+            <div id="user-bubble-alert" class="markdown-link-alert bg-muted text-foreground" role="alert"><span id="user-bubble-alert-text">Blocked file link</span></div>
+            <div class="bg-muted/30"><div id="user-bubble-mermaid-header" class="mermaid-block-header bg-muted/50 text-muted-foreground"><span id="user-bubble-mermaid-header-text">mermaid</span></div></div>
           </div>
           ${focusButtonFixture()}
         </body></html>`,
@@ -564,6 +566,19 @@ describe("compiled theme CSS", () => {
               "#user-bubble-attachment-text",
             ],
             minimumSeparation: 2,
+          },
+          {
+            surface: "#user-bubble-alert",
+            selectors: ["#user-bubble-alert", "#user-bubble-alert-text"],
+            minimumSeparation: 3,
+          },
+          {
+            surface: "#user-bubble-mermaid-header",
+            selectors: [
+              "#user-bubble-mermaid-header",
+              "#user-bubble-mermaid-header-text",
+            ],
+            minimumSeparation: 3,
           },
         ]) {
           const colors = await readRenderedColors(page, surface);

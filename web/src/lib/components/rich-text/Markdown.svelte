@@ -280,7 +280,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 	{#if blockedLinkMessage}
 		<div
 			role="alert"
-			class="not-prose mt-2 rounded-md border border-border bg-muted p-3 text-sm text-foreground break-words"
+			class="markdown-link-alert not-prose mt-2 rounded-md border border-border bg-muted p-3 text-sm text-foreground break-words"
 		>
 			{blockedLinkMessage}
 		</div>

@@ -33,6 +33,8 @@ describe('MermaidBlock', () => {
 		const rendered = render(MermaidBlock, { text: source, themeId: 'classic-light' });
 		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledOnce());
 		expect(mockedRenderMermaid).toHaveBeenLastCalledWith(source, 'standard-light');
+		expect(screen.getByText('mermaid').closest('.mermaid-block-header')).not.toBeNull();
+		expect(screen.getByLabelText('Rendered diagram').closest('.mermaid-block-header')).toBeNull();
 
 		rendered.component.setThemeId('phosphor-light');
 		await tick();

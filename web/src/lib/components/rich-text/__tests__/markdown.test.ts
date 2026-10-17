@@ -291,6 +291,7 @@ describe('Markdown', () => {
 				expect(event.defaultPrevented).toBe(true);
 				expect(handler).not.toHaveBeenCalled();
 				expect(screen.getByRole('alert').textContent).toContain('/workspace');
+				expect(screen.getByRole('alert').classList.contains('markdown-link-alert')).toBe(true);
 				expect(screen.getByRole('alert').textContent).toContain(href);
 				await view.rerender({ source: 'Another message' });
 				expect(screen.queryByRole('alert')).toBeNull();
