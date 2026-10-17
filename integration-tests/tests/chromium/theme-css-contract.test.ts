@@ -205,7 +205,10 @@ describe("compiled theme CSS", () => {
           <div data-processing-surface="selected workspace tab" class="bg-workspace-window-tab-selected"><span class="workspace-chat-processing-indicator bg-status-processing"></span></div>
           <div data-processing-surface="inactive workspace tab" class="bg-workspace-window-tab-selected-inactive"><span class="workspace-chat-processing-indicator bg-status-processing"></span></div>
           <div id="scrollbar" style="width:100px;height:40px;overflow:scroll;scrollbar-gutter:stable"><div style="height:80px"></div></div>
-          <div id="user-bubble" class="bg-user-bubble text-user-bubble-foreground selection:bg-user-bubble-foreground selection:text-user-bubble"><span id="user-bubble-text">Selected message text</span></div>
+          <div id="user-bubble" class="bg-user-bubble text-user-bubble-foreground selection:bg-user-bubble-foreground selection:text-user-bubble">
+            <span id="user-bubble-text">Selected message text</span>
+            <div id="user-bubble-code" class="markdown-code-block"><pre><code class="cm-code"><span id="user-bubble-code-text">Selected code</span><span id="user-bubble-code-keyword" class="cm-code-keyword">const</span></code></pre></div>
+          </div>
           ${["background", "card", "popover"]
             .map(
               (surface) =>
@@ -511,6 +514,23 @@ describe("compiled theme CSS", () => {
           expect(
             contrastRatio(selection.background, bubble.background),
             `${profile} visible bubble selection`,
+          ).toBeGreaterThanOrEqual(3);
+        }
+        const code = await readRenderedColors(page, "#user-bubble-code");
+        for (const selector of [
+          "#user-bubble-code-text",
+          "#user-bubble-code-keyword",
+        ]) {
+          const selection = await readRenderedColors(page, selector, {
+            pseudoElement: "::selection",
+          });
+          expect(
+            contrastRatio(selection.foreground, selection.background),
+            `${profile} fenced code selected text`,
+          ).toBeGreaterThanOrEqual(4.5);
+          expect(
+            contrastRatio(selection.background, code.background),
+            `${profile} visible fenced code selection`,
           ).toBeGreaterThanOrEqual(3);
         }
         await page.keyboard.press("Tab");

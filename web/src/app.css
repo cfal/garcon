@@ -647,6 +647,13 @@
 	}
 }
 
+/* Keeps fenced code selections independent of surrounding message bubbles. */
+.markdown-code-block::selection,
+.markdown-code-block ::selection {
+	background-color: hsl(var(--primary));
+	color: hsl(var(--primary-foreground));
+}
+
 .rainbow-ultra-surface {
 	background-image:
 		linear-gradient(rgb(15 23 42 / 0.5), rgb(15 23 42 / 0.5)),
