@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { NewChatPinnedPathsController } from '../new-chat-pinned-paths-controller';
 import { NewChatFormState } from '../new-chat-form-state.svelte';
 import { NewChatPromptDraft, NewChatPromptDraftStore } from '../new-chat-prompt-draft';
 import * as chatsApi from '$lib/api/chats';
@@ -306,6 +307,44 @@ describe('NewChatFormState', () => {
 		expect(formState.canSubmit).toBe(false);
 	});
 
+
+	it('selects the saved pin with its owner while preserving prompt and attachments', () => {
+		mockRemoteSettings.snapshot = makeSnapshot({ paths: { pinnedProjectPaths: ['/same'], byExecutor: {
+			[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/same', '/exact '] },
+		} } });
+		formState.projectPath = '/same';
+		formState.firstMessage = 'Synthetic retained prompt';
+		const image = new File(['synthetic'], 'synthetic.png', { type: 'image/png' });
+		formState.attachedImages = [image];
+		new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings).select(remoteExecutor.id, '/exact ');
+		expect(formState.executorId).toBe(remoteExecutor.id);
+		expect(formState.projectPath).toBe('/exact ');
+		expect(formState.firstMessage).toBe('Synthetic retained prompt');
+		expect(formState.attachedImages).toEqual([image]);
+		new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings).select('local', '/same');
+		expect(formState.executorId).toBe('local');
+		expect(formState.projectPath).toBe('/same');
+	});
+
+	it('rejects stale pin selection after removal, disconnection or a pending pin write', () => {
+		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byExecutor: {
+			[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/pin'] },
+		} } });
+		formState.projectPath = '/local';
+		new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings).select(remoteExecutor.id, '/removed-pin');
+		expect(formState.executorId).toBe('local');
+		executors.applySnapshot([localExecutor, { ...remoteExecutor, availability: 'offline' }]);
+		new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings).select(remoteExecutor.id, '/worker/pin');
+		expect(formState.executorId).toBe('local');
+		executors.applySnapshot([localExecutor]);
+		new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings).select(remoteExecutor.id, '/worker/pin');
+		expect(formState.executorId).toBe('local');
+		executors.applySnapshot([localExecutor, remoteExecutor]);
+		formState.isUpdatingPinnedPath = true;
+		new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings).select(remoteExecutor.id, '/worker/pin');
+		expect(formState.executorId).toBe('local');
+		expect(formState.projectPath).toBe('/local');
+	});
 	it('preserves compatible models, prompt and attachments while adopting destination path preferences', async () => {
 		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byExecutor: {
 			[remoteExecutor.id]: { defaultPath: '/worker/default', recentPaths: ['/worker/recent'], pinnedPaths: ['/worker/pin'] },
