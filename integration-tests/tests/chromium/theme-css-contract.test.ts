@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { chromium, type Page } from "playwright";
+import { chromium, type Locator, type Page } from "playwright";
 import { THEME_PROFILES } from "../../../web/src/lib/theme/themes";
 import { buttonVariants } from "../../../web/src/lib/components/ui/button/button";
 import { contrastRatio } from "../../support/color-contrast";
@@ -26,6 +26,46 @@ function diffSyntaxFixture(idPrefix: string): string {
     (className) =>
       `<span id="${idPrefix}-${className}" class="${className}">${className}</span>`,
   ).join(" ");
+}
+
+function focusButtonFixture(): string {
+  const surfaces = [];
+  const variants = ["default", "ghost", "link", "destructive"] as const;
+  for (const surface of ["background", "card", "popover"]) {
+    const buttons = variants
+      .map(
+        (variant) =>
+          `<button data-focus-probe="${surface} ${variant}" class="${buttonVariants({ variant })}">Focus</button>`,
+      )
+      .join("");
+    surfaces.push(`<div class="bg-${surface}">${buttons}</div>`);
+  }
+  return surfaces.join("");
+}
+
+async function readButtonFocusColors(button: Locator) {
+  return button.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const shadow = style.boxShadow.match(
+      /((?:rgba?|hsla?|oklch|oklab|color)\([^)]*\)) 0px 0px 0px 3px/,
+    )?.[1];
+    if (!shadow) throw new Error("Missing button focus shadow");
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext("2d")!;
+    const background = getComputedStyle(element.parentElement!).backgroundColor;
+    context.fillStyle = background;
+    context.fillRect(0, 0, 1, 1);
+    context.fillStyle = shadow;
+    context.fillRect(0, 0, 1, 1);
+    const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+    return {
+      label: element.getAttribute("data-focus-probe"),
+      visible: element.matches(":focus-visible"),
+      ring: `rgb(${red}, ${green}, ${blue})`,
+      background,
+    };
+  });
 }
 
 function declaredProperties(source: string): string[] {
@@ -209,19 +249,7 @@ describe("compiled theme CSS", () => {
             <span id="user-bubble-text">Selected message text</span>
             <div id="user-bubble-code" class="markdown-code-block"><pre><code class="cm-code"><span id="user-bubble-code-text">Selected code</span><span id="user-bubble-code-keyword" class="cm-code-keyword">const</span></code></pre></div>
           </div>
-          ${["background", "card", "popover"]
-            .map(
-              (surface) =>
-                `<div class="bg-${surface}">${(
-                  ["default", "ghost", "link", "destructive"] as const
-                )
-                  .map(
-                    (variant) =>
-                      `<button data-focus-probe="${surface} ${variant}" class="${buttonVariants({ variant })}">Focus</button>`,
-                  )
-                  .join("")}</div>`,
-            )
-            .join("")}
+          ${focusButtonFixture()}
         </body></html>`,
       });
     });
@@ -536,30 +564,7 @@ describe("compiled theme CSS", () => {
         await page.keyboard.press("Tab");
         for (const button of await page.locator("[data-focus-probe]").all()) {
           await button.focus();
-          const focus = await button.evaluate((element) => {
-            const style = getComputedStyle(element);
-            const shadow = style.boxShadow.match(
-              /((?:rgba?|hsla?|oklch|oklab|color)\([^)]*\)) 0px 0px 0px 3px/,
-            )?.[1];
-            if (!shadow) throw new Error("Missing button focus shadow");
-            const canvas = document.createElement("canvas");
-            canvas.width = canvas.height = 1;
-            const context = canvas.getContext("2d")!;
-            const background = getComputedStyle(
-              element.parentElement!,
-            ).backgroundColor;
-            context.fillStyle = background;
-            context.fillRect(0, 0, 1, 1);
-            context.fillStyle = shadow;
-            context.fillRect(0, 0, 1, 1);
-            const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
-            return {
-              label: element.getAttribute("data-focus-probe"),
-              visible: element.matches(":focus-visible"),
-              ring: `rgb(${r}, ${g}, ${b})`,
-              background,
-            };
-          });
+          const focus = await readButtonFocusColors(button);
           expect(focus.visible, `${profile} ${focus.label} focus`).toBe(true);
           expect(
             contrastRatio(focus.ring, focus.background),

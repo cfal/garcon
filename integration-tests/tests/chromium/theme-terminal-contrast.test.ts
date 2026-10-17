@@ -1,15 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { readFile, readdir } from "node:fs/promises";
 import { chromium } from "playwright";
-import {
-  THEME_PROFILES,
-  type TerminalThemeColors,
-} from "../../../web/src/lib/theme/themes";
-import type { TerminalThemePresentation } from "../../../web/src/lib/terminal/runtime/terminal-theme";
+import { THEME_PROFILES } from "../../../web/src/lib/theme/themes";
 import { buildWebBrowserEntry } from "../../support/web-browser-bundle";
 import { contrastRatio } from "../../support/color-contrast";
 
 const APP_URL = "http://theme-terminal-contrast.test/";
+type TerminalFixtureScope = typeof globalThis &
+  typeof import("../../../web/src/lib/terminal/runtime/__tests__/terminal-contrast-fixture");
 const SAMPLES = [
   { name: "black foreground", sequence: "\u001b[30mblack" },
   { name: "bright white on black", sequence: "\u001b[97;40mwhite" },
@@ -73,11 +71,8 @@ describe("terminal theme contrast", () => {
           const root = document.documentElement;
           root.dataset.theme = profile.id;
           root.classList.toggle("dark", profile.colorScheme === "dark");
-          const colors = (
-            globalThis as typeof globalThis & {
-              readTerminalColors(root: HTMLElement): TerminalThemeColors | null;
-            }
-          ).readTerminalColors(root);
+          const fixture = globalThis as TerminalFixtureScope;
+          const colors = fixture.readTerminalColors(root);
           if (!colors)
             throw new Error(`Missing terminal colors for ${profile.id}`);
           return {
@@ -113,14 +108,11 @@ describe("terminal theme contrast", () => {
           .evaluate(async (root, presentation) => {
             root.replaceChildren();
             root.style.backgroundColor = presentation.background;
-            const dispose = await (
-              globalThis as typeof globalThis & {
-                renderTerminalSelection(
-                  parent: HTMLElement,
-                  theme: TerminalThemePresentation,
-                ): Promise<() => void>;
-              }
-            ).renderTerminalSelection(root as HTMLElement, presentation);
+            const fixture = globalThis as TerminalFixtureScope;
+            const dispose = await fixture.renderTerminalSelection(
+              root as HTMLElement,
+              presentation,
+            );
             const text = root.querySelector<HTMLElement>(".xterm-rows span");
             const highlight = root.querySelector<HTMLElement>(
               ".xterm-selection div",
@@ -145,16 +137,10 @@ describe("terminal theme contrast", () => {
         for (const sample of SAMPLES) {
           const colors = await page.locator("#terminal").evaluate(
             async (root, { presentation, sequence }) => {
-              const scope = globalThis as typeof globalThis & {
-                renderTerminalSample: (
-                  parent: HTMLElement,
-                  theme: TerminalThemePresentation,
-                  content: string,
-                ) => Promise<() => void>;
-              };
+              const fixture = globalThis as TerminalFixtureScope;
               root.replaceChildren();
               root.style.backgroundColor = presentation.background;
-              const dispose = await scope.renderTerminalSample(
+              const dispose = await fixture.renderTerminalSample(
                 root as HTMLElement,
                 presentation,
                 sequence,
