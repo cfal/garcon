@@ -31,7 +31,8 @@
 .ticket-toolbar-heading .ticket-button {
 	height: 34px;
 }
-.ticket-button[data-active='true'] {
+.ticket-button[data-active='true'],
+.ticket-button[data-active='true']:hover {
 	background: hsl(var(--accent));
 	border-color: hsl(var(--ring));
 }
@@ -202,9 +203,22 @@ textarea.ticket-input.content-sized-textarea {
 .ticket-input:focus-visible {
 	border-color: hsl(var(--ring));
 }
+select.ticket-input {
+	background: var(--native-select-surface-background);
+}
 .ticket-input:focus-visible,
-.tickets-surface :where(button, summary):focus-visible,
-.ticket-dialog :where(button, summary):focus-visible {
+:where(
+	.ticket-button,
+	.ticket-text-button,
+	.ticket-facet-picker,
+	.ticket-facet-option,
+	.ticket-open,
+	.ticket-status,
+	.ticket-assignee-action,
+	.ticket-detail-tabs > button,
+	.tickets-surface summary,
+	.ticket-dialog summary
+):focus-visible {
 	outline: 2px solid hsl(var(--ring));
 	outline-offset: 2px;
 }

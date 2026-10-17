@@ -228,7 +228,12 @@ describe("compiled theme CSS", () => {
             <textarea id="textarea-boundary" class="border border-input bg-control-surface placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
             <div class="ticket-dialog">
               <input id="ticket-field" class="ticket-input" placeholder="Ticket title">
+              <select id="ticket-select" class="ticket-input"><option>Status</option></select>
+              <span id="native-select-reference" style="background:var(--native-select-surface-background)"></span>
               <button id="ticket-action" class="ticket-button">Ticket action</button>
+              <button id="ticket-active-action" class="ticket-button" data-active="true">Active filter</button>
+              <button id="ticket-shared-action" class="${buttonVariants()}">Shared action</button>
+              <button id="ticket-code-action" class="focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">Copy code</button>
             </div>
           </div>
           ${["background", "card", "popover", "accent"].map((surface) => `<div class="bg-${surface}"><span id="error-${surface}" class="text-destructive">Error</span></div>`).join("")}
@@ -667,6 +672,29 @@ describe("compiled theme CSS", () => {
         expect(ticketField.background, `${profile} ticket input surface`).toBe(
           input.background,
         );
+        const ticketSelect = await readRenderedColors(page, "#ticket-select");
+        const nativeSelectReference = await readRenderedColors(
+          page,
+          "#native-select-reference",
+        );
+        expect(
+          ticketSelect.background,
+          `${profile} ticket select surface`,
+        ).toBe(nativeSelectReference.background);
+        await page.mouse.move(0, 0);
+        const activeTicketButton = await readRenderedColors(
+          page,
+          "#ticket-active-action",
+        );
+        await page.locator("#ticket-active-action").hover();
+        const hoveredActiveTicketButton = await readRenderedColors(
+          page,
+          "#ticket-active-action",
+        );
+        expect(
+          hoveredActiveTicketButton.background,
+          `${profile} active ticket hover`,
+        ).toBe(activeTicketButton.background);
         const ticketPlaceholder = await readRenderedColors(
           page,
           "#ticket-field",
@@ -696,6 +724,24 @@ describe("compiled theme CSS", () => {
             contrastRatio(outline.color, dialogSurface.background),
             `${profile} ${selector} focus`,
           ).toBeGreaterThanOrEqual(3);
+        }
+        for (const selector of [
+          "#ticket-shared-action",
+          "#ticket-code-action",
+        ]) {
+          const button = page.locator(selector);
+          await button.focus();
+          const focus = await button.evaluate((element) => {
+            const style = getComputedStyle(element);
+            return { outline: style.outlineStyle, shadow: style.boxShadow };
+          });
+          expect(focus.outline, `${profile} ${selector} no extra outline`).toBe(
+            "none",
+          );
+          expect(
+            focus.shadow,
+            `${profile} ${selector} retains its ring`,
+          ).not.toBe("none");
         }
         if (profile.startsWith("paper-") || profile.startsWith("slate-")) {
           for (const selector of [
