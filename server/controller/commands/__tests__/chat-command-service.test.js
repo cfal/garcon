@@ -890,6 +890,61 @@ describe('ChatCommandService', () => {
       clientRequestId: 'agent-start', clientMessageId: 'agent-start-message', ...overrides };
   }
 
+  function scheduledStartInput(overrides = {}) {
+    return { chatId: SCHEDULED_CHAT_ID, agentId: 'claude', model: 'opus',
+      agentSettingsById: { claude: agentSettings() }, tags: [],
+      projectPath: projectBaseDir, command: 'Synthetic scheduled prompt.',
+      permissionMode: 'default', thinkingMode: 'none',
+      clientRequestId: 'scheduled-start', clientMessageId: 'scheduled-message', ...overrides };
+  }
+
+  it('persists a scheduled title before dispatch, skips generation, and fingerprints it on replay', async () => {
+    const f = makeService();
+    const names = new Map();
+    f.settings.setSessionName.mockImplementation(async (id, title) => { names.set(id, title); });
+    f.settings.getChatName.mockImplementation(id => names.get(id) ?? null);
+    const title = 'Synthetic scheduled title '.repeat(8).trim();
+    f.agents.startSession.mockImplementation(async id => { expect(names.get(id)).toBe(title); });
+    const input = scheduledStartInput({ title: `  ${title}  ` });
+    const first = await f.service.submitScheduledStart(input);
+    expect(f.settings.setSessionName).toHaveBeenCalledWith(SCHEDULED_CHAT_ID, title);
+    expect(f.settings.getUiSettings).not.toHaveBeenCalled();
+    names.set(SCHEDULED_CHAT_ID, 'Manual rename');
+    expect(await f.service.submitScheduledStart({ ...input, title })).toMatchObject({ status: 'duplicate', turnId: first.turnId });
+    expect(names.get(SCHEDULED_CHAT_ID)).toBe('Manual rename');
+    expect(f.settings.setSessionName).toHaveBeenCalledTimes(1);
+    await expect(f.service.submitScheduledStart({ ...input, title: 'Different' })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    expect(f.agents.startSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('compensates a scheduled title when startup fails before dispatch', async () => {
+    const f = makeService();
+    f.settings.ensureInNormal.mockRejectedValue(new Error('Synthetic preparation failure'));
+    await expect(f.service.submitScheduledStart(scheduledStartInput({ title: 'Synthetic title' }))).rejects.toThrow();
+    expect(f.settings.setSessionName).toHaveBeenCalledWith(SCHEDULED_CHAT_ID, 'Synthetic title');
+    expect(f.settings.removeSessionName).toHaveBeenCalledWith(SCHEDULED_CHAT_ID);
+    expect(f.agents.startSession).not.toHaveBeenCalled();
+  });
+
+  it.each(['', 'two\nlines', 'a'.repeat(4097)])('rejects invalid scheduled start titles: %s', async title => {
+    const f = makeService();
+    await expect(f.service.submitScheduledStart(scheduledStartInput({ title }))).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(f.agents.startSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps the automatic-title path for scheduled starts with no custom title', async () => {
+    const f = makeService();
+    await f.service.submitScheduledStart(scheduledStartInput());
+    expect(f.settings.setSessionName).not.toHaveBeenCalled();
+    expect(f.settings.getUiSettings).toHaveBeenCalled();
+  });
+
+  it.each(['interactive', 'cli'])('ignores an internal title on %s starts', async origin => {
+    const f = makeService();
+    await f.service.submitStart({ ...agentStartInput('view-1'), origin, title: 'Not accepted' });
+    expect(f.settings.setSessionName).not.toHaveBeenCalled();
+  });
+
   it.each(['agent-command', 'interactive'])('replays untitled literal starts by requested intent: %s', async (origin) => {
     const f = makeService();
     f.agents.executionPolicy.mockReturnValue('literal');

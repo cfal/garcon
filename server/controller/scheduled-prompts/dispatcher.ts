@@ -1,5 +1,6 @@
 import {
   renderScheduledPrompt,
+  renderScheduledChatTitle,
   scheduledPromptFitsRenderedLimit,
   type ScheduledPrompt,
   type ScheduledPromptRunOutcome,
@@ -60,6 +61,7 @@ export class ScheduledPromptDispatcher {
     }
 
     const chatId = this.deps.chatIds.allocate();
+    const values = runtimeTemplateValues(chatId, at);
     const startInput: ScheduledChatStartInput = {
       chatId,
       clientRequestId: requestId,
@@ -67,7 +69,10 @@ export class ScheduledPromptDispatcher {
       agentId: scheduledPrompt.target.agentId,
       executorId: scheduledPrompt.target.executorId,
       projectPath: scheduledPrompt.target.projectPath,
-      command: renderScheduledPrompt(scheduledPrompt.prompt, runtimeTemplateValues(chatId, at)),
+      command: renderScheduledPrompt(scheduledPrompt.prompt, values),
+      ...(scheduledPrompt.target.chatTitleTemplate === undefined ? {} : {
+        title: renderScheduledChatTitle(scheduledPrompt.target.chatTitleTemplate, values),
+      }),
       model: scheduledPrompt.target.model,
       apiProviderId: scheduledPrompt.target.apiProviderId,
       modelEndpointId: scheduledPrompt.target.modelEndpointId,

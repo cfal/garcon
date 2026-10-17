@@ -9,6 +9,7 @@ import {
 import { parseAgentSettingsById, type AgentSettingsEnvelope } from './agent-integration.js';
 import { normalizePreambleSelectionChoice, type PreambleSelectionChoice } from './preambles.js';
 import { normalizeTags } from './tags.js';
+import { CHAT_TITLE_MAX_BYTES, isChatTitleWithinLimit } from './chat-title-contracts.js';
 import {
   CHAT_ID_TEMPLATE_TOKEN,
   RUNTIME_TEMPLATE_VARIABLES,
@@ -24,6 +25,7 @@ export const SCHEDULED_PROMPT_MAX_LENGTH = 32_000;
 export const SCHEDULED_PROMPT_RUN_LOG_LIMIT = 200;
 export const SCHEDULED_PROMPT_LABEL_MAX_LENGTH = 200;
 export const SCHEDULED_PROMPT_MAX_COUNT = 500;
+export const SCHEDULED_PROMPT_NAME_MAX_CODE_POINTS = 120;
 
 export type ScheduleForChatFirstRun =
   | { readonly type: 'after'; readonly minutes: number }
@@ -58,6 +60,7 @@ export type ScheduledPromptSchedule = OneOffScheduledPromptSchedule | RecurringS
 
 export interface NewChatScheduledPromptTarget {
   type: 'new-chat';
+  chatTitleTemplate?: string;
   executorId?: string | null;
   agentId: string;
   projectPath: string;
@@ -82,6 +85,7 @@ export type ScheduledPromptTarget = NewChatScheduledPromptTarget | ExistingChatS
 
 export interface ScheduledPrompt {
   id: string;
+  name?: string;
   schedule: ScheduledPromptSchedule;
   target: ScheduledPromptTarget;
   prompt: string;
@@ -135,6 +139,7 @@ export interface RecurringScheduleInput {
 export type ScheduledPromptScheduleInput = OneOffScheduleInput | RecurringScheduleInput;
 
 export interface ScheduledPromptDefinitionInput {
+  name?: string;
   schedule: ScheduledPromptScheduleInput;
   target: ScheduledPromptTarget;
   prompt: string;
@@ -216,6 +221,44 @@ export function scheduledPromptFitsRenderedLimit(
   }
 }
 
+const SINGLE_LINE_CONTROL = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+
+export function normalizeScheduledPromptName(value: unknown): string | undefined | null {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') return null;
+  const name = value.trim();
+  if (!name) return undefined;
+  return name.isWellFormed() && !SINGLE_LINE_CONTROL.test(name)
+    && [...name].length <= SCHEDULED_PROMPT_NAME_MAX_CODE_POINTS ? name : null;
+}
+
+export function normalizeScheduledChatTitle(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const title = value.trim();
+  return title && title.isWellFormed() && !SINGLE_LINE_CONTROL.test(title)
+    && isChatTitleWithinLimit(title) ? title : null;
+}
+
+export function renderScheduledChatTitle(template: string, values: RuntimeTemplateValues): string {
+  const title = normalizeScheduledChatTitle(expandTemplate(
+    template, RUNTIME_TEMPLATE_VARIABLES, values, CHAT_TITLE_MAX_BYTES,
+  ));
+  if (title === null) throw new TypeError('Invalid scheduled chat title after variable expansion');
+  return title;
+}
+
+export function normalizeScheduledChatTitleTemplate(value: unknown): string | null {
+  const template = normalizeScheduledChatTitle(value);
+  if (template === null) return null;
+  try {
+    renderScheduledChatTitle(template, TEMPLATE_VALIDATION_VALUES);
+    return template;
+  } catch (error) {
+    if (error instanceof TemplateExpansionTooLongError || error instanceof TypeError) return null;
+    throw error;
+  }
+}
+
 export function isScheduledPromptsInvalidationReason(value: unknown): value is ScheduledPromptsInvalidationReason {
   return typeof value === 'string' && (SCHEDULED_PROMPTS_INVALIDATION_REASONS as readonly string[]).includes(value);
 }
@@ -259,6 +302,8 @@ function normalizeApiProtocol(value: unknown): ApiProtocol | null | undefined {
 }
 
 function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledPromptTarget | null {
+  const chatTitleTemplate = raw.chatTitleTemplate === undefined
+    ? undefined : normalizeScheduledChatTitleTemplate(raw.chatTitleTemplate);
   const executorId = parseExecutorId(raw.executorId);
   const agentId = requiredString(raw.agentId);
   const projectPath = typeof raw.projectPath === 'string' && raw.projectPath.trim() ? raw.projectPath : null;
@@ -276,6 +321,7 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
   }
   const preambleChoice = normalizePreambleSelectionChoice(raw.preambleChoice);
   if (
+    chatTitleTemplate === null ||
     !executorId ||
     !agentId ||
     !projectPath ||
@@ -293,6 +339,7 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
 
   return {
     type: 'new-chat',
+    ...(chatTitleTemplate === undefined ? {} : { chatTitleTemplate }),
     ...(executorId !== LOCAL_EXECUTOR_ID ? { executorId } : {}),
     agentId,
     projectPath,
@@ -326,7 +373,7 @@ export function normalizeScheduledPromptTarget(value: unknown): ScheduledPromptT
   if (!raw) return null;
   if (raw.type === 'new-chat') return normalizeNewChatTarget(raw);
   if (raw.type !== 'existing-chat') return null;
-  if ('preambleChoice' in raw) return null;
+  if ('preambleChoice' in raw || 'chatTitleTemplate' in raw) return null;
   const chatId = requiredString(raw.chatId);
   if (!chatId || (raw.busyBehavior !== 'queue' && raw.busyBehavior !== 'skip')) return null;
   return { type: 'existing-chat', chatId, busyBehavior: raw.busyBehavior };
@@ -352,10 +399,12 @@ export function normalizeScheduledPrompt(value: unknown): ScheduledPrompt | null
   const raw = asRecord(value);
   if (!raw) return null;
   const id = requiredString(raw.id);
+  const name = normalizeScheduledPromptName(raw.name);
   const prompt = promptSource(raw.prompt);
   const schedule = normalizeScheduledPromptSchedule(raw.schedule);
   const target = normalizeScheduledPromptTarget(raw.target);
   if (
+    name === null ||
     !id ||
     !prompt ||
     prompt.length > SCHEDULED_PROMPT_MAX_LENGTH ||
@@ -369,6 +418,7 @@ export function normalizeScheduledPrompt(value: unknown): ScheduledPrompt | null
     return null;
   return {
     id,
+    ...(name === undefined ? {} : { name }),
     schedule,
     target,
     prompt,
@@ -379,10 +429,12 @@ export function normalizeScheduledPrompt(value: unknown): ScheduledPrompt | null
 
 export function normalizeScheduledPromptDefinitionInput(value: unknown): ScheduledPromptDefinitionInput | null {
   const raw = asRecord(value);
+  const name = normalizeScheduledPromptName(raw?.name);
   const schedule = asRecord(raw?.schedule);
   const target = normalizeScheduledPromptTarget(raw?.target);
   const prompt = promptSource(raw?.prompt);
   if (
+    name === null ||
     !raw ||
     !schedule ||
     'intervalHours' in schedule ||
@@ -410,7 +462,9 @@ export function normalizeScheduledPromptDefinitionInput(value: unknown): Schedul
       endAtUtc: schedule.endAtUtc as string | null,
     };
   }
-  return normalizedSchedule ? { schedule: normalizedSchedule, target, prompt } : null;
+  return normalizedSchedule
+    ? { schedule: normalizedSchedule, target, prompt, ...(name === undefined ? {} : { name }) }
+    : null;
 }
 
 export function normalizeScheduledPromptsSnapshot(value: unknown): ScheduledPromptsSnapshot | null {

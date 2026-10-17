@@ -448,6 +448,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
               endAt: definition.schedule.endAtUtc,
             },
       target: structuredClone(definition.target),
+      ...(definition.name === undefined ? {} : { name: definition.name }),
       prompt: definition.prompt,
       createdAt,
       updatedAt: now.toISOString(),
