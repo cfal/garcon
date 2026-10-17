@@ -25,6 +25,7 @@ import {
 } from './chat-execution-control';
 import { parseExecutors, type ExecutorSnapshot } from './executors';
 import type { ErrorCode } from './error-codes';
+import { parseRevisionInvalidation, type RevisionInvalidationMessage } from './ws-revision-invalidations';
 import { normalizeRemoteSettingsSnapshot, type RemoteSettingsSnapshot } from './settings';
 import {
   isScheduledPromptsInvalidationReason,
@@ -364,11 +365,6 @@ export class ChatBoardsInvalidatedMessage {
   ) {}
 }
 
-export class TicketsInvalidatedMessage {
-  readonly type = 'tickets-invalidated' as const;
-  constructor(public revision: number) {}
-}
-
 export class SettingsChangedMessage {
   readonly type = 'settings-changed' as const;
   constructor(public settings: RemoteSettingsSnapshot) {}
@@ -479,7 +475,7 @@ export type ServerWsMessage =
   | ChatReadUpdatedV1Message
   | ChatListRefreshRequestedMessage
   | ChatBoardsInvalidatedMessage
-  | TicketsInvalidatedMessage
+  | RevisionInvalidationMessage
   | SettingsChangedMessage
   | ApiProvidersInvalidatedMessage
   | ExecutorsChangedMessage
@@ -919,11 +915,9 @@ export function parseServerWsMessage(
         ? new ChatBoardsInvalidatedMessage(revision, reason)
         : null;
     }
-    case 'tickets-invalidated': {
-      if (Object.keys(data).length !== 2 || !Object.hasOwn(data, 'revision')) return null;
-      const revision = nonNegativeInt(data.revision);
-      return revision !== null ? new TicketsInvalidatedMessage(revision) : null;
-    }
+    case 'tickets-invalidated':
+    case 'pull-request-reviews-invalidated':
+      return parseRevisionInvalidation(data);
     case 'settings-changed': {
       const settings = normalizeRemoteSettingsSnapshot(data.settings);
       return settings ? new SettingsChangedMessage(settings) : null;

@@ -73,8 +73,8 @@ describe('GET /api/v1/gh/status', () => {
 describe('GitHub route dispatch', () => {
   const operations = [
     ['status', 'getStatus', '', undefined, GIT_OPERATION_TIMEOUT_MS],
-    ['pull-requests', 'listPullRequests', 'project=%2Fproject', { projectPath: '/project' }, GIT_OPERATION_TIMEOUT_MS],
-    ['pull-request', 'getPullRequest', 'project=%2Fproject&number=42', { projectPath: '/project', number: 42 }, GH_DETAIL_TIMEOUT_MS],
+    ['pull-requests', 'listPullRequests', 'project=%2Fproject', { projectPath: '/project' }, GH_DETAIL_TIMEOUT_MS],
+    ['pull-request', 'getPullRequest', 'project=%2Fproject&number=42&repositoryHost=github.example.com&repositoryName=acme%2Fapp', { projectPath: '/project', number: 42, repository: { host: 'github.example.com', nameWithOwner: 'acme/app' } }, GH_DETAIL_TIMEOUT_MS],
   ];
 
   it.each(operations)('dispatches %s with the selected executor, signal, and bounded timeout', async (path, method, query, input, maximum) => {
@@ -112,6 +112,8 @@ describe('GitHub route dispatch', () => {
     ['pull-requests', 'project=/project&number=42'],
     ['pull-request', 'project=/project&number=0'],
     ['pull-request', 'project=/project&number=1&number=2'],
+    ['pull-request', 'project=/project&number=1'],
+    ['pull-request', 'project=/project&number=1&repositoryHost=github.com&repositoryName=acme/app&repositoryHost=other.example'],
   ])('rejects invalid %s fields before resolving an executor', async (path, query) => {
     const resolve = mock(async () => makeService());
     const routes = createGhRoutes(resolve);

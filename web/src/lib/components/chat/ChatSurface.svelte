@@ -5,7 +5,6 @@
 		getChatSessions,
 		getConversationPanels,
 		getGitViewLauncher,
-		getGhCapability,
 		getExecutors,
 		getWorkspaceCoordinator,
 		getModelCatalog,
@@ -71,7 +70,6 @@
 	const conversationPanels = getConversationPanels();
 	const rootModelCatalog = getModelCatalog();
 	const gitViews = getGitViewLauncher();
-	const ghCapabilities = getGhCapability();
 	const executors = getExecutors();
 	const workspace = getWorkspaceCoordinator();
 	const transcriptCache =
@@ -83,17 +81,6 @@
 	const selectedChat = $derived(sessions.selectedChat);
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(selectedChat?.executorId));
 	const gitAvailable = $derived(executors.gitAvailable(selectedChat?.executorId));
-	const ghCapability = $derived(ghCapabilities.forExecutor(selectedChat?.executorId ?? 'local'));
-	$effect(() => {
-		if (
-			!isMobile ||
-			!isVisible ||
-			!executors.ghAvailable(selectedChat?.executorId) ||
-			ghCapability.hasChecked
-		)
-			return;
-		untrack(() => void ghCapability.ensureChecked());
-	});
 	const mobileToolbarChat = $derived(isVisible ? selectedChat : null);
 	const hasUsableChatContext = $derived(Boolean(selectedChat));
 	const chatSurfacePresentation = $derived(
@@ -173,9 +160,7 @@
 					onOpenTickets={() => void workspace.focusMobileSingleton('tickets')}
 					onOpenChatMap={() => void workspace.focusMobileSingleton('chat-map')}
 					onOpenCanvas={() => void workspace.focusMobileSingleton('chat-canvas')}
-					onOpenPullRequests={gitAvailable && ghCapability.available
-						? () => void workspace.focusMobileSingleton('pull-requests')
-						: undefined}
+					onOpenPullRequests={() => void workspace.focusMobileSingleton('pull-requests')}
 					onRename={() => selectedChat && chatActions.requestRename(selectedChat)}
 					onDetails={() => selectedChat && chatActions.requestDetails(selectedChat)}
 					onReload={() => selectedChat && chatActions.reload(selectedChat)}

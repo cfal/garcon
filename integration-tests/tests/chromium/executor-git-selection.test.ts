@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect, type Locator, type Page } from 'playwright/test';
-import { chmod, copyFile, mkdir, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
@@ -46,7 +46,7 @@ test('Local-only Files and Git hide executor selectors and allow Git browsing wi
   }, undefined, { executionBackend: 'in-process' });
 }, 120_000);
 
-test('independent Git folder and executor selection survives chat changes and owns Commit and PR requests', async () => {
+test('independent Git folder and executor selection survives chat changes and owns Commit requests', async () => {
   await withChromiumFixture('git-independent-executor-selection', async ({ page, integration, assertNoBrowserErrors }, phase) => {
     const { client, dirs, executionDirs, directAgents } = integration;
     await client.put(`/api/v1/api-provider-assignments?executorId=local&apiProviderId=${directAgents.openAi.provider.providerId}`, {});
@@ -54,7 +54,6 @@ test('independent Git folder and executor selection survives chat changes and ow
     await initializeFixtureRepository(executionDirs.project);
     await writeFile(join(dirs.project, 'example.txt'), 'Local project change\n');
     await writeFile(join(executionDirs.project, 'example.txt'), 'Worker project change\n');
-    await writeFile(join(dirs.project, 'gh-fixture.json'), JSON.stringify({ label: 'local-review' }));
     const alternate = join(executionDirs.project, 'alternate');
     await mkdir(alternate);
     await initializeFixtureRepository(alternate);
@@ -99,14 +98,6 @@ test('independent Git folder and executor selection survives chat changes and ow
     expect(await runFixtureGit(dirs.project, 'show', ':example.txt')).toBe('initial\n');
     expect(await runFixtureGit(executionDirs.project, 'show', ':example.txt')).toBe('initial\n');
 
-    phase('PR capability and requests follow its own selected executor');
-    await clickWorkspaceWindowAddAction(page, 'Open Pull Requests');
-    const pr = surface(page, 'pull-requests');
-    await pr.locator('[data-pr-list]').getByText('local-review', { exact: false }).first().waitFor();
-    await selectExecutor(page, pr, 'Integration worker');
-    await pr.locator('[data-pr-list]').getByText('worker-review', { exact: false }).first().waitFor();
-    await browserExpect(pr.locator('[data-git-folder-picker]')).toHaveAttribute('title', executionDirs.project);
-
     phase('return restores the actual chat project');
     await page.getByRole('tab', { name: 'Git', exact: true }).click();
     await git.getByRole('button', { name: 'Go to chat project', exact: true }).click();
@@ -118,15 +109,5 @@ test('independent Git folder and executor selection survives chat changes and ow
     assertNoBrowserErrors();
   }, undefined, {
     executionBackend: 'remote-controller-dials', projectRoots: 'separate',
-    resolveServerEnvironment: dirs => ({ PATH: join(dirs.root, 'gh-bin') }),
-    prepareWorkspace: async dirs => {
-      const bin = join(dirs.root, 'gh-bin');
-      await mkdir(bin);
-      await copyFile(new URL('../../../server/remote/__tests__/fixtures/fake-gh.js', import.meta.url), join(bin, 'gh'));
-      await chmod(join(bin, 'gh'), 0o755);
-      await symlink(process.execPath, join(bin, 'bun'));
-      await symlink(Bun.which('git')!, join(bin, 'git'));
-      await writeFile(join(dirs.project, 'gh-fixture.json'), JSON.stringify({ label: 'worker-review' }));
-    },
   });
 }, 120_000);
