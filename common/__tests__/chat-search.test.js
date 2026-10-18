@@ -112,10 +112,21 @@ describe('chat search contracts', () => {
       'PR\u00a0#K\u0130-123', 'foo"#K\u0130-123"', '"PR #K\u0130-123', '#K\u0130-123"',
     ]) {
       const { textTokens } = parseChatSearch(query);
-      expect(compileChatSearchQuery(query, textTokens)).toEqual(compileChatSearchQuery(query));
-      expect(compileChatSearchQuery(query, textTokens).clauses.some((clause) =>
+      const browser = compileChatSearchQuery(query, textTokens);
+      const raw = compileChatSearchQuery(query);
+      expect(browser.clauses.filter((clause) => clause.kind === 'literal'))
+        .toEqual(raw.clauses.filter((clause) => clause.kind === 'literal'));
+      expect(browser.clauses.some((clause) =>
         clause.kind === 'literal' && clause.text.includes('#K\u0130-123'))).toBe(true);
     }
+  });
+
+  it('retains supplied browser spelling for lexical prefixes', () => {
+    const query = '\u1c90\u1c91\u1c92';
+    expect(compileChatSearchQuery(query, parseChatSearch(query).textTokens).clauses).toEqual([{
+      kind: 'all-words',
+      tokens: [{ text: '\u10d0\u10d1\u10d2', normalized: '\u10d0\u10d1\u10d2', match: 'prefix' }],
+    }]);
   });
 
   it('recovers repeated normalized tokens in their original order', () => {
@@ -141,14 +152,16 @@ describe('chat search contracts', () => {
   });
 
   it('separates all unquoted whitespace but retains quoted Unicode whitespace', () => {
-    for (const whitespace of [' ', '\t', '\n', '\r\n', '\u00a0', '\u2003']) {
+    for (const whitespace of [' ', '\t', '\n', '\r\n', '\u00a0', '\u2003', '\u0085', '\ufeff']) {
       const query = `alpha${whitespace}beta`;
       const expected = compileChatSearchQuery('alpha beta');
       expect(compileChatSearchQuery(query)).toEqual(expected);
       expect(compileChatSearchQuery(query, parseChatSearch(query).textTokens)).toEqual(expected);
     }
-    const filter = parseChatSearch('"alpha\u00a0beta"');
-    expect(parseChatSearch(serializeChatFilter(filter))).toEqual(filter);
+    for (const whitespace of ['\u00a0', '\u0085', '\ufeff']) {
+      const filter = parseChatSearch(`"alpha${whitespace}beta"`);
+      expect(parseChatSearch(serializeChatFilter(filter))).toEqual(filter);
+    }
   });
 
   it('parses a correlated search page and rejects malformed relations', () => {

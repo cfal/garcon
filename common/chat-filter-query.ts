@@ -253,7 +253,7 @@ export function serializeChatFilter(spec: ChatFilterSpec): string {
   for (const value of spec.updatedBefore ?? []) parts.push(`updated-before:${value}`);
   for (const value of spec.updatedAfter ?? []) parts.push(`updated-after:${value}`);
   for (const text of spec.textTokens) {
-    parts.push(/\s/u.test(text) ? `"${text}"` : text);
+    parts.push(hasChatFilterWhitespace(text) ? `"${text}"` : text);
   }
   return parts.join(' ');
 }
@@ -374,6 +374,10 @@ function matchesTimeConstraints(
     && (after ?? []).every((limit) => epochMs > Date.parse(limit));
 }
 
+export function hasChatFilterWhitespace(value: string): boolean {
+  return /[\s\p{White_Space}]/u.test(value);
+}
+
 export function tokenizeChatFilter(input: string): ChatFilterTerm[] {
   const tokens: ChatFilterTerm[] = [];
   let current = '';
@@ -407,7 +411,7 @@ export function tokenizeChatFilter(input: string): ChatFilterTerm[] {
       inQuote = true;
       quoteChar = character;
       quoted = true;
-    } else if (/\s/u.test(character)) {
+    } else if (hasChatFilterWhitespace(character)) {
       pushTerm();
     } else {
       current += character;
@@ -429,5 +433,5 @@ function buildHaystack(chat: ChatFilterTarget): string {
 }
 
 function serializeOperatorValue(value: string): string {
-  return /\s/u.test(value) ? `"${value}"` : value;
+  return hasChatFilterWhitespace(value) ? `"${value}"` : value;
 }

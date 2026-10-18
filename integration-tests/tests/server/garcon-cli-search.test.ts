@@ -48,17 +48,18 @@ describe('garcon-cli chat research', () => {
       const unicodeLiterals = ['#K\u0130-123', '/workspace/Cafe\u0301x/file.ts'];
       const quotedFragments = ['"type":"tool_use"', '{"type":"tool_use"}', 'key:"value"'];
       const contents = [
-        'Review #731.',
+        `marker ${'synthetic context '.repeat(100)}Review #731. useful trailing explanation`,
         'Review PR#731.',
         '731: synthetic source line',
         '00:00:00.731Z',
         'Review #7310.',
-        ...unicodeLiterals.map((literal) => `${'='.repeat(600)}${literal}`),
+        ...unicodeLiterals.map((literal) => `${'='.repeat(600)}${literal} useful trailing explanation`),
         'foo PR #K\u0130-123',
         'foo\u0000bar',
         ...quotedFragments,
         'alphabet betamax',
         'alpha beta gamma delta epsilon zeta eta theta iota',
+        '\u10d0\u10d1\u10d2\u10d3\u10d0',
       ];
       const chatIds: string[] = [];
       for (const content of contents) {
@@ -106,9 +107,10 @@ describe('garcon-cli chat research', () => {
         ...[
           'PR\u00a0#K\u0130-123', '"PR #K\u0130-123', '#K\u0130-123"',
           '" #K\u0130-123 "', '"#K\u0130-123 "', 'foo \u00a0 #K\u0130-123',
+          '"PR\u0085#K\u0130-123"',
         ].map((query) => ({ query, chatIndex: 7, snippet: '#K\u0130-123' })),
         ...quotedFragments.map((query, index) => ({ query, chatIndex: 9 + index, snippet: query })),
-        ...['alpha\nbeta', 'alpha\u00a0beta'].map((query) => ({
+        ...['alpha\nbeta', 'alpha\u00a0beta', 'alpha\u0085beta'].map((query) => ({
           query, chatIndex: 12, snippet: 'alphabet',
         })),
         {
@@ -124,6 +126,9 @@ describe('garcon-cli chat research', () => {
         });
         expect(browser.results.map((hit) => hit.chatId)).toEqual([chatId]);
         expect(browser.results[0]!.snippets[0]!.text).toContain(snippet);
+        if (chatIndex === 5 || chatIndex === 6) {
+          expect(browser.results[0]!.snippets[0]!.text).toContain('useful trailing explanation');
+        }
         const cli = await runCli(fixture, ['search', query, '--filter', `id:${chatId}`, '--json']);
         expect(cli).toMatchObject({ exitCode: 0, stderr: '' });
         const result = JSON.parse(cli.stdout);
@@ -131,6 +136,17 @@ describe('garcon-cli chat research', () => {
           .toEqual([chatId]);
         expect(result.results[0].snippets[0].text).toContain(snippet);
       }
+      const mixed = await fixture.client.searchChats({
+        query: 'marker #731', chatIds: [chatIds[0]!], snippetLimit: 1,
+      });
+      expect(mixed.results[0]!.snippets[0]!.text).toContain('#731. useful trailing explanation');
+      const browserPrefixQuery = '\u1c90\u1c91\u1c92';
+      const browserPrefix = await fixture.client.searchChats({
+        query: browserPrefixQuery,
+        textTokens: parseChatSearch(browserPrefixQuery).textTokens,
+        chatIds: [chatIds[14]!],
+      });
+      expect(browserPrefix.results.map((hit) => hit.chatId)).toEqual([chatIds[14]!]);
       const nul = await fixture.client.searchChats({ query: 'foo\u0000bar', chatIds });
       expect(nul.results.map((hit) => hit.chatId)).toEqual([chatIds[8]!]);
       const lexicalBound = await fixture.client.timedSearchChats({

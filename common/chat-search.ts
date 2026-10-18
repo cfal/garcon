@@ -1,4 +1,4 @@
-import { parseChatFilterQuery, tokenizeChatFilter, type ChatFilterTerm } from './chat-filter-query.js';
+import { hasChatFilterWhitespace, parseChatFilterQuery, tokenizeChatFilter, type ChatFilterTerm } from './chat-filter-query.js';
 
 export type ChatSearchSnippetRole = 'user' | 'assistant' | 'tool' | 'system';
 
@@ -240,17 +240,19 @@ export function compileChatSearchQuery(
     }
     terms = textTokens.map((text) =>
       originals.get(text.trim().toLowerCase())?.shift()
-        ?? { text, quoted: /\s/u.test(text), source: text });
+        ?? { text, quoted: hasChatFilterWhitespace(text), source: text });
   } else {
     terms = tokenizeChatFilter(query.trim());
   }
   return {
     version: 1,
-    clauses: terms.map((term): ChatSearchClauseV1 => {
+    clauses: terms.map((term, index): ChatSearchClauseV1 => {
       let text = term.text;
       if (term.quoted && !/^["']/u.test(term.source)) text = term.source;
-      const isLiteral = /[^\p{L}\p{N}\p{M}\p{Cf}\s]/u.test(text);
-      const phrase = term.quoted || /\s/u.test(text);
+      const isLiteral = /[^\p{L}\p{N}\p{M}\p{Cf}\s\p{White_Space}]/u.test(text);
+      // Browser lexical tokens retain the index's existing case-folding behavior.
+      if (!isLiteral) text = textTokens?.[index] ?? text;
+      const phrase = term.quoted || hasChatFilterWhitespace(text);
       const tokens = (text.match(/[\p{L}\p{N}_]+/gu) ?? []).map((text) => ({
         text,
         normalized: text.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase(),
@@ -259,7 +261,7 @@ export function compileChatSearchQuery(
           : 'exact' as const,
       }));
       if (isLiteral) {
-        return { kind: 'literal', text: text.replace(/\s+/gu, ' ').trim(), tokens };
+        return { kind: 'literal', text: text.replace(/[\s\p{White_Space}]+/gu, ' ').trim(), tokens };
       }
       return { kind: phrase ? 'phrase' : 'all-words', tokens };
     }).filter((clause) => clause.tokens.length > 0),

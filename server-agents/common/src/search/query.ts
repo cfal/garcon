@@ -27,6 +27,7 @@ import type { TranscriptSearchOrder } from './worker-protocol.js';
 
 const SNIPPET_PREFIX = '... ';
 const SNIPPET_SUFFIX = ' ...';
+const MAX_SNIPPET_LEADING_CONTEXT_CHARS = 160;
 const MAX_SNIPPET_CHARS = CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS
   - [...SNIPPET_PREFIX].length
   - [...SNIPPET_SUFFIX].length;
@@ -157,12 +158,16 @@ function matchSnippetTerms(
   terms: readonly CompiledTerm[],
 ): SnippetAnchor | null {
   let firstMatch: SnippetAnchor | null = null;
+  let firstLiteralMatch: SnippetAnchor | null = null;
   for (const term of terms) {
     const match = matchSnippetTerm(body, tokens, term);
     if (match === null) continue;
     if (firstMatch === null || match.start < firstMatch.start) firstMatch = match;
+    if (term.literalPattern && (firstLiteralMatch === null || match.start < firstLiteralMatch.start)) {
+      firstLiteralMatch = match;
+    }
   }
-  return firstMatch;
+  return firstLiteralMatch ?? firstMatch;
 }
 
 function publicRole(role: number): ChatSearchSnippetRole {
@@ -188,7 +193,10 @@ function snippetWindow(body: string, tokens: SnippetToken[], firstMatch: Snippet
   );
   const context = [...body.slice(start, anchor.start)];
   const matchLength = [...body.slice(anchor.start, anchor.end)].length;
-  const contextBudget = Math.max(0, MAX_SNIPPET_CHARS - matchLength);
+  const contextBudget = Math.max(0, Math.min(
+    MAX_SNIPPET_LEADING_CONTEXT_CHARS,
+    MAX_SNIPPET_CHARS - matchLength,
+  ));
   const contextStart = Math.max(0, context.length - contextBudget);
   const raw = context.slice(contextStart).join('') + body.slice(anchor.start, end);
   const normalized = raw.replace(/\s+/g, ' ').trim();
@@ -208,7 +216,8 @@ function compileLiteralPattern(clause: ChatSearchClauseV1, words: readonly strin
       || clause.tokens.some((token) => token.match !== 'exact')) {
     throw new RangeError('Transcript search literal is invalid');
   }
-  const escapedText = clause.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedText = clause.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replaceAll(' ', '[\\s\\p{White_Space}]+');
   const wordCharacter = '[\\p{L}\\p{N}\\p{M}_]';
   const startBoundary = /^[\p{L}\p{N}\p{M}_]/u.test(clause.text) ? `(?<!${wordCharacter})` : '';
   const endBoundary = /[\p{L}\p{N}\p{M}_]$/u.test(clause.text) ? `(?!${wordCharacter})` : '';

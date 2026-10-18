@@ -126,6 +126,34 @@ describe('literal identifier search', () => {
     expect(search('#731').results[1]!.snippets[0]!.text).toBe('#731.');
   });
 
+  test('anchors mixed-clause snippets on the verified literal rather than an earlier word', () => {
+    addChat('wanted', [`marker ${'synthetic context '.repeat(100)}#731 useful trailing explanation`]);
+    const result = searchTranscriptIndexV1(db, {
+      query: compileChatSearchQuery('marker #731'), allowedChats, snippetLimit: 1,
+    });
+    expect(result.results[0]!.snippets).toHaveLength(1);
+    expect(result.results[0]!.snippets[0]!.text).toContain('#731');
+  });
+
+  test.each(['needle', '#731'])(
+    'retains trailing context after %s with a long punctuation prefix', (query) => {
+      addChat('wanted', [`${'='.repeat(600)} ${query} useful trailing explanation`]);
+      const snippet = search(query).results[0]!.snippets[0]!.text;
+      expect(snippet).toContain(`${query} useful trailing explanation`);
+      expect([...snippet].length).toBeLessThanOrEqual(CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS);
+    },
+  );
+
+  test('retains browser lexical case folding without changing literal spelling recovery', () => {
+    addChat('wanted', [projectSearchMessage(new UserMessage('', '\u10d0\u10d1\u10d2\u10d3\u10d0'))!.body]);
+    const query = '\u1c90\u1c91\u1c92';
+    const result = searchTranscriptIndexV1(db, {
+      query: compileChatSearchQuery(query, parseChatSearch(query).textTokens), allowedChats,
+    });
+    expect(result.results.map((hit) => hit.chatId)).toEqual(['wanted']);
+    expect(result.index.resultsTruncated).toBe(false);
+  });
+
   test.each(['#731', 'needle', '/workspace/src/index.ts', 'C++'])(
     'keeps %s visible after long punctuation or word context', (query) => {
       addChat('punctuation', [`${'='.repeat(600)}${query}.`]);
@@ -230,7 +258,7 @@ describe('literal identifier search', () => {
     }
   });
 
-  test.each(['\n', '\u00a0', '\u2003'])(
+  test.each(['\n', '\u00a0', '\u2003', '\u0085'])(
     'keeps unquoted %s-separated prefixes independent across messages', (whitespace) => {
       addChat('wanted', ['alphabet', 'betamax']);
       const query = `alpha${whitespace}beta`;
@@ -242,6 +270,19 @@ describe('literal identifier search', () => {
       }
     },
   );
+
+  test('normalizes Unicode whitespace in literal phrases without requiring an index rebuild', () => {
+    addChat('nel', [projectSearchMessage(new UserMessage('', 'PR\u0085#731'))!.body]);
+    addChat('space', [projectSearchMessage(new UserMessage('', 'PR #731'))!.body]);
+    for (const query of ['"PR\u0085#731"', '"PR #731"']) {
+      for (const textTokens of [undefined, parseChatSearch(query).textTokens]) {
+        const result = searchTranscriptIndexV1(db, {
+          query: compileChatSearchQuery(query, textTokens), allowedChats, order: 'allowlist',
+        });
+        expect(result.results.map((hit) => hit.chatId)).toEqual(['nel', 'space']);
+      }
+    }
+  });
 
   test('keeps internal combining marks intact in literal FTS candidates', () => {
     const query = '/workspace/Cafe\u0301x/file.ts';
