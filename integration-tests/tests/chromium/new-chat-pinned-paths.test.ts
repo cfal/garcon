@@ -43,6 +43,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await trigger.focus();
       await page.keyboard.press('Space');
       await browserExpect(picker).toBeVisible();
+      await browserExpect.poll(() => picker.evaluate(element => element.parentElement?.contains(document.activeElement))).toBe(true);
       await browserExpect(path).toHaveValue(sharedPath);
       await browserExpect(picker.getByRole('group', { name: 'Local', exact: true })).toHaveCount(0);
       const offlinePin = picker.getByRole('button', { name: 'Offline worker: /projects/archive', exact: true });

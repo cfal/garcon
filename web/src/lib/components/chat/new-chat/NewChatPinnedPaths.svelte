@@ -17,6 +17,7 @@
 	const mobile = new MediaQuery('(max-width: 639px)');
 	let open = $state(false);
 	let trigger = $state<HTMLElement | null>(null);
+	let content = $state<HTMLElement | null>(null);
 	// Keeps the focus return target mounted after selection or live pin removal.
 	let pickerVisited = $state(false);
 	const groups = $derived(pins.groups);
@@ -34,7 +35,20 @@
 	async function restoreFocus(event: Event): Promise<void> {
 		event.preventDefault();
 		await tick();
-		trigger?.focus({ preventScroll: true });
+		// Restores focus after the enclosing form's reactive autofocus has settled.
+		requestAnimationFrame(() => {
+			if (!open) trigger?.focus({ preventScroll: true });
+		});
+	}
+
+	async function focusPicker(event: Event): Promise<void> {
+		event.preventDefault();
+		await tick();
+		requestAnimationFrame(() => {
+			if (!open) return;
+			const firstButton = content?.querySelector<HTMLButtonElement>('button:not([disabled])');
+			(firstButton ?? content)?.focus({ preventScroll: true });
+		});
 	}
 </script>
 
@@ -109,6 +123,8 @@
 						}}>{m.chat_new_chat_pinned_paths_other_machines()}</Dialog.Trigger
 					>
 					<Dialog.Content
+						bind:ref={content}
+						onOpenAutoFocus={focusPicker}
 						onCloseAutoFocus={restoreFocus}
 						class="top-auto bottom-0 left-0 max-w-full translate-x-0 translate-y-0 gap-3 rounded-b-none rounded-t-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
 						showCloseButton={false}
@@ -135,6 +151,8 @@
 						}}>{m.chat_new_chat_pinned_paths_other_machines()}</Popover.Trigger
 					>
 					<Popover.Content
+						bind:ref={content}
+						onOpenAutoFocus={focusPicker}
 						getFocusReturnTarget={() => trigger}
 						onCloseAutoFocus={restoreFocus}
 						align="start"

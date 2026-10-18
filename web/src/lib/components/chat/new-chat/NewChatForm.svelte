@@ -244,13 +244,13 @@
 		untrack(() => form.reconcileAgentSelection(selectableAgentIds));
 	});
 
-	// Checks ownership when validation completes without refocusing on unrelated overlay changes.
+	// Focus textarea when path validates successfully, but not while browsing.
 	$effect(() => {
 		if (
 			initialContentReady &&
 			form.validationStatus === 'valid' &&
 			!form.showBrowser &&
-			untrack(canFocusTextarea)
+			canFocusTextarea()
 		) {
 			textareaRef?.focus();
 		}
