@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { parseChatRowTitle } from '../../../common/chat-row-contracts.js';
+import { normalizeScheduledChatTitle } from '../../../common/scheduled-prompts.js';
 import {
   recordsStartupPreferences,
   type StartChatCommandResponse,
@@ -149,7 +150,7 @@ export class StartCommands {
         404,
       );
     }
-    const title = input.origin === 'agent-command' ? parseChatRowTitle(input.title) ?? null : null;
+    const title = requestedStartTitle(input);
     const transcriptSnapshot = input.origin === 'agent-command' ? input.transcriptSnapshot ?? null : null;
     if (transcriptSnapshot) {
       if (parentChatId === null || !Number.isSafeInteger(transcriptSnapshot.ordinal) || transcriptSnapshot.ordinal < 1) {
@@ -487,7 +488,7 @@ function startReplayPayload(
 ): Record<string, unknown> {
   return {
     executorId: effectiveExecutorId(input.executorId),
-    title: input.origin === 'agent-command' ? parseChatRowTitle(input.title) ?? null : null,
+    title: requestedStartTitle(input),
     transcriptSnapshot: input.origin === 'agent-command' ? input.transcriptSnapshot ?? null : null,
     origin: input.origin,
     chatId,
@@ -508,4 +509,12 @@ function startReplayPayload(
     orderedPreambleIds: input.orderedPreambleIds ?? null,
     userMessagePresentation: input.userMessagePresentation ?? null,
   };
+}
+
+function requestedStartTitle(input: ChatStartInput): string | null {
+  if (input.origin === 'agent-command') return parseChatRowTitle(input.title) ?? null;
+  if (input.origin !== 'scheduled' || input.title === undefined) return null;
+  const title = normalizeScheduledChatTitle(input.title);
+  if (title === null) throw new CommandValidationError('VALIDATION_FAILED', 'Invalid scheduled chat title');
+  return title;
 }

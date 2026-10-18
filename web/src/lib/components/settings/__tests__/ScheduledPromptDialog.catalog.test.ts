@@ -84,7 +84,7 @@ it('allows cold existing remote schedules without waiting for inventory and reta
 	expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ prompt: prompt.prompt }));
 	discovery.resolve();
 	await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Save Prompt' }).disabled).toBe(false));
-	expect(screen.getByRole('button', { name: 'Insert {{chat_id}}' })).toBeTruthy();
+	expect(screen.getByRole('button', { name: 'Insert variable' })).toBeTruthy();
 	expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Prompt' }).value).toBe(prompt.prompt);
 });
 

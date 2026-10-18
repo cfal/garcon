@@ -241,6 +241,7 @@ export interface AgentCommandStopInput {
 }
 
 export interface ScheduledChatStartInput {
+  title?: string;
   executorId?: string | null;
   chatId: ChatId;
   clientRequestId: string;
