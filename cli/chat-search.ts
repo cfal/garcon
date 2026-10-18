@@ -223,7 +223,7 @@ export async function runChatSearch(
     if (error instanceof GarconHttpError && error.errorCode === 'SEARCH_TIMEOUT') {
       throw new CliError(
         'chat search',
-        'transcript search timed out before coverage could be reported; rerun the search, try a quoted phrase, or change the metadata filter',
+        'transcript search timed out before coverage could be reported; rerun the search, include nearby words in a quoted phrase, or change the metadata filter',
         3,
         { cause: error },
       );

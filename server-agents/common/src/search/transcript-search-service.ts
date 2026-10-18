@@ -443,6 +443,7 @@ export class TranscriptSearchService {
           allowedChatCount: request.allowedChats.length,
           clauseCount: request.query.clauses.length,
           phraseClauseCount: request.query.clauses.filter((clause) => clause.kind === 'phrase').length,
+          literalClauseCount: request.query.clauses.filter((clause) => clause.kind === 'literal').length,
           order: request.order,
           offset: request.offset,
           limit: request.limit,

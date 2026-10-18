@@ -426,7 +426,7 @@ describe('chat search', () => {
       },
     }, output)).rejects.toMatchObject({
       exitCode: 3,
-      message: expect.stringContaining('timed out before coverage could be reported'),
+      message: 'transcript search timed out before coverage could be reported; rerun the search, include nearby words in a quoted phrase, or change the metadata filter',
     } satisfies Partial<CliError>);
   });
 });
