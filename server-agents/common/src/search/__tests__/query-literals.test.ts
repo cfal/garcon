@@ -149,6 +149,54 @@ describe('literal identifier search', () => {
     expect(result.results.map((hit) => hit.chatId)).toEqual(['wanted']);
   });
 
+  test.each([
+    ['PR\u00a0#K\u0130-123', 'PR #K\u0130-123'],
+    ['foo"#K\u0130-123"', 'foo #K\u0130-123'],
+    ['"PR #K\u0130-123', 'PR #K\u0130-123'],
+    ['#K\u0130-123"', '#K\u0130-123'],
+    ['title:"synthetic #ki\u0307-123 label" #K\u0130-123', '#K\u0130-123'],
+  ])('preserves browser literal spelling for %s', (query, body) => {
+    const projected = projectSearchMessage(new UserMessage('', body))!;
+    addChat('wanted', [projected.body]);
+    const result = searchTranscriptIndexV1(db, {
+      query: compileChatSearchQuery(query, parseChatSearch(query).textTokens),
+      allowedChats,
+    });
+    expect(result.results.map((hit) => hit.chatId)).toEqual(['wanted']);
+    expect(result.index.resultsTruncated).toBe(false);
+  });
+
+  test.each(['- needle in a list item', '# Heading needle', '(#731) fixed'])(
+    'retains short leading punctuation in %s', (body) => {
+      addChat('wanted', [body]);
+      expect(search(body.includes('needle') ? 'needle' : '#731').results[0]!.snippets[0]!.text)
+        .toBe(body);
+    },
+  );
+
+  test('keeps NUL literal verification without passing NUL to FTS syntax', () => {
+    const query = 'foo\u0000bar';
+    addChat('wanted', [projectSearchMessage(new UserMessage('', query))!.body]);
+    addChat('decoy', ['foo bar']);
+    expect(search(query).results.map((hit) => hit.chatId)).toEqual(['wanted']);
+    expect(search('bar').page.total).toBe(2);
+  });
+
+  test('keeps format characters lexical rather than requiring their exact spelling', () => {
+    addChat('spaced', ['\u0645\u06cc \u062e\u0648\u0627\u0647\u0645 soft hyphens']);
+    for (const query of ['\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645', 'soft\u00adhyphen']) {
+      expect(search(query).results.map((hit) => hit.chatId)).toEqual(['spaced']);
+    }
+  });
+
+  test('keeps asterisks literal and supports apostrophes inside double-quoted phrases', () => {
+    addChat('wanted', ["needle* don't stop user's config"]);
+    addChat('decoy', ['needle needles stop config']);
+    for (const query of ['needle*', '"don\'t stop"', '"user\'s config"']) {
+      expect(search(query).results.map((hit) => hit.chatId)).toEqual(['wanted']);
+    }
+  });
+
   test('keeps internal combining marks intact in literal FTS candidates', () => {
     const query = '/workspace/Cafe\u0301x/file.ts';
     addChat('wanted', [query]);

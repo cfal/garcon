@@ -1,3 +1,5 @@
+import { parseChatFilterQuery, tokenizeChatFilter, type ChatFilterTerm } from './chat-filter-query.js';
+
 export type ChatSearchSnippetRole = 'user' | 'assistant' | 'tool' | 'system';
 
 export const CHAT_SEARCH_MAX_TERMS = 16;
@@ -226,48 +228,36 @@ export function compileChatSearchQuery(
   query: string,
   textTokens?: readonly string[],
 ): ChatSearchQueryV1 {
-  const rawTerms = [...query.matchAll(/"([^"]+)"|'([^']+)'|(\S+)/g)].map((match) => ({
-    text: match[1] ?? match[2] ?? match[3] ?? '',
-    phrase: match[1] !== undefined || match[2] !== undefined,
-  }));
-  const originalTexts = new Map<string, string[]>();
-  for (const term of rawTerms) {
-    const key = term.text.toLowerCase();
-    const originals = originalTexts.get(key) ?? [];
-    originals.push(term.text);
-    originalTexts.set(key, originals);
+  let terms: ChatFilterTerm[];
+  if (textTokens?.length) {
+    const originals = new Map<string, ChatFilterTerm[]>();
+    for (const term of parseChatFilterQuery(query).textTerms) {
+      const key = term.text.toLowerCase();
+      const matches = originals.get(key) ?? [];
+      matches.push(term);
+      originals.set(key, matches);
+    }
+    terms = textTokens.map((text) =>
+      originals.get(text.toLowerCase())?.shift() ?? { text, quoted: /\s/u.test(text) });
+  } else {
+    terms = tokenizeChatFilter(query.trim());
   }
-  const quoted = new Map<string, number>();
-  for (const match of query.matchAll(/"([^"]+)"|'([^']+)'/g)) {
-    const value = (match[1] ?? match[2] ?? '').toLowerCase();
-    quoted.set(value, (quoted.get(value) ?? 0) + 1);
-  }
-  const terms = textTokens?.length
-    ? textTokens.map((text) => {
-      const key = text.toLowerCase();
-      const count = quoted.get(key) ?? 0;
-      if (count > 0) quoted.set(key, count - 1);
-      return {
-        text: originalTexts.get(key)?.shift() ?? text,
-        phrase: /\s/u.test(text) || count > 0,
-      };
-    })
-    : rawTerms;
   return {
     version: 1,
     clauses: terms.map((term): ChatSearchClauseV1 => {
-      const isLiteral = /[^\p{L}\p{N}\p{M}\s]/u.test(term.text);
+      const isLiteral = /[^\p{L}\p{N}\p{M}\p{Cf}\s]/u.test(term.text);
+      const phrase = term.quoted || /\s/u.test(term.text);
       const tokens = (term.text.match(/[\p{L}\p{N}_]+/gu) ?? []).map((text) => ({
         text,
         normalized: text.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase(),
-        match: !isLiteral && !term.phrase && [...text].length >= CHAT_SEARCH_MIN_PREFIX_CHARS
+        match: !isLiteral && !phrase && [...text].length >= CHAT_SEARCH_MIN_PREFIX_CHARS
           ? 'prefix' as const
           : 'exact' as const,
       }));
       if (isLiteral) {
         return { kind: 'literal', text: term.text.replace(/\s+/gu, ' ').trim(), tokens };
       }
-      return { kind: term.phrase ? 'phrase' : 'all-words', tokens };
+      return { kind: phrase ? 'phrase' : 'all-words', tokens };
     }).filter((clause) => clause.tokens.length > 0),
   };
 }

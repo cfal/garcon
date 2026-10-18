@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseChatSearch } from '@garcon/common/chat-filter-query';
 import { cliEnvironment } from '../../support/cli-environment.js';
 import {
   type IntegrationFixture,
@@ -52,6 +53,8 @@ describe('garcon-cli chat research', () => {
         '00:00:00.731Z',
         'Review #7310.',
         ...unicodeLiterals.map((literal) => `${'='.repeat(600)}${literal}`),
+        'PR #K\u0130-123',
+        'foo\u0000bar',
       ];
       const chatIds: string[] = [];
       for (const content of contents) {
@@ -95,18 +98,32 @@ describe('garcon-cli chat research', () => {
       expect(new Set(result.results.map((hit: { chatId: string }) => hit.chatId)))
         .toEqual(new Set(chatIds.slice(0, 2)));
       for (const [index, query] of unicodeLiterals.entries()) {
+        const literalChatIds = [chatIds[5 + index]!];
         const browser = await fixture.client.searchChats({
-          query, textTokens: [query.toLowerCase()], chatIds, offset: 0, limit: 20, snippetLimit: 1,
+          query, textTokens: parseChatSearch(query).textTokens, chatIds: literalChatIds,
+          offset: 0, limit: 20, snippetLimit: 1,
         });
         expect(browser.results.map((hit) => hit.chatId)).toEqual([chatIds[5 + index]!]);
         expect(browser.results[0]!.snippets[0]!.text).toContain(query);
-        const cli = await runCli(fixture, ['search', query, '--json']);
+        const cli = await runCli(fixture, ['search', query, '--filter', `id:${literalChatIds[0]}`, '--json']);
         expect(cli).toMatchObject({ exitCode: 0, stderr: '' });
         const result = JSON.parse(cli.stdout);
         expect(result.results.map((hit: { chatId: string }) => hit.chatId))
           .toEqual([chatIds[5 + index]!]);
         expect(result.results[0].snippets[0].text).toContain(query);
       }
+      for (const query of ['PR\u00a0#K\u0130-123', '"PR #K\u0130-123', '#K\u0130-123"']) {
+        const browser = await fixture.client.searchChats({
+          query, textTokens: parseChatSearch(query).textTokens, chatIds: [chatIds[7]!], snippetLimit: 1,
+        });
+        expect(browser.results.map((hit) => hit.chatId)).toEqual([chatIds[7]!]);
+        const cli = await runCli(fixture, ['search', query, '--filter', `id:${chatIds[7]}`, '--json']);
+        expect(cli).toMatchObject({ exitCode: 0, stderr: '' });
+        expect(JSON.parse(cli.stdout).results.map((hit: { chatId: string }) => hit.chatId))
+          .toEqual([chatIds[7]!]);
+      }
+      const nul = await fixture.client.searchChats({ query: 'foo\u0000bar', chatIds });
+      expect(nul.results.map((hit) => hit.chatId)).toEqual([chatIds[8]!]);
     });
   }, 120_000);
 

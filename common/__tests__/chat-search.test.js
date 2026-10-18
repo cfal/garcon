@@ -107,10 +107,37 @@ describe('chat search contracts', () => {
   });
 
   it('recovers original literal spelling from normalized browser tokens', () => {
-    for (const query of ['#K\u0130-123', '"#K\u0130-123"', 'ABC-123 abc-123', '"PR #K\u0130-123"']) {
+    for (const query of [
+      '#K\u0130-123', '"#K\u0130-123"', '"PR #K\u0130-123"',
+      'PR\u00a0#K\u0130-123', 'foo"#K\u0130-123"', '"PR #K\u0130-123', '#K\u0130-123"',
+    ]) {
       const { textTokens } = parseChatSearch(query);
       expect(compileChatSearchQuery(query, textTokens)).toEqual(compileChatSearchQuery(query));
+      expect(compileChatSearchQuery(query, textTokens).clauses.some((clause) =>
+        clause.kind === 'literal' && clause.text.includes('#K\u0130-123'))).toBe(true);
     }
+  });
+
+  it('recovers repeated normalized tokens in their original order', () => {
+    const query = 'ABC-123 abc-123';
+    expect(compileChatSearchQuery(query, parseChatSearch(query).textTokens))
+      .toEqual(compileChatSearchQuery(query));
+  });
+
+  it('does not recover literal spelling from metadata filter values', () => {
+    const query = 'title:"synthetic #ki\u0307-123 label" #K\u0130-123';
+    expect(compileChatSearchQuery(query, parseChatSearch(query).textTokens))
+      .toEqual(compileChatSearchQuery('#K\u0130-123'));
+  });
+
+  it('keeps Unicode format characters lexical and asterisks literal', () => {
+    for (const query of ['\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645', 'soft\u00adhyphen']) {
+      const clause = compileChatSearchQuery(query).clauses[0];
+      expect(clause.kind).toBe('all-words');
+      expect(clause.tokens.some((token) => token.match === 'prefix')).toBe(true);
+    }
+    expect(compileChatSearchQuery('needle*').clauses[0])
+      .toMatchObject({ kind: 'literal', text: 'needle*' });
   });
 
   it('parses a correlated search page and rejects malformed relations', () => {

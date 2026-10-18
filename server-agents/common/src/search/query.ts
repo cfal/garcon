@@ -181,7 +181,7 @@ function snippetWindow(body: string, tokens: SnippetToken[], firstMatch: Snippet
   const anchor = firstMatch ?? { tokenIndex: 0, start: tokens[0].start, end: tokens[0].end };
   const startToken = Math.max(0, anchor.tokenIndex - 8);
   const endToken = Math.min(tokens.length, startToken + 32);
-  const start = Math.min(tokens[startToken].start, anchor.start);
+  const start = startToken === 0 ? 0 : Math.min(tokens[startToken].start, anchor.start);
   const end = Math.max(
     anchor.end,
     endToken === tokens.length ? body.length : tokens[endToken].start,
@@ -247,7 +247,7 @@ function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
     const phraseText = clause.kind === 'literal' ? clause.text : words.join(' ');
     return {
       query: exactPhrase
-        ? escapeFtsWord(phraseText)
+        ? escapeFtsWord(phraseText.replaceAll('\u0000', ' '))
         : words.map((word: string, index: number) => prefixWords[index]
           ? `${escapeFtsWord(word)}*`
           : escapeFtsWord(word)).join(' AND '),

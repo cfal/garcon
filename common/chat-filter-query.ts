@@ -31,6 +31,12 @@ export interface ChatFilterSpec {
 export interface ChatFilterParseResult {
   readonly spec: ChatFilterSpec;
   readonly invalidTokens: readonly string[];
+  readonly textTerms: readonly ChatFilterTerm[];
+}
+
+export interface ChatFilterTerm {
+  readonly text: string;
+  readonly quoted: boolean;
 }
 
 export interface ChatFilterTarget {
@@ -75,10 +81,12 @@ export function isEmptyFilter(spec: ChatFilterSpec): boolean {
 export function parseChatFilterQuery(query: string): ChatFilterParseResult {
   const spec = emptyFilterSpec();
   const invalidTokens: string[] = [];
+  const textTerms: ChatFilterTerm[] = [];
   const raw = query.trim();
-  if (!raw) return { spec, invalidTokens };
+  if (!raw) return { spec, invalidTokens, textTerms };
 
-  for (const token of tokenizeChatFilter(raw)) {
+  for (const term of tokenizeChatFilter(raw)) {
+    const token = term.text;
     const lower = token.toLowerCase();
     if (lower.startsWith('status:')) {
       const value = token.slice(7).trim().toLowerCase();
@@ -144,9 +152,10 @@ export function parseChatFilterQuery(query: string): ChatFilterParseResult {
       continue;
     }
     spec.textTokens.push(lower);
+    textTerms.push(term);
   }
 
-  return { spec, invalidTokens };
+  return { spec, invalidTokens, textTerms };
 }
 
 export function parseChatSearch(query: string): ChatFilterSpec {
@@ -364,36 +373,41 @@ function matchesTimeConstraints(
     && (after ?? []).every((limit) => epochMs > Date.parse(limit));
 }
 
-function tokenizeChatFilter(input: string): string[] {
-  const tokens: string[] = [];
+export function tokenizeChatFilter(input: string): ChatFilterTerm[] {
+  const tokens: ChatFilterTerm[] = [];
   let current = '';
   let inQuote = false;
   let quoteChar = '';
+  let quoted = false;
+  const pushTerm = () => {
+    if (current) tokens.push({ text: current, quoted });
+    current = '';
+    quoted = false;
+  };
   for (const character of input) {
     if (inQuote) {
       if (character === quoteChar) {
         inQuote = false;
-        if (current) tokens.push(current);
-        current = '';
+        pushTerm();
       } else {
         current += character;
       }
     } else if ((character === '"' || character === "'") && (current === '' || current.endsWith(':'))) {
       inQuote = true;
       quoteChar = character;
+      quoted = true;
     } else if (character === '"') {
-      if (current) tokens.push(current);
-      current = '';
+      pushTerm();
       inQuote = true;
       quoteChar = character;
+      quoted = true;
     } else if (character === ' ' || character === '\t') {
-      if (current) tokens.push(current);
-      current = '';
+      pushTerm();
     } else {
       current += character;
     }
   }
-  if (current) tokens.push(current);
+  pushTerm();
   return tokens;
 }
 
