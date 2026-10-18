@@ -71,8 +71,13 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     const connectForm = page.locator('[data-pr-repository-dialog]');
     await connectForm.getByText('Review automatically', { exact: true }).waitFor();
     // Review prompts offer their own tokens, not the scheduled-prompt chat ID.
-    await browserExpect(connectForm.getByRole('button', { name: 'Insert {{pull_request_number}}' })).toBeVisible();
-    await browserExpect(connectForm.getByRole('button', { name: 'Insert {{chat_id}}' })).toHaveCount(0);
+    await connectForm.getByRole('button', { name: 'Insert variable', exact: true }).click();
+    await browserExpect(page.getByRole('menuitem', { name: /\{\{pull_request_number\}\}/ })).toBeVisible();
+    await browserExpect(page.getByRole('menuitem', { name: /\{\{repository_url\}\}/ })).toBeVisible();
+    await browserExpect(page.getByRole('menuitem', { name: /\{\{chat_id\}\}/ })).toHaveCount(0);
+    await browserExpect(page.getByRole('menuitem', { name: /\{\{current_date\}\}/ })).toHaveCount(0);
+    await capture('review-prompt-variables-desktop');
+    await page.keyboard.press('Escape');
     await browserExpect(connectForm.getByRole('checkbox', { name: 'Post reviews to GitHub automatically' })).not.toBeChecked();
     await browserExpect(connectForm.getByRole('checkbox', { name: 'Skip bot authors' })).toHaveCount(0);
     await browserExpect(connectForm.getByRole('checkbox', { name: 'Include pull requests from forks' })).toHaveCount(0);
@@ -291,6 +296,7 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
       .inbox.some(entry => entry.pull.number === 140)).toBe(false);
     await page.setViewportSize({ width: 1920, height: 1080 });
     await panel.locator('[data-pr-repositories-button]').click();
+    await repositories.getByRole('button', { name: 'Show all unresolved posts' }).click();
     const reconcile = repositories.locator(`[data-pr-reconcile-run="${recovery.run.id}"]`);
     await browserExpect(reconcile).toBeVisible();
     await reconcile.scrollIntoViewIfNeeded();
@@ -298,6 +304,7 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     await page.keyboard.press('Escape');
     await page.setViewportSize({ width: 390, height: 844 });
     await panel.locator('[data-pr-repositories-button]').click();
+    await repositories.getByRole('button', { name: 'Show all unresolved posts' }).click();
     await reconcile.scrollIntoViewIfNeeded();
     await capture('closed-review-recovery-mobile');
     await reconcile.click();

@@ -159,6 +159,7 @@
 		tokens: Object.values(PULL_REQUEST_REVIEW_PROMPT_TOKENS),
 		help: m.pull_request_repository_prompt_hint({
 			repository: PULL_REQUEST_REVIEW_PROMPT_TOKENS.repository,
+			url: PULL_REQUEST_REVIEW_PROMPT_TOKENS.repositoryUrl,
 			number: PULL_REQUEST_REVIEW_PROMPT_TOKENS.pullRequestNumber,
 			path: PULL_REQUEST_REVIEW_PROMPT_TOKENS.projectPath,
 		}),

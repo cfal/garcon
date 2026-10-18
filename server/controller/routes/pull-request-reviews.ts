@@ -2,12 +2,29 @@ import type {
   PullRequestReviewMutationResponse,
   PullRequestReviewRunMutationResponse,
   PullRequestReviewRunsResponse,
+  PullRequestReviewRunDetailResponse,
+  PullRequestReviewRecoveryResponse,
 } from '../../../common/pull-request-reviews.js';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { withJsonBody } from '../lib/json-route.js';
 import { reviewInvalid } from '../pull-request-reviews/errors.js';
 import type { PullRequestReviewsRuntime } from '../pull-request-reviews/setup.js';
+import type { ReviewRunCursor } from '../pull-request-reviews/store.js';
+
+function pageCursor(value: string | null): ReviewRunCursor | null {
+  if (value === null) return null;
+  if (value.length > 512) throw reviewInvalid('cursor is invalid');
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed) && parsed.length === 2 && typeof parsed[0] === 'string'
+      && parsed[0].length <= 32 && Number.isFinite(Date.parse(parsed[0]))
+      && typeof parsed[1] === 'number' && Number.isSafeInteger(parsed[1]) && parsed[1] > 0) {
+      return { createdAt: parsed[0], sequence: parsed[1] };
+    }
+  } catch { /* Invalid cursor input is rejected below. */ }
+  throw reviewInvalid('cursor is invalid');
+}
 
 function requiredId(value: unknown, field: string): string {
   if (typeof value !== 'string' || !value || value.length > 128) throw reviewInvalid(`${field} is required`);
@@ -62,14 +79,24 @@ export default function createPullRequestReviewRoutes(reviews: PullRequestReview
       })),
     },
     '/api/v1/pull-request-reviews/runs': {
-      GET: (_request, url) => guarded(() => Response.json({
-        runs: reviews.service.runs(requiredId(url.searchParams.get('repositoryId'), 'repositoryId'), requiredNumber(url.searchParams.get('number'))),
-      } satisfies PullRequestReviewRunsResponse)),
+      GET: (_request, url) => guarded(() => Response.json(reviews.service.runs(
+        requiredId(url.searchParams.get('repositoryId'), 'repositoryId'), requiredNumber(url.searchParams.get('number')), pageCursor(url.searchParams.get('cursor')),
+      ) satisfies PullRequestReviewRunsResponse)),
       POST: withJsonBody((raw) => guarded(() => {
         const request = body(raw);
         const run = reviews.service.review(requiredId(request.repositoryId, 'repositoryId'), requiredNumber(request.number));
         return Response.json({ ...mutation(), run } satisfies PullRequestReviewRunMutationResponse, { status: 201 });
       })),
+    },
+    '/api/v1/pull-request-reviews/runs/detail': {
+      GET: (_request, url) => guarded(() => Response.json({
+        run: reviews.service.runDetail(requiredId(url.searchParams.get('runId'), 'runId')),
+      } satisfies PullRequestReviewRunDetailResponse)),
+    },
+    '/api/v1/pull-request-reviews/runs/recovery': {
+      GET: (_request, url) => guarded(() => Response.json(reviews.service.recoveryRuns(
+        pageCursor(url.searchParams.get('cursor')),
+      ) satisfies PullRequestReviewRecoveryResponse)),
     },
     '/api/v1/pull-request-reviews/runs/stop': {
       POST: withJsonBody((raw) => guarded(async () => {

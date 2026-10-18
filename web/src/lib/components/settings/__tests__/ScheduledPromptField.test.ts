@@ -28,7 +28,7 @@ describe('ScheduledPromptField', () => {
 	it('does not insert into a draft that changed while the variable menu was open', async () => {
 		const { rerender, onPromptChange, onPromptKeydown } = renderField();
 		await fireEvent.click(screen.getByRole('button', { name: 'Insert variable' }));
-		await rerender({ prompt: 'A newer draft', promptError: null, targetType: 'new-chat', surface: 'standalone', onPromptChange, onPromptKeydown });
+		await rerender({ prompt: 'A newer draft', promptError: null, variables: scheduledPromptVariables('new-chat'), surface: 'standalone', onPromptChange, onPromptKeydown });
 		await fireEvent.click(await screen.findByRole('menuitem', { name: /Current date \(UTC\)/ }));
 		expect(onPromptChange).not.toHaveBeenCalled();
 		expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe('A newer draft');

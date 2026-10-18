@@ -2,9 +2,11 @@ import { afterEach, beforeEach, expect, it } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { watch } from 'node:fs';
 import { createGhOperations } from '../gh-service.js';
 
 const repository = {host: "git.example.invalid", nameWithOwner: "synthetic/repository"};
+const expectedPull = { state: "open", headRefOid: "a".repeat(40) };
 const actor = {id: "actor:synthetic", login: "synthetic"};
 let root;
 let originalPath;
@@ -20,6 +22,41 @@ beforeEach(async () => {
 afterEach(async () => {
   process.env.PATH = originalPath;
   await fs.rm(root, { recursive: true, force: true });
+});
+
+for (const change of [{ state: 'CLOSED' }, { state: 'MERGED' }, { headRefOid: 'b'.repeat(40) }]) {
+  it(`rechecks the pull request after a held posting-actor preflight: ${JSON.stringify(change)}`, async () => {
+    const config = { label: 'synthetic', holdPostingActor: true, pulls: [{ number: 1 }] };
+    const fixture = path.join(root, 'gh-fixture.json');
+    await fs.writeFile(fixture, JSON.stringify(config));
+    const started = Promise.withResolvers();
+    const watcher = watch(root, (_event, file) => { if (file === 'gh-actor-started') started.resolve(); });
+    const posting = createGhOperations(root).createPullRequestComment({
+      projectPath: root, repository, actor, number: 1, body: 'Synthetic review', expected: { state: 'open', headRefOid: 'a'.repeat(40) },
+    });
+    const outcome = posting.then(result => result, error => error);
+    try {
+      await started.promise;
+      await fs.writeFile(fixture, JSON.stringify({ ...config, pulls: [{ number: 1, ...change }] }));
+      await fs.writeFile(path.join(root, 'gh-actor-release'), 'released');
+      expect(await outcome).toMatchObject({ code: 'GH_STALE_PULL_REQUEST' });
+      expect(await Bun.file(path.join(root, 'gh-comments.json')).exists()).toBe(false);
+    } finally {
+      watcher.close();
+      await fs.writeFile(path.join(root, 'gh-actor-release'), 'released');
+      await outcome;
+    }
+  });
+}
+
+it('reports an unknown outcome when GitHub accepted the comment before a network failure', async () => {
+  await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({
+    label: 'synthetic', commentFailureAfterWrite: 'Post: connection reset by peer',
+  }));
+  await expect(createGhOperations(root).createPullRequestComment({
+    projectPath: root, repository, actor, number: 1, body: 'Synthetic review', expected: { state: 'open', headRefOid: 'a'.repeat(40) },
+  })).rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
+  expect(JSON.parse(await fs.readFile(path.join(root, 'gh-comments.json'), 'utf8'))).toMatchObject([{ body: 'Synthetic review' }]);
 });
 
 it('lists open pull requests with the inputs review selection needs', async () => {
@@ -45,7 +82,7 @@ it('posts a comment, finds it by marker, and minimizes it', async () => {
   const gh = createGhOperations(root);
   // Longer than one argument may be, so it can only arrive through standard input.
   const body = `${'review line\n'.repeat(5_000)}\n<!-- garcon-review synthetic/repository#3 ${'c'.repeat(40)} -->`;
-  const created = await gh.createPullRequestComment({ projectPath: root, repository, actor, number: 3, body });
+  const created = await gh.createPullRequestComment({ projectPath: root, repository, actor, expected: { ...expectedPull, headRefOid: "c".repeat(40) }, number: 3, body });
   expect(created.url).toContain('/pull/3#issuecomment-');
 
   const target = await gh.getPullRequestReviewTarget({ projectPath: root, repository, actor, number: 3, marker: 'garcon-review synthetic/repository#3 ' });
@@ -81,7 +118,7 @@ for (const [label, commentResponse] of [
 ]) {
   it(`preserves an unknown posting outcome for an unusable reply: ${label}`, async () => {
     await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic', commentResponse }));
-    await expect(createGhOperations(root).createPullRequestComment({ projectPath: root, repository, actor, number: 1, body: 'Synthetic review' }))
+    await expect(createGhOperations(root).createPullRequestComment({ projectPath: root, repository, actor, expected: expectedPull, number: 1, body: 'Synthetic review' }))
       .rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
     const comments = JSON.parse(await fs.readFile(path.join(root, 'gh-comments.json'), 'utf8'));
     expect(comments).toMatchObject([{ body: 'Synthetic review' }]);
@@ -92,7 +129,7 @@ it('recovers a delivered SHA-256 review comment after repository casing changes'
   const head = 'c'.repeat(64);
   await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'Synthetic', login: 'synthetic', repository: 'Repository', pulls: [{ number: 3, headRefOid: head }] }));
   const gh = createGhOperations(root);
-  const created = await gh.createPullRequestComment({ projectPath: root, repository, actor, number: 3, body: `Review\n<!-- garcon-review Synthetic/Repository#3 ${head} -->` });
+  const created = await gh.createPullRequestComment({ projectPath: root, repository, actor, expected: { ...expectedPull, headRefOid: head }, number: 3, body: `Review\n<!-- garcon-review Synthetic/Repository#3 ${head} -->` });
   const retry = await gh.getPullRequestReviewTarget({ projectPath: root, repository, actor, number: 3, marker: 'garcon-review synthetic/repository#3 ' });
   expect(retry.markedComments).toMatchObject([{ id: created.id, marker: expect.stringContaining(head) }]);
 });
@@ -148,7 +185,7 @@ for (const expected of [{ host: "another.example.invalid", nameWithOwner: "synth
     const gh = createGhOperations(root);
     await expect(gh.getPullRequestReviewTarget({ projectPath: root, repository: expected, number: 1, marker: "garcon-review " })).rejects.toThrow(/repository.*changed/i);
     await expect(gh.getPullRequest({ projectPath: root, repository: expected, number: 1 })).rejects.toThrow(/repository.*changed/i);
-    await expect(gh.createPullRequestComment({ projectPath: root, repository: expected, actor, number: 1, body: "Review" })).rejects.toThrow(/repository.*changed/i);
+    await expect(gh.createPullRequestComment({ projectPath: root, repository: expected, actor, expected: expectedPull, number: 1, body: "Review" })).rejects.toThrow(/repository.*changed/i);
     expect(await Bun.file(`${root}/gh-comments.json`).exists()).toBe(false);
   });
 }
@@ -158,7 +195,7 @@ it("rejects checkout retargeting between target read and comment dispatch", asyn
   const gh = createGhOperations(root);
   await gh.getPullRequestReviewTarget({ projectPath: root, repository, number: 1, marker: "garcon-review " });
   await Bun.write(`${root}/gh-fixture.json`, JSON.stringify({ label: "other" }));
-  await expect(gh.createPullRequestComment({ projectPath: root, repository, actor, number: 1, body: "Review" })).rejects.toThrow(/repository.*changed/i);
+  await expect(gh.createPullRequestComment({ projectPath: root, repository, actor, expected: expectedPull, number: 1, body: "Review" })).rejects.toThrow(/repository.*changed/i);
   expect(await Bun.file(`${root}/gh-comments.json`).exists()).toBe(false);
 });
 
@@ -167,7 +204,7 @@ it("rejects an account switch between target read and comment dispatch", async (
   const gh = createGhOperations(root);
   await gh.getPullRequestReviewTarget({ projectPath: root, repository, number: 1, marker: "garcon-review " });
   await Bun.write(`${root}/gh-fixture.json`, JSON.stringify({ label: "synthetic", login: "other" }));
-  await expect(gh.createPullRequestComment({ projectPath: root, repository, actor, number: 1, body: "Review" })).rejects.toThrow(/account.*changed/i);
+  await expect(gh.createPullRequestComment({ projectPath: root, repository, actor, expected: expectedPull, number: 1, body: "Review" })).rejects.toThrow(/account.*changed/i);
   expect(await Bun.file(`${root}/gh-comments.json`).exists()).toBe(false);
 });
 
@@ -175,7 +212,7 @@ it("leaves the outcome unknown if auth changes after the actor preflight", async
   const other = { id: "actor:other", login: "other" };
   await Bun.write(`${root}/gh-fixture.json`, JSON.stringify({ label: "synthetic", commentAuthor: other }));
   const gh = createGhOperations(root);
-  await expect(gh.createPullRequestComment({ projectPath: root, repository, actor, number: 1, body: `Review\n<!-- garcon-review synthetic/repository#1 ${"a".repeat(40)} -->` })).rejects.toMatchObject({ code: "GIT_MUTATION_OUTCOME_UNKNOWN" });
+  await expect(gh.createPullRequestComment({ projectPath: root, repository, actor, expected: expectedPull, number: 1, body: `Review\n<!-- garcon-review synthetic/repository#1 ${"a".repeat(40)} -->` })).rejects.toMatchObject({ code: "GIT_MUTATION_OUTCOME_UNKNOWN" });
   const target = await gh.getPullRequestReviewTarget({ projectPath: root, repository, number: 1, marker: "garcon-review " });
   expect(target).toMatchObject({ viewer: actor, markedComments: [{ author: other }] });
 });

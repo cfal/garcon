@@ -13,6 +13,10 @@ import {
 } from '$shared/pull-request-reviews';
 import type { PullRequestSummary } from '$shared/gh';
 import type { PullRequestDetail } from '$lib/api/pull-requests';
+import type {
+	getPullRequestReviewRuns,
+	getPullRequestReviewRun,
+} from '$lib/api/pull-request-reviews';
 
 afterEach(cleanup);
 
@@ -98,12 +102,14 @@ const snapshot: PullRequestReviewsSnapshot = {
 			repositoryId: 'repo',
 			pull: pull(7, { reviewRequest: 'me' }),
 			latestRun: run,
+			historyRevision: 1,
 			autoReview: { kind: 'eligible' },
 		},
 		{
 			repositoryId: 'repo',
 			pull: pull(8, { authoredByViewer: true, isDraft: true }),
 			latestRun: null,
+			historyRevision: 0,
 			autoReview: { kind: 'skipped', reason: 'draft' },
 		},
 	],
@@ -114,6 +120,8 @@ function setup(
 	options: {
 		getRuns?: () => Promise<PullRequestReviewRunDetail[]>;
 		getDetail?: () => Promise<PullRequestDetail>;
+		getPage?: typeof getPullRequestReviewRuns;
+		getRun?: typeof getPullRequestReviewRun;
 		snapshot?: PullRequestReviewsSnapshot;
 	} = {},
 ) {
@@ -129,10 +137,23 @@ function setup(
 	} satisfies PullRequestReviewsApi;
 	const getDetail = vi.fn(options.getDetail ?? (() => new Promise<never>(() => {})));
 	const getRuns = vi.fn(options.getRuns ?? (async () => [run]));
+	const details = new Map<string, PullRequestReviewRunDetail>();
+	const getRun = vi.fn(options.getRun ?? (async (id: string) => details.get(id)!));
 	const controller = new PullRequestsStore({
 		reviews: new PullRequestReviewsStore(api),
 		getDetail,
-		getRuns,
+		getRuns:
+			options.getPage ??
+			(async () => {
+				const rows = await getRuns();
+				for (const entry of rows) details.set(entry.id, entry);
+				return {
+					runs: rows.map(({ review: _review, ...summary }) => summary),
+					nextCursor: null,
+					revision: 1,
+				};
+			}),
+		getRun,
 	});
 	controller.setPresentationVisible(true);
 	const onOpenChat = vi.fn();
@@ -140,10 +161,100 @@ function setup(
 		controller,
 		onOpenChat,
 	});
-	return { api, onOpenChat, controller, getDetail, getRuns };
+	return { api, onOpenChat, controller, getDetail, getRuns, getRun };
 }
 
 describe('PullRequestsPanel', () => {
+	it('keeps selected history and its body when only another repository scan changes the snapshot', async () => {
+		const { controller, getRuns, getRun } = setup();
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await screen.findByText('No actionable findings.');
+		controller.reviews.apply({ ...snapshot, revision: 2 });
+		await waitFor(() => expect(controller.reviews.snapshot?.revision).toBe(2));
+		expect(getRuns).toHaveBeenCalledTimes(1);
+		expect(getRun).toHaveBeenCalledTimes(1);
+	});
+
+	it('loads bounded history pages and fetches a body only when its review is selected', async () => {
+		const older = { ...run, id: 'older', review: 'Selected older body.' };
+		const getPage = vi
+			.fn<typeof getPullRequestReviewRuns>()
+			.mockResolvedValueOnce({ runs: [run], nextCursor: 'next-page', revision: 1 })
+			.mockResolvedValueOnce({ runs: [older], nextCursor: null, revision: 1 });
+		const getRun = vi.fn<typeof getPullRequestReviewRun>(async (id) =>
+			id === older.id ? older : run,
+		);
+		setup({ getPage, getRun });
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await screen.findByText('No actionable findings.');
+		expect(getRun).toHaveBeenCalledTimes(1);
+		await fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+		await waitFor(() =>
+			expect(document.querySelector('[data-pr-review-run="older"]')).not.toBeNull(),
+		);
+		expect(getPage.mock.calls[1][2]?.cursor).toBe('next-page');
+		expect(getRun).toHaveBeenCalledTimes(1);
+		await fireEvent.click(document.querySelector('[data-pr-review-run="older"]')!);
+		await screen.findByText('Selected older body.');
+		expect(getRun).toHaveBeenCalledTimes(2);
+	});
+
+	it('does not publish the body of a review selected before the current one', async () => {
+		const older = { ...run, id: 'older', review: 'Older body.' };
+		const delayed = Promise.withResolvers<PullRequestReviewRunDetail>();
+		const getRun = vi
+			.fn<typeof getPullRequestReviewRun>()
+			.mockReturnValueOnce(delayed.promise)
+			.mockResolvedValue(older);
+		const { controller } = setup({ getRuns: async () => [run, older], getRun });
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await waitFor(() => expect(getRun).toHaveBeenCalledTimes(1));
+		controller.selectRun(older.id);
+		await screen.findByText('Older body.');
+		delayed.resolve(run);
+		await Promise.resolve();
+		expect(screen.queryByText('No actionable findings.')).toBeNull();
+	});
+
+	it('keeps the summary and retries a selected review body read failure', async () => {
+		const getRun = vi
+			.fn<typeof getPullRequestReviewRun>()
+			.mockRejectedValueOnce(new Error('The selected review could not be loaded.'))
+			.mockResolvedValue(run);
+		setup({ getRun });
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await screen.findByText('The selected review could not be loaded.');
+		expect(screen.getByRole('button', { name: 'Post to GitHub' })).toHaveProperty('disabled', true);
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		await screen.findByText('No actionable findings.');
+		expect(screen.getByRole('button', { name: 'Post to GitHub' })).toHaveProperty(
+			'disabled',
+			false,
+		);
+	});
+
+	it('does not let a history page request replace an in-flight revision refresh', async () => {
+		const refresh = Promise.withResolvers<Awaited<ReturnType<typeof getPullRequestReviewRuns>>>();
+		const getPage = vi
+			.fn<typeof getPullRequestReviewRuns>()
+			.mockResolvedValueOnce({ runs: [run], nextCursor: 'old-next-page', revision: 1 })
+			.mockReturnValueOnce(refresh.promise);
+		const { controller } = setup({ getPage, getRun: async () => run });
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await screen.findByText('No actionable findings.');
+		controller.reviews.apply({
+			...snapshot,
+			revision: 2,
+			inbox: [{ ...snapshot.inbox[0], historyRevision: 2 }],
+		});
+		await screen.findByText('Loading review history...');
+		expect(screen.getByRole('button', { name: 'Load more' })).toHaveProperty('disabled', true);
+		await controller.loadMoreRuns();
+		expect(getPage).toHaveBeenCalledTimes(2);
+		refresh.resolve({ runs: [run], nextCursor: 'new-next-page', revision: 2 });
+		await waitFor(() => expect(controller.nextRunsCursor).toBe('new-next-page'));
+	});
+
 	it('keeps the inbox review summary while history loads and gates review actions', async () => {
 		const history = Promise.withResolvers<PullRequestReviewRunDetail[]>();
 		const { controller } = setup({ getRuns: () => history.promise });
@@ -183,7 +294,7 @@ describe('PullRequestsPanel', () => {
 			controller.reviews.apply({
 				...snapshot,
 				revision: 2,
-				inbox: [{ ...snapshot.inbox[0], latestRun: waiting }],
+				inbox: [{ ...snapshot.inbox[0], latestRun: waiting, historyRevision: 2 }],
 			});
 			await screen.findByText('Loading review history...');
 			expect(controller.shownRun).toMatchObject({ id: latestId, state: 'needs-input' });
@@ -193,7 +304,7 @@ describe('PullRequestsPanel', () => {
 			expect(controller.shownRun).toMatchObject({ id: latestId, state: 'needs-input' });
 			if (latestId !== run.id) {
 				expect(screen.queryByText('No actionable findings.')).toBeNull();
-				controller.selectedRunId = run.id;
+				controller.selectRun(run.id);
 				await screen.findByText('No actionable findings.');
 			}
 		},
@@ -258,7 +369,7 @@ describe('PullRequestsPanel', () => {
 		});
 		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
 		await screen.findByText('Latest review.');
-		controller.selectedRunId = run.id;
+		controller.selectRun(run.id);
 		await screen.findByText('Earlier review.');
 		api.post.mockImplementationOnce(async () => {
 			older = {
@@ -269,7 +380,7 @@ describe('PullRequestsPanel', () => {
 					commentUrl: 'https://github.com/acme/app/pull/7#issuecomment-1',
 				},
 			};
-			return { ...initial, revision: 2 };
+			return { ...initial, revision: 2, inbox: [{ ...initial.inbox[0], historyRevision: 2 }] };
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Post to GitHub' }));
 		await screen.findByRole('link', { name: 'View the posted comment' });
@@ -311,7 +422,8 @@ describe('PullRequestsPanel', () => {
 		const controller = new PullRequestsStore({
 			reviews,
 			getDetail,
-			getRuns: vi.fn(async () => [run]),
+			getRuns: vi.fn(async () => ({ runs: [run], nextCursor: null, revision: 1 })),
+			getRun: vi.fn(async () => run),
 		});
 		controller.setPresentationVisible(true);
 		controller.select(snapshot.inbox[0]);

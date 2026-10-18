@@ -29,7 +29,7 @@ export interface GhRequests {
   listPullRequests: { projectPath: string; repository?: GhRepositoryIdentity };
   getPullRequest: { projectPath: string; repository: GhRepositoryIdentity; number: number };
   getPullRequestReviewTarget: { projectPath: string; repository: GhRepositoryIdentity; number: number; marker: string };
-  createPullRequestComment: { projectPath: string; repository: GhRepositoryIdentity; actor: GhActorIdentity; number: number; body: string };
+  createPullRequestComment: { projectPath: string; repository: GhRepositoryIdentity; actor: GhActorIdentity; number: number; body: string; expected: { state: 'open'; headRefOid: string } };
   minimizePullRequestComment: { projectPath: string; repository: GhRepositoryIdentity; actor: GhActorIdentity; commentId: string };
 }
 

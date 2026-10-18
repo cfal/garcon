@@ -73,9 +73,9 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         id: 'comment-1', url: expect.any(String), number: 7,
         body: `No findings.\n\nReviewed commit: ${HEAD}\n\n<!-- garcon-review synthetic-worker/repository#7 ${HEAD} -->`,
       });
-      const [stored] = (await fixture.client.get<{ runs: { review: string }[] }>(
-        `/api/v1/pull-request-reviews/runs?repositoryId=${repository.id}&number=7`,
-      )).runs;
+      const { run: stored } = await fixture.client.get<{ run: { review: string } }>(
+        `/api/v1/pull-request-reviews/runs/detail?runId=${posted!.id}`,
+      );
       expect(stored.review).toBe(`No findings.\n\nReviewed commit: ${HEAD}\n`);
 
       await writeFile(fixturePath, JSON.stringify({ label: 'synthetic-worker', pulls: [{ number: 7, headRefOid: NEXT_HEAD }] }));

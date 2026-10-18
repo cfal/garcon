@@ -30,6 +30,7 @@ export const PULL_REQUEST_REVIEW_PROMPT_MAX_LENGTH = 32_000;
 export const PULL_REQUEST_REVIEW_MAX_REPOSITORIES = 50;
 export const PULL_REQUEST_REVIEW_MAX_FILTER_VALUES = 20;
 export const PULL_REQUEST_REVIEW_RECENT_RUN_LIMIT = 100;
+export const PULL_REQUEST_REVIEW_RUN_PAGE_SIZE = 20;
 export const PULL_REQUEST_REVIEW_SCAN_INTERVAL_MINUTES = 5;
 // Reviews running at once across the workspace; each repository runs one at a time.
 export const PULL_REQUEST_REVIEW_MAX_RUNNING = 2;
@@ -38,11 +39,12 @@ export const PULL_REQUEST_REVIEW_PERMISSION_TIMEOUT_MINUTES = 30;
 
 export const PULL_REQUEST_REVIEW_PROMPT_TOKENS = {
   repository: '{{repository}}',
+  repositoryUrl: '{{repository_url}}',
   pullRequestNumber: '{{pull_request_number}}',
   projectPath: '{{project_path}}',
 } as const;
 
-const PROMPT_VARIABLES = ['repository', 'pull_request_number', 'project_path'] as const;
+const PROMPT_VARIABLES = ['repository', 'repository_url', 'pull_request_number', 'project_path'] as const;
 
 export const DEFAULT_PULL_REQUEST_REVIEW_PROMPT = [
   'Review {{repository}}#{{pull_request_number}} comprehensively.',
@@ -54,7 +56,7 @@ export const DEFAULT_PULL_REQUEST_REVIEW_PROMPT = [
   'In your final response, output only the comprehensive review summary and nothing else.',
   'Include exactly one line in the final response in this form: Reviewed commit: <full-commit-sha>.',
   'Report findings by severity with a concrete fix and precise code links. If there are no actionable findings, say so clearly.',
-  'Every code link in the final response must be an absolute GitHub URL pinned to the reviewed commit, in the form https://github.com/{{repository}}/blob/<full-commit-sha>/path/to/file#L10-L20. Never link to a branch or another commit.',
+  'Every code link in the final response must be an absolute GitHub URL pinned to the reviewed commit, in the form {{repository_url}}/blob/<full-commit-sha>/path/to/file#L10-L20. Never link to a branch or another commit.',
 ].join('\n');
 
 export interface PullRequestReviewFilters {
@@ -170,6 +172,7 @@ export type PullRequestAutoReviewStatus =
 export interface PullRequestReviewInboxEntry {
   repositoryId: string;
   pull: PullRequestSummary;
+  historyRevision: number;
   latestRun: PullRequestReviewRun | null;
   autoReview: PullRequestAutoReviewStatus;
 }
@@ -182,7 +185,18 @@ export interface PullRequestReviewsSnapshot {
 }
 
 export interface PullRequestReviewRunsResponse {
-  runs: PullRequestReviewRunDetail[];
+  runs: PullRequestReviewRun[];
+  nextCursor: string | null;
+  revision: number;
+}
+
+export interface PullRequestReviewRecoveryResponse {
+  runs: PullRequestReviewRun[];
+  nextCursor: string | null;
+}
+
+export interface PullRequestReviewRunDetailResponse {
+  run: PullRequestReviewRunDetail;
 }
 
 export interface PullRequestReviewMutationResponse {
@@ -196,12 +210,12 @@ export interface PullRequestReviewRunMutationResponse extends PullRequestReviewM
 
 export function renderPullRequestReviewPrompt(
   template: string,
-  values: { repository: string; number: number; projectPath: string },
+  values: { repository: string; repositoryUrl: string; number: number; projectPath: string },
 ): string {
   return expandTemplate(
     template.trim() ? template : DEFAULT_PULL_REQUEST_REVIEW_PROMPT,
     PROMPT_VARIABLES,
-    { repository: values.repository, pull_request_number: String(values.number), project_path: values.projectPath },
+    { repository: values.repository, repository_url: values.repositoryUrl.replace(/\/$/, ''), pull_request_number: String(values.number), project_path: values.projectPath },
     PULL_REQUEST_REVIEW_PROMPT_MAX_LENGTH,
   );
 }
@@ -210,7 +224,7 @@ export function pullRequestReviewPromptFits(template: string, projectPath: strin
   if (template.length > PULL_REQUEST_REVIEW_PROMPT_MAX_LENGTH) return false;
   try {
     // Sized with the longest repository name and number GitHub allows.
-    renderPullRequestReviewPrompt(template, { repository: 'o'.repeat(140), number: Number.MAX_SAFE_INTEGER, projectPath });
+    renderPullRequestReviewPrompt(template, { repository: 'o'.repeat(140), repositoryUrl: `https://${'h'.repeat(253)}/${'o'.repeat(140)}`, number: Number.MAX_SAFE_INTEGER, projectPath });
     return true;
   } catch (error) {
     if (error instanceof TemplateExpansionTooLongError) return false;

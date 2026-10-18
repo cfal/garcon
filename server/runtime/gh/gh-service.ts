@@ -137,11 +137,16 @@ export function createGhOperations(statusDirectory = process.cwd()): GhOperation
       return readReviewTarget(projectPath, repository, number, marker, signal);
     },
 
-    async createPullRequestComment({ projectPath, repository, actor, number, body, signal }): Promise<PullRequestCommentRef> {
+    async createPullRequestComment({ projectPath, repository, actor, number, body, expected, signal }): Promise<PullRequestCommentRef> {
       assertPullRequestNumber(number);
       await assertAccessibleDirectory(projectPath);
       await resolveCheckoutRepository(projectPath, repository, signal);
       assertGhActor(await readPostingActor(projectPath, repository, signal), actor);
+      const current = await runGhJson<{ state: string; headRefOid: string }>(projectPath,
+        ['pr', 'view', String(number), '--repo', `${repository.host}/${repository.nameWithOwner}`, '--json', 'state,headRefOid'], { signal });
+      if (current.state !== expected.state.toUpperCase() || current.headRefOid !== expected.headRefOid) {
+        throw new GitServiceError('GH_STALE_PULL_REQUEST', 'The pull request is no longer open at the reviewed commit, so this review was not posted.');
+      }
       // The body arrives on stdin because a full-length comment exceeds the size of one argument.
       const { stdout } = await runGhMutation(
         projectPath,

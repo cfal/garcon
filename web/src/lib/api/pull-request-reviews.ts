@@ -6,6 +6,8 @@ import {
 	type PullRequestReviewRun,
 	type PullRequestReviewRunDetail,
 	type PullRequestReviewRunsResponse,
+	type PullRequestReviewRecoveryResponse,
+	type PullRequestReviewRunDetailResponse,
 	type PullRequestReviewsSnapshot,
 } from '$shared/pull-request-reviews';
 
@@ -13,7 +15,8 @@ const BASE = '/api/v1/pull-request-reviews';
 
 function snapshotFrom(value: unknown): PullRequestReviewsSnapshot {
 	const snapshot = (value as { snapshot?: unknown } | null)?.snapshot ?? value;
-	if (!isPullRequestReviewsSnapshot(snapshot)) throw new Error('Invalid pull request review response');
+	if (!isPullRequestReviewsSnapshot(snapshot))
+		throw new Error('Invalid pull request review response');
 	return snapshot;
 }
 
@@ -60,12 +63,41 @@ export async function scanPullRequestReviewRepositories(repositoryId?: string): 
 export async function getPullRequestReviewRuns(
 	repositoryId: string,
 	number: number,
-	options?: { signal?: AbortSignal },
-): Promise<PullRequestReviewRunDetail[]> {
+	options?: { signal?: AbortSignal; cursor?: string },
+): Promise<PullRequestReviewRunsResponse> {
 	const query = new URLSearchParams({ repositoryId, number: String(number) });
+	if (options?.cursor) query.set('cursor', options.cursor);
 	const result = await apiGet<PullRequestReviewRunsResponse>(`${BASE}/runs?${query}`, options);
 	if (!Array.isArray(result?.runs)) throw new Error('Invalid pull request review runs response');
-	return result.runs;
+	return result;
+}
+
+export async function getPullRequestReviewRun(
+	runId: string,
+	options?: { signal?: AbortSignal },
+): Promise<PullRequestReviewRunDetail> {
+	const query = new URLSearchParams({ runId });
+	const result = await apiGet<PullRequestReviewRunDetailResponse>(
+		`${BASE}/runs/detail?${query}`,
+		options,
+	);
+	if (result?.run?.id !== runId) throw new Error('Invalid pull request review run response');
+	return result.run;
+}
+
+export async function getPullRequestReviewRecovery(options?: {
+	signal?: AbortSignal;
+	cursor?: string;
+}): Promise<PullRequestReviewRecoveryResponse> {
+	const query = new URLSearchParams();
+	if (options?.cursor) query.set('cursor', options.cursor);
+	const result = await apiGet<PullRequestReviewRecoveryResponse>(
+		`${BASE}/runs/recovery?${query}`,
+		options,
+	);
+	if (!Array.isArray(result?.runs))
+		throw new Error('Invalid pull request review recovery response');
+	return result;
 }
 
 export async function requestPullRequestReview(

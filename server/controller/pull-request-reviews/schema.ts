@@ -12,12 +12,14 @@ export const PULL_REQUEST_REVIEW_SCHEMA = [
   scan_json TEXT NOT NULL,
   pulls_json TEXT NOT NULL,
   executor_id TEXT NOT NULL,
+  repository_host TEXT NOT NULL,
   repository_name TEXT NOT NULL
 ) STRICT`,
-`CREATE UNIQUE INDEX IF NOT EXISTS review_repositories_identity ON review_repositories(executor_id, repository_name)`,
+`CREATE UNIQUE INDEX IF NOT EXISTS review_repositories_identity ON review_repositories(executor_id, repository_host, repository_name)`,
 `CREATE TABLE IF NOT EXISTS review_pulls (
   repository_id TEXT NOT NULL REFERENCES review_repositories(id) ON DELETE CASCADE,
   number INTEGER NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 0,
   closed_at TEXT,
   PRIMARY KEY (repository_id, number)
 ) STRICT`,
@@ -54,4 +56,9 @@ export const PULL_REQUEST_REVIEW_SCHEMA = [
 `CREATE INDEX IF NOT EXISTS review_runs_prunable ON review_runs(repository_id, number)
   WHERE (chat_id IS NULL OR chat_archived = 1) AND state NOT IN ('queued','reviewing','needs-input')
     AND NOT ${PENDING_REVIEW_POST_RECOVERY}`,
+...['INSERT', 'UPDATE', 'DELETE'].map((operation) => `CREATE TRIGGER IF NOT EXISTS review_runs_revision_${operation.toLowerCase()}
+  AFTER ${operation} ON review_runs BEGIN
+    UPDATE review_pulls SET revision = revision + 1
+      WHERE repository_id = ${operation === 'DELETE' ? 'OLD' : 'NEW'}.repository_id AND number = ${operation === 'DELETE' ? 'OLD' : 'NEW'}.number;
+  END`),
 ] as const;

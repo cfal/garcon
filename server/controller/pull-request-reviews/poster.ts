@@ -116,16 +116,20 @@ export class PullRequestReviewPoster {
       }
       // An interruption after durable admission retains the identity needed for reconciliation.
       this.#record(run.id, { status: 'unknown', actor, message: 'GitHub has not confirmed the comment yet.' });
-      const posted = await gh.createPullRequestComment({ projectPath, repository, actor, number: run.number, body });
+      const posted = await gh.createPullRequestComment({ projectPath, repository, actor, number: run.number, body, expected: { state: 'open', headRefOid: reviewedSha } });
       this.#record(run.id, { status: 'posted', actor, commentUrl: posted.url || null, postedAt: new Date(this.deps.now()).toISOString(), message: null });
       await this.#minimizeEarlier(run.id, ownComments, gh, projectPath, repository, actor);
     } catch (error) {
       const savedPost = this.deps.store.getRun(run.id)?.post ?? run.post;
+      if (error instanceof GitServiceError && error.code === 'GH_STALE_PULL_REQUEST') {
+        this.#record(run.id, { status: 'stale', message: error.message }, 'outdated');
+        return;
+      }
       if (savedPost.status === 'posted') {
         this.#record(run.id, { ...savedPost, message: 'The review was posted, but older comments could not be hidden. Retry cleanup.' });
         return;
       }
-      const unknown = run.post.status === 'unknown'
+      const unknown = savedPost.status === 'unknown'
         || error instanceof GitServiceError && error.code === 'GIT_MUTATION_OUTCOME_UNKNOWN';
       this.#record(run.id, unknown
         ? { status: 'unknown', message: 'GitHub did not confirm the comment. Post again to check for it before a new one is sent.' }

@@ -317,6 +317,20 @@ test('the initial schema rejects normalized duplicate repository identities', ()
   expect(store.available).toBe(true);
 });
 
+test('repository uniqueness includes the normalized GitHub host on insert and update', () => {
+  const { store, repository } = harness();
+  const enterprise = { ...repository, id: 'enterprise', url: 'https://git.example.invalid/acme/app' };
+  store.insertRepository(enterprise, { status: 'ok', scannedAt: null, message: null }, []);
+  expect(store.listRepositories()).toHaveLength(2);
+  expect(() => store.insertRepository(
+    { ...enterprise, id: 'duplicate-host', nameWithOwner: 'ACME/APP', url: 'https://GIT.EXAMPLE.INVALID/ACME/APP' },
+    { status: 'ok', scannedAt: null, message: null }, [],
+  )).toThrow('already connected');
+  expect(() => store.updateRepository({ ...enterprise, url: repository.url })).toThrow('already connected');
+  expect(store.getRepository(enterprise.id)?.url).toBe(enterprise.url);
+  expect(store.available).toBe(true);
+});
+
 test('indexed selection preserves head aliases, attempt counts, and active reviews after a push', () => {
   const { store, repository, run, clock } = harness();
   store.insertRun({ ...run, id: 'reviewed-alias', headSha: NEXT_HEAD, reviewedSha: HEAD, state: 'failed',

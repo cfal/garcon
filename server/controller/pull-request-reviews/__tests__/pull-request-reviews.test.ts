@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Database } from 'bun:sqlite';
-import { DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, PULL_REQUEST_REVIEW_MAX_REPOSITORIES, type PullRequestReviewSettings } from '../../../../common/pull-request-reviews.js';
+import { DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, PULL_REQUEST_REVIEW_MAX_REPOSITORIES, PULL_REQUEST_REVIEW_RUN_PAGE_SIZE, type PullRequestReviewSettings } from '../../../../common/pull-request-reviews.js';
 import type { PullRequestSummary } from '../../../../common/gh.js';
 import { PullRequestReviews, type PullRequestReviewsDeps } from '../setup.js';
 import { PullRequestReviewStore } from '../store.js';
@@ -13,6 +13,9 @@ import type { CommandLedgerRecord } from '../../commands/command-ledger.js';
 import type { AgentStopResponse } from '../../../../common/chat-command-contracts.js';
 import { emptyChatExecutionControlState } from '../../../../common/chat-execution-control.js';
 import { GitServiceError } from '../../../../common/git-error.js';
+import createPullRequestReviewRoutes from '../../routes/pull-request-reviews.js';
+import { TURN_RESULT_BYTE_LIMIT } from '../../commands/command-ledger.js';
+import type { PullRequestReviewRunsResponse, PullRequestReviewRecoveryResponse } from '../../../../common/pull-request-reviews.js';
 
 const POSTING_ACTOR = { id: "actor:viewer", login: "viewer" };
 const REPOSITORY = { host: "github.com", nameWithOwner: "acme/app" };
@@ -108,6 +111,143 @@ async function connect(reviews: PullRequestReviews, settings: Partial<PullReques
 
 const latestRun = (reviews: PullRequestReviews) => reviews.snapshot().inbox[0].latestRun;
 
+function seedHistory(directory: string, repositoryId: string, count: number, review: string, unknown = false): void {
+  const database = new Database(join(directory, 'pull-request-reviews.sqlite'));
+  try {
+    database.transaction(() => {
+      database.query('INSERT OR IGNORE INTO review_pulls (repository_id, number) VALUES (?, 7)').run(repositoryId);
+      const insert = database.query(`INSERT INTO review_runs (id, repository_id, number, head_sha, state, created_at, payload_json, review)
+        VALUES (?, ?, 7, ?, 'completed', ?, ?, ?)`);
+      for (let index = 0; index < count; index++) {
+        const at = new Date(Date.parse('2026-01-01T00:00:00Z') + index).toISOString();
+        insert.run(`history-${String(index).padStart(3, '0')}`, repositoryId, HEAD, at, JSON.stringify({
+          title: 'Synthetic change', reviewedSha: HEAD, trigger: 'manual', message: null,
+          chatId: null, turnId: null, chatArchived: true, startedAt: at, finishedAt: at,
+          post: { actor: null, status: unknown ? 'unknown' : 'none', postedAt: null, commentUrl: null, message: null },
+        }), review);
+      }
+    }).immediate();
+  } finally { database.close(); }
+}
+
+test('paginates maximum-size review history without serializing bodies or blocking health requests', async () => {
+  const { reviews, directory } = harness();
+  const repository = await connect(reviews, {});
+  const review = 'x'.repeat(TURN_RESULT_BYTE_LIMIT);
+  seedHistory(directory, repository.id, 50, review);
+  const routes = createPullRequestReviewRoutes({
+    service: reviews, referencesApiProvider: () => false, handleChatRemoved() {}, start() {}, stop() {}, close() {},
+  });
+  const server = Bun.serve({ port: 0, fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === '/health') return new Response('ok');
+    return routes[url.pathname]?.GET?.(request, url) ?? new Response('missing', { status: 404 });
+  } });
+  try {
+    let cursor: string | null = null;
+    const ids: string[] = [];
+    do {
+      const query = new URLSearchParams({ repositoryId: repository.id, number: '7' });
+      if (cursor) query.set('cursor', cursor);
+      const started = performance.now();
+      const [response, health] = await Promise.all([
+        fetch(`${server.url}api/v1/pull-request-reviews/runs?${query}`), fetch(`${server.url}health`),
+      ]);
+      const text = await response.text();
+      expect(health.status).toBe(200);
+      expect(performance.now() - started).toBeLessThan(500);
+      expect(Buffer.byteLength(text)).toBeLessThan(64 * 1024);
+      const page = JSON.parse(text) as PullRequestReviewRunsResponse;
+      expect(page.runs).toHaveLength(Math.min(PULL_REQUEST_REVIEW_RUN_PAGE_SIZE, 50 - ids.length));
+      expect(page.runs.every(run => !('review' in run))).toBe(true);
+      ids.push(...page.runs.map(run => run.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(ids).toHaveLength(50);
+    expect(new Set(ids).size).toBe(50);
+    const detail = await fetch(`${server.url}api/v1/pull-request-reviews/runs/detail?runId=${ids[0]}`);
+    expect((await detail.json()).run.review).toBe(review);
+    const invalid = await fetch(`${server.url}api/v1/pull-request-reviews/runs?repositoryId=${repository.id}&number=7&cursor=malformed`);
+    expect(invalid.status).toBe(400);
+  } finally { await server.stop(true); reviews.close(); }
+}, 30_000);
+
+test('keeps all 101 closed unresolved posts actionable beyond the recent-run cap', async () => {
+  const { reviews, directory } = harness();
+  const repository = await connect(reviews, {});
+  seedHistory(directory, repository.id, 101, `Reviewed commit: ${HEAD}`, true);
+  const store = new PullRequestReviewStore(directory);
+  store.recordScan(repository.id, { status: 'ok', scannedAt: new Date().toISOString(), message: null }, []);
+  try {
+    expect(reviews.snapshot().inbox).toHaveLength(0);
+    expect(reviews.snapshot().recentRuns.some(run => run.id === 'history-000')).toBe(false);
+    expect(() => reviews.remove(repository.id)).toThrow('unconfirmed post');
+    const routes = createPullRequestReviewRoutes({ service: reviews, referencesApiProvider: () => false, handleChatRemoved() {}, start() {}, stop() {}, close() {} });
+    const recovered: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const url = new URL('http://localhost/api/v1/pull-request-reviews/runs/recovery');
+      if (cursor) url.searchParams.set('cursor', cursor);
+      const response = await routes[url.pathname].GET(new Request(url), url);
+      const page = await response.json() as PullRequestReviewRecoveryResponse;
+      recovered.push(...page.runs.map(run => run.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(recovered).toHaveLength(101);
+    expect(recovered.at(-1)).toBe('history-000');
+    // Marker absence after closure settles the oldest unknown without creating a comment.
+    store.updateRun(recovered.at(-1)!, run => ({ ...run, state: 'outdated' }));
+    await reviews.postRun(recovered.at(-1)!);
+    expect(reviews.runDetail('history-000').post.status).not.toBe('unknown');
+    expect(reviews.recoveryRuns().runs.every(run => run.id !== 'history-000')).toBe(true);
+  } finally { store.close(); reviews.close(); }
+});
+
+test('invalidates only the pull request whose review history changed', async () => {
+  const { reviews, directory } = harness();
+  const repository = await connect(reviews, {});
+  seedHistory(directory, repository.id, 1, 'Synthetic review');
+  const store = new PullRequestReviewStore(directory);
+  try {
+    const before = reviews.snapshot().inbox[0].historyRevision;
+    store.recordScan(repository.id, { status: 'ok', scannedAt: new Date().toISOString(), message: null }, [pull()]);
+    expect(reviews.snapshot().inbox[0].historyRevision).toBe(before);
+    store.updateRun('history-000', run => ({ ...run, post: { ...run.post, status: 'posted' } }));
+    expect(reviews.snapshot().inbox[0].historyRevision).toBe(before + 1);
+    expect(reviews.runs(repository.id, 7).revision).toBe(before + 1);
+  } finally { store.close(); reviews.close(); }
+});
+
+test('keeps history pages in newest insertion order when run timestamps tie', async () => {
+  const { reviews, directory } = harness();
+  const repository = await connect(reviews, {});
+  seedHistory(directory, repository.id, 21, 'Synthetic review');
+  const database = new Database(join(directory, 'pull-request-reviews.sqlite'));
+  try { database.query("UPDATE review_runs SET created_at = '2026-01-01T00:00:00.000Z'").run(); }
+  finally { database.close(); }
+  const first = reviews.runs(repository.id, 7);
+  expect(first.runs[0].id).toBe(reviews.snapshot().inbox[0].latestRun?.id);
+  expect(first.runs[0].id).toBe('history-020');
+  const [createdAt, sequence] = JSON.parse(first.nextCursor!);
+  expect(reviews.runs(repository.id, 7, { createdAt, sequence }).runs.map(run => run.id)).toEqual(['history-000']);
+  reviews.close();
+});
+
+test('starts Enterprise reviews with code links to the saved repository host', async () => {
+  const { reviews, deps, starts, turns, github } = harness();
+  const gh = await deps.executors.requireExecutor('local').getGhService();
+  const list = spyOn(gh, 'listPullRequests');
+  list.mockResolvedValue({ executorId: 'local', instanceId: 'instance', pulls: github.pulls,
+    repo: { nameWithOwner: 'acme/app', url: 'https://git.example.invalid/acme/app' }, viewerLogin: 'viewer' });
+  try {
+    await connect(reviews, { autoReview: true });
+    reviews.start();
+    await until(() => turns.has('chat-1'));
+    expect(starts[0].command).toContain('https://git.example.invalid/acme/app/blob/');
+    expect(starts[0].command).not.toContain('github.com');
+  } finally { list.mockRestore(); reviews.close(); }
+});
+
 test('reviews a new pull request automatically and posts the review as a comment', async () => {
   const { reviews, github, turns, starts } = harness();
   await connect(reviews, { autoReview: true, autoPost: true });
@@ -148,7 +288,7 @@ test('invalidates a completed review immediately when its chat is deleted', asyn
     expect(after.revision).toBeGreaterThan(before.revision);
     expect(invalidated).toHaveBeenCalledWith(after.revision);
     expect(after.inbox[0].latestRun).toMatchObject({ state: 'completed', chatId: null, chatAvailable: false });
-    expect(reviews.runs(repository.id, 7)[0]).toMatchObject({
+    expect(reviews.runDetail(before.inbox[0].latestRun!.id)).toMatchObject({
       chatId: null, chatAvailable: false, review: `No findings.\n\nReviewed commit: ${HEAD}`,
     });
 
@@ -330,12 +470,12 @@ test('retains a repository and its review while a comment is being delivered', a
       target: { ...repository.target, executorId: '11111111-1111-4111-8111-111111111111' }, settings: repository.settings,
     })).rejects.toThrow('being posted');
     expect(reviews.snapshot().repositories[0].target).toEqual(repository.target);
-    expect(reviews.runs(repository.id, 7)).toHaveLength(1);
+    expect(reviews.runs(repository.id, 7).runs).toHaveLength(1);
     await expect(reviews.postRun(run.id)).rejects.toThrow('already being posted');
     const another = reviews.review(repository.id, 8);
     await until(() => turns.has('chat-2'));
     turns.get('chat-2')!(`Reviewed commit: ${HEAD}`);
-    await until(() => reviews.runs(repository.id, 8)[0]?.state === 'completed');
+    await until(() => reviews.runs(repository.id, 8).runs[0]?.state === 'completed');
     await expect(reviews.postRun(another.id)).resolves.toMatchObject({ post: { status: 'posted' } });
     expect(() => reviews.remove(repository.id)).toThrow('being posted');
     pending.resolve({ executorId: 'local', instanceId: 'instance', id: 'comment', url: 'https://git.example.invalid/comment' });
@@ -365,7 +505,7 @@ test('keeps an unknown post on its original executor until reconciliation', asyn
       target: repository.target, settings: { ...repository.settings, autoPost: false },
     })).resolves.toMatchObject({ settings: { autoPost: false } });
     expect(() => reviews.remove(repository.id)).toThrow('unconfirmed post');
-    expect(reviews.runs(repository.id, 7)[0]).toMatchObject({ id: run.id, post: { status: 'unknown' } });
+    expect(reviews.runs(repository.id, 7).runs[0]).toMatchObject({ id: run.id, post: { status: 'unknown' } });
     await expect(reviews.postRun(run.id)).resolves.toMatchObject({ post: { status: 'posted' } });
     reviews.remove(repository.id);
     expect(reviews.snapshot().repositories).toEqual([]);
@@ -390,7 +530,7 @@ test('retries failed archival on the next successful scan', async () => {
   service.scan(repository.id);
   await until(() => attempts === 1);
   await new Promise((resolve) => setImmediate(resolve));
-  const run = store.runsForPull(repository.id, 7)[0];
+  const run = store.runsForPull(repository.id, 7).runs[0];
   expect(run.chatArchived).toBe(false);
   service.scan(repository.id);
   await until(() => store.getRun(run.id)?.chatArchived === true);
@@ -456,7 +596,7 @@ test('fails a review whose response names no commit', async () => {
   await until(() => turns.has('chat-1'));
   turns.get('chat-1')!('Looks fine.');
   await until(() => latestRun(reviews)?.state === 'failed');
-  expect(reviews.runs(repository.id, 7)[0]).toMatchObject({ message: 'The review does not name the commit it reviewed.', review: 'Looks fine.' });
+  expect(reviews.runDetail(reviews.runs(repository.id, 7).runs[0].id)).toMatchObject({ message: 'The review does not name the commit it reviewed.', review: 'Looks fine.' });
   reviews.stop();
 });
 
@@ -496,7 +636,7 @@ test('reopens saved repositories and review text without schema version metadata
   const reopened = harness(first.directory);
   try {
     expect(reopened.reviews.snapshot()).toMatchObject({ revision, repositories: [{ id: repository.id }] });
-    expect(reopened.reviews.runs(repository.id, 7)).toMatchObject([{ id: run.id, state: 'completed', review: text }]);
+    expect(reopened.reviews.runDetail(run.id)).toMatchObject({ id: run.id, state: 'completed', review: text });
   } finally { reopened.reviews.close(); }
 });
 
@@ -514,11 +654,11 @@ test('runs one review per repository within the workspace concurrency limit', as
     reviews.review(remote.id, 7);
     await until(() => turns.size === 2);
     expect(starts).toHaveLength(2);
-    expect(reviews.runs(local.id, 8)[0]).toMatchObject({ id: queued.id, state: 'queued', chatId: null });
+    expect(reviews.runs(local.id, 8).runs[0]).toMatchObject({ id: queued.id, state: 'queued', chatId: null });
     turns.get('chat-1')!(`Reviewed commit: ${HEAD}`);
     await until(() => starts.length === 3);
-    expect(reviews.runs(local.id, 7)[0]).toMatchObject({ id: first.id, state: 'completed' });
-    expect(reviews.runs(local.id, 8)[0]).toMatchObject({ id: queued.id, state: 'reviewing', chatId: 'chat-3' });
+    expect(reviews.runs(local.id, 7).runs[0]).toMatchObject({ id: first.id, state: 'completed' });
+    expect(reviews.runs(local.id, 8).runs[0]).toMatchObject({ id: queued.id, state: 'reviewing', chatId: 'chat-3' });
   } finally { reviews.stop(); reviews.close(); }
 });
 
@@ -546,16 +686,16 @@ test('continues scanning other pull requests when a push arrives during a review
     const nextHead = 'b'.repeat(40);
     github.pulls = [pull({ headRefOid: nextHead }), pull({ number: 8 })];
     reviews.scan(repository.id);
-    await until(() => reviews.runs(repository.id, 8).length === 1);
-    expect(reviews.runs(repository.id, 7)).toMatchObject([{ state: 'reviewing', headSha: HEAD }]);
-    expect(reviews.runs(repository.id, 8)).toMatchObject([{ state: 'queued' }]);
+    await until(() => reviews.runs(repository.id, 8).runs.length === 1);
+    expect(reviews.runs(repository.id, 7).runs).toMatchObject([{ state: 'reviewing', headSha: HEAD }]);
+    expect(reviews.runs(repository.id, 8).runs).toMatchObject([{ state: 'queued' }]);
     expect(starts).toHaveLength(1);
 
     turns.get('chat-1')!(`Reviewed commit: ${HEAD}`);
     await until(() => turns.has('chat-2'));
     reviews.scan(repository.id);
-    await until(() => reviews.runs(repository.id, 7).length === 2);
-    expect(reviews.runs(repository.id, 7)).toMatchObject([
+    await until(() => reviews.runs(repository.id, 7).runs.length === 2);
+    expect(reviews.runs(repository.id, 7).runs).toMatchObject([
       { state: 'queued', headSha: nextHead }, { state: 'outdated', reviewedSha: HEAD },
     ]);
   } finally { reviews.stop(); reviews.close(); }
@@ -643,10 +783,10 @@ test('serializes concurrent connects at the repository limit', async () => {
   const database = new Database(join(directory, 'pull-request-reviews.sqlite'));
   try {
     database.transaction(() => {
-      const insert = database.query('INSERT INTO review_repositories VALUES (?, ?, ?, ?, ?, ?)');
+      const insert = database.query('INSERT INTO review_repositories VALUES (?, ?, ?, ?, ?, ?, ?)');
       for (let index = 0; index < PULL_REQUEST_REVIEW_MAX_REPOSITORIES - 1; index++) {
-        const repository = { id: `seed-${index}`, nameWithOwner: `acme/seed-${index}`, target, settings: DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, viewerLogin: 'viewer', url: '', createdAt: '', updatedAt: '' };
-        insert.run(repository.id, JSON.stringify(repository), JSON.stringify({ status: 'ok', scannedAt: null, message: null }), '[]', 'local', repository.nameWithOwner);
+        const repository = { id: `seed-${index}`, nameWithOwner: `acme/seed-${index}`, target, settings: DEFAULT_PULL_REQUEST_REVIEW_SETTINGS, viewerLogin: 'viewer', url: `https://github.com/acme/seed-${index}`, createdAt: '', updatedAt: '' };
+        insert.run(repository.id, JSON.stringify(repository), JSON.stringify({ status: 'ok', scannedAt: null, message: null }), '[]', 'local', 'github.com', repository.nameWithOwner);
       }
     }).immediate();
   } finally { database.close(); }

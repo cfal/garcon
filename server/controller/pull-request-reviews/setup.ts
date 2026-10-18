@@ -1,12 +1,12 @@
-import type { PullRequestReviewRun, PullRequestReviewRunDetail, PullRequestReviewsSnapshot, PullRequestReviewRepository } from '../../../common/pull-request-reviews.js';
+import type { PullRequestReviewRun, PullRequestReviewRunDetail, PullRequestReviewRunsResponse, PullRequestReviewRecoveryResponse, PullRequestReviewsSnapshot, PullRequestReviewRepository } from '../../../common/pull-request-reviews.js';
 import { createLogger } from '../../common/log.js';
 import type { TranscriptCommitEvent } from '../ledger/service.js';
-import { reviewConflict, reviewStorageUnavailable } from './errors.js';
+import { reviewConflict, reviewNotFound, reviewStorageUnavailable } from './errors.js';
 import { PullRequestReviewPoster } from './poster.js';
 import { PullRequestReviewRunner, type PullRequestReviewRunnerDeps } from './runner.js';
 import { PullRequestReviewScanner } from './scanner.js';
 import { PullRequestReviewRepositories, type PullRequestReviewRepositoriesDeps } from './service.js';
-import { PullRequestReviewStore } from './store.js';
+import { PullRequestReviewStore, type ReviewRunCursor } from './store.js';
 
 export interface PullRequestReviewsDeps
   extends Omit<PullRequestReviewRepositoriesDeps, 'store' | 'autoReviewStatus' | 'isPostingRepository' | 'repositoryUpdated' | 'changed' | 'now'>,
@@ -98,9 +98,21 @@ export class PullRequestReviews {
     this.#scanner.requestScan(repositoryId);
   }
 
-  runs(repositoryId: string, number: number): PullRequestReviewRunDetail[] {
+  runs(repositoryId: string, number: number, cursor: ReviewRunCursor | null = null): PullRequestReviewRunsResponse {
     this.#repositories.require(repositoryId);
-    return this.store.runsForPull(repositoryId, number).map((run) => this.#repositories.projectRunDetail(run));
+    const page = this.store.runsForPull(repositoryId, number, cursor);
+    return { ...page, runs: page.runs.map((run) => this.#repositories.projectRun(run)), revision: this.store.pullRunsRevision(repositoryId, number) };
+  }
+
+  runDetail(runId: string): PullRequestReviewRunDetail {
+    const run = this.store.getRun(runId);
+    if (!run) throw reviewNotFound('Review');
+    return this.#repositories.projectRunDetail(run);
+  }
+
+  recoveryRuns(cursor: ReviewRunCursor | null = null): PullRequestReviewRecoveryResponse {
+    const page = this.store.recoveryRuns(cursor);
+    return { ...page, runs: page.runs.map((run) => this.#repositories.projectRun(run)) };
   }
 
   // Reviews the pull request's current head now, regardless of filters and the automatic setting.

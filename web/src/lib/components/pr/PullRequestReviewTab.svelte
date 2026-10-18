@@ -8,7 +8,7 @@
 	import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 	import {
 		isActivePullRequestReviewRun,
-		type PullRequestReviewRunDetail,
+		type PullRequestReviewRun,
 	} from '$shared/pull-request-reviews';
 	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp';
 	import { errorMessage } from '$lib/utils/error-message.js';
@@ -60,7 +60,7 @@
 		return sha ? sha.slice(0, 7) : '';
 	}
 
-	function runSummary(candidate: PullRequestReviewRunDetail): string {
+	function runSummary(candidate: PullRequestReviewRun): string {
 		const age =
 			formatRelativeTimestamp(
 				candidate.finishedAt ?? candidate.startedAt ?? candidate.createdAt,
@@ -102,7 +102,10 @@
 					<button
 						type="button"
 						class="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
-						disabled={pending !== null || historyUnavailable}
+						disabled={pending !== null ||
+							historyUnavailable ||
+							controller.isRunLoading ||
+							controller.runError !== null}
 						onclick={() => act('post', () => controller.reviews.post(run.id))}
 					>
 						<Send class="h-3.5 w-3.5" />
@@ -157,6 +160,18 @@
 					>
 				</div>
 			{/if}
+			{#if controller.runError}
+				<div class="flex flex-wrap items-center gap-2" role="alert">
+					<p class="text-xs text-status-error-foreground">{controller.runError}</p>
+					<button
+						type="button"
+						class="rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent"
+						onclick={() => void controller.loadRun()}>{m.common_retry()}</button
+					>
+				</div>
+			{:else if controller.isRunLoading && !controller.isRunsLoading}
+				<p class="text-xs text-muted-foreground" role="status">{m.common_loading()}</p>
+			{/if}
 			{#if canPost && repository.viewerLogin}
 				<p class="text-xs text-muted-foreground">
 					{m.pull_request_review_posts_as({ login: `@${repository.viewerLogin}` })}
@@ -199,7 +214,7 @@
 			{#if run?.review}
 				<Markdown source={run.review} class="markdown-body prose prose-sm max-w-none text-sm" />
 			{/if}
-			{#if controller.runs.length > 1}
+			{#if controller.runs.length > 1 || controller.nextRunsCursor}
 				<section class="border-t border-border pt-3">
 					<h3 class="mb-1 text-xs font-medium text-muted-foreground">
 						{m.pull_request_review_history()}
@@ -216,7 +231,7 @@
 									)}
 									aria-current={candidate.id === run?.id}
 									data-pr-review-run={candidate.id}
-									onclick={() => (controller.selectedRunId = candidate.id)}
+									onclick={() => controller.selectRun(candidate.id)}
 								>
 									<span class="min-w-0 flex-1 truncate text-muted-foreground"
 										>{runSummary(candidate)}</span
@@ -226,6 +241,17 @@
 							</li>
 						{/each}
 					</ul>
+					{#if controller.nextRunsCursor}
+						<button
+							type="button"
+							class="mt-2 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent disabled:opacity-60"
+							disabled={controller.isRunsLoading || controller.isMoreRunsLoading}
+							onclick={() => void controller.loadMoreRuns()}
+							>{controller.isMoreRunsLoading
+								? m.common_loading()
+								: m.pull_request_review_load_more()}</button
+						>
+					{/if}
 				</section>
 			{/if}
 		</div>

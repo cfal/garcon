@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { watch } from 'node:fs';
 // Synthetic GitHub CLI. Reads `gh-fixture.json` from the working directory and
 // keeps posted comments in `gh-comments.json` beside it so writes can be read back.
 const cwd = process.cwd();
@@ -56,6 +57,14 @@ if (command === 'auth') print({ hosts: { [host]: [{ active: true, state: 'succes
 else if (command === 'repo') print(repo);
 else if (command === 'api' && action === 'graphql') {
   const query = field('query') ?? '';
+  if (query === 'query{viewer{id login}}' && config.holdPostingActor) {
+    const released = Promise.withResolvers();
+    const watcher = watch(cwd, (_event, filename) => { if (filename === 'gh-actor-release') released.resolve(); });
+    try {
+      await Bun.write(`${cwd}/gh-actor-started`, 'ready');
+      if (!await Bun.file(`${cwd}/gh-actor-release`).exists()) await released.promise;
+    } finally { watcher.close(); }
+  }
   if (query.startsWith('mutation')) {
     const comments = await readComments();
     const comment = comments.find(entry => entry.id === field('id')) ?? fail('GraphQL: Could not resolve to a node with the global id.');
@@ -96,6 +105,7 @@ else if (command === 'api' && action === 'graphql') {
   const url = `https://git.example.invalid/${owner}/${repository}/pull/${number}#issuecomment-${comments.length + 1}`;
   comments.push({ id, url, number, body: await Bun.stdin.text(), author: commentActor });
   await Bun.write(commentsFile, JSON.stringify(comments));
+  if (config.commentFailureAfterWrite) fail(config.commentFailureAfterWrite);
   if (config.commentResponse !== undefined) process.stdout.write(config.commentResponse);
   else print({ node_id: id, html_url: url, user: { node_id: commentActor.id, login: commentActor.login } });
 } else if (command === 'api') {

@@ -153,13 +153,13 @@ gh.listPullRequests({ projectPath, repository? }, callOptions)
 gh.getPullRequest({ projectPath, repository, number }, callOptions)
 gh.getPullRequestReviewTarget({ projectPath, repository, number, marker }, callOptions)
   -> repository identity, viewer identity, head commit, state, and marked comments with their authors
-gh.createPullRequestComment({ projectPath, repository, actor, number, body }, callOptions)
+gh.createPullRequestComment({ projectPath, repository, actor, number, body, expected: { state: 'open', headRefOid } }, callOptions)
 gh.minimizePullRequestComment({ projectPath, repository, actor, commentId }, callOptions)
 ```
 
 `listPullRequests` reads the viewer's login and paginates open pull requests, labels, and review requests. Each pull request includes its head commit, fork flag, author association, and whether review is requested from the viewer directly or through a team. Incomplete pagination fails the read. Comment bodies, at most GitHub's 65,536 characters, reach `gh` on standard input. The comment writes are GitHub mutations: they take the mutation admission pool, and an interruption or unconfirmed result after dispatch is `GIT_MUTATION_OUTCOME_UNKNOWN`, never a retry. The controller resolves an unknown post by looking for its marker before posting again.
 
-`repository` binds the GitHub host and owner/name; `actor` carries a stable GitHub user ID and login. Connected reads and mutations address that host/repository explicitly and reject a different live checkout identity. Mutation admission also rechecks the actor. The controller saves the posting actor before dispatch and retains it through reconciliation, so changing the executor's `gh` login cannot duplicate an uncertain post. Browser detail requests carry `repositoryHost` and `repositoryName` alongside the executor, project, and PR number.
+`repository` binds the GitHub host and owner/name; `actor` carries a stable GitHub user ID and login. Connected reads and mutations address that host/repository explicitly and reject a different live checkout identity. Comment creation rechecks the actor, then reads the PR's open state and head immediately before dispatch. A changed state or head returns `GH_STALE_PULL_REQUEST` without posting. The controller saves the posting actor before dispatch and retains it through reconciliation, so changing the executor's `gh` login cannot duplicate an uncertain post. Browser detail requests carry `repositoryHost` and `repositoryName` alongside the executor, project, and PR number.
 
 The service is already acquired from a selected executor. Validate returned executor identity against that selection rather than letting a response retarget a call. `ExecutorCallOptions` carries local abort/deadline plumbing; do not serialize `AbortSignal`, callbacks, `Response`, mutable trace arrays, Maps, or filesystem handles. Return serializable optional diagnostics if needed, and keep HTTP serialization metrics at the controller.
 

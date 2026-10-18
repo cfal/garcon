@@ -1,12 +1,15 @@
 import { afterEach, expect, mock, test } from 'bun:test';
 import type { ExecutionGhService } from '@garcon/server-agent-interface';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, watch } from 'node:fs';
+import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GitServiceError } from '../../../../common/git-error.js';
 import { DEFAULT_PULL_REQUEST_REVIEW_SETTINGS } from '../../../../common/pull-request-reviews.js';
 import { PullRequestReviewPoster } from '../poster.js';
 import { PullRequestReviewStore, type StoredRepository, type StoredRun } from '../store.js';
+import { PullRequestReviewRepositories } from '../service.js';
+import { createGhOperations } from '../../../runtime/gh/gh-service.js';
 
 const REPOSITORY = { host: "github.invalid", nameWithOwner: "acme/app" };
 const ACTOR = { id: "actor-a", login: "viewer" };
@@ -42,15 +45,87 @@ function harness() {
     createPullRequestComment: mock<ExecutionGhService['createPullRequestComment']>(async () => ({ ...scope, id: 'new', url: 'https://github.invalid/new' })),
     minimizePullRequestComment: mock<ExecutionGhService['minimizePullRequestComment']>(async () => ({ ...scope, minimized: true })),
   };
-  const poster = new PullRequestReviewPoster({
-    store, changed() {}, now: () => Date.parse('2026-03-01T00:00:00Z'),
-    executors: { requireExecutor: () => ({ getGhService: async () => ({
+  const executors = { requireExecutor: () => ({ getGhService: async () => ({
       ...gh, getStatus: async () => { throw new Error('Unused'); },
       getPullRequest: async () => { throw new Error('Unused'); }, listPullRequests: async () => { throw new Error('Unused'); },
-    }) }) },
+    }) }) };
+  const poster = new PullRequestReviewPoster({
+    store, executors, changed() {}, now: () => Date.parse('2026-03-01T00:00:00Z'),
   });
-  return { store, poster, gh, scope };
+  const repositories = new PullRequestReviewRepositories({
+    store, executors, changed() {}, now: () => 0, repositoryUpdated() {}, autoReviewStatus: () => null,
+    isPostingRepository: id => poster.isPostingRepository(id), chats: { hasChat: () => true },
+    agents: {
+      hasAgent: () => { throw new Error('Unused'); }, assertExecutorReady() { throw new Error('Unused'); },
+      assertExecutionModeSelectionSupported() { throw new Error('Unused'); }, executionPolicy: () => { throw new Error('Unused'); },
+    },
+  });
+  return { store, poster, gh, scope, directory, repositories };
 }
+
+async function useRuntimeGh({ directory, gh, scope }: ReturnType<typeof harness>) {
+  const bin = join(directory, 'bin');
+  await fs.mkdir(bin);
+  await fs.copyFile(new URL('../../../remote/__tests__/fixtures/fake-gh.js', import.meta.url), join(bin, 'gh'));
+  await fs.chmod(join(bin, 'gh'), 0o755);
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}:${previousPath}`;
+  cleanups.push(() => { process.env.PATH = previousPath; });
+  const runtime = createGhOperations(directory);
+  gh.getPullRequestReviewTarget.mockImplementation(async request => ({ ...scope, ...await runtime.getPullRequestReviewTarget({ ...request, projectPath: directory }) }));
+  gh.createPullRequestComment.mockImplementation(async request => ({ ...scope, ...await runtime.createPullRequestComment({ ...request, projectPath: directory }) }));
+  return { label: 'acme', repository: 'app', host: REPOSITORY.host, login: ACTOR.login, viewerId: ACTOR.id, pulls: [{ number: 7 }] };
+}
+
+test('does not post head A when head B is scanned during the executor actor preflight', async () => {
+  const setup = harness();
+  const { directory, poster, store } = setup;
+  const config = await useRuntimeGh(setup);
+  const fixture = join(directory, 'gh-fixture.json');
+  await fs.writeFile(fixture, JSON.stringify({ ...config, holdPostingActor: true }));
+  const started = Promise.withResolvers<void>();
+  const watcher = watch(directory, (_event, file) => { if (file === 'gh-actor-started') started.resolve(); });
+  const posting = poster.post('run');
+  try {
+    await started.promise;
+    await fs.writeFile(fixture, JSON.stringify({ ...config, pulls: [{ number: 7, headRefOid: 'b'.repeat(40) }] }));
+    store.updateRun('run', current => ({ ...current, state: 'outdated' }));
+    await fs.writeFile(join(directory, 'gh-actor-release'), 'released');
+    await posting;
+    expect(store.getRun('run')).toMatchObject({ state: 'outdated', post: { status: 'stale' } });
+    expect(store.hasUnknownPost('repository')).toBe(false);
+    expect(await Bun.file(join(directory, 'gh-comments.json')).exists()).toBe(false);
+  } finally {
+    watcher.close();
+    await fs.writeFile(join(directory, 'gh-actor-release'), 'released');
+    await posting;
+  }
+});
+
+test('retains a delivered comment after a network error and reconciles after push and closure', async () => {
+  const setup = harness();
+  const { directory, poster, store, repositories, gh } = setup;
+  const config = await useRuntimeGh(setup);
+  const fixture = join(directory, 'gh-fixture.json');
+  await fs.writeFile(fixture, JSON.stringify({ ...config, commentFailureAfterWrite: 'Post: connection reset by peer' }));
+  await poster.post('run');
+  expect(store.getRun('run')?.post).toMatchObject({ status: 'unknown', actor: ACTOR });
+  expect(() => repositories.remove('repository')).toThrow('unconfirmed post');
+  await fs.writeFile(fixture, JSON.stringify({ ...config, pulls: [{ number: 7, state: 'CLOSED', headRefOid: 'b'.repeat(40) }] }));
+  store.updateRun('run', current => ({ ...current, state: 'outdated' }));
+  await poster.post('run');
+  expect(store.getRun('run')).toMatchObject({ state: 'outdated', post: { status: 'posted', actor: ACTOR } });
+  expect(gh.createPullRequestComment).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(await fs.readFile(join(directory, 'gh-comments.json'), 'utf8'))).toHaveLength(1);
+});
+
+test('does not overwrite durable admission when the executor returns an unclassified failure', async () => {
+  const { store, poster, gh, repositories } = harness();
+  gh.createPullRequestComment.mockRejectedValueOnce(new Error('The executor reply was lost'));
+  await poster.post('run');
+  expect(store.getRun('run')?.post).toMatchObject({ status: 'unknown', actor: ACTOR });
+  expect(() => repositories.remove('repository')).toThrow('unconfirmed post');
+});
 
 test('does not publish a delayed target after a newer scan invalidates the review', async () => {
   const { store, poster, gh, scope } = harness();
@@ -142,7 +217,7 @@ test("persists the posting actor before dispatching a comment", async () => {
   const { store, poster, gh, scope } = harness();
   gh.createPullRequestComment.mockImplementationOnce(async (request) => {
     expect(store.getRun("run")?.post).toMatchObject({ status: "unknown", actor: ACTOR });
-    expect(request).toMatchObject({ repository: REPOSITORY, actor: ACTOR });
+    expect(request).toMatchObject({ repository: REPOSITORY, actor: ACTOR, expected: { state: 'open', headRefOid: HEAD } });
     return { ...scope, id: "new", url: "https://github.invalid/new" };
   });
   await poster.post("run");

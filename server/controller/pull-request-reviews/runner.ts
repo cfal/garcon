@@ -222,6 +222,7 @@ export class PullRequestReviewRunner {
         projectPath: target.projectPath,
         command: renderPullRequestReviewPrompt(repository.settings.prompt, {
           repository: repository.nameWithOwner,
+          repositoryUrl: repository.url,
           number: queued.number,
           projectPath: target.projectPath,
         }),

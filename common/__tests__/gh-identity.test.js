@@ -19,7 +19,7 @@ test('GitHub operations require explicit destination and mutation actor identiti
   const requests = [
     ['getPullRequest', { projectPath: '/work/app', repository, number: 7 }],
     ['getPullRequestReviewTarget', { projectPath: '/work/app', repository, number: 7, marker: 'garcon-review ' }],
-    ['createPullRequestComment', { projectPath: '/work/app', repository, actor, number: 7, body: 'Review' }],
+    ['createPullRequestComment', { projectPath: '/work/app', repository, actor, expected: { state: "open", headRefOid: "a".repeat(40) }, number: 7, body: 'Review' }],
     ['minimizePullRequestComment', { projectPath: '/work/app', repository, actor, commentId: 'comment' }],
   ];
   for (const [method, request] of requests) {
@@ -44,4 +44,15 @@ test('reconciliation responses preserve viewer and comment author identities', (
     { ...target, repository: { nameWithOwner: 'acme/app' } },
     { ...target, markedComments: [{ ...comment, author: undefined }] },
   ]) expect(() => validateGhResult('getPullRequestReviewTarget', invalid, scope)).toThrow();
+});
+
+test('comment creation requires the reviewed open head before mutation admission', () => {
+  const request = { projectPath: '/work/app', repository, actor, number: 7, body: 'Review' };
+  for (const headRefOid of ['a'.repeat(40), 'b'.repeat(64)]) {
+    expect(() => validateGhRequest('createPullRequestComment', { ...request, expected: { state: 'open', headRefOid } })).not.toThrow();
+  }
+  for (const expected of [undefined, { state: 'closed', headRefOid: 'a'.repeat(40) }, { state: 'open', headRefOid: 'a'.repeat(41) },
+    { state: 'open', headRefOid: 'main' }, { state: 'open', headRefOid: 'a'.repeat(40), extra: true }]) {
+    expect(() => validateGhRequest('createPullRequestComment', { ...request, expected })).toThrow();
+  }
 });

@@ -1,10 +1,12 @@
 import type { Database } from 'bun:sqlite';
 import { join } from 'node:path';
-import type { PullRequestSummary } from '../../../common/gh.js';
+import type { GhRepositoryIdentity, PullRequestSummary } from '../../../common/gh.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
+import { ghRepositoryIdentity } from '../../../common/gh-identity.js';
 import {
   isActivePullRequestReviewRun,
   PULL_REQUEST_REVIEW_MAX_REPOSITORIES,
+  PULL_REQUEST_REVIEW_RUN_PAGE_SIZE,
   type PullRequestReviewRepository,
   type PullRequestReviewRun,
   type PullRequestReviewRunState,
@@ -29,6 +31,25 @@ export interface StoredRun extends Omit<PullRequestReviewRun, 'chatAvailable'> {
 }
 
 export type StoredRunDetail = StoredRun & { review: string | null };
+
+export interface ReviewRunCursor {
+  createdAt: string;
+  sequence: number;
+}
+
+export interface StoredRunPage {
+  runs: StoredRun[];
+  nextCursor: string | null;
+}
+
+function runPage(rows: (RunRow & { sequence: number })[]): StoredRunPage {
+  const runs = rows.slice(0, PULL_REQUEST_REVIEW_RUN_PAGE_SIZE).map(runFromRow);
+  const last = rows[runs.length - 1];
+  return {
+    runs,
+    nextCursor: rows.length > runs.length && last ? JSON.stringify([last.created_at, last.sequence]) : null,
+  };
+}
 
 export interface ReviewSelectionHistory {
   active: boolean;
@@ -154,26 +175,29 @@ export class PullRequestReviewStore {
     this.#write((database) => {
       const count = database.query<{ count: number }, []>('SELECT count(*) AS count FROM review_repositories').get()!.count;
       if (count >= PULL_REQUEST_REVIEW_MAX_REPOSITORIES) throw reviewConflict(`At most ${PULL_REQUEST_REVIEW_MAX_REPOSITORIES} repositories can be connected.`);
-      this.#assertRepositoryIdentity(database, repository);
-      database.query('INSERT INTO review_repositories (id, payload_json, scan_json, pulls_json, executor_id, repository_name) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(repository.id, JSON.stringify(repository), JSON.stringify(scan), JSON.stringify(pulls), effectiveExecutorId(repository.target.executorId), repository.nameWithOwner.toLowerCase());
+      const identity = this.#assertRepositoryIdentity(database, repository);
+      database.query('INSERT INTO review_repositories (id, payload_json, scan_json, pulls_json, executor_id, repository_host, repository_name) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(repository.id, JSON.stringify(repository), JSON.stringify(scan), JSON.stringify(pulls), effectiveExecutorId(repository.target.executorId), identity.host, identity.nameWithOwner);
     });
   }
 
   updateRepository(repository: StoredRepository): boolean {
     return this.#write((database) => {
-      this.#assertRepositoryIdentity(database, repository);
-      return database.query('UPDATE review_repositories SET payload_json = ?, executor_id = ?, repository_name = ? WHERE id = ?')
-        .run(JSON.stringify(repository), effectiveExecutorId(repository.target.executorId), repository.nameWithOwner.toLowerCase(), repository.id).changes > 0;
+      const identity = this.#assertRepositoryIdentity(database, repository);
+      return database.query('UPDATE review_repositories SET payload_json = ?, executor_id = ?, repository_host = ?, repository_name = ? WHERE id = ?')
+        .run(JSON.stringify(repository), effectiveExecutorId(repository.target.executorId), identity.host, identity.nameWithOwner, repository.id).changes > 0;
     });
   }
 
   // Checks identity under the same immediate transaction as the write; the index also enforces it.
-  #assertRepositoryIdentity(database: Database, repository: StoredRepository): void {
-    const existing = database.query<{ id: string }, [string, string, string]>(
-      'SELECT id FROM review_repositories WHERE executor_id = ? AND repository_name = ? AND id != ?',
-    ).get(effectiveExecutorId(repository.target.executorId), repository.nameWithOwner.toLowerCase(), repository.id);
+  #assertRepositoryIdentity(database: Database, repository: StoredRepository): GhRepositoryIdentity {
+    const identity = ghRepositoryIdentity(repository);
+    if (!identity) throw reviewConflict('The repository has an invalid GitHub identity.');
+    const existing = database.query<{ id: string }, [string, string, string, string]>(
+      'SELECT id FROM review_repositories WHERE executor_id = ? AND repository_host = ? AND repository_name = ? AND id != ?',
+    ).get(effectiveExecutorId(repository.target.executorId), identity.host, identity.nameWithOwner, repository.id);
     if (existing) throw reviewConflict(`${repository.nameWithOwner} is already connected on this executor.`);
+    return identity;
   }
 
   deleteRepository(id: string): boolean {
@@ -244,10 +268,24 @@ export class PullRequestReviewStore {
     });
   }
 
-  runsForPull(repositoryId: string, number: number, limit = 50): StoredRunDetail[] {
-    return this.#read((database) => database.query<RunRow, [string, number, number]>(
-      `SELECT ${RUN_COLUMNS}, review FROM review_runs WHERE repository_id = ? AND number = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`,
-    ).all(repositoryId, number, limit).map((row) => ({ ...runFromRow(row), review: row.review ?? null })));
+  runsForPull(repositoryId: string, number: number, cursor: ReviewRunCursor | null = null): StoredRunPage {
+    return this.#read((database) => runPage(database.query<RunRow & { sequence: number }, [string, number, string, number, number]>(
+      `SELECT ${RUN_COLUMNS}, rowid AS sequence FROM review_runs WHERE repository_id = ? AND number = ?
+        AND (created_at, rowid) < (?, ?) ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+    ).all(repositoryId, number, cursor?.createdAt ?? '\uffff', cursor?.sequence ?? Number.MAX_SAFE_INTEGER, PULL_REQUEST_REVIEW_RUN_PAGE_SIZE + 1)));
+  }
+
+  pullRunsRevision(repositoryId: string, number: number): number {
+    return this.#read((database) => database.query<{ revision: number }, [string, number]>(
+      'SELECT revision FROM review_pulls WHERE repository_id = ? AND number = ?',
+    ).get(repositoryId, number)?.revision ?? 0);
+  }
+
+  recoveryRuns(cursor: ReviewRunCursor | null = null): StoredRunPage {
+    return this.#read((database) => runPage(database.query<RunRow & { sequence: number }, [string, number, number]>(
+      `SELECT ${RUN_COLUMNS}, rowid AS sequence FROM review_runs WHERE ${PENDING_REVIEW_POST_RECOVERY}
+        AND (created_at, rowid) < (?, ?) ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+    ).all(cursor?.createdAt ?? '\uffff', cursor?.sequence ?? Number.MAX_SAFE_INTEGER, PULL_REQUEST_REVIEW_RUN_PAGE_SIZE + 1)));
   }
 
   runsRevision(repositoryId: string): number {

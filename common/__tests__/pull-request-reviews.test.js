@@ -15,9 +15,18 @@ test.each([
 });
 
 test('renders the built-in prompt when the template is blank', () => {
-  const prompt = renderPullRequestReviewPrompt('  ', { repository: 'o/r', number: 12, projectPath: '/work/r' });
+  const prompt = renderPullRequestReviewPrompt('  ', { repository: 'o/r', repositoryUrl: 'https://github.com/o/r', number: 12, projectPath: '/work/r' });
   expect(prompt).toContain('Review o/r#12 comprehensively.');
   expect(prompt).toContain('Perform all work in exactly: /work/r');
+});
+
+test('pins built-in code links to the connected Enterprise repository', () => {
+  const prompt = renderPullRequestReviewPrompt('', {
+    repository: 'o/r', repositoryUrl: 'https://git.example.invalid/o/r', number: 12, projectPath: '/work/r',
+  });
+  expect(prompt).toContain('https://git.example.invalid/o/r/blob/<full-commit-sha>/path/to/file#L10-L20');
+  expect(prompt).not.toContain('github.com');
+  expect(prompt).not.toContain('{{repository_url}}');
 });
 
 test('requires an explicit boolean to opt into automatic posting', () => {

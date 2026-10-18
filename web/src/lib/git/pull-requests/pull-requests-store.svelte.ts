@@ -4,7 +4,10 @@
 // so it shows the last scan immediately instead of waiting on GitHub.
 
 import { getPullRequest, type PullRequestDetail } from '$lib/api/pull-requests.js';
-import { getPullRequestReviewRuns } from '$lib/api/pull-request-reviews.js';
+import {
+	getPullRequestReviewRun,
+	getPullRequestReviewRuns,
+} from '$lib/api/pull-request-reviews.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import { errorMessage } from '$lib/utils/error-message.js';
@@ -13,6 +16,7 @@ import { ghRepositoryIdentity } from '$shared/gh-identity';
 import type {
 	PullRequestReviewInboxEntry,
 	PullRequestReviewRepository,
+	PullRequestReviewRun,
 	PullRequestReviewRunDetail,
 } from '$shared/pull-request-reviews';
 import { groupInbox, inboxEntryKey, type PullRequestInboxGroup } from './pull-request-inbox.js';
@@ -25,6 +29,7 @@ export interface PullRequestsStoreDeps {
 	notifyError?: (message: string) => void;
 	getDetail?: typeof getPullRequest;
 	getRuns?: typeof getPullRequestReviewRuns;
+	getRun?: typeof getPullRequestReviewRun;
 }
 
 export class PullRequestsStore implements PortableSingletonController {
@@ -34,7 +39,7 @@ export class PullRequestsStore implements PortableSingletonController {
 	#detailController: AbortController | null = null;
 	#detailVersion: string | null = null;
 	#runsController: AbortController | null = null;
-	// A snapshot revision also changes when an older history entry is posted.
+	#runController: AbortController | null = null;
 	#runsVersion: number | null = null;
 
 	query = $state('');
@@ -44,9 +49,14 @@ export class PullRequestsStore implements PortableSingletonController {
 	detail = $state<PullRequestDetail | null>(null);
 	isDetailLoading = $state(false);
 	detailError = $state<string | null>(null);
-	runs = $state<PullRequestReviewRunDetail[]>([]);
+	runs = $state<PullRequestReviewRun[]>([]);
+	nextRunsCursor = $state<string | null>(null);
 	isRunsLoading = $state(false);
+	isMoreRunsLoading = $state(false);
 	runsError = $state<string | null>(null);
+	selectedRun = $state<PullRequestReviewRunDetail | null>(null);
+	isRunLoading = $state(false);
+	runError = $state<string | null>(null);
 	// The run shown in the Review tab; null shows the latest.
 	selectedRunId = $state<string | null>(null);
 
@@ -77,15 +87,25 @@ export class PullRequestsStore implements PortableSingletonController {
 
 	get shownRun(): PullRequestReviewRunDetail | null {
 		const latest = this.selectedEntry?.latestRun;
-		const selected = this.runs.find((run) => run.id === this.selectedRunId);
+		const selected = this.selectedRunId
+			? (this.runs.find((run) => run.id === this.selectedRunId) ?? this.selectedRun)
+			: null;
 		if (
 			latest &&
 			(this.isRunsLoading || this.runsError !== null) &&
 			(!selected || selected.id === latest.id)
 		) {
-			return { ...latest, review: this.runs.find((run) => run.id === latest.id)?.review ?? null };
+			return {
+				...latest,
+				review: this.selectedRun?.id === latest.id ? this.selectedRun.review : null,
+			};
 		}
-		return selected ?? this.runs[0] ?? (latest ? { ...latest, review: null } : null);
+		const summary = selected ?? this.runs[0] ?? latest;
+		if (!summary) return null;
+		return {
+			...summary,
+			review: this.selectedRun?.id === summary.id ? this.selectedRun.review : null,
+		};
 	}
 
 	// The inbox does not follow the chat's project.
@@ -119,9 +139,11 @@ export class PullRequestsStore implements PortableSingletonController {
 	clearSelection(): void {
 		this.#detailController?.abort();
 		this.#runsController?.abort();
+		this.#runController?.abort();
 		this.#detailController = null;
 		this.#detailVersion = null;
 		this.#runsController = null;
+		this.#runController = null;
 		this.#runsVersion = null;
 		this.selectedKey = null;
 		this.selectedRunId = null;
@@ -129,8 +151,13 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.detailError = null;
 		this.isDetailLoading = false;
 		this.runs = [];
+		this.nextRunsCursor = null;
+		this.isMoreRunsLoading = false;
 		this.isRunsLoading = false;
 		this.runsError = null;
+		this.selectedRun = null;
+		this.isRunLoading = false;
+		this.runError = null;
 	}
 
 	// Follows scanner changes without publishing detail from an earlier head or executor.
@@ -145,12 +172,49 @@ export class PullRequestsStore implements PortableSingletonController {
 			this.detail = null;
 			void this.loadDetail();
 		}
-		if (this.reviews.snapshot?.revision !== this.#runsVersion) void this.loadRuns();
+		if (entry.historyRevision !== this.#runsVersion) void this.loadRuns();
 	}
 
 	async loadRuns(): Promise<void> {
 		const entry = this.selectedEntry;
-		if (entry) await this.#loadRuns(entry, this.reviews.snapshot?.revision ?? 0);
+		if (entry) await this.#loadRuns(entry, entry.historyRevision);
+	}
+
+	selectRun(runId: string): void {
+		this.selectedRunId = runId;
+		void this.loadRun();
+	}
+
+	async loadRun(): Promise<void> {
+		const id = this.selectedRunId ?? this.runs[0]?.id;
+		if (!id) return;
+		this.#runController?.abort();
+		const controller = new AbortController();
+		this.#runController = controller;
+		this.isRunLoading = true;
+		this.runError = null;
+		this.selectedRun = this.selectedRun?.id === id ? { ...this.selectedRun, review: null } : null;
+		try {
+			const run = await (this.#deps.getRun ?? getPullRequestReviewRun)(id, {
+				signal: controller.signal,
+			});
+			if (controller.signal.aborted) return;
+			this.selectedRun = run;
+		} catch (error) {
+			if (!controller.signal.aborted)
+				this.runError = errorMessage(error, m.pull_request_reviews_load_failed());
+		} finally {
+			if (this.#runController === controller) {
+				this.#runController = null;
+				this.isRunLoading = false;
+			}
+		}
+	}
+
+	async loadMoreRuns(): Promise<void> {
+		const entry = this.selectedEntry;
+		if (entry && this.nextRunsCursor && !this.isRunsLoading && !this.isMoreRunsLoading)
+			await this.#loadRuns(entry, entry.historyRevision, this.nextRunsCursor);
 	}
 
 	async loadDetail(): Promise<void> {
@@ -210,12 +274,18 @@ export class PullRequestsStore implements PortableSingletonController {
 		]);
 	}
 
-	async #loadRuns(entry: PullRequestReviewInboxEntry, version: number): Promise<void> {
+	async #loadRuns(
+		entry: PullRequestReviewInboxEntry,
+		version: number,
+		cursor?: string,
+	): Promise<void> {
+		if (!cursor) this.#runController?.abort();
 		this.#runsController?.abort();
 		const controller = new AbortController();
 		this.#runsController = controller;
 		this.#runsVersion = version;
-		this.isRunsLoading = true;
+		this.isRunsLoading = !cursor;
+		this.isMoreRunsLoading = Boolean(cursor);
 		this.runsError = null;
 		try {
 			const runs = await (this.#deps.getRuns ?? getPullRequestReviewRuns)(
@@ -223,11 +293,14 @@ export class PullRequestsStore implements PortableSingletonController {
 				entry.pull.number,
 				{
 					signal: controller.signal,
+					cursor,
 				},
 			);
 			if (controller.signal.aborted) return;
-			this.runs = runs;
+			this.runs = cursor ? [...this.runs, ...runs.runs] : runs.runs;
+			this.nextRunsCursor = runs.nextCursor;
 			this.runsError = null;
+			if (!cursor) await this.loadRun();
 		} catch (error) {
 			if (controller.signal.aborted) return;
 			this.runsError = errorMessage(error, m.pull_request_reviews_load_failed());
@@ -235,6 +308,7 @@ export class PullRequestsStore implements PortableSingletonController {
 			if (this.#runsController === controller) {
 				this.#runsController = null;
 				this.isRunsLoading = false;
+				this.isMoreRunsLoading = false;
 			}
 		}
 	}

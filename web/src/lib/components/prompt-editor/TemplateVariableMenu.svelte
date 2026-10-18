@@ -71,6 +71,12 @@
 				return m.template_variable_arguments();
 			case 'project_path':
 				return m.template_variable_project_path();
+			case 'repository':
+				return m.template_variable_repository();
+			case 'repository_url':
+				return m.template_variable_repository_url();
+			case 'pull_request_number':
+				return m.template_variable_pull_request_number();
 			default:
 				return `{{${variable}}}`;
 		}

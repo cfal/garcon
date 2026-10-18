@@ -10,8 +10,12 @@ import {
 } from '$shared/pull-request-reviews';
 import { closedRun, makeReviewsSnapshot } from './pull-request-reviews-fixture';
 import PullRequestRepositoriesDialogTestHost from './PullRequestRepositoriesDialogTestHost.svelte';
+import * as reviewApi from '$lib/api/pull-request-reviews';
 
-afterEach(cleanup);
+afterEach(() => {
+	cleanup();
+	vi.restoreAllMocks();
+});
 
 function setup(run: PullRequestReviewRun = closedRun) {
 	const snapshot = makeReviewsSnapshot(run);
@@ -83,4 +87,26 @@ it('retries failed cleanup on a closed pull request and shows a saved cleanup fa
 	await screen.findByText('Cleanup failed. Retry cleanup.');
 	expect(api.post).toHaveBeenCalledWith(cleanupRun.id);
 	expect(screen.getByRole('button', { name: 'Retry cleanup' })).toHaveProperty('disabled', false);
+});
+
+it('loads unresolved posts beyond the recent list and reconciles an older closed review', async () => {
+	const oldest = { ...closedRun, id: 'oldest-hidden', number: 1 };
+	const recovery = vi
+		.spyOn(reviewApi, 'getPullRequestReviewRecovery')
+		.mockResolvedValueOnce({ runs: [closedRun], nextCursor: 'next-page' })
+		.mockResolvedValueOnce({ runs: [oldest], nextCursor: null })
+		.mockResolvedValueOnce({ runs: [], nextCursor: null });
+	const { api } = setup();
+	expect(recovery).not.toHaveBeenCalled();
+	await fireEvent.click(screen.getByRole('button', { name: 'Show all unresolved posts' }));
+	await fireEvent.click(await screen.findByRole('button', { name: 'Load more' }));
+	const row = await waitFor(() => {
+		const found = document.querySelector('[data-pr-recent-run="oldest-hidden"]');
+		expect(found).not.toBeNull();
+		return found!;
+	});
+	expect(recovery.mock.calls[1][0]?.cursor).toBe('next-page');
+	await fireEvent.click(row.querySelector('button')!);
+	await waitFor(() => expect(api.post).toHaveBeenCalledWith('oldest-hidden'));
+	await screen.findByText('No unresolved posts.');
 });

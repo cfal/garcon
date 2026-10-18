@@ -20,8 +20,9 @@ and viewing recent reviews.
    a GitHub repository, plus the new-chat selection (agent, model, permission
    mode, effort, tags, preambles) its reviews start with. Connecting runs
    `gh` on that executor to resolve `owner/name` and the login it acts as. A
-   folder that is not a checkout, or a repository already connected on the
-   same executor, is refused.
+   folder that is not a checkout, or the same host and repository already
+   connected on the same executor, is refused. Matching owner/name pairs on
+   different GitHub hosts are separate connections.
 2. **Scan.** Every 5 minutes, and at once after a connect, edit, or Scan now,
    the controller lists the repository's open pull requests through the
    executor's `gh`. An unreachable executor marks the repository paused and
@@ -63,7 +64,7 @@ archived.
 The controller posts, never the agent, through the repository executor's `gh`
 login. The saved GitHub host and owner/name identify every detail read and post;
 a checkout retargeted to another repository or host is rejected. Before creating
-a comment it re-reads the pull request and checks that
+a comment it re-reads the pull request after checkout and account preflight and checks that
 the saved review is still current: a closed pull request or a
 moved head posts nothing and marks the review outdated. The comment ends with a
 hidden marker naming the repository, pull request, and commit. A marker for the
@@ -73,9 +74,12 @@ resolves the same way on the next attempt, even after a push or closure. Earlier
 Garcon comments on the pull request are minimized as outdated. A failed
 minimization exposes Retry cleanup, which never creates another comment.
 Recent reviews keeps unresolved posts and cleanup failures ahead of newer runs.
-Its Reconcile post and Retry cleanup actions stay available after closure and
-show their outcome on that review row. An unreadable
+Show all unresolved posts opens a paginated recovery list, including closed pull
+requests beyond the recent-run limit. Its Reconcile post and Retry cleanup
+actions remain available after closure and show their outcome on that review row. An unreadable
 comment-creation reply also leaves the outcome unknown until marker recovery.
+A failed subprocess after mutation dispatch also leaves the outcome unknown;
+a connection failure does not prove that GitHub rejected the comment.
 A review longer than a GitHub comment is
 kept and reported as too long, never truncated. Reviews never approve or
 request changes.
@@ -97,7 +101,7 @@ send a duplicate comment.
 repositories, their last pull request list and scan status, and review runs
 with their review text. Startup creates missing tables and indexes without
 schema versions or migrations. The schema enforces unique normalized
-executor/repository identities. Databases created from earlier revisions of
+executor/host/repository identities. Databases created from earlier revisions of
 this unmerged feature must be recreated.
 Running work is not durable: a run that was queued or
 running when the controller stopped is marked interrupted when it starts again,
@@ -115,7 +119,9 @@ another request's remaining time.
 Inbox snapshots read only the newest run for each open pull request and a
 bounded recent-run list. Selection reads indexed active/current-head summaries
 and the last 24 hours' automatic-review count. A process-local per-repository
-run revision fences pending scans without loading their history. Closure is
+run revision fences pending scans without loading their history. A durable
+per-pull revision invalidates only the selected pull request history; unrelated
+scans do not reload it. Closure is
 recorded once per pull request, so a repeated scan does not rewrite every run.
 Archival and expired-history deletion use bounded batches separated by event
 loop turns; unsuccessful archival remains eligible on a later successful scan.
@@ -140,10 +146,15 @@ included and excluded labels, maximum changed lines (blank allows any size),
 attempts per head commit, and daily starts. Branches and labels are entered
 one per line. All supported limits can also be edited offline.
 
-The Review tab keeps the inbox's run summary while history loads and shows
-history read failures with Retry. Review and Post remain disabled until that
-read succeeds. Snapshot revisions also refresh older selected history entries
-after a posting result changes.
+Review prompts can insert the saved repository URL with `{{repository_url}}`.
+The built-in prompt uses that URL for commit-pinned code links, including
+GitHub Enterprise hosts.
+
+The Review tab loads history summaries in pages of 20 and fetches the review
+text only for the selected run. It keeps the inbox's run summary while history
+loads and shows history or body read failures with Retry. Review and Post remain
+disabled until the required reads succeed. Changes to that pull request refresh
+its history, including an older selected run after a posting result changes.
 
 ## Safety
 
@@ -159,8 +170,10 @@ starts from the new-chat default; which mode lets each agent run `gh` and
 ## Interfaces
 
 - HTTP: `/api/v1/pull-request-reviews` (snapshot), `/repositories`
-  (connect, edit, disconnect), `/scan`, `/runs` (list a pull request's runs
-  with review text, or request a review), `/runs/stop`, `/runs/post`.
+  (connect, edit, disconnect), `/scan`, `/runs` (20 summary rows with
+  `nextCursor` and per-pull `revision`, or request a review), `/runs/detail`
+  (one selected review body), `/runs/recovery` (20 unresolved-post summaries
+  with `nextCursor`), `/runs/stop`, `/runs/post`.
 - WebSocket: `pull-request-reviews-invalidated` carries the store revision.
 - Executor: three `ExecutionGhService` additions, described in the
   [Git contract](./executor/git.md).

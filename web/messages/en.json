@@ -3024,7 +3024,7 @@
 	"pull_request_repositories_description": "Connected repositories, their review settings, and recent review runs. Garcon reads and posts with each executor's gh login.",
 	"pull_request_repository_connect": "Connect repository",
 	"pull_request_repository_description": "Pick a folder that is a checkout of a GitHub repository. Reviews start as ordinary chats there, read-only, with this agent and model.",
-	"pull_request_repository_prompt_hint": "Use {repository}, {number}, and {path}. The final response must name the commit it reviewed.",
+	"pull_request_repository_prompt_hint": "Use {repository}, {url}, {number}, and {path}. The final response must name the commit it reviewed.",
 	"pull_request_repository_prompt_too_long": "The review prompt is too long.",
 	"pull_request_repository_auto_review": "Review automatically",
 	"pull_request_repository_auto_review_description": "Starts a review when a pull request opens or gets new commits.",
@@ -3117,5 +3117,13 @@
 	"pull_request_repository_debounce_hint": "0–1,440 minutes. Set 0 to review immediately.",
 	"pull_request_repository_settings_invalid": "Use whole numbers within the shown ranges and at most 20 filter values of 255 characters per list.",
 	"pull_request_review_retry_cleanup": "Retry cleanup",
-	"pull_request_review_reconcile_post": "Reconcile post"
+	"pull_request_review_reconcile_post": "Reconcile post",
+	"template_variable_repository": "Repository",
+	"template_variable_repository_url": "Repository URL",
+	"template_variable_pull_request_number": "Pull request number",
+	"pull_request_review_load_more": "Load more",
+	"pull_request_review_recovery_title": "Unresolved GitHub posts",
+	"pull_request_review_show_recovery": "Show all unresolved posts",
+	"pull_request_review_recovery_hint": "Includes closed pull requests and reviews outside the recent list.",
+	"pull_request_review_recovery_empty": "No unresolved posts."
 }

@@ -58,6 +58,7 @@ export class PullRequestReviewRepositories {
         inbox.push({
           repositoryId: repository.id,
           pull,
+          historyRevision: store.pullRunsRevision(repository.id, pull.number),
           latestRun: run ? this.projectRun(run) : null,
           autoReview: this.deps.autoReviewStatus(repository.id, pull.number)
             ?? (repository.settings.autoReview ? { kind: 'eligible' } : { kind: 'off' }),

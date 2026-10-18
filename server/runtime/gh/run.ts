@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import { gitOperationOptions, markGitMutationDispatched, trackGitProcess } from '../git/operation-context.js';
 import { readTextStreamPrefix, readTextStreamWithLimit } from '../../common/bounded-text-stream.js';
 import type { GhCommandOptions, GhCommandResult, GhProcessError } from './gh-types.js';
+import { GitServiceError } from '../../../common/git-error.js';
 
 const GH_DEFAULT_TIMEOUT_MS = 30_000;
 const GH_DEFAULT_MAX_STDOUT_BYTES = 64 * 1024 * 1024;
@@ -61,7 +62,7 @@ export async function runGh(
   return trackGitProcess(() => runGhProcess(cwd, args, gitOperationOptions({ ...options, disableOptionalLocks: true })));
 }
 
-async function runGhProcess(cwd: string, args: string[], options: GhCommandOptions): Promise<GhCommandResult> {
+async function runGhProcess(cwd: string, args: string[], options: GhCommandOptions, dispatched?: () => void): Promise<GhCommandResult> {
   const timeoutMs = options.timeoutMs ?? GH_DEFAULT_TIMEOUT_MS;
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal = options.signal
@@ -86,6 +87,7 @@ async function runGhProcess(cwd: string, args: string[], options: GhCommandOptio
     spawnError.stderr = error instanceof Error ? error.message : String(error);
     throw spawnError;
   }
+  dispatched?.();
 
   const abortListener = (): void => {
     proc.kill();
@@ -125,15 +127,24 @@ async function runGhProcess(cwd: string, args: string[], options: GhCommandOptio
   });
 }
 
-// Runs a `gh` command that changes GitHub state. An interruption after this
-// point leaves the outcome unknown, so the enclosing operation reports it as such.
+// A failed subprocess cannot prove that GitHub did not accept its mutation.
 export async function runGhMutation(
   cwd: string,
   args: string[],
   options: GhCommandOptions = {},
 ): Promise<GhCommandResult> {
-  markGitMutationDispatched();
-  return runGh(cwd, args, options);
+  return trackGitProcess(async () => {
+    let dispatched = false;
+    try {
+      return await runGhProcess(cwd, args, gitOperationOptions({ ...options, disableOptionalLocks: true }), () => {
+        dispatched = true;
+        markGitMutationDispatched();
+      });
+    } catch (error) {
+      if (!dispatched) throw error;
+      throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'GitHub did not confirm the mutation after dispatch. Check its outcome before trying again.');
+    }
+  });
 }
 
 export function parseGhJson<T>(stdout: string, command: string): T {

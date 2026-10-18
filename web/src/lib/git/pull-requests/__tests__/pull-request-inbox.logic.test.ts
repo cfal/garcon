@@ -11,6 +11,7 @@ function entry(
 	return {
 		repositoryId,
 		latestRun: null,
+		historyRevision: 0,
 		autoReview: { kind: 'off' },
 		pull: {
 			number,

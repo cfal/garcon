@@ -17,6 +17,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import PullRequestRecentRunRow from './PullRequestRecentRunRow.svelte';
 	import PullRequestRepositoryDialog from './PullRequestRepositoryDialog.svelte';
+	import PullRequestRecoveryRuns from './PullRequestRecoveryRuns.svelte';
 
 	interface Props {
 		reviews: PullRequestReviewsStore;
@@ -36,6 +37,7 @@
 	let editing = $state<{ repository: PullRequestReviewRepository | null } | null>(null);
 	let removing = $state<string | null>(null);
 	let error = $state<string | null>(null);
+	let showingRecovery = $state(false);
 
 	function executorLabel(repository: PullRequestReviewRepository): string {
 		const id = effectiveExecutorId(repository.target.executorId);
@@ -236,10 +238,26 @@
 	{/if}
 	{#if reviews.snapshot}
 		<section>
-			<h3 class="mb-2 text-sm font-medium text-foreground">
-				{m.pull_request_repository_recent_runs()}
-			</h3>
-			{#if reviews.recentRuns.length === 0}
+			<div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+				<h3 class="text-sm font-medium text-foreground">
+					{showingRecovery
+						? m.pull_request_review_recovery_title()
+						: m.pull_request_repository_recent_runs()}
+				</h3>
+				<Button size="sm" variant="ghost" onclick={() => (showingRecovery = !showingRecovery)}
+					>{showingRecovery
+						? m.pull_request_repository_recent_runs()
+						: m.pull_request_review_show_recovery()}</Button
+				>
+			</div>
+			{#if showingRecovery}
+				<PullRequestRecoveryRuns
+					{currentTime}
+					{repositoryName}
+					{onOpenChat}
+					onPost={(runId) => reviews.post(runId)}
+				/>
+			{:else if reviews.recentRuns.length === 0}
 				<p class="text-sm text-muted-foreground">
 					{m.pull_request_repository_recent_runs_empty()}
 				</p>

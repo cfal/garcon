@@ -171,7 +171,7 @@ test('successive scans reserve queued reviews within the daily start budget', as
   service.scan(repository.id);
   await until(() => github.reads > reads);
   await new Promise((resolve) => setImmediate(resolve));
-  expect(store.runsForPull(repository.id, 9)).toEqual([]);
+  expect(store.runsForPull(repository.id, 9).runs).toEqual([]);
   expect(store.activeRuns()).toHaveLength(2);
 });
 
