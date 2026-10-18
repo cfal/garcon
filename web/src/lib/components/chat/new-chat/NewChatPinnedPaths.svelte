@@ -18,6 +18,7 @@
 	let open = $state(false);
 	let trigger = $state<HTMLElement | null>(null);
 	let content = $state<HTMLElement | null>(null);
+	let restoreOnClose = true;
 	// Keeps the focus return target mounted after selection or live pin removal.
 	let pickerVisited = $state(false);
 	const groups = $derived(pins.groups);
@@ -34,14 +35,16 @@
 
 	async function restoreFocus(event: Event): Promise<void> {
 		event.preventDefault();
+		if (!restoreOnClose) return;
 		await tick();
 		// Restores focus after the enclosing form's reactive autofocus has settled.
 		requestAnimationFrame(() => {
-			if (!open) trigger?.focus({ preventScroll: true });
+			if (!open && restoreOnClose) trigger?.focus({ preventScroll: true });
 		});
 	}
 
 	async function focusPicker(event: Event): Promise<void> {
+		restoreOnClose = true;
 		event.preventDefault();
 		await tick();
 		requestAnimationFrame(() => {
@@ -151,6 +154,7 @@
 						}}>{m.chat_new_chat_pinned_paths_other_machines()}</Popover.Trigger
 					>
 					<Popover.Content
+						onInteractOutside={() => { restoreOnClose = false; }}
 						bind:ref={content}
 						onOpenAutoFocus={focusPicker}
 						getFocusReturnTarget={() => trigger}

@@ -54,6 +54,13 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(picker).toHaveCount(0);
       await browserExpect(trigger).toBeFocused();
 
+      phase('dismissing into the prompt without stealing its focus');
+      await trigger.click();
+      await prompt.click({ position: { x: 12, y: 12 } });
+      await browserExpect(picker).toHaveCount(0);
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      await browserExpect(prompt).toBeFocused();
+
       if (client.executorId !== 'local') {
         phase('selecting identical path on the real worker');
         await trigger.click();
