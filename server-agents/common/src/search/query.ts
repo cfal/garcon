@@ -45,6 +45,7 @@ interface CompiledTerm {
   normalizedWords: string[];
   exactPhrase: boolean;
   prefixWords: boolean[];
+  literalPattern: RegExp | null;
 }
 
 interface ResultRow {
@@ -99,9 +100,16 @@ function tokenMatchesWord(token: SnippetToken, normalizedWord: string, prefix: b
 }
 
 function matchSnippetTerm(
+  body: string,
   tokens: SnippetToken[],
   term: CompiledTerm,
 ): number | null {
+  if (term.literalPattern) {
+    const match = term.literalPattern.exec(body);
+    if (!match) return null;
+    const index = tokens.findIndex((token) => token.end > match.index);
+    return index < 0 ? null : index;
+  }
   if (term.exactPhrase) {
     for (let start = 0; start + term.words.length <= tokens.length; start += 1) {
       if (term.normalizedWords.every(
@@ -129,12 +137,13 @@ function matchSnippetTerm(
 }
 
 function matchSnippetTerms(
+  body: string,
   tokens: SnippetToken[],
-  terms: CompiledTerm[],
+  terms: readonly CompiledTerm[],
 ): number | null {
   let firstTokenIndex = Number.POSITIVE_INFINITY;
   for (const term of terms) {
-    const match = matchSnippetTerm(tokens, term);
+    const match = matchSnippetTerm(body, tokens, term);
     if (match === null) continue;
     firstTokenIndex = Math.min(firstTokenIndex, match);
   }
@@ -156,12 +165,31 @@ function snippetWindow(body: string, tokens: SnippetToken[], firstTokenIndex: nu
   if (tokens.length === 0) return '';
   const startToken = Math.max(0, firstTokenIndex - 8);
   const endToken = Math.min(tokens.length, startToken + 32);
-  const raw = body.slice(tokens[startToken].start, tokens[endToken - 1].end);
+  const raw = body.slice(
+    startToken === 0 ? 0 : tokens[startToken].start,
+    endToken === tokens.length ? body.length : tokens[endToken].start,
+  );
   const normalized = raw.replace(/\s+/g, ' ').trim();
   const characters = [...normalized];
   const text = characters.slice(0, MAX_SNIPPET_CHARS).join('');
   const hasSuffix = endToken < tokens.length || characters.length > MAX_SNIPPET_CHARS;
   return `${startToken > 0 ? SNIPPET_PREFIX : ''}${text}${hasSuffix ? SNIPPET_SUFFIX : ''}`;
+}
+
+function compileLiteralPattern(clause: ChatSearchClauseV1, words: readonly string[]): RegExp | null {
+  if (clause.kind !== 'literal') return null;
+  const literalWords = typeof clause.text === 'string' ? wordsIn(clause.text) : [];
+  if (typeof clause.text !== 'string'
+      || literalWords.length !== words.length
+      || literalWords.some((word, index) => word !== words[index])
+      || clause.tokens.some((token) => token.match !== 'exact')) {
+    throw new RangeError('Transcript search literal is invalid');
+  }
+  const escapedText = clause.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const wordCharacter = '[\\p{L}\\p{N}\\p{M}_]';
+  const startBoundary = /^[\p{L}\p{N}_]/u.test(clause.text) ? `(?<!${wordCharacter})` : '';
+  const endBoundary = /[\p{L}\p{N}_]$/u.test(clause.text) ? `(?!${wordCharacter})` : '';
+  return new RegExp(`${startBoundary}${escapedText}${endBoundary}`, 'iu');
 }
 
 function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
@@ -171,7 +199,7 @@ function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
   }
   let wordCount = 0;
   return query.clauses.map((clause: ChatSearchClauseV1) => {
-    if ((clause.kind !== 'phrase' && clause.kind !== 'all-words')
+    if ((clause.kind !== 'phrase' && clause.kind !== 'all-words' && clause.kind !== 'literal')
         || !Array.isArray(clause.tokens) || clause.tokens.length === 0) {
       throw new RangeError('Transcript search query is invalid');
     }
@@ -188,7 +216,8 @@ function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
       }
       return parsed[0];
     });
-    const exactPhrase = clause.kind === 'phrase';
+    const literalPattern = compileLiteralPattern(clause, words);
+    const exactPhrase = clause.kind !== 'all-words';
     const prefixWords = clause.tokens.map(
       (token: ChatSearchTokenV1) => !exactPhrase && token.match === 'prefix',
     );
@@ -202,6 +231,7 @@ function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
       normalizedWords: clause.tokens.map((token: ChatSearchTokenV1) => token.normalized),
       exactPhrase,
       prefixWords,
+      literalPattern,
     };
   });
 }
@@ -292,7 +322,7 @@ function hydrateSnippets(
         snippets: match.ranked.map((candidate) => {
           const body = bodyStatement.get(candidate.rowId)?.body ?? '';
           const tokens = tokenizeForSnippet(body);
-          const firstTokenIndex = matchSnippetTerms(tokens, [...terms]);
+          const firstTokenIndex = matchSnippetTerms(body, tokens, terms);
           return {
             ordinal: Number(candidate.ordinal),
             role: publicRole(candidate.role),
@@ -415,17 +445,29 @@ function collectBoundedTermMatches(
   const truncated = rows.length > SEARCH_QUERY_MATCH_ROW_LIMIT;
   if (truncated) rows.length = SEARCH_QUERY_MATCH_ROW_LIMIT;
   const matches = new Map<string, TermMatch>();
-  for (const row of rows) {
-    const key = resultKey(row.chatId, row.transcriptViewId);
-    const current = matches.get(key) ?? {
-      chatId: row.chatId,
-      transcriptViewId: row.transcriptViewId,
-      rank: row.rank,
-      rows: [],
-    };
-    current.rank = Math.min(current.rank, row.rank);
-    current.rows.push(row);
-    matches.set(key, current);
+  // Preserves the FTS sampling ceiling even when no candidate passes literal verification.
+  const bodyStatement = term.literalPattern
+    ? db.prepare<{ body: string }, [number]>('SELECT body FROM search_chunks WHERE id = ?')
+    : null;
+  try {
+    for (const row of rows) {
+      if (bodyStatement && term.literalPattern) {
+        const body = bodyStatement.get(row.rowId)?.body ?? '';
+        if (!term.literalPattern.test(body)) continue;
+      }
+      const key = resultKey(row.chatId, row.transcriptViewId);
+      const current = matches.get(key) ?? {
+        chatId: row.chatId,
+        transcriptViewId: row.transcriptViewId,
+        rank: row.rank,
+        rows: [],
+      };
+      current.rank = Math.min(current.rank, row.rank);
+      current.rows.push(row);
+      matches.set(key, current);
+    }
+  } finally {
+    bodyStatement?.finalize();
   }
   return { matches, truncated };
 }

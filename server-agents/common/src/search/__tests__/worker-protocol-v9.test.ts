@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { compileChatSearchQuery } from '@garcon/common/chat-search';
 import { SEARCH_INGEST_ROW_MAX_BYTES, SEARCH_TIMESTAMP_MAX_BYTES } from '../schema.js';
 import {
   MAX_FRAME_BYTES,
@@ -19,6 +20,25 @@ function extra<T extends object>(value: T): T & { extra: true } {
 }
 
 describe('worker protocol v9', () => {
+  test('accepts typed literal queries and rejects malformed literal clauses', () => {
+    const request = {
+      ...envelope,
+      type: 'search-start',
+      query: compileChatSearchQuery('#731'),
+      order: 'relevance', mode: 'page', offset: 0, limit: 20, snippetLimit: 3,
+    };
+    expect(isReaderRequest(request)).toBe(true);
+    const literal = request.query.clauses[0]!;
+    for (const invalid of [
+      { ...literal, text: undefined },
+      { ...literal, text: '' },
+      { ...literal, extra: true },
+      { ...literal, tokens: [{ text: '731', normalized: '731', match: 'prefix' }] },
+    ]) {
+      expect(isReaderRequest({ ...request, query: { version: 1, clauses: [invalid] } })).toBe(false);
+    }
+  });
+
   test('[TLV5-SEARCH.09-PROTO-01] accepts exact indexer requests and rejects extras', () => {
     const requests = [
       { ...envelope, type: 'open', dbPath: '/tmp/index.sqlite' },

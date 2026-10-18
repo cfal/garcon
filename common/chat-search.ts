@@ -24,7 +24,8 @@ export interface ChatSearchQueryV1 {
 
 export type ChatSearchClauseV1 =
   | { readonly kind: 'phrase'; readonly tokens: readonly ChatSearchTokenV1[] }
-  | { readonly kind: 'all-words'; readonly tokens: readonly ChatSearchTokenV1[] };
+  | { readonly kind: 'all-words'; readonly tokens: readonly ChatSearchTokenV1[] }
+  | { readonly kind: 'literal'; readonly text: string; readonly tokens: readonly ChatSearchTokenV1[] };
 
 export interface ChatSearchTokenV1 {
   readonly text: string;
@@ -243,16 +244,20 @@ export function compileChatSearchQuery(
     }));
   return {
     version: 1,
-    clauses: terms.map((term) => ({
-      kind: term.phrase ? 'phrase' as const : 'all-words' as const,
-      tokens: (term.text.match(/[\p{L}\p{N}_]+/gu) ?? []).map((text) => ({
+    clauses: terms.map((term): ChatSearchClauseV1 => {
+      const isLiteral = /[^\p{L}\p{N}\p{M}\s]/u.test(term.text);
+      const tokens = (term.text.match(/[\p{L}\p{N}_]+/gu) ?? []).map((text) => ({
         text,
         normalized: text.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase(),
-        match: !term.phrase && [...text].length >= CHAT_SEARCH_MIN_PREFIX_CHARS
+        match: !isLiteral && !term.phrase && [...text].length >= CHAT_SEARCH_MIN_PREFIX_CHARS
           ? 'prefix' as const
           : 'exact' as const,
-      })),
-    })).filter((clause) => clause.tokens.length > 0),
+      }));
+      if (isLiteral) {
+        return { kind: 'literal', text: term.text.replace(/\s+/gu, ' ').trim(), tokens };
+      }
+      return { kind: term.phrase ? 'phrase' : 'all-words', tokens };
+    }).filter((clause) => clause.tokens.length > 0),
   };
 }
 

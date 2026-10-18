@@ -85,6 +85,26 @@ describe('chat search contracts', () => {
       });
   });
 
+  it('preserves punctuation-bearing identifiers for raw and web-token queries', () => {
+    for (const text of ['#731', 'ABC-123', '/workspace/src/index.ts', 'file_name', 'C++', 'dev@example.test']) {
+      for (const query of [text, `"${text}"`, `'${text}'`]) {
+        const compiled = compileChatSearchQuery(query);
+        expect(compiled.clauses[0]).toMatchObject({ kind: 'literal', text });
+        expect(compiled.clauses[0].tokens.every((token) => token.match === 'exact')).toBe(true);
+        expect(compileChatSearchQuery(query, [text])).toEqual(compiled);
+      }
+    }
+    expect(compileChatSearchQuery('"PR #731"', ['PR #731']).clauses[0])
+      .toMatchObject({ kind: 'literal', text: 'PR #731' });
+    expect(compileChatSearchQuery('"PR\t#731"').clauses[0])
+      .toMatchObject({ kind: 'literal', text: 'PR #731' });
+    expect(compileChatSearchQuery('#731 marker').clauses.map((clause) => clause.kind))
+      .toEqual(['literal', 'all-words']);
+    expect(compileChatSearchQuery('731 cafe\u0301').clauses.map((clause) => clause.kind))
+      .toEqual(['all-words', 'all-words']);
+    expect(compileChatSearchQuery('###').clauses).toEqual([]);
+  });
+
   it('parses a correlated search page and rejects malformed relations', () => {
     expect(parseChatSearchResponse(request, response())).toEqual(response());
     expect(() => parseChatSearchResponse(request, {

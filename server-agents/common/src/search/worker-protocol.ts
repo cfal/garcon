@@ -266,8 +266,9 @@ function searchQuery(value: unknown): boolean {
   for (const valueClause of candidate.clauses) {
     const clause = record(valueClause);
     if (!clause
-        || Object.keys(clause).length !== 2
-        || (clause.kind !== 'phrase' && clause.kind !== 'all-words')
+        || Object.keys(clause).length !== (clause.kind === 'literal' ? 3 : 2)
+        || (clause.kind !== 'phrase' && clause.kind !== 'all-words' && clause.kind !== 'literal')
+        || (clause.kind === 'literal' && (typeof clause.text !== 'string' || !clause.text.trim()))
         || !Array.isArray(clause.tokens)
         || clause.tokens.length === 0) return false;
     tokenCount += clause.tokens.length;
@@ -279,7 +280,7 @@ function searchQuery(value: unknown): boolean {
           || typeof token.text !== 'string'
           || typeof token.normalized !== 'string'
           || (token.match !== 'exact' && token.match !== 'prefix')
-          || (clause.kind === 'phrase' && token.match !== 'exact')
+          || (clause.kind !== 'all-words' && token.match !== 'exact')
           || (token.match === 'prefix'
             && [...token.text].length < CHAT_SEARCH_MIN_PREFIX_CHARS)) return false;
     }
