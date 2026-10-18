@@ -85,6 +85,18 @@ describe('literal identifier search', () => {
     expect(search('"731"').page.total).toBe(4);
   });
 
+  test('retains exact FTS candidates when newer symbols or private-use glyphs join an identifier', () => {
+    addChat('separated', ['#731.']);
+    for (const [index, suffix] of ['\u{1f914}', '\u{1fae1}', '\u20bf', '\ue0a0'].entries()) {
+      addChat(`attached-${index}`, [`#731${suffix}`]);
+    }
+    for (const query of ['#731', '"#731"']) {
+      const result = search(query);
+      expect(result.results.map((hit) => hit.chatId)).toEqual(['separated']);
+      expect(result.index.resultsTruncated).toBe(false);
+    }
+  });
+
   test.each([
     { query: 'ABC-123', body: 'abc-123', decoy: 'ABC 123', longer: 'ABC-123suffix' },
     { query: '/workspace/src/index.ts', body: '/WORKSPACE/src/index.ts', decoy: '/workspace/src/index ts', longer: '/workspace/src/index.tsx' },

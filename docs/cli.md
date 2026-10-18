@@ -588,6 +588,10 @@ straight and curly apostrophes are distinct. Literal spelling does not fold
 accents or composed/decomposed Unicode forms.
 Case-insensitive matching retains the index's existing Unicode tokenizer and
 case-folding limits; some newer Unicode case pairs are not equivalent in the index.
+Its tokenizer also treats some newer symbols and private-use glyphs as word
+characters. An identifier directly followed by one of those characters may not
+be found on its own, even when that character looks like punctuation or an emoji.
+Literal queries retain exact FTS candidates rather than broad prefix candidates.
 There is no wildcard syntax: `*` is literal punctuation. Prefix matches are
 displayed as `prefix("word")`, not as query syntax. Use double quotes for phrases
 containing apostrophes; single quotes delimit phrases and cannot enclose an
