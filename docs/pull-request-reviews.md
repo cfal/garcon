@@ -12,7 +12,8 @@ login. Repository connection and scan errors appear inside the inbox.
 Connected repositories are also available directly in **Settings → GitHub**,
 below the executor's GitHub CLI status. Settings and the inbox's Repositories
 dialog share the same controls for connecting, editing, scanning, disconnecting,
-and viewing recent reviews.
+and viewing recent reviews. Connections with matching names on different hosts
+show their host in the manager, inbox, filters, and recovery list.
 
 ## Loop
 
@@ -78,8 +79,15 @@ Show all unresolved posts opens a paginated recovery list, including closed pull
 requests beyond the recent-run limit. Its Reconcile post and Retry cleanup
 actions remain available after closure and show their outcome on that review row. An unreadable
 comment-creation reply also leaves the outcome unknown until marker recovery.
-A failed subprocess after mutation dispatch also leaves the outcome unknown;
-a connection failure does not prove that GitHub rejected the comment.
+A transport failure, timeout, or unusable reply after mutation dispatch leaves
+the outcome unknown. A proven preflight failure or explicit HTTP rejection
+records a failed post, which does not lock the connection. A failed recovery
+read cannot clear an earlier unknown outcome.
+When recovery is impossible, **Abandon unresolved post** asks for confirmation:
+the comment may already exist on GitHub and abandonment does not delete it.
+Confirmation records a terminal abandoned state, timestamp, and posting actor,
+retains the review, and releases the connection lock. The abandoned review
+cannot be posted again. Abandonment is refused while a post is in flight.
 A review longer than a GitHub comment is
 kept and reported as too long, never truncated. Reviews never approve or
 request changes.
@@ -90,7 +98,7 @@ preserving comment recovery. Posts for one pull request cannot overlap; other
 pull requests in the repository can post independently. Disconnecting a
 repository is refused while its posts are in flight or have an unknown outcome.
 Its executor and folder also remain fixed during posting and until an unknown
-posting outcome has been reconciled.
+posting outcome has been reconciled or explicitly abandoned.
 The controller records the posting actor's stable GitHub identity before
 dispatch and retains it through recovery, so changing `gh` accounts cannot
 send a duplicate comment.
@@ -108,7 +116,7 @@ running when the controller stopped is marked interrupted when it starts again,
 and the next scan decides afresh. Runs are dropped 30 days after a successful
 scan first observes the pull request closed, once its chat has been archived
 (or no chat exists). Unresolved posts and failed cleanup are retained until
-reconciled. Reopening resets that retention period. Failed archival
+reconciled or explicitly abandoned. Reopening resets that retention period. Failed archival
 is retried on later successful scans. A scan that overlaps a change to a
 review run is discarded and repeated before it can invalidate that review.
 A permission request in a review chat shows the run as Needs you; one
@@ -173,7 +181,8 @@ starts from the new-chat default; which mode lets each agent run `gh` and
   (connect, edit, disconnect), `/scan`, `/runs` (20 summary rows with
   `nextCursor` and per-pull `revision`, or request a review), `/runs/detail`
   (one selected review body), `/runs/recovery` (20 unresolved-post summaries
-  with `nextCursor`), `/runs/stop`, `/runs/post`.
+  with `nextCursor`), `/runs/stop`, `/runs/post`, `/runs/abandon`
+  (requires `{runId, confirm: true}`).
 - WebSocket: `pull-request-reviews-invalidated` carries the store revision.
 - Executor: three `ExecutionGhService` additions, described in the
   [Git contract](./executor/git.md).

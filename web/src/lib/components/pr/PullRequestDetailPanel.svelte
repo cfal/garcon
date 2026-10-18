@@ -50,7 +50,9 @@
 	{#if entry}
 		<PullRequestHeader
 			pull={entry.pull}
-			repositoryName={pullRequests.selectedRepository?.nameWithOwner ?? ''}
+			repositoryName={pullRequests.selectedRepository
+				? pullRequests.reviews.repositoryLabel(pullRequests.selectedRepository.id)
+				: ''}
 			body={detail?.body ?? ''}
 			{currentTime}
 			onRefresh={() => void pullRequests.loadDetail()}

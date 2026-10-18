@@ -13,9 +13,10 @@
 		currentTime: Date;
 		onOpenChat: (chatId: string) => void;
 		onPost: (runId: string) => Promise<void>;
+		onAbandon: (runId: string) => Promise<void>;
 	}
 
-	let { run, repositoryName, currentTime, onOpenChat, onPost }: Props = $props();
+	let { run, repositoryName, currentTime, onOpenChat, onPost, onAbandon }: Props = $props();
 	const chip = $derived(reviewRunChip(run));
 	const age = $derived(formatRelativeTimestamp(run.createdAt, currentTime));
 	const canRecover = $derived(
@@ -23,13 +24,15 @@
 	);
 	let pending = $state(false);
 	let actionError = $state<string | null>(null);
+	let confirmingAbandon = $state(false);
 
-	async function recoverPost(): Promise<void> {
+	async function act(action: () => Promise<void>): Promise<void> {
 		if (pending) return;
 		pending = true;
 		actionError = null;
 		try {
-			await onPost(run.id);
+			await action();
+			confirmingAbandon = false;
 		} catch (error) {
 			actionError = errorMessage(error, m.pull_request_review_action_failed());
 		} finally {
@@ -54,7 +57,7 @@
 				size="sm"
 				variant="secondary"
 				disabled={pending}
-				onclick={() => void recoverPost()}
+				onclick={() => act(() => onPost(run.id))}
 				data-pr-reconcile-run={run.post.status === 'unknown' ? run.id : undefined}
 				data-pr-retry-cleanup-run={run.post.status === 'posted' ? run.id : undefined}
 			>
@@ -65,12 +68,47 @@
 						: m.pull_request_review_retry_cleanup()}
 			</Button>
 		{/if}
+		{#if run.post.status === 'unknown'}
+			<Button
+				size="sm"
+				variant="ghost"
+				disabled={pending}
+				onclick={() => (confirmingAbandon = true)}
+				data-pr-abandon-run={run.id}
+			>
+				{m.pull_request_review_abandon()}
+			</Button>
+		{/if}
 		{#if run.chatId && run.chatAvailable}
 			<Button size="sm" variant="ghost" onclick={() => run.chatId && onOpenChat(run.chatId)}>
 				{m.pull_request_review_open_chat()}
 			</Button>
 		{/if}
 	</div>
+	{#if confirmingAbandon && run.post.status === 'unknown'}
+		<div
+			class="space-y-2 rounded-md border border-border bg-muted p-3"
+			role="group"
+			aria-label={m.pull_request_review_abandon()}
+		>
+			<p>{m.pull_request_review_abandon_warning()}</p>
+			<div class="flex flex-wrap gap-2">
+				<Button
+					size="sm"
+					variant="destructive"
+					disabled={pending}
+					onclick={() => act(() => onAbandon(run.id))}
+					data-pr-confirm-abandon={run.id}>{m.pull_request_review_abandon_confirm()}</Button
+				>
+				<Button
+					size="sm"
+					variant="ghost"
+					disabled={pending}
+					onclick={() => (confirmingAbandon = false)}>{m.common_cancel()}</Button
+				>
+			</div>
+		</div>
+	{/if}
 	{#if run.message && run.state !== 'completed'}
 		<p class="break-words text-muted-foreground">{run.message}</p>
 	{/if}

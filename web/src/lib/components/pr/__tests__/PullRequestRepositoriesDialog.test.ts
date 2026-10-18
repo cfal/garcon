@@ -17,8 +17,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-function setup(run: PullRequestReviewRun = closedRun) {
-	const snapshot = makeReviewsSnapshot(run);
+function setup(run: PullRequestReviewRun = closedRun, snapshot = makeReviewsSnapshot(run)) {
 	const api = {
 		get: vi.fn(async () => snapshot),
 		connect: vi.fn(),
@@ -28,12 +27,59 @@ function setup(run: PullRequestReviewRun = closedRun) {
 		review: vi.fn(),
 		stop: vi.fn(),
 		post: vi.fn(async () => snapshot),
+		abandon: vi.fn(async () => snapshot),
 	} satisfies PullRequestReviewsApi;
 	const reviews = new PullRequestReviewsStore(api);
 	reviews.apply(snapshot);
 	render(PullRequestRepositoriesDialogTestHost, { reviews });
 	return { api, snapshot };
 }
+
+it('requires confirmation to abandon, supports cancel, and keeps the terminal audit visible', async () => {
+	const { api, snapshot } = setup();
+	await fireEvent.click(await screen.findByRole('button', { name: 'Abandon unresolved post' }));
+	expect(api.abandon).not.toHaveBeenCalled();
+	await screen.findByText(/The comment may already exist on GitHub/);
+	await fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }));
+	expect(screen.queryByRole('button', { name: 'Confirm abandon' })).toBeNull();
+	await fireEvent.click(screen.getByRole('button', { name: 'Abandon unresolved post' }));
+	api.abandon.mockResolvedValueOnce({
+		...snapshot,
+		revision: 2,
+		recentRuns: [
+			{
+				...closedRun,
+				post: { ...closedRun.post, status: 'abandoned', message: 'Post recovery was abandoned.' },
+			},
+		],
+	});
+	await fireEvent.click(screen.getByRole('button', { name: 'Confirm abandon' }));
+	await waitFor(() => expect(api.abandon).toHaveBeenCalledWith(closedRun.id));
+	await screen.findByText('Post recovery was abandoned.');
+	expect(screen.queryByRole('button', { name: 'Reconcile post' })).toBeNull();
+});
+
+it('disambiguates colliding names in repository controls and unresolved recovery rows', async () => {
+	const snapshot = makeReviewsSnapshot();
+	snapshot.repositories.push({
+		...snapshot.repositories[0],
+		id: 'enterprise',
+		url: 'https://git.example.invalid/acme/app',
+	});
+	vi.spyOn(reviewApi, 'getPullRequestReviewRecovery').mockResolvedValue({
+		runs: [closedRun, { ...closedRun, id: 'enterprise-run', repositoryId: 'enterprise' }],
+		nextCursor: null,
+	});
+	setup(closedRun, snapshot);
+	await screen.findByRole('button', { name: 'Edit acme/app (github.com)' });
+	await screen.findByRole('button', { name: 'Edit acme/app (git.example.invalid)' });
+	expect(
+		screen.getByRole('switch', { name: 'Review acme/app (github.com) automatically' }),
+	).toBeTruthy();
+	await fireEvent.click(screen.getByRole('button', { name: 'Show all unresolved posts' }));
+	await screen.findByText('acme/app (github.com) #7 · Closed pull request');
+	await screen.findByText('acme/app (git.example.invalid) #7 · Closed pull request');
+});
 
 it('reconciles an unknown post for a closed pull request from its recent review row', async () => {
 	const { api, snapshot } = setup();

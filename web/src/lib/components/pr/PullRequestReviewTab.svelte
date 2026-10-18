@@ -38,6 +38,7 @@
 				(run.post.status === 'posted' && run.post.message !== null) ||
 				(run.state === 'completed' &&
 					run.post.status !== 'posted' &&
+					run.post.status !== 'abandoned' &&
 					run.post.status !== 'too-long')),
 	);
 	const historyUnavailable = $derived(controller.isRunsLoading || controller.runsError !== null);

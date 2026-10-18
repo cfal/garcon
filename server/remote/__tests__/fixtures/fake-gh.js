@@ -97,6 +97,7 @@ else if (command === 'api' && action === 'graphql') {
     } });
   }
 } else if (command === 'api' && args.includes('POST')) {
+  if (config.commentRejection) fail(config.commentRejection);
   const number = Number(/issues\/(\d+)\/comments/.exec(args.find(arg => arg.includes('/issues/')) ?? '')?.[1]);
   findPull(number);
   const comments = await readComments();

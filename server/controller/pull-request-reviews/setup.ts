@@ -135,6 +135,11 @@ export class PullRequestReviews {
     return this.#repositories.projectRun(run);
   }
 
+  abandonPost(runId: string): PullRequestReviewRun {
+    this.#poster.abandon(runId);
+    return this.#repositories.projectRun(this.store.getRun(runId)!);
+  }
+
   // Coalesces the changes of one turn of the event loop into one browser invalidation.
   #scheduleInvalidation(): void {
     if (this.#invalidationScheduled) return;

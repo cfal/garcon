@@ -873,6 +873,7 @@ describe('Settings', () => {
 			review: vi.fn(),
 			stop: vi.fn(),
 			post: vi.fn(),
+			abandon: vi.fn(),
 		} satisfies PullRequestReviewsApi;
 		const reviews = new PullRequestReviewsStore(api);
 		const appShell = createAppShellStore();

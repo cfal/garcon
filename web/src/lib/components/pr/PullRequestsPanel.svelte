@@ -99,7 +99,7 @@
 	});
 
 	function repositoryName(repositoryId: string): string {
-		return showsRepositoryNames ? (reviews.repository(repositoryId)?.nameWithOwner ?? '') : '';
+		return showsRepositoryNames ? reviews.repositoryLabel(repositoryId) : '';
 	}
 
 	function toggleGroup(id: PullRequestInboxGroupId): void {
@@ -211,7 +211,7 @@
 						>
 							<option value={null}>{m.pull_request_inbox_all_repositories()}</option>
 							{#each reviews.repositories as repository (repository.id)}
-								<option value={repository.id}>{repository.nameWithOwner}</option>
+								<option value={repository.id}>{reviews.repositoryLabel(repository.id)}</option>
 							{/each}
 						</select>
 					</div>

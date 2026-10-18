@@ -119,6 +119,60 @@ test('retains a delivered comment after a network error and reconciles after pus
   expect(JSON.parse(await fs.readFile(join(directory, 'gh-comments.json'), 'utf8'))).toHaveLength(1);
 });
 
+test('records a definite HTTP rejection as failed and allows disconnecting', async () => {
+  const setup = harness();
+  const config = await useRuntimeGh(setup);
+  await fs.writeFile(join(setup.directory, 'gh-fixture.json'), JSON.stringify({ ...config, commentRejection: 'gh: Resource not accessible by integration (HTTP 403)' }));
+  await setup.poster.post('run');
+  expect(setup.store.getRun('run')?.post.status).toBe('failed');
+  expect(await Bun.file(join(setup.directory, 'gh-comments.json')).exists()).toBe(false);
+  expect(() => setup.repositories.remove('repository')).not.toThrow();
+});
+
+test('preserves an earlier unknown outcome when the recovery read is rejected', async () => {
+  const { store, poster, gh } = harness();
+  gh.createPullRequestComment.mockRejectedValueOnce(new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Reply lost'));
+  await poster.post('run');
+  gh.getPullRequestReviewTarget.mockRejectedValueOnce(new GitServiceError('GH_FORBIDDEN', 'HTTP 403'));
+  await poster.post('run');
+  expect(store.getRun('run')?.post).toMatchObject({ status: 'unknown', actor: ACTOR });
+  expect(gh.createPullRequestComment).toHaveBeenCalledTimes(1);
+});
+
+for (const reason of ['deleted PR', 'another actor'] as const) {
+  test(`explicitly abandons an unresolved post for ${reason} without resending or deleting its audit`, async () => {
+    const { store, poster, gh, scope, repositories } = harness();
+    gh.createPullRequestComment.mockRejectedValueOnce(new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Reply lost'));
+    await poster.post('run');
+    if (reason === 'deleted PR') gh.getPullRequestReviewTarget.mockRejectedValueOnce(new GitServiceError('GH_NOT_FOUND', 'Deleted PR'));
+    else gh.getPullRequestReviewTarget.mockResolvedValueOnce({
+      ...scope, repository: REPOSITORY, viewer: ACTOR, number: 7, state: 'open', headRefOid: HEAD,
+      markedComments: [{ id: 'other', url: '', marker: `<!-- garcon-review acme/app#7 ${HEAD} -->`, isMinimized: false, author: { id: 'other', login: 'other' } }],
+    });
+    await poster.post('run');
+    expect(store.hasUnknownPost('repository')).toBe(true);
+    poster.abandon('run');
+    expect(store.getRun('run')).toMatchObject({ review: expect.stringContaining(HEAD), post: { status: 'abandoned', actor: ACTOR, abandonedAt: '2026-03-01T00:00:00.000Z' } });
+    expect(store.recoveryRuns().runs).toHaveLength(0);
+    await expect(poster.post('run')).rejects.toThrow('abandoned');
+    expect(gh.createPullRequestComment).toHaveBeenCalledTimes(1);
+    expect(() => repositories.remove('repository')).not.toThrow();
+  });
+}
+
+test('cannot abandon a post while its executor call is in flight', async () => {
+  const { poster, gh, scope, store } = harness();
+  const pending = Promise.withResolvers<Awaited<ReturnType<ExecutionGhService['createPullRequestComment']>>>();
+  gh.createPullRequestComment.mockImplementationOnce(() => pending.promise);
+  const posting = poster.post('run');
+  await new Promise(resolve => setImmediate(resolve));
+  expect(() => poster.abandon('run')).toThrow('being posted');
+  pending.resolve({ ...scope, id: 'new', url: '' });
+  await posting;
+  expect(store.getRun('run')?.post.status).toBe('posted');
+  expect(() => poster.abandon('run')).toThrow('unresolved');
+});
+
 test('does not overwrite durable admission when the executor returns an unclassified failure', async () => {
   const { store, poster, gh, repositories } = harness();
   gh.createPullRequestComment.mockRejectedValueOnce(new Error('The executor reply was lost'));

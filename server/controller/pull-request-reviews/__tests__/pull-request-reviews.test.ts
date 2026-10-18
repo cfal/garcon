@@ -130,6 +130,29 @@ function seedHistory(directory: string, repositoryId: string, count: number, rev
   } finally { database.close(); }
 }
 
+test('requires explicit abandonment confirmation and retains the audit across restart', async () => {
+  const { reviews, directory, deps } = harness();
+  const repository = await connect(reviews, {});
+  seedHistory(directory, repository.id, 1, `Reviewed commit: ${HEAD}`, true);
+  const routes = createPullRequestReviewRoutes({ service: reviews, referencesApiProvider: () => false, handleChatRemoved() {}, start() {}, stop() {}, close() {} });
+  const url = new URL('http://localhost/api/v1/pull-request-reviews/runs/abandon');
+  const post = (body: unknown) => routes[url.pathname].POST!(new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), url);
+  expect((await post({ runId: 'history-000' })).status).toBe(400);
+  expect((await post({ runId: 'history-000', confirm: false })).status).toBe(400);
+  expect(reviews.recoveryRuns().runs).toHaveLength(1);
+  const response = await post({ runId: 'history-000', confirm: true });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ run: { post: { status: 'abandoned', abandonedAt: expect.any(String) } } });
+  reviews.close();
+  const restarted = new PullRequestReviews(new PullRequestReviewStore(directory), deps);
+  try {
+    expect(restarted.runDetail('history-000')).toMatchObject({ review: `Reviewed commit: ${HEAD}`, post: { status: 'abandoned' } });
+    expect(restarted.recoveryRuns().runs).toHaveLength(0);
+    await expect(restarted.postRun('history-000')).rejects.toThrow('abandoned');
+    expect(() => restarted.remove(repository.id)).not.toThrow();
+  } finally { restarted.close(); }
+});
+
 test('paginates maximum-size review history without serializing bodies or blocking health requests', async () => {
   const { reviews, directory } = harness();
   const repository = await connect(reviews, {});

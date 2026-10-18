@@ -52,6 +52,15 @@ describe('runGh', () => {
     await expect(runGhMutation('/repo', ['api', '--method', 'POST'])).rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
   });
 
+  for (const status of [400, 401, 403, 404, 422, 429, 408, 500, 502]) {
+    it(`classifies HTTP ${status} without treating uncertain responses as rejections`, async () => {
+      spawnMock.mockImplementation(() => ({ stdout: textStream(''), stderr: textStream(`gh: Request failed (HTTP ${status})`), exited: Promise.resolve(1), kill: mock(() => undefined) }));
+      await expect(runGhMutation('/repo', ['api', '--method', 'POST'])).rejects.toMatchObject({
+        code: status < 500 && status !== 408 ? 'GH_MUTATION_REJECTED' : 'GIT_MUTATION_OUTCOME_UNKNOWN',
+      });
+    });
+  }
+
   it('preserves an unknown mutation outcome when its reply exceeds the output limit', async () => {
     await expect(runGhMutation('/repo', ['api', '--method', 'POST'], { maxStdoutBytes: 1 }))
       .rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });

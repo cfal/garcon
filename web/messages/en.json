@@ -3125,5 +3125,8 @@
 	"pull_request_review_recovery_title": "Unresolved GitHub posts",
 	"pull_request_review_show_recovery": "Show all unresolved posts",
 	"pull_request_review_recovery_hint": "Includes closed pull requests and reviews outside the recent list.",
-	"pull_request_review_recovery_empty": "No unresolved posts."
+	"pull_request_review_recovery_empty": "No unresolved posts.",
+	"pull_request_review_abandon": "Abandon unresolved post",
+	"pull_request_review_abandon_confirm": "Confirm abandon",
+	"pull_request_review_abandon_warning": "The comment may already exist on GitHub. Abandoning stops recovery and unlocks this connection. It does not delete a GitHub comment. This review cannot be posted again."
 }

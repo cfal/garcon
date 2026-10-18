@@ -127,7 +127,15 @@ async function runGhProcess(cwd: string, args: string[], options: GhCommandOptio
   });
 }
 
-// A failed subprocess cannot prove that GitHub did not accept its mutation.
+function isDefiniteHttpRejection(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const processError = error as GhProcessError;
+  if (processError.timedOut || processError.aborted) return false;
+  const status = /^gh: [^\r\n]*\(HTTP (4\d{2})\)\s*$/m.exec(processError.stderr ?? '')?.[1];
+  return status !== undefined && status !== '408';
+}
+
+// A transport failure after dispatch cannot prove that GitHub rejected its mutation.
 export async function runGhMutation(
   cwd: string,
   args: string[],
@@ -141,7 +149,9 @@ export async function runGhMutation(
         markGitMutationDispatched();
       });
     } catch (error) {
-      if (!dispatched) throw error;
+      if (!dispatched || isDefiniteHttpRejection(error)) {
+        throw new GitServiceError('GH_MUTATION_REJECTED', error instanceof Error ? error.message : 'GitHub did not dispatch the mutation.');
+      }
       throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'GitHub did not confirm the mutation after dispatch. Check its outcome before trying again.');
     }
   });

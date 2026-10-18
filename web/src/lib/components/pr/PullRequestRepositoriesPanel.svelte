@@ -76,7 +76,7 @@
 	}
 
 	function repositoryName(repositoryId: string): string {
-		return reviews.repository(repositoryId)?.nameWithOwner ?? '';
+		return reviews.repositoryLabel(repositoryId);
 	}
 </script>
 
@@ -130,7 +130,9 @@
 								data-label={m.pull_request_repository_column_repository()}
 								class="max-w-56 px-3 py-2"
 							>
-								<p class="truncate font-medium text-foreground">{repository.nameWithOwner}</p>
+								<p class="break-words font-medium text-foreground">
+									{repositoryName(repository.id)}
+								</p>
 								<p
 									class="truncate font-mono text-xs text-muted-foreground"
 									title={repository.target.projectPath}
@@ -150,7 +152,7 @@
 									checked={repository.settings.autoReview}
 									onCheckedChange={(next) => setAutoReview(repository, Boolean(next))}
 									aria-label={m.pull_request_repository_auto_review_for({
-										repository: repository.nameWithOwner,
+										repository: repositoryName(repository.id),
 									})}
 								/>
 							</td>
@@ -211,7 +213,7 @@
 											size="icon-sm"
 											variant="ghost"
 											aria-label={m.pull_request_repository_edit({
-												repository: repository.nameWithOwner,
+												repository: repositoryName(repository.id),
 											})}
 											onclick={() => (editing = { repository })}
 										>
@@ -221,7 +223,7 @@
 											size="icon-sm"
 											variant="ghost"
 											aria-label={m.pull_request_repository_disconnect_named({
-												repository: repository.nameWithOwner,
+												repository: repositoryName(repository.id),
 											})}
 											onclick={() => (removing = repository.id)}
 										>
@@ -256,6 +258,7 @@
 					{repositoryName}
 					{onOpenChat}
 					onPost={(runId) => reviews.post(runId)}
+					onAbandon={(runId) => reviews.abandon(runId)}
 				/>
 			{:else if reviews.recentRuns.length === 0}
 				<p class="text-sm text-muted-foreground">
@@ -270,6 +273,7 @@
 							{currentTime}
 							{onOpenChat}
 							onPost={(runId) => reviews.post(runId)}
+							onAbandon={(runId) => reviews.abandon(runId)}
 						/>
 					{/each}
 				</ol>

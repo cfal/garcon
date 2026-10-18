@@ -4,6 +4,7 @@
 
 import { untrack } from 'svelte';
 import {
+	abandonPullRequestReviewPost,
 	connectPullRequestReviewRepository,
 	getPullRequestReviews,
 	postPullRequestReview,
@@ -13,6 +14,7 @@ import {
 	stopPullRequestReview,
 	updatePullRequestReviewRepository,
 } from '$lib/api/pull-request-reviews.js';
+import { ghRepositoryIdentity } from '$shared/gh-identity';
 import type {
 	PullRequestReviewRepository,
 	PullRequestReviewRepositoryInput,
@@ -34,6 +36,7 @@ export interface PullRequestReviewsApi {
 	review: typeof requestPullRequestReview;
 	stop: typeof stopPullRequestReview;
 	post: typeof postPullRequestReview;
+	abandon: typeof abandonPullRequestReviewPost;
 }
 
 const DEFAULT_API: PullRequestReviewsApi = {
@@ -45,6 +48,7 @@ const DEFAULT_API: PullRequestReviewsApi = {
 	review: requestPullRequestReview,
 	stop: stopPullRequestReview,
 	post: postPullRequestReview,
+	abandon: abandonPullRequestReviewPost,
 };
 
 export class PullRequestReviewsStore {
@@ -82,6 +86,19 @@ export class PullRequestReviewsStore {
 
 	repository(id: string): PullRequestReviewRepository | null {
 		return this.repositories.find((repository) => repository.id === id) ?? null;
+	}
+
+	repositoryLabel(id: string): string {
+		const repository = this.repository(id);
+		if (!repository) return '';
+		const host = ghRepositoryIdentity(repository)?.host;
+		const collision = this.repositories.some(
+			(other) =>
+				other.id !== id &&
+				other.nameWithOwner.toLowerCase() === repository.nameWithOwner.toLowerCase() &&
+				ghRepositoryIdentity(other)?.host !== host,
+		);
+		return collision && host ? `${repository.nameWithOwner} (${host})` : repository.nameWithOwner;
 	}
 
 	async ensureLoaded(): Promise<void> {
@@ -189,5 +206,9 @@ export class PullRequestReviewsStore {
 
 	async post(runId: string): Promise<void> {
 		this.apply(await this.api.post(runId));
+	}
+
+	async abandon(runId: string): Promise<void> {
+		this.apply(await this.api.abandon(runId));
 	}
 }

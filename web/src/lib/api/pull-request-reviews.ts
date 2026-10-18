@@ -2,6 +2,7 @@ import { apiDelete, apiGet, apiPost, apiPut } from './client.js';
 import {
 	isPullRequestReviewsSnapshot,
 	type PullRequestReviewMutationResponse,
+	type PullRequestReviewAbandonRequest,
 	type PullRequestReviewRepositoryInput,
 	type PullRequestReviewRun,
 	type PullRequestReviewRunDetail,
@@ -12,6 +13,17 @@ import {
 } from '$shared/pull-request-reviews';
 
 const BASE = '/api/v1/pull-request-reviews';
+
+export async function abandonPullRequestReviewPost(
+	runId: string,
+): Promise<PullRequestReviewsSnapshot> {
+	return snapshotFrom(
+		await apiPost<PullRequestReviewMutationResponse>(`${BASE}/runs/abandon`, {
+			runId,
+			confirm: true,
+		} satisfies PullRequestReviewAbandonRequest),
+	);
+}
 
 function snapshotFrom(value: unknown): PullRequestReviewsSnapshot {
 	const snapshot = (value as { snapshot?: unknown } | null)?.snapshot ?? value;

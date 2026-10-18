@@ -10,8 +10,9 @@
 		repositoryName: (repositoryId: string) => string;
 		onOpenChat: (chatId: string) => void;
 		onPost: (runId: string) => Promise<void>;
+		onAbandon: (runId: string) => Promise<void>;
 	}
-	let { currentTime, repositoryName, onOpenChat, onPost }: Props = $props();
+	let { currentTime, repositoryName, onOpenChat, onPost, onAbandon }: Props = $props();
 	const recovery = new PullRequestRecoveryState();
 	onMount(() => {
 		void recovery.load();
@@ -44,6 +45,10 @@
 				{currentTime}
 				{onOpenChat}
 				onPost={reconcile}
+				onAbandon={async (runId) => {
+					await onAbandon(runId);
+					await recovery.load();
+				}}
 			/>
 		{/each}
 	</ol>

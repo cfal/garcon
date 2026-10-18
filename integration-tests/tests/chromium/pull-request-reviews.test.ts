@@ -314,6 +314,55 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     const delivered = JSON.parse(await readFile(join(project, 'gh-comments.json'), 'utf8')) as { number: number }[];
     expect(delivered.filter(comment => comment.number === 140)).toHaveLength(1);
 
+    phase('distinguish same-name connections and abandon an unreconcilable post');
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    const enterpriseProject = join(project, 'other-host');
+    await mkdir(enterpriseProject);
+    await initializeFixtureRepository(enterpriseProject);
+    await writeFile(join(enterpriseProject, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic-viewer', owner: 'acme', repository: 'app', host: 'github.com', pulls: [] }));
+    await client.post('/api/v1/pull-request-reviews/repositories', {
+      target: { ...connected.target, projectPath: enterpriseProject }, settings: DEFAULT_PULL_REQUEST_REVIEW_SETTINGS,
+    });
+    await browserExpect(panel.getByRole('option', { name: 'acme/app (github.com)' })).toHaveCount(1);
+    await browserExpect(panel.getByRole('option', { name: 'acme/app (git.example.invalid)' })).toHaveCount(1);
+    const abandonedPull = { number: 141, title: 'Stop recovery for a deleted pull request', headRefOid: HEAD };
+    await writeFile(githubFixturePath, JSON.stringify({ ...githubFixture, pulls: [...PULLS, abandonedPull], commentResponse: '{' }));
+    await client.post('/api/v1/pull-request-reviews/scan', { repositoryId });
+    await browserExpect.poll(async () => (await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews')).inbox.some(entry => entry.pull.number === 141)).toBe(true);
+    const abandoning = await client.post<PullRequestReviewRunMutationResponse>('/api/v1/pull-request-reviews/runs', { repositoryId, number: 141 });
+    await browserExpect.poll(async () => (await client.get<PullRequestReviewRunsResponse>(`/api/v1/pull-request-reviews/runs?repositoryId=${repositoryId}&number=141`)).runs[0]?.state, { timeout: 30_000 }).toBe('completed');
+    await client.post('/api/v1/pull-request-reviews/runs/post', { runId: abandoning.run.id });
+    await writeFile(githubFixturePath, JSON.stringify({ ...githubFixture, pulls: PULLS }));
+    await client.post('/api/v1/pull-request-reviews/scan', { repositoryId });
+    await browserExpect.poll(async () => (await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews')).inbox.some(entry => entry.pull.number === 141)).toBe(false);
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await panel.locator('[data-pr-repositories-button]').click();
+    await browserExpect(repositories.getByRole('button', { name: 'Edit acme/app (github.com)' })).toBeVisible();
+    await browserExpect(repositories.getByRole('button', { name: 'Edit acme/app (git.example.invalid)' })).toBeVisible();
+    await capture('repository-hosts-desktop');
+    await repositories.getByRole('button', { name: 'Show all unresolved posts' }).click();
+    const abandoningRow = repositories.locator(`[data-pr-recent-run="${abandoning.run.id}"]`);
+    await browserExpect(abandoningRow).toContainText('acme/app (git.example.invalid) #141');
+    await abandoningRow.locator('[data-pr-abandon-run]').click();
+    await capture('abandon-post-desktop');
+    await abandoningRow.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await panel.locator('[data-pr-repositories-button]').click();
+    await repositories.getByRole('button', { name: 'Edit acme/app (github.com)' }).scrollIntoViewIfNeeded();
+    await capture('repository-hosts-mobile');
+    await repositories.getByRole('button', { name: 'Show all unresolved posts' }).click();
+    await abandoningRow.locator('[data-pr-abandon-run]').scrollIntoViewIfNeeded();
+    await abandoningRow.locator('[data-pr-abandon-run]').click();
+    await abandoningRow.locator('[data-pr-confirm-abandon]').scrollIntoViewIfNeeded();
+    await capture('abandon-post-mobile');
+    await abandoningRow.locator('[data-pr-confirm-abandon]').click();
+    await browserExpect(abandoningRow).toHaveCount(0);
+    const abandoned = await client.get<PullRequestReviewRunsResponse>(`/api/v1/pull-request-reviews/runs?repositoryId=${repositoryId}&number=141`);
+    expect(abandoned.runs[0].post).toMatchObject({ status: 'abandoned', abandonedAt: expect.any(String) });
+    expect(JSON.parse(await readFile(join(project, 'gh-comments.json'), 'utf8')).filter((comment: { number: number }) => comment.number === 141)).toHaveLength(1);
+
     expect(browserErrors).toEqual([
       'console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)',
     ]);

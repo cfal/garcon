@@ -53,6 +53,14 @@ export default function createPullRequestReviewRoutes(reviews: PullRequestReview
   }
 
   return {
+    '/api/v1/pull-request-reviews/runs/abandon': {
+      POST: withJsonBody((raw) => guarded(() => {
+        const request = body(raw);
+        if (request.confirm !== true) throw reviewInvalid('Abandoning an unresolved post requires confirmation.');
+        const run = reviews.service.abandonPost(requiredId(request.runId, 'runId'));
+        return Response.json({ ...mutation(), run } satisfies PullRequestReviewRunMutationResponse);
+      })),
+    },
     '/api/v1/pull-request-reviews': {
       GET: () => guarded(() => Response.json(reviews.service.snapshot())),
     },

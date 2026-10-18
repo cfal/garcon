@@ -134,6 +134,7 @@ function setup(
 		review: vi.fn(),
 		stop: vi.fn(),
 		post: vi.fn(async () => snapshot),
+		abandon: vi.fn(async () => snapshot),
 	} satisfies PullRequestReviewsApi;
 	const getDetail = vi.fn(options.getDetail ?? (() => new Promise<never>(() => {})));
 	const getRuns = vi.fn(options.getRuns ?? (async () => [run]));
@@ -165,6 +166,36 @@ function setup(
 }
 
 describe('PullRequestsPanel', () => {
+	it('distinguishes repositories on different hosts in the inbox filter', async () => {
+		setup({
+			snapshot: {
+				...snapshot,
+				repositories: [
+					...snapshot.repositories,
+					{
+						...snapshot.repositories[0],
+						id: 'enterprise',
+						url: 'https://git.example.invalid/acme/app',
+					},
+				],
+			},
+		});
+		await screen.findByRole('option', { name: 'acme/app (github.com)' });
+		await screen.findByRole('option', { name: 'acme/app (git.example.invalid)' });
+	});
+	it('does not offer to post an abandoned review again', async () => {
+		setup({
+			getRuns: async () => [
+				{
+					...run,
+					post: { ...run.post, status: 'abandoned', message: 'Post recovery was abandoned.' },
+				},
+			],
+		});
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await screen.findByText('Post recovery was abandoned.');
+		expect(screen.queryByRole('button', { name: 'Post to GitHub' })).toBeNull();
+	});
 	it('keeps selected history and its body when only another repository scan changes the snapshot', async () => {
 		const { controller, getRuns, getRun } = setup();
 		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);

@@ -128,7 +128,12 @@ export interface PullRequestReviewRepository extends PullRequestReviewRepository
   scan: PullRequestReviewScan;
 }
 
-export type PullRequestReviewPostStatus = 'none' | 'posted' | 'too-long' | 'stale' | 'failed' | 'unknown';
+export type PullRequestReviewPostStatus = 'none' | 'posted' | 'too-long' | 'stale' | 'failed' | 'unknown' | 'abandoned';
+
+export interface PullRequestReviewAbandonRequest {
+  runId: string;
+  confirm: true;
+}
 
 export interface PullRequestReviewPost {
   // Captured durably before dispatch so unknown outcomes retain their author.
@@ -136,6 +141,7 @@ export interface PullRequestReviewPost {
   status: PullRequestReviewPostStatus;
   commentUrl: string | null;
   postedAt: string | null;
+  abandonedAt?: string;
   message: string | null;
 }
 

@@ -138,32 +138,37 @@ export function createGhOperations(statusDirectory = process.cwd()): GhOperation
     },
 
     async createPullRequestComment({ projectPath, repository, actor, number, body, expected, signal }): Promise<PullRequestCommentRef> {
-      assertPullRequestNumber(number);
-      await assertAccessibleDirectory(projectPath);
-      await resolveCheckoutRepository(projectPath, repository, signal);
-      assertGhActor(await readPostingActor(projectPath, repository, signal), actor);
-      const current = await runGhJson<{ state: string; headRefOid: string }>(projectPath,
-        ['pr', 'view', String(number), '--repo', `${repository.host}/${repository.nameWithOwner}`, '--json', 'state,headRefOid'], { signal });
-      if (current.state !== expected.state.toUpperCase() || current.headRefOid !== expected.headRefOid) {
-        throw new GitServiceError('GH_STALE_PULL_REQUEST', 'The pull request is no longer open at the reviewed commit, so this review was not posted.');
-      }
-      // The body arrives on stdin because a full-length comment exceeds the size of one argument.
-      const { stdout } = await runGhMutation(
-        projectPath,
-        ['api', '--hostname', repository.host, '--method', 'POST', `repos/${repository.nameWithOwner}/issues/${number}/comments`, '-F', 'body=@-'],
-        { signal, stdin: body },
-      );
       try {
-        const created = parseGhJson<{ node_id?: string; html_url?: string; user?: { node_id?: string; login?: string } } | null>(stdout, 'api');
-        if (typeof created?.node_id !== 'string' || !created.node_id
-          || created.node_id.length > GH_COMMENT_ID_MAX_LENGTH || created.node_id.includes('\0')) throw new Error('Invalid comment identity');
-        if (created.html_url !== undefined && typeof created.html_url !== 'string') throw new Error('Invalid comment URL');
-        // External auth can still change after the preflight; never confirm a different author.
-        if (created.user?.node_id !== actor.id) throw new Error('Comment author changed');
-        return { id: created.node_id, url: created.html_url ?? '' };
-      } catch {
-        // An unusable successful reply cannot prove whether GitHub created the comment.
-        throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'GitHub did not return a usable comment identity. Check for the comment before trying again.');
+        assertPullRequestNumber(number);
+        await assertAccessibleDirectory(projectPath);
+        await resolveCheckoutRepository(projectPath, repository, signal);
+        assertGhActor(await readPostingActor(projectPath, repository, signal), actor);
+        const current = await runGhJson<{ state: string; headRefOid: string }>(projectPath,
+          ['pr', 'view', String(number), '--repo', `${repository.host}/${repository.nameWithOwner}`, '--json', 'state,headRefOid'], { signal });
+        if (current.state !== expected.state.toUpperCase() || current.headRefOid !== expected.headRefOid) {
+          throw new GitServiceError('GH_STALE_PULL_REQUEST', 'The pull request is no longer open at the reviewed commit, so this review was not posted.');
+        }
+        // The body arrives on stdin because a full-length comment exceeds the size of one argument.
+        const { stdout } = await runGhMutation(
+          projectPath,
+          ['api', '--hostname', repository.host, '--method', 'POST', `repos/${repository.nameWithOwner}/issues/${number}/comments`, '-F', 'body=@-'],
+          { signal, stdin: body },
+        );
+        try {
+          const created = parseGhJson<{ node_id?: string; html_url?: string; user?: { node_id?: string; login?: string } } | null>(stdout, 'api');
+          if (typeof created?.node_id !== 'string' || !created.node_id
+            || created.node_id.length > GH_COMMENT_ID_MAX_LENGTH || created.node_id.includes('\0')) throw new Error('Invalid comment identity');
+          if (created.html_url !== undefined && typeof created.html_url !== 'string') throw new Error('Invalid comment URL');
+          // External auth can still change after the preflight; never confirm a different author.
+          if (created.user?.node_id !== actor.id) throw new Error('Comment author changed');
+          return { id: created.node_id, url: created.html_url ?? '' };
+        } catch {
+          // An unusable successful reply cannot prove whether GitHub created the comment.
+          throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'GitHub did not return a usable comment identity. Check for the comment before trying again.');
+        }
+      } catch (error) {
+        if (error instanceof GitServiceError && (error.code === 'GIT_MUTATION_OUTCOME_UNKNOWN' || error.code === 'GH_STALE_PULL_REQUEST')) throw error;
+        throw new GitServiceError('GH_MUTATION_REJECTED', error instanceof Error ? error.message : 'The comment was not created.');
       }
     },
 
