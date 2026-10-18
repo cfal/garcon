@@ -11,6 +11,7 @@ import type {
   TranscriptSearchStatusV1,
 } from '../../../common/chat-search.js';
 import {
+  CHAT_SEARCH_MAX_COMPILED_QUERY_BYTES,
   CHAT_SEARCH_MAX_OFFSET,
   CHAT_SEARCH_MAX_CHAT_IDS,
   CHAT_SEARCH_MAX_PAGE_SIZE,
@@ -283,7 +284,7 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
     ? body as Record<string, unknown>
     : {};
   const textTokens = optionalBoundedStringArrayField(input, 'textTokens', {
-    maxItems: CHAT_SEARCH_MAX_TERMS,
+    maxItems: MAX_SEARCH_TEXT_CHARS,
     maxItemChars: MAX_SEARCH_TEXT_TOKEN_CHARS,
     maxTotalChars: MAX_SEARCH_TEXT_CHARS,
   });
@@ -304,6 +305,9 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
   );
   if (wordCount > CHAT_SEARCH_MAX_WORDS) {
     throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_WORDS} words`);
+  }
+  if (Buffer.byteLength(JSON.stringify(compiled), 'utf8') > CHAT_SEARCH_MAX_COMPILED_QUERY_BYTES) {
+    throw new ValidationDomainError('search query is too large');
   }
   const mode = optionalSearchResultMode(input.mode) ?? 'page';
   const offset = optionalBoundedOffset(input.offset) ?? 0;

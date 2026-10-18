@@ -58,6 +58,7 @@ describe('garcon-cli chat research', () => {
         'foo\u0000bar',
         ...quotedFragments,
         'alphabet betamax',
+        'alpha beta gamma delta epsilon zeta eta theta iota',
       ];
       const chatIds: string[] = [];
       for (const content of contents) {
@@ -110,6 +111,10 @@ describe('garcon-cli chat research', () => {
         ...['alpha\nbeta', 'alpha\u00a0beta'].map((query) => ({
           query, chatIndex: 12, snippet: 'alphabet',
         })),
+        {
+          query: 'alpha - beta - gamma - delta - epsilon - zeta - eta - theta - iota',
+          chatIndex: 13, snippet: 'alpha',
+        },
       ];
       for (const { query, chatIndex, snippet } of parserCases) {
         const chatId = chatIds[chatIndex]!;
@@ -128,6 +133,17 @@ describe('garcon-cli chat research', () => {
       }
       const nul = await fixture.client.searchChats({ query: 'foo\u0000bar', chatIds });
       expect(nul.results.map((hit) => hit.chatId)).toEqual([chatIds[8]!]);
+      const lexicalBound = await fixture.client.timedSearchChats({
+        query: '', textTokens: Array(8).fill('\u754c'.repeat(1_024)),
+      });
+      expect(lexicalBound.status).toBe(200);
+      const literalOverflow = await fixture.client.timedSearchChats({
+        query: '', textTokens: Array(8).fill('\u754c'.repeat(1_023) + '?'),
+      });
+      expect(literalOverflow.status).toBe(400);
+      expect(literalOverflow.body).toMatchObject({ errorCode: 'VALIDATION_FAILED' });
+      const subsequent = await fixture.client.searchChats({ query: '#731', chatIds });
+      expect(subsequent.page.total).toBe(2);
       const overLimitQuery = JSON.stringify(Object.fromEntries(
         Array.from({ length: 9 }, (_, index) => [`key${index}`, `value${index}`]),
       ));

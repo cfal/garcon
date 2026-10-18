@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { compileChatSearchQuery } from '@garcon/common/chat-search';
+import { CHAT_SEARCH_MAX_COMPILED_QUERY_BYTES, compileChatSearchQuery } from '@garcon/common/chat-search';
 import { SEARCH_INGEST_ROW_MAX_BYTES, SEARCH_TIMESTAMP_MAX_BYTES } from '../schema.js';
 import {
   MAX_FRAME_BYTES,
@@ -20,6 +20,21 @@ function extra<T extends object>(value: T): T & { extra: true } {
 }
 
 describe('worker protocol v9', () => {
+  test('bounds expanded literal queries by encoded bytes', () => {
+    for (const punctuation of ['', '?']) {
+      const query = compileChatSearchQuery('', Array(8).fill(
+        '\u754c'.repeat(1_024 - punctuation.length) + punctuation,
+      ));
+      const bytes = Buffer.byteLength(JSON.stringify(query), 'utf8');
+      const request = {
+        ...envelope, type: 'search-start', query,
+        order: 'relevance', mode: 'page', offset: 0, limit: 20, snippetLimit: 3,
+      };
+      expect(isReaderRequest(request)).toBe(punctuation === '');
+      expect(bytes > CHAT_SEARCH_MAX_COMPILED_QUERY_BYTES).toBe(punctuation !== '');
+    }
+  });
+
   test('accepts typed literal queries and rejects malformed literal clauses', () => {
     const request = {
       ...envelope,

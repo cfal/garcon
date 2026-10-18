@@ -4,6 +4,7 @@ export type ChatSearchSnippetRole = 'user' | 'assistant' | 'tool' | 'system';
 
 export const CHAT_SEARCH_MAX_TERMS = 16;
 export const CHAT_SEARCH_MAX_WORDS = 32;
+export const CHAT_SEARCH_MAX_COMPILED_QUERY_BYTES = 64 * 1024;
 export const CHAT_SEARCH_MIN_PREFIX_CHARS = 3;
 export const CHAT_SEARCH_DEFAULT_PAGE_SIZE = 20;
 export const CHAT_SEARCH_MAX_PAGE_SIZE = 100;

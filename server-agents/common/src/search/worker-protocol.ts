@@ -8,6 +8,7 @@ import type {
   TranscriptSearchAllowedChat,
 } from '@garcon/common/chat-search';
 import {
+  CHAT_SEARCH_MAX_COMPILED_QUERY_BYTES,
   CHAT_SEARCH_MAX_OFFSET,
   CHAT_SEARCH_MAX_FAILED_CHAT_DETAILS,
   CHAT_SEARCH_MAX_PAGE_SIZE,
@@ -261,7 +262,7 @@ function searchQuery(value: unknown): boolean {
       || candidate.version !== 1
       || !Array.isArray(candidate.clauses)
       || candidate.clauses.length > CHAT_SEARCH_MAX_TERMS
-      || !jsonBytesWithin(candidate, 64 * 1024)) return false;
+      || !jsonBytesWithin(candidate, CHAT_SEARCH_MAX_COMPILED_QUERY_BYTES)) return false;
   let tokenCount = 0;
   for (const valueClause of candidate.clauses) {
     const clause = record(valueClause);
