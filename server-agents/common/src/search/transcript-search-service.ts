@@ -22,18 +22,16 @@ import {
 } from './reader-admission.js';
 import type { HistoricalSearchMessageRow } from './rows.js';
 import { SEARCH_INGEST_ROW_MAX_BYTES, type SearchChatState } from './schema.js';
-import type {
-  IndexerEvent,
-  IndexerRequest,
-  ReaderEvent,
-  ReaderRequest,
-} from './worker-protocol.js';
-import type { TranscriptSearchOrder } from './worker-protocol.js';
 import {
   MAX_FRAME_BYTES,
   MAX_ROWS_PER_FRAME,
   isIndexerEvent,
   isReaderEvent,
+  type IndexerEvent,
+  type IndexerRequest,
+  type ReaderEvent,
+  type ReaderRequest,
+  type TranscriptSearchOrder,
 } from './worker-protocol.js';
 import {
   SearchWorkerSupervisor,
