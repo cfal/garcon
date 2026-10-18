@@ -253,13 +253,18 @@ function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
     const prefixWords = clause.tokens.map(
       (token: ChatSearchTokenV1) => !exactPhrase && token.match === 'prefix',
     );
-    const phraseText = clause.kind === 'literal' ? clause.text : words.join(' ');
+    let ftsQuery: string;
+    if (exactPhrase) {
+      const phraseText = clause.kind === 'literal' ? clause.text : words.join(' ');
+      ftsQuery = escapeFtsWord(phraseText.replace(/[\u0000\p{Cs}]/gu, ' '));
+    } else {
+      ftsQuery = words.map((word, index) => {
+        const escapedWord = escapeFtsWord(word);
+        return prefixWords[index] ? `${escapedWord}*` : escapedWord;
+      }).join(' AND ');
+    }
     return {
-      query: exactPhrase
-        ? escapeFtsWord(phraseText.replace(/[\u0000\p{Cs}]/gu, ' '))
-        : words.map((word: string, index: number) => prefixWords[index]
-          ? `${escapeFtsWord(word)}*`
-          : escapeFtsWord(word)).join(' AND '),
+      query: ftsQuery,
       words,
       normalizedWords: clause.tokens.map((token: ChatSearchTokenV1) => token.normalized),
       exactPhrase,

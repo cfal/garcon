@@ -246,26 +246,28 @@ export function compileChatSearchQuery(
   }
   return {
     version: 1,
-    clauses: terms.map((term, index): ChatSearchClauseV1 => {
-      let text = term.text;
-      if (term.quoted && !/^["']/u.test(term.source)) text = term.source;
-      const isLiteral = /[^\p{L}\p{N}\p{M}\p{Cf}\s\p{White_Space}]/u.test(text);
-      // Browser lexical tokens retain the index's existing case-folding behavior.
-      if (!isLiteral) text = textTokens?.[index] ?? text;
-      const phrase = term.quoted || hasChatFilterWhitespace(text);
-      const tokens = (text.match(/[\p{L}\p{N}_]+/gu) ?? []).map((text) => ({
-        text,
-        normalized: text.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase(),
-        match: !isLiteral && !phrase && [...text].length >= CHAT_SEARCH_MIN_PREFIX_CHARS
-          ? 'prefix' as const
-          : 'exact' as const,
-      }));
-      if (isLiteral) {
-        return { kind: 'literal', text: text.replace(/[\s\p{White_Space}]+/gu, ' ').trim(), tokens };
-      }
-      return { kind: phrase ? 'phrase' : 'all-words', tokens };
-    }).filter((clause) => clause.tokens.length > 0),
+    clauses: terms.map((term, index) => compileSearchClause(term, textTokens?.[index]))
+      .filter((clause) => clause.tokens.length > 0),
   };
+}
+
+function compileSearchClause(term: ChatFilterTerm, browserText?: string): ChatSearchClauseV1 {
+  const sourceText = term.quoted && !/^["']/u.test(term.source) ? term.source : term.text;
+  const isLiteral = /[^\p{L}\p{N}\p{M}\p{Cf}\s\p{White_Space}]/u.test(sourceText);
+  // Browser lexical tokens retain the index's existing case-folding behavior.
+  const text = isLiteral ? sourceText : (browserText ?? sourceText);
+  const phrase = term.quoted || hasChatFilterWhitespace(text);
+  const tokens = (text.match(/[\p{L}\p{N}_]+/gu) ?? []).map((word): ChatSearchTokenV1 => ({
+    text: word,
+    normalized: word.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase(),
+    match: !isLiteral && !phrase && [...word].length >= CHAT_SEARCH_MIN_PREFIX_CHARS
+      ? 'prefix'
+      : 'exact',
+  }));
+  if (isLiteral) {
+    return { kind: 'literal', text: text.replace(/[\s\p{White_Space}]+/gu, ' ').trim(), tokens };
+  }
+  return { kind: phrase ? 'phrase' : 'all-words', tokens };
 }
 
 function parseChatSearchResult(value: unknown, snippetLimit: number): ChatSearchResult {
