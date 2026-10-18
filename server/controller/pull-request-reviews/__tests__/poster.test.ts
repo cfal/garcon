@@ -10,6 +10,7 @@ import { PullRequestReviewPoster } from '../poster.js';
 import { PullRequestReviewStore, type StoredRepository, type StoredRun } from '../store.js';
 import { PullRequestReviewRepositories } from '../service.js';
 import { createGhOperations } from '../../../runtime/gh/gh-service.js';
+import { GitRuntime } from '../../../runtime/git/runtime.js';
 
 const REPOSITORY = { host: "github.invalid", nameWithOwner: "acme/app" };
 const ACTOR = { id: "actor-a", login: "viewer" };
@@ -140,6 +141,22 @@ for (const outcome of ['not-dispatched', 'rejected', 'unknown'] as const) {
     expect(gh.createPullRequestComment).toHaveBeenCalledTimes(1);
     if (outcome === 'unknown') expect(() => repositories.remove('repository')).toThrow('unconfirmed post');
     else expect(() => repositories.remove('repository')).not.toThrow();
+  });
+}
+
+for (const failure of ['missing checkout', 'invalid comment'] as const) {
+  test(`does not lock the connection when runtime preflight rejects a ${failure}`, async () => {
+    const { store, poster, gh, directory, repositories } = harness();
+    const runtime = new GitRuntime({ executorId: 'local', instanceId: 'instance', projectBasePath: directory, assertAvailable() {} });
+    cleanups.push(() => runtime.dispose());
+    if (failure === 'invalid comment') store.updateRun('run', current => current, `Reviewed commit: ${HEAD}\n\0`);
+    gh.createPullRequestComment.mockImplementationOnce(request => runtime.gh.createPullRequestComment({
+      ...request, projectPath: failure === 'missing checkout' ? join(directory, 'removed-checkout') : directory,
+    }));
+    await poster.post('run');
+    expect(store.getRun('run')?.post.status).toBe('failed');
+    expect(await Bun.file(join(directory, 'gh-comments.json')).exists()).toBe(false);
+    expect(() => repositories.remove('repository')).not.toThrow();
   });
 }
 

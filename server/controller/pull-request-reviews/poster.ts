@@ -16,6 +16,11 @@ import type { PullRequestReviewStore, StoredRun } from './store.js';
 
 const logger = createLogger('pull-request-review-poster');
 
+// Request, path, and admission rejections occur before the GitHub mutation starts.
+const POST_REJECTION_CODES: readonly GitServiceError['code'][] = [
+  'GH_MUTATION_REJECTED', 'GIT_INVALID_INPUT', 'GIT_NOT_REPO', 'GIT_OUTSIDE_BASE', 'GIT_SERVICE_BUSY',
+];
+
 export interface PullRequestReviewPosterDeps {
   store: PullRequestReviewStore;
   executors: GhServiceSource;
@@ -142,7 +147,7 @@ export class PullRequestReviewPoster {
         this.#record(run.id, { ...savedPost, message: 'The review was posted, but older comments could not be hidden. Retry cleanup.' });
         return;
       }
-      const rejected = creating && (error instanceof GitServiceError && error.code === 'GH_MUTATION_REJECTED'
+      const rejected = creating && (error instanceof GitServiceError && POST_REJECTION_CODES.includes(error.code)
         || error instanceof AgentCallError && error.outcome !== 'unknown');
       const unknown = !rejected && (savedPost.status === 'unknown'
         || error instanceof GitServiceError && error.code === 'GIT_MUTATION_OUTCOME_UNKNOWN');
