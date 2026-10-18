@@ -33,18 +33,19 @@ export class NewChatPinnedPathsController {
 		);
 	}
 
-	select(executorId: string, path: string): void {
+	select(executorId: string, path: string): boolean {
 		const form = this.getForm();
-		if (form.isUpdatingPinnedPath || !this.executors.isReady(executorId)) return;
+		if (form.isUpdatingPinnedPath || !this.executors.isReady(executorId)) return false;
 		const paths =
 			executorId === form.executorId
 				? form.pinnedProjectPaths
 				: executorPinnedProjectPaths(this.settings.snapshot, executorId);
-		if (!path.trim() || !paths.includes(path)) return;
+		if (!path.trim() || !paths.includes(path)) return false;
 		form.selectExecutor(executorId);
 		form.projectPath = path;
 		form.showBrowser = false;
 		form.clearError();
 		form.validatePath();
+		return true;
 	}
 }

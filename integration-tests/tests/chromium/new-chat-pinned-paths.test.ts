@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
-  test(`New Chat browses machine pins without changing execution until a pin is selected (${executionBackend})`, async () => {
+  test(`New Chat picks other machine pins without losing draft or focus (${executionBackend})`, async () => {
     await withChromiumFixture(`new-chat-machine-pins-${executionBackend}`, async ({ page, context, integration, assertNoBrowserErrors }, phase) => {
       const { client, dirs } = integration;
       const offline = await client.post<{ id: string }>('/api/v1/executors', {
@@ -29,27 +29,34 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const prompt = page.getByPlaceholder('How can I help you today?');
       await prompt.fill('Synthetic retained draft');
       const pins = page.getByRole('region', { name: 'Pinned paths', exact: true });
-      const toggle = pins.getByRole('button', { name: 'All machines', exact: true });
-      await browserExpect(toggle).toHaveAttribute('aria-pressed', 'false');
+      const trigger = pins.getByRole('button', { name: 'Other machines…', exact: true });
+      const picker = page.locator('[data-machine-pins-picker]');
       const path = page.locator('#project-path-input');
       await browserExpect(path).toHaveValue(sharedPath);
       await browserExpect(page.locator('[data-slot="project-path-field"] .text-status-success-foreground')).toBeVisible();
-      phase('checking default compact view');
+      await browserExpect(trigger).toHaveAttribute('aria-expanded', 'false');
+      await browserExpect(picker).toHaveCount(0);
+      phase('checking compact inline pins');
       const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
       await mkdir(artifacts, { recursive: true });
       await dialog.screenshot({ path: join(artifacts, `machine-pins-${executionBackend}-desktop-default.png`) });
-      await toggle.focus();
+      await trigger.focus();
       await page.keyboard.press('Space');
-      await browserExpect(toggle).toHaveAttribute('aria-pressed', 'true');
+      await browserExpect(picker).toBeVisible();
       await browserExpect(path).toHaveValue(sharedPath);
-      const offlinePin = pins.getByRole('button', { name: 'Offline worker: /projects/archive', exact: true });
+      await browserExpect(picker.getByRole('group', { name: 'Local', exact: true })).toHaveCount(0);
+      const offlinePin = picker.getByRole('button', { name: 'Offline worker: /projects/archive', exact: true });
       await browserExpect(offlinePin).toBeDisabled();
       await browserExpect(offlinePin).toHaveAccessibleDescription('Waiting for connection');
-      await browserExpect(pins.getByRole('button', { name: `Offline worker: ${longPath}`, exact: true })).toHaveAttribute('title', longPath);
+      await browserExpect(picker.getByRole('button', { name: `Offline worker: ${longPath}`, exact: true })).toHaveAttribute('title', longPath);
+      await page.keyboard.press('Escape');
+      await browserExpect(picker).toHaveCount(0);
+      await browserExpect(trigger).toBeFocused();
 
       if (client.executorId !== 'local') {
         phase('selecting identical path on the real worker');
-        const workerPin = pins.getByRole('button', { name: `Integration worker: ${sharedPath}`, exact: true });
+        await trigger.click();
+        const workerPin = picker.getByRole('button', { name: `Integration worker: ${sharedPath}`, exact: true });
         await workerPin.focus();
         const validated = page.waitForResponse(response => {
           const url = new URL(response.url());
@@ -59,58 +66,67 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await page.keyboard.press('Enter');
         await validated;
         await browserExpect(page.getByText('Loading models...', { exact: true })).toHaveCount(0, { timeout: 20_000 });
-        await browserExpect(workerPin).toHaveAttribute('aria-pressed', 'true');
-        await browserExpect(pins.getByRole('button', { name: `Local: ${sharedPath}`, exact: true })).toHaveAttribute('aria-pressed', 'false');
+        await browserExpect(picker).toHaveCount(0);
+        await browserExpect(pins.getByRole('button', { name: sharedPath, exact: true })).toHaveAttribute('aria-pressed', 'true');
         await browserExpect(prompt).toHaveValue('Synthetic retained draft');
       }
 
       for (const width of [1440, 390, 360]) {
-        phase(`checking pins at ${width}px`);
+        phase(`checking picker at ${width}px`);
         const cdp = await context.newCDPSession(page);
         await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: width < 500 });
         await page.setViewportSize({ width, height: 900 });
-        await browserExpect(toggle).toBeVisible();
-        await browserExpect.poll(() => pins.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        await trigger.click();
+        await browserExpect(picker).toBeVisible();
+        await browserExpect.poll(() => picker.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        const surface = width < 500
+          ? page.getByRole('dialog', { name: 'Other machines…', exact: true })
+          : page.locator('[data-slot="popover-content"]').filter({ has: picker });
+        await browserExpect(surface).toBeVisible();
         if (width < 500) {
-          const button = pins.getByRole('button', { name: `Local: ${sharedPath}`, exact: true });
-          await browserExpect.poll(() => button.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+          await browserExpect.poll(() => trigger.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+          const box = await surface.boundingBox();
+          expect(box).not.toBeNull();
+          expect(box!.y + box!.height).toBeCloseTo(900, 0);
         }
-        await dialog.screenshot({ path: join(artifacts, `machine-pins-${executionBackend}-${width}-all.png`) });
+        await page.screenshot({ path: join(artifacts, `machine-pins-${executionBackend}-${width}-picker.png`) });
+        await page.keyboard.press('Escape');
+        await browserExpect(picker).toHaveCount(0);
+        await browserExpect(trigger).toBeFocused();
         await cdp.detach();
       }
 
       phase('reconciling live settings without losing draft or changing machine');
-      await client.put('/api/v1/app/settings', { paths: { pinnedProjectPaths: ['/projects/replacement'] } });
-      await browserExpect(pins.getByRole('button', { name: 'Local: /projects/replacement', exact: true })).toBeVisible();
-      await browserExpect(pins.getByRole('button', { name: `Local: ${sharedPath}`, exact: true })).toHaveCount(0);
-      await toggle.click();
-      await browserExpect(toggle).toHaveAttribute('aria-pressed', 'false');
+      await trigger.click();
+      await client.put('/api/v1/app/settings', { paths: {
+        byExecutor: { [offline.id]: { pinnedPaths: ['/projects/replacement'] } },
+      } });
+      await browserExpect(picker.getByRole('button', { name: 'Offline worker: /projects/replacement', exact: true })).toBeVisible();
+      await browserExpect(offlinePin).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await browserExpect(trigger).toBeFocused();
       await browserExpect(prompt).toHaveValue('Synthetic retained draft');
       await browserExpect(path).toHaveValue(sharedPath);
-      if (client.executorId !== 'local') {
-        phase('collapsing to the only pinned machine without losing keyboard focus');
-        await client.put('/api/v1/app/settings', { paths: {
-          pinnedProjectPaths: [], byExecutor: { [offline.id]: { pinnedPaths: [] } },
-        } });
-        await toggle.focus();
-        await page.keyboard.press('Space');
-        await browserExpect(toggle).toHaveAttribute('aria-pressed', 'true');
-        await browserExpect(offlinePin).toHaveCount(0);
-        await browserExpect(pins.getByRole('button', { name: 'Local: /projects/replacement', exact: true })).toHaveCount(0);
-        await page.keyboard.press('Space');
-        await browserExpect(toggle).toHaveAttribute('aria-pressed', 'false');
-        await browserExpect(toggle).toBeFocused();
-        await page.keyboard.press('Tab');
-        await browserExpect(pins.getByRole('button', { name: '/projects/garcon', exact: true })).toBeFocused();
-        await browserExpect(toggle).toHaveAttribute('aria-pressed', 'false');
-      }
+      phase('retaining focused trigger when the final other pin disappears');
+      await client.put('/api/v1/app/settings', { paths: {
+        ...(client.executorId === 'local' ? {} : { pinnedProjectPaths: [] }),
+        byExecutor: { [offline.id]: { pinnedPaths: [] } },
+      } });
+      await browserExpect(trigger).toBeFocused();
+      await page.keyboard.press('Space');
+      await browserExpect(picker.getByText('No pinned paths on other machines.')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await browserExpect(trigger).toBeFocused();
+      await page.keyboard.press('Tab');
+      await browserExpect(trigger).not.toBeFocused();
+      await browserExpect(trigger).toHaveAttribute('aria-expanded', 'false');
       expect((await client.listChats()).sessions).toEqual([]);
       assertNoBrowserErrors();
     }, undefined, { executionBackend });
   }, 120_000);
 }
 
-test('machine pins retain touch targets with a fine primary pointer and secondary touchscreen', async () => {
+test('machine pin picker retains touch targets with a fine primary pointer and secondary touchscreen', async () => {
   const browser = await chromium.launch({
     headless: true,
     args: ['--blink-settings=primaryPointerType=4,availablePointerTypes=6'],
@@ -133,21 +149,22 @@ test('machine pins retain touch targets with a fine primary pointer and secondar
         anyCoarse: matchMedia('(any-pointer: coarse)').matches,
       }))).toEqual({ primaryFine: true, primaryCoarse: false, anyCoarse: true });
       const pins = page.getByRole('region', { name: 'Pinned paths' });
-      const toggle = pins.getByRole('button', { name: 'All machines', exact: true });
+      const trigger = pins.getByRole('button', { name: 'Other machines…', exact: true });
       const pin = pins.getByRole('button', { name: dirs.project, exact: true });
-      for (const control of [toggle, pin]) {
+      await browserExpect(page.locator('[data-slot="project-path-field"] .text-status-success-foreground')).toBeVisible();
+      for (const control of [trigger, pin]) {
         await browserExpect.poll(() => control.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
       }
-      await toggle.click();
-      const groupedPin = pins.getByRole('button', { name: `Local: ${dirs.project}`, exact: true });
+      await trigger.click();
+      const groupedPin = page.getByRole('button', { name: 'Touchscreen worker: /projects/atlas', exact: true });
       await browserExpect.poll(() => groupedPin.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
-      await toggle.click();
-      await toggle.focus();
+      await page.keyboard.press('Escape');
+      await browserExpect(trigger).toBeFocused();
       await client.put('/api/v1/app/settings', { paths: { byExecutor: { [worker.id]: { pinnedPaths: [] } } } });
-      await browserExpect(toggle).toBeFocused();
+      await browserExpect(trigger).toBeFocused();
       await page.keyboard.press('Tab');
-      await browserExpect(pin).toBeFocused();
-      await browserExpect(toggle).toHaveAttribute('aria-pressed', 'false');
+      await browserExpect(trigger).not.toBeFocused();
+      await browserExpect(trigger).toHaveAttribute('aria-expanded', 'false');
       assertNoBrowserErrors();
     }, undefined, {}, browser);
   } finally {
