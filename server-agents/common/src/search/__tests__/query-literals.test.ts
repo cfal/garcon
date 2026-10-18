@@ -210,6 +210,26 @@ describe('literal identifier search', () => {
     },
   );
 
+  test.each([
+    { query: 'class="banner"', decoy: ['class= is set elsewhere', 'the banner text'] },
+    { query: 'API_MODE="safe mode"', decoy: ['API_MODE= unset', 'enter safe mode now'] },
+    { query: '"type":"tool_use"', decoy: ['{"type":"text"}', '{"kind":"tool_use"}'] },
+    { query: '{"type":"tool_use"}', decoy: ['{"type":"text"}', '{"kind":"tool_use"}'] },
+  ])('keeps shared quote delimiters in $query and supports an enclosing literal phrase', ({ query, decoy }) => {
+    addChat('wanted', [projectSearchMessage(new UserMessage('', query))!.body]);
+    addChat('split', decoy.map((body) => projectSearchMessage(new UserMessage('', body))!.body));
+    for (const text of [query, `'${query}'`]) {
+      for (const textTokens of [undefined, parseChatSearch(text).textTokens]) {
+        const result = searchTranscriptIndexV1(db, {
+          query: compileChatSearchQuery(text, textTokens), allowedChats, order: 'allowlist',
+        });
+        expect(result.results.map((hit) => hit.chatId))
+          .toEqual(text === query ? ['wanted', 'split'] : ['wanted']);
+        expect(result.index.resultsTruncated).toBe(false);
+      }
+    }
+  });
+
   test.each(['\n', '\u00a0', '\u2003'])(
     'keeps unquoted %s-separated prefixes independent across messages', (whitespace) => {
       addChat('wanted', ['alphabet', 'betamax']);

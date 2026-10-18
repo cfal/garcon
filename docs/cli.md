@@ -586,12 +586,18 @@ punctuation preserve that punctuation too. Whitespace is normalized to spaces.
 Prose punctuation is significant too: `TypeError:` requires the colon, and
 straight and curly apostrophes are distinct. Literal spelling does not fold
 accents or composed/decomposed Unicode forms.
+Case-insensitive matching retains the index's existing Unicode tokenizer and
+case-folding limits; some newer Unicode case pairs are not equivalent in the index.
 There is no wildcard syntax: `*` is literal punctuation. Prefix matches are
 displayed as `prefix("word")`, not as query syntax. Use double quotes for phrases
 containing apostrophes; single quotes delimit phrases and cannot enclose an
 apostrophe.
 Whitespace outside quotes separates terms, including Unicode whitespace.
-Quotes glued into punctuation-bearing terms are retained, as in `key:"value"`.
+An opening quote directly after `:` stays in the same term, as in `key:"value"`.
+Other double quotes start a separate phrase, and a closing quote ends its term:
+`class="banner"` and `"type":"tool_use"` therefore compile to separate terms.
+Enclose a whole fragment in single quotes, such as `'class="banner"'` or
+`'"type":"tool_use"'`, to require its literal spelling within one entry.
 Terms are ANDed at chat scope and can occur in different messages; ordinary
 unquoted words of at least three code points use prefix matching. The plain result shows
 the interpreted query, labels chat activity separately from snippet timestamps,
