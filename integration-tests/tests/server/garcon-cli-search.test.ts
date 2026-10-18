@@ -60,6 +60,7 @@ describe('garcon-cli chat research', () => {
         'alphabet betamax',
         'alpha beta gamma delta epsilon zeta eta theta iota',
         '\u10d0\u10d1\u10d2\u10d3\u10d0',
+        `PR${'\u0085'.repeat(600)}#K\u0130-123 useful trailing explanation`,
       ];
       const chatIds: string[] = [];
       for (const content of contents) {
@@ -117,6 +118,10 @@ describe('garcon-cli chat research', () => {
           query: 'alpha - beta - gamma - delta - epsilon - zeta - eta - theta - iota',
           chatIndex: 13, snippet: 'alpha',
         },
+        {
+          query: '"PR #K\u0130-123"', chatIndex: 15,
+          snippet: 'PR #K\u0130-123 useful trailing explanation',
+        },
       ];
       for (const { query, chatIndex, snippet } of parserCases) {
         const chatId = chatIds[chatIndex]!;
@@ -149,6 +154,11 @@ describe('garcon-cli chat research', () => {
       expect(browserPrefix.results.map((hit) => hit.chatId)).toEqual([chatIds[14]!]);
       const nul = await fixture.client.searchChats({ query: 'foo\u0000bar', chatIds });
       expect(nul.results.map((hit) => hit.chatId)).toEqual([chatIds[8]!]);
+      for (const query of ['#731\ud800', '#731\udc00']) {
+        const malformedUnicode = await fixture.client.timedSearchChats({ query, chatIds });
+        expect(malformedUnicode.status).toBe(200);
+        expect(malformedUnicode.body.results).toEqual([]);
+      }
       const lexicalBound = await fixture.client.timedSearchChats({
         query: '', textTokens: Array(8).fill('\u754c'.repeat(1_024)),
       });

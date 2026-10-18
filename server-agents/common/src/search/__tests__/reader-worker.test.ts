@@ -26,7 +26,7 @@ function post(worker: Worker, request: ReaderRequest): void {
 }
 
 describe('reader worker v9', () => {
-  test('searches NUL-containing literals without reporting an internal failure', async () => {
+  test('searches NUL and unpaired-surrogate literals without reporting an internal failure', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'search-reader-nul-'));
     directories.push(directory);
     const dbPath = join(directory, 'index.sqlite');
@@ -55,7 +55,14 @@ describe('reader worker v9', () => {
       let event = nextEvent();
       post(worker, { type: 'open', requestId: 1, lifecycleEpoch, dbPath });
       expect(await event).toMatchObject({ type: 'opened' });
-      for (const [index, query] of ['foo\u0000bar', 'marker'].entries()) {
+      for (const [index, { query, expectedChatIds }] of [
+        { query: 'foo\u0000bar', expectedChatIds: [chatId] },
+        { query: 'foo\ud800bar', expectedChatIds: [] },
+        { query: 'foo\udc00bar', expectedChatIds: [] },
+        { query: '#731\ud800', expectedChatIds: [] },
+        { query: '#731\udc00', expectedChatIds: [] },
+        { query: 'marker', expectedChatIds: [chatId] },
+      ].entries()) {
         event = nextEvent();
         const requestId = index + 2;
         post(worker, {
@@ -70,7 +77,7 @@ describe('reader worker v9', () => {
         const result = await event;
         expect(result).toMatchObject({ type: 'search-result', requestId });
         expect(result.type === 'search-result' && result.results.map((hit) => hit.chatId))
-          .toEqual([chatId]);
+          .toEqual(expectedChatIds);
       }
     } finally {
       await worker.terminate();

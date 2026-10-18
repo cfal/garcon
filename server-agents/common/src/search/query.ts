@@ -199,7 +199,7 @@ function snippetWindow(body: string, tokens: SnippetToken[], firstMatch: Snippet
   ));
   const contextStart = Math.max(0, context.length - contextBudget);
   const raw = context.slice(contextStart).join('') + body.slice(anchor.start, end);
-  const normalized = raw.replace(/\s+/g, ' ').trim();
+  const normalized = raw.replace(/[\s\p{White_Space}]+/gu, ' ').trim();
   const characters = [...normalized];
   const text = characters.slice(0, MAX_SNIPPET_CHARS).join('');
   const hasPrefix = start > 0 || contextStart > 0;
@@ -256,7 +256,7 @@ function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
     const phraseText = clause.kind === 'literal' ? clause.text : words.join(' ');
     return {
       query: exactPhrase
-        ? escapeFtsWord(phraseText.replaceAll('\u0000', ' '))
+        ? escapeFtsWord(phraseText.replace(/[\u0000\p{Cs}]/gu, ' '))
         : words.map((word: string, index: number) => prefixWords[index]
           ? `${escapeFtsWord(word)}*`
           : escapeFtsWord(word)).join(' AND '),

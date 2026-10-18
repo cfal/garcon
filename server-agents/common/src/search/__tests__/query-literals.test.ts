@@ -284,6 +284,25 @@ describe('literal identifier search', () => {
     }
   });
 
+  test('keeps verified literals and trailing context visible across long Unicode whitespace runs', () => {
+    addChat('wanted', [projectSearchMessage(new UserMessage(
+      '', `PR${'\u0085'.repeat(600)}#731 useful trailing explanation`,
+    ))!.body]);
+    const snippet = search('"PR #731"').results[0]!.snippets[0]!.text;
+    expect(snippet).toContain('PR #731 useful trailing explanation');
+    expect([...snippet].length).toBeLessThanOrEqual(CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS);
+  });
+
+  test.each(['\ud800', '\udc00'])(
+    'keeps unpaired surrogate %j out of FTS syntax without changing literal verification', (surrogate) => {
+      addChat('wanted', ['foo bar #731']);
+      for (const query of [`foo${surrogate}bar`, `#731${surrogate}`]) {
+        expect(search(query).results).toEqual([]);
+      }
+      expect(search('#731').results.map((hit) => hit.chatId)).toEqual(['wanted']);
+    },
+  );
+
   test('keeps internal combining marks intact in literal FTS candidates', () => {
     const query = '/workspace/Cafe\u0301x/file.ts';
     addChat('wanted', [query]);
