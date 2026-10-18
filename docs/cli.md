@@ -590,6 +590,8 @@ There is no wildcard syntax: `*` is literal punctuation. Prefix matches are
 displayed as `prefix("word")`, not as query syntax. Use double quotes for phrases
 containing apostrophes; single quotes delimit phrases and cannot enclose an
 apostrophe.
+Whitespace outside quotes separates terms, including Unicode whitespace.
+Quotes glued into punctuation-bearing terms are retained, as in `key:"value"`.
 Terms are ANDed at chat scope and can occur in different messages; ordinary
 unquoted words of at least three code points use prefix matching. The plain result shows
 the interpreted query, labels chat activity separately from snippet timestamps,

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseChatSearch } from '@garcon/common/chat-filter-query';
+import { parseChatSearch } from '../../../common/chat-filter-query.js';
 import { cliEnvironment } from '../../support/cli-environment.js';
 import {
   type IntegrationFixture,
@@ -46,6 +46,7 @@ describe('garcon-cli chat research', () => {
   test('preserves identifier punctuation through HTTP paging and CLI forwarding', async () => {
     await withCliFixture('garcon-cli-search-literals', async (fixture) => {
       const unicodeLiterals = ['#K\u0130-123', '/workspace/Cafe\u0301x/file.ts'];
+      const quotedFragments = ['"type":"tool_use"', '{"type":"tool_use"}', 'key:"value"'];
       const contents = [
         'Review #731.',
         'Review PR#731.',
@@ -53,8 +54,10 @@ describe('garcon-cli chat research', () => {
         '00:00:00.731Z',
         'Review #7310.',
         ...unicodeLiterals.map((literal) => `${'='.repeat(600)}${literal}`),
-        'PR #K\u0130-123',
+        'foo PR #K\u0130-123',
         'foo\u0000bar',
+        ...quotedFragments,
+        'alphabet betamax',
       ];
       const chatIds: string[] = [];
       for (const content of contents) {
@@ -97,33 +100,42 @@ describe('garcon-cli chat research', () => {
       });
       expect(new Set(result.results.map((hit: { chatId: string }) => hit.chatId)))
         .toEqual(new Set(chatIds.slice(0, 2)));
-      for (const [index, query] of unicodeLiterals.entries()) {
-        const literalChatIds = [chatIds[5 + index]!];
+      const parserCases = [
+        ...unicodeLiterals.map((query, index) => ({ query, chatIndex: 5 + index, snippet: query })),
+        ...[
+          'PR\u00a0#K\u0130-123', '"PR #K\u0130-123', '#K\u0130-123"',
+          '" #K\u0130-123 "', '"#K\u0130-123 "', 'foo \u00a0 #K\u0130-123',
+        ].map((query) => ({ query, chatIndex: 7, snippet: '#K\u0130-123' })),
+        ...quotedFragments.map((query, index) => ({ query, chatIndex: 9 + index, snippet: query })),
+        ...['alpha\nbeta', 'alpha\u00a0beta'].map((query) => ({
+          query, chatIndex: 12, snippet: 'alphabet',
+        })),
+      ];
+      for (const { query, chatIndex, snippet } of parserCases) {
+        const chatId = chatIds[chatIndex]!;
         const browser = await fixture.client.searchChats({
-          query, textTokens: parseChatSearch(query).textTokens, chatIds: literalChatIds,
+          query, textTokens: parseChatSearch(query).textTokens, chatIds: [chatId],
           offset: 0, limit: 20, snippetLimit: 1,
         });
-        expect(browser.results.map((hit) => hit.chatId)).toEqual([chatIds[5 + index]!]);
-        expect(browser.results[0]!.snippets[0]!.text).toContain(query);
-        const cli = await runCli(fixture, ['search', query, '--filter', `id:${literalChatIds[0]}`, '--json']);
+        expect(browser.results.map((hit) => hit.chatId)).toEqual([chatId]);
+        expect(browser.results[0]!.snippets[0]!.text).toContain(snippet);
+        const cli = await runCli(fixture, ['search', query, '--filter', `id:${chatId}`, '--json']);
         expect(cli).toMatchObject({ exitCode: 0, stderr: '' });
         const result = JSON.parse(cli.stdout);
         expect(result.results.map((hit: { chatId: string }) => hit.chatId))
-          .toEqual([chatIds[5 + index]!]);
-        expect(result.results[0].snippets[0].text).toContain(query);
-      }
-      for (const query of ['PR\u00a0#K\u0130-123', '"PR #K\u0130-123', '#K\u0130-123"']) {
-        const browser = await fixture.client.searchChats({
-          query, textTokens: parseChatSearch(query).textTokens, chatIds: [chatIds[7]!], snippetLimit: 1,
-        });
-        expect(browser.results.map((hit) => hit.chatId)).toEqual([chatIds[7]!]);
-        const cli = await runCli(fixture, ['search', query, '--filter', `id:${chatIds[7]}`, '--json']);
-        expect(cli).toMatchObject({ exitCode: 0, stderr: '' });
-        expect(JSON.parse(cli.stdout).results.map((hit: { chatId: string }) => hit.chatId))
-          .toEqual([chatIds[7]!]);
+          .toEqual([chatId]);
+        expect(result.results[0].snippets[0].text).toContain(snippet);
       }
       const nul = await fixture.client.searchChats({ query: 'foo\u0000bar', chatIds });
       expect(nul.results.map((hit) => hit.chatId)).toEqual([chatIds[8]!]);
+      const overLimitQuery = JSON.stringify(Object.fromEntries(
+        Array.from({ length: 9 }, (_, index) => [`key${index}`, `value${index}`]),
+      ));
+      const invalid = await fixture.client.timedSearchChats({ query: overLimitQuery });
+      expect(invalid.status).toBe(400);
+      const invalidCli = await runCli(fixture, ['search', overLimitQuery, '--json']);
+      expect(invalidCli.exitCode).toBe(2);
+      expect(invalidCli.stderr).toContain('at most 16 terms');
     });
   }, 120_000);
 

@@ -197,6 +197,32 @@ describe('literal identifier search', () => {
     }
   });
 
+  test.each(['"type":"tool_use"', '{"type":"tool_use"}', 'key:"value"'])(
+    'finds the original quoted fragment %s on raw and browser paths', (query) => {
+      addChat('wanted', [projectSearchMessage(new UserMessage('', query))!.body]);
+      for (const textTokens of [undefined, parseChatSearch(query).textTokens]) {
+        const result = searchTranscriptIndexV1(db, {
+          query: compileChatSearchQuery(query, textTokens), allowedChats,
+        });
+        expect(result.results.map((hit) => hit.chatId)).toEqual(['wanted']);
+        expect(result.index.resultsTruncated).toBe(false);
+      }
+    },
+  );
+
+  test.each(['\n', '\u00a0', '\u2003'])(
+    'keeps unquoted %s-separated prefixes independent across messages', (whitespace) => {
+      addChat('wanted', ['alphabet', 'betamax']);
+      const query = `alpha${whitespace}beta`;
+      for (const textTokens of [undefined, parseChatSearch(query).textTokens]) {
+        const result = searchTranscriptIndexV1(db, {
+          query: compileChatSearchQuery(query, textTokens), allowedChats,
+        });
+        expect(result.results.map((hit) => hit.chatId)).toEqual(['wanted']);
+      }
+    },
+  );
+
   test('keeps internal combining marks intact in literal FTS candidates', () => {
     const query = '/workspace/Cafe\u0301x/file.ts';
     addChat('wanted', [query]);

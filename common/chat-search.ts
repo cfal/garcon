@@ -232,22 +232,25 @@ export function compileChatSearchQuery(
   if (textTokens?.length) {
     const originals = new Map<string, ChatFilterTerm[]>();
     for (const term of parseChatFilterQuery(query).textTerms) {
-      const key = term.text.toLowerCase();
+      const key = term.text.trim().toLowerCase();
       const matches = originals.get(key) ?? [];
       matches.push(term);
       originals.set(key, matches);
     }
     terms = textTokens.map((text) =>
-      originals.get(text.toLowerCase())?.shift() ?? { text, quoted: /\s/u.test(text) });
+      originals.get(text.trim().toLowerCase())?.shift()
+        ?? { text, quoted: /\s/u.test(text), source: text });
   } else {
     terms = tokenizeChatFilter(query.trim());
   }
   return {
     version: 1,
     clauses: terms.map((term): ChatSearchClauseV1 => {
-      const isLiteral = /[^\p{L}\p{N}\p{M}\p{Cf}\s]/u.test(term.text);
-      const phrase = term.quoted || /\s/u.test(term.text);
-      const tokens = (term.text.match(/[\p{L}\p{N}_]+/gu) ?? []).map((text) => ({
+      let text = term.text;
+      if (term.quoted && !/^["']/u.test(term.source)) text = term.source;
+      const isLiteral = /[^\p{L}\p{N}\p{M}\p{Cf}\s]/u.test(text);
+      const phrase = term.quoted || /\s/u.test(text);
+      const tokens = (text.match(/[\p{L}\p{N}_]+/gu) ?? []).map((text) => ({
         text,
         normalized: text.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase(),
         match: !isLiteral && !phrase && [...text].length >= CHAT_SEARCH_MIN_PREFIX_CHARS
@@ -255,7 +258,7 @@ export function compileChatSearchQuery(
           : 'exact' as const,
       }));
       if (isLiteral) {
-        return { kind: 'literal', text: term.text.replace(/\s+/gu, ' ').trim(), tokens };
+        return { kind: 'literal', text: text.replace(/\s+/gu, ' ').trim(), tokens };
       }
       return { kind: phrase ? 'phrase' : 'all-words', tokens };
     }).filter((clause) => clause.tokens.length > 0),

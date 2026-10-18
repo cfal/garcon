@@ -37,6 +37,7 @@ export interface ChatFilterParseResult {
 export interface ChatFilterTerm {
   readonly text: string;
   readonly quoted: boolean;
+  readonly source: string;
 }
 
 export interface ChatFilterTarget {
@@ -252,7 +253,7 @@ export function serializeChatFilter(spec: ChatFilterSpec): string {
   for (const value of spec.updatedBefore ?? []) parts.push(`updated-before:${value}`);
   for (const value of spec.updatedAfter ?? []) parts.push(`updated-after:${value}`);
   for (const text of spec.textTokens) {
-    parts.push(text.includes(' ') ? `"${text}"` : text);
+    parts.push(/\s/u.test(text) ? `"${text}"` : text);
   }
   return parts.join(' ');
 }
@@ -379,13 +380,16 @@ export function tokenizeChatFilter(input: string): ChatFilterTerm[] {
   let inQuote = false;
   let quoteChar = '';
   let quoted = false;
+  let source = '';
   const pushTerm = () => {
-    if (current) tokens.push({ text: current, quoted });
+    if (current) tokens.push({ text: current, quoted, source });
     current = '';
     quoted = false;
+    source = '';
   };
   for (const character of input) {
     if (inQuote) {
+      source += character;
       if (character === quoteChar) {
         inQuote = false;
         pushTerm();
@@ -393,18 +397,21 @@ export function tokenizeChatFilter(input: string): ChatFilterTerm[] {
         current += character;
       }
     } else if ((character === '"' || character === "'") && (current === '' || current.endsWith(':'))) {
+      source += character;
       inQuote = true;
       quoteChar = character;
       quoted = true;
     } else if (character === '"') {
       pushTerm();
+      source = character;
       inQuote = true;
       quoteChar = character;
       quoted = true;
-    } else if (character === ' ' || character === '\t') {
+    } else if (/\s/u.test(character)) {
       pushTerm();
     } else {
       current += character;
+      source += character;
     }
   }
   pushTerm();

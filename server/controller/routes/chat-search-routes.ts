@@ -20,6 +20,7 @@ import {
   CHAT_SEARCH_MAX_TERMS,
   CHAT_SEARCH_MAX_WORDS,
   CHAT_SEARCH_SORT_VALUES,
+  compileChatSearchQuery,
 } from '../../../common/chat-search.js';
 import type { ChatListEntry } from '../../../common/chat-list.js';
 import type { ChatOrderTimestamps } from '../../../common/chat-order-sort.js';
@@ -291,22 +292,19 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
     throw new ValidationDomainError(`query must be at most ${MAX_SEARCH_QUERY_CHARS} characters`);
   }
   const normalizedQuery = rawQuery.trim();
-  const effectiveTerms = textTokens?.length
-    ? textTokens
-    : [...normalizedQuery.matchAll(/"([^"]+)"|(\S+)/g)]
-        .map((match) => match[1] ?? match[2] ?? '');
-  if (effectiveTerms.length > CHAT_SEARCH_MAX_TERMS) {
+  const effectiveQuery = normalizedQuery || textTokens?.join(' ') || '';
+  if (!effectiveQuery) throw new ValidationDomainError('query is required');
+  const compiled = compileChatSearchQuery(effectiveQuery, textTokens);
+  if (compiled.clauses.length > CHAT_SEARCH_MAX_TERMS) {
     throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_TERMS} terms`);
   }
-  const wordCount = effectiveTerms.reduce(
-    (count, term) => count + (term.match(/[\p{L}\p{N}_]+/gu)?.length ?? 0),
+  const wordCount = compiled.clauses.reduce(
+    (count, clause) => count + clause.tokens.length,
     0,
   );
   if (wordCount > CHAT_SEARCH_MAX_WORDS) {
     throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_WORDS} words`);
   }
-  const effectiveQuery = normalizedQuery || textTokens?.join(' ') || '';
-  if (!effectiveQuery) throw new ValidationDomainError('query is required');
   const mode = optionalSearchResultMode(input.mode) ?? 'page';
   const offset = optionalBoundedOffset(input.offset) ?? 0;
   const snippetLimit = optionalSnippetLimit(input.snippetLimit)

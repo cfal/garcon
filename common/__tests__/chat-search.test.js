@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { parseChatSearch } from '../chat-filter-query.ts';
+import { parseChatSearch, serializeChatFilter } from '../chat-filter-query.ts';
 import {
   CHAT_SEARCH_MAX_FAILED_CHAT_DETAILS,
   classifyChatSearchFailureRecovery,
@@ -138,6 +138,17 @@ describe('chat search contracts', () => {
     }
     expect(compileChatSearchQuery('needle*').clauses[0])
       .toMatchObject({ kind: 'literal', text: 'needle*' });
+  });
+
+  it('separates all unquoted whitespace but retains quoted Unicode whitespace', () => {
+    for (const whitespace of [' ', '\t', '\n', '\r\n', '\u00a0', '\u2003']) {
+      const query = `alpha${whitespace}beta`;
+      const expected = compileChatSearchQuery('alpha beta');
+      expect(compileChatSearchQuery(query)).toEqual(expected);
+      expect(compileChatSearchQuery(query, parseChatSearch(query).textTokens)).toEqual(expected);
+    }
+    const filter = parseChatSearch('"alpha\u00a0beta"');
+    expect(parseChatSearch(serializeChatFilter(filter))).toEqual(filter);
   });
 
   it('parses a correlated search page and rejects malformed relations', () => {
