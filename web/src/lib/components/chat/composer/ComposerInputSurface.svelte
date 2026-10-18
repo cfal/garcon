@@ -16,7 +16,10 @@
 		onComposerKeydown,
 		onCompletionKeydown,
 		onInput,
-		onRecallReset,
+		onRecallReset = () => {},
+		onPaste,
+		placeholder = m.chat_composer_reply_placeholder(),
+		allowFileMentions = true,
 	}: {
 		draft: ({ source: string } & ComposerMarkdownDocument) | null;
 		disabled: boolean;
@@ -29,12 +32,19 @@
 		onComposerKeydown: (event: KeyboardEvent) => void;
 		onCompletionKeydown: (event: KeyboardEvent) => boolean;
 		onInput: (event: Event) => void;
-		onRecallReset: () => void;
+		onRecallReset?: () => void;
+		onPaste?: (event: ClipboardEvent) => void;
+		placeholder?: string;
+		allowFileMentions?: boolean;
 	} = $props();
 	const contentSizing = contentSizedTextarea(() => (visible ? text : undefined));
 </script>
 
-<div class="relative overflow-hidden bg-transparent focus-within:ring-0">
+<div
+	class="relative overflow-hidden bg-transparent focus-within:ring-0"
+	onpaste={onPaste}
+	role="presentation"
+>
 	{#if draft}
 		<!-- The controller publishes a draft only after this cached import succeeds. -->
 		{#await loadComposerMarkdownEditor() then MarkdownEditor}
@@ -45,6 +55,8 @@
 					selection={draft.selection}
 					selectionMarks={draft.selectionMarks}
 					readOnly={disabled || busy}
+					{placeholder}
+					{allowFileMentions}
 					snippetTrigger={controller.snippetTrigger}
 					{onComposerKeydown}
 					{onCompletionKeydown}
@@ -54,7 +66,8 @@
 					onReady={(target) => controller.focus(target)}
 					onMention={(mention) => controller.mention(mention)}
 					onLargePaste={(request) => void controller.pasteSource(request)}
-					onMarkdownPaste={(source, caret, apply) => void controller.pasteMarkdown(source, caret, apply)}
+					onMarkdownPaste={(source, caret, apply) =>
+						void controller.pasteMarkdown(source, caret, apply)}
 					onOverflow={(source) => controller.overflow(source)}
 				/>
 			{/key}
@@ -70,7 +83,7 @@
 			onpointerdown={onRecallReset}
 			oninput={onInput}
 			oncompositionend={() => controller.input(new InputEvent('input'))}
-			placeholder={m.chat_composer_reply_placeholder()}
+			{placeholder}
 			{disabled}
 			readonly={sourceReadOnly}
 			aria-busy={busy}

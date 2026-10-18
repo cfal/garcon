@@ -41,6 +41,7 @@
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '$shared/attachments';
 
 	interface Props {
+		composerInputMode?: 'source' | 'formatted';
 		executionPolicy?: 'conversation' | 'literal';
 		allowDirectChats?: boolean;
 		catalogVersion?: number;
@@ -62,6 +63,7 @@
 
 	let {
 		executionPolicy = 'conversation',
+		composerInputMode = 'source',
 		allowDirectChats = false,
 		catalogVersion = 0,
 		catalogValidated = true,
@@ -84,6 +86,7 @@
 
 	setLocalSettings({
 		sendByShiftEnter: false,
+		get composerInputMode() { return composerInputMode; },
 		showQuickCommitTray: true,
 		get snippetTrigger() {
 			return snippetTrigger;
@@ -214,6 +217,7 @@
 		getAgent(agentId: string) {
 			return {
 				executionPolicy,
+				inputFormatByModel: {},
 				id: agentId,
 				label: agentLabelFor(agentId),
 				description: '',
