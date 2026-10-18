@@ -65,6 +65,14 @@ function response(overrides: Partial<ChatSearchResponse> = {}): ChatSearchRespon
 }
 
 describe('chat search', () => {
+  test('describes ordinary prefixes without suggesting wildcard syntax', () => {
+    const prefixCommand = { ...command, query: 'needle' };
+    const result = buildChatSearchResult(prefixCommand, chatList([]), response({ query: 'needle' }), 0);
+    const text = formatChatSearchResult(result, false, prefixCommand);
+    expect(text).toContain('interpreted as: prefix("needle")');
+    expect(text).not.toContain('needle*');
+  });
+
   test('describes punctuation-bearing queries as literals without losing their spelling', () => {
     const literalCommand = { ...command, query: '#731' };
     const result = buildChatSearchResult(literalCommand, chatList([]), response({ query: '#731' }), 0);

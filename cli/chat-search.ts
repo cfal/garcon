@@ -305,7 +305,7 @@ function formatInterpretedQuery(query: ChatSearchQueryV1): string {
   return query.clauses.map((clause) => {
     if (clause.kind === 'literal') return `literal(${JSON.stringify(clause.text)})`;
     const tokens = clause.tokens.map((token) => (
-      token.match === 'prefix' ? `${token.normalized}*` : token.normalized
+      token.match === 'prefix' ? `prefix(${JSON.stringify(token.normalized)})` : token.normalized
     ));
     return clause.kind === 'phrase' ? `"${tokens.join(' ')}"` : tokens.join(' & ');
   }).join(' AND ') || '[no searchable words]';
