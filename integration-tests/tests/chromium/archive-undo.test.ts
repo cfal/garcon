@@ -37,6 +37,9 @@ test('archive Undo restores the captured chat without changing selection', async
         }, ids[0]);
         return data;
       }).toBe(false);
+      // Browser reconciliation can lag the server; resizing remounts the sidebar.
+      await expect(row).toHaveAttribute('data-sidebar-virtual-list-row', 'normal');
+      await expect(page.getByText('Chat archived.', { exact: true })).toHaveCount(0);
       expect(page.url()).toBe(selectedUrl);
     }
     await page.setViewportSize({ width: 1440, height: 900 });
