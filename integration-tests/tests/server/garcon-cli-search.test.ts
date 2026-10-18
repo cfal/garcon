@@ -42,6 +42,59 @@ async function runCli(
 }
 
 describe('garcon-cli chat research', () => {
+  test('preserves identifier punctuation through HTTP paging and CLI forwarding', async () => {
+    await withCliFixture('garcon-cli-search-literals', async (fixture) => {
+      const contents = [
+        'Review #731.',
+        'Review PR#731.',
+        '731: synthetic source line',
+        '00:00:00.731Z',
+        'Review #7310.',
+      ];
+      const chatIds: string[] = [];
+      for (const content of contents) {
+        const chatId = fixture.newChatId();
+        const turn = await fixture.client.startDirectChat({
+          chatId,
+          content,
+          projectPath: fixture.executionDirs.project,
+          agent: fixture.directAgents.openAi,
+        });
+        await fixture.client.waitForTurnTerminal(chatId, turn.turnId);
+        chatIds.push(chatId);
+      }
+      await fixture.client.updateSettings({ features: { transcriptSearch: { enabled: true } } });
+      await fixture.client.waitForSearchPhase(['ready'], { timeoutMs: 60_000 });
+      for (const query of ['#731', '"#731"']) {
+        const first = await fixture.client.searchChats({
+          query, textTokens: ['#731'], chatIds, sort: 'created', offset: 0, limit: 1, snippetLimit: 1,
+        });
+        const last = await fixture.client.searchChats({
+          query, textTokens: ['#731'], chatIds, sort: 'created', offset: 1, limit: 1, snippetLimit: 1,
+        });
+        expect(first.page).toEqual({ offset: 0, limit: 1, total: 2, hasMore: true, nextOffset: 1 });
+        expect(last.page).toEqual({ offset: 1, limit: 1, total: 2, hasMore: false, nextOffset: null });
+        const results = [...first.results, ...last.results];
+        expect(new Set(results.map((hit) => hit.chatId))).toEqual(new Set(chatIds.slice(0, 2)));
+        expect(results.every((hit) => hit.snippets[0]?.text.includes('#731'))).toBe(true);
+      }
+      const prefix = await fixture.client.searchChats({
+        query: '#731', mode: 'prefix', offset: 0, limit: 2, snippetLimit: 1,
+      });
+      expect(prefix.page.total).toBe(2);
+      const cli = await runCli(fixture, ['search', '#731', '--json']);
+      expect(cli).toMatchObject({ exitCode: 0, stderr: '' });
+      const result = JSON.parse(cli.stdout);
+      expect(result).toMatchObject({
+        page: { total: 2 },
+        interpretedQuery: { clauses: [{ kind: 'literal', text: '#731' }] },
+        index: { resultsTruncated: false },
+      });
+      expect(new Set(result.results.map((hit: { chatId: string }) => hit.chatId)))
+        .toEqual(new Set(chatIds.slice(0, 2)));
+    });
+  }, 120_000);
+
   test('lists, searches, and reads a chat after its project directory disappears', async () => {
     await withCliFixture('garcon-cli-search-read', async (fixture) => {
       const projectPath = path.join(fixture.executionDirs.project, 'removed-project');

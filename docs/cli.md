@@ -576,9 +576,15 @@ index phase, chat coverage, queued and active indexing work, backlog and resync
 progress, the last error code, and query admission/execution/total latency
 statistics. JSON status is the validated server status document.
 
-Search is lexical. Quoted phrases require adjacent words in one indexed entry.
-Unquoted terms are ANDed at chat scope and can occur in different messages;
-terms of at least three code points use prefix matching. The plain result shows
+Search is lexical for ordinary words. Quoted word phrases require adjacent words
+in one indexed entry. Terms containing punctuation, such as `#731`, `ABC-123`,
+`file_name`, or `/workspace/src/index.ts`, instead match their literal spelling,
+case-insensitively, with punctuation preserved and no word-prefix expansion.
+Identifier word edges are exact: `#731` does not match `731` or `#7310`.
+Quoting an identifier preserves the same literal behavior; quoted phrases with
+punctuation preserve that punctuation too. Whitespace is normalized to spaces.
+Terms are ANDed at chat scope and can occur in different messages; ordinary
+unquoted words of at least three code points use prefix matching. The plain result shows
 the interpreted query, labels chat activity separately from snippet timestamps,
 and prints an exact follow-up `read` command carrying the resolved workspace,
 config directory, optional server assertion, and any category includes needed to
@@ -602,7 +608,9 @@ error code, indexed frontier where available, and recovery classification; an
 omitted count preserves the total when more failures exist. Likewise,
 `resultsTruncated` means index row sampling can make matches and `page.total`
 incomplete; narrow the metadata filter or quote a phrase before drawing a
-negative conclusion. Tool inputs and results are indexed with size bounds, so a
+negative conclusion. Literal verification uses the same bounded FTS candidate
+sample, so punctuation-only differences do not bypass the sampling ceiling.
+Tool inputs and results are indexed with size bounds, so a
 missing path match is not proof that the path was never used.
 If a transcript view changes after the index page is selected, the response
 reports how many stale hits were removed. The CLI warns for any positive count,

@@ -65,6 +65,15 @@ function response(overrides: Partial<ChatSearchResponse> = {}): ChatSearchRespon
 }
 
 describe('chat search', () => {
+  test('describes punctuation-bearing queries as literals without losing their spelling', () => {
+    const literalCommand = { ...command, query: '#731' };
+    const result = buildChatSearchResult(literalCommand, chatList([]), response({ query: '#731' }), 0);
+    expect(result.interpretedQuery.clauses[0]).toMatchObject({ kind: 'literal', text: '#731' });
+    expect(formatChatSearchResult(result, false, literalCommand))
+      .toContain('interpreted as: literal("#731")');
+    expect(JSON.parse(formatChatSearchResult(result, true, literalCommand))).toEqual(result);
+  });
+
   test('escapes human titles and snippets without changing JSON values', () => {
     const unsafe = 'Synthetic\x1b]52;c;YWJj\x07\u009b\u202e';
     const reply = response();

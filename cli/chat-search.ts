@@ -303,6 +303,7 @@ function readIncludesForSearchRole(role: ChatSearchSnippet['role']): string | nu
 
 function formatInterpretedQuery(query: ChatSearchQueryV1): string {
   return query.clauses.map((clause) => {
+    if (clause.kind === 'literal') return `literal(${JSON.stringify(clause.text)})`;
     const tokens = clause.tokens.map((token) => (
       token.match === 'prefix' ? `${token.normalized}*` : token.normalized
     ));
