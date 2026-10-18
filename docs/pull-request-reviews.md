@@ -94,8 +94,9 @@ request changes.
 
 Markers use a normalized repository identity and accept full 40- or 64-character
 commit hashes. A case-only repository rename refreshes the displayed name while
-preserving comment recovery. Posts for one pull request cannot overlap; other
-pull requests in the repository can post independently. Disconnecting a
+preserving comment recovery. Posts for one GitHub pull request cannot overlap,
+including connections on different executors; other pull requests can post
+independently. Disconnecting a
 repository is refused while its posts are in flight or have an unknown outcome.
 Its executor and folder also remain fixed during posting and until an unknown
 posting outcome has been reconciled or explicitly abandoned.

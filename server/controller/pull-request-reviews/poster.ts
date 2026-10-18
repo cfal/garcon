@@ -21,6 +21,10 @@ const POST_REJECTION_CODES: readonly GitServiceError['code'][] = [
   'GH_MUTATION_REJECTED', 'GIT_INVALID_INPUT', 'GIT_NOT_REPO', 'GIT_OUTSIDE_BASE', 'GIT_SERVICE_BUSY',
 ];
 
+function postingPullKey(repository: GhRepositoryIdentity, number: number): string {
+  return `${repository.host}/${repository.nameWithOwner}#${number}`;
+}
+
 export interface PullRequestReviewPosterDeps {
   store: PullRequestReviewStore;
   executors: GhServiceSource;
@@ -41,7 +45,9 @@ export class PullRequestReviewPoster {
   abandon(runId: string): void {
     const run = this.deps.store.getRun(runId);
     if (!run || run.post.status !== 'unknown') throw reviewConflict('Only an unresolved post can be abandoned.');
-    if (this.#postingPulls.has(`${run.repositoryId}:${run.number}`)) throw reviewConflict('The review is still being posted. Wait for it to finish before abandoning it.');
+    const repository = this.deps.store.getRepository(run.repositoryId);
+    const identity = repository && ghRepositoryIdentity(repository);
+    if (identity && this.#postingPulls.has(postingPullKey(identity, run.number))) throw reviewConflict('The review is still being posted. Wait for it to finish before abandoning it.');
     this.#record(runId, {
       ...run.post, status: 'abandoned', abandonedAt: new Date(this.deps.now()).toISOString(),
       message: 'Post recovery was abandoned. The comment may already exist on GitHub. This review cannot be posted again.',
@@ -60,7 +66,7 @@ export class PullRequestReviewPoster {
     if (!repository) throw reviewConflict('The repository is no longer connected.');
     const identity = ghRepositoryIdentity(repository);
     if (!identity) throw reviewConflict('The connected repository has an invalid GitHub identity. Reconnect it before posting.');
-    const pullKey = `${run.repositoryId}:${run.number}`;
+    const pullKey = postingPullKey(identity, run.number);
     if (this.#postingPulls.has(pullKey)) throw reviewConflict('A review of this pull request is already being posted.');
     const body = pullRequestReviewCommentBody(run.review, repository.nameWithOwner, run.number, run.reviewedSha);
     if (body.length > GH_COMMENT_BODY_MAX_LENGTH && run.post.status !== 'unknown' && run.post.status !== 'posted') {

@@ -204,6 +204,43 @@ test('cannot abandon a post while its executor call is in flight', async () => {
   expect(() => poster.abandon('run')).toThrow('unresolved');
 });
 
+for (const host of [REPOSITORY.host, 'enterprise.invalid']) {
+test(`coordinates connections on different executors for ${host}`, async () => {
+  const { store, poster, gh, scope } = harness();
+  const repository = store.getRepository('repository')!;
+  store.insertRepository({ ...repository, id: 'other-repository', url: `https://${host}/acme/app`, target: { ...repository.target, executorId: 'other-executor' } }, repository.scan, []);
+  const original = store.getRun('run')!;
+  store.insertRun({ ...original, id: 'other-run', repositoryId: 'other-repository' });
+  store.updateRun('other-run', current => current, original.review);
+  gh.getPullRequestReviewTarget.mockImplementation(async request => ({
+    ...scope, repository: request.repository, viewer: ACTOR, number: 7, state: 'open', headRefOid: HEAD, markedComments: [],
+  }));
+  const expectedCreates = host === REPOSITORY.host ? 1 : 2;
+  const pending = Promise.withResolvers<Awaited<ReturnType<ExecutionGhService['createPullRequestComment']>>>();
+  gh.createPullRequestComment.mockImplementation(() => pending.promise);
+  const first = poster.post('run');
+  await new Promise(resolve => setImmediate(resolve));
+  const second = poster.post('other-run').then(() => null, error => error);
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    expect(gh.createPullRequestComment).toHaveBeenCalledTimes(expectedCreates);
+  } finally {
+    pending.resolve({ ...scope, id: 'new', url: 'https://github.invalid/new' });
+    await first;
+    await second;
+  }
+  if (host === REPOSITORY.host) expect(await second).toMatchObject({ message: expect.stringContaining('already being posted') });
+  else expect(await second).toBeNull();
+  gh.getPullRequestReviewTarget.mockResolvedValueOnce({
+    ...scope, repository: { ...REPOSITORY, host }, viewer: ACTOR, number: 7, state: 'open', headRefOid: HEAD,
+    markedComments: [{ id: 'new', url: 'https://github.invalid/new', marker: `<!-- garcon-review acme/app#7 ${HEAD} -->`, isMinimized: false, author: ACTOR }],
+  });
+  await poster.post('other-run');
+  expect(store.getRun('other-run')?.post.status).toBe('posted');
+  expect(gh.createPullRequestComment).toHaveBeenCalledTimes(expectedCreates);
+});
+}
+
 test('does not overwrite durable admission when the executor returns an unclassified failure', async () => {
   const { store, poster, gh, repositories } = harness();
   gh.createPullRequestComment.mockRejectedValueOnce(new Error('The executor reply was lost'));
