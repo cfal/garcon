@@ -122,7 +122,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(trigger).toHaveAttribute('aria-expanded', 'false');
       expect((await client.listChats()).sessions).toEqual([]);
       assertNoBrowserErrors();
-    }, undefined, { executionBackend });
+    }, async ({ page }) => page.evaluate(() => ({ activeElement: document.activeElement?.outerHTML })), { executionBackend });
   }, 120_000);
 }
 

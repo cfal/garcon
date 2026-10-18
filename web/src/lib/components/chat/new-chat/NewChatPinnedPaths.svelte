@@ -135,6 +135,7 @@
 						}}>{m.chat_new_chat_pinned_paths_other_machines()}</Popover.Trigger
 					>
 					<Popover.Content
+						getFocusReturnTarget={() => trigger}
 						onCloseAutoFocus={restoreFocus}
 						align="start"
 						collisionPadding={8}

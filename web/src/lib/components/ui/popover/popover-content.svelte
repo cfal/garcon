@@ -13,9 +13,11 @@
 		sideOffset = 4,
 		align = 'center',
 		portalProps,
+		getFocusReturnTarget,
 		...restProps
 	}: PopoverPrimitive.ContentProps & {
 		portalProps?: WithoutChildrenOrChild<ComponentProps<typeof PopoverPortal>>;
+		getFocusReturnTarget?: () => HTMLElement | null;
 	} = $props();
 	const transientLayers = getOptionalTransientLayers();
 	const layerControl = getTransientLayerControl();
@@ -37,7 +39,7 @@
 				layerControl.close();
 				return true;
 			},
-			restoreFocus: () => focusReturnTarget?.focus(),
+			restoreFocus: () => (getFocusReturnTarget?.() ?? focusReturnTarget)?.focus(),
 		});
 	});
 </script>
