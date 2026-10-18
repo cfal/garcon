@@ -1,4 +1,4 @@
-import type { ExecutionGhService } from '@garcon/server-agent-interface';
+import { AgentCallError, type ExecutionGhService } from '@garcon/server-agent-interface';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { GitServiceError } from '../../../common/git-error.js';
 import { GH_COMMENT_BODY_MAX_LENGTH, type GhActorIdentity, type GhRepositoryIdentity, type PullRequestMarkedComment } from '../../../common/gh.js';
@@ -142,7 +142,8 @@ export class PullRequestReviewPoster {
         this.#record(run.id, { ...savedPost, message: 'The review was posted, but older comments could not be hidden. Retry cleanup.' });
         return;
       }
-      const rejected = creating && error instanceof GitServiceError && error.code === 'GH_MUTATION_REJECTED';
+      const rejected = creating && (error instanceof GitServiceError && error.code === 'GH_MUTATION_REJECTED'
+        || error instanceof AgentCallError && error.outcome !== 'unknown');
       const unknown = !rejected && (savedPost.status === 'unknown'
         || error instanceof GitServiceError && error.code === 'GIT_MUTATION_OUTCOME_UNKNOWN');
       this.#record(run.id, unknown

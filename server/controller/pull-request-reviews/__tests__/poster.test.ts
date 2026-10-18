@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, test } from 'bun:test';
-import type { ExecutionGhService } from '@garcon/server-agent-interface';
+import { AgentCallError, type ExecutionGhService } from '@garcon/server-agent-interface';
 import { mkdtempSync, rmSync, watch } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -128,6 +128,20 @@ test('records a definite HTTP rejection as failed and allows disconnecting', asy
   expect(await Bun.file(join(setup.directory, 'gh-comments.json')).exists()).toBe(false);
   expect(() => setup.repositories.remove('repository')).not.toThrow();
 });
+
+for (const outcome of ['not-dispatched', 'rejected', 'unknown'] as const) {
+  test(`preserves the executor's ${outcome} delivery outcome when posting`, async () => {
+    const { store, poster, gh, repositories } = harness();
+    gh.createPullRequestComment.mockRejectedValueOnce(new AgentCallError(outcome, 'Executor delivery failed'));
+    await poster.post('run');
+    expect(store.getRun('run')?.post).toMatchObject({
+      status: outcome === 'unknown' ? 'unknown' : 'failed', actor: ACTOR,
+    });
+    expect(gh.createPullRequestComment).toHaveBeenCalledTimes(1);
+    if (outcome === 'unknown') expect(() => repositories.remove('repository')).toThrow('unconfirmed post');
+    else expect(() => repositories.remove('repository')).not.toThrow();
+  });
+}
 
 test('preserves an earlier unknown outcome when the recovery read is rejected', async () => {
   const { store, poster, gh } = harness();
