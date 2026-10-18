@@ -94,6 +94,11 @@ function runPayload(run: StoredRun): string {
   return JSON.stringify(payload satisfies RunPayload);
 }
 
+// Excludes history-revision trigger writes from the affected run count.
+function affectedRuns(database: Database): number {
+  return database.query<{ count: number }, []>('SELECT changes() AS count').get()!.count;
+}
+
 export class PullRequestReviewStore {
   #database: Database | null = null;
   // Only in-flight reads use this fence; it has no meaning across controller lifetimes.
@@ -361,11 +366,14 @@ export class PullRequestReviewStore {
   }
 
   markOutdated(repositoryId: string, number: number, head: string): number {
-    const count = this.#write((database) => database.query(`UPDATE review_runs SET state = 'outdated',
-      payload_json = json_set(payload_json, '$.message', 'The pull request has new commits.') WHERE rowid IN (
-        SELECT rowid FROM review_runs WHERE repository_id = ? AND number = ? AND state = 'completed'
-          AND reviewed_sha != ? LIMIT ?
-      )`).run(repositoryId, number, head, REVIEW_HISTORY_BATCH_SIZE).changes);
+    const count = this.#write((database) => {
+      database.query(`UPDATE review_runs SET state = 'outdated',
+        payload_json = json_set(payload_json, '$.message', 'The pull request has new commits.') WHERE rowid IN (
+          SELECT rowid FROM review_runs WHERE repository_id = ? AND number = ? AND state = 'completed'
+            AND reviewed_sha != ? LIMIT ?
+        )`).run(repositoryId, number, head, REVIEW_HISTORY_BATCH_SIZE);
+      return affectedRuns(database);
+    });
     if (count) this.#touchRuns(repositoryId);
     return count;
   }
@@ -390,9 +398,12 @@ export class PullRequestReviewStore {
   }
 
   interruptQueuedAutomaticRuns(repositoryId: string, now: string): number {
-    const count = this.#write((database) => database.query(`UPDATE review_runs SET state = 'interrupted',
-      payload_json = json_set(payload_json, '$.finishedAt', ?, '$.message', 'Repository settings changed before the automatic review started.')
-      WHERE repository_id = ? AND trigger = 'auto' AND state = 'queued'`).run(now, repositoryId).changes);
+    const count = this.#write((database) => {
+      database.query(`UPDATE review_runs SET state = 'interrupted',
+        payload_json = json_set(payload_json, '$.finishedAt', ?, '$.message', 'Repository settings changed before the automatic review started.')
+        WHERE repository_id = ? AND trigger = 'auto' AND state = 'queued'`).run(now, repositoryId);
+      return affectedRuns(database);
+    });
     if (count) this.#touchRuns(repositoryId);
     return count;
   }
@@ -430,13 +441,16 @@ export class PullRequestReviewStore {
 
   // Preserves active work, archival retries, and unresolved posts within one bounded batch.
   pruneClosedRuns(repositoryId: string, before: string): number {
-    const count = this.#write((database) => database.query(`DELETE FROM review_runs WHERE rowid IN (
-      SELECT run.rowid FROM review_pulls AS pull INDEXED BY review_pulls_closed
-      CROSS JOIN review_runs AS run INDEXED BY review_runs_prunable
-      WHERE pull.repository_id = ? AND pull.closed_at < ? AND run.repository_id = pull.repository_id AND run.number = pull.number
-        AND run.state NOT IN ('queued','reviewing','needs-input') AND (run.chat_id IS NULL OR run.chat_archived = 1)
-        AND NOT ${PENDING_REVIEW_POST_RECOVERY} LIMIT ?
-    )`).run(repositoryId, before, REVIEW_HISTORY_BATCH_SIZE).changes);
+    const count = this.#write((database) => {
+      database.query(`DELETE FROM review_runs WHERE rowid IN (
+        SELECT run.rowid FROM review_pulls AS pull INDEXED BY review_pulls_closed
+        CROSS JOIN review_runs AS run INDEXED BY review_runs_prunable
+        WHERE pull.repository_id = ? AND pull.closed_at < ? AND run.repository_id = pull.repository_id AND run.number = pull.number
+          AND run.state NOT IN ('queued','reviewing','needs-input') AND (run.chat_id IS NULL OR run.chat_archived = 1)
+          AND NOT ${PENDING_REVIEW_POST_RECOVERY} LIMIT ?
+      )`).run(repositoryId, before, REVIEW_HISTORY_BATCH_SIZE);
+      return affectedRuns(database);
+    });
     if (count) this.#touchRuns(repositoryId);
     return count;
   }
