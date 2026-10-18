@@ -9,6 +9,11 @@ The global inbox stays accessible from GitHub Views on desktop and Open PRs
 in the mobile chat menu, regardless of the current chat's executor or GitHub
 login. Repository connection and scan errors appear inside the inbox.
 
+Connected repositories are also available directly in **Settings → GitHub**,
+below the executor's GitHub CLI status. Settings and the inbox's Repositories
+dialog share the same controls for connecting, editing, scanning, disconnecting,
+and viewing recent reviews.
+
 ## Loop
 
 1. **Connect.** A repository is an executor and a folder that is a checkout of

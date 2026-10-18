@@ -165,15 +165,31 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     await capture('inbox-detail-mobile');
     await panel.locator('[data-pr-repositories-button]').click();
     await page.locator('[data-pr-repositories-dialog]').waitFor();
+    await capture('repositories-mobile');
     await page.keyboard.press('Escape');
     await panel.getByRole('button', { name: 'All pull requests' }).click();
     await browserExpect(needsReview).toBeVisible();
     await capture('inbox-mobile');
 
-    phase('opt into automatic posting for the repository');
-    await page.setViewportSize({ width: 1920, height: 1080 });
-    await panel.locator('[data-pr-repositories-button]').click();
-    await repositories.locator('[data-pr-repository="acme/app"]').getByRole('button', { name: 'Edit acme/app' }).click();
+    phase('manage the connected repository directly in GitHub settings');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole('button', { name: 'More actions', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+    const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
+    await settings.getByRole('tab', { name: 'GitHub', exact: true }).click();
+    const settingsRepositories = settings.locator('[data-pr-repositories-panel]');
+    await browserExpect(settingsRepositories.locator('[data-pr-repository="acme/app"]')).toBeVisible();
+    await browserExpect(settingsRepositories.locator('[data-pr-run-log]')).toContainText('acme/app #128');
+    await settings.getByText('Connected as synthetic-viewer@git.example.invalid', { exact: true }).waitFor();
+    await capture('github-repositories-settings-desktop');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await settingsRepositories.getByRole('button', { name: 'Edit acme/app' }).scrollIntoViewIfNeeded();
+    await browserExpect(settingsRepositories.getByRole('switch', { name: 'Review acme/app automatically' })).toBeVisible();
+    expect(await settings.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await capture('github-repositories-settings-mobile');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    phase('opt into automatic posting from Settings');
+    await settingsRepositories.locator('[data-pr-repository="acme/app"]').getByRole('button', { name: 'Edit acme/app' }).click();
     const autoPost = connectForm.getByRole('checkbox', { name: 'Post reviews to GitHub automatically' });
     await browserExpect(autoPost).not.toBeChecked();
     await browserExpect(connectForm.locator('[data-pr-repository-save]')).toBeEnabled();
@@ -190,16 +206,20 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     await autoPost.check();
     await connectForm.locator('[data-pr-repository-save]').click();
     await browserExpect(connectForm).toHaveCount(0);
-    await browserExpect(repositories.locator('[data-pr-repository="acme/app"]')).toContainText('Automatic');
+    await browserExpect(settingsRepositories.locator('[data-pr-repository="acme/app"]')).toContainText('Automatic');
     const saved = await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews');
     expect(saved.repositories[0].settings.autoPost).toBe(true);
     expect(saved.repositories[0].settings).toMatchObject({
       filters: { baseBranches: ['main'], excludeLabels: ['hold-review'], maxChangedLines: null },
       maxAttemptsPerCommit: 3, dailyReviewLimit: 25,
     });
-    await page.keyboard.press('Escape');
+    const settingsReview = snapshot.inbox.find(entry => entry.pull.number === 128)!.latestRun!;
+    await settingsRepositories.locator(`[data-pr-recent-run="${settingsReview.id}"]`).getByRole('button', { name: 'Open chat' }).click();
+    await browserExpect(settings).toHaveCount(0);
 
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('[data-mobile-current-chat-menu]').getByRole('button').click();
+    await page.getByRole('menuitem', { name: 'Open PRs', exact: true }).click();
     await panel.locator('[data-pr-repositories-button]').click();
     await repositories.locator('[data-pr-repository="acme/app"]').getByRole('button', { name: 'Edit acme/app' }).click();
     await browserExpect(autoPost).toBeChecked();

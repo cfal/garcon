@@ -343,7 +343,6 @@
 {#if repositoriesOpen}
 	<PullRequestRepositoriesDialog
 		{reviews}
-		{currentTime}
 		{onOpenChat}
 		onClose={() => (repositoriesOpen = false)}
 	/>
