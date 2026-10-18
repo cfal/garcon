@@ -138,7 +138,7 @@ export const BUNDLED_PREAMBLES = [
       '',
       '`at` and `until` require minute-aligned timestamps with a timezone: seconds are `00`, optional milliseconds are `.000`, and `Z` or a numeric offset is required. The first run must be at least the next minute. `until` requires `every`, is inclusive, and cannot precede the first run. `busy` defaults to `queue`; use `skip` to avoid accumulating occurrences while the chat is busy.',
       '',
-      'The action body is optional. `\\{{chat_id}}` expands to the current chat ID when the scheduled action is created. Framing, XML escaping, and expansion must fit the 32,000-character saved-prompt limit; the encoded command envelope is limited to 64 KiB.',
+      'The action body is optional. At each scheduled dispatch, `\\{{chat_id}}` expands to the target chat ID, `\\{{current_date}}` to the UTC date, and `\\{{current_date_local}}` to the controller-local date (YYYY-MM-DD). Framing, XML escaping, and expansion must fit the 32,000-character saved-prompt limit; the encoded command envelope is limited to 64 KiB.',
       '',
       'The schedule always targets the requesting chat and uses its current configuration when it runs. Delivered input is wrapped in `<garcon-schedule-action>...</garcon-schedule-action>`, or is self-closing for an empty action. Definitions survive restart, but Garcon must be running at the execution minute: missed one-offs are removed and missed recurring occurrences are skipped, not replayed.',
       '',

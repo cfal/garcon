@@ -7,12 +7,14 @@ import {
   type ThinkingMode,
 } from './chat-modes.js';
 import { parseAgentSettingsById, type AgentSettingsEnvelope } from './agent-integration.js';
-import { CHAT_ID_LENGTH } from './chat-id.js';
 import { normalizePreambleSelectionChoice, type PreambleSelectionChoice } from './preambles.js';
 import { normalizeTags } from './tags.js';
+import { CHAT_TITLE_MAX_BYTES, isChatTitleWithinLimit } from './chat-title-contracts.js';
 import {
   CHAT_ID_TEMPLATE_TOKEN,
-  CHAT_ID_TEMPLATE_VARIABLE,
+  RUNTIME_TEMPLATE_VARIABLES,
+  TEMPLATE_VALIDATION_VALUES,
+  type RuntimeTemplateValues,
   TemplateExpansionTooLongError,
   expandTemplate,
 } from './template-tokens.js';
@@ -23,6 +25,7 @@ export const SCHEDULED_PROMPT_MAX_LENGTH = 32_000;
 export const SCHEDULED_PROMPT_RUN_LOG_LIMIT = 200;
 export const SCHEDULED_PROMPT_LABEL_MAX_LENGTH = 200;
 export const SCHEDULED_PROMPT_MAX_COUNT = 500;
+export const SCHEDULED_PROMPT_NAME_MAX_CODE_POINTS = 120;
 
 export type ScheduleForChatFirstRun =
   | { readonly type: 'after'; readonly minutes: number }
@@ -38,9 +41,6 @@ export interface ScheduleForChatRequest {
   readonly prompt: string;
 }
 export const SCHEDULED_PROMPT_CHAT_ID_TOKEN = CHAT_ID_TEMPLATE_TOKEN;
-
-const SCHEDULED_PROMPT_TEMPLATE_VARIABLES = [CHAT_ID_TEMPLATE_VARIABLE] as const;
-const SCHEDULED_PROMPT_CHAT_ID_LENGTH_SAMPLE = '1'.repeat(CHAT_ID_LENGTH);
 
 export type ScheduledPromptBusyBehavior = 'queue' | 'skip';
 
@@ -60,6 +60,7 @@ export type ScheduledPromptSchedule = OneOffScheduledPromptSchedule | RecurringS
 
 export interface NewChatScheduledPromptTarget {
   type: 'new-chat';
+  chatTitleTemplate?: string;
   executorId?: string | null;
   agentId: string;
   projectPath: string;
@@ -84,6 +85,7 @@ export type ScheduledPromptTarget = NewChatScheduledPromptTarget | ExistingChatS
 
 export interface ScheduledPrompt {
   id: string;
+  name?: string;
   schedule: ScheduledPromptSchedule;
   target: ScheduledPromptTarget;
   prompt: string;
@@ -137,6 +139,7 @@ export interface RecurringScheduleInput {
 export type ScheduledPromptScheduleInput = OneOffScheduleInput | RecurringScheduleInput;
 
 export interface ScheduledPromptDefinitionInput {
+  name?: string;
   schedule: ScheduledPromptScheduleInput;
   target: ScheduledPromptTarget;
   prompt: string;
@@ -196,24 +199,65 @@ export function hasLeadingSlashCommand(value: string): boolean {
   return LEADING_SLASH_COMMAND.test(value);
 }
 
-export function renderScheduledPrompt(prompt: string, chatId: string): string {
+export function renderScheduledPrompt(prompt: string, values: RuntimeTemplateValues): string {
   return expandTemplate(
     prompt,
-    SCHEDULED_PROMPT_TEMPLATE_VARIABLES,
-    { chat_id: chatId },
+    RUNTIME_TEMPLATE_VARIABLES,
+    values,
     SCHEDULED_PROMPT_MAX_LENGTH,
   );
 }
 
 export function scheduledPromptFitsRenderedLimit(
   prompt: string,
-  chatId = SCHEDULED_PROMPT_CHAT_ID_LENGTH_SAMPLE,
+  chatId = TEMPLATE_VALIDATION_VALUES.chat_id,
 ): boolean {
   try {
-    renderScheduledPrompt(prompt, chatId);
+    renderScheduledPrompt(prompt, { ...TEMPLATE_VALIDATION_VALUES, chat_id: chatId });
     return true;
   } catch (error) {
     if (error instanceof TemplateExpansionTooLongError) return false;
+    throw error;
+  }
+}
+
+const SINGLE_LINE_CONTROL = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+
+export function normalizeScheduledPromptName(value: unknown): string | undefined | null {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') return null;
+  const name = value.trim();
+  if (!name) return undefined;
+  if (!name.isWellFormed() || SINGLE_LINE_CONTROL.test(name)) return null;
+  if ([...name].length > SCHEDULED_PROMPT_NAME_MAX_CODE_POINTS) return null;
+  return name;
+}
+
+export function normalizeScheduledChatTitle(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const title = value.trim();
+  if (!title || !title.isWellFormed() || SINGLE_LINE_CONTROL.test(title)) return null;
+  if (!isChatTitleWithinLimit(title)) return null;
+  return title;
+}
+
+export function renderScheduledChatTitle(template: string, values: RuntimeTemplateValues): string {
+  const expanded = expandTemplate(
+    template, RUNTIME_TEMPLATE_VARIABLES, values, CHAT_TITLE_MAX_BYTES,
+  );
+  const title = normalizeScheduledChatTitle(expanded);
+  if (title === null) throw new TypeError('Invalid scheduled chat title after variable expansion');
+  return title;
+}
+
+export function normalizeScheduledChatTitleTemplate(value: unknown): string | null {
+  const template = normalizeScheduledChatTitle(value);
+  if (template === null) return null;
+  try {
+    renderScheduledChatTitle(template, TEMPLATE_VALIDATION_VALUES);
+    return template;
+  } catch (error) {
+    if (error instanceof TemplateExpansionTooLongError || error instanceof TypeError) return null;
     throw error;
   }
 }
@@ -261,6 +305,8 @@ function normalizeApiProtocol(value: unknown): ApiProtocol | null | undefined {
 }
 
 function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledPromptTarget | null {
+  const chatTitleTemplate = raw.chatTitleTemplate === undefined
+    ? undefined : normalizeScheduledChatTitleTemplate(raw.chatTitleTemplate);
   const executorId = parseExecutorId(raw.executorId);
   const agentId = requiredString(raw.agentId);
   const projectPath = typeof raw.projectPath === 'string' && raw.projectPath.trim() ? raw.projectPath : null;
@@ -278,6 +324,7 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
   }
   const preambleChoice = normalizePreambleSelectionChoice(raw.preambleChoice);
   if (
+    chatTitleTemplate === null ||
     !executorId ||
     !agentId ||
     !projectPath ||
@@ -295,6 +342,7 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
 
   return {
     type: 'new-chat',
+    ...(chatTitleTemplate === undefined ? {} : { chatTitleTemplate }),
     ...(executorId !== LOCAL_EXECUTOR_ID ? { executorId } : {}),
     agentId,
     projectPath,
@@ -328,7 +376,7 @@ export function normalizeScheduledPromptTarget(value: unknown): ScheduledPromptT
   if (!raw) return null;
   if (raw.type === 'new-chat') return normalizeNewChatTarget(raw);
   if (raw.type !== 'existing-chat') return null;
-  if ('preambleChoice' in raw) return null;
+  if ('preambleChoice' in raw || 'chatTitleTemplate' in raw) return null;
   const chatId = requiredString(raw.chatId);
   if (!chatId || (raw.busyBehavior !== 'queue' && raw.busyBehavior !== 'skip')) return null;
   return { type: 'existing-chat', chatId, busyBehavior: raw.busyBehavior };
@@ -354,10 +402,12 @@ export function normalizeScheduledPrompt(value: unknown): ScheduledPrompt | null
   const raw = asRecord(value);
   if (!raw) return null;
   const id = requiredString(raw.id);
+  const name = normalizeScheduledPromptName(raw.name);
   const prompt = promptSource(raw.prompt);
   const schedule = normalizeScheduledPromptSchedule(raw.schedule);
   const target = normalizeScheduledPromptTarget(raw.target);
   if (
+    name === null ||
     !id ||
     !prompt ||
     prompt.length > SCHEDULED_PROMPT_MAX_LENGTH ||
@@ -371,6 +421,7 @@ export function normalizeScheduledPrompt(value: unknown): ScheduledPrompt | null
     return null;
   return {
     id,
+    ...(name === undefined ? {} : { name }),
     schedule,
     target,
     prompt,
@@ -381,10 +432,12 @@ export function normalizeScheduledPrompt(value: unknown): ScheduledPrompt | null
 
 export function normalizeScheduledPromptDefinitionInput(value: unknown): ScheduledPromptDefinitionInput | null {
   const raw = asRecord(value);
+  const name = normalizeScheduledPromptName(raw?.name);
   const schedule = asRecord(raw?.schedule);
   const target = normalizeScheduledPromptTarget(raw?.target);
   const prompt = promptSource(raw?.prompt);
   if (
+    name === null ||
     !raw ||
     !schedule ||
     'intervalHours' in schedule ||
@@ -412,7 +465,9 @@ export function normalizeScheduledPromptDefinitionInput(value: unknown): Schedul
       endAtUtc: schedule.endAtUtc as string | null,
     };
   }
-  return normalizedSchedule ? { schedule: normalizedSchedule, target, prompt } : null;
+  return normalizedSchedule
+    ? { schedule: normalizedSchedule, target, prompt, ...(name === undefined ? {} : { name }) }
+    : null;
 }
 
 export function normalizeScheduledPromptsSnapshot(value: unknown): ScheduledPromptsSnapshot | null {

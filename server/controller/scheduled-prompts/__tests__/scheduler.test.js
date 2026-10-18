@@ -136,6 +136,24 @@ async function sameChatScheduler(agents = agentCapabilities()) {
   return { store, cron, scheduler };
 }
 
+it('retains task names and title templates through create, edit, and clearing', async () => {
+  const { store, scheduler } = await sameChatScheduler();
+  const definition = newChatDefinition('2030-01-02T09:00:00.000Z');
+  definition.name = '  Daily review  ';
+  definition.target.chatTitleTemplate = 'Review {{current_date}}';
+  const created = await scheduler.create({ expectedRevision: 0, scheduledPrompt: definition });
+  const prompt = created.prompts[0];
+  expect(prompt).toMatchObject({ name: 'Daily review', target: { chatTitleTemplate: 'Review {{current_date}}' } });
+  definition.name = 'Edited review';
+  const updated = await scheduler.update({ id: prompt.id, expectedRevision: store.revision, scheduledPrompt: definition });
+  expect(updated.prompts[0].name).toBe('Edited review');
+  expect(updated.prompts[0].target.chatTitleTemplate).toBe('Review {{current_date}}');
+  const cleared = newChatDefinition('2030-01-02T09:00:00.000Z');
+  await scheduler.update({ id: prompt.id, expectedRevision: store.revision, scheduledPrompt: cleared });
+  expect(store.list()[0]).not.toHaveProperty('name');
+  expect(store.list()[0].target).not.toHaveProperty('chatTitleTemplate');
+});
+
 it('preserves literal schedules from both user and agent admission', async () => {
   const { scheduler } = await sameChatScheduler({ ...agentCapabilities(), chatExecutionPolicy: () => 'literal' });
   const now = new Date('2030-01-01T00:00:00.000Z');

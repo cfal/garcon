@@ -148,6 +148,8 @@ describe('ConversationMessage actions', () => {
 		const rail = container.querySelector('.user-message-accessory-rail') as HTMLElement;
 		expect(trigger.className).toContain('user-message-context-target');
 		expect(trigger.className).toContain('data-[state=open]:bg-user-bubble-selected');
+		expect(trigger.classList.contains('selection:bg-user-bubble-foreground')).toBe(true);
+		expect(trigger.classList.contains('selection:text-user-bubble')).toBe(true);
 		expect(trigger.className).toContain('rounded-xl');
 		expect(trigger.className).toContain('border');
 		expect(trigger.className).toContain('border-border');
@@ -194,10 +196,22 @@ describe('ConversationMessage actions', () => {
 		expect(bubble?.classList.contains('bg-status-neutral/25')).toBe(true);
 		expect(bubble?.classList.contains('text-status-neutral-foreground')).toBe(true);
 		expect(bubble?.className).not.toContain('data-[state=open]:bg-user-bubble-selected');
+		expect(bubble?.classList.contains('selection:bg-user-bubble-foreground')).toBe(false);
+		expect(bubble?.classList.contains('selection:text-user-bubble')).toBe(false);
 		expect(screen.getByText('CLI info').className).toContain('sr-only');
 		expect(container.querySelector('.cli-row-message')).toBeNull();
 		expect(container.querySelector('[role="alert"]')).toBeNull();
 		expect(screen.getByText('Body')).toBeTruthy();
+	});
+
+	it('gives non-image attachments their own selection surface', () => {
+		render(ConversationMessageHost, {
+			message: new UserMessage('2026-06-27T00:00:00.000Z', 'Attached document', [
+				{ name: 'document.txt', data: 'data:text/plain;base64,Zml4dHVyZQ==' },
+			]),
+		});
+
+		expect(screen.getByText('document.txt').closest('.user-message-attachment')).not.toBeNull();
 	});
 
 	it('styles a complete custom user message with both theme accents', () => {

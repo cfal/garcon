@@ -16,6 +16,7 @@
 	import type { TerminalClientSession } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 	import TerminalSurface from '../TerminalSurface.svelte';
 	import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
+	import { TerminalInputControls } from '$lib/terminal/runtime/terminal-input-controls.svelte.js';
 
 	interface Props {
 		host: WorkspaceWindowId | 'mobile';
@@ -91,13 +92,24 @@
 			replayTruncatedAt: null,
 		};
 	}
+	const inputControls = new TerminalInputControls();
 	const runtime: TerminalSurfaceRuntimePort = {
 		inputControls: {
-			ctrlMode: 'inactive',
-			altMode: 'inactive',
-			toggleModifier: (modifier: 'ctrl' | 'alt') => onModifier(modifier),
+			get ctrlMode() {
+				return inputControls.ctrlMode;
+			},
+			get altMode() {
+				return inputControls.altMode;
+			},
+			toggleModifier: (modifier: 'ctrl' | 'alt') => {
+				inputControls.toggleModifier(modifier);
+				onModifier(modifier);
+			},
 		},
-		sendToolbarKey: (key: string) => onToolbarKey(key),
+		sendToolbarKey: (key) => {
+			inputControls.buildToolbarSequence(key);
+			onToolbarKey(key);
+		},
 		attach: () => ({ lease: 1, ready: Promise.resolve() }),
 		park: () => undefined,
 		scheduleFit: () => undefined,
@@ -136,7 +148,10 @@
 		},
 		get executorInventories() {
 			return {
-				local: { status: executorError ? ('failed' as const) : ('ready' as const), error: executorError },
+				local: {
+					status: executorError ? ('failed' as const) : ('ready' as const),
+					error: executorError,
+				},
 			};
 		},
 		executorLabel: () => 'Local',

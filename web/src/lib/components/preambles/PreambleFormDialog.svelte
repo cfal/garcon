@@ -7,6 +7,8 @@
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
 	import PromptTextField from '$lib/components/prompt-editor/PromptTextField.svelte';
+	import TemplateVariableMenu from '$lib/components/prompt-editor/TemplateVariableMenu.svelte';
+	import { RUNTIME_TEMPLATE_VARIABLES } from '$shared/template-tokens';
 	import { PromptEditorDialogState } from '$lib/prompt-editor/prompt-editor-dialog-state.svelte.js';
 	import {
 		promptEditorSelectionFromTextarea,
@@ -323,9 +325,13 @@
 			/>
 
 			<div class="space-y-1.5">
-				<label for="preamble-content" class="text-sm font-medium text-foreground">
-					{m.preambles_content_label()}
-				</label>
+				<div class="flex items-center justify-between gap-2">
+					<label for="preamble-content" class="text-sm font-medium text-foreground">
+						{m.preambles_content_label()}
+					</label>
+					<TemplateVariableMenu variables={RUNTIME_TEMPLATE_VARIABLES} getInput={() => contentTextarea}
+						onInsert={(value) => (form.content = value)} disabled={form.saving} />
+				</div>
 				<PromptTextField
 					id="preamble-content"
 					bind:ref={contentTextarea}

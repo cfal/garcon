@@ -7,13 +7,70 @@ import {
   normalizeScheduledPrompt,
   normalizeScheduledPromptDefinitionInput,
   renderScheduledPrompt,
+  renderScheduledChatTitle,
+  normalizeScheduledPromptsSnapshot,
   scheduledPromptFitsRenderedLimit,
 } from '../scheduled-prompts.js';
 import { PREAMBLE_MAX_COUNT } from '../preambles.js';
+import { TEMPLATE_VALIDATION_VALUES } from '../template-tokens.js';
 
 const CHAT_ID = '1783725900000000';
+const VALUES = { ...TEMPLATE_VALIDATION_VALUES, chat_id: CHAT_ID };
 const PREAMBLE_A = '00000000-0000-4000-8000-000000000001';
 const PREAMBLE_B = '00000000-0000-4000-8000-000000000002';
+
+describe('scheduled task names and titles', () => {
+  it('normalizes static optional names, preserving Unicode code points', () => {
+    for (const name of [undefined, '', '   ']) {
+      expect(normalizeScheduledPromptDefinitionInput({ ...definition('Body'), name })).not.toHaveProperty('name');
+    }
+    for (const name of ['Daily review', '{{current_date}}', '\u{1F680}'.repeat(120)]) {
+      expect(normalizeScheduledPromptDefinitionInput({ ...definition('Body'), name: ` ${name} ` })?.name).toBe(name);
+    }
+    for (const name of [null, 5, 'a'.repeat(121), '\u{1F680}'.repeat(121), 'two\nlines', 'a\u0000b', 'a\u2028b', '\ud800']) {
+      expect(normalizeScheduledPromptDefinitionInput({ ...definition('Body'), name })).toBeNull();
+    }
+  });
+
+  it('retains names and templates through record and snapshot normalization', () => {
+    const value = newChatDefinition({ mode: 'defaults' });
+    value.name = '  Daily review  ';
+    value.target.chatTitleTemplate = '  Review {{current_date}} / {{current_date_local}}  ';
+    const normalized = normalizeScheduledPromptDefinitionInput(value);
+    expect(normalized.name).toBe('Daily review');
+    expect(normalized.target.chatTitleTemplate).toBe('Review {{current_date}} / {{current_date_local}}');
+    expect(normalizeScheduledPromptDefinitionInput(normalized)).toEqual(normalized);
+    const record = normalizeScheduledPrompt({
+      ...normalized, id: 'task', schedule: { type: 'once', nextRunAt: value.schedule.runAtUtc },
+      createdAt: '2030-01-01T00:00:00.000Z', updatedAt: '2030-01-01T00:00:00.000Z',
+    });
+    expect(normalizeScheduledPromptsSnapshot({ revision: 1, prompts: [record], runLog: [] }).prompts).toEqual([record]);
+    expect(record).toMatchObject({ name: normalized.name, target: normalized.target });
+    expect(normalizeScheduledPrompt({ ...record, name: 123 })).toBeNull();
+  });
+
+  it('bounds source and rendered titles in UTF-8 bytes, not the agent-command character cap', () => {
+    const value = newChatDefinition({ mode: 'defaults' });
+    for (const chatTitleTemplate of ['a'.repeat(4096), '\u{1F680}'.repeat(1024), 'a'.repeat(4080) + '{{chat_id}}']) {
+      value.target.chatTitleTemplate = chatTitleTemplate;
+      expect(normalizeScheduledPromptDefinitionInput(value)?.target.chatTitleTemplate).toBe(chatTitleTemplate);
+    }
+    for (const chatTitleTemplate of ['', '  ', null, 123, 'a\nb', 'a\u2029b', '\ud800', 'a'.repeat(4097), '\u{1F680}'.repeat(1025), 'a'.repeat(4081) + '{{chat_id}}']) {
+      value.target.chatTitleTemplate = chatTitleTemplate;
+      expect(normalizeScheduledPromptDefinitionInput(value)).toBeNull();
+    }
+    expect(normalizeScheduledPromptDefinitionInput({ ...definition('Body'), target: {
+      ...definition('Body').target, chatTitleTemplate: 'Not a rename',
+    } })).toBeNull();
+  });
+
+  it('renders only runtime tokens once and revalidates the final title', () => {
+    expect(renderScheduledChatTitle(' {{chat_id}} {{current_date}} {{current_date_local}} \\{{current_date}} {{arguments}} {{current_time}} ', VALUES))
+      .toBe(`${CHAT_ID} 2000-01-02 2000-01-01 {{current_date}} {{arguments}} {{current_time}}`);
+    expect(() => renderScheduledChatTitle('a'.repeat(4081) + '{{chat_id}}', VALUES)).toThrow();
+    expect(() => renderScheduledChatTitle('line\nbreak', VALUES)).toThrow();
+  });
+});
 
 function definition(prompt) {
   return {
@@ -117,13 +174,13 @@ describe('scheduled prompt variables', () => {
     expect(
       renderScheduledPrompt(
         `Chat ${SCHEDULED_PROMPT_CHAT_ID_TOKEN}; literal \\${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`,
-        CHAT_ID,
+        VALUES,
       ),
     ).toBe(`Chat ${CHAT_ID}; literal ${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`);
   });
 
   it('leaves unsupported variables unchanged', () => {
-    expect(renderScheduledPrompt('{{arguments}} {{project_path}} {{unknown}}', CHAT_ID)).toBe(
+    expect(renderScheduledPrompt('{{arguments}} {{project_path}} {{unknown}}', VALUES)).toBe(
       '{{arguments}} {{project_path}} {{unknown}}',
     );
   });
@@ -132,7 +189,7 @@ describe('scheduled prompt variables', () => {
     const exact = `${'x'.repeat(SCHEDULED_PROMPT_MAX_LENGTH - CHAT_ID.length)}${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`;
     const tooLong = `${'x'.repeat(SCHEDULED_PROMPT_MAX_LENGTH - CHAT_ID.length + 1)}${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`;
 
-    expect(renderScheduledPrompt(exact, CHAT_ID)).toHaveLength(SCHEDULED_PROMPT_MAX_LENGTH);
+    expect(renderScheduledPrompt(exact, VALUES)).toHaveLength(SCHEDULED_PROMPT_MAX_LENGTH);
     expect(scheduledPromptFitsRenderedLimit(exact)).toBe(true);
     expect(scheduledPromptFitsRenderedLimit(tooLong)).toBe(false);
     expect(normalizeScheduledPromptDefinitionInput(definition(exact))).not.toBeNull();

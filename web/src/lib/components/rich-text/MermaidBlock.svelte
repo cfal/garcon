@@ -116,7 +116,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	data-chat-layout-pending={loading ? 'true' : undefined}
 >
 	<div
-		class="flex items-center gap-1.5 border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"
+		class="mermaid-block-header flex items-center gap-1.5 border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"
 	>
 		<span class="mr-auto">mermaid</span>
 		<div

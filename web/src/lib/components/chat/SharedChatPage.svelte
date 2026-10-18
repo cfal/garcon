@@ -293,6 +293,8 @@
 									<div
 										class={cn(
 											'mt-1 bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm',
+											!userPresentation?.style &&
+												'selection:bg-user-bubble-foreground selection:text-user-bubble',
 											userPresentation?.style &&
 												cliPresentationSurfaceClass(userPresentation.style),
 										)}

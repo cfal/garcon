@@ -3,7 +3,8 @@ import type { Extension } from '@codemirror/state';
 import { oneDarkTheme } from '@codemirror/theme-one-dark';
 import { EditorView } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
-import type { RendererThemeId } from '$lib/theme/themes.js';
+import { codeTagHighlighter } from '$lib/highlighting/codemirror-code-highlighter.js';
+import type { ColorScheme, RendererThemeId } from '$lib/theme/themes.js';
 
 export type EditorThemeId = RendererThemeId;
 
@@ -272,6 +273,44 @@ const NEKO_DARK_THEME: Extension = [
 	),
 ];
 
+function semanticEditorTheme(colorScheme: ColorScheme): Extension {
+	return [
+		EditorView.theme(
+			{
+				'&': { color: 'hsl(var(--foreground))', backgroundColor: 'hsl(var(--background))' },
+				'.cm-content': { caretColor: 'hsl(var(--primary))' },
+				'.cm-cursor, .cm-dropCursor': { borderLeftColor: 'hsl(var(--primary))' },
+				'& > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground':
+					{
+						backgroundColor: 'var(--editor-selection-background)',
+					},
+				'.cm-activeLine, .cm-activeLineGutter': {
+					backgroundColor: 'hsl(var(--foreground) / 0.04)',
+				},
+				// Keeps diff syntax from covering the drawn selection layer.
+				'.cm-code-addition, .cm-code-deletion': { backgroundColor: 'transparent' },
+				'.cm-gutters': {
+					color: 'hsl(var(--muted-foreground))',
+					backgroundColor: 'hsl(var(--background))',
+					borderRightColor: 'hsl(var(--border))',
+				},
+			},
+			{ dark: colorScheme === 'dark' },
+		),
+		EditorView.editorAttributes.of({ class: 'code-highlight' }),
+		syntaxHighlighting(codeTagHighlighter),
+		syntaxHighlighting(
+			HighlightStyle.define([
+				{ tag: tags.strong, fontWeight: 'bold' },
+				{ tag: tags.emphasis, fontStyle: 'italic' },
+				{ tag: tags.strikethrough, textDecoration: 'line-through' },
+				{ tag: tags.link, textDecoration: 'underline' },
+				{ tag: tags.heading, fontWeight: 'bold' },
+			]),
+		),
+	];
+}
+
 const EDITOR_THEME_EXTENSIONS: Record<EditorThemeId, Extension> = {
 	'standard-light': STANDARD_LIGHT_CONTRAST_STYLE,
 	'standard-dark': STANDARD_DARK_THEME,
@@ -281,6 +320,8 @@ const EDITOR_THEME_EXTENSIONS: Record<EditorThemeId, Extension> = {
 	'owl-dark': OWL_DARK_THEME,
 	'neko-light': NEKO_LIGHT_THEME,
 	'neko-dark': NEKO_DARK_THEME,
+	'semantic-light': semanticEditorTheme('light'),
+	'semantic-dark': semanticEditorTheme('dark'),
 };
 
 export function editorThemeExtension(themeId: EditorThemeId): Extension {

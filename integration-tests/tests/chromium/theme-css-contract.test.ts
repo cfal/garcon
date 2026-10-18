@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { chromium, type Page } from "playwright";
+import { chromium, type Locator, type Page } from "playwright";
 import { THEME_PROFILES } from "../../../web/src/lib/theme/themes";
+import { buttonVariants } from "../../../web/src/lib/components/ui/button/button";
+import { buildThinkingOptions } from "../../../web/src/lib/chat/composer/composer-controls";
 import { contrastRatio } from "../../support/color-contrast";
 
 const APP_URL = "http://theme-css-contract.test/";
+const THINKING_OPTIONS = buildThinkingOptions(["xhigh", "max", "ultra"]);
 const DIFF_SYNTAX_CLASSES = [
   "cm-code-keyword",
   "cm-code-title",
@@ -25,6 +28,65 @@ function diffSyntaxFixture(idPrefix: string): string {
     (className) =>
       `<span id="${idPrefix}-${className}" class="${className}">${className}</span>`,
   ).join(" ");
+}
+
+function thinkingButtonFixture(surface: string): string {
+  return THINKING_OPTIONS.map(
+    (option) =>
+      `<button id="thinking-${surface}-${option.value}" aria-label="${option.label}" class="inline-flex size-9 items-center justify-center rounded-lg border ${option.toneClass}"><svg class="size-4" viewBox="0 0 24 24" stroke="currentColor" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8" /></svg></button>`,
+  ).join("");
+}
+
+function focusButtonFixture(): string {
+  const surfaces = [];
+  const variants = [
+    "default",
+    "outline",
+    "secondary",
+    "ghost",
+    "link",
+    "destructive",
+  ] as const;
+  for (const surface of ["background", "card", "popover"]) {
+    const buttons = variants
+      .map(
+        (variant) =>
+          `<button data-focus-probe="${surface} ${variant}" class="${buttonVariants({ variant })}">Focus</button>`,
+      )
+      .join("");
+    surfaces.push(`<div class="bg-${surface}">${buttons}</div>`);
+  }
+  return surfaces.join("");
+}
+
+async function readButtonFocusColors(button: Locator) {
+  return button.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const shadow = style.boxShadow.match(
+      /((?:rgba?|hsla?|oklch|oklab|color)\([^)]*\)) 0px 0px 0px 3px/,
+    )?.[1];
+    if (!shadow) {
+      throw new Error(
+        `Missing ${document.documentElement.dataset.theme} ${element.getAttribute("data-focus-probe")} focus shadow`,
+      );
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext("2d")!;
+    const background = getComputedStyle(element.parentElement!).backgroundColor;
+    context.fillStyle = background;
+    context.fillRect(0, 0, 1, 1);
+    context.fillStyle = shadow;
+    context.fillRect(0, 0, 1, 1);
+    const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+    return {
+      label: element.getAttribute("data-focus-probe"),
+      visible: element.matches(":focus-visible"),
+      hovered: element.matches(":hover"),
+      ring: `rgb(${red}, ${green}, ${blue})`,
+      background,
+    };
+  });
 }
 
 function declaredProperties(source: string): string[] {
@@ -106,7 +168,7 @@ async function readRenderedColors(
 }
 
 async function readNormalAndHoveredColors(page: Page, selector: string) {
-  await page.mouse.move(0, 0);
+  await page.mouse.move(-1, -1);
   const normal = await readRenderedColors(page, selector);
   await page.locator(selector).hover();
   const hovered = await readRenderedColors(page, selector);
@@ -170,10 +232,26 @@ describe("compiled theme CSS", () => {
         contentType: "text/html",
         body: `<!doctype html><html><head><link rel="stylesheet" href="/theme.css"><style>*{transition:none!important}</style></head><body class="bg-background">
           <div id="dialog-surface" style="background:var(--dialog-surface)">
-            <select class="select-native"><option>Theme</option></select>
-            <input id="input-boundary" class="border border-input bg-background dark:bg-input/30 placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground" placeholder="Input placeholder">
-            <textarea id="textarea-boundary" class="border border-input bg-transparent dark:bg-input/30 placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
+            ${thinkingButtonFixture("dialog")}
+            <select id="native-select-muted" class="select-native"><option>Theme</option></select>
+            <select class="select-native select-native-surface"><option>Theme surface</option></select>
+            <div id="error-dialog" class="bg-destructive/10 text-destructive">Error</div>
+            <div class="bg-muted/50"><div id="error-muted-dialog" class="bg-destructive/10 text-destructive">Error</div></div>
+            <input id="input-boundary" class="border border-input bg-control-surface placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground" placeholder="Input placeholder">
+            <textarea id="textarea-boundary" class="border border-input bg-control-surface placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
+            <div class="ticket-dialog">
+              <input id="ticket-field" class="ticket-input" placeholder="Ticket title">
+              <select id="ticket-select" class="ticket-input"><option>Status</option></select>
+              <span id="native-select-reference" style="background:var(--native-select-surface-background)"></span>
+              <button id="ticket-action" class="ticket-button">Ticket action</button>
+              <button id="ticket-active-action" class="ticket-button" data-active="true">Active filter</button>
+              <button id="ticket-shared-action" class="${buttonVariants()}">Shared action</button>
+              <button id="ticket-code-action" class="focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">Copy code</button>
+            </div>
           </div>
+          ${["background", "card", "popover", "accent"].map((surface) => `<div class="bg-${surface}"><span id="error-${surface}" class="text-destructive">Error</span></div>`).join("")}
+          <div class="bg-card"><span id="merged-badge" class="bg-pr-merged/15 text-pr-merged">Merged</span></div>
+          <div class="bg-card">${thinkingButtonFixture("card")}</div>
           <div class="bg-popover">
             <div id="destructive-menu-item" data-variant="destructive" class="data-highlighted:bg-accent data-highlighted:text-accent-foreground data-[variant=destructive]:text-status-error-foreground data-[variant=destructive]:data-highlighted:bg-destructive/10 dark:data-[variant=destructive]:data-highlighted:bg-destructive/20 data-[variant=destructive]:data-highlighted:text-status-error-foreground">Delete</div>
           </div>
@@ -198,19 +276,28 @@ describe("compiled theme CSS", () => {
             <div id="virtual-hunk-header" class="bg-diff-hunk-header"><span id="virtual-hunk-header-text" class="text-muted-foreground">@@ hunk</span></div>
           </div>
           <div id="scroll-area-thumb" data-slot="scroll-area-thumb" class="bg-(color:--scroll-area-thumb) hover:bg-(color:--scroll-area-thumb-hover)" style="width:8px;height:32px"></div>
-          <div id="dark-utility" class="bg-transparent dark:bg-input/30"></div>
+          <div id="dark-utility" class="bg-transparent dark:bg-card"></div>
           <div data-processing-surface="sidebar" class="bg-sidebar-chat-item-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
           <div data-processing-surface="selected sidebar" class="bg-sidebar-chat-item-selected-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
           <div data-processing-surface="selected workspace tab" class="bg-workspace-window-tab-selected"><span class="workspace-chat-processing-indicator bg-status-processing"></span></div>
           <div data-processing-surface="inactive workspace tab" class="bg-workspace-window-tab-selected-inactive"><span class="workspace-chat-processing-indicator bg-status-processing"></span></div>
           <div id="scrollbar" style="width:100px;height:40px;overflow:scroll;scrollbar-gutter:stable"><div style="height:80px"></div></div>
+          <div id="user-bubble" class="bg-user-bubble text-user-bubble-foreground selection:bg-user-bubble-foreground selection:text-user-bubble">
+            <span id="user-bubble-text">Selected message text</span>
+            <div id="user-bubble-code" class="markdown-code-block"><pre><code class="cm-code"><span id="user-bubble-code-text">Selected code</span><span id="user-bubble-code-keyword" class="cm-code-keyword">const</span></code></pre></div>
+            <div class="markdown-body"><table><thead><tr><th id="user-bubble-header">Selected header <strong id="user-bubble-header-text">text</strong></th></tr></thead></table></div>
+            <div id="user-bubble-attachment" class="user-message-attachment bg-background/70 text-foreground"><span id="user-bubble-attachment-text">document.txt</span></div>
+            <div id="user-bubble-alert" class="markdown-link-alert bg-muted text-foreground" role="alert"><span id="user-bubble-alert-text">Blocked file link</span></div>
+            <div class="bg-muted/30"><div id="user-bubble-mermaid-header" class="mermaid-block-header bg-muted/50 text-muted-foreground"><span id="user-bubble-mermaid-header-text">mermaid</span></div></div>
+          </div>
+          ${focusButtonFixture()}
         </body></html>`,
       });
     });
 
     try {
       await page.goto(APP_URL);
-      await page.locator(".select-native").waitFor();
+      await page.locator("#native-select-muted").waitFor();
       for (const profile of THEME_PROFILES) {
         const values = await page.evaluate(
           ({ profile, properties }) => {
@@ -231,6 +318,23 @@ describe("compiled theme CSS", () => {
         for (const property of profileProperties) {
           expect(values[property], `${profile.id} ${property}`).not.toBe("");
         }
+        const preview = await page.evaluate((themeId) => {
+          const root = document.documentElement;
+          const activeBackground =
+            getComputedStyle(root).getPropertyValue("--background");
+          root.dataset.theme =
+            themeId === "classic-dark" ? "classic-light" : "classic-dark";
+          const element = document.createElement("span");
+          element.dataset.themePreview = themeId;
+          document.body.append(element);
+          const previewBackground =
+            getComputedStyle(element).getPropertyValue("--background");
+          element.remove();
+          return { activeBackground, previewBackground };
+        }, profile.id);
+        expect(preview.previewBackground, `${profile.id} scoped preview`).toBe(
+          preview.activeBackground,
+        );
       }
 
       const colorblindValues = await page.evaluate(() => {
@@ -286,6 +390,24 @@ describe("compiled theme CSS", () => {
 
       for (const profile of THEME_PROFILES) {
         await applyProfile(page, profile);
+        for (const surface of ["card", "dialog"]) {
+          for (const option of THINKING_OPTIONS) {
+            const colorsByInteraction = await readNormalAndHoveredColors(
+              page,
+              `#thinking-${surface}-${option.value} svg`,
+            );
+            expect(
+              colorsByInteraction.hovered.background,
+              `${profile.id} ${option.value} thinking hover on ${surface}`,
+            ).not.toBe(colorsByInteraction.normal.background);
+            for (const [interaction, colors] of Object.entries(colorsByInteraction)) {
+              expect(
+                contrastRatio(colors.foreground, colors.background),
+                `${profile.id} ${option.value} thinking icon ${interaction} on ${surface}`,
+              ).toBeGreaterThanOrEqual(3);
+            }
+          }
+        }
         const processingColors = await page.evaluate(() => {
           return [
             ...document.querySelectorAll<HTMLElement>(
@@ -464,12 +586,87 @@ describe("compiled theme CSS", () => {
         }
       }
 
-      for (const profile of ["phosphor-light", "phosphor-dark"] as const) {
-        const descriptor = THEME_PROFILES.find(
-          (candidate) => candidate.id === profile,
-        );
-        if (!descriptor) throw new Error(`Missing profile ${profile}`);
+      for (const descriptor of THEME_PROFILES) {
+        const profile = descriptor.id;
         await applyProfile(page, descriptor);
+        const bubble = await readRenderedColors(page, "#user-bubble");
+        for (const selector of ["#user-bubble", "#user-bubble-text"]) {
+          const selection = await readRenderedColors(page, selector, {
+            pseudoElement: "::selection",
+          });
+          expect(
+            contrastRatio(selection.foreground, selection.background),
+            `${profile} bubble selected text`,
+          ).toBeGreaterThanOrEqual(4.5);
+          expect(
+            contrastRatio(selection.background, bubble.background),
+            `${profile} visible bubble selection`,
+          ).toBeGreaterThanOrEqual(3);
+        }
+        for (const { surface, selectors, minimumSeparation } of [
+          {
+            surface: "#user-bubble-code",
+            selectors: ["#user-bubble-code-text", "#user-bubble-code-keyword"],
+            minimumSeparation: 3,
+          },
+          {
+            surface: "#user-bubble-header",
+            selectors: ["#user-bubble-header", "#user-bubble-header-text"],
+            minimumSeparation: 3,
+          },
+          {
+            surface: "#user-bubble-attachment",
+            selectors: [
+              "#user-bubble-attachment",
+              "#user-bubble-attachment-text",
+            ],
+            minimumSeparation: 2,
+          },
+          {
+            surface: "#user-bubble-alert",
+            selectors: ["#user-bubble-alert", "#user-bubble-alert-text"],
+            minimumSeparation: 3,
+          },
+          {
+            surface: "#user-bubble-mermaid-header",
+            selectors: [
+              "#user-bubble-mermaid-header",
+              "#user-bubble-mermaid-header-text",
+            ],
+            minimumSeparation: 3,
+          },
+        ]) {
+          const colors = await readRenderedColors(page, surface);
+          for (const selector of selectors) {
+            const selection = await readRenderedColors(page, selector, {
+              pseudoElement: "::selection",
+            });
+            expect(
+              contrastRatio(selection.foreground, selection.background),
+              `${profile} ${selector} selected text`,
+            ).toBeGreaterThanOrEqual(4.5);
+            expect(
+              contrastRatio(selection.background, colors.background),
+              `${profile} ${selector} visible selection`,
+            ).toBeGreaterThanOrEqual(minimumSeparation);
+          }
+        }
+        await page.keyboard.press("Tab");
+        for (const button of await page.locator("[data-focus-probe]").all()) {
+          await page.mouse.move(0, 0);
+          await button.focus();
+          for (const hovered of [false, true]) {
+            if (hovered) await button.hover();
+            const focus = await readButtonFocusColors(button);
+            const label = `${profile} ${focus.label} ${hovered ? "hovered" : "at rest"}`;
+            expect(focus.hovered, `${label} hover`).toBe(hovered);
+            expect(focus.visible, `${label} focus`).toBe(true);
+            expect(
+              contrastRatio(focus.ring, focus.background),
+              `${label} focus ring`,
+            ).toBeGreaterThanOrEqual(3);
+          }
+        }
         const scrollbarWidth = await page.evaluate(() => {
           const scrollbar = document.querySelector<HTMLElement>("#scrollbar");
           if (!scrollbar) throw new Error("Missing scrollbar fixture");
@@ -491,7 +688,7 @@ describe("compiled theme CSS", () => {
           textareaPlaceholder,
         ] = await Promise.all([
           readRenderedColors(page, "#dialog-surface"),
-          readRenderedColors(page, ".select-native"),
+          readRenderedColors(page, "#native-select-muted"),
           readRenderedColors(page, "#input-boundary"),
           readRenderedColors(page, "#input-boundary", {
             pseudoElement: "::placeholder",
@@ -500,14 +697,138 @@ describe("compiled theme CSS", () => {
             pseudoElement: "::placeholder",
           }),
         ]);
+        for (const nativeSelect of await page.locator(".select-native").all()) {
+          const colors = await nativeSelect.evaluate((element) => {
+            const style = getComputedStyle(element);
+            const imageUrl = style.backgroundImage.slice(5, -2);
+            const svg = new DOMParser().parseFromString(
+              decodeURIComponent(imageUrl.slice(imageUrl.indexOf(",") + 1)),
+              "image/svg+xml",
+            );
+            const stroke = svg.documentElement.getAttribute("stroke");
+            if (!stroke) throw new Error("Missing native select chevron stroke");
+            const probe = document.createElement("span");
+            probe.style.color = stroke;
+            document.body.append(probe);
+            const foreground = getComputedStyle(probe).color;
+            probe.remove();
+            return { foreground, background: style.backgroundColor };
+          });
+          expect(
+            contrastRatio(colors.foreground, colors.background),
+            `${profile} native select chevron`,
+          ).toBeGreaterThanOrEqual(3);
+        }
+        const ticketField = await readRenderedColors(page, "#ticket-field");
+        expect(ticketField.border, `${profile} ticket input border`).toBe(
+          input.border,
+        );
+        expect(ticketField.background, `${profile} ticket input surface`).toBe(
+          input.background,
+        );
+        const ticketSelect = await readRenderedColors(page, "#ticket-select");
+        const nativeSelectReference = await readRenderedColors(
+          page,
+          "#native-select-reference",
+        );
         expect(
-          contrastRatio(input.border, dialogSurface.background),
-          `${profile} input boundary`,
-        ).toBeGreaterThanOrEqual(3);
+          ticketSelect.background,
+          `${profile} ticket select surface`,
+        ).toBe(nativeSelectReference.background);
+        await page.mouse.move(0, 0);
+        const activeTicketButton = await readRenderedColors(
+          page,
+          "#ticket-active-action",
+        );
+        await page.locator("#ticket-active-action").hover();
+        const hoveredActiveTicketButton = await readRenderedColors(
+          page,
+          "#ticket-active-action",
+        );
         expect(
-          contrastRatio(select.border, select.background),
-          `${profile} native-select boundary`,
-        ).toBeGreaterThanOrEqual(3);
+          hoveredActiveTicketButton.background,
+          `${profile} active ticket hover`,
+        ).toBe(activeTicketButton.background);
+        const ticketPlaceholder = await readRenderedColors(
+          page,
+          "#ticket-field",
+          { pseudoElement: "::placeholder" },
+        );
+        expect(
+          contrastRatio(
+            ticketPlaceholder.foreground,
+            ticketPlaceholder.background,
+          ),
+          `${profile} ticket placeholder`,
+        ).toBeGreaterThanOrEqual(4.5);
+        await page.keyboard.press("Tab");
+        for (const selector of ["#ticket-field", "#ticket-action"]) {
+          await page.locator(selector).focus();
+          const outline = await page.locator(selector).evaluate((element) => {
+            const style = getComputedStyle(element);
+            return {
+              color: style.outlineColor,
+              style: style.outlineStyle,
+              width: style.outlineWidth,
+            };
+          });
+          expect(outline.style).toBe("solid");
+          expect(outline.width).toBe("2px");
+          expect(
+            contrastRatio(outline.color, dialogSurface.background),
+            `${profile} ${selector} focus`,
+          ).toBeGreaterThanOrEqual(3);
+        }
+        for (const selector of [
+          "#ticket-shared-action",
+          "#ticket-code-action",
+        ]) {
+          const button = page.locator(selector);
+          await button.focus();
+          const focus = await button.evaluate((element) => {
+            const style = getComputedStyle(element);
+            return { outline: style.outlineStyle, shadow: style.boxShadow };
+          });
+          expect(focus.outline, `${profile} ${selector} no extra outline`).toBe(
+            "none",
+          );
+          expect(
+            focus.shadow,
+            `${profile} ${selector} retains its ring`,
+          ).not.toBe("none");
+        }
+        if (profile.startsWith("paper-") || profile.startsWith("slate-")) {
+          for (const selector of [
+            "#error-background",
+            "#error-card",
+            "#error-popover",
+            "#error-accent",
+            "#error-dialog",
+            "#error-muted-dialog",
+            "#merged-badge",
+          ]) {
+            const colors = await readRenderedColors(page, selector);
+            expect(
+              contrastRatio(colors.foreground, colors.background),
+              `${profile} ${selector}`,
+            ).toBeGreaterThanOrEqual(4.5);
+          }
+        }
+        if (
+          profile.startsWith("phosphor-") ||
+          profile === "classic-light" ||
+          profile === "colorblind-light" ||
+          descriptor.rendererPalette === "semantic"
+        ) {
+          expect(
+            contrastRatio(input.border, dialogSurface.background),
+            `${profile} input boundary`,
+          ).toBeGreaterThanOrEqual(3);
+          expect(
+            contrastRatio(select.border, select.background),
+            `${profile} native-select boundary`,
+          ).toBeGreaterThanOrEqual(3);
+        }
         expect(
           contrastRatio(
             inputPlaceholder.foreground,
@@ -540,5 +861,5 @@ describe("compiled theme CSS", () => {
       await context.close();
       await browser.close();
     }
-  }, 20_000);
+  }, 90_000);
 });

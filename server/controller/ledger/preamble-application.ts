@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { runtimeTemplateValues } from '../../../common/template-tokens.js';
 import { createPreamblePrefix } from '../../../common/preamble-prefix.js';
 import {
   renderPreambleContent,
@@ -56,10 +57,11 @@ export function preparePreambleInput(input: {
   if (input.boundary && !input.detail.clientMessageId) {
     throw new TypeError('Boundary input requires a client message ID');
   }
+  const values = runtimeTemplateValues(input.chatId, new Date(input.at));
   const application = input.boundary
     ? createPreamblePrefix({
         contents: input.preambles.map((preamble) => (
-          renderPreambleContent(preamble.content, input.chatId)
+          renderPreambleContent(preamble.content, values)
         )),
       })
     : null;

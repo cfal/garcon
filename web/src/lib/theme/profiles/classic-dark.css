@@ -1,4 +1,5 @@
-:root:where([data-theme='classic-dark']) {
+:root:where([data-theme='classic-dark']),
+:where([data-theme-preview='classic-dark']) {
 	--background: 0 0% 10%;
 	--foreground: 0 0% 95%;
 	--card: 0 0% 8%;
@@ -221,8 +222,21 @@
 	--switch-thumb-checked: hsl(var(--background));
 	--switch-thumb-unchecked: hsl(var(--background));
 	--native-select-muted-background: hsl(var(--muted));
+	--terminal-foreground: var(--foreground);
+	--terminal-cursor: var(--primary);
+	--terminal-selection-bg: 210 36% 39%;
+	--terminal-selection-foreground: var(--foreground);
+	--editor-selection-background: hsl(var(--interactive-accent) / 0.16);
 	--native-select-surface-background: hsl(var(--background));
 	--native-select-border: hsl(var(--input));
 	--native-select-radius: calc(var(--radius) - 2px);
 	--native-select-compact-radius: calc(var(--radius) - 4px);
+	--control-surface: hsl(var(--input) / 0.3);
+	--control-hover-surface: hsl(var(--input) / 0.5);
+	--ticket-open: hsl(var(--muted-foreground));
+	--ticket-urgent: hsl(var(--status-error-foreground));
+	--ticket-high: hsl(30 85% 68%);
+	--ticket-progress: hsl(214 91% 75%);
+	--ticket-review: hsl(268 76% 81%);
+	--ticket-done: hsl(150 43% 59%);
 }

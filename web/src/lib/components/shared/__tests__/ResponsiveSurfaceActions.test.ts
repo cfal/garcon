@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { installResizeObserverHarness, ResizeObserverHarness } from './resize-observer-harness.js';
 import ResponsiveSurfaceActionsTestHost from './ResponsiveSurfaceActionsTestHost.svelte';
+import ResponsiveSurfaceActions from '../ResponsiveSurfaceActions.svelte';
+import Save from '@lucide/svelte/icons/save';
 
 describe('ResponsiveSurfaceActions', () => {
 	let restoreResizeObserver: () => void;
@@ -14,6 +16,38 @@ describe('ResponsiveSurfaceActions', () => {
 		cleanup();
 		restoreResizeObserver();
 	});
+
+	it.each([true, false])(
+		'keeps shared primary roles and compact padding (label: %s)',
+		(showLabel) => {
+			render(ResponsiveSurfaceActions, {
+				menuLabel: 'File actions',
+				actions: [
+					{
+						id: 'save',
+						label: 'Save',
+						icon: Save,
+						onclick: () => {},
+						variant: 'primary',
+						showLabel,
+					},
+				],
+			});
+			const button = screen.getByRole('button', { name: 'Save' });
+			for (const className of [
+				'bg-primary',
+				'text-primary-foreground',
+				'rounded-(--control-radius)',
+				'focus-visible:ring-ring',
+			]) {
+				expect(button.classList).toContain(className);
+			}
+			expect(button.classList).not.toContain('bg-interactive-accent');
+			expect(button.classList).not.toContain('has-[>svg]:px-2.5');
+			expect(button.classList).toContain(showLabel ? 'has-[>svg]:px-2' : 'has-[>svg]:px-0');
+			expect(button.classList).toContain(showLabel ? 'px-2' : 'px-0');
+		},
+	);
 
 	it('keeps one persistent menu and moves lower-priority actions into it', async () => {
 		const { container } = render(ResponsiveSurfaceActionsTestHost);

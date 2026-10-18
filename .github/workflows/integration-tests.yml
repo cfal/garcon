@@ -48,7 +48,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: canary
+          bun-version: 1.4.3
 
       - name: Install server dependencies
         working-directory: server
@@ -134,7 +134,7 @@ jobs:
         if: steps.claude-config.outputs.available == 'true'
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: canary
+          bun-version: 1.4.3
 
       - name: Install server dependencies
         if: steps.claude-config.outputs.available == 'true'
@@ -225,7 +225,7 @@ jobs:
         if: steps.codex-key.outputs.available == 'true'
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: canary
+          bun-version: 1.4.3
 
       - name: Install server dependencies
         if: steps.codex-key.outputs.available == 'true'
@@ -312,7 +312,7 @@ jobs:
         if: steps.opencode-key.outputs.available == 'true'
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: canary
+          bun-version: 1.4.3
 
       - name: Install server dependencies
         if: steps.opencode-key.outputs.available == 'true'
@@ -383,7 +383,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: canary
+          bun-version: 1.4.3
 
       - name: Install server dependencies
         working-directory: server
@@ -456,7 +456,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: canary
+          bun-version: 1.4.3
 
       - name: Install server dependencies
         working-directory: server

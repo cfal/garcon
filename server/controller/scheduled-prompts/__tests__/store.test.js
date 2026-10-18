@@ -40,6 +40,27 @@ async function scheduledPromptBackupPaths(dir, version = 1) {
 }
 
 describe('scheduled prompt persistence', () => {
+  it('retains optional names and title templates through v4 load, mutation, claim, and restart', async () => {
+    const dir = await tempDir();
+    const prompt = { ...scheduledPrompt('named', { type: 'recurring', nextRunAt: '2030-01-01T09:00:00.000Z', intervalMinutes: 60, endAt: null }),
+      name: 'Private task name',
+      target: { type: 'new-chat', agentId: 'codex', projectPath: '/workspace/project', model: 'gpt-5',
+        apiProviderId: null, modelEndpointId: null, modelProtocol: null, permissionMode: 'default', thinkingMode: 'none',
+        agentSettingsById: {}, tags: [], preambleChoice: { mode: 'defaults' }, chatTitleTemplate: 'Review {{current_date}}' },
+    };
+    const unnamed = scheduledPrompt('unnamed', { type: 'once', nextRunAt: '2030-01-02T09:00:00.000Z' });
+    await seedScheduledPrompts(dir, { version: 4, revision: 1, prompts: [prompt, unnamed] });
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+    expect(store.list()).toEqual([prompt, unnamed]);
+    await store.reorder(['unnamed', 'named'], 1);
+    const claim = await store.claimOccurrence(prompt.id, prompt.schedule.nextRunAt);
+    expect(claim.scheduledPrompt).toMatchObject({ name: prompt.name, target: prompt.target });
+    const restarted = new ScheduledPromptStore(dir);
+    await restarted.init();
+    expect(restarted.list()).toEqual(store.list());
+    expect(restarted.list()[1]).toMatchObject({ name: prompt.name, target: prompt.target });
+  });
   it.each(['create', 'update', 'remove', 'claim', 'reorder'])('fences later mutations and occurrence claims after an uncertain %s', async operation => {
     const dir = await fs.mkdtemp(path.join(os.homedir(), 'scheduled-durability-'));
     createdDirs.push(dir);

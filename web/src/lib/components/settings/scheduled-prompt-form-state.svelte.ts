@@ -17,6 +17,8 @@ import {
 	SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN,
 	SCHEDULED_PROMPT_MAX_LENGTH,
 	hasLeadingSlashCommand,
+	normalizeScheduledPromptName,
+	normalizeScheduledChatTitleTemplate,
 	scheduledPromptFitsRenderedLimit,
 	type ScheduledPrompt,
 	type ScheduledPromptDefinitionInput,
@@ -65,6 +67,9 @@ export class ScheduledPromptFormState {
 	existingChatId = $state<string | null>(null);
 	busyBehavior = $state<'queue' | 'skip'>('queue');
 	prompt = $state('');
+	taskName = $state('');
+	customTitleEnabled = $state(false);
+	customTitleTemplate = $state('');
 	saving = $state(false);
 	promptTransformPending = $state(false);
 	error = $state<string | null>(null);
@@ -101,6 +106,8 @@ export class ScheduledPromptFormState {
 			!this.saving &&
 			!this.promptTransformPending &&
 			this.promptError === null &&
+			this.nameError === null &&
+			this.titleError === null &&
 			this.scheduleIssue(now) === null &&
 			this.targetValid
 		);
@@ -124,6 +131,16 @@ export class ScheduledPromptFormState {
 		}
 		if (this.executionPolicy === 'conversation' && hasLeadingSlashCommand(this.prompt)) return m.scheduled_prompts_slash_command_error();
 		return null;
+	}
+
+	get nameError(): string | null {
+		return normalizeScheduledPromptName(this.taskName) === null ? m.scheduled_prompts_name_invalid() : null;
+	}
+
+	get titleError(): string | null {
+		if (this.targetType !== 'new-chat' || !this.customTitleEnabled) return null;
+		return normalizeScheduledChatTitleTemplate(this.customTitleTemplate) === null
+			? m.scheduled_prompts_title_invalid() : null;
 	}
 
 	get executionPolicy(): 'literal' | 'conversation' | null {
@@ -211,6 +228,7 @@ export class ScheduledPromptFormState {
 		this.mode = 'edit';
 		this.scheduledPromptId = scheduledPrompt.id;
 		this.prompt = scheduledPrompt.prompt;
+		this.taskName = scheduledPrompt.name ?? '';
 		this.scheduleType = scheduledPrompt.schedule.type;
 		const next = new Date(scheduledPrompt.schedule.nextRunAt);
 		this.date = localDateValue(next);
@@ -235,6 +253,8 @@ export class ScheduledPromptFormState {
 			await this.startup.loadSettingsAndModels();
 			return;
 		}
+		this.customTitleEnabled = scheduledPrompt.target.chatTitleTemplate !== undefined;
+		this.customTitleTemplate = scheduledPrompt.target.chatTitleTemplate ?? '';
 		this.startup.selectExecutor(scheduledPrompt.target.executorId);
 		this.startup.restoreSelection(scheduledPrompt.target.agentId, {
 			model: scheduledPrompt.target.model,
@@ -258,10 +278,13 @@ export class ScheduledPromptFormState {
 	buildDefinition(now = new Date()): ScheduledPromptDefinitionInput | null {
 		const { schedule } = this.#evaluateSchedule(now);
 		if (!schedule || !this.targetValid || this.promptError) return null;
+		const name = normalizeScheduledPromptName(this.taskName);
+		if (name === null || this.titleError) return null;
 		if (this.targetType === 'existing-chat') {
 			if (!this.existingChatId) return null;
 			return {
 				schedule,
+				...(name ? { name } : {}),
 				target: {
 					type: 'existing-chat',
 					chatId: this.existingChatId,
@@ -274,8 +297,10 @@ export class ScheduledPromptFormState {
 		if (!selection) return null;
 		return {
 			schedule,
+			...(name ? { name } : {}),
 			target: {
 				type: 'new-chat',
+				...(this.customTitleEnabled ? { chatTitleTemplate: this.customTitleTemplate.trim() } : {}),
 				...(this.startup.executorId === 'local' ? {} : { executorId: this.startup.executorId }),
 				agentId: this.startup.agentId,
 				projectPath: this.startup.nonblankPath,

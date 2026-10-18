@@ -134,9 +134,23 @@ test("mobile Tickets opens, saves and closes without crypto.randomUUID", async (
       await page.keyboard.press("Escape");
       await search.fill("");
       await search.press("Enter");
-      expect(
-        await search.evaluate((input) => getComputedStyle(input).outlineStyle),
-      ).toBe("none");
+      const searchFocus = await search.evaluate((input) => {
+        const style = getComputedStyle(input);
+        return {
+          visible: input.matches(":focus-visible"),
+          outlineStyle: style.outlineStyle,
+          outlineWidth: style.outlineWidth,
+          outlineOffset: style.outlineOffset,
+          matchesBorder: style.outlineColor === style.borderColor,
+        };
+      });
+      expect(searchFocus).toEqual({
+        visible: true,
+        outlineStyle: "solid",
+        outlineWidth: "2px",
+        outlineOffset: "2px",
+        matchesBorder: true,
+      });
       const labelTrigger = panel.getByRole("button", {
         name: "Label",
         exact: true,

@@ -65,10 +65,10 @@ describe('prompt refinement', () => {
   });
 
   test('constrains snippet refinement and rejects changed template tokens', async () => {
-    const draft = 'Review {{arguments}} in {{project_path}}.';
+    const draft = 'Review {{arguments}} in {{project_path}} for {{chat_id}} on {{current_date}} / {{current_date_local}}; literals \\{{current_date}} / \\{{current_date_local}}.';
     const constraint = [
       'The draft is a Garcon snippet template. Preserve every supported template token verbatim, in the same order and with the same count.',
-      'Supported tokens are {{arguments}}, {{project_path}}, and {{chat_id}}, including their escaped forms \\{{arguments}}, \\{{project_path}}, and \\{{chat_id}}.',
+      'Supported tokens are {{arguments}}, {{project_path}}, {{chat_id}}, {{current_date}}, and {{current_date_local}}, including their escaped forms \\{{arguments}}, \\{{project_path}}, \\{{chat_id}}, \\{{current_date}}, and \\{{current_date_local}}.',
       'Do not add, remove, reorder, escape, or unescape these tokens.',
     ].join(' ');
 
@@ -100,11 +100,29 @@ describe('prompt refinement', () => {
       const response = fixture.client.refinePrompt({ draft, target: 'snippet-template' });
 
       expect((await held.received).lastUserText).toBe(expectedModelPrompt);
-      expect(held.releaseText('Review {{chat_id}} in {{project_path}}.')).toBe(true);
-      expect(await rejectionOf(response)).toMatchObject({
-        status: 502,
-        body: { errorCode: 'PROMPT_REFINEMENT_TOKEN_SIGNATURE_CHANGED' },
-      });
+      const refinedPrompt = draft.replace('Review', 'Review carefully');
+      expect(held.releaseText(`  ${refinedPrompt}  `)).toBe(true);
+      expect(await response).toEqual({ success: true, refinedPrompt });
+
+      for (const invalidPrompt of [
+        draft.replace('{{arguments}}', '{{chat_id}}'),
+        draft.replace('{{current_date}}', ''),
+        draft.replace('{{current_date_local}}', ''),
+        draft.replace('\\{{current_date}}', '{{current_date}}'),
+        draft.replace('\\{{current_date_local}}', '{{current_date_local}}'),
+      ]) {
+        const invalidHeld = fixture.fakeProviders.openAi.holdNext({
+          model: target.provider.model,
+          lastUserText: expectedModelPrompt,
+        });
+        const rejected = rejectionOf(fixture.client.refinePrompt({ draft, target: 'snippet-template' }));
+        expect((await invalidHeld.received).lastUserText).toBe(expectedModelPrompt);
+        expect(invalidHeld.releaseText(invalidPrompt)).toBe(true);
+        expect(await rejected).toMatchObject({
+          status: 502,
+          body: { errorCode: 'PROMPT_REFINEMENT_TOKEN_SIGNATURE_CHANGED' },
+        });
+      }
     });
   });
 });

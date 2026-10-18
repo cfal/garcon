@@ -34,6 +34,58 @@ function prompt(target, text = 'Review the current work') {
 }
 
 describe('scheduled prompt dispatcher', () => {
+  it('renders body and title with one dispatch instant and never sends the task name', async () => {
+    const originalTimezone = process.env.TZ;
+    try {
+      process.env.TZ = 'America/Los_Angeles';
+      const now = mock(() => new Date('2030-01-02T00:30:00Z'));
+      const submitScheduledStart = mock(async input => ({ chatId: input.chatId }));
+      const dispatcher = new ScheduledPromptDispatcher({ now, chatIds: { allocate: () => CREATED_CHAT_ID },
+        commands: { submitScheduledStart, async submitScheduledExistingChat() { throw new Error('unexpected'); } } });
+      const template = '{{chat_id}} {{current_date}} {{current_date_local}}';
+      const scheduled = { ...prompt({ type: 'new-chat', chatTitleTemplate: template }, template), name: 'Private list label' };
+      await dispatcher.dispatch(scheduled, '2030-01-01T23:59:00.000Z');
+      expect(now).toHaveBeenCalledTimes(1);
+      expect(submitScheduledStart.mock.calls[0][0]).toMatchObject({
+        title: `${CREATED_CHAT_ID} 2030-01-02 2030-01-01`,
+        command: `${CREATED_CHAT_ID} 2030-01-02 2030-01-01`,
+      });
+      expect(JSON.stringify(submitScheduledStart.mock.calls)).not.toContain(scheduled.name);
+      scheduled.target.chatTitleTemplate = 'a'.repeat(4081) + '{{chat_id}}';
+      await expect(dispatcher.dispatch(scheduled, '2030-01-02T00:00:00.000Z')).rejects.toThrow();
+      expect(submitScheduledStart).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimezone;
+    }
+  });
+  it('captures dates once per actual dispatch while keeping occurrence identity stable', async () => {
+    const originalTimezone = process.env.TZ;
+    try {
+      process.env.TZ = 'America/Los_Angeles';
+      const instants = ['2030-01-02T00:30:00Z', '2030-01-03T00:30:00Z'];
+      const now = mock(() => new Date(instants.shift()));
+      const submitScheduledExistingChat = mock(async input => ({ type: 'queued', chatId: input.chatId }));
+      const dispatcher = new ScheduledPromptDispatcher({
+        now, chatIds: { allocate: () => CREATED_CHAT_ID },
+        commands: { submitScheduledExistingChat, async submitScheduledStart() { throw new Error('unexpected'); } },
+      });
+      const scheduled = prompt({ type: 'existing-chat', chatId: CREATED_CHAT_ID, busyBehavior: 'queue' },
+        '{{current_date}} / {{current_date_local}} / {{current_time}}');
+      await dispatcher.dispatch(scheduled, '2030-01-01T23:59:00.000Z');
+      await dispatcher.dispatch(scheduled, '2030-01-02T23:59:00.000Z');
+      expect(now).toHaveBeenCalledTimes(2);
+      expect(submitScheduledExistingChat.mock.calls[0][0]).toMatchObject({
+        command: '2030-01-02 / 2030-01-01 / {{current_time}}',
+        clientRequestId: 'scheduled:prompt-a:2030-01-01T23:59:00.000Z',
+      });
+      expect(submitScheduledExistingChat.mock.calls[1][0].command).toBe('2030-01-03 / 2030-01-02 / {{current_time}}');
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimezone;
+    }
+  });
+
   it('expands chat IDs without trimming executable source', async () => {
     const submitScheduledExistingChat = mock(async input => ({ type: 'sent', chatId: input.chatId }));
     const dispatcher = new ScheduledPromptDispatcher({
@@ -103,6 +155,7 @@ describe('scheduled prompt dispatcher', () => {
     expect(calls[0].tags).toEqual(['qa', 'review-needed']);
     expect(calls[0].orderedPreambleIds).toEqual(target.preambleChoice.orderedPreambleIds);
     expect(calls[0]).not.toHaveProperty('images');
+    expect(calls[0]).not.toHaveProperty('title');
     expect(outcome).toMatchObject({ outcome: 'created-chat', chatId: CREATED_CHAT_ID });
     expect(outcome.message).toContain(CREATED_CHAT_ID);
     expect(outcome.message).not.toContain('Review');

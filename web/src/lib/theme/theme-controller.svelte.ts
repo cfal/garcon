@@ -7,19 +7,16 @@ import {
 	type ThemePreference,
 	type ThemeProfile,
 	type ThemeRendererPresentation,
+	type TerminalThemeColors,
 } from './themes.js';
-import {
-	applyThemeToDocument,
-	hasResolvedThemeStyles,
-	readTerminalBackground,
-} from './theme-dom.js';
+import { applyThemeToDocument, hasResolvedThemeStyles, readTerminalColors } from './theme-dom.js';
 
 const SYSTEM_DARK_MODE_QUERY = '(prefers-color-scheme: dark)';
 
 export interface ThemeControllerDeps {
 	readonly getPreference: () => ThemePreference;
 	readonly setTerminalPresentation: (
-		presentation: ThemeRendererPresentation & { readonly background: string },
+		presentation: ThemeRendererPresentation & TerminalThemeColors,
 	) => void;
 	readonly setEditorPresentation: (presentation: ThemeRendererPresentation) => void;
 	readonly reportError: (message: string) => void;
@@ -59,16 +56,16 @@ export class ThemeController {
 				colorScheme: profile.colorScheme,
 				rendererPalette: profile.rendererPalette,
 			};
-			const terminalBackground = readTerminalBackground(document.documentElement);
+			const terminalColors = readTerminalColors(document.documentElement);
 			untrack(() => {
-				if (terminalBackground) {
-					this.deps.setTerminalPresentation({ ...presentation, background: terminalBackground });
+				if (terminalColors) {
+					this.deps.setTerminalPresentation({ ...presentation, ...terminalColors });
 				} else if (
 					hasResolvedThemeStyles(document.documentElement) &&
 					!this.#reportedMissingTerminalThemeIds.has(profile.id)
 				) {
 					this.#reportedMissingTerminalThemeIds.add(profile.id);
-					this.deps.reportError(`Theme ${profile.id} has an invalid --terminal-bg token`);
+					this.deps.reportError(`Theme ${profile.id} has invalid terminal color tokens`);
 				}
 				this.deps.setEditorPresentation(presentation);
 			});

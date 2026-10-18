@@ -24,7 +24,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: canary
+          bun-version: 1.4.3
 
       # Node backs Vitest's thread pools and node-shebang tooling.
       - name: Set up Node.js

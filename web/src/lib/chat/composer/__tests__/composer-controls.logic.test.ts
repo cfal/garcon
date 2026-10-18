@@ -36,6 +36,17 @@ describe('buildThinkingOptions', () => {
 		expect(terraUltra).not.toHaveProperty('rainbow');
 	});
 
+	it('keeps higher-effort icons distinct from their tinted fills', () => {
+		const options = buildThinkingOptions(['xhigh', 'max', 'ultra']);
+		for (const [index, option] of options.entries()) {
+			const classes = option.toneClass.split(' ');
+			expect(classes).toContain('text-foreground');
+			expect(classes).not.toContain('text-destructive');
+			expect(classes).toContain(`bg-destructive/${20 + index * 10}`);
+			expect(classes).toContain(`hover:bg-destructive/${30 + index * 10}`);
+		}
+	});
+
 	it('recognizes GPT-6 Sol through an API endpoint model value', () => {
 		const endpointSolUltra = buildThinkingOptions(allModes, 'acme-openai:gpt-6-sol').find(
 			(option) => option.value === 'ultra',

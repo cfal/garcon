@@ -24,7 +24,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: canary
+          bun-version: 1.4.3
 
       - name: Install server dependencies
         working-directory: server
@@ -60,7 +60,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: canary
+          bun-version: 1.4.3
 
       - name: Install server dependencies
         working-directory: server

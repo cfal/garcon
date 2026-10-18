@@ -9,6 +9,7 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import { cn } from '$lib/utils/cn';
+	import { buttonVariants } from '$lib/components/ui/button';
 	import { selectVisibleSurfaceActionIds } from './responsive-surface-actions.js';
 
 	export interface ResponsiveSurfaceAction {
@@ -65,10 +66,9 @@
 
 	function actionClass(action: ResponsiveSurfaceAction): string {
 		return cn(
-			'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50',
-			action.showLabel ? '' : 'w-8 px-0',
-			action.variant === 'primary' &&
-				'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110',
+			buttonVariants({ variant: action.variant === 'primary' ? 'default' : 'ghost', size: 'sm' }),
+			'gap-1.5 px-2 has-[>svg]:px-2 text-xs',
+			action.showLabel ? '' : 'w-8 px-0 has-[>svg]:px-0',
 			action.variant === 'destructive' &&
 				'text-destructive hover:bg-destructive/10 hover:text-destructive',
 			(!action.variant || action.variant === 'ghost') &&
@@ -79,7 +79,8 @@
 
 	function menuClass(): string {
 		return cn(
-			'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+			buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
+			'text-muted-foreground',
 			menuButtonClass,
 		);
 	}

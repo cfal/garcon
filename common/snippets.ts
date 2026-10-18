@@ -1,6 +1,8 @@
 import { parseChatId } from './chat-id.js';
 import {
   CHAT_ID_TEMPLATE_TOKEN,
+  RUNTIME_TEMPLATE_VARIABLES,
+  type RuntimeTemplateVariable,
   matchTemplateTokens,
   type TemplateTokenMatch,
 } from './template-tokens.js';
@@ -15,11 +17,11 @@ export const SNIPPET_ARGUMENTS_TOKEN = '{{arguments}}';
 export const SNIPPET_PROJECT_PATH_TOKEN = '{{project_path}}';
 export const SNIPPET_CHAT_ID_TOKEN = CHAT_ID_TEMPLATE_TOKEN;
 
-export type SnippetTemplateVariable = 'arguments' | 'project_path' | 'chat_id';
+export type SnippetTemplateVariable = 'arguments' | 'project_path' | RuntimeTemplateVariable;
 export const SNIPPET_TEMPLATE_VARIABLES: readonly SnippetTemplateVariable[] = [
   'arguments',
   'project_path',
-  'chat_id',
+  ...RUNTIME_TEMPLATE_VARIABLES,
 ];
 
 export type SnippetTemplateTokenMatch = TemplateTokenMatch<SnippetTemplateVariable>;

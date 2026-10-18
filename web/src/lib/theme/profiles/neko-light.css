@@ -1,4 +1,5 @@
-:root:where([data-theme='neko-light']) {
+:root:where([data-theme='neko-light']),
+:where([data-theme-preview='neko-light']) {
 	--background: 220 23% 95%;
 	--foreground: 234 16% 14%;
 	--card: 0 0% 100%;
@@ -221,49 +222,21 @@
 	--switch-thumb-checked: hsl(var(--primary-foreground));
 	--switch-thumb-unchecked: hsl(var(--foreground));
 	--native-select-muted-background: hsl(var(--muted));
+	--terminal-foreground: var(--foreground);
+	--terminal-cursor: var(--primary);
+	--terminal-selection-bg: 232 30% 80%;
+	--terminal-selection-foreground: var(--foreground);
+	--editor-selection-background: hsl(var(--interactive-accent) / 0.16);
 	--native-select-surface-background: hsl(var(--muted));
 	--native-select-border: hsl(var(--input));
 	--native-select-radius: var(--radius);
 	--native-select-compact-radius: var(--radius);
-}
-
-@supports not selector(::-webkit-scrollbar) {
-	:root:where([data-theme='neko-light']),
-	:root:where([data-theme='neko-light']) * {
-		scrollbar-width: thin;
-		scrollbar-color: hsl(var(--foreground) / 0.52) transparent;
-	}
-}
-
-@layer base {
-	:root:where([data-theme='neko-light']) ::selection {
-		background-color: hsl(var(--primary));
-		color: hsl(var(--primary-foreground));
-	}
-}
-
-:root:where([data-theme='neko-light']) :is(input[type='checkbox'], input[type='radio'], progress) {
-	accent-color: hsl(var(--primary));
-}
-
-:root:where([data-theme='neko-light']) ::-webkit-scrollbar {
-	width: 10px;
-	height: 10px;
-}
-
-:root:where([data-theme='neko-light']) ::-webkit-scrollbar-track,
-:root:where([data-theme='neko-light']) ::-webkit-scrollbar-corner {
-	background: transparent;
-}
-
-:root:where([data-theme='neko-light']) ::-webkit-scrollbar-thumb {
-	border: 2px solid transparent;
-	border-radius: 999px;
-	background: hsl(var(--foreground) / 0.52);
-	background-clip: padding-box;
-}
-
-:root:where([data-theme='neko-light']) ::-webkit-scrollbar-thumb:hover {
-	background: hsl(var(--foreground) / 0.68);
-	background-clip: padding-box;
+	--control-surface: hsl(var(--background));
+	--control-hover-surface: hsl(var(--accent));
+	--ticket-open: hsl(var(--muted-foreground));
+	--ticket-urgent: hsl(var(--status-error-foreground));
+	--ticket-high: hsl(35 100% 26%);
+	--ticket-progress: hsl(213 65% 40%);
+	--ticket-review: hsl(271 43% 44%);
+	--ticket-done: hsl(156 80% 23%);
 }
