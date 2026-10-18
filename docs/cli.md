@@ -583,6 +583,9 @@ case-insensitively, with punctuation preserved and no word-prefix expansion.
 Identifier word edges are exact: `#731` does not match `731` or `#7310`.
 Quoting an identifier preserves the same literal behavior; quoted phrases with
 punctuation preserve that punctuation too. Whitespace is normalized to spaces.
+Prose punctuation is significant too: `TypeError:` requires the colon, and
+straight and curly apostrophes are distinct. Literal spelling does not fold
+accents or composed/decomposed Unicode forms.
 Terms are ANDed at chat scope and can occur in different messages; ordinary
 unquoted words of at least three code points use prefix matching. The plain result shows
 the interpreted query, labels chat activity separately from snippet timestamps,
@@ -607,8 +610,8 @@ includes up to 20 typed chat details with the affected chat ID, failure stage,
 error code, indexed frontier where available, and recovery classification; an
 omitted count preserves the total when more failures exist. Likewise,
 `resultsTruncated` means index row sampling can make matches and `page.total`
-incomplete; narrow the metadata filter or quote a phrase before drawing a
-negative conclusion. Literal verification uses the same bounded FTS candidate
+incomplete; narrow the metadata filter or include nearby words in a quoted phrase
+before drawing a negative conclusion. Literal verification uses the same bounded FTS candidate
 sample, so punctuation-only differences do not bypass the sampling ceiling.
 Tool inputs and results are indexed with size bounds, so a
 missing path match is not proof that the path was never used.

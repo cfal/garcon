@@ -173,7 +173,7 @@ export function searchDiagnostics(result: CliChatSearchResult): string[] {
   }
   if (result.index.resultsTruncated) {
     diagnostics.push(
-      'search coverage: index row sampling truncated this query; matches and total may be incomplete; narrow the metadata filter or quote a phrase',
+      'search coverage: index row sampling truncated this query; matches and total may be incomplete; narrow the metadata filter or include nearby words in a quoted phrase',
     );
   }
   if (result.page.hasMore) {

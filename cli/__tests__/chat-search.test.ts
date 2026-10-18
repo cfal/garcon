@@ -74,6 +74,17 @@ describe('chat search', () => {
     expect(JSON.parse(formatChatSearchResult(result, true, literalCommand))).toEqual(result);
   });
 
+  test('suggests a longer phrase rather than merely quoting a truncated literal', () => {
+    const literalCommand = { ...command, query: '#731' };
+    const reply = response();
+    const result = buildChatSearchResult(literalCommand, chatList([]), {
+      ...reply,
+      index: { ...reply.index, resultsTruncated: true },
+    }, 0);
+    expect(searchDiagnostics(result).join('\n'))
+      .toContain('include nearby words in a quoted phrase');
+  });
+
   test('escapes human titles and snippets without changing JSON values', () => {
     const unsafe = 'Synthetic\x1b]52;c;YWJj\x07\u009b\u202e';
     const reply = response();
