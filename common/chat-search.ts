@@ -226,6 +226,17 @@ export function compileChatSearchQuery(
   query: string,
   textTokens?: readonly string[],
 ): ChatSearchQueryV1 {
+  const rawTerms = [...query.matchAll(/"([^"]+)"|'([^']+)'|(\S+)/g)].map((match) => ({
+    text: match[1] ?? match[2] ?? match[3] ?? '',
+    phrase: match[1] !== undefined || match[2] !== undefined,
+  }));
+  const originalTexts = new Map<string, string[]>();
+  for (const term of rawTerms) {
+    const key = term.text.toLowerCase();
+    const originals = originalTexts.get(key) ?? [];
+    originals.push(term.text);
+    originalTexts.set(key, originals);
+  }
   const quoted = new Map<string, number>();
   for (const match of query.matchAll(/"([^"]+)"|'([^']+)'/g)) {
     const value = (match[1] ?? match[2] ?? '').toLowerCase();
@@ -236,12 +247,12 @@ export function compileChatSearchQuery(
       const key = text.toLowerCase();
       const count = quoted.get(key) ?? 0;
       if (count > 0) quoted.set(key, count - 1);
-      return { text, phrase: /\s/u.test(text) || count > 0 };
+      return {
+        text: originalTexts.get(key)?.shift() ?? text,
+        phrase: /\s/u.test(text) || count > 0,
+      };
     })
-    : [...query.matchAll(/"([^"]+)"|'([^']+)'|(\S+)/g)].map((match) => ({
-      text: match[1] ?? match[2] ?? match[3] ?? '',
-      phrase: match[1] !== undefined || match[2] !== undefined,
-    }));
+    : rawTerms;
   return {
     version: 1,
     clauses: terms.map((term): ChatSearchClauseV1 => {

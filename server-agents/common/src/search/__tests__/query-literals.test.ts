@@ -3,7 +3,10 @@ import type { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compileChatSearchQuery, type TranscriptSearchAllowedChat } from '@garcon/common/chat-search';
+import { CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS, compileChatSearchQuery, type TranscriptSearchAllowedChat } from '@garcon/common/chat-search';
+import { parseChatSearch } from '@garcon/common/chat-filter-query';
+import { UserMessage } from '@garcon/common/chat-types';
+import { projectSearchMessage } from '../message-projector.js';
 import { SEARCH_QUERY_MATCH_ROW_LIMIT, searchTranscriptIndexV1 } from '../query.js';
 import {
   finishChatSync,
@@ -121,6 +124,65 @@ describe('literal identifier search', () => {
     expect(snippet.text).toStartWith('... ');
     addChat('leading', ['#731.']);
     expect(search('#731').results[1]!.snippets[0]!.text).toBe('#731.');
+  });
+
+  test.each(['#731', 'needle', '/workspace/src/index.ts', 'C++'])(
+    'keeps %s visible after long punctuation or word context', (query) => {
+      addChat('punctuation', [`${'='.repeat(600)}${query}.`]);
+      addChat('long-word', [`${'context'.repeat(100)} ${query}.`]);
+      const result = search(query);
+      expect(result.page.total).toBe(2);
+      for (const hit of result.results) {
+        expect(hit.snippets[0]!.text).toContain(query);
+        expect([...hit.snippets[0]!.text].length).toBeLessThanOrEqual(CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS);
+      }
+    },
+  );
+
+  test('preserves original Unicode literals from actual browser parsing', () => {
+    const query = '#K\u0130-123';
+    addChat('wanted', [query]);
+    const result = searchTranscriptIndexV1(db, {
+      query: compileChatSearchQuery(query, parseChatSearch(query).textTokens),
+      allowedChats,
+    });
+    expect(result.results.map((hit) => hit.chatId)).toEqual(['wanted']);
+  });
+
+  test('keeps internal combining marks intact in literal FTS candidates', () => {
+    const query = '/workspace/Cafe\u0301x/file.ts';
+    addChat('wanted', [query]);
+    expect(search(query).results.map((hit) => hit.chatId)).toEqual(['wanted']);
+  });
+
+  test('enforces identifier boundaries at combining marks', () => {
+    addChat('wanted', ['#cafe\u0301']);
+    addChat('suffix', ['#cafe\u0301_suffix']);
+    addChat('prefix', ['prefix\u0301cafe#']);
+    addChat('leading', ['\u0301cafe#']);
+    expect(search('#cafe\u0301').results.map((hit) => hit.chatId)).toEqual(['wanted']);
+    expect(search('\u0301cafe#').results.map((hit) => hit.chatId)).toEqual(['leading']);
+  });
+
+  test('matches normalized production whitespace in quoted literals', () => {
+    for (const [index, whitespace] of [' ', '  ', '\n', '\t', '\u00a0'].entries()) {
+      const projected = projectSearchMessage(new UserMessage('', `PR${whitespace}#731`));
+      expect(projected?.body).toBe('PR #731');
+      addChat(`whitespace-${index}`, [projected!.body]);
+    }
+    for (const whitespace of [' ', '  ', '\n', '\t', '\u00a0']) {
+      expect(search(`"PR${whitespace}#731"`).page.total).toBe(5);
+    }
+  });
+
+  test('keeps prose punctuation and accent spelling significant in literal queries', () => {
+    addChat('ascii', ["don't TypeError: failing? /workspace/Caf\u00e9/a.ts"]);
+    addChat('other-spelling', ['don\u2019t TypeError failing /workspace/Cafe\u0301/a.ts']);
+    for (const query of ["don't", 'TypeError:', 'failing?', '/workspace/Caf\u00e9/a.ts']) {
+      expect(search(query).results.map((hit) => hit.chatId)).toEqual(['ascii']);
+    }
+    expect(search('/workspace/Cafe\u0301/a.ts').results.map((hit) => hit.chatId))
+      .toEqual(['other-spelling']);
   });
 
   test('keeps sampling truthful when literal candidates exceed the row ceiling', () => {

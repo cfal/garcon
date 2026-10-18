@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { parseChatSearch } from '../chat-filter-query.ts';
 import {
   CHAT_SEARCH_MAX_FAILED_CHAT_DETAILS,
   classifyChatSearchFailureRecovery,
@@ -103,6 +104,13 @@ describe('chat search contracts', () => {
     expect(compileChatSearchQuery('731 cafe\u0301').clauses.map((clause) => clause.kind))
       .toEqual(['all-words', 'all-words']);
     expect(compileChatSearchQuery('###').clauses).toEqual([]);
+  });
+
+  it('recovers original literal spelling from normalized browser tokens', () => {
+    for (const query of ['#K\u0130-123', '"#K\u0130-123"', 'ABC-123 abc-123', '"PR #K\u0130-123"']) {
+      const { textTokens } = parseChatSearch(query);
+      expect(compileChatSearchQuery(query, textTokens)).toEqual(compileChatSearchQuery(query));
+    }
   });
 
   it('parses a correlated search page and rejects malformed relations', () => {

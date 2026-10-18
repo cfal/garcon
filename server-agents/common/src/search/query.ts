@@ -70,6 +70,12 @@ interface SnippetToken {
   end: number;
 }
 
+interface SnippetAnchor {
+  tokenIndex: number;
+  start: number;
+  end: number;
+}
+
 interface SnippetMatch {
   matchedMessageCount: number;
   ranked: FtsSnippetMatchRow[];
@@ -103,19 +109,24 @@ function matchSnippetTerm(
   body: string,
   tokens: SnippetToken[],
   term: CompiledTerm,
-): number | null {
+): SnippetAnchor | null {
   if (term.literalPattern) {
     const match = term.literalPattern.exec(body);
     if (!match) return null;
     const index = tokens.findIndex((token) => token.end > match.index);
-    return index < 0 ? null : index;
+    if (index < 0) return null;
+    return { tokenIndex: index, start: match.index, end: match.index + match[0].length };
   }
   if (term.exactPhrase) {
     for (let start = 0; start + term.words.length <= tokens.length; start += 1) {
       if (term.normalizedWords.every(
         (word, offset) => tokenMatchesWord(tokens[start + offset], word, false),
       )) {
-        return start;
+        return {
+          tokenIndex: start,
+          start: tokens[start].start,
+          end: tokens[start + term.words.length - 1].end,
+        };
       }
     }
     return null;
@@ -133,21 +144,25 @@ function matchSnippetTerm(
     if (firstMatch < 0) return null;
     firstTokenIndex = Math.min(firstTokenIndex, firstMatch);
   }
-  return firstTokenIndex;
+  return {
+    tokenIndex: firstTokenIndex,
+    start: tokens[firstTokenIndex].start,
+    end: tokens[firstTokenIndex].end,
+  };
 }
 
 function matchSnippetTerms(
   body: string,
   tokens: SnippetToken[],
   terms: readonly CompiledTerm[],
-): number | null {
-  let firstTokenIndex = Number.POSITIVE_INFINITY;
+): SnippetAnchor | null {
+  let firstMatch: SnippetAnchor | null = null;
   for (const term of terms) {
     const match = matchSnippetTerm(body, tokens, term);
     if (match === null) continue;
-    firstTokenIndex = Math.min(firstTokenIndex, match);
+    if (firstMatch === null || match.start < firstMatch.start) firstMatch = match;
   }
-  return Number.isFinite(firstTokenIndex) ? firstTokenIndex : null;
+  return firstMatch;
 }
 
 function publicRole(role: number): ChatSearchSnippetRole {
@@ -161,19 +176,27 @@ function resultKey(chatId: string, transcriptViewId: string): string {
   return `${chatId.length}:${chatId}${transcriptViewId}`;
 }
 
-function snippetWindow(body: string, tokens: SnippetToken[], firstTokenIndex: number): string {
+function snippetWindow(body: string, tokens: SnippetToken[], firstMatch: SnippetAnchor | null): string {
   if (tokens.length === 0) return '';
-  const startToken = Math.max(0, firstTokenIndex - 8);
+  const anchor = firstMatch ?? { tokenIndex: 0, start: tokens[0].start, end: tokens[0].end };
+  const startToken = Math.max(0, anchor.tokenIndex - 8);
   const endToken = Math.min(tokens.length, startToken + 32);
-  const raw = body.slice(
-    startToken === 0 ? 0 : tokens[startToken].start,
+  const start = Math.min(tokens[startToken].start, anchor.start);
+  const end = Math.max(
+    anchor.end,
     endToken === tokens.length ? body.length : tokens[endToken].start,
   );
+  const context = [...body.slice(start, anchor.start)];
+  const matchLength = [...body.slice(anchor.start, anchor.end)].length;
+  const contextBudget = Math.max(0, MAX_SNIPPET_CHARS - matchLength);
+  const contextStart = Math.max(0, context.length - contextBudget);
+  const raw = context.slice(contextStart).join('') + body.slice(anchor.start, end);
   const normalized = raw.replace(/\s+/g, ' ').trim();
   const characters = [...normalized];
   const text = characters.slice(0, MAX_SNIPPET_CHARS).join('');
-  const hasSuffix = endToken < tokens.length || characters.length > MAX_SNIPPET_CHARS;
-  return `${startToken > 0 ? SNIPPET_PREFIX : ''}${text}${hasSuffix ? SNIPPET_SUFFIX : ''}`;
+  const hasPrefix = start > 0 || contextStart > 0;
+  const hasSuffix = end < body.length || characters.length > MAX_SNIPPET_CHARS;
+  return `${hasPrefix ? SNIPPET_PREFIX : ''}${text}${hasSuffix ? SNIPPET_SUFFIX : ''}`;
 }
 
 function compileLiteralPattern(clause: ChatSearchClauseV1, words: readonly string[]): RegExp | null {
@@ -187,8 +210,8 @@ function compileLiteralPattern(clause: ChatSearchClauseV1, words: readonly strin
   }
   const escapedText = clause.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const wordCharacter = '[\\p{L}\\p{N}\\p{M}_]';
-  const startBoundary = /^[\p{L}\p{N}_]/u.test(clause.text) ? `(?<!${wordCharacter})` : '';
-  const endBoundary = /[\p{L}\p{N}_]$/u.test(clause.text) ? `(?!${wordCharacter})` : '';
+  const startBoundary = /^[\p{L}\p{N}\p{M}_]/u.test(clause.text) ? `(?<!${wordCharacter})` : '';
+  const endBoundary = /[\p{L}\p{N}\p{M}_]$/u.test(clause.text) ? `(?!${wordCharacter})` : '';
   return new RegExp(`${startBoundary}${escapedText}${endBoundary}`, 'iu');
 }
 
@@ -221,9 +244,10 @@ function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
     const prefixWords = clause.tokens.map(
       (token: ChatSearchTokenV1) => !exactPhrase && token.match === 'prefix',
     );
+    const phraseText = clause.kind === 'literal' ? clause.text : words.join(' ');
     return {
       query: exactPhrase
-        ? `"${words.join(' ').replaceAll('"', '""')}"`
+        ? escapeFtsWord(phraseText)
         : words.map((word: string, index: number) => prefixWords[index]
           ? `${escapeFtsWord(word)}*`
           : escapeFtsWord(word)).join(' AND '),
@@ -322,12 +346,12 @@ function hydrateSnippets(
         snippets: match.ranked.map((candidate) => {
           const body = bodyStatement.get(candidate.rowId)?.body ?? '';
           const tokens = tokenizeForSnippet(body);
-          const firstTokenIndex = matchSnippetTerms(body, tokens, terms);
+          const firstMatch = matchSnippetTerms(body, tokens, terms);
           return {
             ordinal: Number(candidate.ordinal),
             role: publicRole(candidate.role),
             timestamp: candidate.timestamp,
-            text: snippetWindow(body, tokens, firstTokenIndex ?? 0),
+            text: snippetWindow(body, tokens, firstMatch),
           };
         }),
       }] as const];

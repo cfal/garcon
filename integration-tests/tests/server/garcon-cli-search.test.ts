@@ -44,12 +44,14 @@ async function runCli(
 describe('garcon-cli chat research', () => {
   test('preserves identifier punctuation through HTTP paging and CLI forwarding', async () => {
     await withCliFixture('garcon-cli-search-literals', async (fixture) => {
+      const unicodeLiterals = ['#K\u0130-123', '/workspace/Cafe\u0301x/file.ts'];
       const contents = [
         'Review #731.',
         'Review PR#731.',
         '731: synthetic source line',
         '00:00:00.731Z',
         'Review #7310.',
+        ...unicodeLiterals.map((literal) => `${'='.repeat(600)}${literal}`),
       ];
       const chatIds: string[] = [];
       for (const content of contents) {
@@ -92,6 +94,19 @@ describe('garcon-cli chat research', () => {
       });
       expect(new Set(result.results.map((hit: { chatId: string }) => hit.chatId)))
         .toEqual(new Set(chatIds.slice(0, 2)));
+      for (const [index, query] of unicodeLiterals.entries()) {
+        const browser = await fixture.client.searchChats({
+          query, textTokens: [query.toLowerCase()], chatIds, offset: 0, limit: 20, snippetLimit: 1,
+        });
+        expect(browser.results.map((hit) => hit.chatId)).toEqual([chatIds[5 + index]!]);
+        expect(browser.results[0]!.snippets[0]!.text).toContain(query);
+        const cli = await runCli(fixture, ['search', query, '--json']);
+        expect(cli).toMatchObject({ exitCode: 0, stderr: '' });
+        const result = JSON.parse(cli.stdout);
+        expect(result.results.map((hit: { chatId: string }) => hit.chatId))
+          .toEqual([chatIds[5 + index]!]);
+        expect(result.results[0].snippets[0].text).toContain(query);
+      }
     });
   }, 120_000);
 
