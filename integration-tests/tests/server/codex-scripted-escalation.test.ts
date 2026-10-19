@@ -82,12 +82,12 @@ describe('scripted Codex escalation', () => {
           streamed,
           command,
           marker,
-          1,
+          ['call_escalated'],
         );
         expect(messagesOfType(streamed.messages, 'permission-request')).toEqual([]);
         await fixture.restartGarcon();
         const restored = await fixture.client.getMessages(chatId);
-        expect(expectExecutions(restored, command, marker, 1)).toEqual(executions);
+        expect(expectExecutions(restored, command, marker, ['call_escalated'])).toEqual(executions);
         expect(messagesOfType(restored.messages, 'permission-request')).toEqual([]);
         expect(countUserContent(restored.messages, prompt)).toBe(1);
         testEnvironment.model.assertSettled();
@@ -103,7 +103,7 @@ describe('scripted Codex escalation', () => {
     }
   });
 
-  test('persists the streamed escalated retry without reconciling native-only output', async () => {
+  test('persists exactly the streamed sandbox attempts across restart', async () => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
     const serverEnvironment = { ...testEnvironment.serverEnvironment };
@@ -156,15 +156,22 @@ describe('scripted Codex escalation', () => {
         ]);
 
         const streamed = await fixture.client.getMessages(chatId);
-        // A sandbox-denied native attempt exists only in Codex's rollout. Garcon persists the
-        // streamed escalated retry and does not reconcile the native-only attempt into history.
-        const streamedExecutions = expectExecutions(streamed, command, marker, 1);
+        // Codex can stream a denial that misses its early-exit window; only completed live items count.
+        // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core/src/unified_exec/process.rs#L355-L395
+        // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core/src/unified_exec/process_manager.rs#L785-L835
+        const liveCommandIds = await protocolProbe.readCompletedCommandItemIds();
+        expect([
+          ['call_escalated_retry'],
+          ['call_sandboxed', 'call_escalated_retry'],
+        ]).toContainEqual(liveCommandIds);
+        const streamedExecutions = expectExecutions(streamed, command, marker, liveCommandIds);
         expect(assistantContents(streamed.messages).some((content) => content.includes(reply)))
           .toBe(true);
 
         await fixture.restartGarcon();
         const restored = await fixture.client.getMessages(chatId);
-        expect(expectExecutions(restored, command, marker, 1)).toEqual(streamedExecutions);
+        expect(expectExecutions(restored, command, marker, liveCommandIds)).toEqual(streamedExecutions);
+        expect(restored).toEqual(streamed);
         expect(countUserContent(restored.messages, prompt)).toBe(1);
         testEnvironment.model.assertSettled();
       }, {
@@ -277,6 +284,7 @@ describe('scripted Codex escalation', () => {
         commandItemIds[0],
         commandItemIds[0],
       ]);
+      expect(await protocolProbe.readResolvedApprovalIndexes()).toEqual([0, 1, 2]);
       expect(messagesOfType((await fixture.client.getMessages(chatId)).messages, 'permission-request'))
         .toEqual([]);
       testEnvironment.model.assertSettled();
@@ -294,27 +302,25 @@ function expectExecutions(
   transcript: Awaited<ReturnType<GarconTestClient['getMessages']>>,
   command: string,
   marker: string,
-  executionCount: number,
-): Array<{
-  readonly command: string;
-  readonly content: Record<string, unknown>;
-  readonly isError: boolean;
-}> {
-  const commands = messagesOfType(transcript.messages, 'bash-tool-use').filter(
-    (message) => message.command === command,
-  );
-  expect(commands).toHaveLength(executionCount);
+  toolIds: string[],
+) {
+  const commands = messagesOfType(transcript.messages, 'bash-tool-use');
+  expect(commands.map((message) => ({ toolId: message.toolId, command: message.command })))
+    .toEqual(toolIds.map((toolId) => ({ toolId, command })));
   const results = messagesOfType(transcript.messages, 'tool-result');
+  expect(results.map((message) => message.toolId)).toEqual(toolIds);
   const executions = commands.map((bash) => {
     const result = results.find((message) => message.toolId === bash.toolId);
     if (!result) throw new Error(`Codex execution ${bash.toolId} has no result.`);
     return {
+      toolId: bash.toolId,
       command: bash.command,
       content: result.content,
       isError: result.isError,
     };
   });
   expect(executions.filter((execution) => !execution.isError)).toEqual([{
+    toolId: toolIds[toolIds.length - 1],
     command,
     content: { raw: marker },
     isError: false,

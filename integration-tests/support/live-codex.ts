@@ -278,6 +278,11 @@ export async function startLiveCodexTestEnvironment(
       await writeFile(join(codexHome, 'config.toml'), [
         'model_provider = "garcon-live-testing"',
         'web_search = "disabled"',
+        // Prevents background marketplace fetches from escaping fixture teardown.
+        // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/features/src/lib.rs#L1619-L1624
+        // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/app-server/src/message_processor.rs#L542-L560
+        // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core-plugins/src/manager.rs#L2824-L2834
+        'features.plugins = false',
         ...(useFixtureModelCatalog
           ? [`model_catalog_json = ${JSON.stringify(catalogPath)}`]
           : []),

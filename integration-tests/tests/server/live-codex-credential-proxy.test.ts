@@ -102,6 +102,7 @@ describe('live Codex credential proxy', () => {
         expect(config).toMatchObject({
           model_provider: 'garcon-live-testing',
           web_search: 'disabled',
+          features: { plugins: false },
           model_providers: {
             'garcon-live-testing': {
               base_url: `${environment.proxyBaseUrl}/v1`,

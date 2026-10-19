@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { appendFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import {
@@ -122,12 +122,12 @@ describe('scripted Codex late subagent lifecycle', () => {
       serverEnvironment: testEnvironment.serverEnvironment,
       prepareWorkspace: async (directories) => {
         await testEnvironment.prepareWorkspace(directories, { multiAgentVersion: 'v2' });
-        await appendFile(join(directories.home, '.codex', 'config.toml'), [
-          '',
-          '[features]',
-          'multi_agent_v2 = true',
-          '',
-        ].join('\n'));
+        const configPath = join(directories.home, '.codex', 'config.toml');
+        const config = Bun.TOML.parse(await readFile(configPath, 'utf8')) as {
+          features: Record<string, boolean>;
+        };
+        config.features.multi_agent_v2 = true;
+        await writeFile(configPath, Bun.TOML.stringify(config));
       },
     });
   }, 120_000);
