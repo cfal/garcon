@@ -8,6 +8,7 @@ import type {
   TranscriptSearchAllowedChat,
 } from '@garcon/common/chat-search';
 import {
+  CHAT_SEARCH_MAX_COMPILED_QUERY_BYTES,
   CHAT_SEARCH_MAX_OFFSET,
   CHAT_SEARCH_MAX_FAILED_CHAT_DETAILS,
   CHAT_SEARCH_MAX_PAGE_SIZE,
@@ -261,13 +262,14 @@ function searchQuery(value: unknown): boolean {
       || candidate.version !== 1
       || !Array.isArray(candidate.clauses)
       || candidate.clauses.length > CHAT_SEARCH_MAX_TERMS
-      || !jsonBytesWithin(candidate, 64 * 1024)) return false;
+      || !jsonBytesWithin(candidate, CHAT_SEARCH_MAX_COMPILED_QUERY_BYTES)) return false;
   let tokenCount = 0;
   for (const valueClause of candidate.clauses) {
     const clause = record(valueClause);
     if (!clause
-        || Object.keys(clause).length !== 2
-        || (clause.kind !== 'phrase' && clause.kind !== 'all-words')
+        || Object.keys(clause).length !== (clause.kind === 'literal' ? 3 : 2)
+        || (clause.kind !== 'phrase' && clause.kind !== 'all-words' && clause.kind !== 'literal')
+        || (clause.kind === 'literal' && (typeof clause.text !== 'string' || !clause.text.trim()))
         || !Array.isArray(clause.tokens)
         || clause.tokens.length === 0) return false;
     tokenCount += clause.tokens.length;
@@ -279,7 +281,7 @@ function searchQuery(value: unknown): boolean {
           || typeof token.text !== 'string'
           || typeof token.normalized !== 'string'
           || (token.match !== 'exact' && token.match !== 'prefix')
-          || (clause.kind === 'phrase' && token.match !== 'exact')
+          || (clause.kind !== 'all-words' && token.match !== 'exact')
           || (token.match === 'prefix'
             && [...token.text].length < CHAT_SEARCH_MIN_PREFIX_CHARS)) return false;
     }

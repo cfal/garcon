@@ -8,11 +8,11 @@ describe('execution control plane startup', () => {
       order.push('wire');
       return { waitForIdle: mock(async () => undefined) };
     });
-    const startScheduledPrompts = mock(async () => {
+    const startDispatchers = mock(async () => {
       order.push('schedule');
     });
 
-    const wiring = await startExecutionControlPlane({ wireEvents, startScheduledPrompts });
+    const wiring = await startExecutionControlPlane({ wireEvents, startDispatchers });
 
     expect(order).toEqual(['wire', 'schedule']);
     expect(wiring.waitForIdle).toBeDefined();
@@ -21,7 +21,7 @@ describe('execution control plane startup', () => {
   it('propagates scheduled producer startup failure', async () => {
     await expect(startExecutionControlPlane({
       wireEvents: () => ({}),
-      startScheduledPrompts: async () => { throw new Error('schedule failed'); },
+      startDispatchers: async () => { throw new Error('schedule failed'); },
     })).rejects.toThrow('schedule failed');
   });
 });

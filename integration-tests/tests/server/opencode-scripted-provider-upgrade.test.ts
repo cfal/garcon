@@ -153,9 +153,12 @@ describeOnLinux('scripted OpenCode provider upgrade contracts', () => {
             { toolCallId: gifCall, content: 'Image read successfully' },
           ]);
           const transcript = await fixture.client.getMessages(chatId);
+          // Parallel reads publish in completion order.
           expect(
-            messagesOfType(transcript.messages, 'read-tool-use').map((tool) => tool.toolId),
-          ).toEqual([pngCall, gifCall]);
+            messagesOfType(transcript.messages, 'read-tool-use')
+              .map((tool) => tool.toolId)
+              .sort(),
+          ).toEqual([pngCall, gifCall].sort());
           expect(messagesOfType(transcript.messages, 'unknown-tool-use')).toHaveLength(0);
 
           const supervisors = await readExecutionSupervisorStates(fixture);

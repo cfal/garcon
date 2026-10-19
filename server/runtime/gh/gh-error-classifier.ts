@@ -10,6 +10,7 @@ export type ClassifiedGhErrorCode =
   | 'NO_GITHUB_REMOTE'
   | 'NOT_REPO'
   | 'NOT_FOUND'
+  | 'FORBIDDEN'
   | 'NETWORK'
   | 'RATE_LIMITED'
   | 'UNKNOWN';
@@ -80,6 +81,19 @@ export function classifyGhError(error: unknown): ClassifiedGhError {
       status: 429,
       message: 'GitHub API rate limit exceeded.',
       details: 'Wait a few minutes and try again.',
+    };
+  }
+
+  if (
+    text.includes('http 403') ||
+    text.includes('resource not accessible') ||
+    text.includes('does not have the correct permissions')
+  ) {
+    return {
+      code: 'FORBIDDEN',
+      status: 403,
+      message: 'GitHub refused this operation for the signed-in account.',
+      details: 'Check that the gh login can read and comment on this repository.',
     };
   }
 

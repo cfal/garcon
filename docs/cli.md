@@ -576,9 +576,34 @@ index phase, chat coverage, queued and active indexing work, backlog and resync
 progress, the last error code, and query admission/execution/total latency
 statistics. JSON status is the validated server status document.
 
-Search is lexical. Quoted phrases require adjacent words in one indexed entry.
-Unquoted terms are ANDed at chat scope and can occur in different messages;
-terms of at least three code points use prefix matching. The plain result shows
+Search is lexical for ordinary words. Quoted word phrases require adjacent words
+in one indexed entry. Terms containing punctuation, such as `#731`, `ABC-123`,
+`file_name`, or `/workspace/src/index.ts`, instead match their literal spelling,
+case-insensitively, with punctuation preserved and no word-prefix expansion.
+Identifier word edges are exact: `#731` does not match `731` or `#7310`.
+Quoting an identifier preserves the same literal behavior; quoted phrases with
+punctuation preserve that punctuation too. Whitespace is normalized to spaces.
+Prose punctuation is significant too: `TypeError:` requires the colon, and
+straight and curly apostrophes are distinct. Literal spelling does not fold
+accents or composed/decomposed Unicode forms.
+Case-insensitive matching retains the index's existing Unicode tokenizer and
+case-folding limits; some newer Unicode case pairs are not equivalent in the index.
+Its tokenizer also treats some newer symbols and private-use glyphs as word
+characters. An identifier directly followed by one of those characters may not
+be found on its own, even when that character looks like punctuation or an emoji.
+Literal queries retain exact FTS candidates rather than broad prefix candidates.
+There is no wildcard syntax: `*` is literal punctuation. Prefix matches are
+displayed as `prefix("word")`, not as query syntax. Use double quotes for phrases
+containing apostrophes; single quotes delimit phrases and cannot enclose an
+apostrophe.
+Whitespace outside quotes separates terms, including Unicode whitespace.
+An opening quote directly after `:` stays in the same term, as in `key:"value"`.
+Other double quotes start a separate phrase, and a closing quote ends its term:
+`class="banner"` and `"type":"tool_use"` therefore compile to separate terms.
+Enclose a whole fragment in single quotes, such as `'class="banner"'` or
+`'"type":"tool_use"'`, to require its literal spelling within one entry.
+Terms are ANDed at chat scope and can occur in different messages; ordinary
+unquoted words of at least three code points use prefix matching. The plain result shows
 the interpreted query, labels chat activity separately from snippet timestamps,
 and prints an exact follow-up `read` command carrying the resolved workspace,
 config directory, optional server assertion, and any category includes needed to
@@ -601,8 +626,10 @@ includes up to 20 typed chat details with the affected chat ID, failure stage,
 error code, indexed frontier where available, and recovery classification; an
 omitted count preserves the total when more failures exist. Likewise,
 `resultsTruncated` means index row sampling can make matches and `page.total`
-incomplete; narrow the metadata filter or quote a phrase before drawing a
-negative conclusion. Tool inputs and results are indexed with size bounds, so a
+incomplete; narrow the metadata filter or include nearby words in a quoted phrase
+before drawing a negative conclusion. Literal verification uses the same bounded FTS candidate
+sample, so punctuation-only differences do not bypass the sampling ceiling.
+Tool inputs and results are indexed with size bounds, so a
 missing path match is not proof that the path was never used.
 If a transcript view changes after the index page is selected, the response
 reports how many stale hits were removed. The CLI warns for any positive count,

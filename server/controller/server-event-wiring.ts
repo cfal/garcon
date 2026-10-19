@@ -3,6 +3,7 @@ import type { ExecutorManager } from './executors/manager.js';
 import { effectiveExecutorId } from '../../common/executors.js';
 import type { TranscriptSearchStatusV1 } from '../../common/chat-search.js';
 import { isChatListInvalidationReason } from '../../common/ws-events.ts';
+import { PullRequestReviewsInvalidatedMessage, TicketsInvalidatedMessage } from '../../common/ws-revision-invalidations.ts';
 import { isErrorCode } from '../../common/error-codes.ts';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import { wireExecutorAvailability } from './executors/availability-wiring.js';
@@ -26,6 +27,7 @@ import type { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js'
 import type { SnippetService } from './snippets/service.js';
 import type { PreambleService } from './preambles/service.js';
 import type { ChatBoardService } from './chat-boards/service.js';
+import type { PullRequestReviewsRuntime } from './pull-request-reviews/setup.js';
 import { createLogger } from '../common/log.js';
 import { errorMessage } from '../common/errors.js';
 import { withActivity } from '../common/event-loop-stalls.js';
@@ -53,7 +55,6 @@ import {
   PreamblesInvalidatedMessage,
   ChatPreamblesInvalidatedMessage,
   ChatBoardsInvalidatedMessage,
-  TicketsInvalidatedMessage,
 } from '../../common/ws-events.ts';
 
 const logger = createLogger('server-events');
@@ -106,6 +107,7 @@ export interface ServerEventWiringDeps {
   snippets: SnippetService;
   preambles: PreambleService;
   chatBoards: ChatBoardService;
+  pullRequestReviews: Pick<PullRequestReviewsRuntime, 'handleChatRemoved'>;
   searchIndex?: ChatSearchEventIndex;
 }
 
@@ -125,6 +127,7 @@ export interface ServerEventWiring {
   notifyChatPreamblesInvalidated(chatId: string, revision: number): void;
   broadcastTranscriptSearchStatus(status: TranscriptSearchStatusV1): void;
   broadcastTicketsInvalidated(revision: number): void;
+  broadcastPullRequestReviewsInvalidated(revision: number): void;
   broadcastApiProvidersInvalidated(): void;
   waitForIdle(): Promise<void>;
 }
@@ -150,6 +153,7 @@ export function wireServerEvents({
   snippets,
   preambles,
   chatBoards,
+  pullRequestReviews,
   searchIndex,
 }: ServerEventWiringDeps): ServerEventWiring {
   const broadcast = (payload: unknown) =>
@@ -614,6 +618,7 @@ export function wireServerEvents({
       if (removalReason === 'user-deletion') {
         await commandLedger.markChatInterrupted(chatId, 'chat-deleted');
       }
+      pullRequestReviews.handleChatRemoved(chatId);
     });
     shareStore.revokeShareByChatId(chatId).catch((err) => {
       logger.warn(
@@ -710,6 +715,9 @@ export function wireServerEvents({
     },
     broadcastTicketsInvalidated(revision: number): void {
       broadcast(new TicketsInvalidatedMessage(revision));
+    },
+    broadcastPullRequestReviewsInvalidated(revision: number): void {
+      broadcast(new PullRequestReviewsInvalidatedMessage(revision));
     },
     broadcastApiProvidersInvalidated(): void {
       broadcast(new ApiProvidersInvalidatedMessage());

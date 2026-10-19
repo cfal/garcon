@@ -11,6 +11,7 @@ import type {
   TranscriptSearchStatusV1,
 } from '../../../common/chat-search.js';
 import {
+  CHAT_SEARCH_MAX_COMPILED_QUERY_BYTES,
   CHAT_SEARCH_MAX_OFFSET,
   CHAT_SEARCH_MAX_CHAT_IDS,
   CHAT_SEARCH_MAX_PAGE_SIZE,
@@ -20,6 +21,7 @@ import {
   CHAT_SEARCH_MAX_TERMS,
   CHAT_SEARCH_MAX_WORDS,
   CHAT_SEARCH_SORT_VALUES,
+  compileChatSearchQuery,
 } from '../../../common/chat-search.js';
 import type { ChatListEntry } from '../../../common/chat-list.js';
 import type { ChatOrderTimestamps } from '../../../common/chat-order-sort.js';
@@ -282,7 +284,7 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
     ? body as Record<string, unknown>
     : {};
   const textTokens = optionalBoundedStringArrayField(input, 'textTokens', {
-    maxItems: CHAT_SEARCH_MAX_TERMS,
+    maxItems: MAX_SEARCH_TEXT_CHARS,
     maxItemChars: MAX_SEARCH_TEXT_TOKEN_CHARS,
     maxTotalChars: MAX_SEARCH_TEXT_CHARS,
   });
@@ -291,22 +293,22 @@ function parseSearchRequest(body: unknown): NormalizedChatSearchRequest {
     throw new ValidationDomainError(`query must be at most ${MAX_SEARCH_QUERY_CHARS} characters`);
   }
   const normalizedQuery = rawQuery.trim();
-  const effectiveTerms = textTokens?.length
-    ? textTokens
-    : [...normalizedQuery.matchAll(/"([^"]+)"|(\S+)/g)]
-        .map((match) => match[1] ?? match[2] ?? '');
-  if (effectiveTerms.length > CHAT_SEARCH_MAX_TERMS) {
+  const effectiveQuery = normalizedQuery || textTokens?.join(' ') || '';
+  if (!effectiveQuery) throw new ValidationDomainError('query is required');
+  const compiled = compileChatSearchQuery(effectiveQuery, textTokens);
+  if (compiled.clauses.length > CHAT_SEARCH_MAX_TERMS) {
     throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_TERMS} terms`);
   }
-  const wordCount = effectiveTerms.reduce(
-    (count, term) => count + (term.match(/[\p{L}\p{N}_]+/gu)?.length ?? 0),
+  const wordCount = compiled.clauses.reduce(
+    (count, clause) => count + clause.tokens.length,
     0,
   );
   if (wordCount > CHAT_SEARCH_MAX_WORDS) {
     throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_WORDS} words`);
   }
-  const effectiveQuery = normalizedQuery || textTokens?.join(' ') || '';
-  if (!effectiveQuery) throw new ValidationDomainError('query is required');
+  if (Buffer.byteLength(JSON.stringify(compiled), 'utf8') > CHAT_SEARCH_MAX_COMPILED_QUERY_BYTES) {
+    throw new ValidationDomainError('search query is too large');
+  }
   const mode = optionalSearchResultMode(input.mode) ?? 'page';
   const offset = optionalBoundedOffset(input.offset) ?? 0;
   const snippetLimit = optionalSnippetLimit(input.snippetLimit)

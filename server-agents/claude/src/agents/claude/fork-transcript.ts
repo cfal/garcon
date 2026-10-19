@@ -25,14 +25,10 @@ const CLAUDE_SOURCE_ONLY_FIELDS = [
   'slug',
   'sourceToolAssistantUUID',
 ] as const;
-// Task-identity keys the CLI 2.1.220 resume scanner uses to reconstruct
-// outstanding background work from the transcript. A fork's fresh session
-// cannot own the source's tasks, so copying these makes the child's first
-// resume synthesize an orphaned-task "stopped" notification. Verified live:
-// stripping backgroundTaskId alone silences the scanner; run_in_background
-// in the tool_use input does not participate. outputTaskId is stripped as
-// task identity on the same rationale; descriptive fields stay.
-const CLAUDE_TASK_ACTIVATION_FIELDS = ['backgroundTaskId', 'outputTaskId'] as const;
+// Resume reconstructs shell and async subagent tasks from these result fields.
+// A native fork cannot own the source's tasks; retaining their identity triggers
+// orphan-task notifications on its first resume. Descriptive fields stay.
+const CLAUDE_TASK_ACTIVATION_FIELDS = ['backgroundTaskId', 'outputTaskId', 'agentId'] as const;
 
 type ClaudeTranscriptEntry = Record<string, unknown> & { uuid: string };
 

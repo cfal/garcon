@@ -24,6 +24,8 @@ export interface GhCommandOptions {
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
   env?: NodeJS.ProcessEnv;
+  // Written to the subprocess's standard input, for values too large for an argument.
+  stdin?: string;
 }
 
 export interface GhCommandResult {

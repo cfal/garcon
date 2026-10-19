@@ -37,14 +37,20 @@ export function interactWithWorkspaceWindowAddAction({
         (element.getAttribute('aria-label') || element.textContent?.trim()) === expectedLabel,
     );
   const action = inlineAction ?? menuAction;
-  const isChatView = ['Open Chat Map', 'Open Canvas', 'Open Chat Board'].includes(expectedLabel);
-  const chatViewsTrigger = isChatView
+  // Views that live in a titlebar group menu rather than in the add menu itself.
+  const viewGroup = ({
+    'Open Chat Map': 'chat-views',
+    'Open Canvas': 'chat-views',
+    'Open Chat Board': 'chat-views',
+    'Open Pull Requests': 'github-views',
+  } as Record<string, string>)[expectedLabel];
+  const groupTrigger = viewGroup
     ? addControls?.querySelector<HTMLButtonElement>(
-        '[data-workspace-window-add-chat-views-trigger]',
+        `[data-workspace-window-add-group-trigger="${viewGroup}"]`,
       )
     : null;
   const trigger =
-    chatViewsTrigger ??
+    groupTrigger ??
     addControls?.querySelector<HTMLButtonElement>('[data-workspace-window-add-trigger]') ??
     addControls?.querySelector<HTMLButtonElement>('[data-workspace-window-add-terminal-trigger]');
 
@@ -76,10 +82,10 @@ export function interactWithWorkspaceWindowAddAction({
 
   if (trigger?.getAttribute('aria-expanded') !== 'true') {
     trigger?.click();
-  } else if (isChatView) {
+  } else if (viewGroup) {
     const submenuTrigger = menus
       .flatMap((menu) => [
-        ...menu.querySelectorAll<HTMLElement>('[data-workspace-window-add-action="chat-views"]'),
+        ...menu.querySelectorAll<HTMLElement>(`[data-workspace-window-add-action="${viewGroup}"]`),
       ])
       .find((element) => element.getAttribute('aria-expanded') !== 'true');
     submenuTrigger?.click();

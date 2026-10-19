@@ -2,7 +2,6 @@
 	import { onDestroy, tick, untrack, type Snippet } from 'svelte';
 	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import TemplateVariableMenu from '$lib/components/prompt-editor/TemplateVariableMenu.svelte';
-	import { RUNTIME_TEMPLATE_VARIABLES } from '$shared/template-tokens';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import { getSnippets, getPreambles } from '$lib/context';
 	import ComposerSnippetPalette from '$lib/components/chat/composer/ComposerSnippetPalette.svelte';
@@ -10,13 +9,14 @@
 	import type { ScheduledSnippetExpansionContext } from '$shared/snippets';
 	import { Button } from '$lib/components/ui/button';
 	import { SCHEDULED_PROMPT_CHAT_ID_TOKEN } from '$shared/scheduled-prompts';
+	import type { PromptTemplateVariables } from './prompt-template-variables';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		ref?: HTMLTextAreaElement | null;
 		prompt: string;
 		promptError: string | null;
-		targetType: 'new-chat' | 'existing-chat';
+		variables: PromptTemplateVariables;
 		surface: 'composer' | 'standalone';
 		onPromptChange: (value: string) => void;
 		onPromptKeydown: (event: KeyboardEvent) => void;
@@ -32,7 +32,7 @@
 		ref = $bindable(null),
 		prompt,
 		promptError,
-		targetType,
+		variables,
 		surface,
 		onPromptChange,
 		onPromptKeydown,
@@ -155,7 +155,7 @@
 			</Button>
 		{/if}
 		<TemplateVariableMenu
-			variables={RUNTIME_TEMPLATE_VARIABLES}
+			variables={variables.tokens.map((token) => token.slice(2, -2))}
 			getInput={() => ref}
 			onInsert={onPromptChange}
 			disabled={snippets.expansion.pending}
@@ -163,9 +163,7 @@
 	</div>
 	<div>
 		<p id={variableHelpId} class="text-xs text-muted-foreground">
-			{targetType === 'new-chat'
-				? m.scheduled_prompts_new_chat_id_help({ token: SCHEDULED_PROMPT_CHAT_ID_TOKEN })
-				: m.scheduled_prompts_existing_chat_id_help({ token: SCHEDULED_PROMPT_CHAT_ID_TOKEN })}
+			{variables.help}
 		</p>
 	</div>
 

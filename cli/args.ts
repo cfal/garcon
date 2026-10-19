@@ -191,6 +191,8 @@ Chat research:
   chats filters the complete visible metadata snapshot and sorts by activity.
   search performs paged lexical transcript search; quoted phrases are adjacent,
   while separate terms may match different entries in the same chat.
+  Punctuation-bearing terms such as #731 and src/file.ts match literally,
+  case-insensitively; ordinary unquoted words retain prefix matching.
   read shows bounded context around one durable ordinal. It defaults to the
   conversation spine; use --include tools for tool calls and results.
   Search coverage warnings are diagnostics. A truncated or partially indexed

@@ -31,6 +31,13 @@ export interface ChatFilterSpec {
 export interface ChatFilterParseResult {
   readonly spec: ChatFilterSpec;
   readonly invalidTokens: readonly string[];
+  readonly textTerms: readonly ChatFilterTerm[];
+}
+
+export interface ChatFilterTerm {
+  readonly text: string;
+  readonly quoted: boolean;
+  readonly source: string;
 }
 
 export interface ChatFilterTarget {
@@ -75,10 +82,12 @@ export function isEmptyFilter(spec: ChatFilterSpec): boolean {
 export function parseChatFilterQuery(query: string): ChatFilterParseResult {
   const spec = emptyFilterSpec();
   const invalidTokens: string[] = [];
+  const textTerms: ChatFilterTerm[] = [];
   const raw = query.trim();
-  if (!raw) return { spec, invalidTokens };
+  if (!raw) return { spec, invalidTokens, textTerms };
 
-  for (const token of tokenizeChatFilter(raw)) {
+  for (const term of tokenizeChatFilter(raw)) {
+    const token = term.text;
     const lower = token.toLowerCase();
     if (lower.startsWith('status:')) {
       const value = token.slice(7).trim().toLowerCase();
@@ -144,9 +153,10 @@ export function parseChatFilterQuery(query: string): ChatFilterParseResult {
       continue;
     }
     spec.textTokens.push(lower);
+    textTerms.push(term);
   }
 
-  return { spec, invalidTokens };
+  return { spec, invalidTokens, textTerms };
 }
 
 export function parseChatSearch(query: string): ChatFilterSpec {
@@ -243,7 +253,7 @@ export function serializeChatFilter(spec: ChatFilterSpec): string {
   for (const value of spec.updatedBefore ?? []) parts.push(`updated-before:${value}`);
   for (const value of spec.updatedAfter ?? []) parts.push(`updated-after:${value}`);
   for (const text of spec.textTokens) {
-    parts.push(text.includes(' ') ? `"${text}"` : text);
+    parts.push(hasChatFilterWhitespace(text) ? `"${text}"` : text);
   }
   return parts.join(' ');
 }
@@ -364,36 +374,51 @@ function matchesTimeConstraints(
     && (after ?? []).every((limit) => epochMs > Date.parse(limit));
 }
 
-function tokenizeChatFilter(input: string): string[] {
-  const tokens: string[] = [];
+export function hasChatFilterWhitespace(value: string): boolean {
+  return /[\s\p{White_Space}]/u.test(value);
+}
+
+export function tokenizeChatFilter(input: string): ChatFilterTerm[] {
+  const tokens: ChatFilterTerm[] = [];
   let current = '';
   let inQuote = false;
   let quoteChar = '';
+  let quoted = false;
+  let source = '';
+  const pushTerm = () => {
+    if (current) tokens.push({ text: current, quoted, source });
+    current = '';
+    quoted = false;
+    source = '';
+  };
   for (const character of input) {
     if (inQuote) {
+      source += character;
       if (character === quoteChar) {
         inQuote = false;
-        if (current) tokens.push(current);
-        current = '';
+        pushTerm();
       } else {
         current += character;
       }
     } else if ((character === '"' || character === "'") && (current === '' || current.endsWith(':'))) {
+      source += character;
       inQuote = true;
       quoteChar = character;
+      quoted = true;
     } else if (character === '"') {
-      if (current) tokens.push(current);
-      current = '';
+      pushTerm();
+      source = character;
       inQuote = true;
       quoteChar = character;
-    } else if (character === ' ' || character === '\t') {
-      if (current) tokens.push(current);
-      current = '';
+      quoted = true;
+    } else if (hasChatFilterWhitespace(character)) {
+      pushTerm();
     } else {
       current += character;
+      source += character;
     }
   }
-  if (current) tokens.push(current);
+  pushTerm();
   return tokens;
 }
 
@@ -408,5 +433,5 @@ function buildHaystack(chat: ChatFilterTarget): string {
 }
 
 function serializeOperatorValue(value: string): string {
-  return /\s/u.test(value) ? `"${value}"` : value;
+  return hasChatFilterWhitespace(value) ? `"${value}"` : value;
 }

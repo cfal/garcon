@@ -102,6 +102,17 @@ describe('projectClaudeForkEntry', () => {
 describe('transformClaudeForkTranscript', () => {
   const taskActivationShapes = [
     [
+      'an asynchronous fork subagent',
+      {
+        isAsync: true,
+        status: 'async_launched',
+        agentId: 'synthetic-source-agent',
+        description: 'Synthetic fork task',
+        prompt: 'Synthetic fork directive',
+        outputFile: '/synthetic/source/tasks/agent.output',
+      },
+    ],
+    [
       'an explicitly backgrounded shell',
       {
         backgroundTaskId: 'task-explicit',
@@ -376,6 +387,7 @@ function withoutTaskActivationFields(toolUseResult) {
   const projected = structuredClone(toolUseResult);
   delete projected.backgroundTaskId;
   delete projected.outputTaskId;
+  delete projected.agentId;
   return projected;
 }
 
@@ -388,6 +400,7 @@ function renderedWithoutTaskActivation(entries, forkTimestamp) {
     if (typeof toolUseResult !== 'object' || toolUseResult === null) continue;
     delete toolUseResult.backgroundTaskId;
     delete toolUseResult.outputTaskId;
+    delete toolUseResult.agentId;
   }
   return rendered;
 }

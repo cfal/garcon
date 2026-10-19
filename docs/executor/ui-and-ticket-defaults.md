@@ -19,7 +19,8 @@ Executor selection sits beside the project directory rather than in the model pi
 - Wide layout: executor selector to the left of the directory field.
 - Narrow layout: executor selector above the directory field, retaining its full label.
 - Scheduled New Chat uses the same arrangement.
-- Directory browsing, Tab completion, pinned/recent paths, worktrees, and model discovery are scoped to that executor.
+- Directory browsing, Tab completion, recent paths, worktrees, and model discovery are scoped to that executor.
+- New Chat keeps pinned-path pills scoped to the selected executor by default. The adjacent Other machines… picker shows other executors’ saved pins grouped by owner in a desktop popover or mobile bottom sheet. Selecting a pin closes the picker. Selecting a ready executor's pin changes executor and path together, retaining the prompt and attachments; unavailable pins remain visible and disabled. The machine selector continues to select the execution target.
 - The model picker is fixed to the selected executor. Neither its ordinary options nor its recents switch executors implicitly.
 
 Changing the executor chooses the destination's saved default or most recent directory, falling back to its advertised project base. Prompt text and attachments are preserved. An agent/model selection is kept only when valid on the destination, and submission requires a validated destination catalog.

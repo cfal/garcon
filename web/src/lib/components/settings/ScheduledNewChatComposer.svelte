@@ -10,6 +10,7 @@
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import NewChatPreambleControls from '$lib/components/preambles/NewChatPreambleControls.svelte';
 	import ScheduledPromptField from './ScheduledPromptField.svelte';
+	import type { PromptTemplateVariables } from './prompt-template-variables';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import {
 		buildPermissionOptions,
@@ -33,6 +34,7 @@
 		remoteSettings: RemoteSettingsStore;
 		getSelectableAgentIds: (executorId: string) => readonly SessionAgentId[];
 		prompt: string;
+		promptVariables: PromptTemplateVariables;
 		conversationInput: boolean;
 		promptError: string | null;
 		knownTags: string[];
@@ -51,6 +53,7 @@
 		remoteSettings,
 		getSelectableAgentIds,
 		prompt,
+		promptVariables,
 		conversationInput,
 		promptError,
 		knownTags,
@@ -232,7 +235,7 @@
 		bind:ref={textarea}
 		{prompt}
 		{promptError}
-		targetType="new-chat"
+		variables={promptVariables}
 		surface="composer"
 		{onPromptChange}
 		{onPromptKeydown}

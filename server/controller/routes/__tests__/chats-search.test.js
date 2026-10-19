@@ -1,6 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import { compareChatOrderNewestFirst } from '../../../../common/chat-order-sort.js';
+import { compileChatSearchQuery } from '../../../../common/chat-search.js';
+import { parseChatSearch } from '../../../../common/chat-filter-query.js';
 import createChatRoutes from '../chats.js';
 import { TranscriptSearchUnavailableError } from '../../chats/search/errors.js';
 import { TranscriptSearchSettingsError } from '../../chats/search/settings-coordinator.js';
@@ -315,6 +317,49 @@ describe('POST /api/v1/chats/search', () => {
     }));
   });
 
+  it('retains original literal spelling after HTTP trims padded browser tokens', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+    for (const query of ['" #K\u0130-123 "', '"#K\u0130-123 "', 'foo \u00a0 #K\u0130-123']) {
+      const response = await postSearch(routes, {
+        query, textTokens: parseChatSearch(query).textTokens,
+      });
+      expect(response.status).toBe(200);
+      const request = searchIndex.search.mock.calls.at(-1)[0];
+      expect(compileChatSearchQuery(request.query, request.textTokens).clauses)
+        .toContainEqual(compileChatSearchQuery('#K\u0130-123').clauses[0]);
+    }
+  });
+
+  it('rejects compiled clause overflow before dispatching search', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+    const query = JSON.stringify(Object.fromEntries(
+      Array.from({ length: 9 }, (_, index) => [`key${index}`, `value${index}`]),
+    ));
+    const response = await postSearch(routes, { query });
+    expect(response.status).toBe(400);
+    expect(searchIndex.search).not.toHaveBeenCalled();
+  });
+
+  it('rejects compiled UTF-8 overflow before dispatching search', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+    const response = await postSearch(routes, {
+      query: '', textTokens: Array(8).fill('\u754c'.repeat(1_023) + '?'),
+    });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ errorCode: 'VALIDATION_FAILED' });
+    expect(searchIndex.search).not.toHaveBeenCalled();
+  });
+
+  it('applies the same searchable-term limit to raw and browser requests', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+    const query = 'alpha - beta - gamma - delta - epsilon - zeta - eta - theta - iota';
+    for (const textTokens of [undefined, parseChatSearch(query).textTokens]) {
+      const response = await postSearch(routes, { query, textTokens });
+      expect(response.status).toBe(200);
+    }
+    expect(searchIndex.search).toHaveBeenCalledTimes(2);
+  });
+
   it('includes chats without checking project path availability', async () => {
     const { routes, searchIndex } = createRoutesFixture();
 
@@ -501,6 +546,7 @@ describe('POST /api/v1/chats/search', () => {
     const requests = [
       { query: 'x'.repeat(4_097) },
       { textTokens: Array(17).fill('token') },
+      { query: 'needle', textTokens: Array(8_193).fill('') },
       { query: Array(33).fill('word').join(' ') },
       { textTokens: Array(16).fill('one two three') },
       { query: 'needle', chatIds: Array(10_001).fill('c1') },
