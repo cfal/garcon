@@ -5,6 +5,7 @@ import {
 	CommandResultMessage,
 	AskUserQuestionToolUseMessage,
 	BashToolUseMessage,
+	EditToolUseMessage,
 	ExecToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	GlobToolUseMessage,
@@ -16,6 +17,7 @@ import {
 	ToolResultMessage,
 	UserMessage,
 	WriteStdinToolUseMessage,
+	WriteToolUseMessage,
 	type ChatMessage,
 } from '$shared/chat-types';
 import { compileHiddenBashCommandPatterns } from '$lib/chat/transcript/hidden-bash-commands.js';
@@ -30,6 +32,35 @@ import type { LocalNoticeRow } from '$lib/chat/transcript/local-notice.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 
 const TS = '2026-05-29T00:00:00.000Z';
+
+it.each([
+	new BashToolUseMessage(TS, 'invalid', ''),
+	new ReadToolUseMessage(TS, 'invalid', ''),
+	new WriteToolUseMessage(TS, 'invalid', ''),
+	new EditToolUseMessage(TS, 'invalid', ''),
+	new ExecToolUseMessage(TS, 'invalid', '', 'javascript'),
+	new ExecToolUseMessage(TS, 'invalid', '', 'powershell'),
+])('keeps the paired $type error visible while suppressing successful results', (tool) => {
+	for (const isError of [false, true]) {
+		const result = new ToolResultMessage(TS, tool.toolId, { raw: 'synthetic diagnostic' }, isError);
+		const model = buildConversationFeedRenderModel(rows([tool, result]));
+		expect(model.toolResultByUseRowId.get('row-0')).toBe(result);
+		expect(model.items[1]).toMatchObject({ pairedToolUse: tool });
+		expect(conversationFeedItemLayout(model.items[1])).toBe(isError ? 'standard' : 'hidden');
+	}
+});
+
+it.each([
+	new BashToolUseMessage(TS, 'denied', 'rg no-match'),
+	new ReadToolUseMessage(TS, 'denied', 'file.txt'),
+	new WriteToolUseMessage(TS, 'denied', 'file.txt'),
+	new EditToolUseMessage(TS, 'denied', 'file.txt'),
+	new EditToolUseMessage(TS, 'dynamic'),
+])('preserves ordinary $type failure suppression', (tool) => {
+	const result = new ToolResultMessage(TS, tool.toolId, { raw: 'Denied by user' }, true);
+	const model = buildConversationFeedRenderModel(rows([tool, result]));
+	expect(conversationFeedItemLayout(model.items[1])).toBe('hidden');
+});
 
 it('keeps duplicate command output records separately visible without mutating durable messages', () => {
 	const context = { executorId: 'local', projectPath: '/original' };

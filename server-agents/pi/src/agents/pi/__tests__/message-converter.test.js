@@ -62,6 +62,31 @@ describe('convertPiMessage', () => {
     });
   });
 
+  it('preserves rejected tool calls and their error results without reparsing argumentsError', () => {
+    const calls = convertPiMessage({
+      role: 'assistant',
+      content: ['bash', 'read', 'write', 'edit'].map((name) => ({
+        type: 'toolCall', id: name, name, arguments: {},
+        argumentsError: 'Received arguments:\n{"path":"not-a-valid-call","invalid":.5}',
+      })),
+    });
+    expect(calls.map((message) => message.type)).toEqual([
+      'bash-tool-use', 'read-tool-use', 'write-tool-use', 'edit-tool-use',
+    ]);
+    expect(calls.map((message) => message.toolId)).toEqual(['bash', 'read', 'write', 'edit']);
+    expect(calls[0].command).toBe('');
+    expect(calls[1].filePath).toBe('');
+    expect(calls[2].filePath).toBe('');
+    expect(calls[3].filePath).toBe('');
+    expect(convertPiMessage({
+      role: 'toolResult', toolCallId: 'write', isError: true,
+      content: [{ type: 'text', text: 'Invalid arguments for tool "write"' }],
+    })).toMatchObject([{
+      type: 'tool-result', toolId: 'write', isError: true,
+      content: { items: [{ type: 'text', text: 'Invalid arguments for tool "write"' }] },
+    }]);
+  });
+
   it('can suppress live user and tool-result echoes', () => {
     expect(convertPiMessage({ role: 'user', content: 'hello' }, { includeUser: false })).toEqual([]);
     expect(convertPiMessage({

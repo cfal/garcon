@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { appendFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { codexAssistantMessage } from '../../support/fake-codex-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -70,7 +70,12 @@ test('resumes a legacy active goal without native goal tools or autonomous turns
       serverEnvironment: environment.serverEnvironment,
       async prepareWorkspace(directories) {
         await environment.prepareWorkspace(directories);
-        await appendFile(join(directories.home, '.codex', 'config.toml'), '\n[features]\ngoals = true\n');
+        const configPath = join(directories.home, '.codex', 'config.toml');
+        const config = Bun.TOML.parse(await readFile(configPath, 'utf8')) as {
+          features: Record<string, boolean>;
+        };
+        config.features.goals = true;
+        await writeFile(configPath, Bun.TOML.stringify(config));
       },
     });
   } finally {

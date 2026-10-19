@@ -15,9 +15,11 @@ import {
 	GlobToolUseMessage,
 	GrepToolUseMessage,
 	PiToolSearchToolUseMessage,
+	ReadToolUseMessage,
 	UnknownToolUseMessage,
 	WebFetchToolUseMessage,
 	WriteStdinToolUseMessage,
+	WriteToolUseMessage,
 } from '$shared/chat-types';
 
 beforeAll(async () => {
@@ -26,6 +28,73 @@ beforeAll(async () => {
 });
 
 describe('ChatToolEventRenderer', () => {
+	it.each([
+		new BashToolUseMessage('', 'invalid-bash', ''),
+		new ReadToolUseMessage('', 'invalid-read', ''),
+		new WriteToolUseMessage('', 'invalid-write', ''),
+		new EditToolUseMessage('', 'invalid-edit', ''),
+		new ExecToolUseMessage('', 'invalid-codemode', '', 'javascript'),
+		new ExecToolUseMessage('', 'invalid-powershell', '', 'powershell'),
+	])('renders a rejected $type with empty arguments through its canonical renderer', (toolMessage) => {
+		const onFileOpen = vi.fn();
+		const { container } = render(ChatToolEventRenderer, { toolMessage, mode: 'input', onFileOpen });
+		expect(screen.queryByText('Tool')).toBeNull();
+		if (toolMessage.type === 'bash-tool-use') {
+			expect(container.querySelector('code')?.textContent?.trim()).toBe('$');
+		} else if (toolMessage.type === 'exec-tool-use') {
+			expect(screen.getByText(`Exec ${toolMessage.language}`)).toBeTruthy();
+		} else {
+			const label = toolMessage.type === 'read-tool-use' ? 'Read' : toolMessage.type === 'edit-tool-use' ? 'Edit' : 'Write';
+			expect(screen.getByText(label)).toBeTruthy();
+		}
+		if (toolMessage.type === 'read-tool-use') expect(screen.queryByRole('button')).toBeNull();
+		expect(onFileOpen).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		new BashToolUseMessage('', 'invalid-bash', ''),
+		new ReadToolUseMessage('', 'invalid-read', ''),
+		new WriteToolUseMessage('', 'invalid-write', ''),
+		new EditToolUseMessage('', 'invalid-edit', ''),
+		new ExecToolUseMessage('', 'invalid-codemode', '', 'javascript'),
+		new ExecToolUseMessage('', 'invalid-powershell', '', 'powershell'),
+	])('renders the actual failure for $type instead of its success presentation', (toolMessage) => {
+		const diagnostic = 'Invalid arguments for tool "synthetic"\nReceived arguments:\n{"invalid":.5}';
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage, mode: 'result',
+			toolResult: { content: { items: [{ type: 'text', text: diagnostic }] }, isError: true },
+			autoExpandTools: true,
+		});
+		expect(screen.getByText('Error')).toBeTruthy();
+		expect(container.querySelector('.whitespace-pre-wrap')?.textContent?.trim()).toBe(diagnostic);
+	});
+
+	it('uses distinct disclosure targets for simultaneously mounted input and failed result', () => {
+		const toolMessage = new WriteToolUseMessage('', 'invalid-write', '', '');
+		const input = render(ChatToolEventRenderer, { toolMessage, mode: 'input', autoExpandTools: true });
+		const result = render(ChatToolEventRenderer, {
+			toolMessage, mode: 'result', autoExpandTools: true,
+			toolResult: { content: { raw: 'Invalid arguments' }, isError: true },
+			resultAnchorId: 'tool-result-view:2',
+		});
+		const inputTarget = input.container.querySelector('[aria-controls]')?.getAttribute('aria-controls');
+		const resultTarget = result.container.querySelector('[aria-controls]')?.getAttribute('aria-controls');
+		expect(inputTarget).toBeTruthy();
+		expect(resultTarget).toBeTruthy();
+		expect(inputTarget).not.toBe(resultTarget);
+		expect(document.getElementById(inputTarget!)).toBeTruthy();
+		expect(document.getElementById(resultTarget!)).toBeTruthy();
+	});
+
+	it('keeps rejected empty calls collapsed unless tools auto-expand', () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new BashToolUseMessage('', 'invalid', ''), mode: 'result',
+			toolResult: { content: { raw: 'Invalid arguments' }, isError: true },
+		});
+		expect(screen.getByText('Error')).toBeTruthy();
+		expect(screen.queryByText('Invalid arguments')).toBeNull();
+	});
+
 	it('renders Pi tool discovery through its explicit message contract', () => {
 		render(ChatToolEventRenderer, {
 			toolMessage: new PiToolSearchToolUseMessage('', 'search', 'issue tools', 3),
@@ -178,7 +247,7 @@ describe('ChatToolEventRenderer', () => {
 		const disclosureButton = screen.getByRole('button', { name: 'Expand' });
 		expect(disclosureButton.tabIndex).toBe(0);
 		expect(disclosureButton.getAttribute('aria-expanded')).toBe('false');
-		expect(disclosureButton.getAttribute('aria-controls')).toBe('tool-body-tool-accessible');
+		expect(disclosureButton.getAttribute('aria-controls')).toBe('tool-body-tool-input-tool-accessible');
 		expect(disclosureButton.querySelector('button')).toBeNull();
 
 		await fireEvent.click(fileButton);
@@ -210,7 +279,7 @@ describe('ChatToolEventRenderer', () => {
 		const card = disclosureButton.closest('article');
 		expect(card).toBeTruthy();
 		expect(disclosureButton.closest('div.mb-2')).toBeNull();
-		expect(card!.querySelector('#tool-body-tool-collapsed-gap')).toBeNull();
+		expect(card!.querySelector('#tool-body-tool-input-tool-collapsed-gap')).toBeNull();
 
 		await fireEvent.click(disclosureButton);
 		expect(disclosureButton.closest('div.mb-2')).toBeTruthy();
@@ -454,7 +523,7 @@ describe('ChatToolEventRenderer', () => {
 
 		const codeElement = container.querySelector('code.code-highlight');
 		expect(codeElement?.textContent).toBe(code);
-		expect(container.querySelector('#tool-body-exec-1')).toBeNull();
+		expect(container.querySelector('#tool-body-tool-input-exec-1')).toBeNull();
 		expect(codeElement?.classList.contains('whitespace-pre-wrap')).toBe(true);
 		expect(codeElement?.classList.contains('break-all')).toBe(true);
 		await waitFor(

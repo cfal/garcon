@@ -102,7 +102,7 @@ export function conversationFeedItemLayout(
 		return shouldRenderToolResult(rule, {
 			content: message.content,
 			isError: message.isError,
-		})
+		}, tool)
 			? 'standard'
 			: 'hidden';
 	}

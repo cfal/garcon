@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { ExecToolUseMessage, McpToolUseMessage, PiToolSearchToolUseMessage, isToolUseMessage, parseChatMessage } from '../chat-types';
+import { BashToolUseMessage, EditToolUseMessage, ExecToolUseMessage, McpToolUseMessage, PiToolSearchToolUseMessage, ReadToolUseMessage, ToolResultMessage, WriteToolUseMessage, isToolUseMessage, parseChatMessage } from '../chat-types';
 import { projectToolUseSummary, renderTranscriptSeed } from '../transcript-seed';
 
 describe('Pi tool contracts', () => {
@@ -8,10 +8,22 @@ describe('Pi tool contracts', () => {
       new ExecToolUseMessage('', 'code', 'return 1;', 'javascript'),
       new McpToolUseMessage('', 'mcp', 'docs', 'read_mcp_resource', { uri: 'resource://intro' }),
       new PiToolSearchToolUseMessage('', 'search', 'issue tools', 3),
+      new BashToolUseMessage('', 'invalid-bash', ''),
+      new ReadToolUseMessage('', 'invalid-read', ''),
+      new WriteToolUseMessage('', 'invalid-write', ''),
+      new EditToolUseMessage('', 'invalid-edit', ''),
     ]) {
       const parsed = parseChatMessage(JSON.parse(JSON.stringify(message)));
       expect(parsed).toEqual(message);
       expect(isToolUseMessage(parsed)).toBe(true);
+    }
+  });
+
+  it('round-trips paired validation errors without relaxing required wire fields', () => {
+    const result = new ToolResultMessage('', 'invalid-write', { raw: 'Invalid arguments' }, true);
+    expect(parseChatMessage(JSON.parse(JSON.stringify(result)))).toEqual(result);
+    for (const type of ['bash-tool-use', 'read-tool-use', 'write-tool-use']) {
+      expect(parseChatMessage({ type, timestamp: '', toolId: 'invalid' })).toBeNull();
     }
   });
 
