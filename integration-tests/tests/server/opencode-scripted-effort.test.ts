@@ -191,6 +191,12 @@ describeOnLinux('scripted OpenCode thinking effort', () => {
       testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
 
       await withIntegrationFixture('opencode-effort-configured', async (fixture) => {
+        if (scenario.thinkingMode === 'none') {
+          // Default effort avoids discovery to preserve native defaults; declared none needs a warm catalog.
+          const catalog = await fixture.client.listAgentCatalog();
+          expect(catalog.agents.find((agent) => agent.id === 'opencode')?.models
+            .some((model) => model.value === OPENCODE_TEST_REASONING_MODEL)).toBe(true);
+        }
         const requestCursor = testEnvironment.model.markRequests();
         const chatId = fixture.newChatId();
         const cursor = fixture.client.markEvents();
