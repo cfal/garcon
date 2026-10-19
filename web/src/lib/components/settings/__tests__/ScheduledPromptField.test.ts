@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import ScheduledPromptField from '../ScheduledPromptField.svelte';
+import { scheduledPromptVariables } from '../prompt-template-variables';
 
 function renderField(
 	overrides: Partial<{
@@ -15,7 +16,7 @@ function renderField(
 	const result = render(ScheduledPromptField, {
 		prompt: overrides.prompt ?? 'Review this section',
 		promptError: overrides.promptError ?? null,
-		targetType: overrides.targetType ?? 'new-chat',
+		variables: scheduledPromptVariables(overrides.targetType ?? 'new-chat'),
 		surface: overrides.surface ?? 'standalone',
 		onPromptChange,
 		onPromptKeydown,
@@ -27,7 +28,7 @@ describe('ScheduledPromptField', () => {
 	it('does not insert into a draft that changed while the variable menu was open', async () => {
 		const { rerender, onPromptChange, onPromptKeydown } = renderField();
 		await fireEvent.click(screen.getByRole('button', { name: 'Insert variable' }));
-		await rerender({ prompt: 'A newer draft', promptError: null, targetType: 'new-chat', surface: 'standalone', onPromptChange, onPromptKeydown });
+		await rerender({ prompt: 'A newer draft', promptError: null, variables: scheduledPromptVariables('new-chat'), surface: 'standalone', onPromptChange, onPromptKeydown });
 		await fireEvent.click(await screen.findByRole('menuitem', { name: /Current date \(UTC\)/ }));
 		expect(onPromptChange).not.toHaveBeenCalled();
 		expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe('A newer draft');
@@ -62,7 +63,7 @@ describe('ScheduledPromptField', () => {
 		rerender({
 			prompt: 'Review this section',
 			promptError: null,
-			targetType: 'existing-chat',
+			variables: scheduledPromptVariables('existing-chat'),
 			surface: 'standalone',
 			onPromptChange: vi.fn(),
 			onPromptKeydown: vi.fn(),

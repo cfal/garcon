@@ -6,6 +6,7 @@
 	import ScheduledNewChatComposer from './ScheduledNewChatComposer.svelte';
 	import ScheduledPromptField from './ScheduledPromptField.svelte';
 	import ScheduledChatTitleField from './ScheduledChatTitleField.svelte';
+	import { scheduledPromptVariables } from './prompt-template-variables';
 	import ScheduledPromptOption from './ScheduledPromptOption.svelte';
 	import ScheduledPromptHeader from './ScheduledPromptHeader.svelte';
 	import ScheduledPromptSchedulePreview from './ScheduledPromptSchedulePreview.svelte';
@@ -437,6 +438,7 @@
 						{remoteSettings}
 						getSelectableAgentIds={selectableAgentsForExecutor}
 						prompt={form.prompt}
+						promptVariables={scheduledPromptVariables('new-chat')}
 						promptError={form.promptError}
 						{knownTags}
 						{isMobile}
@@ -494,7 +496,7 @@
 				<ScheduledPromptField
 					prompt={form.prompt}
 					promptError={form.promptError}
-					targetType="existing-chat"
+					variables={scheduledPromptVariables('existing-chat')}
 					surface="standalone"
 					onPromptChange={(value) => (form.prompt = value)}
 					onPromptKeydown={handlePromptKeydown}

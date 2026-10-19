@@ -1,7 +1,8 @@
 import { promises as fs } from 'fs';
-import { gitOperationOptions, trackGitProcess } from '../git/operation-context.js';
+import { gitOperationOptions, markGitMutationDispatched, trackGitProcess } from '../git/operation-context.js';
 import { readTextStreamPrefix, readTextStreamWithLimit } from '../../common/bounded-text-stream.js';
 import type { GhCommandOptions, GhCommandResult, GhProcessError } from './gh-types.js';
+import { GitServiceError } from '../../../common/git-error.js';
 
 const GH_DEFAULT_TIMEOUT_MS = 30_000;
 const GH_DEFAULT_MAX_STDOUT_BYTES = 64 * 1024 * 1024;
@@ -61,7 +62,7 @@ export async function runGh(
   return trackGitProcess(() => runGhProcess(cwd, args, gitOperationOptions({ ...options, disableOptionalLocks: true })));
 }
 
-async function runGhProcess(cwd: string, args: string[], options: GhCommandOptions): Promise<GhCommandResult> {
+async function runGhProcess(cwd: string, args: string[], options: GhCommandOptions, dispatched?: () => void): Promise<GhCommandResult> {
   const timeoutMs = options.timeoutMs ?? GH_DEFAULT_TIMEOUT_MS;
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal = options.signal
@@ -72,6 +73,7 @@ async function runGhProcess(cwd: string, args: string[], options: GhCommandOptio
   try {
     proc = Bun.spawn(['gh', ...args], {
       cwd,
+      ...(options.stdin === undefined ? {} : { stdin: Buffer.from(options.stdin) }),
       stdout: 'pipe',
       stderr: 'pipe',
       signal,
@@ -85,6 +87,7 @@ async function runGhProcess(cwd: string, args: string[], options: GhCommandOptio
     spawnError.stderr = error instanceof Error ? error.message : String(error);
     throw spawnError;
   }
+  dispatched?.();
 
   const abortListener = (): void => {
     proc.kill();
@@ -124,6 +127,44 @@ async function runGhProcess(cwd: string, args: string[], options: GhCommandOptio
   });
 }
 
+function isDefiniteHttpRejection(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const processError = error as GhProcessError;
+  if (processError.timedOut || processError.aborted) return false;
+  const status = /^gh: [^\r\n]*\(HTTP (4\d{2})\)\s*$/m.exec(processError.stderr ?? '')?.[1];
+  return status !== undefined && status !== '408';
+}
+
+// A transport failure after dispatch cannot prove that GitHub rejected its mutation.
+export async function runGhMutation(
+  cwd: string,
+  args: string[],
+  options: GhCommandOptions = {},
+): Promise<GhCommandResult> {
+  return trackGitProcess(async () => {
+    let dispatched = false;
+    try {
+      return await runGhProcess(cwd, args, gitOperationOptions({ ...options, disableOptionalLocks: true }), () => {
+        dispatched = true;
+        markGitMutationDispatched();
+      });
+    } catch (error) {
+      if (!dispatched || isDefiniteHttpRejection(error)) {
+        throw new GitServiceError('GH_MUTATION_REJECTED', error instanceof Error ? error.message : 'GitHub did not dispatch the mutation.');
+      }
+      throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'GitHub did not confirm the mutation after dispatch. Check its outcome before trying again.');
+    }
+  });
+}
+
+export function parseGhJson<T>(stdout: string, command: string): T {
+  try {
+    return JSON.parse(stdout) as T;
+  } catch {
+    throw new Error(`gh ${command} returned malformed JSON output.`);
+  }
+}
+
 // Runs `gh` and parses its stdout as JSON, throwing a descriptive error when
 // the output is not valid JSON.
 export async function runGhJson<T>(
@@ -132,11 +173,7 @@ export async function runGhJson<T>(
   options: GhCommandOptions = {},
 ): Promise<T> {
   const { stdout } = await runGh(cwd, args, options);
-  try {
-    return JSON.parse(stdout) as T;
-  } catch {
-    throw new Error(`gh ${args[0] ?? ''} returned malformed JSON output.`);
-  }
+  return parseGhJson<T>(stdout, args[0] ?? '');
 }
 
 // Asserts the given path is an accessible directory before shelling out.

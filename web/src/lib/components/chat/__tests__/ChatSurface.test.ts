@@ -5,15 +5,14 @@ import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-stat
 import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
 import * as m from '$lib/paraglide/messages.js';
 import ChatSurface from '../ChatSurface.svelte';
-import type { GhExecutorCapabilityContext } from '$lib/git/pull-requests/gh-capability.svelte';
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte';
+import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 
-const { sessions, ghCapability, workspace } = vi.hoisted(() => ({
-	ghCapability: {
-		available: true as boolean,
-		hasChecked: true,
-		ensureChecked: vi.fn(),
-	} satisfies Pick<GhExecutorCapabilityContext, 'available' | 'hasChecked' | 'ensureChecked'>,
+const { sessions, executors, workspace } = vi.hoisted(() => ({
+	executors: {
+		gitAvailable: vi.fn(() => true),
+		isReady: () => true,
+	} satisfies Pick<ExecutorsStore, 'gitAvailable' | 'isReady'>,
 	workspace: { focusMobileSingleton: vi.fn(async () => {}) } satisfies Pick<
 		WorkspaceCoordinator,
 		'focusMobileSingleton'
@@ -39,8 +38,7 @@ vi.mock('$lib/context', () => ({
 	}),
 	getOptionalTransientLayers: () => null,
 	getWorkspaceCoordinator: () => workspace,
-	getGhCapability: () => ({ forExecutor: () => ghCapability }),
-	getExecutors: () => ({ gitAvailable: () => true, ghAvailable: () => true, isReady: () => true }),
+	getExecutors: () => executors,
 	getGitViewLauncher: () => ({
 		openHistory: vi.fn(),
 		openCompare: vi.fn(),
@@ -128,7 +126,7 @@ describe('ChatSurface mobile toolbar', () => {
 	afterEach(() => {
 		cleanup();
 		sessions.selectedChat = null;
-		ghCapability.available = true;
+		executors.gitAvailable.mockReturnValue(true);
 		vi.clearAllMocks();
 	});
 
@@ -176,10 +174,10 @@ describe('ChatSurface mobile toolbar', () => {
 	});
 
 	it.each([true, false])(
-		'opens secondary views from the menu with GitHub available=%s',
+		'opens global views from the menu with current-chat Git available=%s',
 		async (available) => {
 			sessions.selectedChat = chat();
-			ghCapability.available = available;
+			executors.gitAvailable.mockReturnValue(available);
 			render(ChatSurface, props(new SubagentToolbarState()));
 			for (const [kind, label] of [
 				['chat-map', m.workspace_open_chat_map()],
@@ -187,10 +185,6 @@ describe('ChatSurface mobile toolbar', () => {
 				['pull-requests', m.workspace_open_pull_requests()],
 			] as const) {
 				await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
-				if (kind === 'pull-requests' && !available) {
-					expect(screen.queryByRole('menuitem', { name: label })).toBeNull();
-					continue;
-				}
 				await fireEvent.click(screen.getByRole('menuitem', { name: label }));
 				expect(workspace.focusMobileSingleton).toHaveBeenLastCalledWith(kind);
 			}

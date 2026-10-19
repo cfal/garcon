@@ -18,7 +18,6 @@
 		threadCountByFile: ReadonlyMap<string, number>;
 		onToggleViewed: (filePath: string) => void;
 		onToggleCollapsed: (filePath: string) => void;
-		onAddressThread: (thread: PullRequestThreadData) => void;
 	}
 
 	let {
@@ -30,7 +29,6 @@
 		threadCountByFile,
 		onToggleViewed,
 		onToggleCollapsed,
-		onAddressThread,
 	}: PullRequestVirtualDiffSurfaceProps = $props();
 
 	const readOnlyInteraction = { kind: 'read-only' as const };
@@ -57,7 +55,7 @@
 						{m.pull_request_other_comments()}
 					</div>
 				{/if}
-				<PullRequestThread {thread} onAddress={() => onAddressThread(thread)} />
+				<PullRequestThread {thread} />
 			</div>
 		{/if}
 	{:else if row.kind === 'unified-row' || row.kind === 'split-row'}

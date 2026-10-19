@@ -11,6 +11,7 @@ Make the existing Git and read-only pull-request experience work on the reposito
 - Status, workbench, staged/unstaged review, partial staging, commit, branch/ref selection, history, comparisons, blame, graph, conflict resolution, stashes, remotes, fetch/pull/push, and worktrees.
 - Remote worktree selection/creation from New Chat and the sidebar project-path dialog.
 - GitHub CLI availability/auth status and existing pull-request list/detail views, including diffs and best-effort review threads.
+- The review-target read and two comment writes that [automatic pull request review](../pull-request-reviews.md) needs: find marked comments, create a pull request comment, and minimize one.
 - Commit-message generation that reads the correct executor's repository while retaining independently selected one-shot generation settings.
 - Local uses the same service implementation and behavioral contract as remote executors.
 
@@ -18,7 +19,7 @@ Use the executor's paired Noise lanes: `git.getQuickSummary` stays on primary fo
 
 Reuse the existing Git implementation. Do not build a second Git engine or make the controller issue primitive subprocess commands to a worker. Multi-command operations, locks, direct filesystem reads, temporary indexes, and review documents all belong beside the repository.
 
-No repository synchronization, cloning workflow, cross-executor worktree migration, SSH-key forwarding, credential synchronization, new GitHub write operations, filesystem watchers, durable operation queue, or exactly-once mutation ledger. Existing binaries, OS permissions, Git configuration, hooks, credential helpers, SSH configuration, and `gh` login belong to the executor. Remoting is not an OS sandbox.
+No repository synchronization, cloning workflow, cross-executor worktree migration, SSH-key forwarding, credential synchronization, GitHub writes beyond review comments, filesystem watchers, durable operation queue, or exactly-once mutation ledger. Existing binaries, OS permissions, Git configuration, hooks, credential helpers, SSH configuration, and `gh` login belong to the executor. Remoting is not an OS sandbox.
 
 ## Original Behavior
 
@@ -125,9 +126,9 @@ Keep domain operations rather than exposing `git(args)` or serializing arbitrary
 | Remotes | `getRemotes`, `getRemoteStatus`, `fetch`, `pull`, `push` |
 | Worktrees | `getWorktrees`, `getTargetCandidates`, `createWorktree`, `removeWorktree` |
 | Generation input | `collectCommitMessageContext` (extracted filesystem-only work, not model invocation) |
-| GitHub CLI | `getStatus`, `listPullRequests`, `getPullRequest` on `ExecutionGhService` |
+| GitHub CLI | `getStatus`, `listPullRequests`, `getPullRequest`, `getPullRequestReviewTarget`, `createPullRequestComment`, `minimizePullRequestComment` on `ExecutionGhService` |
 
-`initialCommit` preserves today's operation on an already initialized repository; this is not a new `git init` or clone workflow. `push` preserves its current remote/branch restrictions and does not acquire force-push or upstream-setting behavior. PR operations remain read-only.
+`initialCommit` preserves today's operation on an already initialized repository; this is not a new `git init` or clone workflow. `push` preserves its current remote/branch restrictions and does not acquire force-push or upstream-setting behavior. PR operations are read-only except the two comment writes, which the controller alone calls when it posts a review; the browser has no route to them.
 
 Illustrative calls:
 
@@ -148,9 +149,17 @@ git.collectCommitMessageContext({ projectPath, files }, callOptions)
   -> bounded selected-file diff context
 
 gh.getStatus(callOptions)
-gh.listPullRequests({ projectPath }, callOptions)
-gh.getPullRequest({ projectPath, number }, callOptions)
+gh.listPullRequests({ projectPath, repository? }, callOptions)
+gh.getPullRequest({ projectPath, repository, number }, callOptions)
+gh.getPullRequestReviewTarget({ projectPath, repository, number, marker }, callOptions)
+  -> repository identity, viewer identity, head commit, state, and marked comments with their authors
+gh.createPullRequestComment({ projectPath, repository, actor, number, body, expected: { state: 'open', headRefOid } }, callOptions)
+gh.minimizePullRequestComment({ projectPath, repository, actor, commentId }, callOptions)
 ```
+
+`listPullRequests` reads the viewer's login and paginates open pull requests, labels, and review requests. Each pull request includes its head commit, fork flag, author association, and whether review is requested from the viewer directly or through a team. Incomplete pagination fails the read. Comment bodies, at most GitHub's 65,536 characters, reach `gh` on standard input. The comment writes are GitHub mutations: they take the mutation admission pool, and an interruption or unconfirmed result after dispatch is `GIT_MUTATION_OUTCOME_UNKNOWN`, never a retry. The controller resolves an unknown post by looking for its marker before posting again. Comment creation returns `GH_MUTATION_REJECTED` for proven preflight/non-dispatch failures and explicit HTTP 4xx rejections (excluding request timeout); these cannot have created the attempted comment. HTTP 5xx, timeout, cancellation, transport errors, and unusable successful replies preserve uncertainty. Executor protocol revision 31 carries the new rejection code.
+
+`repository` binds the GitHub host and owner/name; `actor` carries a stable GitHub user ID and login. Connected reads and mutations address that host/repository explicitly and reject a different live checkout identity. Comment creation rechecks the actor, then reads the PR's open state and head immediately before dispatch. A changed state or head returns `GH_STALE_PULL_REQUEST` without posting. The controller saves the posting actor before dispatch and retains it through reconciliation, so changing the executor's `gh` login cannot duplicate an uncertain post. Browser detail requests carry `repositoryHost` and `repositoryName` alongside the executor, project, and PR number.
 
 The service is already acquired from a selected executor. Validate returned executor identity against that selection rather than letting a response retarget a call. `ExecutorCallOptions` carries local abort/deadline plumbing; do not serialize `AbortSignal`, callbacks, `Response`, mutable trace arrays, Maps, or filesystem handles. Return serializable optional diagnostics if needed, and keep HTTP serialization metrics at the controller.
 
@@ -195,6 +204,13 @@ Git requests are bounded to 4 MiB of encoded JSON and 100,000 paths. Oversized r
 Mutation replies are also inline. A result that exceeds the size limit after a mutation produces `GIT_MUTATION_OUTCOME_UNKNOWN`, never a safe-to-repeat rejection. Diagnostic stdout/stderr retain their separate bounds and explicit truncation flags.
 
 Propagate the operation deadline through RPC, subprocesses, and lock waits. Cancellation stops undispatched work and requests interruption of dispatched subprocesses; it is not rollback. Temporary-index cleanup and repository locks remain executor-owned until native operations settle. Connection loss alone never permits mutation replay.
+
+`ghOperationTimeoutMs` in `common/git-execution.ts` owns the per-method GitHub
+budget. Pull request lists, details, and review posting targets each share
+60 seconds across all pages; status and GitHub mutations
+receive 30 seconds. Local admission, the remote facade, and worker envelope
+validation use that same policy, and callers may shorten it. Executor protocol
+revision 28 requires both peers to accept the paginated read budgets together.
 
 Bulk Git traffic cannot occupy primary's socket queue, but host and network resources remain shared. Fixed size/admission bounds are not a traffic scheduler or an end-to-end latency promise. Larger results require a separate product decision.
 
