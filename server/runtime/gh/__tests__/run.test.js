@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { GhOutputLimitError, runGh } from '../run.js';
+import { GhOutputLimitError, runGh, runGhMutation } from '../run.js';
 
 function textStream(value) {
   return new ReadableStream({
@@ -38,6 +38,32 @@ describe('runGh', () => {
       stdout: 'ok\n',
       stderr: '',
     });
+  });
+
+  it('keeps an undispatched mutation launch failure definite', async () => {
+    spawnMock.mockImplementation(() => { throw new Error('Executable not found'); });
+    await expect(runGhMutation('/repo', ['api', '--method', 'POST'])).rejects.toThrow('not installed');
+  });
+
+  it('reports an unconfirmed mutation exit as unknown', async () => {
+    spawnMock.mockImplementation(() => ({
+      stdout: textStream(''), stderr: textStream('connection reset by peer'), exited: Promise.resolve(1), kill: mock(() => undefined),
+    }));
+    await expect(runGhMutation('/repo', ['api', '--method', 'POST'])).rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
+  });
+
+  for (const status of [400, 401, 403, 404, 422, 429, 408, 500, 502]) {
+    it(`classifies HTTP ${status} without treating uncertain responses as rejections`, async () => {
+      spawnMock.mockImplementation(() => ({ stdout: textStream(''), stderr: textStream(`gh: Request failed (HTTP ${status})`), exited: Promise.resolve(1), kill: mock(() => undefined) }));
+      await expect(runGhMutation('/repo', ['api', '--method', 'POST'])).rejects.toMatchObject({
+        code: status < 500 && status !== 408 ? 'GH_MUTATION_REJECTED' : 'GIT_MUTATION_OUTCOME_UNKNOWN',
+      });
+    });
+  }
+
+  it('preserves an unknown mutation outcome when its reply exceeds the output limit', async () => {
+    await expect(runGhMutation('/repo', ['api', '--method', 'POST'], { maxStdoutBytes: 1 }))
+      .rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
   });
 
   it('kills commands whose stdout exceeds its configured limit', async () => {

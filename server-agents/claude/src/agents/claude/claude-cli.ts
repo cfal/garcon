@@ -46,6 +46,7 @@ import {
 import {
   claudeResultFailureMessage,
   convertCLIMessageToChatMessages,
+  isClaudeSubagentContent,
   type ClaudeCLIMessage,
   type ClaudeTurnTerminalState,
 } from './cli-protocol.js';
@@ -169,6 +170,7 @@ class ClaudeCliRuntime {
     msg: ClaudeCLIMessage,
   ): void {
     if (this.#runningSessions.get(session.id) !== session || session.process !== proc) return;
+    if (isClaudeSubagentContent(msg)) return;
     const activeTurn = session.activeTurn;
     const inputEvent = activeTurn?.protocol.observeInput(msg) ?? null;
     if (inputEvent?.type === 'started') {

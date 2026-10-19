@@ -351,6 +351,14 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       });
       enqueueCliMessage(fake, {
         type: 'user',
+        parent_tool_use_id: 'toolu_child_agent',
+        message: {
+          role: 'user',
+          content: 'This session is being continued from a previous conversation.\n\nSummary:\nChild context.',
+        },
+      });
+      enqueueCliMessage(fake, {
+        type: 'user',
         uuid: 'compaction-summary-uuid',
         message: {
           role: 'user',
@@ -385,6 +393,40 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       expect(messages.some((message) => message.type === 'user-message')).toBe(false);
       await runtime.shutdown();
     } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it.each(['Synthetic parent result', ''])('does not count child output as parent output with result %j', async (result) => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+    const runtime = createRuntime();
+    const published = collectOperation('run-parent-only');
+    try {
+      const start = runtime.startClaudeCliSession(startOptions({ operation: published.operation }));
+      const input = await enqueueInputStarted(fake);
+      enqueueCliMessage(fake, {
+        type: 'assistant', parent_tool_use_id: 'toolu_child_agent',
+        message: { content: [{ type: 'text', text: 'Synthetic child answer' }] },
+      });
+      enqueueCliMessage(fake, {
+        type: 'user', parent_tool_use_id: 'toolu_child_agent',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_child', content: 'Synthetic child output' }] },
+      });
+      enqueueCliMessage(fake, {
+        type: 'result', subtype: 'success', is_error: false, result, user_message_uuid: input.uuid,
+      });
+      enqueueProviderState(fake, 'idle');
+      await start;
+      expect(publishedMessages(published.events).map((message) => message.content))
+        .toEqual(result ? [result] : []);
+      expect(terminalEvents(published.events)).toMatchObject([
+        { outcome: result ? 'finished' : 'failed' },
+      ]);
+      if (!result) expect(failureMessages(published.events)[0]).toContain('without producing a response');
+    } finally {
+      await runtime.shutdown();
       Bun.spawn = originalSpawn;
     }
   });

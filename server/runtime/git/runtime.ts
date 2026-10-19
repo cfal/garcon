@@ -3,8 +3,9 @@ import { stat } from 'node:fs/promises';
 import type { ExecutionGitService, ExecutionGhService, ExecutorCallOptions } from '@garcon/server-agent-interface';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import type { GitMethod } from '../../../common/git.js';
-import { GIT_MAX_CONCURRENT_QUERIES, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults, type GitExecutorScope } from '../../../common/git-execution.js';
+import { GIT_MAX_CONCURRENT_QUERIES, ghOperationTimeoutMs, isGitMutation, type ExecutionGitRequests, type ExecutionGitResults, type ExecutionGhResults, type GitExecutorScope } from '../../../common/git-execution.js';
 import { GitServiceError } from '../../../common/git-error.js';
+import { isGhMutation, type GhRequests, type GhResults } from '../../../common/gh.js';
 import { validateGitRequest, validateGhRequest } from '../../../common/git-request-validation.js';
 import { validateGitResult, validateGhResult } from '../../../common/git-result-validation.js';
 import { isRecord } from '../../../common/json.js';
@@ -81,6 +82,9 @@ export class GitRuntime {
       getStatus: (options) => this.#ghCall('getStatus', {}, options),
       listPullRequests: (request, options) => this.#ghCall('listPullRequests', request, options),
       getPullRequest: (request, options) => this.#ghCall('getPullRequest', request, options),
+      getPullRequestReviewTarget: (request, options) => this.#ghCall('getPullRequestReviewTarget', request, options),
+      createPullRequestComment: (request, options) => this.#ghCall('createPullRequestComment', request, options),
+      minimizePullRequestComment: (request, options) => this.#ghCall('minimizePullRequestComment', request, options),
     };
   }
 
@@ -226,22 +230,37 @@ export class GitRuntime {
     }
   }
 
-  async #ghCall<K extends keyof ExecutionGhResults>(method: K, request: { projectPath?: string; number?: number }, options?: ExecutorCallOptions): Promise<ExecutionGhResults[K]> {
+  async #ghCall<K extends keyof GhRequests>(method: K, request: GhRequests[K], options?: ExecutorCallOptions): Promise<ExecutionGhResults[K]> {
     validateGhRequest(method, request);
+    const mutation = isGhMutation(method);
     try {
-      const payload = await this.#admit(`gh.${method}`, false, options, async (callOptions) => {
+      const timeoutMs = Math.max(1, Math.min(options?.timeoutMs ?? ghOperationTimeoutMs(method), ghOperationTimeoutMs(method)));
+      const payload = await this.#admit(`gh.${method}`, mutation, { ...options, timeoutMs }, async (callOptions) => {
         if (method === 'getStatus') return this.#gh.getStatus(callOptions.signal);
-        if (typeof request.projectPath !== 'string' || !request.projectPath || request.projectPath.length > 4096 || request.projectPath.includes('\0')) throw new GitServiceError('GIT_INVALID_INPUT', 'Invalid GitHub project');
-        const projectPath = await this.#repository(request.projectPath, callOptions);
+        const input = request as Exclude<GhRequests[keyof GhRequests], Record<string, never>>;
+        const projectPath = await this.#repository(input.projectPath, callOptions);
         this.#available(callOptions);
-        if (method === 'listPullRequests') return this.#gh.listPullRequests({ projectPath, signal: callOptions.signal });
-        if (!Number.isSafeInteger(request.number) || request.number! <= 0) throw new GitServiceError('GIT_INVALID_INPUT', 'Invalid pull request number');
-        return this.#gh.getPullRequest({ projectPath, number: request.number!, signal: callOptions.signal });
+        return this.#ghOperation(method, { ...input, projectPath }, callOptions.signal);
       });
       const result = { ...payload, executorId: this.configuration.executorId, instanceId: this.configuration.instanceId };
-      validateGhResult(method, result, this.configuration);
-      return result;
+      try { validateGhResult(method, result, this.configuration); }
+      catch (error) {
+        if (mutation) throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'GitHub change could not be confirmed. Check the pull request before trying again.');
+        throw error;
+      }
+      return result as ExecutionGhResults[K];
     } catch (error) { throw gitServiceError(error, 'gh'); }
+  }
+
+  #ghOperation(method: keyof GhRequests, request: GhRequests[keyof GhRequests], signal?: AbortSignal): Promise<GhResults[keyof GhResults]> {
+    switch (method) {
+      case 'getStatus': return this.#gh.getStatus(signal);
+      case 'listPullRequests': return this.#gh.listPullRequests({ ...request as GhRequests['listPullRequests'], signal });
+      case 'getPullRequest': return this.#gh.getPullRequest({ ...request as GhRequests['getPullRequest'], signal });
+      case 'getPullRequestReviewTarget': return this.#gh.getPullRequestReviewTarget({ ...request as GhRequests['getPullRequestReviewTarget'], signal });
+      case 'createPullRequestComment': return this.#gh.createPullRequestComment({ ...request as GhRequests['createPullRequestComment'], signal });
+      case 'minimizePullRequestComment': return this.#gh.minimizePullRequestComment({ ...request as GhRequests['minimizePullRequestComment'], signal });
+    }
   }
 
   #gitService(): ExecutionGitService {

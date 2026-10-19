@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
-import { assistantContents, userContents } from '../../support/chat-assertions.js';
+import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
 import {
   claudeText,
   claudeToolUse,
@@ -9,6 +9,7 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import {
   expectFinished,
   LIVE_TURN_TIMEOUT_MS,
+  reloadUntilNativeContains,
   reloadUntilNativeStableAfterPrompt,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
@@ -28,6 +29,94 @@ describe('scripted Claude background settlement', () => {
   afterAll(() => {
     environment?.dispose();
   });
+
+  test('keeps fork internals out of the main transcript through peer and task continuations', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const prompt = 'Synthetic fork parent prompt';
+    const launched = 'Synthetic parent launched';
+    const peer = 'Synthetic fork peer message';
+    const peerReply = 'Synthetic parent peer reply';
+    const settled = 'Synthetic parent settled';
+    const childText = 'Synthetic child private text';
+    const childReport = 'Synthetic child private report';
+    const childGate = Promise.withResolvers<void>();
+    const reportGate = Promise.withResolvers<void>();
+    const requestStart = testEnvironment.model.markRequests();
+    testEnvironment.model.scriptTurn([
+      claudeToolUse('toolu_fork_parent', 'Agent', {
+        subagent_type: 'fork', description: 'Synthetic fork', prompt: 'Synthetic fork directive',
+      }),
+    ]);
+    for (let index = 0; index < 6; index += 1) {
+      testEnvironment.model.scriptTurn(async (request) => {
+        const messages = JSON.stringify(request.body.messages);
+        if (messages.includes('<fork-boilerplate>')) {
+          if (!messages.includes('toolu_fork_bash')) {
+            await childGate.promise;
+            return [claudeText(childText), claudeToolUse('toolu_fork_bash', 'Bash', {
+              command: 'printf synthetic-child-output',
+            })];
+          }
+          if (!messages.includes('toolu_fork_peer')) {
+            return [claudeToolUse('toolu_fork_peer', 'SendMessage', {
+              to: 'main', message: peer, summary: 'Synthetic peer update',
+            })];
+          }
+          await reportGate.promise;
+          return [claudeText(childReport)];
+        }
+        if (request.lastUserText.includes('<task-notification>')) return [claudeText(settled)];
+        return [claudeText(request.lastUserText.includes(peer) ? peerReply : launched)];
+      });
+    }
+
+    try {
+      await withIntegrationFixture('claude-scripted-fork-continuations', async (fixture) => {
+        const chatId = fixture.newChatId();
+        const cursor = fixture.client.markEvents();
+        const turn = await fixture.client.startChat(liveClaudeStartRequest({
+          chatId, projectPath: fixture.dirs.project, command: prompt, permissionMode: 'bypassPermissions',
+        }));
+        for (const [reply, gate] of [[launched, childGate], [peerReply, reportGate]] as const) {
+          await fixture.client.waitForEvent(
+            (event): event is ChatMessagesMessage => event.type === 'chat-messages'
+              && event.chatId === chatId && event.messages.some((entry) =>
+                entry.message.type === 'assistant-message' && entry.message.content === reply),
+            'synthetic parent response', { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+          );
+          expect(fixture.client.eventsSince(cursor)).not.toContainEqual(expect.objectContaining({
+            type: 'agent-run-finished', chatId, turnId: turn.turnId,
+          }));
+          gate.resolve();
+        }
+        await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: settled, afterIndex: cursor });
+        const live = await fixture.client.getMessages(chatId);
+        expect(assistantContents(live.messages)).toEqual([launched, peerReply, settled]);
+        expect(userContents(live.messages)).toEqual([prompt]);
+        expect(messagesOfType(live.messages, 'task-tool-use')).toContainEqual(expect.objectContaining({
+          toolId: 'toolu_fork_parent', subagentType: 'fork',
+        }));
+        expect(messagesOfType(live.messages, 'bash-tool-use')).toEqual([]);
+        expect(messagesOfType(live.messages, 'tool-result').map((message) => message.toolId))
+          .not.toContain('toolu_fork_bash');
+        expect(messagesOfType(live.messages, 'tool-result').map((message) => message.toolId))
+          .not.toContain('toolu_fork_peer');
+        await reloadUntilNativeContains(fixture, chatId, settled);
+        const reloaded = await fixture.client.getMessages(chatId);
+        expect(assistantContents(reloaded.messages)).toEqual(assistantContents(live.messages));
+        expect(userContents(reloaded.messages)).toEqual([prompt]);
+        const parentRequests = testEnvironment.model.requestsSince(requestStart)
+          .filter((request) => !JSON.stringify(request.body.messages).includes('<fork-boilerplate>'));
+        expect(parentRequests.some((request) => request.lastUserText.includes(peer))).toBe(true);
+        expect(parentRequests.some((request) => request.lastUserText.includes('<task-notification>'))).toBe(true);
+        testEnvironment.model.assertSettled();
+      }, { serverEnvironment: testEnvironment.serverEnvironment });
+    } finally {
+      childGate.resolve();
+      reportGate.resolve();
+    }
+  }, 60_000);
 
   test('settles background work before queued input and preserves continuation output on reload', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');

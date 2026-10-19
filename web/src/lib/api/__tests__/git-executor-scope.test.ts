@@ -88,12 +88,18 @@ describe('Git executor response boundaries', () => {
 		).rejects.toMatchObject({ errorCode: 'GIT_STALE_DOCUMENT' });
 	});
 
-	it('qualifies PR rendering identities by executor, instance, and project', async () => {
+	it('qualifies PR rendering identities by executor, instance, project, and GitHub repository', async () => {
 		const payload = { ...scope, number: 1, updatedAt: '2026-01-01', fileBodies: {} };
 		fetchMock.mockImplementation(async () => response(payload));
-		const first = await getPullRequest(target, 1);
-		const second = await getPullRequest({ ...target, projectPath: '/other' }, 1);
+		const prTarget = { ...target, repository: { host: 'github.com', nameWithOwner: 'acme/app' } };
+		const first = await getPullRequest(prTarget, 1);
+		const second = await getPullRequest({ ...prTarget, projectPath: '/other' }, 1);
+		const otherHost = await getPullRequest(
+			{ ...prTarget, repository: { ...prTarget.repository, host: 'github.example.com' } },
+			1,
+		);
 		expect(first.documentId).not.toBe(second.documentId);
+		expect(first.documentId).not.toBe(otherHost.documentId);
 		expect(first.documentId).toContain('remote-executor');
 	});
 });

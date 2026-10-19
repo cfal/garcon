@@ -5,6 +5,7 @@ import { saveText } from '$lib/api/files.js';
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte.js';
 import { createGhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import {
 	createLocalSettingsStore,
@@ -134,6 +135,7 @@ function assembleWorkspaceServices(
 	const executors = new ExecutorsStore();
 	executors.applySnapshot([localExecutor]);
 	const services = createWorkspaceServices({
+		pullRequestReviews: new PullRequestReviewsStore(),
 		executors,
 		localProjectBasePath: () => '/workspace',
 		appShell: createAppShellStore(),
@@ -644,16 +646,11 @@ describe('createWorkspaceServices', () => {
 		expect(services.commands.knownFileLocations).toEqual([]);
 		expect(services.singletonSurfaces.filesIfPresent()).toBeNull();
 		expect(services.gitQuickSummary.isEnabled).toBe(false);
-		const pullRequests = services.singletonSurfaces.pullRequests();
-		await tick();
-		expect(pullRequests.capabilityState).toBe('available');
-
 		rootLocalSettings.showQuickCommitTray = true;
 		ghCapability.forExecutor('local').available = false;
 		await tick();
 
 		expect(services.gitQuickSummary.isEnabled).toBe(true);
-		expect(services.singletonSurfaces.pullRequests().capabilityState).toBe('unavailable');
 	});
 
 	it('assembles before terminal identity is ready without secure-context-only randomUUID', () => {

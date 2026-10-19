@@ -32,6 +32,7 @@
 	import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 	import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 	import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
+	import { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
@@ -115,7 +116,7 @@
 		...unusedSingletonFactories,
 		...gitDeps,
 		createCommit: () => commit ?? new CommitController(gitDeps),
-		createPullRequests: () => new PullRequestsStore(),
+		createPullRequests: () => new PullRequestsStore({ reviews: new PullRequestReviewsStore() }),
 	});
 	setSingletonSurfaces(singletonSurfaces);
 	onDestroy(() => singletonSurfaces.destroy());

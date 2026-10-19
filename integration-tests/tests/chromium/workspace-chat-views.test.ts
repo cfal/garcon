@@ -30,7 +30,7 @@ describe('Chromium Chat Views navigation', () => {
         if (!windowId) throw new Error('Missing chat views workspace window.');
         const titlebar = page.locator(`[data-workspace-window-titlebar="${windowId}"]`);
         const controls = titlebar.locator('[data-workspace-window-add-controls]');
-        const viewsMenu = page.locator(`[data-workspace-window-chat-views-menu="${windowId}"]`);
+        const viewsMenu = page.locator(`[data-workspace-window-add-menu="${windowId}"][data-workspace-window-group-menu="chat-views"]`);
 
         async function setLayout(next: 'overflow' | 'inline'): Promise<void> {
           await titlebar.evaluate((element, mode) => {
@@ -72,7 +72,7 @@ describe('Chromium Chat Views navigation', () => {
           ({ id, mode }) => {
             const selector =
               mode === 'inline'
-                ? '[data-workspace-window-add-chat-views-trigger]'
+                ? '[data-workspace-window-add-group-trigger="chat-views"]'
                 : '[data-workspace-window-add-trigger]';
             return (
               document.querySelector(`[data-workspace-window-titlebar="${id}"] ${selector}`) ===

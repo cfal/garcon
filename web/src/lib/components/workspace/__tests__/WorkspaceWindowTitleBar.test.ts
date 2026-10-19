@@ -132,7 +132,8 @@ vi.mock('$lib/context', () => ({
 	getTerminalRegistry: () => ({
 		hasRemoteHosts: false,
 		hosts: [{ id: 'local', label: 'Local', available: true, full: false }],
-		canCreate: (executorId: string) => executorId === 'local' && runtime.terminalSessions.length < 8,
+		canCreate: (executorId: string) =>
+			executorId === 'local' && runtime.terminalSessions.length < 8,
 		displayName: (metadata: { title: string | null; displaySequence: number }) =>
 			terminalDisplayName(metadata, 'Local'),
 		get orderedSessions() {
@@ -917,12 +918,13 @@ describe('WorkspaceWindowTitleBar', () => {
 	});
 
 	it.each([
-		{ kind: 'chat-map', label: m.workspace_open_chat_map },
-		{ kind: 'chat-canvas', label: m.workspace_open_chat_canvas },
-		{ kind: 'chat-board', label: m.workspace_open_chat_board },
+		{ kind: 'chat-map', label: m.workspace_open_chat_map, group: m.workspace_chat_views },
+		{ kind: 'chat-canvas', label: m.workspace_open_chat_canvas, group: m.workspace_chat_views },
+		{ kind: 'chat-board', label: m.workspace_open_chat_board, group: m.workspace_chat_views },
+		{ kind: 'pull-requests', label: () => 'Open Pull Requests', group: m.workspace_github_views },
 	] as const)(
-		'opens $kind through Chat Views in both titlebar layouts',
-		async ({ kind, label }) => {
+		'opens $kind through its view group in both titlebar layouts',
+		async ({ kind, label, group }) => {
 			const executor = workspaceWindow([chatSurface.id]);
 			const rendered = render(WorkspaceWindowAddMenu, {
 				windowId: executor.id,
@@ -931,7 +933,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			});
 			await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
 			expect(screen.queryByRole('menuitem', { name: label() })).toBeNull();
-			const submenuTrigger = screen.getByRole('menuitem', { name: m.workspace_chat_views() });
+			const submenuTrigger = screen.getByRole('menuitem', { name: group() });
 			submenuTrigger.focus();
 			await fireEvent.keyDown(submenuTrigger, { key: 'ArrowRight' });
 			await fireEvent.click(await screen.findByRole('menuitem', { name: label() }));
@@ -942,14 +944,18 @@ describe('WorkspaceWindowTitleBar', () => {
 				tabs: executor.tabs,
 				measure: { naturalWidth: 100, viewportWidth: 1_000 },
 			});
-			const inlineTrigger = await screen.findByRole('button', { name: m.workspace_chat_views() });
+			const inlineTrigger = await screen.findByRole('button', { name: group() });
 			expect(screen.queryByRole('button', { name: label() })).toBeNull();
 			await fireEvent.click(inlineTrigger);
-			expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
-				m.workspace_open_chat_map(),
-				m.workspace_open_chat_canvas(),
-				m.workspace_open_chat_board(),
-			]);
+			expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual(
+				kind === 'pull-requests'
+					? ['Open Pull Requests']
+					: [
+							m.workspace_open_chat_map(),
+							m.workspace_open_chat_canvas(),
+							m.workspace_open_chat_board(),
+						],
+			);
 			await fireEvent.click(screen.getByRole('menuitem', { name: label() }));
 			expect(openSingletonAsTab).toHaveBeenCalledTimes(2);
 			expect(openSingletonAsTab).toHaveBeenLastCalledWith(kind, 'window-main');
@@ -983,45 +989,57 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_canvas() })).toBeNull();
 	});
 
-	it('restores Chat Views focus when its open submenu moves between layouts', async () => {
-		const executor = workspaceWindow([chatSurface.id]);
-		const rendered = render(WorkspaceWindowAddMenu, {
-			windowId: executor.id,
-			tabs: executor.tabs,
-			measure: { naturalWidth: 200, viewportWidth: 0 },
-		});
-		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
-		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_chat_views() }));
-		const canvasItem = await screen.findByRole('menuitem', {
-			name: m.workspace_open_chat_canvas(),
-		});
-		canvasItem.focus();
-		await rendered.rerender({
-			windowId: executor.id,
-			tabs: executor.tabs,
-			measure: { naturalWidth: 100, viewportWidth: 1_000 },
-		});
-		await waitFor(() =>
-			expect(document.activeElement).toBe(
-				screen.getByRole('button', { name: m.workspace_chat_views() }),
-			),
-		);
-		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_canvas() })).toBeNull();
+	it.each([
+		{
+			group: m.workspace_chat_views,
+			first: m.workspace_open_chat_canvas,
+			second: m.workspace_open_chat_board,
+		},
+		{
+			group: m.workspace_github_views,
+			first: () => 'Open Pull Requests',
+			second: () => 'Open Pull Requests',
+		},
+	])(
+		'restores view-group focus when its open submenu moves between layouts',
+		async ({ group, first, second }) => {
+			const executor = workspaceWindow([chatSurface.id]);
+			const rendered = render(WorkspaceWindowAddMenu, {
+				windowId: executor.id,
+				tabs: executor.tabs,
+				measure: { naturalWidth: 200, viewportWidth: 0 },
+			});
+			await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
+			await fireEvent.click(screen.getByRole('menuitem', { name: group() }));
+			const canvasItem = await screen.findByRole('menuitem', {
+				name: first(),
+			});
+			canvasItem.focus();
+			await rendered.rerender({
+				windowId: executor.id,
+				tabs: executor.tabs,
+				measure: { naturalWidth: 100, viewportWidth: 1_000 },
+			});
+			await waitFor(() =>
+				expect(document.activeElement).toBe(screen.getByRole('button', { name: group() })),
+			);
+			expect(screen.queryByRole('menuitem', { name: first() })).toBeNull();
 
-		await fireEvent.click(screen.getByRole('button', { name: m.workspace_chat_views() }));
-		screen.getByRole('menuitem', { name: m.workspace_open_chat_board() }).focus();
-		await rendered.rerender({
-			windowId: executor.id,
-			tabs: executor.tabs,
-			measure: { naturalWidth: 200, viewportWidth: 0 },
-		});
-		await waitFor(() =>
-			expect(document.activeElement).toBe(
-				screen.getByRole('button', { name: m.workspace_add_to_window() }),
-			),
-		);
-		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_board() })).toBeNull();
-	});
+			await fireEvent.click(screen.getByRole('button', { name: group() }));
+			screen.getByRole('menuitem', { name: second() }).focus();
+			await rendered.rerender({
+				windowId: executor.id,
+				tabs: executor.tabs,
+				measure: { naturalWidth: 200, viewportWidth: 0 },
+			});
+			await waitFor(() =>
+				expect(document.activeElement).toBe(
+					screen.getByRole('button', { name: m.workspace_add_to_window() }),
+				),
+			);
+			expect(screen.queryByRole('menuitem', { name: second() })).toBeNull();
+		},
+	);
 
 	it.each(['chat views', 'saved terminals'] as const)(
 		'keeps %s layout focus ahead of an external pre-open target',
@@ -1281,11 +1299,11 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
 			m.workspace_open_git_history(),
 			m.workspace_open_git_compare(),
-			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
 			m.workspace_open_surface({ surface: m.tickets_title() }),
 			m.workspace_chat_views(),
+			m.workspace_github_views(),
 			m.workspace_new_terminal(),
 		];
 
@@ -1639,11 +1657,11 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
 			m.workspace_open_git_history(),
 			m.workspace_open_git_compare(),
-			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
 			m.workspace_open_surface({ surface: m.tickets_title() }),
 			m.workspace_chat_views(),
+			m.workspace_github_views(),
 		];
 		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));
 		const newTerminal = screen.getByRole('menuitem', { name: m.workspace_new_terminal() });

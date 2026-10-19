@@ -107,7 +107,14 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			label,
 			section: m.settings_tab_notifications(),
 		})),
-		...[m.settings_tab_github(), m.settings_gh_title()].map((label) => ({
+		...[
+			m.settings_tab_github(),
+			m.settings_gh_title(),
+			m.pull_request_repositories(),
+			m.pull_request_repository_connect(),
+			m.pull_request_repository_column_auto_review(),
+			m.pull_request_repository_recent_runs(),
+		].map((label) => ({
 			tab: 'github' as const,
 			label,
 			section: m.settings_tab_github(),

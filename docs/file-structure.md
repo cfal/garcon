@@ -71,6 +71,9 @@ The controller owns chats, ledgers, queues, schedules, provider configuration/cr
 - `controller/chats/token-fitting/` owns bounded token estimation and fitting
   shared by carryover and handoff artifacts. Transcript rendering and export
   retain their existing concern directories and Worker boundaries.
+- `controller/pull-request-reviews/` owns automatic pull request review: the
+  SQLite store, the scanner, the runner that starts and settles review chats,
+  and the poster. See [Pull request reviews](./pull-request-reviews.md).
 - `runtime/git/review-patch.ts` constructs compact patch bodies;
   `runtime/gh/pull-request-diff.ts` projects GitHub pull-request diffs.
 - Git operation tests live in named suites under `runtime/git/__tests__/`;

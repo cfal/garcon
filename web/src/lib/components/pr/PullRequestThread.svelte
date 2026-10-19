@@ -1,6 +1,5 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import History from '@lucide/svelte/icons/history';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
@@ -9,10 +8,9 @@
 
 	interface PullRequestThreadProps {
 		thread: PullRequestThread;
-		onAddress: () => void;
 	}
 
-	let { thread, onAddress }: PullRequestThreadProps = $props();
+	let { thread }: PullRequestThreadProps = $props();
 
 	// Outdated threads (no longer on the current diff) start collapsed to reduce
 	// noise; a user toggle overrides that default.
@@ -53,15 +51,6 @@
 					{m.pull_request_comment_count({ count: commentCount })}
 				</span>
 			{/if}
-		</button>
-		<button
-			type="button"
-			class="inline-flex flex-shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-			onclick={onAddress}
-			title={m.pull_request_address_with_agent_hint()}
-		>
-			<Sparkles class="h-3 w-3" />
-			{m.pull_request_address_with_agent()}
 		</button>
 	</div>
 	{#if !collapsed}
