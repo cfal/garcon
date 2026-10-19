@@ -5,7 +5,7 @@ import type { HttpTicketMutationRequest, TicketMutationPayload } from '../../../
 import { parseTicketWriteResult } from '../../../common/ticket-records.js';
 import { parseTicketBootstrap, parseTicketCommentsPage, parseTicketDetail, parseTicketPage,
   parseTicketProjectDefault } from '../../../common/ticket-responses.js';
-import type { TicketsInvalidatedMessage } from '../../../common/ws-events.js';
+import type { TicketsInvalidatedMessage } from '../../../common/ws-revision-invalidations.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 

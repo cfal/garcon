@@ -171,7 +171,6 @@
 	conversationUi.mountExecutionControlPruning({
 		getActiveChatIds: () => new Set(Object.keys(sessions.byId)),
 	});
-	let chatSubmit: ((message: string) => Promise<boolean>) | null = null;
 	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
 	let chatDraftAppend: ChatDraftAppend | null = null;
 	let renamingTerminalId = $state<string | null>(null);
@@ -518,10 +517,6 @@
 		return `top: calc(${top}% - 2px); left: ${bounds.left * 100}%; width: ${bounds.width * 100}%; height: 5px;`;
 	}
 
-	async function sendToChat(message: string): Promise<boolean> {
-		return chatSubmit ? chatSubmit(message) : false;
-	}
-
 	function appendToChatDraft(block: string): ChatDraftAppendResult {
 		return chatDraftAppend ? chatDraftAppend(block) : 'unavailable';
 	}
@@ -582,7 +577,6 @@
 				{presentation}
 				{visible}
 				style={PORTABLE_SURFACE_STYLE}
-				onSendToChat={sendToChat}
 				onAppendToChatDraft={appendToChatDraft}
 				onChooseProjectFolder={modelCatalog
 					.forExecutor(sessions.selectedChat?.executorId)
@@ -627,7 +621,6 @@
 				{surfaceMenuItems}
 				frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
 				surfaceStyle={PORTABLE_SURFACE_STYLE}
-				onSendToChat={sendToChat}
 				onAppendToChatDraft={appendToChatDraft}
 			/>
 		{/each}
@@ -721,7 +714,6 @@
 				isVisible={composerBound}
 				isInteractive={liveChatLayerVisible && workspace.isChatInteractive}
 				{onRegisterReload}
-				onRegisterSubmit={(submit) => (chatSubmit = submit)}
 				onRegisterUserMessageNavigator={(command: UserMessageNavigatorRegistration) =>
 					(openUserMessageNavigator = command)}
 				onRegisterAppendToDraft={(append) => (chatDraftAppend = append)}
