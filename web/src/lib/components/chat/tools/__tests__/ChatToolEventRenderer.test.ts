@@ -33,12 +33,16 @@ describe('ChatToolEventRenderer', () => {
 		new ReadToolUseMessage('', 'invalid-read', ''),
 		new WriteToolUseMessage('', 'invalid-write', ''),
 		new EditToolUseMessage('', 'invalid-edit', ''),
+		new ExecToolUseMessage('', 'invalid-codemode', '', 'javascript'),
+		new ExecToolUseMessage('', 'invalid-powershell', '', 'powershell'),
 	])('renders a rejected $type with empty arguments through its canonical renderer', (toolMessage) => {
 		const onFileOpen = vi.fn();
 		const { container } = render(ChatToolEventRenderer, { toolMessage, mode: 'input', onFileOpen });
 		expect(screen.queryByText('Tool')).toBeNull();
 		if (toolMessage.type === 'bash-tool-use') {
 			expect(container.querySelector('code')?.textContent?.trim()).toBe('$');
+		} else if (toolMessage.type === 'exec-tool-use') {
+			expect(screen.getByText(`Exec ${toolMessage.language}`)).toBeTruthy();
 		} else {
 			const label = toolMessage.type === 'read-tool-use' ? 'Read' : toolMessage.type === 'edit-tool-use' ? 'Edit' : 'Write';
 			expect(screen.getByText(label)).toBeTruthy();
@@ -52,6 +56,8 @@ describe('ChatToolEventRenderer', () => {
 		new ReadToolUseMessage('', 'invalid-read', ''),
 		new WriteToolUseMessage('', 'invalid-write', ''),
 		new EditToolUseMessage('', 'invalid-edit', ''),
+		new ExecToolUseMessage('', 'invalid-codemode', '', 'javascript'),
+		new ExecToolUseMessage('', 'invalid-powershell', '', 'powershell'),
 	])('renders the actual failure for $type instead of its success presentation', (toolMessage) => {
 		const diagnostic = 'Invalid arguments for tool "synthetic"\nReceived arguments:\n{"invalid":.5}';
 		const { container } = render(ChatToolEventRenderer, {

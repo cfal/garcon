@@ -38,6 +38,8 @@ it.each([
 	new ReadToolUseMessage(TS, 'invalid', ''),
 	new WriteToolUseMessage(TS, 'invalid', ''),
 	new EditToolUseMessage(TS, 'invalid', ''),
+	new ExecToolUseMessage(TS, 'invalid', '', 'javascript'),
+	new ExecToolUseMessage(TS, 'invalid', '', 'powershell'),
 ])('keeps the paired $type error visible while suppressing successful results', (tool) => {
 	for (const isError of [false, true]) {
 		const result = new ToolResultMessage(TS, tool.toolId, { raw: 'synthetic diagnostic' }, isError);

@@ -8,12 +8,17 @@ import { reloadUntilNativeContains, waitForVisibleResponse } from '../../support
 import { piNativeSession, scriptedPiStartRequest, startScriptedPiTestEnvironment } from '../../support/scripted-pi.js';
 
 test('keeps malformed Pi built-in calls canonical without executing their valid argument prefix', async () => {
-  const environment = startScriptedPiTestEnvironment();
+  const environment = startScriptedPiTestEnvironment({ extensionSource: `
+export default function (pi) {
+  pi.on('session_start', () => pi.setActiveTools(['bash', 'read', 'write', 'edit', 'codemode']));
+}
+` });
   const malformed = [
     ['bash', '{"command":"touch rejected-bash.txt","invalid":.5}'],
     ['read', '{"path":"rejected-write.txt","invalid":.5}'],
     ['write', '{"path":"rejected-write.txt","content":"not written","invalid":.5}'],
     ['edit', '{"path":"rejected-edit.txt","edits":[{"oldText":"unchanged sentinel","newText":"not edited"}],"invalid":.5}'],
+    ['codemode', '{"code":"text(await tools.bash({command:\\"touch rejected-codemode.txt\\"}))","invalid":.5}'],
   ] as const;
   try {
     environment.model.scriptTurn(malformed.map(([name, rawArguments]) =>
@@ -48,6 +53,9 @@ test('keeps malformed Pi built-in calls canonical without executing their valid 
       expect(messagesOfType(messages, 'edit-tool-use')).toEqual([
         expect.objectContaining({ toolId: 'invalid-edit', filePath: '' }),
       ]);
+      expect(messagesOfType(messages, 'exec-tool-use')).toEqual([
+        expect.objectContaining({ toolId: 'invalid-codemode', code: '', language: 'javascript' }),
+      ]);
       const results = messagesOfType(messages, 'tool-result');
       for (const [name] of malformed) {
         expect(results.filter((result) => result.toolId === `invalid-${name}`)).toEqual([
@@ -56,11 +64,12 @@ test('keeps malformed Pi built-in calls canonical without executing their valid 
       }
       expect(messagesOfType(messages, 'unknown-tool-use')).toEqual([]);
       expect(await Bun.file(join(fixture.dirs.project, 'rejected-bash.txt')).exists()).toBe(false);
+      expect(await Bun.file(join(fixture.dirs.project, 'rejected-codemode.txt')).exists()).toBe(false);
       expect(await Bun.file(join(fixture.dirs.project, 'rejected-write.txt')).text()).toBe('unchanged sentinel');
       expect(await Bun.file(join(fixture.dirs.project, 'rejected-edit.txt')).text()).toBe('unchanged sentinel');
       await reloadUntilNativeContains(fixture, chatId, 'invalid tools rejected');
       const reloaded = (await fixture.client.getMessages(chatId)).messages;
-      for (const type of ['bash-tool-use', 'read-tool-use', 'write-tool-use', 'edit-tool-use', 'tool-result', 'unknown-tool-use'] as const) {
+      for (const type of ['bash-tool-use', 'read-tool-use', 'write-tool-use', 'edit-tool-use', 'exec-tool-use', 'tool-result', 'unknown-tool-use'] as const) {
         expect(messagesOfType(reloaded, type)).toEqual(messagesOfType(messages, type));
       }
       const native = await piNativeSession(fixture, chatId);
