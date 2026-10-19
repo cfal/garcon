@@ -38,6 +38,7 @@ export type CodexScriptedFault =
       readonly headers?: Readonly<Record<string, string>>;
     }
   | { readonly kind: 'stream-error'; readonly message: string }
+  | { readonly kind: 'incomplete-response'; readonly reason: string; readonly items: CodexScriptedItem[] }
   | { readonly kind: 'truncated-stream' };
 
 export interface HeldCodexTurn {
@@ -459,6 +460,16 @@ export class FakeCodexModel {
       }
       if (turn.kind === 'stream-error') {
         return sseResponse(failedEvents(turn.message));
+      }
+      if (turn.kind === 'incomplete-response') {
+        const events = turnEvents(turn.items, `resp_fake_${recorded.id}`);
+        const completed = events.at(-1)!;
+        completed.type = 'response.incomplete';
+        completed.response = {
+          ...completed.response as Record<string, unknown>,
+          incomplete_details: { reason: turn.reason },
+        };
+        return sseResponse(events);
       }
       return sseResponse([{ type: 'response.created', response: {} }]);
     }

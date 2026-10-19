@@ -18,6 +18,23 @@ console.log(JSON.stringify({
     cwd: '/private/path',
   },
 }));
+console.log(JSON.stringify({
+  method: 'serverRequest/resolved',
+  params: { threadId: 'private-thread', requestId: 'unmatched-request-id' },
+}));
+console.log(JSON.stringify({
+  method: 'serverRequest/resolved',
+  params: { threadId: 'private-thread', requestId: 'private-request-id' },
+}));
+for (const method of ['item/started', 'item/completed']) {
+  console.log(JSON.stringify({
+    method,
+    params: { threadId: 'private-thread', item: {
+      type: 'commandExecution', id: 'synthetic-command', command: 'private command',
+      aggregatedOutput: 'private output', cwd: '/private/path',
+    } },
+  }));
+}
 console.log(JSON.stringify({ method: 'unrelated', params: { content: 'private output' } }));
 `, { mode: 0o700 });
       const environment = { GARCON_CODEX_CLI: fakeBinary };
@@ -45,8 +62,13 @@ console.log(JSON.stringify({ method: 'unrelated', params: { content: 'private ou
       expect(await probe.readApprovalRequests()).toEqual([
         'item/commandExecution/requestApproval',
       ]);
+      expect(await probe.readResolvedApprovalIndexes()).toEqual([0]);
+      expect(await probe.readCommandItemIds()).toEqual(['synthetic-command']);
+      expect(await probe.readCompletedCommandItemIds()).toEqual(['synthetic-command']);
       const persistedProbeData = await readFile(join(root, 'codex-approval-requests'), 'utf8');
       expect(persistedProbeData).not.toContain('private-request-id');
+      expect(persistedProbeData).not.toContain('unmatched-request-id');
+      expect(persistedProbeData).not.toContain('private-thread');
       expect(persistedProbeData).not.toContain('private command');
       expect(persistedProbeData).not.toContain('/private/path');
       expect(persistedProbeData).not.toContain('private output');

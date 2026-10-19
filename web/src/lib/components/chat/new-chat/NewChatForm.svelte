@@ -3,7 +3,9 @@
 	// to NewChatFormState and retains only DOM interactions and template logic.
 
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
-	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
+	import ComposerInputSurface from '../composer/ComposerInputSurface.svelte';
+	import { NewChatMarkdownState } from './new-chat-markdown-state.svelte.js';
+	import { acceptsMarkdownInput } from '$lib/chat/composer/markdown-input.js';
 	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
 	import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import { NewChatPromptDraft } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
@@ -19,7 +21,6 @@
 		applySnippetTriggerReplacement,
 		findSnippetTrigger,
 	} from '$lib/chat/composer/snippet-trigger.js';
-	import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
 	import {
 		buildPermissionOptions,
 		buildThinkingOptions,
@@ -51,6 +52,7 @@
 		getSnippets,
 		getTransientLayers,
 		getWorkspaceLayout,
+		getOptionalWorkspaceShortcuts,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
@@ -106,6 +108,7 @@
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
 	const workspaceLayout = getWorkspaceLayout();
+	const workspaceShortcuts = getOptionalWorkspaceShortcuts();
 	const newChatSurfaceId = $derived(chatViewSurfaceId(workspaceLayout.defaultWindowId));
 	const promptDraft = new NewChatPromptDraft(getNewChatPromptDrafts());
 	const form: NewChatFormState = new NewChatFormState({
@@ -165,7 +168,37 @@
 		`${snippetInteractionGeneration}\u0000${form.executorId}\u0000${form.nonblankPath}`,
 	);
 
-	const snippetPalette = new SnippetPaletteTriggerState();
+	const markdownState: NewChatMarkdownState = new NewChatMarkdownState({
+		form,
+		get generation() {
+			return snippetInteractionGeneration;
+		},
+		get textarea() {
+			return textareaRef;
+		},
+		get canFormat() {
+			return canFormat;
+		},
+		get acceptsMarkdown() {
+			return acceptsMarkdownInput(executionAgent, form.modelValue);
+		},
+		get preferredMode() {
+			return localSettings.composerInputMode;
+		},
+		get interactionGeneration() {
+			return workspaceShortcuts?.userInteractionGeneration ?? 0;
+		},
+		get snippetTrigger() {
+			return conversationInput ? localSettings.snippetTrigger : '';
+		},
+		onUnavailable() {
+			notifications.error(m.chat_composer_format_unavailable());
+		},
+	});
+	const inputUi = markdownState.ui;
+	const markdown = markdownState.controller;
+	const snippetPalette = inputUi.snippetPalette;
+	const formattedDraft = $derived(markdownState.draft);
 	const composerEditor = new NewChatComposerEditorState();
 	const promptRefinement = new NewChatPromptRefinementController({
 		form,
@@ -176,11 +209,22 @@
 			return textareaRef;
 		},
 		get startBlocked() {
-			return !initialContentReady || snippetExpansion.pending;
+			return !initialContentReady || snippetExpansion.pending || inputUi.formattedPastePending;
 		},
-		closePromptSurfaces: () => snippetPalette.dismiss(),
+		closePromptSurfaces: () => {
+			snippetPalette.dismiss();
+			markdown.reset();
+		},
 	});
-	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
+	const canFormat = $derived(
+		initialContentReady &&
+			!composerEditor.open &&
+			!promptRefinement.pending &&
+			!snippetExpansion.pending,
+	);
+	const promptTransformPending = $derived(
+		snippetExpansion.pending || promptRefinement.pending || inputUi.formattedPastePending,
+	);
 	$effect(() => {
 		executionKey;
 		return () => {
@@ -189,7 +233,11 @@
 		};
 	});
 	const promptTransformStatus = $derived(
-		promptRefinement.pending ? m.chat_composer_refining_prompt() : m.snippets_expanding(),
+		inputUi.formattedPastePending
+			? m.chat_composer_pasting()
+			: promptRefinement.pending
+				? m.chat_composer_refining_prompt()
+				: m.snippets_expanding(),
 	);
 
 	function canFocusTextarea(): boolean {
@@ -199,6 +247,7 @@
 	}
 
 	function reseed(): void {
+		markdown.reset();
 		snippetExpansion.cancel();
 		promptRefinement.abort();
 		prospectiveChatId = null;
@@ -252,7 +301,7 @@
 			!form.showBrowser &&
 			canFocusTextarea()
 		) {
-			textareaRef?.focus();
+			untrack(returnTextareaFocus);
 		}
 	});
 
@@ -290,6 +339,7 @@
 	onDestroy(() => {
 		snippetExpansion.cancel();
 		promptRefinement.destroy();
+		markdown.destroy();
 		form.revokeAllImageUrls();
 		form.dispose();
 	});
@@ -326,8 +376,6 @@
 		}
 	}
 
-	const contentSizing = contentSizedTextarea(() => form.firstMessage);
-
 	function handleMessageInput(event: Event): void {
 		const input = event.currentTarget as HTMLTextAreaElement;
 		if (promptRefinement.pending) {
@@ -336,6 +384,7 @@
 		}
 		if (snippetExpansion.pending) snippetExpansion.cancel();
 		form.firstMessage = input.value;
+		markdown.input(event as InputEvent);
 		if (!conversationInput || (event as InputEvent).isComposing) return;
 		snippetPalette.updateDetectedTrigger(
 			findSnippetTrigger(input.value, input.selectionStart, localSettings.snippetTrigger),
@@ -344,7 +393,7 @@
 	}
 
 	function returnTextareaFocus(): void {
-		textareaRef?.focus({ preventScroll: true });
+		(formattedDraft ? inputUi.formattedTarget : textareaRef)?.focus({ preventScroll: true });
 	}
 
 	async function settleTextareaAfterSnippet(caret?: number): Promise<void> {
@@ -354,6 +403,9 @@
 
 	function openExpandedEditor(): void {
 		if (promptTransformPending || !textareaRef) return;
+		if (formattedDraft)
+			textareaRef.setSelectionRange(form.firstMessage.length, form.firstMessage.length);
+		markdown.reset();
 		snippetPalette.dismiss();
 		const selection = promptEditorSelectionFromTextarea(textareaRef);
 		textareaRef.focus({ preventScroll: true });
@@ -725,7 +777,7 @@
 
 			<div
 				data-slot="new-chat-composer"
-				class="relative mt-3 border border-border rounded-lg"
+				class="relative mt-3 border border-border rounded-lg [--composer-input-max-height:300px]"
 				aria-busy={promptTransformPending}
 			>
 				<input
@@ -737,24 +789,28 @@
 					class="hidden"
 					onchange={handleImageInputChange}
 				/>
-				<textarea
-					{@attach contentSizing}
-					bind:this={textareaRef}
-					value={form.firstMessage}
-					onkeydown={handleKeyDown}
-					oninput={handleMessageInput}
-					onpaste={handleMessagePaste}
+				<ComposerInputSurface
+					bind:textarea={textareaRef}
+					text={form.firstMessage}
+					draft={formattedDraft}
+					disabled={false}
+					busy={promptTransformPending}
+					sourceReadOnly={promptRefinement.pending}
+					visible={initialContentReady}
+					controller={markdown}
 					placeholder={form.placeholder}
-					readonly={promptRefinement.pending}
-					aria-busy={promptTransformPending}
-					class="content-sized-textarea chat-input-placeholder block w-full px-4 py-2.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground text-base leading-6 transition-colors duration-200"
-					rows="1"></textarea>
+					allowFileMentions={false}
+					onComposerKeydown={handleKeyDown}
+					onCompletionKeydown={() => false}
+					onInput={handleMessageInput}
+					onPaste={handleMessagePaste}
+				/>
 
 				<ComposerBottomBar
 					canAttachImages={canAttachAttachments}
 					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}
-					onOpenSnippetPalette={() => snippetPalette.openFromMenu()}
+					onOpenSnippetPalette={() => void markdown.openSnippets()}
 					onOpenExpandedEditor={openExpandedEditor}
 					onRefinePrompt={() => promptRefinement.handleAction()}
 					canRefinePrompt={promptRefinement.canStart}

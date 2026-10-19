@@ -6,6 +6,13 @@ import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { makeTestGhCapability } from './gh-capability-test-context';
 import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-settings-snapshot-fixture';
+import {
+	PullRequestReviewsStore,
+	type PullRequestReviewsApi,
+} from '$lib/git/pull-requests/pull-request-reviews-store.svelte';
+import { NotificationsStore } from '$lib/stores/notifications.svelte';
+import { makeReviewsSnapshot } from '$lib/components/pr/__tests__/pull-request-reviews-fixture';
+import type { PullRequestReviewsSnapshot } from '$shared/pull-request-reviews';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 vi.mock('$lib/api/settings.js', () => ({
@@ -54,12 +61,14 @@ describe('Settings', () => {
 			const format = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Message format' });
 			expect(format.value).toBe('formatted');
 			await fireEvent.change(format, { target: { value: 'source' } });
-			expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!))
-				.toMatchObject({ composerInputMode: 'source' });
+			expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
+				composerInputMode: 'source',
+			});
 			rendered.unmount();
 			rendered = render(SettingsTestHost, props);
-			expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Message format' }).value)
-				.toBe('source');
+			expect(
+				screen.getByRole<HTMLSelectElement>('combobox', { name: 'Message format' }).value,
+			).toBe('source');
 		} finally {
 			rendered.unmount();
 		}
@@ -805,6 +814,121 @@ describe('Settings', () => {
 			await fireEvent.click(worker.getByRole('button', { name: 'Refresh GitHub CLI status' }));
 			expect(remoteStatus.refresh).toHaveBeenCalledOnce();
 			expect(screen.queryByRole('combobox')).toBeNull();
+		} finally {
+			rendered.unmount();
+		}
+	});
+	it('finds repositories through search and updates the shared repository settings', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('interface');
+		const reviews = new PullRequestReviewsStore();
+		const snapshot = makeReviewsSnapshot();
+		reviews.apply(snapshot);
+		const update = vi.spyOn(reviews, 'update').mockImplementation(async (id, input) => {
+			reviews.apply({
+				...snapshot,
+				revision: 2,
+				repositories: [{ ...snapshot.repositories[0], ...input }],
+			});
+		});
+		const rendered = render(SettingsTestHost, {
+			appShell,
+			reviews,
+			remoteSettings: new RemoteSettingsStore(),
+		});
+		try {
+			await fireEvent.input(screen.getByRole('searchbox', { name: 'Search settings' }), {
+				target: { value: 'repositories' },
+			});
+			await fireEvent.click(screen.getByRole('button', { name: 'Repositories GitHub' }));
+			await screen.findByText('acme/app');
+			expect(screen.getByRole('heading', { name: 'Recent reviews' })).toBeTruthy();
+			const toggle = screen.getByRole('switch', { name: 'Review acme/app automatically' });
+			await fireEvent.click(toggle);
+			await waitFor(() =>
+				expect(update).toHaveBeenCalledWith('repository', {
+					target: snapshot.repositories[0].target,
+					settings: {
+						...snapshot.repositories[0].settings,
+						autoReview: !snapshot.repositories[0].settings.autoReview,
+					},
+				}),
+			);
+			expect(toggle.getAttribute('aria-checked')).toBe(
+				String(reviews.repositories[0].settings.autoReview),
+			);
+		} finally {
+			rendered.unmount();
+		}
+	});
+
+	it('shows repository loading and read failures, then retries without a false empty state', async () => {
+		const pending = Promise.withResolvers<PullRequestReviewsSnapshot>();
+		const api = {
+			get: vi.fn(() => pending.promise),
+			connect: vi.fn(),
+			update: vi.fn(),
+			remove: vi.fn(),
+			scan: vi.fn(),
+			review: vi.fn(),
+			stop: vi.fn(),
+			post: vi.fn(),
+			abandon: vi.fn(),
+		} satisfies PullRequestReviewsApi;
+		const reviews = new PullRequestReviewsStore(api);
+		const appShell = createAppShellStore();
+		appShell.openSettings('github');
+		const rendered = render(SettingsTestHost, {
+			appShell,
+			reviews,
+			remoteSettings: new RemoteSettingsStore(),
+		});
+		try {
+			await screen.findByText('Loading...', { exact: true });
+			expect(screen.queryByText('No repositories connected.')).toBeNull();
+			pending.reject(new Error('Repository settings are unavailable.'));
+			await screen.findByText('Repository settings are unavailable.');
+			api.get.mockResolvedValueOnce(makeReviewsSnapshot());
+			await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+			await screen.findByText('acme/app');
+			expect(api.get).toHaveBeenCalledTimes(2);
+		} finally {
+			rendered.unmount();
+		}
+	});
+
+	it('opens the exact review chat and closes settings only after navigation succeeds', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('github');
+		const reviews = new PullRequestReviewsStore();
+		const snapshot = makeReviewsSnapshot();
+		reviews.apply({
+			...snapshot,
+			recentRuns: [{ ...snapshot.recentRuns[0], chatId: 'review-chat', chatAvailable: true }],
+		});
+		const workspace = {
+			showChatInCurrentWindow: vi
+				.fn()
+				.mockRejectedValueOnce(new Error('Chat could not be opened.'))
+				.mockResolvedValueOnce('chat-view:review'),
+		};
+		const notifications = new NotificationsStore();
+		const rendered = render(SettingsTestHost, {
+			appShell,
+			reviews,
+			workspace,
+			notifications,
+			remoteSettings: new RemoteSettingsStore(),
+		});
+		try {
+			await fireEvent.click(await screen.findByRole('button', { name: 'Open chat' }));
+			await waitFor(() =>
+				expect(notifications.items[0]?.message).toBe('Chat could not be opened.'),
+			);
+			expect(appShell.showSettings).toBe(true);
+			await fireEvent.click(screen.getByRole('button', { name: 'Open chat' }));
+			await waitFor(() => expect(appShell.showSettings).toBe(false));
+			expect(workspace.showChatInCurrentWindow).toHaveBeenLastCalledWith('review-chat');
 		} finally {
 			rendered.unmount();
 		}

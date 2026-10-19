@@ -30,6 +30,7 @@ import type { AppTitleStore } from '$lib/stores/app-title';
 import type { MinuteClockStore } from '$lib/stores/minute-clock.svelte';
 import type { GhCapabilityContext } from '$lib/git/pull-requests/gh-capability.svelte';
 import type { ScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte';
+import type { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte';
 import type { ChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
 import type { SnippetsStore } from '$lib/snippets/snippets-store.svelte';
@@ -80,6 +81,7 @@ export const [getSidebarProjectCollapse, setSidebarProjectCollapse] =
 export const [getAppTitle, setAppTitle] = createContext<AppTitleStore>();
 export const [getMinuteClock, setMinuteClock] = createContext<MinuteClockStore>();
 export const [getScheduledPrompts, setScheduledPrompts] = createContext<ScheduledPromptsStore>();
+export const [getPullRequestReviews, setPullRequestReviews] = createContext<PullRequestReviewsStore>();
 export const [getPreambles, setPreambles] = createContext<PreamblesStore>();
 export const [getChatPreambleSelectionInvalidationHub, setChatPreambleSelectionInvalidationHub] =
 	createContext<ChatPreambleSelectionInvalidationHub>();

@@ -1,21 +1,25 @@
 import type { ExecutionGhService } from '@garcon/server-agent-interface';
-import { GH_DETAIL_TIMEOUT_MS, GIT_OPERATION_TIMEOUT_MS } from '../../../common/git-execution.js';
+import { GH_DETAIL_TIMEOUT_MS, ghOperationTimeoutMs } from '../../../common/git-execution.js';
 import { validateGhRequest } from '../../../common/git-request-validation.js';
 import { GitServiceError } from '../../../common/git-error.js';
+import type { GhRepositoryIdentity } from '../../../common/gh.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import { executorIdFromValue } from './executor-target.js';
 import { gitRouteFailure } from './git-executor-service.js';
 
-export type GhServiceResolver = (executorId: string) => Promise<ExecutionGhService>;
+// The browser reads GitHub through these methods; review posting stays inside the controller.
+type BrowserGhMethod = 'getStatus' | 'listPullRequests' | 'getPullRequest';
+
+export type GhServiceResolver = (executorId: string) => Promise<Pick<ExecutionGhService, BrowserGhMethod>>;
 
 const REQUEST_FIELDS = {
   getStatus: ['executorId'],
   listPullRequests: ['executorId', 'project'],
-  getPullRequest: ['executorId', 'project', 'number'],
-} satisfies Record<keyof ExecutionGhService, readonly string[]>;
+  getPullRequest: ['executorId', 'project', 'number', 'repositoryHost', 'repositoryName'],
+} satisfies Record<BrowserGhMethod, readonly string[]>;
 
 export default function createGhRoutes(resolve: GhServiceResolver, timeoutMs = GH_DETAIL_TIMEOUT_MS): RouteMap {
-  function route(method: keyof ExecutionGhService): RouteHandler {
+  function route(method: BrowserGhMethod): RouteHandler {
     return async (request, url) => {
       try {
         const fields = REQUEST_FIELDS[method];
@@ -25,12 +29,19 @@ export default function createGhRoutes(resolve: GhServiceResolver, timeoutMs = G
         const executorId = executorIdFromValue(url.searchParams.get('executorId'));
         const projectPath = url.searchParams.get('project') ?? '';
         const number = Number(url.searchParams.get('number'));
-        const input: { projectPath?: string; number?: number } = {};
+        const input: { projectPath?: string; number?: number; repository?: GhRepositoryIdentity } = {};
         if (method !== 'getStatus') input.projectPath = projectPath;
-        if (method === 'getPullRequest') input.number = number;
+        const repository = {
+          host: url.searchParams.get('repositoryHost') ?? '',
+          nameWithOwner: url.searchParams.get('repositoryName') ?? '',
+        };
+        if (method === 'getPullRequest') {
+          input.number = number;
+          input.repository = repository;
+        }
         validateGhRequest(method, input);
         const service = await resolve(executorId);
-        const options = { signal: request.signal, timeoutMs: Math.min(timeoutMs, method === 'getPullRequest' ? GH_DETAIL_TIMEOUT_MS : GIT_OPERATION_TIMEOUT_MS) };
+        const options = { signal: request.signal, timeoutMs: Math.min(timeoutMs, ghOperationTimeoutMs(method)) };
         let result;
         switch (method) {
           case 'getStatus':
@@ -40,7 +51,7 @@ export default function createGhRoutes(resolve: GhServiceResolver, timeoutMs = G
             result = await service.listPullRequests({ projectPath }, options);
             break;
           case 'getPullRequest':
-            result = await service.getPullRequest({ projectPath, number }, options);
+            result = await service.getPullRequest({ projectPath, number, repository }, options);
             break;
         }
         if (result.executorId !== executorId || typeof result.instanceId !== 'string' || !result.instanceId) {

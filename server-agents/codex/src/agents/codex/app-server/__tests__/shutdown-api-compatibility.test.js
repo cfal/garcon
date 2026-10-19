@@ -27,6 +27,9 @@ describe('bundled Codex shutdown compatibility', () => {
       'wire_api = "responses"',
       '[features]',
       'hooks = true',
+      // Prevents background marketplace fetches from outliving the fixture.
+      // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core-plugins/src/manager.rs#L2824-L2834
+      'plugins = false',
       '[[hooks.SessionEnd]]',
       'matcher = "other"',
       '[[hooks.SessionEnd.hooks]]',

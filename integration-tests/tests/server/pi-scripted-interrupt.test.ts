@@ -1,4 +1,4 @@
-import { access } from 'node:fs/promises';
+import { access, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { PrimaryWsServerMessage as ServerWsMessage } from '../../../common/ws-protocol.js';
@@ -36,6 +36,62 @@ describe('scripted Pi interrupt lifecycle', () => {
     environment?.dispose();
     environment = undefined;
   });
+
+  test('kills preparation before any model request and respawns for the next operation', async () => {
+    environment?.dispose();
+    environment = startScriptedPiTestEnvironment({ extensionSource: `
+import { access, appendFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+export default function (pi) {
+  pi.on('session_start', async (_event, ctx) => {
+    await appendFile(join(ctx.cwd, '.pi-scripted-processes'), process.pid + '\\n');
+  });
+  pi.on('before_agent_start', async (event, ctx) => {
+    if (event.messageType !== 'user' || event.prompt !== 'hold-preflight') return;
+    await writeFile(join(ctx.cwd, '.pi-scripted-preflight'), 'ready');
+    while (true) {
+      try { await access(join(ctx.cwd, '.pi-scripted-release')); break; } catch {}
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  });
+}
+` });
+    const testEnvironment = requireEnvironment();
+    testEnvironment.model.scriptTurn([chatCompletionsText('bootstrap finished')]);
+    await withIntegrationFixture('pi-scripted-preflight-stop', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const initialCursor = fixture.client.markEvents();
+      const initial = await fixture.client.startChat(scriptedPiStartRequest({
+        chatId, projectPath: fixture.dirs.project, command: 'bootstrap history',
+      }));
+      await waitForVisibleResponse({
+        fixture, chatId, turnId: initial.turnId, marker: 'bootstrap finished', afterIndex: initialCursor,
+      });
+      await fixture.client.runChat(scriptedPiRunRequest({ chatId, command: 'hold-preflight' }));
+      await waitForFile(join(fixture.dirs.project, '.pi-scripted-preflight'));
+      const oldPid = Number((await readFile(join(fixture.dirs.project, '.pi-scripted-processes'), 'utf8')).trim());
+      expect(Number.isInteger(oldPid) && oldPid > 0).toBe(true);
+      const cursor = fixture.client.markEvents();
+      expect((await fixture.client.stopChat({ chatId, clientRequestId: crypto.randomUUID() })).outcome)
+        .toBe('interrupt-requested');
+      await fixture.client.waitForProcessing(chatId, false, { afterIndex: cursor });
+      await waitForProcessExit(oldPid);
+      await writeFile(join(fixture.dirs.project, '.pi-scripted-release'), 'released');
+      expect(testEnvironment.model.requests()).toHaveLength(1);
+      testEnvironment.model.scriptTurn([chatCompletionsText('preflight recovery finished')]);
+      const recoveryCursor = fixture.client.markEvents();
+      const recovery = await fixture.client.runChat(scriptedPiRunRequest({ chatId, command: 'recover preparation' }));
+      await waitForVisibleResponse({
+        fixture, chatId, turnId: recovery.turnId, marker: 'preflight recovery finished', afterIndex: recoveryCursor,
+      });
+      expect(testEnvironment.model.requests()).toHaveLength(2);
+      expect(testEnvironment.model.requests().at(-1)?.lastUserText.endsWith('recover preparation')).toBe(true);
+      const pids = (await readFile(join(fixture.dirs.project, '.pi-scripted-processes'), 'utf8')).trim().split('\n');
+      expect(pids).toHaveLength(2);
+      expect(new Set(pids).size).toBe(2);
+      testEnvironment.model.assertSettled();
+    }, withScriptedPi());
+  }, 120_000);
 
   test('stops an active tool turn and preserves the stopped transcript shape', async () => {
     const testEnvironment = requireEnvironment();
@@ -163,6 +219,20 @@ function expectPiStoppedTurnEventOrder(
 
 function marker(label: string): string {
   return `SCRIPTED_PI_INTERRUPT_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
+}
+
+async function waitForProcessExit(pid: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+      throw error;
+    }
+    await Bun.sleep(20);
+  }
+  throw new Error(`Stopped turn left Pi process ${pid} running`);
 }
 
 async function waitForFile(path: string): Promise<void> {

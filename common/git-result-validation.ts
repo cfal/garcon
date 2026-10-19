@@ -2,6 +2,8 @@ import { isRecord } from './json.js';
 import { GitServiceError } from './git-error.js';
 import { GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitResults, type ExecutionGhResults, type GitExecutorScope } from './git-execution.js';
 import type { GitMethod } from './git.js';
+import { PULL_REQUEST_AUTHOR_ASSOCIATIONS } from './gh.js';
+import { isGhActorIdentity, isGhRepositoryIdentity } from './gh-identity.js';
 
 type Check = (value: unknown) => boolean;
 const str: Check = v => typeof v === 'string';
@@ -146,14 +148,26 @@ export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, 
     throw new GitServiceError('GIT_INVALID_RESULT', `Invalid GitHub ${method} response scope`);
   }
   const identity = { number: num, title: str, state: oneOf('open', 'closed', 'merged'), isDraft: bool, author: str, headRefName: str, baseRefName: str,
-    additions: num, deletions: num, changedFiles: num, updatedAt: str, url: str, reviewDecision: oneOf('approved', 'changes_requested', 'review_required', null) };
+    additions: num, deletions: num, changedFiles: num, createdAt: str, updatedAt: str, url: str, headRefOid: str,
+    reviewDecision: oneOf('approved', 'changes_requested', 'review_required', null) };
+  const state = oneOf('open', 'closed', 'merged');
   let valid: boolean;
   if (method === 'getStatus') {
     valid = shape(value, { available: bool, authenticated: bool, reason: oneOf('authenticated', 'unauthenticated', 'gh_missing', 'auth_error', 'unknown'), login: optional(str), host: optional(str) });
   } else if (method === 'listPullRequests') {
-    valid = shape(value, { pulls: array(x => shape(x, { ...identity, checksState: oneOf('passing', 'failing', 'pending', 'none') }), 100), repo: nullable(x => shape(x, { nameWithOwner: str })) });
+    valid = shape(value, { pulls: array(x => shape(x, { ...identity, checksState: oneOf('passing', 'failing', 'pending', 'none'),
+      isCrossRepository: bool, authorAssociation: oneOf(...PULL_REQUEST_AUTHOR_ASSOCIATIONS), authorIsBot: bool, authoredByViewer: bool,
+      labels: array(str), reviewRequest: oneOf('me', 'team', null) })),
+      repo: nullable(x => shape(x, { nameWithOwner: str, url: str })), viewerLogin: nullable(str) });
+  } else if (method === 'getPullRequestReviewTarget') {
+    valid = shape(value, { repository: isGhRepositoryIdentity, viewer: isGhActorIdentity, number: num, state, headRefOid: str,
+      markedComments: array(x => shape(x, { id: str, url: str, marker: str, isMinimized: bool, author: nullable(isGhActorIdentity) })) });
+  } else if (method === 'createPullRequestComment') {
+    valid = shape(value, { id: str, url: str });
+  } else if (method === 'minimizePullRequestComment') {
+    valid = shape(value, { minimized: bool });
   } else {
-    valid = shape(value, { ...identity, body: str, createdAt: str, mergeable: oneOf('mergeable', 'conflicting', 'unknown'), files: array(reviewFile, 10_000), fileBodies: map(isGitPatchBody),
+    valid = shape(value, { ...identity, body: str, mergeable: oneOf('mergeable', 'conflicting', 'unknown'), files: array(reviewFile, 10_000), fileBodies: map(isGitPatchBody),
       checks: array(x => shape(x, { name: str, state: oneOf('success', 'failure', 'pending', 'neutral', 'skipped'), url: optional(str) })),
       threads: array(x => shape(x, { id: str, path: str, side: oneOf('before', 'after'), line: num, diffHunk: str, isOutdated: bool,
         comments: array(c => shape(c, { id: num, author: str, body: str, createdAt: str })) })) });

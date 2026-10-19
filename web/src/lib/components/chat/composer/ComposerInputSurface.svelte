@@ -16,7 +16,10 @@
 		onComposerKeydown,
 		onCompletionKeydown,
 		onInput,
-		onRecallReset,
+		onRecallReset = () => {},
+		onPaste,
+		placeholder = m.chat_composer_reply_placeholder(),
+		allowFileMentions = true,
 	}: {
 		draft: ({ source: string } & ComposerMarkdownDocument) | null;
 		disabled: boolean;
@@ -29,12 +32,19 @@
 		onComposerKeydown: (event: KeyboardEvent) => void;
 		onCompletionKeydown: (event: KeyboardEvent) => boolean;
 		onInput: (event: Event) => void;
-		onRecallReset: () => void;
+		onRecallReset?: () => void;
+		onPaste?: (event: ClipboardEvent) => void;
+		placeholder?: string;
+		allowFileMentions?: boolean;
 	} = $props();
 	const contentSizing = contentSizedTextarea(() => (visible ? text : undefined));
 </script>
 
-<div class="relative overflow-hidden bg-transparent focus-within:ring-0">
+<div
+	class="relative overflow-hidden bg-transparent focus-within:ring-0"
+	onpaste={onPaste}
+	role="presentation"
+>
 	{#if draft}
 		<!-- The controller publishes a draft only after this cached import succeeds. -->
 		{#await loadComposerMarkdownEditor() then MarkdownEditor}
@@ -45,6 +55,8 @@
 					selection={draft.selection}
 					selectionMarks={draft.selectionMarks}
 					readOnly={disabled || busy}
+					{placeholder}
+					{allowFileMentions}
 					snippetTrigger={controller.snippetTrigger}
 					{onComposerKeydown}
 					{onCompletionKeydown}
@@ -54,7 +66,8 @@
 					onReady={(target) => controller.focus(target)}
 					onMention={(mention) => controller.mention(mention)}
 					onLargePaste={(request) => void controller.pasteSource(request)}
-					onMarkdownPaste={(source, caret, apply) => void controller.pasteMarkdown(source, caret, apply)}
+					onMarkdownPaste={(source, caret, apply) =>
+						void controller.pasteMarkdown(source, caret, apply)}
 					onOverflow={(source) => controller.overflow(source)}
 				/>
 			{/key}
@@ -70,11 +83,11 @@
 			onpointerdown={onRecallReset}
 			oninput={onInput}
 			oncompositionend={() => controller.input(new InputEvent('input'))}
-			placeholder={m.chat_composer_reply_placeholder()}
+			{placeholder}
 			{disabled}
 			readonly={sourceReadOnly}
 			aria-busy={busy}
-			class="content-sized-textarea block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-composer-foreground placeholder:text-muted-foreground disabled:opacity-50 max-h-[min(40dvh,150px)] sm:max-h-[min(40dvh,300px)] text-base leading-6 transition-colors duration-200 px-4 py-3 sm:px-5 sm:py-3.5 min-h-[48px]"
+			class="content-sized-textarea block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-composer-foreground placeholder:text-muted-foreground disabled:opacity-50 max-h-[var(--composer-input-max-height,min(40dvh,150px))] sm:max-h-[var(--composer-input-max-height,min(40dvh,300px))] text-base leading-6 transition-colors duration-200 px-4 py-3 sm:px-5 sm:py-3.5 min-h-[48px]"
 		></textarea>
 	</div>
 </div>

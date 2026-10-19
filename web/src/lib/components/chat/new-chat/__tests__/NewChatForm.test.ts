@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { loadComposerMarkdownEditor } from '../../composer/composer-markdown-editor-loader.js';
 import NewChatFormTestHost from './NewChatFormTestHost.svelte';
 import * as settingsApi from '$lib/api/settings';
 import * as gitApi from '$lib/api/git';
@@ -15,6 +16,10 @@ import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
+
+vi.mock('../../composer/composer-markdown-editor-loader.js', () => ({
+	loadComposerMarkdownEditor: vi.fn(() => new Promise(() => {})),
+}));
 
 const PROSPECTIVE_CHAT_ID = parseChatId('1787471053739199');
 const RESEEDED_CHAT_ID = parseChatId('1787471053739200');
@@ -205,6 +210,24 @@ function previewResponse(
 }
 
 describe('NewChatForm', () => {
+	it('connects the formatted New Chat input to the shared Markdown editor', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());
+		render(NewChatFormTestHost, { composerInputMode: 'formatted' });
+		await waitFor(() => expect(loadComposerMarkdownEditor).toHaveBeenCalled());
+	});
+
+	it.each([
+		['source', 'conversation'],
+		['formatted', 'literal'],
+	] as const)('keeps %s / %s input in the source editor', async (composerInputMode, executionPolicy) => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());
+		render(NewChatFormTestHost, { composerInputMode, executionPolicy });
+		await waitFor(() => expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull());
+		expect(loadComposerMarkdownEditor).not.toHaveBeenCalled();
+	});
+
 	it('retains cached selection and text while catalog failure blocks click and Enter until retry', async () => {
 		stubMatchMedia(false);
 		const chatsApi = await import('$lib/api/chats');

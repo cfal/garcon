@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import Settings from '../Settings.svelte';
+	import { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte';
+	import { NotificationsStore } from '$lib/stores/notifications.svelte';
+	import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte';
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 	import type { GhCapabilityContext } from '$lib/git/pull-requests/gh-capability.svelte';
@@ -15,6 +18,9 @@
 		setModelCatalog,
 		setRemoteSettings,
 		setThemeRuntime,
+		setPullRequestReviews,
+		setWorkspaceCoordinator,
+		setNotifications,
 	} from '$lib/context';
 	import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
@@ -27,6 +33,12 @@
 	import { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte';
 	import { getThemeProfile, resolveThemeId } from '$lib/theme/themes.js';
 
+	function emptyReviews(): PullRequestReviewsStore {
+		const reviews = new PullRequestReviewsStore();
+		reviews.apply({ revision: 1, repositories: [], inbox: [], recentRuns: [] });
+		return reviews;
+	}
+
 	interface SettingsTestHostProps {
 		appShell: AppShellStore;
 		remoteSettings: RemoteSettingsStore;
@@ -36,6 +48,9 @@
 		executors?: readonly ExecutorSnapshot[];
 		executorStore?: ExecutorsStore;
 		ghCapability?: GhCapabilityContext;
+		reviews?: PullRequestReviewsStore;
+		workspace?: Pick<WorkspaceCoordinator, 'showChatInCurrentWindow'>;
+		notifications?: NotificationsStore;
 	}
 
 	let {
@@ -47,6 +62,13 @@
 		executors,
 		executorStore,
 		ghCapability = { forExecutor: () => makeTestGhCapability() },
+		reviews = emptyReviews(),
+		workspace = {
+			showChatInCurrentWindow: async () => {
+				throw new Error('Unexpected navigation');
+			},
+		},
+		notifications = new NotificationsStore(),
 	}: SettingsTestHostProps = $props();
 	untrack(() => {
 		if (executorStore) setExecutors(executorStore);
@@ -196,6 +218,9 @@
 	};
 
 	setGhCapability(untrack(() => ghCapability));
+	setPullRequestReviews(untrack(() => reviews));
+	setWorkspaceCoordinator(untrack(() => workspace) as WorkspaceCoordinator);
+	setNotifications(untrack(() => notifications));
 
 	setAppShell(untrack(() => appShell));
 	setApiProviders(new ApiProvidersStore(() => {}, {

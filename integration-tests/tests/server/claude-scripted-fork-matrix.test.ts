@@ -523,20 +523,34 @@ describe('scripted Claude fork lifecycle matrix', () => {
     });
   });
 
-  test('does not inherit task notification state when forking an outstanding background task', async () => {
+  test.each(['shell', 'fork'])('does not inherit task notification state from an outstanding %s task', async (taskKind) => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     const sourcePrompt = marker('BACKGROUND_SOURCE_PROMPT');
     const launchedReply = marker('BACKGROUND_LAUNCHED_REPLY');
     const childPrompt = marker('BACKGROUND_CHILD_PROMPT');
     const childReply = marker('BACKGROUND_CHILD_REPLY');
+    const forkGate = Promise.withResolvers<void>();
+    const forkRequested = Promise.withResolvers<void>();
     testEnvironment.model.scriptTurn([
-      claudeToolUse('toolu_background', 'Bash', {
+      taskKind === 'shell' ? claudeToolUse('toolu_background', 'Bash', {
         command: 'sleep 600',
         run_in_background: true,
+      }) : claudeToolUse('toolu_background', 'Agent', {
+        subagent_type: 'fork', description: 'Synthetic outstanding fork',
+        prompt: 'Synthetic held fork directive',
       }),
     ]);
-    testEnvironment.model.scriptTurn([claudeText(launchedReply)]);
+    for (let index = 0; index < (taskKind === 'fork' ? 2 : 1); index += 1) {
+      testEnvironment.model.scriptTurn(async (request) => {
+        if (JSON.stringify(request.body.messages).includes('<fork-boilerplate>')) {
+          forkRequested.resolve();
+          await forkGate.promise;
+          return [claudeText('Synthetic held fork report')];
+        }
+        return [claudeText(launchedReply)];
+      });
+    }
 
     await withIntegrationFixture('claude-scripted-fork-background-task', async (fixture) => {
       const sourceChatId = fixture.newChatId();
@@ -564,8 +578,9 @@ describe('scripted Claude fork lifecycle matrix', () => {
       await waitForNativeFileContains(
         fixture.dirs.workspace,
         sourceChatId,
-        'backgroundTaskId',
+        taskKind === 'shell' ? 'backgroundTaskId' : 'async_launched',
       );
+      if (taskKind === 'fork') await forkRequested.promise;
       const forkChatId = fixture.newChatId();
       await forkWhenTranscriptPersists(fixture, sourceChatId, forkChatId);
       expect(JSON.stringify((await fixture.client.getMessages(forkChatId)).messages))
@@ -603,6 +618,7 @@ describe('scripted Claude fork lifecycle matrix', () => {
           afterIndex: stopCursor,
           timeoutMs: LIVE_TURN_TIMEOUT_MS,
         });
+        forkGate.resolve();
       }
       testEnvironment.model.assertSettled();
     }, {

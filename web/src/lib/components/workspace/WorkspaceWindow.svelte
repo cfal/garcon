@@ -48,7 +48,6 @@
 		surfaceMenuItems,
 		frameBridge,
 		surfaceStyle,
-		onSendToChat,
 		onAppendToChatDraft,
 	}: {
 		workspaceWindow: WorkspaceWindowNode;
@@ -67,7 +66,6 @@
 		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
 		frameBridge(surfaceId: string): SurfaceFrameBridge;
 		surfaceStyle: string;
-		onSendToChat(message: string): Promise<boolean>;
 		onAppendToChatDraft: ChatDraftAppend;
 	} = $props();
 
@@ -354,7 +352,6 @@
 						presentation={item.presentation}
 						visible={item.visible}
 						style={surfaceStyle}
-						{onSendToChat}
 						{onAppendToChatDraft}
 						frameBridge={frameBridge(surface.id)}
 					/>

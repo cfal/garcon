@@ -42,6 +42,8 @@
 		selection: initialSelection,
 		selectionMarks,
 		readOnly,
+		placeholder = m.chat_composer_reply_placeholder(),
+		allowFileMentions = true,
 		snippetTrigger,
 		onChange,
 		onSourceAction,
@@ -59,6 +61,8 @@
 		selection?: number;
 		selectionMarks?: JSONContent['marks'];
 		readOnly: boolean;
+		placeholder?: string;
+		allowFileMentions?: boolean;
 		snippetTrigger: string;
 		onChange: (source: string) => void;
 		onSourceAction: (text: string, caret: number) => void;
@@ -134,7 +138,7 @@
 			const inCode = block.type.spec.code || head.marks().some((mark) => mark.type.name === 'code');
 			const text = blockText(block);
 			const trigger =
-				current.isEditable && selection.empty && block.isTextblock && !inCode
+				allowFileMentions && current.isEditable && selection.empty && block.isTextblock && !inCode
 					? findFileMentionTrigger(text, head.parentOffset)
 					: null;
 			if (!trigger) {
@@ -192,7 +196,7 @@
 			if (position === undefined) {
 				const { selection, storedMarks } = view.state;
 				marks =
-					storedMarks ?? (selection.empty ? head.marks() : head.marksAcross(selection.$to) ?? []);
+					storedMarks ?? (selection.empty ? head.marks() : (head.marksAcross(selection.$to) ?? []));
 			}
 			let literal = marks.some((mark) => mark.type.name === 'code');
 			for (let depth = head.depth; depth > 0; depth--) {
@@ -211,7 +215,11 @@
 				const marked = serialize(view.state.tr.insertText(marker, position).doc);
 				const start = marked.indexOf(marker);
 				if (start >= 0) {
-					onMarkdownPaste(marked.replace(marker, () => text), start + text.length, applyMarkdownPaste);
+					onMarkdownPaste(
+						marked.replace(marker, () => text),
+						start + text.length,
+						applyMarkdownPaste,
+					);
 					return;
 				}
 			}
@@ -235,7 +243,7 @@
 			extensions: [
 				...extensions,
 				composerMarkdownEmptyMarks,
-				Placeholder.configure({ placeholder: m.chat_composer_reply_placeholder() }),
+				Placeholder.configure({ placeholder: () => placeholder }),
 				composerMarkdownTableInput(composerMarkdownCodec.parse),
 				...(initialSelection !== undefined && selectionMarks
 					? [composerMarkdownCaretMarks(initialSelection, selectionMarks)]
@@ -371,7 +379,7 @@
 <div
 	bind:this={container}
 	data-composer-markdown-editor
-	class="composer-markdown-editor max-h-[min(40dvh,150px)] overflow-auto px-4 py-3 text-base leading-6 text-composer-foreground sm:max-h-[min(40dvh,300px)] sm:px-5 sm:py-3.5"
+	class="composer-markdown-editor max-h-[var(--composer-input-max-height,min(40dvh,150px))] overflow-auto px-4 py-3 text-base leading-6 text-composer-foreground sm:max-h-[var(--composer-input-max-height,min(40dvh,300px))] sm:px-5 sm:py-3.5"
 ></div>
 
 <style>

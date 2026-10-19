@@ -363,6 +363,22 @@ describe('buildClaudeCLIArgs', () => {
 });
 
 describe('convertCLIMessageToChatMessages', () => {
+  it.each(['assistant', 'user'])('excludes %s content owned by a subagent', (type) => {
+    const frame = {
+      type,
+      parent_tool_use_id: 'toolu_source_agent',
+      message: { content: [
+        { type: 'text', text: 'Synthetic child answer' },
+        { type: 'thinking', thinking: 'Synthetic child reasoning' },
+        { type: 'tool_use', id: 'toolu_child', name: 'Bash', input: { command: 'true' } },
+        { type: 'tool_result', tool_use_id: 'toolu_child', content: 'Synthetic child output' },
+      ] },
+    };
+    expect(convertCLIMessageToChatMessages(frame)).toEqual([]);
+    expect(convertCLIMessageToChatMessages({ ...frame, parent_tool_use_id: null }).length)
+      .toBeGreaterThan(0);
+  });
+
   it('returns empty array for non-assistant messages', () => {
     expect(convertCLIMessageToChatMessages({ type: 'system', content: [] })).toEqual([]);
   });

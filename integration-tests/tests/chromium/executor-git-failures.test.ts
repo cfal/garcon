@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
+import { DEFAULT_PULL_REQUEST_REVIEW_SETTINGS } from '../../../common/pull-request-reviews.js';
 
 const remoteOptions = { executionBackend: 'remote-controller-dials', projectRoots: 'separate' } as const;
 
@@ -14,6 +15,19 @@ async function openChat(fixture: ChromiumFixture) {
   await client.waitForTurnTerminal(chatId, accepted.turnId);
   await fixture.page.goto(`${fixture.integration.garcon.baseUrl}/chat/${chatId}`);
   await collapseCanonicalFilesWindow(fixture.page);
+}
+
+// Connects the worker checkout so the inbox lists its pull requests.
+async function connectReviewRepository(fixture: ChromiumFixture) {
+  const { client, executionDirs } = fixture.integration;
+  await client.post('/api/v1/pull-request-reviews/repositories', {
+    target: {
+      type: 'new-chat', executorId: client.executorId, agentId: 'shell', model: 'sh', projectPath: executionDirs.project,
+      apiProviderId: null, modelEndpointId: null, modelProtocol: null, permissionMode: 'default', thinkingMode: 'none',
+      agentSettingsById: { shell: { ownerId: 'shell', schemaVersion: 1, values: {} } }, tags: [], preambleChoice: { mode: 'defaults' },
+    },
+    settings: DEFAULT_PULL_REQUEST_REVIEW_SETTINGS,
+  });
 }
 
 function assertOnlyExpectedHttpErrors(fixture: ChromiumFixture) {
@@ -114,11 +128,12 @@ test('worktree creation blocks Refresh and reports uncertainty after dialog disc
   }, undefined, remoteOptions);
 }, 120_000);
 
-test('failed PR detail refresh on reconnect waits for an explicit retry', async () => {
+test('failed PR detail refresh waits for an explicit retry', async () => {
   await withChromiumFixture('git-pr-detail-retry', async (fixture, phase) => {
     const { page, integration } = fixture;
     const { client, executionDirs } = integration;
     await initializeFixtureRepository(executionDirs.project);
+    await connectReviewRepository(fixture);
     await openChat(fixture);
     await clickWorkspaceWindowAddAction(page, 'Open Pull Requests');
     const panel = page.locator('[data-workspace-surface-id="singleton:pull-requests"][aria-hidden="false"]');
@@ -129,20 +144,19 @@ test('failed PR detail refresh on reconnect waits for an explicit retry', async 
       if (failing) await route.fulfill({ status: 503, json: { error: 'Synthetic PR detail unavailable', errorCode: 'GH_OPERATION_FAILED' } });
       else await route.continue();
     });
-    await panel.locator('[data-pr-list] button').filter({ hasText: 'synthetic-worker' }).click();
+    await panel.locator('[data-pr-list] [data-pr-inbox-row]').first().click();
+    await panel.locator('[data-pr-tab="changes"]').click();
     await panel.locator('[data-pr-detail]').getByText('+changed', { exact: true }).waitFor();
-    phase('replace executor session');
-    await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
-    await panel.locator('[aria-busy="true"]').waitFor();
+    phase('failed refresh');
     failing = true;
-    await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
-    await page.getByText('Synthetic PR detail unavailable', { exact: true }).waitFor();
+    await panel.locator('[data-pr-detail]').getByRole('button', { name: 'Refresh', exact: true }).click();
+    await panel.locator('[data-pr-detail]').getByText('Synthetic PR detail unavailable', { exact: true }).waitFor();
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     expect(requests).toBe(2);
     phase('explicit detail retry');
     failing = false;
     const retried = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/gh/pull-request');
-    await panel.locator('[data-pr-detail]').getByRole('button', { name: 'Refresh', exact: true }).click();
+    await panel.locator('[data-pr-detail]').getByRole('button', { name: 'Retry', exact: true }).click();
     expect((await retried).status()).toBe(200);
     expect(requests).toBe(3);
     assertOnlyExpectedHttpErrors(fixture);
