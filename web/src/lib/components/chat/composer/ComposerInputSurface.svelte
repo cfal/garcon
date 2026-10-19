@@ -87,7 +87,7 @@
 			{disabled}
 			readonly={sourceReadOnly}
 			aria-busy={busy}
-			class="content-sized-textarea block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-composer-foreground placeholder:text-muted-foreground disabled:opacity-50 max-h-[min(40dvh,150px)] sm:max-h-[min(40dvh,300px)] text-base leading-6 transition-colors duration-200 px-4 py-3 sm:px-5 sm:py-3.5 min-h-[48px]"
+			class="content-sized-textarea block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-composer-foreground placeholder:text-muted-foreground disabled:opacity-50 max-h-[var(--composer-input-max-height,min(40dvh,150px))] sm:max-h-[var(--composer-input-max-height,min(40dvh,300px))] text-base leading-6 transition-colors duration-200 px-4 py-3 sm:px-5 sm:py-3.5 min-h-[48px]"
 		></textarea>
 	</div>
 </div>

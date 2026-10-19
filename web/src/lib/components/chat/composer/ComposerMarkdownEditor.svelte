@@ -379,7 +379,7 @@
 <div
 	bind:this={container}
 	data-composer-markdown-editor
-	class="composer-markdown-editor max-h-[min(40dvh,150px)] overflow-auto px-4 py-3 text-base leading-6 text-composer-foreground sm:max-h-[min(40dvh,300px)] sm:px-5 sm:py-3.5"
+	class="composer-markdown-editor max-h-[var(--composer-input-max-height,min(40dvh,150px))] overflow-auto px-4 py-3 text-base leading-6 text-composer-foreground sm:max-h-[var(--composer-input-max-height,min(40dvh,300px))] sm:px-5 sm:py-3.5"
 ></div>
 
 <style>

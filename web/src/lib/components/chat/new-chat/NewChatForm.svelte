@@ -786,7 +786,7 @@
 
 			<div
 				data-slot="new-chat-composer"
-				class="relative mt-3 border border-border rounded-lg"
+				class="relative mt-3 border border-border rounded-lg [--composer-input-max-height:300px]"
 				aria-busy={promptTransformPending}
 			>
 				<input

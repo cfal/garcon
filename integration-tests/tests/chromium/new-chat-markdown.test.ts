@@ -95,3 +95,38 @@ test('New Chat formats pasted Markdown, retains its source and draft, and submit
     assertNoBrowserErrors();
   }, undefined, { composerInputMode: null });
 }, 120_000);
+
+test('New Chat keeps its 300px input cap in Source and formatted modes on desktop and mobile', async () => {
+  await withChromiumFixture('new-chat-markdown-sizing', async ({ page, integration, assertNoBrowserErrors }) => {
+    await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+    await page.getByRole('status', { name: 'Loading chat defaults...' }).waitFor({ state: 'detached' });
+    const composer = page.locator('[data-slot="new-chat-composer"]');
+    const source = composer.locator('textarea');
+    const formatted = composer.locator('[data-composer-markdown-editor]');
+    const longDraft = Array.from({ length: 24 }, (_, index) => `Synthetic paragraph ${index + 1}.`).join('\n\n');
+    const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
+    await mkdir(artifacts, { recursive: true });
+    await source.fill(longDraft);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await browserExpect(source).toHaveCSS('height', '300px');
+      expect(await source.evaluate(node => node.scrollHeight > node.clientHeight)).toBe(true);
+      await setFormat(page, 'formatted');
+      await browserExpect(formatted).toBeVisible();
+      await browserExpect(formatted).toHaveCSS('height', '300px');
+      expect(await formatted.evaluate(node => node.scrollHeight > node.clientHeight)).toBe(true);
+      await browserExpect(source).toHaveValue(longDraft);
+      await page.screenshot({ path: join(artifacts, `new-chat-markdown-sizing-${width}.png`) });
+      // Keeps focus inside the dialog while the storage event replaces the focused editor.
+      await composer.getByRole('button', { name: 'Add to prompt', exact: true }).focus();
+      await setFormat(page, 'source');
+      await browserExpect(source).toBeVisible();
+      await source.fill('');
+      await browserExpect(source).toHaveValue('');
+      await browserExpect.poll(() => source.evaluate(node => node.clientHeight)).toBeLessThanOrEqual(52);
+      await source.fill(longDraft);
+    }
+    assertNoBrowserErrors();
+  });
+}, 120_000);
