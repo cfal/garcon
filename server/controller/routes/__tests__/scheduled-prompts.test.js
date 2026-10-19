@@ -45,6 +45,7 @@ function scheduler() {
         snapshot: { ...emptySnapshot, revision: 1 },
       }),
     ),
+    setEnabled: mock(() => Promise.resolve({ ...emptySnapshot, revision: 1 })),
     update: mock(() => Promise.resolve({ ...emptySnapshot, revision: 1 })),
     remove: mock(() => Promise.resolve({ ...emptySnapshot, revision: 1 })),
     reorder: mock(() => Promise.resolve({ ...emptySnapshot, revision: 1 })),
@@ -169,4 +170,19 @@ describe('scheduled prompt routes', () => {
       orderedPromptIds: ['b', 'a'],
     });
   });
+});
+
+
+it('validates and forwards explicit enablement with revision conflicts', async () => {
+  const service = scheduler();
+  const route = createScheduledPromptRoutes(service)['/api/v1/scheduled-prompts/enabled'].PUT;
+  for (const enabled of [null, 'false', 0, undefined]) {
+    expect((await call(route, { expectedRevision: 0, id: 'repeat', enabled }, 'PUT')).response.status).toBe(400);
+  }
+  expect(service.setEnabled).not.toHaveBeenCalled();
+  const request = { expectedRevision: 0, id: 'repeat', enabled: false };
+  expect((await call(route, request, 'PUT')).response.status).toBe(200);
+  expect(service.setEnabled).toHaveBeenCalledWith(request);
+  service.setEnabled.mockRejectedValueOnce(new ScheduledPromptDomainError('SCHEDULED_PROMPT_REVISION_CONFLICT', 'Refresh', 409, true));
+  expect((await call(route, request, 'PUT')).response.status).toBe(409);
 });

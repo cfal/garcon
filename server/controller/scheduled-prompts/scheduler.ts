@@ -12,6 +12,7 @@ import {
   type NewChatScheduledPromptTarget,
   type ReorderScheduledPromptsRequest,
   type RemoveScheduledPromptRequest,
+  type SetScheduledPromptEnabledRequest,
   type ScheduleInPromptRequest,
   type ScheduledPrompt,
   type ScheduledPromptDefinitionInput,
@@ -277,6 +278,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       }
       const validated = this.#validateDefinition(definition);
       const replacement = this.#promptFromDefinition(request.id, validated, new Date(), previous.createdAt);
+      replacement.enabled = previous.enabled;
       const release = this.deps.retainExecutorReferences?.(
         replacement.target.type === 'new-chat' ? [replacement.target.executorId] : [],
         previous.target.type === 'new-chat' ? [previous.target.executorId] : [],
@@ -305,6 +307,51 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       } finally {
         release?.();
       }
+    });
+  }
+
+  async setEnabled(request: SetScheduledPromptEnabledRequest): Promise<ScheduledPromptsSnapshot> {
+    return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
+      if (typeof request.enabled !== 'boolean') {
+        throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_VALIDATION_FAILED', 'enabled must be a boolean', 400);
+      }
+      const previous = this.deps.store.get(request.id);
+      if (!previous) {
+        throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_NOT_FOUND', 'Scheduled prompt not found', 404);
+      }
+      const now = new Date();
+      const replacement = { ...previous, enabled: request.enabled, updatedAt: now.toISOString() };
+      if (request.enabled && !previous.enabled) {
+        const earliest = nextMinute(now);
+        const scheduledAt = Date.parse(replacement.schedule.nextRunAt);
+        if (scheduledAt < earliest) {
+          if (replacement.schedule.type === 'once') {
+            throw new ScheduledPromptDomainError(
+              'SCHEDULED_PROMPT_VALIDATION_FAILED', 'Choose a future run time before enabling this one-off prompt.', 400,
+            );
+          }
+          const intervalMs = replacement.schedule.intervalMinutes * 60_000;
+          const nextRunAt = new Date(scheduledAt + Math.ceil((earliest - scheduledAt) / intervalMs) * intervalMs).toISOString();
+          if (replacement.schedule.endAt && nextRunAt > replacement.schedule.endAt) {
+            throw new ScheduledPromptDomainError(
+              'SCHEDULED_PROMPT_VALIDATION_FAILED', 'Update the end date before enabling this expired prompt.', 400,
+            );
+          }
+          replacement.schedule.nextRunAt = nextRunAt;
+        }
+      }
+      await this.deps.store.replace(replacement, request.expectedRevision);
+      this.#jobs.get(request.id)?.stop();
+      this.#jobs.delete(request.id);
+      try {
+        this.#register(replacement);
+      } catch (error) {
+        await this.deps.store.restore(previous);
+        this.#register(previous);
+        throw error;
+      }
+      this.#emitInvalidated('updated');
+      return this.#snapshot();
     });
   }
 
@@ -438,6 +485,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
   ): ScheduledPrompt {
     return {
       id,
+      enabled: true,
       schedule:
         definition.schedule.type === 'once'
           ? { type: 'once', nextRunAt: definition.schedule.runAtUtc }
@@ -456,7 +504,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
   }
 
   #register(scheduledPrompt: ScheduledPrompt): void {
-    if (this.#stopped) return;
+    if (this.#stopped || scheduledPrompt.enabled === false) return;
     this.#jobs.get(scheduledPrompt.id)?.stop();
     const expectedRunAt = scheduledPrompt.schedule.nextRunAt;
     const expectedMs = Date.parse(expectedRunAt);

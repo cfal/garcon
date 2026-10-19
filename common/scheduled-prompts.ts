@@ -85,6 +85,7 @@ export type ScheduledPromptTarget = NewChatScheduledPromptTarget | ExistingChatS
 
 export interface ScheduledPrompt {
   id: string;
+  enabled: boolean;
   name?: string;
   schedule: ScheduledPromptSchedule;
   target: ScheduledPromptTarget;
@@ -152,6 +153,12 @@ export interface CreateScheduledPromptRequest {
 
 export interface UpdateScheduledPromptRequest extends CreateScheduledPromptRequest {
   id: string;
+}
+
+export interface SetScheduledPromptEnabledRequest {
+  expectedRevision: number;
+  id: string;
+  enabled: boolean;
 }
 
 export interface RemoveScheduledPromptRequest {
@@ -408,6 +415,7 @@ export function normalizeScheduledPrompt(value: unknown): ScheduledPrompt | null
   const target = normalizeScheduledPromptTarget(raw.target);
   if (
     name === null ||
+    (raw.enabled !== undefined && typeof raw.enabled !== 'boolean') ||
     !id ||
     !prompt ||
     prompt.length > SCHEDULED_PROMPT_MAX_LENGTH ||
@@ -421,6 +429,7 @@ export function normalizeScheduledPrompt(value: unknown): ScheduledPrompt | null
     return null;
   return {
     id,
+    enabled: raw.enabled !== false,
     ...(name === undefined ? {} : { name }),
     schedule,
     target,

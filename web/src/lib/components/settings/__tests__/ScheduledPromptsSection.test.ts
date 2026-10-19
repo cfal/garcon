@@ -16,6 +16,7 @@ const ScheduledPromptsSectionTestHost = (await import('./ScheduledPromptsSection
 function prompt(id: string, title: string, target: ScheduledPromptTarget): ScheduledPrompt {
 	return {
 		id,
+		enabled: true,
 		schedule: { type: 'once', nextRunAt: '2099-01-01T00:00:00.000Z' },
 		target,
 		prompt: title,

@@ -2,6 +2,7 @@ import type {
   CreateScheduledPromptRequest,
   ReorderScheduledPromptsRequest,
   RemoveScheduledPromptRequest,
+  SetScheduledPromptEnabledRequest,
   ScheduleInPromptRequest,
   ScheduleInPromptResponse,
   UpdateScheduledPromptRequest,
@@ -82,6 +83,20 @@ export default function createScheduledPromptRoutes(scheduledPrompts: ScheduledP
     }
   }
 
+  async function putEnabled(body: SetScheduledPromptEnabledRequest): Promise<Response> {
+    const revision = expectedRevision(body?.expectedRevision);
+    const id = typeof body?.id === 'string' ? body.id.trim() : '';
+    if (revision === null || !id || typeof body?.enabled !== 'boolean') {
+      return jsonError('expectedRevision, id, and enabled are required', 400, 'SCHEDULED_PROMPT_VALIDATION_FAILED');
+    }
+    try {
+      const snapshot = await scheduledPrompts.setEnabled({ expectedRevision: revision, id, enabled: body.enabled });
+      return Response.json({ success: true, snapshot });
+    } catch (error) {
+      return scheduledPromptError(error);
+    }
+  }
+
   async function deletePrompt(body: RemoveScheduledPromptRequest): Promise<Response> {
     const revision = expectedRevision(body?.expectedRevision);
     const id = typeof body?.id === 'string' ? body.id.trim() : '';
@@ -124,6 +139,9 @@ export default function createScheduledPromptRoutes(scheduledPrompts: ScheduledP
       POST: withJsonBody(postPrompt),
       PUT: withJsonBody(putPrompt),
       DELETE: withJsonBody(deletePrompt),
+    },
+    '/api/v1/scheduled-prompts/enabled': {
+      PUT: withJsonBody(putEnabled),
     },
     '/api/v1/scheduled-prompts/reorder': {
       PUT: withJsonBody(putOrder),

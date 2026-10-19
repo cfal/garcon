@@ -5,6 +5,7 @@ import type { ScheduledPromptsMutationResponse, ScheduledPromptsSnapshot } from 
 function scheduledPrompt(id: string) {
 	return {
 		id,
+		enabled: true,
 		schedule: { type: 'once' as const, nextRunAt: '2030-01-01T09:00:00.000Z' },
 		target: { type: 'existing-chat' as const, chatId: '123', busyBehavior: 'queue' as const },
 		prompt: `Prompt ${id}`,
@@ -141,4 +142,18 @@ describe('ScheduledPromptsStore', () => {
 
 		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b']));
 	});
+});
+
+
+it('publishes only saved enablement and retains the previous state on failure', async () => {
+  const saved = snapshot(2, ['a']);
+  saved.prompts[0].enabled = false;
+  const setEnabled = vi.fn().mockResolvedValueOnce({ success: true, snapshot: saved }).mockRejectedValueOnce(new Error('offline'));
+  const store = new ScheduledPromptsStore({ setEnabled });
+  store.applySnapshot(snapshot(1, ['a']));
+  await store.setEnabled('a', false);
+  expect(setEnabled).toHaveBeenCalledWith({ expectedRevision: 1, id: 'a', enabled: false });
+  expect(store.prompts[0].enabled).toBe(false);
+  await expect(store.setEnabled('a', true)).rejects.toThrow('offline');
+  expect(store.prompts[0].enabled).toBe(false);
 });

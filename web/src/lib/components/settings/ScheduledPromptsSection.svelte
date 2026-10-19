@@ -38,6 +38,7 @@
 	let removeError = $state<string | null>(null);
 	let runLogOpen = $state(false);
 	let movingPromptId = $state<string | null>(null);
+	let togglingPromptId = $state<string | null>(null);
 	let operationError = $state<string | null>(null);
 	let currentTime = $state(new Date());
 	const lastRunByPromptId = $derived.by(() => {
@@ -126,8 +127,21 @@
 		return chatId && sessions.byId[chatId] ? chatId : null;
 	}
 
+	async function toggle(scheduledPrompt: ScheduledPrompt): Promise<void> {
+		if (togglingPromptId || movingPromptId) return;
+		togglingPromptId = scheduledPrompt.id;
+		operationError = null;
+		try {
+			await prompts.setEnabled(scheduledPrompt.id, scheduledPrompt.enabled === false);
+		} catch (error) {
+			operationError = error instanceof Error ? error.message : m.scheduled_prompts_toggle_error();
+		} finally {
+			togglingPromptId = null;
+		}
+	}
+
 	async function move(scheduledPrompt: ScheduledPrompt, direction: 'up' | 'down'): Promise<void> {
-		if (movingPromptId) return;
+		if (movingPromptId || togglingPromptId) return;
 		movingPromptId = scheduledPrompt.id;
 		operationError = null;
 		try {
@@ -220,7 +234,9 @@
 						lastRunChatId={lastRun?.outcome === 'created-chat'
 							? openableChatId(lastRun.chatId)
 							: null}
-						disabled={movingPromptId !== null}
+						disabled={movingPromptId !== null || togglingPromptId !== null}
+						toggling={togglingPromptId === scheduledPrompt.id}
+						onToggle={() => void toggle(scheduledPrompt)}
 						onEdit={() => openEdit(scheduledPrompt)}
 						onRemove={() => {
 							removeError = null;

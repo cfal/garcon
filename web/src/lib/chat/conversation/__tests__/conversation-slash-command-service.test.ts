@@ -999,7 +999,7 @@ describe('ConversationSlashCommandService', () => {
 		mockScheduleChatPrompt.mockResolvedValueOnce({
 			success: true,
 			scheduledPrompt: {
-				id: 'prompt-1',
+				id: 'prompt-1', enabled: true,
 				schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
 				target: { type: 'existing-chat', chatId: 'chat-1', busyBehavior: 'skip' },
 				prompt: 'Continue',

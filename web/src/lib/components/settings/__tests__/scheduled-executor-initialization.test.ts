@@ -8,7 +8,7 @@ import type { JsonObject } from '$shared/json';
 
 function scheduledPrompt(executorId?: string): ScheduledPrompt & { target: Extract<ScheduledPrompt['target'], { type: 'new-chat' }> } {
 	return {
-		id: 'synthetic-schedule', prompt: 'Synthetic prompt',
+		id: 'synthetic-schedule', enabled: true, prompt: 'Synthetic prompt',
 		schedule: { type: 'once', nextRunAt: '2030-01-02T09:00:00.000Z' },
 		createdAt: '2029-01-01T00:00:00.000Z', updatedAt: '2029-01-01T00:00:00.000Z',
 		target: {

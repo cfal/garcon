@@ -78,7 +78,7 @@ function createForm(
 
 function existingPrompt(schedule: ScheduledPrompt['schedule']): ScheduledPrompt {
 	return {
-		id: 'prompt-a',
+		id: 'prompt-a', enabled: true,
 		schedule,
 		target: { type: 'existing-chat', chatId: '123', busyBehavior: 'queue' },
 		prompt: 'Continue the work',
@@ -133,7 +133,7 @@ function newChatPrompt(
 		Partial<Pick<Extract<ScheduledPrompt['target'], { type: 'new-chat' }>, 'preambleChoice'>>,
 ): ScheduledPrompt {
 	return {
-		id: 'prompt-new-chat',
+		id: 'prompt-new-chat', enabled: true,
 		schedule: { type: 'once', nextRunAt: '2030-01-02T09:00:00.000Z' },
 		target: { preambleChoice: { mode: 'defaults' }, ...target },
 		prompt: 'Continue the work',
@@ -868,7 +868,7 @@ describe('ScheduledPromptFormState', () => {
 		form.startup.replaceAgentSettingsById = vi.fn();
 		form.startup.validatePath = vi.fn();
 		const scheduledPrompt: ScheduledPrompt = {
-			id: 'tagged-prompt',
+			id: 'tagged-prompt', enabled: true,
 			schedule: { type: 'once', nextRunAt: '2030-01-02T09:00:00.000Z' },
 			target: {
 				type: 'new-chat',

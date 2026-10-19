@@ -19,6 +19,7 @@ async function tempDir() {
 function scheduledPrompt(id, schedule) {
   return {
     id,
+    enabled: true,
     schedule,
     target: { type: 'existing-chat', chatId: '123', busyBehavior: 'queue' },
     prompt: `Prompt ${id}`,

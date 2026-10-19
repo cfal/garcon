@@ -1065,7 +1065,7 @@ describe('ConversationSessionController', () => {
 			mockScheduleChatPrompt.mockResolvedValue({
 				success: true,
 				scheduledPrompt: {
-					id: 'prompt-in',
+					id: 'prompt-in', enabled: true,
 					schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
 					target: { type: 'existing-chat', chatId: 'chat-1', busyBehavior: 'skip' },
 					prompt: 'Synthetic follow-up',
@@ -1224,7 +1224,7 @@ describe('ConversationSessionController', () => {
 		mockScheduleChatPrompt.mockResolvedValue({
 			success: true,
 			scheduledPrompt: {
-				id: 'prompt-in',
+				id: 'prompt-in', enabled: true,
 				schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
 				target: { type: 'existing-chat', chatId: 'chat-1', busyBehavior: 'skip' },
 				prompt: 'Continue the migration',

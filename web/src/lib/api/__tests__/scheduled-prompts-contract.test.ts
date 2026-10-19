@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createScheduledPrompt, getScheduledPrompts, updateScheduledPrompt, scheduleChatPrompt } from '../scheduled-prompts';
+import { createScheduledPrompt, getScheduledPrompts, updateScheduledPrompt, scheduleChatPrompt, setScheduledPromptEnabled } from '../scheduled-prompts';
 import {
 	SCHEDULED_PROMPT_LABEL_MAX_LENGTH,
 	normalizeScheduledPromptTarget,
@@ -15,6 +15,7 @@ vi.stubGlobal('localStorage', {
 
 const scheduledPrompt = {
 	id: 'prompt-in',
+	enabled: true,
 	schedule: { type: 'once' as const, nextRunAt: '2030-01-01T09:00:00.000Z' },
 	target: {
 		type: 'existing-chat' as const,
@@ -36,6 +37,17 @@ describe('scheduled prompts API contract', () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+	});
+
+	it('sends typed enablement and normalizes the persisted state', async () => {
+		const paused = { ...scheduledPrompt, enabled: false };
+		fetchMock.mockResolvedValue(Response.json({ success: true, snapshot: { revision: 2, prompts: [paused], runLog: [] } }));
+		const result = await setScheduledPromptEnabled({ expectedRevision: 1, id: paused.id, enabled: false });
+		expect(result.snapshot.prompts[0].enabled).toBe(false);
+		const [url, options] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/scheduled-prompts/enabled');
+		expect(options.method).toBe('PUT');
+		expect(JSON.parse(options.body)).toEqual({ expectedRevision: 1, id: paused.id, enabled: false });
 	});
 
 	it('posts a relative scheduled prompt and normalizes the created prompt and snapshot', async () => {

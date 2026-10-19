@@ -6,7 +6,7 @@ const workerId = '22222222-2222-4222-8222-222222222222';
 
 function prompt(target: ScheduledPromptTarget): ScheduledPrompt {
 	return {
-		id: 'prompt-1',
+		id: 'prompt-1', enabled: true,
 		schedule: { type: 'once', nextRunAt: '2030-01-01T00:00:00.000Z' },
 		target,
 		prompt: 'Synthetic prompt',

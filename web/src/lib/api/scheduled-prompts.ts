@@ -5,6 +5,7 @@ import {
 	type CreateScheduledPromptRequest,
 	type ReorderScheduledPromptsRequest,
 	type RemoveScheduledPromptRequest,
+	type SetScheduledPromptEnabledRequest,
 	type ScheduleInPromptRequest,
 	type ScheduleInPromptResponse,
 	type ScheduledPromptsMutationResponse,
@@ -38,6 +39,12 @@ export async function updateScheduledPrompt(
 	request: UpdateScheduledPromptRequest,
 ): Promise<ScheduledPromptsMutationResponse> {
 	return normalizeMutation(await apiPut('/api/v1/scheduled-prompts', request));
+}
+
+export async function setScheduledPromptEnabled(
+	request: SetScheduledPromptEnabledRequest,
+): Promise<ScheduledPromptsMutationResponse> {
+	return normalizeMutation(await apiPut('/api/v1/scheduled-prompts/enabled', request));
 }
 
 export async function removeScheduledPrompt(

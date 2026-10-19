@@ -26,6 +26,8 @@
 	import Folder from '@lucide/svelte/icons/folder';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import ExecutorPill from '$lib/components/shared/ExecutorPill.svelte';
+	import Pause from '@lucide/svelte/icons/pause';
+	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Repeat from '@lucide/svelte/icons/repeat';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
@@ -44,6 +46,8 @@
 		lastRunChatId?: string | null;
 		currentTime: Date;
 		disabled?: boolean;
+		toggling?: boolean;
+		onToggle: () => void;
 		onEdit: () => void;
 		onRemove: () => void;
 		onMoveUp: () => void;
@@ -61,6 +65,8 @@
 		lastRunChatId = null,
 		currentTime,
 		disabled = false,
+		toggling = false,
+		onToggle,
 		onEdit,
 		onRemove,
 		onMoveUp,
@@ -68,6 +74,7 @@
 		onOpenChat,
 	}: Props = $props();
 
+	let enabled = $derived(scheduledPrompt.enabled !== false);
 	const headingId = $props.id();
 	let promptPreview = $derived(scheduledPromptTitle(scheduledPrompt.prompt));
 	let title = $derived(scheduledPrompt.name ?? promptPreview);
@@ -75,7 +82,9 @@
 	let timeUntilRun = $derived(formatCompactTimeUntil(schedule.nextRunAt, currentTime));
 	let nextRunLabel = $derived(scheduledInstantLabel(schedule.nextRunAt, currentTime));
 	let relativeRunLabel = $derived(
-		timeUntilRun ? m.scheduled_prompts_runs_in({ duration: timeUntilRun }) : m.scheduled_prompts_due_now(),
+		timeUntilRun
+			? m.scheduled_prompts_runs_in({ duration: timeUntilRun })
+			: m.scheduled_prompts_due_now(),
 	);
 	let cadence = $derived(
 		schedule.type === 'once'
@@ -92,8 +101,7 @@
 	);
 	let projectName = $derived(
 		newChatTarget
-			? newChatTarget.projectPath.split(/[\\/]/).filter(Boolean).at(-1) ||
-					newChatTarget.projectPath
+			? newChatTarget.projectPath.split(/[\\/]/).filter(Boolean).at(-1) || newChatTarget.projectPath
 			: '',
 	);
 	let explicitPreambleCount = $derived(
@@ -114,14 +122,21 @@
 		'inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground';
 </script>
 
-<article class="rounded-lg border border-border bg-card p-3 sm:p-4" aria-labelledby={headingId}>
+<article
+	class="rounded-lg border border-border bg-card p-3 transition-colors sm:p-4"
+	data-enabled={enabled}
+	aria-labelledby={headingId}
+>
 	<div class="flex min-w-0 items-start gap-2">
 		<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 pt-1 text-xs">
 			{#if executorLabel}
 				<ExecutorPill label={executorLabel} data-slot="scheduled-prompt-executor" />
 			{/if}
 			<span
-				class="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-foreground"
+				class={cn(
+					'inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium',
+					enabled ? 'bg-primary/10 text-foreground' : 'bg-muted text-muted-foreground',
+				)}
 				data-slot="scheduled-prompt-cadence"
 			>
 				{#if schedule.type === 'once'}
@@ -135,11 +150,52 @@
 				{/if}
 			</span>
 			<span class="text-foreground" data-slot="scheduled-prompt-next-run">
-				{nextRunLabel}
-				<span class="whitespace-nowrap text-muted-foreground">· {relativeRunLabel}</span>
+				{#if enabled}
+					{nextRunLabel}
+					<span class="whitespace-nowrap text-muted-foreground">· {relativeRunLabel}</span>
+				{:else}
+					<span class="inline-flex items-center gap-1 text-muted-foreground">
+						<Pause class="h-3 w-3" aria-hidden="true" />
+						{m.scheduled_prompts_paused()}
+					</span>
+				{/if}
 			</span>
 		</div>
 		<div class="-mr-1 -mt-0.5 flex shrink-0 items-center">
+			<button
+				type="button"
+				role="switch"
+				aria-checked={enabled}
+				aria-label={m.scheduled_prompts_enabled_label({ title })}
+				aria-busy={toggling}
+				title={enabled ? m.scheduled_prompts_pause_hint() : m.scheduled_prompts_resume_hint()}
+				disabled={disabled || toggling}
+				onclick={onToggle}
+				class="group inline-flex min-h-11 min-w-11 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60"
+			>
+				<span
+					class={cn(
+						'relative inline-flex h-5 w-9 items-center rounded-full border transition-colors motion-reduce:transition-none',
+						enabled
+							? 'border-primary bg-primary group-hover:bg-primary/90'
+							: 'border-border bg-input group-hover:bg-muted',
+					)}
+				>
+					<span
+						class={cn(
+							'flex size-4 items-center justify-center rounded-full shadow-sm transition-transform motion-reduce:transition-none',
+							enabled
+								? 'translate-x-4 bg-(color:--switch-thumb-checked)'
+								: 'translate-x-0.5 bg-(color:--switch-thumb-unchecked)',
+						)}
+					>
+						{#if toggling}<Loader2
+								class="size-2.5 animate-spin text-muted-foreground"
+								aria-hidden="true"
+							/>{/if}
+					</span>
+				</span>
+			</button>
 			<Button
 				variant="ghost"
 				size="icon-sm"
@@ -211,7 +267,10 @@
 				<span class="truncate">{existingChat.title}</span>
 			</button>
 		{:else if existingChat?.title}
-			<span class="inline-flex min-w-0 max-w-full items-center gap-1" data-slot="scheduled-prompt-target">
+			<span
+				class="inline-flex min-w-0 max-w-full items-center gap-1"
+				data-slot="scheduled-prompt-target"
+			>
 				<MessageSquare class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
 				<span class="truncate">{existingChat.title}</span>
 			</span>
@@ -249,7 +308,9 @@
 		<div
 			class="mt-3 flex min-w-0 items-start gap-1.5 border-t border-border pt-2 text-xs text-muted-foreground"
 			data-slot="scheduled-prompt-last-run"
-			title={lastRun.outcome === 'failed' || lastRun.outcome === 'missed' ? lastRun.message : undefined}
+			title={lastRun.outcome === 'failed' || lastRun.outcome === 'missed'
+				? lastRun.message
+				: undefined}
 		>
 			<ScheduledRunOutcomeIcon outcome={lastRun.outcome} class="mt-px h-3.5 w-3.5" />
 			<span class="min-w-0 break-words">{lastRunSummary}</span>

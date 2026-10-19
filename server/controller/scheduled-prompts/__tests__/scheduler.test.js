@@ -26,6 +26,7 @@ async function tempDir() {
 function recurringPrompt(nextRunAt) {
   return {
     id: 'repeat',
+    enabled: true,
     schedule: { type: 'recurring', intervalMinutes: 60, nextRunAt, endAt: null },
     target: { type: 'existing-chat', chatId: '123', busyBehavior: 'queue' },
     prompt: 'Continue the work',
@@ -1029,5 +1030,73 @@ describe('scheduled prompt scheduler', () => {
     scheduler.stop();
 
     expect(replacement.stopped).toBe(true);
+  });
+});
+
+
+describe('scheduled prompt enablement', () => {
+  afterEach(() => setSystemTime());
+
+  it('defaults on, persists pauses across restart, and fences stale cron callbacks', async () => {
+    setSystemTime(new Date('2030-01-01T00:00:00.000Z'));
+    const { store, cron, scheduler } = await sameChatScheduler();
+    const created = await scheduler.create({ expectedRevision: 0, scheduledPrompt: recurringDefinition('2030-01-01T01:00:00.000Z', 60) });
+    const prompt = created.prompts[0];
+    expect(prompt.enabled).toBe(true);
+    const oldJob = cron.jobs[0];
+    const paused = await scheduler.setEnabled({ expectedRevision: created.revision, id: prompt.id, enabled: false });
+    expect(paused.prompts[0].enabled).toBe(false);
+    expect(oldJob.stopped).toBe(true);
+    setSystemTime(new Date('2030-01-01T01:00:00.000Z'));
+    await oldJob.fire();
+    expect(store.get(prompt.id).schedule.nextRunAt).toBe('2030-01-01T01:00:00.000Z');
+    expect(await store.claimOccurrence(prompt.id, prompt.schedule.nextRunAt)).toBeNull();
+    await store.init();
+    await scheduler.start(new Date('2030-01-02T00:00:00.000Z'));
+    expect((await scheduler.snapshotAfterReconciliation()).prompts[0].enabled).toBe(false);
+    expect((await scheduler.snapshotAfterReconciliation()).runLog).toEqual([]);
+    scheduler.stop();
+  });
+
+  it('resumes the original recurring cadence strictly in the future without catch-up', async () => {
+    setSystemTime(new Date('2030-01-01T00:00:00.000Z'));
+    const { store, cron, scheduler } = await sameChatScheduler();
+    await store.create({ ...recurringPrompt('2030-01-01T01:00:00.000Z'), enabled: false }, 0);
+    setSystemTime(new Date('2030-01-01T04:00:30.000Z'));
+    const snapshot = await scheduler.setEnabled({ expectedRevision: 1, id: 'repeat', enabled: true });
+    expect(snapshot.prompts[0]).toMatchObject({ enabled: true, schedule: { nextRunAt: '2030-01-01T05:00:00.000Z' } });
+    expect(snapshot.runLog).toEqual([]);
+    expect(cron.jobs).toHaveLength(1);
+    scheduler.stop();
+  });
+
+  it('retains overdue paused one-offs and expired recurrence until their dates are edited', async () => {
+    setSystemTime(new Date('2030-01-02T00:00:00.000Z'));
+    const { store, scheduler } = await sameChatScheduler();
+    await store.create({ ...recurringPrompt('2030-01-01T01:00:00.000Z'), enabled: false, schedule: { type: 'once', nextRunAt: '2030-01-01T01:00:00.000Z' } }, 0);
+    expect((await scheduler.snapshotAfterReconciliation()).prompts).toHaveLength(1);
+    await expect(scheduler.setEnabled({ expectedRevision: 1, id: 'repeat', enabled: true })).rejects.toThrow('Choose a future run time');
+    await store.replace({ ...recurringPrompt('2030-01-01T01:00:00.000Z'), enabled: false, schedule: { ...recurringPrompt('2030-01-01T01:00:00.000Z').schedule, endAt: '2030-01-01T02:00:00.000Z' } }, 1);
+    await expect(scheduler.setEnabled({ expectedRevision: 2, id: 'repeat', enabled: true })).rejects.toThrow('Update the end date');
+    expect(store.get('repeat').enabled).toBe(false);
+  });
+
+  it('preserves a pause through editing and rejects stale revisions', async () => {
+    setSystemTime(new Date('2030-01-01T00:00:00.000Z'));
+    const { store, scheduler } = await sameChatScheduler();
+    await store.create({ ...recurringPrompt('2030-01-01T01:00:00.000Z'), enabled: false }, 0);
+    const edited = await scheduler.update({ expectedRevision: 1, id: 'repeat', scheduledPrompt: recurringDefinition('2030-01-01T02:00:00.000Z') });
+    expect(edited.prompts[0].enabled).toBe(false);
+    await expect(scheduler.setEnabled({ expectedRevision: 1, id: 'repeat', enabled: true })).rejects.toMatchObject({ status: 409 });
+    expect(store.get('repeat').enabled).toBe(false);
+  });
+
+  it('retains a paused state if registration fails when resuming', async () => {
+    setSystemTime(new Date('2030-01-01T00:00:00.000Z'));
+    const { store, cron, scheduler } = await sameChatScheduler();
+    await store.create({ ...recurringPrompt('2030-01-01T01:00:00.000Z'), enabled: false }, 0);
+    cron.schedule = () => { throw new Error('cron registration failed'); };
+    await expect(scheduler.setEnabled({ expectedRevision: 1, id: 'repeat', enabled: true })).rejects.toThrow('cron registration failed');
+    expect(store.get('repeat').enabled).toBe(false);
   });
 });

@@ -54,7 +54,7 @@ function renderExistingSchedule() {
 	} satisfies ChatListEntry;
 	sessions.upsertFromServer([chat]);
 	const prompt: ScheduledPrompt = {
-		id: 'synthetic-schedule', prompt: '  echo {{chat_id}}  \n',
+		id: 'synthetic-schedule', enabled: true, prompt: '  echo {{chat_id}}  \n',
 		schedule: { type: 'once', nextRunAt: '2099-01-02T09:00:00.000Z' },
 		createdAt: '2029-01-01T00:00:00.000Z', updatedAt: '2029-01-01T00:00:00.000Z',
 		target: { type: 'existing-chat', chatId: chat.id, busyBehavior: 'queue' },

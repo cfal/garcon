@@ -85,6 +85,7 @@ describe("scheduled prompt persistence migration", () => {
         expect(snapshot.prompts).toEqual(
           original.prompts.map((prompt) => ({
             ...prompt,
+            enabled: true,
             schedule: {
               type: "recurring",
               intervalMinutes: prompt.schedule.intervalHours * 60,

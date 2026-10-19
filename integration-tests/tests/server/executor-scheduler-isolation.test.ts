@@ -74,7 +74,7 @@ for (const dialer of ['controller', 'worker'] as const) {
         setSystemTime(new Date(due - 30_000));
         await store.init();
         const local = {
-          id: 'local-due', schedule: { type: 'once', nextRunAt: new Date(due).toISOString() },
+          id: 'local-due', enabled: true, schedule: { type: 'once', nextRunAt: new Date(due).toISOString() },
           target: { type: 'existing-chat', chatId: '1111111111111111', busyBehavior: 'queue' },
           prompt: 'Synthetic scheduled prompt', createdAt: '2029-01-01T00:00:00.000Z', updatedAt: '2029-01-01T00:00:00.000Z',
         } satisfies ScheduledPrompt;

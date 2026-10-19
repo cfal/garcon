@@ -241,3 +241,16 @@ describe('scheduled prompt recurring intervals', () => {
     }
   });
 });
+
+
+it('defaults existing records to enabled, retains pauses, and rejects invalid enablement', () => {
+  const record = {
+    id: 'prompt-enabled', prompt: 'Synthetic prompt',
+    schedule: { type: 'once', nextRunAt: '2030-01-01T00:00:00.000Z' },
+    target: { type: 'existing-chat', chatId: 'synthetic-chat', busyBehavior: 'skip' },
+    createdAt: '2029-01-01T00:00:00.000Z', updatedAt: '2029-01-01T00:00:00.000Z',
+  };
+  expect(normalizeScheduledPrompt(record).enabled).toBe(true);
+  expect(normalizeScheduledPrompt({ ...record, enabled: false }).enabled).toBe(false);
+  for (const enabled of [null, 'false', 0]) expect(normalizeScheduledPrompt({ ...record, enabled })).toBeNull();
+});

@@ -62,7 +62,7 @@ Garcon keeps that development loop coherent:
 - **Coordinate agents visibly.** Exchange provenance-labeled messages between chats, launch delegated children, receive their final results, and keep parentage auditable instead of hiding it in a side channel.
 - **Track durable work.** Create workspace tickets in a list or status board, assign and claim work, discuss progress, and retain attributed change history across chat deletion and server restarts.
 - **Review the real change.** Browse and edit files, run terminals, inspect reasoning and tool calls, review diffs, then stage individual lines, hunks, files, or folders before committing and pushing.
-- **Find and reuse context.** Search chat metadata and indexed transcripts, save filters, tag, pin, archive, export Markdown or XML, build bounded handoffs, share snapshots, and schedule prompts.
+- **Find and reuse context.** Search chat metadata and indexed transcripts, save filters, tag, pin, archive, export Markdown or XML, build bounded handoffs, share snapshots, and [schedule prompts](docs/scheduled-prompts.md) with per-prompt pause and resume.
 - **Work from any screen.** Use the responsive workspace on desktop or phone and choose Classic, Phosphor, or colorblind-aware themes in light or dark mode.
 
 ## See It In Action

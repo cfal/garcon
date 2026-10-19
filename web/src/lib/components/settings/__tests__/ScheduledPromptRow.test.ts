@@ -11,6 +11,7 @@ import ScheduledPromptRow from '../ScheduledPromptRow.svelte';
 function makePrompt(schedule: ScheduledPromptSchedule): ScheduledPrompt {
 	return {
 		id: 'prompt-1',
+		enabled: true,
 		schedule,
 		target: { type: 'existing-chat', chatId: '123', busyBehavior: 'skip' },
 		prompt: 'Review the build',
@@ -24,6 +25,9 @@ interface RowOptions {
 	existingChat?: Pick<ChatSessionRecord, 'id' | 'title'>;
 	lastRun?: ScheduledPromptRunLogEntry;
 	lastRunChatId?: string | null;
+	onToggle?: () => void;
+	toggling?: boolean;
+	disabled?: boolean;
 	onOpenChat?: (chatId: string) => void;
 }
 
@@ -31,6 +35,7 @@ function renderRow(scheduledPrompt: ScheduledPrompt, currentTime: Date, options:
 	return render(ScheduledPromptRow, {
 		scheduledPrompt,
 		currentTime,
+		onToggle: vi.fn(),
 		...options,
 		index: 0,
 		total: 1,
@@ -254,6 +259,7 @@ describe('ScheduledPromptRow', () => {
 			currentTime: new Date('2030-01-01T02:03:00.000Z'),
 			index: 0,
 			total: 1,
+			onToggle: vi.fn(),
 			onEdit: vi.fn(),
 			onRemove: vi.fn(),
 			onMoveUp: vi.fn(),
@@ -311,4 +317,25 @@ describe('ScheduledPromptRow', () => {
 		expect(screen.getByRole('button', { name: 'Prompt actions' })).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Remove prompt' })).toBeNull();
 	});
+});
+
+
+it('exposes a named switch and replaces the countdown with Paused when off', async () => {
+  const onToggle = vi.fn();
+  const prompt = { ...makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:00:00.000Z' }), enabled: false };
+  const { container } = renderRow(prompt, new Date('2030-01-01T00:00:00.000Z'), { onToggle });
+  const toggle = screen.getByRole('switch', { name: 'Scheduled prompt enabled: Review the build' });
+  expect(toggle.getAttribute('aria-checked')).toBe('false');
+  expect(slotText(container, 'scheduled-prompt-next-run')).toBe('Paused');
+  await fireEvent.click(toggle);
+  expect(onToggle).toHaveBeenCalledOnce();
+  expect(toggle.getAttribute('aria-checked')).toBe('false');
+});
+
+it('keeps the saved switch value and blocks duplicate requests while saving', () => {
+  renderRow(makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:00:00.000Z' }), new Date(), { toggling: true });
+  const toggle = screen.getByRole('switch') as HTMLButtonElement;
+  expect(toggle.disabled).toBe(true);
+  expect(toggle.getAttribute('aria-busy')).toBe('true');
+  expect(toggle.getAttribute('aria-checked')).toBe('true');
 });
