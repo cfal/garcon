@@ -12,7 +12,9 @@ export interface LiveCodexProtocolProbe {
   prepareWorkspace(directories: IntegrationDirectories): Promise<void>;
   readApprovalRequests(): Promise<string[]>;
   readApprovalRequestDetails(): Promise<LiveCodexApprovalRequest[]>;
+  readResolvedApprovalIndexes(): Promise<number[]>;
   readCommandItemIds(): Promise<string[]>;
+  readCompletedCommandItemIds(): Promise<string[]>;
   waitForApprovalRequest(count?: number): Promise<string>;
 }
 
@@ -24,7 +26,8 @@ export interface LiveCodexApprovalRequest {
 }
 
 interface LiveCodexProbeEntry {
-  type: 'approval-request' | 'command-item';
+  type: 'approval-request' | 'command-item' | 'completed-command-item' | 'approval-resolved';
+  approvalIndex?: number;
   method?: string;
   approvalId?: string | null;
   itemId?: string | null;
@@ -87,9 +90,23 @@ exec "$GARCON_LIVE_CODEX_BUN_BINARY" "$GARCON_LIVE_CODEX_FORWARDER" "$@"
     },
     readApprovalRequests,
     readApprovalRequestDetails,
+    async readResolvedApprovalIndexes() {
+      return (await readProbeEntries(approvalPath)).flatMap((entry) => (
+        entry.type === 'approval-resolved' && typeof entry.approvalIndex === 'number'
+          ? [entry.approvalIndex]
+          : []
+      ));
+    },
     async readCommandItemIds() {
       return (await readProbeEntries(approvalPath)).flatMap((entry) => (
         entry.type === 'command-item' && typeof entry.itemId === 'string'
+          ? [entry.itemId]
+          : []
+      ));
+    },
+    async readCompletedCommandItemIds() {
+      return (await readProbeEntries(approvalPath)).flatMap((entry) => (
+        entry.type === 'completed-command-item' && typeof entry.itemId === 'string'
           ? [entry.itemId]
           : []
       ));
