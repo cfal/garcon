@@ -25,7 +25,7 @@
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@types/bun": "1.4.3",
     "bun-pty": "0.5.1",
-    "opencode-ai": "1.19.0",
+    "opencode-ai": "1.19.3",
     "playwright": "1.64.1",
     "puppeteer-core": "25.14.0",
     "svelte": "5.57.2",
