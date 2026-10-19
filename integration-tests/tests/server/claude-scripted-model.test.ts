@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import type { ApiProviderCatalogEntry } from '../../../common/api-providers.js';
 import { INTEGRATION_ANTHROPIC_API_KEY } from '../../support/anthropic-test-contract.js';
 import {
@@ -36,6 +36,10 @@ describe('Claude against a scripted model', () => {
 
   afterAll(() => {
     environment?.dispose();
+  });
+
+  afterEach(() => {
+    environment?.model.reset();
   });
 
   test('completes a scripted tool turn end to end', async () => {
@@ -89,7 +93,9 @@ describe('Claude against a scripted model', () => {
     });
   });
 
-  test.each(['', '[922k]'])('pins subagents to the selected custom endpoint model with suffix %j', async (suffix) => {
+  test.each([
+    ['Explore', ''], ['Explore', '[922k]'], ['fork', ''], ['fork', '[922k]'],
+  ])('pins %s subagents to the selected custom endpoint model with suffix %j', async (subagentType, suffix) => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     const childPrompt = `Inspect the scripted project ${crypto.randomUUID()}.`;
@@ -103,12 +109,20 @@ describe('Claude against a scripted model', () => {
       claudeToolUse('toolu_scripted_agent', 'Agent', {
         description: 'Inspect the scripted project',
         prompt: childPrompt,
-        subagent_type: 'Explore',
-        run_in_background: false,
+        subagent_type: subagentType,
+        ...(subagentType === 'fork' ? {} : { run_in_background: false }),
       }),
     ]);
-    testEnvironment.model.scriptTurn([claudeText(childReply)]);
-    testEnvironment.model.scriptTurn([claudeText(reply)]);
+    for (let index = 0; index < (subagentType === 'fork' ? 3 : 2); index += 1) {
+      testEnvironment.model.scriptTurn((request) => {
+        const messages = JSON.stringify(request.body.messages);
+        if (messages.includes('<fork-boilerplate>') || request.lastUserText.includes(childPrompt)) {
+          return [claudeText(childReply)];
+        }
+        return [claudeText(subagentType === 'fork' && !request.lastUserText.includes('<task-notification>')
+          ? 'Synthetic custom parent launched' : reply)];
+      });
+    }
 
     await withIntegrationFixture('claude-scripted-custom-subagent-model', async (fixture) => {
       const created = await fixture.client.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?executorId=${fixture.client.executorId}`, {
@@ -153,14 +167,16 @@ describe('Claude against a scripted model', () => {
       expect(messagesOfType(transcript.messages, 'task-tool-use')).toContainEqual(
         expect.objectContaining({
           toolId: 'toolu_scripted_agent',
-          subagentType: 'Explore',
+          subagentType,
           description: 'Inspect the scripted project',
           prompt: childPrompt,
         }),
       );
 
       const requests = testEnvironment.model.requestsSince(requestStart);
-      const childRequest = requests.find((candidate) => candidate.lastUserText.includes(childPrompt));
+      const childRequest = requests.find((candidate) =>
+        JSON.stringify(candidate.body.messages).includes('<fork-boilerplate>')
+        || candidate.lastUserText.includes(childPrompt));
       if (!childRequest) throw new Error('The scripted subagent never reached the fake model.');
       expect(childRequest.body.model).toBe(wireModel);
       expect(requests[0]?.body.model).toBe(wireModel);

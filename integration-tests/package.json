@@ -19,7 +19,7 @@
     "typecheck": "bunx tsc -p tsconfig.json"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "2.1.296",
+    "@anthropic-ai/claude-code": "2.1.303",
     "@earendil-works/pi-coding-agent": "1.1.0",
     "@openai/codex": "0.162.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
