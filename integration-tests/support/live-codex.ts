@@ -278,6 +278,8 @@ export async function startLiveCodexTestEnvironment(
       await writeFile(join(codexHome, 'config.toml'), [
         'model_provider = "garcon-live-testing"',
         'web_search = "disabled"',
+        // Prevents background marketplace fetches from escaping fixture teardown.
+        'features.plugins = false',
         ...(useFixtureModelCatalog
           ? [`model_catalog_json = ${JSON.stringify(catalogPath)}`]
           : []),

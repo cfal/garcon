@@ -27,6 +27,7 @@ describe('bundled Codex shutdown compatibility', () => {
       'wire_api = "responses"',
       '[features]',
       'hooks = true',
+      'plugins = false',
       '[[hooks.SessionEnd]]',
       'matcher = "other"',
       '[[hooks.SessionEnd.hooks]]',

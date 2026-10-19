@@ -1,13 +1,22 @@
 import { describe, expect, it } from 'bun:test';
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { CodexAppServerClient, CodexAppServerRpcError } from '../client.ts';
 
 describe('bundled Codex history API compatibility', () => {
   it('recognizes paginated turn and item list methods', async () => {
-    const client = new CodexAppServerClient({ shutdownGraceMs: 100 });
+    const home = await realpath(await mkdtemp(join(tmpdir(), 'garcon-codex-handshake-')));
+    const client = new CodexAppServerClient({
+      env: { CODEX_HOME: home, HOME: home },
+      shutdownGraceMs: 100,
+    });
     try {
+      await writeFile(join(home, 'config.toml'), '[features]\nplugins = false\n');
       const initialized = await client.connect();
       expect(initialized.userAgent).toBeString();
       expect(initialized.userAgent.length).toBeGreaterThan(0);
+      expect(initialized.codexHome).toBe(home);
 
       let failure;
       try {
@@ -36,7 +45,11 @@ describe('bundled Codex history API compatibility', () => {
       expect(failure).toBeInstanceOf(CodexAppServerRpcError);
       expect(failure.message).not.toMatch(/^method not found$/i);
     } finally {
-      await client.shutdown();
+      try {
+        await client.shutdown();
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
     }
   });
 });
