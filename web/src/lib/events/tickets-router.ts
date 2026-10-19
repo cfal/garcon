@@ -1,6 +1,7 @@
 import type { TicketsInvalidationHub } from '$lib/tickets/catalog/tickets-invalidation-hub.js';
 import { createDrainCursor, type DrainHandle, type WsMessageLog } from '$lib/ws/drain';
-import { TicketsInvalidatedMessage, parseServerWsMessage } from '$shared/ws-events';
+import { parseServerWsMessage } from '$shared/ws-events';
+import { TicketsInvalidatedMessage } from '$shared/ws-revision-invalidations';
 
 export class TicketsRouter {
 	#handle: DrainHandle | null = null;

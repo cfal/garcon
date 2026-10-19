@@ -7,6 +7,7 @@ import { canvas } from '$lib/chat-canvas/__tests__/canvas-fixtures';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
+import { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte.js';
 import type { ChatBoardApi } from '$lib/api/chat-boards.js';
 import { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
 import { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
@@ -49,6 +50,10 @@ function fileTreeResponse(directoryPath: string, fileName: string): FileTreeResp
 	};
 }
 
+function newPullRequestsStore(): PullRequestsStore {
+	return new PullRequestsStore({ reviews: new PullRequestReviewsStore() });
+}
+
 function createRegistry() {
 	const commits: Array<{
 		setProjectState: ReturnType<typeof vi.fn>;
@@ -57,7 +62,6 @@ function createRegistry() {
 	}> = [];
 	const pullRequestsStores: Array<{
 		setProjectState: ReturnType<typeof vi.fn>;
-		setCapability: ReturnType<typeof vi.fn>;
 		setPresentationVisible: ReturnType<typeof vi.fn>;
 		dispose: ReturnType<typeof vi.fn>;
 	}> = [];
@@ -81,10 +85,9 @@ function createRegistry() {
 			return controller;
 		},
 		createPullRequests: () => {
-			const controller = new PullRequestsStore();
+			const controller = newPullRequestsStore();
 			const tracked = {
 				setProjectState: vi.spyOn(controller, 'setProjectState'),
-				setCapability: vi.spyOn(controller, 'setCapability'),
 				setPresentationVisible: vi.spyOn(controller, 'setPresentationVisible'),
 				dispose: vi.spyOn(controller, 'dispose'),
 			};
@@ -146,7 +149,7 @@ describe('SingletonSurfaceRegistry', () => {
 			...gitDeps,
 			createTickets,
 			createCommit: () => new CommitController(gitDeps),
-			createPullRequests: () => new PullRequestsStore(),
+			createPullRequests: () => newPullRequestsStore(),
 		});
 		registries.push(registry);
 		expect(registry.ticketsIfPresent()).toBeNull();
@@ -171,7 +174,7 @@ describe('SingletonSurfaceRegistry', () => {
 			...gitDeps,
 			createTickets: () => harness.controller,
 			createCommit: () => new CommitController(gitDeps),
-			createPullRequests: () => new PullRequestsStore(),
+			createPullRequests: () => newPullRequestsStore(),
 		});
 		registries.push(registry);
 		const tickets = registry.tickets();

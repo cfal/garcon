@@ -5,7 +5,9 @@ export async function dispatchListenersSequentially<Args extends readonly unknow
 ): Promise<void> {
   for (const listener of listeners) {
     try {
-      await listener(...args);
+      const pending = listener(...args);
+      // Synchronous observers must not delay transcript fanout behind terminal broadcasts.
+      if (pending) await pending;
     } catch (error) {
       onError(error);
     }

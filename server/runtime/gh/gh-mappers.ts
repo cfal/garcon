@@ -3,6 +3,14 @@
 
 import type { GitDiffPatchFile } from './pull-request-diff.js';
 import type { GitReviewFilePatchBody, GitReviewFileSummary } from '../git/types.js';
+import { PULL_REQUEST_AUTHOR_ASSOCIATIONS } from '../../../common/gh.js';
+import { ghRepositoryIdentity, isGhActorIdentity } from '../../../common/gh-identity.js';
+import type {
+  PullRequestAuthorAssociation,
+  PullRequestMarkedComment,
+  PullRequestListResult,
+  PullRequestReviewTarget,
+} from './gh-types.js';
 import type {
   PullRequestCheck,
   PullRequestCheckState,
@@ -52,6 +60,7 @@ export interface GhRawPullRequest {
   createdAt?: string;
   updatedAt?: string;
   url?: string;
+  headRefOid?: string;
   mergeable?: string;
   reviewDecision?: string;
   statusCheckRollup?: GhRawStatusCheck[] | null;
@@ -125,32 +134,151 @@ export function mapChecks(rollup: GhRawStatusCheck[] | null | undefined): PullRe
   }));
 }
 
-export function mapChecksState(
-  rollup: GhRawStatusCheck[] | null | undefined,
-): PullRequestChecksState {
-  const checks = mapChecks(rollup);
-  if (checks.length === 0) return 'none';
-  if (checks.some((check) => check.state === 'failure')) return 'failing';
-  if (checks.some((check) => check.state === 'pending')) return 'pending';
-  return 'passing';
+export interface GhRawNodes<T> {
+  nodes?: (T | null)[] | null;
+  pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  issueCount?: number;
 }
 
-export function mapSummary(raw: GhRawPullRequest): PullRequestSummary {
+export interface GhRawListPullRequest {
+  number: number;
+  title?: string;
+  url?: string;
+  state?: string;
+  isDraft?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  author?: { login?: string; __typename?: string } | null;
+  authorAssociation?: string;
+  headRefName?: string;
+  baseRefName?: string;
+  headRefOid?: string;
+  isCrossRepository?: boolean;
+  additions?: number;
+  deletions?: number;
+  changedFiles?: number;
+  reviewDecision?: string | null;
+  labels?: GhRawNodes<{ name?: string }> | null;
+  reviewRequests?: GhRawNodes<{ requestedReviewer?: { __typename?: string; login?: string } | null }> | null;
+  commits?: GhRawNodes<{ commit?: { statusCheckRollup?: { state?: string } | null } | null }> | null;
+}
+
+export interface GhRawPullRequestList {
+  data?: {
+    viewer?: { id?: string; login?: string } | null;
+    repository?: {
+      nameWithOwner?: string;
+      url?: string;
+      pullRequests?: GhRawNodes<GhRawListPullRequest> | null;
+    } | null;
+    requested?: GhRawNodes<{ number?: number }> | null;
+  } | null;
+}
+
+export interface GhRawReviewTarget {
+  data?: {
+    viewer?: { id?: string; login?: string } | null;
+    repository?: {
+      nameWithOwner?: string;
+      url?: string;
+      pullRequest?: {
+        number?: number;
+        state?: string;
+        headRefOid?: string;
+        comments?: GhRawNodes<{ id?: string; url?: string; isMinimized?: boolean; author?: { id?: string; login?: string } | null; body?: string }> | null;
+      } | null;
+    } | null;
+  } | null;
+}
+
+function nodes<T>(connection: GhRawNodes<T> | null | undefined): T[] {
+  return (connection?.nodes ?? []).filter((node): node is T => node != null);
+}
+
+export function mapAuthorAssociation(raw: string | undefined): PullRequestAuthorAssociation {
+  const value = (raw ?? '').toLowerCase();
+  return (PULL_REQUEST_AUTHOR_ASSOCIATIONS as readonly string[]).includes(value)
+    ? value as PullRequestAuthorAssociation
+    : 'none';
+}
+
+function mapRollupState(raw: string | undefined): PullRequestChecksState {
+  const value = (raw ?? '').toUpperCase();
+  if (value === 'SUCCESS') return 'passing';
+  if (value === 'FAILURE' || value === 'ERROR') return 'failing';
+  if (value === 'PENDING' || value === 'EXPECTED') return 'pending';
+  return 'none';
+}
+
+export function mapSummary(
+  raw: GhRawListPullRequest,
+  viewerLogin: string | null,
+  requestedNumbers: ReadonlySet<number>,
+): PullRequestSummary {
+  const author = raw.author?.login || 'unknown';
+  const requestedDirectly = viewerLogin !== null && nodes(raw.reviewRequests)
+    .some((request) => request.requestedReviewer?.__typename === 'User' && request.requestedReviewer.login === viewerLogin);
   return {
     number: raw.number,
     title: raw.title ?? '',
-    state: raw.isDraft ? 'open' : mapPrState(raw.state),
+    state: mapPrState(raw.state),
     isDraft: Boolean(raw.isDraft),
-    author: authorLogin(raw.author),
+    author,
     headRefName: raw.headRefName ?? '',
     baseRefName: raw.baseRefName ?? '',
     additions: raw.additions ?? 0,
     deletions: raw.deletions ?? 0,
     changedFiles: raw.changedFiles ?? 0,
+    createdAt: raw.createdAt ?? '',
     updatedAt: raw.updatedAt ?? '',
     url: raw.url ?? '',
-    reviewDecision: mapReviewDecision(raw.reviewDecision),
-    checksState: mapChecksState(raw.statusCheckRollup),
+    reviewDecision: mapReviewDecision(raw.reviewDecision ?? undefined),
+    checksState: mapRollupState(nodes(raw.commits)[0]?.commit?.statusCheckRollup?.state),
+    headRefOid: raw.headRefOid ?? '',
+    isCrossRepository: Boolean(raw.isCrossRepository),
+    authorAssociation: mapAuthorAssociation(raw.authorAssociation),
+    authorIsBot: raw.author?.__typename === 'Bot',
+    authoredByViewer: viewerLogin !== null && author === viewerLogin,
+    labels: nodes(raw.labels).map((label) => label.name ?? '').filter(Boolean),
+    // GitHub's search counts team requests too, so a match without a direct request came through a team.
+    reviewRequest: requestedDirectly ? 'me' : requestedNumbers.has(raw.number) ? 'team' : null,
+  };
+}
+
+export function buildPullRequestList(raw: GhRawPullRequestList): PullRequestListResult {
+  const repository = raw.data?.repository;
+  if (!repository) throw new Error('gh api returned no repository for this project.');
+  const viewerLogin = raw.data?.viewer?.login || null;
+  const requested = new Set(nodes(raw.data?.requested).map((node) => node.number).filter((n): n is number => typeof n === 'number'));
+  return {
+    pulls: nodes(repository.pullRequests).map((pull) => mapSummary(pull, viewerLogin, requested)),
+    repo: repository.nameWithOwner ? { nameWithOwner: repository.nameWithOwner, url: repository.url ?? '' } : null,
+    viewerLogin,
+  };
+}
+
+// Only the final canonical marker identifies a posted review; quoted markers are untrusted text.
+export function buildReviewTarget(raw: GhRawReviewTarget, markerPrefix: string): PullRequestReviewTarget | null {
+  const pull = raw.data?.repository?.pullRequest;
+  const repository = ghRepositoryIdentity({ nameWithOwner: raw.data?.repository?.nameWithOwner ?? '', url: raw.data?.repository?.url ?? '' });
+  const viewer = raw.data?.viewer;
+  if (!pull || typeof pull.number !== 'number' || !repository || !isGhActorIdentity(viewer)) return null;
+  const pattern = /<!-- garcon-review [^\s#]+\/[^\s#]+#[1-9]\d* (?:[a-f0-9]{40}|[a-f0-9]{64}) -->\s*$/;
+  const markedComments: PullRequestMarkedComment[] = [];
+  for (const comment of nodes(pull.comments)) {
+    if (!comment.id) continue;
+    const marker = pattern.exec(comment.body ?? '')?.[0].trimEnd();
+    if (!marker?.toLowerCase().startsWith(`<!-- ${markerPrefix.toLowerCase()}`)) continue;
+    markedComments.push({ id: comment.id, url: comment.url ?? '', marker, isMinimized: Boolean(comment.isMinimized),
+      author: isGhActorIdentity(comment.author) ? comment.author : null });
+  }
+  return {
+    repository,
+    viewer,
+    number: pull.number,
+    state: mapPrState(pull.state),
+    headRefOid: pull.headRefOid ?? '',
+    markedComments,
   };
 }
 
@@ -249,6 +377,7 @@ export function buildDetail(
     createdAt: raw.createdAt ?? '',
     updatedAt: raw.updatedAt ?? '',
     url: raw.url ?? '',
+    headRefOid: raw.headRefOid ?? '',
     mergeable: mapMergeable(raw.mergeable),
     reviewDecision: mapReviewDecision(raw.reviewDecision),
     checks: mapChecks(raw.statusCheckRollup),

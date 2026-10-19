@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { scheduledPromptVariables } from '../prompt-template-variables';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
@@ -54,6 +55,7 @@
 	{remoteSettings}
 	getSelectableAgentIds={() => selectableAgentIds}
 	{prompt}
+	promptVariables={scheduledPromptVariables('new-chat')}
 	{promptError}
 	{knownTags}
 	{isMobile}

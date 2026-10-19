@@ -60,7 +60,6 @@
 		surface,
 		presentation,
 		visible,
-		onSendToChat,
 		onAppendToChatDraft,
 		onChooseProjectFolder,
 		frameBridge,
@@ -68,7 +67,6 @@
 		surface: SurfaceDescriptor;
 		presentation: WorkspaceWindowId | 'mobile';
 		visible: boolean;
-		onSendToChat: (message: string) => Promise<boolean>;
 		onAppendToChatDraft: ChatDraftAppend;
 		onChooseProjectFolder?: () => void;
 		frameBridge: SurfaceFrameBridge;
@@ -171,8 +169,10 @@
 			<PullRequestsPanel
 				{controller}
 				isMobile={presentation === 'mobile'}
-				{onSendToChat}
-				onNavigateToChat={() => void workspace.focusChat()}
+				onOpenChat={(chatId) => {
+					if (presentation === 'mobile') void workspace.showChatInCurrentWindow(chatId);
+					else void workspace.openChatBeside(chatId, presentation);
+				}}
 			/>
 		{/await}
 	{:else if surface.type === 'singleton' && surface.kind === 'commit'}

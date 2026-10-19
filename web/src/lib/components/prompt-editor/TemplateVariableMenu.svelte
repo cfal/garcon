@@ -8,12 +8,11 @@
 		DropdownMenuContent,
 		DropdownMenuItem,
 	} from '$lib/components/ui/dropdown-menu';
-	import type { SnippetTemplateVariable } from '$shared/snippets';
 	import * as m from '$lib/paraglide/messages.js';
 
 	type TextInput = HTMLInputElement | HTMLTextAreaElement;
 	interface Props {
-		variables: readonly SnippetTemplateVariable[];
+		variables: readonly string[];
 		getInput: () => TextInput | null;
 		onInsert: (value: string) => void;
 		disabled?: boolean;
@@ -38,7 +37,7 @@
 		};
 	}
 
-	function insertVariable(variable: SnippetTemplateVariable): void {
+	function insertVariable(variable: string): void {
 		if (disabled || !selection) return;
 		const { input, text, start, end } = selection;
 		if (input !== getInput() || input.value !== text) return;
@@ -60,7 +59,7 @@
 		input.setSelectionRange(caret, caret);
 	}
 
-	function variableLabel(variable: SnippetTemplateVariable): string {
+	function variableLabel(variable: string): string {
 		switch (variable) {
 			case 'chat_id':
 				return m.template_variable_chat_id();
@@ -72,6 +71,14 @@
 				return m.template_variable_arguments();
 			case 'project_path':
 				return m.template_variable_project_path();
+			case 'repository':
+				return m.template_variable_repository();
+			case 'repository_url':
+				return m.template_variable_repository_url();
+			case 'pull_request_number':
+				return m.template_variable_pull_request_number();
+			default:
+				return `{{${variable}}}`;
 		}
 	}
 </script>

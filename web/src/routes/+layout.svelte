@@ -39,6 +39,8 @@
 	import { projectOverlayBackdropEffects } from '$lib/overlays/backdrop-effects.js';
 	import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { createGhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
+	import { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte.js';
+	import { PullRequestReviewsRouter } from '$lib/events/pull-request-reviews-router.js';
 	import { createSidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
 	import { resolveFirstRegistrationOnboarding } from '$lib/onboarding/first-registration-onboarding.js';
 	import {
@@ -59,6 +61,7 @@
 		setAppTitle,
 		setMinuteClock,
 		setGhCapability,
+		setPullRequestReviews,
 		setScheduledPrompts,
 		setPreambles,
 		setExecutors,
@@ -151,7 +154,9 @@
 		});
 	});
 	const ghCapability = createGhCapabilityStore(executors);
+	const pullRequestReviews = new PullRequestReviewsStore();
 	const workspaceServices = createWorkspaceServices({
+		pullRequestReviews,
 		localProjectBasePath: () => remoteSettings.snapshot?.projectBasePath ?? null,
 		executors,
 		appShell,
@@ -256,6 +261,7 @@
 	setReadReceiptOutbox(readReceiptOutbox);
 	setModelCatalog(modelCatalog);
 	setGhCapability(ghCapability);
+	setPullRequestReviews(pullRequestReviews);
 	setNotifications(notifications);
 	setSidebarSearch(sidebarSearch);
 	setSidebarProjectCollapse(sidebarProjectCollapse);
@@ -368,6 +374,7 @@
 		sidebarSearch.applyTranscriptSearchStatus(status),
 	);
 	const scheduledPromptsRouter = new ScheduledPromptsRouter(ws, scheduledPrompts);
+	const pullRequestReviewsRouter = new PullRequestReviewsRouter(ws, pullRequestReviews);
 	const preamblesRouter = new PreamblesRouter(ws, preambles, chatPreambleSelectionInvalidationHub);
 	const snippetsRouter = new SnippetsRouter(ws, snippets);
 	const executorsRouter = new ExecutorsRouter(ws, executors);
@@ -380,6 +387,7 @@
 	settingsRouter.start();
 	transcriptSearchStatus.start();
 	scheduledPromptsRouter.start();
+	pullRequestReviewsRouter.start();
 	preamblesRouter.start();
 	snippetsRouter.start();
 	executorsRouter.start();
@@ -392,6 +400,7 @@
 		settingsRouter.tick();
 		transcriptSearchStatus.tick();
 		scheduledPromptsRouter.tick();
+		pullRequestReviewsRouter.tick();
 		preamblesRouter.tick();
 		snippetsRouter.tick();
 		executorsRouter.tick();
@@ -405,6 +414,7 @@
 		if (!connectedAt) return;
 		untrack(() => void transcriptSearchStatus.refresh());
 		untrack(() => void scheduledPrompts.refreshIfLoaded());
+		untrack(() => pullRequestReviews.invalidate());
 		untrack(() => void preambles.refreshIfLoaded());
 		untrack(() => void snippets.refreshIfLoaded());
 		untrack(() => void executors.refresh());
@@ -500,6 +510,7 @@
 		settingsRouter.destroy();
 		transcriptSearchStatus.destroy();
 		scheduledPromptsRouter.destroy();
+		pullRequestReviewsRouter.destroy();
 		preamblesRouter.destroy();
 		snippetsRouter.destroy();
 		executorsRouter.destroy();
