@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { compileChatSearchQuery } from '@garcon/common/chat-search';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { openSearchReadDatabase, statusCounts } from '../schema.js';
 import {
@@ -827,11 +828,14 @@ describe('transcript search service v9', () => {
       }),
     });
     await service.enable(new AbortController().signal);
-    await build(service, 'chat-grace', 'view-grace', 20, 'gracemarker');
-    await expect(service.search(searchRequest(
-      'chat-grace', 'view-grace', 20, 'gracemarker',
-    ))).rejects.toThrow('SEARCH_TIMEOUT');
+    await build(service, 'chat-grace', 'view-grace', 20, 'gracemarker #731');
+    await expect(service.search({
+      ...searchRequest('chat-grace', 'view-grace', 20, 'gracemarker'),
+      query: compileChatSearchQuery('"gracemarker" #731'),
+    })).rejects.toThrow('SEARCH_TIMEOUT');
     expect(service.queryStats().timedOut).toBe(1);
+    expect(records.find((record) => record.message === 'Transcript search query timeout')?.fields)
+      .toMatchObject({ clauseCount: 2, phraseClauseCount: 1, literalClauseCount: 1 });
     await expect(service.search(searchRequest(
       'chat-grace', 'view-grace', 20, 'gracemarker',
     ))).resolves.toMatchObject({ results: [expect.objectContaining({ chatId: 'chat-grace' })] });

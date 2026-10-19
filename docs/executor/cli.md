@@ -129,6 +129,12 @@ The HTTP capability is endpoint-local. A gateway capability is never forwarded a
 
 Application status codes, JSON bodies, and applicable `Retry-After` information survive the relay. Do not wrap successful application responses in a gateway-specific JSON object or translate typed domain errors to generic success/failure strings. Gateway and relay failures use explicit shared error codes in the ordinary HTTP error shape.
 
+Transcript search uses the same controller query semantics in both paths:
+punctuation-bearing identifiers match literally and case-insensitively, while
+ordinary unquoted words retain lexical prefix matching. The gateway forwards
+the unchanged search request and response; literal clauses remain internal to
+the controller's search Workers and require no executor protocol change.
+
 Only a small header set is supported. Reconstruct JSON content headers, set `Cache-Control: no-store`, and propagate validated retry metadata where needed. Do not forward cookies, caller-supplied authorization, origin, host, proxy headers, redirects, compression negotiation, or arbitrary response headers. The CLI does not currently need conditional HTTP caching or an upgrade through this endpoint.
 
 All gateway application requests require the captured controller-instance header. The direct controller boundary also validates this header when supplied, so the updated CLI uses one request path for both endpoints. Existing browser authentication remains independent; the header is an additional fence, never authentication. Neither gateway nor dispatcher may replace an old expected instance with the current one.

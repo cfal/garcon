@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
-	setExecutorsTestContext();
+	import type { ExecutorSnapshot } from '$shared/executors';
+	import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
+	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import NewChatForm from '../NewChatForm.svelte';
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 	import {
@@ -41,6 +43,9 @@
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '$shared/attachments';
 
 	interface Props {
+		executorSnapshots?: readonly ExecutorSnapshot[];
+		onExecutors?: (store: ExecutorsStore) => void;
+		onRemoteSettings?: (store: RemoteSettingsStore) => void;
 		executionPolicy?: 'conversation' | 'literal';
 		allowDirectChats?: boolean;
 		catalogVersion?: number;
@@ -61,6 +66,9 @@
 	}
 
 	let {
+		executorSnapshots,
+		onExecutors,
+		onRemoteSettings,
 		executionPolicy = 'conversation',
 		allowDirectChats = false,
 		catalogVersion = 0,
@@ -93,7 +101,11 @@
 		},
 	} as never);
 
-	setRemoteSettings(createRemoteSettingsStore());
+	const executors = setExecutorsTestContext(untrack(() => executorSnapshots));
+	untrack(() => onExecutors?.(executors));
+	const remoteSettings = createRemoteSettingsStore();
+	setRemoteSettings(remoteSettings);
+	untrack(() => onRemoteSettings?.(remoteSettings));
 
 	setChatSessions({
 		orderedChats: [],

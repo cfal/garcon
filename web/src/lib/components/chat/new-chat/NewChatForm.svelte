@@ -54,7 +54,7 @@
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
-	import ProjectPinnedPathList from '$lib/components/project-paths/ProjectPinnedPathList.svelte';
+	import NewChatPinnedPaths from './NewChatPinnedPaths.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import FileText from '@lucide/svelte/icons/file-text';
@@ -687,16 +687,7 @@
 					{/if}
 				</ProjectPathField>
 
-				<ProjectPinnedPathList
-					pinnedProjectPaths={form.pinnedProjectPaths}
-					selectedPath={form.projectPath}
-					emptyLabel={m.chat_new_chat_star_bookmark()}
-					disabled={form.isUpdatingPinnedPath}
-					onSelect={(pinnedPath) => {
-						form.projectPath = pinnedPath;
-						form.clearError();
-					}}
-				/>
+				<NewChatPinnedPaths {form} />
 
 				<ChatTagEditor
 					tags={form.chatTags}

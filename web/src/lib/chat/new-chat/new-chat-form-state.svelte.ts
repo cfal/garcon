@@ -40,7 +40,7 @@ import {
 	isPinnedProjectPath,
 	nextPinnedProjectPaths,
 } from '$lib/project-paths/project-pinned-paths.js';
-import { savePinnedProjectPathsOptimistically } from '$lib/project-paths/pinned-project-path-settings.js';
+import { executorPinnedProjectPaths, savePinnedProjectPathsOptimistically } from '$lib/project-paths/pinned-project-path-settings.js';
 import { normalizeTagSlug } from '$lib/utils/tags.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -66,7 +66,7 @@ export class NewChatFormState {
 
 	// Path
 	projectPath = $state('');
-	pinnedProjectPaths = $state<string[]>([]);
+	#pinnedProjectPaths = $state<string[]>([]);
 	browseStartPath = $state('');
 	#localProjectBasePath = $state('/');
 
@@ -126,6 +126,14 @@ export class NewChatFormState {
 	}
 
 	// Derived accessors
+	get pinnedProjectPaths(): string[] {
+		return this.isUpdatingPinnedPath || !this.#remoteSettings.snapshot
+			? this.#pinnedProjectPaths
+			: executorPinnedProjectPaths(this.#remoteSettings.snapshot, this.executorId);
+	}
+	set pinnedProjectPaths(paths: string[]) {
+		this.#pinnedProjectPaths = paths;
+	}
 
 	get #modelCatalog(): ModelCatalogStore {
 		return this.executorId === 'local'

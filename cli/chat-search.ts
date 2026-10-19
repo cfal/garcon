@@ -173,7 +173,7 @@ export function searchDiagnostics(result: CliChatSearchResult): string[] {
   }
   if (result.index.resultsTruncated) {
     diagnostics.push(
-      'search coverage: index row sampling truncated this query; matches and total may be incomplete; narrow the metadata filter or quote a phrase',
+      'search coverage: index row sampling truncated this query; matches and total may be incomplete; narrow the metadata filter or include nearby words in a quoted phrase',
     );
   }
   if (result.page.hasMore) {
@@ -223,7 +223,7 @@ export async function runChatSearch(
     if (error instanceof GarconHttpError && error.errorCode === 'SEARCH_TIMEOUT') {
       throw new CliError(
         'chat search',
-        'transcript search timed out before coverage could be reported; rerun the search, try a quoted phrase, or change the metadata filter',
+        'transcript search timed out before coverage could be reported; rerun the search, include nearby words in a quoted phrase, or change the metadata filter',
         3,
         { cause: error },
       );
@@ -303,8 +303,9 @@ function readIncludesForSearchRole(role: ChatSearchSnippet['role']): string | nu
 
 function formatInterpretedQuery(query: ChatSearchQueryV1): string {
   return query.clauses.map((clause) => {
+    if (clause.kind === 'literal') return `literal(${JSON.stringify(clause.text)})`;
     const tokens = clause.tokens.map((token) => (
-      token.match === 'prefix' ? `${token.normalized}*` : token.normalized
+      token.match === 'prefix' ? `prefix(${JSON.stringify(token.normalized)})` : token.normalized
     ));
     return clause.kind === 'phrase' ? `"${tokens.join(' ')}"` : tokens.join(' & ');
   }).join(' AND ') || '[no searchable words]';

@@ -65,6 +65,34 @@ function response(overrides: Partial<ChatSearchResponse> = {}): ChatSearchRespon
 }
 
 describe('chat search', () => {
+  test('describes ordinary prefixes without suggesting wildcard syntax', () => {
+    const prefixCommand = { ...command, query: 'needle' };
+    const result = buildChatSearchResult(prefixCommand, chatList([]), response({ query: 'needle' }), 0);
+    const text = formatChatSearchResult(result, false, prefixCommand);
+    expect(text).toContain('interpreted as: prefix("needle")');
+    expect(text).not.toContain('needle*');
+  });
+
+  test('describes punctuation-bearing queries as literals without losing their spelling', () => {
+    const literalCommand = { ...command, query: '#731' };
+    const result = buildChatSearchResult(literalCommand, chatList([]), response({ query: '#731' }), 0);
+    expect(result.interpretedQuery.clauses[0]).toMatchObject({ kind: 'literal', text: '#731' });
+    expect(formatChatSearchResult(result, false, literalCommand))
+      .toContain('interpreted as: literal("#731")');
+    expect(JSON.parse(formatChatSearchResult(result, true, literalCommand))).toEqual(result);
+  });
+
+  test('suggests a longer phrase rather than merely quoting a truncated literal', () => {
+    const literalCommand = { ...command, query: '#731' };
+    const reply = response();
+    const result = buildChatSearchResult(literalCommand, chatList([]), {
+      ...reply,
+      index: { ...reply.index, resultsTruncated: true },
+    }, 0);
+    expect(searchDiagnostics(result).join('\n'))
+      .toContain('include nearby words in a quoted phrase');
+  });
+
   test('escapes human titles and snippets without changing JSON values', () => {
     const unsafe = 'Synthetic\x1b]52;c;YWJj\x07\u009b\u202e';
     const reply = response();
@@ -398,7 +426,7 @@ describe('chat search', () => {
       },
     }, output)).rejects.toMatchObject({
       exitCode: 3,
-      message: expect.stringContaining('timed out before coverage could be reported'),
+      message: 'transcript search timed out before coverage could be reported; rerun the search, include nearby words in a quoted phrase, or change the metadata filter',
     } satisfies Partial<CliError>);
   });
 });

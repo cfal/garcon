@@ -2,6 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { compileChatSearchQuery } from '@garcon/common/chat-search';
+import { UserMessage } from '@garcon/common/chat-types';
+import { projectSearchMessage } from '../message-projector.js';
 import {
   finishChatSync,
   insertRowsBatch,
@@ -23,6 +26,64 @@ function post(worker: Worker, request: ReaderRequest): void {
 }
 
 describe('reader worker v9', () => {
+  test('searches NUL and unpaired-surrogate literals without reporting an internal failure', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'search-reader-nul-'));
+    directories.push(directory);
+    const dbPath = join(directory, 'index.sqlite');
+    const { db } = await openSearchDatabase(dbPath);
+    const chatId = 'chat-nul';
+    const transcriptViewId = 'view-nul';
+    planChatSync(db, {
+      mode: 'replace', chatId, transcriptViewId, targetThrough: 1, expectedAfterOrdinal: 0,
+    });
+    insertRowsBatch(db, {
+      chatId, transcriptViewId, advanceTo: 1,
+      rows: [{
+        ordinal: 1, role: 'user', timestamp: null,
+        body: projectSearchMessage(new UserMessage('', 'foo\u0000bar marker'))!.body,
+      }],
+    });
+    finishChatSync(db, { chatId, transcriptViewId });
+    db.close();
+
+    const worker = new Worker(new URL('../reader-main.ts', import.meta.url).href);
+    const lifecycleEpoch = 'epoch-nul';
+    const nextEvent = () => new Promise<ReaderEvent>((resolve) => {
+      worker.addEventListener('message', (event: MessageEvent<ReaderEvent>) => resolve(event.data), { once: true });
+    });
+    try {
+      let event = nextEvent();
+      post(worker, { type: 'open', requestId: 1, lifecycleEpoch, dbPath });
+      expect(await event).toMatchObject({ type: 'opened' });
+      for (const [index, { query, expectedChatIds }] of [
+        { query: 'foo\u0000bar', expectedChatIds: [chatId] },
+        { query: 'foo\ud800bar', expectedChatIds: [] },
+        { query: 'foo\udc00bar', expectedChatIds: [] },
+        { query: '#731\ud800', expectedChatIds: [] },
+        { query: '#731\udc00', expectedChatIds: [] },
+        { query: 'marker', expectedChatIds: [chatId] },
+      ].entries()) {
+        event = nextEvent();
+        const requestId = index + 2;
+        post(worker, {
+          type: 'search-start', requestId, lifecycleEpoch,
+          query: compileChatSearchQuery(query), order: 'allowlist', mode: 'page',
+          offset: 0, limit: 20, snippetLimit: 1,
+        });
+        post(worker, {
+          type: 'search-allowlist-chunk', requestId, lifecycleEpoch, chunkIndex: 0, done: true,
+          allowedChats: [{ chatId, transcriptViewId, throughOrdinal: 1 }],
+        });
+        const result = await event;
+        expect(result).toMatchObject({ type: 'search-result', requestId });
+        expect(result.type === 'search-result' && result.results.map((hit) => hit.chatId))
+          .toEqual(expectedChatIds);
+      }
+    } finally {
+      await worker.terminate();
+    }
+  });
+
   test('[TLV5-SEARCH.08-READER-01] searches and cooperatively exits', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'search-v9-reader-'));
     directories.push(directory);
