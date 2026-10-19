@@ -320,7 +320,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
         throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_NOT_FOUND', 'Scheduled prompt not found', 404);
       }
       const now = new Date();
-      const replacement = { ...previous, enabled: request.enabled, updatedAt: now.toISOString() };
+      const replacement = { ...structuredClone(previous), enabled: request.enabled, updatedAt: now.toISOString() };
       if (request.enabled && !previous.enabled) {
         const earliest = nextMinute(now);
         const scheduledAt = Date.parse(replacement.schedule.nextRunAt);

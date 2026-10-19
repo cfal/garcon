@@ -1094,9 +1094,11 @@ describe('scheduled prompt enablement', () => {
   it('retains a paused state if registration fails when resuming', async () => {
     setSystemTime(new Date('2030-01-01T00:00:00.000Z'));
     const { store, cron, scheduler } = await sameChatScheduler();
-    await store.create({ ...recurringPrompt('2030-01-01T01:00:00.000Z'), enabled: false }, 0);
+    const previous = { ...recurringPrompt('2030-01-01T01:00:00.000Z'), enabled: false };
+    await store.create(previous, 0);
+    setSystemTime(new Date('2030-01-01T04:00:30.000Z'));
     cron.schedule = () => { throw new Error('cron registration failed'); };
     await expect(scheduler.setEnabled({ expectedRevision: 1, id: 'repeat', enabled: true })).rejects.toThrow('cron registration failed');
-    expect(store.get('repeat').enabled).toBe(false);
+    expect(store.get('repeat')).toEqual(previous);
   });
 });
