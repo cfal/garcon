@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { BashToolUseMessage, ExecToolUseMessage, McpToolUseMessage, PiToolSearchToolUseMessage, ReadToolUseMessage, ToolResultMessage, WriteToolUseMessage, isToolUseMessage, parseChatMessage } from '../chat-types';
+import { BashToolUseMessage, EditToolUseMessage, ExecToolUseMessage, McpToolUseMessage, PiToolSearchToolUseMessage, ReadToolUseMessage, ToolResultMessage, WriteToolUseMessage, isToolUseMessage, parseChatMessage } from '../chat-types';
 import { projectToolUseSummary, renderTranscriptSeed } from '../transcript-seed';
 
 describe('Pi tool contracts', () => {
@@ -11,6 +11,7 @@ describe('Pi tool contracts', () => {
       new BashToolUseMessage('', 'invalid-bash', ''),
       new ReadToolUseMessage('', 'invalid-read', ''),
       new WriteToolUseMessage('', 'invalid-write', ''),
+      new EditToolUseMessage('', 'invalid-edit', ''),
     ]) {
       const parsed = parseChatMessage(JSON.parse(JSON.stringify(message)));
       expect(parsed).toEqual(message);

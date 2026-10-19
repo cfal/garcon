@@ -163,7 +163,7 @@ export function convertPiToolUse(
 
     case 'edit': {
       const { oldText, newText } = firstEdit(input);
-      return new EditToolUseMessage(timestamp, toolCallId, asString(input.path), oldText, newText);
+      return new EditToolUseMessage(timestamp, toolCallId, requiredString(input.path), oldText, newText);
     }
 
     case 'grep':

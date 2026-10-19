@@ -5,6 +5,7 @@ import {
 	CommandResultMessage,
 	AskUserQuestionToolUseMessage,
 	BashToolUseMessage,
+	EditToolUseMessage,
 	ExecToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	GlobToolUseMessage,
@@ -36,6 +37,7 @@ it.each([
 	new BashToolUseMessage(TS, 'invalid', ''),
 	new ReadToolUseMessage(TS, 'invalid', ''),
 	new WriteToolUseMessage(TS, 'invalid', ''),
+	new EditToolUseMessage(TS, 'invalid', ''),
 ])('keeps the paired $type error visible while suppressing successful results', (tool) => {
 	for (const isError of [false, true]) {
 		const result = new ToolResultMessage(TS, tool.toolId, { raw: 'synthetic diagnostic' }, isError);
@@ -50,6 +52,8 @@ it.each([
 	new BashToolUseMessage(TS, 'denied', 'rg no-match'),
 	new ReadToolUseMessage(TS, 'denied', 'file.txt'),
 	new WriteToolUseMessage(TS, 'denied', 'file.txt'),
+	new EditToolUseMessage(TS, 'denied', 'file.txt'),
+	new EditToolUseMessage(TS, 'dynamic'),
 ])('preserves ordinary $type failure suppression', (tool) => {
 	const result = new ToolResultMessage(TS, tool.toolId, { raw: 'Denied by user' }, true);
 	const model = buildConversationFeedRenderModel(rows([tool, result]));

@@ -28,7 +28,7 @@ export function resolveToolResultDisplayRule(
 ): ToolResultDisplayRule | undefined {
 	const emptyRequiredInput = tool?.type === 'bash-tool-use'
 		? tool.command === ''
-		: (tool?.type === 'read-tool-use' || tool?.type === 'write-tool-use') && tool.filePath === '';
+		: (tool?.type === 'read-tool-use' || tool?.type === 'write-tool-use' || tool?.type === 'edit-tool-use') && tool.filePath === '';
 	if (toolResult?.isError === true && emptyRequiredInput) return FAILED_RESULT_RULE;
 	return rule.result;
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
 import type { ToolDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
-import { BashToolUseMessage, ReadToolUseMessage, WriteToolUseMessage } from '$shared/chat-types';
+import { BashToolUseMessage, EditToolUseMessage, ReadToolUseMessage, WriteToolUseMessage } from '$shared/chat-types';
 
 describe('shouldRenderToolResult', () => {
 	it.each([
@@ -10,7 +10,7 @@ describe('shouldRenderToolResult', () => {
 		{ hideOnSuccess: true },
 		{ mode: 'collapsible' as const, contentKind: 'fileList' as const },
 	])('keeps rejected empty canonical calls renderable despite their success policy: %j', (result) => {
-		for (const tool of [new BashToolUseMessage('', 'invalid', ''), new ReadToolUseMessage('', 'invalid', ''), new WriteToolUseMessage('', 'invalid', '')]) {
+		for (const tool of [new BashToolUseMessage('', 'invalid', ''), new ReadToolUseMessage('', 'invalid', ''), new WriteToolUseMessage('', 'invalid', ''), new EditToolUseMessage('', 'invalid', '')]) {
 			expect(shouldRenderToolResult({ input: { mode: 'inline' }, result }, {
 				content: { raw: 'Invalid arguments' }, isError: true,
 			}, tool)).toBe(true);
@@ -18,7 +18,7 @@ describe('shouldRenderToolResult', () => {
 	});
 
 	it('preserves ordinary failure and permission-denial suppression for populated inputs', () => {
-		for (const tool of [new BashToolUseMessage('', 'normal', 'rg missing'), new ReadToolUseMessage('', 'normal', 'file'), new WriteToolUseMessage('', 'normal', 'file')]) {
+		for (const tool of [new BashToolUseMessage('', 'normal', 'rg missing'), new ReadToolUseMessage('', 'normal', 'file'), new WriteToolUseMessage('', 'normal', 'file'), new EditToolUseMessage('', 'normal', 'file'), new EditToolUseMessage('', 'dynamic')]) {
 			expect(shouldRenderToolResult({ input: { mode: 'inline' }, result: { hidden: true } }, {
 				content: { raw: 'Denied by user' }, isError: true,
 			}, tool)).toBe(false);

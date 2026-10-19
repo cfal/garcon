@@ -32,6 +32,7 @@ describe('ChatToolEventRenderer', () => {
 		new BashToolUseMessage('', 'invalid-bash', ''),
 		new ReadToolUseMessage('', 'invalid-read', ''),
 		new WriteToolUseMessage('', 'invalid-write', ''),
+		new EditToolUseMessage('', 'invalid-edit', ''),
 	])('renders a rejected $type with empty arguments through its canonical renderer', (toolMessage) => {
 		const onFileOpen = vi.fn();
 		const { container } = render(ChatToolEventRenderer, { toolMessage, mode: 'input', onFileOpen });
@@ -39,7 +40,8 @@ describe('ChatToolEventRenderer', () => {
 		if (toolMessage.type === 'bash-tool-use') {
 			expect(container.querySelector('code')?.textContent?.trim()).toBe('$');
 		} else {
-			expect(screen.getByText(toolMessage.type === 'read-tool-use' ? 'Read' : 'Write')).toBeTruthy();
+			const label = toolMessage.type === 'read-tool-use' ? 'Read' : toolMessage.type === 'edit-tool-use' ? 'Edit' : 'Write';
+			expect(screen.getByText(label)).toBeTruthy();
 		}
 		if (toolMessage.type === 'read-tool-use') expect(screen.queryByRole('button')).toBeNull();
 		expect(onFileOpen).not.toHaveBeenCalled();
@@ -49,6 +51,7 @@ describe('ChatToolEventRenderer', () => {
 		new BashToolUseMessage('', 'invalid-bash', ''),
 		new ReadToolUseMessage('', 'invalid-read', ''),
 		new WriteToolUseMessage('', 'invalid-write', ''),
+		new EditToolUseMessage('', 'invalid-edit', ''),
 	])('renders the actual failure for $type instead of its success presentation', (toolMessage) => {
 		const diagnostic = 'Invalid arguments for tool "synthetic"\nReceived arguments:\n{"invalid":.5}';
 		const { container } = render(ChatToolEventRenderer, {

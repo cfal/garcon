@@ -82,6 +82,7 @@ describe('convertPiToolUse', () => {
     ['bash', { type: 'bash-tool-use', command: '' }],
     ['read', { type: 'read-tool-use', filePath: '' }],
     ['write', { type: 'write-tool-use', filePath: '' }],
+    ['edit', { type: 'edit-tool-use', filePath: '' }],
   ])('keeps %s canonical when Pi rejects malformed arguments', (name, expected) => {
     for (const input of [{}, null, [], { command: {}, path: [] }]) {
       expect(convertPiToolUse(ts, 'invalid', name, input)).toMatchObject({ toolId: 'invalid', ...expected });
@@ -90,7 +91,7 @@ describe('convertPiToolUse', () => {
 
   it.each([42, false, null])('displays Pi-coerced required primitive strings: %j', (value) => {
     expect(convertPiToolUse(ts, 'primitive', 'bash', { command: value }).command).toBe(String(value));
-    for (const name of ['read', 'write']) {
+    for (const name of ['read', 'write', 'edit']) {
       expect(convertPiToolUse(ts, 'primitive', name, { path: value }).filePath).toBe(String(value));
     }
   });
