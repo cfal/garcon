@@ -150,6 +150,8 @@ describe('bundled Codex experimental schema compatibility', () => {
     );
     expect(inputImage.anyOf.map((variant) => variant.required)).toEqual([['image_url'], ['file_id']]);
     // The pinned binary's inline attachment store never emits the published file-ID form.
+    // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/attachment-store/src/lib.rs#L163-L174
+    // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core/src/image_preparation.rs#L372-L376
     expect(() => decodeItem({
       type: 'functionCallOutput', id: 'synthetic-output', ...itemFields.functionCallOutput,
       output: [{ type: 'input_image', file_id: 'synthetic-file' }],

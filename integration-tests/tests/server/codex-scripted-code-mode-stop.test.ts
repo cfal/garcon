@@ -11,6 +11,8 @@ import { liveCodexRunRequest, liveCodexStartRequest } from '../../support/live-c
 import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
 
 test('Stop terminates a running Code Mode cell and permits a new turn', async () => {
+  // Code Mode interruption is enabled by default in the pinned release.
+  // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/features/src/lib.rs#L1195-L1200
   const environment = await startScriptedCodexTestEnvironment({ toolMode: 'code_mode_only' });
   const recoveryReply = 'SCRIPTED_CODE_MODE_STOP_RECOVERED';
   let startedPath = '';
@@ -33,7 +35,9 @@ test('Stop terminates a running Code Mode cell and permits a new turn', async ()
     arguments: JSON.stringify({ cell_id: cellId, yield_time_ms: 1000 }),
   }]);
   environment.model.scriptTurn((request) => {
-    // Termination consumes the cell's final observation; a later wait cannot find it.
+    // Interrupt retires active cells; a later wait must report the old cell missing.
+    // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core/src/tasks/mod.rs#L946-L957
+    // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/code-mode-runtime/src/service.rs#L414-L424
     expect(request.functionCallOutputs.find((item) => item.callId === 'call_verify_stopped_cell')?.output)
       .toContain(`exec cell ${cellId} not found`);
     return [codexCodeModeCall('call_recovered_cell', 'text(String(load("garcon_stop_probe")));')];
@@ -43,6 +47,7 @@ test('Stop terminates a running Code Mode cell and permits a new turn', async ()
     const result = input.find((item) => isRecord(item)
       && item.type === 'custom_tool_call_output' && item.call_id === 'call_recovered_cell');
     // The completed cell's store survives only when recovery reuses the interrupted session.
+    // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/code-mode-runtime/src/session_runtime/mod.rs#L286-L303
     expect(isRecord(result) && JSON.stringify(result.output)).toContain('kept');
     return [codexAssistantMessage(recoveryReply)];
   });

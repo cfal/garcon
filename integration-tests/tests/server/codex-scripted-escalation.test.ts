@@ -157,6 +157,8 @@ describe('scripted Codex escalation', () => {
 
         const streamed = await fixture.client.getMessages(chatId);
         // Codex can stream a denial that misses its early-exit window; only completed live items count.
+        // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core/src/unified_exec/process.rs#L355-L395
+        // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core/src/unified_exec/process_manager.rs#L785-L835
         const liveCommandIds = await protocolProbe.readCompletedCommandItemIds();
         expect([
           ['call_escalated_retry'],
