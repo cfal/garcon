@@ -663,6 +663,7 @@ describe('agent integration core-record migration', () => {
       await store.init();
       expect(store.list()).toEqual([{
         ...migrated.prompts[0],
+        enabled: true,
         target: {
           ...migrated.prompts[0].target,
           preambleChoice: { mode: 'defaults' },
