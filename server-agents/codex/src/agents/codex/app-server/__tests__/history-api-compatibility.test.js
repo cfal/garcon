@@ -12,6 +12,8 @@ describe('bundled Codex history API compatibility', () => {
       shutdownGraceMs: 100,
     });
     try {
+      // Prevents background marketplace fetches from outliving the fixture.
+      // https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core-plugins/src/manager.rs#L2824-L2834
       await writeFile(join(home, 'config.toml'), '[features]\nplugins = false\n');
       const initialized = await client.connect();
       expect(initialized.userAgent).toBeString();
