@@ -13,11 +13,11 @@ Local models are available to:
 
 ## Prerequisites
 
-- Ollama installed and running on the machine that runs the agent: the Local
+- Ollama installed and running on the executor that runs the agent: the Local
   executor, or the remote executor that will run the chat.
 - At least one pulled model, for example `ollama pull llama3.1:8b`.
 
-`curl http://localhost:11434/api/tags` on that machine should list the pulled
+`curl http://localhost:11434/api/tags` on that executor should list the pulled
 models.
 
 ## Add An Ollama Provider
@@ -43,7 +43,7 @@ Create a chat on an executor the provider is assigned to, choose the agent, and
 pick a model ending in `(local)` under the provider.
 
 The provider URL is resolved on the executor that runs the agent, so
-`localhost` means that executor's machine, not necessarily the controller's.
+`localhost` means that executor, not necessarily the controller.
 Assigning a provider does not make an unreachable address reachable.
 
 A chat cannot switch between a local and a cloud model mid-session; start a new

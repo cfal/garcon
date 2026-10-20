@@ -20,7 +20,7 @@ Executor selection sits beside the project directory rather than in the model pi
 - Narrow layout: executor selector above the directory field, retaining its full label.
 - Scheduled New Chat uses the same arrangement.
 - Directory browsing, Tab completion, recent paths, worktrees, and model discovery are scoped to that executor.
-- New Chat keeps pinned-path pills scoped to the selected executor by default. The adjacent Other machines… picker shows other executors’ saved pins grouped by owner in a desktop popover or mobile bottom sheet. Selecting a pin closes the picker. Selecting a ready executor's pin changes executor and path together, retaining the prompt and attachments; unavailable pins remain visible and disabled. The machine selector continues to select the execution target.
+- New Chat keeps pinned-path pills scoped to the selected executor by default. The adjacent Other executors… picker shows other executors’ saved pins grouped by owner in a desktop popover or mobile bottom sheet. Selecting a pin closes the picker. Selecting a ready executor's pin changes executor and path together, retaining the prompt and attachments; unavailable pins remain visible and disabled. The executor selector continues to select the execution target.
 - The model picker is fixed to the selected executor. Neither its ordinary options nor its recents switch executors implicitly.
 
 Changing the executor chooses the destination's saved default or most recent directory, falling back to its advertised project base. Prompt text and attachments are preserved. An agent/model selection is kept only when valid on the destination, and submission requires a validated destination catalog.
@@ -78,7 +78,7 @@ Ticket projects remain global, editable labels, not executor-owned filesystem id
 - Defaults carry no executor prefix, identity is not inferred from Git remote URLs, and there is no project-mapping system.
 - Explicit project labels bypass automatic inference. The rule does not rewrite existing ticket labels; it applies only to automatic defaults for new tickets.
 
-The [controller resolver](../../server/controller/tickets/project-default.ts) asks the owning executor through the typed `ticketProjectDefault` project-service query, which [resolves the name on that machine](../../server/runtime/projects/ticket-project-default.ts). It preserves primary-checkout grouping, executor-local filesystem boundaries, bounded probing, cancellation, and directory fallback. The Git `getRepoInfo` result alone is insufficient because it describes the current worktree rather than necessarily identifying the shared primary checkout.
+The [controller resolver](../../server/controller/tickets/project-default.ts) asks the owning executor through the typed `ticketProjectDefault` project-service query, which [resolves the name on that executor](../../server/runtime/projects/ticket-project-default.ts). It preserves primary-checkout grouping, executor-local filesystem boundaries, bounded probing, cancellation, and directory fallback. The Git `getRepoInfo` result alone is insufficient because it describes the current worktree rather than necessarily identifying the shared primary checkout.
 
 The browser and controller-handled agent commands use the same resolver. Executor unavailability never triggers controller-local inspection. If no usable default can be produced, explicit project entry remains. Ticket storage and CRUD remain controller-owned and do not depend on executor availability.
 

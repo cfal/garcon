@@ -184,7 +184,7 @@ following up on a mutation.
 
 ```bash
 bun cli/main.ts executor list --json
-bun cli/main.ts executor create --label 'Build machine' --direction executor-connects \
+bun cli/main.ts executor create --label 'Build executor' --direction executor-connects \
   --advertise-url 'wss://controller.example.com/executor/{executorId}' --json
 bun cli/main.ts executor connection <executor-id> --output ./worker-connection.txt
 bun cli/main.ts executor create --label 'Listening worker' --direction controller-connects \
@@ -275,9 +275,9 @@ connection or its authority. Model/provider resolution and chat creation use the
 same selected target. Unknown or unavailable targets fail without falling back
 to another executor.
 
-Cross-executor starts require an explicit absolute `--cwd` on the target machine.
+Cross-executor starts require an explicit absolute `--cwd` on the target executor.
 The CLI sends it unchanged, including Windows drive/UNC paths; it does not expand
-`~`, normalize remote paths, or check them against the CLI machine's filesystem.
+`~`, normalize remote paths, or check them against the CLI's own filesystem.
 The target validates its own filesystem boundary. Same-origin starts retain local
 directory validation and canonicalization, including when `--executor` is explicit.
 

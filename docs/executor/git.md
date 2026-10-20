@@ -27,7 +27,7 @@ No repository synchronization, cloning workflow, cross-executor worktree migrati
 | --- | --- |
 | [Executor contract](../../server-agents/interface/src/contracts/execution-runtime.ts) | `git: false` and `getGitService(): Promise<never>`; no `gh` accessor. Files and Terminal have typed services. |
 | Route composition at the design baseline | Git and GitHub routes were Local-only. That wrapper has since been removed; filesystem validation now runs on the selected executor. |
-| [Git service](../../server/runtime/git/git-service.ts) | Composes status, diff, history, comparisons, review documents, porcelain operations, worktrees, and quick summaries. Also contains HTTP error translation and an agent dependency; neither belongs in a machine-service contract. |
+| [Git service](../../server/runtime/git/git-service.ts) | Composes status, diff, history, comparisons, review documents, porcelain operations, worktrees, and quick summaries. Also contains HTTP error translation and an agent dependency; neither belongs in an executor-service contract. |
 | [Git runner](../../server/runtime/git/run.ts) | Spawns the real `git` executable with argv, captures bounded output, propagates abort, and retries recognized lock failures within one deadline. Defaults: 30 seconds, 64 MiB stdout, two MiB stderr prefix. These are subprocess limits, not safe RPC message sizes. |
 | [Status/commit operations](../../server/runtime/git/status.ts) | Selected-file and whole-index commit semantics differ. Selected-file commit uses a temporary index and reports `commitScope` and `indexSynchronized`. Commit coordination is keyed by canonical Git common directory. Network operations suppress terminal credential prompts and derive a timeout from controller HTTP configuration. |
 | [Review registry](../../server/runtime/git/review-document-registry.ts) | Opaque document IDs, per-source generations, leases, supersession, ten-minute idle TTL, 32 idle/64 total documents, and a 128 MiB cached patch-body budget. This is not a hard bound on every live object or in-flight computation. |
@@ -40,7 +40,7 @@ Important implementation details must not disappear behind the service extractio
 
 - [Selected-file commit](../../server/runtime/git/selected-file-commit.ts) may successfully move a ref while failing subsequent real-index synchronization. That is a successful commit with a warning, not permission to retry the commit.
 - [Partial staging](../../server/runtime/git/diff-engine.ts) currently interprets indices against a newly read diff. It does not receive the browser's review-document identity. Remoting must not turn stale line/hunk indices into a different selected change.
-- The diff engine directly spawns `git show` for a bounded binary-prefix probe. Conflict and review helpers directly access files. Moving only `runGit()` would leave machine-dependent work on the controller.
+- The diff engine directly spawns `git show` for a bounded binary-prefix probe. Conflict and review helpers directly access files. Moving only `runGit()` would leave executor-local work on the controller.
 - [Project inspection](../../server/runtime/projects/project-service.ts) already performs a bounded repository probe on the executor. It stays a narrow project-service operation, not a second Git implementation.
 - Ticket project defaults were Local-only at the design baseline. Subsequent work routes [controller resolution](../../server/controller/tickets/project-default.ts) through `ExecutionProjectService.ticketProjectDefault()` on the selected executor. The executor owns the bounded repository probe; this does not require a separate Git implementation.
 
@@ -171,7 +171,7 @@ Browser endpoints stay under `/api/v1/git/*` and `/api/v1/gh/*`, adding executor
 
 The authoritative `GitReviewDocumentRegistry` moves to each executor service. It binds a snapshot to canonical project/worktree identity, context, source hashes or mutable-file tokens, and the permitted file set. Body retrieval must return content from that document or a stale/expired outcome, never silently switch to a newly generated document.
 
-Qualify browser/controller document references by stable executor and serving `instanceId`. Do not use provider integration scope for machine resources. The registry's existing numeric `generation` is source supersession within that registry, not the executor serving instance or terminal process runtime.
+Qualify browser/controller document references by stable executor and serving `instanceId`. Do not use provider integration scope for executor resources. The registry's existing numeric `generation` is source supersession within that registry, not the executor serving instance or terminal process runtime.
 
 - Documents belong to the worker process, subject to their TTL and supersession. Reconnect refreshes visible surfaces without replaying operations.
 - Worker restart changes the serving instance and invalidates document references. Obtain new documents before acting on retained UI selections.

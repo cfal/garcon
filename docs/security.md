@@ -99,7 +99,7 @@ authenticate with the executor's shared secret over Noise rather than user token
 
 ## Executor Trust Boundary
 
-An executor is a trusted machine/OS-account boundary, not a sandbox for mutually
+An executor is a trusted host/OS-account boundary, not a sandbox for mutually
 untrusted agents. Provider subprocesses, native sessions, files, Git operations,
 and terminals run with that worker account's authority. Other processes under
 the same account can inspect its data and credentials. Use separate OS accounts

@@ -29,7 +29,7 @@ Authority policy: explicit controller-side, per-executor opt-in to workspace-lev
 - Preserve CLI syntax, output formatting, application error contracts, existing command identities, and operation-specific retry rules.
 - Work in both connection directions without requiring the worker to reach the controller's HTTP listener.
 - Keep the controller as the only owner of chats, transcript ledgers, queues, permissions, application settings, and tickets.
-- Keep argument parsing, stdin, cwd resolution, receipt polling, and output-file writes on the machine running the CLI.
+- Keep argument parsing, stdin, cwd resolution, receipt polling, and output-file writes where the CLI runs.
 - Keep retained remote terminals usable after controller restart without changing their process-lifetime guarantee.
 
 No CLI-specific controller-worker channel, traffic scheduler, generic HTTP proxy, controller-side CLI subprocess, durable forwarding queue, new mutation ledger, result cache, or automatic agent recovery. Per-chat CLI capabilities are separate work. Existing executor-aware ticket project inference is reused. Controller-interpreted provider-output commands keep their existing path and authorization rules.
@@ -279,14 +279,14 @@ Origin and target are different identities. Origin is derived from the authentic
 
 | Operation | Target rule |
 | --- | --- |
-| New `start` / `start-async` | Use explicit `--executor` or `context.defaultExecutorId`. Cross-executor starts require an absolute target-local cwd; otherwise resolve cwd on the CLI machine. Validate through the target executor's project service. |
+| New `start` / `start-async` | Use explicit `--executor` or `context.defaultExecutorId`. Cross-executor starts require an absolute target-local cwd; otherwise resolve cwd where the CLI runs. Validate through the target executor's project service. |
 | Standalone agent/model catalog | Use explicit `--executor` or the context default executor. Provider endpoint definitions remain controller-owned; discovery executes on the selected executor. |
 | Native-session lookup | Include explicit `--executor` or the context default executor to avoid same-native-ID ambiguity across hosts. |
 | Existing-chat resume/settings selection | Use the already-fetched snapshot's durable executor/agent/epoch and that executor's catalog. Do not fetch the full chat list or use the HTTP endpoint's default. |
 | Agent handoff without an executor override | Preserve the existing chat executor and use its destination-agent catalog. Do not move execution just because the CLI ran on another worker. |
 | Fork/fork-run | Keep the source-chat executor and existing fork/handoff semantics. |
 | Read/search/status/wait/stop | Keep the explicit chat identity and existing ownership/control fences; no caller-executor filter or retargeting. |
-| Export/handoff output file | Write on the CLI machine, never on the controller by interpreting the requested output path remotely. |
+| Export/handoff output file | Write where the CLI runs, never on the controller by interpreting the requested output path remotely. |
 | Ticket project inference | Send the context default executor and CLI directory to the existing resolver. |
 
 Require explicit executor fields for bridged executor-sensitive requests where omission would otherwise mean Local. Do not repair them by blindly rewriting every executor or path at the gateway. The context default is not an authorization ceiling: an existing chat may legitimately belong to another executor. New cross-executor selection flags are not required to make this bridge useful.
