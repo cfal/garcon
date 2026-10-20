@@ -96,7 +96,7 @@ describe('MarkdownViewer', () => {
 				{
 					...remoteExecutor,
 					projectBasePath: '/workspace',
-					machineServices: { ...remoteExecutor.machineServices, files: true },
+					executorServices: { ...remoteExecutor.executorServices, files: true },
 				},
 			],
 		});

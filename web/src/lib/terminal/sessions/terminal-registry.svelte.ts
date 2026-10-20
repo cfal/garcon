@@ -145,11 +145,11 @@ export class TerminalRegistry {
 				label: 'Local',
 				enabled: true,
 				availability: 'ready',
-				machineServices: { terminals: true },
+				executorServices: { terminals: true },
 			},
 		];
 		return executors
-			.filter((executor) => executor.id === 'local' || executor.machineServices.terminals)
+			.filter((executor) => executor.id === 'local' || executor.executorServices.terminals)
 			.toSorted((left, right) => {
 				if (left.id === 'local') return -1;
 				if (right.id === 'local') return 1;
@@ -158,7 +158,7 @@ export class TerminalRegistry {
 			.map((executor) => ({
 				id: executor.id,
 				label: executor.label,
-				available: executor.enabled && executor.availability === 'ready' && executor.machineServices.terminals,
+				available: executor.enabled && executor.availability === 'ready' && executor.executorServices.terminals,
 				full:
 					this.orderedSessions.filter(
 						(session) => this.executorIdFor(session.metadata.terminalId) === executor.id,

@@ -18,11 +18,11 @@
 	} = $props();
 
 	function defaultExecutors(): ExecutorsStore {
-		const services = localExecutor.machineServices;
+		const services = localExecutor.executorServices;
 		const store = new ExecutorsStore();
 		store.applySnapshot([
-			{ ...localExecutor, machineServices: { ...services, directoryCreation: localDirectoryCreation } },
-			{ ...remoteExecutor, machineServices: { ...services } },
+			{ ...localExecutor, executorServices: { ...services, directoryCreation: localDirectoryCreation } },
+			{ ...remoteExecutor, executorServices: { ...services } },
 		]);
 		return store;
 	}

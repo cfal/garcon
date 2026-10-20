@@ -114,9 +114,9 @@ describe('GhCapabilityStore', () => {
 		const executors = new ExecutorsStore();
 		const local = {
 			...localExecutor,
-			machineServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: true },
+			executorServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: true },
 		};
-		const remote = { ...remoteExecutor, machineServices: local.machineServices };
+		const remote = { ...remoteExecutor, executorServices: local.executorServices };
 		executors.applySnapshot([local, remote]);
 		const capabilities = new GhCapabilityStore(executors);
 		const pending = Promise.withResolvers<Awaited<ReturnType<typeof ghApi.getGhStatus>>>();

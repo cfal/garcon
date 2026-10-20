@@ -800,7 +800,7 @@ describe('Settings', () => {
 	it('shows and refreshes GitHub status per executor independently of server settings loading', async () => {
 		const remote = {
 			...remoteExecutor,
-			machineServices: { ...remoteExecutor.machineServices, git: true, gh: true },
+			executorServices: { ...remoteExecutor.executorServices, git: true, gh: true },
 		};
 		const localStatus = makeTestGhCapability();
 		const remoteStatus = makeTestGhCapability({

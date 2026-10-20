@@ -12,14 +12,14 @@ function executors(snapshot: ExecutorSnapshot | null, hasSnapshot = true) {
 		get: () => snapshot ?? undefined,
 		isReady: ready,
 		label: () => snapshot?.label ?? (hasSnapshot ? 'Unavailable executor' : remoteExecutor.id),
-		filesAvailable: () => ready() && snapshot?.machineServices.files === true,
-		gitAvailable: () => ready() && snapshot?.machineServices.git === true,
+		filesAvailable: () => ready() && snapshot?.executorServices.files === true,
+		gitAvailable: () => ready() && snapshot?.executorServices.git === true,
 	} satisfies Parameters<typeof resolveExecutorServiceNotice>[0];
 }
 
 describe('resolveExecutorServiceNotice', () => {
 	it('reports nothing when the executor provides the service', () => {
-		const ready = executors({ ...remoteExecutor, machineServices: filesAndGit });
+		const ready = executors({ ...remoteExecutor, executorServices: filesAndGit });
 		expect(resolveExecutorServiceNotice(ready, remoteExecutor.id, 'files')).toBeNull();
 		expect(resolveExecutorServiceNotice(ready, remoteExecutor.id, 'git')).toBeNull();
 	});
@@ -30,8 +30,8 @@ describe('resolveExecutorServiceNotice', () => {
 			executorId: remoteExecutor.id,
 		});
 		for (const snapshot of [
-			{ ...remoteExecutor, availability: 'offline', machineServices: filesAndGit },
-			{ ...remoteExecutor, enabled: false, machineServices: filesAndGit },
+			{ ...remoteExecutor, availability: 'offline', executorServices: filesAndGit },
+			{ ...remoteExecutor, enabled: false, executorServices: filesAndGit },
 		] satisfies ExecutorSnapshot[]) {
 			expect(resolveExecutorServiceNotice(executors(snapshot), remoteExecutor.id, 'files')).toEqual(
 				{
@@ -52,7 +52,7 @@ describe('resolveExecutorServiceNotice', () => {
 		const reconnecting = executors({
 			...remoteExecutor,
 			availability: 'reconnecting',
-			machineServices: filesAndGit,
+			executorServices: filesAndGit,
 		});
 		expect(resolveExecutorServiceNotice(reconnecting, remoteExecutor.id, 'files')).toEqual({
 			kind: 'executor-reconnecting',
@@ -62,7 +62,7 @@ describe('resolveExecutorServiceNotice', () => {
 			...remoteExecutor,
 			enabled: false,
 			availability: 'reconnecting',
-			machineServices: filesAndGit,
+			executorServices: filesAndGit,
 		});
 		expect(resolveExecutorServiceNotice(disabled, remoteExecutor.id, 'files')).toMatchObject({
 			kind: 'executor-unavailable',

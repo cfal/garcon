@@ -189,7 +189,7 @@ describe('FilesSurfaceController executor browsing', () => {
 			localExecutor,
 			{
 				...remoteExecutor,
-				machineServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
+				executorServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
 			},
 		]);
 		return executors;

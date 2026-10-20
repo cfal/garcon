@@ -496,7 +496,7 @@ describe('NewChatFormState', () => {
 			{
 				...remoteExecutor,
 				projectBasePath: '/same',
-				machineServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
+				executorServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
 			},
 		]);
 		const local = deferred<Awaited<ReturnType<typeof browseDirectory>>>();
@@ -526,7 +526,7 @@ describe('NewChatFormState', () => {
 	it('routes worktrees to the draft executor and rejects publication from a replaced instance', async () => {
 		const remote = {
 			...remoteExecutor,
-			machineServices: { ...remoteExecutor.machineServices, git: true },
+			executorServices: { ...remoteExecutor.executorServices, git: true },
 		};
 		executors.applySnapshot([localExecutor, remote]);
 		formState.selectExecutor(remote.id);
