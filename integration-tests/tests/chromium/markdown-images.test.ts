@@ -248,27 +248,31 @@ test('opens remote thumbnails in the image viewer with mouse, keyboard, and mobi
     });
     await page.goto(`${garcon.baseUrl}/chat/${chatId}`);
     const assistant = page.locator('[data-chat-message-type="assistant-message"]');
+    const thumbnail = assistant.getByRole('button', { name: 'Open image Capture', exact: true });
+    const thumbnailImage = thumbnail.getByRole('img');
+    const imageLink = assistant.getByRole('link', { name: 'Linked capture', exact: true });
+    const dialog = page.locator('[role="dialog"][data-workspace-surface-id^="file:"]');
+    const expandedImage = dialog.getByRole('img', { name: 'capture.png', exact: true });
     try {
       const spinner = assistant.getByRole('status', { name: 'Loading image...' }).first();
       await browserExpect(spinner.locator('svg.animate-spin')).toBeVisible();
       await browserExpect(spinner).toHaveText('');
       await browserExpect(spinner).toHaveAttribute('aria-busy', 'true');
-      await browserExpect(assistant.getByRole('button', { name: 'Open image Capture', exact: true })).toHaveCount(0);
+      await browserExpect(thumbnail).toHaveCount(0);
     } finally {
       releaseContent.resolve();
     }
-    const thumbnail = assistant.getByRole('button', { name: 'Open image Capture', exact: true });
-    await expectDecodedImage(thumbnail.getByRole('img'));
-    const thumbnailSource = await thumbnail.getByRole('img').getAttribute('src');
-    const linkedImage = assistant.getByRole('link', { name: 'Linked capture', exact: true });
-    await browserExpect(linkedImage.locator('button')).toHaveCount(0);
-    const dialog = page.locator('[role="dialog"][data-workspace-surface-id^="file:"]');
+    await expectDecodedImage(thumbnailImage);
+    const thumbnailSource = await thumbnailImage.getAttribute('src');
+    await browserExpect(imageLink.locator('button')).toHaveCount(0);
     const artifactDirectory = new URL('../../artifacts/chromium/', import.meta.url).pathname;
     await mkdir(artifactDirectory, { recursive: true });
     for (const activation of ['click', 'Enter', 'Space']) {
-      if (activation === 'click') await thumbnail.getByRole('img').click();
-      else await thumbnail.press(activation);
-      const expandedImage = dialog.getByRole('img', { name: 'capture.png', exact: true });
+      if (activation === 'click') {
+        await thumbnailImage.click();
+      } else {
+        await thumbnail.press(activation);
+      }
       await expectDecodedImage(expandedImage);
       expect(await expandedImage.getAttribute('src')).not.toBe(thumbnailSource);
       await browserExpect(dialog.getByRole('button', { name: 'Fit to window (0)', exact: true })).toBeVisible();
@@ -281,7 +285,7 @@ test('opens remote thumbnails in the image viewer with mouse, keyboard, and mobi
       await page.keyboard.press('Escape');
       await browserExpect(dialog).toHaveCount(0);
       await browserExpect(thumbnail).toBeFocused();
-      await expectDecodedImage(thumbnail.getByRole('img'));
+      await expectDecodedImage(thumbnailImage);
     }
     expect(contentRequests.length).toBeGreaterThanOrEqual(3);
     for (const request of contentRequests) {
@@ -291,7 +295,7 @@ test('opens remote thumbnails in the image viewer with mouse, keyboard, and mobi
       expect(query.get('path')).toBe('capture.png');
       expect(request.authorization).toBe(`Bearer ${garcon.authToken}`);
     }
-    await linkedImage.click();
+    await imageLink.click();
     await browserExpect(page.getByRole('heading', { name: 'Linked document', exact: true })).toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });

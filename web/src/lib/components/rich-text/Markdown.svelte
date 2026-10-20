@@ -172,6 +172,10 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		variant === 'user' || variant === 'presented' ? { breaks: true } : undefined,
 	);
 
+	function openImageFile(rawHref: string): void {
+		onLinkNavigate?.({ rawHref, kind: 'file' });
+	}
+
 	function stopParentContextTriggerGesture(event: PointerEvent | MouseEvent): void {
 		event.stopPropagation();
 	}
@@ -208,9 +212,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 				{title}
 				{text}
 				{resolveImageFile}
-				onOpen={onLinkNavigate
-					? (rawHref) => onLinkNavigate?.({ rawHref, kind: 'file' })
-					: undefined}
+				onOpen={onLinkNavigate ? openImageFile : undefined}
 			/>
 		{/snippet}
 

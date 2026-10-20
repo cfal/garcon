@@ -81,6 +81,25 @@ describe('Markdown images', () => {
 		expect(screen.queryByRole('button')).toBeNull();
 	});
 
+	it('updates thumbnail navigation without reloading the image', async () => {
+		const initialNavigate = vi.fn();
+		const nextNavigate = vi.fn();
+		const view = render(Markdown, {
+			source: '![Capture](capture.png)',
+			resolveImageFile,
+			onLinkNavigate: initialNavigate,
+		});
+		await screen.findByRole('button', { name: 'Open image Capture' });
+		await view.rerender({ onLinkNavigate: nextNavigate });
+		await fireEvent.click(screen.getByRole('button', { name: 'Open image Capture' }));
+		expect(initialNavigate).not.toHaveBeenCalled();
+		expect(nextNavigate).toHaveBeenCalledExactlyOnceWith({ rawHref: 'capture.png', kind: 'file' });
+		await view.rerender({ onLinkNavigate: undefined });
+		expect(screen.queryByRole('button')).toBeNull();
+		expect(screen.getByRole('img').getAttribute('src')).toBe('blob:preview-1');
+		expect(filesApi.readContent).toHaveBeenCalledOnce();
+	});
+
 	it.each(['guide.md', 'https://example.com/guide'])(
 		'preserves an authored image link to %s without nesting a button',
 		async (destination) => {
