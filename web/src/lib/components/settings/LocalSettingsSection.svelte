@@ -48,6 +48,7 @@
 		small: m.settings_inline_image_thumbnail_size_small,
 		medium: m.settings_inline_image_thumbnail_size_medium,
 		large: m.settings_inline_image_thumbnail_size_large,
+		full: m.settings_inline_image_thumbnail_size_full,
 	};
 	const hideableToolGroupLabels = {
 		bash: m.settings_chat_hidden_tool_bash,

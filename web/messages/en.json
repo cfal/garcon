@@ -1753,6 +1753,7 @@
 	"settings_inline_image_thumbnail_size_small": "Small 320x180",
 	"settings_inline_image_thumbnail_size_medium": "Medium 640x320",
 	"settings_inline_image_thumbnail_size_large": "Large 960x480",
+	"settings_inline_image_thumbnail_size_full": "Full",
 	"settings_workspace_titlebar_size": "Titlebar size adjustment",
 	"settings_highlight_active_window": "Highlight active window",
 	"settings_fullscreen_covers_sidebar": "Always cover chat sidebar in fullscreen",

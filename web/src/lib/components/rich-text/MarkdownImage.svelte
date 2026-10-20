@@ -179,6 +179,11 @@
 		--inline-image-max-height: 480px;
 	}
 
+	:global(html[data-inline-image-thumbnail-size='full']) .markdown-image {
+		--inline-image-max-width: 100%;
+		--inline-image-max-height: none;
+	}
+
 	img {
 		display: block;
 		width: auto;

@@ -107,6 +107,7 @@ test('persists inline image size limits and bounds local and external images wit
       { size: 'medium', maxWidth: 640, maxHeight: 320 },
       { size: 'small', maxWidth: 320, maxHeight: 180 },
       { size: 'large', maxWidth: 960, maxHeight: 480 },
+      { size: 'full', maxWidth: Infinity, maxHeight: Infinity },
     ];
     const viewports = [
       { label: 'desktop', width: 1440, height: 900 },
@@ -197,12 +198,12 @@ test('persists inline image size limits and bounds local and external images wit
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.reload();
-    await browserExpect(page.locator('html')).toHaveAttribute('data-inline-image-thumbnail-size', 'large');
+    await browserExpect(page.locator('html')).toHaveAttribute('data-inline-image-thumbnail-size', 'full');
     const savedSize = await page.evaluate(() =>
       JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}').inlineImageThumbnailSize,
     );
-    expect(savedSize).toBe('large');
-    await browserExpect(assistant.getByRole('img', { name: 'Tall capture', exact: true })).toHaveCSS('max-height', '480px');
+    expect(savedSize).toBe('full');
+    await browserExpect(assistant.getByRole('img', { name: 'Tall capture', exact: true })).toHaveCSS('max-height', 'none');
     const composer = page.locator('[data-conversation-composer-host] textarea[placeholder="Reply..."]');
     await composer.focus();
     const originalComposer = await composer.elementHandle();

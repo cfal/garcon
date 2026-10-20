@@ -369,6 +369,7 @@ describe('Settings', () => {
 				['small', 'Small 320x180'],
 				['medium', 'Medium 640x320'],
 				['large', 'Large 960x480'],
+				['full', 'Full'],
 			]) {
 				expect(within(thumbnailSize).getByRole('option', { name: label })).toBeTruthy();
 				await fireEvent.change(thumbnailSize, { target: { value } });
