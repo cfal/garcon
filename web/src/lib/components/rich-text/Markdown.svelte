@@ -8,6 +8,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		buildUnsupportedHTML,
 		defaultRenderers,
 		defaultSanitizeUrl,
+		type ParagraphSnippetProps,
 		type RendererComponent,
 		type Renderers,
 		type SanitizeUrlFn,
@@ -16,6 +17,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 	import { createChatReferenceMarkdownExtension } from '$lib/chat/transcript/chat-reference-markdown.js';
 	import MathRenderer from '$lib/components/rich-text/MathRenderer.svelte';
 	import { createLiteralHtmlMarkdownExtension } from '$lib/components/rich-text/markdown-html-policy';
+	import { createImageParagraphMarkdownExtension } from './markdown-image-paragraph';
 
 	interface MathRenderers extends Renderers {
 		inlineKatex: RendererComponent;
@@ -25,6 +27,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 	const baseMarkdownExtensions = [
 		markedKatex({ singleDollarInline: true }),
 		createLiteralHtmlMarkdownExtension(),
+		createImageParagraphMarkdownExtension(),
 	];
 	const bareChatIdMarkdownExtensions = [
 		...baseMarkdownExtensions,
@@ -281,8 +284,10 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 			</blockquote>
 		{/snippet}
 
-		{#snippet paragraph({ children })}
-			<div class="mb-1 last:mb-0 break-words">
+		{#snippet paragraph({ children, imageOnly }: ParagraphSnippetProps & { imageOnly?: boolean })}
+			<div
+				class={imageOnly ? 'markdown-image-paragraph break-words' : 'mb-1 last:mb-0 break-words'}
+			>
 				{@render children?.()}
 			</div>
 		{/snippet}
@@ -296,3 +301,9 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		</div>
 	{/if}
 </div>
+
+<style>
+	.markdown-image-paragraph {
+		margin-block: 0.5rem;
+	}
+</style>
