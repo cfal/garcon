@@ -376,6 +376,21 @@ describe('Settings', () => {
 				expect(onLocalSet).toHaveBeenCalledWith('inlineImageThumbnailSize', value);
 				expect((thumbnailSize as HTMLSelectElement).value).toBe(value);
 			}
+			const mermaidSize = screen.getByRole('combobox', {
+				name: 'Inline Mermaid thumbnail size (px)',
+			});
+			expect((mermaidSize as HTMLSelectElement).value).toBe('medium');
+			for (const [value, label] of [
+				['small', 'Small 320x180'],
+				['medium', 'Medium 640x320'],
+				['large', 'Large 960x480'],
+				['full', 'Full'],
+			]) {
+				expect(within(mermaidSize).getByRole('option', { name: label })).toBeTruthy();
+				await fireEvent.change(mermaidSize, { target: { value } });
+				expect(onLocalSet).toHaveBeenCalledWith('inlineMermaidThumbnailSize', value);
+				expect((mermaidSize as HTMLSelectElement).value).toBe(value);
+			}
 			const inactivityDuration = screen.getByRole('combobox', {
 				name: 'Inactivity duration',
 			});

@@ -46,6 +46,8 @@ export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as con
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 export const INLINE_IMAGE_THUMBNAIL_SIZE_VALUES = ['small', 'medium', 'large', 'full'] as const;
 export type InlineImageThumbnailSize = (typeof INLINE_IMAGE_THUMBNAIL_SIZE_VALUES)[number];
+export const INLINE_MERMAID_THUMBNAIL_SIZE_VALUES = ['small', 'medium', 'large', 'full'] as const;
+export type InlineMermaidThumbnailSize = (typeof INLINE_MERMAID_THUMBNAIL_SIZE_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
 export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
 export const WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MIN_PX = -2;
@@ -151,6 +153,7 @@ export interface LocalSettingsSnapshot {
 	snippetTrigger: string;
 	chatMaxWidth: ChatMaxWidth;
 	inlineImageThumbnailSize: InlineImageThumbnailSize;
+	inlineMermaidThumbnailSize: InlineMermaidThumbnailSize;
 	workspaceWindowTitlebarHeightDeltaPx: number;
 	fullscreenCoversSidebar: boolean;
 	chatListAutohide: boolean;
@@ -226,6 +229,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
 	inlineImageThumbnailSize: 'medium',
+	inlineMermaidThumbnailSize: 'medium',
 	workspaceWindowTitlebarHeightDeltaPx: 0,
 	fullscreenCoversSidebar: true,
 	chatListAutohide: false,
@@ -301,6 +305,13 @@ export function isInlineImageThumbnailSize(value: unknown): value is InlineImage
 	return (
 		typeof value === 'string' &&
 		INLINE_IMAGE_THUMBNAIL_SIZE_VALUES.includes(value as InlineImageThumbnailSize)
+	);
+}
+
+export function isInlineMermaidThumbnailSize(value: unknown): value is InlineMermaidThumbnailSize {
+	return (
+		typeof value === 'string' &&
+		INLINE_MERMAID_THUMBNAIL_SIZE_VALUES.includes(value as InlineMermaidThumbnailSize)
 	);
 }
 
@@ -424,6 +435,9 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		inlineImageThumbnailSize: isInlineImageThumbnailSize(parsed.inlineImageThumbnailSize)
 			? parsed.inlineImageThumbnailSize
 			: DEFAULTS.inlineImageThumbnailSize,
+		inlineMermaidThumbnailSize: isInlineMermaidThumbnailSize(parsed.inlineMermaidThumbnailSize)
+			? parsed.inlineMermaidThumbnailSize
+			: DEFAULTS.inlineMermaidThumbnailSize,
 		workspaceWindowTitlebarHeightDeltaPx: parseWorkspaceWindowTitlebarHeightDeltaPx(
 			parsed.workspaceWindowTitlebarHeightDeltaPx,
 		),
@@ -534,6 +548,9 @@ export class LocalSettingsStore {
 	snippetTrigger = $state(DEFAULTS.snippetTrigger);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
 	inlineImageThumbnailSize = $state<InlineImageThumbnailSize>(DEFAULTS.inlineImageThumbnailSize);
+	inlineMermaidThumbnailSize = $state<InlineMermaidThumbnailSize>(
+		DEFAULTS.inlineMermaidThumbnailSize,
+	);
 	workspaceWindowTitlebarHeightDeltaPx = $state(DEFAULTS.workspaceWindowTitlebarHeightDeltaPx);
 	fullscreenCoversSidebar = $state(DEFAULTS.fullscreenCoversSidebar);
 	chatListAutohide = $state(DEFAULTS.chatListAutohide);
@@ -663,6 +680,7 @@ export class LocalSettingsStore {
 			snippetTrigger: this.snippetTrigger,
 			chatMaxWidth: this.chatMaxWidth,
 			inlineImageThumbnailSize: this.inlineImageThumbnailSize,
+			inlineMermaidThumbnailSize: this.inlineMermaidThumbnailSize,
 			workspaceWindowTitlebarHeightDeltaPx: this.workspaceWindowTitlebarHeightDeltaPx,
 			fullscreenCoversSidebar: this.fullscreenCoversSidebar,
 			chatListAutohide: this.chatListAutohide,
@@ -717,6 +735,7 @@ export class LocalSettingsStore {
 		this.snippetTrigger = snap.snippetTrigger;
 		this.chatMaxWidth = snap.chatMaxWidth;
 		this.inlineImageThumbnailSize = snap.inlineImageThumbnailSize;
+		this.inlineMermaidThumbnailSize = snap.inlineMermaidThumbnailSize;
 		this.workspaceWindowTitlebarHeightDeltaPx = snap.workspaceWindowTitlebarHeightDeltaPx;
 		this.fullscreenCoversSidebar = snap.fullscreenCoversSidebar;
 		this.chatListAutohide = snap.chatListAutohide;

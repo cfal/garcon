@@ -666,13 +666,6 @@
 	color: hsl(var(--primary-foreground));
 }
 
-/* Translucent diagram headers need stronger separation than the primary accent. */
-.mermaid-block-header::selection,
-.mermaid-block-header ::selection {
-	background-color: hsl(var(--foreground));
-	color: hsl(var(--background));
-}
-
 .rainbow-ultra-surface {
 	background-image:
 		linear-gradient(rgb(15 23 42 / 0.5), rgb(15 23 42 / 0.5)),

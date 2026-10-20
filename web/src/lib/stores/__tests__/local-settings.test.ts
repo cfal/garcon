@@ -3,6 +3,7 @@ import {
 	createLocalSettingsStore,
 	HIDEABLE_TOOL_GROUPS,
 	INLINE_IMAGE_THUMBNAIL_SIZE_VALUES,
+	INLINE_MERMAID_THUMBNAIL_SIZE_VALUES,
 	SIDEBAR_INACTIVITY_DURATION_VALUES,
 } from '../local-settings.svelte.ts';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
@@ -23,6 +24,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.fullscreenCoversSidebar).toBe(true);
 		expect(store.chatMaxWidth).toBe('none');
 		expect(store.inlineImageThumbnailSize).toBe('medium');
+		expect(store.inlineMermaidThumbnailSize).toBe('medium');
 		expect(store.overlayBackdropEffects).toBe(true);
 		expect(store.highlightActiveWindow).toBe(true);
 		expect(store.alwaysExpandCliMessages).toBe(false);
@@ -75,6 +77,35 @@ describe('LocalSettingsStore', () => {
 			);
 			const store = createLocalSettingsStore();
 			expect(store.inlineImageThumbnailSize).toBe('medium');
+			store.destroy();
+		},
+	);
+
+	it.each(INLINE_MERMAID_THUMBNAIL_SIZE_VALUES)(
+		'persists the %s inline Mermaid thumbnail limit independently of image sizing',
+		(size) => {
+			const store = createLocalSettingsStore();
+			store.set('inlineMermaidThumbnailSize', size);
+			expect(
+				JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+			).toMatchObject({ inlineMermaidThumbnailSize: size });
+			const restored = createLocalSettingsStore();
+			expect(restored.inlineMermaidThumbnailSize).toBe(size);
+			expect(restored.inlineImageThumbnailSize).toBe('medium');
+			store.destroy();
+			restored.destroy();
+		},
+	);
+
+	it.each(['unbounded', '', null, 960, {}, ['large']])(
+		'rejects invalid stored Mermaid thumbnail size %j',
+		(size) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ inlineMermaidThumbnailSize: size }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.inlineMermaidThumbnailSize).toBe('medium');
 			store.destroy();
 		},
 	);
@@ -981,6 +1012,7 @@ describe('LocalSettingsStore', () => {
 				...firstStore.snapshot(),
 				chatMaxWidth: 'small',
 				inlineImageThumbnailSize: 'large',
+				inlineMermaidThumbnailSize: 'full',
 				overlayBackdropEffects: false,
 				highlightActiveWindow: false,
 				fullscreenCoversSidebar: false,
@@ -1010,6 +1042,7 @@ describe('LocalSettingsStore', () => {
 
 		expect(secondStore.chatMaxWidth).toBe('small');
 		expect(secondStore.inlineImageThumbnailSize).toBe('large');
+		expect(secondStore.inlineMermaidThumbnailSize).toBe('full');
 		expect(secondStore.overlayBackdropEffects).toBe(false);
 		expect(secondStore.highlightActiveWindow).toBe(false);
 		expect(secondStore.fullscreenCoversSidebar).toBe(false);
@@ -1039,6 +1072,7 @@ describe('LocalSettingsStore', () => {
 		store.set('highlightActiveWindow', false);
 		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
 		store.set('inlineImageThumbnailSize', 'large');
+		store.set('inlineMermaidThumbnailSize', 'full');
 
 		localStorage.removeItem(LOCAL_STORAGE_KEYS.localSettings);
 		window.dispatchEvent(
@@ -1051,9 +1085,11 @@ describe('LocalSettingsStore', () => {
 		expect(store.highlightActiveWindow).toBe(true);
 		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
 		expect(store.inlineImageThumbnailSize).toBe('medium');
+		expect(store.inlineMermaidThumbnailSize).toBe('medium');
 
 		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
 		store.set('inlineImageThumbnailSize', 'small');
+		store.set('inlineMermaidThumbnailSize', 'small');
 		store.set('highlightActiveWindow', false);
 		localStorage.clear();
 		window.dispatchEvent(
@@ -1062,6 +1098,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.highlightActiveWindow).toBe(true);
 		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
 		expect(store.inlineImageThumbnailSize).toBe('medium');
+		expect(store.inlineMermaidThumbnailSize).toBe('medium');
 		store.destroy();
 	});
 

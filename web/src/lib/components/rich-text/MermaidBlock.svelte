@@ -6,8 +6,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 <script lang="ts">
 	import { onDestroy, tick, untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import { copyToClipboard } from '$lib/utils/clipboard';
-	import Maximize2 from '@lucide/svelte/icons/maximize-2';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import MermaidViewerDialog from '$lib/components/rich-text/MermaidViewerDialog.svelte';
 	import { renderMermaid, resolveMermaidThemeId } from '$lib/components/rich-text/mermaid-loader';
 	import { getThemeRuntime } from '$lib/context';
@@ -30,21 +29,8 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	let renderedSource = $state('');
 	let renderError = $state('');
 	let loading = $state(true);
-	let copied = $state(false);
 	let viewerOpen = $state(false);
-	let copyTimer: ReturnType<typeof setTimeout> | null = null;
 	let releaseViewer: (() => void) | null = null;
-
-	async function handleCopy() {
-		const didCopy = await copyToClipboard(text);
-		if (!didCopy) return;
-		copied = true;
-		if (copyTimer) clearTimeout(copyTimer);
-		copyTimer = setTimeout(() => {
-			copied = false;
-			copyTimer = null;
-		}, 2000);
-	}
 
 	function openViewer(): void {
 		releaseViewer ??= acquireTransientActivity?.(() => void closeViewer()) ?? null;
@@ -106,92 +92,31 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	});
 
 	onDestroy(() => {
-		if (copyTimer) clearTimeout(copyTimer);
 		releaseViewer?.();
 	});
 </script>
 
-<div
-	class="group relative overflow-hidden rounded-md border border-border bg-muted/30"
-	data-chat-layout-pending={loading ? 'true' : undefined}
->
-	<div
-		class="mermaid-block-header flex items-center gap-1.5 border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"
-	>
-		<span class="mr-auto">mermaid</span>
-		<div
-			class="flex items-center gap-0.5 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100"
-		>
-			<button
-				onclick={handleCopy}
-				class="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-				title={m.chat_code_block_copy()}
-				aria-label={copied ? m.chat_code_block_copied() : m.chat_code_block_copy()}
-			>
-				{#if copied}
-					<svg
-						class="w-3 h-3 text-status-success-foreground"
-						fill="none"
-						stroke="currentColor"
-						viewBox="0 0 24 24"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M5 13l4 4L19 7"
-						/>
-					</svg>
-				{:else}
-					<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-						/>
-					</svg>
-				{/if}
-			</button>
-			<button
-				onclick={openViewer}
-				class="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-				title={m.chat_mermaid_expand()}
-				aria-label={m.chat_mermaid_expand()}
-				disabled={loading || Boolean(renderError) || !renderedSvg}
-			>
-				<Maximize2 class="h-3 w-3" />
-			</button>
+<div class="mermaid-container" data-chat-layout-pending={loading ? 'true' : undefined}>
+	{#if loading && !renderedSvg}
+		<div role="status" class="flex h-8 items-center text-muted-foreground">
+			<LoaderCircle class="h-4 w-4 animate-spin" aria-hidden="true" />
+			<span class="sr-only">{m.chat_mermaid_rendering()}</span>
 		</div>
-	</div>
-
-	<div class="mermaid-container overflow-x-auto p-4">
-		{#if loading && !renderedSvg}
-			<div class="flex items-center gap-2 text-sm text-muted-foreground">
-				<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-					<circle
-						class="opacity-25"
-						cx="12"
-						cy="12"
-						r="10"
-						stroke="currentColor"
-						stroke-width="4"
-					/>
-					<path
-						class="opacity-75"
-						fill="currentColor"
-						d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-					/>
-				</svg>
-				{m.chat_mermaid_rendering()}
-			</div>
-		{:else if renderError}
-			<div class="text-sm text-destructive">{renderError}</div>
-		{:else}
+	{:else if renderError}
+		<div class="text-sm text-destructive">{renderError}</div>
+	{:else if renderedSvg}
+		<button
+			type="button"
+			class="mermaid-thumbnail focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			onclick={openViewer}
+			aria-label={m.chat_mermaid_expand()}
+			aria-haspopup="dialog"
+			disabled={loading}
+		>
 			<!-- eslint-disable-next-line svelte/no-at-html-tags -- Mermaid generates this SVG in strict security mode. -->
 			{@html renderedSvg}
-		{/if}
-	</div>
+		</button>
+	{/if}
 </div>
 
 <MermaidViewerDialog
@@ -202,8 +127,43 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 />
 
 <style>
-	.mermaid-container :global(svg) {
+	.mermaid-container {
+		--mermaid-thumbnail-width: 640px;
+		--mermaid-thumbnail-height: 320px;
 		max-width: 100%;
+	}
+
+	:global([data-inline-mermaid-thumbnail-size='small']) .mermaid-container {
+		--mermaid-thumbnail-width: 320px;
+		--mermaid-thumbnail-height: 180px;
+	}
+
+	:global([data-inline-mermaid-thumbnail-size='large']) .mermaid-container {
+		--mermaid-thumbnail-width: 960px;
+		--mermaid-thumbnail-height: 480px;
+	}
+
+	:global([data-inline-mermaid-thumbnail-size='full']) .mermaid-container {
+		--mermaid-thumbnail-width: 100%;
+		--mermaid-thumbnail-height: none;
+	}
+
+	.mermaid-thumbnail {
+		display: block;
+		width: 100%;
+		max-width: var(--mermaid-thumbnail-width);
+		padding: 0;
+		border: 0;
+		background: none;
+		cursor: zoom-in;
+		text-align: left;
+	}
+
+	.mermaid-thumbnail > :global(svg) {
+		display: block;
+		width: auto;
+		max-width: 100%;
+		max-height: var(--mermaid-thumbnail-height);
 		height: auto;
 	}
 </style>

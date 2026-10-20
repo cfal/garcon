@@ -288,7 +288,6 @@ describe("compiled theme CSS", () => {
             <div class="markdown-body"><table><thead><tr><th id="user-bubble-header">Selected header <strong id="user-bubble-header-text">text</strong></th></tr></thead></table></div>
             <div id="user-bubble-attachment" class="user-message-attachment bg-background/70 text-foreground"><span id="user-bubble-attachment-text">document.txt</span></div>
             <div id="user-bubble-alert" class="markdown-link-alert bg-muted text-foreground" role="alert"><span id="user-bubble-alert-text">Blocked file link</span></div>
-            <div class="bg-muted/30"><div id="user-bubble-mermaid-header" class="mermaid-block-header bg-muted/50 text-muted-foreground"><span id="user-bubble-mermaid-header-text">mermaid</span></div></div>
           </div>
           ${focusButtonFixture()}
         </body></html>`,
@@ -625,14 +624,6 @@ describe("compiled theme CSS", () => {
           {
             surface: "#user-bubble-alert",
             selectors: ["#user-bubble-alert", "#user-bubble-alert-text"],
-            minimumSeparation: 3,
-          },
-          {
-            surface: "#user-bubble-mermaid-header",
-            selectors: [
-              "#user-bubble-mermaid-header",
-              "#user-bubble-mermaid-header-text",
-            ],
             minimumSeparation: 3,
           },
         ]) {

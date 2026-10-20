@@ -7,16 +7,19 @@
 		FILE_OPEN_PLACEMENT_VALUES,
 		HIDEABLE_TOOL_GROUPS,
 		INLINE_IMAGE_THUMBNAIL_SIZE_VALUES,
+		INLINE_MERMAID_THUMBNAIL_SIZE_VALUES,
 		SIDEBAR_INACTIVITY_DURATION_VALUES,
 		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MAX_PX,
 		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MIN_PX,
 		isChatMaxWidth,
 		isFileOpenPlacement,
 		isInlineImageThumbnailSize,
+		isInlineMermaidThumbnailSize,
 		isSidebarInactivityDuration,
 		type ChatMaxWidth,
 		type FileOpenPlacementPreference,
 		type InlineImageThumbnailSize,
+		type InlineMermaidThumbnailSize,
 		type SidebarInactivityDuration,
 	} from '$lib/stores/local-settings.svelte.js';
 	import {
@@ -49,6 +52,12 @@
 		medium: m.settings_inline_image_thumbnail_size_medium,
 		large: m.settings_inline_image_thumbnail_size_large,
 		full: m.settings_inline_image_thumbnail_size_full,
+	};
+	const inlineMermaidThumbnailSizeLabels: Record<InlineMermaidThumbnailSize, () => string> = {
+		small: m.settings_inline_mermaid_thumbnail_size_small,
+		medium: m.settings_inline_mermaid_thumbnail_size_medium,
+		large: m.settings_inline_mermaid_thumbnail_size_large,
+		full: m.settings_inline_mermaid_thumbnail_size_full,
 	};
 	const hideableToolGroupLabels = {
 		bash: m.settings_chat_hidden_tool_bash,
@@ -89,6 +98,10 @@
 
 	function setInlineImageThumbnailSize(value: string): void {
 		if (isInlineImageThumbnailSize(value)) ls.set('inlineImageThumbnailSize', value);
+	}
+
+	function setInlineMermaidThumbnailSize(value: string): void {
+		if (isInlineMermaidThumbnailSize(value)) ls.set('inlineMermaidThumbnailSize', value);
 	}
 
 	function setSidebarInactivityDuration(value: string): void {
@@ -267,6 +280,21 @@
 				>
 					{#each INLINE_IMAGE_THUMBNAIL_SIZE_VALUES as size (size)}
 						<option value={size}>{inlineImageThumbnailSizeLabels[size]()}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+				<label class="min-w-0 text-sm font-medium text-foreground" for="local-inline-mermaid-size">
+					{m.settings_inline_mermaid_thumbnail_size()}
+				</label>
+				<select
+					id="local-inline-mermaid-size"
+					class="select-native w-full sm:w-auto sm:shrink-0"
+					value={ls.inlineMermaidThumbnailSize}
+					onchange={(event) => setInlineMermaidThumbnailSize(event.currentTarget.value)}
+				>
+					{#each INLINE_MERMAID_THUMBNAIL_SIZE_VALUES as size (size)}
+						<option value={size}>{inlineMermaidThumbnailSizeLabels[size]()}</option>
 					{/each}
 				</select>
 			</div>

@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RendererPalette } from '$lib/theme/themes.js';
 import MermaidBlock from '$lib/components/rich-text/__tests__/MermaidBlockTestHost.svelte';
 import { renderMermaid } from '$lib/components/rich-text/mermaid-loader';
+import { copyToClipboard } from '$lib/utils/clipboard';
+
+vi.mock('$lib/utils/clipboard', () => ({ copyToClipboard: vi.fn() }));
 
 vi.mock('$lib/components/rich-text/mermaid-loader', () => ({
 	renderMermaid: vi.fn(),
@@ -21,6 +24,7 @@ const mockedRenderMermaid = vi.mocked(renderMermaid);
 describe('MermaidBlock', () => {
 	beforeEach(() => {
 		mockedRenderMermaid.mockReset();
+		vi.mocked(copyToClipboard).mockReset().mockResolvedValue(true);
 		vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
 		vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
 		mockedRenderMermaid.mockResolvedValue(
@@ -33,8 +37,12 @@ describe('MermaidBlock', () => {
 		const rendered = render(MermaidBlock, { text: source, themeId: 'classic-light' });
 		await waitFor(() => expect(mockedRenderMermaid).toHaveBeenCalledOnce());
 		expect(mockedRenderMermaid).toHaveBeenLastCalledWith(source, 'standard-light');
-		expect(screen.getByText('mermaid').closest('.mermaid-block-header')).not.toBeNull();
-		expect(screen.getByLabelText('Rendered diagram').closest('.mermaid-block-header')).toBeNull();
+		expect(screen.queryByText('mermaid')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Copy code' })).toBeNull();
+		expect(screen.getAllByRole('button')).toHaveLength(1);
+		expect(screen.getByLabelText('Rendered diagram').closest('button')).toBe(
+			screen.getByRole('button', { name: 'Expand diagram' }),
+		);
 
 		rendered.component.setThemeId('phosphor-light');
 		await tick();
@@ -167,6 +175,7 @@ describe('MermaidBlock', () => {
 			expect(container.querySelector('[data-chat-layout-pending]')).toBeNull();
 		});
 		expect(mockedRenderMermaid).not.toHaveBeenCalled();
+		expect(screen.queryByRole('button')).toBeNull();
 	});
 
 	it('publishes layout readiness while rendering settles', async () => {
@@ -177,10 +186,48 @@ describe('MermaidBlock', () => {
 		const { container } = render(MermaidBlock, { text: 'flowchart LR\nA --> B' });
 
 		expect(container.querySelector('[data-chat-layout-pending="true"]')).toBeTruthy();
+		expect(screen.getByRole('status').querySelector('.animate-spin')).toBeTruthy();
+		expect(screen.queryByRole('button')).toBeNull();
 		resolveRender('<svg viewBox="0 0 100 100"></svg>');
 		await waitFor(() => {
 			expect(container.querySelector('[data-chat-layout-pending]')).toBeNull();
 		});
+	});
+
+	it('does not expose a thumbnail or viewer when rendering fails', async () => {
+		mockedRenderMermaid.mockRejectedValue(new Error('Invalid diagram'));
+		render(MermaidBlock, { text: 'invalid' });
+		await screen.findByText('Invalid diagram');
+		expect(screen.queryByRole('button')).toBeNull();
+		expect(screen.queryByRole('dialog')).toBeNull();
+	});
+
+	it('copies diagram source only from the expanded viewer', async () => {
+		const source = 'flowchart LR\nA --> B';
+		render(MermaidBlock, { text: source });
+		const thumbnail = await screen.findByRole('button', { name: 'Expand diagram' });
+		expect(thumbnail.getAttribute('type')).toBe('button');
+		expect(thumbnail.getAttribute('aria-haspopup')).toBe('dialog');
+		expect(screen.queryByRole('button', { name: 'Copy diagram source' })).toBeNull();
+		await fireEvent.click(screen.getByLabelText('Rendered diagram'));
+		const dialog = screen.getByRole('dialog');
+		const copyButton = screen.getByRole('button', { name: 'Copy diagram source' });
+		expect(copyButton.title).toBe('Copy diagram source');
+		await fireEvent.click(copyButton);
+		expect(copyToClipboard).toHaveBeenCalledWith(source, dialog, expect.any(Function));
+		expect(screen.getByRole('button', { name: 'Copied' })).toBeTruthy();
+		expect(copyButton.title).toBe('Copied');
+		await fireEvent.click(screen.getByRole('button', { name: 'Close (Escape)' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+	});
+
+	it('does not report success when copying source fails', async () => {
+		vi.mocked(copyToClipboard).mockResolvedValue(false);
+		render(MermaidBlock, { text: 'flowchart LR\nA --> B' });
+		await fireEvent.click(await screen.findByRole('button', { name: 'Expand diagram' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Copy diagram source' }));
+		expect(screen.queryByRole('button', { name: 'Copied' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Copy diagram source' })).toBeTruthy();
 	});
 
 	it('opens an expanded viewer with translated zoom and fit controls', async () => {

@@ -282,6 +282,14 @@
 		};
 	});
 
+	$effect(() => {
+		const root = document.documentElement;
+		root.dataset.inlineMermaidThumbnailSize = localSettings.inlineMermaidThumbnailSize;
+		return () => {
+			delete root.dataset.inlineMermaidThumbnailSize;
+		};
+	});
+
 	// Projects the browser-local backdrop preference to portal-rendered overlays.
 	$effect(() => {
 		return projectOverlayBackdropEffects(
