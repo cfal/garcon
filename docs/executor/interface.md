@@ -38,7 +38,7 @@ The implemented stage supports one configured executor per controller. Without r
 | Native history | Provider-owned parsing and normalized import; controller-owned staging and manual Reload. |
 | Single queries | No public working-directory argument. Each provider owns any temporary invocation directory. |
 | Goal behavior | Removed, including native goal lifecycle and execution-authority transfer. |
-| Generic process/file/Git/terminal services | Not implemented on `ExecutionRuntimeApi`. Local application services remain available in local mode; remote machine routes explicitly reject. |
+| Generic process/file/Git/terminal services | Not implemented on `ExecutionRuntimeApi`. Local application services remain available in local mode; remote executor-service routes explicitly reject. |
 
 Ordinary steering, Stop, queueing, compaction, fork, cross-provider handoff, and existing transcripts are preserved. Former `/goal` syntax follows ordinary prompt and admission rules, including normal keyboard/button submission. Unrelated provider tool-message fields named `goal` are not the removed Garcon feature.
 
@@ -133,7 +133,7 @@ Run terminal does not close the producer binding. Late rows and session facts re
 - Permission requests carry a live response reference distinct from the historical occurrence ID. The worker retains the native callback and consumes responses single-flight. Core records resolution only after confirmed success; definite non-dispatch may release the claim, while uncertainty or a stale resource retires actionability without a successful resolution row.
 - Steering captures an async target against the expected run/binding. The controller commits raw input and revalidates ownership before delivery; the worker checks the exact native target immediately before native writes. No callback RPC or extra steering preparation transaction is introduced.
 - Project-path updates use scoped `prepare`, `commit`, and `rollback` operations. Preparations expire after 30 seconds. Expiry retires the reference but does not undo artifacts that may already be authoritative. Explicit known-no-mutation failures unblock another preparation; ambiguous failure or expiry keeps the chat quarantined for this adapter lifetime. This is compensation, not a distributed transaction or automatic reconciliation service.
-- Cancellation is best effort and is not rollback. Authorization already sent cannot be synchronously revoked across machines.
+- Cancellation is best effort and is not rollback. Authorization already sent cannot be synchronously revoked on the executor.
 
 The common implementations are [producer-adapter.ts](../../server-agents/common/src/execution/producer-adapter.ts), [control-adapters.ts](../../server-agents/common/src/execution/control-adapters.ts), and [project-path-adapter.ts](../../server-agents/common/src/execution/project-path-adapter.ts).
 
@@ -187,7 +187,7 @@ These are implementation defaults, not new operator-facing configuration fields:
 | Single-query RPC timeout | Validated provider timeout plus 30 seconds; default 150 seconds |
 | Worker serving-scope cleanup wait | 2 seconds, diagnostic failure only |
 
-Count and byte limits are independent bounds, not a claim about total process memory. Normalized provider rows are never evicted to keep a later terminal. These limits do not provide bulk-stream fairness; generic machine streams are deferred.
+Count and byte limits are independent bounds, not a claim about total process memory. Normalized provider rows are never evicted to keep a later terminal. These limits do not provide bulk-stream fairness; generic executor-service streams are deferred.
 
 ## Session Replacement And Failure Semantics
 
@@ -268,7 +268,7 @@ Mention expansion revalidates the project root and preserves the existing limits
 
 Persisted preamble scopes are checked lexically as portable paths during loading, without querying the controller filesystem. Mutation-time admission checks the executor. Existing chats whose paths do not resolve there remain unavailable; there is no path mapping or automatic migration.
 
-[Remote machine routes](https://github.com/cfal/garcon/blob/2bf52dafc/server/routes/unavailable-machine-services.ts) return `501 OPERATION_UNSUPPORTED` for files, Git, gh, and terminals. Terminal WebSocket requests return typed `terminal-unsupported` errors while chat remains usable. Manual project-path entry remains available. Remote ticket auto-default resolution returns `TICKET_PROJECT_UNAVAILABLE`; explicit projects work in both HTTP and agent-command paths.
+[Remote executor-service routes](https://github.com/cfal/garcon/blob/2bf52dafc/server/routes/unavailable-machine-services.ts) return `501 OPERATION_UNSUPPORTED` for files, Git, gh, and terminals. Terminal WebSocket requests return typed `terminal-unsupported` errors while chat remains usable. Manual project-path entry remains available. Remote ticket auto-default resolution returns `TICKET_PROJECT_UNAVAILABLE`; explicit projects work in both HTTP and agent-command paths.
 
 ### Single Queries And History
 
@@ -313,7 +313,7 @@ Raw listeners bind `0.0.0.0` and require `allowInsecureDevelopment: true`. This 
 
 Controller and worker ship together. Replacement does not support changed inventory/capabilities or changed project base until the controller restarts. The browser goal-control capability and endpoint are removed along with the provider facet; `/goal` is ordinary input, not a supported built-in command. Existing transcript rows are not migrated or deleted by goal removal.
 
-Local mode remains the default when `GARCON_AGENT_EXECUTOR_CONFIG` is absent. Switching executor configuration is not a native-session migration: provider state and stored paths must already exist on the selected executor. No state transfer, path remapping, or recovery against another machine's files is implied by changing the connection.
+Local mode remains the default when `GARCON_AGENT_EXECUTOR_CONFIG` is absent. Switching executor configuration is not a native-session migration: provider state and stored paths must already exist on the selected executor. No state transfer, path remapping, or recovery against another executor's files is implied by changing the connection.
 
 Accepted limitations are deliberate:
 
@@ -347,9 +347,9 @@ The [CI matrix](../../.github/workflows/integration-tests.yml) runs SACS as `in-
 
 At the documented implementation baseline, all three SACS lanes passed 93/93. This is bounded scripted evidence, not a claim of paid/live-provider, production-network soak, or real Windows deployment validation. Portable-path codec cases likewise do not imply cross-OS deployment validation.
 
-## Deferred Machine Services
+## Deferred Executor Services
 
-The original process/file/Git/terminal inventory remains design context, not implemented API or required follow-up for this provider-remoting stage. These services would serve independent machine operations, not replace the provider-integration boundary. Their motivating distinctions are:
+The original process/file/Git/terminal inventory remains design context, not implemented API or required follow-up for this provider-remoting stage. These services would serve independent executor operations, not replace the provider-integration boundary. Their motivating distinctions are:
 
 - **ProcessService:** opaque scoped identity; PID diagnostic only; explicit executable/argv/cwd/environment without an implicit shell; raw stdout/stderr bytes with per-stream ordering; ordered stdin and explicit EOF; termination request distinct from observed exit; exit distinct from output EOF; bounded `exec` that waits for the required output drain. Attach only when a caller needs processes to outlive a handle.
 - **FileService:** typed path/stat/list/read/write operations justified by callers; owner-side path boundaries and complete revision-checked save transactions. Do not expose provider-native/config directories through browser file routes or implement safe-save as controller-side stat followed by unrelated remote write.

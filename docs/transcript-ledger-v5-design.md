@@ -114,7 +114,7 @@ advisory, and native-history Reload remains exclusively manual. Neither a
 disconnect nor restart initiates native import or transcript replacement.
 Earlier statements about
 unbuffered synchronous publication and object-only capabilities describe the
-controller ledger boundary, not cross-machine delivery.
+controller ledger boundary, not executor-link delivery.
 
 Permission occurrences carry scoped response references. Native closures stay
 on the executor and each response is single-flight. Confirmed success

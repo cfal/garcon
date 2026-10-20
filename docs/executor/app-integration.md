@@ -83,7 +83,7 @@ An execution selection contains four distinct concepts:
 executor -> agent integration -> optional API provider/endpoint -> model
 ```
 
-For example: `Build Machine -> Codex -> configured endpoint -> chosen model`. The executor chooses the machine and provider instance. The integration chooses the adapter. The API provider/endpoint chooses credentials and network API where applicable. The model is not a replacement for any of those identities. Thinking effort, permission mode, and agent settings remain additional configuration.
+For example: `Build Executor -> Codex -> configured endpoint -> chosen model`. The executor chooses where the agent runs and the provider instance. The integration chooses the adapter. The API provider/endpoint chooses credentials and network API where applicable. The model is not a replacement for any of those identities. Thinking effort, permission mode, and agent settings remain additional configuration.
 
 Use explicit fields, not encoded agent IDs such as `node:codex`:
 
@@ -114,7 +114,7 @@ Keep identity lifetimes separate:
 | Serving `instanceId` | Fresh worker integration/resource generation, even when only the controller restarted. |
 | Transport `sessionId` | One logical replay session. |
 
-Resource scopes remain `{ executorId, instanceId, integrationId }`. A stable executor ID is not a native-session capability or proof that a particular machine still holds the same files.
+Resource scopes remain `{ executorId, instanceId, integrationId }`. A stable executor ID is not a native-session capability or proof that the executor still holds the same files.
 
 ### Controller Store
 
@@ -322,7 +322,7 @@ interface ExecutorSnapshot {
   readonly availability: 'ready' | 'reconnecting' | 'offline';
   readonly projectBasePath: string | null;
   readonly lastError: { readonly code: string; readonly message: string } | null;
-  readonly machineServices: {
+  readonly executorServices: {
     readonly files: boolean;
     readonly git: boolean;
     readonly terminals: boolean;
@@ -335,7 +335,7 @@ type ExecutorsChanged = {
 };
 ```
 
-Use one small full snapshot on configuration/availability transitions, not an executor event log. HTTP bootstrapping and browser reconnection fetch the current snapshot. `machineServices` describes application route availability: true for existing local services, false remotely. It must not misrepresent the still-unimplemented generic `ExecutionRuntimeApi` accessors as available on Local.
+Use one small full snapshot on configuration/availability transitions, not an executor event log. HTTP bootstrapping and browser reconnection fetch the current snapshot. `executorServices` describes application route availability: true for existing local services, false remotely. It must not misrepresent the still-unimplemented generic `ExecutionRuntimeApi` accessors as available on Local.
 
 ### Frontend Ownership
 
@@ -414,7 +414,7 @@ Audit creation and dispatch outside the main composer:
 | Agent-emitted creation commands | Include executor in the typed controller command contract and request fingerprint. |
 | Deletion/ownership recovery | Preserve the executor in references and comparisons; never release a same-ID native session on another executor. |
 
-Do not change all provider settings to executor-scoped preferences merely because routing is now explicit. Schema-owned per-agent chat settings can remain reusable by agent where they are already portable. Machine-sensitive discovery/auth caches and project paths cannot.
+Do not change all provider settings to executor-scoped preferences merely because routing is now explicit. Schema-owned per-agent chat settings can remain reusable by agent where they are already portable. Executor-sensitive discovery/auth caches and project paths cannot.
 
 ## Projects Without Remote Files
 
@@ -472,9 +472,9 @@ Add optional `executorId` to project-scoped preamble rules and their matching co
 
 File mention ordering is unchanged: inspect and expand authored text through that executor before private provider-prefix composition; commit raw authored input; use the existing separator/sanitizer; preserve steering's existing bounded timeout behavior. Single queries still have no public cwd/project argument.
 
-### Machine Surface Gating
+### Executor Surface Gating
 
-Remove the server-wide `localMachineServices` switch. Keep current local file/Git/gh/terminal routes and local PTY services alive alongside remotes. Qualify machine requests with their target executor, or derive it from the selected chat; reject remote targets with `501 OPERATION_UNSUPPORTED` before any filesystem lookup or spawn. Keep terminal socket ownership local and reject remote terminal creation explicitly.
+Remove the server-wide `localMachineServices` switch. Keep current local file/Git/gh/terminal routes and local PTY services alive alongside remotes. Qualify executor-service requests with their target executor, or derive it from the selected chat; reject remote targets with `501 OPERATION_UNSUPPORTED` before any filesystem lookup or spawn. Keep terminal socket ownership local and reject remote terminal creation explicitly.
 
 Remote file links and project actions must show unavailable/disabled behavior, never open a controller file having the same path. Local actions remain usable even if every configured remote executor is offline. This is target gating of existing local services, not implementation of the deferred generic executor service APIs.
 
@@ -541,7 +541,7 @@ interface HandoffSourceIdentity {
 }
 ```
 
-The destination project path and executor must be installed atomically with the execution config. Do not first call the old owner's project-path mutation and then switch executors: that mutates the wrong machine and creates an unnecessary compensation problem.
+The destination project path and executor must be installed atomically with the execution config. Do not first call the old owner's project-path mutation and then switch executors: that mutates the wrong executor and creates an unnecessary compensation problem.
 
 Preserve ledger-v5 ordering:
 
@@ -595,7 +595,7 @@ Primary files: [websocket-link.ts](../../server/remote/transport/websocket-link.
 
 ### 3. Runtime, Catalog, And Project Routing
 
-Replace bare integration lookups with `AgentExecutionTarget`, single inspector injection with executor-aware resolution, and global queue/loss gates with chat/executor-qualified ones. Update model/auth/configuration routes, native-reference indexes, snippets/preambles, schedules, ticket defaults, and all ordinary command entry points. Local machine routes remain available with remote-target rejection.
+Replace bare integration lookups with `AgentExecutionTarget`, single inspector injection with executor-aware resolution, and global queue/loss gates with chat/executor-qualified ones. Update model/auth/configuration routes, native-reference indexes, snippets/preambles, schedules, ticket defaults, and all ordinary command entry points. Local executor-service routes remain available with remote-target rejection.
 
 Primary files: [registry.ts](../../server/controller/agents/registry.ts), [runtime-router.ts](../../server/controller/agents/runtime-router.ts), [catalog-service.ts](../../server/controller/agents/catalog-service.ts), [project-admission.ts](../../server/controller/projects/project-admission.ts), [project-resolution.ts](../../server/controller/routes/project-resolution.ts), [queue-drainer.ts](../../server/controller/chat-execution/queue-drainer.ts), and [server-event-wiring.ts](../../server/controller/server-event-wiring.ts). Test Local plus two workers with colliding agent/native IDs, disjoint roots, separate credentials/catalogs, one-executor loss, scoped queue wake-up, and restart with every remote offline while their saved chats/ledgers remain intact. Never use global map clear operations for one remote failure.
 
@@ -639,7 +639,7 @@ Proposed files below are additions unless an existing file is linked. Use synthe
 | `server/controller/agents/__tests__/cross-executor-handoff.test.ts` | Idle/queue guards, pre-decision failure, committed roll-forward with destination offline, executor/path atomic config, prepared context identity, no native resume/transfer. |
 | `server/controller/settings/__tests__/generation-executor-selection.test.ts` | Auto Local, explicit remote, no silent fallback, all four settings/test endpoints, provider owns invocation directory. |
 | `integration-tests/tests/server/executor-app.test.ts` | Normal HTTP CRUD, Local + two real worker processes, both dial directions, late startup, restart/secret reuse, executor-scoped loss, authenticated shared upgrades, saved remote chats/refs/ledgers surviving controller startup with all workers offline. |
-| [executor-projects.test.ts](../../integration-tests/tests/server/executor-projects.test.ts) | Explicit executor selection; same path text with different contents; invalid/symlink-escaped root; mentions from only selected worker; stale inspection; remote machine request rejected before local IO. |
+| [executor-projects.test.ts](../../integration-tests/tests/server/executor-projects.test.ts) | Explicit executor selection; same path text with different contents; invalid/symlink-escaped root; mentions from only selected worker; stale inspection; remote executor-service request rejected before local IO. |
 | `integration-tests/tests/server/cross-executor-handoff.test.ts` | Same-agent Local->remote->Local, fresh native sessions, source-offline ledger handoff, crash recovery, preserved rows/boundaries, no duplicate dispatch, no file copy. |
 | `web/src/lib/executors/__tests__/executors-store.logic.test.ts` | Sanitized snapshots, remove/prune behavior, offline selection preservation, no secret-bearing fields stored. |
 | `web/src/lib/components/executors/__tests__/ExecutorsDialog.test.ts` | Both onboarding forms, validation/loading/error/disabled states, copy/reveal, secret cleared on close, keyboard navigation, focus restoration. |
