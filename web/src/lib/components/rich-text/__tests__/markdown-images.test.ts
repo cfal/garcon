@@ -35,6 +35,45 @@ describe('Markdown images', () => {
 		vi.unstubAllGlobals();
 	});
 
+	it.each([
+		['standalone', '![Capture](capture.png)', true],
+		['linked', '[![Capture](capture.png)](guide.md)', true],
+		['formatted', '**![Capture](capture.png)**', true],
+		['reference', '![Capture][image]\n\n[image]: capture.png', true],
+		['multiple', '![Capture](capture.png) ![Other](other.png)', true],
+		['line break', '![Capture](capture.png)  \n![Other](other.png)', true],
+		['blockquote', '> ![Capture](capture.png)', true],
+		['loose list', '- First\n\n- ![Capture](capture.png)', true],
+		['leading text', 'Before ![Capture](capture.png)', false],
+		['trailing text', '![Capture](capture.png) after', false],
+		['linked caption', '[![Capture](capture.png) caption](guide.md)', false],
+		['formatted caption', '**![Capture](capture.png) caption**', false],
+		['literal HTML', '![Capture](capture.png) <caption>', false],
+	])('adds block margins only to image-only paragraphs: %s', (_name, source, imageOnly) => {
+		const { container } = render(Markdown, { source });
+		const paragraph = container.querySelector('.markdown-image')!.closest('div.break-words')!;
+		expect(paragraph.classList.contains('markdown-image-paragraph')).toBe(imageOnly);
+		expect(paragraph.classList.contains('mb-1')).toBe(!imageOnly);
+		expect(paragraph.classList.contains('last:mb-0')).toBe(!imageOnly);
+	});
+
+	it.each(['assistant', 'user', 'presented', 'thinking'] as const)(
+		'updates image-only spacing without remounting the %s thumbnail',
+		async (variant) => {
+			const view = render(Markdown, {
+				source: '![Capture](capture.png)',
+				variant,
+				resolveImageFile,
+			});
+			const image = await screen.findByRole('img', { name: 'Capture' });
+			expect(image.closest('.markdown-image-paragraph')).not.toBeNull();
+			await view.rerender({ source: '![Capture](capture.png) caption' });
+			expect(screen.getByRole('img', { name: 'Capture' })).toBe(image);
+			expect(image.closest('.markdown-image-paragraph')).toBeNull();
+			expect(filesApi.readContent).toHaveBeenCalledOnce();
+		},
+	);
+
 	it('loads a local file through the file API and releases it on unmount', async () => {
 		const view = render(Markdown, {
 			source: '![Capture](capture.png "Desktop")',
@@ -70,7 +109,10 @@ describe('Markdown images', () => {
 		const button = await screen.findByRole('button', { name: 'Open image Capture' });
 		expect(button.querySelector('img')?.getAttribute('src')).toBe('blob:preview-1');
 		await fireEvent.click(button);
-		expect(onLinkNavigate).toHaveBeenCalledExactlyOnceWith({ rawHref: 'capture.png', kind: 'file' });
+		expect(onLinkNavigate).toHaveBeenCalledExactlyOnceWith({
+			rawHref: 'capture.png',
+			kind: 'file',
+		});
 		await fireEvent.error(screen.getByRole('img'));
 		expect(screen.queryByRole('button')).toBeNull();
 	});
@@ -116,7 +158,10 @@ describe('Markdown images', () => {
 			expect(screen.queryByRole('button')).toBeNull();
 			if (destination === 'guide.md') {
 				await fireEvent.click(image);
-				expect(onLinkNavigate).toHaveBeenCalledExactlyOnceWith({ rawHref: destination, kind: 'file' });
+				expect(onLinkNavigate).toHaveBeenCalledExactlyOnceWith({
+					rawHref: destination,
+					kind: 'file',
+				});
 			} else {
 				expect(link.getAttribute('target')).toBe('_blank');
 			}

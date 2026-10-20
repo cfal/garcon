@@ -135,6 +135,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 		--mermaid-thumbnail-width: 640px;
 		--mermaid-thumbnail-height: 320px;
 		max-width: 100%;
+		margin-block: 0.5rem;
 	}
 
 	:global([data-inline-mermaid-thumbnail-size='small']) .mermaid-container {
