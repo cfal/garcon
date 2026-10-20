@@ -215,6 +215,92 @@ test('persists inline image size limits and bounds local and external images wit
     expect(await composer.evaluate((element, original) => element === original, originalComposer)).toBe(true);
     expect(await composer.evaluate((element) => document.activeElement === element)).toBe(true);
     expect(Math.abs((await composer.boundingBox())!.y - composerBounds!.y)).toBeLessThan(1);
+    await assistant.getByRole('button', { name: 'Open image Small capture', exact: true }).click();
+    await expectDecodedImage(page.getByRole('img', { name: 'small.png', exact: true }));
     assertNoBrowserErrors();
   });
+}, 180_000);
+
+test('opens remote thumbnails in the image viewer with mouse, keyboard, and mobile controls', async () => {
+  await withChromiumFixture('markdown-image-viewer', async ({ page, integration, assertNoBrowserErrors }) => {
+    const { client, executionDirs, directAgents, garcon } = integration;
+    await writeFile(join(executionDirs.project, 'capture.png'), await createImageBuffer(page, { width: 1400, height: 900 }));
+    await writeFile(join(executionDirs.project, 'linked.md'), '# Linked document');
+    const chatId = integration.newChatId();
+    const started = await client.startDirectChat({
+      chatId,
+      content: '![Capture](capture.png)\n\n[![Linked capture](capture.png)](linked.md)',
+      projectPath: executionDirs.project,
+      agent: directAgents.openAi,
+    });
+    await client.waitForTurnTerminal(chatId, started.turnId);
+    await page.addInitScript(() => {
+      const settings = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
+      localStorage.setItem('pref_local_settings', JSON.stringify({ ...settings, imageViewerOpenPlacement: 'dialog' }));
+    });
+    const contentRequests: Array<{ url: string; authorization?: string }> = [];
+    const releaseContent = new Deferred<void>();
+    await page.route('**/api/v1/files/content?**', async (route) => {
+      contentRequests.push({ url: route.request().url(), authorization: route.request().headers().authorization });
+      await releaseContent.promise;
+      await route.continue();
+    });
+    await page.goto(`${garcon.baseUrl}/chat/${chatId}`);
+    const assistant = page.locator('[data-chat-message-type="assistant-message"]');
+    try {
+      const spinner = assistant.getByRole('status', { name: 'Loading image...' }).first();
+      await browserExpect(spinner.locator('svg.animate-spin')).toBeVisible();
+      await browserExpect(spinner).toHaveText('');
+      await browserExpect(spinner).toHaveAttribute('aria-busy', 'true');
+      await browserExpect(assistant.getByRole('button', { name: 'Open image Capture', exact: true })).toHaveCount(0);
+    } finally {
+      releaseContent.resolve();
+    }
+    const thumbnail = assistant.getByRole('button', { name: 'Open image Capture', exact: true });
+    await expectDecodedImage(thumbnail.getByRole('img'));
+    const thumbnailSource = await thumbnail.getByRole('img').getAttribute('src');
+    const linkedImage = assistant.getByRole('link', { name: 'Linked capture', exact: true });
+    await browserExpect(linkedImage.locator('button')).toHaveCount(0);
+    const dialog = page.locator('[role="dialog"][data-workspace-surface-id^="file:"]');
+    const artifactDirectory = new URL('../../artifacts/chromium/', import.meta.url).pathname;
+    await mkdir(artifactDirectory, { recursive: true });
+    for (const activation of ['click', 'Enter', 'Space']) {
+      if (activation === 'click') await thumbnail.getByRole('img').click();
+      else await thumbnail.press(activation);
+      const expandedImage = dialog.getByRole('img', { name: 'capture.png', exact: true });
+      await expectDecodedImage(expandedImage);
+      expect(await expandedImage.getAttribute('src')).not.toBe(thumbnailSource);
+      await browserExpect(dialog.getByRole('button', { name: 'Fit to window (0)', exact: true })).toBeVisible();
+      const beforeZoom = await expandedImage.boundingBox();
+      await dialog.getByRole('button', { name: 'Zoom in (+)', exact: true }).click();
+      await browserExpect.poll(async () => (await expandedImage.boundingBox())!.width).toBeGreaterThan(beforeZoom!.width);
+      if (activation === 'click') {
+        await page.screenshot({ path: join(artifactDirectory, 'markdown-image-viewer-desktop.png') });
+      }
+      await page.keyboard.press('Escape');
+      await browserExpect(dialog).toHaveCount(0);
+      await browserExpect(thumbnail).toBeFocused();
+      await expectDecodedImage(thumbnail.getByRole('img'));
+    }
+    expect(contentRequests.length).toBeGreaterThanOrEqual(3);
+    for (const request of contentRequests) {
+      const query = new URL(request.url).searchParams;
+      expect(query.get('executorId')).toBe(client.executorId);
+      expect(query.get('projectPath')).toBe(executionDirs.project);
+      expect(query.get('path')).toBe('capture.png');
+      expect(request.authorization).toBe(`Bearer ${garcon.authToken}`);
+    }
+    await linkedImage.click();
+    await browserExpect(page.getByRole('heading', { name: 'Linked document', exact: true })).toBeVisible();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${garcon.baseUrl}/chat/${chatId}`);
+    await browserExpect(page.locator('.mobile-shell')).toHaveCount(1);
+    await thumbnail.click();
+    const mobileImage = page.getByRole('img', { name: 'capture.png', exact: true });
+    await expectDecodedImage(mobileImage);
+    await browserExpect(page.getByRole('button', { name: 'Fit to window (0)', exact: true })).toBeVisible();
+    await page.screenshot({ path: join(artifactDirectory, 'markdown-image-viewer-mobile.png') });
+    assertNoBrowserErrors();
+  }, undefined, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 180_000);

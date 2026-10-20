@@ -1122,6 +1122,7 @@
 	"image_close": "Close (Escape)",
 	"image_fit_to_window": "Fit to window (0)",
 	"image_loading": "Loading image...",
+	"image_open": "Open image {name}",
 	"image_unable_to_load": "Unable to load image",
 	"image_zoom_in": "Zoom in (+)",
 	"image_zoom_out": "Zoom out (-)",

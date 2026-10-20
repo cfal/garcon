@@ -203,7 +203,15 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		{/snippet}
 
 		{#snippet image({ href, title, text })}
-			<MarkdownImage {href} {title} {text} {resolveImageFile} />
+			<MarkdownImage
+				{href}
+				{title}
+				{text}
+				{resolveImageFile}
+				onOpen={onLinkNavigate
+					? (rawHref) => onLinkNavigate?.({ rawHref, kind: 'file' })
+					: undefined}
+			/>
 		{/snippet}
 
 		{#snippet chatReference({ chatId }: { chatId: string })}

@@ -269,7 +269,8 @@ describe('ConversationMessage local images', () => {
 			),
 		],
 	] as const)('passes file context through %s Markdown', async (_label, message) => {
-		render(ConversationMessageHost, { message, disclosureState });
+		const openAuto = vi.fn();
+		render(ConversationMessageHost, { message, disclosureState, openAuto });
 		await waitFor(() =>
 			expect(screen.getByRole('img', { name: 'Capture' }).getAttribute('src')).toBe('blob:preview'),
 		);
@@ -281,6 +282,15 @@ describe('ConversationMessage local images', () => {
 			},
 			{ signal: expect.any(AbortSignal), cache: 'no-store' },
 		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Open image Capture' }));
+		expect(openAuto).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+			executorId: 'local',
+			fileRootPath: '/workspace',
+			relativePath: 'project/capture.png',
+			mode: 'auto',
+			origin: 'window-main',
+			reason: 'user-open',
+		}));
 	});
 
 	it.each([
@@ -391,7 +401,9 @@ describe('ConversationMessage local images', () => {
 	])(
 		'loads %s from the owning executor, not the selected Local executor',
 		async (href, filePath) => {
+			const openAuto = vi.fn();
 			render(ConversationMessageHost, {
+				openAuto,
 				message: new AssistantMessage(TS, `![Capture](${href})`),
 				chatContext: {
 					chatId: 'remote-chat',
@@ -417,6 +429,13 @@ describe('ConversationMessage local images', () => {
 				),
 			);
 			expect(screen.getByRole('img', { name: 'Capture' }).getAttribute('src')).toBe('blob:preview');
+			await fireEvent.click(screen.getByRole('button', { name: 'Open image Capture' }));
+			expect(openAuto).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+				executorId: remoteExecutor.id,
+				fileRootPath: '/worker',
+				relativePath: filePath,
+				mode: 'auto',
+			}));
 		},
 	);
 

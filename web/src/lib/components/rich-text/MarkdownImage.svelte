@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getAbortSignal } from 'svelte';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import { readContent } from '$lib/api/files.js';
 	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -9,11 +10,13 @@
 		title,
 		text = '',
 		resolveImageFile,
+		onOpen,
 	}: {
 		href?: string;
 		title?: string;
 		text?: string;
 		resolveImageFile?: ResolveMarkdownImageFile;
+		onOpen?: (href: string) => void;
 	} = $props();
 
 	const externalSource = $derived(href && /^(https?:)?\/\//i.test(href) ? href : undefined);
@@ -31,6 +34,9 @@
 		filePath,
 	});
 	let element = $state<HTMLSpanElement>();
+	// Authored image links retain their destination instead of nesting another control.
+	const canOpen = $derived(Boolean(file && onOpen && element && !element.closest('a, button')));
+	const openLabel = $derived(m.image_open({ name: text || title || filePath || '' }));
 	let loaded = $state.raw<{ attempt: typeof attempt; url: string; release: () => void }>();
 	let failed = $state.raw<typeof attempt>();
 	const source = $derived(externalSource ?? (loaded?.attempt === attempt ? loaded.url : undefined));
@@ -94,7 +100,23 @@
 		failed = current;
 		if (loaded?.attempt === current) loaded.release();
 	}
+
+	function stopParentContextTriggerGesture(event: PointerEvent | MouseEvent): void {
+		event.stopPropagation();
+	}
 </script>
+
+{#snippet thumbnail(current: typeof attempt, url: string)}
+	<img
+		src={url}
+		alt={text}
+		{title}
+		loading="lazy"
+		decoding="async"
+		referrerpolicy="no-referrer"
+		onerror={() => failImage(current)}
+	/>
+{/snippet}
 
 <span bind:this={element} class="markdown-image" {title}>
 	{#if unavailable}
@@ -108,18 +130,33 @@
 	{:else if source}
 		{#key attempt}
 			{@const current = attempt}
-			<img
-				src={source}
-				alt={text}
-				{title}
-				loading="lazy"
-				decoding="async"
-				referrerpolicy="no-referrer"
-				onerror={() => failImage(current)}
-			/>
+			{#if canOpen}
+				<button
+					type="button"
+					class="block max-w-full cursor-zoom-in rounded-sm p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					aria-label={openLabel}
+					title={title || openLabel}
+					onpointerdowncapture={stopParentContextTriggerGesture}
+					oncontextmenu={stopParentContextTriggerGesture}
+					onclick={() => {
+						if (current === attempt && href) onOpen?.(href);
+					}}
+				>
+					{@render thumbnail(current, source)}
+				</button>
+			{:else}
+				{@render thumbnail(current, source)}
+			{/if}
 		{/key}
 	{:else}
-		<span class="placeholder text-muted-foreground" aria-busy="true">{m.image_loading()}</span>
+		<span
+			class="placeholder text-muted-foreground"
+			role="status"
+			aria-label={m.image_loading()}
+			aria-busy="true"
+		>
+			<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+		</span>
 	{/if}
 </span>
 

@@ -87,9 +87,10 @@ describe('MarkdownViewer', () => {
 			'synthetic-markdown-session',
 		);
 		session.content = '![Capture](../images/capture.png)';
+		const onOpen = vi.fn();
 		render(MarkdownViewerTestHost, {
 			session,
-			onOpen: vi.fn(),
+			onOpen,
 			executors: [
 				localExecutor,
 				{
@@ -110,6 +111,14 @@ describe('MarkdownViewer', () => {
 			),
 		);
 		expect(screen.getByRole('img').getAttribute('src')).toBe('blob:file-preview');
+		await fireEvent.click(screen.getByRole('button', { name: 'Open image Capture' }));
+		expect(onOpen).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+			executorId: remoteExecutor.id,
+			fileRootPath: '/workspace',
+			relativePath: 'docs/images/capture.png',
+			mode: 'auto',
+			reason: 'user-open',
+		}));
 	});
 
 	it('invalidates images when the owning executor instance changes', async () => {

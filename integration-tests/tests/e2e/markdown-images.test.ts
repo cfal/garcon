@@ -29,7 +29,15 @@ test('Markdown images use authenticated file reads on the owning remote executor
       const images = [...document.querySelectorAll<HTMLImageElement>(selector)];
       return images.length === 2 && images.every((image) => image.src.startsWith('blob:'));
     }, {}, selector);
-    expect(fileRequests.length).toBeGreaterThanOrEqual(2);
+    // Lightpanda does not decode blob image dimensions; Chromium covers hit testing.
+    await fixture.page.$eval('[data-chat-message-type="assistant-message"] button[aria-label="Open image Relative capture"]', (button) => {
+      if (!(button instanceof HTMLButtonElement)) throw new Error('Expected thumbnail button');
+      button.click();
+    });
+    await fixture.page.waitForFunction(() =>
+      document.querySelector<HTMLImageElement>('[data-workspace-surface-id^="file:"] img[alt="capture.png"]')?.src.startsWith('blob:'),
+    );
+    expect(fileRequests.length).toBeGreaterThanOrEqual(3);
     for (const request of fileRequests) {
       const query = new URL(request.url).searchParams;
       expect(query.get('executorId')).toBe(client.executorId);
@@ -39,5 +47,5 @@ test('Markdown images use authenticated file reads on the owning remote executor
     }
     expect(rawRequests).toEqual([]);
     fixture.assertNoBrowserErrors();
-  }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
+  }, { executionBackend: 'remote-executor-dials', projectRoots: 'separate' });
 }, 60_000);

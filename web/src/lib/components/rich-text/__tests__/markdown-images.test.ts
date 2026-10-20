@@ -60,13 +60,61 @@ describe('Markdown images', () => {
 		expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-1');
 	});
 
+	it('opens a loaded thumbnail through file navigation', async () => {
+		const onLinkNavigate = vi.fn();
+		render(Markdown, {
+			source: '![Capture](capture.png)',
+			resolveImageFile,
+			onLinkNavigate,
+		});
+		const button = await screen.findByRole('button', { name: 'Open image Capture' });
+		expect(button.querySelector('img')?.getAttribute('src')).toBe('blob:preview-1');
+		await fireEvent.click(button);
+		expect(onLinkNavigate).toHaveBeenCalledExactlyOnceWith({ rawHref: 'capture.png', kind: 'file' });
+		await fireEvent.error(screen.getByRole('img'));
+		expect(screen.queryByRole('button')).toBeNull();
+	});
+
+	it('leaves thumbnails without a navigation callback non-interactive', async () => {
+		render(Markdown, { source: '![Capture](capture.png)', resolveImageFile });
+		await screen.findByRole('img');
+		expect(screen.queryByRole('button')).toBeNull();
+	});
+
+	it.each(['guide.md', 'https://example.com/guide'])(
+		'preserves an authored image link to %s without nesting a button',
+		async (destination) => {
+			const onLinkNavigate = vi.fn();
+			render(Markdown, {
+				source: `[![Capture](capture.png)](${destination})`,
+				resolveImageFile,
+				onLinkNavigate,
+			});
+			const image = await screen.findByRole('img', { name: 'Capture' });
+			const link = screen.getByRole('link', { name: 'Capture' });
+			expect(link.contains(image)).toBe(true);
+			expect(link.getAttribute('href')).toBe(destination);
+			expect(screen.queryByRole('button')).toBeNull();
+			if (destination === 'guide.md') {
+				await fireEvent.click(image);
+				expect(onLinkNavigate).toHaveBeenCalledExactlyOnceWith({ rawHref: destination, kind: 'file' });
+			} else {
+				expect(link.getAttribute('target')).toBe('_blank');
+			}
+		},
+	);
+
 	it.each([
 		'https://example.com/capture.png',
 		'http://example.com/capture.png',
 		'//example.com/capture.png',
 	])('leaves %s native and never forwards API authentication', async (href) => {
 		const resolver = vi.fn(resolveImageFile);
-		render(Markdown, { source: `![Capture](${href})`, resolveImageFile: resolver });
+		render(Markdown, {
+			source: `![Capture](${href})`,
+			resolveImageFile: resolver,
+			onLinkNavigate: vi.fn(),
+		});
 		await tick();
 		const image = screen.getByRole('img');
 		expect(image.getAttribute('src')).toBe(href);
@@ -74,6 +122,7 @@ describe('Markdown images', () => {
 		expect(image.getAttribute('referrerpolicy')).toBe('no-referrer');
 		expect(resolver).not.toHaveBeenCalled();
 		expect(filesApi.readContent).not.toHaveBeenCalled();
+		expect(screen.queryByRole('button')).toBeNull();
 	});
 
 	it.each([
@@ -152,6 +201,10 @@ describe('Markdown images', () => {
 		const view = render(Markdown, { source: '![Capture](capture.png)', resolveImageFile });
 		await tick();
 		expect(filesApi.readContent).not.toHaveBeenCalled();
+		const loading = screen.getByRole('status', { name: 'Loading image...' });
+		expect(loading.getAttribute('aria-busy')).toBe('true');
+		expect(loading.textContent?.trim()).toBe('');
+		expect(loading.querySelector('svg.animate-spin')).not.toBeNull();
 		enter();
 		enter();
 		await waitFor(() => expect(filesApi.readContent).toHaveBeenCalledOnce());
