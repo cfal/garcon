@@ -8,7 +8,7 @@ const DIAGRAMS = [
   'flowchart LR\n' + Array.from({ length: 12 }, (_, i) => `N${i}[Stage ${i}] --> N${i + 1}`).join('\n'),
   'flowchart TD\n' + Array.from({ length: 12 }, (_, i) => `N${i}[Stage ${i}] --> N${i + 1}`).join('\n'),
   'sequenceDiagram\nAlice->>Bob: Request\nBob-->>Alice: Response',
-  'flowchart LR\nA[Small]',
+  'flowchart LR\nA[Small]\nclick A href "https://example.com/diagram" "Linked node"',
 ];
 const SOURCE = DIAGRAMS.map((source) => '```mermaid\n' + source + '\n```').join('\n\n');
 const THUMBNAIL_SIZES = [
@@ -87,6 +87,7 @@ test('sizes unframed Mermaid thumbnails and opens the viewer by click, keyboard,
     const assistant = page.locator('[data-chat-message-type="assistant-message"]');
     const thumbnails = assistant.locator('.mermaid-thumbnail');
     const firstThumbnail = thumbnails.first();
+    const firstOpenButton = firstThumbnail.getByRole('button', { name: 'Expand diagram' });
     const firstSvg = firstThumbnail.locator('svg').first();
     const viewer = page.getByRole('dialog', { name: 'Mermaid diagram', exact: true });
     const expandedSvg = viewer.locator('.mermaid-zoom-stage > svg');
@@ -94,6 +95,30 @@ test('sizes unframed Mermaid thumbnails and opens the viewer by click, keyboard,
     await browserExpect(page.locator('html')).toHaveAttribute('data-inline-mermaid-thumbnail-size', 'medium');
     await browserExpect(assistant.locator('.mermaid-block-header')).toHaveCount(0);
     await browserExpect(assistant.getByRole('button', { name: 'Copy diagram source' })).toHaveCount(0);
+    const linkedThumbnail = thumbnails.last();
+    const linkedNode = linkedThumbnail.locator('svg a').first();
+    const linkedOpenButton = linkedThumbnail.getByRole('button', { name: 'Expand diagram' });
+    await linkedThumbnail.scrollIntoViewIfNeeded();
+    expect(await linkedNode.evaluate((element) => element.closest('button'))).toBeNull();
+    expect(await linkedNode.evaluate((element) => Boolean(element.closest('[inert]')))).toBe(true);
+    await linkedOpenButton.focus();
+    await linkedNode.evaluate((element) => (element as SVGElement).focus());
+    await browserExpect(linkedOpenButton).toBeFocused();
+    const linkedBounds = await linkedNode.boundingBox();
+    const chatUrl = page.url();
+    const pageCount = context.pages().length;
+    await page.mouse.click(linkedBounds!.x + linkedBounds!.width / 2, linkedBounds!.y + linkedBounds!.height / 2);
+    await browserExpect(viewer).toBeVisible();
+    expect(page.url()).toBe(chatUrl);
+    expect(context.pages()).toHaveLength(pageCount);
+    const viewerLink = expandedSvg.locator('a').first();
+    expect(await viewerLink.evaluate((element) => element.getAttribute('href') ?? element.getAttribute('xlink:href'))).toBe('https://example.com/diagram');
+    expect(await viewerLink.evaluate((element) => element.closest('[inert]'))).toBeNull();
+    await viewerLink.focus();
+    await browserExpect(viewerLink).toBeFocused();
+    await page.keyboard.press('Escape');
+    await browserExpect(viewer).toHaveCount(0);
+    await browserExpect(linkedOpenButton).toBeFocused();
     const artifacts = new URL('../../artifacts/chromium/', import.meta.url).pathname;
     await mkdir(artifacts, { recursive: true });
 
@@ -131,7 +156,7 @@ test('sizes unframed Mermaid thumbnails and opens the viewer by click, keyboard,
         }
         await firstThumbnail.scrollIntoViewIfNeeded();
         await page.screenshot({ path: join(artifacts, `mermaid-${size}-${viewport.width}.png`) });
-        await firstSvg.click();
+        await firstOpenButton.click();
         await browserExpect(viewer).toBeVisible();
         await browserExpect(expandedSvg).toBeVisible();
         expect((await expandedSvg.boundingBox())!.width).toBeGreaterThan(viewport.width / 2);
@@ -142,22 +167,22 @@ test('sizes unframed Mermaid thumbnails and opens the viewer by click, keyboard,
         await page.screenshot({ path: join(artifacts, `mermaid-viewer-${viewport.width}.png`) });
         await page.keyboard.press('Escape');
         await browserExpect(viewer).toHaveCount(0);
-        await browserExpect(firstThumbnail).toBeFocused();
+        await browserExpect(firstOpenButton).toBeFocused();
       }
     }
 
     await page.setViewportSize(DESKTOP_VIEWPORT);
     await browserExpect(page.locator('.mobile-shell')).toHaveCount(0);
-    await firstThumbnail.focus();
+    await firstOpenButton.focus();
     for (const key of ['Enter', 'Space']) {
-      await firstThumbnail.press(key);
+      await firstOpenButton.press(key);
       await browserExpect(viewer).toBeVisible();
       await viewer.getByRole('button', { name: 'Close (Escape)' }).click();
       await browserExpect(viewer).toHaveCount(0);
-      await browserExpect(firstThumbnail).toBeFocused();
+      await browserExpect(firstOpenButton).toBeFocused();
     }
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-    await firstThumbnail.click();
+    await firstOpenButton.click();
     await viewer.getByRole('button', { name: 'Copy diagram source' }).click();
     expect((await page.evaluate(() => navigator.clipboard.readText())).trim()).toBe(DIAGRAMS[0]);
     await page.keyboard.press('Escape');
@@ -181,6 +206,12 @@ test('sizes unframed Mermaid thumbnails and opens the viewer by click, keyboard,
     expect(Math.abs((await composer.boundingBox())!.y - originalBounds!.y)).toBeLessThan(1);
     await originalComposer?.dispose();
 
+    await linkedOpenButton.click();
+    await browserExpect(viewer).toBeVisible();
+    await context.route('https://example.com/diagram', (route) => route.fulfill({ body: 'Linked diagram target' }));
+    await viewerLink.click();
+    await browserExpect(page).toHaveURL('https://example.com/diagram');
+
     const touchContext = await context.browser()!.newContext({
       storageState: await context.storageState(),
       viewport: MOBILE_VIEWPORT,
@@ -199,6 +230,11 @@ test('sizes unframed Mermaid thumbnails and opens the viewer by click, keyboard,
       expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
       await touchViewer.getByRole('button', { name: 'Close (Escape)' }).tap();
       await browserExpect(touchViewer).toHaveCount(0);
+      await touchContext.route('https://example.com/diagram', (route) => route.fulfill({ body: 'Linked diagram target' }));
+      await touchPage.locator('[data-chat-message-type="assistant-message"] .mermaid-thumbnail').last().tap();
+      await browserExpect(touchViewer).toBeVisible();
+      await touchViewer.locator('svg a').first().tap();
+      await browserExpect(touchPage).toHaveURL('https://example.com/diagram');
     } finally {
       await touchContext.close();
     }

@@ -105,17 +105,21 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	{:else if renderError}
 		<div class="text-sm text-destructive">{renderError}</div>
 	{:else if renderedSvg}
-		<button
-			type="button"
-			class="mermaid-thumbnail focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-			onclick={openViewer}
-			aria-label={m.chat_mermaid_expand()}
-			aria-haspopup="dialog"
-			disabled={loading}
-		>
-			<!-- eslint-disable-next-line svelte/no-at-html-tags -- Mermaid generates this SVG in strict security mode. -->
-			{@html renderedSvg}
-		</button>
+		<div class="mermaid-thumbnail">
+			<!-- Inert artwork prevents diagram links from competing with viewer activation. -->
+			<div class="mermaid-thumbnail-artwork" inert aria-hidden="true">
+				<!-- eslint-disable-next-line svelte/no-at-html-tags -- Mermaid generates this SVG in strict security mode. -->
+				{@html renderedSvg}
+			</div>
+			<button
+				type="button"
+				class="mermaid-thumbnail-open focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				onclick={openViewer}
+				aria-label={m.chat_mermaid_expand()}
+				aria-haspopup="dialog"
+				disabled={loading}
+			></button>
+		</div>
 	{/if}
 </div>
 
@@ -149,17 +153,23 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	}
 
 	.mermaid-thumbnail {
-		display: block;
+		position: relative;
 		width: 100%;
 		max-width: var(--mermaid-thumbnail-width);
+	}
+
+	.mermaid-thumbnail-open {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
 		padding: 0;
 		border: 0;
 		background: none;
 		cursor: zoom-in;
-		text-align: left;
 	}
 
-	.mermaid-thumbnail > :global(svg) {
+	.mermaid-thumbnail-artwork > :global(svg) {
 		display: block;
 		width: auto;
 		max-width: 100%;

@@ -209,6 +209,10 @@
 
 	function handlePointerDown(event: PointerEvent) {
 		if (!viewportElement || (event.pointerType === 'mouse' && event.button !== 0)) return;
+		const targetsLink = event
+			.composedPath()
+			.some((target) => target instanceof Element && target.localName === 'a');
+		if (targetsLink) return;
 		if (pointers.size === 0 && pendingZoomAnchor) restoreScheduledAnchor();
 		pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
 		viewportElement.setPointerCapture(event.pointerId);
