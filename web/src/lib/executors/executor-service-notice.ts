@@ -27,7 +27,7 @@ export function resolveExecutorAvailabilityNotice(
 		: { kind: 'executor-unavailable', executorLabel: executors.label(executorId) };
 }
 
-// Machine-service surfaces report executor-level outages separately from project
+// Executor-service surfaces report executor-level outages separately from project
 // failures, since choosing another folder cannot recover them.
 export function resolveExecutorServiceNotice(
 	executors: ExecutorAvailability & Pick<ExecutorsStore, 'filesAvailable' | 'gitAvailable'>,

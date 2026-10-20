@@ -80,7 +80,7 @@ test('Local chat remains usable when executor discovery fails at startup', async
   }, { executionBackend: 'in-process' });
 }, 60_000);
 
-test('normal app onboarding supports both directions and sends remote chat input without local machine IO', async () => {
+test('normal app onboarding supports both directions and sends remote chat input without Local executor IO', async () => {
   await withE2eFixture('executors', async (fixture) => {
     const workers: ExecutorProcess[] = [];
     try {

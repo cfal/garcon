@@ -7240,7 +7240,7 @@ describe('ChatCommandService', () => {
     { executorId: '22222222-2222-4222-8222-222222222222' },
     { agentOwnershipEpoch: 'next-owner' },
     { projectPath: '/another-project' },
-  ])('checks a captured folder binding under the chat lock before machine IO: %j', async (change) => {
+  ])('checks a captured folder binding under the chat lock before executor IO: %j', async (change) => {
     const lock = new KeyedPromiseLock();
     const entered = deferred();
     const release = deferred();

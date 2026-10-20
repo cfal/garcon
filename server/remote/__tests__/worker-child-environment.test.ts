@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
-test.skipIf(process.platform === 'win32')('provider and machine children cannot inherit the consumed native controller credential', async () => {
+test.skipIf(process.platform === 'win32')('provider and executor-service children cannot inherit the consumed native controller credential', async () => {
   const temporary = join(homedir(), 'tmp');
   await mkdir(temporary, { recursive: true });
   const root = await mkdtemp(join(temporary, 'worker-child-environment-'));

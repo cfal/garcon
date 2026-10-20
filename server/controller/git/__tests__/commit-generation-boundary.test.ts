@@ -30,7 +30,7 @@ test('repository context collection is separate from model execution and its exe
   expect(calls).toEqual(['repository', 'model']);
 });
 
-test('machine Git operations expose neither HTTP formatting nor model generation', () => {
+test('executor Git operations expose neither HTTP formatting nor model generation', () => {
   const git = createGitOperations();
   expect(Object.keys(git)).toHaveLength(45);
   expect(git).not.toHaveProperty('toHttpError');
