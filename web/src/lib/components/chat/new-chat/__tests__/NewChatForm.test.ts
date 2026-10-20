@@ -1718,8 +1718,8 @@ describe('NewChatForm', () => {
 });
 
 
-describe('New Chat machine pin scope', () => {
-	it('keeps the current compact view and selects both owner and path from all machines', async () => {
+describe('New Chat executor pin scope', () => {
+	it('keeps the current compact view and selects both owner and path from all executors', async () => {
 		const chatsApi = await import('$lib/api/chats');
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
@@ -1734,7 +1734,7 @@ describe('New Chat machine pin scope', () => {
 			}),
 		);
 		render(NewChatFormTestHost, { props: { executorSnapshots: [localExecutor, remoteExecutor] } });
-		const toggle = await screen.findByRole('button', { name: 'Other machines…' });
+		const toggle = await screen.findByRole('button', { name: 'Other executors…' });
 		expect(toggle.getAttribute('aria-expanded')).toBe('false');
 		expect(screen.queryByRole('button', { name: 'Worker: /worker/pin' })).toBeNull();
 		await screen.findByRole('button', { name: '/same' });
@@ -1782,7 +1782,7 @@ describe('New Chat machine pin scope', () => {
 				},
 			},
 		});
-		await fireEvent.click(await screen.findByRole('button', { name: 'Other machines…' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Other executors…' }));
 		const pin = screen.getByRole('button', { name: 'Worker: /worker/pin' }) as HTMLButtonElement;
 		expect(pin.disabled).toBe(true);
 		expect(document.getElementById(pin.getAttribute('aria-describedby')!)?.textContent).toBe(
@@ -1809,7 +1809,7 @@ describe('New Chat machine pin scope', () => {
 		await screen.findByRole('button', { name: remoteExecutor.id + ': /worker/pin' });
 	});
 
-	it('retains the picker trigger after selecting the only machine with pins', async () => {
+	it('retains the picker trigger after selecting the only executor with pins', async () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({
 				paths: {
@@ -1818,7 +1818,7 @@ describe('New Chat machine pin scope', () => {
 			}),
 		);
 		render(NewChatFormTestHost, { props: { executorSnapshots: [localExecutor, remoteExecutor] } });
-		const toggle = await screen.findByRole('button', { name: 'Other machines…' });
+		const toggle = await screen.findByRole('button', { name: 'Other executors…' });
 		toggle.focus();
 		await fireEvent.click(toggle);
 		const pin = screen.getByRole('button', { name: 'Worker: /worker/pin' });
@@ -1831,7 +1831,7 @@ describe('New Chat machine pin scope', () => {
 		const path = screen.getByLabelText('Project Path');
 		path.focus();
 		await waitFor(() =>
-			expect(screen.queryByRole('button', { name: 'Other machines…' })).toBe(toggle),
+			expect(screen.queryByRole('button', { name: 'Other executors…' })).toBe(toggle),
 		);
 		expect(document.activeElement).toBe(path);
 	});
@@ -1853,17 +1853,17 @@ describe('New Chat machine pin scope', () => {
 				},
 			},
 		});
-		const toggle = await screen.findByRole('button', { name: 'Other machines…' });
+		const toggle = await screen.findByRole('button', { name: 'Other executors…' });
 		toggle.focus();
 		settings.applySnapshot({ ...snapshot, paths: { ...snapshot.paths, byExecutor: {} } });
 		await waitFor(() =>
-			expect(screen.queryByRole('button', { name: 'Other machines…' })).toBe(toggle),
+			expect(screen.queryByRole('button', { name: 'Other executors…' })).toBe(toggle),
 		);
 		expect(document.activeElement).toBe(toggle);
 		const path = screen.getByLabelText('Project Path');
 		path.focus();
 		await waitFor(() =>
-			expect(screen.queryByRole('button', { name: 'Other machines…' })).toBe(toggle),
+			expect(screen.queryByRole('button', { name: 'Other executors…' })).toBe(toggle),
 		);
 		expect(document.activeElement).toBe(path);
 	});
@@ -1874,6 +1874,6 @@ describe('New Chat machine pin scope', () => {
 		);
 		render(NewChatFormTestHost);
 		await screen.findByRole('button', { name: '/local' });
-		expect(screen.queryByRole('button', { name: 'Other machines…' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Other executors…' })).toBeNull();
 	});
 });

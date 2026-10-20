@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
-  test(`New Chat picks other machine pins without losing draft or focus (${executionBackend})`, async () => {
-    await withChromiumFixture(`new-chat-machine-pins-${executionBackend}`, async ({ page, context, integration, assertNoBrowserErrors }, phase) => {
+  test(`New Chat picks other executor pins without losing draft or focus (${executionBackend})`, async () => {
+    await withChromiumFixture(`new-chat-executor-pins-${executionBackend}`, async ({ page, context, integration, assertNoBrowserErrors }, phase) => {
       const { client, dirs } = integration;
       const offline = await client.post<{ id: string }>('/api/v1/executors', {
         label: 'Offline worker', direction: 'executor-connects', noTls: true,
@@ -29,8 +29,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const prompt = page.getByPlaceholder('How can I help you today?');
       await prompt.fill('Synthetic retained draft');
       const pins = page.getByRole('region', { name: 'Pinned paths', exact: true });
-      const trigger = pins.getByRole('button', { name: 'Other machines…', exact: true });
-      const picker = page.locator('[data-machine-pins-picker]');
+      const trigger = pins.getByRole('button', { name: 'Other executors…', exact: true });
+      const picker = page.locator('[data-executor-pins-picker]');
       const path = page.locator('#project-path-input');
       await browserExpect(path).toHaveValue(sharedPath);
       await browserExpect(page.locator('[data-slot="project-path-field"] .text-status-success-foreground')).toBeVisible();
@@ -39,7 +39,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       phase('checking compact inline pins');
       const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
       await mkdir(artifacts, { recursive: true });
-      await dialog.screenshot({ path: join(artifacts, `machine-pins-${executionBackend}-desktop-default.png`) });
+      await dialog.screenshot({ path: join(artifacts, `executor-pins-${executionBackend}-desktop-default.png`) });
       await trigger.focus();
       await page.keyboard.press('Space');
       await browserExpect(picker).toBeVisible();
@@ -88,7 +88,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await browserExpect(picker).toBeVisible();
         await browserExpect.poll(() => picker.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         const surface = width < 500
-          ? page.getByRole('dialog', { name: 'Other machines…', exact: true })
+          ? page.getByRole('dialog', { name: 'Other executors…', exact: true })
           : page.locator('[data-slot="popover-content"]').filter({ has: picker });
         await browserExpect(surface).toBeVisible();
         if (width < 500) {
@@ -97,14 +97,14 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           expect(box).not.toBeNull();
           expect(box!.y + box!.height).toBeCloseTo(900, 0);
         }
-        await page.screenshot({ path: join(artifacts, `machine-pins-${executionBackend}-${width}-picker.png`) });
+        await page.screenshot({ path: join(artifacts, `executor-pins-${executionBackend}-${width}-picker.png`) });
         await page.keyboard.press('Escape');
         await browserExpect(picker).toHaveCount(0);
         await browserExpect(trigger).toBeFocused();
         await cdp.detach();
       }
 
-      phase('reconciling live settings without losing draft or changing machine');
+      phase('reconciling live settings without losing draft or changing executor');
       await trigger.click();
       await client.put('/api/v1/app/settings', { paths: {
         byExecutor: { [offline.id]: { pinnedPaths: ['/projects/replacement'] } },
@@ -122,7 +122,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       } });
       await browserExpect(trigger).toBeFocused();
       await page.keyboard.press('Space');
-      await browserExpect(picker.getByText('No pinned paths on other machines.')).toBeVisible();
+      await browserExpect(picker.getByText('No pinned paths on other executors.')).toBeVisible();
       await page.keyboard.press('Escape');
       await browserExpect(trigger).toBeFocused();
       await page.keyboard.press('Tab');
@@ -134,13 +134,13 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
   }, 120_000);
 }
 
-test('machine pin picker retains touch targets with a fine primary pointer and secondary touchscreen', async () => {
+test('executor pin picker retains touch targets with a fine primary pointer and secondary touchscreen', async () => {
   const browser = await chromium.launch({
     headless: true,
     args: ['--blink-settings=primaryPointerType=4,availablePointerTypes=6'],
   });
   try {
-    await withChromiumFixture('new-chat-machine-pins-hybrid', async ({ page, integration, assertNoBrowserErrors }) => {
+    await withChromiumFixture('new-chat-executor-pins-hybrid', async ({ page, integration, assertNoBrowserErrors }) => {
       const { client, dirs } = integration;
       const worker = await client.post<{ id: string }>('/api/v1/executors', {
         label: 'Touchscreen worker', direction: 'executor-connects', noTls: true,
@@ -157,7 +157,7 @@ test('machine pin picker retains touch targets with a fine primary pointer and s
         anyCoarse: matchMedia('(any-pointer: coarse)').matches,
       }))).toEqual({ primaryFine: true, primaryCoarse: false, anyCoarse: true });
       const pins = page.getByRole('region', { name: 'Pinned paths' });
-      const trigger = pins.getByRole('button', { name: 'Other machines…', exact: true });
+      const trigger = pins.getByRole('button', { name: 'Other executors…', exact: true });
       const pin = pins.getByRole('button', { name: dirs.project, exact: true });
       await browserExpect(page.locator('[data-slot="project-path-field"] .text-status-success-foreground')).toBeVisible();
       for (const control of [trigger, pin]) {

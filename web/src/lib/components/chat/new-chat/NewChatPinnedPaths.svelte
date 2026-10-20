@@ -58,7 +58,7 @@
 {#snippet pickerContent()}
 	<div
 		class="max-h-[min(24rem,55dvh)] space-y-4 overflow-y-auto overscroll-contain p-1"
-		data-machine-pins-picker
+		data-executor-pins-picker
 	>
 		{#each otherGroups as group (group.executorId)}
 			{@const executor = executors.get(group.executorId)}
@@ -123,7 +123,7 @@
 						class={triggerClass}
 						onfocus={() => {
 							pickerVisited = true;
-						}}>{m.chat_new_chat_pinned_paths_other_machines()}</Dialog.Trigger
+						}}>{m.chat_new_chat_pinned_paths_other_executors()}</Dialog.Trigger
 					>
 					<Dialog.Content
 						bind:ref={content}
@@ -134,7 +134,7 @@
 					>
 						<div class="flex items-center justify-between gap-3">
 							<Dialog.Title class="text-sm font-medium"
-								>{m.chat_new_chat_pinned_paths_other_machines()}</Dialog.Title
+								>{m.chat_new_chat_pinned_paths_other_executors()}</Dialog.Title
 							>
 							<Dialog.Close
 								class="min-h-11 rounded-md px-3 text-sm text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -151,7 +151,7 @@
 						class={triggerClass}
 						onfocus={() => {
 							pickerVisited = true;
-						}}>{m.chat_new_chat_pinned_paths_other_machines()}</Popover.Trigger
+						}}>{m.chat_new_chat_pinned_paths_other_executors()}</Popover.Trigger
 					>
 					<Popover.Content
 						onInteractOutside={() => { restoreOnClose = false; }}
@@ -161,7 +161,7 @@
 						onCloseAutoFocus={restoreFocus}
 						align="start"
 						collisionPadding={8}
-						aria-label={m.chat_new_chat_pinned_paths_other_machines()}
+						aria-label={m.chat_new_chat_pinned_paths_other_executors()}
 						class="w-[min(26rem,calc(100vw-1rem))] max-h-(--bits-popover-content-available-height) overflow-y-auto p-3"
 					>
 						{@render pickerContent()}

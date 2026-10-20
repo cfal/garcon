@@ -141,11 +141,11 @@ export class NewChatFormState {
 			: this.#options.modelCatalog.forExecutor(this.executorId);
 	}
 
-	get localMachine(): boolean {
+	get isLocalExecutor(): boolean {
 		return this.executorId === 'local';
 	}
 	get projectBasePath(): string {
-		return this.localMachine
+		return this.isLocalExecutor
 			? this.#localProjectBasePath
 			: (this.#options.executors?.get(this.executorId)?.projectBasePath ?? '');
 	}
@@ -153,10 +153,10 @@ export class NewChatFormState {
 		return this.#options.executors?.pathContextKey(this.executorId) ?? this.executorId;
 	}
 	get filesAvailable(): boolean {
-		return this.#options.executors?.filesAvailable(this.executorId) ?? this.localMachine;
+		return this.#options.executors?.filesAvailable(this.executorId) ?? this.isLocalExecutor;
 	}
 	get gitAvailable(): boolean {
-		return this.#options.executors?.gitAvailable(this.executorId) ?? this.localMachine;
+		return this.#options.executors?.gitAvailable(this.executorId) ?? this.isLocalExecutor;
 	}
 	get executorReady(): boolean {
 		return this.#options.executors?.isReady(this.executorId) ?? true;
@@ -914,7 +914,7 @@ export class NewChatFormState {
 		this.#executionDefaults = snap.executionDefaults;
 		this.#startupRecents = snap.recentAgentSettings;
 
-		// A path already entered on the provisional host must not move to another machine.
+		// A path already entered on the provisional executor must not move to another executor.
 		if (
 			!this.settingsLoaded &&
 			this.#startupSelectionAutomatic &&
