@@ -5,7 +5,7 @@
 	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import { getAppShell, getWorkspaceWindowDnd } from '$lib/context';
 	import SidebarProjectHeaderRow from './SidebarProjectHeaderRow.svelte';
-	import SidebarMachineHeaderRow from './SidebarMachineHeaderRow.svelte';
+	import SidebarExecutorHeaderRow from './SidebarExecutorHeaderRow.svelte';
 	import SidebarSectionHeaderRow from './SidebarSectionHeaderRow.svelte';
 	import SidebarVirtualSortableChatRow from './SidebarVirtualSortableChatRow.svelte';
 	import {
@@ -908,8 +908,8 @@
 				class="absolute left-0 right-0 top-0"
 				style={`height:${virtualItem.size}px; transform:translateY(${virtualItem.start}px);`}
 			>
-				{#if row.type === 'machine-header'}
-					<SidebarMachineHeaderRow
+				{#if row.type === 'executor-header'}
+					<SidebarExecutorHeaderRow
 						{row}
 						containsSelectedChat={Boolean(
 							row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),

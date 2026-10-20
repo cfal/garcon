@@ -15,7 +15,7 @@
 	let { row, containsSelectedChat = false, onToggle }: SidebarProjectHeaderRowProps = $props();
 	const executors = getExecutors();
 	const executorLabel = $derived(
-		row.machineGrouped || (row.executorId ?? 'local') === 'local'
+		row.executorGrouped || (row.executorId ?? 'local') === 'local'
 			? ''
 			: `${executors.label(row.executorId)} / `,
 	);
@@ -34,7 +34,7 @@
 		type="button"
 		class={cn(
 			'flex h-full w-full items-center gap-2 px-2.5 text-left text-xs font-semibold text-muted-foreground transition-colors hover:bg-sidebar-chat-item-hover-bg hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-			row.machineGrouped && 'pl-8',
+			row.executorGrouped && 'pl-8',
 			containsSelectedChat &&
 				'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
 		)}

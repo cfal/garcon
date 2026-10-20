@@ -7,7 +7,7 @@ import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatList
 import { SidebarVirtualChatListController } from '../SidebarVirtualChatListController.svelte.js';
 import {
 	CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
-	MACHINE_HEADER_ROW_HEIGHT,
+	EXECUTOR_HEADER_ROW_HEIGHT,
 	PROJECT_HEADER_ROW_HEIGHT,
 	type SidebarVirtualChatRow,
 	type SidebarVirtualRow,
@@ -361,7 +361,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(screen.queryByText('Chat 119')).toBeNull();
 	});
 
-	it('keeps removed machine history collapsible and identifies its executor', async () => {
+	it('keeps removed executor history collapsible and identifies the executor', async () => {
 		const onToggleProjectCollapsed = vi.fn();
 		render(SidebarVirtualSortableChatListHost, {
 			executors: [localExecutor],
@@ -369,10 +369,10 @@ describe('SidebarVirtualSortableChatList', () => {
 			onToggleProjectCollapsed,
 			rows: [
 				{
-					type: 'machine-header',
-					key: 'machine:removed',
+					type: 'executor-header',
+					key: 'executor:removed',
 					executorId: remoteExecutor.id,
-					collapseKey: 'machine:removed',
+					collapseKey: 'executor:removed',
 					count: 1,
 					chatIds: ['hidden-chat'],
 					isCollapsed: true,
@@ -386,10 +386,10 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(button.classList.contains('bg-sidebar-chat-item-selected-bg')).toBe(true);
 		expect(button.getAttribute('title')).toContain(remoteExecutor.id);
 		await fireEvent.click(button);
-		expect(onToggleProjectCollapsed).toHaveBeenCalledWith('machine:removed');
+		expect(onToggleProjectCollapsed).toHaveBeenCalledWith('executor:removed');
 	});
 
-	it('keeps the Local machine group when filtering history from a removed executor', () => {
+	it('keeps the Local executor group when filtering history from a removed executor', () => {
 		const localChat = makeChat(0, { id: 'local-chat', executorId: 'local' });
 		const removedChat = makeChat(1, { id: 'removed-chat', executorId: remoteExecutor.id });
 		render(SidebarChatListHost, {
@@ -397,7 +397,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			chats: [localChat, removedChat],
 			filteredChats: [localChat],
 			searchFilter: 'local',
-			collapsedProjectKeys: new Set(['machine:local']),
+			collapsedProjectKeys: new Set(['executor:local']),
 			displayOptions: { grouping: 'project' },
 		});
 
@@ -405,19 +405,19 @@ describe('SidebarVirtualSortableChatList', () => {
 			'false',
 		);
 		expect(screen.queryByText('Chat 0')).toBeNull();
-		expect(document.querySelector('[data-sidebar-machine-header="local"]')).toBeTruthy();
+		expect(document.querySelector('[data-sidebar-executor-header="local"]')).toBeTruthy();
 		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBe(0);
 	});
 
-	it('renders compact machine headers with machine-sized geometry', () => {
+	it('renders compact executor headers with executor-header geometry', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			executors: [localExecutor, remoteExecutor],
 			rows: [
 				{
-					type: 'machine-header',
-					key: 'machine-header:machine:local',
+					type: 'executor-header',
+					key: 'executor-header:executor:local',
 					executorId: 'local',
-					collapseKey: 'machine:local',
+					collapseKey: 'executor:local',
 					count: 2,
 					chatIds: ['chat-0', 'chat-1'],
 					isCollapsed: false,
@@ -426,11 +426,11 @@ describe('SidebarVirtualSortableChatList', () => {
 		});
 
 		expectCompactGroupHeader(screen.getByRole('button', { name: 'Local 2' }));
-		expect(document.querySelector('[data-sidebar-machine-header="local"]')).toBeTruthy();
-		const machineItem = document.querySelector<HTMLElement>(
-			'[data-sidebar-virtual-item="machine-header"]',
+		expect(document.querySelector('[data-sidebar-executor-header="local"]')).toBeTruthy();
+		const executorItem = document.querySelector<HTMLElement>(
+			'[data-sidebar-virtual-item="executor-header"]',
 		);
-		expect(machineItem?.style.height).toBe(`${MACHINE_HEADER_ROW_HEIGHT}px`);
+		expect(executorItem?.style.height).toBe(`${EXECUTOR_HEADER_ROW_HEIGHT}px`);
 	});
 
 	it('places disclosure arrows before group labels and keeps counts at the end', () => {

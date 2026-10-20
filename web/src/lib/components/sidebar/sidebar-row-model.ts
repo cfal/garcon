@@ -39,7 +39,7 @@ export interface SidebarRowModelInput {
 	groupNestedProjectPaths?: boolean;
 	collapsedProjectKeys?: ReadonlySet<string>;
 	executorOrder?: readonly string[];
-	/** Keeps machine ownership visible when filtering hides other machines. */
+	/** Keeps executor ownership visible when filtering hides other executors. */
 	groupByExecutor?: boolean;
 }
 
@@ -287,7 +287,7 @@ function appendChatRow(
 }
 
 export function sidebarExecutorKey(executorId?: string | null): string {
-	return `machine:${effectiveExecutorId(executorId)}`;
+	return `executor:${effectiveExecutorId(executorId)}`;
 }
 
 export function shouldGroupSidebarByExecutor(input: {
@@ -348,12 +348,12 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 	};
 	for (const executorId of executorIds) {
 		const chats = chatsByExecutor.get(executorId) ?? [];
-		const machine = buildSidebarRows({ ...input, displayedChats: chats, executorId });
+		const executorRows = buildSidebarRows({ ...input, displayedChats: chats, executorId });
 		const collapseKey = sidebarExecutorKey(executorId);
 		const isCollapsed = input.collapsedProjectKeys?.has(collapseKey) ?? false;
-		result.projectKeys.push(...machine.projectKeys);
+		result.projectKeys.push(...executorRows.projectKeys);
 		result.rows.push({
-			type: 'machine-header',
+			type: 'executor-header',
 			key: collapseKey,
 			executorId,
 			collapseKey,
@@ -362,13 +362,13 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 			isCollapsed,
 		});
 		if (isCollapsed) continue;
-		for (const row of machine.rows) {
-			result.rows.push(row.type === 'project-header' ? { ...row, machineGrouped: true } : row);
+		for (const row of executorRows.rows) {
+			result.rows.push(row.type === 'project-header' ? { ...row, executorGrouped: true } : row);
 		}
 		for (const list of chatOrderLists)
-			result.visibleOrders[list].push(...machine.visibleOrders[list]);
-		result.visibleChatIds.push(...machine.visibleChatIds);
-		for (const [chatId, scopeIds] of machine.reorderScopesByChatId) {
+			result.visibleOrders[list].push(...executorRows.visibleOrders[list]);
+		result.visibleChatIds.push(...executorRows.visibleChatIds);
+		for (const [chatId, scopeIds] of executorRows.reorderScopesByChatId) {
 			result.reorderScopesByChatId.set(chatId, scopeIds);
 		}
 	}

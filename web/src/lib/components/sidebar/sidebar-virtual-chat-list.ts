@@ -8,7 +8,7 @@ export const COMPACT_CHAT_ROW_HEIGHT = 62;
 export const DESKTOP_CHAT_ROW_HEIGHT = 76;
 export const PROJECT_PATH_LINE_HEIGHT = 18;
 export const PROJECT_HEADER_ROW_HEIGHT = 32;
-export const MACHINE_HEADER_ROW_HEIGHT = 34;
+export const EXECUTOR_HEADER_ROW_HEIGHT = 34;
 export const DEFAULT_CHAT_ROW_OVERSCAN = 8;
 export const CHAT_ROW_SEPARATOR_SLOT_HEIGHT = 2;
 
@@ -22,12 +22,12 @@ export interface SidebarVirtualProjectHeaderRow {
 	count: number;
 	chatIds: string[];
 	isCollapsed: boolean;
-	/** True when a machine header already identifies the executor above this project. */
-	machineGrouped?: boolean;
+	/** True when an executor header already identifies this project's executor. */
+	executorGrouped?: boolean;
 }
 
-export interface SidebarVirtualMachineHeaderRow {
-	type: 'machine-header';
+export interface SidebarVirtualExecutorHeaderRow {
+	type: 'executor-header';
 	key: string;
 	executorId: string;
 	collapseKey: string;
@@ -43,7 +43,7 @@ export type SidebarChatSection =
 export function sidebarSectionKey(section: SidebarChatSection, executorId?: string): string {
 	return executorId === undefined
 		? `section:${section}`
-		: `machine:${executorId}:section:${section}`;
+		: `executor:${executorId}:section:${section}`;
 }
 
 export function sidebarSectionProjectKey(section: SidebarChatSection, projectKey: string): string {
@@ -84,7 +84,7 @@ export interface SidebarVirtualChatRow {
 }
 
 export type SidebarVirtualRow =
-	| SidebarVirtualMachineHeaderRow
+	| SidebarVirtualExecutorHeaderRow
 	| SidebarVirtualProjectHeaderRow
 	| SidebarVirtualSectionHeaderRow
 	| SidebarVirtualChatRow;
@@ -104,8 +104,8 @@ export function estimateSidebarVirtualRowSize(
 	chatItemLayout: ChatItemLayout,
 	showProjectPath = false,
 ): number {
-	if (row?.type === 'machine-header') {
-		return MACHINE_HEADER_ROW_HEIGHT;
+	if (row?.type === 'executor-header') {
+		return EXECUTOR_HEADER_ROW_HEIGHT;
 	}
 	if (row?.type === 'project-header' || row?.type === 'section-header') {
 		return PROJECT_HEADER_ROW_HEIGHT;

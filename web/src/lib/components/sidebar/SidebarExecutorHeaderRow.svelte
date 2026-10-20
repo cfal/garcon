@@ -2,16 +2,16 @@
 	import { cn } from '$lib/utils/cn';
 	import { getExecutors } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { SidebarVirtualMachineHeaderRow } from './sidebar-virtual-chat-list';
+	import type { SidebarVirtualExecutorHeaderRow } from './sidebar-virtual-chat-list';
 	import SidebarGroupHeaderContent from './SidebarGroupHeaderContent.svelte';
 
-	interface SidebarMachineHeaderRowProps {
-		row: SidebarVirtualMachineHeaderRow;
+	interface SidebarExecutorHeaderRowProps {
+		row: SidebarVirtualExecutorHeaderRow;
 		containsSelectedChat?: boolean;
 		onToggle?: (collapseKey: string) => void;
 	}
 
-	let { row, containsSelectedChat = false, onToggle }: SidebarMachineHeaderRowProps = $props();
+	let { row, containsSelectedChat = false, onToggle }: SidebarExecutorHeaderRowProps = $props();
 	const executors = getExecutors();
 	const executor = $derived(executors.get(row.executorId));
 	const label = $derived(
@@ -34,9 +34,9 @@
 		title={`${label}${executor ? '' : ` · ${row.executorId}`}`}
 		aria-expanded={!row.isCollapsed}
 		onclick={handleToggle}
-		data-sidebar-machine-header={row.executorId}
-		data-sidebar-machine-collapse-key={row.collapseKey}
-		data-sidebar-machine-collapsed={row.isCollapsed ? 'true' : 'false'}
+		data-sidebar-executor-header={row.executorId}
+		data-sidebar-executor-collapse-key={row.collapseKey}
+		data-sidebar-executor-collapsed={row.isCollapsed ? 'true' : 'false'}
 	>
 		<SidebarGroupHeaderContent
 			{label}

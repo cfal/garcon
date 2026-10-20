@@ -12,13 +12,13 @@ import {
 
 describe('sidebar chat scroll targets', () => {
 	it.each([false, true])(
-		'anchors the closest visible collapsed ancestor with machine collapsed=%s',
+		'anchors the closest visible collapsed ancestor with executor collapsed=%s',
 		(isCollapsed) => {
 			const rows: SidebarVirtualRow[] = [
 				{
-					type: 'machine-header',
-					key: 'machine:worker',
-					collapseKey: 'machine:worker',
+					type: 'executor-header',
+					key: 'executor:worker',
+					collapseKey: 'executor:worker',
 					executorId: 'worker',
 					count: 1,
 					chatIds: ['hidden'],
@@ -38,16 +38,16 @@ describe('sidebar chat scroll targets', () => {
 				});
 			const target = sidebarScrollTargetForChat(rows, 'hidden');
 			expect(target).toEqual(
-				isCollapsed ? { index: 0, machineCollapseKey: 'machine:worker' } : { index: 1, sectionKey },
+				isCollapsed ? { index: 0, executorCollapseKey: 'executor:worker' } : { index: 1, sectionKey },
 			);
 			const viewport = document.createElement('div');
-			const machine = document.createElement('button');
-			machine.dataset.sidebarMachineCollapseKey = 'machine:worker';
+			const executor = document.createElement('button');
+			executor.dataset.sidebarExecutorCollapseKey = 'executor:worker';
 			const section = document.createElement('button');
 			section.dataset.sidebarSectionKey = sectionKey;
-			viewport.append(machine, section);
+			viewport.append(executor, section);
 			expect(target && mountedElementForScrollTarget(viewport, target)).toBe(
-				isCollapsed ? machine : section,
+				isCollapsed ? executor : section,
 			);
 		},
 	);
