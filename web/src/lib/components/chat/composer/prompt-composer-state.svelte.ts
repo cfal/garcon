@@ -69,7 +69,8 @@ export class PromptComposerUiState {
 		if (mode === 'literal') {
 			this.closeFileMenu();
 			const trigger = findSlashCommandTrigger(value, caret);
-			this.setSlashCommandTrigger(trigger && LITERAL_APP_COMMAND_NAMES.some(name => name.startsWith(trigger.query)) ? trigger : null);
+			const matchesLiteralCommand = trigger && LITERAL_APP_COMMAND_NAMES.some(name => name.startsWith(trigger.query));
+			this.setSlashCommandTrigger(matchesLiteralCommand ? trigger : null);
 			this.snippetPalette.dismiss();
 			return;
 		}

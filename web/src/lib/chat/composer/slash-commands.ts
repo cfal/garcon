@@ -85,7 +85,8 @@ export const LITERAL_APP_COMMAND_NAMES: readonly string[] = [
 export function isLiteralAppCommand(input: string): boolean {
 	const name = /^\/([a-z]+)(?=[ \t\r\n\v\f]|$)/.exec(input)?.[1];
 	if (!name || !LITERAL_APP_COMMAND_NAMES.includes(name)) return false;
-	if (name === 'clear' || name === 'fork') return /^\/(?:clear|fork)[ \t\r\n\v\f]*$/.test(input);
+	if (name === 'clear') return isClearCommand(input);
+	if (name === 'fork') return /^\/fork[ \t\r\n\v\f]*$/.test(input);
 	return true;
 }
 

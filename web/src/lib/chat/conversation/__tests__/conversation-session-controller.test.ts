@@ -1104,17 +1104,20 @@ describe('ConversationSessionController', () => {
 					model: deps.agentState.model,
 				} } : {}),
 			});
-			for (const text of [
+			const executionCommands = [
 				'Ordinary prompt',
 				'/compact',
 				'/fork with a body',
 				'/steer guidance',
 				'/rename-agent',
-			]) {
+			];
+			if (executionPolicy === 'conversation') executionCommands.push('/fork');
+			for (const text of executionCommands) {
 				deps.composerState.inputText = text;
 				expect(await controller[submit]('chat-1')).toBe('no-op');
 				expect(deps.composerState.inputText).toBe(text);
 			}
+			expect(mockForkChat).not.toHaveBeenCalled();
 			expect(mockRunChat).not.toHaveBeenCalled();
 			expect(mockSteerChat).not.toHaveBeenCalled();
 			expect(mockCreateQueuedInput).not.toHaveBeenCalled();

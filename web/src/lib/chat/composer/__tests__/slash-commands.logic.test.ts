@@ -3,6 +3,7 @@ import {
 	applySlashCommand,
 	BUILTIN_SLASH_COMMANDS,
 	findSlashCommandTrigger,
+	isClearCommand,
 	isControllerSlashCommand,
 	isLiteralAppCommand,
 	parseCompactCommand,
@@ -15,6 +16,13 @@ import {
 } from '$lib/chat/composer/slash-commands.js';
 
 describe('slash command helpers', () => {
+	it.each(['', ' ', '\t', '\r', '\n', '\v', '\f', '\r\n', '\u00a0', ' body'])(
+		'uses the standalone Clear whitespace rules for literal Clear and Fork: %j', suffix => {
+			const clear = `/clear${suffix}`;
+			expect(isLiteralAppCommand(clear)).toBe(isClearCommand(clear));
+			expect(isLiteralAppCommand(`/fork${suffix}`)).toBe(isClearCommand(clear));
+		},
+	);
 	it.each(['/clear', '/fork\t', '/rename Title', '/move top', '/tag add urgent', '/in 1h Follow up', '/in invalid'])(
 		'recognizes the literal app command %s', text => {
 			expect(isLiteralAppCommand(text)).toBe(true);
