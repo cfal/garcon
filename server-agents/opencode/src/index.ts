@@ -77,6 +77,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
       ...DOCUMENT_FILE_ATTACHMENT_MIME_TYPES,
       ...VIDEO_FILE_ATTACHMENT_MIME_TYPES,
     ],
+    inlineTextMaxBytes: null,
   } as const;
   readonly execution;
   readonly producers;

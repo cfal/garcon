@@ -1,7 +1,8 @@
 import {
   DOCUMENT_FILE_ATTACHMENT_MIME_TYPES,
-  TEXT_FILE_ATTACHMENT_MIME_TYPES,
+  MAX_INLINE_TEXT_ATTACHMENT_BYTES,
   isImageAttachmentMimeType,
+  isTextAttachmentMimeType,
 } from '@garcon/common/attachments';
 
 export interface AttachmentInput {
@@ -10,8 +11,7 @@ export interface AttachmentInput {
   readonly mimeType?: string;
 }
 
-const MAX_INLINE_ATTACHMENT_CHARS = 120_000;
-const TEXT_ATTACHMENT_MIMES: ReadonlySet<string> = new Set(TEXT_FILE_ATTACHMENT_MIME_TYPES);
+const MAX_INLINE_ATTACHMENT_CHARS = MAX_INLINE_TEXT_ATTACHMENT_BYTES;
 const DOCUMENT_ATTACHMENT_MIMES: ReadonlySet<string> = new Set(DOCUMENT_FILE_ATTACHMENT_MIME_TYPES);
 
 export interface DataUrlParts {
@@ -50,7 +50,7 @@ export function nonImageAttachments(attachments: readonly AttachmentInput[] | un
 }
 
 export function isTextAttachment(attachment: AttachmentInput): boolean {
-  return TEXT_ATTACHMENT_MIMES.has(attachmentMimeType(attachment));
+  return isTextAttachmentMimeType(attachmentMimeType(attachment));
 }
 
 // Decoded bytes bound the decoded character count, so this never admits text

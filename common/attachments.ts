@@ -34,6 +34,9 @@ export const MAX_CHAT_ATTACHMENT_COUNT = 5;
 export const MAX_CHAT_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024;
 export const MAX_CHAT_ATTACHMENT_FILE_BYTES = 10 * 1024 * 1024;
 export const MAX_CHAT_VIDEO_ATTACHMENT_FILE_BYTES = 25 * 1024 * 1024;
+export const MAX_CHAT_ATTACHMENT_NAME_BYTES = 255;
+// Text attachments larger than this cannot be inlined into a prompt whole.
+export const MAX_INLINE_TEXT_ATTACHMENT_BYTES = 120_000;
 
 const CHAT_ATTACHMENT_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   csv: 'text/csv',
@@ -107,6 +110,10 @@ export function isValidAttachmentMimeType(mimeType: string): boolean {
 
 export function isImageAttachmentMimeType(mimeType: string): boolean {
   return (IMAGE_ATTACHMENT_MIME_TYPES as readonly string[]).includes(mimeType.toLowerCase());
+}
+
+export function isTextAttachmentMimeType(mimeType: string): boolean {
+  return (TEXT_FILE_ATTACHMENT_MIME_TYPES as readonly string[]).includes(mimeType.toLowerCase());
 }
 
 export function isVideoAttachmentMimeType(mimeType: string): boolean {

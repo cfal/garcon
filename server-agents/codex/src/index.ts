@@ -83,6 +83,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
   readonly readiness = null;
   readonly attachments = {
     fileMimeTypes: ANY_FILE_ATTACHMENT_MIME_TYPE,
+    inlineTextMaxBytes: null,
   } as const;
   readonly execution;
   readonly producers;

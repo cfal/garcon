@@ -39,7 +39,7 @@ describe('Claude file attachments against a scripted model', () => {
     const reply = `SCRIPTED_DONE_${crypto.randomUUID().replaceAll('-', '')}`;
     let sheetPath = '';
     testEnvironment.model.scriptTurn((request) => {
-      sheetPath = request.lastUserText.match(/^- (\S+budget\.xlsx)$/m)?.[1] ?? '';
+      sheetPath = request.lastUserText.match(/^- (\S+budget\.xlsx) \(original name: "budget\.xlsx"\)$/m)?.[1] ?? '';
       if (!sheetPath) throw new Error(`No spreadsheet path in prompt: ${request.lastUserText}`);
       return [claudeToolUse('toolu_read_sheet', 'Bash', { command: `cat ${sheetPath}` })];
     });

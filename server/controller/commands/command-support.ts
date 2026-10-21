@@ -98,7 +98,7 @@ export type AgentRegistryDep = Pick<
   | 'executionPolicy'
   | 'assertExecutorReady'
   | 'supportsImages'
-  | 'supportsFileAttachmentMimeType'
+  | 'fileAttachmentAdmission'
   | 'modelSupportsImages'
   | 'startSession'
   | 'resolvePermission'

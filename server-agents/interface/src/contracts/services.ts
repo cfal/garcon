@@ -55,6 +55,9 @@ export interface AgentAttachments {
   // Non-image file types the agent accepts, or 'any' when it reads
   // attachments from disk with its own tools.
   readonly fileMimeTypes: FileAttachmentMimeTypes;
+  // Largest text attachment the agent receives whole, or null when it reads
+  // text attachments in full however large they are.
+  readonly inlineTextMaxBytes: number | null;
 }
 
 export interface AgentSettings {

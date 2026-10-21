@@ -1,6 +1,7 @@
 import type { AgentCommandImage } from '../../../common/ws-requests.js';
 import {
   MAX_CHAT_ATTACHMENT_COUNT,
+  MAX_CHAT_ATTACHMENT_NAME_BYTES,
   MAX_CHAT_ATTACHMENT_FILE_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   MAX_CHAT_VIDEO_ATTACHMENT_FILE_BYTES,
@@ -50,6 +51,9 @@ export function validateCommandAttachments(value: unknown): AgentCommandImage[] 
     const name = typeof attachment.name === 'string' && attachment.name.trim()
       ? attachment.name
       : `attachment-${index + 1}`;
+    if (Buffer.byteLength(name) > MAX_CHAT_ATTACHMENT_NAME_BYTES) {
+      throw new AttachmentValidationError('Attachment name is too long.');
+    }
     const rawDataMimeType = match[1].trim().toLowerCase();
     const rawDeclaredMimeType = typeof attachment.mimeType === 'string'
       ? attachment.mimeType.trim().toLowerCase()

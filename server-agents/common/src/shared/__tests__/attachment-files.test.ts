@@ -2,7 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-import { attachmentFileName, materializeAttachmentFiles } from '../attachment-files.ts';
+import {
+  appendAttachmentFileReferences,
+  attachmentFileName,
+  materializeAttachmentFiles,
+} from '../attachment-files.ts';
 
 function attachment(name: string | null, mimeType: string, content = 'bytes') {
   return { name, mimeType, data: `data:${mimeType};base64,${Buffer.from(content).toString('base64')}` };
@@ -16,11 +20,22 @@ describe('attachment files', () => {
     expect(attachmentFileName(attachment('.env', 'text/plain'), 3)).toBe('4-env.txt');
   });
 
-  it('bounds long multi-byte names by bytes and keeps the extension', () => {
-    const name = attachmentFileName(attachment('表'.repeat(150) + '.xlsx', 'application/octet-stream'), 0);
-    expect(Buffer.byteLength(name)).toBeLessThanOrEqual(255);
-    expect(name).toEndWith('表.xlsx');
-    expect(name).not.toContain('�');
+  it.each([
+    ['report$(touch PWNED).csv', '1-report_touch_PWNED_.csv'],
+    ['a`id`b.csv', '1-a_id_b.csv'],
+    ['q"uote\x27s.csv', '1-q_uote_s.csv'],
+    ['x; rm -rf ~ && y | z.csv', '1-x_rm_-rf_y_z.csv'],
+    ['-rf.csv', '1-rf.csv'],
+  ])('keeps only shell-inert characters in %j', (name, expected) => {
+    expect(attachmentFileName(attachment(name, 'text/csv'), 0)).toBe(expected);
+  });
+
+  it('bounds very long stems and extensions', () => {
+    const started = performance.now();
+    const name = attachmentFileName(attachment('a'.repeat(1_000_000) + '.' + 'b'.repeat(1_000_000), 'application/octet-stream'), 0);
+    expect(name).toBe(`1-${'a'.repeat(64)}`);
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(attachmentFileName(attachment('表格.docx', 'application/octet-stream'), 0)).toBe('1-attachment.docx');
   });
 
   it('adds the known extension when the name has none', () => {
@@ -41,5 +56,12 @@ describe('attachment files', () => {
 
     await cleanup();
     expect(await fs.stat(path.dirname(files[0]!.path)).catch(() => null)).toBeNull();
+  });
+
+  it('lists the original name as quoted metadata beside the path', () => {
+    const file = { attachment: attachment('Q3 $(budget).xlsx', 'text/plain'), path: '/tmp/x/1-Q3_budget_.xlsx' };
+    expect(appendAttachmentFileReferences('Read', [file])).toBe(
+      'Read\n\nAttached files are available on disk:\n\n- /tmp/x/1-Q3_budget_.xlsx (original name: "Q3 $(budget).xlsx")',
+    );
   });
 });

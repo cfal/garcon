@@ -36,6 +36,35 @@ describe('file attachment support for direct agents', () => {
     });
   });
 
+  test.each(['openAi', 'openAiResponses', 'anthropic'] as const)(
+    'rejects a CSV too large for %s to receive whole before any provider request',
+    async (agentKey) => {
+      await withIntegrationFixture(`file-attachment-direct-large-csv-${agentKey}`, async (fixture) => {
+        const chatId = fixture.newChatId();
+        const provider = {
+          openAi: fixture.fakeProviders.openAi,
+          openAiResponses: fixture.fakeProviders.openAiResponses,
+          anthropic: fixture.fakeProviders.anthropic,
+        }[agentKey];
+        const requestCount = provider.requests().length;
+        const csv = 'name,value\n' + 'row,1\n'.repeat(30_000);
+        expect(await rejectionOf(fixture.client.startChat({
+          ...fixture.client.directStartRequest({
+            chatId,
+            content: 'Summarize the table.',
+            projectPath: fixture.dirs.project,
+            agent: fixture.directAgents[agentKey],
+          }),
+          images: [{ name: 'large.csv', mimeType: 'text/csv', data: dataUrl('text/csv', csv) }],
+        }))).toMatchObject({
+          status: 422,
+          body: { errorCode: 'UNSUPPORTED_AGENT' },
+        });
+        expect(provider.requests()).toHaveLength(requestCount);
+      });
+    },
+  );
+
   test('rejects a spreadsheet before any provider request', async () => {
     await withIntegrationFixture('file-attachment-direct-xlsx', async (fixture) => {
       const chatId = fixture.newChatId();

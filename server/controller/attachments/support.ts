@@ -5,7 +5,7 @@ import { isImageAttachmentMimeType } from '../../../common/attachments.js';
 
 export type AttachmentAgentCapabilities = Pick<
   AgentRegistryServiceContract,
-  'assertExecutorReady' | 'modelSupportsImages' | 'supportsImages' | 'supportsFileAttachmentMimeType'
+  'assertExecutorReady' | 'modelSupportsImages' | 'supportsImages' | 'fileAttachmentAdmission'
 >;
 
 type Attachments = NonNullable<RunAgentTurnOptions['images']>;
@@ -70,14 +70,32 @@ export function assertAttachmentsSupported(
     }
   }
 
-  for (const mimeType of mimeTypes) {
-    if (isImageAttachmentMimeType(mimeType)) continue;
-    if (!agents.supportsFileAttachmentMimeType(input.agentId, mimeType, input.executorId)) {
+  input.attachments.forEach((attachment, index) => {
+    const mimeType = mimeTypes[index];
+    if (isImageAttachmentMimeType(mimeType)) return;
+    const admission = agents.fileAttachmentAdmission(
+      input.agentId,
+      { mimeType, sizeBytes: attachmentSizeBytes(attachment.data) },
+      input.executorId,
+    );
+    if (admission.kind === 'unsupported-type') {
       throw new CommandValidationError(
         'UNSUPPORTED_AGENT',
         `${mimeType} attachments unsupported for agent: ${input.agentId}`,
         422,
       );
     }
-  }
+    if (admission.kind === 'text-too-large') {
+      throw new CommandValidationError(
+        'UNSUPPORTED_AGENT',
+        `${attachment.name ?? mimeType} is too large for agent ${input.agentId} to read; the limit for text attachments is ${Math.floor(admission.maxBytes / 1000)} KB`,
+        422,
+      );
+    }
+  });
+}
+
+function attachmentSizeBytes(data: string): number {
+  const base64 = data.slice(data.indexOf(',') + 1);
+  return Buffer.byteLength(base64, 'base64');
 }
