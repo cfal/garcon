@@ -33,7 +33,7 @@ export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze
     'tickets', 'websocket-backpressure', 'websocket-payload-limit', 'websocket-request-validation',
   ].map(name => [name, 'Controller persistence, ordering or browser delivery; no runtime contract under test.'])),
   ...Object.fromEntries([
-    'fake-chat-completions-model', 'fixture-auth', 'git-fixture', 'support-contract',
+    'execution-backend', 'fake-chat-completions-model', 'fixture-auth', 'git-fixture', 'support-contract',
     'persisted-chat-support', 'reload-helper', 'live-claude-protocol-probe',
     'live-codex-protocol-probe', 'live-codex-credential-proxy',
     'garcon-agent-command-reload', 'garcon-schedule-pipeline',
