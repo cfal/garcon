@@ -14,6 +14,13 @@ import type { ChatTransientControlAction } from '../../../common/chat-transient-
 import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
 import type { AgentCatalogEntry, AgentModelOption } from '../../../common/agents.js';
 import type { SlashCommand } from '../../../common/slash-commands.js';
+import { acceptsFileAttachmentMimeType, isTextAttachmentMimeType } from '../../../common/attachments.js';
+
+// Text over an inline-only agent's limit would reach it truncated.
+export type FileAttachmentAdmission =
+  | { readonly kind: 'accepted' }
+  | { readonly kind: 'unsupported-type' }
+  | { readonly kind: 'text-too-large'; readonly maxBytes: number };
 import type {
   AgentAuthLoginCompleteResult,
   AgentAuthLoginLaunchResult,
@@ -97,7 +104,11 @@ export interface AgentRegistryServiceContract {
   supportsUpdateProjectPath(agentId: string, executorId?: string | null): boolean;
   requiresNativePathForProjectPathUpdate(agentId: string, executorId?: string | null): boolean;
   supportsImages(agentId: string, executorId?: string | null): boolean;
-  supportsFileAttachmentMimeType(agentId: string, mimeType: string, executorId?: string | null): boolean;
+  fileAttachmentAdmission(
+    agentId: string,
+    attachment: { readonly mimeType: string; readonly sizeBytes: number },
+    executorId?: string | null,
+  ): FileAttachmentAdmission;
   requiresStrictModelDiscovery(agentId: string, executorId?: string | null): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined, executorId?: string | null): boolean;
   currentTranscriptViewId(chatId: string, signal?: AbortSignal): Promise<string>;
@@ -322,8 +333,20 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#directory.get(agentId, executorId)?.descriptor.requiresNativePathForProjectPathUpdate ?? false;
   }
   supportsImages(agentId: string, executorId?: string | null): boolean { return this.#directory.get(agentId, executorId)?.descriptor.supportsImages ?? false; }
-  supportsFileAttachmentMimeType(agentId: string, mimeType: string, executorId?: string | null): boolean {
-    return this.#directory.get(agentId, executorId)?.attachments?.fileMimeTypes.includes(mimeType.toLowerCase()) ?? false;
+  fileAttachmentAdmission(
+    agentId: string,
+    attachment: { readonly mimeType: string; readonly sizeBytes: number },
+    executorId?: string | null,
+  ): FileAttachmentAdmission {
+    const attachments = this.#directory.get(agentId, executorId)?.attachments;
+    if (!attachments || !acceptsFileAttachmentMimeType(attachments.fileMimeTypes, attachment.mimeType)) {
+      return { kind: 'unsupported-type' };
+    }
+    const limit = attachments.inlineTextMaxBytes;
+    if (limit !== null && isTextAttachmentMimeType(attachment.mimeType) && attachment.sizeBytes > limit) {
+      return { kind: 'text-too-large', maxBytes: limit };
+    }
+    return { kind: 'accepted' };
   }
 
   requiresStrictModelDiscovery(agentId: string, executorId?: string | null): boolean {

@@ -8,7 +8,7 @@ function agents(overrides = {}) {
     assertExecutorReady: mock(() => undefined),
     modelSupportsImages: mock(() => true),
     supportsImages: mock(() => true),
-    supportsFileAttachmentMimeType: mock(() => true),
+    fileAttachmentAdmission: mock(() => ({ kind: 'accepted' })),
     ...overrides,
   };
 }
@@ -80,5 +80,24 @@ describe('attachment support', () => {
     expect(() => assertAttachmentsSupported(capabilities, { ...chat, attachments: [IMAGE] }))
       .toThrow('The chat has no model to receive attachments');
     expect(capabilities.assertExecutorReady).not.toHaveBeenCalled();
+  });
+
+  it('passes the decoded size to the agent and explains a text limit', () => {
+    const capabilities = agents({
+      fileAttachmentAdmission: mock(() => ({ kind: 'text-too-large', maxBytes: 120_000 })),
+    });
+    const csv = { data: 'data:text/csv;base64,YWJj', name: 'table.csv', mimeType: 'text/csv' };
+
+    expect(() => assertAttachmentsSupported(capabilities, {
+      executorId: 'local',
+      agentId: 'direct-openai-compatible',
+      model: 'model',
+      attachments: [csv],
+    })).toThrow('table.csv is too large for agent direct-openai-compatible to read; the limit for text attachments is 120 KB');
+    expect(capabilities.fileAttachmentAdmission).toHaveBeenCalledWith(
+      'direct-openai-compatible',
+      { mimeType: 'text/csv', sizeBytes: 3 },
+      'local',
+    );
   });
 });

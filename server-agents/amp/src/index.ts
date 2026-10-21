@@ -48,6 +48,7 @@ export default class AmpAgentIntegration implements AgentIntegration {
   readonly readiness = null;
   readonly attachments = {
     fileMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+    inlineTextMaxBytes: null,
   } as const;
   readonly execution;
   readonly producers;

@@ -1616,7 +1616,7 @@ describe('NewChatForm', () => {
 		const attachment = new File(['image'], 'pasted.png', { type: 'image/png' });
 		await fireEvent.paste(messageInput, {
 			clipboardData: {
-				items: [{ type: 'image/png', getAsFile: () => attachment }],
+				items: [{ kind: 'file', type: 'image/png', getAsFile: () => attachment }],
 			},
 		});
 
@@ -1658,7 +1658,7 @@ describe('NewChatForm', () => {
 		const attachment = new File(['image'], 'unsupported.png', { type: 'image/png' });
 		await fireEvent.paste(messageInput, {
 			clipboardData: {
-				items: [{ type: 'image/png', getAsFile: () => attachment }],
+				items: [{ kind: 'file', type: 'image/png', getAsFile: () => attachment }],
 			},
 		});
 

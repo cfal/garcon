@@ -1,11 +1,12 @@
 import type { AgentCommandImage } from '../../../common/ws-requests.js';
 import {
-  CHAT_FILE_ATTACHMENT_MIME_TYPES,
   MAX_CHAT_ATTACHMENT_COUNT,
+  MAX_CHAT_ATTACHMENT_NAME_BYTES,
   MAX_CHAT_ATTACHMENT_FILE_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   MAX_CHAT_VIDEO_ATTACHMENT_FILE_BYTES,
   chatAttachmentMimeType,
+  isValidAttachmentMimeType,
   isVideoAttachmentMimeType,
 } from '../../../common/attachments.js';
 
@@ -13,16 +14,6 @@ export const MAX_ATTACHMENT_TOTAL_BYTES = MAX_CHAT_ATTACHMENT_TOTAL_BYTES;
 export const MAX_ATTACHMENT_FILE_BYTES = MAX_CHAT_ATTACHMENT_FILE_BYTES;
 export const MAX_VIDEO_ATTACHMENT_FILE_BYTES = MAX_CHAT_VIDEO_ATTACHMENT_FILE_BYTES;
 export const MAX_ATTACHMENT_COUNT = MAX_CHAT_ATTACHMENT_COUNT;
-
-export const ALLOWED_ATTACHMENT_MIMES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-  'image/svg+xml',
-  ...CHAT_FILE_ATTACHMENT_MIME_TYPES,
-]);
-
 
 const DATA_URL_RE = /^data:([^;,]*);base64,([A-Za-z0-9+/]*={0,2})$/;
 const BASE64_CHARS_RE = /^[A-Za-z0-9+/]*={0,2}$/;
@@ -60,6 +51,9 @@ export function validateCommandAttachments(value: unknown): AgentCommandImage[] 
     const name = typeof attachment.name === 'string' && attachment.name.trim()
       ? attachment.name
       : `attachment-${index + 1}`;
+    if (Buffer.byteLength(name) > MAX_CHAT_ATTACHMENT_NAME_BYTES) {
+      throw new AttachmentValidationError('Attachment name is too long.');
+    }
     const rawDataMimeType = match[1].trim().toLowerCase();
     const rawDeclaredMimeType = typeof attachment.mimeType === 'string'
       ? attachment.mimeType.trim().toLowerCase()
@@ -70,17 +64,20 @@ export function validateCommandAttachments(value: unknown): AgentCommandImage[] 
     const declaredMimeType = rawDeclaredMimeType
       ? chatAttachmentMimeType({ name, type: rawDeclaredMimeType })
       : '';
-    const mimeType = dataMimeType || declaredMimeType;
+    const mimeType = dataMimeType || declaredMimeType || chatAttachmentMimeType({ name });
     if (dataMimeType && declaredMimeType && dataMimeType !== declaredMimeType) {
       throw new AttachmentValidationError('Attachment MIME type does not match its data URL.');
     }
-    assertAllowedAttachmentMime(mimeType);
+    assertValidAttachmentMime(mimeType);
 
     const base64 = match[2];
     if (!isValidBase64Payload(base64)) {
       throw new AttachmentValidationError('Invalid attachment payload.');
     }
     const size = Buffer.byteLength(base64, 'base64');
+    if (size === 0) {
+      throw new AttachmentValidationError(`Attachment ${name} is empty.`);
+    }
     assertAttachmentSize(size, mimeType);
     totalBytes += size;
     if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
@@ -95,11 +92,11 @@ export function validateCommandAttachments(value: unknown): AgentCommandImage[] 
   });
 }
 
-function assertAllowedAttachmentMime(mimeType: string): void {
-  if (!ALLOWED_ATTACHMENT_MIMES.has(mimeType)) {
-    throw new AttachmentValidationError(
-      'Invalid file type. Only images, videos, Markdown, text, and PDF files are allowed.',
-    );
+// Any well-formed type is admitted here; whether the chat's agent accepts it
+// is checked separately against its attachment capability.
+function assertValidAttachmentMime(mimeType: string): void {
+  if (!isValidAttachmentMimeType(mimeType)) {
+    throw new AttachmentValidationError('Invalid attachment MIME type.');
   }
 }
 

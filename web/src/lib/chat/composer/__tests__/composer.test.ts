@@ -67,7 +67,10 @@ describe('ComposerState', () => {
 		state.addImages([file1]);
 		expect(state.images).toHaveLength(1);
 
-		state.addImages([file2, file1dup, file1, unsupported]);
+		state.addImages([file2, file1dup, file1, unsupported], {
+			allowImages: true,
+			fileMimeTypes: ['text/markdown'],
+		});
 		expect(state.images).toHaveLength(3);
 		expect(state.images.map((f) => f.name)).toEqual(['a.png', 'notes.md', 'a.png']);
 	});

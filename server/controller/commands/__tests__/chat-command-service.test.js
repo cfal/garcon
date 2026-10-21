@@ -554,8 +554,8 @@ function makeService(overrides = {}) {
     hasAgent: mock(() => true),
     assertExecutorReady: mock(() => undefined),
     supportsImages: mock(() => true),
-    supportsFileAttachmentMimeType: mock(
-      (_agentId, mimeType) => mimeType === 'video/mp4',
+    fileAttachmentAdmission: mock(
+      (_agentId, { mimeType }) => ({ kind: mimeType === 'video/mp4' ? 'accepted' : 'unsupported-type' }),
     ),
     modelSupportsImages: mock(() => true),
     startSession: mock(() => Promise.resolve(undefined)),
@@ -1652,7 +1652,7 @@ describe('ChatCommandService', () => {
 
   it('rejects videos when the selected agent does not advertise their MIME type', async () => {
     const unsupported = makeService({
-      agents: { supportsFileAttachmentMimeType: mock(() => false) },
+      agents: { fileAttachmentAdmission: mock(() => ({ kind: 'unsupported-type' })) },
     });
     await expect(
       unsupported.service.submitStart({
@@ -1726,7 +1726,7 @@ describe('ChatCommandService', () => {
 
   it('rejects unsupported fork-run attachments before creating the fork', async () => {
     const unsupported = makeService({
-      agents: { supportsFileAttachmentMimeType: mock(() => false) },
+      agents: { fileAttachmentAdmission: mock(() => ({ kind: 'unsupported-type' })) },
     });
 
     await expect(unsupported.service.submitForkRun({

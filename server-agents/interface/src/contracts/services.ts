@@ -12,6 +12,7 @@ import type {
   AgentSettingsEnvelope,
 } from '@garcon/common/agent-integration';
 import type { AgentModelOption } from '@garcon/common/agents';
+import type { FileAttachmentMimeTypes } from '@garcon/common/attachments';
 import type { InputFormatByModel } from '@garcon/common/input-format';
 import type { ThinkingMode } from '@garcon/common/chat-modes';
 import type { JsonObject } from '@garcon/common/json';
@@ -51,7 +52,12 @@ export interface AgentCatalog {
 }
 
 export interface AgentAttachments {
-  readonly fileMimeTypes: readonly string[];
+  // Non-image file types the agent accepts, or 'any' when it reads
+  // attachments from disk with its own tools.
+  readonly fileMimeTypes: FileAttachmentMimeTypes;
+  // Largest text attachment the agent receives whole, or null when it reads
+  // text attachments in full however large they are.
+  readonly inlineTextMaxBytes: number | null;
 }
 
 export interface AgentSettings {

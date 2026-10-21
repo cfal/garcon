@@ -62,7 +62,7 @@ import {
 } from './user-input.js';
 import { handleClaudeInterruptReceipt } from './interrupt-receipt.js';
 import { ClaudeTurnPublisher } from './turn-publisher.js';
-import { materializeClaudeVideoAttachments } from './video-attachments.js';
+import { materializeClaudeDiskAttachments } from './disk-attachments.js';
 import {
   CLAUDE_STEER_IDLE_FENCE_TIMEOUT_MS,
   CLAUDE_STEER_WRITE_TIMEOUT_MS,
@@ -1096,15 +1096,15 @@ class ClaudeCliRuntime {
     // Another start may supersede this one while the version probe is pending.
     if (this.#runningSessions.get(agentSessionId) !== session) return agentSessionId;
 
-    let cleanupVideoAttachments = async () => {};
+    let cleanupDiskAttachments = async () => {};
     try {
       assertClaudeExecutionOpen(requestAdmission);
       await this.#spawnCLI(session, allOpts, false, cliVersion);
       assertClaudeExecutionOpen(requestAdmission);
-      const prepared = await materializeClaudeVideoAttachments(command, images);
-      cleanupVideoAttachments = prepared.cleanup;
+      const prepared = await materializeClaudeDiskAttachments(command, images);
+      cleanupDiskAttachments = prepared.cleanup;
       if (executionAdmission) await executionAdmission.markStarted();
-      await this.#sendUserMessage(session, activeTurn, prepared.command, images);
+      await this.#sendUserMessage(session, activeTurn, prepared.command, prepared.inlineAttachments);
       this.#completeSessionInitialization(session);
       await this.#waitForTurnComplete(activeTurn);
     } catch (error) {
@@ -1115,7 +1115,7 @@ class ClaudeCliRuntime {
       throw error;
     } finally {
       this.#completeSessionInitialization(session);
-      await cleanupVideoAttachments();
+      await cleanupDiskAttachments();
     }
     return agentSessionId;
   }
@@ -1204,7 +1204,7 @@ class ClaudeCliRuntime {
     const resumeOwner = Symbol();
     this.#resumeOwners.set(session, resumeOwner);
     let ownedTurn: ClaudeActiveTurn | null = null;
-    let cleanupVideoAttachments = async () => {};
+    let cleanupDiskAttachments = async () => {};
     try {
       if (chatId !== session.chatId) throw new Error('Chat ID mismatch');
 
@@ -1264,10 +1264,10 @@ class ClaudeCliRuntime {
       assertClaudeExecutionOpen(requestAdmission);
       const activeTurn = this.#beginTurn(session, operation);
       ownedTurn = activeTurn;
-      const prepared = await materializeClaudeVideoAttachments(command, images);
-      cleanupVideoAttachments = prepared.cleanup;
+      const prepared = await materializeClaudeDiskAttachments(command, images);
+      cleanupDiskAttachments = prepared.cleanup;
       if (executionAdmission) await executionAdmission.markStarted();
-      await this.#sendUserMessage(session, activeTurn, prepared.command, images);
+      await this.#sendUserMessage(session, activeTurn, prepared.command, prepared.inlineAttachments);
       await this.#waitForTurnComplete(activeTurn);
     } catch (error) {
       if (ownedTurn && session.activeTurn === ownedTurn) {
@@ -1276,7 +1276,7 @@ class ClaudeCliRuntime {
       throw error;
     } finally {
       if (this.#resumeOwners.get(session) === resumeOwner) this.#resumeOwners.delete(session);
-      await cleanupVideoAttachments();
+      await cleanupDiskAttachments();
     }
   }
 

@@ -35,7 +35,23 @@ describe('image attachment state', () => {
 		expect(isSupportedChatAttachment(file('notes.md'))).toBe(true);
 		expect(isSupportedChatAttachment(file('guide.markdown'))).toBe(true);
 		expect(isSupportedChatAttachment(file('report.pdf'))).toBe(true);
-		expect(isSupportedChatAttachment(file('archive.zip', 'application/zip'))).toBe(false);
+	});
+
+	it('accepts every file type for agents that read attachments from disk', () => {
+		const support = { allowImages: true, fileMimeTypes: 'any' } as const;
+		expect(isSupportedChatAttachment(file('budget.xlsx'), support)).toBe(true);
+		expect(isSupportedChatAttachment(file('archive.zip', 'application/zip'), support)).toBe(true);
+		expect(isSupportedChatAttachment(file('photo.heic', 'image/heic'), support)).toBe(true);
+		expect(isImageAttachment(file('photo.heic', 'image/heic'))).toBe(false);
+		expect(chatAttachmentAccept(support)).toBe('');
+	});
+
+	it('limits listed-type agents to their advertised files', () => {
+		const support = { allowImages: true, fileMimeTypes: ['text/csv', 'text/plain'] };
+		expect(isSupportedChatAttachment(file('table.csv', 'application/vnd.ms-excel'), support)).toBe(true);
+		expect(isSupportedChatAttachment(file('budget.xlsx'), support)).toBe(false);
+		expect(isSupportedChatAttachment(file('archive.zip', 'application/zip'), support)).toBe(false);
+		expect(chatAttachmentAccept(support)).toBe('image/*,.svg,text/csv,.csv,text/plain,.txt');
 	});
 
 	it('accepts only video formats advertised by the selected agent', () => {
@@ -54,8 +70,9 @@ describe('image attachment state', () => {
 		const state = new ImageAttachmentState();
 		const first = file('same.png', 'image/png', 'content');
 		const second = file('same.png', 'image/png', 'changed');
-		state.add([first, second, first, file('archive.zip', 'application/zip')]);
-		state.add([first, file('notes.md')]);
+		const support = { allowImages: true, fileMimeTypes: ['text/markdown'] };
+		state.add([first, second, first, file('archive.zip', 'application/zip')], support);
+		state.add([first, file('notes.md')], support);
 
 		expect(state.images).toEqual([first, second, expect.objectContaining({ name: 'notes.md' })]);
 	});

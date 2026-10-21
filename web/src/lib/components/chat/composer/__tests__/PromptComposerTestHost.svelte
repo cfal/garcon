@@ -62,7 +62,10 @@
 	import type { RecallPrompt } from '$lib/chat/composer/prompt-recall';
 	import type { InputFormatByModel } from '$shared/input-format';
 	import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
-	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '$shared/attachments';
+	import {
+		ANY_FILE_ATTACHMENT_MIME_TYPE,
+		type FileAttachmentMimeTypes,
+	} from '$shared/attachments';
 
 	interface Props {
 		recallPrompts?: readonly RecallPrompt[];
@@ -77,7 +80,7 @@
 		executionPolicy?: 'conversation' | 'literal';
 		inputFormatByModel?: InputFormatByModel;
 		model?: string;
-		fileAttachmentMimeTypes?: readonly string[];
+		fileAttachmentMimeTypes?: FileAttachmentMimeTypes;
 		selectedIsProcessing?: boolean;
 		isVisible?: boolean;
 		isPresented?: boolean;
@@ -120,7 +123,7 @@
 		executionPolicy = 'conversation',
 		inputFormatByModel = {},
 		model,
-		fileAttachmentMimeTypes = CHAT_FILE_ATTACHMENT_MIME_TYPES,
+		fileAttachmentMimeTypes = ANY_FILE_ATTACHMENT_MIME_TYPE,
 		selectedIsProcessing = false,
 		isVisible = true,
 		isPresented,

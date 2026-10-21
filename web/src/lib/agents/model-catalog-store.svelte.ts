@@ -19,6 +19,10 @@ import {
 	type AgentSettingsEnvelope,
 } from '$shared/agent-integration';
 import { createEmptyAgentSettings } from '$shared/agent-settings';
+import {
+	ANY_FILE_ATTACHMENT_MIME_TYPE,
+	type FileAttachmentMimeTypes,
+} from '$shared/attachments';
 import { hasAgentExecutionMetadata, isAgentId, type AgentCatalogEntry } from '$shared/agents';
 import {
 	isPermissionMode,
@@ -58,7 +62,7 @@ export interface AgentMetadata extends Pick<AgentCatalogEntry, 'executionPolicy'
 	supportsUpdateProjectPath: boolean;
 	supportsSteering: boolean;
 	supportsImages: boolean;
-	fileAttachmentMimeTypes: string[];
+	fileAttachmentMimeTypes: FileAttachmentMimeTypes;
 	acceptsApiProviderEndpoints: boolean;
 	supportedProtocols: ApiProtocol[];
 	authLoginSupported: boolean;
@@ -110,7 +114,8 @@ function normalizeProtocols(value: unknown): ApiProtocol[] {
 	);
 }
 
-function normalizeMimeTypes(value: unknown): string[] {
+function normalizeFileAttachmentMimeTypes(value: unknown): FileAttachmentMimeTypes {
+	if (value === ANY_FILE_ATTACHMENT_MIME_TYPE) return ANY_FILE_ATTACHMENT_MIME_TYPE;
 	if (!Array.isArray(value)) return [];
 	return value.filter((mimeType): mimeType is string => typeof mimeType === 'string');
 }
@@ -350,7 +355,7 @@ function parseCatalogResponse(data: unknown): {
 			supportsUpdateProjectPath: Boolean(entry.supportsUpdateProjectPath),
 			supportsSteering: Boolean(entry.supportsSteering),
 			supportsImages: Boolean(entry.supportsImages),
-			fileAttachmentMimeTypes: normalizeMimeTypes(entry.fileAttachmentMimeTypes),
+			fileAttachmentMimeTypes: normalizeFileAttachmentMimeTypes(entry.fileAttachmentMimeTypes),
 			acceptsApiProviderEndpoints: Boolean(entry.acceptsApiProviderEndpoints),
 			supportedProtocols: normalizeProtocols(entry.supportedProtocols),
 			authLoginSupported: Boolean(entry.authLoginSupported),
@@ -649,7 +654,7 @@ export class ModelCatalogStore {
 		return this.agentMetadata[agentId]?.supportsImages ?? false;
 	}
 
-	fileAttachmentMimeTypes(agentId: SessionAgentId): readonly string[] {
+	fileAttachmentMimeTypes(agentId: SessionAgentId): FileAttachmentMimeTypes {
 		if (!isAgentId(agentId)) return [];
 		return this.agentMetadata[agentId]?.fileAttachmentMimeTypes ?? [];
 	}
