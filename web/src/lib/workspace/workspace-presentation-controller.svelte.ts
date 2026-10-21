@@ -457,7 +457,9 @@ export class WorkspacePresentationController {
 			!current ||
 			responsiveGeneration !== this.#responsiveGeneration ||
 			focusGeneration !== this.#focusIntentGeneration
-		) return;
+		) {
+			return;
+		}
 		this.#presentSurfaceAfterResponsiveHandoff(activeId);
 	}
 
@@ -497,7 +499,9 @@ export class WorkspacePresentationController {
 			!current ||
 			responsiveGeneration !== this.#responsiveGeneration ||
 			focusGeneration !== this.#focusIntentGeneration
-		) return;
+		) {
+			return;
+		}
 		this.#focusPresentedSurfaceUnlessLayered(this.lastFocusedSurfaceId);
 	}
 
