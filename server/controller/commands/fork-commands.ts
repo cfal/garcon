@@ -141,6 +141,7 @@ export class ForkCommands {
       thinkingMode: input.options.thinkingMode,
     });
     const source = forkContext.sourceSession;
+    this.deps.agents.assertAgentAvailable(source.agentId, source.executorId);
     this.support.assertAttachmentsSupported({
       agentId: source.agentId,
       executorId: source.executorId,

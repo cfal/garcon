@@ -64,7 +64,7 @@ async function fixture(chatExecutors: readonly string[] = IDS) {
     hasPendingOwnershipTransfer: () => false,
     async resolveFileMentions(prompt, _projectPath, executorId) { mentions.push(effectiveExecutorId(executorId)); return prompt; },
   });
-  return { root, chats, providers, directory, ledger, router, mentions, ready };
+  return { root, chats, providers, directory, ledger, router, mentions, ready, registries };
 }
 
 test('same-agent execution, expansion, Stop, and one-shot queries resolve the selected executor', async () => {
@@ -110,6 +110,29 @@ test('unknown explicit executor does not borrow a Local integration', async () =
   const f = await fixture();
   expect(f.directory.get('test', crypto.randomUUID())).toBeNull();
   expect(() => f.directory.require('test', crypto.randomUUID())).toThrow('unavailable');
+});
+
+test('an offline known integration without native forking needs only retained controller history', async () => {
+  const f = await fixture();
+  f.ready.delete(FIRST);
+  expect(await f.router.forkAgentSession({ sourceSession: f.chats.getChat(CHAT_IDS[1]!)!,
+    sourceChatId: CHAT_IDS[1]!, targetChatId: '1783725900000403', signal: new AbortController().signal,
+  })).toBeNull();
+  f.registries.set(FIRST, new IntegrationRegistry({ instances: [{ ...f.providers[1]!.integration,
+    forking: { fork: mock(async () => ({ kind: 'unmaterialized' })), discard: mock(async () => undefined) },
+  }] }));
+  await expect(f.router.forkAgentSession({ sourceSession: f.chats.getChat(CHAT_IDS[1]!)!,
+    sourceChatId: CHAT_IDS[1]!, targetChatId: '1783725900000403', signal: new AbortController().signal,
+  })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
+});
+
+test('an offline unknown integration cannot fall back to retained controller history', async () => {
+  const f = await fixture();
+  f.ready.delete(FIRST);
+  f.registries.delete(FIRST);
+  await expect(f.router.forkAgentSession({ sourceSession: f.chats.getChat(CHAT_IDS[1]!)!,
+    sourceChatId: CHAT_IDS[1]!, targetChatId: '1783725900000403', signal: new AbortController().signal,
+  })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
 });
 
 test('executor loss closes every producer even when one chat cannot commit its terminal', async () => {

@@ -553,6 +553,7 @@ function makeService(overrides = {}) {
     currentTranscriptViewId: mock(() => Promise.resolve('view-1')),
     hasAgent: mock(() => true),
     assertExecutorReady: mock(() => undefined),
+    assertAgentAvailable: mock(() => undefined),
     supportsImages: mock(() => true),
     fileAttachmentAdmission: mock(
       (_agentId, { mimeType }) => ({ kind: mimeType === 'video/mp4' ? 'accepted' : 'unsupported-type' }),
@@ -1740,6 +1741,31 @@ describe('ChatCommandService', () => {
 
     expect(unsupported.createForkedChat).not.toHaveBeenCalled();
     expect(unsupported.queue.runReservedTurn).not.toHaveBeenCalled();
+  });
+
+  it('rejects offline text-only fork-runs before creating or accepting the fork', async () => {
+    const executorId = '22222222-2222-4222-8222-222222222222';
+    const { service, createForkedChat, ledger, queue, agents } = makeService({
+      session: { executorId },
+      agents: {
+        assertAgentAvailable: mock(() => {
+          throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+        }),
+      },
+    });
+
+    await expect(service.submitForkRun({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      command: 'continue in fork',
+      clientRequestId: 'req-fork-offline',
+      clientMessageId: 'msg-fork-offline',
+    })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503 });
+
+    expect(agents.assertAgentAvailable).toHaveBeenCalledWith('claude', executorId);
+    expect(createForkedChat).not.toHaveBeenCalled();
+    expect(queue.runReservedTurn).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(ledger, 'fork-run', 'req-fork-offline', TARGET_CHAT_ID)).toBeNull();
   });
 
   it('rejects an unsupported fork-run thinking override before persistence', async () => {
