@@ -103,6 +103,144 @@ describe('Markdown image recovery', () => {
 		}
 	});
 
+	it.each([
+		'![Capture](capture.png)',
+		'[![Capture](capture.png)](guide.md)',
+		'[![Capture](capture.png)](C:/workspace/guide.md)',
+	])('retains parked retry focus when the window loses focus for %s', async (source) => {
+		vi.mocked(filesApi.readContent).mockRejectedValueOnce(new Error('Not found'));
+		const { container } = render(Markdown, { source, resolveImageFile });
+		const retry = await screen.findByRole('button', { name: 'Retry image Capture' });
+		const pending = Promise.withResolvers<typeof imageResult>();
+		vi.mocked(filesApi.readContent).mockReturnValueOnce(pending.promise);
+		retry.focus();
+		await fireEvent.click(retry);
+		const focusTarget = container.querySelector('a') ?? container.querySelector('.markdown-image')!;
+		expect(document.activeElement).toBe(focusTarget);
+		await fireEvent.blur(focusTarget);
+		expect(document.activeElement).toBe(focusTarget);
+		pending.reject(new Error('Still missing'));
+		const nextRetry = await screen.findByRole('button', { name: 'Retry image Capture' });
+		expect(document.activeElement).toBe(nextRetry);
+		expect(focusTarget.hasAttribute('tabindex')).toBe(false);
+	});
+
+	it.each(['capture.png', 'https://example.com/capture.png'])(
+		'keeps later failures of a recovered image at %s passive',
+		async (href) => {
+			vi.mocked(filesApi.readContent).mockRejectedValueOnce(new Error('Not found'));
+			render(Markdown, { source: `[![Capture](${href})](guide.md)`, resolveImageFile });
+			if (href.startsWith('https:')) await fireEvent.error(screen.getByRole('img'));
+			const retry = await screen.findByRole('button', { name: 'Retry image Capture' });
+			retry.focus();
+			await fireEvent.click(retry);
+			const image = await screen.findByAltText('Capture');
+			await fireEvent.load(image);
+			const link = screen.getByRole('link');
+			expect(document.activeElement).toBe(link);
+			await fireEvent.error(image);
+			await screen.findByRole('button', { name: 'Retry image Capture' });
+			expect(screen.queryByRole('alert')).toBeNull();
+			expect(document.activeElement).toBe(link);
+			expect(filesApi.readContent).toHaveBeenCalledTimes(href.startsWith('https:') ? 0 : 2);
+		},
+	);
+
+	it.each(['guide.md', 'C:/workspace/guide.md'])(
+		'does not restore an older retry after another image takes focus on %s',
+		async (destination) => {
+			vi.mocked(filesApi.readContent).mockRejectedValue(new Error('Not found'));
+			const { container } = render(Markdown, {
+				source: `[![First](first.png) ![Second](second.png)](${destination})`,
+				resolveImageFile,
+			});
+			const firstRetry = await screen.findByRole('button', { name: 'Retry image First' });
+			const secondRetry = await screen.findByRole('button', { name: 'Retry image Second' });
+			const first = Promise.withResolvers<typeof imageResult>();
+			const second = Promise.withResolvers<typeof imageResult>();
+			vi.mocked(filesApi.readContent)
+				.mockReturnValueOnce(first.promise)
+				.mockReturnValueOnce(second.promise);
+			firstRetry.focus();
+			await fireEvent.click(firstRetry);
+			secondRetry.focus();
+			await fireEvent.click(secondRetry);
+			const link = container.querySelector('a');
+			expect(document.activeElement).toBe(link);
+			first.reject(new Error('First still missing'));
+			await screen.findByRole('button', { name: 'Retry image First' });
+			expect(document.activeElement).toBe(link);
+			second.reject(new Error('Second still missing'));
+			const returnedRetry = await screen.findByRole('button', { name: 'Retry image Second' });
+			expect(document.activeElement).toBe(returnedRetry);
+		},
+	);
+
+	it('keeps linked retry controls in document order across out-of-order failures and retries', async () => {
+		const first = Promise.withResolvers<typeof imageResult>();
+		const second = Promise.withResolvers<typeof imageResult>();
+		vi.mocked(filesApi.readContent).mockImplementation(({ filePath }) =>
+			filePath.endsWith('first.png') ? first.promise : second.promise,
+		);
+		render(Markdown, {
+			source: '[![First](first.png) ![Second](second.png)](guide.md)',
+			resolveImageFile,
+		});
+		second.reject(new Error('Not found'));
+		await screen.findByRole('button', { name: 'Retry image Second' });
+		first.reject(new Error('Not found'));
+		const retry = await screen.findByRole('button', { name: 'Retry image First' });
+		const labels = () =>
+			screen.getAllByRole('button').map((button) => button.getAttribute('aria-label'));
+		expect(labels()).toEqual(['Retry image First', 'Retry image Second']);
+		const pending = Promise.withResolvers<typeof imageResult>();
+		vi.mocked(filesApi.readContent).mockReturnValueOnce(pending.promise);
+		await fireEvent.click(retry);
+		expect(labels()).toEqual(['Retry image Second']);
+		pending.reject(new Error('Still missing'));
+		await screen.findByRole('button', { name: 'Retry image First' });
+		expect(labels()).toEqual(['Retry image First', 'Retry image Second']);
+	});
+
+	it('orders new linked retry controls before retained images when source text changes', async () => {
+		vi.mocked(filesApi.readContent).mockRejectedValue(new Error('Not found'));
+		const placeholder = 'Placeholder content ';
+		const firstImage = '![First](first.png) ';
+		expect(placeholder.length).toBe(firstImage.length);
+		const view = render(Markdown, {
+			source: `[${placeholder}![Second](second.png)](guide.md)`,
+			resolveImageFile,
+		});
+		const secondRetry = await screen.findByRole('button', { name: 'Retry image Second' });
+		await view.rerender({ source: `[${firstImage}![Second](second.png)](guide.md)` });
+		await screen.findByRole('button', { name: 'Retry image First' });
+		expect(screen.getByRole('button', { name: 'Retry image Second' })).toBe(secondRetry);
+		expect(
+			screen.getAllByRole('button').map((button) => button.getAttribute('aria-label')),
+		).toEqual(['Retry image First', 'Retry image Second']);
+		expect(filesApi.readContent).toHaveBeenCalledTimes(2);
+	});
+
+	it('removes its temporary focus stop when a pending retry unmounts', async () => {
+		vi.mocked(filesApi.readContent).mockRejectedValueOnce(new Error('Not found'));
+		const view = render(Markdown, {
+			source: '[![Capture](capture.png)](C:/workspace/guide.md)',
+			resolveImageFile,
+		});
+		const retry = await screen.findByRole('button', { name: 'Retry image Capture' });
+		const pending = Promise.withResolvers<typeof imageResult>();
+		vi.mocked(filesApi.readContent).mockReturnValueOnce(pending.promise);
+		retry.focus();
+		await fireEvent.click(retry);
+		const link = view.container.querySelector('a')!;
+		expect(link.getAttribute('tabindex')).toBe('-1');
+		view.unmount();
+		expect(link.hasAttribute('tabindex')).toBe(false);
+		pending.resolve(imageResult);
+		await tick();
+		expect(URL.createObjectURL).not.toHaveBeenCalled();
+	});
+
 	it.each(['capture.png', 'https://example.com/capture.png'])(
 		'does not add a focus stop to a never-failed image at %s',
 		async (href) => {
@@ -211,17 +349,21 @@ describe('Markdown image recovery', () => {
 			vi.mocked(filesApi.readContent).mockReturnValueOnce(pending.promise);
 			await fireEvent.click(retry);
 			const signal = vi.mocked(filesApi.readContent).mock.calls[1][1]?.signal;
-			if (change === 'unmount') view.unmount();
-			else if (change === 'source') await view.rerender({ source: '![Capture](other.png)' });
-			else
+			if (change === 'unmount') {
+				view.unmount();
+			} else if (change === 'source') {
+				await view.rerender({ source: '![Capture](other.png)' });
+			} else {
 				await view.rerender({
 					resolveImageFile: (href) => ({ ...resolveImageFile(href)!, [change]: 'replacement' }),
 				});
+			}
 			expect(signal?.aborted).toBe(true);
 			pending.resolve(imageResult);
 			await tick();
-			if (change === 'unmount') expect(URL.createObjectURL).not.toHaveBeenCalled();
-			else {
+			if (change === 'unmount') {
+				expect(URL.createObjectURL).not.toHaveBeenCalled();
+			} else {
 				await screen.findByRole('img');
 				expect(URL.createObjectURL).toHaveBeenCalledOnce();
 			}

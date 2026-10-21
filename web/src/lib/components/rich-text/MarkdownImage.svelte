@@ -32,8 +32,9 @@
 
 	const ownsCache = !hasFileImages();
 	const cache = ownsCache ? new FileImageCache({ budgetBytes: 0 }) : getFileImages();
-	const linkActions = hasMarkdownLinkActions() ? getMarkdownLinkActions() : undefined;
+	const registerLinkAction = hasMarkdownLinkActions() ? getMarkdownLinkActions() : undefined;
 	onDestroy(() => {
+		clearRetryFocus?.();
 		if (ownsCache) cache.destroy();
 	});
 
@@ -55,13 +56,15 @@
 	});
 	let requestedRetry = $state.raw<typeof attempt>();
 	let loaded = $state.raw<typeof attempt>();
+	let focusAttempt = $state.raw<typeof attempt>();
+	let clearRetryFocus: (() => void) | undefined;
 	let element = $state<HTMLSpanElement>();
 	let retryButton = $state<HTMLButtonElement | null>(null);
 	const retryFocusTarget = $derived(element?.closest('a') ?? element);
 	// Authored image links retain their destination instead of nesting another control.
 	const canOpen = $derived(Boolean(file && onOpen && element && !element.closest('a, button')));
-	const openLabel = $derived(m.image_open({ name: text || title || filePath || '' }));
 	const imageName = $derived(text || title || filePath || '');
+	const openLabel = $derived(m.image_open({ name: imageName }));
 	const retryLabel = $derived(m.image_retry({ name: imageName }).trim());
 	const canRetry = $derived(
 		Boolean(externalSource || (file && executorContextKey && cache.available)),
@@ -78,6 +81,7 @@
 			(!externalSource &&
 				(!executorId || !projectPath || !filePath || !cache.available || lease?.failed)),
 	);
+	const retryFailed = $derived(unavailable && requestedRetry === attempt && loaded !== attempt);
 
 	$effect(() => {
 		const current = attempt;
@@ -128,33 +132,48 @@
 	});
 
 	$effect(() => {
-		if (unavailable && canRetry) return linkActions?.(retryControl);
+		if (element) return registerLinkAction?.(element, retryControl);
 	});
 
 	$effect(() => {
 		if (
-			unavailable &&
-			requestedRetry === attempt &&
+			retryFailed &&
+			focusAttempt === attempt &&
 			retryButton &&
 			document.activeElement === retryFocusTarget
 		) {
 			retryButton.focus({ preventScroll: true });
+			clearRetryFocus?.();
 		}
 	});
 
 	function retry(): void {
 		if (!unavailable || !canRetry) return;
 		const target = retryFocusTarget;
-		if (target && document.activeElement === retryButton) {
-			// Only explicit retries need a focus stop; ordinary image clicks must not expand messages.
-			if (!target.matches('a[href], [tabindex]')) {
-				target.setAttribute('tabindex', '-1');
-				target.addEventListener('blur', () => target.removeAttribute('tabindex'), { once: true });
-			}
-			target.focus({ preventScroll: true });
-		}
+		const preserveFocus = document.activeElement === retryButton;
+		clearRetryFocus?.();
 		retryVersion += 1;
 		requestedRetry = attempt;
+		if (!target || !preserveFocus) return;
+
+		const focusTarget = target;
+		const current = attempt;
+		// Only explicit retries need a focus stop; ordinary image clicks must not expand messages.
+		const needsTabIndex = !focusTarget.matches('a[href], [tabindex]');
+		if (needsTabIndex) focusTarget.setAttribute('tabindex', '-1');
+		function releaseFocus(): void {
+			focusTarget.removeEventListener('blur', onBlur);
+			if (needsTabIndex) focusTarget.removeAttribute('tabindex');
+			if (focusAttempt === current) focusAttempt = undefined;
+			if (clearRetryFocus === releaseFocus) clearRetryFocus = undefined;
+		}
+		function onBlur(): void {
+			if (document.activeElement !== focusTarget) releaseFocus();
+		}
+		focusAttempt = current;
+		clearRetryFocus = releaseFocus;
+		focusTarget.addEventListener('blur', onBlur);
+		focusTarget.focus({ preventScroll: true });
 	}
 
 	function failImage(current: typeof attempt, url: string): void {
@@ -196,26 +215,28 @@
 {/snippet}
 
 {#snippet retryControl()}
-	<Button
-		bind:ref={retryButton}
-		variant="ghost"
-		size="icon-sm"
-		class={linkActions ? 'ml-1 align-middle' : ''}
-		aria-label={retryLabel}
-		title={retryLabel}
-		onpointerdowncapture={stopParentContextTriggerGesture}
-		oncontextmenu={stopParentContextTriggerGesture}
-		onclick={retry}
-	>
-		<RefreshCw class="size-3.5" aria-hidden="true" />
-	</Button>
+	{#if unavailable && canRetry}
+		<Button
+			bind:ref={retryButton}
+			variant="ghost"
+			size="icon-sm"
+			class={registerLinkAction ? 'ml-1 align-middle' : ''}
+			aria-label={retryLabel}
+			title={retryLabel}
+			onpointerdowncapture={stopParentContextTriggerGesture}
+			oncontextmenu={stopParentContextTriggerGesture}
+			onclick={retry}
+		>
+			<RefreshCw class="size-3.5" aria-hidden="true" />
+		</Button>
+	{/if}
 {/snippet}
 
 <span bind:this={element} class="markdown-image" {title}>
 	{#if unavailable}
 		<span
 			class="markdown-image-error not-prose inline-flex max-w-full items-center gap-2 rounded-md border border-status-error-border bg-status-error px-3 py-2 text-sm text-status-error-foreground"
-			role={requestedRetry === attempt ? 'alert' : undefined}
+			role={retryFailed ? 'alert' : undefined}
 		>
 			<CircleAlert class="size-3.5 shrink-0" aria-hidden="true" />
 			<span class="min-w-0 break-words">
@@ -224,7 +245,7 @@
 					<span class="block text-xs [overflow-wrap:anywhere]">{imageName}</span>
 				{/if}
 			</span>
-			{#if canRetry && !linkActions}
+			{#if !registerLinkAction}
 				{@render retryControl()}
 			{/if}
 		</span>
