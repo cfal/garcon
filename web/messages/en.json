@@ -472,6 +472,7 @@
 	"chat_notice_project_permission_denied": "Permission denied while accessing the project folder: {projectPath}",
 	"chat_notice_cannot_compact_draft": "Cannot compact a draft chat. Send a message first.",
 	"chat_notice_cannot_fork_draft": "Cannot fork a draft chat. Select an existing chat first.",
+	"chat_notice_fork_attachments": "Fork without a message cannot include attachments. Remove the attachments and try again.",
 	"chat_notice_cannot_fork_processing": "Cannot fork while chat is processing",
 	"chat_handoff_fork_title": "Fork without native history?",
 	"chat_clear_title": "Clear chat history?",

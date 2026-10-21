@@ -21,8 +21,8 @@ configured title-generation model. Explicit title generation and prose refinemen
 also remain available.
 
 Literal-input rules still apply to both formats. `/md`, `/markdown`, shell syntax,
-and Garcon control envelopes are note text; only the app's standalone `/clear`
-action is intercepted. Attachments and automatic preambles remain disabled.
+and Garcon control envelopes are note text. The app commands listed below are
+intercepted in both Notes formats. Attachments and automatic preambles remain disabled.
 Native Reload restores saved notes and their original formats.
 
 Changing modes requires an idle chat with no queued user or control input.
@@ -46,7 +46,7 @@ differently or block.
 
 Commands must contain well-formed Unicode and no NUL bytes. They are literal,
 including whitespace, absolute executable paths, and
-`@file` text. Automatic slash/snippet interpretation, preambles, attachments,
+`@file` text. Provider slash-command and automatic snippet interpretation, preambles, attachments,
 file expansion, and automatic resend are disabled. Explicit snippet insertion,
 prose refinement, and title generation remain available. These are authoring
 actions, not shell-aware validation; inspect their results before submitting.
@@ -57,9 +57,39 @@ rewrite the command or run the Shell integration as an AI model.
 Schedules substitute `{{chat_id}}`, `{{current_date}}` (UTC), and
 `{{current_date_local}}` (controller-local timezone) using the usual template
 escaping rules. Both dates use `YYYY-MM-DD` at dispatch, not the executor's clock.
-Agent-created tasks and incoming automation are allowed without additional
-Shell-specific checks. The user is responsible for supplying valid commands.
+Existing-chat schedules capture the mode and owner when saved; changing either
+causes the scheduled run to fail rather than reinterpret a note as a command.
+The user is responsible for supplying valid commands.
 Printed output remains inert even when it contains Garcon control envelopes.
+
+## App Commands
+
+The composer recognizes `/rename TITLE`, `/move top|bottom`, `/tag add|rm TAGS`,
+`/in DURATION TEXT`, bare `/fork`, and confirmed `/clear`. These actions run on
+the controller, including when the selected executor is unavailable and its
+capabilities are still known. Fork copies
+retained history without submitting new input; `/fork TEXT` remains literal.
+
+Names must be lowercase at column zero and followed by ASCII whitespace or the
+end of input. `/fork` and `/clear` accept only trailing whitespace. Leading
+whitespace escapes app interpretation. Other forms, including `/compact`,
+`/handoff`, `/steer`, `/md`, and `/markdown`, remain literal. Provider commands
+and skills are not discovered. CLI input, automatic initial input, printed output,
+and Reload never trigger these composer actions.
+
+`/in 5m TEXT` saves a one-off input, not a notification. Durations use ordered
+`d`, `h`, and `m` units, from one minute through 365 days; the requested time
+rounds up to a minute. After the duration, one whitespace separator (including
+a CRLF pair) is consumed; all remaining payload whitespace is preserved.
+Absolute paths and `/md` prefixes are allowed. The payload is not recursively
+interpreted as an app command: `/in 5m /clear` sends literal `/clear` to Shell.
+
+At firing, normal schedule templates expand and the input uses the chat's
+current confirmed working directory. Busy or paused chats skip the occurrence;
+missed, skipped, and failed occurrences are not retried. Only the eventual input
+enters native history, not the `/in` wrapper. The captured mode and owner must
+still match. Editing a schedule does not retarget that capture; recreate it to
+use a different mode. See [Scheduled prompts](scheduled-prompts.md).
 
 Shell chats can hand off to AI agents with retained command history and normal
 carryover compaction. Handoffs into Shell, including executor transfers, are
