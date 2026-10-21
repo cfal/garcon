@@ -424,6 +424,7 @@ export class WorkspacePresentationController {
 		if (this.#requestedPresentationMode === 'mobile') return;
 		this.#requestedPresentationMode = 'mobile';
 		this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		const focusGeneration = this.#focusIntentGeneration;
 		const responsiveGeneration = ++this.#responsiveGeneration;
 		const from = this.#presentationMode;
 		let activeId = this.layout.defaultActiveId;
@@ -452,7 +453,13 @@ export class WorkspacePresentationController {
 			}
 			throw error;
 		}
-		if (!current || responsiveGeneration !== this.#responsiveGeneration) return;
+		if (
+			!current ||
+			responsiveGeneration !== this.#responsiveGeneration ||
+			focusGeneration !== this.#focusIntentGeneration
+		) {
+			return;
+		}
 		this.#presentSurfaceAfterResponsiveHandoff(activeId);
 	}
 
@@ -460,6 +467,7 @@ export class WorkspacePresentationController {
 		if (this.#requestedPresentationMode === 'desktop') return;
 		this.#requestedPresentationMode = 'desktop';
 		this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		const focusGeneration = this.#focusIntentGeneration;
 		const responsiveGeneration = ++this.#responsiveGeneration;
 		let plannedTransientKinds: TransientMobileSingletonKind[] = [];
 		let current: boolean;
@@ -487,7 +495,13 @@ export class WorkspacePresentationController {
 			throw error;
 		}
 		await this.#reconcileTransientMobileGitViews(plannedTransientKinds, responsiveGeneration);
-		if (!current || responsiveGeneration !== this.#responsiveGeneration) return;
+		if (
+			!current ||
+			responsiveGeneration !== this.#responsiveGeneration ||
+			focusGeneration !== this.#focusIntentGeneration
+		) {
+			return;
+		}
 		this.#focusPresentedSurfaceUnlessLayered(this.lastFocusedSurfaceId);
 	}
 

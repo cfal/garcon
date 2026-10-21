@@ -1858,6 +1858,39 @@ describe('WorkspaceCoordinator', () => {
 		await vi.waitFor(() => expect(appShell.requestComposerFocus).toHaveBeenCalledOnce());
 	});
 
+	it.each([false, true])(
+		'settles desktop handoff reconciliation (explicitChromeFocus=%s)',
+		async (explicitChromeFocus) => {
+			let desktopPublications = 0;
+			let returningToDesktop = false;
+			const { coordinator, appShell } = createHarness({
+				onLayoutChanged: () => {
+					if (!returningToDesktop || ++desktopPublications !== 2) return;
+					if (explicitChromeFocus) {
+						coordinator.noteWindowChromeFocus('window-main', CANONICAL_CHAT_SURFACE_ID);
+					}
+				},
+			});
+			await coordinator.enterMobilePresentation();
+			await tick();
+			appShell.requestComposerFocus.mockClear();
+			returningToDesktop = true;
+
+			await coordinator.exitMobilePresentation();
+			await tick();
+
+			expect(desktopPublications).toBe(2);
+			if (explicitChromeFocus) {
+				expect(coordinator.focusOwner).toEqual({
+					kind: 'window-chrome',
+					windowId: 'window-main',
+					surfaceId: CANONICAL_CHAT_SURFACE_ID,
+				});
+			}
+			expect(appShell.requestComposerFocus).toHaveBeenCalledTimes(explicitChromeFocus ? 0 : 1);
+		},
+	);
+
 	it.each(['enter', 'exit'] as const)(
 		'leaves an open menu focused when a responsive %s handoff settles',
 		async (direction) => {
