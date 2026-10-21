@@ -1,5 +1,6 @@
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import {
+	hasChatAttachmentSupport,
 	isSupportedChatAttachment,
 	type ChatAttachmentSupport,
 } from '$lib/chat/composer/image-attachment.svelte.js';
@@ -43,10 +44,9 @@ export class PromptComposerAttachmentController {
 		if (!this.#isFileDrag(event)) return;
 		event.preventDefault();
 		event.stopPropagation();
-		const support = this.options.attachmentSupport;
 		const allowed =
 			!this.options.attachmentInputBlocked &&
-			(support.allowImages || support.fileMimeTypes.length > 0);
+			hasChatAttachmentSupport(this.options.attachmentSupport);
 		if (event.dataTransfer) event.dataTransfer.dropEffect = allowed ? 'copy' : 'none';
 		this.options.composer.isDragActive = allowed;
 	}
@@ -82,7 +82,7 @@ export class PromptComposerAttachmentController {
 		if (!items) return;
 		const images: File[] = [];
 		for (const item of items) {
-			if (!item.type.startsWith('image/')) continue;
+			if (item.kind !== 'file') continue;
 			const file = item.getAsFile();
 			if (file && isSupportedChatAttachment(file, this.options.attachmentSupport)) {
 				images.push(file);

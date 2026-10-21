@@ -967,8 +967,23 @@ describe('PromptComposer focus', () => {
 		expect(onsubmit).toHaveBeenCalledOnce();
 	});
 
-	it('accepts multiple files across the composer and keeps the overlay out of hit testing', async () => {
+	it('accepts every dropped file type for agents that read attachments from disk', async () => {
 		const { container } = render(PromptComposerTestHost);
+		const composer = container.querySelector('[data-composer]');
+		if (!composer) throw new Error('Missing composer');
+		const transfer = new DataTransfer();
+		transfer.items.add(new File(['sheet'], 'budget.xlsx', { type: '' }));
+		transfer.items.add(new File(['a,b'], 'table.csv', { type: 'application/vnd.ms-excel' }));
+		transfer.items.add(new File(['archive'], 'bundle.zip', { type: 'application/zip' }));
+
+		await fireEvent.drop(composer, { dataTransfer: transfer });
+		expect(screen.getByTestId('composer-attachment-count').textContent).toBe('3');
+	});
+
+	it('accepts multiple files across the composer and keeps the overlay out of hit testing', async () => {
+		const { container } = render(PromptComposerTestHost, {
+			fileAttachmentMimeTypes: ['text/markdown'],
+		});
 		const composer = container.querySelector('[data-composer]');
 		if (!composer) throw new Error('Missing composer');
 		const transfer = new DataTransfer();

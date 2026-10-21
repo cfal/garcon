@@ -1,32 +1,44 @@
 import {
-	CHAT_FILE_ATTACHMENT_MIME_TYPES,
+	ANY_FILE_ATTACHMENT_MIME_TYPE,
+	acceptsFileAttachmentMimeType,
 	chatAttachmentMimeType,
+	hasFileAttachmentSupport,
+	isImageAttachmentMimeType,
+	type FileAttachmentMimeTypes,
 } from '@garcon/common/attachments';
 import { untrack } from 'svelte';
 
 export interface ChatAttachmentSupport {
 	allowImages: boolean;
-	fileMimeTypes: readonly string[];
+	fileMimeTypes: FileAttachmentMimeTypes;
 }
 
 const DEFAULT_CHAT_ATTACHMENT_SUPPORT: ChatAttachmentSupport = {
 	allowImages: true,
-	fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
+	fileMimeTypes: ANY_FILE_ATTACHMENT_MIME_TYPE,
 };
 
 const ACCEPT_TOKENS_BY_MIME: Record<string, readonly string[]> = {
 	'application/pdf': ['application/pdf', '.pdf'],
+	'text/csv': ['text/csv', '.csv'],
 	'text/markdown': ['text/markdown', '.md', '.markdown'],
 	'text/plain': ['text/plain', '.txt'],
+	'text/tab-separated-values': ['text/tab-separated-values', '.tsv'],
 	'video/mp4': ['video/mp4', '.mp4', '.m4v'],
 	'video/quicktime': ['video/quicktime', '.mov'],
 	'video/webm': ['video/webm', '.webm'],
 	'video/x-matroska': ['video/x-matroska', '.mkv'],
 };
 
+export function hasChatAttachmentSupport(support: ChatAttachmentSupport): boolean {
+	return support.allowImages || hasFileAttachmentSupport(support.fileMimeTypes);
+}
+
+// An empty accept attribute lets the picker offer every file type.
 export function chatAttachmentAccept(
 	support: ChatAttachmentSupport = DEFAULT_CHAT_ATTACHMENT_SUPPORT,
 ): string {
+	if (support.fileMimeTypes === ANY_FILE_ATTACHMENT_MIME_TYPE) return '';
 	const tokens = support.allowImages ? ['image/*', '.svg'] : [];
 	for (const mimeType of support.fileMimeTypes) {
 		tokens.push(...(ACCEPT_TOKENS_BY_MIME[mimeType] ?? [mimeType]));
@@ -39,7 +51,7 @@ export function mimeTypeForChatAttachment(file: Pick<File, 'name' | 'type'>): st
 }
 
 export function isImageAttachment(file: Pick<File, 'name' | 'type'>): boolean {
-	return mimeTypeForChatAttachment(file).startsWith('image/');
+	return isImageAttachmentMimeType(mimeTypeForChatAttachment(file));
 }
 
 export function isSupportedChatAttachment(
@@ -47,8 +59,8 @@ export function isSupportedChatAttachment(
 	support: ChatAttachmentSupport = DEFAULT_CHAT_ATTACHMENT_SUPPORT,
 ): boolean {
 	const mimeType = mimeTypeForChatAttachment(file);
-	if (mimeType.startsWith('image/')) return support.allowImages;
-	return support.fileMimeTypes.includes(mimeType);
+	if (isImageAttachmentMimeType(mimeType)) return support.allowImages;
+	return acceptsFileAttachmentMimeType(support.fileMimeTypes, mimeType);
 }
 
 export function isVideoChatAttachment(file: Pick<File, 'name' | 'type'>): boolean {

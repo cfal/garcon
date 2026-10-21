@@ -40,7 +40,10 @@
 		resolveModelSelection,
 	} from '../../../../../test/model-catalog';
 	import { untrack } from 'svelte';
-	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '$shared/attachments';
+	import {
+		ANY_FILE_ATTACHMENT_MIME_TYPE,
+		type FileAttachmentMimeTypes,
+	} from '$shared/attachments';
 
 	interface Props {
 		composerInputMode?: 'source' | 'formatted';
@@ -56,7 +59,7 @@
 		endpointBackedDirectModel?: boolean;
 		modelsAvailable?: boolean;
 		supportsImages?: boolean;
-		fileAttachmentMimeTypes?: readonly string[];
+		fileAttachmentMimeTypes?: FileAttachmentMimeTypes;
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
@@ -80,7 +83,7 @@
 		endpointBackedDirectModel = false,
 		modelsAvailable = true,
 		supportsImages = true,
-		fileAttachmentMimeTypes = CHAT_FILE_ATTACHMENT_MIME_TYPES,
+		fileAttachmentMimeTypes = ANY_FILE_ATTACHMENT_MIME_TYPE,
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { QueueEntryAttachment } from '$lib/types/chat';
+	import { isImageAttachmentMimeType } from '@garcon/common/attachments';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import FileText from '@lucide/svelte/icons/file-text';
@@ -24,7 +25,7 @@
 				class="flex min-w-0 max-w-48 items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
 				title={attachment.name}
 			>
-				{#if attachment.mimeType.startsWith('image/')}
+				{#if isImageAttachmentMimeType(attachment.mimeType)}
 					<ImageIcon class="size-3.5 shrink-0" aria-hidden="true" />
 				{:else}
 					<FileText class="size-3.5 shrink-0" aria-hidden="true" />

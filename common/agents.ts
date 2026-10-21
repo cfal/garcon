@@ -8,6 +8,7 @@ import type {
 } from "./agent-integration.js";
 import type { PermissionMode, ThinkingMode } from "./chat-modes.js";
 import { isRecord } from './json.js';
+import type { FileAttachmentMimeTypes } from './attachments.js';
 import { isInputFormatByModel, type InputFormatByModel } from './input-format.js';
 
 export const DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID =
@@ -52,7 +53,7 @@ export interface AgentCatalogEntry {
   supportsUpdateProjectPath: boolean;
   supportsSteering: boolean;
   supportsImages: boolean;
-  fileAttachmentMimeTypes?: string[];
+  fileAttachmentMimeTypes?: FileAttachmentMimeTypes;
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: ApiProtocol[];
   authLoginSupported: boolean;

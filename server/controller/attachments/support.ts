@@ -1,6 +1,7 @@
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { RunAgentTurnOptions } from '../agents/session-types.js';
 import { CommandValidationError } from '../lib/command-validation-error.js';
+import { isImageAttachmentMimeType } from '../../../common/attachments.js';
 
 export type AttachmentAgentCapabilities = Pick<
   AgentRegistryServiceContract,
@@ -45,7 +46,7 @@ export function assertAttachmentsSupported(
     return mimeType;
   });
 
-  if (mimeTypes.some((mimeType) => mimeType.startsWith('image/'))) {
+  if (mimeTypes.some(isImageAttachmentMimeType)) {
     let modelSupportsImages = false;
     try {
       modelSupportsImages = agents.modelSupportsImages({
@@ -70,7 +71,7 @@ export function assertAttachmentsSupported(
   }
 
   for (const mimeType of mimeTypes) {
-    if (mimeType.startsWith('image/')) continue;
+    if (isImageAttachmentMimeType(mimeType)) continue;
     if (!agents.supportsFileAttachmentMimeType(input.agentId, mimeType, input.executorId)) {
       throw new CommandValidationError(
         'UNSUPPORTED_AGENT',

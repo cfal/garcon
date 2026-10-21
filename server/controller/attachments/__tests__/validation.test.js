@@ -71,20 +71,26 @@ describe('attachment validation', () => {
     }]);
   });
 
-  it('rejects unsupported direct-send attachment MIME types', () => {
+  it('admits any well-formed file type and canonicalizes known extensions', () => {
+    const xlsx = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    expect(validateCommandAttachments([
+      { data: dataUrl('application/octet-stream', 'binary'), name: 'payload.bin' },
+      { data: dataUrl('application/vnd.ms-excel', 'a,b'), name: 'table.csv', mimeType: 'application/vnd.ms-excel' },
+      { data: dataUrl('', 'sheet'), name: 'budget.xlsx' },
+    ]).map((attachment) => attachment.mimeType)).toEqual(['application/octet-stream', 'text/csv', xlsx]);
+  });
+
+  it('rejects malformed attachment MIME types', () => {
     expect(() => validateCommandAttachments([{
-      data: dataUrl('application/octet-stream', 'binary'),
-      name: 'payload.bin',
-      mimeType: 'application/octet-stream',
-    }])).toThrow(
-      'Invalid file type. Only images, videos, Markdown, text, and PDF files are allowed.',
-    );
+      data: dataUrl('not a mime', 'binary'),
+      name: 'payload',
+    }])).toThrow('Invalid attachment MIME type.');
   });
 
   it('rejects mismatched direct-send MIME declarations', () => {
     expect(() => validateCommandAttachments([{
       data: dataUrl('text/plain', 'hello'),
-      name: 'hello.md',
+      name: 'hello',
       mimeType: 'text/markdown',
     }])).toThrow('Attachment MIME type does not match its data URL.');
   });

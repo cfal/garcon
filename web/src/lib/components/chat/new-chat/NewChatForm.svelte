@@ -11,6 +11,7 @@
 	import { NewChatPromptDraft } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import {
 		chatAttachmentAccept,
+		hasChatAttachmentSupport,
 		isImageAttachment,
 		isSupportedChatAttachment,
 		isVideoChatAttachment,
@@ -61,7 +62,7 @@
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import FileVideo from '@lucide/svelte/icons/file-video';
-	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
+	import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 	import X from '@lucide/svelte/icons/x';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
@@ -131,13 +132,13 @@
 	const newChatAgentIds = $derived(selectableAgentsForExecutor(form.executorId));
 	const canAttachImages = $derived(modelCatalog.supportsImages(form.agentId, form.modelValue));
 	const fileAttachmentMimeTypes = $derived(
-		modelCatalog.fileAttachmentMimeTypes?.(form.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES,
+		modelCatalog.fileAttachmentMimeTypes?.(form.agentId) ?? ANY_FILE_ATTACHMENT_MIME_TYPE,
 	);
 	const attachmentSupport = $derived({
 		allowImages: canAttachImages,
 		fileMimeTypes: fileAttachmentMimeTypes,
 	});
-	const canAttachAttachments = $derived(canAttachImages || fileAttachmentMimeTypes.length > 0);
+	const canAttachAttachments = $derived(hasChatAttachmentSupport(attachmentSupport));
 	const attachmentAccept = $derived(chatAttachmentAccept(attachmentSupport));
 	const snippetExpansion = new SnippetExpansionController();
 	const snippetExpansionLayer = transientLayerAttachment({
@@ -366,7 +367,7 @@
 		if (!items) return;
 		const pastedImages: File[] = [];
 		for (const item of items) {
-			if (!item.type.startsWith('image/')) continue;
+			if (item.kind !== 'file') continue;
 			const file = item.getAsFile();
 			if (file && isSupportedChatAttachment(file, attachmentSupport)) pastedImages.push(file);
 		}

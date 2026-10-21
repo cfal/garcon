@@ -14,6 +14,7 @@ import type { ChatTransientControlAction } from '../../../common/chat-transient-
 import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
 import type { AgentCatalogEntry, AgentModelOption } from '../../../common/agents.js';
 import type { SlashCommand } from '../../../common/slash-commands.js';
+import { acceptsFileAttachmentMimeType } from '../../../common/attachments.js';
 import type {
   AgentAuthLoginCompleteResult,
   AgentAuthLoginLaunchResult,
@@ -323,7 +324,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
   supportsImages(agentId: string, executorId?: string | null): boolean { return this.#directory.get(agentId, executorId)?.descriptor.supportsImages ?? false; }
   supportsFileAttachmentMimeType(agentId: string, mimeType: string, executorId?: string | null): boolean {
-    return this.#directory.get(agentId, executorId)?.attachments?.fileMimeTypes.includes(mimeType.toLowerCase()) ?? false;
+    const attachments = this.#directory.get(agentId, executorId)?.attachments;
+    return attachments ? acceptsFileAttachmentMimeType(attachments.fileMimeTypes, mimeType) : false;
   }
 
   requiresStrictModelDiscovery(agentId: string, executorId?: string | null): boolean {

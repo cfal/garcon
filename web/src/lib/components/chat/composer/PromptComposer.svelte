@@ -31,6 +31,7 @@
 	} from '$lib/context';
 	import {
 		chatAttachmentAccept,
+		hasChatAttachmentSupport,
 		ImageAttachmentState,
 		isSupportedChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
@@ -68,7 +69,7 @@
 	import { ApiError } from '$lib/api/client.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
-	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
+	import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 	import PromptComposerModelSelector from './PromptComposerModelSelector.svelte';
 	import { snippetTemplateUsesArguments } from '$shared/snippets';
 	import { acceptsMarkdownInput } from '$lib/chat/composer/markdown-input.js';
@@ -739,13 +740,13 @@
 		modelCatalog.supportsImages(agentState.agentId, agentState.model),
 	);
 	const fileAttachmentMimeTypes = $derived(
-		modelCatalog.fileAttachmentMimeTypes?.(agentState.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES,
+		modelCatalog.fileAttachmentMimeTypes?.(agentState.agentId) ?? ANY_FILE_ATTACHMENT_MIME_TYPE,
 	);
 	const attachmentSupport = $derived({
 		allowImages: canAttachImages,
 		fileMimeTypes: fileAttachmentMimeTypes,
 	});
-	const canAttachAttachments = $derived(canAttachImages || fileAttachmentMimeTypes.length > 0);
+	const canAttachAttachments = $derived(hasChatAttachmentSupport(attachmentSupport));
 	const attachmentAccept = $derived(chatAttachmentAccept(attachmentSupport));
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';

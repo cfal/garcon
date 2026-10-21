@@ -63,6 +63,7 @@
 	} from '$lib/components/ui/context-menu';
 	import * as m from '$lib/paraglide/messages.js';
 	import { formatQuoteBlock } from '$lib/chat/composer/quote-selection.js';
+	import { isImageAttachmentMimeType } from '@garcon/common/attachments';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { cn } from '$lib/utils/cn';
 	import MessageActionMenu from './MessageActionMenu.svelte';
@@ -271,7 +272,7 @@
 	}
 
 	function isImageAttachment(attachment: { data?: string; mimeType?: string }): boolean {
-		return attachmentMimeType(attachment).startsWith('image/');
+		return isImageAttachmentMimeType(attachmentMimeType(attachment));
 	}
 
 	let messageMenuOpen = $state(false);

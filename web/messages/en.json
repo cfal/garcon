@@ -243,7 +243,7 @@
 	"chat_code_block_copy": "Copy",
 	"chat_composer_add_attachment": "Add attachment",
 	"chat_composer_add_image": "Add image",
-	"chat_composer_attach_image_files": "Attach images, documents, or videos supported by this agent.",
+	"chat_composer_attach_image_files": "Attach images or files supported by this agent.",
 	"chat_composer_attach_images": "Attach files",
 	"chat_composer_catalog_failed": "Failed to load model catalog",
 	"chat_composer_drop_images": "Drop files here",

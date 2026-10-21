@@ -150,6 +150,7 @@ describe('validateAgentIntegration', () => {
       ['migration', { ...integration.migration, translateLegacySettings: undefined }],
       ['migration', { ...integration.migration, translateLegacyModel: undefined }],
       ['attachments', { fileMimeTypes: ['image/png', 7] }],
+      ['attachments', { fileMimeTypes: 'all' }],
       ['auth', { status: undefined }],
       ['auth', { status: async () => ({}), launchLogin: false }],
       ['commands', {}],

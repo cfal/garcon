@@ -1,3 +1,9 @@
+import {
+  DOCUMENT_FILE_ATTACHMENT_MIME_TYPES,
+  TEXT_FILE_ATTACHMENT_MIME_TYPES,
+  isImageAttachmentMimeType,
+} from '@garcon/common/attachments';
+
 export interface AttachmentInput {
   readonly data: string;
   readonly name?: string | null;
@@ -5,8 +11,8 @@ export interface AttachmentInput {
 }
 
 const MAX_INLINE_ATTACHMENT_CHARS = 120_000;
-const TEXT_ATTACHMENT_MIMES = new Set(['text/markdown', 'text/plain']);
-const DOCUMENT_ATTACHMENT_MIMES = new Set(['application/pdf']);
+const TEXT_ATTACHMENT_MIMES: ReadonlySet<string> = new Set(TEXT_FILE_ATTACHMENT_MIME_TYPES);
+const DOCUMENT_ATTACHMENT_MIMES: ReadonlySet<string> = new Set(DOCUMENT_FILE_ATTACHMENT_MIME_TYPES);
 
 export interface DataUrlParts {
   mimeType: string;
@@ -32,7 +38,7 @@ export function attachmentMimeType(attachment: AttachmentInput): string {
 }
 
 export function isImageAttachment(attachment: AttachmentInput): boolean {
-  return attachmentMimeType(attachment).startsWith('image/');
+  return isImageAttachmentMimeType(attachmentMimeType(attachment));
 }
 
 export function imageAttachments(attachments: readonly AttachmentInput[] | undefined): AttachmentInput[] {
@@ -43,10 +49,18 @@ export function nonImageAttachments(attachments: readonly AttachmentInput[] | un
   return attachments?.filter((attachment) => !isImageAttachment(attachment)) ?? [];
 }
 
+export function isTextAttachment(attachment: AttachmentInput): boolean {
+  return TEXT_ATTACHMENT_MIMES.has(attachmentMimeType(attachment));
+}
+
+export function isDocumentAttachment(attachment: AttachmentInput): boolean {
+  return DOCUMENT_ATTACHMENT_MIMES.has(attachmentMimeType(attachment));
+}
+
 // Attachments that map to native document content blocks (PDFs). Providers that
 // support the Anthropic document block send these as base64 rather than inlining.
 export function documentAttachments(attachments: readonly AttachmentInput[] | undefined): AttachmentInput[] {
-  return attachments?.filter((attachment) => DOCUMENT_ATTACHMENT_MIMES.has(attachmentMimeType(attachment))) ?? [];
+  return attachments?.filter(isDocumentAttachment) ?? [];
 }
 
 // Builds an Anthropic document content block for a PDF attachment, or null when
@@ -69,7 +83,7 @@ export function appendTextAttachmentContext(
   for (const attachment of nonImageAttachments(attachments)) {
     const parts = parseAttachmentDataUrl(attachment.data);
     const mimeType = attachmentMimeType(attachment);
-    if (!parts || !TEXT_ATTACHMENT_MIMES.has(mimeType)) continue;
+    if (!parts || !isTextAttachment(attachment)) continue;
     const text = Buffer.from(parts.base64, 'base64').toString('utf8');
     const truncated = text.length > MAX_INLINE_ATTACHMENT_CHARS;
     sections.push([
