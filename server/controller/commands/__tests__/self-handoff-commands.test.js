@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { CommandValidationError } from '../command-support.ts';
 import { SelfHandoffCommands } from '../self-handoff-commands.ts';
+import { DomainError } from '../../../common/domain-error.js';
 
 const SOURCE_ID = '1786077000000001';
 const TARGET_ID = '1786077000000002';
@@ -63,6 +64,7 @@ function harness({ source = sourceChat() } = {}) {
       },
       queue: { ownsExecution: mock(() => false) },
       agents: {
+        assertAgentAvailable: mock(() => undefined),
         normalizeThinkingModeForAgent: mock((_agentId, value) => value),
       },
       settings: {
@@ -112,6 +114,22 @@ function request(overrides = {}) {
 }
 
 describe('self handoff commands', () => {
+  it('rejects an offline executor before accepting or creating a continuation', async () => {
+    const executorId = '22222222-2222-4222-8222-222222222222';
+    const { commands, support } = harness({ source: sourceChat({ executorId }) });
+    support.deps.agents.assertAgentAvailable.mockImplementation(() => {
+      throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+    });
+
+    await expect(commands.submitSelfHandoffRun(request()))
+      .rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503 });
+
+    expect(support.deps.agents.assertAgentAvailable).toHaveBeenCalledWith('claude', executorId);
+    expect(support.deps.ledger.accept).not.toHaveBeenCalled();
+    expect(support.deps.chats.addChat).not.toHaveBeenCalled();
+    expect(support.deps.handoffs.seedContinuationLedger).not.toHaveBeenCalled();
+  });
+
   it('creates a target under the same agent after seeding its ledger', async () => {
     const { commands, added, support } = harness();
 

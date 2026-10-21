@@ -553,6 +553,7 @@ function makeService(overrides = {}) {
     currentTranscriptViewId: mock(() => Promise.resolve('view-1')),
     hasAgent: mock(() => true),
     assertExecutorReady: mock(() => undefined),
+    assertAgentAvailable: mock(() => undefined),
     supportsImages: mock(() => true),
     fileAttachmentAdmission: mock(
       (_agentId, { mimeType }) => ({ kind: mimeType === 'video/mp4' ? 'accepted' : 'unsupported-type' }),
@@ -1740,6 +1741,31 @@ describe('ChatCommandService', () => {
 
     expect(unsupported.createForkedChat).not.toHaveBeenCalled();
     expect(unsupported.queue.runReservedTurn).not.toHaveBeenCalled();
+  });
+
+  it('rejects offline text-only fork-runs before creating or accepting the fork', async () => {
+    const executorId = '22222222-2222-4222-8222-222222222222';
+    const { service, createForkedChat, ledger, queue, agents } = makeService({
+      session: { executorId },
+      agents: {
+        assertAgentAvailable: mock(() => {
+          throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+        }),
+      },
+    });
+
+    await expect(service.submitForkRun({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      command: 'continue in fork',
+      clientRequestId: 'req-fork-offline',
+      clientMessageId: 'msg-fork-offline',
+    })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503 });
+
+    expect(agents.assertAgentAvailable).toHaveBeenCalledWith('claude', executorId);
+    expect(createForkedChat).not.toHaveBeenCalled();
+    expect(queue.runReservedTurn).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(ledger, 'fork-run', 'req-fork-offline', TARGET_CHAT_ID)).toBeNull();
   });
 
   it('rejects an unsupported fork-run thinking override before persistence', async () => {
@@ -7022,14 +7048,63 @@ describe('ChatCommandService', () => {
     expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
   });
 
-  it('admits a schedule after the destination becomes literal', async () => {
+  it.each([
+    { model: 'sh' },
+    { model: 'notes-markdown' },
+    { agentId: 'another-agent' },
+    { agentOwnershipEpoch: 'another-executor-epoch' },
+  ])('rejects a guarded schedule after its selection changes: %j', async changes => {
+    const expectedSelection = { agentId: 'synthetic-literal', agentOwnershipEpoch: 'epoch-1', model: 'notes' };
+    const { service, queue, agents } = makeService({ session: { ...expectedSelection, ...changes } });
+    agents.executionPolicy.mockReturnValue('literal');
+    await expect(service.submitScheduledExistingChat({ chatId: SOURCE_CHAT_ID, command: 'touch must-not-exist',
+      busyBehavior: 'skip', clientRequestId: 'guarded-schedule', clientMessageId: 'guarded-message', expectedSelection }))
+      .rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 409 });
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
+    expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
+  });
+
+  it('checks a scheduled selection only after acquiring the chat mutation lock', async () => {
+    const lock = new KeyedPromiseLock();
+    const expectedSelection = { agentId: 'synthetic-literal', agentOwnershipEpoch: 'epoch-1', model: 'notes' };
+    const { service, queue, sessions } = makeService({ chatMutationLock: lock, session: expectedSelection });
+    const entered = deferred();
+    const release = deferred();
+    const setting = lock.runExclusive(`chat:${SOURCE_CHAT_ID}`, async () => {
+      entered.resolve();
+      await release.promise;
+      sessions.get(SOURCE_CHAT_ID).model = 'sh';
+    });
+    await entered.promise;
+    const outcome = service.submitScheduledExistingChat({ chatId: SOURCE_CHAT_ID, command: 'touch must-not-exist',
+      busyBehavior: 'skip', clientRequestId: 'guarded-race', clientMessageId: 'guarded-race-message', expectedSelection })
+      .then(() => null, error => error);
+    release.resolve();
+    await setting;
+    expect(await outcome).toMatchObject({ code: 'VALIDATION_FAILED', status: 409 });
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
+    expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
+  });
+
+  it('admits a matching guarded literal schedule without changing its source', async () => {
+    const expectedSelection = { agentId: 'synthetic-literal', agentOwnershipEpoch: 'epoch-1', model: 'notes' };
+    const { service, queue, agents } = makeService({ session: expectedSelection });
+    agents.executionPolicy.mockReturnValue('literal');
+    const command = '  /md synthetic note\n';
+    await service.submitScheduledExistingChat({ chatId: SOURCE_CHAT_ID, command,
+      busyBehavior: 'skip', clientRequestId: 'matching-schedule', clientMessageId: 'matching-message', expectedSelection });
+    expect(queue.admitUserInput).toHaveBeenCalledWith(SOURCE_CHAT_ID, command, expect.anything());
+    expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unguarded schedule after the destination becomes literal', async () => {
     const { service, queue, agents } = makeService();
     agents.executionPolicy.mockReturnValue('literal');
     await expect(service.submitScheduledExistingChat({
       chatId: SOURCE_CHAT_ID, command: '<garcon-schedule-action>echo must-not-run</garcon-schedule-action>',
       busyBehavior: 'queue', clientRequestId: 'stale-schedule', clientMessageId: 'stale-schedule-input',
-    })).resolves.toMatchObject({ type: 'sent' });
-    expect(queue.admitUserInput).toHaveBeenCalled();
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 409 });
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
   });
 
   it('validates deferred conversational schedule syntax at dispatch', async () => {
@@ -7049,6 +7124,7 @@ describe('ChatCommandService', () => {
     await service.submitScheduledExistingChat({
       chatId: SOURCE_CHAT_ID, command: source,
       busyBehavior: 'queue', clientRequestId: 'literal-schedule', clientMessageId: 'literal-schedule-input',
+      expectedSelection: { agentId: 'claude', agentOwnershipEpoch: 'epoch-1', model: 'opus' },
     });
     expect(queue.admitUserInput).toHaveBeenCalledWith(SOURCE_CHAT_ID, source, expect.anything());
   });

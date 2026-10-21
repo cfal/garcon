@@ -597,6 +597,7 @@ export class AgentRuntimeRouter {
     }
     try {
       const source = requireAgentChatEntry(args.sourceChatId, args.sourceSession);
+      if (this.#directory.get(source.agentId, source.executorId)?.forking === null) return null;
       const integration = this.#directory.require(source.agentId, source.executorId);
       if (!integration.forking) return null;
       const scope = { ...integration.producers.scope };

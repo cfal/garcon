@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import type { ProjectInspector } from '../../../common/project-resolution.js';
 import {
   normalizeScheduledPromptDefinitionInput,
+  scheduledPromptSelectionMatches,
   hasLeadingSlashCommand,
   scheduledPromptFitsRenderedLimit,
   isMinuteAlignedIso,
@@ -16,6 +17,7 @@ import {
   type ScheduleInPromptRequest,
   type ScheduledPrompt,
   type ScheduledPromptDefinitionInput,
+  type ScheduledPromptTarget,
   type ScheduledPromptsInvalidationReason,
   type ScheduledPromptsSnapshot,
   type UpdateScheduledPromptRequest,
@@ -226,14 +228,14 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       const durationToken = typeof request?.duration === 'string' ? request.duration : '';
       const duration = parseScheduleDuration(durationToken);
       if (!duration.ok) throw scheduleDurationDomainError(duration.error);
-
       const definition = this.#validateDefinition(
         {
           schedule: {
             type: 'once',
             runAtUtc: scheduleInRunAt(now, duration.minutes),
           },
-          target: { type: 'existing-chat', chatId, busyBehavior: 'skip' },
+          target: { type: 'existing-chat', chatId, busyBehavior: 'skip',
+            ...(request.expectedSelection === undefined ? {} : { expectedSelection: request.expectedSelection }) },
           prompt,
         },
         now,
@@ -277,6 +279,13 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
         throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_NOT_FOUND', 'Scheduled prompt not found', 404);
       }
       const validated = this.#validateDefinition(definition);
+      // Editing a guarded schedule must not silently re-arm it under a new mode.
+      if (validated.target.type === 'existing-chat' && previous.target.type === 'existing-chat'
+        && validated.target.chatId === previous.target.chatId && previous.target.expectedSelection) {
+        validated.target.expectedSelection = previous.target.expectedSelection;
+      } else {
+        this.#assertCurrentSelection(validated.target);
+      }
       const replacement = this.#promptFromDefinition(request.id, validated, new Date(), previous.createdAt);
       replacement.enabled = previous.enabled;
       const release = this.deps.retainExecutorReferences?.(
@@ -399,6 +408,12 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       if (this.deps.agents.hasAgent(chat.agentId, chat.executorId)) {
         policy = this.deps.agents.chatExecutionPolicy(target.chatId);
       }
+      // Unknown inventory cannot certify that changing this selection is safe.
+      if (policy !== 'conversation' && target.expectedSelection === undefined) {
+        target.expectedSelection = {
+          agentId: chat.agentId, agentOwnershipEpoch: chat.agentOwnershipEpoch, model: chat.model,
+        };
+      }
     } else {
       this.deps.agents.assertExecutorReady(target.executorId);
       if (!this.deps.agents.hasAgent(target.agentId, target.executorId)) {
@@ -449,11 +464,21 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     }
   }
 
+  #assertCurrentSelection(target: ScheduledPromptTarget): void {
+    if (target.type !== 'existing-chat' || !target.expectedSelection) return;
+    const chat = this.deps.chats.getChat(target.chatId);
+    if (!chat) throw new ScheduledPromptDomainError('SESSION_NOT_FOUND', 'Selected chat was not found', 404);
+    if (!scheduledPromptSelectionMatches(target.expectedSelection, chat)) {
+      throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_SELECTION_CHANGED', 'Execution selection changed before scheduling. Check the chat mode and try again.', 409);
+    }
+  }
+
   async #createDefinition(
     definition: ScheduledPromptDefinitionInput,
     now: Date,
     expectedRevision: number,
   ): Promise<ScheduledPrompt> {
+    this.#assertCurrentSelection(definition.target);
     const scheduledPrompt = this.#promptFromDefinition(crypto.randomUUID(), definition, now);
     try {
       await this.deps.store.create(scheduledPrompt, expectedRevision);

@@ -88,6 +88,34 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 }
 
 describe('PromptComposer focus', () => {
+	it.each(['in', 'rename', 'move', 'tag', 'fork'])(
+		'completes the literal /%s app command without provider discovery or submission', async name => {
+			const onsubmit = vi.fn();
+			const discover = vi.spyOn(commandsApi, 'getSlashCommands');
+			try {
+				render(PromptComposerTestHost, {
+					selectedChatId: 'synthetic-literal-command', selectedStatus: 'running',
+					executionPolicy: 'literal', onsubmit,
+				});
+				const input = screen.getByRole<HTMLTextAreaElement>('textbox');
+				await inputAtCaret(input, `/${name}`, name.length + 1);
+				await screen.findByText(`/${name}`);
+				await fireEvent.keyDown(input, { key: 'Tab' });
+				expect(input.value).toBe(`/${name} `);
+				expect(onsubmit).not.toHaveBeenCalled();
+				expect(discover).not.toHaveBeenCalled();
+			} finally { discover.mockRestore(); }
+		},
+	);
+	it.each(['/usr/bin/printf', '/md', '/markdown', '/compact', '/snippet', '/In', ' /in'])(
+		'keeps a literal completion menu out of ordinary source: %s', async source => {
+			render(PromptComposerTestHost, { selectedChatId: 'synthetic-literal-source', executionPolicy: 'literal' });
+			const input = screen.getByRole<HTMLTextAreaElement>('textbox');
+			await inputAtCaret(input, source, source.length);
+			expect(screen.queryByRole('listbox')).toBeNull();
+			expect(input.value).toBe(source);
+		},
+	);
 	it.each(['literal', 'conversation'] as const)('labels Clear as Send rather than Queue for %s agents', async executionPolicy => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'synthetic-clear-label', selectedStatus: 'running',
@@ -303,11 +331,13 @@ describe('PromptComposer focus', () => {
 		expect(onsubmit).toHaveBeenCalledTimes(2);
 	});
 
-	it.each(['offline', 'cold-catalog'])(
-		'allows controller commands through click, Enter and steer shortcut with %s',
-		async (availability) => {
+	it.each((['conversation', 'literal'] as const).flatMap(executionPolicy =>
+		['offline', 'cold-catalog'].map(availability => ({ availability, executionPolicy }))))(
+		'allows $executionPolicy controller commands through click, Enter and steer shortcut with $availability',
+		async ({ availability, executionPolicy }) => {
 			const catalog = conversationalCatalog();
 			const remote = catalog.forExecutor(remoteExecutor.id);
+			remote.agentMetadata.claude = { ...remote.agentMetadata.claude, executionPolicy };
 			remote.invalidate();
 			vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
 			vi.spyOn(remote, 'refreshIfStale').mockResolvedValue();
@@ -315,6 +345,7 @@ describe('PromptComposer focus', () => {
 			const onSteerPreferredSubmit = vi.fn();
 			render(PromptComposerTestHost, {
 				selectedExecutorId: remoteExecutor.id,
+				executionPolicy,
 				executors: [
 					localExecutor,
 					{

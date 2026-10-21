@@ -79,6 +79,13 @@ export interface ExistingChatScheduledPromptTarget {
   type: 'existing-chat';
   chatId: string;
   busyBehavior: ScheduledPromptBusyBehavior;
+  expectedSelection?: ScheduledPromptExecutionSelection;
+}
+
+export interface ScheduledPromptExecutionSelection {
+  agentId: string;
+  agentOwnershipEpoch: string | null;
+  model: string | null;
 }
 
 export type ScheduledPromptTarget = NewChatScheduledPromptTarget | ExistingChatScheduledPromptTarget;
@@ -180,6 +187,7 @@ export interface ScheduleInPromptRequest {
   chatId: string;
   duration: string;
   prompt: string;
+  expectedSelection?: ScheduledPromptExecutionSelection;
 }
 
 export interface ScheduleInPromptResponse {
@@ -311,6 +319,26 @@ function normalizeApiProtocol(value: unknown): ApiProtocol | null | undefined {
   return undefined;
 }
 
+export function parseScheduledPromptExecutionSelection(value: unknown): ScheduledPromptExecutionSelection | null {
+  const raw = asRecord(value);
+  if (!raw || typeof raw.agentId !== 'string' || !raw.agentId.trim()) return null;
+  if (raw.agentOwnershipEpoch !== null
+    && (typeof raw.agentOwnershipEpoch !== 'string' || !raw.agentOwnershipEpoch.trim())) {
+    return null;
+  }
+  if (raw.model !== null && typeof raw.model !== 'string') return null;
+  return { agentId: raw.agentId, agentOwnershipEpoch: raw.agentOwnershipEpoch, model: raw.model };
+}
+
+export function scheduledPromptSelectionMatches(
+  expected: ScheduledPromptExecutionSelection,
+  current: ScheduledPromptExecutionSelection,
+): boolean {
+  return expected.agentId === current.agentId
+    && expected.agentOwnershipEpoch === current.agentOwnershipEpoch
+    && expected.model === current.model;
+}
+
 function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledPromptTarget | null {
   const chatTitleTemplate = raw.chatTitleTemplate === undefined
     ? undefined : normalizeScheduledChatTitleTemplate(raw.chatTitleTemplate);
@@ -386,7 +414,11 @@ export function normalizeScheduledPromptTarget(value: unknown): ScheduledPromptT
   if ('preambleChoice' in raw || 'chatTitleTemplate' in raw) return null;
   const chatId = requiredString(raw.chatId);
   if (!chatId || (raw.busyBehavior !== 'queue' && raw.busyBehavior !== 'skip')) return null;
-  return { type: 'existing-chat', chatId, busyBehavior: raw.busyBehavior };
+  const expectedSelection = raw.expectedSelection === undefined
+    ? undefined : parseScheduledPromptExecutionSelection(raw.expectedSelection);
+  if (expectedSelection === null) return null;
+  return { type: 'existing-chat', chatId, busyBehavior: raw.busyBehavior,
+    ...(expectedSelection === undefined ? {} : { expectedSelection }) };
 }
 
 export function normalizeScheduledPromptSchedule(value: unknown): ScheduledPromptSchedule | null {

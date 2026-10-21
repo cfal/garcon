@@ -417,6 +417,7 @@ function createRouteAgent(sessionOverrides = {}) {
   const agents = {
     hasAgent: mock(() => true),
     assertExecutorReady: mock(() => undefined),
+    assertAgentAvailable: mock(() => undefined),
     supportsFork: mock(() => true),
     supportsForkAtMessage: mock(() => true),
     supportsForkWhileRunning: mock(() => false),

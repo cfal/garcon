@@ -3,7 +3,9 @@ import {
 	applySlashCommand,
 	BUILTIN_SLASH_COMMANDS,
 	findSlashCommandTrigger,
+	isClearCommand,
 	isControllerSlashCommand,
+	isLiteralAppCommand,
 	parseCompactCommand,
 	parseMoveChatBoundaryCommand,
 	parseRenameCommand,
@@ -14,6 +16,41 @@ import {
 } from '$lib/chat/composer/slash-commands.js';
 
 describe('slash command helpers', () => {
+	it.each(['', ' ', '\t', '\r', '\n', '\v', '\f', '\r\n', '\u00a0', ' body'])(
+		'uses the standalone Clear whitespace rules for literal Clear and Fork: %j', suffix => {
+			const clear = `/clear${suffix}`;
+			expect(isLiteralAppCommand(clear)).toBe(isClearCommand(clear));
+			expect(isLiteralAppCommand(`/fork${suffix}`)).toBe(isClearCommand(clear));
+		},
+	);
+	it.each(['/clear', '/fork\t', '/rename Title', '/move top', '/tag add urgent', '/in 1h Follow up', '/in invalid'])(
+		'recognizes the literal app command %s', text => {
+			expect(isLiteralAppCommand(text)).toBe(true);
+			expect(isControllerSlashCommand(text, 'literal')).toBe(true);
+		},
+	);
+	it.each([' /rename Title', '/Rename Title', '/inbox', '/usr/bin/printf hi', '/md printf hi',
+		'/clear other', '/fork echo next', '/compact', '/handoff', '/steer hello', '/st hello', '/s saved',
+		'/snippet saved', '/in\u00a01h text', 'printf hi\n/rename title'])(
+		'leaves non-allowlisted literal input untouched: %s', text => {
+			expect(isLiteralAppCommand(text)).toBe(false);
+		},
+	);
+	it.each(['  /md printf exact\n ', '/usr/bin/printf exact\n', '/clear', '\n  indented note\n', 'literal {{chat_id}}']) (
+		'preserves a literal scheduled body exactly: %j', prompt => {
+			expect(parseScheduleInCommand(`/in 5m ${prompt}`, 'literal')).toEqual({ kind: 'valid', duration: '5m', delayMinutes: 5, prompt });
+		},
+	);
+	it('accepts a single newline separator without swallowing body indentation', () => {
+		expect(parseScheduleInCommand('/in 5m\r\n  printf exact\n', 'literal'))
+			.toMatchObject({ kind: 'valid', prompt: '  printf exact\n' });
+		for (const input of [' /in 5m text', '/In 5m text']) {
+			expect(parseScheduleInCommand(input, 'literal')).toEqual({ kind: 'not-command' });
+		}
+		for (const input of ['/in', '/in 5m', '/in 5m  \n', '/in 2s text']) {
+			expect(parseScheduleInCommand(input, 'literal').kind).toBe('invalid');
+		}
+	});
 	it.each(['/rename Title', '/move top', '/tag add urgent', '/in 1h Follow up', '/rename', '/move invalid', '/in invalid', ' /TAG '])(
 		'classifies %s as controller-owned, including invalid arguments', (text) => {
 			expect(isControllerSlashCommand(text)).toBe(true);

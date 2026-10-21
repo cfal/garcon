@@ -6,7 +6,7 @@
 	import Slash from '@lucide/svelte/icons/slash';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import { getSlashCommands, type SlashCommand } from '$lib/api/commands.js';
-	import { BUILTIN_SLASH_COMMANDS } from '$lib/chat/composer/slash-commands.js';
+	import { BUILTIN_SLASH_COMMANDS, LITERAL_APP_COMMAND_NAMES } from '$lib/chat/composer/slash-commands.js';
 	import { FixedVirtualWindow } from '$lib/components/virtual/fixed-virtual-window.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getTransientLayers } from '$lib/context';
@@ -114,7 +114,7 @@
 	let mergedCommands = $derived.by(() => {
 		const builtins = BUILTIN_SLASH_COMMANDS.filter((command) => {
 			if (command.name === 'clear') return canClear;
-			if (!conversationInput) return false;
+			if (!conversationInput && !LITERAL_APP_COMMAND_NAMES.includes(command.name)) return false;
 			if (command.name === 'fork') return supportsFork;
 			if (command.name === 'in') return canScheduleIn;
 			if (command.name === 'steer' || command.name === 'st') return supportsSteering;

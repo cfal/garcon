@@ -239,7 +239,7 @@
 	const showProjectNotice = $derived(availabilityNotice?.kind === 'project-unavailable');
 	const fileMenuVisible = $derived(conversationInput && filesAvailable && ui.showFileMenu && !showProjectNotice);
 	const slashMenuVisible = $derived(
-		ui.showSlashMenu && (!conversationInput || executors.isReady(agentState.executorId)) && !showProjectNotice,
+		Boolean(executionAgent) && ui.showSlashMenu && (!conversationInput || executors.isReady(agentState.executorId)) && !showProjectNotice,
 	);
 	const completionProjectPath = $derived(projectState.completionProjectPath);
 	const canChooseProjectFolder = $derived(
@@ -702,7 +702,7 @@
 	const controllerCommand = $derived.by(() => {
 		if (sessions.selectedChat?.status !== 'running') return false;
 		if (isClearCommand(composerState.inputText)) return true;
-		return conversationInput && isControllerSlashCommand(composerState.inputText);
+		return executionAgent !== null && isControllerSlashCommand(composerState.inputText, executionAgent.executionPolicy);
 	});
 	// Loading is explained by the disabled send button so the composer keeps its height.
 	const modelsLoading = $derived(

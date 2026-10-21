@@ -124,18 +124,95 @@ class FakeCron {
 }
 
 async function sameChatScheduler(agents = agentCapabilities()) {
-  const store = new ScheduledPromptStore(await tempDir());
+  const dir = await tempDir();
+  const store = new ScheduledPromptStore(dir);
   await store.init();
   const cron = new FakeCron();
+  const chat = { agentId: 'synthetic-literal', agentOwnershipEpoch: 'synthetic-epoch', model: 'notes' };
   const scheduler = new ScheduledPromptScheduler({
     inspectProject: inspectProjectDirectory,
     store, cron, runLog: new ScheduledPromptRunLog(), agents,
     preambles: preambleCatalog(),
-    chats: { getChat: (chatId) => chatId === '123' ? {} : null },
+    chats: { getChat: (chatId) => chatId === '123' ? chat : null },
     dispatcher: { dispatch: async () => ({ outcome: 'sent', chatId: '123', message: 'sent' }) },
   });
-  return { store, cron, scheduler };
+  return { store, cron, scheduler, chat, dir };
 }
+
+it('pins literal selections through creation, editing, and store restart', async () => {
+  const { store, scheduler, chat, dir } = await sameChatScheduler({ ...agentCapabilities(), chatExecutionPolicy: () => 'literal' });
+  const expectedSelection = { ...chat };
+  const now = new Date('2030-01-01T00:00:00.000Z');
+  const created = await scheduler.scheduleIn({ chatId: '123', duration: '1h', prompt: '  Synthetic note\n', expectedSelection }, now);
+  expect(created.scheduledPrompt.target.expectedSelection).toEqual(expectedSelection);
+  chat.model = 'sh';
+  await expect(scheduler.scheduleIn({ chatId: '123', duration: '1h', prompt: 'stale note', expectedSelection }, now))
+    .rejects.toMatchObject({ code: 'SCHEDULED_PROMPT_SELECTION_CHANGED', status: 409 });
+  const edited = await scheduler.update({ id: created.scheduledPrompt.id, expectedRevision: store.revision,
+    scheduledPrompt: { ...recurringDefinition('2099-01-01T00:00:00.000Z'), prompt: created.scheduledPrompt.prompt } });
+  expect(edited.prompts[0].target.expectedSelection).toEqual(expectedSelection);
+  const echoed = await scheduler.update({ id: created.scheduledPrompt.id, expectedRevision: store.revision,
+    scheduledPrompt: { ...recurringDefinition('2099-01-01T00:00:00.000Z'),
+      target: edited.prompts[0].target, prompt: 'Edited synthetic note' } });
+  expect(echoed.prompts[0].target.expectedSelection).toEqual(expectedSelection);
+  const reloaded = new ScheduledPromptStore(dir);
+  await reloaded.init();
+  expect(reloaded.list()[0].target.expectedSelection).toEqual(expectedSelection);
+});
+
+it('captures literal selections for Settings and schedule-action creation too', async () => {
+  const { scheduler, store, chat } = await sameChatScheduler({ ...agentCapabilities(), chatExecutionPolicy: () => 'literal' });
+  const created = await scheduler.create({ expectedRevision: 0, scheduledPrompt: recurringDefinition('2099-01-01T00:00:00.000Z') });
+  expect(created.prompts[0].target.expectedSelection).toEqual(chat);
+  const action = await scheduler.scheduleForChat({ chatId: '123', prompt: 'Synthetic note', busyBehavior: 'skip',
+    firstRun: { type: 'after', minutes: 60 }, intervalMinutes: null, endAtUtc: null }, new Date('2030-01-01T00:00:00.000Z'));
+  expect(action.scheduledPrompt.target.expectedSelection).toEqual(chat);
+  expect(store.list()).toHaveLength(2);
+});
+
+it('captures the current literal selection when editing an unguarded schedule', async () => {
+  const { scheduler, store, chat } = await sameChatScheduler({
+    ...agentCapabilities(),
+    chatExecutionPolicy: () => 'literal',
+  });
+  const runAt = '2099-01-01T00:00:00.000Z';
+  const previous = recurringPrompt(runAt);
+  await store.create(previous, store.revision);
+  chat.model = 'notes-markdown';
+
+  const edited = await scheduler.update({
+    id: previous.id,
+    expectedRevision: store.revision,
+    scheduledPrompt: recurringDefinition(runAt),
+  });
+
+  expect(edited.prompts[0].target).toEqual({ ...previous.target, expectedSelection: chat });
+  expect(store.list()[0].target).toEqual(edited.prompts[0].target);
+});
+
+it('rejects malformed schedule-in expectations without creating a schedule', async () => {
+  const { scheduler, store } = await sameChatScheduler();
+  for (const expectedSelection of [null, {}, { agentId: 'synthetic-literal', model: 'notes' }]) {
+    await expect(scheduler.scheduleIn({ chatId: '123', duration: '1h', prompt: 'Synthetic note', expectedSelection }))
+      .rejects.toMatchObject({ code: 'SCHEDULED_PROMPT_VALIDATION_FAILED' });
+  }
+  expect(store.list()).toEqual([]);
+});
+
+it('rejects mismatched captures on general creation and unguarded schedule edits', async () => {
+  const { scheduler, store, chat } = await sameChatScheduler();
+  const definition = recurringDefinition('2099-01-01T00:00:00.000Z');
+  const expectedSelection = { ...chat, model: 'sh' };
+  const guarded = { ...definition, target: { ...definition.target, expectedSelection } };
+  await expect(scheduler.create({ expectedRevision: 0, scheduledPrompt: guarded }))
+    .rejects.toMatchObject({ code: 'SCHEDULED_PROMPT_SELECTION_CHANGED', status: 409 });
+  expect(store.list()).toEqual([]);
+  const created = await scheduler.create({ expectedRevision: 0, scheduledPrompt: definition });
+  expect(created.prompts[0].target).not.toHaveProperty('expectedSelection');
+  await expect(scheduler.update({ expectedRevision: store.revision, id: created.prompts[0].id, scheduledPrompt: guarded }))
+    .rejects.toMatchObject({ code: 'SCHEDULED_PROMPT_SELECTION_CHANGED', status: 409 });
+  expect(store.list()).toEqual(created.prompts);
+});
 
 it('retains task names and title templates through create, edit, and clearing', async () => {
   const { store, scheduler } = await sameChatScheduler();
@@ -169,15 +246,17 @@ it('preserves literal schedules from both user and agent admission', async () =>
 
 it('creates and edits existing-chat schedules without a cold executor inventory', async () => {
   const policy = mock(() => { throw new DomainError('EXECUTOR_UNAVAILABLE', 'Offline', 503); });
-  const { scheduler, store } = await sameChatScheduler({ ...agentCapabilities(), hasAgent: () => false, chatExecutionPolicy: policy });
+  const { scheduler, store, chat } = await sameChatScheduler({ ...agentCapabilities(), hasAgent: () => false, chatExecutionPolicy: policy });
   const source = '  /usr/bin/printf "{{chat_id}}"  \n';
   const definition = { ...recurringDefinition('2099-01-01T00:00:00.000Z'), prompt: source };
   const created = await scheduler.create({ expectedRevision: 0, scheduledPrompt: definition });
   expect(created.prompts[0].prompt).toBe(source);
+  expect(created.prompts[0].target.expectedSelection).toEqual(chat);
   const edited = await scheduler.update({ expectedRevision: created.revision, id: created.prompts[0].id,
     scheduledPrompt: { ...definition, prompt: `${source}\n` } });
   expect(edited.prompts[0].prompt).toBe(`${source}\n`);
   expect(store.list()[0].prompt).toBe(`${source}\n`);
+  expect(store.list()[0].target.expectedSelection).toEqual(chat);
   expect(policy).not.toHaveBeenCalled();
   await expect(scheduler.create({ expectedRevision: edited.revision,
     scheduledPrompt: { ...definition, prompt: 'x'.repeat(32_001) } }))
@@ -679,6 +758,7 @@ describe('scheduled prompt scheduler', () => {
       createdAt: '2029-07-10T12:00:45.000Z',
     });
     expect(result.snapshot.revision).toBe(1);
+    expect(result.scheduledPrompt.target).not.toHaveProperty('expectedSelection');
     expect(result.snapshot.prompts).toEqual([result.scheduledPrompt]);
     expect(cron.jobs).toHaveLength(1);
     expect(cron.jobs[0].expression).toBe('2 12 10 7 *');
@@ -752,6 +832,7 @@ describe('scheduled prompt scheduler', () => {
       createdAt: now.toISOString(),
     });
     expect(cron.jobs[0].expression).toBe(cronExpressionForUtcInstant(nextRunAt));
+    expect(result.scheduledPrompt.target).not.toHaveProperty('expectedSelection');
     expect(store.list()).toEqual([result.scheduledPrompt]);
     scheduler.stop();
   });

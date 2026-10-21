@@ -2,6 +2,7 @@ import { compactChat } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
+import type { ScheduledPromptExecutionSelection } from '$shared/scheduled-prompts';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ApiProtocol } from '$shared/api-providers';
 import { effectiveExecutorId } from '$shared/executors';
@@ -21,6 +22,7 @@ import {
 	parseScheduleInCommand,
 	parseSteerCommand,
 	parseTagCommand,
+	isLiteralAppCommand,
 } from '$lib/chat/composer/slash-commands.js';
 import { createClientChatId } from '$shared/client-chat-id';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
@@ -168,8 +170,12 @@ export class ConversationSlashCommandService {
 		text: string;
 		images: File[];
 		ownsComposer: boolean;
+		executionPolicy?: 'conversation' | 'literal';
+		expectedSelection?: ScheduledPromptExecutionSelection;
 	}): SlashCommandSubmissionResolution {
 		const { chatId, chat, text, images, ownsComposer } = input;
+		const policy = input.executionPolicy ?? 'conversation';
+		if (policy === 'literal' && !isLiteralAppCommand(text)) return { kind: 'continue', content: text };
 		const rename = parseRenameCommand(text);
 		if (rename) {
 			return {
@@ -194,11 +200,11 @@ export class ConversationSlashCommandService {
 			};
 		}
 
-		const schedule = parseScheduleInCommand(text);
+		const schedule = parseScheduleInCommand(text, policy);
 		if (schedule.kind !== 'not-command') {
 			return {
 				kind: 'handled',
-				outcome: this.submitScheduleInCommand(chatId, chat, schedule, images, ownsComposer),
+				outcome: this.submitScheduleInCommand(chatId, chat, schedule, images, ownsComposer, input.expectedSelection),
 			};
 		}
 
@@ -222,6 +228,10 @@ export class ConversationSlashCommandService {
 		if (modelCatalog.supportsFork(agentId)) {
 			const fork = parseForkCommand(text);
 			if (fork) {
+				if (policy === 'literal' && images.length > 0) {
+					this.deps.chatState.appendLocalNotice('error', m.chat_notice_fork_attachments());
+					return { kind: 'handled', outcome: 'rejected' };
+				}
 				if (
 					chat.status === 'running' &&
 					chat.isProcessing &&
@@ -265,6 +275,7 @@ export class ConversationSlashCommandService {
 		command: ScheduleInCommandParseResult,
 		images: File[],
 		ownsComposer: boolean,
+		expectedSelection?: ScheduledPromptExecutionSelection,
 	): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
 		if (command.kind === 'invalid') {
@@ -290,6 +301,7 @@ export class ConversationSlashCommandService {
 				chatId,
 				duration: command.duration,
 				prompt: command.prompt,
+				...(expectedSelection === undefined ? {} : { expectedSelection }),
 			});
 			if (deps.chatState.activeChatId === chatId) {
 				deps.chatState.appendLocalNotice(

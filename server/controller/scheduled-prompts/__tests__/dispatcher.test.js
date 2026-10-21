@@ -34,6 +34,15 @@ function prompt(target, text = 'Review the current work') {
 }
 
 describe('scheduled prompt dispatcher', () => {
+  it('forwards the saved selection without substituting a live mode', async () => {
+    const expectedSelection = { agentId: 'synthetic-literal', agentOwnershipEpoch: 'synthetic-epoch', model: 'notes' };
+    const submitScheduledExistingChat = mock(async input => ({ type: 'sent', chatId: input.chatId }));
+    const dispatcher = new ScheduledPromptDispatcher({ chatIds: { allocate: () => CREATED_CHAT_ID },
+      commands: { submitScheduledExistingChat, async submitScheduledStart() { throw new Error('unexpected'); } } });
+    await dispatcher.dispatch(prompt({ type: 'existing-chat', chatId: CREATED_CHAT_ID, busyBehavior: 'skip', expectedSelection }),
+      '2030-01-01T09:00:00.000Z');
+    expect(submitScheduledExistingChat.mock.calls[0][0].expectedSelection).toEqual(expectedSelection);
+  });
   it('renders body and title with one dispatch instant and never sends the task name', async () => {
     const originalTimezone = process.env.TZ;
     try {

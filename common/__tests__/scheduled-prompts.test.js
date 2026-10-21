@@ -6,6 +6,7 @@ import {
   SCHEDULED_PROMPT_MAX_LENGTH,
   normalizeScheduledPrompt,
   normalizeScheduledPromptDefinitionInput,
+  normalizeScheduledPromptTarget,
   renderScheduledPrompt,
   renderScheduledChatTitle,
   normalizeScheduledPromptsSnapshot,
@@ -18,6 +19,50 @@ const CHAT_ID = '1783725900000000';
 const VALUES = { ...TEMPLATE_VALIDATION_VALUES, chat_id: CHAT_ID };
 const PREAMBLE_A = '00000000-0000-4000-8000-000000000001';
 const PREAMBLE_B = '00000000-0000-4000-8000-000000000002';
+
+describe('scheduled execution selection', () => {
+  const expectedSelection = { agentId: 'synthetic-literal', agentOwnershipEpoch: 'synthetic-epoch', model: 'notes' };
+
+  it('retains the captured selection through definitions, persistence, and snapshots', () => {
+    const input = definition('  Synthetic note\n');
+    input.target.expectedSelection = expectedSelection;
+    const normalized = normalizeScheduledPromptDefinitionInput(input);
+    expect(normalized.target.expectedSelection).toEqual(expectedSelection);
+    const record = normalizeScheduledPrompt({ ...normalized, id: 'synthetic-schedule', enabled: true,
+      schedule: { type: 'once', nextRunAt: input.schedule.runAtUtc },
+      createdAt: '2029-01-01T00:00:00.000Z', updatedAt: '2029-01-01T00:00:00.000Z' });
+    expect(normalizeScheduledPromptsSnapshot({ revision: 1, prompts: [record], runLog: [] }).prompts[0].target.expectedSelection)
+      .toEqual(expectedSelection);
+  });
+
+  it('rejects malformed selection guards instead of dropping them', () => {
+    const target = definition('Body').target;
+    for (const guard of [
+      null,
+      false,
+      {},
+      { ...expectedSelection, agentId: '' },
+      { ...expectedSelection, agentId: ' \t' },
+      { ...expectedSelection, agentOwnershipEpoch: 1 },
+      { ...expectedSelection, agentOwnershipEpoch: ' \t' },
+      { ...expectedSelection, model: 1 },
+      { agentId: 'synthetic-literal', model: 'notes' },
+      { agentId: 'synthetic-literal', agentOwnershipEpoch: 'synthetic-epoch' },
+    ]) {
+      expect(normalizeScheduledPromptTarget({ ...target, expectedSelection: guard })).toBeNull();
+    }
+    expect(normalizeScheduledPromptTarget(target)).toEqual(target);
+  });
+
+  it.each([
+    { agentId: 'synthetic-literal', agentOwnershipEpoch: null, model: null },
+    { ...expectedSelection, model: '' },
+    { agentId: ' synthetic-literal ', agentOwnershipEpoch: ' synthetic-epoch ', model: ' notes ' },
+  ])('preserves valid selection fields without normalizing their values: %j', selection => {
+    const target = { ...definition('Body').target, expectedSelection: selection };
+    expect(normalizeScheduledPromptTarget(target)).toEqual(target);
+  });
+});
 
 describe('scheduled task names and titles', () => {
   it('normalizes static optional names, preserving Unicode code points', () => {

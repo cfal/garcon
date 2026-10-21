@@ -310,10 +310,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     }
   }
   normalizeThinkingModeForAgent(agentId: string, value: unknown, executorId?: string | null): ThinkingMode {
-    return normalizeSupportedThinkingMode(
-      value,
-      this.#directory.require(agentId, executorId).descriptor.supportedThinkingModes,
-    );
+    const descriptor = this.#directory.get(agentId, executorId)?.descriptor;
+    if (!descriptor) throw new DomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${agentId}`, 422);
+    return normalizeSupportedThinkingMode(value, descriptor.supportedThinkingModes);
   }
   supportsAuthLogin(agentId: string, executorId?: string | null): boolean { return Boolean(this.#directory.get(agentId, executorId)?.auth?.launchLogin); }
   supportsAuthLoginCompletion(agentId: string, executorId?: string | null): boolean { return Boolean(this.#directory.get(agentId, executorId)?.auth?.completeLogin); }

@@ -1052,9 +1052,10 @@ describe('ConversationSessionController', () => {
 		},
 	);
 
-	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
-		'keeps controller commands available without executor admission through %s',
-		async (submit) => {
+	it.each((['conversation', 'literal'] as const).flatMap(executionPolicy =>
+		(['submitForChat', 'submitComposerWithSteerPreference'] as const).map(submit => ({ executionPolicy, submit }))))(
+		'keeps $executionPolicy controller commands available without executor admission through $submit',
+		async ({ submit, executionPolicy }) => {
 			const { deps } = createDeps(
 				createRunningChat({
 					executorId: '22222222-2222-4222-8222-222222222222',
@@ -1062,6 +1063,9 @@ describe('ConversationSessionController', () => {
 				}),
 			);
 			deps.canSubmitToExecutor.mockReturnValue(false);
+			const metadata = deps.modelCatalog.getAgent('claude');
+			if (!metadata) throw new Error('Missing fixture metadata');
+			deps.modelCatalog.getAgent.mockImplementation(id => ({ ...metadata, id, executionPolicy }));
 			mockScheduleChatPrompt.mockResolvedValue({
 				success: true,
 				scheduledPrompt: {
@@ -1094,23 +1098,49 @@ describe('ConversationSessionController', () => {
 				chatId: 'chat-1',
 				duration: '1h',
 				prompt: 'Synthetic follow-up',
+				...(executionPolicy === 'literal' ? { expectedSelection: {
+					agentId: deps.agentState.agentId,
+					agentOwnershipEpoch: deps.sessions.byId['chat-1'].agentOwnershipEpoch,
+					model: deps.agentState.model,
+				} } : {}),
 			});
-			for (const text of [
+			const executionCommands = [
 				'Ordinary prompt',
 				'/compact',
-				'/fork',
+				'/fork with a body',
 				'/steer guidance',
 				'/rename-agent',
-			]) {
+			];
+			if (executionPolicy === 'conversation') executionCommands.push('/fork');
+			for (const text of executionCommands) {
 				deps.composerState.inputText = text;
 				expect(await controller[submit]('chat-1')).toBe('no-op');
 				expect(deps.composerState.inputText).toBe(text);
 			}
+			expect(mockForkChat).not.toHaveBeenCalled();
 			expect(mockRunChat).not.toHaveBeenCalled();
 			expect(mockSteerChat).not.toHaveBeenCalled();
 			expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 		},
 	);
+
+	it('captures the displayed literal mode and preserves the draft when scheduling rejects it', async () => {
+		const { deps } = createDeps();
+		const metadata = deps.modelCatalog.getAgent('claude')!;
+		deps.modelCatalog.getAgent.mockReturnValue({ ...metadata, executionPolicy: 'literal' });
+		const controller = new ConversationSessionController(deps);
+		controller.handleChatSwitchIfChanged('chat-1');
+		deps.agentState.model = 'pending-selection';
+		deps.composerState.inputText = '/in 1h touch synthetic-file';
+		mockScheduleChatPrompt.mockRejectedValueOnce(new ApiError(409, 'Execution selection changed', 'SCHEDULED_PROMPT_SELECTION_CHANGED'));
+
+		expect(await controller.submitForChat('chat-1')).toBe('rejected');
+		expect(mockScheduleChatPrompt).toHaveBeenCalledWith(expect.objectContaining({
+			expectedSelection: expect.objectContaining({ model: 'pending-selection' }),
+		}));
+		expect(deps.composerState.inputText).toBe('/in 1h touch synthetic-file');
+		expect(mockRunChat).not.toHaveBeenCalled();
+	});
 
 	it('renames the current chat without sending or queueing the command', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
@@ -2205,9 +2235,13 @@ describe('ConversationSessionController', () => {
 		);
 	});
 
-	it('submits bare /fork through the fork API without sending fork-run', async () => {
+	it.each(['conversation', 'literal'] as const)('submits bare /fork through the fork API for %s input without sending fork-run', async executionPolicy => {
 		const chat = createRunningChat({ id: '123' });
 		const { deps } = createDeps(chat);
+		const metadata = deps.modelCatalog.getAgent(chat.agentId);
+		if (!metadata) throw new Error('Missing fixture metadata');
+		deps.modelCatalog.getAgent.mockReturnValue({ ...metadata, executionPolicy });
+		deps.canSubmitToExecutor.mockReturnValue(executionPolicy !== 'literal');
 		deps.composerState.inputText = '/fork';
 		deps.ws.sendMessage = vi.fn(() => true);
 		mockForkChat.mockResolvedValue({
@@ -2231,6 +2265,22 @@ describe('ConversationSessionController', () => {
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('456');
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
 		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('456');
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		expect(mockRunChat).not.toHaveBeenCalled();
+	});
+
+	it('rejects bare literal fork attachments without creating a fork or losing the draft', async () => {
+		const { deps } = createDeps();
+		const metadata = deps.modelCatalog.getAgent('claude')!;
+		deps.modelCatalog.getAgent.mockReturnValue({ ...metadata, executionPolicy: 'literal' });
+		deps.composerState.inputText = '/fork';
+		deps.composerState.images = [new File(['synthetic'], 'note.txt', { type: 'text/plain' })];
+		const controller = new ConversationSessionController(deps);
+		expect(await controller.submitForChat('chat-1')).toBe('rejected');
+		expect(mockForkChat).not.toHaveBeenCalled();
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(deps.composerState.inputText).toBe('/fork');
+		expect(deps.composerState.images).toHaveLength(1);
 	});
 
 	it('keeps the fork failure notice while clearing the progress notice', async () => {
@@ -2715,6 +2765,22 @@ describe('ConversationSessionController', () => {
 		const startPayload = mockStartChat.mock.calls[0][0];
 		expect(startPayload).not.toHaveProperty('options');
 		expect(startPayload.images).toBeUndefined();
+	});
+
+	it('keeps app-looking literal automatic startup text as provider input', async () => {
+		const chat = createRunningChat({ id: 'draft-1', status: 'draft' });
+		const { deps } = createDeps(chat);
+		const metadata = deps.modelCatalog.getAgent('claude')!;
+		deps.modelCatalog.getAgent.mockReturnValue({ ...metadata, executionPolicy: 'literal' });
+		const source = '/in 1h synthetic startup text  \n';
+		deps.sessions.startupByChatId = { 'draft-1': createDraftStartup({ firstMessage: source }) };
+		mockStartChat.mockResolvedValueOnce({ success: true, commandType: 'chat-start',
+			clientRequestId: 'req-start', chatId: 'draft-1', turnId: 'turn-start', status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:00.000Z', chat: createServerEntry('draft-1') });
+		const controller = new ConversationSessionController(deps);
+		controller.handleChatSwitchIfChanged('draft-1');
+		await vi.waitFor(() => expect(mockStartChat).toHaveBeenCalledWith(expect.objectContaining({ command: source })));
+		expect(mockScheduleChatPrompt).not.toHaveBeenCalled();
 	});
 
 	it.each(['attachment-read', 'start-request'])(

@@ -8,6 +8,7 @@ import {
 } from '$lib/chat/composer/file-mentions.js';
 import {
 	findSlashCommandTrigger,
+	LITERAL_APP_COMMAND_NAMES,
 	type SlashCommandTrigger,
 } from '$lib/chat/composer/slash-commands.js';
 import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
@@ -68,7 +69,8 @@ export class PromptComposerUiState {
 		if (mode === 'literal') {
 			this.closeFileMenu();
 			const trigger = findSlashCommandTrigger(value, caret);
-			this.setSlashCommandTrigger(trigger && 'clear'.startsWith(trigger.query) ? trigger : null);
+			const matchesLiteralCommand = trigger && LITERAL_APP_COMMAND_NAMES.some(name => name.startsWith(trigger.query));
+			this.setSlashCommandTrigger(matchesLiteralCommand ? trigger : null);
 			this.snippetPalette.dismiss();
 			return;
 		}

@@ -100,6 +100,7 @@ export class SelfHandoffCommands {
     const replaying = targetExists && priorRecord !== undefined && !retryingPreScheduleFailure;
     const source = replaying ? null : this.#requireSource(input.sourceChatId);
     if (source) {
+      this.deps.agents.assertAgentAvailable(source.agentId, source.executorId);
       this.support.assertAttachmentsSupported({
         agentId: source.agentId,
         executorId: source.executorId,
