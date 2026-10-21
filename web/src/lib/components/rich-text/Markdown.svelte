@@ -50,6 +50,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 	import * as m from '$lib/paraglide/messages.js';
 	import SvelteMarkdown from '@humanspeak/svelte-markdown';
 	import MarkdownImage from './MarkdownImage.svelte';
+	import MarkdownLinkActions from './MarkdownLinkActions.svelte';
 	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 	import ChatReference from '$lib/components/chat/ChatReference.svelte';
@@ -229,53 +230,55 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		{/snippet}
 
 		{#snippet link({ href, title, text, children })}
-			{@const chatId = chatReferencePolicy === 'disabled' ? null : parseChatReferenceHref(href)}
-			{#if chatId}
-				<ChatReference
-					{chatId}
-					resolution={resolveChatReference?.(chatId) ?? null}
-					authoredLabelText={text}
-					authoredTitle={title}
-					linkClass={styles.link}
-					idClass={styles.chatReferenceId}
-				>
-					{#snippet authoredLabel()}
-						{@render children?.()}
-					{/snippet}
-				</ChatReference>
-			{:else}
-				{@const parsed = parseFileLink(href, parserOptions)}
-				{@const isFile = parsed.kind === 'file'}
-				{@const isAbsPath = parsed.blockedReason !== undefined}
-				{@const isExternal = !isFile && !isAbsPath}
-				<a
-					{href}
-					{title}
-					class={styles.link}
-					target={isExternal ? '_blank' : undefined}
-					rel={isExternal ? 'noopener noreferrer' : undefined}
-					onpointerdowncapture={stopParentContextTriggerGesture}
-					oncontextmenu={stopParentContextTriggerGesture}
-					onclick={isFile || isAbsPath
-						? (event: MouseEvent) => {
-								event.preventDefault();
-								blockedLink = null;
-								if (isFile) {
-									onLinkNavigate?.({ rawHref: href ?? '', kind: parsed.kind });
-								} else {
-									blockedLink = {
-										href: href ?? '',
-										source,
-										basePath: fileLinkBasePath,
-										reason: parsed.blockedReason,
-									};
+			<MarkdownLinkActions>
+				{@const chatId = chatReferencePolicy === 'disabled' ? null : parseChatReferenceHref(href)}
+				{#if chatId}
+					<ChatReference
+						{chatId}
+						resolution={resolveChatReference?.(chatId) ?? null}
+						authoredLabelText={text}
+						authoredTitle={title}
+						linkClass={styles.link}
+						idClass={styles.chatReferenceId}
+					>
+						{#snippet authoredLabel()}
+							{@render children?.()}
+						{/snippet}
+					</ChatReference>
+				{:else}
+					{@const parsed = parseFileLink(href, parserOptions)}
+					{@const isFile = parsed.kind === 'file'}
+					{@const isAbsPath = parsed.blockedReason !== undefined}
+					{@const isExternal = !isFile && !isAbsPath}
+					<a
+						{href}
+						{title}
+						class={styles.link}
+						target={isExternal ? '_blank' : undefined}
+						rel={isExternal ? 'noopener noreferrer' : undefined}
+						onpointerdowncapture={stopParentContextTriggerGesture}
+						oncontextmenu={stopParentContextTriggerGesture}
+						onclick={isFile || isAbsPath
+							? (event: MouseEvent) => {
+									event.preventDefault();
+									blockedLink = null;
+									if (isFile) {
+										onLinkNavigate?.({ rawHref: href ?? '', kind: parsed.kind });
+									} else {
+										blockedLink = {
+											href: href ?? '',
+											source,
+											basePath: fileLinkBasePath,
+											reason: parsed.blockedReason,
+										};
+									}
 								}
-							}
-						: undefined}
-				>
-					{@render children?.()}
-				</a>
-			{/if}
+							: undefined}
+					>
+						{@render children?.()}
+					</a>
+				{/if}
+			</MarkdownLinkActions>
 		{/snippet}
 
 		{#snippet blockquote({ children })}

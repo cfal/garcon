@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import { Button } from '$lib/components/ui/button';
 	import { getFileImages, hasFileImages } from '$lib/context/file-images-context.js';
+	import {
+		getMarkdownLinkActions,
+		hasMarkdownLinkActions,
+	} from '$lib/context/markdown-link-actions-context.js';
 	import {
 		FileImageCache,
 		type FileImageLease,
@@ -25,6 +32,7 @@
 
 	const ownsCache = !hasFileImages();
 	const cache = ownsCache ? new FileImageCache({ budgetBytes: 0 }) : getFileImages();
+	const linkActions = hasMarkdownLinkActions() ? getMarkdownLinkActions() : undefined;
 	onDestroy(() => {
 		if (ownsCache) cache.destroy();
 	});
@@ -35,6 +43,7 @@
 	const executorContextKey = $derived(file?.executorContextKey);
 	const projectPath = $derived(file?.projectPath);
 	const filePath = $derived(file?.filePath);
+	let retryVersion = $state(0);
 	// Scalar dependencies keep equivalent resolver results on the same loading attempt.
 	const attempt = $derived({
 		externalSource,
@@ -42,15 +51,28 @@
 		executorContextKey,
 		projectPath,
 		filePath,
+		retryVersion,
 	});
+	let requestedRetry = $state.raw<typeof attempt>();
+	let loaded = $state.raw<typeof attempt>();
 	let element = $state<HTMLSpanElement>();
+	let retryButton = $state<HTMLButtonElement | null>(null);
+	const retryFocusTarget = $derived(element?.closest('a') ?? element);
 	// Authored image links retain their destination instead of nesting another control.
 	const canOpen = $derived(Boolean(file && onOpen && element && !element.closest('a, button')));
 	const openLabel = $derived(m.image_open({ name: text || title || filePath || '' }));
+	const imageName = $derived(text || title || filePath || '');
+	const retryLabel = $derived(m.image_retry({ name: imageName }).trim());
+	const canRetry = $derived(
+		Boolean(externalSource || (file && executorContextKey && cache.available)),
+	);
 	let held = $state.raw<{ attempt: typeof attempt; lease: FileImageLease }>();
 	let failed = $state.raw<typeof attempt>();
 	const lease = $derived(held?.attempt === attempt ? held.lease : undefined);
 	const source = $derived(externalSource ?? lease?.image?.url);
+	const externalRetryPending = $derived(
+		Boolean(externalSource && requestedRetry === attempt && loaded !== attempt),
+	);
 	const unavailable = $derived(
 		failed === attempt ||
 			(!externalSource &&
@@ -87,7 +109,7 @@
 			void acquired.ensureCurrent();
 		}
 
-		if (typeof IntersectionObserver === 'undefined') {
+		if (current === requestedRetry || typeof IntersectionObserver === 'undefined') {
 			load();
 		} else {
 			observer = new IntersectionObserver(
@@ -105,6 +127,36 @@
 		};
 	});
 
+	$effect(() => {
+		if (unavailable && canRetry) return linkActions?.(retryControl);
+	});
+
+	$effect(() => {
+		if (
+			unavailable &&
+			requestedRetry === attempt &&
+			retryButton &&
+			document.activeElement === retryFocusTarget
+		) {
+			retryButton.focus({ preventScroll: true });
+		}
+	});
+
+	function retry(): void {
+		if (!unavailable || !canRetry) return;
+		const target = retryFocusTarget;
+		if (target && document.activeElement === retryButton) {
+			// Only explicit retries need a focus stop; ordinary image clicks must not expand messages.
+			if (!target.matches('a[href], [tabindex]')) {
+				target.setAttribute('tabindex', '-1');
+				target.addEventListener('blur', () => target.removeAttribute('tabindex'), { once: true });
+			}
+			target.focus({ preventScroll: true });
+		}
+		retryVersion += 1;
+		requestedRetry = attempt;
+	}
+
 	function failImage(current: typeof attempt, url: string): void {
 		if (current !== attempt) return;
 		if (externalSource) failed = current;
@@ -118,26 +170,68 @@
 
 {#snippet thumbnail(current: typeof attempt, url: string)}
 	<img
+		loading={requestedRetry === current ? 'eager' : 'lazy'}
 		src={url}
 		alt={text}
 		{title}
-		loading="lazy"
 		decoding="async"
 		referrerpolicy="no-referrer"
+		style:display={externalRetryPending ? 'none' : undefined}
+		onload={() => {
+			if (current === attempt) loaded = current;
+		}}
 		onerror={(event) => failImage(current, event.currentTarget.getAttribute('src') ?? '')}
 	/>
+{/snippet}
+
+{#snippet loading()}
+	<span
+		class="placeholder text-muted-foreground"
+		role="status"
+		aria-label={m.image_loading()}
+		aria-busy="true"
+	>
+		<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+	</span>
+{/snippet}
+
+{#snippet retryControl()}
+	<Button
+		bind:ref={retryButton}
+		variant="ghost"
+		size="icon-sm"
+		class={linkActions ? 'ml-1 align-middle' : ''}
+		aria-label={retryLabel}
+		title={retryLabel}
+		onpointerdowncapture={stopParentContextTriggerGesture}
+		oncontextmenu={stopParentContextTriggerGesture}
+		onclick={retry}
+	>
+		<RefreshCw class="size-3.5" aria-hidden="true" />
+	</Button>
 {/snippet}
 
 <span bind:this={element} class="markdown-image" {title}>
 	{#if unavailable}
 		<span
-			class="placeholder text-muted-foreground"
-			role="img"
-			aria-label={text || m.image_unable_to_load()}
+			class="markdown-image-error not-prose inline-flex max-w-full items-center gap-2 rounded-md border border-status-error-border bg-status-error px-3 py-2 text-sm text-status-error-foreground"
+			role={requestedRetry === attempt ? 'alert' : undefined}
 		>
-			{m.image_unable_to_load()}
+			<CircleAlert class="size-3.5 shrink-0" aria-hidden="true" />
+			<span class="min-w-0 break-words">
+				<span class="block">{m.image_unable_to_load()}</span>
+				{#if imageName}
+					<span class="block text-xs [overflow-wrap:anywhere]">{imageName}</span>
+				{/if}
+			</span>
+			{#if canRetry && !linkActions}
+				{@render retryControl()}
+			{/if}
 		</span>
 	{:else if source}
+		{#if externalRetryPending}
+			{@render loading()}
+		{/if}
 		{#key attempt}
 			{@const current = attempt}
 			{#if canOpen}
@@ -159,14 +253,7 @@
 			{/if}
 		{/key}
 	{:else}
-		<span
-			class="placeholder text-muted-foreground"
-			role="status"
-			aria-label={m.image_loading()}
-			aria-busy="true"
-		>
-			<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
-		</span>
+		{@render loading()}
 	{/if}
 </span>
 

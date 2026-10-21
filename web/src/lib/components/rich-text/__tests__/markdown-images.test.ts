@@ -112,7 +112,8 @@ describe('Markdown images', () => {
 			kind: 'file',
 		});
 		await fireEvent.error(screen.getByRole('img'));
-		expect(screen.queryByRole('button')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Open image Capture' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Retry image Capture' })).toBeTruthy();
 	});
 
 	it('leaves thumbnails without a navigation callback non-interactive', async () => {
@@ -201,6 +202,7 @@ describe('Markdown images', () => {
 		expect(container.querySelector('img')).toBeNull();
 		expect(filesApi.readContent).not.toHaveBeenCalled();
 		expect(screen.getByText('Unable to load image')).toBeTruthy();
+		expect(screen.queryByRole('button')).toBeNull();
 	});
 
 	it.each(['C:/workspace/capture.png', 'C:\\workspace\\capture.png'])(
@@ -270,7 +272,8 @@ describe('Markdown images', () => {
 		enter();
 		enter();
 		await waitFor(() => expect(filesApi.readContent).toHaveBeenCalledOnce());
-		expect(disconnect).toHaveBeenCalled();
+		expect(disconnect).toHaveBeenCalledOnce();
+		await screen.findByRole('img');
 		view.unmount();
 		expect(disconnect).toHaveBeenCalledTimes(2);
 	});
