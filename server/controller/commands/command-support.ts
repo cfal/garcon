@@ -24,6 +24,7 @@ import { InvalidChatIdError, parseChatId, type ChatId } from '../../../common/ch
 import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
 import type { UserMessagePresentation } from '../../../common/chat-types.js';
 import type { JsonObject } from '../../../common/json.js';
+import type { ScheduledPromptExecutionSelection } from '../../../common/scheduled-prompts.js';
 import {
   PREAMBLE_ERROR_CODES,
   type ChatPreambleSelection,
@@ -298,6 +299,7 @@ export interface ScheduledExistingChatInput {
   busyBehavior: 'queue' | 'skip';
   clientRequestId: string;
   clientMessageId: string;
+  expectedSelection?: ScheduledPromptExecutionSelection;
 }
 
 export type ScheduledExistingChatOutcome =

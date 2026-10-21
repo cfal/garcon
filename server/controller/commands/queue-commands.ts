@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { hasLeadingSlashCommand } from '../../../common/scheduled-prompts.js';
+import { hasLeadingSlashCommand, scheduledPromptSelectionMatches } from '../../../common/scheduled-prompts.js';
 import type {
   QueueEntryCommandResponse,
   QueueEntryCreateCommandRequest,
@@ -228,7 +228,13 @@ export class QueueCommands {
       if (!session) {
         throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
       }
+      if (input.expectedSelection && !scheduledPromptSelectionMatches(input.expectedSelection, session)) {
+        throw new CommandValidationError('VALIDATION_FAILED', 'Scheduled input was not sent because the chat execution mode or owner changed. Recreate the schedule for the intended mode.', 409);
+      }
       const policy = this.deps.agents.executionPolicy(session.agentId, session.executorId);
+      if (policy === 'literal' && !input.expectedSelection) {
+        throw new CommandValidationError('VALIDATION_FAILED', 'Scheduled input has no captured execution mode. Recreate the schedule before sending it to a literal agent.', 409);
+      }
       const command = policy === 'conversation' ? input.command.trim() : input.command;
       if (policy === 'conversation' && hasLeadingSlashCommand(command)) {
         throw new CommandValidationError('VALIDATION_FAILED', 'Scheduled prompts cannot start with a slash command');

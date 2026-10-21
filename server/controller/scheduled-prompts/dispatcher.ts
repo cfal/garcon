@@ -40,6 +40,9 @@ export class ScheduledPromptDispatcher {
         chatId: scheduledPrompt.target.chatId,
         command: renderScheduledPrompt(scheduledPrompt.prompt, runtimeTemplateValues(scheduledPrompt.target.chatId, at)),
         busyBehavior: scheduledPrompt.target.busyBehavior,
+        ...(scheduledPrompt.target.expectedSelection === undefined ? {} : {
+          expectedSelection: scheduledPrompt.target.expectedSelection,
+        }),
         clientRequestId: requestId,
         clientMessageId: messageId,
       });
