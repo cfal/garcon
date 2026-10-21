@@ -37,11 +37,29 @@ describe('scheduled execution selection', () => {
 
   it('rejects malformed selection guards instead of dropping them', () => {
     const target = definition('Body').target;
-    for (const guard of [null, false, {}, { ...expectedSelection, agentId: '' },
-      { ...expectedSelection, agentOwnershipEpoch: 1 }, { ...expectedSelection, model: 1 },
-      { agentId: 'synthetic-literal', model: 'notes' }]) {
+    for (const guard of [
+      null,
+      false,
+      {},
+      { ...expectedSelection, agentId: '' },
+      { ...expectedSelection, agentId: ' \t' },
+      { ...expectedSelection, agentOwnershipEpoch: 1 },
+      { ...expectedSelection, agentOwnershipEpoch: ' \t' },
+      { ...expectedSelection, model: 1 },
+      { agentId: 'synthetic-literal', model: 'notes' },
+      { agentId: 'synthetic-literal', agentOwnershipEpoch: 'synthetic-epoch' },
+    ]) {
       expect(normalizeScheduledPromptTarget({ ...target, expectedSelection: guard })).toBeNull();
     }
+    expect(normalizeScheduledPromptTarget(target)).toEqual(target);
+  });
+
+  it.each([
+    { agentId: 'synthetic-literal', agentOwnershipEpoch: null, model: null },
+    { ...expectedSelection, model: '' },
+    { agentId: ' synthetic-literal ', agentOwnershipEpoch: ' synthetic-epoch ', model: ' notes ' },
+  ])('preserves valid selection fields without normalizing their values: %j', selection => {
+    const target = { ...definition('Body').target, expectedSelection: selection };
     expect(normalizeScheduledPromptTarget(target)).toEqual(target);
   });
 });

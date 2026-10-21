@@ -170,6 +170,26 @@ it('captures literal selections for Settings and schedule-action creation too', 
   expect(store.list()).toHaveLength(2);
 });
 
+it('captures the current literal selection when editing an unguarded schedule', async () => {
+  const { scheduler, store, chat } = await sameChatScheduler({
+    ...agentCapabilities(),
+    chatExecutionPolicy: () => 'literal',
+  });
+  const runAt = '2099-01-01T00:00:00.000Z';
+  const previous = recurringPrompt(runAt);
+  await store.create(previous, store.revision);
+  chat.model = 'notes-markdown';
+
+  const edited = await scheduler.update({
+    id: previous.id,
+    expectedRevision: store.revision,
+    scheduledPrompt: recurringDefinition(runAt),
+  });
+
+  expect(edited.prompts[0].target).toEqual({ ...previous.target, expectedSelection: chat });
+  expect(store.list()[0].target).toEqual(edited.prompts[0].target);
+});
+
 it('rejects malformed schedule-in expectations without creating a schedule', async () => {
   const { scheduler, store } = await sameChatScheduler();
   for (const expectedSelection of [null, {}, { agentId: 'synthetic-literal', model: 'notes' }]) {

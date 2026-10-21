@@ -321,9 +321,12 @@ function normalizeApiProtocol(value: unknown): ApiProtocol | null | undefined {
 
 export function parseScheduledPromptExecutionSelection(value: unknown): ScheduledPromptExecutionSelection | null {
   const raw = asRecord(value);
-  if (!raw || typeof raw.agentId !== 'string' || !raw.agentId.trim()
-    || (raw.agentOwnershipEpoch !== null && (typeof raw.agentOwnershipEpoch !== 'string' || !raw.agentOwnershipEpoch.trim()))
-    || (raw.model !== null && typeof raw.model !== 'string')) return null;
+  if (!raw || typeof raw.agentId !== 'string' || !raw.agentId.trim()) return null;
+  if (raw.agentOwnershipEpoch !== null
+    && (typeof raw.agentOwnershipEpoch !== 'string' || !raw.agentOwnershipEpoch.trim())) {
+    return null;
+  }
+  if (raw.model !== null && typeof raw.model !== 'string') return null;
   return { agentId: raw.agentId, agentOwnershipEpoch: raw.agentOwnershipEpoch, model: raw.model };
 }
 
