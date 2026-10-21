@@ -2,13 +2,21 @@ import { expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import { watch } from 'node:fs';
 import path from 'node:path';
+import { GH_DETAIL_TIMEOUT_MS, GIT_OPERATION_TIMEOUT_MS } from '../../../common/git-execution.js';
+import * as gitOperation from '../../runtime/git/operation-context.js';
 import { gitRpcFixture } from './git-rpc-fixture.js';
 
 test('paginated GitHub policy reads retain their detail budget on Local and remote', async () => {
   const fixture = await gitRpcFixture();
   const originalPath = process.env.PATH;
-  const originalTimeout = globalThis.setTimeout;
-  const timer = spyOn(globalThis, 'setTimeout');
+  const operation = spyOn(gitOperation, 'withGitOperation');
+  function expectDetailBudget(): void {
+    expect(operation).toHaveBeenCalledTimes(1);
+    const timeoutMs = operation.mock.calls[0]![1]?.timeoutMs;
+    expect(timeoutMs).toBeGreaterThan(GIT_OPERATION_TIMEOUT_MS);
+    expect(timeoutMs).toBeLessThanOrEqual(GH_DETAIL_TIMEOUT_MS);
+    operation.mockClear();
+  }
   try {
     const bin = path.join(fixture.root, 'bin');
     await fs.mkdir(bin);
@@ -16,19 +24,17 @@ test('paginated GitHub policy reads retain their detail budget on Local and remo
     await fs.chmod(path.join(bin, 'gh'), 0o755);
     process.env.PATH = `${bin}:${originalPath}`;
     await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({
-      label: 'synthetic', pageSize: 1, delayMs: 50, pulls: [{ number: 1 }, { number: 2 }],
+      label: 'synthetic', pageSize: 1, pulls: [{ number: 1 }, { number: 2 }],
     }));
-    // Accelerates only operation deadlines; subprocess pages still take real time.
-    timer.mockImplementation((callback, delay, ...args) => originalTimeout(callback,
-      delay && delay > 59_000 && delay <= 60_000 ? 2_000
-        : delay && delay > 29_000 && delay <= 30_000 ? 25 : delay, ...args));
     for (const service of [await fixture.local.getGhService(), await fixture.executor.getGhService()]) {
       const repository = {host: "git.example.invalid", nameWithOwner: "synthetic/repository"};
-      const list = await service.listPullRequests({ projectPath: fixture.projectPath }, { timeoutMs: 60_000 });
+      const list = await service.listPullRequests({ projectPath: fixture.projectPath });
       expect(list.pulls.map(pull => pull.number)).toEqual([1, 2]);
+      expectDetailBudget();
       expect((await service.getPullRequestReviewTarget({ projectPath: fixture.projectPath, repository, number: 1, marker: 'garcon-review synthetic/repository#1 ' })).state).toBe('open');
+      expectDetailBudget();
     }
-  } finally { timer.mockRestore(); process.env.PATH = originalPath; await fixture.dispose(); }
+  } finally { operation.mockRestore(); process.env.PATH = originalPath; await fixture.dispose(); }
 }, 10_000);
 
 for (const dialer of ['controller', 'worker'] as const) {
