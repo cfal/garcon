@@ -82,6 +82,7 @@ for (const executionBackend of ['in-process', 'remote-executor-dials', 'remote-c
         await mkdir(artifactDirectory, { recursive: true });
         for (const width of [1440, 320]) {
           await page.setViewportSize({ width, height: 900 });
+          await browserExpect(page.locator('.mobile-shell')).toHaveCount(width === 320 ? 1 : 0);
           for (const retry of [retryPending, retryLinked, retryPartial]) {
             await retry.scrollIntoViewIfNeeded();
             await browserExpect(retry).toBeVisible();
@@ -113,6 +114,7 @@ for (const executionBackend of ['in-process', 'remote-executor-dials', 'remote-c
           }
         }
         await page.setViewportSize({ width: 1440, height: 900 });
+        await browserExpect(page.locator('.mobile-shell')).toHaveCount(0);
         await browserExpect(retryPending).toBeVisible();
         await browserExpect(retryLinked).toBeVisible();
         await browserExpect(retryPartial).toBeVisible();
