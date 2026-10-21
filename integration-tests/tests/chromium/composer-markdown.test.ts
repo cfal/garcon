@@ -362,6 +362,19 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await page.goto(`${integration.garcon.baseUrl}/chat/${ids[0]}`);
       const textarea = page.getByPlaceholder("Reply...", { exact: true });
       const editor = page.getByRole("textbox", { name: "Formatted message" });
+      const selectFirstCellEnd = async () => {
+        await editor.evaluate(element => {
+          const paragraph = element.querySelector('td p');
+          if (!paragraph) throw new Error('Expected a table cell paragraph');
+          const rich = (element as HTMLElement & { editor: {
+            view: { posAtDOM(node: Node, offset: number): number };
+            commands: { setTextSelection(position: number): void; unsetBold(): void };
+          } }).editor;
+          // End targets a visual line in wrapped cells, not the paragraph boundary.
+          rich.commands.setTextSelection(rich.view.posAtDOM(paragraph, paragraph.childNodes.length));
+          rich.commands.unsetBold();
+        });
+      };
       const format = async () => {
         await selectMessageFormat(page, 'formatted');
         await editor.focus();
@@ -505,10 +518,9 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
           ),
         ).toBe(true);
         await screenshot(`composer-markdown-${width}.png`);
-        await editor.locator("td").first().click();
-        await page.keyboard.press("End");
+        await selectFirstCellEnd();
         await page.keyboard.type(" edited");
-        await browserExpect(textarea).toHaveValue(/Startup ready.*edited/);
+        await browserExpect(textarea).toHaveValue(/\*\*Startup ready\*\* edited/);
         await browserExpect(textarea).toHaveValue(/`a  b`/);
         const edited = await textarea.inputValue();
         await clear();
@@ -517,16 +529,7 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
           await format();
           await browserExpect(editor).toBeVisible();
           await browserExpect(editor).toBeFocused();
-          await editor.locator("td").first().locator("p").click();
-          await browserExpect
-            .poll(() => editor.evaluate(element => {
-              const mounted = element as HTMLElement & {
-                editor: { state: { selection: { $from: { parent: { textContent: string } } } } };
-              };
-              return mounted.editor.state.selection.$from.parent.textContent;
-            }))
-            .toBe("Startup ready edited");
-          await page.keyboard.press("End");
+          await selectFirstCellEnd();
           await page.keyboard.press("Control+B");
           await page.keyboard.press("Shift+Enter");
           await page.keyboard.type("next paragraph");
