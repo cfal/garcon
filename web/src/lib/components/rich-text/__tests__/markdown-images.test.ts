@@ -93,9 +93,7 @@ describe('Markdown images', () => {
 			{ signal: expect.any(AbortSignal), cache: 'no-store' },
 		);
 		expect(screen.getByRole('img').getAttribute('title')).toBe('Desktop');
-		const signal = vi.mocked(filesApi.readContent).mock.calls[0][1]?.signal;
 		view.unmount();
-		expect(signal?.aborted).toBe(true);
 		expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-1');
 	});
 

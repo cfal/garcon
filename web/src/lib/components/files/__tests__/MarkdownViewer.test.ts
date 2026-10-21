@@ -110,7 +110,7 @@ describe('MarkdownViewer', () => {
 				{ signal: expect.any(AbortSignal), cache: 'no-store' },
 			),
 		);
-		expect(screen.getByRole('img').getAttribute('src')).toBe('blob:file-preview');
+		expect((await screen.findByRole('img')).getAttribute('src')).toBe('blob:file-preview');
 		await fireEvent.click(screen.getByRole('button', { name: 'Open image Capture' }));
 		expect(onOpen).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
 			executorId: remoteExecutor.id,

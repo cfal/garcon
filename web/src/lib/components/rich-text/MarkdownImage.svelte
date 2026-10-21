@@ -1,7 +1,11 @@
 <script lang="ts">
-	import { getAbortSignal } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import { readContent } from '$lib/api/files.js';
+	import { getFileImages, hasFileImages } from '$lib/context/file-images-context.js';
+	import {
+		FileImageCache,
+		type FileImageLease,
+	} from '$lib/files/images/file-image-cache.svelte.js';
 	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -18,6 +22,12 @@
 		resolveImageFile?: ResolveMarkdownImageFile;
 		onOpen?: (href: string) => void;
 	} = $props();
+
+	const ownsCache = !hasFileImages();
+	const cache = ownsCache ? new FileImageCache({ budgetBytes: 0 }) : getFileImages();
+	onDestroy(() => {
+		if (ownsCache) cache.destroy();
+	});
 
 	const externalSource = $derived(href && /^(https?:)?\/\//i.test(href) ? href : undefined);
 	const file = $derived(href && !externalSource ? resolveImageFile?.(href) : null);
@@ -37,68 +47,68 @@
 	// Authored image links retain their destination instead of nesting another control.
 	const canOpen = $derived(Boolean(file && onOpen && element && !element.closest('a, button')));
 	const openLabel = $derived(m.image_open({ name: text || title || filePath || '' }));
-	let loaded = $state.raw<{ attempt: typeof attempt; url: string; release: () => void }>();
+	let held = $state.raw<{ attempt: typeof attempt; lease: FileImageLease }>();
 	let failed = $state.raw<typeof attempt>();
-	const source = $derived(externalSource ?? (loaded?.attempt === attempt ? loaded.url : undefined));
+	const lease = $derived(held?.attempt === attempt ? held.lease : undefined);
+	const source = $derived(externalSource ?? lease?.image?.url);
 	const unavailable = $derived(
-		failed === attempt || (!externalSource && (!executorId || !projectPath || !filePath)),
+		failed === attempt ||
+			(!externalSource &&
+				(!executorId || !projectPath || !filePath || !cache.available || lease?.failed)),
 	);
 
 	$effect(() => {
 		const current = attempt;
 		const target = element;
-		if (!target || !current.executorId || !current.projectPath || !current.filePath) return;
-		const params = {
+		void cache.generation;
+		if (
+			!target ||
+			!cache.available ||
+			!current.executorId ||
+			!current.executorContextKey ||
+			!current.projectPath ||
+			!current.filePath
+		)
+			return;
+		const acquired = cache.acquire({
 			executorId: current.executorId,
+			executorContextKey: current.executorContextKey,
 			projectPath: current.projectPath,
 			filePath: current.filePath,
-		};
-		const signal = getAbortSignal();
-		let objectUrl: string | undefined;
+		});
+		held = { attempt: current, lease: acquired };
 		let started = false;
 		let observer: IntersectionObserver | undefined;
 
-		function release(): void {
-			if (objectUrl) URL.revokeObjectURL(objectUrl);
-			objectUrl = undefined;
-		}
-
-		async function load(): Promise<void> {
-			if (started || signal.aborted) return;
+		function load(): void {
+			if (started) return;
 			started = true;
 			observer?.disconnect();
-			try {
-				const { blob } = await readContent(params, { signal, cache: 'no-store' });
-				if (signal.aborted) return;
-				if (!blob.type.startsWith('image/')) throw new Error('Invalid image content type');
-				objectUrl = URL.createObjectURL(blob);
-				loaded = { attempt: current, url: objectUrl, release };
-			} catch {
-				if (!signal.aborted) failed = current;
-			}
+			void acquired.ensureCurrent();
 		}
 
 		if (typeof IntersectionObserver === 'undefined') {
-			void load();
+			load();
 		} else {
 			observer = new IntersectionObserver(
 				(entries) => {
-					if (entries.some((entry) => entry.isIntersecting)) void load();
+					if (entries.some((entry) => entry.isIntersecting)) load();
 				},
 				{ rootMargin: '50px' },
 			);
 			observer.observe(target);
 		}
 		return () => {
+			started = true;
 			observer?.disconnect();
-			release();
+			acquired.release();
 		};
 	});
 
-	function failImage(current: typeof attempt): void {
+	function failImage(current: typeof attempt, url: string): void {
 		if (current !== attempt) return;
-		failed = current;
-		if (loaded?.attempt === current) loaded.release();
+		if (externalSource) failed = current;
+		else lease?.reportDisplayError(url);
 	}
 
 	function stopParentContextTriggerGesture(event: PointerEvent | MouseEvent): void {
@@ -114,7 +124,7 @@
 		loading="lazy"
 		decoding="async"
 		referrerpolicy="no-referrer"
-		onerror={() => failImage(current)}
+		onerror={(event) => failImage(current, event.currentTarget.getAttribute('src') ?? '')}
 	/>
 {/snippet}
 

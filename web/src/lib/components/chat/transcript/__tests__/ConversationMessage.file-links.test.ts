@@ -428,7 +428,7 @@ describe('ConversationMessage local images', () => {
 					{ signal: expect.any(AbortSignal), cache: 'no-store' },
 				),
 			);
-			expect(screen.getByRole('img', { name: 'Capture' }).getAttribute('src')).toBe('blob:preview');
+			expect((await screen.findByRole('img', { name: 'Capture' })).getAttribute('src')).toBe('blob:preview');
 			await fireEvent.click(screen.getByRole('button', { name: 'Open image Capture' }));
 			expect(openAuto).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
 				executorId: remoteExecutor.id,

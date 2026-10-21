@@ -14,7 +14,16 @@ const expectedConcerns = {
 		'transcript',
 	],
 	git: ['commit', 'history', 'pull-requests', 'review', 'surface', 'targets', 'workbench'],
-	files: ['documents', 'editor', 'navigation', 'persistence', 'sessions', 'surface', 'tree'],
+	files: [
+		'documents',
+		'editor',
+		'images',
+		'navigation',
+		'persistence',
+		'sessions',
+		'surface',
+		'tree',
+	],
 	terminal: ['runtime', 'sessions'],
 	sidebar: ['projects', 'search'],
 } as const;
