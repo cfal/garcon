@@ -44,6 +44,51 @@ async function expectSizeOptionsToFit(sizeSelect: Locator): Promise<void> {
   }
 }
 
+test('Markdown images use authenticated file reads on the owning remote executor', async () => {
+  await withChromiumFixture('markdown-remote-images', async ({ page, integration, assertNoBrowserErrors }) => {
+    const { client, executionDirs, directAgents, garcon } = integration;
+    const path = join(executionDirs.project, 'capture.png');
+    await writeFile(path, await createImageBuffer(page, { width: 160, height: 90 }));
+    const chatId = integration.newChatId();
+    const started = await client.startDirectChat({
+      chatId, content: `![Relative capture](capture.png)\n\n![Absolute capture](${path})`,
+      projectPath: executionDirs.project, agent: directAgents.openAi,
+    });
+    await client.waitForTurnTerminal(chatId, started.turnId);
+    const fileRequests: Array<{ url: string; authorization?: string }> = [];
+    const rawRequests: string[] = [];
+    page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === '/api/v1/files/content') fileRequests.push({ url: request.url(), authorization: request.headers().authorization });
+      if (url.pathname.endsWith('/capture.png')) rawRequests.push(request.url());
+    });
+    await page.goto(`${garcon.baseUrl}/chat/${chatId}`);
+    const assistant = page.locator('[data-chat-message-type="assistant-message"]');
+    const images = assistant.locator('.markdown-image img');
+    await browserExpect(images).toHaveCount(2);
+    for (const image of await images.all()) {
+      await browserExpect(image).toHaveAttribute('src', /^blob:/);
+      await expectDecodedImage(image);
+    }
+    expect(await images.nth(0).getAttribute('src')).toBe(await images.nth(1).getAttribute('src'));
+    expect(fileRequests).toHaveLength(1);
+    await assistant.getByRole('img', { name: 'Relative capture', exact: true }).click();
+    const expandedImage = page.locator('[data-workspace-surface-id^="file:"] img[alt="capture.png"]');
+    await browserExpect(expandedImage).toHaveAttribute('src', /^blob:/);
+    await expectDecodedImage(expandedImage);
+    expect(fileRequests).toHaveLength(2);
+    for (const request of fileRequests) {
+      const query = new URL(request.url).searchParams;
+      expect(query.get('executorId')).toBe(client.executorId);
+      expect(query.get('projectPath')).toBe(executionDirs.project);
+      expect(query.get('path')).toBe('capture.png');
+      expect(request.authorization).toBe(`Bearer ${garcon.authToken}`);
+    }
+    expect(rawRequests).toEqual([]);
+    assertNoBrowserErrors();
+  }, undefined, { executionBackend: 'remote-executor-dials', projectRoots: 'separate' });
+}, 60_000);
+
 test('persists inline image size limits and bounds local and external images without distortion', async () => {
   await withChromiumFixture('markdown-image-layout', async ({ page, integration, assertNoBrowserErrors }) => {
     const { client, executionDirs, directAgents } = integration;
