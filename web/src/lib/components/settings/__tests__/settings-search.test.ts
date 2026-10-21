@@ -16,6 +16,9 @@ describe('settings search', () => {
 			{ tab: 'automation', label: 'Commit message model', section: 'Automation' },
 		]);
 		expect(searchSettings(entries, 'interface theme').length).toBeGreaterThan(0);
+		expect(searchSettings(entries, 'image cache')).toEqual([
+			{ tab: 'interface', label: 'Inline image cache size', section: 'Interface' },
+		]);
 		expect(searchSettings(entries, 'Mermaid')).toEqual([
 			{ tab: 'interface', label: 'Inline Mermaid thumbnail size (px)', section: 'Interface' },
 		]);

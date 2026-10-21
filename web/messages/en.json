@@ -1755,6 +1755,7 @@
 	"settings_inline_image_thumbnail_size_medium": "Medium 640x320",
 	"settings_inline_image_thumbnail_size_large": "Large 960x480",
 	"settings_inline_image_thumbnail_size_full": "Full",
+	"settings_image_cache_size": "Inline image cache size",
 	"settings_inline_mermaid_thumbnail_size": "Inline Mermaid thumbnail size (px)",
 	"settings_inline_mermaid_thumbnail_size_small": "Small 320x180",
 	"settings_inline_mermaid_thumbnail_size_medium": "Medium 640x320",

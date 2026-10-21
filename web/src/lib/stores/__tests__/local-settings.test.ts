@@ -3,6 +3,7 @@ import {
 	createLocalSettingsStore,
 	HIDEABLE_TOOL_GROUPS,
 	INLINE_IMAGE_THUMBNAIL_SIZE_VALUES,
+	IMAGE_CACHE_SIZE_MIB_VALUES,
 	INLINE_MERMAID_THUMBNAIL_SIZE_VALUES,
 	SIDEBAR_INACTIVITY_DURATION_VALUES,
 } from '../local-settings.svelte.ts';
@@ -24,6 +25,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.fullscreenCoversSidebar).toBe(true);
 		expect(store.chatMaxWidth).toBe('none');
 		expect(store.inlineImageThumbnailSize).toBe('medium');
+		expect(store.imageCacheSizeMiB).toBe(64);
 		expect(store.inlineMermaidThumbnailSize).toBe('medium');
 		expect(store.overlayBackdropEffects).toBe(true);
 		expect(store.highlightActiveWindow).toBe(true);
@@ -50,6 +52,28 @@ describe('LocalSettingsStore', () => {
 		expect(store.steerWithCtrlEnter).toBe(true);
 		expect(store.codeEditorVimMode).toBe(false);
 
+		store.destroy();
+	});
+
+	it.each(IMAGE_CACHE_SIZE_MIB_VALUES)('persists the %i MiB image cache budget', (size) => {
+		const store = createLocalSettingsStore();
+		store.set('imageCacheSizeMiB', size);
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ imageCacheSizeMiB: size });
+		const restored = createLocalSettingsStore();
+		expect(restored.imageCacheSizeMiB).toBe(size);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it.each([0, -8, 9, 1024, '64', null, {}])('rejects invalid image cache budget %j', (size) => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ imageCacheSizeMiB: size }),
+		);
+		const store = createLocalSettingsStore();
+		expect(store.imageCacheSizeMiB).toBe(64);
 		store.destroy();
 	});
 

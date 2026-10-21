@@ -7,6 +7,7 @@
 		FILE_OPEN_PLACEMENT_VALUES,
 		HIDEABLE_TOOL_GROUPS,
 		INLINE_IMAGE_THUMBNAIL_SIZE_VALUES,
+		IMAGE_CACHE_SIZE_MIB_VALUES,
 		INLINE_MERMAID_THUMBNAIL_SIZE_VALUES,
 		SIDEBAR_INACTIVITY_DURATION_VALUES,
 		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MAX_PX,
@@ -14,6 +15,7 @@
 		isChatMaxWidth,
 		isFileOpenPlacement,
 		isInlineImageThumbnailSize,
+		isImageCacheSizeMiB,
 		isInlineMermaidThumbnailSize,
 		isSidebarInactivityDuration,
 		type ChatMaxWidth,
@@ -98,6 +100,11 @@
 
 	function setInlineImageThumbnailSize(value: string): void {
 		if (isInlineImageThumbnailSize(value)) ls.set('inlineImageThumbnailSize', value);
+	}
+
+	function setImageCacheSize(value: string): void {
+		const size = Number(value);
+		if (isImageCacheSizeMiB(size)) ls.set('imageCacheSizeMiB', size);
 	}
 
 	function setInlineMermaidThumbnailSize(value: string): void {
@@ -280,6 +287,21 @@
 				>
 					{#each INLINE_IMAGE_THUMBNAIL_SIZE_VALUES as size (size)}
 						<option value={size}>{inlineImageThumbnailSizeLabels[size]()}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+				<label class="min-w-0 text-sm font-medium text-foreground" for="local-image-cache-size">
+					{m.settings_image_cache_size()}
+				</label>
+				<select
+					id="local-image-cache-size"
+					class="select-native w-full sm:w-auto sm:shrink-0"
+					value={ls.imageCacheSizeMiB}
+					onchange={(event) => setImageCacheSize(event.currentTarget.value)}
+				>
+					{#each IMAGE_CACHE_SIZE_MIB_VALUES as size (size)}
+						<option value={size}>{size} MiB</option>
 					{/each}
 				</select>
 			</div>

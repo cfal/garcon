@@ -46,6 +46,8 @@ export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as con
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 export const INLINE_IMAGE_THUMBNAIL_SIZE_VALUES = ['small', 'medium', 'large', 'full'] as const;
 export type InlineImageThumbnailSize = (typeof INLINE_IMAGE_THUMBNAIL_SIZE_VALUES)[number];
+export const IMAGE_CACHE_SIZE_MIB_VALUES = [8, 16, 32, 64, 128, 256, 512] as const;
+export type ImageCacheSizeMiB = (typeof IMAGE_CACHE_SIZE_MIB_VALUES)[number];
 export const INLINE_MERMAID_THUMBNAIL_SIZE_VALUES = ['small', 'medium', 'large', 'full'] as const;
 export type InlineMermaidThumbnailSize = (typeof INLINE_MERMAID_THUMBNAIL_SIZE_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
@@ -153,6 +155,7 @@ export interface LocalSettingsSnapshot {
 	snippetTrigger: string;
 	chatMaxWidth: ChatMaxWidth;
 	inlineImageThumbnailSize: InlineImageThumbnailSize;
+	imageCacheSizeMiB: ImageCacheSizeMiB;
 	inlineMermaidThumbnailSize: InlineMermaidThumbnailSize;
 	workspaceWindowTitlebarHeightDeltaPx: number;
 	fullscreenCoversSidebar: boolean;
@@ -229,6 +232,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
 	inlineImageThumbnailSize: 'medium',
+	imageCacheSizeMiB: 64,
 	inlineMermaidThumbnailSize: 'medium',
 	workspaceWindowTitlebarHeightDeltaPx: 0,
 	fullscreenCoversSidebar: true,
@@ -299,6 +303,12 @@ export function isChatMaxWidth(value: unknown): value is ChatMaxWidth {
 
 function parseChatMaxWidth(value: unknown): ChatMaxWidth {
 	return isChatMaxWidth(value) ? value : DEFAULTS.chatMaxWidth;
+}
+
+export function isImageCacheSizeMiB(value: unknown): value is ImageCacheSizeMiB {
+	return (
+		typeof value === 'number' && IMAGE_CACHE_SIZE_MIB_VALUES.includes(value as ImageCacheSizeMiB)
+	);
 }
 
 export function isInlineImageThumbnailSize(value: unknown): value is InlineImageThumbnailSize {
@@ -435,6 +445,9 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		inlineImageThumbnailSize: isInlineImageThumbnailSize(parsed.inlineImageThumbnailSize)
 			? parsed.inlineImageThumbnailSize
 			: DEFAULTS.inlineImageThumbnailSize,
+		imageCacheSizeMiB: isImageCacheSizeMiB(parsed.imageCacheSizeMiB)
+			? parsed.imageCacheSizeMiB
+			: DEFAULTS.imageCacheSizeMiB,
 		inlineMermaidThumbnailSize: isInlineMermaidThumbnailSize(parsed.inlineMermaidThumbnailSize)
 			? parsed.inlineMermaidThumbnailSize
 			: DEFAULTS.inlineMermaidThumbnailSize,
@@ -548,6 +561,7 @@ export class LocalSettingsStore {
 	snippetTrigger = $state(DEFAULTS.snippetTrigger);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
 	inlineImageThumbnailSize = $state<InlineImageThumbnailSize>(DEFAULTS.inlineImageThumbnailSize);
+	imageCacheSizeMiB = $state<ImageCacheSizeMiB>(DEFAULTS.imageCacheSizeMiB);
 	inlineMermaidThumbnailSize = $state<InlineMermaidThumbnailSize>(
 		DEFAULTS.inlineMermaidThumbnailSize,
 	);
@@ -680,6 +694,7 @@ export class LocalSettingsStore {
 			snippetTrigger: this.snippetTrigger,
 			chatMaxWidth: this.chatMaxWidth,
 			inlineImageThumbnailSize: this.inlineImageThumbnailSize,
+			imageCacheSizeMiB: this.imageCacheSizeMiB,
 			inlineMermaidThumbnailSize: this.inlineMermaidThumbnailSize,
 			workspaceWindowTitlebarHeightDeltaPx: this.workspaceWindowTitlebarHeightDeltaPx,
 			fullscreenCoversSidebar: this.fullscreenCoversSidebar,
@@ -735,6 +750,7 @@ export class LocalSettingsStore {
 		this.snippetTrigger = snap.snippetTrigger;
 		this.chatMaxWidth = snap.chatMaxWidth;
 		this.inlineImageThumbnailSize = snap.inlineImageThumbnailSize;
+		this.imageCacheSizeMiB = snap.imageCacheSizeMiB;
 		this.inlineMermaidThumbnailSize = snap.inlineMermaidThumbnailSize;
 		this.workspaceWindowTitlebarHeightDeltaPx = snap.workspaceWindowTitlebarHeightDeltaPx;
 		this.fullscreenCoversSidebar = snap.fullscreenCoversSidebar;

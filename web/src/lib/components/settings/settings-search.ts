@@ -28,6 +28,7 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			m.settings_workspace_titlebar_size(),
 			m.settings_chat_max_width(),
 			m.settings_inline_image_thumbnail_size(),
+			m.settings_image_cache_size(),
 			m.settings_inline_mermaid_thumbnail_size(),
 			m.settings_sidebar_inactivity_duration(),
 			m.settings_overlay_backdrop_effects(),

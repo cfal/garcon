@@ -15,6 +15,8 @@
 	import ReauthenticationOverlay from '$lib/components/auth/ReauthenticationOverlay.svelte';
 	import { AUTH_UNAVAILABLE_CLOSE_CODE } from '$shared/ws-auth';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+	import { FileImageCache } from '$lib/files/images/file-image-cache.svelte.js';
+	import { setFileImages } from '$lib/context/file-images-context.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte.js';
 	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
@@ -124,6 +126,12 @@
 	const auth = createAuthStore();
 	const terminalIdentity = new TerminalClientIdentity();
 	const localSettings = createLocalSettingsStore();
+	const fileImages = new FileImageCache({
+		budgetBytes: localSettings.imageCacheSizeMiB * 1024 * 1024,
+		owner: null,
+	});
+	setFileImages(fileImages);
+	$effect(() => fileImages.setIdleBudget(localSettings.imageCacheSizeMiB * 1024 * 1024));
 	const remoteSettings = createRemoteSettingsStore();
 	const scheduledPrompts = createScheduledPromptsStore();
 	const preambles = createPreamblesStore();
@@ -320,14 +328,15 @@
 		} else untrack(() => ws.pauseForAuth());
 	});
 
-	let ticketOwner: string | null = null;
+	let presentationOwnerKey: string | null = null;
 	$effect(() => {
 		const authenticated = auth.isAuthenticated;
 		const owner = auth.presentationOwner;
 		const key = owner ? JSON.stringify([owner.mode, owner.key]) : null;
 		untrack(() => {
-			if (key !== ticketOwner) {
-				ticketOwner = key;
+			fileImages.setOwner(key);
+			if (key !== presentationOwnerKey) {
+				presentationOwnerKey = key;
 				ticketsInvalidations.publishAuthority(authenticated);
 			} else ticketsInvalidations.publishAvailability(authenticated);
 		});
@@ -527,6 +536,7 @@
 		chatBoardsRouter.destroy();
 		ticketsRouter.destroy();
 		localSettings.destroy();
+		fileImages.destroy();
 		sidebarProjectCollapse.destroy();
 		minuteClock.destroy();
 		sidebarSearch.destroy();

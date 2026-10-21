@@ -376,6 +376,15 @@ describe('Settings', () => {
 				expect(onLocalSet).toHaveBeenCalledWith('inlineImageThumbnailSize', value);
 				expect((thumbnailSize as HTMLSelectElement).value).toBe(value);
 			}
+			const imageCacheSize = screen.getByRole('combobox', { name: 'Inline image cache size' });
+			expect((imageCacheSize as HTMLSelectElement).value).toBe('64');
+			expect(within(imageCacheSize).getAllByRole('option')).toHaveLength(7);
+			for (const size of [8, 16, 32, 64, 128, 256, 512]) {
+				expect(within(imageCacheSize).getByRole('option', { name: `${size} MiB` })).toBeTruthy();
+				await fireEvent.change(imageCacheSize, { target: { value: String(size) } });
+				expect(onLocalSet).toHaveBeenCalledWith('imageCacheSizeMiB', size);
+				expect((imageCacheSize as HTMLSelectElement).value).toBe(String(size));
+			}
 			const mermaidSize = screen.getByRole('combobox', {
 				name: 'Inline Mermaid thumbnail size (px)',
 			});
