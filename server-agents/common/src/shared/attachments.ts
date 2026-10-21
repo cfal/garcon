@@ -53,6 +53,15 @@ export function isTextAttachment(attachment: AttachmentInput): boolean {
   return TEXT_ATTACHMENT_MIMES.has(attachmentMimeType(attachment));
 }
 
+// Decoded bytes bound the decoded character count, so this never admits text
+// that appendTextAttachmentContext would truncate.
+export function fitsInlineTextAttachment(attachment: AttachmentInput): boolean {
+  const parts = parseAttachmentDataUrl(attachment.data);
+  return isTextAttachment(attachment)
+    && Boolean(parts)
+    && Buffer.byteLength(parts!.base64, 'base64') <= MAX_INLINE_ATTACHMENT_CHARS;
+}
+
 export function isDocumentAttachment(attachment: AttachmentInput): boolean {
   return DOCUMENT_ATTACHMENT_MIMES.has(attachmentMimeType(attachment));
 }

@@ -44,5 +44,16 @@ describe("Claude disk attachments", () => {
 
     expect(materialized.command).toBe("Read this");
     expect(materialized.filePaths).toEqual([]);
+    expect(materialized.inlineAttachments).toHaveLength(4);
+  });
+
+  it("writes text too long to inline to disk instead of truncating it", async () => {
+    const large = attachment("large.csv", "text/csv", "a,b\n".repeat(40_000));
+    const materialized = await materializeClaudeDiskAttachments("Analyze", [large]);
+
+    expect(materialized.inlineAttachments).toEqual([]);
+    expect(materialized.filePaths[0]).toEndWith("large.csv");
+    expect((await fs.stat(materialized.filePaths[0])).size).toBe(160_000);
+    await materialized.cleanup();
   });
 });

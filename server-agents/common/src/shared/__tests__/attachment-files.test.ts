@@ -16,6 +16,13 @@ describe('attachment files', () => {
     expect(attachmentFileName(attachment('.env', 'text/plain'), 3)).toBe('4-env.txt');
   });
 
+  it('bounds long multi-byte names by bytes and keeps the extension', () => {
+    const name = attachmentFileName(attachment('表'.repeat(150) + '.xlsx', 'application/octet-stream'), 0);
+    expect(Buffer.byteLength(name)).toBeLessThanOrEqual(255);
+    expect(name).toEndWith('表.xlsx');
+    expect(name).not.toContain('�');
+  });
+
   it('adds the known extension when the name has none', () => {
     expect(attachmentFileName(attachment(null, 'image/png'), 0)).toBe('1-attachment.png');
     expect(attachmentFileName(attachment('notes', 'text/markdown'), 0)).toBe('1-notes.md');

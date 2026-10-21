@@ -1104,7 +1104,7 @@ class ClaudeCliRuntime {
       const prepared = await materializeClaudeDiskAttachments(command, images);
       cleanupDiskAttachments = prepared.cleanup;
       if (executionAdmission) await executionAdmission.markStarted();
-      await this.#sendUserMessage(session, activeTurn, prepared.command, images);
+      await this.#sendUserMessage(session, activeTurn, prepared.command, prepared.inlineAttachments);
       this.#completeSessionInitialization(session);
       await this.#waitForTurnComplete(activeTurn);
     } catch (error) {
@@ -1267,7 +1267,7 @@ class ClaudeCliRuntime {
       const prepared = await materializeClaudeDiskAttachments(command, images);
       cleanupDiskAttachments = prepared.cleanup;
       if (executionAdmission) await executionAdmission.markStarted();
-      await this.#sendUserMessage(session, activeTurn, prepared.command, images);
+      await this.#sendUserMessage(session, activeTurn, prepared.command, prepared.inlineAttachments);
       await this.#waitForTurnComplete(activeTurn);
     } catch (error) {
       if (ownedTurn && session.activeTurn === ownedTurn) {

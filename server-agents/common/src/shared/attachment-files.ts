@@ -16,7 +16,8 @@ export interface MaterializedAttachmentFiles {
 }
 
 const UNSAFE_FILE_NAME_CHARS_RE = /[\u0000-\u001f\u007f/\\:*?"<>|]/g;
-const MAX_FILE_NAME_CHARS = 120;
+// File systems limit names to 255 bytes; the index prefix needs a few more.
+const MAX_FILE_NAME_BYTES = 200;
 
 const NO_FILES: MaterializedAttachmentFiles = { files: [], cleanup: async () => {} };
 
@@ -51,15 +52,25 @@ export async function materializeAttachmentFiles(
 
 // Prefixes the index so two attachments with the same name stay distinct.
 export function attachmentFileName(attachment: AttachmentInput, index: number): string {
-  const baseName = path.basename(attachment.name?.replace(/\\/g, '/') ?? '')
-    .replace(UNSAFE_FILE_NAME_CHARS_RE, '_')
-    .trim()
-    .slice(-MAX_FILE_NAME_CHARS)
-    .replace(/^\.+/, '');
+  const baseName = truncateFileName(
+    path.basename(attachment.name?.replace(/\\/g, '/') ?? '')
+      .replace(UNSAFE_FILE_NAME_CHARS_RE, '_')
+      .trim()
+      .replace(/^\.+/, ''),
+  );
   const extension = chatAttachmentExtension(attachmentMimeType(attachment));
   const named = baseName || 'attachment';
   const withExtension = path.extname(named) || !extension ? named : `${named}.${extension}`;
   return `${index + 1}-${withExtension}`;
+}
+
+// Shortens the stem by whole code points so the extension survives.
+function truncateFileName(name: string): string {
+  if (Buffer.byteLength(name) <= MAX_FILE_NAME_BYTES) return name;
+  const extension = path.extname(name);
+  const stem = Array.from(name.slice(0, name.length - extension.length));
+  while (stem.length > 0 && Buffer.byteLength(stem.join('') + extension) > MAX_FILE_NAME_BYTES) stem.pop();
+  return stem.join('') + extension;
 }
 
 export function appendAttachmentFileReferences(

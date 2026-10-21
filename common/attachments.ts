@@ -1,4 +1,4 @@
-// Image types every image-capable provider accepts natively. Other image/*
+// Image types sent to image-capable providers as image content. Other image/*
 // types, such as HEIC or TIFF, are ordinary files.
 export const IMAGE_ATTACHMENT_MIME_TYPES = [
   'image/gif',
@@ -84,16 +84,17 @@ const CHAT_ATTACHMENT_MIME_ALIASES: Readonly<Record<string, string>> = {
 const MIME_TYPE_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
 
 // A known extension outranks the declared type because browsers disagree on
-// common files: Windows Chrome declares CSV as application/vnd.ms-excel.
+// common files: Windows Chrome declares CSV as application/vnd.ms-excel. A
+// declared image type is kept, since providers check it against the bytes.
 export function chatAttachmentMimeType(file: {
   readonly name: string;
   readonly type?: string | null;
 }): string {
+  const rawDeclared = file.type?.trim().toLowerCase() ?? '';
+  const declared = CHAT_ATTACHMENT_MIME_ALIASES[rawDeclared] ?? rawDeclared;
+  if (isImageAttachmentMimeType(declared)) return declared;
   const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
-  const inferred = CHAT_ATTACHMENT_MIME_BY_EXTENSION[extension];
-  if (inferred) return inferred;
-  const declared = file.type?.trim().toLowerCase() ?? '';
-  return CHAT_ATTACHMENT_MIME_ALIASES[declared] ?? (declared || 'application/octet-stream');
+  return CHAT_ATTACHMENT_MIME_BY_EXTENSION[extension] ?? (declared || 'application/octet-stream');
 }
 
 export function chatAttachmentExtension(mimeType: string): string | null {

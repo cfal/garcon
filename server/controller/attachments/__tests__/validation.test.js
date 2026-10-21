@@ -80,6 +80,17 @@ describe('attachment validation', () => {
     ]).map((attachment) => attachment.mimeType)).toEqual(['application/octet-stream', 'text/csv', xlsx]);
   });
 
+  it('rejects empty attachments instead of dropping them', () => {
+    expect(() => validateCommandAttachments([{ data: 'data:text/plain;base64,', name: '.gitkeep' }]))
+      .toThrow('Attachment .gitkeep is empty.');
+  });
+
+  it('keeps a declared image type that disagrees with the extension', () => {
+    expect(validateCommandAttachments([
+      { data: dataUrl('image/png', 'png'), name: 'shot.jpg', mimeType: 'image/png' },
+    ])[0].mimeType).toBe('image/png');
+  });
+
   it('rejects malformed attachment MIME types', () => {
     expect(() => validateCommandAttachments([{
       data: dataUrl('not a mime', 'binary'),

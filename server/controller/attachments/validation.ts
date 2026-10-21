@@ -71,6 +71,9 @@ export function validateCommandAttachments(value: unknown): AgentCommandImage[] 
       throw new AttachmentValidationError('Invalid attachment payload.');
     }
     const size = Buffer.byteLength(base64, 'base64');
+    if (size === 0) {
+      throw new AttachmentValidationError(`Attachment ${name} is empty.`);
+    }
     assertAttachmentSize(size, mimeType);
     totalBytes += size;
     if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
