@@ -370,6 +370,43 @@ describe('Markdown image recovery', () => {
 		},
 	);
 
+	it.each(['source', 'executorId', 'executorContextKey'])(
+		'keeps replacement failures passive after %s changes during a keyboard retry',
+		async (change) => {
+			vi.mocked(filesApi.readContent).mockRejectedValueOnce(new Error('Not found'));
+			const view = render(Markdown, { source: '![Capture](capture.png)', resolveImageFile });
+			const retry = await screen.findByRole('button', { name: 'Retry image Capture' });
+			const pending = Promise.withResolvers<typeof imageResult>();
+			const replacement = Promise.withResolvers<typeof imageResult>();
+			vi.mocked(filesApi.readContent)
+				.mockReturnValueOnce(pending.promise)
+				.mockReturnValueOnce(replacement.promise);
+			retry.focus();
+			await fireEvent.click(retry);
+			const thumbnail = view.container.querySelector('.markdown-image');
+			expect(document.activeElement).toBe(thumbnail);
+			const signal = vi.mocked(filesApi.readContent).mock.calls[1][1]?.signal;
+			if (change === 'source') {
+				await view.rerender({ source: '![Capture](other.png)' });
+			} else {
+				await view.rerender({
+					resolveImageFile: (href) => ({ ...resolveImageFile(href)!, [change]: 'replacement' }),
+				});
+			}
+			expect(signal?.aborted).toBe(true);
+			expect(filesApi.readContent).toHaveBeenCalledTimes(3);
+			pending.reject(new Error('Previous retry failed'));
+			replacement.reject(new Error('Replacement failed'));
+			const replacementRetry = await screen.findByRole('button', { name: 'Retry image Capture' });
+			expect(screen.queryByRole('alert')).toBeNull();
+			expect(document.activeElement).toBe(thumbnail);
+			expect(thumbnail?.getAttribute('tabindex')).toBe('-1');
+			replacementRetry.focus();
+			expect(document.activeElement).toBe(replacementRetry);
+			expect(thumbnail?.hasAttribute('tabindex')).toBe(false);
+		},
+	);
+
 	it('ignores detached-image errors before and after retry publication', async () => {
 		render(Markdown, { source: '![Capture](capture.png)', resolveImageFile });
 		const oldImage = await screen.findByRole('img');

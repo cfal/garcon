@@ -64,6 +64,7 @@ describe('shared Markdown image cache', () => {
 		cache.setOwner(null);
 		await tick();
 		expect(screen.getByText('Unable to load image')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Retry image Capture' })).toBeNull();
 		expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:cached-1');
 		cache.setOwner('user:second');
 		await waitFor(() => expect(screen.getByRole('img').getAttribute('src')).toBe('blob:cached-2'));
