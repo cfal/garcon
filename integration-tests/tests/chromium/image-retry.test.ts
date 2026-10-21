@@ -7,8 +7,9 @@ import { Deferred } from '../../support/deferred.js';
 
 const EXPECTED_NOT_FOUND =
   'console.error: Failed to load resource: the server responded with a status of 404 (Not Found)';
+const EXTERNAL_IMAGE_URL = 'https://images.example.test/capture.png';
 
-async function createImageBuffer(page: Page): Promise<Buffer> {
+async function createPngBuffer(page: Page): Promise<Buffer> {
   const encoded = await page.evaluate(() => {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 1;
@@ -26,7 +27,7 @@ for (const executionBackend of ['in-process', 'remote-executor-dials', 'remote-c
       `image-retry-${executionBackend}`,
       async ({ page, integration, browserErrors, failedResponses }) => {
         const { client, executionDirs, directAgents, garcon } = integration;
-        const png = await createImageBuffer(page);
+        const png = await createPngBuffer(page);
         await writeFile(join(executionDirs.project, 'partial.png'), png.subarray(0, 24));
         await writeFile(join(executionDirs.project, 'good.png'), png);
         await writeFile(join(executionDirs.project, 'linked.md'), '# Linked document');
@@ -218,9 +219,9 @@ for (const linked of [false, true]) {
   test(`retries an external image without authentication or URL rewriting (linked: ${linked})`, async () => {
     await withChromiumFixture(`external-image-retry-${linked}`, async ({ page, integration, browserErrors }) => {
       const { client, executionDirs, directAgents, garcon } = integration;
-      const png = await createImageBuffer(page);
+      const png = await createPngBuffer(page);
       const chatId = integration.newChatId();
-      const imageMarkdown = '![External capture](https://images.example.test/capture.png)';
+      const imageMarkdown = `![External capture](${EXTERNAL_IMAGE_URL})`;
       const started = await client.startDirectChat({
         chatId,
         content: linked ? `[${imageMarkdown}](C:/workspace/guide.md)` : imageMarkdown,
@@ -230,7 +231,7 @@ for (const linked of [false, true]) {
       await client.waitForTurnTerminal(chatId, started.turnId);
       let ready = false;
       const releaseRetry = new Deferred<void>();
-      await page.route('https://images.example.test/capture.png', async (route) => {
+      await page.route(EXTERNAL_IMAGE_URL, async (route) => {
         expect(route.request().headers().authorization).toBeUndefined();
         expect(route.request().headers().referer).toBeUndefined();
         if (ready) await releaseRetry.promise;
@@ -269,7 +270,7 @@ for (const linked of [false, true]) {
       });
       await browserExpect(image).toBeVisible();
       await browserExpect(image).toHaveJSProperty('naturalWidth', 1);
-      await browserExpect(image).toHaveAttribute('src', 'https://images.example.test/capture.png');
+      await browserExpect(image).toHaveAttribute('src', EXTERNAL_IMAGE_URL);
       await browserExpect(assistant.getByRole('status')).toHaveCount(0);
       await page.locator('[data-conversation-composer-host] textarea[placeholder="Reply..."]').focus();
       await browserExpect(assistant.locator('.markdown-image[tabindex], a[tabindex]')).toHaveCount(0);
@@ -277,3 +278,71 @@ for (const linked of [false, true]) {
     });
   }, 180_000);
 }
+
+test('keeps shared-link retry focus and button order tied to the active image', async () => {
+  await withChromiumFixture('shared-link-image-retry', async ({ page, integration, browserErrors }) => {
+    const { client, executionDirs, directAgents, garcon } = integration;
+    const png = await createPngBuffer(page);
+    const firstUrl = new URL('first.png', EXTERNAL_IMAGE_URL).href;
+    const secondUrl = new URL('second.png', EXTERNAL_IMAGE_URL).href;
+    const firstRelease = new Deferred<void>();
+    const secondRelease = new Deferred<void>();
+    let holdRetries = false;
+    let ready = false;
+    await page.route('https://images.example.test/*.png', async (route) => {
+      if (holdRetries) {
+        const release = route.request().url() === firstUrl ? firstRelease : secondRelease;
+        await release.promise;
+      }
+      await route.fulfill({
+        status: ready ? 200 : 404,
+        contentType: 'image/png',
+        body: ready ? png : '',
+      });
+    });
+    const chatId = integration.newChatId();
+    const started = await client.startDirectChat({
+      chatId,
+      content: `[![First](${firstUrl}) ![Second](${secondUrl})](https://docs.example.test/guide)`,
+      projectPath: executionDirs.project,
+      agent: directAgents.openAi,
+    });
+    await client.waitForTurnTerminal(chatId, started.turnId);
+    await page.goto(`${garcon.baseUrl}/chat/${chatId}`);
+    const assistant = page.locator('[data-chat-message-type="assistant-message"]');
+    const firstRetry = assistant.getByRole('button', { name: 'Retry image First', exact: true });
+    const secondRetry = assistant.getByRole('button', { name: 'Retry image Second', exact: true });
+    const link = assistant.getByRole('link');
+    await browserExpect(firstRetry).toBeVisible();
+    await browserExpect(secondRetry).toBeVisible();
+    holdRetries = true;
+    try {
+      await firstRetry.press('Enter');
+      await secondRetry.press('Enter');
+      await browserExpect(link).toBeFocused();
+      await link.dispatchEvent('blur');
+      firstRelease.resolve();
+      await browserExpect(firstRetry).toBeVisible();
+      await browserExpect(link).toBeFocused();
+      secondRelease.resolve();
+      await browserExpect(secondRetry).toBeFocused();
+      const retryLabels = await assistant
+        .getByRole('button', { name: /^Retry image / })
+        .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label')));
+      expect(retryLabels).toEqual(['Retry image First', 'Retry image Second']);
+      ready = true;
+      await firstRetry.press('Enter');
+      const recovered = assistant.getByRole('img', { name: 'First', exact: true });
+      await browserExpect(recovered).toHaveJSProperty('naturalWidth', 1);
+      await browserExpect(link).toBeFocused();
+      await recovered.dispatchEvent('error');
+      await browserExpect(firstRetry).toBeVisible();
+      await browserExpect(assistant.locator('.markdown-image-error').first()).not.toHaveAttribute('role', 'alert');
+      await browserExpect(link).toBeFocused();
+    } finally {
+      firstRelease.resolve();
+      secondRelease.resolve();
+    }
+    expect(browserErrors.filter((error) => error !== EXPECTED_NOT_FOUND)).toEqual([]);
+  });
+}, 180_000);
