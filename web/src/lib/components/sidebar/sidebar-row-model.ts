@@ -18,7 +18,6 @@ import {
 	type SidebarChatOrderMap,
 	type SidebarChatSection,
 	type SidebarRowModel,
-	type SidebarVirtualProjectHeaderRow,
 	type SidebarVirtualChatRow,
 	type SidebarVirtualRow,
 } from './sidebar-virtual-chat-list';
@@ -326,17 +325,19 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 // Project headers show only their folder name, so headers whose names collide
 // under one executor also show their parent directories.
 function withAmbiguousProjectNames(rows: SidebarVirtualRow[]): SidebarVirtualRow[] {
-	const nameKey = (row: SidebarVirtualProjectHeaderRow): string =>
-		JSON.stringify([effectiveExecutorId(row.executorId), splitProjectPath(row.projectPath).name]);
+	const nameKeys = new Map<SidebarVirtualRow, string>();
 	const pathsByName = new Map<string, Set<string>>();
 	for (const row of rows) {
 		if (row.type !== 'project-header') continue;
-		const paths = pathsByName.get(nameKey(row)) ?? new Set<string>();
-		paths.add(row.projectPath);
-		pathsByName.set(nameKey(row), paths);
+		const key = JSON.stringify([
+			effectiveExecutorId(row.executorId),
+			splitProjectPath(row.projectPath).name,
+		]);
+		nameKeys.set(row, key);
+		pathsByName.set(key, (pathsByName.get(key) ?? new Set()).add(row.projectPath));
 	}
 	return rows.map((row) =>
-		row.type === 'project-header' && (pathsByName.get(nameKey(row))?.size ?? 0) > 1
+		row.type === 'project-header' && pathsByName.get(nameKeys.get(row)!)!.size > 1
 			? { ...row, showParentPath: true }
 			: row,
 	);

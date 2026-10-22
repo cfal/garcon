@@ -43,6 +43,13 @@ describe('splitProjectPath', () => {
 		});
 	});
 
+	it('keeps the drive root separator for top-level Windows directories', () => {
+		const driveRootChild = { name: 'workspace', parent: 'C:\\' };
+		expect(splitProjectPath('C:\\workspace')).toEqual(driveRootChild);
+		expect(splitProjectPath('C:\\workspace\\')).toEqual(driveRootChild);
+		expect(splitProjectPath('C:\\')).toEqual({ name: 'C:\\', parent: '' });
+	});
+
 	it('returns relative single-segment paths without a parent', () => {
 		expect(splitProjectPath('project-a')).toEqual({ name: 'project-a', parent: '' });
 	});

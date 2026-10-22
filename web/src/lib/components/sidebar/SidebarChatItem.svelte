@@ -106,10 +106,7 @@
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
 	let isSingleLineLayout = $derived(displayOptions.chatItemLayout === 'single-line');
-	// Multi-select narrows the inset to make room for the checkbox column.
-	let contentInset = $derived(
-		isMultiSelectMode ? sidebarChatInset(depth) - 4 : sidebarChatInset(depth),
-	);
+	let contentInset = $derived(sidebarChatInset(depth));
 	let hasAdditionalLines = $derived(
 		!isSingleLineLayout || (displayOptions.showProjectPath && Boolean(session.projectPath?.trim())),
 	);
