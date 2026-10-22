@@ -84,15 +84,24 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const cdp = await context.newCDPSession(page);
         await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: width < 500 });
         await page.setViewportSize({ width, height: 900 });
+        await browserExpect.poll(() => page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(width < 500);
+        for (const control of [trigger, pins.getByRole('button', { name: sharedPath, exact: true })]) {
+          await browserExpect.poll(() => control.evaluate(element => element.getBoundingClientRect().height)).toBe(28);
+        }
+        await browserExpect.poll(() => pins.evaluate(element => {
+          const rows = [...new Set([...element.querySelectorAll('button')]
+            .map(button => button.getBoundingClientRect().top))].sort((a, b) => a - b);
+          return element.getBoundingClientRect().height - (rows.length * 28 + (rows.length - 1) * 8);
+        })).toBe(0);
         await trigger.click();
         await browserExpect(picker).toBeVisible();
+        await browserExpect.poll(() => offlinePin.evaluate(element => element.getBoundingClientRect().height)).toBe(28);
         await browserExpect.poll(() => picker.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         const surface = width < 500
           ? page.getByRole('dialog', { name: 'Other executors…', exact: true })
           : page.locator('[data-slot="popover-content"]').filter({ has: picker });
         await browserExpect(surface).toBeVisible();
         if (width < 500) {
-          await browserExpect.poll(() => trigger.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
           const box = await surface.boundingBox();
           expect(box).not.toBeNull();
           expect(box!.y + box!.height).toBeCloseTo(900, 0);
@@ -134,7 +143,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
   }, 120_000);
 }
 
-test('executor pin picker retains touch targets with a fine primary pointer and secondary touchscreen', async () => {
+test('executor pins stay compact with a fine primary pointer and secondary touchscreen', async () => {
   const browser = await chromium.launch({
     headless: true,
     args: ['--blink-settings=primaryPointerType=4,availablePointerTypes=6'],
@@ -161,11 +170,11 @@ test('executor pin picker retains touch targets with a fine primary pointer and 
       const pin = pins.getByRole('button', { name: dirs.project, exact: true });
       await browserExpect(page.locator('[data-slot="project-path-field"] .text-status-success-foreground')).toBeVisible();
       for (const control of [trigger, pin]) {
-        await browserExpect.poll(() => control.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+        await browserExpect.poll(() => control.evaluate(element => element.getBoundingClientRect().height)).toBe(28);
       }
       await trigger.click();
       const groupedPin = page.getByRole('button', { name: 'Touchscreen worker: /projects/atlas', exact: true });
-      await browserExpect.poll(() => groupedPin.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+      await browserExpect.poll(() => groupedPin.evaluate(element => element.getBoundingClientRect().height)).toBe(28);
       await page.keyboard.press('Escape');
       await browserExpect(trigger).toBeFocused();
       await client.put('/api/v1/app/settings', { paths: { byExecutor: { [worker.id]: { pinnedPaths: [] } } } });

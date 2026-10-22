@@ -33,7 +33,7 @@
 				aria-describedby={statusId}
 				aria-pressed={selectedPath === pinnedPath}
 				title={pinnedPath}
-				class="min-h-7 min-w-0 max-w-full rounded-md border px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring any-pointer-coarse:min-h-11 {selectedPath ===
+				class="min-h-7 min-w-0 max-w-full rounded-md border px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {selectedPath ===
 				pinnedPath
 					? 'border-border bg-accent text-accent-foreground'
 					: 'border-border/70 bg-muted/40 text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'} disabled:cursor-not-allowed disabled:opacity-50"

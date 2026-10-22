@@ -27,7 +27,7 @@
 	const currentReady = $derived(executors.isReady(form.executorId));
 	const otherGroups = $derived(groups.filter((group) => group.executorId !== form.executorId));
 	const triggerClass =
-		'min-h-7 shrink-0 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring any-pointer-coarse:min-h-11';
+		'min-h-7 shrink-0 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 	function select(executorId: string, path: string): void {
 		if (pins.select(executorId, path)) open = false;
