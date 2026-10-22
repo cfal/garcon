@@ -1,7 +1,7 @@
 import { test } from 'bun:test';
 import { expect } from 'playwright/test';
 import { mkdir } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import type { Page } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
@@ -91,6 +91,7 @@ test('sidebar executor hierarchy separates executors, sections, projects, and ch
       { executorId: BUILD_EXECUTOR_ID, projectPath: '/home/demo', title: 'Nightly build report', ageMs: 21 * HOUR_MS },
       { executorId: BUILD_EXECUTOR_ID, projectPath: '/home/demo/projects/ledger/unified-deposit', title: 'Order path optimization', ageMs: 60_000 },
       { executorId: BUILD_EXECUTOR_ID, projectPath: '/home/demo/projects/ledger/unified-deposit', title: 'Dependency updates', ageMs: 3 * HOUR_MS },
+      { executorId: BUILD_EXECUTOR_ID, projectPath: '/home/demo/forks/unified-deposit', title: 'Compare fork changes', ageMs: 4 * HOUR_MS },
     ];
     const sessions = [
       { ...live, title: 'Feed error investigation' },
@@ -124,7 +125,13 @@ test('sidebar executor hierarchy separates executors, sections, projects, and ch
     const projectHeader = page.locator(`[data-sidebar-project-header="${gatewayPath}"]`).first();
     await expect(projectHeader).toHaveAttribute('data-sidebar-row-depth', '1');
     await expect(projectHeader.locator('[data-sidebar-group-header-label]')).toHaveText('atlas-service-gateway');
-    await expect(projectHeader.locator('[data-sidebar-project-header-parent]')).toHaveText(dirname(gatewayPath));
+    await expect(projectHeader.locator('[data-sidebar-project-header-parent]')).toHaveCount(0);
+    await expect(projectHeader.locator('[data-sidebar-group-header-count]')).toHaveCount(0);
+    // Projects that share a folder name under one executor show their parents to stay distinguishable.
+    await expect(page.locator('[data-sidebar-project-header="/home/demo/forks/unified-deposit"] [data-sidebar-project-header-parent]'))
+      .toHaveText('/home/demo/forks');
+    await expect(page.locator('[data-sidebar-project-header="/home/demo/projects/ledger/unified-deposit"] [data-sidebar-project-header-parent]'))
+      .toHaveText('/home/demo/projects/ledger');
     await expect(projectHeader).toHaveAttribute('title', `Studio server: ${gatewayPath}`);
     const sectionHeader = page.locator(`[data-sidebar-section-key="executor:${studio}:section:inactive"]`);
     await expect(sectionHeader).toHaveAttribute('data-sidebar-row-depth', '1');
@@ -148,6 +155,7 @@ test('sidebar executor hierarchy separates executors, sections, projects, and ch
     phase('collapse and restore an executor');
     await executorHeader.click();
     await expect(executorHeader).toHaveAttribute('aria-expanded', 'false');
+    await expect(executorHeader.locator('[data-sidebar-group-header-count]')).toHaveText('9');
     await expect(page.getByText('Null response logging', { exact: true })).toHaveCount(0);
     await page.reload();
     await expect(executorHeader).toHaveAttribute('aria-expanded', 'false');

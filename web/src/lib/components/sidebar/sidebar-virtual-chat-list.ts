@@ -13,13 +13,12 @@ export const EXECUTOR_HEADER_ROW_HEIGHT = 36;
 export const DEFAULT_CHAT_ROW_OVERSCAN = 8;
 export const CHAT_ROW_SEPARATOR_SLOT_HEIGHT = 2;
 
-// Horizontal geometry shared by headers, chat rows, tree guides, and separators.
-// Each nesting level indents by one step, which places a child's content under
-// its parent header's icon.
+// Horizontal geometry shared by headers, chat rows, and separators. A header's
+// label follows its 12px chevron and 6px gap, so a chat one level deeper starts
+// exactly where its parent's label does.
 const SIDEBAR_HEADER_BASE_INSET = 6;
-const SIDEBAR_CHAT_BASE_INSET = 8;
-const SIDEBAR_NESTING_STEP = 16;
-const SIDEBAR_CHEVRON_CENTER = 6;
+const SIDEBAR_CHAT_BASE_INSET = 12;
+const SIDEBAR_NESTING_STEP = 12;
 
 export function sidebarHeaderInset(depth: number): number {
 	return SIDEBAR_HEADER_BASE_INSET + depth * SIDEBAR_NESTING_STEP;
@@ -27,14 +26,6 @@ export function sidebarHeaderInset(depth: number): number {
 
 export function sidebarChatInset(depth: number): number {
 	return SIDEBAR_CHAT_BASE_INSET + depth * SIDEBAR_NESTING_STEP;
-}
-
-// Places one vertical guide beneath each ancestor header's disclosure chevron.
-export function sidebarTreeGuideOffsets(depth: number): number[] {
-	return Array.from(
-		{ length: depth },
-		(_, level) => sidebarHeaderInset(level) + SIDEBAR_CHEVRON_CENTER,
-	);
 }
 
 export interface SidebarVirtualProjectHeaderRow {
@@ -51,6 +42,8 @@ export interface SidebarVirtualProjectHeaderRow {
 	isCollapsed: boolean;
 	/** True when an executor header already identifies this project's executor. */
 	executorGrouped?: boolean;
+	/** True when another project under the same executor shares this folder name. */
+	showParentPath?: boolean;
 }
 
 export interface SidebarVirtualExecutorHeaderRow {
@@ -113,6 +106,8 @@ export interface SidebarVirtualChatRow {
 	reorderScopeIds: string[];
 	/** True when an executor header already identifies this chat's executor. */
 	executorGrouped?: boolean;
+	/** Section header the chat renders directly beneath, when it is not within a project. */
+	section?: SidebarChatSection;
 }
 
 export type SidebarVirtualRow =

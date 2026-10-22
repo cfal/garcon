@@ -40,6 +40,8 @@
 		depth?: number;
 		/** True when an executor header already names this chat's executor. */
 		executorGrouped?: boolean;
+		/** True when an Archived section header already marks this chat as archived. */
+		inArchivedSection?: boolean;
 		enableNativeDrag?: boolean;
 		enableRecenterOnRequest?: boolean;
 		onChatSelect: (chatId: string) => void;
@@ -75,6 +77,7 @@
 		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		depth = 0,
 		executorGrouped = false,
+		inArchivedSection = false,
 		enableNativeDrag = true,
 		enableRecenterOnRequest = true,
 		onChatSelect,
@@ -233,7 +236,7 @@
 </script>
 
 {#snippet stateBadge()}
-	{#if !isMultiSelectMode && (isPinned || isArchived)}
+	{#if !isMultiSelectMode && (isPinned || (isArchived && !inArchivedSection))}
 		<div
 			class={cn(
 				'relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',

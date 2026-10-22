@@ -11,12 +11,14 @@ import { prioritizeOptimisticArchives, sortSidebarChatsByRecency } from './chat-
 import type { PinnedInsertPosition } from '$shared/settings';
 import { isProjectPathAncestor, normalizeProjectPath } from '$lib/utils/project-path.js';
 import { effectiveExecutorId } from '$shared/executors';
+import { splitProjectPath } from '$lib/project-paths/compact-project-path';
 import {
 	sidebarSectionKey,
 	sidebarSectionProjectKey,
 	type SidebarChatOrderMap,
 	type SidebarChatSection,
 	type SidebarRowModel,
+	type SidebarVirtualProjectHeaderRow,
 	type SidebarVirtualChatRow,
 	type SidebarVirtualRow,
 } from './sidebar-virtual-chat-list';
@@ -317,6 +319,30 @@ export function buildSidebarExecutorCollapseKeys(input: {
 }
 
 export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowModel {
+	const model = buildGroupedSidebarRows(input);
+	return { ...model, rows: withAmbiguousProjectNames(model.rows) };
+}
+
+// Project headers show only their folder name, so headers whose names collide
+// under one executor also show their parent directories.
+function withAmbiguousProjectNames(rows: SidebarVirtualRow[]): SidebarVirtualRow[] {
+	const nameKey = (row: SidebarVirtualProjectHeaderRow): string =>
+		JSON.stringify([effectiveExecutorId(row.executorId), splitProjectPath(row.projectPath).name]);
+	const pathsByName = new Map<string, Set<string>>();
+	for (const row of rows) {
+		if (row.type !== 'project-header') continue;
+		const paths = pathsByName.get(nameKey(row)) ?? new Set<string>();
+		paths.add(row.projectPath);
+		pathsByName.set(nameKey(row), paths);
+	}
+	return rows.map((row) =>
+		row.type === 'project-header' && (pathsByName.get(nameKey(row))?.size ?? 0) > 1
+			? { ...row, showParentPath: true }
+			: row,
+	);
+}
+
+function buildGroupedSidebarRows(input: SidebarRowModelInput): SidebarRowModel {
 	const groupByExecutor =
 		input.groupByExecutor ??
 		shouldGroupSidebarByExecutor({
@@ -712,7 +738,7 @@ function appendSidebarChatSection(input: {
 			if (!chat) continue;
 			appendChatRow(
 				input.rows,
-				createChatRow(chat, list, `${list}:${key}`, scopeIds, 0),
+				{ ...createChatRow(chat, list, `${list}:${key}`, scopeIds, 0), section: input.section },
 				input.visibleOrders,
 				input.visibleChatIds,
 				input.reorderScopesByChatId,

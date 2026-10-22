@@ -196,7 +196,7 @@ describe('shared sidebar chat row', () => {
 			session: createChat({ isUnread: false, isProcessing: true }),
 		});
 
-		expect(title.className).toContain('font-medium');
+		expect(title.className).toContain('font-normal');
 		expect(title.className).not.toContain('font-bold');
 		expect(preview.className).toContain('font-normal');
 		expect(preview.className).not.toContain('font-semibold');
@@ -208,7 +208,7 @@ describe('shared sidebar chat row', () => {
 			selectedChatId: 'chat-1',
 		});
 
-		expect(title.className).toContain('font-medium');
+		expect(title.className).toContain('font-normal');
 		expect(title.className).not.toContain('font-bold');
 		expect(preview.className).toContain('font-normal');
 		expect(preview.className).not.toContain('font-semibold');

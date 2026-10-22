@@ -279,6 +279,34 @@ describe('sidebar row model', () => {
 		expect(ungrouped.rows.some((row) => 'executorGrouped' in row)).toBe(false);
 	});
 
+	it('marks project names that collide under one executor', () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const chats = [
+			chat('a', '/workspace/clients/app'),
+			chat('b', '/workspace/forks/app'),
+			chat('c', '/workspace/notes'),
+			chat('d', '/remote/app', { executorId }),
+		];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project',
+			currentTime: TEST_NOW,
+		});
+
+		const ambiguity = Object.fromEntries(
+			model.rows
+				.filter((row) => row.type === 'project-header')
+				.map((row) => [row.projectPath, row.showParentPath ?? false]),
+		);
+		expect(ambiguity).toEqual({
+			'/workspace/clients/app': true,
+			'/workspace/forks/app': true,
+			'/workspace/notes': false,
+			'/remote/app': false,
+		});
+	});
+
 	it('collapses an executor without losing its project anchor', () => {
 		const executorId = '22222222-2222-4222-8222-222222222222';
 		const chats = [chat('local', '/local'), chat('remote', '/remote', { executorId })];

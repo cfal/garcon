@@ -11,8 +11,8 @@ import {
 	PROJECT_HEADER_ROW_HEIGHT,
 	sidebarChatInset,
 	sidebarHeaderInset,
-	sidebarTreeGuideOffsets,
 	type SidebarVirtualChatRow,
+	type SidebarVirtualProjectHeaderRow,
 	type SidebarVirtualRow,
 } from '../sidebar-virtual-chat-list';
 import { sidebarProjectKey } from '../sidebar-row-model';
@@ -130,7 +130,7 @@ function makeProjectHeader(
 	count: number,
 	chatIds: string[] = [],
 	isCollapsed = false,
-): SidebarVirtualRow {
+): SidebarVirtualProjectHeaderRow {
 	return {
 		type: 'project-header',
 		key: `project:${sidebarProjectKey(projectPath)}`,
@@ -187,16 +187,21 @@ function querySummaryProjectPath(projectPath: string): HTMLElement | null {
 	);
 }
 
+// Expanded groups list their chats, so only collapsed groups end with a count.
 function expectCompactGroupHeader(header: HTMLElement): void {
 	const label = header.querySelector<HTMLElement>('[data-sidebar-group-header-label]');
 	const disclosureIcon = header.firstElementChild;
-	const count = header.lastElementChild;
+	const count = header.querySelector('[data-sidebar-group-header-count]');
 
 	expect(label).toBeTruthy();
 	expect(disclosureIcon?.tagName.toLowerCase()).toBe('svg');
 	expect(disclosureIcon?.getAttribute('aria-hidden')).toBe('true');
-	expect(count?.hasAttribute('data-sidebar-group-header-count')).toBe(true);
 	expect(disclosureIcon?.compareDocumentPosition(label!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+	if (header.getAttribute('aria-expanded') === 'true') {
+		expect(count).toBeNull();
+		return;
+	}
+	expect(header.lastElementChild).toBe(count);
 	expect(label?.compareDocumentPosition(count!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 }
 
@@ -435,7 +440,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			],
 		});
 
-		expectCompactGroupHeader(screen.getByRole('button', { name: 'Local 2' }));
+		expectCompactGroupHeader(screen.getByRole('button', { name: 'Local' }));
 		expect(document.querySelector('[data-sidebar-executor-header="local"]')).toBeTruthy();
 		const executorItem = document.querySelector<HTMLElement>(
 			'[data-sidebar-virtual-item="executor-header"]',
@@ -470,7 +475,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		expectCompactGroupHeader(activityHeader);
 	});
 
-	it('indents nested rows and draws one tree guide per ancestor header', () => {
+	it('aligns nested chats with their parent header label', () => {
 		const projectPath = '/workspace/clients/project-a';
 		const chatRow: SidebarVirtualChatRow = {
 			...makeScopedRow(0, projectPath, ['chat-0']),
@@ -503,22 +508,12 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(projectHeader?.querySelector('[data-sidebar-group-header-label]')?.textContent).toBe(
 			'project-a',
 		);
-		expect(projectHeader?.querySelector('[data-sidebar-project-header-parent]')?.textContent).toBe(
-			'/workspace/clients',
-		);
+		expect(projectHeader?.querySelector('[data-sidebar-project-header-parent]')).toBeNull();
+		expect(projectHeader?.querySelector('[data-sidebar-group-header-count]')).toBeNull();
 		expect(projectHeader?.getAttribute('title')).toBe(projectPath);
 
-		const guideOffsets = (type: SidebarVirtualRow['type']) =>
-			[
-				...document.querySelectorAll<HTMLElement>(
-					`[data-sidebar-virtual-item="${type}"] [data-sidebar-tree-guide]`,
-				),
-			].map((guide) => guide.style.left);
-		const toPixels = (offsets: number[]) => offsets.map((offset) => `${offset}px`);
-		expect(guideOffsets('executor-header')).toEqual([]);
-		expect(guideOffsets('project-header')).toEqual(toPixels(sidebarTreeGuideOffsets(1)));
-		expect(guideOffsets('chat')).toEqual(toPixels(sidebarTreeGuideOffsets(2)));
-
+		// A chat one level deeper starts where its parent's label does, after the chevron and gap.
+		expect(sidebarChatInset(2)).toBe(sidebarHeaderInset(1) + 18);
 		const chatButton = screen.getByText('Chat 0').closest('button');
 		expect(chatButton?.style.paddingLeft).toBe(`${sidebarChatInset(2)}px`);
 		expect(
@@ -527,6 +522,44 @@ describe('SidebarVirtualSortableChatList', () => {
 		).toBe(`${sidebarChatInset(2)}px`);
 		// The executor header already names the executor, so the row omits its pill.
 		expect(document.querySelector('[data-slot="chat-executor-pill"]')).toBeNull();
+	});
+
+	it('omits the archived badge beneath an Archived section header', () => {
+		const [ungrouped, sectioned] = makeRows(2).map((row): SidebarVirtualChatRow => ({
+			...row,
+			list: 'archived',
+			isArchived: true,
+		}));
+		render(SidebarVirtualSortableChatListHost, {
+			rows: [ungrouped!, { ...sectioned!, section: 'archived' }],
+		});
+
+		const badge = (chatId: string) =>
+			document.querySelector(
+				`[data-sidebar-virtual-row="${chatId}"] [data-slot="sidebar-chat-state-badge"]`,
+			);
+		expect(badge(ungrouped!.chat.id)).toBeTruthy();
+		expect(badge(sectioned!.chat.id)).toBeNull();
+	});
+
+	it('shows a project parent directory only when the row model marks the name ambiguous', () => {
+		const projectPath = '/workspace/clients/project-a';
+		render(SidebarVirtualSortableChatListHost, {
+			rows: [{ ...makeProjectHeader(projectPath, 2, [], true), showParentPath: true }],
+		});
+
+		const header = document.querySelector<HTMLElement>(
+			`[data-sidebar-project-header="${projectPath}"]`,
+		);
+		expect(header?.querySelector('[data-sidebar-group-header-label]')?.textContent).toBe(
+			'project-a',
+		);
+		expect(header?.querySelector('[data-sidebar-project-header-parent]')?.textContent).toBe(
+			'/workspace/clients',
+		);
+		expect(header?.querySelector('[data-sidebar-group-header-count]')?.textContent?.trim()).toBe(
+			'2',
+		);
 	});
 
 	it('renders collapsed project groups as header-only virtual rows', () => {

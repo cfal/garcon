@@ -224,6 +224,7 @@
 				{displayOptions}
 				depth={row.depth}
 				executorGrouped={row.executorGrouped}
+				inArchivedSection={row.section === 'archived'}
 				{isMultiSelectMode}
 				{isMultiSelected}
 				enableNativeDrag={false}

@@ -1,6 +1,4 @@
 <script lang="ts">
-	import Folder from '@lucide/svelte/icons/folder';
-	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getExecutors } from '$lib/context';
 	import { splitProjectPath } from '$lib/project-paths/compact-project-path';
@@ -23,16 +21,16 @@
 			? splitProjectPath(row.projectPath)
 			: { name: m.sidebar_project_unknown(), parent: '' },
 	);
-	// An executor header already names the executor, so only ungrouped remote projects show it inline.
+	// An executor header already names the executor, so only ungrouped remote projects show it
+	// inline. The parent directory appears only when it distinguishes projects with the same name.
 	const parentLabel = $derived(
-		executorLabel && !row.executorGrouped
-			? [executorLabel, pathParts.parent].filter(Boolean).join(': ')
-			: pathParts.parent,
+		[!row.executorGrouped && executorLabel, row.showParentPath && pathParts.parent]
+			.filter(Boolean)
+			.join(': '),
 	);
 	const fullLabel = $derived(
 		[executorLabel, row.projectPath || m.sidebar_project_unknown()].filter(Boolean).join(': '),
 	);
-	const Icon = $derived(row.isCollapsed ? Folder : FolderOpen);
 
 	function handleToggle(): void {
 		onToggle?.(row.collapseKey);
@@ -53,9 +51,6 @@
 	data-sidebar-project-collapsed={row.isCollapsed ? 'true' : 'false'}
 	data-sidebar-row-depth={row.depth}
 >
-	{#snippet icon()}
-		<Icon class="size-3.5 shrink-0 text-file-icon-folder" aria-hidden="true" />
-	{/snippet}
 	{#snippet label()}
 		<span class="min-w-0 truncate" data-sidebar-group-header-label>{pathParts.name}</span>
 		{#if parentLabel}

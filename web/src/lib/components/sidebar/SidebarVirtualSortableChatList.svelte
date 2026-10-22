@@ -12,7 +12,6 @@
 		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
 		computeSidebarSeparatorItems,
 		DEFAULT_CHAT_ROW_OVERSCAN,
-		sidebarTreeGuideOffsets,
 		type SidebarVirtualChatRow,
 		type SidebarVirtualRow,
 	} from './sidebar-virtual-chat-list';
@@ -909,14 +908,6 @@
 				class="absolute left-0 right-0 top-0"
 				style={`height:${virtualItem.size}px; transform:translateY(${virtualItem.start}px);`}
 			>
-				{#each sidebarTreeGuideOffsets(row.depth) as offset (offset)}
-					<span
-						aria-hidden="true"
-						class="pointer-events-none absolute inset-y-0 z-10 w-px bg-border"
-						style={`left:${offset}px;`}
-						data-sidebar-tree-guide
-					></span>
-				{/each}
 				{#if row.type === 'executor-header'}
 					<SidebarExecutorHeaderRow
 						{row}

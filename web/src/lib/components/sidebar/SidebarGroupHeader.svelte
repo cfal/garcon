@@ -33,10 +33,10 @@
 		...rest
 	}: SidebarGroupHeaderProps = $props();
 
-	// Executors are the top of the tree; projects and section labels sit beneath them.
+	// Executors are the top of the tree; projects and section labels recede so chats stay prominent.
 	const levelClasses: Record<SidebarGroupHeaderLevel, string> = {
 		executor: 'gap-2 text-[13px] font-semibold text-foreground',
-		project: 'gap-1.5 text-xs font-medium text-foreground/85',
+		project: 'gap-1.5 text-xs font-medium text-muted-foreground',
 		section:
 			'gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground',
 	};
@@ -69,14 +69,17 @@
 		/>
 		{@render icon?.()}
 		{@render label()}
-		<span
-			class={cn(
-				'ml-auto shrink-0 pl-2 text-[11px] font-normal normal-case tracking-normal tabular-nums text-muted-foreground',
-				containsSelectedChat && 'text-sidebar-chat-item-selected-foreground/80',
-			)}
-			data-sidebar-group-header-count
-		>
-			{count}
-		</span>
+		<!-- An expanded group lists its chats, so only a collapsed group summarizes them. -->
+		{#if isCollapsed}
+			<span
+				class={cn(
+					'ml-auto shrink-0 pl-2 text-[11px] font-normal normal-case tracking-normal tabular-nums text-muted-foreground',
+					containsSelectedChat && 'text-sidebar-chat-item-selected-foreground/80',
+				)}
+				data-sidebar-group-header-count
+			>
+				{count}
+			</span>
+		{/if}
 	</button>
 </div>
