@@ -224,7 +224,6 @@ const SAFE_DIAGNOSTIC_STRING_KEYS = new Set([
   'agentid',
   'code',
   'method',
-  'model',
   'permissionmode',
   'requesttype',
   'status',
