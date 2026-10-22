@@ -26,6 +26,8 @@ const TRIM_THRESHOLD = 500;
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const HEARTBEAT_TIMEOUT_MS = 6_000;
+// Resume checks bound the wait on sockets silently lost during mobile suspension.
+const RESUME_PROBE_TIMEOUT_MS = 1_500;
 const HEARTBEAT_JITTER_MS = 1_500;
 const CONNECTION_STABILITY_MS = 10_000;
 const CONNECT_ATTEMPT_DEDUPE_MS = 2_000;
@@ -157,10 +159,12 @@ export class WsConnection {
 		timer: ReturnType<typeof setTimeout>;
 	}>();
 	#visibilityHandler: (() => void) | null = null;
+	#pageShowHandler: ((event: PageTransitionEvent) => void) | null = null;
 	#onlineHandler: (() => void) | null = null;
 	#offlineHandler: (() => void) | null = null;
 	#heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 	#heartbeatInFlight = false;
+	#visibilityProbeInFlight = false;
 	#heartbeatGeneration = 0;
 	#lastInboundAt: number | null = null;
 	#connectStartedAt: number | null = null;
@@ -180,12 +184,10 @@ export class WsConnection {
 					this.#suspendHeartbeat();
 					return;
 				}
-				if (this.isConnected) {
-					this.#clearHeartbeatTimer();
-					void this.#sendVisibilityProbe();
-				} else {
-					this.#connectNow('visibility-visible');
-				}
+				this.#resumeConnection('visibility-visible');
+			};
+			this.#pageShowHandler = (event) => {
+				if (event.persisted) this.#resumeConnection('visibility-visible');
 			};
 			this.#onlineHandler = () => {
 				if (this.#destroyed) return;
@@ -193,7 +195,7 @@ export class WsConnection {
 					this.#nextConnectReason = 'browser-online';
 					return;
 				}
-				this.#connectNow('browser-online');
+				this.#resumeConnection('browser-online');
 			};
 			this.#offlineHandler = () => {
 				if (!this.#destroyed) {
@@ -201,6 +203,7 @@ export class WsConnection {
 				}
 			};
 			document.addEventListener('visibilitychange', this.#visibilityHandler);
+			window.addEventListener('pageshow', this.#pageShowHandler);
 			window.addEventListener('online', this.#onlineHandler);
 			window.addEventListener('offline', this.#offlineHandler);
 		}
@@ -309,12 +312,14 @@ export class WsConnection {
 
 			websocket.onclose = (event) => {
 				if (!this.#isCurrentSocket(websocket)) return;
+				// An opaque upgrade failure needs an auth probe; an established socket
+				// lost during suspension can authenticate directly on its next upgrade.
 				if (
 					!this.#authDisabled &&
 					this.onAuthFailure &&
 					(event.code === AUTH_REVOKED_CLOSE_CODE ||
 						event.code === AUTH_UNAVAILABLE_CLOSE_CODE ||
-						event.code === 1006)
+						(event.code === 1006 && this.#ws !== websocket))
 				) {
 					this.pauseForAuth();
 					this.onAuthFailure(token, event.code);
@@ -396,6 +401,10 @@ export class WsConnection {
 		if (this.#visibilityHandler) {
 			document.removeEventListener('visibilitychange', this.#visibilityHandler);
 			this.#visibilityHandler = null;
+		}
+		if (this.#pageShowHandler) {
+			window.removeEventListener('pageshow', this.#pageShowHandler);
+			this.#pageShowHandler = null;
 		}
 		if (this.#onlineHandler) {
 			window.removeEventListener('online', this.#onlineHandler);
@@ -547,12 +556,19 @@ export class WsConnection {
 		return { clientRequestId, response };
 	}
 
-	async requestProcessingSnapshot(
+	requestProcessingSnapshot(
 		source: Exclude<ChatProcessingSnapshotSource, 'reconnect'> = 'stop-probe',
+	): Promise<ChatProcessingSnapshotResult> {
+		return this.#requestProcessingSnapshot(source, HEARTBEAT_TIMEOUT_MS);
+	}
+
+	async #requestProcessingSnapshot(
+		source: Exclude<ChatProcessingSnapshotSource, 'reconnect'>,
+		timeoutMs: number,
 	): Promise<ChatProcessingSnapshotResult> {
 		const raw = await this.#sendRequest<Record<string, unknown>>(
 			{ type: 'ws-ping', sentAt: Date.now() },
-			HEARTBEAT_TIMEOUT_MS,
+			timeoutMs,
 			{ processingSnapshotSource: source },
 			null,
 		).response;
@@ -696,21 +712,37 @@ export class WsConnection {
 	}
 
 	async #sendVisibilityProbe(): Promise<void> {
-		if (!this.isConnected || this.#destroyed) return;
+		if (this.#visibilityProbeInFlight || !this.isConnected || this.#destroyed) return;
 		const generation = this.#heartbeatGeneration;
+		this.#visibilityProbeInFlight = true;
 		try {
 			// A visibility repair must not reuse an older scheduled heartbeat snapshot.
-			await this.requestProcessingSnapshot('visibility');
+			await this.#requestProcessingSnapshot('visibility', RESUME_PROBE_TIMEOUT_MS);
 			if (generation !== this.#heartbeatGeneration) return;
+			this.#visibilityProbeInFlight = false;
 			this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
 		} catch {
 			if (generation !== this.#heartbeatGeneration) return;
+			this.#visibilityProbeInFlight = false;
 			if (this.#destroyed || !this.isConnected) return;
-			if (this.#lastInboundAt !== null && Date.now() - this.#lastInboundAt < HEARTBEAT_TIMEOUT_MS) {
+			if (
+				this.#lastInboundAt !== null &&
+				Date.now() - this.#lastInboundAt < RESUME_PROBE_TIMEOUT_MS
+			) {
 				this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
 				return;
 			}
 			this.#forceReconnect('heartbeat-timeout', { reconnectNow: true });
+		}
+	}
+
+	#resumeConnection(reason: WsConnectionIssue): void {
+		if (this.#destroyed || this.#authPaused || document.visibilityState === 'hidden') return;
+		if (this.isConnected && this.#activeSocket?.readyState === WebSocket.OPEN) {
+			this.#clearHeartbeatTimer();
+			void this.#sendVisibilityProbe();
+		} else {
+			this.#connectNow(reason);
 		}
 	}
 
@@ -851,6 +883,7 @@ export class WsConnection {
 	#suspendHeartbeat(): void {
 		this.#heartbeatGeneration += 1;
 		this.#heartbeatInFlight = false;
+		this.#visibilityProbeInFlight = false;
 		this.#clearHeartbeatTimer();
 	}
 }
