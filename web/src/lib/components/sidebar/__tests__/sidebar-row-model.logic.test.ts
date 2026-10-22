@@ -228,6 +228,57 @@ describe('sidebar row model', () => {
 		).toBe(true);
 	});
 
+	it('nests rows beneath executor and project headers but not beneath section labels', () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const chats = ['local', executorId].flatMap((id) => [
+			chat(`${id}-active`, '/workspace', { executorId: id }),
+			chat(`${id}-inactive`, '/workspace', { executorId: id, status: 'running' }),
+			chat(`${id}-archived`, '/workspace', { executorId: id, isArchived: true }),
+		]);
+		const input = {
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project-and-activity' as const,
+			currentTime: TEST_NOW,
+		};
+		const depths = (model: ReturnType<typeof buildSidebarRowModel>) => {
+			const labels = rowLabels(model);
+			return model.rows.map((row, index) => `${labels[index]}@${row.depth}`);
+		};
+
+		expect(depths(buildSidebarRowModel(input)).slice(0, 7)).toEqual([
+			'executor:local@0',
+			'header:/workspace@1',
+			'local-active@2',
+			'section:inactive@1',
+			'header:/workspace@1',
+			'local-inactive@2',
+			'section:archived@1',
+		]);
+		expect(
+			buildSidebarRowModel(input)
+				.rows.filter((row) => row.type === 'chat')
+				.every((row) => row.executorGrouped),
+		).toBe(true);
+
+		const localChats = chats.filter((entry) => !entry.executorId || entry.executorId === 'local');
+		const ungrouped = buildSidebarRowModel({
+			...input,
+			displayedChats: localChats,
+			orders: buildSidebarChatOrderMap(localChats),
+		});
+		expect(depths(ungrouped)).toEqual([
+			'header:/workspace@0',
+			'local-active@1',
+			'section:inactive@0',
+			'header:/workspace@0',
+			'local-inactive@1',
+			'section:archived@0',
+			'local-archived@0',
+		]);
+		expect(ungrouped.rows.some((row) => 'executorGrouped' in row)).toBe(false);
+	});
+
 	it('collapses an executor without losing its project anchor', () => {
 		const executorId = '22222222-2222-4222-8222-222222222222';
 		const chats = [chat('local', '/local'), chat('remote', '/remote', { executorId })];

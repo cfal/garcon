@@ -18,6 +18,7 @@ describe('sidebar chat scroll targets', () => {
 				{
 					type: 'executor-header',
 					key: 'executor:worker',
+					depth: 0,
 					collapseKey: 'executor:worker',
 					executorId: 'worker',
 					count: 1,
@@ -30,6 +31,7 @@ describe('sidebar chat scroll targets', () => {
 				rows.push({
 					type: 'section-header',
 					key: sectionKey,
+					depth: 1,
 					section: 'inactive',
 					executorId: 'worker',
 					count: 1,
@@ -59,6 +61,7 @@ describe('sidebar chat scroll targets', () => {
 			{
 				type: 'project-header',
 				key: `project:${projectKey}`,
+				depth: 0,
 				projectKey,
 				collapseKey: projectKey,
 				projectPath: '/tmp/shared-project',
@@ -69,6 +72,7 @@ describe('sidebar chat scroll targets', () => {
 			{
 				type: 'section-header',
 				key: sidebarSectionKey('inactive'),
+				depth: 0,
 				section: 'inactive',
 				count: 1,
 				chatIds: ['inactive-chat'],
@@ -77,6 +81,7 @@ describe('sidebar chat scroll targets', () => {
 			{
 				type: 'project-header',
 				key: `project:${inactiveProjectCollapseKey}`,
+				depth: 0,
 				projectKey,
 				collapseKey: inactiveProjectCollapseKey,
 				projectPath: '/tmp/shared-project',

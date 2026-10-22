@@ -12,6 +12,7 @@
 		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
 		computeSidebarSeparatorItems,
 		DEFAULT_CHAT_ROW_OVERSCAN,
+		sidebarTreeGuideOffsets,
 		type SidebarVirtualChatRow,
 		type SidebarVirtualRow,
 	} from './sidebar-virtual-chat-list';
@@ -897,8 +898,8 @@
 		{#each separatorItems as separator (separator.key)}
 			<div
 				aria-hidden="true"
-				class="pointer-events-none absolute inset-x-0 z-10 bg-border"
-				style={`top:${separator.top}px;height:${separator.height}px;`}
+				class="pointer-events-none absolute right-0 z-10 bg-border"
+				style={`top:${separator.top}px;left:${separator.left}px;height:${separator.height}px;`}
 				data-sidebar-virtual-list-separator={separator.key}
 			></div>
 		{/each}
@@ -908,9 +909,18 @@
 				class="absolute left-0 right-0 top-0"
 				style={`height:${virtualItem.size}px; transform:translateY(${virtualItem.start}px);`}
 			>
+				{#each sidebarTreeGuideOffsets(row.depth) as offset (offset)}
+					<span
+						aria-hidden="true"
+						class="pointer-events-none absolute inset-y-0 z-10 w-px bg-border"
+						style={`left:${offset}px;`}
+						data-sidebar-tree-guide
+					></span>
+				{/each}
 				{#if row.type === 'executor-header'}
 					<SidebarExecutorHeaderRow
 						{row}
+						separated={virtualItem.index > 0}
 						containsSelectedChat={Boolean(
 							row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),
 						)}

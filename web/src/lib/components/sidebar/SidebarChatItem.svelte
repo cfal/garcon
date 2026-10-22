@@ -19,6 +19,7 @@
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
 	import SidebarChatMenu from './SidebarChatMenu.svelte';
+	import { sidebarChatInset } from './sidebar-virtual-chat-list';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
@@ -35,6 +36,10 @@
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
 		displayOptions?: SidebarDisplayOptions;
+		/** Nesting level beneath executor and project headers. */
+		depth?: number;
+		/** True when an executor header already names this chat's executor. */
+		executorGrouped?: boolean;
 		enableNativeDrag?: boolean;
 		enableRecenterOnRequest?: boolean;
 		onChatSelect: (chatId: string) => void;
@@ -68,6 +73,8 @@
 		isMultiSelectMode = false,
 		isMultiSelected = false,
 		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		depth = 0,
+		executorGrouped = false,
 		enableNativeDrag = true,
 		enableRecenterOnRequest = true,
 		onChatSelect,
@@ -96,6 +103,10 @@
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
 	let isSingleLineLayout = $derived(displayOptions.chatItemLayout === 'single-line');
+	// Multi-select narrows the inset to make room for the checkbox column.
+	let contentInset = $derived(
+		isMultiSelectMode ? sidebarChatInset(depth) - 4 : sidebarChatInset(depth),
+	);
 	let hasAdditionalLines = $derived(
 		!isSingleLineLayout || (displayOptions.showProjectPath && Boolean(session.projectPath?.trim())),
 	);
@@ -163,7 +174,9 @@
 	const appShell = getAppShell();
 	const executors = getExecutors();
 	const executorLabel = $derived(
-		executors.executors.length > 1 ? executors.label(session.executorId) : undefined,
+		executors.executors.length > 1 && !executorGrouped
+			? executors.label(session.executorId)
+			: undefined,
 	);
 	const rootModelCatalog = getModelCatalog();
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(session.executorId));
@@ -308,9 +321,9 @@
 				type="button"
 				class={cn(
 					'flex-1 min-w-0 text-left py-[5px] pr-2 mx-0 my-0 rounded-none hover:bg-sidebar-chat-item-hover-bg active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
-					isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
 					isSingleLineLayout && 'py-[2px]',
 				)}
+				style={`padding-left:${contentInset}px;`}
 				onclick={handleItemClick}
 				role={isMultiSelectMode ? 'checkbox' : undefined}
 				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
@@ -342,13 +355,14 @@
 				oncontextmenu={handleRightClick}
 				class={cn(
 					'w-full h-full justify-start pr-2 font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200',
-					isMultiSelectMode ? 'pl-1 border-l-0' : 'pl-[9px]',
+					isMultiSelectMode && 'border-l-0',
 					isSingleLineLayout ? 'py-[2px]' : 'py-[5px]',
 					!isMultiSelectMode &&
 						isSelected &&
 						'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
 					isMultiSelectMode && isMultiSelected && 'bg-primary/8',
 				)}
+				style={`padding-left:${contentInset}px;`}
 				onclick={handleItemClick}
 				role={isMultiSelectMode ? 'checkbox' : undefined}
 				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}

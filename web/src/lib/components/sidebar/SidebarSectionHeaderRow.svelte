@@ -1,12 +1,11 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import { cn } from '$lib/utils/cn';
 	import {
 		sidebarSectionKey,
 		type SidebarChatSection,
 		type SidebarVirtualSectionHeaderRow,
 	} from './sidebar-virtual-chat-list';
-	import SidebarGroupHeaderContent from './SidebarGroupHeaderContent.svelte';
+	import SidebarGroupHeader from './SidebarGroupHeader.svelte';
 
 	const sectionLabels: Record<SidebarChatSection, () => string> = {
 		active: m.sidebar_section_active,
@@ -26,33 +25,26 @@
 	let { row, containsSelectedChat = false, onToggle }: SidebarSectionHeaderRowProps = $props();
 
 	let sectionKey = $derived(sidebarSectionKey(row.section, row.executorId));
-	let label = $derived(sectionLabels[row.section]());
+	let sectionLabel = $derived(sectionLabels[row.section]());
 
 	function handleToggle(): void {
 		onToggle?.(sectionKey);
 	}
 </script>
 
-<div class="h-full bg-card" role="heading" aria-level="3">
-	<button
-		type="button"
-		class={cn(
-			'flex h-full w-full items-center gap-2 px-2.5 text-left text-xs font-semibold text-muted-foreground transition-colors hover:bg-sidebar-chat-item-hover-bg hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-			row.executorId !== undefined && 'pl-8',
-			containsSelectedChat &&
-				'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
-		)}
-		aria-expanded={!row.isCollapsed}
-		onclick={handleToggle}
-		data-sidebar-section-header={row.section}
-		data-sidebar-section-key={sectionKey}
-		data-sidebar-section-collapsed={row.isCollapsed ? 'true' : 'false'}
-	>
-		<SidebarGroupHeaderContent
-			{label}
-			count={row.count}
-			isCollapsed={row.isCollapsed}
-			{containsSelectedChat}
-		/>
-	</button>
-</div>
+<SidebarGroupHeader
+	level="section"
+	depth={row.depth}
+	count={row.count}
+	isCollapsed={row.isCollapsed}
+	{containsSelectedChat}
+	onToggle={handleToggle}
+	data-sidebar-section-header={row.section}
+	data-sidebar-section-key={sectionKey}
+	data-sidebar-section-collapsed={row.isCollapsed ? 'true' : 'false'}
+	data-sidebar-row-depth={row.depth}
+>
+	{#snippet label()}
+		<span class="min-w-0 truncate" data-sidebar-group-header-label>{sectionLabel}</span>
+	{/snippet}
+</SidebarGroupHeader>

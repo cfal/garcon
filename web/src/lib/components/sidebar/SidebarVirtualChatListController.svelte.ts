@@ -10,9 +10,7 @@ import {
 } from '$lib/virt/virtual-list-types.js';
 import {
 	DEFAULT_CHAT_ROW_OVERSCAN,
-	EXECUTOR_HEADER_ROW_HEIGHT,
 	estimateSidebarVirtualRowSize,
-	PROJECT_HEADER_ROW_HEIGHT,
 	type SidebarVirtualRow,
 } from './sidebar-virtual-chat-list.js';
 
@@ -119,13 +117,7 @@ export class SidebarVirtualChatListController {
 	}
 
 	#estimateRow(row: SidebarVirtualRow, input: SidebarVirtualGeometryUpdate): number {
-		if (row.type === 'executor-header') {
-			return EXECUTOR_HEADER_ROW_HEIGHT;
-		}
-		if (row.type === 'project-header' || row.type === 'section-header') {
-			return PROJECT_HEADER_ROW_HEIGHT;
-		}
-		if (input.rowHeight !== undefined) return input.rowHeight;
+		if (row.type === 'chat' && input.rowHeight !== undefined) return input.rowHeight;
 		return estimateSidebarVirtualRowSize(row, input.chatItemLayout, input.showProjectPath);
 	}
 

@@ -9,3 +9,22 @@ export function formatCompactProjectPath(projectPath: string, maxLength = 40): s
 	}
 	return `\u2026/${result}`;
 }
+
+export interface ProjectPathParts {
+	name: string;
+	parent: string;
+}
+
+// Splits a path into its final segment and the directory containing it.
+// Accepts either separator because remote executors may run Windows.
+export function splitProjectPath(projectPath: string): ProjectPathParts {
+	const trimmed = projectPath.replace(/(?<=.)[\\/]+$/, '');
+	const separatorIndex = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+	if (separatorIndex < 0 || separatorIndex === trimmed.length - 1) {
+		return { name: trimmed, parent: '' };
+	}
+	return {
+		name: trimmed.slice(separatorIndex + 1),
+		parent: trimmed.slice(0, separatorIndex) || trimmed.slice(0, 1),
+	};
+}

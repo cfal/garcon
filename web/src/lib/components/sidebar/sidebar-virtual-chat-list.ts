@@ -8,14 +8,41 @@ export const COMPACT_CHAT_ROW_HEIGHT = 62;
 export const DESKTOP_CHAT_ROW_HEIGHT = 76;
 export const PROJECT_PATH_LINE_HEIGHT = 18;
 export const PROJECT_HEADER_ROW_HEIGHT = 32;
-export const EXECUTOR_HEADER_ROW_HEIGHT = 34;
+export const SECTION_HEADER_ROW_HEIGHT = 28;
+export const EXECUTOR_HEADER_ROW_HEIGHT = 36;
 export const DEFAULT_CHAT_ROW_OVERSCAN = 8;
 export const CHAT_ROW_SEPARATOR_SLOT_HEIGHT = 2;
+
+// Horizontal geometry shared by headers, chat rows, tree guides, and separators.
+// Each nesting level indents by one step, which places a child's content under
+// its parent header's icon.
+const SIDEBAR_HEADER_BASE_INSET = 6;
+const SIDEBAR_CHAT_BASE_INSET = 8;
+const SIDEBAR_NESTING_STEP = 16;
+const SIDEBAR_CHEVRON_CENTER = 6;
+
+export function sidebarHeaderInset(depth: number): number {
+	return SIDEBAR_HEADER_BASE_INSET + depth * SIDEBAR_NESTING_STEP;
+}
+
+export function sidebarChatInset(depth: number): number {
+	return SIDEBAR_CHAT_BASE_INSET + depth * SIDEBAR_NESTING_STEP;
+}
+
+// Places one vertical guide beneath each ancestor header's disclosure chevron.
+export function sidebarTreeGuideOffsets(depth: number): number[] {
+	return Array.from(
+		{ length: depth },
+		(_, level) => sidebarHeaderInset(level) + SIDEBAR_CHEVRON_CENTER,
+	);
+}
 
 export interface SidebarVirtualProjectHeaderRow {
 	executorId?: string;
 	type: 'project-header';
 	key: string;
+	/** Nesting level beneath executor and project headers; section labels do not nest. */
+	depth: number;
 	projectKey: string;
 	collapseKey: string;
 	projectPath: string;
@@ -29,6 +56,7 @@ export interface SidebarVirtualProjectHeaderRow {
 export interface SidebarVirtualExecutorHeaderRow {
 	type: 'executor-header';
 	key: string;
+	depth: number;
 	executorId: string;
 	collapseKey: string;
 	count: number;
@@ -63,6 +91,7 @@ export interface SidebarVirtualSectionHeaderRow {
 	type: 'section-header';
 	executorId?: string;
 	key: string;
+	depth: number;
 	section: SidebarChatSection;
 	count: number;
 	chatIds: string[];
@@ -72,6 +101,7 @@ export interface SidebarVirtualSectionHeaderRow {
 export interface SidebarVirtualChatRow {
 	type: 'chat';
 	key: string;
+	depth: number;
 	chat: ChatSessionRecord;
 	list: PersistedChatOrderGroup;
 	isPinned: boolean;
@@ -81,6 +111,8 @@ export interface SidebarVirtualChatRow {
 	groupProjectPath: string;
 	reorderScopeKey: string;
 	reorderScopeIds: string[];
+	/** True when an executor header already identifies this chat's executor. */
+	executorGrouped?: boolean;
 }
 
 export type SidebarVirtualRow =
@@ -107,8 +139,11 @@ export function estimateSidebarVirtualRowSize(
 	if (row?.type === 'executor-header') {
 		return EXECUTOR_HEADER_ROW_HEIGHT;
 	}
-	if (row?.type === 'project-header' || row?.type === 'section-header') {
+	if (row?.type === 'project-header') {
 		return PROJECT_HEADER_ROW_HEIGHT;
+	}
+	if (row?.type === 'section-header') {
+		return SECTION_HEADER_ROW_HEIGHT;
 	}
 	const pathHeight =
 		showProjectPath && row?.chat.projectPath?.trim() ? PROJECT_PATH_LINE_HEIGHT : 0;
@@ -135,11 +170,12 @@ export function snapCssPixel(value: number, pixelRatio: number): number {
 export interface SidebarChatSeparatorItem {
 	key: string | number;
 	top: number;
+	left: number;
 	height: number;
 }
 
 // Positions the hairline separator inside each chat row's trailing separator
-// slot, snapped to the physical pixel grid.
+// slot, snapped to the physical pixel grid and starting at the row's content.
 export function computeSidebarSeparatorItems(
 	virtualItems: readonly VirtualItem[],
 	rows: readonly SidebarVirtualRow[],
@@ -147,8 +183,11 @@ export function computeSidebarSeparatorItems(
 	separatorPixelRatio: number,
 ): SidebarChatSeparatorItem[] {
 	return virtualItems
-		.filter((virtualItem) => rows[virtualItem.index]?.type === 'chat')
-		.map((virtualItem) => {
+		.flatMap((virtualItem) => {
+			const row = rows[virtualItem.index];
+			return row?.type === 'chat' ? [{ row, virtualItem }] : [];
+		})
+		.map(({ row, virtualItem }) => {
 			const slotStart = virtualItem.start + virtualItem.size - CHAT_ROW_SEPARATOR_SLOT_HEIGHT;
 			const slotEnd = virtualItem.start + virtualItem.size;
 			const preferredTop = slotStart + (CHAT_ROW_SEPARATOR_SLOT_HEIGHT - separatorLineHeight) / 2;
@@ -158,8 +197,9 @@ export function computeSidebarSeparatorItems(
 				slotEnd - separatorLineHeight,
 			);
 			return {
-				key: rows[virtualItem.index]?.key ?? virtualItem.key,
+				key: row.key,
 				top,
+				left: sidebarChatInset(row.depth),
 				height: separatorLineHeight,
 			};
 		});

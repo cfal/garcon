@@ -95,7 +95,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials'] as cons
             await expectRowGeometry(row, showPath);
             const header = row.locator('[data-slot="chat-summary-header"]');
             await browserExpect(header.locator('[data-slot="sidebar-chat-timestamp-badge"]')).toHaveCount(1);
-            const pillCount = executionBackend !== 'in-process' && layout !== 'single-line' ? 1 : 0;
+            // Project grouping places remote chats beneath an executor header, which replaces the pill.
+            const pillCount = executionBackend !== 'in-process' && layout !== 'single-line' && width === 1440 ? 1 : 0;
             await browserExpect(row.locator('[data-slot="chat-executor-pill"]')).toHaveCount(pillCount);
             if (pillCount) {
               await browserExpect(row.locator('[data-slot="chat-executor-pill"]')).toHaveText('Integration worker');
