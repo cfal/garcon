@@ -174,9 +174,7 @@
 	const appShell = getAppShell();
 	const executors = getExecutors();
 	const executorLabel = $derived(
-		executors.executors.length > 1 && !executorGrouped
-			? executors.label(session.executorId)
-			: undefined,
+		executors.executors.length > 1 ? executors.label(session.executorId) : undefined,
 	);
 	const rootModelCatalog = getModelCatalog();
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(session.executorId));
@@ -233,7 +231,13 @@
 </script>
 
 {#snippet stateBadge()}
-	{#if !isMultiSelectMode && (isPinned || (isArchived && !inArchivedSection))}
+	<!-- Virtualized section headers may be unmounted, so rows keep their archived
+	     state for assistive technology. -->
+	{#if !isMultiSelectMode && isArchived && !isPinned && inArchivedSection}
+		<span class="sr-only" data-slot="sidebar-chat-state-status">
+			{m.sidebar_chat_archived_status()}
+		</span>
+	{:else if !isMultiSelectMode && (isPinned || isArchived)}
 		<div
 			class={cn(
 				'relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
@@ -293,13 +297,18 @@
 			{currentTime}
 			showTimestamp={true}
 			showProjectPath={displayOptions.showProjectPath}
-			{executorLabel}
+			executorLabel={executorGrouped ? undefined : executorLabel}
 			chatItemLayout={displayOptions.chatItemLayout}
 			titleBadge={stateBadge}
 			hasDesktopOverlayMenu={!isMobile && !isMultiSelectMode}
 			onTagClick={isMultiSelectMode ? undefined : onTagClick}
 			onManageTags={isMultiSelectMode || !onManageTags ? undefined : () => onManageTags(session)}
 		/>
+		<!-- The executor header names the executor visually; the row keeps it in its
+		     accessible name. -->
+		{#if executorGrouped && executorLabel}
+			<span class="sr-only" data-slot="sidebar-chat-executor-status">{executorLabel}</span>
+		{/if}
 	</div>
 {/snippet}
 

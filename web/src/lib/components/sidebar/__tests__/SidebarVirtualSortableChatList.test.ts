@@ -540,6 +540,23 @@ describe('SidebarVirtualSortableChatList', () => {
 			);
 		expect(badge(ungrouped!.chat.id)).toBeTruthy();
 		expect(badge(sectioned!.chat.id)).toBeNull();
+		// The section header may be virtualized away, so the row itself still announces its state.
+		expect(screen.getByRole('button', { name: /Chat 1.*Archived/ })).toBeTruthy();
+	});
+
+	it("keeps a grouped chat's executor in its accessible name without the visual pill", () => {
+		const chat = makeChat(0, { executorId: remoteExecutor.id });
+		const [row] = makeRows(1);
+		render(SidebarVirtualSortableChatListHost, {
+			executors: [localExecutor, remoteExecutor],
+			displayOptions: { chatItemLayout: 'compact' },
+			rows: [{ ...row!, chat, depth: 1, executorGrouped: true }],
+		});
+
+		expect(document.querySelector('[data-slot="chat-executor-pill"]')).toBeNull();
+		expect(
+			screen.getByRole('button', { name: new RegExp(`Chat 0.*${remoteExecutor.label}`) }),
+		).toBeTruthy();
 	});
 
 	it('shows a project parent directory only when the row model marks the name ambiguous', () => {
