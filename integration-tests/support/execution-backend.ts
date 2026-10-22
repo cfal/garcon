@@ -37,11 +37,11 @@ function canListen(port: number): Promise<boolean> {
 // Restarted controllers and relaunched workers listen on their previous ports. While a process is
 // down, the kernel may assign a released ephemeral port to any socket, including a peer's redial of
 // that port from the same host, so reused ports come from below the range it assigns implicitly.
-export async function reusableListenPort(): Promise<number> {
+export async function reusableListenPort(reservedPorts: readonly number[] = []): Promise<number> {
   const floor = await ephemeralPortFloor();
   for (let attempt = 0; attempt < 20; attempt++) {
     const port = floor - 1 - Math.floor(Math.random() * WORKER_PORT_SPAN);
-    if (port >= 1024 && await canListen(port)) return port;
+    if (port >= 1024 && !reservedPorts.includes(port) && await canListen(port)) return port;
   }
   throw new Error(`No free worker port below the ephemeral range at ${floor}`);
 }
@@ -164,9 +164,12 @@ export class ExecutionBackendFixture {
   get executorId(): string { return this.#executorId ?? 'local'; }
 
   async start(options: GarconProcessOptions): Promise<GarconProcess> {
+    // A stopped worker still owns its port for the next launch.
+    const workerConnection = this.#workerLaunch?.connection;
+    const reservedPorts = workerConnection?.kind === 'listen' ? [workerConnection.port] : [];
     const port = this.backend === 'remote-executor-dials' && this.#controllerUrl
       ? Number(new URL(this.#controllerUrl).port)
-      : options.port ?? await reusableListenPort();
+      : options.port ?? await reusableListenPort(reservedPorts);
     if (this.backend === 'in-process') {
       const controller = await GarconProcess.start({ ...options, port });
       if (controller.pid !== null) this.executionProcessIds.add(controller.pid);
@@ -233,7 +236,10 @@ export class ExecutionBackendFixture {
     } catch (error) {
       await controller?.stop().catch(() => undefined);
       await this.stop().catch(() => undefined);
-      throw new Error(`${error instanceof Error ? error.message : String(error)}\nWorker logs:\n${this.logs.join('\n')}`);
+      const controllerLogs = controller
+        ? `\nController logs (${controller.baseUrl}):\n${controller.describeLogs()}`
+        : '';
+      throw new Error(`${error instanceof Error ? error.message : String(error)}${controllerLogs}\nWorker logs:\n${this.logs.join('\n')}`);
     }
   }
 

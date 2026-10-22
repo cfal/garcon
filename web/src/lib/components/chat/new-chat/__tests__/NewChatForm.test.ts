@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import { loadComposerMarkdownEditor } from '../../composer/composer-markdown-editor-loader.js';
 import NewChatFormTestHost from './NewChatFormTestHost.svelte';
 import * as settingsApi from '$lib/api/settings';
@@ -1719,6 +1720,73 @@ describe('NewChatForm', () => {
 
 
 describe('New Chat executor pin scope', () => {
+	it.each([
+		{ mobile: false, explicitFocus: false },
+		{ mobile: false, explicitFocus: true },
+		{ mobile: true, explicitFocus: false },
+		{ mobile: true, explicitFocus: true },
+	])('yields opening autofocus to focus inside the picker (mobile=$mobile, explicitFocus=$explicitFocus)', async ({ mobile, explicitFocus }) => {
+		stubMatchMedia(mobile);
+		const frames = new Map<number, FrameRequestCallback>();
+		let frameId = 0;
+		async function flushFrames(): Promise<void> {
+			for (let round = 0; round < 5; round++) {
+				await tick();
+				const pending = [...frames.values()];
+				frames.clear();
+				for (const callback of pending) callback(performance.now());
+			}
+		}
+		try {
+			const chatsApi = await import('$lib/api/chats');
+			vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+			vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+				makeSnapshot({
+					paths: {
+						recentProjectPaths: ['/same'],
+						pinnedProjectPaths: ['/same'],
+						byExecutor: {
+							[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/first', '/same'] },
+						},
+					},
+				}),
+			);
+			render(NewChatFormTestHost, { props: { executorSnapshots: [localExecutor, remoteExecutor] } });
+			const toggle = await screen.findByRole('button', { name: 'Other executors…' });
+			await waitFor(() => expect(document.activeElement).toBe(screen.getByPlaceholderText('How can I help you today?')));
+			vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+				frames.set(++frameId, callback);
+				return frameId;
+			});
+			vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+			toggle.focus();
+			await fireEvent.click(toggle);
+			const intendedPin = screen.getByRole('button', { name: 'Worker: /same' });
+			if (explicitFocus) {
+				intendedPin.focus();
+				expect(document.activeElement).toBe(intendedPin);
+			}
+			await flushFrames();
+			if (explicitFocus) {
+				expect(document.activeElement).toBe(intendedPin);
+				await fireEvent.click(intendedPin);
+				expect(screen.getByRole('button', { name: '/same' }).getAttribute('aria-pressed')).toBe('true');
+				await waitFor(() => expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/same', { executorId: remoteExecutor.id }));
+			} else if (mobile) {
+				expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close' }));
+			} else {
+				expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Worker: /first' }));
+			}
+		} finally {
+			try {
+				cleanup();
+				await flushFrames();
+			} finally {
+				vi.unstubAllGlobals();
+			}
+		}
+	});
+
 	it('keeps the current compact view and selects both owner and path from all executors', async () => {
 		const chatsApi = await import('$lib/api/chats');
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });

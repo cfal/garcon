@@ -1272,6 +1272,36 @@ describe('integration support contracts', () => {
     }
   });
 
+  test('redacts credential-backed model names from HTTP diagnostics without changing responses', async () => {
+    const payload = { model: 'synthetic-private-model' };
+    const server = Bun.serve({
+      hostname: '0.0.0.0',
+      port: 0,
+      fetch: async (request) => Response.json(await request.json()),
+    });
+    let socket: ControlledWebSocket | null = null;
+    const client = await GarconTestClient.connect(`http://127.0.0.1:${server.port}`, {
+      createWebSocket: () => {
+        socket = new ControlledWebSocket();
+        return socket;
+      },
+      redactSensitiveDiagnostics: true,
+    });
+    try {
+      expect(await client.post('/api/v1/chats', payload)).toEqual(payload);
+      expect(client.exchanges()).toMatchObject([{
+        requestBody: { model: '[REDACTED]' },
+        responseBody: { model: '[REDACTED]' },
+      }]);
+      expect(JSON.stringify(client.exchanges())).not.toContain(payload.model);
+    } finally {
+      const close = client.close();
+      socket!.finishClose();
+      await close;
+      server.stop(true);
+    }
+  });
+
   test('redacts credential-backed event diagnostics without changing live events', async () => {
     const privateContent = 'private provider prompt and response';
     let socket: ControlledWebSocket | null = null;

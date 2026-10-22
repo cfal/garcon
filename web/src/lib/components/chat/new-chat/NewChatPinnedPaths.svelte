@@ -48,9 +48,9 @@
 		event.preventDefault();
 		await tick();
 		requestAnimationFrame(() => {
-			if (!open) return;
-			const firstButton = content?.querySelector<HTMLButtonElement>('button:not([disabled])');
-			(firstButton ?? content)?.focus({ preventScroll: true });
+			if (!open || !content || content.contains(content.ownerDocument.activeElement)) return;
+			const firstButton = content.querySelector<HTMLButtonElement>('button:not([disabled])');
+			(firstButton ?? content).focus({ preventScroll: true });
 		});
 	}
 </script>
