@@ -114,31 +114,64 @@ describe('WsConnection', () => {
 		vi.stubGlobal('WebSocket', originalWebSocket);
 	});
 
-	it.each([4001, 4002, 1006])(
-		'pauses revoked or opaque sockets until auth recovery, code %s',
-		async (code) => {
-			const connection = new WsConnection();
-			connection.onAuthFailure = vi.fn();
-			connection.connect('old-token');
-			const old = mockSockets[0];
-			old.open();
-			const staleOpen = old.onopen;
-			old.onclose?.(new CloseEvent('close', { code }));
-			expect(connection.onAuthFailure).toHaveBeenCalledWith('old-token', code);
-			expect(connection.sendMessage({ type: 'ws-ping' })).toBe(false);
+	it.each([4001, 4002])('pauses revoked sockets until auth recovery, code %s', async (code) => {
+		const connection = new WsConnection();
+		connection.onAuthFailure = vi.fn();
+		connection.connect('old-token');
+		const old = mockSockets[0];
+		old.open();
+		const staleOpen = old.onopen;
+		old.onclose?.(new CloseEvent('close', { code }));
+		expect(connection.onAuthFailure).toHaveBeenCalledWith('old-token', code);
+		expect(connection.sendMessage({ type: 'ws-ping' })).toBe(false);
+		window.dispatchEvent(new Event('online'));
+		document.dispatchEvent(new Event('visibilitychange'));
+		await vi.advanceTimersByTimeAsync(30_000);
+		expect(mockSockets).toHaveLength(1);
+		connection.resumeForAuth('replacement');
+		mockSockets[1].open();
+		staleOpen?.(new Event('open'));
+		expect(connection.isConnected).toBe(true);
+		expect(connection.sendMessage({ type: 'ws-ping' })).toBe(true);
+		expect(old.send).not.toHaveBeenCalled();
+		connection.disconnect();
+	});
+	it('pauses an opaque upgrade failure until HTTP authentication is checked', () => {
+		const connection = new WsConnection();
+		connection.onAuthFailure = vi.fn();
+		connection.connect('old-token');
+		try {
+			mockSockets[0].onclose?.(new CloseEvent('close', { code: 1006 }));
+			expect(connection.onAuthFailure).toHaveBeenCalledWith('old-token', 1006);
 			window.dispatchEvent(new Event('online'));
-			document.dispatchEvent(new Event('visibilitychange'));
-			await vi.advanceTimersByTimeAsync(30_000);
 			expect(mockSockets).toHaveLength(1);
-			connection.resumeForAuth('replacement');
-			mockSockets[1].open();
-			staleOpen?.(new Event('open'));
-			expect(connection.isConnected).toBe(true);
-			expect(connection.sendMessage({ type: 'ws-ping' })).toBe(true);
-			expect(old.send).not.toHaveBeenCalled();
+		} finally {
 			connection.disconnect();
-		},
-	);
+		}
+	});
+
+	it('recovers an authenticated socket lost in the background without waiting for HTTP auth', () => {
+		let visibilityState: DocumentVisibilityState = 'visible';
+		vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+		const connection = new WsConnection();
+		connection.onAuthFailure = vi.fn();
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+		try {
+			visibilityState = 'hidden';
+			document.dispatchEvent(new Event('visibilitychange'));
+			socket.onclose?.(new CloseEvent('close', { code: 1006 }));
+			expect(connection.onAuthFailure).not.toHaveBeenCalled();
+			expect(connection.isConnected).toBe(false);
+			expect(mockSockets).toHaveLength(1);
+			visibilityState = 'visible';
+			document.dispatchEvent(new Event('visibilitychange'));
+			expect(mockSockets).toHaveLength(2);
+		} finally {
+			connection.disconnect();
+		}
+	});
 	it('retains reconnect backoff when HTTP authentication succeeds but WebSocket upgrades fail', async () => {
 		const connection = new WsConnection();
 		connection.onAuthFailure = () => connection.retryAfterAuthProbe();
@@ -610,6 +643,115 @@ describe('WsConnection', () => {
 		expect(snapshotSources).toEqual(['visibility']);
 
 		connection.disconnect();
+	});
+
+	it('keeps a healthy socket through overlapping online and visibility resume events', async () => {
+		const connection = new WsConnection();
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+		try {
+			window.dispatchEvent(new Event('online'));
+			document.dispatchEvent(new Event('visibilitychange'));
+			window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+			expect(socket.close).not.toHaveBeenCalled();
+			expect(mockSockets).toHaveLength(1);
+			expect(socket.send).toHaveBeenCalledTimes(1);
+			const ping = lastSentPayload(socket);
+			socket.message({
+				type: 'ws-pong',
+				clientRequestId: ping.clientRequestId,
+				sentAt: ping.sentAt,
+				serverTime: '2026-10-22T00:00:00.000Z',
+				serverInstanceId: 'server-instance-test',
+				processing: { outcome: 'snapshot', chats: [] },
+			});
+			await vi.advanceTimersByTimeAsync(1_500);
+			expect(connection.isConnected).toBe(true);
+			expect(mockSockets).toHaveLength(1);
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it('replaces a silently dead socket within 1.5 seconds of foregrounding', async () => {
+		let visibilityState: DocumentVisibilityState = 'visible';
+		vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+		const connection = new WsConnection();
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+		try {
+			visibilityState = 'hidden';
+			document.dispatchEvent(new Event('visibilitychange'));
+			await vi.advanceTimersByTimeAsync(30_000);
+			visibilityState = 'visible';
+			document.dispatchEvent(new Event('visibilitychange'));
+			await vi.advanceTimersByTimeAsync(1_499);
+			expect(socket.close).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(socket.close).toHaveBeenCalledOnce();
+			expect(mockSockets).toHaveLength(2);
+			expect(connection.connectionStatus.reason).toBe('heartbeat-timeout');
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it('keeps a resumed socket that receives traffic while its pong is delayed', async () => {
+		const connection = new WsConnection();
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+		try {
+			document.dispatchEvent(new Event('visibilitychange'));
+			await vi.advanceTimersByTimeAsync(1_000);
+			socket.message({ type: 'test-live-message' });
+			await vi.advanceTimersByTimeAsync(500);
+			expect(socket.close).not.toHaveBeenCalled();
+			expect(connection.isConnected).toBe(true);
+			await vi.advanceTimersByTimeAsync(15_000);
+			expect(socket.send).toHaveBeenCalledTimes(2);
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it('probes a socket restored from the back-forward cache without a visibility event', () => {
+		const connection = new WsConnection();
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+		try {
+			window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false }));
+			expect(socket.send).not.toHaveBeenCalled();
+			window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+			expect(lastSentPayload(socket)).toMatchObject({ type: 'ws-ping' });
+			expect(socket.close).not.toHaveBeenCalled();
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it('ignores an expired resume probe after hiding again', async () => {
+		let visibilityState: DocumentVisibilityState = 'visible';
+		vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+		const connection = new WsConnection();
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+		try {
+			document.dispatchEvent(new Event('visibilitychange'));
+			visibilityState = 'hidden';
+			document.dispatchEvent(new Event('visibilitychange'));
+			await vi.advanceTimersByTimeAsync(1_500);
+			expect(socket.close).not.toHaveBeenCalled();
+			visibilityState = 'visible';
+			document.dispatchEvent(new Event('visibilitychange'));
+			expect(socket.send).toHaveBeenCalledTimes(2);
+		} finally {
+			connection.disconnect();
+		}
 	});
 
 	it('ignores an in-flight heartbeat timeout after the document is hidden', async () => {
