@@ -1,5 +1,6 @@
 import type { AgentExecutionCommandType } from './session-types.js';
 import type { CommandWorkingDirectory } from '../../../common/command-output.js';
+import type { AgentRunFailureDetail } from '@garcon/server-agent-interface';
 import { createLogger } from '../../common/log.js';
 import { matchesTurnIdentity, type TurnReceiptOwner } from '../lib/turn-identity.js';
 import type { LedgerRunEndedRow } from '../ledger/contracts.js';
@@ -119,25 +120,16 @@ export class AgentEventBus {
   }
 
   async publishRunEnded(chatId: string, runId: string, row: LedgerRunEndedRow, workingDirectory?: CommandWorkingDirectory): Promise<void> {
+    if (row.outcome === 'failed') {
+      return this.publishRunFailed(chatId, runId, row.error ?? {
+        code: 'INTERNAL_ERROR', message: 'Agent run failed',
+      }, workingDirectory);
+    }
     const captured = this.#terminalMetadata(chatId, runId);
     if (!captured) return;
     const metadata = { ...captured, ...(workingDirectory ? { workingDirectory } : {}) };
     this.#settledTurnByChatId.delete(chatId);
     this.#turnMetadataByChatId.delete(chatId);
-    if (row.outcome === 'failed') {
-      const message = row.error?.message ?? row.error?.code ?? 'Agent run failed';
-      const code = row.error?.code ?? 'INTERNAL_ERROR';
-      await this.#dispatch(
-        'failed terminal',
-        chatId,
-        this.#failedListeners,
-        chatId,
-        message,
-        code,
-        metadata,
-      );
-      return;
-    }
     await this.#dispatch(
       'finished terminal',
       chatId,
@@ -147,6 +139,16 @@ export class AgentEventBus {
       metadata,
       row.outcome,
     );
+  }
+
+  async publishRunFailed(chatId: string, runId: string, error: AgentRunFailureDetail, workingDirectory?: CommandWorkingDirectory): Promise<void> {
+    const captured = this.#terminalMetadata(chatId, runId);
+    if (!captured) return;
+    const metadata = { ...captured, ...(workingDirectory ? { workingDirectory } : {}) };
+    this.#settledTurnByChatId.delete(chatId);
+    this.#turnMetadataByChatId.delete(chatId);
+    await this.#dispatch('failed terminal', chatId, this.#failedListeners,
+      chatId, error.message ?? error.code, error.code, metadata);
   }
 
   async #dispatch<Args extends readonly unknown[]>(

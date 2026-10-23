@@ -261,6 +261,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       });
     });
     this.#ledger.subscribe((event) => this.#onTranscriptCommit(event));
+    this.#ledger.subscribeRunAbandoned((chatId, runId) => this.#events.publishRunFailed(chatId, runId, {
+      code: 'TRANSCRIPT_UNAVAILABLE',
+      message: 'Transcript storage failed. Check server storage and restart the server before continuing this chat.',
+    }));
   }
 
   hasAgent(agentId: string, executorId?: string | null): boolean { return this.#directory.has(agentId, executorId); }

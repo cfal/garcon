@@ -1208,6 +1208,12 @@ CREATE INDEX transcript_session_rows
 - A commit failure or unknown commit outcome means no broadcast and the
   chat's ledger fences for writes; the producer holds nothing, and
   whatever the fence loses falls under accepted loss 1 (section 16).
+  If a producer publication or terminal write fails during a run, core closes
+  that producer, aborts its execution best-effort, and reports a process-only
+  storage failure through the ordered chat lifecycle path. This releases
+  execution ownership and pending permission controls without claiming a
+  committed terminal row. The write fence remains; neither later input nor
+  queued work may dispatch through it. No terminal row is synthesized on restart.
 - Live backups use SQLite's backup API or `VACUUM INTO`; copying only
   `ledger.sqlite` while the WAL may contain commits is not a valid
   backup.
