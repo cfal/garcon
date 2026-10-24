@@ -87,16 +87,26 @@ describe('scheduled prompts API contract', () => {
 		const prompt = { ...scheduledPrompt, name: 'Daily review', target };
 		const snapshot = { revision: 1, prompts: [prompt], runLog: [] };
 		fetchMock.mockImplementation(async (_url, options) => Response.json(
-			(options.method ?? 'GET') === 'GET' ? snapshot : { success: true, snapshot },
+			(options.method ?? 'GET') === 'GET' ? snapshot : { success: true, snapshot, scheduledPrompt: prompt },
 		));
 		const request = { expectedRevision: 0, scheduledPrompt: {
 			schedule: { type: 'once' as const, runAtUtc: prompt.schedule.nextRunAt },
 			name: prompt.name, target, prompt: prompt.prompt,
 		} };
-		expect((await createScheduledPrompt(request)).snapshot).toEqual(snapshot);
+		expect(await createScheduledPrompt(request)).toEqual({ success: true, snapshot, scheduledPrompt: prompt });
 		expect(await getScheduledPrompts()).toEqual(snapshot);
 		expect((await updateScheduledPrompt({ ...request, id: prompt.id })).snapshot).toEqual(snapshot);
 		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(request);
+	});
+
+	it('rejects a creation response with a different record in the snapshot', async () => {
+		fetchMock.mockResolvedValue(Response.json({ success: true, scheduledPrompt,
+			snapshot: { revision: 1, prompts: [{ ...scheduledPrompt, enabled: false }], runLog: [] },
+		}));
+		await expect(createScheduledPrompt({ expectedRevision: 0, scheduledPrompt: {
+			schedule: { type: 'once', runAtUtc: scheduledPrompt.schedule.nextRunAt },
+			target: scheduledPrompt.target, prompt: scheduledPrompt.prompt,
+		} })).rejects.toThrow('Invalid scheduled prompt creation response');
 	});
 
 	it('rejects malformed responses and snapshots that omit the scheduled prompt', async () => {
@@ -120,7 +130,7 @@ describe('scheduled prompts API contract', () => {
 		);
 		await expect(
 			scheduleChatPrompt({ chatId: '123', duration: '1m', prompt: 'Continue' }),
-		).rejects.toThrow('omitted the created prompt');
+		).rejects.toThrow('Invalid schedule-in response');
 	});
 
 	it('preserves typed API errors', async () => {

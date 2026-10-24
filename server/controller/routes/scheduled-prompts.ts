@@ -1,5 +1,6 @@
 import type {
   CreateScheduledPromptRequest,
+  CreateScheduledPromptResponse,
   ReorderScheduledPromptsRequest,
   RemoveScheduledPromptRequest,
   SetScheduledPromptEnabledRequest,
@@ -39,11 +40,11 @@ export default function createScheduledPromptRoutes(scheduledPrompts: ScheduledP
       return jsonError('expectedRevision and scheduledPrompt are required', 400, 'SCHEDULED_PROMPT_VALIDATION_FAILED');
     }
     try {
-      const snapshot = await scheduledPrompts.create({
+      const result = await scheduledPrompts.create({
         expectedRevision: revision,
         scheduledPrompt: body.scheduledPrompt,
       });
-      return Response.json({ success: true, snapshot }, { status: 201 });
+      return Response.json({ success: true, ...result } satisfies CreateScheduledPromptResponse, { status: 201 });
     } catch (error) {
       return scheduledPromptError(error);
     }

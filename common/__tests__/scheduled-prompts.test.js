@@ -5,6 +5,7 @@ import {
   SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN,
   SCHEDULED_PROMPT_MAX_LENGTH,
   normalizeScheduledPrompt,
+  normalizeCreateScheduledPromptResponse,
   normalizeScheduledPromptDefinitionInput,
   normalizeScheduledPromptTarget,
   renderScheduledPrompt,
@@ -19,6 +20,20 @@ const CHAT_ID = '1783725900000000';
 const VALUES = { ...TEMPLATE_VALIDATION_VALUES, chat_id: CHAT_ID };
 const PREAMBLE_A = '00000000-0000-4000-8000-000000000001';
 const PREAMBLE_B = '00000000-0000-4000-8000-000000000002';
+
+it('confirms a created record only when the same record is in its atomic snapshot', () => {
+  const scheduledPrompt = normalizeScheduledPrompt({ ...definition('Synthetic input'),
+    id: '11111111-1111-4111-8111-111111111111', enabled: true,
+    schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
+    createdAt: '2029-01-01T00:00:00.000Z', updatedAt: '2029-01-01T00:00:00.000Z',
+  });
+  const response = { success: true, scheduledPrompt, snapshot: { revision: 1, prompts: [scheduledPrompt], runLog: [] } };
+  expect(normalizeCreateScheduledPromptResponse(response)).toEqual(response);
+  for (const invalid of [null, {}, { ...response, success: false }, { ...response, scheduledPrompt: undefined },
+    { ...response, snapshot: { ...response.snapshot, prompts: [] } },
+    { ...response, scheduledPrompt: { ...scheduledPrompt, prompt: 'Different input' } },
+  ]) expect(normalizeCreateScheduledPromptResponse(invalid)).toBeNull();
+});
 
 describe('scheduled execution selection', () => {
   const expectedSelection = { agentId: 'synthetic-literal', agentOwnershipEpoch: 'synthetic-epoch', model: 'notes' };

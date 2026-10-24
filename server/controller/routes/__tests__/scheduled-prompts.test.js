@@ -27,7 +27,7 @@ async function call(handler, body, method) {
 function scheduler() {
   return {
     snapshotAfterReconciliation: mock(() => Promise.resolve(emptySnapshot)),
-    create: mock(() => Promise.resolve({ ...emptySnapshot, revision: 1 })),
+    create: mock(() => Promise.resolve({ scheduledPrompt: { id: 'created-prompt' }, snapshot: { ...emptySnapshot, revision: 1 } })),
     scheduleIn: mock(() =>
       Promise.resolve({
         scheduledPrompt: {
@@ -74,6 +74,7 @@ describe('scheduled prompt routes', () => {
     expect(created.response.status).toBe(201);
     expect(created.body).toEqual({
       success: true,
+      scheduledPrompt: { id: 'created-prompt' },
       snapshot: { ...emptySnapshot, revision: 1 },
     });
     expect(service.create).toHaveBeenCalledWith({
