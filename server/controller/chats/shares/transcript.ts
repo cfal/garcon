@@ -316,7 +316,6 @@ function formatMetadataLines(snapshot: SharedChatSnapshot): string[] {
     `Agent: ${snapshot.agentId || 'Unknown'}`,
     `Model: ${snapshot.model || 'Unknown'}`,
     `Shared At: ${snapshot.sharedAt || ''}`,
-    `Project Path: ${snapshot.projectPath || ''}`,
     '',
     'Transcript',
   ];

@@ -171,6 +171,7 @@ describe('share storage error boundaries', () => {
     });
     expect(isNoAuthHandler(handler)).toBe(publicRoute);
     if (method === 'GET') expect(response.headers.get('Cache-Control')).toContain('no-store');
+    expect(response.headers.get('x-robots-tag')).toBe(publicRoute ? 'noindex, nofollow, noarchive' : null);
   });
 });
 
@@ -316,6 +317,44 @@ describe('shared transcript routes', () => {
 
     expect(response.status).toBe(400);
     expect(body.error).toBe('Share token is required');
+  });
+});
+
+describe('public share responses', () => {
+  const publicRequests = [
+    ['/api/v1/shared', 'http://localhost/api/v1/shared?token=share-token', {}],
+    ['/api/v1/shared', 'http://localhost/api/v1/shared?token=missing-token', {}],
+    ['/shared/:token', 'http://localhost/shared/share-token', { Accept: 'text/html' }],
+    ['/shared/:token', 'http://localhost/shared/share-token', {}],
+    ['/shared/:token', 'http://localhost/shared/missing-token', { Accept: 'text/html' }],
+    ['/shared/llm/:token', 'http://localhost/shared/llm/share-token', {}],
+    ['/shared/llm/:token', 'http://localhost/shared/llm/missing-token', {}],
+  ];
+
+  it.each(publicRequests)('keeps %s (%s) out of search indexes and referrers', async (route, href, headers) => {
+    const { routes } = createRoutes();
+    const response = await routes[route].GET(new Request(href, { headers }), new URL(href));
+
+    expect(response.headers.get('x-robots-tag')).toBe('noindex, nofollow, noarchive');
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+  });
+
+  it('omits the owning chat, project path, and transcript origin', async () => {
+    const { routes } = createRoutes(createSnapshot({
+      origin: { transcriptViewId: 'view-1', lastOrdinal: 4 },
+    }));
+    const href = 'http://localhost/api/v1/shared?token=share-token';
+    const response = await routes['/api/v1/shared'].GET(new Request(href), new URL(href));
+    const body = await response.json();
+
+    expect(Object.keys(body.snapshot).sort()).toEqual(
+      ['agentId', 'messages', 'model', 'shareToken', 'sharedAt', 'title'],
+    );
+    const text = await (await routes['/shared/llm/:token'].GET(
+      new Request('http://localhost/shared/llm/share-token'),
+      new URL('http://localhost/shared/llm/share-token'),
+    )).text();
+    expect(text).not.toContain('/workspace/garcon');
   });
 });
 

@@ -20,11 +20,9 @@ function response(
 	return {
 		snapshot: {
 			shareToken: 'share-token',
-			chatId: 'chat-1',
 			title: 'Large shared chat',
 			agentId: 'codex',
 			model: 'gpt-5',
-			projectPath: '/workspace/garcon',
 			sharedAt: pageOverrides.snapshotVersion ?? '2025-01-02T03:04:05.000Z',
 			messages: contents.map((content, index) => ({
 				type: 'assistant-message',
