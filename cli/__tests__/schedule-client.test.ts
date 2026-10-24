@@ -2,7 +2,7 @@ import { expect, mock, test } from 'bun:test';
 import { GarconClient } from '../garcon-client.js';
 import { main } from '../main.js';
 import { CLI_SERVER_INSTANCE_HEADER } from '@garcon/common/server-runtime';
-import { scheduleId, scheduleDefinition, newChatDefinition, schedulePrompt, scheduleSnapshot } from './schedule-fixtures.js';
+import { scheduleId, scheduleChatId, scheduleDefinition, newChatDefinition, schedulePrompt, scheduleSnapshot } from './schedule-fixtures.js';
 
 const connection = { baseUrl: 'http://127.0.0.1:1', instanceId: 'synthetic-controller', endpointInstanceId: 'synthetic-endpoint',
   defaultExecutorId: 'local', workspaceName: null, localCapability: 'synthetic-capability' };
@@ -124,3 +124,36 @@ test.each([[404, 'SESSION_NOT_FOUND'], [422, 'UNSUPPORTED_AGENT'], [400, 'SCHEDU
     expect(request).toHaveBeenCalledTimes(1);
   },
 );
+
+test.each(['create', 'update'] as const)('offline target rejection remains actionable for schedule %s', async (action) => {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const request = mock(async () => Response.json({
+    error: 'Executor is unavailable', errorCode: 'EXECUTOR_UNAVAILABLE', retryable: true,
+  }, { status: 503 }));
+  const fetcher = Object.assign(request, { preconnect() {} }) satisfies typeof fetch;
+  const args = ['schedule', action];
+  if (action === 'update') args.push(scheduleId);
+  args.push('--definition', JSON.stringify(newChatDefinition), '--expected-revision', '0', '--json');
+  const exit = await main(args, {
+    fetch: fetcher,
+    discoverRuntime: async () => ({ ...connection, configDir: '/synthetic', runtime: 'controller' as const }),
+    output: { result(text) { stdout.push(text); }, diagnostic(text) { stderr.push(text); } },
+  });
+  expect(exit).toBe(3);
+  expect(stdout).toEqual([]);
+  expect(stderr.join('\n')).toContain('EXECUTOR_UNAVAILABLE');
+  expect(stderr.join('\n')).not.toContain('outcome is unknown');
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+test('schedule readiness classification does not broaden other mutation rejections', async () => {
+  const request = mock(async () => Response.json({
+    error: 'Executor is unavailable', errorCode: 'EXECUTOR_UNAVAILABLE', retryable: true,
+  }, { status: 503 }));
+  const fetcher = Object.assign(request, { preconnect() {} }) satisfies typeof fetch;
+  const client = new GarconClient({ ...connection, fetch: fetcher });
+  await expect(client.updateChatTitle({ chatId: scheduleChatId, title: 'Synthetic title' }))
+    .rejects.toThrow('outcome is unknown');
+  expect(request).toHaveBeenCalledTimes(1);
+});

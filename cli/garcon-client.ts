@@ -168,16 +168,25 @@ export function isDefinitiveMutationRejection(error: unknown): boolean {
     || error.errorCode === 'SERVER_SHUTTING_DOWN';
 }
 
+export function isDefinitiveScheduleMutationRejection(error: unknown): boolean {
+  if (isDefinitiveMutationRejection(error)) return true;
+  // Schedule target readiness is validated before persistence.
+  return error instanceof GarconHttpError
+    && error.status === 503
+    && error.errorCode === 'EXECUTOR_UNAVAILABLE';
+}
+
 async function oneShotMutation<T>(
   phase: CliErrorPhase,
   submit: () => Promise<T>,
   signal?: AbortSignal,
+  isDefinitiveRejection: (error: unknown) => boolean = isDefinitiveMutationRejection,
 ): Promise<T> {
   signal?.throwIfAborted();
   try {
     return await submit();
   } catch (error) {
-    if (isDefinitiveMutationRejection(error)) throw error;
+    if (isDefinitiveRejection(error)) throw error;
     throw new CliError(
       phase,
       'mutation outcome is unknown; inspect the current value or operation status before retrying. No automatic retry was made.',
@@ -1221,7 +1230,7 @@ export class GarconClient {
     return oneShotMutation('schedules', async () => {
       const response = await this.#request('schedules', 'POST', '/api/v1/scheduled-prompts', request, signal);
       return scheduleCreation(response);
-    }, signal);
+    }, signal, isDefinitiveScheduleMutationRejection);
   }
 
   async updateScheduledPrompt(
@@ -1231,7 +1240,7 @@ export class GarconClient {
     return oneShotMutation('schedules', async () => {
       const response = await this.#request('schedules', 'PUT', '/api/v1/scheduled-prompts', request, signal);
       return scheduleMutation(response);
-    }, signal);
+    }, signal, isDefinitiveScheduleMutationRejection);
   }
 
   async setScheduledPromptEnabled(
@@ -1241,7 +1250,7 @@ export class GarconClient {
     return oneShotMutation('schedules', async () => {
       const response = await this.#request('schedules', 'PUT', '/api/v1/scheduled-prompts/enabled', request, signal);
       return scheduleMutation(response);
-    }, signal);
+    }, signal, isDefinitiveScheduleMutationRejection);
   }
 
   async deleteScheduledPrompt(
@@ -1251,7 +1260,7 @@ export class GarconClient {
     return oneShotMutation('schedules', async () => {
       const response = await this.#request('schedules', 'DELETE', '/api/v1/scheduled-prompts', request, signal);
       return scheduleMutation(response);
-    }, signal);
+    }, signal, isDefinitiveScheduleMutationRejection);
   }
 
   async listExecutors(signal?: AbortSignal): Promise<readonly ExecutorSnapshot[]> {

@@ -116,10 +116,16 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       revision = (await invoke<ScheduleResult>(['show', id])).revision;
       if (origin !== 'local') {
         await fixture.client.patch(`/api/v1/executors/${origin}`, { enabled: false });
-        const unavailable = await runCli(fixture, ['schedule', 'update', id, '--definition', JSON.stringify(definition),
-          '--expected-revision', String(revision)], 'controller');
-        expect(unavailable).toMatchObject({ exitCode: 3, stdout: '' });
-        expect((await invoke<ScheduleResult>(['show', id], 'controller')).revision).toBe(revision);
+        for (const action of ['create', 'update']) {
+          const args = ['schedule', action];
+          if (action === 'update') args.push(id);
+          args.push('--definition', JSON.stringify(definition), '--expected-revision', String(revision));
+          const unavailable = await runCli(fixture, args, 'controller');
+          expect(unavailable).toMatchObject({ exitCode: 3, stdout: '' });
+          expect(unavailable.stderr).toContain('EXECUTOR_UNAVAILABLE');
+          expect(unavailable.stderr).not.toContain('outcome is unknown');
+          expect(await invoke(['list'], 'controller')).toEqual({ revision, prompts: [edited.scheduledPrompt] });
+        }
       }
       const enabled = await invoke<ScheduleResult>(['enable', id, '--expected-revision', String(revision)], 'controller');
       expect(enabled.scheduledPrompt.enabled).toBe(true);

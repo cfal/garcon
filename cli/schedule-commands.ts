@@ -6,7 +6,7 @@ import type {
 } from '@garcon/common/scheduled-prompts';
 import type { ScheduleCliCommand } from './schedule-args.js';
 import { CliError, argumentError } from './errors.js';
-import { isDefinitiveMutationRejection, type GarconClient } from './garcon-client.js';
+import { isDefinitiveScheduleMutationRejection, type GarconClient } from './garcon-client.js';
 import type { CliOutput } from './output.js';
 import { terminalLine } from './terminal-output.js';
 import { formatTextTable } from './text-table.js';
@@ -146,7 +146,7 @@ export async function runScheduleCommand(
     }
     writeResult({ revision: result.snapshot.revision, scheduledPrompt });
   } catch (error) {
-    if (submitted && !isDefinitiveMutationRejection(error)) {
+    if (submitted && !isDefinitiveScheduleMutationRejection(error)) {
       throw new CliError('schedules', 'schedule mutation outcome is unknown; inspect schedules before retrying. No automatic retry was made.', 3, { cause: error });
     }
     throw error;
