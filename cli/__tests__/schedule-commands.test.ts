@@ -24,7 +24,7 @@ function fixture() {
     if (command.kind !== 'schedule') throw new Error('Missing schedule command');
     await runScheduleCommand(command, client, output, signal, onSubmission);
   };
-  return { run, client, stdout, stderr };
+  return { run, client, output, stdout, stderr };
 }
 
 test('every schedule verb uses its typed operation and emits a single JSON result', async () => {
@@ -51,6 +51,45 @@ test('explicit creation revision avoids a fresh baseline and conflicts are never
   await expect(f.run(['create', '--expected-revision', '0', '--definition', JSON.stringify(scheduleDefinition)])).rejects.toBe(conflict);
   expect(f.client.getScheduledPrompts).not.toHaveBeenCalled();
   expect(f.client.createScheduledPrompt).toHaveBeenCalledTimes(1);
+  expect(f.stdout).toEqual([]);
+});
+
+test('unread definitions fail before baseline reads or submission', async () => {
+  const f = fixture();
+  const onSubmission = mock();
+  const commands = [
+    ['create', '--definition', '-'],
+    ['update', scheduleId, '--definition', '-', '--expected-revision', '0'],
+  ];
+  for (const args of commands) {
+    await expect(f.run(args, undefined, onSubmission)).rejects.toMatchObject({
+      exitCode: 2,
+      message: 'schedule definition has not been read',
+    });
+  }
+  expect(onSubmission).not.toHaveBeenCalled();
+  expect(f.client.getScheduledPrompts).not.toHaveBeenCalled();
+  expect(f.client.createScheduledPrompt).not.toHaveBeenCalled();
+  expect(f.client.updateScheduledPrompt).not.toHaveBeenCalled();
+  expect(f.stdout).toEqual([]);
+});
+
+test('encoded request bounds reject before marking or sending a mutation', async () => {
+  const f = fixture();
+  const onSubmission = mock();
+  const command = parseCliArgs([
+    'schedule', 'update', scheduleId, '--definition', '-', '--expected-revision', '0',
+  ], {});
+  if (command.kind !== 'schedule' || command.operation.action !== 'update') {
+    throw new Error('Missing schedule update command');
+  }
+  command.operation.definition = { ...scheduleDefinition, prompt: 'x'.repeat(512 * 1024) };
+  await expect(runScheduleCommand(command, f.client, f.output, undefined, onSubmission)).rejects.toMatchObject({
+    exitCode: 2,
+    message: 'encoded schedule request exceeds 512 KiB',
+  });
+  expect(onSubmission).not.toHaveBeenCalled();
+  expect(f.client.updateScheduledPrompt).not.toHaveBeenCalled();
   expect(f.stdout).toEqual([]);
 });
 

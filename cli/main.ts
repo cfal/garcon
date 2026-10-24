@@ -249,9 +249,12 @@ export async function main(
       return 0;
     }
     if (command.kind === 'schedule') {
-      const scheduleCommand = command.readsDefinitionFromStdin
-        ? applyScheduleDefinitionStdin(command, await readConfiguredStdin(options,
-          (signal) => readScheduleDefinitionStdin(Bun.stdin.stream(), signal))) : command;
+      let scheduleCommand = command;
+      if (command.readsDefinitionFromStdin) {
+        const definition = await readConfiguredStdin(options,
+          (signal) => readScheduleDefinitionStdin(Bun.stdin.stream(), signal));
+        scheduleCommand = applyScheduleDefinitionStdin(command, definition);
+      }
       const { client, command: connected } = await connectedClient(scheduleCommand, options);
       await runScheduleCommand(connected, client, output, options.signal, () => { scheduleSubmissionStarted = true; });
       return 0;
@@ -530,15 +533,27 @@ export async function main(
     return 0;
   } catch (error) {
     if (options.signal?.aborted) {
-      output.diagnostic(command?.kind === 'schedule'
-        ? scheduleSubmissionStarted ? 'terminal interrupted; schedule mutation may have committed. Inspect schedules before retrying.' : 'terminal interrupted; no schedule mutation was submitted'
-        : command?.kind === 'executor'
-        ? executorSubmissionStarted ? 'terminal interrupted; executor configuration may have committed. Inspect before retrying.' : 'terminal interrupted; no executor mutation was submitted'
-        : command?.kind === 'ticket'
-        ? ticketSubmissionStarted
-          ? 'terminal interrupted; the ticket save is not confirmed. Retry with the printed identity and identical body.'
-          : 'terminal interrupted; no ticket mutation was submitted'
-        : interruptDiagnostic(command, forkTargetChatId));
+      let diagnostic: string;
+      switch (command?.kind) {
+        case 'schedule':
+          diagnostic = scheduleSubmissionStarted
+            ? 'terminal interrupted; schedule mutation may have committed. Inspect schedules before retrying.'
+            : 'terminal interrupted; no schedule mutation was submitted';
+          break;
+        case 'executor':
+          diagnostic = executorSubmissionStarted
+            ? 'terminal interrupted; executor configuration may have committed. Inspect before retrying.'
+            : 'terminal interrupted; no executor mutation was submitted';
+          break;
+        case 'ticket':
+          diagnostic = ticketSubmissionStarted
+            ? 'terminal interrupted; the ticket save is not confirmed. Retry with the printed identity and identical body.'
+            : 'terminal interrupted; no ticket mutation was submitted';
+          break;
+        default:
+          diagnostic = interruptDiagnostic(command, forkTargetChatId);
+      }
+      output.diagnostic(diagnostic);
       return 130;
     }
     const cliError = error instanceof CliError

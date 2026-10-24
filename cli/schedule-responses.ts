@@ -1,9 +1,16 @@
 import { isRecord } from '@garcon/common/json';
-import { normalizeCreateScheduledPromptResponse, normalizeScheduledPromptsSnapshot,
-  type CreateScheduledPromptResponse, type ScheduledPromptsSnapshot, type ScheduledPromptsMutationResponse } from '@garcon/common/scheduled-prompts';
+import {
+  normalizeCreateScheduledPromptResponse,
+  normalizeScheduledPromptsSnapshot,
+  type CreateScheduledPromptResponse,
+  type ScheduledPromptsSnapshot,
+  type ScheduledPromptsMutationResponse,
+} from '@garcon/common/scheduled-prompts';
 import { CliError } from './errors.js';
 
-function invalid(): never { throw new CliError('schedules', 'invalid scheduled prompts response', 3); }
+function invalidScheduleResponse(): never {
+  throw new CliError('schedules', 'invalid scheduled prompts response', 3);
+}
 
 function hasExplicitEnablement(value: unknown): boolean {
   return isRecord(value) && typeof value.enabled === 'boolean';
@@ -11,21 +18,27 @@ function hasExplicitEnablement(value: unknown): boolean {
 
 export function scheduleSnapshot(value: unknown): ScheduledPromptsSnapshot {
   const snapshot = normalizeScheduledPromptsSnapshot(value);
-  if (!snapshot || !isRecord(value) || !Array.isArray(value.runLog) || value.runLog.length !== snapshot.runLog.length
-    || !Array.isArray(value.prompts) || !value.prompts.every(hasExplicitEnablement)
-    || new Set(snapshot.prompts.map((entry) => entry.id)).size !== snapshot.prompts.length) invalid();
+  if (!snapshot || !isRecord(value)) invalidScheduleResponse();
+  if (!Array.isArray(value.runLog) || value.runLog.length !== snapshot.runLog.length) {
+    invalidScheduleResponse();
+  }
+  if (!Array.isArray(value.prompts) || !value.prompts.every(hasExplicitEnablement)) {
+    invalidScheduleResponse();
+  }
+  const promptIds = new Set(snapshot.prompts.map((entry) => entry.id));
+  if (promptIds.size !== snapshot.prompts.length) invalidScheduleResponse();
   return snapshot;
 }
 
 export function scheduleMutation(value: unknown): ScheduledPromptsMutationResponse {
-  if (!isRecord(value) || value.success !== true) invalid();
+  if (!isRecord(value) || value.success !== true) invalidScheduleResponse();
   return { success: true, snapshot: scheduleSnapshot(value.snapshot) };
 }
 
 export function scheduleCreation(value: unknown): CreateScheduledPromptResponse {
-  if (!isRecord(value) || !hasExplicitEnablement(value.scheduledPrompt)) invalid();
+  if (!isRecord(value) || !hasExplicitEnablement(value.scheduledPrompt)) invalidScheduleResponse();
   const created = normalizeCreateScheduledPromptResponse(value);
-  if (!created) invalid();
+  if (!created) invalidScheduleResponse();
   scheduleMutation(value);
   return created;
 }
