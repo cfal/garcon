@@ -1,4 +1,4 @@
-import type { ScheduledPromptDefinitionInput } from '@garcon/common/scheduled-prompts';
+import { SCHEDULED_PROMPT_RUN_LOG_LIMIT, type ScheduledPromptDefinitionInput } from '@garcon/common/scheduled-prompts';
 import type { CliConnectionOptions } from './args.js';
 import { argumentError } from './errors.js';
 import { parseScheduleDefinition } from './schedule-definition.js';
@@ -82,8 +82,8 @@ export function parseScheduleCliCommand(
     }
     case 'history': {
       const limit = values.limit ?? '50';
-      if (typeof limit !== 'string' || !/^\d+$/u.test(limit) || Number(limit) < 1 || Number(limit) > 200) {
-        throw argumentError('--limit must be between 1 and 200');
+      if (typeof limit !== 'string' || !/^\d+$/u.test(limit) || Number(limit) < 1 || Number(limit) > SCHEDULED_PROMPT_RUN_LOG_LIMIT) {
+        throw argumentError(`--limit must be between 1 and ${SCHEDULED_PROMPT_RUN_LOG_LIMIT}`);
       }
       operation = { action, ...(id ? { id } : {}), limit: Number(limit) };
       break;

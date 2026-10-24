@@ -130,17 +130,18 @@ test('a deletion reply retaining the schedule reports uncertainty without retry'
   expect(f.stdout).toEqual([]);
 });
 
-test('history filters deleted IDs, retains process metadata and orders newest first', async () => {
+test('history filters deleted IDs, retains process metadata and limits to the newest entries in order', async () => {
   const f = fixture();
   const entry = { at: '2026-01-01T00:00:00.000Z', scheduledPromptId: scheduleId,
     promptLabel: 'Synthetic', outcome: 'missed' as const, chatId: null, message: 'Synthetic missed occurrence' };
   f.client.getScheduledPrompts.mockResolvedValue({ revision: 2, prompts: [], runLog: [entry,
-    { ...entry, scheduledPromptId: null, promptLabel: null }, { ...entry, at: '2026-01-02T00:00:00.000Z' }] });
+    { ...entry, scheduledPromptId: null, promptLabel: null },
+    { ...entry, at: '2026-01-02T00:00:00.000Z' }, { ...entry, at: '2026-01-03T00:00:00.000Z' }] });
   await f.run(['history', scheduleId, '--limit', '2', '--json']);
   expect(JSON.parse(f.stdout[0]!)).toMatchObject({ retention: 'controller-process', capacity: 200,
     runLog: [
+      { at: '2026-01-03T00:00:00.000Z', scheduledPromptId: scheduleId },
       { at: '2026-01-02T00:00:00.000Z', scheduledPromptId: scheduleId },
-      { at: '2026-01-01T00:00:00.000Z', scheduledPromptId: scheduleId },
     ] });
   await expect(f.run(['show', scheduleId])).rejects.toThrow('not found');
 });

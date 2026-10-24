@@ -1,8 +1,9 @@
 import { scheduledPromptLabel } from '@garcon/common/garcon-schedule';
-import type {
-  ScheduledPrompt,
-  ScheduledPromptsMutationResponse,
-  ScheduledPromptsSnapshot,
+import {
+  SCHEDULED_PROMPT_RUN_LOG_LIMIT,
+  type ScheduledPrompt,
+  type ScheduledPromptsMutationResponse,
+  type ScheduledPromptsSnapshot,
 } from '@garcon/common/scheduled-prompts';
 import type { ScheduleCliCommand } from './schedule-args.js';
 import { CliError, argumentError } from './errors.js';
@@ -60,10 +61,10 @@ export async function runScheduleCommand(
       const runLog = snapshot.runLog.filter((entry) => operation.id === undefined || entry.scheduledPromptId === operation.id)
         .slice(-operation.limit).reverse();
       if (command.json) {
-        writeResult({ revision: snapshot.revision, retention: 'controller-process', capacity: 200, runLog });
+        writeResult({ revision: snapshot.revision, retention: 'controller-process', capacity: SCHEDULED_PROMPT_RUN_LOG_LIMIT, runLog });
         return;
       }
-      output.diagnostic('Dispatch history only; latest 200 workspace entries, cleared on controller restart. Not agent completion status.');
+      output.diagnostic(`Dispatch history only; latest ${SCHEDULED_PROMPT_RUN_LOG_LIMIT} workspace entries, cleared on controller restart. Not agent completion status.`);
       const rows = runLog.map((entry) => [
         entry.at,
         entry.scheduledPromptId ?? '-',

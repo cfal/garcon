@@ -13,6 +13,7 @@ import {
 import { parseChatId, type ChatId } from '@garcon/common/chat-id';
 import { isAgentId, type AgentId } from '@garcon/common/agents';
 import { isExecutorId } from '@garcon/common/executors';
+import { SCHEDULED_PROMPT_RUN_LOG_LIMIT } from '@garcon/common/scheduled-prompts';
 import {
   parseChatRowTitle,
 } from '@garcon/common/chat-row-contracts';
@@ -139,7 +140,7 @@ Reload and provider-native fork segments may drop Garcon-only presentation.
 
 Schedule management:
   list|show <id> [--json]        Full definitions and collection revision (list takes no ID)
-  history [id] [--limit 1..200] [--json]  Recent dispatches, not agent completion; cleared on restart
+  history [id] [--limit 1..${SCHEDULED_PROMPT_RUN_LOG_LIMIT}] [--json]  Recent dispatches, not agent completion; cleared on restart
   create --definition <json|-> [--expected-revision N] [--json]
   update <id> --definition <json|-> --expected-revision N [--json]
   enable|disable|delete <id> --expected-revision N [--json]
@@ -147,7 +148,7 @@ Schedule management:
   New-chat targets require explicit executorId and an absolute executor-local projectPath.
   Use --definition - for bounded UTF-8 stdin. Updates replace one definition and preserve its pause.
   No automatic mutation retries; inspect schedules after an unknown outcome. Pausing does not stop claimed work.
-  History retains the latest 200 workspace dispatches in memory (default limit 50).
+  History retains the latest ${SCHEDULED_PROMPT_RUN_LOG_LIMIT} workspace dispatches in memory (default limit 50).
 
 Executor management:
   list|show <id> [--json]        Redacted configuration and readiness (list takes no ID)
