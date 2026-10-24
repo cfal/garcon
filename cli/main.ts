@@ -1,6 +1,5 @@
 import packageJson from '../package.json' with { type: 'json' };
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import { CLI_HELP, parseCliArgs, type CliConnectionOptions, type ParsedCliCommand } from './args.js';
 import { runCatalogQuery } from './catalog-query.js';
 import { resumeChatAsync, stopChat } from './chat-control.js';
@@ -36,6 +35,7 @@ import {
 } from './automation-output.js';
 import { discoverRuntime } from './discovery.js';
 import { CliError } from './errors.js';
+import { isAbsoluteExecutorPath } from './executor-path.js';
 import { GarconClient } from './garcon-client.js';
 import { createCliOutput, type CliOutput } from './output.js';
 import { applyTicketStdin, runTicketCommand } from './ticket-commands.js';
@@ -142,8 +142,7 @@ async function canonicalProjectDirectory(cwd: string): Promise<string> {
 }
 
 function remoteProjectDirectory(cwd: string | undefined): string {
-  if (cwd === undefined || cwd.includes('\0') || !(path.posix.isAbsolute(cwd)
-    || /^[a-z]:[\\/]/iu.test(cwd) || /^\\\\[^\\]+\\[^\\]+(?:\\|$)/u.test(cwd))) {
+  if (!isAbsoluteExecutorPath(cwd)) {
     throw new CliError('arguments', 'cross-executor starts require an explicit absolute --cwd on the selected executor', 2);
   }
   return cwd;

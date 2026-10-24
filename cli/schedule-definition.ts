@@ -1,4 +1,3 @@
-import path from 'node:path';
 import { isRecord } from '@garcon/common/json';
 import { parseChatId } from '@garcon/common/chat-id';
 import { isExecutorId } from '@garcon/common/executors';
@@ -7,6 +6,7 @@ import {
   type ScheduledPromptDefinitionInput,
 } from '@garcon/common/scheduled-prompts';
 import { argumentError } from './errors.js';
+import { isAbsoluteExecutorPath } from './executor-path.js';
 
 export const SCHEDULE_DEFINITION_BYTES = 256 * 1024;
 
@@ -23,13 +23,6 @@ function requireKnownFields(value: unknown, allowed: readonly string[], label: s
     if (!allowed.includes(key)) throw argumentError(`${label} contains an unsupported field`);
   }
   return value;
-}
-
-function isAbsoluteExecutorPath(value: unknown): value is string {
-  if (typeof value !== 'string' || value.includes('\0')) return false;
-  return path.posix.isAbsolute(value)
-    || /^[a-z]:[\\/]/iu.test(value)
-    || /^\\\\[^\\]+\\[^\\]+(?:\\|$)/u.test(value);
 }
 
 export function parseScheduleDefinition(input: string): ScheduledPromptDefinitionInput {
