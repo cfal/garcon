@@ -1921,7 +1921,11 @@ model context, carryover, or export.
   `server/controller/routes/shares.ts`, `server/controller/chats/share-store.ts`,
   `common/share-types.ts`); the share never reads the ledger again and
   is unaffected by reload or deletion of views. Share revocation policy
-  is unchanged.
+  is unchanged. Share artifacts withhold execution context the share
+  never renders: command output carries a null context and a reported
+  working directory becomes `withheld`. The share index records the
+  renderer revision of each share's artifacts, and a read renders older
+  artifacts again from the stored snapshot before serving them.
 - **Ordinary user export** captures the current view through one pinned
   watermark and folds raw ledger rows into export entries. It includes
   `user-input`, every rendered `provider-row`, every public `notice`,
