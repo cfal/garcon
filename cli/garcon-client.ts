@@ -1,4 +1,7 @@
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
+import type { CreateScheduledPromptRequest, UpdateScheduledPromptRequest, SetScheduledPromptEnabledRequest,
+  RemoveScheduledPromptRequest } from '@garcon/common/scheduled-prompts';
+import { scheduleSnapshot, scheduleMutation, scheduleCreation } from './schedule-responses.js';
 import { isRemoteExecutorId, parseExecutorConnection, type CreateExecutorRequest, type UpdateExecutorRequest,
   type ExecutorSnapshot, type ExecutorConnection } from '@garcon/common/executors';
 import { executorSnapshots, executorProviders, executorResponseError, type ExecutorProvider } from './executor-responses.js';
@@ -126,7 +129,7 @@ export class GarconHttpError extends CliError {
     super(
       phase,
       message,
-      errorCode === 'SESSION_NOT_FOUND'
+      phase !== 'schedules' && (errorCode === 'SESSION_NOT_FOUND'
         || errorCode === 'NATIVE_SESSION_NOT_FOUND'
         || errorCode === 'NATIVE_SESSION_AMBIGUOUS'
         || errorCode === 'UNSUPPORTED_AGENT'
@@ -137,7 +140,7 @@ export class GarconHttpError extends CliError {
           || phase === 'title update'
           || phase === 'export'
           || phase === 'handoff artifact'
-          || phase === 'chat search') && status === 400)
+          || phase === 'chat search') && status === 400))
         ? 2
         : 3,
     );
@@ -1199,6 +1202,30 @@ export class GarconClient {
     const value = await this.#request('tickets', method, `/api/v1/tickets${route}`, body, signal);
     try { return parse(value); }
     catch (error) { throw new CliError('tickets', 'server returned an invalid ticket response', 3, { cause: error }); }
+  }
+
+  async getScheduledPrompts(signal?: AbortSignal) {
+    return scheduleSnapshot(await this.#request('schedules', 'GET', '/api/v1/scheduled-prompts', undefined, signal));
+  }
+
+  async createScheduledPrompt(request: CreateScheduledPromptRequest, signal?: AbortSignal) {
+    return oneShotMutation('schedules', async () => scheduleCreation(
+      await this.#request('schedules', 'POST', '/api/v1/scheduled-prompts', request, signal)), signal);
+  }
+
+  async updateScheduledPrompt(request: UpdateScheduledPromptRequest, signal?: AbortSignal) {
+    return oneShotMutation('schedules', async () => scheduleMutation(
+      await this.#request('schedules', 'PUT', '/api/v1/scheduled-prompts', request, signal)), signal);
+  }
+
+  async setScheduledPromptEnabled(request: SetScheduledPromptEnabledRequest, signal?: AbortSignal) {
+    return oneShotMutation('schedules', async () => scheduleMutation(
+      await this.#request('schedules', 'PUT', '/api/v1/scheduled-prompts/enabled', request, signal)), signal);
+  }
+
+  async deleteScheduledPrompt(request: RemoveScheduledPromptRequest, signal?: AbortSignal) {
+    return oneShotMutation('schedules', async () => scheduleMutation(
+      await this.#request('schedules', 'DELETE', '/api/v1/scheduled-prompts', request, signal)), signal);
   }
 
   async listExecutors(signal?: AbortSignal): Promise<readonly ExecutorSnapshot[]> {

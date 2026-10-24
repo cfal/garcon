@@ -29,6 +29,11 @@ const document = { mutation: false, management: false, timeoutMs: 120_000, pool:
 const maintenance = { mutation: true, management: false, timeoutMs: null, pool: 'long', lane: 'bulk' } as const;
 
 export const CLI_OPERATIONS = {
+  'GET /api/v1/scheduled-prompts': read,
+  'POST /api/v1/scheduled-prompts': write,
+  'PUT /api/v1/scheduled-prompts': write,
+  'DELETE /api/v1/scheduled-prompts': write,
+  'PUT /api/v1/scheduled-prompts/enabled': write,
   'GET /api/v1/executors': read,
   'POST /api/v1/executors': { ...write, management: true },
   'PATCH /api/v1/executors/:executorId': { ...write, management: true },
@@ -150,6 +155,11 @@ export function parseControllerCliRequest(value: unknown): ControllerCliRequest 
   }
   if (['POST /api/v1/chats/start', 'POST /api/v1/chats/lookup-native-session', 'POST /api/v1/tickets/project-default'].includes(http.operation)) {
     if (!isRecord(http.body) || !isExecutorId(http.body.executorId)) invalid();
+  }
+  if (http.operation === 'POST /api/v1/scheduled-prompts' || http.operation === 'PUT /api/v1/scheduled-prompts') {
+    const definition = isRecord(http.body) ? http.body.scheduledPrompt : null;
+    const target = isRecord(definition) ? definition.target : null;
+    if (isRecord(target) && target.type === 'new-chat' && !isExecutorId(target.executorId)) invalid();
   }
   if (http.operation.includes('/api/v1/executors') && http.query.length !== 0) invalid();
   if (http.operation === 'DELETE /api/v1/executors/:executorId' && http.body !== null) invalid();

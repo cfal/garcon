@@ -43,6 +43,9 @@ import { terminalLine } from './terminal-output.js';
 import { readTicketStdin } from './ticket-stdin.js';
 import { applyExecutorConnectionStdin, readExecutorConnectionStdin } from './executor-args.js';
 import { runExecutorCommand } from './executor-commands.js';
+import { applyScheduleDefinitionStdin } from './schedule-args.js';
+import { readScheduleDefinitionStdin } from './schedule-definition.js';
+import { runScheduleCommand } from './schedule-commands.js';
 import { requireCompletedTurnReceipt, writeTerminalResult } from './terminal-receipt.js';
 
 export interface MainOptions {
@@ -233,6 +236,7 @@ export async function main(
   let command: ParsedCliCommand | undefined;
   let ticketSubmissionStarted = false;
   let executorSubmissionStarted = false;
+  let scheduleSubmissionStarted = false;
   let forkTargetChatId: string | undefined;
   try {
     command = parseCliArgs(argv);
@@ -242,6 +246,14 @@ export async function main(
     }
     if (command.kind === 'version') {
       process.stdout.write(`${packageJson.version}\n`);
+      return 0;
+    }
+    if (command.kind === 'schedule') {
+      const scheduleCommand = command.readsDefinitionFromStdin
+        ? applyScheduleDefinitionStdin(command, await readConfiguredStdin(options,
+          (signal) => readScheduleDefinitionStdin(Bun.stdin.stream(), signal))) : command;
+      const { client, command: connected } = await connectedClient(scheduleCommand, options);
+      await runScheduleCommand(connected, client, output, options.signal, () => { scheduleSubmissionStarted = true; });
       return 0;
     }
     if (command.kind === 'executor') {
@@ -518,7 +530,9 @@ export async function main(
     return 0;
   } catch (error) {
     if (options.signal?.aborted) {
-      output.diagnostic(command?.kind === 'executor'
+      output.diagnostic(command?.kind === 'schedule'
+        ? scheduleSubmissionStarted ? 'terminal interrupted; schedule mutation may have committed. Inspect schedules before retrying.' : 'terminal interrupted; no schedule mutation was submitted'
+        : command?.kind === 'executor'
         ? executorSubmissionStarted ? 'terminal interrupted; executor configuration may have committed. Inspect before retrying.' : 'terminal interrupted; no executor mutation was submitted'
         : command?.kind === 'ticket'
         ? ticketSubmissionStarted
