@@ -106,15 +106,42 @@ test('malformed confirmations and possible dispatch failures report uncertainty 
   expect(f.stdout).toEqual([]);
 });
 
+test('an unconfirmed creation revision reports uncertainty without retry', async () => {
+  const f = fixture();
+  f.client.createScheduledPrompt.mockResolvedValueOnce({
+    success: true,
+    scheduledPrompt: schedulePrompt,
+    snapshot: scheduleSnapshot,
+  });
+  await expect(f.run(['create', '--expected-revision', '1', '--definition', JSON.stringify(scheduleDefinition)]))
+    .rejects.toThrow('outcome is unknown');
+  expect(f.client.createScheduledPrompt).toHaveBeenCalledTimes(1);
+  expect(f.stdout).toEqual([]);
+});
+
+test('a deletion reply retaining the schedule reports uncertainty without retry', async () => {
+  const f = fixture();
+  f.client.deleteScheduledPrompt.mockResolvedValueOnce({
+    success: true,
+    snapshot: { ...scheduleSnapshot, revision: 2 },
+  });
+  await expect(f.run(['delete', scheduleId, '--expected-revision', '1'])).rejects.toThrow('outcome is unknown');
+  expect(f.client.deleteScheduledPrompt).toHaveBeenCalledTimes(1);
+  expect(f.stdout).toEqual([]);
+});
+
 test('history filters deleted IDs, retains process metadata and orders newest first', async () => {
   const f = fixture();
   const entry = { at: '2026-01-01T00:00:00.000Z', scheduledPromptId: scheduleId,
     promptLabel: 'Synthetic', outcome: 'missed' as const, chatId: null, message: 'Synthetic missed occurrence' };
   f.client.getScheduledPrompts.mockResolvedValue({ revision: 2, prompts: [], runLog: [entry,
     { ...entry, scheduledPromptId: null, promptLabel: null }, { ...entry, at: '2026-01-02T00:00:00.000Z' }] });
-  await f.run(['history', scheduleId, '--limit', '1', '--json']);
+  await f.run(['history', scheduleId, '--limit', '2', '--json']);
   expect(JSON.parse(f.stdout[0]!)).toMatchObject({ retention: 'controller-process', capacity: 200,
-    runLog: [{ at: '2026-01-02T00:00:00.000Z', scheduledPromptId: scheduleId }] });
+    runLog: [
+      { at: '2026-01-02T00:00:00.000Z', scheduledPromptId: scheduleId },
+      { at: '2026-01-01T00:00:00.000Z', scheduledPromptId: scheduleId },
+    ] });
   await expect(f.run(['show', scheduleId])).rejects.toThrow('not found');
 });
 
