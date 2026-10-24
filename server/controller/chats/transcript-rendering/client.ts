@@ -4,6 +4,7 @@ import type { ShareSnapshotHeader } from '../shares/snapshot-format.js';
 import type { TranscriptExportDocumentRequest } from '../transcript-export/document.js';
 import type {
   RenderedShareSnapshot,
+  ShareSnapshotFormat,
   TranscriptRenderingResults,
   TranscriptRenderingTask,
 } from './tasks.js';
@@ -22,7 +23,13 @@ export interface TranscriptRendering {
     },
     signal?: AbortSignal,
   ): Promise<RenderedShareSnapshot>;
-  convertShareSnapshot(shareToken: string, json: string, signal?: AbortSignal): Promise<RenderedShareSnapshot | null>;
+  // Renders a stored snapshot again with the current renderer; null when it is unreadable.
+  upgradeShareSnapshot(
+    shareToken: string,
+    format: ShareSnapshotFormat,
+    text: string,
+    signal?: AbortSignal,
+  ): Promise<RenderedShareSnapshot | null>;
 }
 
 // Renders whole transcripts into export and share documents on a Worker, from rows as the
@@ -51,8 +58,13 @@ export class TranscriptRenderingWorker implements TranscriptRendering {
     return this.#worker.run({ kind: 'render-share-snapshot', header }, rows, signal);
   }
 
-  convertShareSnapshot(shareToken: string, json: string, signal?: AbortSignal): Promise<RenderedShareSnapshot | null> {
-    return this.#worker.run({ kind: 'convert-share-snapshot', shareToken }, [json], signal);
+  upgradeShareSnapshot(
+    shareToken: string,
+    format: ShareSnapshotFormat,
+    text: string,
+    signal?: AbortSignal,
+  ): Promise<RenderedShareSnapshot | null> {
+    return this.#worker.run({ kind: 'upgrade-share-snapshot', shareToken, format }, [text], signal);
   }
 
   close(): void {

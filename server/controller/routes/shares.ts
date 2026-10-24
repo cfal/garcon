@@ -1,7 +1,7 @@
 // Share routes. Provides endpoints to create, query, revoke, and
 // publicly access shared chat snapshots.
 
-import { markRouteNoAuth } from '../lib/http-route.js';
+import { markRouteNoAuth, markRouteResponseHeaders } from '../lib/http-route.js';
 import { withJsonBody } from '../lib/json-route.js';
 import type { IShareStore } from '../chats/shares/store.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -209,17 +209,10 @@ function withShareStorageErrors(handler: RouteHandler): RouteHandler {
   };
 }
 
-// Serves a share route without authentication. Every response it returns, including
-// errors and the not-found shell, carries the public share headers.
+// Serves a share route without authentication. The HTTP wrapper adds the public share
+// headers to every response, including shutdown and unhandled-error responses.
 function publicShareRoute(handler: RouteHandler): RouteHandler {
-  const guarded = withShareStorageErrors(handler);
-  return markRouteNoAuth(async (...args) => {
-    const response = await guarded(...args);
-    for (const [name, value] of Object.entries(PUBLIC_SHARE_HEADERS)) {
-      response.headers.set(name, value);
-    }
-    return response;
-  });
+  return markRouteNoAuth(markRouteResponseHeaders(withShareStorageErrors(handler), PUBLIC_SHARE_HEADERS));
 }
 
 // Builds a GetSharedChatResponse around the page's messages as stored, so serving a page
