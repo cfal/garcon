@@ -72,6 +72,7 @@
 		{#if showCloseButton}
 			<DialogPrimitive.Close
 				data-slot="dialog-close"
+				aria-label={m.common_close()}
 				class="ring-offset-background focus-visible:ring-ring absolute end-4 top-4 rounded-(--dialog-close-radius) opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
 			>
 				<XIcon />
