@@ -6,8 +6,7 @@
 	font-display: swap;
 }
 
-.ansi-glyph,
-.ansi-masthead {
+.ansi-glyph {
 	display: none;
 }
 
@@ -215,22 +214,6 @@
 	[data-terminal-input-controls] > button {
 		font-size: 11px;
 		padding-inline: 6px;
-	}
-
-	.ansi-masthead {
-		display: flex;
-		flex-shrink: 0;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1ch;
-		padding: 11px 8px;
-		font-size: 11px;
-		line-height: 11px;
-		color: hsl(var(--sidebar-foreground));
-		border-bottom: 1px dashed hsl(var(--border));
-	}
-	.ansi-masthead span:last-child {
-		color: hsl(var(--status-warning-muted-foreground));
 	}
 
 	::-webkit-scrollbar-thumb {

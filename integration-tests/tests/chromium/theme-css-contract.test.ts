@@ -867,7 +867,6 @@ describe("compiled theme CSS", () => {
             "beforeend",
             `
           <div data-slot="dialog-content" style="background:var(--dialog-surface)"><h2 id="terminal-dialog-title" data-slot="dialog-title">Settings</h2></div>
-          <div class="bg-card"><div id="terminal-masthead" class="ansi-masthead">GARCON://</div></div>
           <div data-slot="dropdown-menu-item" data-highlighted><div id="terminal-description" data-menu-description class="text-xs text-muted-foreground">Description</div></div>
           <div data-slot="dropdown-menu-sub-trigger" data-highlighted><span>Font size</span><span id="terminal-submenu-value" class="ml-auto text-xs text-muted-foreground">14</span></div>
           <div data-slot="select-item" data-highlighted><span><svg id="terminal-check" class="text-muted-foreground" width="16" height="16"></svg></span></div>
@@ -888,7 +887,6 @@ describe("compiled theme CSS", () => {
           ["#terminal-description", 4.5],
           ["#terminal-submenu-value", 4.5],
           ["#terminal-dialog-title", 4.5],
-          ["#terminal-masthead", 4.5],
           ["#terminal-check", 3],
           ["#terminal-tab-close", 3],
         ] as const) {
