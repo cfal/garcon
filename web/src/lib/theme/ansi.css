@@ -1,0 +1,249 @@
+@font-face {
+	font-family: 'Departure Mono';
+	src: url('./assets/DepartureMono-1.500.woff2') format('woff2');
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+}
+
+.ansi-glyph,
+.ansi-masthead {
+	display: none;
+}
+
+/* Window content is positioned separately; chrome must not alter its geometry. */
+:root:where([data-theme-appearance='terminal']) {
+	--font-sans: 'Departure Mono', ui-monospace, 'Cascadia Mono', 'Noto Sans Mono', monospace;
+	--control-radius: 0px;
+	--menu-radius: 0px;
+	--menu-item-radius: 0px;
+	--dialog-radius: 0px;
+	--dialog-close-radius: 0px;
+	--native-select-radius: 0px;
+	--native-select-compact-radius: 0px;
+	--transient-backdrop-blur: 0px;
+	--transient-backdrop-opacity: 0.72;
+	--menu-shadow: 6px 6px 0 hsl(var(--border) / 0.65);
+	--submenu-shadow: var(--menu-shadow);
+	--tooltip-shadow: var(--menu-shadow);
+	--dialog-shadow: 10px 10px 0 hsl(var(--border) / 0.65);
+	--primary-hover-shadow: 0 0 #0000;
+
+	body {
+		font-family: var(--font-sans);
+		letter-spacing: 0;
+	}
+
+	:where(
+		button,
+		input,
+		textarea,
+		select,
+		kbd,
+		[data-slot],
+		.ticket-button,
+		.ticket-input,
+		.ticket-card,
+		.ticket-status,
+		.ticket-facet-picker,
+		.markdown-code-block,
+		.user-message-context-target
+	) {
+		border-radius: 0;
+	}
+
+	:where(button, input, textarea, select) {
+		font-family: inherit;
+	}
+
+	:where(button, a, input, textarea, select, [role='menuitem'], [role='tab']) {
+		transition-duration: 0s;
+	}
+
+	:where(
+		[data-slot='dialog-content'],
+		[data-slot='alert-dialog-content'],
+		[data-slot='dropdown-menu-content'],
+		[data-slot='dropdown-menu-sub-content'],
+		[data-slot='context-menu-content'],
+		[data-slot='context-menu-sub-content'],
+		[data-slot='popover-content'],
+		[data-slot='select-content'],
+		[data-slot='tooltip-content']
+	) {
+		border: 1px solid hsl(var(--border));
+		animation: none;
+	}
+
+	:where([data-slot='dialog-content'], [data-slot='alert-dialog-content']) {
+		border: 3px double hsl(var(--primary));
+	}
+
+	:where([data-slot='dialog-title'], [data-slot='alert-dialog-title']) {
+		font-size: 16px;
+		line-height: 1.5;
+		color: hsl(var(--foreground));
+	}
+
+	:where([data-slot='dialog-title'], [data-slot='alert-dialog-title'])::before {
+		content: '[ ' / '';
+	}
+	:where([data-slot='dialog-title'], [data-slot='alert-dialog-title'])::after {
+		content: ' ]' / '';
+	}
+
+	:where(
+			[data-slot='dialog-close'],
+			[data-workspace-window-fullscreen],
+			[data-workspace-window-close]
+		)
+		> svg {
+		display: none;
+	}
+	.ansi-glyph {
+		display: inline;
+		font: 11px/1 var(--font-sans);
+		user-select: none;
+	}
+
+	:where(
+			[data-slot='dropdown-menu-item'],
+			[data-slot='dropdown-menu-checkbox-item'],
+			[data-slot='dropdown-menu-radio-item'],
+			[data-slot='dropdown-menu-sub-trigger'],
+			[data-slot='context-menu-item'],
+			[data-slot='context-menu-checkbox-item'],
+			[data-slot='context-menu-radio-item'],
+			[data-slot='context-menu-sub-trigger'],
+			[data-slot='select-item']
+		)[data-highlighted]:not([data-variant='destructive']) {
+		background: hsl(var(--primary));
+		color: hsl(var(--primary-foreground));
+		:where(svg, [data-menu-description], .text-muted-foreground) {
+			color: inherit;
+		}
+	}
+
+	:where([data-slot='dropdown-menu-separator'], [data-slot='context-menu-separator']) {
+		background: hsl(var(--border));
+	}
+
+	[data-slot='button']:not(:focus-visible) {
+		box-shadow: none;
+	}
+
+	[data-slot='dialog-footer'] [data-slot='button'][data-size='default'] {
+		border-inline: 2px solid currentColor;
+	}
+
+	[data-workspace-window-tabs] [role='tab'][aria-selected='true'],
+	[data-slot='tabs-trigger'][data-state='active'] {
+		background: hsl(var(--primary));
+		color: hsl(var(--primary-foreground));
+		[data-workspace-window-tab-close]:not([data-disabled]) {
+			color: inherit;
+			background: transparent;
+		}
+		[data-slot='workspace-chat-processing-indicator-dot'] {
+			background: currentColor;
+		}
+	}
+
+	[data-slot='switch'] {
+		border: 1px solid hsl(var(--input));
+		background: hsl(var(--card));
+		justify-content: center;
+		color: hsl(var(--foreground));
+	}
+	[data-slot='switch']::before {
+		content: '[ ]' / '';
+		font-size: 11px;
+	}
+	[data-slot='switch'][data-state='checked']::before {
+		content: '[x]' / '';
+	}
+	[data-slot='switch'][data-state='checked'] {
+		background: hsl(var(--primary));
+		color: hsl(var(--primary-foreground));
+	}
+	[data-slot='switch-thumb'] {
+		display: none;
+	}
+
+	:where(input[type='checkbox'], input[type='radio']) {
+		appearance: none;
+		width: 16px;
+		height: 16px;
+		border: 1px solid hsl(var(--input));
+		background: hsl(var(--card));
+		flex-shrink: 0;
+	}
+	input[type='radio'] {
+		border-radius: 50%;
+	}
+	:where(input[type='checkbox'], input[type='radio']):checked {
+		background: hsl(var(--primary));
+		box-shadow: inset 0 0 0 3px hsl(var(--card));
+	}
+	input[type='checkbox']:indeterminate {
+		background: linear-gradient(hsl(var(--primary)), hsl(var(--primary))) center / 10px 3px
+			no-repeat hsl(var(--card));
+		box-shadow: none;
+	}
+	:where(input[type='checkbox'], input[type='radio']):disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	:where(input[type='checkbox'], input[type='radio']):focus-visible {
+		outline: 2px solid hsl(var(--ring));
+		outline-offset: 2px;
+	}
+
+	[data-workspace-window-active-border] {
+		border: 3px double hsl(var(--primary));
+	}
+	[data-workspace-window-titlebar] {
+		border-bottom-style: dashed;
+	}
+	[data-workspace-chat-list-panel][data-divider-edge='end'] {
+		border-inline-end: 3px double hsl(var(--border));
+	}
+	[data-workspace-chat-list-panel][data-divider-edge='start'] {
+		border-inline-start: 3px double hsl(var(--border));
+	}
+	[data-composer] {
+		border: 3px double hsl(var(--primary));
+		border-radius: 0;
+	}
+
+	[data-terminal-input-controls] > button {
+		font-size: 11px;
+		padding-inline: 6px;
+	}
+
+	.ansi-masthead {
+		display: flex;
+		flex-shrink: 0;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1ch;
+		padding: 11px 8px;
+		font-size: 11px;
+		line-height: 11px;
+		color: hsl(var(--sidebar-foreground));
+		border-bottom: 1px dashed hsl(var(--border));
+	}
+	.ansi-masthead span:last-child {
+		color: hsl(var(--status-warning-muted-foreground));
+	}
+
+	::-webkit-scrollbar-thumb {
+		border-radius: 0;
+	}
+
+	@media (forced-colors: active) {
+		:where(input[type='checkbox'], input[type='radio']) {
+			appearance: auto;
+		}
+	}
+}

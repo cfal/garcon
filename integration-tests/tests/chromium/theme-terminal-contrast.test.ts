@@ -70,6 +70,7 @@ describe("terminal theme contrast", () => {
         const presentation = await page.evaluate((profile) => {
           const root = document.documentElement;
           root.dataset.theme = profile.id;
+          root.dataset.themeAppearance = 'terminal';
           root.classList.toggle("dark", profile.colorScheme === "dark");
           const fixture = globalThis as TerminalFixtureScope;
           const colors = fixture.readTerminalColors(root);

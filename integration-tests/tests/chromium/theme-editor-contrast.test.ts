@@ -65,6 +65,7 @@ async function readRenderedEditorColors(
   return page.locator("#editor").evaluate(async (root, fixtureTheme) => {
     const documentRoot = document.documentElement;
     documentRoot.dataset.theme = fixtureTheme.profileId;
+    documentRoot.dataset.themeAppearance = 'terminal';
     documentRoot.classList.toggle("dark", fixtureTheme.colorScheme === "dark");
 
     interface MountedEditor {
@@ -347,6 +348,7 @@ describe("CodeMirror theme contrast", () => {
         };
         root.replaceChildren();
         document.documentElement.dataset.theme = "lagoon-dark";
+        document.documentElement.dataset.themeAppearance = "standard";
         const view = scope.mountEditor(root, "semantic-dark");
         view.focus();
         await new Promise(requestAnimationFrame);
@@ -395,6 +397,7 @@ describe("CodeMirror theme contrast", () => {
       )) {
         await page.evaluate(async (profile) => {
           document.documentElement.dataset.theme = profile.id;
+          document.documentElement.dataset.themeAppearance = 'terminal';
           document.documentElement.classList.toggle(
             "dark",
             profile.colorScheme === "dark",

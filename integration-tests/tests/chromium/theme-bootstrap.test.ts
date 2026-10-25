@@ -15,6 +15,7 @@ const LOCAL_SETTINGS_KEY = "pref_local_settings";
 const STARTUP_MARKER = `<script>
 globalThis.__themeBeforeApplicationStartup = {
   themeId: document.documentElement.dataset.theme,
+  appearance: document.documentElement.dataset.themeAppearance,
   dark: document.documentElement.classList.contains('dark'),
   colorScheme: document.documentElement.style.colorScheme,
   themeColor: document.querySelector('meta[name="theme-color"]')?.getAttribute('content'),
@@ -27,6 +28,7 @@ interface ThemeScenario {
   storedSettings: string | null;
   systemColorScheme: ColorScheme;
   expectedThemeId: ThemeId;
+  terminalAppearance?: boolean;
   storageUnavailable?: boolean;
 }
 
@@ -34,14 +36,16 @@ function defaultThemeId(systemColorScheme: ColorScheme): ThemeId {
   return resolveThemeId(DEFAULT_THEME_PREFERENCE, systemColorScheme);
 }
 
-const fixedScenarios: ThemeScenario[] = THEME_PROFILES.map((profile) => ({
-  name: `fixed ${profile.id} ignores the opposite system scheme`,
+const fixedScenarios: ThemeScenario[] = THEME_PROFILES.flatMap((profile) => [false, true].map((terminalAppearance) => ({
+  name: `fixed ${profile.id}, terminal=${terminalAppearance} ignores the opposite system scheme`,
   storedSettings: JSON.stringify({
     themePreference: { mode: "fixed", themeId: profile.id },
+    terminalAppearance,
   }),
   systemColorScheme: profile.colorScheme === "dark" ? "light" : "dark",
   expectedThemeId: profile.id,
-}));
+  terminalAppearance,
+})));
 
 const malformedSettings = [
   ["missing settings", null],
@@ -78,6 +82,12 @@ const malformedSettings = [
 
 const scenarios: ThemeScenario[] = [
   ...fixedScenarios,
+  ...[null, 'true', 1, {}, []].map((terminalAppearance) => ({
+    name: `invalid terminal appearance ${JSON.stringify(terminalAppearance)}`,
+    storedSettings: JSON.stringify({ terminalAppearance }),
+    systemColorScheme: 'light' as const,
+    expectedThemeId: defaultThemeId('light'),
+  })),
   {
     name: "a mixed System pair resolves its light selection",
     storedSettings: JSON.stringify({
@@ -198,6 +208,7 @@ describe("theme bootstrap", () => {
           const annotatedGlobal = globalThis as typeof globalThis & {
             __themeBeforeApplicationStartup?: {
               themeId: string;
+              appearance: string;
               dark: boolean;
               colorScheme: string;
               themeColor: string | null;
@@ -209,6 +220,7 @@ describe("theme bootstrap", () => {
         const expectedProfile = getThemeProfile(scenario.expectedThemeId);
         expect(startupTheme, scenario.name).toEqual({
           themeId: expectedProfile.id,
+          appearance: scenario.terminalAppearance ? 'terminal' : 'standard',
           dark: expectedProfile.colorScheme === "dark",
           colorScheme: expectedProfile.colorScheme,
           themeColor: expectedProfile.browserThemeColor,

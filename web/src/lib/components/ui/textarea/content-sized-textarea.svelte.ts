@@ -61,8 +61,17 @@ export function contentSizedTextarea(
 		observer.observe(target);
 		// A breakpoint can change the font size while the field keeps its width.
 		window.addEventListener('resize', scheduleResize);
+		document.fonts?.addEventListener('loadingdone', scheduleResize);
+		// Appearance can change an already loaded font without resizing the field.
+		const appearanceObserver = new MutationObserver(scheduleResize);
+		appearanceObserver.observe(document.documentElement, {
+			attributes: true,
+			attributeFilter: ['data-theme-appearance'],
+		});
 		return () => {
 			observer.disconnect();
+			appearanceObserver.disconnect();
+			document.fonts?.removeEventListener('loadingdone', scheduleResize);
 			window.removeEventListener('resize', scheduleResize);
 			if (frame !== null) cancelAnimationFrame(frame);
 			target.style.height = initialHeight;

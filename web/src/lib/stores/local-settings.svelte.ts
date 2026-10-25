@@ -140,6 +140,7 @@ export type HideableToolType = (typeof HIDEABLE_TOOL_GROUPS)[number]['toolTypes'
 
 export interface LocalSettingsSnapshot {
 	themePreference: ThemePreference;
+	terminalAppearance: boolean;
 	overlayBackdropEffects: boolean;
 	highlightActiveWindow: boolean;
 	autoExpandTools: boolean;
@@ -194,6 +195,7 @@ export interface LocalSettingsSnapshot {
 }
 
 type BooleanLocalSettingKey =
+	| 'terminalAppearance'
 	| 'overlayBackdropEffects'
 	| 'highlightActiveWindow'
 	| 'autoExpandTools'
@@ -217,6 +219,7 @@ type BooleanLocalSettingKey =
 
 const DEFAULTS: LocalSettingsSnapshot = {
 	themePreference: DEFAULT_THEME_PREFERENCE,
+	terminalAppearance: false,
 	overlayBackdropEffects: true,
 	highlightActiveWindow: true,
 	autoExpandTools: false,
@@ -413,6 +416,7 @@ function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
 function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	return {
 		themePreference: parseThemePreference(parsed.themePreference),
+		terminalAppearance: parseBoolean(parsed.terminalAppearance, DEFAULTS.terminalAppearance),
 		highlightActiveWindow: parseBoolean(
 			parsed.highlightActiveWindow,
 			DEFAULTS.highlightActiveWindow,
@@ -546,6 +550,7 @@ function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
 
 export class LocalSettingsStore {
 	themePreference = $state<ThemePreference>(DEFAULTS.themePreference);
+	terminalAppearance = $state(DEFAULTS.terminalAppearance);
 	overlayBackdropEffects = $state(DEFAULTS.overlayBackdropEffects);
 	highlightActiveWindow = $state(DEFAULTS.highlightActiveWindow);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
@@ -679,6 +684,7 @@ export class LocalSettingsStore {
 	snapshot(): LocalSettingsSnapshot {
 		return {
 			themePreference: this.themePreference,
+			terminalAppearance: this.terminalAppearance,
 			overlayBackdropEffects: this.overlayBackdropEffects,
 			highlightActiveWindow: this.highlightActiveWindow,
 			autoExpandTools: this.autoExpandTools,
@@ -735,6 +741,7 @@ export class LocalSettingsStore {
 
 	#apply(snap: LocalSettingsSnapshot): void {
 		this.themePreference = snap.themePreference;
+		this.terminalAppearance = snap.terminalAppearance;
 		this.overlayBackdropEffects = snap.overlayBackdropEffects;
 		this.highlightActiveWindow = snap.highlightActiveWindow;
 		this.autoExpandTools = snap.autoExpandTools;

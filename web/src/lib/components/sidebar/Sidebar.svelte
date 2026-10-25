@@ -443,6 +443,7 @@
 	]}
 	onkeydown={handleSidebarKeydown}
 >
+	<div class="ansi-masthead" aria-hidden="true"><span>GARCON://</span><span>█ ▓ ▒ ░</span></div>
 	<div class="order-1 flex-shrink-0">
 		<SidebarSearchDock
 			{isLoading}

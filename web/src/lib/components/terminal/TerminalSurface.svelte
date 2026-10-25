@@ -393,7 +393,10 @@
 			class={`min-h-0 flex-1 ${host === 'mobile' ? 'mobile-terminal-host bg-terminal-bg' : 'bg-background'}`}
 		></div>
 		{#if runtime && showInputControls}
-			<div class="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-border p-1">
+			<div
+				data-terminal-input-controls
+				class="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-border p-1"
+			>
 				<TerminalModifierButton
 					label={m.terminal_key_control()}
 					mode={runtime.inputControls.ctrlMode}

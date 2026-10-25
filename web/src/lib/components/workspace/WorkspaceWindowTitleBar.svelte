@@ -153,6 +153,7 @@
 			{:else}
 				<Maximize2 size={titlebarMetrics.iconSizePx} />
 			{/if}
+			<span class="ansi-glyph" aria-hidden="true">{fullscreen ? '[-]' : '[+]'}</span>
 		</button>
 		{#if workspace.windowCount > 1}
 			<button
@@ -167,6 +168,7 @@
 				onclick={closeWindow}
 			>
 				<X size={titlebarMetrics.iconSizePx} />
+				<span class="ansi-glyph" aria-hidden="true">[x]</span>
 			</button>
 		{/if}
 	</div>

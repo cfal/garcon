@@ -14,6 +14,45 @@ async function withVisibleScrollbars(name: string, run: (fixture: ChromiumFixtur
   }
 }
 
+test('terminal font completion and cached appearance changes refit existing text without editing', async () => {
+  await withChromiumFixture('terminal-font-textarea', async ({ page, integration, assertNoBrowserErrors }) => {
+    let releaseFont!: () => void;
+    const fontReady = new Promise<void>((resolve) => { releaseFont = resolve; });
+    await page.route('**/DepartureMono*.woff2', async (route) => {
+      await fontReady;
+      await route.continue();
+    });
+    try {
+      await page.addInitScript(() => {
+        const settings = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
+        localStorage.setItem('pref_local_settings', JSON.stringify({ ...settings, terminalAppearance: true, reduceMotion: true }));
+      });
+      await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+      await page.getByRole('status', { name: 'Loading chat defaults...' }).waitFor({ state: 'detached' });
+      const input = page.locator('[data-slot="new-chat-composer"] textarea');
+      await input.evaluate((node: HTMLTextAreaElement) => {
+        node.style.cssText = 'width:300px;font-size:16px;line-height:24px;padding:0;border:0';
+      });
+      await input.fill('i'.repeat(62));
+      await browserExpect(input).toHaveCSS('height', '48px');
+      expect(await page.evaluate(() => document.fonts.check('16px "Departure Mono"'))).toBe(false);
+      releaseFont();
+      await page.evaluate(() => document.fonts.ready);
+      await browserExpect(input).toHaveCSS('height', '72px');
+      expect(await input.evaluate(node => node.scrollHeight <= node.clientHeight)).toBe(true);
+      await page.evaluate(() => { document.documentElement.dataset.themeAppearance = 'standard'; });
+      await browserExpect.poll(() => input.evaluate(node => node.clientHeight)).toBeLessThan(72);
+      await page.evaluate(() => { document.documentElement.dataset.themeAppearance = 'terminal'; });
+      await browserExpect(input).toHaveCSS('height', '72px');
+      await browserExpect(input).toHaveValue('i'.repeat(62));
+      assertNoBrowserErrors();
+    } finally {
+      releaseFont();
+    }
+  });
+}, 60_000);
+
 test('composer grows a line at a time, shrinks, caps long drafts, and refits wrapping without losing focus', async () => {
   await withChromiumFixture('content-sized-composer', async ({ page, integration, assertNoBrowserErrors }) => {
     const chatId = integration.newChatId();

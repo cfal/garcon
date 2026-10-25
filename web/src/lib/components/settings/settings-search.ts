@@ -49,6 +49,7 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			m.settings_file_recovery_title(),
 			m.onboarding_setup_wizard_label(),
 			m.settings_theme_title(),
+			m.settings_terminal_appearance(),
 			m.settings_completion_sound_title(),
 		].map((label) => ({ tab: 'interface' as const, label, section: m.settings_tab_interface() })),
 		...[

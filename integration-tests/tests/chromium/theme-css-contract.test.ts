@@ -100,6 +100,7 @@ async function applyProfile(
   await page.evaluate((theme) => {
     const root = document.documentElement;
     root.dataset.theme = theme.id;
+    root.dataset.themeAppearance = 'standard';
     root.classList.toggle("dark", theme.colorScheme === "dark");
     root.style.colorScheme = theme.colorScheme;
   }, profile);
@@ -302,6 +303,7 @@ describe("compiled theme CSS", () => {
           ({ profile, properties }) => {
             const root = document.documentElement;
             root.dataset.theme = profile.id;
+            root.dataset.themeAppearance = 'standard';
             root.classList.toggle("dark", profile.colorScheme === "dark");
             root.style.colorScheme = profile.colorScheme;
             const style = getComputedStyle(root);
@@ -323,6 +325,7 @@ describe("compiled theme CSS", () => {
             getComputedStyle(root).getPropertyValue("--background");
           root.dataset.theme =
             themeId === "classic-dark" ? "classic-light" : "classic-dark";
+          root.dataset.themeAppearance = "standard";
           const element = document.createElement("span");
           element.dataset.themePreview = themeId;
           document.body.append(element);
@@ -847,6 +850,45 @@ describe("compiled theme CSS", () => {
             `${profile} ${label} selection`,
           ).toBeGreaterThanOrEqual(4.5);
         }
+      }
+      await page.evaluate(() => {
+        document.body.insertAdjacentHTML('beforeend', `
+          <div data-slot="dialog-content" style="background:var(--dialog-surface)"><h2 id="terminal-dialog-title" data-slot="dialog-title">Settings</h2></div>
+          <div class="bg-sidebar"><div id="terminal-masthead" class="ansi-masthead">GARCON://</div></div>
+          <div data-slot="dropdown-menu-item" data-highlighted><div id="terminal-description" data-menu-description class="text-xs text-muted-foreground">Description</div></div>
+          <div data-slot="dropdown-menu-sub-trigger" data-highlighted><span>Font size</span><span id="terminal-submenu-value" class="ml-auto text-xs text-muted-foreground">14</span></div>
+          <div data-slot="select-item" data-highlighted><span><svg id="terminal-check" class="text-muted-foreground" width="16" height="16"></svg></span></div>
+          <div data-workspace-window-tabs><button role="tab" aria-selected="true"><span id="terminal-tab-close" data-workspace-window-tab-close class="text-muted-foreground">x</span></button></div>
+          <input id="terminal-checkbox" type="checkbox"><input id="terminal-radio" type="radio">
+        `);
+      });
+      for (const profile of THEME_PROFILES) {
+        await applyProfile(page, profile);
+        await page.evaluate(() => { document.documentElement.dataset.themeAppearance = 'terminal'; });
+        for (const [selector, minimum] of [['#terminal-description', 4.5], ['#terminal-submenu-value', 4.5], ['#terminal-dialog-title', 4.5], ['#terminal-masthead', 4.5], ['#terminal-check', 3], ['#terminal-tab-close', 3]] as const) {
+          const colors = await readRenderedColors(page, selector);
+          expect(contrastRatio(colors.foreground, colors.background), `${profile.id} ${selector}`).toBeGreaterThanOrEqual(minimum);
+        }
+        const controls = await page.evaluate(() => {
+          const checkbox = document.querySelector<HTMLInputElement>('#terminal-checkbox')!;
+          const read = () => { const style = getComputedStyle(checkbox); return { background: style.backgroundImage, shadow: style.boxShadow, opacity: style.opacity }; };
+          checkbox.checked = false;
+          checkbox.indeterminate = false;
+          checkbox.disabled = false;
+          const unchecked = read();
+          checkbox.checked = true;
+          const checked = read();
+          checkbox.checked = false;
+          checkbox.indeterminate = true;
+          const mixed = read();
+          checkbox.disabled = true;
+          const disabled = read();
+          return { unchecked, checked, mixed, disabled, radioRadius: getComputedStyle(document.querySelector('#terminal-radio')!).borderRadius };
+        });
+        expect(controls.mixed.background, profile.id).not.toBe(controls.unchecked.background);
+        expect(controls.checked.shadow, profile.id).not.toBe(controls.unchecked.shadow);
+        expect(controls.disabled.opacity, profile.id).toBe('0.5');
+        expect(controls.radioRadius, profile.id).toBe('50%');
       }
     } finally {
       await context.close();

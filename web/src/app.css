@@ -19,6 +19,9 @@
 @import './lib/theme/profiles/paper-dark.css';
 @import './lib/theme/profiles/slate-light.css';
 @import './lib/theme/profiles/slate-dark.css';
+@import './lib/theme/profiles/ansi-light.css';
+@import './lib/theme/profiles/ansi-dark.css';
+@import './lib/theme/ansi.css';
 @plugin '@tailwindcss/typography';
 
 @custom-variant dark (&:where(.dark, .dark *));

@@ -69,6 +69,8 @@
 					'paper-dark': { colorScheme: 'dark', themeColor: '#272420' },
 					'slate-light': { colorScheme: 'light', themeColor: '#f6f7f9' },
 					'slate-dark': { colorScheme: 'dark', themeColor: '#282c34' },
+					'ansi-light': { colorScheme: 'light', themeColor: '#f0f0f0' },
+					'ansi-dark': { colorScheme: 'dark', themeColor: '#0d0d0d' },
 				};
 				const defaultPreference = {
 					mode: 'system',
@@ -80,8 +82,10 @@
 				const isThemeId = (value) =>
 					typeof value === 'string' && Object.prototype.hasOwnProperty.call(profiles, value);
 				let preference = defaultPreference;
+				let terminalAppearance = false;
 				try {
 					const stored = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
+					terminalAppearance = isRecord(stored) && stored.terminalAppearance === true;
 					const candidate = isRecord(stored) ? stored.themePreference : undefined;
 					if (isRecord(candidate) && candidate.mode === 'fixed' && isThemeId(candidate.themeId)) {
 						preference = { mode: 'fixed', themeId: candidate.themeId };
@@ -115,6 +119,7 @@
 				const profile = profiles[themeId];
 				const root = document.documentElement;
 				root.dataset.theme = themeId;
+				root.dataset.themeAppearance = terminalAppearance ? 'terminal' : 'standard';
 				root.classList.toggle('dark', profile.colorScheme === 'dark');
 				root.style.colorScheme = profile.colorScheme;
 				document

@@ -16,11 +16,47 @@ describe('LocalSettingsStore', () => {
 		localStorage.clear();
 	});
 
+	it.each([true, false, 'true', 1, null, [], {}])(
+		'validates terminal appearance independently: %j',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ terminalAppearance: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.terminalAppearance).toBe(value === true);
+			expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+			store.destroy();
+		},
+	);
+
+	it('persists and synchronizes terminal appearance independently of the palette', () => {
+		const store = createLocalSettingsStore();
+		store.set('terminalAppearance', true);
+		const restored = createLocalSettingsStore();
+		expect(restored.terminalAppearance).toBe(true);
+		expect(restored.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+		const changed = JSON.stringify({ ...store.snapshot(), terminalAppearance: false });
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, changed);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: changed,
+				storageArea: localStorage,
+			}),
+		);
+		expect(restored.terminalAppearance).toBe(false);
+		expect(restored.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+		store.destroy();
+		restored.destroy();
+	});
+
 	it('defaults max chat width and file opening preferences', () => {
 		const store = createLocalSettingsStore();
 
 		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
 		expect(store.chatListDock).toBe('left');
+		expect(store.terminalAppearance).toBe(false);
 		expect(store.chatListAutohide).toBe(false);
 		expect(store.fullscreenCoversSidebar).toBe(true);
 		expect(store.chatMaxWidth).toBe('none');

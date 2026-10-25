@@ -22,4 +22,6 @@ export const THEME_PROFILE_LABELS: Record<ThemeId, () => string> = {
 	'paper-dark': m.settings_theme_profile_paper_dark,
 	'slate-light': m.settings_theme_profile_slate_light,
 	'slate-dark': m.settings_theme_profile_slate_dark,
+	'ansi-light': m.settings_theme_profile_ansi_light,
+	'ansi-dark': m.settings_theme_profile_ansi_dark,
 };

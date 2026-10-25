@@ -60,6 +60,7 @@ describe('ThemeController', () => {
 		document.head.innerHTML =
 			'<meta name="theme-color" content="#000000"><meta name="apple-mobile-web-app-status-bar-style" content="default">';
 		document.documentElement.removeAttribute('data-theme');
+		document.documentElement.removeAttribute('data-theme-appearance');
 		document.documentElement.className = '';
 		document.documentElement.style.cssText = `
 			--terminal-bg: 0 0% 100%;
@@ -111,12 +112,34 @@ describe('ThemeController', () => {
 		installMatchMedia();
 		renderController({ mode: 'fixed', themeId: profile.id });
 		await waitFor(() => expect(document.documentElement.dataset.theme).toBe(profile.id));
+		expect(document.documentElement.dataset.themeAppearance).toBe('standard');
 
 		expect(
 			document
 				.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
 				?.getAttribute('content'),
 		).toBe('default');
+	});
+
+	it('changes appearance without changing palette or resetting renderer presentation', async () => {
+		const media = installMatchMedia();
+		const rendered = renderController({
+			mode: 'system',
+			lightThemeId: 'rose-light',
+			darkThemeId: 'moss-dark',
+		});
+		await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());
+		rendered.component.setTerminalAppearance(true);
+		await waitFor(() => expect(document.documentElement.dataset.themeAppearance).toBe('terminal'));
+		expect(document.documentElement.dataset.theme).toBe('rose-light');
+		expect(rendered.setEditorPresentation).toHaveBeenCalledOnce();
+		expect(rendered.setTerminalPresentation).toHaveBeenCalledOnce();
+		media.setDark(true);
+		await waitFor(() => expect(document.documentElement.dataset.theme).toBe('moss-dark'));
+		expect(document.documentElement.dataset.themeAppearance).toBe('terminal');
+		rendered.component.setTerminalAppearance(false);
+		await waitFor(() => expect(document.documentElement.dataset.themeAppearance).toBe('standard'));
+		expect(document.documentElement.dataset.theme).toBe('moss-dark');
 	});
 
 	it('projects root state and metadata before resolving the terminal background', async () => {

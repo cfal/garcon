@@ -15,6 +15,7 @@ const SYSTEM_DARK_MODE_QUERY = '(prefers-color-scheme: dark)';
 
 export interface ThemeControllerDeps {
 	readonly getPreference: () => ThemePreference;
+	readonly getTerminalAppearance: () => boolean;
 	readonly setTerminalPresentation: (
 		presentation: ThemeRendererPresentation & TerminalThemeColors,
 	) => void;
@@ -38,6 +39,12 @@ export class ThemeController {
 	#reportedMissingTerminalThemeIds = new Set<ThemeId>();
 
 	constructor(private readonly deps: ThemeControllerDeps) {
+		$effect(() => {
+			document.documentElement.dataset.themeAppearance = this.deps.getTerminalAppearance()
+				? 'terminal'
+				: 'standard';
+		});
+
 		$effect(() => {
 			if (this.deps.getPreference().mode !== 'system') return;
 			const media = window.matchMedia(SYSTEM_DARK_MODE_QUERY);
