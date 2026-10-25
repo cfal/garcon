@@ -114,6 +114,7 @@
 	} from '$lib/workspace/terminal-launcher-dismissal.js';
 	import { createWorkspaceServices } from '$lib/workspace/workspace-services.js';
 	import { ThemeController } from '$lib/theme/theme-controller.svelte.js';
+	import AnsiStartup from '$lib/components/theme/AnsiStartup.svelte';
 	import { createChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 	import { ChatBoardsRouter } from '$lib/events/chat-boards-router.js';
 	import { TicketsRouter } from '$lib/events/tickets-router.js';
@@ -282,6 +283,7 @@
 	let isPublicRoute = $derived(isAuthRoute || page.route.id === '/shared/[token]');
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
+	let ansiStartup = $state<AnsiStartup>();
 	// Projects presentation-only bounds without coupling Markdown loading to settings.
 	$effect(() => {
 		const root = document.documentElement;
@@ -608,6 +610,16 @@
 	});
 </script>
 
+<AnsiStartup
+	bind:this={ansiStartup}
+	enabled={localSettings.terminalAppearance && !isPublicRoute}
+	workspaceReady={!auth.logoutPending &&
+		!!auth.presentationOwner &&
+		auth.isAuthenticated &&
+		!isPublicRoute}
+	reduceMotion={localSettings.reduceMotion}
+/>
+
 {#if auth.logoutPending}
 	<div class="min-h-dvh bg-background flex items-center justify-center p-4">
 		<p role="status" class="text-muted-foreground">{m.auth_logging_out()}</p>
@@ -662,6 +674,7 @@
 
 	<CommandMenu bind:this={commandMenu} />
 	<KeyboardShortcuts
+		onKeyboardInteraction={() => ansiStartup?.dismiss()}
 		authSuspended={!auth.isAuthenticated}
 		onToggleCommandMenu={() => commandMenu?.toggle()}
 	/>

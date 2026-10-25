@@ -33,6 +33,26 @@ function fullscreenKey(options: KeyboardEventInit = {}): KeyboardEvent {
 }
 
 describe('KeyboardShortcuts', () => {
+	it('notifies decorative startup without consuming typing or replacing shortcuts', () => {
+		const onKeyboardInteraction = vi.fn();
+		const appShell = createMockAppShell();
+		const { unmount } = render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			onKeyboardInteraction,
+		});
+		const typing = new KeyboardEvent('keydown', { key: 'a', cancelable: true });
+		window.dispatchEvent(typing);
+		expect(onKeyboardInteraction).toHaveBeenCalledOnce();
+		expect(typing.defaultPrevented).toBe(false);
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true }));
+		expect(appShell.openSidebarSearch).toHaveBeenCalledOnce();
+		expect(onKeyboardInteraction).toHaveBeenCalledTimes(2);
+		unmount();
+		window.dispatchEvent(typing);
+		expect(onKeyboardInteraction).toHaveBeenCalledTimes(2);
+	});
+
 	it('blocks protected shortcuts and retained focus traps during authentication repair', async () => {
 		const appShell = createMockAppShell();
 		const { rerender } = render(KeyboardShortcutsHost, {
