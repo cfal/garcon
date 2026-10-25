@@ -11,7 +11,6 @@
 	display: none;
 }
 
-/* Window content is positioned separately; chrome must not alter its geometry. */
 :root:where([data-theme-appearance='terminal']) {
 	--font-sans: 'Departure Mono', ui-monospace, 'Cascadia Mono', 'Noto Sans Mono', monospace;
 	--control-radius: 0px;
@@ -62,42 +61,35 @@
 
 	:where(
 		[data-slot='dialog-content'],
-		[data-slot='alert-dialog-content'],
 		[data-slot='dropdown-menu-content'],
 		[data-slot='dropdown-menu-sub-content'],
 		[data-slot='context-menu-content'],
 		[data-slot='context-menu-sub-content'],
 		[data-slot='popover-content'],
-		[data-slot='select-content'],
-		[data-slot='tooltip-content']
+		[data-slot='select-content']
 	) {
 		border: 1px solid hsl(var(--border));
 		animation: none;
 	}
 
-	:where([data-slot='dialog-content'], [data-slot='alert-dialog-content']) {
+	:where([data-slot='dialog-content']) {
 		border: 3px double hsl(var(--primary));
 	}
 
-	:where([data-slot='dialog-title'], [data-slot='alert-dialog-title']) {
+	:where([data-slot='dialog-title']) {
 		font-size: 16px;
 		line-height: 1.5;
 		color: hsl(var(--foreground));
 	}
 
-	:where([data-slot='dialog-title'], [data-slot='alert-dialog-title'])::before {
+	:where([data-slot='dialog-title'])::before {
 		content: '[ ' / '';
 	}
-	:where([data-slot='dialog-title'], [data-slot='alert-dialog-title'])::after {
+	:where([data-slot='dialog-title'])::after {
 		content: ' ]' / '';
 	}
 
-	:where(
-			[data-slot='dialog-close'],
-			[data-workspace-window-fullscreen],
-			[data-workspace-window-close]
-		)
-		> svg {
+	:where([data-slot='dialog-close'], [data-workspace-window-close]) > svg {
 		display: none;
 	}
 	.ansi-glyph {
@@ -144,30 +136,33 @@
 			color: inherit;
 			background: transparent;
 		}
-		[data-slot='workspace-chat-processing-indicator-dot'] {
+		[data-slot='workspace-chat-processing-indicator-dot'],
+		[data-workspace-tab-drop-position] {
 			background: currentColor;
 		}
 	}
 
-	[data-slot='switch'] {
-		border: 1px solid hsl(var(--input));
-		background: hsl(var(--card));
-		justify-content: center;
-		color: hsl(var(--foreground));
-	}
-	[data-slot='switch']::before {
-		content: '[ ]' / '';
-		font-size: 11px;
-	}
-	[data-slot='switch'][data-state='checked']::before {
-		content: '[x]' / '';
-	}
-	[data-slot='switch'][data-state='checked'] {
-		background: hsl(var(--primary));
-		color: hsl(var(--primary-foreground));
-	}
-	[data-slot='switch-thumb'] {
-		display: none;
+	@supports (content: '[x]' / '') {
+		[data-slot='switch'] {
+			border: 1px solid hsl(var(--input));
+			background: hsl(var(--card));
+			justify-content: center;
+			color: hsl(var(--foreground));
+		}
+		[data-slot='switch']::before {
+			content: '[ ]' / '';
+			font-size: 11px;
+		}
+		[data-slot='switch'][data-state='checked']::before {
+			content: '[x]' / '';
+		}
+		[data-slot='switch'][data-state='checked'] {
+			background: hsl(var(--primary));
+			color: hsl(var(--primary-foreground));
+		}
+		[data-slot='switch-thumb'] {
+			display: none;
+		}
 	}
 
 	:where(input[type='checkbox'], input[type='radio']) {
@@ -199,6 +194,7 @@
 		outline-offset: 2px;
 	}
 
+	/* The overlay frame preserves the separately positioned window content's geometry. */
 	[data-workspace-window-active-border] {
 		border: 3px double hsl(var(--primary));
 	}
