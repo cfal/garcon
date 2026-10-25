@@ -442,9 +442,14 @@ describe('TerminalRuntime', () => {
 		runtime.dispose();
 	});
 
-	it.each(['same', 'new'])(
-		'waits for connected DOM when a font finishes during transfer to the %s host',
-		async (target) => {
+	it.each([
+		['same', 'before transfer'],
+		['new', 'before transfer'],
+		['same', 'during reattachment'],
+		['new', 'during reattachment'],
+	])(
+		'waits for connected DOM at the %s host when a font is selected %s',
+		async (target, timing) => {
 			const selected = deferred<string>();
 			const runtime = createRuntime(vi.fn(), vi.fn(), {
 				load: (preference) =>
@@ -470,10 +475,11 @@ describe('TerminalRuntime', () => {
 					});
 				},
 			});
-			runtime.applyMonospaceFont('departure-mono');
+			if (timing === 'before transfer') runtime.applyMonospaceFont('departure-mono');
 			runtime.park(lease);
 			const nextHost = target === 'same' ? host : measurableHost();
 			const attachment = runtime.attach(nextHost);
+			if (timing === 'during reattachment') runtime.applyMonospaceFont('departure-mono');
 			selected.resolve('"Departure Mono", monospace');
 			await attachment.ready;
 			expect(assignments).toEqual([
