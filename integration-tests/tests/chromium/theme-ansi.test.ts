@@ -1,8 +1,11 @@
 import { expect, test } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
 import type { Page } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+
+const ARTIFACT_DIRECTORY = join(import.meta.dirname, '../../artifacts/chromium');
 
 async function recordStartupMounts(page: Page) {
   await page.addInitScript(() => {
@@ -27,10 +30,17 @@ async function startupMounts(page: Page) {
   );
 }
 
+async function pauseStartupClock(page: Page) {
+  const start = Date.now();
+  await page.clock.install({ time: start });
+  await page.clock.pauseAt(start + 1000);
+}
+
 test('ANSI startup paints moving ASCII, expires, and respects interaction and motion preferences', async () => {
   await withChromiumFixture(
     'ANSI startup',
     async ({ page, integration, assertNoBrowserErrors }) => {
+      await pauseStartupClock(page);
       await recordStartupMounts(page);
       await page.addInitScript(() => {
         const key = 'pref_local_settings';
@@ -50,14 +60,14 @@ test('ANSI startup paints moving ASCII, expires, and respects interaction and mo
           .getImageData(0, 0, element.width, element.height).data;
         return pixels.reduce((sum, value) => sum + value, 0);
       });
-      await page.waitForFunction((before) => {
-        const element = document.querySelector<HTMLCanvasElement>('[data-ansi-startup] canvas');
-        if (!element) return false;
+      await page.clock.runFor(200);
+      const nextFingerprint = await canvas.evaluate((element: HTMLCanvasElement) => {
         const pixels = element
           .getContext('2d')!
           .getImageData(0, 0, element.width, element.height).data;
-        return pixels.reduce((sum, value) => sum + value, 0) !== before;
-      }, fingerprint);
+        return pixels.reduce((sum, value) => sum + value, 0);
+      });
+      expect(nextFingerprint).not.toBe(fingerprint);
       const dimensions = await canvas.evaluate((element: HTMLCanvasElement) => ({
         width: element.width,
         height: element.height,
@@ -68,8 +78,9 @@ test('ANSI startup paints moving ASCII, expires, and respects interaction and mo
       expect(dimensions.height).toBeLessThanOrEqual(495);
       expect(dimensions.focused).toBe(false);
       expect(dimensions.inert).toBe(false);
-      await mkdir('artifacts/chromium', { recursive: true });
-      await page.screenshot({ path: 'artifacts/chromium/ansi-startup-desktop.png' });
+      await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
+      await page.screenshot({ path: join(ARTIFACT_DIRECTORY, 'ansi-startup-desktop.png') });
+      await page.clock.runFor(2600);
       await browserExpect(canvas).toHaveCount(0, { timeout: 5000 });
       await browserExpect(page.locator('[data-workspace-content]')).toBeVisible();
       await page.evaluate(() => document.fonts.ready);
@@ -78,9 +89,8 @@ test('ANSI startup paints moving ASCII, expires, and respects interaction and mo
       await page.setViewportSize({ width: 390, height: 844 });
       await page.reload({ waitUntil: 'domcontentloaded' });
       await browserExpect(canvas).toBeVisible();
-      await page.screenshot({ path: 'artifacts/chromium/ansi-startup-mobile.png' });
+      await page.screenshot({ path: join(ARTIFACT_DIRECTORY, 'ansi-startup-mobile.png') });
       await browserExpect(page.locator('[data-workspace-content]')).toBeVisible();
-      expect(await page.evaluate(() => performance.now())).toBeLessThan(2300);
       await page.keyboard.press('Shift');
       await browserExpect(canvas).toHaveCount(0, { timeout: 300 });
 
@@ -95,7 +105,6 @@ test('ANSI startup paints moving ASCII, expires, and respects interaction and mo
         };
         document.body.append(target);
       });
-      expect(await page.evaluate(() => performance.now())).toBeLessThan(2300);
       await page.mouse.click(2, 2);
       await browserExpect(canvas).toHaveCount(0, { timeout: 300 });
       await browserExpect(page.locator('[data-click-through]')).toHaveAttribute(
@@ -135,6 +144,7 @@ test('startup consumes double-click presses over menus without losing composer f
   await withChromiumFixture(
     'ANSI startup pointer gestures',
     async ({ page, integration, assertNoBrowserErrors }) => {
+      await pauseStartupClock(page);
       const chatId = integration.newChatId();
       const started = await integration.client.startDirectChat({
         chatId,
@@ -163,7 +173,6 @@ test('startup consumes double-click presses over menus without losing composer f
       await browserExpect(trigger).toBeVisible();
       const bounds = await trigger.boundingBox();
       expect(bounds).not.toBeNull();
-      expect(await page.evaluate(() => performance.now())).toBeLessThan(2300);
       await page.mouse.dblclick(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2, {
         delay: 60,
       });
@@ -178,13 +187,14 @@ test('startup consumes double-click presses over menus without losing composer f
       const actionBounds = (await newChat.boundingBox())!;
       const x = actionBounds.x + actionBounds.width / 2;
       const y = actionBounds.y + actionBounds.height / 2;
-      expect(await page.evaluate(() => performance.now())).toBeLessThan(2300);
       await page.mouse.click(x, y);
       await browserExpect(splash).toHaveCount(0, { timeout: 300 });
       await page.mouse.down({ clickCount: 2 });
       await page.mouse.move(x + 10, y);
       await page.mouse.up({ clickCount: 2 });
       await browserExpect(page.getByRole('dialog')).toHaveCount(0);
+      await page.clock.runFor(400);
+      await page.clock.resume();
       await newChat.click({ position: { x: 8, y: 18 } });
       await browserExpect(
         page.getByRole('dialog').getByRole('textbox', { name: 'Project Path', exact: true }),
@@ -199,6 +209,7 @@ test('startup consumes complete taps, swipes and double taps over mobile menus',
   await withChromiumFixture(
     'ANSI startup touch gestures',
     async ({ page, context, integration, assertNoBrowserErrors }) => {
+      await pauseStartupClock(page);
       await page.addInitScript(() => {
         const settings = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
         localStorage.setItem(
@@ -207,7 +218,6 @@ test('startup consumes complete taps, swipes and double taps over mobile menus',
         );
       });
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.clock.install();
       const protocol = await context.newCDPSession(page);
       try {
         await protocol.send('Emulation.setTouchEmulationEnabled', {
@@ -224,8 +234,6 @@ test('startup consumes complete taps, swipes and double taps over mobile menus',
         ]) {
           await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
           const splash = page.locator('[data-ansi-startup]');
-          await browserExpect(splash).toBeVisible();
-          await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
           await browserExpect(splash).toBeVisible();
           const trigger = page.locator(
             '[data-slot="dropdown-menu-trigger"][aria-label="Settings"]:visible',
@@ -278,7 +286,6 @@ test('startup consumes complete taps, swipes and double taps over mobile menus',
             await protocol.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
           }
           await browserExpect(trigger).toHaveAttribute('aria-expanded', 'false');
-          await page.clock.resume();
         }
       } finally {
         await protocol.detach();
@@ -292,6 +299,7 @@ test('ANSI workspace keeps drafts and composer geometry through chat switches', 
   await withChromiumFixture(
     'ANSI chat switches',
     async ({ page, integration, assertNoBrowserErrors }) => {
+      await pauseStartupClock(page);
       await recordStartupMounts(page);
       const ids = [integration.newChatId(), integration.newChatId()];
       for (const [index, chatId] of ids.entries()) {
@@ -317,7 +325,9 @@ test('ANSI workspace keeps drafts and composer geometry through chat switches', 
       });
       await page.goto(`${integration.garcon.baseUrl}/chat/${ids[0]}`);
       await browserExpect(page.locator('[data-ansi-startup]')).toBeVisible();
+      await page.clock.runFor(2600);
       await browserExpect(page.locator('[data-ansi-startup]')).toHaveCount(0);
+      await page.clock.resume();
       expect(await startupMounts(page)).toBe(1);
       await page.evaluate(() => document.fonts.ready);
       const composer = page.locator('[data-composer]');
@@ -328,6 +338,9 @@ test('ANSI workspace keeps drafts and composer geometry through chat switches', 
       await editor.evaluate((element) => element.setAttribute('data-retained-editor', 'true'));
       const before = await composer.boundingBox();
       expect(await page.locator('[data-workspace-window-id]').count()).toBeGreaterThanOrEqual(2);
+      await browserExpect(
+        page.locator('[data-workspace-window-fullscreen] > svg').first(),
+      ).toBeVisible();
       const chatBody = await page.locator('[data-workspace-live-chat-body]').boundingBox();
       const titlebar = await page
         .locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]')
@@ -342,7 +355,7 @@ test('ANSI workspace keeps drafts and composer geometry through chat switches', 
         await browserExpect(page.locator('[data-ansi-startup]')).toHaveCount(0);
         expect(await startupMounts(page)).toBe(1);
       }
-      await mkdir('artifacts/chromium', { recursive: true });
+      await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
       for (const width of [1440, 390, 360, 320]) {
         await page.setViewportSize({ width, height: 900 });
         await browserExpect(
@@ -350,7 +363,7 @@ test('ANSI workspace keeps drafts and composer geometry through chat switches', 
             .getByRole('region', { name: 'Chat messages', exact: true })
             .getByText('Synthetic ANSI workspace sample 1', { exact: true }),
         ).toBeVisible();
-        await page.screenshot({ path: `artifacts/chromium/ansi-workspace-${width}.png` });
+        await page.screenshot({ path: join(ARTIFACT_DIRECTORY, `ansi-workspace-${width}.png`) });
         const box = (await composer.boundingBox())!;
         expect(box.x).toBeGreaterThanOrEqual(0);
         expect(box.x + box.width).toBeLessThanOrEqual(width);
@@ -381,7 +394,7 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
     const originalPalette = await select.inputValue();
     await appearance.check();
     expect(await select.inputValue()).toBe(originalPalette);
-    await mkdir('artifacts/chromium', { recursive: true });
+    await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
 
     for (const id of ['ansi-dark', 'ansi-light']) {
       await select.selectOption(id);
@@ -400,7 +413,7 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
       await browserExpect(select).toBeFocused();
       for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: 900 });
-        await page.screenshot({ path: `artifacts/chromium/${id}-${width}.png` });
+        await page.screenshot({ path: join(ARTIFACT_DIRECTORY, `${id}-${width}.png`) });
         const box = await dialog.boundingBox();
         expect(box!.x).toBeGreaterThanOrEqual(0);
         expect(box!.x + box!.width).toBeLessThanOrEqual(width);
@@ -450,7 +463,7 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
     expect(scroll.fits).toBe(true);
     expect(scroll.after).toEqual(scroll.before);
     await browserExpect(newChat).toHaveCSS('border-bottom-style', 'double');
-    await newChat.screenshot({ path: 'artifacts/chromium/ansi-dialog-scrolled.png' });
+    await newChat.screenshot({ path: join(ARTIFACT_DIRECTORY, 'ansi-dialog-scrolled.png') });
     await page.keyboard.press('Escape');
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.evaluate(() => {

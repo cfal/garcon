@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/svelte';
 import { tick } from 'svelte';
+import { drawPlasma } from '$lib/theme/ansi-plasma.js';
 import AnsiStartup from '../AnsiStartup.svelte';
 
 vi.mock(import('$lib/theme/ansi-plasma.js'), async (importOriginal) => ({
@@ -12,6 +13,7 @@ vi.mock(import('$lib/theme/ansi-plasma.js'), async (importOriginal) => ({
 
 const props = { enabled: true, workspaceReady: true, reduceMotion: false };
 const splash = () => document.querySelector('[data-ansi-startup]');
+const mediaQueries = new Map<string, EventTarget & { matches: boolean }>();
 
 function pointerEvent(type: string, options: PointerEventInit = {}) {
 	return new PointerEvent(type, { bubbles: true, cancelable: true, ...options });
@@ -26,12 +28,25 @@ function touchEvent(type: string, x = 0, identifier = 1) {
 }
 
 beforeEach(() => {
-	vi.useFakeTimers();
-	vi.spyOn(performance, 'now').mockImplementation(() => Date.now());
+	// Uses one clock for performance.now() and animation-frame timestamps.
+	vi.useFakeTimers({
+		toFake: [
+			'setTimeout',
+			'clearTimeout',
+			'requestAnimationFrame',
+			'cancelAnimationFrame',
+			'performance',
+			'Date',
+		],
+	});
 	vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
-	vi.stubGlobal('matchMedia', (media: string) =>
-		Object.assign(new EventTarget(), { matches: false, media }),
-	);
+	mediaQueries.clear();
+	vi.stubGlobal('matchMedia', (media: string) => {
+		const query = Object.assign(new EventTarget(), { matches: false, media });
+		mediaQueries.set(media, query);
+		return query;
+	});
+	vi.mocked(drawPlasma).mockClear();
 	const context = { font: '', textBaseline: 'top' } satisfies Pick<
 		CanvasRenderingContext2D,
 		'font' | 'textBaseline'
@@ -49,6 +64,96 @@ afterEach(() => {
 });
 
 describe('terminal startup', () => {
+	it('ends permanently when workspace readiness is lost before the deadline', async () => {
+		const { rerender } = render(AnsiStartup, props);
+		expect(splash()).not.toBeNull();
+		await rerender({ workspaceReady: false });
+		expect(splash()).toBeNull();
+		await rerender({ workspaceReady: true });
+		expect(splash()).toBeNull();
+	});
+
+	it.each([{ enabled: false }, { reduceMotion: true }])(
+		'dismisses permanently when preferences change mid-intro: %j',
+		async (override) => {
+			const { rerender } = render(AnsiStartup, props);
+			expect(splash()).not.toBeNull();
+			await rerender(override);
+			expect(splash()).toBeNull();
+			await rerender(props);
+			expect(splash()).toBeNull();
+		},
+	);
+
+	it('dismisses permanently when the page becomes hidden', async () => {
+		render(AnsiStartup, props);
+		expect(splash()).not.toBeNull();
+		vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+		document.dispatchEvent(new Event('visibilitychange'));
+		await tick();
+		expect(splash()).toBeNull();
+		vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+		document.dispatchEvent(new Event('visibilitychange'));
+		await tick();
+		expect(splash()).toBeNull();
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it.each(['(prefers-reduced-motion: reduce)', '(forced-colors: active)'])(
+		'dismisses permanently when %s starts matching',
+		async (query) => {
+			render(AnsiStartup, props);
+			expect(splash()).not.toBeNull();
+			const media = mediaQueries.get(query)!;
+			media.matches = true;
+			media.dispatchEvent(new Event('change'));
+			await tick();
+			expect(splash()).toBeNull();
+			media.matches = false;
+			media.dispatchEvent(new Event('change'));
+			await tick();
+			expect(splash()).toBeNull();
+			expect(vi.getTimerCount()).toBe(0);
+		},
+	);
+
+	it('consumes wheel dismissal without intercepting later workspace input', async () => {
+		render(AnsiStartup, props);
+		const wheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 });
+		splash()!.dispatchEvent(wheel);
+		await tick();
+		expect(wheel.defaultPrevented).toBe(true);
+		expect(splash()).toBeNull();
+		const fresh = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 });
+		document.body.dispatchEvent(fresh);
+		expect(fresh.defaultPrevented).toBe(false);
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('caps painting at 16fps and stops at the deadline while a touch retains the overlay', async () => {
+		render(AnsiStartup, props);
+		splash()!.dispatchEvent(touchEvent('touchstart'));
+		await vi.advanceTimersByTimeAsync(1000);
+		const firstSecond = vi.mocked(drawPlasma).mock.calls.length;
+		expect(firstSecond).toBeGreaterThan(10);
+		expect(firstSecond).toBeLessThanOrEqual(17);
+		const times = vi.mocked(drawPlasma).mock.calls.map((call) => call[3]);
+		for (let index = 1; index < times.length; index++) {
+			expect(times[index] - times[index - 1]).toBeGreaterThanOrEqual(1 / 16);
+		}
+		await vi.advanceTimersByTimeAsync(1600);
+		expect(splash()).not.toBeNull();
+		const atDeadline = vi.mocked(drawPlasma).mock.calls.length;
+		expect(atDeadline).toBeGreaterThan(firstSecond);
+		expect(atDeadline).toBeLessThanOrEqual(43);
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(drawPlasma).toHaveBeenCalledTimes(atDeadline);
+		expect(vi.getTimerCount()).toBe(0);
+		splash()!.dispatchEvent(touchEvent('touchend'));
+		await tick();
+		expect(splash()).toBeNull();
+	});
+
 	it('waits for keyboard ownership without extending the original deadline', async () => {
 		const { rerender } = render(AnsiStartup, { ...props, workspaceReady: false });
 		expect(splash()).toBeNull();
