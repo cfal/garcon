@@ -6,7 +6,7 @@
 		getToolDisplayLabel,
 		getToolDisplayPayload,
 	} from '$lib/chat/tools/tool-display-registry.js';
-	import { resolveDisplayRule } from '$lib/chat/tools/tool-display-policy.js';
+	import { resolveDisplayRule, resolveToolResultDisplayRule } from '$lib/chat/tools/tool-display-policy.js';
 	import type {
 		ToolInputDisplayRule,
 		ToolResultDisplayRule,
@@ -61,7 +61,7 @@
 	const toolId = $derived(toolMessage.toolId);
 
 	let config = $derived(resolveDisplayRule(TOOL_DISPLAY_REGISTRY, toolMessage.type));
-	let displayConfig = $derived(mode === 'input' ? config.input : config.result);
+	let displayConfig = $derived(mode === 'input' ? config.input : resolveToolResultDisplayRule(config, toolResult, toolMessage));
 
 	let parsedData = $derived(
 		mode === 'input' ? getToolDisplayPayload(toolMessage) : (toolResult ?? {}),
@@ -71,7 +71,7 @@
 		const cfg = displayConfig as ToolInputDisplayRule | undefined;
 		if (cfg?.action === 'openFile' && onFileOpen) {
 			const value = cfg.getValue?.(parsedData) || '';
-			onFileOpen(value);
+			if (value) onFileOpen(value);
 		}
 	}
 
@@ -185,7 +185,7 @@
 				label={inlineLabel}
 				value={inlineValue}
 				secondary={inlineSecondary}
-				action={cfg.action}
+				action={cfg.action === 'openFile' && !inlineValue ? 'none' : cfg.action}
 				onAction={handleAction}
 				style={cfg.style}
 				wrapText={cfg.wrapText}
@@ -208,7 +208,7 @@
 			{:else}
 				<ChatToolExpandableEvent
 					{toolName}
-					{toolId}
+					toolId={displayAnchorId}
 					title={collapsibleTitle}
 					defaultOpen={collapsibleDefaultOpen}
 					open={displayOpen}

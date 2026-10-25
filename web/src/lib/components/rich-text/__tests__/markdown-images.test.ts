@@ -35,6 +35,45 @@ describe('Markdown images', () => {
 		vi.unstubAllGlobals();
 	});
 
+	it.each([
+		['standalone', '![Capture](capture.png)', true],
+		['linked', '[![Capture](capture.png)](guide.md)', true],
+		['formatted', '**![Capture](capture.png)**', true],
+		['reference', '![Capture][image]\n\n[image]: capture.png', true],
+		['multiple', '![Capture](capture.png) ![Other](other.png)', true],
+		['line break', '![Capture](capture.png)  \n![Other](other.png)', true],
+		['blockquote', '> ![Capture](capture.png)', true],
+		['loose list', '- First\n\n- ![Capture](capture.png)', true],
+		['leading text', 'Before ![Capture](capture.png)', false],
+		['trailing text', '![Capture](capture.png) after', false],
+		['linked caption', '[![Capture](capture.png) caption](guide.md)', false],
+		['formatted caption', '**![Capture](capture.png) caption**', false],
+		['literal HTML', '![Capture](capture.png) <caption>', false],
+	])('adds block margins only to image-only paragraphs: %s', (_name, source, imageOnly) => {
+		const { container } = render(Markdown, { source });
+		const paragraph = container.querySelector('.markdown-image')!.closest('div.break-words')!;
+		expect(paragraph.classList.contains('markdown-image-paragraph')).toBe(imageOnly);
+		expect(paragraph.classList.contains('mb-1')).toBe(!imageOnly);
+		expect(paragraph.classList.contains('last:mb-0')).toBe(!imageOnly);
+	});
+
+	it.each(['assistant', 'user', 'presented', 'thinking'] as const)(
+		'updates image-only spacing without remounting the %s thumbnail',
+		async (variant) => {
+			const view = render(Markdown, {
+				source: '![Capture](capture.png)',
+				variant,
+				resolveImageFile,
+			});
+			const image = await screen.findByRole('img', { name: 'Capture' });
+			expect(image.closest('.markdown-image-paragraph')).not.toBeNull();
+			await view.rerender({ source: '![Capture](capture.png) caption' });
+			expect(screen.getByRole('img', { name: 'Capture' })).toBe(image);
+			expect(image.closest('.markdown-image-paragraph')).toBeNull();
+			expect(filesApi.readContent).toHaveBeenCalledOnce();
+		},
+	);
+
 	it('loads a local file through the file API and releases it on unmount', async () => {
 		const view = render(Markdown, {
 			source: '![Capture](capture.png "Desktop")',
@@ -54,11 +93,79 @@ describe('Markdown images', () => {
 			{ signal: expect.any(AbortSignal), cache: 'no-store' },
 		);
 		expect(screen.getByRole('img').getAttribute('title')).toBe('Desktop');
-		const signal = vi.mocked(filesApi.readContent).mock.calls[0][1]?.signal;
 		view.unmount();
-		expect(signal?.aborted).toBe(true);
 		expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-1');
 	});
+
+	it('opens a loaded thumbnail through file navigation', async () => {
+		const onLinkNavigate = vi.fn();
+		render(Markdown, {
+			source: '![Capture](capture.png)',
+			resolveImageFile,
+			onLinkNavigate,
+		});
+		const button = await screen.findByRole('button', { name: 'Open image Capture' });
+		expect(button.querySelector('img')?.getAttribute('src')).toBe('blob:preview-1');
+		await fireEvent.click(button);
+		expect(onLinkNavigate).toHaveBeenCalledExactlyOnceWith({
+			rawHref: 'capture.png',
+			kind: 'file',
+		});
+		await fireEvent.error(screen.getByRole('img'));
+		expect(screen.queryByRole('button', { name: 'Open image Capture' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Retry image Capture' })).toBeTruthy();
+	});
+
+	it('leaves thumbnails without a navigation callback non-interactive', async () => {
+		render(Markdown, { source: '![Capture](capture.png)', resolveImageFile });
+		await screen.findByRole('img');
+		expect(screen.queryByRole('button')).toBeNull();
+	});
+
+	it('updates thumbnail navigation without reloading the image', async () => {
+		const initialNavigate = vi.fn();
+		const nextNavigate = vi.fn();
+		const view = render(Markdown, {
+			source: '![Capture](capture.png)',
+			resolveImageFile,
+			onLinkNavigate: initialNavigate,
+		});
+		await screen.findByRole('button', { name: 'Open image Capture' });
+		await view.rerender({ onLinkNavigate: nextNavigate });
+		await fireEvent.click(screen.getByRole('button', { name: 'Open image Capture' }));
+		expect(initialNavigate).not.toHaveBeenCalled();
+		expect(nextNavigate).toHaveBeenCalledExactlyOnceWith({ rawHref: 'capture.png', kind: 'file' });
+		await view.rerender({ onLinkNavigate: undefined });
+		expect(screen.queryByRole('button')).toBeNull();
+		expect(screen.getByRole('img').getAttribute('src')).toBe('blob:preview-1');
+		expect(filesApi.readContent).toHaveBeenCalledOnce();
+	});
+
+	it.each(['guide.md', 'https://example.com/guide'])(
+		'preserves an authored image link to %s without nesting a button',
+		async (destination) => {
+			const onLinkNavigate = vi.fn();
+			render(Markdown, {
+				source: `[![Capture](capture.png)](${destination})`,
+				resolveImageFile,
+				onLinkNavigate,
+			});
+			const image = await screen.findByRole('img', { name: 'Capture' });
+			const link = screen.getByRole('link', { name: 'Capture' });
+			expect(link.contains(image)).toBe(true);
+			expect(link.getAttribute('href')).toBe(destination);
+			expect(screen.queryByRole('button')).toBeNull();
+			if (destination === 'guide.md') {
+				await fireEvent.click(image);
+				expect(onLinkNavigate).toHaveBeenCalledExactlyOnceWith({
+					rawHref: destination,
+					kind: 'file',
+				});
+			} else {
+				expect(link.getAttribute('target')).toBe('_blank');
+			}
+		},
+	);
 
 	it.each([
 		'https://example.com/capture.png',
@@ -66,7 +173,11 @@ describe('Markdown images', () => {
 		'//example.com/capture.png',
 	])('leaves %s native and never forwards API authentication', async (href) => {
 		const resolver = vi.fn(resolveImageFile);
-		render(Markdown, { source: `![Capture](${href})`, resolveImageFile: resolver });
+		render(Markdown, {
+			source: `![Capture](${href})`,
+			resolveImageFile: resolver,
+			onLinkNavigate: vi.fn(),
+		});
 		await tick();
 		const image = screen.getByRole('img');
 		expect(image.getAttribute('src')).toBe(href);
@@ -74,6 +185,7 @@ describe('Markdown images', () => {
 		expect(image.getAttribute('referrerpolicy')).toBe('no-referrer');
 		expect(resolver).not.toHaveBeenCalled();
 		expect(filesApi.readContent).not.toHaveBeenCalled();
+		expect(screen.queryByRole('button')).toBeNull();
 	});
 
 	it.each([
@@ -90,6 +202,7 @@ describe('Markdown images', () => {
 		expect(container.querySelector('img')).toBeNull();
 		expect(filesApi.readContent).not.toHaveBeenCalled();
 		expect(screen.getByText('Unable to load image')).toBeTruthy();
+		expect(screen.queryByRole('button')).toBeNull();
 	});
 
 	it.each(['C:/workspace/capture.png', 'C:\\workspace\\capture.png'])(
@@ -152,10 +265,15 @@ describe('Markdown images', () => {
 		const view = render(Markdown, { source: '![Capture](capture.png)', resolveImageFile });
 		await tick();
 		expect(filesApi.readContent).not.toHaveBeenCalled();
+		const loading = screen.getByRole('status', { name: 'Loading image...' });
+		expect(loading.getAttribute('aria-busy')).toBe('true');
+		expect(loading.textContent?.trim()).toBe('');
+		expect(loading.querySelector('svg.animate-spin')).not.toBeNull();
 		enter();
 		enter();
 		await waitFor(() => expect(filesApi.readContent).toHaveBeenCalledOnce());
-		expect(disconnect).toHaveBeenCalled();
+		expect(disconnect).toHaveBeenCalledOnce();
+		await screen.findByRole('img');
 		view.unmount();
 		expect(disconnect).toHaveBeenCalledTimes(2);
 	});

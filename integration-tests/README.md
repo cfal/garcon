@@ -88,7 +88,7 @@ bun run --cwd integration-tests test:server:lane --list
 
 Selecting a backend alone does not prove remote coverage:
 
-- Chat helpers target `client.executorId`. Raw machine requests must explicitly carry that identity; the fixture never rewrites arbitrary HTTP bodies.
+- Chat helpers target `client.executorId`. Raw executor-service requests must explicitly carry that identity; the fixture never rewrites arbitrary HTTP bodies.
 - Use `executionDirs` for native files, home and project paths, and `dirs` for controller configuration and ledgers. `prepareWorkspace` prepares the execution host; `prepareControllerWorkspace` seeds controller-owned storage. Prefer `projectRoots: 'separate'` for routing assertions.
 - Inspect provider logs through `executionLogs`, not controller logs. OpenCode supervisor checks use `readExecutionSupervisorStates` to identify children of the selected runtime across restarts.
 - CLI workflows use `withCliFixture` and `cliConnectionArguments`. Remote lanes explicitly grant CLI access and connect through the worker gateway, rather than exercising controller HTTP with a remote chat. Grant denial and revocation remain in the dedicated executor CLI suite.

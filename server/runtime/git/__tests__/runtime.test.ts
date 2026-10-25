@@ -55,7 +55,7 @@ async function selection(git: GitRuntime['git'], projectPath: string, file = 'ex
     bodyFingerprint: loaded.files[file].bodyFingerprint, patchDigest: loaded.files[file].patchDigest!, hunkIndex: 0 };
 }
 
-test('machine service scopes operations and rejects untrusted fields before execution', async () => {
+test('executor service scopes operations and rejects untrusted fields before execution', async () => {
   const { git, projectPath } = await fixture();
   expect(await git.getStatus({ projectPath })).toMatchObject({ executorId: 'local', instanceId: 'serving-one', branch: 'main' });
   expect(() => validateGitRequest('checkout', { projectPath, ref: 'main', env: { GIT_DIR: '/wrong' } })).toThrow('Invalid Git');

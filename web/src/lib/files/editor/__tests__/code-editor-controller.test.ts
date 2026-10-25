@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import { foldEffect, foldedRanges } from '@codemirror/language';
@@ -8,14 +8,21 @@ import type { CanonicalFileIdentity } from '$shared/file-contracts';
 import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
 import { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
 import { emulateDetachedScrollReset } from '../../../../test/detached-scroll.js';
+import { deferDocumentSelectionChanges } from '../../../../test/selection-change.js';
 
 const mounted: HTMLElement[] = [];
 const controllers: CodeEditorController[] = [];
+let restoreSelectionChanges: () => void;
+
+beforeEach(() => {
+	restoreSelectionChanges = deferDocumentSelectionChanges();
+});
 
 afterEach(() => {
 	for (const controller of controllers.splice(0)) controller.dispose();
 	for (const element of mounted) element.remove();
 	mounted.length = 0;
+	restoreSelectionChanges();
 });
 
 function parent(): HTMLDivElement {

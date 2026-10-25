@@ -1,7 +1,10 @@
+import { hasChatFilterWhitespace, parseChatFilterQuery, tokenizeChatFilter, type ChatFilterTerm } from './chat-filter-query.js';
+
 export type ChatSearchSnippetRole = 'user' | 'assistant' | 'tool' | 'system';
 
 export const CHAT_SEARCH_MAX_TERMS = 16;
 export const CHAT_SEARCH_MAX_WORDS = 32;
+export const CHAT_SEARCH_MAX_COMPILED_QUERY_BYTES = 64 * 1024;
 export const CHAT_SEARCH_MIN_PREFIX_CHARS = 3;
 export const CHAT_SEARCH_DEFAULT_PAGE_SIZE = 20;
 export const CHAT_SEARCH_MAX_PAGE_SIZE = 100;
@@ -24,7 +27,8 @@ export interface ChatSearchQueryV1 {
 
 export type ChatSearchClauseV1 =
   | { readonly kind: 'phrase'; readonly tokens: readonly ChatSearchTokenV1[] }
-  | { readonly kind: 'all-words'; readonly tokens: readonly ChatSearchTokenV1[] };
+  | { readonly kind: 'all-words'; readonly tokens: readonly ChatSearchTokenV1[] }
+  | { readonly kind: 'literal'; readonly text: string; readonly tokens: readonly ChatSearchTokenV1[] };
 
 export interface ChatSearchTokenV1 {
   readonly text: string;
@@ -225,35 +229,45 @@ export function compileChatSearchQuery(
   query: string,
   textTokens?: readonly string[],
 ): ChatSearchQueryV1 {
-  const quoted = new Map<string, number>();
-  for (const match of query.matchAll(/"([^"]+)"|'([^']+)'/g)) {
-    const value = (match[1] ?? match[2] ?? '').toLowerCase();
-    quoted.set(value, (quoted.get(value) ?? 0) + 1);
+  let terms: ChatFilterTerm[];
+  if (textTokens?.length) {
+    const originals = new Map<string, ChatFilterTerm[]>();
+    for (const term of parseChatFilterQuery(query).textTerms) {
+      const key = term.text.trim().toLowerCase();
+      const matches = originals.get(key) ?? [];
+      matches.push(term);
+      originals.set(key, matches);
+    }
+    terms = textTokens.map((text) =>
+      originals.get(text.trim().toLowerCase())?.shift()
+        ?? { text, quoted: hasChatFilterWhitespace(text), source: text });
+  } else {
+    terms = tokenizeChatFilter(query.trim());
   }
-  const terms = textTokens?.length
-    ? textTokens.map((text) => {
-      const key = text.toLowerCase();
-      const count = quoted.get(key) ?? 0;
-      if (count > 0) quoted.set(key, count - 1);
-      return { text, phrase: /\s/u.test(text) || count > 0 };
-    })
-    : [...query.matchAll(/"([^"]+)"|'([^']+)'|(\S+)/g)].map((match) => ({
-      text: match[1] ?? match[2] ?? match[3] ?? '',
-      phrase: match[1] !== undefined || match[2] !== undefined,
-    }));
   return {
     version: 1,
-    clauses: terms.map((term) => ({
-      kind: term.phrase ? 'phrase' as const : 'all-words' as const,
-      tokens: (term.text.match(/[\p{L}\p{N}_]+/gu) ?? []).map((text) => ({
-        text,
-        normalized: text.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase(),
-        match: !term.phrase && [...text].length >= CHAT_SEARCH_MIN_PREFIX_CHARS
-          ? 'prefix' as const
-          : 'exact' as const,
-      })),
-    })).filter((clause) => clause.tokens.length > 0),
+    clauses: terms.map((term, index) => compileSearchClause(term, textTokens?.[index]))
+      .filter((clause) => clause.tokens.length > 0),
   };
+}
+
+function compileSearchClause(term: ChatFilterTerm, browserText?: string): ChatSearchClauseV1 {
+  const sourceText = term.quoted && !/^["']/u.test(term.source) ? term.source : term.text;
+  const isLiteral = /[^\p{L}\p{N}\p{M}\p{Cf}\s\p{White_Space}]/u.test(sourceText);
+  // Browser lexical tokens retain the index's existing case-folding behavior.
+  const text = isLiteral ? sourceText : (browserText ?? sourceText);
+  const phrase = term.quoted || hasChatFilterWhitespace(text);
+  const tokens = (text.match(/[\p{L}\p{N}_]+/gu) ?? []).map((word): ChatSearchTokenV1 => ({
+    text: word,
+    normalized: word.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase(),
+    match: !isLiteral && !phrase && [...word].length >= CHAT_SEARCH_MIN_PREFIX_CHARS
+      ? 'prefix'
+      : 'exact',
+  }));
+  if (isLiteral) {
+    return { kind: 'literal', text: text.replace(/[\s\p{White_Space}]+/gu, ' ').trim(), tokens };
+  }
+  return { kind: phrase ? 'phrase' : 'all-words', tokens };
 }
 
 function parseChatSearchResult(value: unknown, snippetLimit: number): ChatSearchResult {

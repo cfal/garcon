@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { scheduleChatPrompt } from '../scheduled-prompts';
+import { createScheduledPrompt, getScheduledPrompts, updateScheduledPrompt, scheduleChatPrompt, setScheduledPromptEnabled } from '../scheduled-prompts';
 import {
 	SCHEDULED_PROMPT_LABEL_MAX_LENGTH,
 	normalizeScheduledPromptTarget,
@@ -15,6 +15,7 @@ vi.stubGlobal('localStorage', {
 
 const scheduledPrompt = {
 	id: 'prompt-in',
+	enabled: true,
 	schedule: { type: 'once' as const, nextRunAt: '2030-01-01T09:00:00.000Z' },
 	target: {
 		type: 'existing-chat' as const,
@@ -36,6 +37,17 @@ describe('scheduled prompts API contract', () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+	});
+
+	it('sends typed enablement and normalizes the persisted state', async () => {
+		const paused = { ...scheduledPrompt, enabled: false };
+		fetchMock.mockResolvedValue(Response.json({ success: true, snapshot: { revision: 2, prompts: [paused], runLog: [] } }));
+		const result = await setScheduledPromptEnabled({ expectedRevision: 1, id: paused.id, enabled: false });
+		expect(result.snapshot.prompts[0].enabled).toBe(false);
+		const [url, options] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/scheduled-prompts/enabled');
+		expect(options.method).toBe('PUT');
+		expect(JSON.parse(options.body)).toEqual({ expectedRevision: 1, id: paused.id, enabled: false });
 	});
 
 	it('posts a relative scheduled prompt and normalizes the created prompt and snapshot', async () => {
@@ -65,6 +77,38 @@ describe('scheduled prompts API contract', () => {
 		});
 	});
 
+	it('retains task names and custom titles in both mutation and GET responses', async () => {
+		const target = {
+			type: 'new-chat' as const, agentId: 'codex', projectPath: '/workspace/project', model: 'gpt-5',
+			apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+			permissionMode: 'default' as const, thinkingMode: 'none' as const, agentSettingsById: {}, tags: [],
+			preambleChoice: { mode: 'defaults' as const }, chatTitleTemplate: 'Review {{current_date}}',
+		};
+		const prompt = { ...scheduledPrompt, name: 'Daily review', target };
+		const snapshot = { revision: 1, prompts: [prompt], runLog: [] };
+		fetchMock.mockImplementation(async (_url, options) => Response.json(
+			(options.method ?? 'GET') === 'GET' ? snapshot : { success: true, snapshot, scheduledPrompt: prompt },
+		));
+		const request = { expectedRevision: 0, scheduledPrompt: {
+			schedule: { type: 'once' as const, runAtUtc: prompt.schedule.nextRunAt },
+			name: prompt.name, target, prompt: prompt.prompt,
+		} };
+		expect(await createScheduledPrompt(request)).toEqual({ success: true, snapshot, scheduledPrompt: prompt });
+		expect(await getScheduledPrompts()).toEqual(snapshot);
+		expect((await updateScheduledPrompt({ ...request, id: prompt.id })).snapshot).toEqual(snapshot);
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(request);
+	});
+
+	it('rejects a creation response with a different record in the snapshot', async () => {
+		fetchMock.mockResolvedValue(Response.json({ success: true, scheduledPrompt,
+			snapshot: { revision: 1, prompts: [{ ...scheduledPrompt, enabled: false }], runLog: [] },
+		}));
+		await expect(createScheduledPrompt({ expectedRevision: 0, scheduledPrompt: {
+			schedule: { type: 'once', runAtUtc: scheduledPrompt.schedule.nextRunAt },
+			target: scheduledPrompt.target, prompt: scheduledPrompt.prompt,
+		} })).rejects.toThrow('Invalid scheduled prompt creation response');
+	});
+
 	it('rejects malformed responses and snapshots that omit the scheduled prompt', async () => {
 		fetchMock.mockResolvedValueOnce(
 			Response.json({
@@ -86,7 +130,7 @@ describe('scheduled prompts API contract', () => {
 		);
 		await expect(
 			scheduleChatPrompt({ chatId: '123', duration: '1m', prompt: 'Continue' }),
-		).rejects.toThrow('omitted the created prompt');
+		).rejects.toThrow('Invalid schedule-in response');
 	});
 
 	it('preserves typed API errors', async () => {

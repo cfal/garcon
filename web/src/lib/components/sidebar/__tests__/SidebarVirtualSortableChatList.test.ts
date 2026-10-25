@@ -7,11 +7,16 @@ import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatList
 import { SidebarVirtualChatListController } from '../SidebarVirtualChatListController.svelte.js';
 import {
 	CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
+	EXECUTOR_HEADER_ROW_HEIGHT,
 	PROJECT_HEADER_ROW_HEIGHT,
+	sidebarChatInset,
+	sidebarHeaderInset,
 	type SidebarVirtualChatRow,
+	type SidebarVirtualProjectHeaderRow,
 	type SidebarVirtualRow,
 } from '../sidebar-virtual-chat-list';
 import { sidebarProjectKey } from '../sidebar-row-model';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { SidebarChatReorderState } from '../sidebar-chat-reorder-state.svelte';
 import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
@@ -84,6 +89,7 @@ function makeRows(count: number): SidebarVirtualChatRow[] {
 		return {
 			type: 'chat' as const,
 			key: `normal:${chat.id}`,
+			depth: 0,
 			chat,
 			list: 'normal' as const,
 			isPinned: false,
@@ -106,6 +112,7 @@ function makeScopedRow(
 	return {
 		type: 'chat',
 		key: `normal:${chat.id}`,
+		depth: 1,
 		chat,
 		list: 'normal',
 		isPinned: false,
@@ -123,10 +130,11 @@ function makeProjectHeader(
 	count: number,
 	chatIds: string[] = [],
 	isCollapsed = false,
-): SidebarVirtualRow {
+): SidebarVirtualProjectHeaderRow {
 	return {
 		type: 'project-header',
 		key: `project:${sidebarProjectKey(projectPath)}`,
+		depth: 0,
 		projectKey: sidebarProjectKey(projectPath),
 		collapseKey: sidebarProjectKey(projectPath),
 		projectPath,
@@ -179,19 +187,22 @@ function querySummaryProjectPath(projectPath: string): HTMLElement | null {
 	);
 }
 
-function expectInlineGroupHeaderDivider(header: HTMLElement): void {
+// Expanded groups list their chats, so only collapsed groups end with a count.
+function expectCompactGroupHeader(header: HTMLElement): void {
 	const label = header.querySelector<HTMLElement>('[data-sidebar-group-header-label]');
-	const divider = header.querySelector<HTMLElement>('[data-sidebar-group-header-divider]');
-	const count = header.querySelector<HTMLElement>('[data-sidebar-group-header-count]');
-	const disclosureIcon = label?.nextElementSibling;
+	const disclosureIcon = header.firstElementChild;
+	const count = header.querySelector('[data-sidebar-group-header-count]');
 
 	expect(label).toBeTruthy();
 	expect(disclosureIcon?.tagName.toLowerCase()).toBe('svg');
-	expect(disclosureIcon?.nextElementSibling).toBe(divider);
-	expect(divider?.nextElementSibling).toBe(count);
-	expect(divider?.className).toContain('h-px');
-	expect(divider?.className).toContain('flex-1');
-	expect(header.parentElement?.className ?? '').not.toMatch(/\bborder-b\b/);
+	expect(disclosureIcon?.getAttribute('aria-hidden')).toBe('true');
+	expect(disclosureIcon?.compareDocumentPosition(label!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+	if (header.getAttribute('aria-expanded') === 'true') {
+		expect(count).toBeNull();
+		return;
+	}
+	expect(header.lastElementChild).toBe(count);
+	expect(label?.compareDocumentPosition(count!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 }
 
 function isSidebarViewport(element: HTMLElement): boolean {
@@ -272,9 +283,16 @@ describe('SidebarVirtualSortableChatList', () => {
 
 	it('keeps chat props coherent when regrouping inserts a header at the old index', async () => {
 		const rows = makeRows(2);
-		const view = render(SidebarVirtualSortableChatListHost, { rows, rowHeight, selectedChatId: 'chat-1', displayOptions: { chatItemLayout: 'detailed' } });
+		const view = render(SidebarVirtualSortableChatListHost, {
+			rows,
+			rowHeight,
+			selectedChatId: 'chat-1',
+			displayOptions: { chatItemLayout: 'detailed' },
+		});
 		await tick();
-		const update = vi.spyOn(SidebarVirtualChatListController.prototype, 'update').mockImplementation(() => {});
+		const update = vi
+			.spyOn(SidebarVirtualChatListController.prototype, 'update')
+			.mockImplementation(() => {});
 		await view.rerender({
 			rows: [makeProjectHeader('/tmp/project', 2), ...rows],
 			rowHeight,
@@ -282,12 +300,20 @@ describe('SidebarVirtualSortableChatList', () => {
 		});
 		await tick();
 		expect(screen.getByText('Chat 0')).toBeTruthy();
-		const selected = document.querySelector<HTMLElement>('[data-sidebar-virtual-list-selected-background]');
+		const selected = document.querySelector<HTMLElement>(
+			'[data-sidebar-virtual-list-selected-background]',
+		);
 		expect(selected?.dataset.sidebarVirtualListSelectedBackground).toBe('normal:chat-1');
 		expect(selected?.style.top).toBe(`${rowHeight - CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px`);
 		expect(selected?.style.height).toBe(`${rowHeight + CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px`);
-		expect(document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="normal:chat-0"]')?.style.top).toBe('87px');
-		expect(document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="normal:chat-1"]')?.style.top).toBe('175px');
+		expect(
+			document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="normal:chat-0"]')
+				?.style.top,
+		).toBe('87px');
+		expect(
+			document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="normal:chat-1"]')
+				?.style.top,
+		).toBe('175px');
 		update.mockRestore();
 		await view.rerender({ rows, rowHeight });
 		await tick();
@@ -348,10 +374,85 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(screen.queryByText('Chat 119')).toBeNull();
 	});
 
-	it('places disclosure arrows after group labels and replaces header borders with inline dividers', () => {
+	it('keeps removed executor history collapsible and identifies the executor', async () => {
+		const onToggleProjectCollapsed = vi.fn();
+		render(SidebarVirtualSortableChatListHost, {
+			executors: [localExecutor],
+			selectedChatId: 'hidden-chat',
+			onToggleProjectCollapsed,
+			rows: [
+				{
+					type: 'executor-header',
+					key: 'executor:removed',
+					depth: 0,
+					executorId: remoteExecutor.id,
+					collapseKey: 'executor:removed',
+					count: 1,
+					chatIds: ['hidden-chat'],
+					isCollapsed: true,
+				},
+			],
+		});
+		const button = screen.getByRole('button', {
+			name: 'Executor unavailable (22222222) 1',
+		});
+		expect(button.getAttribute('aria-expanded')).toBe('false');
+		expect(button.classList.contains('bg-sidebar-chat-item-selected-bg')).toBe(true);
+		expect(button.getAttribute('title')).toContain(remoteExecutor.id);
+		await fireEvent.click(button);
+		expect(onToggleProjectCollapsed).toHaveBeenCalledWith('executor:removed');
+	});
+
+	it('keeps the Local executor group when filtering history from a removed executor', () => {
+		const localChat = makeChat(0, { id: 'local-chat', executorId: 'local' });
+		const removedChat = makeChat(1, { id: 'removed-chat', executorId: remoteExecutor.id });
+		render(SidebarChatListHost, {
+			executors: [localExecutor],
+			chats: [localChat, removedChat],
+			filteredChats: [localChat],
+			searchFilter: 'local',
+			collapsedProjectKeys: new Set(['executor:local']),
+			displayOptions: { grouping: 'project' },
+		});
+
+		expect(screen.getByRole('button', { name: 'Local 1' }).getAttribute('aria-expanded')).toBe(
+			'false',
+		);
+		expect(screen.queryByText('Chat 0')).toBeNull();
+		expect(document.querySelector('[data-sidebar-executor-header="local"]')).toBeTruthy();
+		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBe(0);
+	});
+
+	it('renders compact executor headers with executor-header geometry', () => {
+		render(SidebarVirtualSortableChatListHost, {
+			executors: [localExecutor, remoteExecutor],
+			rows: [
+				{
+					type: 'executor-header',
+					key: 'executor-header:executor:local',
+					depth: 0,
+					executorId: 'local',
+					collapseKey: 'executor:local',
+					count: 2,
+					chatIds: ['chat-0', 'chat-1'],
+					isCollapsed: false,
+				},
+			],
+		});
+
+		expectCompactGroupHeader(screen.getByRole('button', { name: 'Local' }));
+		expect(document.querySelector('[data-sidebar-executor-header="local"]')).toBeTruthy();
+		const executorItem = document.querySelector<HTMLElement>(
+			'[data-sidebar-virtual-item="executor-header"]',
+		);
+		expect(executorItem?.style.height).toBe(`${EXECUTOR_HEADER_ROW_HEIGHT}px`);
+	});
+
+	it('places disclosure arrows before group labels and keeps counts at the end', () => {
 		const sectionHeader: SidebarVirtualRow = {
 			type: 'section-header',
 			key: 'section:inactive',
+			depth: 0,
 			section: 'inactive',
 			count: 3,
 			chatIds: ['chat-1', 'chat-2', 'chat-3'],
@@ -370,8 +471,112 @@ describe('SidebarVirtualSortableChatList', () => {
 		);
 		if (!projectHeader || !activityHeader) throw new Error('expected both group header types');
 
-		expectInlineGroupHeaderDivider(projectHeader);
-		expectInlineGroupHeaderDivider(activityHeader);
+		expectCompactGroupHeader(projectHeader);
+		expectCompactGroupHeader(activityHeader);
+	});
+
+	it('aligns nested chats with their parent header label', () => {
+		const projectPath = '/workspace/clients/project-a';
+		const chatRow: SidebarVirtualChatRow = {
+			...makeScopedRow(0, projectPath, ['chat-0']),
+			depth: 2,
+			executorGrouped: true,
+		};
+		render(SidebarVirtualSortableChatListHost, {
+			executors: [localExecutor, remoteExecutor],
+			displayOptions: { chatItemLayout: 'compact' },
+			rows: [
+				{
+					type: 'executor-header',
+					key: 'executor:local',
+					depth: 0,
+					executorId: 'local',
+					collapseKey: 'executor:local',
+					count: 1,
+					chatIds: ['chat-0'],
+					isCollapsed: false,
+				},
+				{ ...makeProjectHeader(projectPath, 1, ['chat-0']), depth: 1, executorGrouped: true },
+				chatRow,
+			],
+		});
+
+		const projectHeader = document.querySelector<HTMLElement>(
+			`[data-sidebar-project-header="${projectPath}"]`,
+		);
+		expect(projectHeader?.style.paddingLeft).toBe(`${sidebarHeaderInset(1)}px`);
+		expect(projectHeader?.querySelector('[data-sidebar-group-header-label]')?.textContent).toBe(
+			'project-a',
+		);
+		expect(projectHeader?.querySelector('[data-sidebar-project-header-parent]')).toBeNull();
+		expect(projectHeader?.querySelector('[data-sidebar-group-header-count]')).toBeNull();
+		expect(projectHeader?.getAttribute('title')).toBe(projectPath);
+
+		// A chat one level deeper starts where its parent's label does, after the chevron and gap.
+		expect(sidebarChatInset(2)).toBe(sidebarHeaderInset(1) + 18);
+		const chatButton = screen.getByText('Chat 0').closest('button');
+		expect(chatButton?.style.paddingLeft).toBe(`${sidebarChatInset(2)}px`);
+		expect(
+			document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="normal:chat-0"]')
+				?.style.left,
+		).toBe(`${sidebarChatInset(2)}px`);
+		// The executor header already names the executor, so the row omits its pill.
+		expect(document.querySelector('[data-slot="chat-executor-pill"]')).toBeNull();
+	});
+
+	it('omits the archived badge beneath an Archived section header', () => {
+		const [ungrouped, sectioned] = makeRows(2).map((row): SidebarVirtualChatRow => ({
+			...row,
+			list: 'archived',
+			isArchived: true,
+		}));
+		render(SidebarVirtualSortableChatListHost, {
+			rows: [ungrouped!, { ...sectioned!, section: 'archived' }],
+		});
+
+		const badge = (chatId: string) =>
+			document.querySelector(
+				`[data-sidebar-virtual-row="${chatId}"] [data-slot="sidebar-chat-state-badge"]`,
+			);
+		expect(badge(ungrouped!.chat.id)).toBeTruthy();
+		expect(badge(sectioned!.chat.id)).toBeNull();
+		// The section header may be virtualized away, so the row itself still announces its state.
+		expect(screen.getByRole('button', { name: /Chat 1.*Archived/ })).toBeTruthy();
+	});
+
+	it("keeps a grouped chat's executor in its accessible name without the visual pill", () => {
+		const chat = makeChat(0, { executorId: remoteExecutor.id });
+		const [row] = makeRows(1);
+		render(SidebarVirtualSortableChatListHost, {
+			executors: [localExecutor, remoteExecutor],
+			displayOptions: { chatItemLayout: 'compact' },
+			rows: [{ ...row!, chat, depth: 1, executorGrouped: true }],
+		});
+
+		expect(document.querySelector('[data-slot="chat-executor-pill"]')).toBeNull();
+		expect(
+			screen.getByRole('button', { name: new RegExp(`Chat 0.*${remoteExecutor.label}`) }),
+		).toBeTruthy();
+	});
+
+	it('shows a project parent directory only when the row model marks the name ambiguous', () => {
+		const projectPath = '/workspace/clients/project-a';
+		render(SidebarVirtualSortableChatListHost, {
+			rows: [{ ...makeProjectHeader(projectPath, 2, [], true), showParentPath: true }],
+		});
+
+		const header = document.querySelector<HTMLElement>(
+			`[data-sidebar-project-header="${projectPath}"]`,
+		);
+		expect(header?.querySelector('[data-sidebar-group-header-label]')?.textContent).toBe(
+			'project-a',
+		);
+		expect(header?.querySelector('[data-sidebar-project-header-parent]')?.textContent).toBe(
+			'/workspace/clients',
+		);
+		expect(header?.querySelector('[data-sidebar-group-header-count]')?.textContent?.trim()).toBe(
+			'2',
+		);
 	});
 
 	it('renders collapsed project groups as header-only virtual rows', () => {

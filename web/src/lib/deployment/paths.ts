@@ -1,5 +1,7 @@
-import { base } from '$app/paths';
+import { resolve } from '$app/paths';
 import { stripBasePath } from '$shared/base-path';
+
+const base = resolve('/').slice(0, -1);
 
 export function appPath(path: string): string {
 	if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) {

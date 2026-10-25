@@ -5,6 +5,7 @@
 	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import { getAppShell, getWorkspaceWindowDnd } from '$lib/context';
 	import SidebarProjectHeaderRow from './SidebarProjectHeaderRow.svelte';
+	import SidebarExecutorHeaderRow from './SidebarExecutorHeaderRow.svelte';
 	import SidebarSectionHeaderRow from './SidebarSectionHeaderRow.svelte';
 	import SidebarVirtualSortableChatRow from './SidebarVirtualSortableChatRow.svelte';
 	import {
@@ -235,7 +236,8 @@
 		return cleanup;
 	});
 	$effect(() => {
-		if (pendingRecenter && viewportRef && scrollChatIntoView(pendingRecenter)) pendingRecenter = null;
+		if (pendingRecenter && viewportRef && scrollChatIntoView(pendingRecenter))
+			pendingRecenter = null;
 	});
 	$effect(() => {
 		if (!viewportRef) return;
@@ -895,8 +897,8 @@
 		{#each separatorItems as separator (separator.key)}
 			<div
 				aria-hidden="true"
-				class="pointer-events-none absolute inset-x-0 z-10 bg-border"
-				style={`top:${separator.top}px;height:${separator.height}px;`}
+				class="pointer-events-none absolute right-0 z-10 bg-border"
+				style={`top:${separator.top}px;left:${separator.left}px;height:${separator.height}px;`}
 				data-sidebar-virtual-list-separator={separator.key}
 			></div>
 		{/each}
@@ -906,7 +908,16 @@
 				class="absolute left-0 right-0 top-0"
 				style={`height:${virtualItem.size}px; transform:translateY(${virtualItem.start}px);`}
 			>
-				{#if row.type === 'project-header'}
+				{#if row.type === 'executor-header'}
+					<SidebarExecutorHeaderRow
+						{row}
+						separated={virtualItem.index > 0}
+						containsSelectedChat={Boolean(
+							row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),
+						)}
+						onToggle={onToggleProjectCollapsed}
+					/>
+				{:else if row.type === 'project-header'}
 					<SidebarProjectHeaderRow
 						{row}
 						containsSelectedChat={Boolean(

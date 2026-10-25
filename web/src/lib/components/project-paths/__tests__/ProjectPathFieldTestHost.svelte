@@ -16,7 +16,7 @@
 	setTransientLayers(new TransientLayerRegistry(new WorkspaceInteractionGate()));
 	setExecutorsTestContext([
 		localExecutor,
-		{ ...remoteExecutor, machineServices: { ...localExecutor.machineServices } },
+		{ ...remoteExecutor, executorServices: { ...localExecutor.executorServices } },
 	]);
 </script>
 

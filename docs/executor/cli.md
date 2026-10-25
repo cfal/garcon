@@ -29,7 +29,7 @@ Authority policy: explicit controller-side, per-executor opt-in to workspace-lev
 - Preserve CLI syntax, output formatting, application error contracts, existing command identities, and operation-specific retry rules.
 - Work in both connection directions without requiring the worker to reach the controller's HTTP listener.
 - Keep the controller as the only owner of chats, transcript ledgers, queues, permissions, application settings, and tickets.
-- Keep argument parsing, stdin, cwd resolution, receipt polling, and output-file writes on the machine running the CLI.
+- Keep argument parsing, stdin, cwd resolution, receipt polling, and output-file writes where the CLI runs.
 - Keep retained remote terminals usable after controller restart without changing their process-lifetime guarantee.
 
 No CLI-specific controller-worker channel, traffic scheduler, generic HTTP proxy, controller-side CLI subprocess, durable forwarding queue, new mutation ledger, result cache, or automatic agent recovery. Per-chat CLI capabilities are separate work. Existing executor-aware ticket project inference is reused. Controller-interpreted provider-output commands keep their existing path and authorization rules.
@@ -128,6 +128,12 @@ resolve a public base.
 The HTTP capability is endpoint-local. A gateway capability is never forwarded as controller authentication, and the controller's local capability is never copied to the worker. The executor secret remains private to the connector.
 
 Application status codes, JSON bodies, and applicable `Retry-After` information survive the relay. Do not wrap successful application responses in a gateway-specific JSON object or translate typed domain errors to generic success/failure strings. Gateway and relay failures use explicit shared error codes in the ordinary HTTP error shape.
+
+Transcript search uses the same controller query semantics in both paths:
+punctuation-bearing identifiers match literally and case-insensitively, while
+ordinary unquoted words retain lexical prefix matching. The gateway forwards
+the unchanged search request and response; literal clauses remain internal to
+the controller's search Workers and require no executor protocol change.
 
 Only a small header set is supported. Reconstruct JSON content headers, set `Cache-Control: no-store`, and propagate validated retry metadata where needed. Do not forward cookies, caller-supplied authorization, origin, host, proxy headers, redirects, compression negotiation, or arbitrary response headers. The CLI does not currently need conditional HTTP caching or an upgrade through this endpoint.
 
@@ -251,7 +257,7 @@ require explicit contract and authorization tests; a route prefix never grants
 access to all routes beneath it.
 
 Ordinary workspace CLI access covers chat commands, catalogs, search, metadata,
-tickets, and redacted executor listing. Executor administration, connection
+tickets, scheduled prompts, and redacted executor listing. Executor administration, connection
 credential reveal, and provider assignment operations additionally require the
 separate default-off `allowExecutorManagement` grant. Provider credential
 administration, authentication/account routes, and Files/Git/Terminal APIs remain
@@ -267,21 +273,42 @@ controller and worker builds for these forwarded-contract changes.
 
 Ticket project inference is implemented on the selected executor at current HEAD. Send the context default executor with the CLI directory and reuse that resolver. Do not expand commands merely because their browser APIs exist.
 
+Schedule management forwards exactly `GET`, `POST`, `PUT`, and `DELETE`
+`/api/v1/scheduled-prompts`, plus `PUT /api/v1/scheduled-prompts/enabled`.
+All five use bulk, the short pool, a 30-second deadline, and ordinary workspace
+CLI authority (`management:false`). GET is classified as a read despite its
+idempotent missed-occurrence housekeeping. `/in` and `/reorder` remain excluded.
+POST/PUT new-chat definitions must carry an explicit valid nested
+`scheduledPrompt.target.executorId`, including `local`; neither gateway nor
+dispatcher substitutes a default. Protocol revision 35 requires matching builds.
+POST returns `{success:true, scheduledPrompt, snapshot}` with the created record
+and snapshot captured under the same scheduler lock. Other mutations retain
+`{success:true, snapshot}`. No storage migration is needed.
+
+Schedule mutations use collection-wide revision checks and no automatic retries
+or gateway replay. Full snapshots retain the 8 MiB reply bound; an oversized
+mutation acknowledgement is an unknown outcome, not proof of rejection. History
+is only the latest 200 process-local dispatch outcomes. See
+[Scheduled Prompts](../cli.md#scheduled-prompts) for inputs and recovery rules.
+
 ## Execution Targeting
 
 Origin and target are different identities. Origin is derived from the authenticated worker link and determines CLI authority. Target is a validated executor or existing chat selected by the operation.
 
 | Operation | Target rule |
 | --- | --- |
-| New `start` / `start-async` | Use explicit `--executor` or `context.defaultExecutorId`. Cross-executor starts require an absolute target-local cwd; otherwise resolve cwd on the CLI machine. Validate through the target executor's project service. |
+| New `start` / `start-async` | Use explicit `--executor` or `context.defaultExecutorId`. Cross-executor starts require an absolute target-local cwd; otherwise resolve cwd where the CLI runs. Validate through the target executor's project service. |
 | Standalone agent/model catalog | Use explicit `--executor` or the context default executor. Provider endpoint definitions remain controller-owned; discovery executes on the selected executor. |
 | Native-session lookup | Include explicit `--executor` or the context default executor to avoid same-native-ID ambiguity across hosts. |
 | Existing-chat resume/settings selection | Use the already-fetched snapshot's durable executor/agent/epoch and that executor's catalog. Do not fetch the full chat list or use the HTTP endpoint's default. |
 | Agent handoff without an executor override | Preserve the existing chat executor and use its destination-agent catalog. Do not move execution just because the CLI ran on another worker. |
 | Fork/fork-run | Keep the source-chat executor and existing fork/handoff semantics. |
 | Read/search/status/wait/stop | Keep the explicit chat identity and existing ownership/control fences; no caller-executor filter or retargeting. |
-| Export/handoff output file | Write on the CLI machine, never on the controller by interpreting the requested output path remotely. |
+| Export/handoff output file | Write where the CLI runs, never on the controller by interpreting the requested output path remotely. |
 | Ticket project inference | Send the context default executor and CLI directory to the existing resolver. |
+| New-chat schedule create/update | Require an explicit executor and absolute target-local project path in the JSON definition. Preserve path bytes; the selected executor validates readiness, modes, and project scope. No origin-derived defaults. |
+| Existing-chat schedules | Use the saved chat's executor and current confirmed cwd; retain literal selection guards on same-chat edits. |
+| Schedule list/show/history/enable/disable/delete | Controller-side operations, available without target readiness. The gateway origin still needs a healthy authorized connection. |
 
 Require explicit executor fields for bridged executor-sensitive requests where omission would otherwise mean Local. Do not repair them by blindly rewriting every executor or path at the gateway. The context default is not an authorization ceiling: an existing chat may legitimately belong to another executor. New cross-executor selection flags are not required to make this bridge useful.
 

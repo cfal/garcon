@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy, tick, untrack, type Snippet } from 'svelte';
 	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
-	import Braces from '@lucide/svelte/icons/braces';
+	import TemplateVariableMenu from '$lib/components/prompt-editor/TemplateVariableMenu.svelte';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import { getSnippets, getPreambles } from '$lib/context';
 	import ComposerSnippetPalette from '$lib/components/chat/composer/ComposerSnippetPalette.svelte';
@@ -9,13 +9,14 @@
 	import type { ScheduledSnippetExpansionContext } from '$shared/snippets';
 	import { Button } from '$lib/components/ui/button';
 	import { SCHEDULED_PROMPT_CHAT_ID_TOKEN } from '$shared/scheduled-prompts';
+	import type { PromptTemplateVariables } from './prompt-template-variables';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		ref?: HTMLTextAreaElement | null;
 		prompt: string;
 		promptError: string | null;
-		targetType: 'new-chat' | 'existing-chat';
+		variables: PromptTemplateVariables;
 		surface: 'composer' | 'standalone';
 		onPromptChange: (value: string) => void;
 		onPromptKeydown: (event: KeyboardEvent) => void;
@@ -31,7 +32,7 @@
 		ref = $bindable(null),
 		prompt,
 		promptError,
-		targetType,
+		variables,
 		surface,
 		onPromptChange,
 		onPromptKeydown,
@@ -104,18 +105,6 @@
 		}
 	}
 
-	async function insertChatId(): Promise<void> {
-		if (!ref) return;
-		const start = ref.selectionStart;
-		const end = ref.selectionEnd;
-		const nextPrompt = `${ref.value.slice(0, start)}${SCHEDULED_PROMPT_CHAT_ID_TOKEN}${ref.value.slice(end)}`;
-		const nextCaret = start + SCHEDULED_PROMPT_CHAT_ID_TOKEN.length;
-		ref.value = nextPrompt;
-		onPromptChange(nextPrompt);
-		await tick();
-		ref.focus();
-		ref.setSelectionRange(nextCaret, nextCaret);
-	}
 </script>
 
 <div class="space-y-2" data-slot="scheduled-prompt-field" data-surface={surface}>
@@ -165,23 +154,16 @@
 				<FileText class="size-4" />{m.snippets_picker_title()}
 			</Button>
 		{/if}
-		<Button
-			variant="ghost"
-			size="sm"
-			class="h-9 px-2 text-xs"
+		<TemplateVariableMenu
+			variables={variables.tokens.map((token) => token.slice(2, -2))}
+			getInput={() => ref}
+			onInsert={onPromptChange}
 			disabled={snippets.expansion.pending}
-			onclick={() => void insertChatId()}
-		>
-			<Braces class="size-4" />{m.scheduled_prompts_insert_chat_id({
-				token: SCHEDULED_PROMPT_CHAT_ID_TOKEN,
-			})}
-		</Button>
+		/>
 	</div>
 	<div>
 		<p id={variableHelpId} class="text-xs text-muted-foreground">
-			{targetType === 'new-chat'
-				? m.scheduled_prompts_new_chat_id_help({ token: SCHEDULED_PROMPT_CHAT_ID_TOKEN })
-				: m.scheduled_prompts_existing_chat_id_help({ token: SCHEDULED_PROMPT_CHAT_ID_TOKEN })}
+			{variables.help}
 		</p>
 	</div>
 

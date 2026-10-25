@@ -9,6 +9,7 @@ import {
   claudeToolUse,
 } from '../../support/fake-claude-model.js';
 import { CLAUDE_BINARY } from '../../support/live-claude.js';
+import { convertClaudeEntries } from '../../../server-agents/claude/src/agents/claude/history-loader.js';
 
 const STEERING_PREFIX = 'The user sent steering guidance for the active task:\n\n';
 const createdHarnesses: DirectClaudeHarness[] = [];
@@ -101,12 +102,12 @@ describe('pinned Claude steering protocol', () => {
     harness.model.assertSettled();
   }, 30_000);
 
-  test('batches following guidance in FIFO native history order', async () => {
+  test.each(['', '\n'])('batches following guidance with trailing input %j in FIFO native history order', async (trailing) => {
     const harness = await createHarness();
     const originalId = crypto.randomUUID();
     const firstId = crypto.randomUUID();
     const secondId = crypto.randomUUID();
-    const first = marker('BATCH_FIRST');
+    const first = `${marker('BATCH_FIRST')}${trailing}`;
     const second = marker('BATCH_SECOND');
     const held = harness.model.scriptHeldTurn([claudeText(marker('BATCH_ORIGINAL_REPLY'))]);
     harness.model.scriptTurn([claudeText(marker('BATCH_REPLY'))]);
@@ -126,10 +127,12 @@ describe('pinned Claude steering protocol', () => {
     expect(harness.messages.findIndex(commandLifecycle(firstId, 'queued'))).toBeLessThan(firstReplay);
     expect(harness.messages.findIndex(commandLifecycle(secondId, 'queued'))).toBeLessThan(firstReplay);
     expect(secondReplay).toBeGreaterThan(firstReplay);
-    expect(harness.model.requests().at(-1)?.lastUserText).toContain([
-      `${STEERING_PREFIX}${first}`,
-      `${STEERING_PREFIX}${second}`,
-    ].join('\n'));
+    const modelText = harness.model.requests().at(-1)?.lastUserText ?? '';
+    expect(modelText.split(`${STEERING_PREFIX}${first}`)).toHaveLength(2);
+    expect(modelText.split(`${STEERING_PREFIX}${second}`)).toHaveLength(2);
+    expect(modelText.indexOf(first)).toBeLessThan(modelText.indexOf(second));
+    expect(modelText.slice(modelText.indexOf(first) + first.length, modelText.indexOf(`${STEERING_PREFIX}${second}`)))
+      .toMatch(/^\n+$/);
 
     const entries = await harness.waitForNativeEntries((nativeEntries) => (
       nativeEntries.some((entry) => (
@@ -144,9 +147,14 @@ describe('pinned Claude steering protocol', () => {
       && (asRecord(entry.message).content as unknown[]).length === 2
     ));
     expect(asRecord(batched?.message).content).toEqual([
-      { type: 'text', text: `${STEERING_PREFIX}${first}` },
+      { type: 'text', text: `${STEERING_PREFIX}${first}\n` },
       { type: 'text', text: `${STEERING_PREFIX}${second}` },
     ]);
+    // Reload preserves Claude's merge separator as well as the input's own trailing LF.
+    if (!batched) throw new Error('Batched steering native entry was not found.');
+    expect(convertClaudeEntries([batched]).flatMap((message) =>
+      message.type === 'user-message' ? [message.content] : []))
+      .toEqual([`${first}\n`, second]);
     harness.model.assertSettled();
   }, 30_000);
 

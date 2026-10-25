@@ -92,6 +92,10 @@ Expiry clears queued terminal output and detaches terminal subscriptions; the ne
 browser command retires the expired connection. Refreshed credentials take effect
 by replacing `/ws`.
 
+An established socket lost without a close frame retries the authenticated upgrade
+without waiting for a separate HTTP auth probe. Opaque failures before the socket
+opens and explicit authentication close codes still pause for HTTP reconciliation.
+
 A worker that dials the controller upgrades `/executor/<executor-id>`, not `/ws`; a
 controller that dials a worker uses the worker's own listener. Both directions
 authenticate with the executor's shared secret over Noise rather than user tokens; see
@@ -99,7 +103,7 @@ authenticate with the executor's shared secret over Noise rather than user token
 
 ## Executor Trust Boundary
 
-An executor is a trusted machine/OS-account boundary, not a sandbox for mutually
+An executor is a trusted host/OS-account boundary, not a sandbox for mutually
 untrusted agents. Provider subprocesses, native sessions, files, Git operations,
 and terminals run with that worker account's authority. Other processes under
 the same account can inspect its data and credentials. Use separate OS accounts

@@ -7,7 +7,7 @@ test("service worker caches late navigation and isolates cache-write failures", 
   const bundle = await Bun.build({
     entrypoints: [
       fileURLToPath(
-        new URL("../../../web/src/service-worker.ts", import.meta.url),
+        new URL("../../../web/src/service-worker/index.ts", import.meta.url),
       ),
     ],
     target: "browser",
@@ -15,13 +15,14 @@ test("service worker caches late navigation and isolates cache-write failures", 
       {
         name: "test-manifest",
         setup(build) {
-          build.onResolve({ filter: /^\$service-worker$/ }, () => ({
-            path: "manifest",
+          build.onResolve({ filter: /^\$app\/(env|manifest)$/ }, ({ path }) => ({
+            path,
             namespace: "test-manifest",
           }));
-          build.onLoad({ filter: /.*/, namespace: "test-manifest" }, () => ({
-            contents:
-              "export const base = ''; export const build = []; export const files = []; export const version = 'test';",
+          build.onLoad({ filter: /.*/, namespace: "test-manifest" }, ({ path }) => ({
+            contents: path === "$app/env"
+              ? "export const version = 'test';"
+              : "export const immutable = []; export const assets = [];",
             loader: "js",
           }));
         },
@@ -33,11 +34,13 @@ test("service worker caches late navigation and isolates cache-write failures", 
   const workerSource = await bundle.outputs[0]!.text();
   const lateRequest = new Deferred<void>();
   const lateResponse = new Deferred<Response>();
+  let buildVersion = 'first';
   const server = Bun.serve({
     hostname: "0.0.0.0",
     port: 0,
     fetch(request) {
       const path = new URL(request.url).pathname;
+      if (path === "/_app/version.json") return Response.json({ version: buildVersion });
       if (path === "/service-worker.js") {
         return new Response(workerSource, {
           headers: { "Content-Type": "text/javascript" },
@@ -61,13 +64,20 @@ test("service worker caches late navigation and isolates cache-write failures", 
     await page.goto(origin);
     const workerReady = context.waitForEvent("serviceworker");
     await page.evaluate(async () => {
-      await navigator.serviceWorker.register("/service-worker.js");
+      await navigator.serviceWorker.register("/service-worker.js", { type: "module" });
       await navigator.serviceWorker.ready;
     });
     const worker = await workerReady;
     await page.waitForFunction(
       () => navigator.serviceWorker.controller !== null,
     );
+
+    const readBuildVersion = () => page.evaluate(async () =>
+      (await fetch('/_app/version.json')).json(),
+    );
+    expect(await readBuildVersion()).toEqual({ version: 'first' });
+    buildVersion = 'second';
+    expect(await readBuildVersion()).toEqual({ version: 'second' });
 
     const navigation = page.goto(`${origin}/late`);
     await withTimeout(

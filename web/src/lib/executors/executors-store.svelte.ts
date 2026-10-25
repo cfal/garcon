@@ -19,7 +19,7 @@ const localFallback: readonly ExecutorSnapshot[] = [
 		projectBasePath: null,
 		lastError: null,
 		// Creation stays hidden until the controller reports what Local supports.
-		machineServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: false },
+		executorServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: false },
 	},
 ];
 
@@ -57,20 +57,20 @@ export class ExecutorsStore {
 	}
 
 	filesAvailable(id?: string | null): boolean {
-		return this.isReady(id) && this.get(id)?.machineServices.files === true;
+		return this.isReady(id) && this.get(id)?.executorServices.files === true;
 	}
 
 	/** A capability of the executor, not its readiness: controls stay in place across a reconnect. */
 	supportsDirectoryCreation(id?: string | null): boolean {
-		return this.get(id)?.machineServices.directoryCreation === true;
+		return this.get(id)?.executorServices.directoryCreation === true;
 	}
 
 	gitAvailable(id?: string | null): boolean {
-		return this.isReady(id) && this.get(id)?.machineServices.git === true;
+		return this.isReady(id) && this.get(id)?.executorServices.git === true;
 	}
 
 	ghAvailable(id?: string | null): boolean {
-		return this.gitAvailable(id) && this.get(id)?.machineServices.gh === true;
+		return this.gitAvailable(id) && this.get(id)?.executorServices.gh === true;
 	}
 
 	gitContextKey(id?: string | null): string {
@@ -81,8 +81,8 @@ export class ExecutorsStore {
 			executor?.projectBasePath,
 			executor?.enabled,
 			executor?.availability,
-			executor?.machineServices.git,
-			executor?.machineServices.gh,
+			executor?.executorServices.git,
+			executor?.executorServices.gh,
 		]);
 	}
 
@@ -94,7 +94,7 @@ export class ExecutorsStore {
 			executor?.projectBasePath,
 			executor?.enabled,
 			executor?.availability,
-			executor?.machineServices.files,
+			executor?.executorServices.files,
 		]);
 	}
 

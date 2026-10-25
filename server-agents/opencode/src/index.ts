@@ -1,5 +1,8 @@
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
-import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
+import {
+  DOCUMENT_FILE_ATTACHMENT_MIME_TYPES,
+  VIDEO_FILE_ATTACHMENT_MIME_TYPES,
+} from '@garcon/common/attachments';
 import {
   AgentIntegrationError,
   type AgentChatReference,
@@ -63,8 +66,18 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly descriptor = OPENCODE_DESCRIPTOR;
   readonly literalExecution = null;
   readonly readiness = null;
+  // Attachments ride as data-URL file parts, and OpenCode decodes only
+  // text/plain into prompt text; other text types would reach the model as
+  // unsupported binary parts.
+  // https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/session/prompt.ts#L786-L806
   readonly attachments = {
-    fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
+    fileMimeTypes: [
+      'text/markdown',
+      'text/plain',
+      ...DOCUMENT_FILE_ATTACHMENT_MIME_TYPES,
+      ...VIDEO_FILE_ATTACHMENT_MIME_TYPES,
+    ],
+    inlineTextMaxBytes: null,
   } as const;
   readonly execution;
   readonly producers;

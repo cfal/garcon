@@ -32,6 +32,8 @@ export interface ChromiumFixture {
 }
 
 export interface ChromiumFixtureOptions extends IntegrationFixtureOptions {
+  // Existing workflows use Source; null exercises the application's default.
+  composerInputMode?: 'source' | 'formatted' | null;
   // Playwright request interception can miss requests from pages the app's service worker
   // controls, and the worker claims open pages at an arbitrary point after load, so only
   // tests that exercise the worker allow it.
@@ -70,7 +72,7 @@ export async function createChromiumFixture(
   options: ChromiumFixtureOptions = {},
   sharedBrowser?: Browser,
 ): Promise<ChromiumFixture> {
-  const { serviceWorkers = 'block', ...integrationOptions } = options;
+  const { serviceWorkers = 'block', composerInputMode = 'source', ...integrationOptions } = options;
   await requireCurrentWebBuild();
   const integration = await createIntegrationFixture(integrationOptions);
   let browser: Browser | null = null;
@@ -83,20 +85,24 @@ export async function createChromiumFixture(
       serviceWorkers,
     });
     await authenticateChromiumContext(context, integration);
-    await context.addInitScript(() => {
+    await context.addInitScript((composerInputMode) => {
       const key = 'pref_local_settings';
+      const defaults = {
+        allowDirectChats: true,
+        ...(composerInputMode === null ? {} : { composerInputMode }),
+      };
       try {
         const stored = JSON.parse(globalThis.localStorage.getItem(key) ?? '{}');
         const snapshot =
           stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
         globalThis.localStorage.setItem(
           key,
-          JSON.stringify({ ...snapshot, allowDirectChats: true }),
+          JSON.stringify({ ...defaults, ...snapshot, allowDirectChats: true }),
         );
       } catch {
-        globalThis.localStorage.setItem(key, JSON.stringify({ allowDirectChats: true }));
+        globalThis.localStorage.setItem(key, JSON.stringify(defaults));
       }
-    });
+    }, composerInputMode);
 
     const page = await context.newPage();
     page.setDefaultTimeout(20_000);

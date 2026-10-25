@@ -8,7 +8,7 @@ vi.mock('$lib/context', () => ({
 	getExecutors: () =>
 		({
 			label: (id) =>
-				!id || id === 'local' ? 'Local' : id === 'worker-a' ? 'Build Machine' : 'Unavailable executor',
+				!id || id === 'local' ? 'Local' : id === 'worker-a' ? 'Build Executor' : 'Unavailable executor',
 		}) satisfies Pick<ExecutorsStore, 'label'>,
 }));
 
@@ -49,7 +49,7 @@ describe('AgentSwitchRow', () => {
 			),
 		});
 		expect(
-			screen.getByText('Continued from Local / Codex under Build Machine / Codex'),
+			screen.getByText('Continued from Local / Codex under Build Executor / Codex'),
 		).toBeTruthy();
 	});
 

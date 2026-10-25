@@ -1,6 +1,18 @@
 <script lang="ts">
-	import { getAbortSignal } from 'svelte';
-	import { readContent } from '$lib/api/files.js';
+	import { onDestroy } from 'svelte';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import { Button } from '$lib/components/ui/button';
+	import { getFileImages, hasFileImages } from '$lib/context/file-images-context.js';
+	import {
+		getMarkdownLinkActions,
+		hasMarkdownLinkActions,
+	} from '$lib/context/markdown-link-actions-context.js';
+	import {
+		FileImageCache,
+		type FileImageLease,
+	} from '$lib/files/images/file-image-cache.svelte.js';
 	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -9,12 +21,22 @@
 		title,
 		text = '',
 		resolveImageFile,
+		onOpen,
 	}: {
 		href?: string;
 		title?: string;
 		text?: string;
 		resolveImageFile?: ResolveMarkdownImageFile;
+		onOpen?: (href: string) => void;
 	} = $props();
+
+	const ownsCache = !hasFileImages();
+	const cache = ownsCache ? new FileImageCache({ budgetBytes: 0 }) : getFileImages();
+	const registerLinkAction = hasMarkdownLinkActions() ? getMarkdownLinkActions() : undefined;
+	onDestroy(() => {
+		clearRetryFocus?.();
+		if (ownsCache) cache.destroy();
+	});
 
 	const externalSource = $derived(href && /^(https?:)?\/\//i.test(href) ? href : undefined);
 	const file = $derived(href && !externalSource ? resolveImageFile?.(href) : null);
@@ -22,6 +44,7 @@
 	const executorContextKey = $derived(file?.executorContextKey);
 	const projectPath = $derived(file?.projectPath);
 	const filePath = $derived(file?.filePath);
+	let retryVersion = $state(0);
 	// Scalar dependencies keep equivalent resolver results on the same loading attempt.
 	const attempt = $derived({
 		externalSource,
@@ -29,97 +52,229 @@
 		executorContextKey,
 		projectPath,
 		filePath,
+		retryVersion,
 	});
+	let requestedRetry = $state.raw<typeof attempt>();
+	let loaded = $state.raw<typeof attempt>();
+	let focusAttempt = $state.raw<typeof attempt>();
+	let clearRetryFocus: (() => void) | undefined;
 	let element = $state<HTMLSpanElement>();
-	let loaded = $state.raw<{ attempt: typeof attempt; url: string; release: () => void }>();
-	let failed = $state.raw<typeof attempt>();
-	const source = $derived(externalSource ?? (loaded?.attempt === attempt ? loaded.url : undefined));
-	const unavailable = $derived(
-		failed === attempt || (!externalSource && (!executorId || !projectPath || !filePath)),
+	let retryButton = $state<HTMLButtonElement | null>(null);
+	const retryFocusTarget = $derived(element?.closest('a') ?? element);
+	// Authored image links retain their destination instead of nesting another control.
+	const canOpen = $derived(Boolean(file && onOpen && element && !element.closest('a, button')));
+	const imageName = $derived(text || title || filePath || '');
+	const openLabel = $derived(m.image_open({ name: imageName }));
+	const retryLabel = $derived(m.image_retry({ name: imageName }).trim());
+	const canRetry = $derived(
+		Boolean(externalSource || (file && executorContextKey && cache.available)),
 	);
+	let held = $state.raw<{ attempt: typeof attempt; lease: FileImageLease }>();
+	let failed = $state.raw<typeof attempt>();
+	const lease = $derived(held?.attempt === attempt ? held.lease : undefined);
+	const source = $derived(externalSource ?? lease?.image?.url);
+	const externalRetryPending = $derived(
+		Boolean(externalSource && requestedRetry === attempt && loaded !== attempt),
+	);
+	const unavailable = $derived(
+		failed === attempt ||
+			(!externalSource &&
+				(!executorId || !projectPath || !filePath || !cache.available || lease?.failed)),
+	);
+	const retryFailed = $derived(unavailable && requestedRetry === attempt && loaded !== attempt);
 
 	$effect(() => {
 		const current = attempt;
 		const target = element;
-		if (!target || !current.executorId || !current.projectPath || !current.filePath) return;
-		const params = {
+		void cache.generation;
+		if (
+			!target ||
+			!cache.available ||
+			!current.executorId ||
+			!current.executorContextKey ||
+			!current.projectPath ||
+			!current.filePath
+		)
+			return;
+		const acquired = cache.acquire({
 			executorId: current.executorId,
+			executorContextKey: current.executorContextKey,
 			projectPath: current.projectPath,
 			filePath: current.filePath,
-		};
-		const signal = getAbortSignal();
-		let objectUrl: string | undefined;
+		});
+		held = { attempt: current, lease: acquired };
 		let started = false;
 		let observer: IntersectionObserver | undefined;
 
-		function release(): void {
-			if (objectUrl) URL.revokeObjectURL(objectUrl);
-			objectUrl = undefined;
-		}
-
-		async function load(): Promise<void> {
-			if (started || signal.aborted) return;
+		function load(): void {
+			if (started) return;
 			started = true;
 			observer?.disconnect();
-			try {
-				const { blob } = await readContent(params, { signal, cache: 'no-store' });
-				if (signal.aborted) return;
-				if (!blob.type.startsWith('image/')) throw new Error('Invalid image content type');
-				objectUrl = URL.createObjectURL(blob);
-				loaded = { attempt: current, url: objectUrl, release };
-			} catch {
-				if (!signal.aborted) failed = current;
-			}
+			void acquired.ensureCurrent();
 		}
 
-		if (typeof IntersectionObserver === 'undefined') {
-			void load();
+		if (current === requestedRetry || typeof IntersectionObserver === 'undefined') {
+			load();
 		} else {
 			observer = new IntersectionObserver(
 				(entries) => {
-					if (entries.some((entry) => entry.isIntersecting)) void load();
+					if (entries.some((entry) => entry.isIntersecting)) load();
 				},
 				{ rootMargin: '50px' },
 			);
 			observer.observe(target);
 		}
 		return () => {
+			started = true;
 			observer?.disconnect();
-			release();
+			acquired.release();
 		};
 	});
 
-	function failImage(current: typeof attempt): void {
+	$effect(() => {
+		if (element) return registerLinkAction?.(element, retryControl);
+	});
+
+	$effect(() => {
+		if (
+			retryFailed &&
+			focusAttempt === attempt &&
+			retryButton &&
+			document.activeElement === retryFocusTarget
+		) {
+			retryButton.focus({ preventScroll: true });
+			clearRetryFocus?.();
+		}
+	});
+
+	function retry(): void {
+		if (!unavailable || !canRetry) return;
+		const target = retryFocusTarget;
+		const preserveFocus = document.activeElement === retryButton;
+		clearRetryFocus?.();
+		retryVersion += 1;
+		requestedRetry = attempt;
+		if (!target || !preserveFocus) return;
+
+		const focusTarget = target;
+		const current = attempt;
+		// Only explicit retries need a focus stop; ordinary image clicks must not expand messages.
+		const needsTabIndex = !focusTarget.matches('a[href], [tabindex]');
+		if (needsTabIndex) focusTarget.setAttribute('tabindex', '-1');
+		function releaseFocus(): void {
+			focusTarget.removeEventListener('blur', onBlur);
+			if (needsTabIndex) focusTarget.removeAttribute('tabindex');
+			if (focusAttempt === current) focusAttempt = undefined;
+			if (clearRetryFocus === releaseFocus) clearRetryFocus = undefined;
+		}
+		function onBlur(): void {
+			if (document.activeElement !== focusTarget) releaseFocus();
+		}
+		focusAttempt = current;
+		clearRetryFocus = releaseFocus;
+		focusTarget.addEventListener('blur', onBlur);
+		focusTarget.focus({ preventScroll: true });
+	}
+
+	function failImage(current: typeof attempt, url: string): void {
 		if (current !== attempt) return;
-		failed = current;
-		if (loaded?.attempt === current) loaded.release();
+		if (externalSource) failed = current;
+		else lease?.reportDisplayError(url);
+	}
+
+	function stopParentContextTriggerGesture(event: PointerEvent | MouseEvent): void {
+		event.stopPropagation();
 	}
 </script>
+
+{#snippet thumbnail(current: typeof attempt, url: string)}
+	<img
+		loading={requestedRetry === current ? 'eager' : 'lazy'}
+		src={url}
+		alt={text}
+		{title}
+		decoding="async"
+		referrerpolicy="no-referrer"
+		style:display={externalRetryPending ? 'none' : undefined}
+		onload={() => {
+			if (current === attempt) loaded = current;
+		}}
+		onerror={(event) => failImage(current, event.currentTarget.getAttribute('src') ?? '')}
+	/>
+{/snippet}
+
+{#snippet loading()}
+	<span
+		class="placeholder text-muted-foreground"
+		role="status"
+		aria-label={m.image_loading()}
+		aria-busy="true"
+	>
+		<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+	</span>
+{/snippet}
+
+{#snippet retryControl()}
+	{#if unavailable && canRetry}
+		<Button
+			bind:ref={retryButton}
+			variant="ghost"
+			size="icon-sm"
+			class={registerLinkAction ? 'ml-1 align-middle' : ''}
+			aria-label={retryLabel}
+			title={retryLabel}
+			onpointerdowncapture={stopParentContextTriggerGesture}
+			oncontextmenu={stopParentContextTriggerGesture}
+			onclick={retry}
+		>
+			<RefreshCw class="size-3.5" aria-hidden="true" />
+		</Button>
+	{/if}
+{/snippet}
 
 <span bind:this={element} class="markdown-image" {title}>
 	{#if unavailable}
 		<span
-			class="placeholder text-muted-foreground"
-			role="img"
-			aria-label={text || m.image_unable_to_load()}
+			class="markdown-image-error not-prose inline-flex max-w-full items-center gap-2 rounded-md border border-status-error-border bg-status-error px-3 py-2 text-sm text-status-error-foreground"
+			role={retryFailed ? 'alert' : undefined}
 		>
-			{m.image_unable_to_load()}
+			<CircleAlert class="size-3.5 shrink-0" aria-hidden="true" />
+			<span class="min-w-0 break-words">
+				<span class="block">{m.image_unable_to_load()}</span>
+				{#if imageName}
+					<span class="block text-xs [overflow-wrap:anywhere]">{imageName}</span>
+				{/if}
+			</span>
+			{#if !registerLinkAction}
+				{@render retryControl()}
+			{/if}
 		</span>
 	{:else if source}
+		{#if externalRetryPending}
+			{@render loading()}
+		{/if}
 		{#key attempt}
 			{@const current = attempt}
-			<img
-				src={source}
-				alt={text}
-				{title}
-				loading="lazy"
-				decoding="async"
-				referrerpolicy="no-referrer"
-				onerror={() => failImage(current)}
-			/>
+			{#if canOpen}
+				<button
+					type="button"
+					class="block max-w-full cursor-zoom-in rounded-sm p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					aria-label={openLabel}
+					title={title || openLabel}
+					onpointerdowncapture={stopParentContextTriggerGesture}
+					oncontextmenu={stopParentContextTriggerGesture}
+					onclick={() => {
+						if (current === attempt && href) onOpen?.(href);
+					}}
+				>
+					{@render thumbnail(current, source)}
+				</button>
+			{:else}
+				{@render thumbnail(current, source)}
+			{/if}
 		{/key}
 	{:else}
-		<span class="placeholder text-muted-foreground" aria-busy="true">{m.image_loading()}</span>
+		{@render loading()}
 	{/if}
 </span>
 
@@ -140,6 +295,11 @@
 	:global(html[data-inline-image-thumbnail-size='large']) .markdown-image {
 		--inline-image-max-width: 960px;
 		--inline-image-max-height: 480px;
+	}
+
+	:global(html[data-inline-image-thumbnail-size='full']) .markdown-image {
+		--inline-image-max-width: 100%;
+		--inline-image-max-height: none;
 	}
 
 	img {

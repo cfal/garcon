@@ -85,7 +85,7 @@ describe('GitTargetDialog', () => {
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
 		const remote = {
 			...remoteExecutor,
-			machineServices: { ...remoteExecutor.machineServices, git: true },
+			executorServices: { ...remoteExecutor.executorServices, git: true },
 		};
 		const notifications = new NotificationsStore();
 		let executors!: ExecutorsStore;
@@ -131,7 +131,7 @@ describe('GitTargetDialog', () => {
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
 		const remote = {
 			...remoteExecutor,
-			machineServices: { ...remoteExecutor.machineServices, git: true },
+			executorServices: { ...remoteExecutor.executorServices, git: true },
 		};
 		let executors!: ExecutorsStore;
 		renderDialog({

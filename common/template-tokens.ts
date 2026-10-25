@@ -1,7 +1,29 @@
+import { CHAT_ID_LENGTH } from './chat-id.js';
+
 const TEMPLATE_TOKEN_PATTERN = /\\?\{\{([a-z_][a-z0-9_]*)\}\}/g;
 
 export const CHAT_ID_TEMPLATE_VARIABLE = 'chat_id' as const;
 export const CHAT_ID_TEMPLATE_TOKEN = '{{chat_id}}';
+export const RUNTIME_TEMPLATE_VARIABLES = [CHAT_ID_TEMPLATE_VARIABLE, 'current_date', 'current_date_local'] as const;
+export type RuntimeTemplateVariable = (typeof RUNTIME_TEMPLATE_VARIABLES)[number];
+export type RuntimeTemplateValues = Readonly<Record<RuntimeTemplateVariable, string>>;
+
+export const TEMPLATE_VALIDATION_VALUES: RuntimeTemplateValues = Object.freeze({
+  chat_id: '1'.repeat(CHAT_ID_LENGTH),
+  current_date: '2000-01-02',
+  current_date_local: '2000-01-01',
+});
+
+export function runtimeTemplateValues(chatId: string, at: Date): RuntimeTemplateValues {
+  const year = String(at.getFullYear()).padStart(4, '0');
+  const month = String(at.getMonth() + 1).padStart(2, '0');
+  const day = String(at.getDate()).padStart(2, '0');
+  return {
+    chat_id: chatId,
+    current_date: at.toISOString().slice(0, 10),
+    current_date_local: `${year}-${month}-${day}`,
+  };
+}
 
 export interface TemplateTokenMatch<Variable extends string> {
   index: number;

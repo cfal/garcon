@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { isInputFormatByModel } from '@garcon/common/input-format';
+import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 import type {
   AgentIntegrationClass,
   AgentIntegration,
@@ -128,7 +129,12 @@ function assertAttachmentsFacet(
     throw new Error(`Agent integration ${agentId} has an invalid attachments facet`);
   }
   const fileMimeTypes = (integration.attachments as Record<string, unknown>).fileMimeTypes;
-  if (!Array.isArray(fileMimeTypes) || fileMimeTypes.some((value) => typeof value !== 'string')) {
+  const inlineTextMaxBytes = (integration.attachments as Record<string, unknown>).inlineTextMaxBytes;
+  const validMimeTypes = fileMimeTypes === ANY_FILE_ATTACHMENT_MIME_TYPE
+    || (Array.isArray(fileMimeTypes) && fileMimeTypes.every((value) => typeof value === 'string'));
+  const validInlineTextLimit = inlineTextMaxBytes === null
+    || (Number.isSafeInteger(inlineTextMaxBytes) && (inlineTextMaxBytes as number) >= 0);
+  if (!validMimeTypes || !validInlineTextLimit) {
     throw new Error(`Agent integration ${agentId} has an invalid attachments facet`);
   }
 }

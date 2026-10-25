@@ -4,6 +4,7 @@
 	import NewChatDialog from '../NewChatDialog.svelte';
 	import {
 		setAppShell,
+		setNewChatPromptDrafts,
 		setChatSessions,
 		setLocalSettings,
 		setModelCatalog,
@@ -18,6 +19,7 @@
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
@@ -36,6 +38,7 @@
 	appShell.openNewChatDialog();
 
 	setAppShell(appShell);
+	setNewChatPromptDrafts(new NewChatPromptDraftStore());
 	setLocalSettings({
 		sendByShiftEnter: false,
 		showQuickCommitTray: true,
@@ -153,3 +156,14 @@
 
 <svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 <NewChatDialog />
+
+<button type="button" data-testid="reopen-new-chat" onclick={() => appShell.openNewChatDialog()}>
+	Reopen
+</button>
+<button
+	type="button"
+	data-testid="reopen-new-chat-prefilled"
+	onclick={() => appShell.openNewChatDialog({ prefill: 'Prefilled prompt' })}
+>
+	Reopen prefilled
+</button>

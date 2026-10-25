@@ -8,10 +8,13 @@ test('new chat keeps directory input focus after initial prompt focus', async ()
   await withChromiumFixture('new-chat-focus', async ({ page, context, integration, assertNoBrowserErrors }) => {
     const root = integration.executionDirs.project;
     for (const name of ['alpha', 'beta']) await mkdir(join(root, name));
-    await page.goto(integration.garcon.baseUrl);
     await page.clock.install({ time: new Date('2030-01-01T00:00:00Z') });
-    await page.clock.pauseAt(new Date('2030-01-01T00:00:10Z'));
-    await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+    await page.goto(integration.garcon.baseUrl);
+    const newChatButton = page.getByRole('button', { name: 'New Chat', exact: true }).first();
+    // Keeps startup timers running until authentication and the shell are ready.
+    await browserExpect(newChatButton).toBeVisible();
+    await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1_000);
+    await newChatButton.click();
     const prompt = page.getByPlaceholder('How can I help you today?');
     const input = page.locator('#project-path-input');
     await browserExpect(prompt).toBeFocused();

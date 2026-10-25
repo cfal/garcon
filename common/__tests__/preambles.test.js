@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { TEMPLATE_VALIDATION_VALUES } from '../template-tokens.js';
 import {
   PREAMBLE_AGENT_FILTER_MAX_COUNT,
   PREAMBLE_CHAT_ID_TOKEN,
@@ -223,7 +224,7 @@ describe('preamble prefix contract', () => {
     const chatId = '1783725900000000';
     expect(renderPreambleContent(
       `Chat ${PREAMBLE_CHAT_ID_TOKEN}; literal \\${PREAMBLE_CHAT_ID_TOKEN}; unknown {{project_path}}`,
-      chatId,
+      { ...TEMPLATE_VALIDATION_VALUES, chat_id: chatId },
     )).toBe(`Chat ${chatId}; literal ${PREAMBLE_CHAT_ID_TOKEN}; unknown {{project_path}}`);
   });
 

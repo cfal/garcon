@@ -400,7 +400,7 @@ export class ScheduledPromptStore {
     return this.#mutateInternal<OccurrenceClaim | null>((draft) => {
       const index = draft.prompts.findIndex((entry) => entry.id === id);
       const scheduledPrompt = draft.prompts[index];
-      if (!scheduledPrompt || scheduledPrompt.schedule.nextRunAt !== expectedRunAt) return false;
+      if (!scheduledPrompt || scheduledPrompt.enabled === false || scheduledPrompt.schedule.nextRunAt !== expectedRunAt) return false;
       const claimed = clonePrompt(scheduledPrompt);
       if (scheduledPrompt.schedule.type === 'once') {
         draft.prompts.splice(index, 1);
@@ -431,7 +431,7 @@ export class ScheduledPromptStore {
         const events: ReconciliationEvent[] = [];
         const nextScheduledPrompts: ScheduledPrompt[] = [];
         for (const scheduledPrompt of draft.prompts) {
-          if (!missed(scheduledPrompt.schedule.nextRunAt)) {
+          if (scheduledPrompt.enabled === false || !missed(scheduledPrompt.schedule.nextRunAt)) {
             nextScheduledPrompts.push(scheduledPrompt);
             continue;
           }

@@ -72,16 +72,20 @@ export class E2eFixture {
           const stored = JSON.parse(globalThis.localStorage.getItem(localSettingsKey) ?? '{}');
           const snapshot =
             stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
-          if (typeof snapshot.allowDirectChats !== 'boolean') {
+          if (typeof snapshot.allowDirectChats !== 'boolean' || !('composerInputMode' in snapshot)) {
             globalThis.localStorage.setItem(
               localSettingsKey,
-              JSON.stringify({ ...snapshot, allowDirectChats: true }),
+              JSON.stringify({
+                composerInputMode: 'source',
+                ...snapshot,
+                allowDirectChats: typeof snapshot.allowDirectChats === 'boolean' ? snapshot.allowDirectChats : true,
+              }),
             );
           }
         } catch {
           globalThis.localStorage.setItem(
             localSettingsKey,
-            JSON.stringify({ allowDirectChats: true }),
+            JSON.stringify({ allowDirectChats: true, composerInputMode: 'source' }),
           );
         }
         const scope = globalThis as typeof globalThis & {

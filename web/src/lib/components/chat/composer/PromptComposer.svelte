@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
-	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
-	import ComposerFormattedDraft from './ComposerFormattedDraft.svelte';
+	import ComposerInputSurface from './ComposerInputSurface.svelte';
 	import { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
@@ -32,6 +31,7 @@
 	} from '$lib/context';
 	import {
 		chatAttachmentAccept,
+		hasChatAttachmentSupport,
 		ImageAttachmentState,
 		isSupportedChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
@@ -69,9 +69,10 @@
 	import { ApiError } from '$lib/api/client.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
-	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
+	import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 	import PromptComposerModelSelector from './PromptComposerModelSelector.svelte';
 	import { snippetTemplateUsesArguments } from '$shared/snippets';
+	import { acceptsMarkdownInput } from '$lib/chat/composer/markdown-input.js';
 	import {
 		matchesSelectableSnippetExpansion,
 		type SelectableSnippet,
@@ -118,6 +119,7 @@
 	const executionAgent = $derived(modelCatalog.getAgent(agentState.agentId));
 	const conversationInput = $derived(Boolean(executionAgent && executionAgent.executionPolicy !== 'literal'));
 	const executionKey = $derived(JSON.stringify([agentState.executorId, agentState.agentId, executionAgent?.executionPolicy]));
+	const markdownInput = $derived(acceptsMarkdownInput(executionAgent, agentState.model));
 	const attachmentError = $derived(
 		executionAgent && composerState.images.some(file => !isSupportedChatAttachment(file, attachmentSupport))
 			? m.chat_composer_remove_attachments({ agent: executionAgent.label })
@@ -153,13 +155,17 @@
 			return textarea;
 		},
 		get canFormat() {
-			return (
-				isVisible && isPresented && !isDisabled && !promptTransformPending && !ui.composerEditorOpen
-			);
+			return canFormat;
 		},
+		get sourcePaletteOpen() {
+			return fileMenuVisible || slashMenuVisible || ui.snippetPalette.isOpen;
+		},
+		get acceptsMarkdown() { return markdownInput; },
+		get preferredMode() { return localSettings.composerInputMode; },
 		get interactionGeneration() {
 			return workspaceShortcuts.userInteractionGeneration;
 		},
+		get snippetTrigger() { return conversationInput ? localSettings.snippetTrigger : ''; },
 		onChange: updateDraft,
 		onSourceCaret: updateTriggers,
 		onUnavailable() {
@@ -231,6 +237,10 @@
 		}),
 	);
 	const showProjectNotice = $derived(availabilityNotice?.kind === 'project-unavailable');
+	const fileMenuVisible = $derived(conversationInput && filesAvailable && ui.showFileMenu && !showProjectNotice);
+	const slashMenuVisible = $derived(
+		Boolean(executionAgent) && ui.showSlashMenu && (!conversationInput || executors.isReady(agentState.executorId)) && !showProjectNotice,
+	);
 	const completionProjectPath = $derived(projectState.completionProjectPath);
 	const canChooseProjectFolder = $derived(
 		Boolean(
@@ -278,7 +288,6 @@
 		);
 	}
 
-	// Auto-focus textarea when the composer mounts (new chat or chat switch).
 	onMount(() => {
 		tick().then(() => requestComposerFocusForChat(sessions.selectedChatId));
 	});
@@ -337,14 +346,24 @@
 		attachmentController.resetDrag();
 	});
 
-	// Drops a formatted view that another surface made stale by changing the draft.
+	$effect(() => {
+		const request = composerState.draftAppendRequest;
+		untrack(() => {
+			if (request?.chatId === sessions.selectedChatId) markdown.reset();
+		});
+	});
+	$effect(() => {
+		markdownInput;
+		untrack(() => markdown.inputFormatChanged());
+	});
 	$effect(() => {
 		if (ui.formattedDraft && !formattedDraft) untrack(() => markdown.reset());
 	});
-	// Restores the formatted view of a Markdown draft when its chat is selected or reloaded.
 	$effect(() => {
 		const restored = composerState.draftRestoreRequest?.chatId === sessions.selectedChatId;
-		if (restored && isVisible && isPresented) untrack(() => markdown.restore());
+		canFormat;
+		localSettings.composerInputMode;
+		if (restored && markdownInput) untrack(() => markdown.restore());
 	});
 
 	// Cancels path-bound expansion when a selected chat moves to another project.
@@ -397,10 +416,6 @@
 		promptRefinement.destroy();
 		imageAttachments.revokeAll();
 	});
-
-	const contentSizing = contentSizedTextarea(() =>
-		isVisible ? composerState.inputText : undefined,
-	);
 
 	// Reveals blocks appended from another surface without moving focus away from that surface.
 	$effect(() => {
@@ -482,7 +497,10 @@
 	function returnComposerFocus(): void {
 		if (destroyed || !isVisible) return;
 		if (formattedDraft) void markdown.edit();
-		else textarea?.focus({ preventScroll: true });
+		else {
+			markdown.reset();
+			textarea?.focus({ preventScroll: true });
+		}
 	}
 
 	async function settleComposerAfterSnippet(caret?: number): Promise<void> {
@@ -596,11 +614,10 @@
 	}
 
 	function handleCompletionKeyDown(event: KeyboardEvent): boolean {
-		const showFileMenu = conversationInput && filesAvailable && ui.showFileMenu;
-		if (!showFileMenu && !ui.showSlashMenu) return false;
-		const menu = showFileMenu ? fileMentionMenu : slashCommandMenu;
+		if (!fileMenuVisible && !slashMenuVisible) return false;
+		const menu = fileMenuVisible ? fileMentionMenu : slashCommandMenu;
 		if (menu?.handleKeyDown(event)) return true;
-		if (menu && !showFileMenu && event.key === 'Enter') return false;
+		if (menu && !fileMenuVisible && event.key === 'Enter') return false;
 		if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) return false;
 		event.preventDefault();
 		return true;
@@ -615,6 +632,7 @@
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
+		if (event.isComposing || event.keyCode === 229) return;
 		if (promptTransformPending) {
 			if (event.key === 'Enter' && resolveKeydownAction(event) !== 'newline') {
 				event.preventDefault();
@@ -622,7 +640,10 @@
 			return;
 		}
 		if (handleCompletionKeyDown(event)) return;
-		if (promptRecall.handleKeyDown(event)) return;
+		if (promptRecall.handleKeyDown(event)) {
+			void markdown.edit();
+			return;
+		}
 		if (event.key !== 'Enter') return;
 		const action = resolveKeydownAction(event);
 		if (action === 'newline') return;
@@ -675,10 +696,13 @@
 	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
 	const capabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
 	const isDisabled = $derived(directAdmissionPending && sessions.selectedChat?.status === 'draft');
+	const canFormat = $derived(
+		isVisible && isPresented && !isDisabled && !promptTransformPending && !ui.composerEditorOpen,
+	);
 	const controllerCommand = $derived.by(() => {
 		if (sessions.selectedChat?.status !== 'running') return false;
 		if (isClearCommand(composerState.inputText)) return true;
-		return conversationInput && isControllerSlashCommand(composerState.inputText);
+		return executionAgent !== null && isControllerSlashCommand(composerState.inputText, executionAgent.executionPolicy);
 	});
 	// Loading is explained by the disabled send button so the composer keeps its height.
 	const modelsLoading = $derived(
@@ -716,13 +740,13 @@
 		modelCatalog.supportsImages(agentState.agentId, agentState.model),
 	);
 	const fileAttachmentMimeTypes = $derived(
-		modelCatalog.fileAttachmentMimeTypes?.(agentState.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES,
+		modelCatalog.fileAttachmentMimeTypes?.(agentState.agentId) ?? ANY_FILE_ATTACHMENT_MIME_TYPE,
 	);
 	const attachmentSupport = $derived({
 		allowImages: canAttachImages,
 		fileMimeTypes: fileAttachmentMimeTypes,
 	});
-	const canAttachAttachments = $derived(canAttachImages || fileAttachmentMimeTypes.length > 0);
+	const canAttachAttachments = $derived(hasChatAttachmentSupport(attachmentSupport));
 	const attachmentAccept = $derived(chatAttachmentAccept(attachmentSupport));
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
@@ -736,12 +760,6 @@
 	const composerFrameWrapperClass = $derived(chatDockFrameClass(localSettings.chatMaxWidth));
 	const composerSurfaceClass = cn('relative z-20', CHAT_DOCK_SURFACE_CLASS, 'shadow-none');
 	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
-	const textareaClass = $derived(
-		cn(
-			'content-sized-textarea block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-composer-foreground placeholder:text-muted-foreground disabled:opacity-50 max-h-[min(40dvh,150px)] sm:max-h-[min(40dvh,300px)] text-base leading-6 transition-colors duration-200',
-			'px-4 py-3 sm:px-5 sm:py-3.5 min-h-[48px]',
-		),
-	);
 </script>
 
 {#snippet composerSurface()}
@@ -757,7 +775,6 @@
 		ondrop={(event) => attachmentController.handleDrop(event)}
 		onpaste={(event) => {
 			attachmentController.handlePaste(event);
-			markdown.capturePaste(event);
 		}}
 		{@attach attachProcessingPulse}
 		{@attach snippetExpansion.pending && snippetExpansionLayer}
@@ -772,7 +789,7 @@
 				executorId={agentState.executorId}
 				bind:this={fileMentionMenu}
 				projectPath={completionProjectPath}
-				isVisible={conversationInput && ui.showFileMenu && !showProjectNotice}
+				isVisible={fileMenuVisible}
 				projectPending={Boolean(
 					selectedProjectTarget &&
 					(selectedProjectResolution.kind === 'unchecked' ||
@@ -853,44 +870,29 @@
 				onchange={(event) => attachmentController.handleFileChange(event)}
 			/>
 
-			<div class="relative overflow-hidden bg-transparent focus-within:ring-0">
-				{#if formattedDraft}
-					<ComposerFormattedDraft
-						draft={formattedDraft}
-						readOnly={isDisabled || promptTransformPending}
-						controller={markdown}
-						onSubmitKeydown={handleKeyDown}
-						onCompletionKeydown={handleCompletionKeyDown}
-					/>
-				{/if}
-				<div class="relative z-10" hidden={Boolean(formattedDraft)}>
-					<textarea
-						{@attach contentSizing}
-						rows="1"
-						bind:this={textarea}
-						value={composerState.inputText}
-						onkeydown={handleKeyDown}
-						onpointerdown={() => promptRecall.reset()}
-						oninput={handleInput}
-						placeholder={m.chat_composer_reply_placeholder()}
-						disabled={isDisabled}
-						readonly={promptRefinement.pending}
-						aria-busy={promptTransformPending}
-						class={textareaClass}></textarea>
-				</div>
-			</div>
+			<ComposerInputSurface
+				bind:textarea
+				text={composerState.inputText}
+				draft={formattedDraft}
+				disabled={isDisabled}
+				busy={promptTransformPending}
+				sourceReadOnly={promptRefinement.pending}
+				visible={isVisible}
+				controller={markdown}
+				onComposerKeydown={handleKeyDown}
+				onCompletionKeydown={handleCompletionKeyDown}
+				onInput={handleInput}
+				onRecallReset={() => promptRecall.reset()}
+			/>
 
 			<ComposerBottomBar
-				markdownAction={!formattedDraft && composerState.inputText.trim()
-					? { label: m.chat_composer_format_markdown(), onclick: () => markdown.open() }
-					: undefined}
 				canAttachImages={canAttachAttachments}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={() => attachmentController.pick()}
 				onOpenSnippetPalette={() => void markdown.openSnippets()}
 				onOpenExpandedEditor={() => expandedEditor?.open()}
 				onRefinePrompt={() => {
-					if (formattedDraft) void markdown.edit();
+					returnComposerFocus();
 					promptRefinement.handleAction();
 				}}
 				canRefinePrompt={promptRefinement.canStart}
@@ -952,7 +954,7 @@
 			executorId={agentState.executorId}
 			projectPath={completionProjectPath}
 			chatId={selectedProjectTarget?.kind === 'chat' ? sessions.selectedChatId : null}
-			isVisible={ui.showSlashMenu && (!conversationInput || executors.isReady(agentState.executorId)) && !showProjectNotice}
+			isVisible={slashMenuVisible}
 			{conversationInput}
 			canClear={executionAgent?.executionPolicy === 'literal' && Boolean(sessions.selectedChat && sessions.selectedChat.status !== 'draft')}
 			projectPending={Boolean(
@@ -992,5 +994,6 @@
 	isPromptRefinementPending={promptRefinement.pending}
 	canRefinePrompt={promptRefinement.canStart}
 	onRefinePrompt={() => promptRefinement.handleAction()}
+	onSourceEditing={() => markdown.reset()}
 	openRequestId={composerEditorOpenRequestId}
 />

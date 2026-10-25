@@ -19,7 +19,7 @@ export class ComposerState {
 	isDragActive = $state(false);
 	draftAppendRequest = $state<{ chatId: string; requestId: number } | null>(null);
 	#nextDraftAppendRequestId = 0;
-	/** Marks each time a chat's saved draft becomes the composer's content. */
+	/** Marks a loaded draft or the fresh draft after submission. */
 	draftRestoreRequest = $state<{ chatId: string; requestId: number } | null>(null);
 	#nextDraftRestoreRequestId = 0;
 
@@ -75,6 +75,10 @@ export class ComposerState {
 
 	restoreDraft(chatId: string): void {
 		this.drafts.load(chatId);
+		this.#requestRestore(chatId);
+	}
+
+	#requestRestore(chatId: string): void {
 		this.#nextDraftRestoreRequestId += 1;
 		this.draftRestoreRequest = { chatId, requestId: this.#nextDraftRestoreRequestId };
 	}
@@ -93,10 +97,12 @@ export class ComposerState {
 		text: string,
 		images: readonly File[],
 	): boolean {
-		return this.drafts.restoreIfRevision(chatId, expectedRevision, {
+		const restored = this.drafts.restoreIfRevision(chatId, expectedRevision, {
 			text,
 			attachments: images,
 		});
+		if (restored && chatId === this.options.activeChatId) this.#requestRestore(chatId);
+		return restored;
 	}
 
 	isDraftEmpty(chatId: string): boolean {
@@ -126,6 +132,8 @@ export class ComposerState {
 	}
 
 	clearAfterSubmit(chatId: string): number {
-		return this.drafts.clear(chatId);
+		const revision = this.drafts.clear(chatId);
+		if (chatId === this.options.activeChatId) this.#requestRestore(chatId);
+		return revision;
 	}
 }

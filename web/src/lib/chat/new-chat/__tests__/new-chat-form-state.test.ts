@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { NewChatPinnedPathsController } from '../new-chat-pinned-paths-controller';
 import { NewChatFormState } from '../new-chat-form-state.svelte';
+import { NewChatPromptDraft, NewChatPromptDraftStore } from '../new-chat-prompt-draft';
 import * as chatsApi from '$lib/api/chats';
 import * as preamblesApi from '$lib/api/chat-preambles';
 import * as gitApi from '$lib/api/git';
@@ -305,6 +307,46 @@ describe('NewChatFormState', () => {
 		expect(formState.canSubmit).toBe(false);
 	});
 
+
+	it('selects the saved pin with its owner while preserving prompt and attachments', () => {
+		mockRemoteSettings.snapshot = makeSnapshot({ paths: { pinnedProjectPaths: ['/same'], byExecutor: {
+			[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/same', '/exact '] },
+		} } });
+		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
+		formState.projectPath = '/same';
+		formState.firstMessage = 'Synthetic retained prompt';
+		const image = new File(['synthetic'], 'synthetic.png', { type: 'image/png' });
+		formState.attachedImages = [image];
+		pins.select(remoteExecutor.id, '/exact ');
+		expect(formState.executorId).toBe(remoteExecutor.id);
+		expect(formState.projectPath).toBe('/exact ');
+		expect(formState.firstMessage).toBe('Synthetic retained prompt');
+		expect(formState.attachedImages).toEqual([image]);
+		pins.select('local', '/same');
+		expect(formState.executorId).toBe('local');
+		expect(formState.projectPath).toBe('/same');
+	});
+
+	it('rejects stale pin selection after removal, disconnection or a pending pin write', () => {
+		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byExecutor: {
+			[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/pin'] },
+		} } });
+		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
+		formState.projectPath = '/local';
+		pins.select(remoteExecutor.id, '/removed-pin');
+		expect(formState.executorId).toBe('local');
+		executors.applySnapshot([localExecutor, { ...remoteExecutor, availability: 'offline' }]);
+		pins.select(remoteExecutor.id, '/worker/pin');
+		expect(formState.executorId).toBe('local');
+		executors.applySnapshot([localExecutor]);
+		pins.select(remoteExecutor.id, '/worker/pin');
+		expect(formState.executorId).toBe('local');
+		executors.applySnapshot([localExecutor, remoteExecutor]);
+		formState.isUpdatingPinnedPath = true;
+		pins.select(remoteExecutor.id, '/worker/pin');
+		expect(formState.executorId).toBe('local');
+		expect(formState.projectPath).toBe('/local');
+	});
 	it('preserves compatible models, prompt and attachments while adopting destination path preferences', async () => {
 		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byExecutor: {
 			[remoteExecutor.id]: { defaultPath: '/worker/default', recentPaths: ['/worker/recent'], pinnedPaths: ['/worker/pin'] },
@@ -454,7 +496,7 @@ describe('NewChatFormState', () => {
 			{
 				...remoteExecutor,
 				projectBasePath: '/same',
-				machineServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
+				executorServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
 			},
 		]);
 		const local = deferred<Awaited<ReturnType<typeof browseDirectory>>>();
@@ -484,7 +526,7 @@ describe('NewChatFormState', () => {
 	it('routes worktrees to the draft executor and rejects publication from a replaced instance', async () => {
 		const remote = {
 			...remoteExecutor,
-			machineServices: { ...remoteExecutor.machineServices, git: true },
+			executorServices: { ...remoteExecutor.executorServices, git: true },
 		};
 		executors.applySnapshot([localExecutor, remote]);
 		formState.selectExecutor(remote.id);
@@ -1595,6 +1637,20 @@ describe('NewChatFormState', () => {
 	});
 });
 
+function createFormState(
+	selectableAgentIds: readonly string[] = ['claude'],
+	promptDraft?: NewChatPromptDraft,
+) {
+	return new NewChatFormState({
+		modelCatalog: mockModelCatalog as any,
+		remoteSettings: makeMockRemoteSettings() as any,
+		get selectableAgentIds() {
+			return selectableAgentIds;
+		},
+		promptDraft,
+	});
+}
+
 describe('NewChatFormState preamble selection', () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -1621,18 +1677,8 @@ describe('NewChatFormState preamble selection', () => {
 		};
 	}
 
-	function createPreambleFormState(selectableAgentIds: readonly string[] = ['claude']) {
-		return new NewChatFormState({
-			modelCatalog: mockModelCatalog as any,
-			remoteSettings: makeMockRemoteSettings() as any,
-			get selectableAgentIds() {
-				return selectableAgentIds;
-			},
-		});
-	}
-
 	it('clears the preview immediately when the path becomes empty or invalid', async () => {
-		const formState = createPreambleFormState();
+		const formState = createFormState();
 		formState.projectPath = '/repo';
 		formState.validationStatus = 'valid';
 		formState.preambles.preview = previewResponse([ID_A]).projection;
@@ -1659,7 +1705,7 @@ describe('NewChatFormState preamble selection', () => {
 			})
 			.mockImplementationOnce(async () => previewResponse([ID_A, ID_B]));
 		vi.mocked(preamblesApi.preambleSelectionPreview).mockImplementation(preview);
-		const formState = createPreambleFormState();
+		const formState = createFormState();
 		formState.projectPath = '/repo';
 		formState.validationStatus = 'valid';
 
@@ -1687,7 +1733,7 @@ describe('NewChatFormState preamble selection', () => {
 			return previewResponse([ID_A]);
 		});
 		vi.mocked(preamblesApi.preambleSelectionPreview).mockImplementation(preview);
-		const formState = createPreambleFormState();
+		const formState = createFormState();
 		formState.projectPath = '/repo';
 		formState.validationStatus = 'valid';
 		formState.preambles.setExplicit([ID_A]);
@@ -1700,7 +1746,7 @@ describe('NewChatFormState preamble selection', () => {
 	});
 
 	it('omits orderedPreambleIds in defaults mode and sends explicit lists exactly', () => {
-		const formState = createPreambleFormState();
+		const formState = createFormState();
 		formState.projectPath = '/repo';
 		formState.validationStatus = 'valid';
 		formState.settingsLoaded = true;
@@ -1719,7 +1765,7 @@ describe('NewChatFormState preamble selection', () => {
 				(request.agentId === 'codex' || request.tags.includes('backend') ? [ID_B] : [ID_A]);
 			return previewResponse(ids);
 		});
-		const formState = createPreambleFormState(['claude', 'codex']);
+		const formState = createFormState(['claude', 'codex']);
 		formState.projectPath = '/repo';
 		formState.validationStatus = 'valid';
 
@@ -1767,7 +1813,7 @@ describe('NewChatFormState preamble selection', () => {
 		vi.mocked(preamblesApi.preambleSelectionPreview)
 			.mockReturnValueOnce(first.promise)
 			.mockResolvedValueOnce(previewResponse([ID_B]));
-		const formState = createPreambleFormState(['claude', 'codex']);
+		const formState = createFormState(['claude', 'codex']);
 		formState.projectPath = '/repo';
 		formState.validationStatus = 'valid';
 
@@ -1786,7 +1832,7 @@ describe('NewChatFormState preamble selection', () => {
 
 	it('loads automatic defaults for a picker draft without changing the explicit choice', async () => {
 		vi.mocked(preamblesApi.preambleSelectionPreview).mockResolvedValue(previewResponse([ID_A]));
-		const formState = createPreambleFormState();
+		const formState = createFormState();
 		formState.projectPath = '/repo';
 		formState.validationStatus = 'valid';
 		formState.preambles.setExplicit([ID_B]);
@@ -1808,7 +1854,7 @@ describe('NewChatFormState preamble selection', () => {
 
 	it('restores automatic defaults when the form reopens with the same valid path', async () => {
 		vi.mocked(preamblesApi.preambleSelectionPreview).mockResolvedValue(previewResponse([ID_A]));
-		const formState = createPreambleFormState();
+		const formState = createFormState();
 		formState.projectPath = '/repo';
 		formState.validationStatus = 'valid';
 
@@ -1825,5 +1871,52 @@ describe('NewChatFormState preamble selection', () => {
 			executorId: 'local',
 			tags: [],
 		});
+	});
+});
+
+describe('NewChatFormState prompt draft', () => {
+	beforeEach(() => localStorage.clear());
+
+	function image(name: string): File {
+		return new File(['image'], name, { type: 'image/png' });
+	}
+
+	it('seeds the reopened form from the prompt and attachments retained by the closed one', () => {
+		const drafts = new NewChatPromptDraftStore();
+		const closed = createFormState(['claude'], new NewChatPromptDraft(drafts));
+		closed.reseed('');
+		closed.firstMessage = 'Unsent prompt';
+		const kept = image('kept.png');
+		closed.addImages([kept, image('removed.png')]);
+		closed.removeImage(1);
+
+		const reopened = createFormState(['claude'], new NewChatPromptDraft(drafts));
+		reopened.reseed('');
+
+		expect(reopened.firstMessage).toBe('Unsent prompt');
+		expect(reopened.attachedImages).toEqual([kept]);
+	});
+
+	it('shows an explicit prefill instead of the retained draft', () => {
+		const drafts = new NewChatPromptDraftStore();
+		const closed = createFormState(['claude'], new NewChatPromptDraft(drafts));
+		closed.reseed('');
+		closed.firstMessage = 'Unsent prompt';
+		closed.addImages([image('diagram.png')]);
+
+		const prefilled = createFormState(['claude'], new NewChatPromptDraft(drafts));
+		prefilled.reseed('Prefilled prompt');
+
+		expect(prefilled.firstMessage).toBe('Prefilled prompt');
+		expect(prefilled.attachedImages).toEqual([]);
+	});
+
+	it('leaves storage untouched for forms without a prompt draft', () => {
+		const formState = createFormState();
+		formState.reseed('');
+		formState.firstMessage = 'Scheduled prompt';
+		formState.dispose();
+
+		expect(localStorage.length).toBe(0);
 	});
 });

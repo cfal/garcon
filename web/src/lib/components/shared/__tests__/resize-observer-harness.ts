@@ -22,11 +22,14 @@ export class ResizeObserverHarness implements ResizeObserver {
 	}
 
 	static emit(target: Element, width: number, height = 0): void {
-		const observer = ResizeObserverHarness.instances.find((candidate) =>
+		const observers = ResizeObserverHarness.instances.filter((candidate) =>
 			candidate.observed.has(target),
 		);
-		if (!observer) throw new Error('No ResizeObserver is watching the target element.');
-		ResizeObserverHarness.emitFrom(observer, target, width, height);
+		if (observers.length === 0)
+			throw new Error('No ResizeObserver is watching the target element.');
+		for (const observer of observers) {
+			ResizeObserverHarness.emitFrom(observer, target, width, height);
+		}
 	}
 
 	static emitFrom(

@@ -88,15 +88,6 @@ export function echoedClientMessageOrdinals(
 	return ordinals;
 }
 
-export function visibleOptimisticTranscriptInputs(
-	hasLaterMessages: boolean,
-	inputs: readonly OptimisticUserInput[],
-	echoedIds: ReadonlySet<string>,
-): OptimisticUserInput[] {
-	if (hasLaterMessages) return [];
-	return inputs.filter((input) => !echoedIds.has(input.clientMessageId));
-}
-
 export function hasEarlierTranscriptRowsToReveal(
 	visibleRows: readonly ChatDisplayRow[],
 	entries: readonly TranscriptMessage[],

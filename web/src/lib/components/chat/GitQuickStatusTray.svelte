@@ -132,7 +132,7 @@
 					</span>
 
 					{#if lastError}
-						<TriangleAlert class="h-3.5 w-3.5 shrink-0 text-status-warning-foreground" />
+						<TriangleAlert class="h-3.5 w-3.5 shrink-0 text-status-warning-muted-foreground" />
 					{/if}
 				</div>
 
@@ -151,7 +151,7 @@
 			{:else}
 				<div class="flex min-h-6 flex-1 items-center justify-center">
 					{#if lastError}
-						<TriangleAlert class="h-4 w-4 text-status-warning-foreground" />
+						<TriangleAlert class="h-4 w-4 text-status-warning-muted-foreground" />
 						<span class="sr-only">{lastError}</span>
 					{:else}
 						<LoaderCircle class="h-4 w-4 animate-spin text-muted-foreground" />

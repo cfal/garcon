@@ -117,12 +117,16 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
               element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(1);
           }
           const composerTopBeforeRetry = (await composer.boundingBox())!.y;
+          const editorTopBeforeRetry = (await editor.boundingBox())!.y;
+          await browserExpect(composer.getByRole('button', { name: 'Formatted', exact: true })).toHaveCount(0);
           await page.evaluate(() => { document.documentElement.dataset.repairCatalog = 'true'; });
           await notice.getByRole('button', { name: 'Retry', exact: true }).click();
           await browserExpect(notice).toHaveCount(0);
+          await browserExpect(composer.getByRole('button', { name: 'Formatted', exact: true })).toHaveCount(0);
           await browserExpect(editor).toHaveValue(draft);
           await browserExpect(editor).toHaveAttribute('data-retained-editor', 'true');
           expect((await composer.boundingBox())!.y).toBe(composerTopBeforeRetry);
+          expect((await editor.boundingBox())!.y).toBe(editorTopBeforeRetry);
 
           if (proxy) {
             phase('executor reconnect notice leaves the active composer joined and focused');

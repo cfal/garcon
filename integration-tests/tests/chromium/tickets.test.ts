@@ -486,17 +486,19 @@ describe("Chromium Tickets interaction", () => {
         for (const width of [768, 390, 1440]) {
           markPhase(`restoring the editor at ${width}px`);
           await page.setViewportSize({ width, height: 900 });
-          await title.waitFor({ state: "visible" });
-          await page.waitForFunction(() => {
+          const host = width <= 768 ? "mobile" : "window-main";
+          const titleSelector = `[id="${host}-panel-singleton:tickets"] .ticket-title-input`;
+          await page.locator(titleSelector).waitFor({ state: "visible" });
+          await page.waitForFunction((selector) => {
             const input = document.querySelector<HTMLInputElement>(
-              ".ticket-detail .ticket-title-input",
+              selector,
             );
             return (
               input === document.activeElement &&
               input?.selectionStart === 2 &&
               input.selectionEnd === 10
             );
-          });
+          }, titleSelector);
           expect(await title.inputValue()).toBe("Unsaved synthetic title");
           expect(
             await page
@@ -508,9 +510,10 @@ describe("Chromium Tickets interaction", () => {
         }
         markPhase("honoring explicit focus outside the surface during refresh");
         const outside = page
-          .locator("[data-workspace-window-fullscreen]")
+          .locator("[data-workspace-window-fullscreen]:visible")
           .first();
         await outside.focus();
+        expect(await outside.evaluate(element => element === document.activeElement)).toBe(true);
         await mutate({
           action: "comment",
           ticketId: "G-1",

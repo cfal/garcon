@@ -1,10 +1,12 @@
 import { apiDelete, apiGet, apiPost, apiPut } from './client.js';
 import {
-	normalizeScheduledPrompt,
+	normalizeCreateScheduledPromptResponse,
 	normalizeScheduledPromptsSnapshot,
 	type CreateScheduledPromptRequest,
+	type CreateScheduledPromptResponse,
 	type ReorderScheduledPromptsRequest,
 	type RemoveScheduledPromptRequest,
+	type SetScheduledPromptEnabledRequest,
 	type ScheduleInPromptRequest,
 	type ScheduleInPromptResponse,
 	type ScheduledPromptsMutationResponse,
@@ -30,14 +32,22 @@ export async function getScheduledPrompts(): Promise<ScheduledPromptsSnapshot> {
 
 export async function createScheduledPrompt(
 	request: CreateScheduledPromptRequest,
-): Promise<ScheduledPromptsMutationResponse> {
-	return normalizeMutation(await apiPost('/api/v1/scheduled-prompts', request));
+): Promise<CreateScheduledPromptResponse> {
+	const result = normalizeCreateScheduledPromptResponse(await apiPost('/api/v1/scheduled-prompts', request));
+	if (!result) throw new Error('Invalid scheduled prompt creation response');
+	return result;
 }
 
 export async function updateScheduledPrompt(
 	request: UpdateScheduledPromptRequest,
 ): Promise<ScheduledPromptsMutationResponse> {
 	return normalizeMutation(await apiPut('/api/v1/scheduled-prompts', request));
+}
+
+export async function setScheduledPromptEnabled(
+	request: SetScheduledPromptEnabledRequest,
+): Promise<ScheduledPromptsMutationResponse> {
+	return normalizeMutation(await apiPut('/api/v1/scheduled-prompts/enabled', request));
 }
 
 export async function removeScheduledPrompt(
@@ -56,15 +66,7 @@ export async function scheduleChatPrompt(
 	request: ScheduleInPromptRequest,
 ): Promise<ScheduleInPromptResponse> {
 	const raw = await apiPost<unknown>('/api/v1/scheduled-prompts/in', request);
-	if (!raw || typeof raw !== 'object') throw new Error('Invalid schedule-in response');
-	const value = raw as Record<string, unknown>;
-	const scheduledPrompt = normalizeScheduledPrompt(value.scheduledPrompt);
-	const snapshot = normalizeScheduledPromptsSnapshot(value.snapshot);
-	if (value.success !== true || !scheduledPrompt || !snapshot) {
-		throw new Error('Invalid schedule-in response');
-	}
-	if (!snapshot.prompts.some((entry) => entry.id === scheduledPrompt.id)) {
-		throw new Error('Schedule-in response omitted the created prompt');
-	}
-	return { success: true, scheduledPrompt, snapshot };
+	const result = normalizeCreateScheduledPromptResponse(raw);
+	if (!result) throw new Error('Invalid schedule-in response');
+	return result;
 }

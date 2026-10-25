@@ -11,6 +11,7 @@ import { prioritizeOptimisticArchives, sortSidebarChatsByRecency } from './chat-
 import type { PinnedInsertPosition } from '$shared/settings';
 import { isProjectPathAncestor, normalizeProjectPath } from '$lib/utils/project-path.js';
 import { effectiveExecutorId } from '$shared/executors';
+import { splitProjectPath } from '$lib/project-paths/compact-project-path';
 import {
 	sidebarSectionKey,
 	sidebarSectionProjectKey,
@@ -38,6 +39,9 @@ export interface SidebarRowModelInput {
 	inactivityDuration: SidebarInactivityDuration;
 	groupNestedProjectPaths?: boolean;
 	collapsedProjectKeys?: ReadonlySet<string>;
+	executorOrder?: readonly string[];
+	/** Keeps executor ownership visible when filtering hides other executors. */
+	groupByExecutor?: boolean;
 }
 
 function emptyOrderMap(): SidebarChatOrderMap {
@@ -45,7 +49,8 @@ function emptyOrderMap(): SidebarChatOrderMap {
 }
 
 export function sidebarProjectKey(projectPath: string, executorId?: string | null): string {
-	if (effectiveExecutorId(executorId) !== 'local') return `executor:${JSON.stringify([executorId, projectPath])}`;
+	if (effectiveExecutorId(executorId) !== 'local')
+		return `executor:${JSON.stringify([executorId, projectPath])}`;
 	return projectPath ? `path:${projectPath}` : unknownProjectKey;
 }
 
@@ -165,17 +170,23 @@ function createNestedProjectGroupingContext(chats: ChatSessionRecord[]): Project
 	for (const project of projects) {
 		const group =
 			(project.normalizedPath &&
-				projects.find((candidate) =>
-					candidate.executorId === project.executorId && isProjectPathAncestor(candidate.normalizedPath, project.normalizedPath),
+				projects.find(
+					(candidate) =>
+						candidate.executorId === project.executorId &&
+						isProjectPathAncestor(candidate.normalizedPath, project.normalizedPath),
 				)) ||
 			project;
-		groupPathByNormalizedPath.set(sidebarProjectKey(project.normalizedPath, project.executorId), group.originalPath);
+		groupPathByNormalizedPath.set(
+			sidebarProjectKey(project.normalizedPath, project.executorId),
+			group.originalPath,
+		);
 	}
 
 	return {
 		groupForProjectPath(projectPath, executorId) {
 			const normalizedPath = normalizeProjectPath(projectPath);
-			const groupPath = groupPathByNormalizedPath.get(sidebarProjectKey(normalizedPath, executorId)) ?? projectPath;
+			const groupPath =
+				groupPathByNormalizedPath.get(sidebarProjectKey(normalizedPath, executorId)) ?? projectPath;
 			return exactProjectGroup(groupPath, executorId);
 		},
 	};
@@ -246,11 +257,13 @@ function createChatRow(
 	list: PersistedChatOrderGroup,
 	reorderScopeKey: string,
 	reorderScopeIds: string[],
+	depth: number,
 	group: SidebarProjectGroup = exactProjectGroup(chat.projectPath, chat.executorId),
 ): SidebarVirtualChatRow {
 	return {
 		type: 'chat',
 		key: `${list}:${chat.id}`,
+		depth,
 		chat,
 		list,
 		isPinned: list === 'pinned',
@@ -276,7 +289,137 @@ function appendChatRow(
 	reorderScopesByChatId.set(row.chat.id, row.reorderScopeIds);
 }
 
+export function sidebarExecutorKey(executorId?: string | null): string {
+	return `executor:${effectiveExecutorId(executorId)}`;
+}
+
+export function shouldGroupSidebarByExecutor(input: {
+	allChats: readonly ChatSessionRecord[];
+	executorOrder?: readonly string[];
+}): boolean {
+	return Boolean(
+		input.executorOrder?.some((executorId) => effectiveExecutorId(executorId) !== 'local') ||
+		input.allChats.some((chat) => effectiveExecutorId(chat.executorId) !== 'local'),
+	);
+}
+
+export function buildSidebarExecutorCollapseKeys(input: {
+	displayedChats: readonly ChatSessionRecord[];
+}): string[] {
+	const executorIds = new Set(
+		input.displayedChats.map((chat) => effectiveExecutorId(chat.executorId)),
+	);
+	return Array.from(executorIds).flatMap((executorId) => [
+		sidebarExecutorKey(executorId),
+		...[...ACTIVITY_SECTIONS, ...STATUS_SECTIONS].map((section) =>
+			sidebarSectionKey(section, executorId),
+		),
+	]);
+}
+
 export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowModel {
+	const model = buildGroupedSidebarRows(input);
+	return { ...model, rows: withAmbiguousProjectNames(model.rows) };
+}
+
+// Project headers show only their folder name, so headers whose names collide
+// under one executor also show their parent directories.
+function withAmbiguousProjectNames(rows: SidebarVirtualRow[]): SidebarVirtualRow[] {
+	const nameKeys = new Map<SidebarVirtualRow, string>();
+	const pathsByName = new Map<string, Set<string>>();
+	for (const row of rows) {
+		if (row.type !== 'project-header') continue;
+		const key = JSON.stringify([
+			effectiveExecutorId(row.executorId),
+			splitProjectPath(row.projectPath).name,
+		]);
+		nameKeys.set(row, key);
+		pathsByName.set(key, (pathsByName.get(key) ?? new Set()).add(row.projectPath));
+	}
+	return rows.map((row) =>
+		row.type === 'project-header' && pathsByName.get(nameKeys.get(row)!)!.size > 1
+			? { ...row, showParentPath: true }
+			: row,
+	);
+}
+
+function buildGroupedSidebarRows(input: SidebarRowModelInput): SidebarRowModel {
+	const groupByExecutor =
+		input.groupByExecutor ??
+		shouldGroupSidebarByExecutor({
+			allChats: input.displayedChats,
+			executorOrder: input.executorOrder,
+		});
+	if (input.grouping === 'none' || !groupByExecutor) return buildSidebarRows(input);
+
+	const chatsByExecutor = new Map<string, ChatSessionRecord[]>();
+	for (const chat of input.displayedChats) {
+		const executorId = effectiveExecutorId(chat.executorId);
+		const chats = chatsByExecutor.get(executorId) ?? [];
+		chats.push(chat);
+		chatsByExecutor.set(executorId, chats);
+	}
+	const configuredOrder = new Map((input.executorOrder ?? []).map((id, index) => [id, index]));
+	const executorIds = Array.from(chatsByExecutor.keys()).sort((left, right) => {
+		if (left === 'local') return -1;
+		if (right === 'local') return 1;
+		const order =
+			(configuredOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
+			(configuredOrder.get(right) ?? Number.MAX_SAFE_INTEGER);
+		return order || left.localeCompare(right);
+	});
+	const result: SidebarRowModel = {
+		rows: [],
+		visibleOrders: emptyOrderMap(),
+		visibleChatIds: [],
+		reorderScopesByChatId: new Map(),
+		projectKeys: [],
+	};
+	for (const executorId of executorIds) {
+		const chats = chatsByExecutor.get(executorId) ?? [];
+		const executorRows = buildSidebarRows({ ...input, displayedChats: chats, executorId });
+		const collapseKey = sidebarExecutorKey(executorId);
+		const isCollapsed = input.collapsedProjectKeys?.has(collapseKey) ?? false;
+		result.projectKeys.push(...executorRows.projectKeys);
+		result.rows.push({
+			type: 'executor-header',
+			key: collapseKey,
+			depth: 0,
+			executorId,
+			collapseKey,
+			count: chats.length,
+			chatIds: chats.map((chat) => chat.id),
+			isCollapsed,
+		});
+		if (isCollapsed) continue;
+		for (const row of executorRows.rows) {
+			result.rows.push(withinExecutor(row));
+		}
+		for (const list of chatOrderLists)
+			result.visibleOrders[list].push(...executorRows.visibleOrders[list]);
+		result.visibleChatIds.push(...executorRows.visibleChatIds);
+		for (const [chatId, scopeIds] of executorRows.reorderScopesByChatId) {
+			result.reorderScopesByChatId.set(chatId, scopeIds);
+		}
+	}
+	return result;
+}
+
+// Nests a row one level beneath its executor header. Section headers carry
+// their executor in executorId; projects and chats record the grouping so
+// they can omit the executor label the header already shows.
+function withinExecutor(row: SidebarVirtualRow): SidebarVirtualRow {
+	const depth = row.depth + 1;
+	switch (row.type) {
+		case 'project-header':
+		case 'chat':
+			return { ...row, depth, executorGrouped: true };
+		default:
+			return { ...row, depth };
+	}
+}
+
+function buildSidebarRows(input: SidebarRowModelInput & { executorId?: string }): SidebarRowModel {
 	const displayed = partitionSidebarChats(input.displayedChats);
 	const rows: SidebarVirtualRow[] = [];
 	const visibleOrders = emptyOrderMap();
@@ -292,7 +435,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				if (!chat) continue;
 				appendChatRow(
 					rows,
-					createChatRow(chat, list, `${list}:all`, scopeIds),
+					createChatRow(chat, list, `${list}:all`, scopeIds, 0),
 					visibleOrders,
 					visibleChatIds,
 					reorderScopesByChatId,
@@ -318,6 +461,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		for (const section of ACTIVITY_SECTIONS) {
 			appendSidebarChatSection({
 				section,
+				executorId: input.executorId,
 				lists: chatOrderListsBySection[section],
 				orders: input.orders,
 				byList: displayed.byId,
@@ -340,6 +484,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		for (const section of STATUS_SECTIONS) {
 			appendSidebarChatSection({
 				section,
+				executorId: input.executorId,
 				lists: chatOrderListsBySection[section],
 				orders: input.orders,
 				byList: displayed.byId,
@@ -380,6 +525,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 	if (projectActivityGrouped) {
 		appendSidebarProjectSection({
 			section: 'inactive',
+			executorId: input.executorId,
 			projectChats: input.displayedChats.filter(
 				(chat) => activitySectionByChatId.get(chat.id) === 'inactive',
 			),
@@ -396,6 +542,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		});
 		appendSidebarChatSection({
 			section: 'archived',
+			executorId: input.executorId,
 			lists: chatOrderListsBySection.archived,
 			orders: input.orders,
 			byList: displayed.byId,
@@ -447,7 +594,10 @@ function appendSidebarProjectGroups(input: {
 		for (const chatId of input.orders[list]) {
 			const chat = input.byList[list].get(chatId);
 			if (!chat || !input.belongsToGroup(chat)) continue;
-			const project = input.grouping.groupForProjectPath(chat.projectPath, chat.executorId).projectKey;
+			const project = input.grouping.groupForProjectPath(
+				chat.projectPath,
+				chat.executorId,
+			).projectKey;
 			const scopeIds = scopeIdsByProject.get(project) ?? [];
 			scopeIds.push(chatId);
 			scopeIdsByProject.set(project, scopeIds);
@@ -467,6 +617,7 @@ function appendSidebarProjectGroups(input: {
 							list,
 							sidebarProjectReorderScopeKey(list, project, input.section),
 							scopeIds,
+							1,
 							group,
 						),
 					);
@@ -483,6 +634,7 @@ function appendSidebarProjectGroups(input: {
 		input.rows.push({
 			type: 'project-header',
 			key: `project:${collapseKey}`,
+			depth: 0,
 			projectKey: project,
 			collapseKey,
 			projectPath: projectPathByKey.get(project) ?? '',
@@ -508,6 +660,7 @@ function appendSidebarProjectGroups(input: {
 
 function appendSidebarProjectSection(input: {
 	section: SidebarChatSection;
+	executorId?: string;
 	projectChats: ChatSessionRecord[];
 	lists: readonly PersistedChatOrderGroup[];
 	grouping: ProjectGroupingContext;
@@ -522,11 +675,13 @@ function appendSidebarProjectSection(input: {
 }): void {
 	if (input.projectChats.length === 0) return;
 
-	const sectionKey = sidebarSectionKey(input.section);
+	const sectionKey = sidebarSectionKey(input.section, input.executorId);
 	input.rows.push({
 		type: 'section-header',
 		key: sectionKey,
+		depth: 0,
 		section: input.section,
+		executorId: input.executorId,
 		count: input.projectChats.length,
 		chatIds: input.projectChats.map((chat) => chat.id),
 		isCollapsed: input.collapsedProjectKeys.has(sectionKey),
@@ -538,6 +693,7 @@ function appendSidebarProjectSection(input: {
 
 function appendSidebarChatSection(input: {
 	section: SidebarChatSection;
+	executorId?: string;
 	lists: readonly PersistedChatOrderGroup[];
 	orders: SidebarChatOrderMap;
 	byList: Record<PersistedChatOrderGroup, Map<string, ChatSessionRecord>>;
@@ -560,11 +716,13 @@ function appendSidebarChatSection(input: {
 	}
 	if (memberIds.length === 0) return;
 
-	const key = sidebarSectionKey(input.section);
+	const key = sidebarSectionKey(input.section, input.executorId);
 	input.rows.push({
 		type: 'section-header',
 		key,
+		depth: 0,
 		section: input.section,
+		executorId: input.executorId,
 		count: memberIds.length,
 		chatIds: memberIds,
 		isCollapsed: input.collapsedProjectKeys.has(key),
@@ -573,19 +731,15 @@ function appendSidebarChatSection(input: {
 
 	for (const list of input.lists) {
 		const scopeIds = input.orders[list].filter(
-			(chatId) => input.sectionByChatId.get(chatId) === input.section,
+			(chatId) =>
+				input.byList[list].has(chatId) && input.sectionByChatId.get(chatId) === input.section,
 		);
 		for (const chatId of scopeIds) {
 			const chat = input.byList[list].get(chatId);
 			if (!chat) continue;
 			appendChatRow(
 				input.rows,
-				createChatRow(
-					chat,
-					list,
-					`${list}:section:${input.section}`,
-					scopeIds,
-				),
+				{ ...createChatRow(chat, list, `${list}:${key}`, scopeIds, 0), section: input.section },
 				input.visibleOrders,
 				input.visibleChatIds,
 				input.reorderScopesByChatId,
@@ -616,6 +770,8 @@ export function buildSidebarDisplayChatIds(input: {
 	optimisticArchiveOrder?: readonly ChatSessionRecord[];
 	groupNestedProjectPaths?: boolean;
 	collapsedProjectKeys?: ReadonlySet<string>;
+	executorOrder?: readonly string[];
+	groupByExecutor?: boolean;
 }): string[] {
 	const sortedChats =
 		input.sortMode === 'recent'
@@ -637,5 +793,7 @@ export function buildSidebarDisplayChatIds(input: {
 		inactivityDuration: input.inactivityDuration,
 		groupNestedProjectPaths: input.groupNestedProjectPaths,
 		collapsedProjectKeys: input.collapsedProjectKeys,
+		executorOrder: input.executorOrder,
+		groupByExecutor: input.groupByExecutor,
 	}).visibleChatIds;
 }

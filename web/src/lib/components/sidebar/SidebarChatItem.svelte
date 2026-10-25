@@ -19,6 +19,7 @@
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
 	import SidebarChatMenu from './SidebarChatMenu.svelte';
+	import { sidebarChatInset } from './sidebar-virtual-chat-list';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
@@ -35,6 +36,12 @@
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
 		displayOptions?: SidebarDisplayOptions;
+		/** Nesting level beneath executor and project headers. */
+		depth?: number;
+		/** True when an executor header already names this chat's executor. */
+		executorGrouped?: boolean;
+		/** True when an Archived section header already marks this chat as archived. */
+		inArchivedSection?: boolean;
 		enableNativeDrag?: boolean;
 		enableRecenterOnRequest?: boolean;
 		onChatSelect: (chatId: string) => void;
@@ -68,6 +75,9 @@
 		isMultiSelectMode = false,
 		isMultiSelected = false,
 		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		depth = 0,
+		executorGrouped = false,
+		inArchivedSection = false,
 		enableNativeDrag = true,
 		enableRecenterOnRequest = true,
 		onChatSelect,
@@ -96,6 +106,7 @@
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
 	let isSingleLineLayout = $derived(displayOptions.chatItemLayout === 'single-line');
+	let contentInset = $derived(sidebarChatInset(depth));
 	let hasAdditionalLines = $derived(
 		!isSingleLineLayout || (displayOptions.showProjectPath && Boolean(session.projectPath?.trim())),
 	);
@@ -220,7 +231,13 @@
 </script>
 
 {#snippet stateBadge()}
-	{#if !isMultiSelectMode && (isPinned || isArchived)}
+	<!-- Virtualized section headers may be unmounted, so rows keep their archived
+	     state for assistive technology. -->
+	{#if !isMultiSelectMode && isArchived && !isPinned && inArchivedSection}
+		<span class="sr-only" data-slot="sidebar-chat-state-status">
+			{m.sidebar_chat_archived_status()}
+		</span>
+	{:else if !isMultiSelectMode && (isPinned || isArchived)}
 		<div
 			class={cn(
 				'relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
@@ -280,13 +297,18 @@
 			{currentTime}
 			showTimestamp={true}
 			showProjectPath={displayOptions.showProjectPath}
-			{executorLabel}
+			executorLabel={executorGrouped ? undefined : executorLabel}
 			chatItemLayout={displayOptions.chatItemLayout}
 			titleBadge={stateBadge}
 			hasDesktopOverlayMenu={!isMobile && !isMultiSelectMode}
 			onTagClick={isMultiSelectMode ? undefined : onTagClick}
 			onManageTags={isMultiSelectMode || !onManageTags ? undefined : () => onManageTags(session)}
 		/>
+		<!-- The executor header names the executor visually; the row keeps it in its
+		     accessible name. -->
+		{#if executorGrouped && executorLabel}
+			<span class="sr-only" data-slot="sidebar-chat-executor-status">{executorLabel}</span>
+		{/if}
 	</div>
 {/snippet}
 
@@ -308,9 +330,9 @@
 				type="button"
 				class={cn(
 					'flex-1 min-w-0 text-left py-[5px] pr-2 mx-0 my-0 rounded-none hover:bg-sidebar-chat-item-hover-bg active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
-					isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
 					isSingleLineLayout && 'py-[2px]',
 				)}
+				style={`padding-left:${contentInset}px;`}
 				onclick={handleItemClick}
 				role={isMultiSelectMode ? 'checkbox' : undefined}
 				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
@@ -342,13 +364,14 @@
 				oncontextmenu={handleRightClick}
 				class={cn(
 					'w-full h-full justify-start pr-2 font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200',
-					isMultiSelectMode ? 'pl-1 border-l-0' : 'pl-[9px]',
+					isMultiSelectMode && 'border-l-0',
 					isSingleLineLayout ? 'py-[2px]' : 'py-[5px]',
 					!isMultiSelectMode &&
 						isSelected &&
 						'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
 					isMultiSelectMode && isMultiSelected && 'bg-primary/8',
 				)}
+				style={`padding-left:${contentInset}px;`}
 				onclick={handleItemClick}
 				role={isMultiSelectMode ? 'checkbox' : undefined}
 				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}

@@ -60,7 +60,12 @@
 	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
 	import type { RecallPrompt } from '$lib/chat/composer/prompt-recall';
-	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '$shared/attachments';
+	import type { InputFormatByModel } from '$shared/input-format';
+	import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
+	import {
+		ANY_FILE_ATTACHMENT_MIME_TYPE,
+		type FileAttachmentMimeTypes,
+	} from '$shared/attachments';
 
 	interface Props {
 		recallPrompts?: readonly RecallPrompt[];
@@ -73,7 +78,9 @@
 		selectedThinkingMode?: ChatSessionRecord['thinkingMode'];
 		selectedStatus?: ChatStatus;
 		executionPolicy?: 'conversation' | 'literal';
-		fileAttachmentMimeTypes?: readonly string[];
+		inputFormatByModel?: InputFormatByModel;
+		model?: string;
+		fileAttachmentMimeTypes?: FileAttachmentMimeTypes;
 		selectedIsProcessing?: boolean;
 		isVisible?: boolean;
 		isPresented?: boolean;
@@ -114,7 +121,9 @@
 		selectedThinkingMode = 'none',
 		selectedStatus = 'running',
 		executionPolicy = 'conversation',
-		fileAttachmentMimeTypes = CHAT_FILE_ATTACHMENT_MIME_TYPES,
+		inputFormatByModel = {},
+		model,
+		fileAttachmentMimeTypes = ANY_FILE_ATTACHMENT_MIME_TYPE,
 		selectedIsProcessing = false,
 		isVisible = true,
 		isPresented,
@@ -150,6 +159,15 @@
 		get activeChatId() {
 			return selectedChatId;
 		},
+	});
+	let restoredChatId: string | undefined;
+	$effect(() => {
+		const chatId = selectedChatId;
+		if (restoredChatId === chatId) return;
+		restoredChatId = chatId;
+		untrack(() => {
+			composer.draftRestoreRequest = { chatId, requestId: 0 };
+		});
 	});
 	const transcript = new ActiveTranscriptState();
 
@@ -209,7 +227,7 @@
 		codex: 'Codex',
 		amp: 'Amp',
 	};
-	const selectedModel = $derived(modelOptionsFor(selectedAgentId)[0]?.value ?? 'opus');
+	const selectedModel = $derived(model ?? modelOptionsFor(selectedAgentId)[0]?.value ?? 'opus');
 	const requiresQueuedSubmission = $derived(
 		requiresQueuedSubmissionOverride ?? selectedIsProcessing,
 	);
@@ -316,7 +334,12 @@
 	setChatDrafts(chatDrafts);
 	setAgentState(agent);
 	setAppShell(appShell);
+	let composerInputMode = $state<ComposerInputMode>('source');
 	setLocalSettings({
+		get composerInputMode() { return composerInputMode; },
+		set(key: string, mode: ComposerInputMode) {
+			if (key === 'composerInputMode') composerInputMode = mode;
+		},
 		get sendByShiftEnter() {
 			return false;
 		},
@@ -362,6 +385,7 @@
 		getAgent: (agentId: string) => ({
 			id: agentId,
 			executionPolicy,
+			inputFormatByModel,
 			label: labelForAgent(agentId),
 			description: '',
 			supportsFork: agentId !== 'amp',
@@ -493,6 +517,19 @@
 </script>
 
 <KeyboardShortcuts />
+<select
+	hidden
+	data-testid="composer-input-mode"
+	aria-label="Test message format"
+	value={composerInputMode}
+	onchange={(event) => {
+		const mode = event.currentTarget.value;
+		if (mode === 'source' || mode === 'formatted') composerInputMode = mode;
+	}}
+>
+	<option value="source">Source</option>
+	<option value="formatted">Formatted</option>
+</select>
 {#if composerNotice}
 	<div class={chatDockFrameClass(chatMaxWidth)}>
 		<ComposerAvailabilityNotice {...composerNotice} />

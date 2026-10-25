@@ -27,6 +27,7 @@ import type { TranscriptSearchOrder } from './worker-protocol.js';
 
 const SNIPPET_PREFIX = '... ';
 const SNIPPET_SUFFIX = ' ...';
+const MAX_SNIPPET_LEADING_CONTEXT_CHARS = 160;
 const MAX_SNIPPET_CHARS = CHAT_SEARCH_MAX_SNIPPET_CODE_POINTS
   - [...SNIPPET_PREFIX].length
   - [...SNIPPET_SUFFIX].length;
@@ -45,6 +46,7 @@ interface CompiledTerm {
   normalizedWords: string[];
   exactPhrase: boolean;
   prefixWords: boolean[];
+  literalPattern: RegExp | null;
 }
 
 interface ResultRow {
@@ -65,6 +67,12 @@ interface FtsSnippetMatchRow {
 
 interface SnippetToken {
   normalized: string;
+  start: number;
+  end: number;
+}
+
+interface SnippetAnchor {
+  tokenIndex: number;
   start: number;
   end: number;
 }
@@ -99,15 +107,27 @@ function tokenMatchesWord(token: SnippetToken, normalizedWord: string, prefix: b
 }
 
 function matchSnippetTerm(
+  body: string,
   tokens: SnippetToken[],
   term: CompiledTerm,
-): number | null {
+): SnippetAnchor | null {
+  if (term.literalPattern) {
+    const match = term.literalPattern.exec(body);
+    if (!match) return null;
+    const index = tokens.findIndex((token) => token.end > match.index);
+    if (index < 0) return null;
+    return { tokenIndex: index, start: match.index, end: match.index + match[0].length };
+  }
   if (term.exactPhrase) {
     for (let start = 0; start + term.words.length <= tokens.length; start += 1) {
       if (term.normalizedWords.every(
         (word, offset) => tokenMatchesWord(tokens[start + offset], word, false),
       )) {
-        return start;
+        return {
+          tokenIndex: start,
+          start: tokens[start].start,
+          end: tokens[start + term.words.length - 1].end,
+        };
       }
     }
     return null;
@@ -125,20 +145,29 @@ function matchSnippetTerm(
     if (firstMatch < 0) return null;
     firstTokenIndex = Math.min(firstTokenIndex, firstMatch);
   }
-  return firstTokenIndex;
+  return {
+    tokenIndex: firstTokenIndex,
+    start: tokens[firstTokenIndex].start,
+    end: tokens[firstTokenIndex].end,
+  };
 }
 
 function matchSnippetTerms(
+  body: string,
   tokens: SnippetToken[],
-  terms: CompiledTerm[],
-): number | null {
-  let firstTokenIndex = Number.POSITIVE_INFINITY;
+  terms: readonly CompiledTerm[],
+): SnippetAnchor | null {
+  let firstMatch: SnippetAnchor | null = null;
+  let firstLiteralMatch: SnippetAnchor | null = null;
   for (const term of terms) {
-    const match = matchSnippetTerm(tokens, term);
+    const match = matchSnippetTerm(body, tokens, term);
     if (match === null) continue;
-    firstTokenIndex = Math.min(firstTokenIndex, match);
+    if (firstMatch === null || match.start < firstMatch.start) firstMatch = match;
+    if (term.literalPattern && (firstLiteralMatch === null || match.start < firstLiteralMatch.start)) {
+      firstLiteralMatch = match;
+    }
   }
-  return Number.isFinite(firstTokenIndex) ? firstTokenIndex : null;
+  return firstLiteralMatch ?? firstMatch;
 }
 
 function publicRole(role: number): ChatSearchSnippetRole {
@@ -152,16 +181,47 @@ function resultKey(chatId: string, transcriptViewId: string): string {
   return `${chatId.length}:${chatId}${transcriptViewId}`;
 }
 
-function snippetWindow(body: string, tokens: SnippetToken[], firstTokenIndex: number): string {
+function snippetWindow(body: string, tokens: SnippetToken[], firstMatch: SnippetAnchor | null): string {
   if (tokens.length === 0) return '';
-  const startToken = Math.max(0, firstTokenIndex - 8);
+  const anchor = firstMatch ?? { tokenIndex: 0, start: tokens[0].start, end: tokens[0].end };
+  const startToken = Math.max(0, anchor.tokenIndex - 8);
   const endToken = Math.min(tokens.length, startToken + 32);
-  const raw = body.slice(tokens[startToken].start, tokens[endToken - 1].end);
-  const normalized = raw.replace(/\s+/g, ' ').trim();
+  const start = startToken === 0 ? 0 : Math.min(tokens[startToken].start, anchor.start);
+  const end = Math.max(
+    anchor.end,
+    endToken === tokens.length ? body.length : tokens[endToken].start,
+  );
+  const context = [...body.slice(start, anchor.start)];
+  const matchLength = [...body.slice(anchor.start, anchor.end)].length;
+  const contextBudget = Math.max(0, Math.min(
+    MAX_SNIPPET_LEADING_CONTEXT_CHARS,
+    MAX_SNIPPET_CHARS - matchLength,
+  ));
+  const contextStart = Math.max(0, context.length - contextBudget);
+  const raw = context.slice(contextStart).join('') + body.slice(anchor.start, end);
+  const normalized = raw.replace(/[\s\p{White_Space}]+/gu, ' ').trim();
   const characters = [...normalized];
   const text = characters.slice(0, MAX_SNIPPET_CHARS).join('');
-  const hasSuffix = endToken < tokens.length || characters.length > MAX_SNIPPET_CHARS;
-  return `${startToken > 0 ? SNIPPET_PREFIX : ''}${text}${hasSuffix ? SNIPPET_SUFFIX : ''}`;
+  const hasPrefix = start > 0 || contextStart > 0;
+  const hasSuffix = end < body.length || characters.length > MAX_SNIPPET_CHARS;
+  return `${hasPrefix ? SNIPPET_PREFIX : ''}${text}${hasSuffix ? SNIPPET_SUFFIX : ''}`;
+}
+
+function compileLiteralPattern(clause: ChatSearchClauseV1, words: readonly string[]): RegExp | null {
+  if (clause.kind !== 'literal') return null;
+  const literalWords = typeof clause.text === 'string' ? wordsIn(clause.text) : [];
+  if (typeof clause.text !== 'string'
+      || literalWords.length !== words.length
+      || literalWords.some((word, index) => word !== words[index])
+      || clause.tokens.some((token) => token.match !== 'exact')) {
+    throw new RangeError('Transcript search literal is invalid');
+  }
+  const escapedText = clause.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replaceAll(' ', '[\\s\\p{White_Space}]+');
+  const wordCharacter = '[\\p{L}\\p{N}\\p{M}_]';
+  const startBoundary = /^[\p{L}\p{N}\p{M}_]/u.test(clause.text) ? `(?<!${wordCharacter})` : '';
+  const endBoundary = /[\p{L}\p{N}\p{M}_]$/u.test(clause.text) ? `(?!${wordCharacter})` : '';
+  return new RegExp(`${startBoundary}${escapedText}${endBoundary}`, 'iu');
 }
 
 function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
@@ -171,7 +231,7 @@ function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
   }
   let wordCount = 0;
   return query.clauses.map((clause: ChatSearchClauseV1) => {
-    if ((clause.kind !== 'phrase' && clause.kind !== 'all-words')
+    if ((clause.kind !== 'phrase' && clause.kind !== 'all-words' && clause.kind !== 'literal')
         || !Array.isArray(clause.tokens) || clause.tokens.length === 0) {
       throw new RangeError('Transcript search query is invalid');
     }
@@ -188,20 +248,28 @@ function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
       }
       return parsed[0];
     });
-    const exactPhrase = clause.kind === 'phrase';
+    const literalPattern = compileLiteralPattern(clause, words);
+    const exactPhrase = clause.kind !== 'all-words';
     const prefixWords = clause.tokens.map(
       (token: ChatSearchTokenV1) => !exactPhrase && token.match === 'prefix',
     );
+    let ftsQuery: string;
+    if (exactPhrase) {
+      const phraseText = clause.kind === 'literal' ? clause.text : words.join(' ');
+      ftsQuery = escapeFtsWord(phraseText.replace(/[\u0000\p{Cs}]/gu, ' '));
+    } else {
+      ftsQuery = words.map((word, index) => {
+        const escapedWord = escapeFtsWord(word);
+        return prefixWords[index] ? `${escapedWord}*` : escapedWord;
+      }).join(' AND ');
+    }
     return {
-      query: exactPhrase
-        ? `"${words.join(' ').replaceAll('"', '""')}"`
-        : words.map((word: string, index: number) => prefixWords[index]
-          ? `${escapeFtsWord(word)}*`
-          : escapeFtsWord(word)).join(' AND '),
+      query: ftsQuery,
       words,
       normalizedWords: clause.tokens.map((token: ChatSearchTokenV1) => token.normalized),
       exactPhrase,
       prefixWords,
+      literalPattern,
     };
   });
 }
@@ -292,12 +360,12 @@ function hydrateSnippets(
         snippets: match.ranked.map((candidate) => {
           const body = bodyStatement.get(candidate.rowId)?.body ?? '';
           const tokens = tokenizeForSnippet(body);
-          const firstTokenIndex = matchSnippetTerms(tokens, [...terms]);
+          const firstMatch = matchSnippetTerms(body, tokens, terms);
           return {
             ordinal: Number(candidate.ordinal),
             role: publicRole(candidate.role),
             timestamp: candidate.timestamp,
-            text: snippetWindow(body, tokens, firstTokenIndex ?? 0),
+            text: snippetWindow(body, tokens, firstMatch),
           };
         }),
       }] as const];
@@ -415,17 +483,29 @@ function collectBoundedTermMatches(
   const truncated = rows.length > SEARCH_QUERY_MATCH_ROW_LIMIT;
   if (truncated) rows.length = SEARCH_QUERY_MATCH_ROW_LIMIT;
   const matches = new Map<string, TermMatch>();
-  for (const row of rows) {
-    const key = resultKey(row.chatId, row.transcriptViewId);
-    const current = matches.get(key) ?? {
-      chatId: row.chatId,
-      transcriptViewId: row.transcriptViewId,
-      rank: row.rank,
-      rows: [],
-    };
-    current.rank = Math.min(current.rank, row.rank);
-    current.rows.push(row);
-    matches.set(key, current);
+  // Preserves the FTS sampling ceiling even when no candidate passes literal verification.
+  const bodyStatement = term.literalPattern
+    ? db.prepare<{ body: string }, [number]>('SELECT body FROM search_chunks WHERE id = ?')
+    : null;
+  try {
+    for (const row of rows) {
+      if (bodyStatement && term.literalPattern) {
+        const body = bodyStatement.get(row.rowId)?.body ?? '';
+        if (!term.literalPattern.test(body)) continue;
+      }
+      const key = resultKey(row.chatId, row.transcriptViewId);
+      const current = matches.get(key) ?? {
+        chatId: row.chatId,
+        transcriptViewId: row.transcriptViewId,
+        rank: row.rank,
+        rows: [],
+      };
+      current.rank = Math.min(current.rank, row.rank);
+      current.rows.push(row);
+      matches.set(key, current);
+    }
+  } finally {
+    bodyStatement?.finalize();
   }
   return { matches, truncated };
 }

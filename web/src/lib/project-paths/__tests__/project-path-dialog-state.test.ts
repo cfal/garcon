@@ -57,7 +57,7 @@ describe('ProjectPathDialogState', () => {
 		const executors = new ExecutorsStore();
 		const remote = {
 			...remoteExecutor,
-			machineServices: { ...remoteExecutor.machineServices, git: true },
+			executorServices: { ...remoteExecutor.executorServices, git: true },
 		};
 		executors.applySnapshot([localExecutor, remote]);
 		const dialog = new ProjectPathDialogState(executors);

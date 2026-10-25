@@ -45,6 +45,17 @@ describe('ComposerState', () => {
 		expect(state.images).toEqual([]);
 		expect(state.isDragActive).toBe(false);
 	});
+	it('requests mode restoration only when a rejected submission restores its draft', () => {
+		const { composer } = createComposer();
+		composer.inputText = 'rejected prompt';
+		const revision = composer.clearAfterSubmit('chat-1');
+		const cleared = composer.draftRestoreRequest;
+		expect(composer.restoreDraftIfRevision('chat-1', revision, 'rejected prompt', [])).toBe(true);
+		expect(composer.draftRestoreRequest?.requestId).toBe(cleared!.requestId + 1);
+		const restored = composer.draftRestoreRequest;
+		expect(composer.restoreDraftIfRevision('chat-1', revision, 'stale', [])).toBe(false);
+		expect(composer.draftRestoreRequest).toBe(restored);
+	});
 
 	it('addImages appends supported non-duplicate attachments', () => {
 		const { composer: state } = createComposer();
@@ -56,9 +67,25 @@ describe('ComposerState', () => {
 		state.addImages([file1]);
 		expect(state.images).toHaveLength(1);
 
-		state.addImages([file2, file1dup, file1, unsupported]);
+		state.addImages([file2, file1dup, file1, unsupported], {
+			allowImages: true,
+			fileMimeTypes: ['text/markdown'],
+		});
 		expect(state.images).toHaveLength(3);
 		expect(state.images.map((f) => f.name)).toEqual(['a.png', 'notes.md', 'a.png']);
+	});
+	it('keeps the selected restore request when a background submission settles', () => {
+		const { composer, selectChat } = createComposer('background');
+		composer.inputText = 'rejected prompt';
+		selectChat('selected');
+		const selectedRestore = composer.draftRestoreRequest;
+		const revision = composer.clearAfterSubmit('background');
+		expect(composer.draftRestoreRequest).toBe(selectedRestore);
+		expect(composer.restoreDraftIfRevision('background', revision, 'rejected prompt', [])).toBe(true);
+		expect(composer.draftRestoreRequest).toBe(selectedRestore);
+		selectChat('background');
+		expect(composer.inputText).toBe('rejected prompt');
+		expect(composer.draftRestoreRequest?.chatId).toBe('background');
 	});
 
 	it('removeImage removes at index', () => {
@@ -86,6 +113,7 @@ describe('ComposerState', () => {
 		state.addImages([new File(['a'], 'a.png', { type: 'image/png' })]);
 
 		state.clearAfterSubmit('chat-1');
+		expect(state.draftRestoreRequest).toEqual({ chatId: 'chat-1', requestId: 2 });
 
 		expect(state.inputText).toBe('');
 		expect(state.images).toEqual([]);

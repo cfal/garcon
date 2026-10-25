@@ -1,12 +1,7 @@
 <script lang="ts">
 	import { getLocalSettings, getThemeRuntime } from '$lib/context';
-	import { THEME_PROFILE_LABELS } from '$lib/components/shared/theme-profile-labels.js';
-	import {
-		DARK_THEME_PROFILES,
-		LIGHT_THEME_PROFILES,
-		THEME_PROFILES,
-		type ThemePreference,
-	} from '$lib/theme/themes.js';
+	import ThemePreferenceFields from '$lib/components/shared/ThemePreferenceFields.svelte';
+	import type { ThemePreference } from '$lib/theme/themes.js';
 	import { createThemePreferenceSelection } from '$lib/theme/theme-preference-selection.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -51,45 +46,7 @@
 		</div>
 	</fieldset>
 
-	{#if localSettings.themePreference.mode === 'fixed'}
-		<label class="mt-3 flex items-center justify-between gap-4 text-sm text-foreground">
-			<span>{m.settings_theme_fixed_label()}</span>
-			<select
-				class="select-native w-48 max-w-[60%] shrink-0"
-				value={localSettings.themePreference.themeId}
-				onchange={(event) => selection.selectFixedTheme(event.currentTarget.value)}
-			>
-				{#each THEME_PROFILES as profile (profile.id)}
-					<option value={profile.id}>{THEME_PROFILE_LABELS[profile.id]()}</option>
-				{/each}
-			</select>
-		</label>
-	{:else}
-		<div class="mt-3 grid gap-3 sm:grid-cols-2">
-			<label class="grid gap-1.5 text-sm text-foreground">
-				<span>{m.settings_theme_system_light_label()}</span>
-				<select
-					class="select-native w-full"
-					value={localSettings.themePreference.lightThemeId}
-					onchange={(event) => selection.selectSystemLightTheme(event.currentTarget.value)}
-				>
-					{#each LIGHT_THEME_PROFILES as profile (profile.id)}
-						<option value={profile.id}>{THEME_PROFILE_LABELS[profile.id]()}</option>
-					{/each}
-				</select>
-			</label>
-			<label class="grid gap-1.5 text-sm text-foreground">
-				<span>{m.settings_theme_system_dark_label()}</span>
-				<select
-					class="select-native w-full"
-					value={localSettings.themePreference.darkThemeId}
-					onchange={(event) => selection.selectSystemDarkTheme(event.currentTarget.value)}
-				>
-					{#each DARK_THEME_PROFILES as profile (profile.id)}
-						<option value={profile.id}>{THEME_PROFILE_LABELS[profile.id]()}</option>
-					{/each}
-				</select>
-			</label>
-		</div>
-	{/if}
+	<div class="mt-3">
+		<ThemePreferenceFields preference={localSettings.themePreference} {selection} />
+	</div>
 </div>

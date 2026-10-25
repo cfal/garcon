@@ -14,7 +14,6 @@ import {
 	hasEarlierTranscriptRowsToReveal,
 	messagesFromDisplayRows,
 	transcriptDisplayRows,
-	visibleOptimisticTranscriptInputs,
 	visibleTranscriptRows,
 	type ChatDisplayRow,
 } from './transcript-row-projection.js';
@@ -25,7 +24,8 @@ export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 
 export class ActiveTranscriptPresentationState {
 	activeChatId = $state<string | null>(null);
-	entries = $state<TranscriptMessage[]>([]);
+	// Ledger rows are immutable; only interval replacement needs reactive publication.
+	entries = $state.raw<TranscriptMessage[]>([]);
 	transcriptViewId = $state('');
 	windowRevision = $state(0);
 	lastOrdinal = $state(0);
@@ -54,7 +54,14 @@ export class ActiveTranscriptPresentationState {
 	protected expandedVisibleStartOrdinal: number | null = null;
 
 	readonly #sharedOverlay: ConversationTranscriptOverlayView | null;
+	#chatMessages = $derived(this.entries.map((entry) => entry.message));
 	#echoedClientMessageIds = $derived(echoedClientMessageIds(this.entries));
+	#visibleOptimisticInputs = $derived.by(() => {
+		const inputs = this.optimisticUserInputs;
+		if (this.hasLaterMessages || inputs.length === 0) return [];
+		const echoedIds = this.#echoedClientMessageIds;
+		return inputs.filter((input) => !echoedIds.has(input.clientMessageId));
+	});
 	#displayLocalNotices = $derived(
 		displayLocalNotices(this.hasLaterMessages, this.historyState, this.localNotices),
 	);
@@ -73,6 +80,8 @@ export class ActiveTranscriptPresentationState {
 		notices: this.#displayLocalNotices,
 		visibleCount: this.visibleMessageCount,
 	}));
+	#displayMessages = $derived(messagesFromDisplayRows(this.#displayRows));
+	#visibleMessages = $derived(messagesFromDisplayRows(this.#visibleRows));
 
 	constructor(sharedOverlay: ConversationTranscriptOverlayView | null) {
 		this.#sharedOverlay = sharedOverlay;
@@ -125,7 +134,7 @@ export class ActiveTranscriptPresentationState {
 	}
 
 	get chatMessages(): ChatMessage[] {
-		return this.entries.map((entry) => entry.message);
+		return this.#chatMessages;
 	}
 
 	get feedMutationClock() {
@@ -133,7 +142,7 @@ export class ActiveTranscriptPresentationState {
 	}
 
 	get displayMessages(): ChatMessage[] {
-		return messagesFromDisplayRows(this.#displayRows);
+		return this.#displayMessages;
 	}
 
 	get displayRows(): readonly ChatDisplayRow[] {
@@ -149,7 +158,7 @@ export class ActiveTranscriptPresentationState {
 	}
 
 	get visibleMessages(): ChatMessage[] {
-		return messagesFromDisplayRows(this.#visibleRows);
+		return this.#visibleMessages;
 	}
 
 	get hasEarlierRowsToReveal(): boolean {
@@ -161,11 +170,7 @@ export class ActiveTranscriptPresentationState {
 	}
 
 	get visibleOptimisticInputs(): OptimisticUserInput[] {
-		return visibleOptimisticTranscriptInputs(
-			this.hasLaterMessages,
-			this.optimisticUserInputs,
-			this.#echoedClientMessageIds,
-		);
+		return this.#visibleOptimisticInputs;
 	}
 
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void {

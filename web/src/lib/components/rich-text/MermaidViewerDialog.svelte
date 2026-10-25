@@ -18,6 +18,7 @@
 	import X from '@lucide/svelte/icons/x';
 	import ZoomIn from '@lucide/svelte/icons/zoom-in';
 	import ZoomOut from '@lucide/svelte/icons/zoom-out';
+	import MermaidCopyButton from './MermaidCopyButton.svelte';
 
 	interface Props {
 		open: boolean;
@@ -208,6 +209,10 @@
 
 	function handlePointerDown(event: PointerEvent) {
 		if (!viewportElement || (event.pointerType === 'mouse' && event.button !== 0)) return;
+		const targetsLink = event
+			.composedPath()
+			.some((target) => target instanceof Element && target.localName === 'a');
+		if (targetsLink) return;
 		if (pointers.size === 0 && pendingZoomAnchor) restoreScheduledAnchor();
 		pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
 		viewportElement.setPointerCapture(event.pointerId);
@@ -372,6 +377,7 @@
 				{m.chat_mermaid_viewer_description()}
 			</Dialog.Description>
 			<div class="flex shrink-0 items-center gap-0 sm:gap-1">
+				<MermaidCopyButton {source} />
 				<Button
 					variant="ghost"
 					size="icon-sm"

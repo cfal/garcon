@@ -17,6 +17,24 @@ const OVERRIDE_USAGE = {
 };
 
 describe('FakeChatCompletionsModel usage scripting', () => {
+  test('streams raw malformed tool arguments without JSON normalization', async () => {
+    const model = FakeChatCompletionsModel.start();
+    const rawArguments = '{"path":"synthetic.txt","invalid":.5}';
+    try {
+      model.scriptTurn([chatCompletionsToolUse('invalid', 'write', {}, { rawArguments })]);
+      const response = await fetch(`${model.baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'scripted-model', stream: true, messages: [] }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain(JSON.stringify({ arguments: rawArguments }));
+      model.assertSettled();
+    } finally {
+      model.stop();
+    }
+  });
+
   test('preserves default usage and applies text and tool-call overrides', async () => {
     const model = FakeChatCompletionsModel.start();
     try {

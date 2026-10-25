@@ -149,7 +149,7 @@ worker cannot be recalled by revoking an assignment.
 
 Worker-launched terminals and provider subprocesses inherit the config root and `GARCON_RUNTIME=executor`. Ordinary shells default to automatic selection, described below. Access grants are workspace-wide, including permission decisions and agent execution on other hosts. Provider sandboxes may independently block loopback HTTP.
 
-Every executor connection requires [Noise NNpsk0 encryption](https://github.com/cfal/noise-ws/tree/536eb503e81a1f9d90436006d3821e2080630488), on both `ws:` and `wss:`. Each physical reconnect negotiates fresh keys before the existing authenticated Garcon session resumes. There is no plaintext fallback. Upgrade the controller and all workers together. The pinned library is new and unaudited; vector, interoperability, and integration tests are not a security audit. Bun 1.4.2 or later is required.
+Every executor connection requires [Noise NNpsk0 encryption](https://github.com/cfal/noise-ws/tree/6cf4a4b2ab25d300316a21c23cbcef1bb3558556), on both `ws:` and `wss:`. Each physical reconnect negotiates fresh keys before the existing authenticated Garcon session resumes. There is no plaintext fallback. Upgrade the controller and all workers together. The pinned library is new and unaudited; vector, interoperability, and integration tests are not a security audit. Bun 1.4.2 or later is required.
 
 Remote executors use two sockets to the identical configured URL: primary control
 and subordinate bulk traffic. Proxies must allow both concurrent upgrades. Bulk
@@ -184,7 +184,7 @@ following up on a mutation.
 
 ```bash
 bun cli/main.ts executor list --json
-bun cli/main.ts executor create --label 'Build machine' --direction executor-connects \
+bun cli/main.ts executor create --label 'Build executor' --direction executor-connects \
   --advertise-url 'wss://controller.example.com/executor/{executorId}' --json
 bun cli/main.ts executor connection <executor-id> --output ./worker-connection.txt
 bun cli/main.ts executor create --label 'Listening worker' --direction controller-connects \
@@ -275,14 +275,146 @@ connection or its authority. Model/provider resolution and chat creation use the
 same selected target. Unknown or unavailable targets fail without falling back
 to another executor.
 
-Cross-executor starts require an explicit absolute `--cwd` on the target machine.
+Cross-executor starts require an explicit absolute `--cwd` on the target executor.
 The CLI sends it unchanged, including Windows drive/UNC paths; it does not expand
-`~`, normalize remote paths, or check them against the CLI machine's filesystem.
+`~`, normalize remote paths, or check them against the CLI's own filesystem.
 The target validates its own filesystem boundary. Same-origin starts retain local
 directory validation and canonicalization, including when `--executor` is explicit.
 
 `resume`, `resume-async`, `fork`, and all other existing-chat commands retain the
 chat's saved executor and reject `--executor`. Target selection does not move chats.
+
+## Scheduled Prompts
+
+`schedule` manages the same controller-owned definitions as **Scheduled prompts**
+in the browser. It works through direct controller HTTP and authorized executor
+gateways, without the executor-management grant.
+
+```sh
+garcon-cli schedule list --json
+garcon-cli schedule show <schedule-id> --json
+garcon-cli schedule history [schedule-id] --limit 50 --json
+garcon-cli schedule create --definition - --json < definition.json
+garcon-cli schedule update <schedule-id> --definition - --expected-revision 7 --json < definition.json
+garcon-cli schedule disable <schedule-id> --expected-revision 8 --json
+garcon-cli schedule enable <schedule-id> --expected-revision 9 --json
+garcon-cli schedule delete <schedule-id> --expected-revision 10 --json
+```
+
+IDs are exact schedule UUIDs, not names or chat IDs. Read the collection revision
+from `list` or `show`; update, enable, disable, and delete require it explicitly.
+Creation accepts an optional `--expected-revision` and otherwise reads one
+baseline before submitting once. Revision zero is valid. Firings, missed-run
+reconciliation, and unrelated edits also advance the collection revision, so a
+conflict requires a fresh read and a deliberate new decision, not automatic
+rebasing. Even a read can reconcile missed occurrences.
+
+`--definition` accepts inline JSON or `-` for stdin on the CLI host. Prefer stdin
+for private prompt text. Both inputs are limited to 256 KiB of valid UTF-8 JSON;
+the encoded mutation request is limited to 512 KiB. Unknown fields are rejected.
+Definition fields are `name` (optional), `schedule`, `target`, and `prompt`.
+Stored-record fields such as `id`, `enabled`, `nextRunAt`, and `createdAt` cannot
+be supplied. Definitions are not snapshots: update replaces one definition,
+preserving its ID, creation time, and paused state, not the whole collection.
+
+An existing-chat definition (replace the sample chat ID):
+
+```json
+{
+  "name": "Daily status",
+  "schedule": {
+    "type": "recurring",
+    "firstRunAtUtc": "2099-01-01T09:00:00.000Z",
+    "intervalMinutes": 1440,
+    "endAtUtc": null
+  },
+  "target": {
+    "type": "existing-chat",
+    "chatId": "1000000000000001",
+    "busyBehavior": "skip"
+  },
+  "prompt": "Report the current status."
+}
+```
+
+An existing-chat target uses that chat's executor and current confirmed cwd,
+never the CLI origin. `busyBehavior` is required: `queue` admits ordinary
+process-local queued input; `skip` drops a busy occurrence. Literal/Shell targets
+capture agent, ownership epoch, and model. Same-chat edits preserve that guard;
+recreate intentionally after a mode change. Literal whitespace and slash-leading
+text are preserved, and scheduled input never invokes composer app commands.
+
+A one-off new Shell Notes chat (replace the project path):
+
+```json
+{
+  "schedule": { "type": "once", "runAtUtc": "2099-01-01T09:00:00.000Z" },
+  "target": {
+    "type": "new-chat",
+    "executorId": "local",
+    "agentId": "shell",
+    "projectPath": "/absolute/project/path",
+    "model": "notes",
+    "apiProviderId": null,
+    "modelEndpointId": null,
+    "modelProtocol": null,
+    "permissionMode": "default",
+    "thinkingMode": "none",
+    "agentSettingsById": {
+      "shell": { "ownerId": "shell", "schemaVersion": 1, "values": {} }
+    },
+    "tags": [],
+    "preambleChoice": { "mode": "defaults" },
+    "chatTitleTemplate": "Scheduled note {{current_date}}"
+  },
+  "prompt": "Synthetic scheduled note"
+}
+```
+
+New-chat targets require an explicit `executorId`, either `local` or an executor
+UUID, even through that executor's own gateway. No execution defaults are
+inferred. Discover exact provider/agent/model/settings values before constructing
+other targets. `projectPath` must be absolute on the target host, including when
+targeting another executor. Paths are sent unchanged: no local `realpath`, `~`
+expansion, or controller-side interpretation of a worker path. The target must
+be ready when creating or updating a new-chat definition so the controller can
+validate execution modes, project existence, and preamble scope. Reads, enable,
+disable, and delete do not need a ready target; a disconnected gateway origin
+still cannot access the controller and never falls back to Local.
+
+Times must be canonical, minute-aligned UTC strings ending in `:00.000Z`, with
+the first run at least the controller's next minute. Recurrence intervals are
+whole minutes from 1 through 5,256,000 (3,650 days); `endAtUtc` is inclusive or
+null. Updates require a complete future schedule, including for overdue paused
+tasks. No relative dates, cron expressions, or timezone rules are accepted.
+New definitions start enabled. Pausing/deleting affects future occurrences, not
+already claimed, running, or queued work. Missed occurrences and failed
+dispatches are not retried. Definitions persist; queued inputs do not.
+
+JSON output is one object on stdout, with diagnostics on stderr. List returns
+`{revision, prompts}`; show/create/update/enable/disable return
+`{revision, scheduledPrompt}`; delete returns `{revision, id, deleted:true}`.
+Human list output is a table; detailed records use JSON even without `--json`.
+Returned new-chat records omit `executorId` for Local; a replacement definition
+must still state `"executorId":"local"` explicitly.
+History returns `{revision, retention:"controller-process", capacity:200, runLog}`,
+newest first. `--limit` defaults to 50 and accepts 1 through 200. The log retains
+only the latest 200 workspace-wide dispatch outcomes, cleared on controller
+restart. It is not agent-completion history. Filtering by a deleted schedule ID
+is valid; one-offs disappear after firing or being missed.
+
+Mutations are submitted once. A lost/malformed/oversized reply or interruption
+after submission can mean the mutation committed. Inspect schedules before
+retrying; a fresh revision is not a deduplication key. Exit codes are 0 for
+confirmed success, 2 for invalid CLI input, 3 for domain/transport/conflict or
+unknown outcome, and 130 for interruption.
+
+The existing API returns a full snapshot even for mutations. Large catalogs can
+exceed the gateway's 8 MiB reply limit: reads fail, and mutation outcomes become
+unknown. Client-side history limits do not reduce the wire payload. No run-now,
+reorder, attachments, snippet expansion, or durable history is provided. In-band
+`<garcon-schedule>` remains a separate current-chat creation interface over the
+same scheduler; CLI management does not add an action wrapper to prompt text.
 
 ## Tickets
 
@@ -576,9 +708,34 @@ index phase, chat coverage, queued and active indexing work, backlog and resync
 progress, the last error code, and query admission/execution/total latency
 statistics. JSON status is the validated server status document.
 
-Search is lexical. Quoted phrases require adjacent words in one indexed entry.
-Unquoted terms are ANDed at chat scope and can occur in different messages;
-terms of at least three code points use prefix matching. The plain result shows
+Search is lexical for ordinary words. Quoted word phrases require adjacent words
+in one indexed entry. Terms containing punctuation, such as `#731`, `ABC-123`,
+`file_name`, or `/workspace/src/index.ts`, instead match their literal spelling,
+case-insensitively, with punctuation preserved and no word-prefix expansion.
+Identifier word edges are exact: `#731` does not match `731` or `#7310`.
+Quoting an identifier preserves the same literal behavior; quoted phrases with
+punctuation preserve that punctuation too. Whitespace is normalized to spaces.
+Prose punctuation is significant too: `TypeError:` requires the colon, and
+straight and curly apostrophes are distinct. Literal spelling does not fold
+accents or composed/decomposed Unicode forms.
+Case-insensitive matching retains the index's existing Unicode tokenizer and
+case-folding limits; some newer Unicode case pairs are not equivalent in the index.
+Its tokenizer also treats some newer symbols and private-use glyphs as word
+characters. An identifier directly followed by one of those characters may not
+be found on its own, even when that character looks like punctuation or an emoji.
+Literal queries retain exact FTS candidates rather than broad prefix candidates.
+There is no wildcard syntax: `*` is literal punctuation. Prefix matches are
+displayed as `prefix("word")`, not as query syntax. Use double quotes for phrases
+containing apostrophes; single quotes delimit phrases and cannot enclose an
+apostrophe.
+Whitespace outside quotes separates terms, including Unicode whitespace.
+An opening quote directly after `:` stays in the same term, as in `key:"value"`.
+Other double quotes start a separate phrase, and a closing quote ends its term:
+`class="banner"` and `"type":"tool_use"` therefore compile to separate terms.
+Enclose a whole fragment in single quotes, such as `'class="banner"'` or
+`'"type":"tool_use"'`, to require its literal spelling within one entry.
+Terms are ANDed at chat scope and can occur in different messages; ordinary
+unquoted words of at least three code points use prefix matching. The plain result shows
 the interpreted query, labels chat activity separately from snippet timestamps,
 and prints an exact follow-up `read` command carrying the resolved workspace,
 config directory, optional server assertion, and any category includes needed to
@@ -601,8 +758,10 @@ includes up to 20 typed chat details with the affected chat ID, failure stage,
 error code, indexed frontier where available, and recovery classification; an
 omitted count preserves the total when more failures exist. Likewise,
 `resultsTruncated` means index row sampling can make matches and `page.total`
-incomplete; narrow the metadata filter or quote a phrase before drawing a
-negative conclusion. Tool inputs and results are indexed with size bounds, so a
+incomplete; narrow the metadata filter or include nearby words in a quoted phrase
+before drawing a negative conclusion. Literal verification uses the same bounded FTS candidate
+sample, so punctuation-only differences do not bypass the sampling ceiling.
+Tool inputs and results are indexed with size bounds, so a
 missing path match is not proof that the path was never used.
 If a transcript view changes after the index page is selected, the response
 reports how many stale hits were removed. The CLI warns for any positive count,

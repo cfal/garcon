@@ -1,5 +1,7 @@
 <script lang="ts">
 	import MessagesSquare from '@lucide/svelte/icons/messages-square';
+	import GitPullRequestArrow from '@lucide/svelte/icons/git-pull-request-arrow';
+	import type { Component } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import {
 		DropdownMenu,
@@ -50,19 +52,37 @@
 		readonly onclick: () => void;
 	}
 	type TerminalAddAction = { readonly id: 'new-terminal'; readonly kind: 'terminal' };
-	type WorkspaceWindowAddAction =
-		| WorkspaceWindowAddCommand
-		| TerminalAddAction
-		| {
-				readonly id: 'chat-views';
-				readonly kind: 'chat-views';
-				readonly label: string;
-		  };
-	const CHAT_VIEW_KINDS: readonly PortableSingletonKind[] = [
-		'chat-map',
-		'chat-canvas',
-		'chat-board',
+	type ViewGroupId = 'chat-views' | 'github-views';
+	interface ViewGroup {
+		readonly id: ViewGroupId;
+		readonly kinds: readonly PortableSingletonKind[];
+		readonly label: () => string;
+		readonly icon: Component<{ size?: number }>;
+	}
+	interface ViewGroupAction {
+		readonly id: ViewGroupId;
+		readonly kind: 'view-group';
+		readonly label: string;
+		readonly icon: Component<{ size?: number }>;
+		readonly actions: readonly WorkspaceWindowAddCommand[];
+	}
+	type WorkspaceWindowAddAction = WorkspaceWindowAddCommand | TerminalAddAction | ViewGroupAction;
+	// Views of one family share a single titlebar control that opens a menu of them.
+	const VIEW_GROUPS: readonly ViewGroup[] = [
+		{
+			id: 'chat-views',
+			kinds: ['chat-map', 'chat-canvas', 'chat-board'],
+			label: m.workspace_chat_views,
+			icon: MessagesSquare,
+		},
+		{
+			id: 'github-views',
+			kinds: ['pull-requests'],
+			label: m.workspace_github_views,
+			icon: GitPullRequestArrow,
+		},
 	];
+	const GROUPED_KINDS = new Set(VIEW_GROUPS.flatMap((group) => group.kinds));
 
 	const ADD_ACTION_CONTROL_CLASS =
 		'flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:pointer-events-none aria-disabled:opacity-50 disabled:pointer-events-none disabled:opacity-50';
@@ -93,16 +113,22 @@
 		'chat-board': m.workspace_surface_chat_board,
 		tickets: m.tickets_title,
 	};
-	const chatViewActions = $derived(
-		availableSingletonKinds.filter((kind) => CHAT_VIEW_KINDS.includes(kind)).map(singletonAction),
+	const groupActions = $derived(
+		VIEW_GROUPS.map(
+			(group): ViewGroupAction => ({
+				id: group.id,
+				kind: 'view-group',
+				label: group.label(),
+				icon: group.icon,
+				actions: availableSingletonKinds
+					.filter((kind) => group.kinds.includes(kind))
+					.map(singletonAction),
+			}),
+		).filter((group) => group.actions.length > 0),
 	);
 	const eligibleActions = $derived.by((): readonly WorkspaceWindowAddAction[] => [
-		...availableSingletonKinds
-			.filter((kind) => !CHAT_VIEW_KINDS.includes(kind))
-			.map(singletonAction),
-		...(chatViewActions.length > 0
-			? [{ id: 'chat-views', kind: 'chat-views', label: m.workspace_chat_views() } as const]
-			: []),
+		...availableSingletonKinds.filter((kind) => !GROUPED_KINDS.has(kind)).map(singletonAction),
+		...groupActions,
 		{ id: 'new-terminal', kind: 'terminal' },
 	]);
 	const hasUnplacedTerminalSessions = $derived(unplacedTerminalSessions.length > 0);
@@ -196,9 +222,9 @@
 	{/if}
 {/snippet}
 
-{#snippet chatViewMenuItems()}
-	{#each chatViewActions as action (action.id)}
-		{@render addActionMenuItem(action, 'chat-views')}
+{#snippet viewGroupMenuItems(group: ViewGroupAction)}
+	{#each group.actions as action (action.id)}
+		{@render addActionMenuItem(action, group.id)}
 	{/each}
 {/snippet}
 
@@ -220,7 +246,7 @@
 	data-workspace-window-add-controls={windowId}
 >
 	{#each inlineActions as action (action.id)}
-		{#if action.kind === 'chat-views'}
+		{#if action.kind === 'view-group'}
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					class={ADD_ACTION_CONTROL_CLASS}
@@ -229,18 +255,18 @@
 					title={action.label}
 					data-workspace-window-add-action={action.id}
 					data-workspace-window-add-inline={action.id}
-					data-workspace-window-add-chat-views-trigger={windowId}
+					data-workspace-window-add-group-trigger={action.id}
 				>
-					<MessagesSquare size={titlebarMetrics.iconSizePx} />
+					<action.icon size={titlebarMetrics.iconSizePx} />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent
 					align="end"
 					class="w-64"
 					data-workspace-window-add-menu={windowId}
-					data-workspace-window-chat-views-menu={windowId}
+					data-workspace-window-group-menu={action.id}
 					onCloseAutoFocus={(event) => menuState.handleCloseAutoFocus(event)}
 				>
-					{@render chatViewMenuItems()}
+					{@render viewGroupMenuItems(action)}
 				</DropdownMenuContent>
 			</DropdownMenu>
 		{:else if action.kind === 'terminal' && hasUnplacedTerminalSessions}
@@ -312,18 +338,18 @@
 				onCloseAutoFocus={(event) => menuState.handleCloseAutoFocus(event)}
 			>
 				{#each menuActions as action (action.id)}
-					{#if action.kind === 'chat-views'}
+					{#if action.kind === 'view-group'}
 						<DropdownMenuSub>
 							<DropdownMenuSubTrigger data-workspace-window-add-action={action.id}>
-								<MessagesSquare />
+								<action.icon />
 								{action.label}
 							</DropdownMenuSubTrigger>
 							<DropdownMenuSubContent
 								class="w-64"
 								data-workspace-window-add-menu={windowId}
-								data-workspace-window-chat-views-menu={windowId}
+								data-workspace-window-group-menu={action.id}
 							>
-								{@render chatViewMenuItems()}
+								{@render viewGroupMenuItems(action)}
 							</DropdownMenuSubContent>
 						</DropdownMenuSub>
 					{:else}

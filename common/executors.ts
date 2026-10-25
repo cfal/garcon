@@ -51,7 +51,7 @@ export interface ExecutorSnapshot {
   readonly instanceId: string | null;
   readonly projectBasePath: string | null;
   readonly lastError: { readonly code: string; readonly message: string } | null;
-  readonly machineServices: {
+  readonly executorServices: {
     readonly files: boolean;
     readonly git: boolean;
     readonly gh: boolean;
@@ -150,7 +150,7 @@ export function parseUpdateExecutorRequest(value: unknown): UpdateExecutorReques
 }
 
 export function parseExecutorSnapshot(value: unknown): ExecutorSnapshot | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'label', 'kind', 'enabled', 'direction', 'availability', 'bulk', 'instanceId', 'projectBasePath', 'lastError', 'machineServices', 'allowControllerCli', 'allowExecutorManagement'])
+  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'label', 'kind', 'enabled', 'direction', 'availability', 'bulk', 'instanceId', 'projectBasePath', 'lastError', 'executorServices', 'allowControllerCli', 'allowExecutorManagement'])
     || typeof value.allowExecutorManagement !== 'boolean'
     || typeof value.allowControllerCli !== 'boolean'
     || !isExecutorId(value.id) || !isLabel(value.label) || typeof value.enabled !== 'boolean'
@@ -160,7 +160,7 @@ export function parseExecutorSnapshot(value: unknown): ExecutorSnapshot | null {
   if (value.id === LOCAL_EXECUTOR_ID
     ? value.kind !== 'local' || value.direction !== null || !value.enabled
     : value.kind !== 'remote' || (value.direction !== 'executor-connects' && value.direction !== 'controller-connects')) return null;
-  const services = value.machineServices;
+  const services = value.executorServices;
   if (!isRecord(services) || !hasOnlyKeys(services, ['files', 'git', 'gh', 'terminals', 'directoryCreation'])
     || typeof services.files !== 'boolean' || typeof services.git !== 'boolean' || typeof services.gh !== 'boolean' || typeof services.terminals !== 'boolean'
     || typeof services.directoryCreation !== 'boolean') return null;

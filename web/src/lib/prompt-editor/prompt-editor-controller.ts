@@ -116,7 +116,7 @@ export class PromptEditorController {
 					},
 					'& > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground':
 						{
-							backgroundColor: 'hsl(var(--accent))',
+							backgroundColor: 'var(--editor-selection-background)',
 						},
 					'@media (pointer: fine)': {
 						'.cm-scroller': { fontSize: '14px' },

@@ -97,10 +97,10 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       const controllerBase = fixture.dirs.project;
       const route = (target: string, path: string) => `/api/v1/files/directories?${new URLSearchParams({ executorId: target, path })}`;
       const create = (target: string, path: string, name: unknown) => fixture.client.post<DirectoryEntry>(route(target, path), { name });
-      // The controller and worker run on this machine, so both detect what this process detects.
+      // The controller and worker share this host, so both detect what this process detects.
       const supported = descriptorPathsDirectory() !== null;
       const reported = await fixture.client.get<{ executors: ExecutorSnapshot[] }>('/api/v1/executors');
-      expect(reported.executors.map((executor) => executor.machineServices.directoryCreation)).toEqual([supported, supported]);
+      expect(reported.executors.map((executor) => executor.executorServices.directoryCreation)).toEqual([supported, supported]);
       if (!supported) {
         for (const [target, base] of [[executorId, workerBase], ['local', controllerBase]] as const) {
           expect(await rejectionOf(create(target, base, 'shared name'))).toMatchObject({ status: 501, body: { errorCode: 'OPERATION_UNSUPPORTED' } });
@@ -134,7 +134,7 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       expect(await readdir(controllerBase)).toEqual(['shared name']);
       const { executors } = await fixture.client.get<{ executors: ExecutorSnapshot[] }>('/api/v1/executors');
       expect(executors.find((executor) => executor.id === executorId)?.availability).toBe('ready');
-      expect(executors.map((executor) => executor.machineServices.directoryCreation)).toEqual([supported, supported]);
+      expect(executors.map((executor) => executor.executorServices.directoryCreation)).toEqual([supported, supported]);
     }, { executionBackend: backend, projectRoots: 'separate' });
   }, 60_000);
 }

@@ -110,6 +110,7 @@ import { ChatPreambleSelectionService } from './preambles/chat-selection-service
 import { createCarriedContext } from './chats/carryover/context.js';
 import { initializeChatBoardRuntime } from './chat-boards/setup.js';
 import { initializeTickets } from './tickets/setup.js';
+import { initializePullRequestReviews } from './pull-request-reviews/setup.js';
 import { createTicketProjectResolver } from './tickets/project-default.js';
 import {
   TranscriptAdoptionService,
@@ -333,7 +334,7 @@ export async function startServer(): Promise<void> {
     if (workspaceMigrations.initialVersion >= 5) {
       await finalizeCarryOverMigrationValidation(workspaceDir);
     }
-    const apiProviders = providerPolicy.service(() => [chatRegistry, agentOwnership, scheduledPromptStore, settings]);
+    const apiProviders = providerPolicy.service(() => [chatRegistry, agentOwnership, scheduledPromptStore, pullRequestReviews, settings]);
     const modelCatalogResponseCache = new ModelCatalogResponseCache();
     executors.onAvailabilityChanged((executorId) => modelCatalogResponseCache.clear(executorId));
     executors.onChanged(() => {
@@ -656,6 +657,26 @@ export async function startServer(): Promise<void> {
       preambles,
     });
 
+    const pullRequestReviews = initializePullRequestReviews(workspaceDir, {
+      executors,
+      agents: agentRegistry,
+      chats: chatRegistry,
+      commands: chatCommands,
+      chatIds,
+      turns: commandLedger,
+      chatNames: settings,
+      retainExecutorReferences,
+      retainProviderReferences,
+      archiveChat: (chatId) => chatMutationLock.runExclusive(`chat:${chatId}`, async () => {
+        if (!settings.isArchived(chatId)) await settings.setArchived(chatId, true, (id) => chatRegistry.hasChat(id));
+      }),
+      onInvalidated: (revision) => eventWiring?.broadcastPullRequestReviewsInvalidated(revision),
+    });
+    agentRegistry.onTranscriptCommitted((event) => {
+      try { pullRequestReviews.service.handleTranscriptCommit(event); }
+      catch { /* Reviews are unavailable while their storage is. */ }
+    });
+
     agentCommands.initialize({
       resolveProject: resolveTicketProject,
       registry: chatRegistry,
@@ -715,9 +736,13 @@ export async function startServer(): Promise<void> {
         snippets,
         preambles,
         chatBoards: chatBoardRuntime.chatBoards,
+        pullRequestReviews,
         searchIndex: chatSearch,
       }),
-      startScheduledPrompts: () => scheduledPrompts.start(),
+      startDispatchers: async () => {
+        await scheduledPrompts.start();
+        pullRequestReviews.start();
+      },
     });
     unsubscribeSearchStatus = chatSearch.onStatusChanged((status) => {
       eventWiring?.broadcastTranscriptSearchStatus(status);
@@ -762,6 +787,7 @@ export async function startServer(): Promise<void> {
       modelCatalogResponseCache,
       lastSelectedChat,
       scheduledPrompts,
+      pullRequestReviews,
       snippets,
       preambles,
       chatPreambleSelection,
@@ -886,6 +912,7 @@ export async function startServer(): Promise<void> {
         () => handoffs.shutdown(),
         () => transcriptReader.close(),
         () => scheduledPrompts.stop(),
+        () => pullRequestReviews.stop(),
       ]) {
         try { prepare(); } catch (error) { reportCleanupError(error); }
       }
@@ -938,6 +965,7 @@ export async function startServer(): Promise<void> {
           () => executionSockets.close(),
           () => server.stop(true),
           () => tickets.close(),
+          () => pullRequestReviews.close(),
           () => removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId),
           () => workspaceLease?.release(),
         ]);

@@ -66,10 +66,10 @@ describe('ExecutorEditor', () => {
 
 	it('creates an inbound executor and keeps its connection URL only in editor state', async () => {
 		const { editor, executors, transport } = fixture();
-		editor.label = ' Build Machine ';
+		editor.label = ' Build Executor ';
 		expect(await editor.save()).toBe(true);
 		expect(transport.createExecutor).toHaveBeenCalledWith({
-			label: 'Build Machine', direction: 'executor-connects', noTls: false, allowUnverifiedTls: false,
+			label: 'Build Executor', direction: 'executor-connects', noTls: false, allowUnverifiedTls: false,
 			allowControllerCli: false, allowExecutorManagement: false,
 		});
 		expect(editor.id).toBe(remoteExecutor.id);

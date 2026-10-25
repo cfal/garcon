@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
+import { loadComposerMarkdownEditor } from '../../composer/composer-markdown-editor-loader.js';
 import NewChatFormTestHost from './NewChatFormTestHost.svelte';
 import * as settingsApi from '$lib/api/settings';
 import * as gitApi from '$lib/api/git';
@@ -11,7 +13,14 @@ import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles';
 import { parseChatId } from '$shared/chat-id';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
 import type { PreamblesSnapshot } from '$shared/preambles';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
+import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
+
+vi.mock('../../composer/composer-markdown-editor-loader.js', () => ({
+	loadComposerMarkdownEditor: vi.fn(() => new Promise(() => {})),
+}));
 
 const PROSPECTIVE_CHAT_ID = parseChatId('1787471053739199');
 const RESEEDED_CHAT_ID = parseChatId('1787471053739200');
@@ -202,6 +211,24 @@ function previewResponse(
 }
 
 describe('NewChatForm', () => {
+	it('connects the formatted New Chat input to the shared Markdown editor', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());
+		render(NewChatFormTestHost, { composerInputMode: 'formatted' });
+		await waitFor(() => expect(loadComposerMarkdownEditor).toHaveBeenCalled());
+	});
+
+	it.each([
+		['source', 'conversation'],
+		['formatted', 'literal'],
+	] as const)('keeps %s / %s input in the source editor', async (composerInputMode, executionPolicy) => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());
+		render(NewChatFormTestHost, { composerInputMode, executionPolicy });
+		await waitFor(() => expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull());
+		expect(loadComposerMarkdownEditor).not.toHaveBeenCalled();
+	});
+
 	it('retains cached selection and text while catalog failure blocks click and Enter until retry', async () => {
 		stubMatchMedia(false);
 		const chatsApi = await import('$lib/api/chats');
@@ -237,6 +264,7 @@ describe('NewChatForm', () => {
 	});
 
 	afterEach(() => {
+		localStorage.clear();
 		vi.unstubAllGlobals();
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		vi.mocked(clientChatId.createClientChatId).mockReset();
@@ -1589,7 +1617,7 @@ describe('NewChatForm', () => {
 		const attachment = new File(['image'], 'pasted.png', { type: 'image/png' });
 		await fireEvent.paste(messageInput, {
 			clipboardData: {
-				items: [{ type: 'image/png', getAsFile: () => attachment }],
+				items: [{ kind: 'file', type: 'image/png', getAsFile: () => attachment }],
 			},
 		});
 
@@ -1631,7 +1659,7 @@ describe('NewChatForm', () => {
 		const attachment = new File(['image'], 'unsupported.png', { type: 'image/png' });
 		await fireEvent.paste(messageInput, {
 			clipboardData: {
-				items: [{ type: 'image/png', getAsFile: () => attachment }],
+				items: [{ kind: 'file', type: 'image/png', getAsFile: () => attachment }],
 			},
 		});
 
@@ -1687,5 +1715,233 @@ describe('NewChatForm', () => {
 		await pending.promise;
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(messageInput.value).toBe('/snippet review cancel this');
+	});
+});
+
+
+describe('New Chat executor pin scope', () => {
+	it.each([
+		{ mobile: false, explicitFocus: false },
+		{ mobile: false, explicitFocus: true },
+		{ mobile: true, explicitFocus: false },
+		{ mobile: true, explicitFocus: true },
+	])('yields opening autofocus to focus inside the picker (mobile=$mobile, explicitFocus=$explicitFocus)', async ({ mobile, explicitFocus }) => {
+		stubMatchMedia(mobile);
+		const frames = new Map<number, FrameRequestCallback>();
+		let frameId = 0;
+		async function flushFrames(): Promise<void> {
+			for (let round = 0; round < 5; round++) {
+				await tick();
+				const pending = [...frames.values()];
+				frames.clear();
+				for (const callback of pending) callback(performance.now());
+			}
+		}
+		try {
+			const chatsApi = await import('$lib/api/chats');
+			vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+			vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+				makeSnapshot({
+					paths: {
+						recentProjectPaths: ['/same'],
+						pinnedProjectPaths: ['/same'],
+						byExecutor: {
+							[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/first', '/same'] },
+						},
+					},
+				}),
+			);
+			render(NewChatFormTestHost, { props: { executorSnapshots: [localExecutor, remoteExecutor] } });
+			const toggle = await screen.findByRole('button', { name: 'Other executors…' });
+			await waitFor(() => expect(document.activeElement).toBe(screen.getByPlaceholderText('How can I help you today?')));
+			vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+				frames.set(++frameId, callback);
+				return frameId;
+			});
+			vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+			toggle.focus();
+			await fireEvent.click(toggle);
+			const intendedPin = screen.getByRole('button', { name: 'Worker: /same' });
+			if (explicitFocus) {
+				intendedPin.focus();
+				expect(document.activeElement).toBe(intendedPin);
+			}
+			await flushFrames();
+			if (explicitFocus) {
+				expect(document.activeElement).toBe(intendedPin);
+				await fireEvent.click(intendedPin);
+				expect(screen.getByRole('button', { name: '/same' }).getAttribute('aria-pressed')).toBe('true');
+				await waitFor(() => expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/same', { executorId: remoteExecutor.id }));
+			} else if (mobile) {
+				expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close' }));
+			} else {
+				expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Worker: /first' }));
+			}
+		} finally {
+			try {
+				cleanup();
+				await flushFrames();
+			} finally {
+				vi.unstubAllGlobals();
+			}
+		}
+	});
+
+	it('keeps the current compact view and selects both owner and path from all executors', async () => {
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({
+				paths: {
+					recentProjectPaths: ['/same'],
+					pinnedProjectPaths: ['/same'],
+					byExecutor: {
+						[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/same', '/worker/pin'] },
+					},
+				},
+			}),
+		);
+		render(NewChatFormTestHost, { props: { executorSnapshots: [localExecutor, remoteExecutor] } });
+		const toggle = await screen.findByRole('button', { name: 'Other executors…' });
+		expect(toggle.getAttribute('aria-expanded')).toBe('false');
+		expect(screen.queryByRole('button', { name: 'Worker: /worker/pin' })).toBeNull();
+		await screen.findByRole('button', { name: '/same' });
+		const prompt = screen.getByPlaceholderText('How can I help you today?') as HTMLTextAreaElement;
+		await fireEvent.input(prompt, { target: { value: 'Synthetic retained draft' } });
+		await fireEvent.click(toggle);
+		expect(screen.queryByRole('button', { name: 'Local: /same' })).toBeNull();
+		const remotePin = screen.getByRole('button', { name: 'Worker: /same' });
+		expect(remotePin.getAttribute('aria-pressed')).toBe('false');
+		await fireEvent.click(remotePin);
+		await waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('false'));
+		expect(screen.queryByRole('button', { name: 'Worker: /same' })).toBeNull();
+		expect(screen.getByRole('button', { name: '/same' }).getAttribute('aria-pressed')).toBe('true');
+		expect(prompt.value).toBe('Synthetic retained draft');
+		await waitFor(() =>
+			expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/same', {
+				executorId: remoteExecutor.id,
+			}),
+		);
+		expect(screen.queryByRole('button', { name: 'Local: /same' })).toBeNull();
+		expect(screen.getByRole('button', { name: '/worker/pin' })).toBeTruthy();
+	});
+
+	it('updates live pins and disables offline, disabled and removed owners without selecting Local', async () => {
+		const snapshot = makeSnapshot({
+			paths: {
+				pinnedProjectPaths: ['/local'],
+				byExecutor: {
+					[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/pin'] },
+					'33333333-3333-4333-8333-333333333333': { recentPaths: [], pinnedPaths: ['/removed'] },
+				},
+			},
+		});
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(snapshot);
+		let executors!: ExecutorsStore;
+		let settings!: RemoteSettingsStore;
+		render(NewChatFormTestHost, {
+			props: {
+				executorSnapshots: [localExecutor, { ...remoteExecutor, availability: 'offline' }],
+				onExecutors: (store) => {
+					executors = store;
+				},
+				onRemoteSettings: (store) => {
+					settings = store;
+				},
+			},
+		});
+		await fireEvent.click(await screen.findByRole('button', { name: 'Other executors…' }));
+		const pin = screen.getByRole('button', { name: 'Worker: /worker/pin' }) as HTMLButtonElement;
+		expect(pin.disabled).toBe(true);
+		expect(document.getElementById(pin.getAttribute('aria-describedby')!)?.textContent).toBe(
+			'Waiting for connection',
+		);
+		expect(
+			(
+				screen.getByRole('button', {
+					name: '33333333-3333-4333-8333-333333333333: /removed',
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(true);
+		executors.applySnapshot([localExecutor, remoteExecutor]);
+		await waitFor(() => expect(pin.disabled).toBe(false));
+		executors.applySnapshot([localExecutor, { ...remoteExecutor, enabled: false }]);
+		await waitFor(() => expect(pin.disabled).toBe(true));
+		settings.applySnapshot({
+			...snapshot,
+			paths: { ...snapshot.paths, pinnedProjectPaths: ['/updated'] },
+		});
+		await screen.findByRole('button', { name: '/updated' });
+		expect(screen.queryByRole('button', { name: '/local' })).toBeNull();
+		executors.applySnapshot([localExecutor]);
+		await screen.findByRole('button', { name: remoteExecutor.id + ': /worker/pin' });
+	});
+
+	it('retains the picker trigger after selecting the only executor with pins', async () => {
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({
+				paths: {
+					byExecutor: { [remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/pin'] } },
+				},
+			}),
+		);
+		render(NewChatFormTestHost, { props: { executorSnapshots: [localExecutor, remoteExecutor] } });
+		const toggle = await screen.findByRole('button', { name: 'Other executors…' });
+		toggle.focus();
+		await fireEvent.click(toggle);
+		const pin = screen.getByRole('button', { name: 'Worker: /worker/pin' });
+		pin.focus();
+		await fireEvent.click(pin);
+		toggle.focus();
+		expect(toggle.isConnected).toBe(true);
+		expect(document.activeElement).toBe(toggle);
+		expect(toggle.getAttribute('aria-expanded')).toBe('false');
+		const path = screen.getByLabelText('Project Path');
+		path.focus();
+		await waitFor(() =>
+			expect(screen.queryByRole('button', { name: 'Other executors…' })).toBe(toggle),
+		);
+		expect(document.activeElement).toBe(path);
+	});
+
+	it('retains the focused picker trigger when a live update removes the final other pin', async () => {
+		const snapshot = makeSnapshot({
+			paths: {
+				pinnedProjectPaths: ['/local'],
+				byExecutor: { [remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/pin'] } },
+			},
+		});
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(snapshot);
+		let settings!: RemoteSettingsStore;
+		render(NewChatFormTestHost, {
+			props: {
+				executorSnapshots: [localExecutor, remoteExecutor],
+				onRemoteSettings: (store) => {
+					settings = store;
+				},
+			},
+		});
+		const toggle = await screen.findByRole('button', { name: 'Other executors…' });
+		toggle.focus();
+		settings.applySnapshot({ ...snapshot, paths: { ...snapshot.paths, byExecutor: {} } });
+		await waitFor(() =>
+			expect(screen.queryByRole('button', { name: 'Other executors…' })).toBe(toggle),
+		);
+		expect(document.activeElement).toBe(toggle);
+		const path = screen.getByLabelText('Project Path');
+		path.focus();
+		await waitFor(() =>
+			expect(screen.queryByRole('button', { name: 'Other executors…' })).toBe(toggle),
+		);
+		expect(document.activeElement).toBe(path);
+	});
+
+	it('adds no picker trigger for a workspace with only local pins', async () => {
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { pinnedProjectPaths: ['/local'] } }),
+		);
+		render(NewChatFormTestHost);
+		await screen.findByRole('button', { name: '/local' });
+		expect(screen.queryByRole('button', { name: 'Other executors…' })).toBeNull();
 	});
 });

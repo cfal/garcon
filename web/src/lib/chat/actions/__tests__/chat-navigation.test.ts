@@ -10,6 +10,6 @@ describe('gotoChat', () => {
 	it('preserves focus during chat route navigation', () => {
 		void gotoChat('chat-123');
 
-		expect(goto).toHaveBeenCalledWith('/chat/chat-123', { keepFocus: true });
+		expect(goto).toHaveBeenCalledWith('/chat/chat-123', { reset: false });
 	});
 });

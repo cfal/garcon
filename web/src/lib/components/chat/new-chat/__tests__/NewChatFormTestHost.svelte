@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
-	setExecutorsTestContext();
+	import type { ExecutorSnapshot } from '$shared/executors';
+	import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
+	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import NewChatForm from '../NewChatForm.svelte';
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 	import {
 		setAppShell,
+		setNewChatPromptDrafts,
 		setModelCatalog,
 		setLocalSettings,
 		setRemoteSettings,
@@ -15,6 +18,7 @@
 		setTransientLayers,
 	} from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
 	import type { PreamblesSnapshot } from '$shared/preambles';
 	import type { ChatId } from '$shared/chat-id';
@@ -36,9 +40,16 @@
 		resolveModelSelection,
 	} from '../../../../../test/model-catalog';
 	import { untrack } from 'svelte';
-	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '$shared/attachments';
+	import {
+		ANY_FILE_ATTACHMENT_MIME_TYPE,
+		type FileAttachmentMimeTypes,
+	} from '$shared/attachments';
 
 	interface Props {
+		composerInputMode?: 'source' | 'formatted';
+		executorSnapshots?: readonly ExecutorSnapshot[];
+		onExecutors?: (store: ExecutorsStore) => void;
+		onRemoteSettings?: (store: RemoteSettingsStore) => void;
 		executionPolicy?: 'conversation' | 'literal';
 		allowDirectChats?: boolean;
 		catalogVersion?: number;
@@ -48,7 +59,7 @@
 		endpointBackedDirectModel?: boolean;
 		modelsAvailable?: boolean;
 		supportsImages?: boolean;
-		fileAttachmentMimeTypes?: readonly string[];
+		fileAttachmentMimeTypes?: FileAttachmentMimeTypes;
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
@@ -59,7 +70,11 @@
 	}
 
 	let {
+		executorSnapshots,
+		onExecutors,
+		onRemoteSettings,
 		executionPolicy = 'conversation',
+		composerInputMode = 'source',
 		allowDirectChats = false,
 		catalogVersion = 0,
 		catalogValidated = true,
@@ -68,7 +83,7 @@
 		endpointBackedDirectModel = false,
 		modelsAvailable = true,
 		supportsImages = true,
-		fileAttachmentMimeTypes = CHAT_FILE_ATTACHMENT_MIME_TYPES,
+		fileAttachmentMimeTypes = ANY_FILE_ATTACHMENT_MIME_TYPE,
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',
@@ -82,6 +97,7 @@
 
 	setLocalSettings({
 		sendByShiftEnter: false,
+		get composerInputMode() { return composerInputMode; },
 		showQuickCommitTray: true,
 		get snippetTrigger() {
 			return snippetTrigger;
@@ -91,7 +107,11 @@
 		},
 	} as never);
 
-	setRemoteSettings(createRemoteSettingsStore());
+	const executors = setExecutorsTestContext(untrack(() => executorSnapshots));
+	untrack(() => onExecutors?.(executors));
+	const remoteSettings = createRemoteSettingsStore();
+	setRemoteSettings(remoteSettings);
+	untrack(() => onRemoteSettings?.(remoteSettings));
 
 	setChatSessions({
 		orderedChats: [],
@@ -117,6 +137,7 @@
 		},
 	} as never;
 	setAppShell(appShell);
+	setNewChatPromptDrafts(new NewChatPromptDraftStore());
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
 
@@ -211,6 +232,7 @@
 		getAgent(agentId: string) {
 			return {
 				executionPolicy,
+				inputFormatByModel: {},
 				id: agentId,
 				label: agentLabelFor(agentId),
 				description: '',

@@ -22,6 +22,9 @@
 		type ResponsiveSurfaceAction,
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 	import TerminalSettingsMenu from './TerminalSettingsMenu.svelte';
+	import TerminalModifierButton from './TerminalModifierButton.svelte';
+	import { buttonVariants } from '$lib/components/ui/button';
+	import { cn } from '$lib/utils/cn.js';
 	import TerminalRenameDialog from './TerminalRenameDialog.svelte';
 	import TerminalCreateAction from './TerminalCreateAction.svelte';
 	import type {
@@ -391,25 +394,20 @@
 		></div>
 		{#if runtime && showInputControls}
 			<div class="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-border p-1">
-				<button
-					type="button"
-					class="h-8 rounded-md border border-border px-2 text-xs"
-					onpointerdown={(event) => event.preventDefault()}
-					onclick={() => toggleInputModifier('ctrl')}
-					aria-pressed={runtime.inputControls.ctrlMode !== 'inactive'}
-					>{m.terminal_key_control()}</button
-				>
-				<button
-					type="button"
-					class="h-8 rounded-md border border-border px-2 text-xs"
-					onpointerdown={(event) => event.preventDefault()}
-					onclick={() => toggleInputModifier('alt')}
-					aria-pressed={runtime.inputControls.altMode !== 'inactive'}>{m.terminal_key_alt()}</button
-				>
+				<TerminalModifierButton
+					label={m.terminal_key_control()}
+					mode={runtime.inputControls.ctrlMode}
+					onToggle={() => toggleInputModifier('ctrl')}
+				/>
+				<TerminalModifierButton
+					label={m.terminal_key_alt()}
+					mode={runtime.inputControls.altMode}
+					onToggle={() => toggleInputModifier('alt')}
+				/>
 				{#each toolbarKeys as item (item.key)}
 					<button
 						type="button"
-						class="h-8 min-w-8 rounded-md border border-border px-2 text-xs"
+						class={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'min-w-8 px-2 text-xs')}
 						onclick={() => sendToolbarKey(item.key)}
 						aria-label={item.label}>{item.label}</button
 					>

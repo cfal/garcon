@@ -8,6 +8,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		buildUnsupportedHTML,
 		defaultRenderers,
 		defaultSanitizeUrl,
+		type ParagraphSnippetProps,
 		type RendererComponent,
 		type Renderers,
 		type SanitizeUrlFn,
@@ -16,6 +17,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 	import { createChatReferenceMarkdownExtension } from '$lib/chat/transcript/chat-reference-markdown.js';
 	import MathRenderer from '$lib/components/rich-text/MathRenderer.svelte';
 	import { createLiteralHtmlMarkdownExtension } from '$lib/components/rich-text/markdown-html-policy';
+	import { createImageParagraphMarkdownExtension } from './markdown-image-paragraph';
 
 	interface MathRenderers extends Renderers {
 		inlineKatex: RendererComponent;
@@ -25,6 +27,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 	const baseMarkdownExtensions = [
 		markedKatex({ singleDollarInline: true }),
 		createLiteralHtmlMarkdownExtension(),
+		createImageParagraphMarkdownExtension(),
 	];
 	const bareChatIdMarkdownExtensions = [
 		...baseMarkdownExtensions,
@@ -47,6 +50,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 	import * as m from '$lib/paraglide/messages.js';
 	import SvelteMarkdown from '@humanspeak/svelte-markdown';
 	import MarkdownImage from './MarkdownImage.svelte';
+	import MarkdownLinkActions from './MarkdownLinkActions.svelte';
 	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 	import ChatReference from '$lib/components/chat/ChatReference.svelte';
@@ -172,6 +176,10 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		variant === 'user' || variant === 'presented' ? { breaks: true } : undefined,
 	);
 
+	function openImageFile(rawHref: string): void {
+		onLinkNavigate?.({ rawHref, kind: 'file' });
+	}
+
 	function stopParentContextTriggerGesture(event: PointerEvent | MouseEvent): void {
 		event.stopPropagation();
 	}
@@ -203,7 +211,13 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		{/snippet}
 
 		{#snippet image({ href, title, text })}
-			<MarkdownImage {href} {title} {text} {resolveImageFile} />
+			<MarkdownImage
+				{href}
+				{title}
+				{text}
+				{resolveImageFile}
+				onOpen={onLinkNavigate ? openImageFile : undefined}
+			/>
 		{/snippet}
 
 		{#snippet chatReference({ chatId }: { chatId: string })}
@@ -216,53 +230,55 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		{/snippet}
 
 		{#snippet link({ href, title, text, children })}
-			{@const chatId = chatReferencePolicy === 'disabled' ? null : parseChatReferenceHref(href)}
-			{#if chatId}
-				<ChatReference
-					{chatId}
-					resolution={resolveChatReference?.(chatId) ?? null}
-					authoredLabelText={text}
-					authoredTitle={title}
-					linkClass={styles.link}
-					idClass={styles.chatReferenceId}
-				>
-					{#snippet authoredLabel()}
-						{@render children?.()}
-					{/snippet}
-				</ChatReference>
-			{:else}
-				{@const parsed = parseFileLink(href, parserOptions)}
-				{@const isFile = parsed.kind === 'file'}
-				{@const isAbsPath = parsed.blockedReason !== undefined}
-				{@const isExternal = !isFile && !isAbsPath}
-				<a
-					{href}
-					{title}
-					class={styles.link}
-					target={isExternal ? '_blank' : undefined}
-					rel={isExternal ? 'noopener noreferrer' : undefined}
-					onpointerdowncapture={stopParentContextTriggerGesture}
-					oncontextmenu={stopParentContextTriggerGesture}
-					onclick={isFile || isAbsPath
-						? (event: MouseEvent) => {
-								event.preventDefault();
-								blockedLink = null;
-								if (isFile) {
-									onLinkNavigate?.({ rawHref: href ?? '', kind: parsed.kind });
-								} else {
-									blockedLink = {
-										href: href ?? '',
-										source,
-										basePath: fileLinkBasePath,
-										reason: parsed.blockedReason,
-									};
+			<MarkdownLinkActions>
+				{@const chatId = chatReferencePolicy === 'disabled' ? null : parseChatReferenceHref(href)}
+				{#if chatId}
+					<ChatReference
+						{chatId}
+						resolution={resolveChatReference?.(chatId) ?? null}
+						authoredLabelText={text}
+						authoredTitle={title}
+						linkClass={styles.link}
+						idClass={styles.chatReferenceId}
+					>
+						{#snippet authoredLabel()}
+							{@render children?.()}
+						{/snippet}
+					</ChatReference>
+				{:else}
+					{@const parsed = parseFileLink(href, parserOptions)}
+					{@const isFile = parsed.kind === 'file'}
+					{@const isAbsPath = parsed.blockedReason !== undefined}
+					{@const isExternal = !isFile && !isAbsPath}
+					<a
+						{href}
+						{title}
+						class={styles.link}
+						target={isExternal ? '_blank' : undefined}
+						rel={isExternal ? 'noopener noreferrer' : undefined}
+						onpointerdowncapture={stopParentContextTriggerGesture}
+						oncontextmenu={stopParentContextTriggerGesture}
+						onclick={isFile || isAbsPath
+							? (event: MouseEvent) => {
+									event.preventDefault();
+									blockedLink = null;
+									if (isFile) {
+										onLinkNavigate?.({ rawHref: href ?? '', kind: parsed.kind });
+									} else {
+										blockedLink = {
+											href: href ?? '',
+											source,
+											basePath: fileLinkBasePath,
+											reason: parsed.blockedReason,
+										};
+									}
 								}
-							}
-						: undefined}
-				>
-					{@render children?.()}
-				</a>
-			{/if}
+							: undefined}
+					>
+						{@render children?.()}
+					</a>
+				{/if}
+			</MarkdownLinkActions>
 		{/snippet}
 
 		{#snippet blockquote({ children })}
@@ -271,8 +287,10 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 			</blockquote>
 		{/snippet}
 
-		{#snippet paragraph({ children })}
-			<div class="mb-1 last:mb-0 break-words">
+		{#snippet paragraph({ children, imageOnly }: ParagraphSnippetProps & { imageOnly?: boolean })}
+			<div
+				class={imageOnly ? 'markdown-image-paragraph break-words' : 'mb-1 last:mb-0 break-words'}
+			>
 				{@render children?.()}
 			</div>
 		{/snippet}
@@ -280,9 +298,15 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 	{#if blockedLinkMessage}
 		<div
 			role="alert"
-			class="not-prose mt-2 rounded-md border border-border bg-muted p-3 text-sm text-foreground break-words"
+			class="markdown-link-alert not-prose mt-2 rounded-md border border-border bg-muted p-3 text-sm text-foreground break-words"
 		>
 			{blockedLinkMessage}
 		</div>
 	{/if}
 </div>
+
+<style>
+	.markdown-image-paragraph {
+		margin-block: 0.5rem;
+	}
+</style>

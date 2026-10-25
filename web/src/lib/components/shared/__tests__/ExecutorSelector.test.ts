@@ -13,7 +13,7 @@ afterEach(cleanup);
 it('selects file-capable executors and keeps unavailable executors visible but disabled', async () => {
 	const remote = {
 		...remoteExecutor,
-		machineServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
+		executorServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
 	};
 	const offline = {
 		...remote,
@@ -89,7 +89,7 @@ it.each(['files', 'git', 'agents'] as const)(
 it('selects Git-capable executors independently of Files capability', async () => {
 	const remote = {
 		...remoteExecutor,
-		machineServices: { files: false, git: true, gh: false, terminals: false, directoryCreation: false },
+		executorServices: { files: false, git: true, gh: false, terminals: false, directoryCreation: false },
 	};
 	const snapshot = [localExecutor, remote];
 	const executors = new ExecutorsStore(async () => snapshot);
@@ -118,7 +118,7 @@ it('selects execution hosts without requiring Files or Git and retains missing s
 it('updates the selected label and open menu availability when inventory changes', async () => {
 	const remote = {
 		...remoteExecutor,
-		machineServices: { ...remoteExecutor.machineServices, git: true },
+		executorServices: { ...remoteExecutor.executorServices, git: true },
 	};
 	const snapshot = [localExecutor, remote];
 	const executors = new ExecutorsStore(async () => snapshot);

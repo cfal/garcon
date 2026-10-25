@@ -19,6 +19,7 @@
 	} from './sidebar-pragmatic-dnd';
 	import {
 		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
+		sidebarChatInset,
 		type SidebarVirtualChatRow,
 	} from './sidebar-virtual-chat-list';
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
@@ -183,17 +184,20 @@
 		isDragging && 'opacity-45',
 	)}
 	data-sidebar-virtual-row={row.chat.id}
+	data-sidebar-row-depth={row.depth}
 	data-sidebar-virtual-list-row={row.list}
 	data-sidebar-virtual-reorder-scope={row.reorderScopeKey}
 	data-sidebar-drag-disabled={!dragEnabled ? 'true' : undefined}
 >
 	{#if dropIndicatorEdge === 'top'}
 		<div
-			class="pointer-events-none absolute left-2 right-2 top-0 z-20 h-0.5 rounded-full bg-primary"
+			class="pointer-events-none absolute right-2 top-0 z-20 h-0.5 rounded-full bg-primary"
+			style={`left:${sidebarChatInset(row.depth)}px;`}
 		></div>
 	{:else if dropIndicatorEdge === 'bottom'}
 		<div
-			class="pointer-events-none absolute bottom-0 left-2 right-2 z-20 h-0.5 rounded-full bg-primary"
+			class="pointer-events-none absolute bottom-0 right-2 z-20 h-0.5 rounded-full bg-primary"
+			style={`left:${sidebarChatInset(row.depth)}px;`}
 		></div>
 	{/if}
 
@@ -218,6 +222,9 @@
 				isPinned={row.isPinned}
 				isArchived={row.isArchived}
 				{displayOptions}
+				depth={row.depth}
+				executorGrouped={row.executorGrouped}
+				inArchivedSection={row.section === 'archived'}
 				{isMultiSelectMode}
 				{isMultiSelected}
 				enableNativeDrag={false}
@@ -244,7 +251,8 @@
 			/>
 			{#snippet failed()}
 				<div
-					class="flex h-full items-center px-3 text-sm text-muted-foreground"
+					class="flex h-full items-center pr-3 text-sm text-muted-foreground"
+					style={`padding-left:${sidebarChatInset(row.depth)}px;`}
 					data-sidebar-virtual-row-error={row.chat.id}
 				>
 					{row.chat.title || m.sidebar_chats_unnamed()}

@@ -1,4 +1,14 @@
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
+import type {
+  CreateScheduledPromptRequest,
+  CreateScheduledPromptResponse,
+  UpdateScheduledPromptRequest,
+  SetScheduledPromptEnabledRequest,
+  RemoveScheduledPromptRequest,
+  ScheduledPromptsSnapshot,
+  ScheduledPromptsMutationResponse,
+} from '@garcon/common/scheduled-prompts';
+import { scheduleSnapshot, scheduleMutation, scheduleCreation } from './schedule-responses.js';
 import { isRemoteExecutorId, parseExecutorConnection, type CreateExecutorRequest, type UpdateExecutorRequest,
   type ExecutorSnapshot, type ExecutorConnection } from '@garcon/common/executors';
 import { executorSnapshots, executorProviders, executorResponseError, type ExecutorProvider } from './executor-responses.js';
@@ -123,24 +133,22 @@ export class GarconHttpError extends CliError {
     readonly retryAfterMs: number | null = null,
     readonly responseError: string | null = null,
   ) {
-    super(
-      phase,
-      message,
-      errorCode === 'SESSION_NOT_FOUND'
-        || errorCode === 'NATIVE_SESSION_NOT_FOUND'
-        || errorCode === 'NATIVE_SESSION_AMBIGUOUS'
-        || errorCode === 'UNSUPPORTED_AGENT'
-        || errorCode === 'EXPECTED_AGENT_MISMATCH'
-        || errorCode === 'EXPLICIT_BYPASS_REQUIRED'
-        || errorCode === 'TRANSCRIPT_SEARCH_DISABLED'
-        || ((phase === 'catalog resolution'
-          || phase === 'title update'
-          || phase === 'export'
-          || phase === 'handoff artifact'
-          || phase === 'chat search') && status === 400)
-        ? 2
-        : 3,
+    const inputErrorCode = errorCode === 'SESSION_NOT_FOUND'
+      || errorCode === 'NATIVE_SESSION_NOT_FOUND'
+      || errorCode === 'NATIVE_SESSION_AMBIGUOUS'
+      || errorCode === 'UNSUPPORTED_AGENT'
+      || errorCode === 'EXPECTED_AGENT_MISMATCH'
+      || errorCode === 'EXPLICIT_BYPASS_REQUIRED'
+      || errorCode === 'TRANSCRIPT_SEARCH_DISABLED';
+    const inputErrorStatus = status === 400 && (
+      phase === 'catalog resolution'
+      || phase === 'title update'
+      || phase === 'export'
+      || phase === 'handoff artifact'
+      || phase === 'chat search'
     );
+    const exitCode = phase !== 'schedules' && (inputErrorCode || inputErrorStatus) ? 2 : 3;
+    super(phase, message, exitCode);
     this.name = 'GarconHttpError';
   }
 }
@@ -160,16 +168,25 @@ export function isDefinitiveMutationRejection(error: unknown): boolean {
     || error.errorCode === 'SERVER_SHUTTING_DOWN';
 }
 
+export function isDefinitiveScheduleMutationRejection(error: unknown): boolean {
+  if (isDefinitiveMutationRejection(error)) return true;
+  // Schedule target readiness is validated before persistence.
+  return error instanceof GarconHttpError
+    && error.status === 503
+    && error.errorCode === 'EXECUTOR_UNAVAILABLE';
+}
+
 async function oneShotMutation<T>(
   phase: CliErrorPhase,
   submit: () => Promise<T>,
   signal?: AbortSignal,
+  isDefinitiveRejection: (error: unknown) => boolean = isDefinitiveMutationRejection,
 ): Promise<T> {
   signal?.throwIfAborted();
   try {
     return await submit();
   } catch (error) {
-    if (isDefinitiveMutationRejection(error)) throw error;
+    if (isDefinitiveRejection(error)) throw error;
     throw new CliError(
       phase,
       'mutation outcome is unknown; inspect the current value or operation status before retrying. No automatic retry was made.',
@@ -1199,6 +1216,51 @@ export class GarconClient {
     const value = await this.#request('tickets', method, `/api/v1/tickets${route}`, body, signal);
     try { return parse(value); }
     catch (error) { throw new CliError('tickets', 'server returned an invalid ticket response', 3, { cause: error }); }
+  }
+
+  async getScheduledPrompts(signal?: AbortSignal): Promise<ScheduledPromptsSnapshot> {
+    const response = await this.#request('schedules', 'GET', '/api/v1/scheduled-prompts', undefined, signal);
+    return scheduleSnapshot(response);
+  }
+
+  async createScheduledPrompt(
+    request: CreateScheduledPromptRequest,
+    signal?: AbortSignal,
+  ): Promise<CreateScheduledPromptResponse> {
+    return oneShotMutation('schedules', async () => {
+      const response = await this.#request('schedules', 'POST', '/api/v1/scheduled-prompts', request, signal);
+      return scheduleCreation(response);
+    }, signal, isDefinitiveScheduleMutationRejection);
+  }
+
+  async updateScheduledPrompt(
+    request: UpdateScheduledPromptRequest,
+    signal?: AbortSignal,
+  ): Promise<ScheduledPromptsMutationResponse> {
+    return oneShotMutation('schedules', async () => {
+      const response = await this.#request('schedules', 'PUT', '/api/v1/scheduled-prompts', request, signal);
+      return scheduleMutation(response);
+    }, signal, isDefinitiveScheduleMutationRejection);
+  }
+
+  async setScheduledPromptEnabled(
+    request: SetScheduledPromptEnabledRequest,
+    signal?: AbortSignal,
+  ): Promise<ScheduledPromptsMutationResponse> {
+    return oneShotMutation('schedules', async () => {
+      const response = await this.#request('schedules', 'PUT', '/api/v1/scheduled-prompts/enabled', request, signal);
+      return scheduleMutation(response);
+    }, signal, isDefinitiveScheduleMutationRejection);
+  }
+
+  async deleteScheduledPrompt(
+    request: RemoveScheduledPromptRequest,
+    signal?: AbortSignal,
+  ): Promise<ScheduledPromptsMutationResponse> {
+    return oneShotMutation('schedules', async () => {
+      const response = await this.#request('schedules', 'DELETE', '/api/v1/scheduled-prompts', request, signal);
+      return scheduleMutation(response);
+    }, signal, isDefinitiveScheduleMutationRejection);
   }
 
   async listExecutors(signal?: AbortSignal): Promise<readonly ExecutorSnapshot[]> {

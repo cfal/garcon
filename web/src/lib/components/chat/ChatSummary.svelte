@@ -107,7 +107,10 @@
 		)}
 		data-slot="chat-summary-header"
 	>
-		<span class={cn(titleClass, isUnread ? 'font-bold' : 'font-medium')} title={chatName}>
+		<span
+			class={cn(titleClass, isUnread ? 'font-bold' : isSidebar ? 'font-normal' : 'font-medium')}
+			title={chatName}
+		>
 			{chatName}
 		</span>
 		{#if isUnread}
@@ -136,11 +139,11 @@
 		{:else if formattedTimestamp}
 			<span
 				class={cn(
-					'whitespace-nowrap rounded-full border px-1.5 text-[11px] leading-4 tabular-nums',
+					'whitespace-nowrap text-[11px] leading-4 tabular-nums',
 					headerStatusClass,
 					selectedForeground
-						? 'border-sidebar-chat-item-selected-foreground/25 bg-sidebar-chat-item-selected-foreground/10 text-sidebar-chat-item-selected-foreground/80'
-						: 'border-border/70 bg-muted/40 text-muted-foreground',
+						? 'text-sidebar-chat-item-selected-foreground/75'
+						: 'text-muted-foreground',
 				)}
 				title={formattedTimestamp.tooltip}
 				data-slot="sidebar-chat-timestamp-badge"

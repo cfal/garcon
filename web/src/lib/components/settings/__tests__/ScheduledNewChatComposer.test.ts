@@ -17,7 +17,7 @@ const ScheduledNewChatComposerTestHost = (await import('./ScheduledNewChatCompos
 function makeStartup(modelSelectionError: string | null = null, executorId = 'local'): NewChatFormState {
 	return {
 		executorId,
-		localMachine: executorId === 'local',
+		isLocalExecutor: executorId === 'local',
 		gitAvailable: true,
 		filesAvailable: true,
 		agentId: 'claude',
@@ -126,7 +126,7 @@ describe('ScheduledNewChatComposer', () => {
 	it('omits preambles but retains template variables for literal input', () => {
 		const { container } = renderComposer({ conversationInput: false });
 		expect(container.querySelector('[data-slot="scheduled-new-chat-preambles"]')).toBeNull();
-		expect(screen.getByRole('button', { name: 'Insert {{chat_id}}' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Insert variable' })).toBeTruthy();
 	});
 	it('uses Files capability for remote Tab completion instead of a Local-only guard', async () => {
 		const { startup } = renderComposer({ executorId: '22222222-2222-4222-8222-222222222222' });

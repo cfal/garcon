@@ -1,6 +1,7 @@
 // Reactive local settings store using Svelte 5 runes. Persists
 // browser-only preferences to persisted storage.
 
+import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
 import {
 	getLocalStorageItem,
 	LOCAL_STORAGE_KEYS,
@@ -43,8 +44,12 @@ export const COMPLETION_SOUND_VISIBILITY_VALUES = ['always', 'unfocused'] as con
 export type CompletionSoundVisibility = (typeof COMPLETION_SOUND_VISIBILITY_VALUES)[number];
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
-export const INLINE_IMAGE_THUMBNAIL_SIZE_VALUES = ['small', 'medium', 'large'] as const;
+export const INLINE_IMAGE_THUMBNAIL_SIZE_VALUES = ['small', 'medium', 'large', 'full'] as const;
 export type InlineImageThumbnailSize = (typeof INLINE_IMAGE_THUMBNAIL_SIZE_VALUES)[number];
+export const IMAGE_CACHE_SIZE_MIB_VALUES = [8, 16, 32, 64, 128, 256, 512] as const;
+export type ImageCacheSizeMiB = (typeof IMAGE_CACHE_SIZE_MIB_VALUES)[number];
+export const INLINE_MERMAID_THUMBNAIL_SIZE_VALUES = ['small', 'medium', 'large', 'full'] as const;
+export type InlineMermaidThumbnailSize = (typeof INLINE_MERMAID_THUMBNAIL_SIZE_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
 export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
 export const WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MIN_PX = -2;
@@ -145,10 +150,13 @@ export interface LocalSettingsSnapshot {
 	showQuickCommitTray: boolean;
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
+	composerInputMode: ComposerInputMode;
 	steerWithCtrlEnter: boolean;
 	snippetTrigger: string;
 	chatMaxWidth: ChatMaxWidth;
 	inlineImageThumbnailSize: InlineImageThumbnailSize;
+	imageCacheSizeMiB: ImageCacheSizeMiB;
+	inlineMermaidThumbnailSize: InlineMermaidThumbnailSize;
 	workspaceWindowTitlebarHeightDeltaPx: number;
 	fullscreenCoversSidebar: boolean;
 	chatListAutohide: boolean;
@@ -219,10 +227,13 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	showQuickCommitTray: true,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
+	composerInputMode: 'formatted',
 	steerWithCtrlEnter: true,
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
 	inlineImageThumbnailSize: 'medium',
+	imageCacheSizeMiB: 64,
+	inlineMermaidThumbnailSize: 'medium',
 	workspaceWindowTitlebarHeightDeltaPx: 0,
 	fullscreenCoversSidebar: true,
 	chatListAutohide: false,
@@ -294,10 +305,23 @@ function parseChatMaxWidth(value: unknown): ChatMaxWidth {
 	return isChatMaxWidth(value) ? value : DEFAULTS.chatMaxWidth;
 }
 
+export function isImageCacheSizeMiB(value: unknown): value is ImageCacheSizeMiB {
+	return (
+		typeof value === 'number' && IMAGE_CACHE_SIZE_MIB_VALUES.includes(value as ImageCacheSizeMiB)
+	);
+}
+
 export function isInlineImageThumbnailSize(value: unknown): value is InlineImageThumbnailSize {
 	return (
 		typeof value === 'string' &&
 		INLINE_IMAGE_THUMBNAIL_SIZE_VALUES.includes(value as InlineImageThumbnailSize)
+	);
+}
+
+export function isInlineMermaidThumbnailSize(value: unknown): value is InlineMermaidThumbnailSize {
+	return (
+		typeof value === 'string' &&
+		INLINE_MERMAID_THUMBNAIL_SIZE_VALUES.includes(value as InlineMermaidThumbnailSize)
 	);
 }
 
@@ -411,12 +435,22 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		showQuickCommitTray: parseBoolean(parsed.showQuickCommitTray, DEFAULTS.showQuickCommitTray),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
+		composerInputMode:
+			parsed.composerInputMode === 'source' || parsed.composerInputMode === 'formatted'
+				? parsed.composerInputMode
+				: DEFAULTS.composerInputMode,
 		steerWithCtrlEnter: parseBoolean(parsed.steerWithCtrlEnter, DEFAULTS.steerWithCtrlEnter),
 		snippetTrigger: normalizeSnippetTrigger(parsed.snippetTrigger),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
 		inlineImageThumbnailSize: isInlineImageThumbnailSize(parsed.inlineImageThumbnailSize)
 			? parsed.inlineImageThumbnailSize
 			: DEFAULTS.inlineImageThumbnailSize,
+		imageCacheSizeMiB: isImageCacheSizeMiB(parsed.imageCacheSizeMiB)
+			? parsed.imageCacheSizeMiB
+			: DEFAULTS.imageCacheSizeMiB,
+		inlineMermaidThumbnailSize: isInlineMermaidThumbnailSize(parsed.inlineMermaidThumbnailSize)
+			? parsed.inlineMermaidThumbnailSize
+			: DEFAULTS.inlineMermaidThumbnailSize,
 		workspaceWindowTitlebarHeightDeltaPx: parseWorkspaceWindowTitlebarHeightDeltaPx(
 			parsed.workspaceWindowTitlebarHeightDeltaPx,
 		),
@@ -522,10 +556,15 @@ export class LocalSettingsStore {
 	showQuickCommitTray = $state(DEFAULTS.showQuickCommitTray);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
+	composerInputMode = $state<ComposerInputMode>(DEFAULTS.composerInputMode);
 	steerWithCtrlEnter = $state(DEFAULTS.steerWithCtrlEnter);
 	snippetTrigger = $state(DEFAULTS.snippetTrigger);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
 	inlineImageThumbnailSize = $state<InlineImageThumbnailSize>(DEFAULTS.inlineImageThumbnailSize);
+	imageCacheSizeMiB = $state<ImageCacheSizeMiB>(DEFAULTS.imageCacheSizeMiB);
+	inlineMermaidThumbnailSize = $state<InlineMermaidThumbnailSize>(
+		DEFAULTS.inlineMermaidThumbnailSize,
+	);
 	workspaceWindowTitlebarHeightDeltaPx = $state(DEFAULTS.workspaceWindowTitlebarHeightDeltaPx);
 	fullscreenCoversSidebar = $state(DEFAULTS.fullscreenCoversSidebar);
 	chatListAutohide = $state(DEFAULTS.chatListAutohide);
@@ -650,10 +689,13 @@ export class LocalSettingsStore {
 			showQuickCommitTray: this.showQuickCommitTray,
 			autoScrollToBottom: this.autoScrollToBottom,
 			sendByShiftEnter: this.sendByShiftEnter,
+			composerInputMode: this.composerInputMode,
 			steerWithCtrlEnter: this.steerWithCtrlEnter,
 			snippetTrigger: this.snippetTrigger,
 			chatMaxWidth: this.chatMaxWidth,
 			inlineImageThumbnailSize: this.inlineImageThumbnailSize,
+			imageCacheSizeMiB: this.imageCacheSizeMiB,
+			inlineMermaidThumbnailSize: this.inlineMermaidThumbnailSize,
 			workspaceWindowTitlebarHeightDeltaPx: this.workspaceWindowTitlebarHeightDeltaPx,
 			fullscreenCoversSidebar: this.fullscreenCoversSidebar,
 			chatListAutohide: this.chatListAutohide,
@@ -703,10 +745,13 @@ export class LocalSettingsStore {
 		this.showQuickCommitTray = snap.showQuickCommitTray;
 		this.autoScrollToBottom = snap.autoScrollToBottom;
 		this.sendByShiftEnter = snap.sendByShiftEnter;
+		this.composerInputMode = snap.composerInputMode;
 		this.steerWithCtrlEnter = snap.steerWithCtrlEnter;
 		this.snippetTrigger = snap.snippetTrigger;
 		this.chatMaxWidth = snap.chatMaxWidth;
 		this.inlineImageThumbnailSize = snap.inlineImageThumbnailSize;
+		this.imageCacheSizeMiB = snap.imageCacheSizeMiB;
+		this.inlineMermaidThumbnailSize = snap.inlineMermaidThumbnailSize;
 		this.workspaceWindowTitlebarHeightDeltaPx = snap.workspaceWindowTitlebarHeightDeltaPx;
 		this.fullscreenCoversSidebar = snap.fullscreenCoversSidebar;
 		this.chatListAutohide = snap.chatListAutohide;

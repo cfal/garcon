@@ -2,30 +2,22 @@
 
 ## Svelte derived reconnection
 
-`svelte@5.57.1` registers a previously evaluated, disconnected derived twice
-when a reactive read discovers new dependencies: once during recalculation and
-again during reconnection. Teardown removes only one registration. In Garcon,
-switching chats retains old conversation views through the shared composer inset
-signal, with growing detached DOM, listeners, and heap even after garbage collection.
+The local patch was retired in `svelte@5.57.2`, which includes the upstream fix
+for [duplicate derived subscriptions on reconnect](https://github.com/sveltejs/svelte/issues/18898)
+from [PR #18899](https://github.com/sveltejs/svelte/pull/18899). Duplicate subscriptions
+previously retained detached conversation views when switching chats.
+Keep `scripts/__tests__/svelte-derived-reconnect.test.js` and
+`integration-tests/tests/chromium/chat-view-lifetime.test.ts` as regression coverage.
 
-The patch prevents reconnection from adding a derived already registered with
-that dependency. It preserves Svelte's evaluation, effect, and error-handling
-order. The membership check runs only during reconnection, not ordinary updates.
-Svelte is pinned until an upstream release passes
-`scripts/__tests__/svelte-derived-reconnect.test.js` and
-`integration-tests/tests/chromium/chat-view-lifetime.test.ts` without the patch.
+## Bits UI focus-scope mounting
 
-Reference: [Svelte derived reads and reconnection](https://github.com/sveltejs/svelte/blob/636eaaaa6f064b55072e7d192bb76dc9d8c4516e/packages/svelte/src/internal/client/runtime.js#L683-L738).
+`bits-ui@2.19.5` already includes the deferred-autofocus ownership and focus guards.
+The remaining patch makes mounting the same container idempotent. Remounting an
+unchanged scope otherwise schedules initial autofocus again and can take focus
+from a menu item the user already selected.
 
-## Bits UI deferred autofocus
-
-`bits-ui@2.19.0` must not run a menu's queued initial autofocus after a nested
-focus scope opens or the user focuses an item. The older request otherwise takes
-focus from the submenu and closes it. The patch checks scope ownership and
-existing focus when the animation-frame callback runs. Chromium coverage lives
-in `integration-tests/tests/chromium/file-editor-polish.test.ts`.
-
-Reference: [Bits UI focus scope](https://github.com/huntabyte/bits-ui/blob/80f4358f3c8d95df5572e79cae776cd77a2f69aa/packages/bits-ui/src/lib/bits/utilities/focus-scope/focus-scope.svelte.ts#L78-L99).
+Coverage lives in `WorkspaceWindowTitleBar.test.ts` and
+`integration-tests/tests/chromium/file-editor-polish.test.ts`.
 
 ## Vim shared history
 
@@ -49,17 +41,17 @@ unmount. Viewport pan/zoom remains owned by the existing zoom transport.
 
 - `d3-drag@3.0.0`: cancels private gesture bookkeeping and owned listeners;
   balances selection suppression shared with zoom.
-- `@xyflow/system@0.0.82`: registers gestures by graph host, finalizes before
+- `@xyflow/system@0.0.83`: registers gestures by graph host, finalizes before
   callbacks, and fences asynchronous auto-pan work.
-- `@xyflow/svelte@1.6.6`: wires component destruction, pane capture, and the typed
+- `@xyflow/svelte@1.7.0`: wires component destruction, pane capture, and the typed
   `oninteractioncancel` callback.
 
-References: [XYFlow 1.6.6](https://github.com/xyflow/xyflow/tree/0a1f9575b25679f2880175de8d3eae21aedde921)
+References: [XYFlow 1.7.0](https://github.com/xyflow/xyflow/tree/3d35b57317576b0916c0bfeaaedd573aaacc2839)
 and [D3 drag 3.0.0](https://github.com/d3/d3-drag/tree/1b88d8a2d69fca86d4d90a8329987693b79ec506).
 
 When upgrading, keep ESM, UMD, and declarations aligned. The UMD artifacts were
-regenerated from the patched sources using Rollup 4.59.0 and Terser 5.46.0 with
-D3 imports external. The system UMD uses `@rollup/plugin-replace` 6.0.3 to replace
+regenerated from the patched sources with D3 imports external. The system UMD
+uses Rollup 4.64.7, Terser 5.51.2, and `@rollup/plugin-replace` 6.0.3 to replace
 `process.env.NODE_ENV` with `"production"`, matching upstream's browser build.
 D3's UMD globals share `d3`; system globals use `d3Drag`,
 `d3Selection`, `d3Zoom`, and `d3Interpolate`.
@@ -71,3 +63,14 @@ Canvas Chromium suite to check ordinary graph interactions alongside aborts.
 `integration-tests/tests/chromium/chat-canvas-provider.test.ts` checks the UMD
 in a browser without a Node global shim. The root development dependency on
 `@xyflow/system` gives these contract tests the same pinned, patched provider.
+`scripts/__tests__/xyflow-patch.test.js` also checks browser-global loading,
+ESM/CommonJS export parity, and cancellation cleanup.
+
+## Selector parser override
+
+`@tailwindcss/typography@0.5.20` pins `postcss-selector-parser@6.0.10`.
+The root override selects `7.1.6`, which fixes
+[quadratic selector parsing](https://github.com/advisories/GHSA-rj75-hqrm-r3gf).
+Typography's AST parsing and trailing-pseudo extraction APIs remain compatible;
+`scripts/__tests__/typography-parser.test.js` covers those transformations.
+Remove the override once typography's own dependency range selects a fixed release.

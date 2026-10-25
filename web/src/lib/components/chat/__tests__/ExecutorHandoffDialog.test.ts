@@ -25,15 +25,15 @@ vi.mock(
 const ExecutorHandoffDialogTestHost = (await import('./ExecutorHandoffDialogTestHost.svelte'))
 	.default;
 
-const machineServices = { files: true, git: true, gh: false, terminals: false, directoryCreation: true };
-const worker = { ...remoteExecutor, machineServices };
+const executorServices = { files: true, git: true, gh: false, terminals: false, directoryCreation: true };
+const worker = { ...remoteExecutor, executorServices };
 const builder = {
 	...remoteExecutor,
 	id: '33333333-3333-4333-8333-333333333333',
 	label: 'Builder',
 	instanceId: 'synthetic-builder-instance',
 	projectBasePath: '/builder',
-	machineServices,
+	executorServices,
 };
 const executors = [localExecutor, worker, builder];
 const selection = {

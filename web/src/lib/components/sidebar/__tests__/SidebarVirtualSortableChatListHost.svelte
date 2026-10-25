@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
-	setExecutorsTestContext();
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import SidebarVirtualSortableChatList from '../SidebarVirtualSortableChatList.svelte';
 	import {
 		SidebarChatReorderState,
@@ -21,9 +20,11 @@
 	} from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 	import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
+	import type { ExecutorSnapshot } from '$shared/executors';
 
 	interface SidebarVirtualSortableChatListHostProps {
 		rows: SidebarVirtualRow[];
+		executors?: readonly ExecutorSnapshot[];
 		pendingChatIds?: string[];
 		selectedChatId?: string | null;
 		isMobile?: boolean;
@@ -42,6 +43,7 @@
 
 	let {
 		rows,
+		executors,
 		pendingChatIds = [],
 		selectedChatId = null,
 		isMobile = false,
@@ -57,6 +59,7 @@
 		onToggleProjectCollapsed,
 		onSortChatOrder = () => {},
 	}: SidebarVirtualSortableChatListHostProps = $props();
+	untrack(() => setExecutorsTestContext(executors));
 
 	let viewportRef = $state<HTMLElement | null>(null);
 	let displayOptions = $derived({
@@ -98,7 +101,9 @@
 	} as never);
 
 	setModelCatalog({
-		forExecutor() { return this; },
+		forExecutor() {
+			return this;
+		},
 		supportsFork() {
 			return true;
 		},

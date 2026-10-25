@@ -28,6 +28,8 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			m.settings_workspace_titlebar_size(),
 			m.settings_chat_max_width(),
 			m.settings_inline_image_thumbnail_size(),
+			m.settings_image_cache_size(),
+			m.settings_inline_mermaid_thumbnail_size(),
 			m.settings_sidebar_inactivity_duration(),
 			m.settings_overlay_backdrop_effects(),
 			m.settings_chat_auto_expand_tools(),
@@ -39,6 +41,7 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			m.settings_chat_hidden_tools(),
 			m.settings_chat_show_quick_commit_tray(),
 			m.settings_chat_auto_scroll_to_bottom(),
+			m.chat_composer_input_mode(),
 			m.settings_snippet_trigger_label(),
 			m.settings_text_editor_open_placement(),
 			m.settings_image_viewer_open_placement(),
@@ -106,7 +109,14 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			label,
 			section: m.settings_tab_notifications(),
 		})),
-		...[m.settings_tab_github(), m.settings_gh_title()].map((label) => ({
+		...[
+			m.settings_tab_github(),
+			m.settings_gh_title(),
+			m.pull_request_repositories(),
+			m.pull_request_repository_connect(),
+			m.pull_request_repository_column_auto_review(),
+			m.pull_request_repository_recent_runs(),
+		].map((label) => ({
 			tab: 'github' as const,
 			label,
 			section: m.settings_tab_github(),

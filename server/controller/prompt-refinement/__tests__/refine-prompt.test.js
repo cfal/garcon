@@ -94,7 +94,7 @@ describe('refinePrompt', () => {
     test.agents.runSingleQuery.mockImplementationOnce(async (prompt) => {
       expect(prompt).toContain(draft);
       expect(prompt).toContain('Preserve every supported template token verbatim');
-      expect(prompt).toContain('\\{{arguments}}, \\{{project_path}}, and \\{{chat_id}}');
+      expect(prompt).toContain('\\{{arguments}}, \\{{project_path}}, \\{{chat_id}}, \\{{current_date}}, and \\{{current_date_local}}');
       return 'Review {{arguments}} in \\{{project_path}} for {{chat_id}}, then {{arguments}}.';
     });
 

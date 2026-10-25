@@ -43,12 +43,12 @@ describe('ExecutorsDialog', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Add Executor' }));
 		const label = screen.getByLabelText('Label');
 		expect(screen.getByRole('button', { name: 'Add Executor' }).hasAttribute('disabled')).toBe(true);
-		await fireEvent.input(label, { target: { value: 'Build Machine' } });
+		await fireEvent.input(label, { target: { value: 'Build Executor' } });
 		await fireEvent.submit(label.closest('form')!);
 		const url = await screen.findByLabelText('Connection URL') as HTMLInputElement;
 		expect(url.value).toBe(connection.connectionUrl);
 		expect(url.type).toBe('text');
-		expect(api.createExecutor).toHaveBeenCalledWith({ label: 'Build Machine', direction: 'executor-connects', noTls: false, allowUnverifiedTls: false, allowControllerCli: false, allowExecutorManagement: false });
+		expect(api.createExecutor).toHaveBeenCalledWith({ label: 'Build Executor', direction: 'executor-connects', noTls: false, allowUnverifiedTls: false, allowControllerCli: false, allowExecutorManagement: false });
 		await fireEvent.click(screen.getByRole('button', { name: 'Copy connection URL' }));
 		expect(copyToClipboard).toHaveBeenCalledWith(connection.connectionUrl, expect.any(HTMLElement), expect.any(Function));
 		await fireEvent.keyDown(url, { key: 'Escape' });

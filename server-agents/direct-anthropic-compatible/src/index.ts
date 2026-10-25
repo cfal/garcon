@@ -1,6 +1,7 @@
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import {
   DOCUMENT_FILE_ATTACHMENT_MIME_TYPES,
+  MAX_INLINE_TEXT_ATTACHMENT_BYTES,
   TEXT_FILE_ATTACHMENT_MIME_TYPES,
 } from '@garcon/common/attachments';
 import {
@@ -54,6 +55,7 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
       ...TEXT_FILE_ATTACHMENT_MIME_TYPES,
       ...DOCUMENT_FILE_ATTACHMENT_MIME_TYPES,
     ],
+    inlineTextMaxBytes: MAX_INLINE_TEXT_ATTACHMENT_BYTES,
   } as const;
   readonly execution;
   readonly producers;

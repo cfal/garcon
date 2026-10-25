@@ -11,6 +11,49 @@ import {
 } from '../sidebar-virtual-chat-list';
 
 describe('sidebar chat scroll targets', () => {
+	it.each([false, true])(
+		'anchors the closest visible collapsed ancestor with executor collapsed=%s',
+		(isCollapsed) => {
+			const rows: SidebarVirtualRow[] = [
+				{
+					type: 'executor-header',
+					key: 'executor:worker',
+					depth: 0,
+					collapseKey: 'executor:worker',
+					executorId: 'worker',
+					count: 1,
+					chatIds: ['hidden'],
+					isCollapsed,
+				},
+			];
+			const sectionKey = sidebarSectionKey('inactive', 'worker');
+			if (!isCollapsed)
+				rows.push({
+					type: 'section-header',
+					key: sectionKey,
+					depth: 1,
+					section: 'inactive',
+					executorId: 'worker',
+					count: 1,
+					chatIds: ['hidden'],
+					isCollapsed: true,
+				});
+			const target = sidebarScrollTargetForChat(rows, 'hidden');
+			expect(target).toEqual(
+				isCollapsed ? { index: 0, executorCollapseKey: 'executor:worker' } : { index: 1, sectionKey },
+			);
+			const viewport = document.createElement('div');
+			const executor = document.createElement('button');
+			executor.dataset.sidebarExecutorCollapseKey = 'executor:worker';
+			const section = document.createElement('button');
+			section.dataset.sidebarSectionKey = sectionKey;
+			viewport.append(executor, section);
+			expect(target && mountedElementForScrollTarget(viewport, target)).toBe(
+				isCollapsed ? executor : section,
+			);
+		},
+	);
+
 	it('anchors a collapsed inactive project instead of its duplicate active or section header', () => {
 		const projectKey = sidebarProjectKey('/tmp/shared-project');
 		const inactiveProjectCollapseKey = sidebarSectionProjectKey('inactive', projectKey);
@@ -18,6 +61,7 @@ describe('sidebar chat scroll targets', () => {
 			{
 				type: 'project-header',
 				key: `project:${projectKey}`,
+				depth: 0,
 				projectKey,
 				collapseKey: projectKey,
 				projectPath: '/tmp/shared-project',
@@ -28,6 +72,7 @@ describe('sidebar chat scroll targets', () => {
 			{
 				type: 'section-header',
 				key: sidebarSectionKey('inactive'),
+				depth: 0,
 				section: 'inactive',
 				count: 1,
 				chatIds: ['inactive-chat'],
@@ -36,6 +81,7 @@ describe('sidebar chat scroll targets', () => {
 			{
 				type: 'project-header',
 				key: `project:${inactiveProjectCollapseKey}`,
+				depth: 0,
 				projectKey,
 				collapseKey: inactiveProjectCollapseKey,
 				projectPath: '/tmp/shared-project',

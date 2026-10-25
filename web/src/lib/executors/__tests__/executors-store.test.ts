@@ -6,7 +6,7 @@ import { localExecutor, remoteExecutor } from './fixtures';
 describe('ExecutorsStore', () => {
 	it('keeps primary readiness, capabilities, and context keys stable across bulk-only loss', () => {
 		const executors = new ExecutorsStore();
-		const remote = { ...remoteExecutor, machineServices: localExecutor.machineServices };
+		const remote = { ...remoteExecutor, executorServices: localExecutor.executorServices };
 		executors.applySnapshot([localExecutor, remote]);
 		const gitContext = executors.gitContextKey(remote.id);
 		const pathContext = executors.pathContextKey(remote.id);
@@ -53,17 +53,17 @@ describe('ExecutorsStore', () => {
 		const executors = new ExecutorsStore();
 		expect(executors.filesAvailable('local')).toBe(true);
 		expect(executors.supportsDirectoryCreation('local')).toBe(false);
-		const services = localExecutor.machineServices;
+		const services = localExecutor.executorServices;
 		executors.applySnapshot([
 			localExecutor,
-			{ ...remoteExecutor, machineServices: { ...services, directoryCreation: false } },
+			{ ...remoteExecutor, executorServices: { ...services, directoryCreation: false } },
 		]);
 		expect(executors.supportsDirectoryCreation('local')).toBe(true);
 		expect(executors.filesAvailable(remoteExecutor.id)).toBe(true);
 		expect(executors.supportsDirectoryCreation(remoteExecutor.id)).toBe(false);
 		executors.applySnapshot([
 			localExecutor,
-			{ ...remoteExecutor, availability: 'reconnecting', machineServices: services },
+			{ ...remoteExecutor, availability: 'reconnecting', executorServices: services },
 		]);
 		expect(executors.filesAvailable(remoteExecutor.id)).toBe(false);
 		expect(executors.supportsDirectoryCreation(remoteExecutor.id)).toBe(true);

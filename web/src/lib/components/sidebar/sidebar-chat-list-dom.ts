@@ -44,6 +44,7 @@ export interface SidebarScrollTarget {
 	index: number;
 	chatId?: string;
 	projectCollapseKey?: string;
+	executorCollapseKey?: string;
 	sectionKey?: string;
 }
 
@@ -64,12 +65,23 @@ export function sidebarScrollTargetForChat(
 		return { index: projectHeaderIndex, projectCollapseKey: projectHeader.collapseKey };
 	}
 
+	const executorHeaderIndex = rows.findIndex(
+		(row) => row.type === 'executor-header' && row.isCollapsed && row.chatIds.includes(chatId),
+	);
+	const executorHeader = executorHeaderIndex >= 0 ? rows[executorHeaderIndex] : null;
+	if (executorHeader?.type === 'executor-header') {
+		return { index: executorHeaderIndex, executorCollapseKey: executorHeader.collapseKey };
+	}
+
 	const sectionHeaderIndex = rows.findIndex(
 		(row) => row.type === 'section-header' && row.chatIds.includes(chatId),
 	);
 	const sectionHeader = sectionHeaderIndex >= 0 ? rows[sectionHeaderIndex] : null;
 	if (sectionHeader?.type === 'section-header') {
-		return { index: sectionHeaderIndex, sectionKey: sidebarSectionKey(sectionHeader.section) };
+		return {
+			index: sectionHeaderIndex,
+			sectionKey: sidebarSectionKey(sectionHeader.section, sectionHeader.executorId),
+		};
 	}
 	return null;
 }
@@ -95,6 +107,14 @@ export function mountedElementForScrollTarget(
 			target.projectCollapseKey,
 		);
 	}
+	if (target.executorCollapseKey) {
+		return findMountedElement(
+			viewport,
+			'[data-sidebar-executor-collapse-key]',
+			'sidebarExecutorCollapseKey',
+			target.executorCollapseKey,
+		);
+	}
 	if (target.sectionKey) {
 		return findMountedElement(
 			viewport,
@@ -110,7 +130,11 @@ function findMountedElement(
 	viewport: HTMLElement,
 	selector: string,
 	datasetKey:
-		'sidebarVirtualRow' | 'sidebarProjectKey' | 'sidebarProjectCollapseKey' | 'sidebarSectionKey',
+		| 'sidebarVirtualRow'
+		| 'sidebarProjectKey'
+		| 'sidebarProjectCollapseKey'
+		| 'sidebarExecutorCollapseKey'
+		| 'sidebarSectionKey',
 	value: string,
 ): HTMLElement | null {
 	return (

@@ -15,6 +15,8 @@
 	import ReauthenticationOverlay from '$lib/components/auth/ReauthenticationOverlay.svelte';
 	import { AUTH_UNAVAILABLE_CLOSE_CODE } from '$shared/ws-auth';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+	import { FileImageCache } from '$lib/files/images/file-image-cache.svelte.js';
+	import { setFileImages } from '$lib/context/file-images-context.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte.js';
 	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
@@ -39,6 +41,8 @@
 	import { projectOverlayBackdropEffects } from '$lib/overlays/backdrop-effects.js';
 	import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { createGhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
+	import { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte.js';
+	import { PullRequestReviewsRouter } from '$lib/events/pull-request-reviews-router.js';
 	import { createSidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
 	import { resolveFirstRegistrationOnboarding } from '$lib/onboarding/first-registration-onboarding.js';
 	import {
@@ -59,6 +63,7 @@
 		setAppTitle,
 		setMinuteClock,
 		setGhCapability,
+		setPullRequestReviews,
 		setScheduledPrompts,
 		setPreambles,
 		setExecutors,
@@ -121,6 +126,12 @@
 	const auth = createAuthStore();
 	const terminalIdentity = new TerminalClientIdentity();
 	const localSettings = createLocalSettingsStore();
+	const fileImages = new FileImageCache({
+		budgetBytes: localSettings.imageCacheSizeMiB * 1024 * 1024,
+		owner: null,
+	});
+	setFileImages(fileImages);
+	$effect(() => fileImages.setIdleBudget(localSettings.imageCacheSizeMiB * 1024 * 1024));
 	const remoteSettings = createRemoteSettingsStore();
 	const scheduledPrompts = createScheduledPromptsStore();
 	const preambles = createPreamblesStore();
@@ -151,7 +162,9 @@
 		});
 	});
 	const ghCapability = createGhCapabilityStore(executors);
+	const pullRequestReviews = new PullRequestReviewsStore();
 	const workspaceServices = createWorkspaceServices({
+		pullRequestReviews,
 		localProjectBasePath: () => remoteSettings.snapshot?.projectBasePath ?? null,
 		executors,
 		appShell,
@@ -256,6 +269,7 @@
 	setReadReceiptOutbox(readReceiptOutbox);
 	setModelCatalog(modelCatalog);
 	setGhCapability(ghCapability);
+	setPullRequestReviews(pullRequestReviews);
 	setNotifications(notifications);
 	setSidebarSearch(sidebarSearch);
 	setSidebarProjectCollapse(sidebarProjectCollapse);
@@ -273,6 +287,14 @@
 		root.dataset.inlineImageThumbnailSize = localSettings.inlineImageThumbnailSize;
 		return () => {
 			delete root.dataset.inlineImageThumbnailSize;
+		};
+	});
+
+	$effect(() => {
+		const root = document.documentElement;
+		root.dataset.inlineMermaidThumbnailSize = localSettings.inlineMermaidThumbnailSize;
+		return () => {
+			delete root.dataset.inlineMermaidThumbnailSize;
 		};
 	});
 
@@ -306,14 +328,15 @@
 		} else untrack(() => ws.pauseForAuth());
 	});
 
-	let ticketOwner: string | null = null;
+	let presentationOwnerKey: string | null = null;
 	$effect(() => {
 		const authenticated = auth.isAuthenticated;
 		const owner = auth.presentationOwner;
 		const key = owner ? JSON.stringify([owner.mode, owner.key]) : null;
 		untrack(() => {
-			if (key !== ticketOwner) {
-				ticketOwner = key;
+			fileImages.setOwner(key);
+			if (key !== presentationOwnerKey) {
+				presentationOwnerKey = key;
 				ticketsInvalidations.publishAuthority(authenticated);
 			} else ticketsInvalidations.publishAvailability(authenticated);
 		});
@@ -368,6 +391,7 @@
 		sidebarSearch.applyTranscriptSearchStatus(status),
 	);
 	const scheduledPromptsRouter = new ScheduledPromptsRouter(ws, scheduledPrompts);
+	const pullRequestReviewsRouter = new PullRequestReviewsRouter(ws, pullRequestReviews);
 	const preamblesRouter = new PreamblesRouter(ws, preambles, chatPreambleSelectionInvalidationHub);
 	const snippetsRouter = new SnippetsRouter(ws, snippets);
 	const executorsRouter = new ExecutorsRouter(ws, executors);
@@ -380,6 +404,7 @@
 	settingsRouter.start();
 	transcriptSearchStatus.start();
 	scheduledPromptsRouter.start();
+	pullRequestReviewsRouter.start();
 	preamblesRouter.start();
 	snippetsRouter.start();
 	executorsRouter.start();
@@ -392,6 +417,7 @@
 		settingsRouter.tick();
 		transcriptSearchStatus.tick();
 		scheduledPromptsRouter.tick();
+		pullRequestReviewsRouter.tick();
 		preamblesRouter.tick();
 		snippetsRouter.tick();
 		executorsRouter.tick();
@@ -405,6 +431,7 @@
 		if (!connectedAt) return;
 		untrack(() => void transcriptSearchStatus.refresh());
 		untrack(() => void scheduledPrompts.refreshIfLoaded());
+		untrack(() => pullRequestReviews.invalidate());
 		untrack(() => void preambles.refreshIfLoaded());
 		untrack(() => void snippets.refreshIfLoaded());
 		untrack(() => void executors.refresh());
@@ -500,6 +527,7 @@
 		settingsRouter.destroy();
 		transcriptSearchStatus.destroy();
 		scheduledPromptsRouter.destroy();
+		pullRequestReviewsRouter.destroy();
 		preamblesRouter.destroy();
 		snippetsRouter.destroy();
 		executorsRouter.destroy();
@@ -508,6 +536,7 @@
 		chatBoardsRouter.destroy();
 		ticketsRouter.destroy();
 		localSettings.destroy();
+		fileImages.destroy();
 		sidebarProjectCollapse.destroy();
 		minuteClock.destroy();
 		sidebarSearch.destroy();

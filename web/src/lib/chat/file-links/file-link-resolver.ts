@@ -1,12 +1,8 @@
 import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
 import { isImageFilePath } from '$lib/utils/file-kind.js';
+import type { FileImageTarget } from '$lib/files/images/file-image-cache.svelte.js';
 
-export interface MarkdownImageFileTarget {
-	executorId: string;
-	executorContextKey: string;
-	projectPath: string;
-	filePath: string;
-}
+export type MarkdownImageFileTarget = FileImageTarget;
 
 export type ResolveMarkdownImageFile = (href: string) => MarkdownImageFileTarget | null;
 

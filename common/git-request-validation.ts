@@ -1,9 +1,10 @@
 import { isRecord } from './json.js';
+import { isGhActorIdentity, isGhRepositoryIdentity } from './gh-identity.js';
 import type { GitMethod } from './git.js';
 import type { ExecutionGitRequests, GitReviewDocumentRef } from './git-execution.js';
 import { GIT_MAX_REQUEST_BYTES, GIT_MAX_REQUEST_PATHS } from './git-execution.js';
 import { GitServiceError } from './git-error.js';
-import type { GhRequests } from './gh.js';
+import { GH_COMMENT_BODY_MAX_LENGTH, GH_COMMENT_ID_MAX_LENGTH, GH_COMMENT_MARKER_MAX_LENGTH, type GhRequests } from './gh.js';
 
 const path = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 4096 && !v.includes('\0');
 const text = (v: unknown): v is string => typeof v === 'string' && v.length <= 64 * 1024 && !v.includes('\0');
@@ -56,12 +57,35 @@ export function isGitMethod(value: unknown): value is GitMethod {
   return typeof value === 'string' && Object.hasOwn(GIT_REQUEST_FIELDS, value);
 }
 
-export function validateGhRequest(method: keyof GhRequests, request: unknown): void {
-  const keys = method === 'getStatus' ? [] : method === 'listPullRequests' ? ['projectPath'] : ['projectPath', 'number'];
-  if (!isRecord(request) || !fields(request, keys) || method !== 'getStatus' && !path(request.projectPath)
-    || method === 'getPullRequest' && (!integer(request.number, Number.MAX_SAFE_INTEGER) || request.number === 0)) {
-    throw new GitServiceError('GIT_INVALID_INPUT', `Invalid GitHub ${method} request`);
-  }
+export const GH_REQUEST_FIELDS = {
+  getStatus: [],
+  listPullRequests: ['projectPath', 'repository'],
+  getPullRequest: ['projectPath', 'repository', 'number'],
+  getPullRequestReviewTarget: ['projectPath', 'repository', 'number', 'marker'],
+  createPullRequestComment: ['projectPath', 'repository', 'actor', 'number', 'body', 'expected'],
+  minimizePullRequestComment: ['projectPath', 'repository', 'actor', 'commentId'],
+} as const satisfies Record<keyof GhRequests, readonly string[]>;
+
+export function isGhMethod(value: unknown): value is keyof GhRequests {
+  return typeof value === 'string' && Object.hasOwn(GH_REQUEST_FIELDS, value);
+}
+
+const bounded = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max && !v.includes('\0');
+
+export function validateGhRequest<K extends keyof GhRequests>(method: K, request: unknown): asserts request is GhRequests[K] {
+  const keys: readonly string[] = GH_REQUEST_FIELDS[method];
+  const valid = isRecord(request) && fields(request, keys)
+    && (!keys.includes('projectPath') || path(request.projectPath))
+    && (!keys.includes('repository') || method === 'listPullRequests' && request.repository === undefined || isGhRepositoryIdentity(request.repository))
+    && (!keys.includes('actor') || isGhActorIdentity(request.actor))
+    && (!keys.includes('number') || integer(request.number, Number.MAX_SAFE_INTEGER) && request.number !== 0)
+    && (!keys.includes('marker') || bounded(request.marker, GH_COMMENT_MARKER_MAX_LENGTH))
+    && (!keys.includes('body') || bounded(request.body, GH_COMMENT_BODY_MAX_LENGTH))
+    && (!keys.includes('expected') || isRecord(request.expected) && request.expected.state === 'open'
+      && typeof request.expected.headRefOid === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(request.expected.headRefOid)
+      && fields(request.expected, ['state', 'headRefOid']))
+    && (!keys.includes('commentId') || bounded(request.commentId, GH_COMMENT_ID_MAX_LENGTH));
+  if (!valid) throw new GitServiceError('GIT_INVALID_INPUT', `Invalid GitHub ${method} request`);
 }
 
 export function validateGitRequest<K extends GitMethod>(method: K, request: unknown): asserts request is ExecutionGitRequests[K] {

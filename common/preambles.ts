@@ -1,4 +1,4 @@
-import { CHAT_ID_TEMPLATE_TOKEN, CHAT_ID_TEMPLATE_VARIABLE, expandTemplate } from './template-tokens.js';
+import { CHAT_ID_TEMPLATE_TOKEN, RUNTIME_TEMPLATE_VARIABLES, expandTemplate, type RuntimeTemplateValues } from './template-tokens.js';
 import { isAgentId, type AgentId } from './agents.js';
 import { isSnippetShortName } from './snippets.js';
 import { normalizeTagSlug } from './tags.js';
@@ -16,8 +16,6 @@ export const PREAMBLE_CHAT_ID_TOKEN = CHAT_ID_TEMPLATE_TOKEN;
 // Lifetime bounds cover active plus retired IDs; tombstones are never pruned.
 export const PREAMBLE_ID_LIFETIME_MAX_COUNT = 100_000;
 export const PREAMBLES_FILE_MAX_BYTES = 64 * 1024 * 1024;
-
-const PREAMBLE_TEMPLATE_VARIABLES = [CHAT_ID_TEMPLATE_VARIABLE] as const;
 
 export const PREAMBLE_BOUNDARY_KINDS = [
   'new-chat',
@@ -247,11 +245,11 @@ export const PREAMBLE_ERROR_CODES = {
 
 export type PreambleErrorCode = (typeof PREAMBLE_ERROR_CODES)[keyof typeof PREAMBLE_ERROR_CODES];
 
-export function renderPreambleContent(content: string, chatId: string): string {
+export function renderPreambleContent(content: string, values: RuntimeTemplateValues): string {
   return expandTemplate(
     content,
-    PREAMBLE_TEMPLATE_VARIABLES,
-    { chat_id: chatId },
+    RUNTIME_TEMPLATE_VARIABLES,
+    values,
     PREAMBLE_COMBINED_MAX_LENGTH,
   );
 }

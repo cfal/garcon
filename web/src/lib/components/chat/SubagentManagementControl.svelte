@@ -113,51 +113,49 @@
 		</div>
 
 		<Popover.Content align="start" sideOffset={6} class="w-72 p-0">
-			<div class="bg-popover text-popover-foreground rounded-md border border-border">
-				{#if rootEntry}
-					<div class="flex items-center gap-2 border-b border-border/70 px-3 py-2">
-						<Bot class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-						<div class="min-w-0 flex-1">
-							<div class="truncate text-sm font-medium">{rootEntry.name}</div>
-							{#if rootEntry.model}
-								<div class="truncate text-xs text-muted-foreground">{rootEntry.model}</div>
-							{/if}
-						</div>
-						<span
-							class={cn('size-2 shrink-0 rounded-full bg-current', statusTone(rootEntry.status))}
-							title={rootEntry.statusLabel}
-						></span>
+			{#if rootEntry}
+				<div class="flex items-center gap-2 border-b border-border/70 px-3 py-2">
+					<Bot class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+					<div class="min-w-0 flex-1">
+						<div class="truncate text-sm font-medium">{rootEntry.name}</div>
+						{#if rootEntry.model}
+							<div class="truncate text-xs text-muted-foreground">{rootEntry.model}</div>
+						{/if}
 					</div>
-				{/if}
+					<span
+						class={cn('size-2 shrink-0 rounded-full bg-current', statusTone(rootEntry.status))}
+						title={rootEntry.statusLabel}
+					></span>
+				</div>
+			{/if}
 
-				<ul class="max-h-72 overflow-y-auto py-1">
-					{#each model.subagents as entry (entry.id)}
-						<li>
-							<button
-								type="button"
-								class="group flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-hidden disabled:cursor-default disabled:hover:bg-transparent"
-								disabled={!entry.anchorId}
-								onclick={() => selectEntry(entry)}
-							>
-								<span
-									class={cn('size-2 shrink-0 rounded-full bg-current', statusTone(entry.status))}
+			<ul class="max-h-72 overflow-y-auto py-1">
+				{#each model.subagents as entry (entry.id)}
+					<li>
+						<button
+							type="button"
+							class="group flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-hidden disabled:cursor-default disabled:hover:bg-transparent"
+							disabled={!entry.anchorId}
+							onclick={() => selectEntry(entry)}
+						>
+							<span
+								class={cn('size-2 shrink-0 rounded-full bg-current', statusTone(entry.status))}
+								aria-hidden="true"
+							></span>
+							<div class="min-w-0 flex-1">
+								<div class="truncate text-sm font-medium">{entry.name}</div>
+								<div class="truncate text-xs text-muted-foreground">{detailFor(entry)}</div>
+							</div>
+							{#if entry.anchorId}
+								<CornerDownLeft
+									class="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
 									aria-hidden="true"
-								></span>
-								<div class="min-w-0 flex-1">
-									<div class="truncate text-sm font-medium">{entry.name}</div>
-									<div class="truncate text-xs text-muted-foreground">{detailFor(entry)}</div>
-								</div>
-								{#if entry.anchorId}
-									<CornerDownLeft
-										class="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-										aria-hidden="true"
-									/>
-								{/if}
-							</button>
-						</li>
-					{/each}
-				</ul>
-			</div>
+								/>
+							{/if}
+						</button>
+					</li>
+				{/each}
+			</ul>
 		</Popover.Content>
 	</Popover.Root>
 {/if}

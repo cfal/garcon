@@ -1,7 +1,4 @@
-import { promises as fs } from 'fs';
 import { createHash } from 'node:crypto';
-import os from 'os';
-import path from 'path';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import { GPT_6_ASTRA_MODEL, GPT_6_1_SOL_MODEL, GPT_6_SOL_MODEL, GPT_6_LUNA_MODEL } from '@garcon/common/models';
@@ -12,7 +9,8 @@ import type {
   CodexThreadSettingsSandboxPolicy,
   ThreadSettingsUpdateParams,
 } from './protocol.js';
-import { attachmentMimeType, isImageAttachment, parseAttachmentDataUrl } from '@garcon/server-agent-common/shared/attachments';
+import { isImageAttachment } from '@garcon/server-agent-common/shared/attachments';
+import { materializeAttachmentFiles } from '@garcon/server-agent-common/shared/attachment-files';
 
 export function codexSourceRuntimeIdentity(
   request: Pick<CodexStartRequest, 'envOverrides' | 'codexConfig'>,
@@ -79,21 +77,6 @@ const CODEX_SANDBOX: Record<string, CodexSandboxSettings> = {
   acceptEdits: { sandbox: 'workspace-write', approvalPolicy: 'never' },
   manualBypass: { sandbox: 'workspace-write', approvalPolicy: 'on-request' },
   bypassPermissions: { sandbox: 'danger-full-access', approvalPolicy: 'never' },
-};
-
-const MIME_EXTENSIONS: Record<string, string> = {
-  'image/png': '.png',
-  'image/jpeg': '.jpg',
-  'image/gif': '.gif',
-  'image/webp': '.webp',
-  'image/svg+xml': '.svg',
-  'application/pdf': '.pdf',
-  'text/markdown': '.md',
-  'text/plain': '.txt',
-  'video/mp4': '.mp4',
-  'video/quicktime': '.mov',
-  'video/webm': '.webm',
-  'video/x-matroska': '.mkv',
 };
 
 export function codexSandboxSettings(permissionMode: PermissionMode): CodexSandboxSettings {
@@ -355,44 +338,15 @@ export function buildUserInput(
   return input;
 }
 
-export async function writeAttachmentsToTempFiles(images?: readonly AgentAttachment[]): Promise<{
+export async function writeAttachmentsToTempFiles(attachments?: readonly AgentAttachment[]): Promise<{
   imagePaths: string[];
   filePaths: string[];
   cleanup: () => Promise<void>;
 }> {
-  if (!images?.length) {
-    return { imagePaths: [], filePaths: [], cleanup: async () => {} };
-  }
-
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-attachments-'));
-  const imagePaths: string[] = [];
-  const filePaths: string[] = [];
-
-  try {
-    for (let i = 0; i < images.length; i++) {
-      const attachment = images[i];
-      const parts = parseAttachmentDataUrl(attachment.data);
-      if (!parts) continue;
-
-      const mimeType = attachmentMimeType(attachment);
-      const ext = MIME_EXTENSIONS[mimeType];
-      if (!ext) continue;
-      const prefix = isImageAttachment(attachment) ? 'image' : 'attachment';
-      const filePath = path.join(tmpDir, `${prefix}-${i}${ext}`);
-      await fs.writeFile(filePath, Buffer.from(parts.base64, 'base64'));
-      if (isImageAttachment(attachment)) imagePaths.push(filePath);
-      else filePaths.push(filePath);
-    }
-  } catch (error) {
-    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-    throw error;
-  }
-
+  const { files, cleanup } = await materializeAttachmentFiles('codex-attachments', attachments ?? []);
   return {
-    imagePaths,
-    filePaths,
-    cleanup: async () => {
-      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-    },
+    imagePaths: files.filter((file) => isImageAttachment(file.attachment)).map((file) => file.path),
+    filePaths: files.filter((file) => !isImageAttachment(file.attachment)).map((file) => file.path),
+    cleanup,
   };
 }

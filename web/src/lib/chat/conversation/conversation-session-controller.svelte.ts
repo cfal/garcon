@@ -577,7 +577,7 @@ export class ConversationSessionController {
 		};
 		if (!literal) text = text.trim();
 		if (
-			(literal || isDraft || !isControllerSlashCommand(text)) &&
+			(isDraft || !isControllerSlashCommand(text, agent.executionPolicy)) &&
 			(!deps.canSubmitToExecutor(executorId) ||
 				!isCustomProviderSelectionAvailable(deps.modelCatalogForExecutor(executorId), selection))
 		) {
@@ -588,12 +588,20 @@ export class ConversationSessionController {
 		if (!text.trim() && submissionImages.length === 0) return 'no-op';
 		const previousText = draft.text;
 		const previousImages = [...draft.attachments];
-		const slash = literal ? { kind: 'pass-through' as const, content: text } : this.#slashCommands.dispatchSubmission({
+		const slash = literal && source === 'automatic-start'
+			? { kind: 'continue' as const, content: text }
+			: this.#slashCommands.dispatchSubmission({
 			chatId,
 			chat: selected,
 			text,
 			images: [...submissionImages],
 			ownsComposer,
+			executionPolicy: agent.executionPolicy,
+			expectedSelection: literal ? {
+				agentId: agent.id,
+				agentOwnershipEpoch: selected.agentOwnershipEpoch,
+				model: selection.model ?? null,
+			} : undefined,
 		});
 		if (slash.kind === 'handled') return slash.outcome;
 
@@ -723,7 +731,7 @@ export class ConversationSessionController {
 		const text = agent.executionPolicy === 'literal' ? deps.composerState.inputText : deps.composerState.inputText.trim();
 		const hasAttachments = deps.composerState.images.length > 0;
 		if (!text.trim() && !hasAttachments) return 'no-op';
-		if (agent.executionPolicy !== 'literal' && selected.status === 'running' && isControllerSlashCommand(text))
+		if (selected.status === 'running' && isControllerSlashCommand(text, agent.executionPolicy))
 			return this.submitForChat(chatId);
 		if (
 			!deps.canSubmitToExecutor(deps.agentState.executorId) ||

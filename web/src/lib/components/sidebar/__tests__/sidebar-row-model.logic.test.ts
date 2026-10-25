@@ -2,15 +2,18 @@ import { describe, expect, it } from 'vitest';
 import {
 	buildSidebarChatOrderMap,
 	buildSidebarDisplayChatIds as buildSidebarDisplayChatIdsBase,
+	buildSidebarExecutorCollapseKeys,
 	buildSidebarProjectKeys,
 	buildSidebarRowModel as buildSidebarRowModelBase,
 	sidebarActivitySection,
+	sidebarExecutorKey,
 	sidebarProjectKey,
 	sidebarStatusSection,
 } from '../sidebar-row-model';
 import { SIDEBAR_INACTIVITY_DURATION_MS } from '../chat-inactivity';
 import {
 	SIDEBAR_SECTION_COLLAPSE_KEYS,
+	sidebarSectionKey,
 	sidebarSectionProjectKey,
 } from '../sidebar-virtual-chat-list';
 import type { SidebarInactivityDuration } from '$lib/stores/local-settings.svelte';
@@ -84,6 +87,7 @@ function chat(
 
 function rowLabels(model: ReturnType<typeof buildSidebarRowModel>): string[] {
 	return model.rows.map((row) => {
+		if (row.type === 'executor-header') return `executor:${row.executorId}`;
 		if (row.type === 'project-header') return `header:${row.projectPath}`;
 		if (row.type === 'section-header') return `section:${row.section}`;
 		return row.chat.id;
@@ -91,18 +95,278 @@ function rowLabels(model: ReturnType<typeof buildSidebarRowModel>): string[] {
 }
 
 describe('sidebar row model', () => {
-	it.each([false, true])('keeps same-path projects on different executors separate with nested grouping=%s', (groupNestedProjectPaths) => {
-		const executorId = '22222222-2222-4222-8222-222222222222';
-		const chats = [chat('local', '/repo'), chat('remote', '/repo', { executorId })];
-		const model = buildSidebarRowModel({
-			displayedChats: chats, orders: buildSidebarChatOrderMap(chats), grouping: 'project',
-			currentTime: TEST_NOW, groupNestedProjectPaths,
-		});
-		expect(model.projectKeys).toEqual([sidebarProjectKey('/repo'), sidebarProjectKey('/repo', executorId)]);
-		expect(model.rows.filter((row) => row.type === 'project-header').map((row) => row.executorId)).toEqual(['local', executorId]);
-		expect(model.reorderScopesByChatId.get('local')).toEqual(['local']);
-		expect(model.reorderScopesByChatId.get('remote')).toEqual(['remote']);
+	it.each(['project', 'project-and-activity', 'activity', 'status'] as const)(
+		'keeps executors outermost and row identities unique in %s grouping',
+		(grouping) => {
+			const executorId = '22222222-2222-4222-8222-222222222222';
+			const chats = ['local', executorId].flatMap((id) => [
+				chat(`${id}-active`, '/workspace', { executorId: id }),
+				chat(`${id}-inactive`, '/workspace', { executorId: id, status: 'running' }),
+				chat(`${id}-archived`, '/workspace', { executorId: id, isArchived: true }),
+			]);
+			const model = buildSidebarRowModel({
+				displayedChats: chats,
+				orders: buildSidebarChatOrderMap(chats),
+				grouping,
+				currentTime: TEST_NOW,
+			});
+			let owner: string | undefined;
+			for (const row of model.rows) {
+				if (row.type === 'executor-header') owner = row.executorId;
+				else if (row.type === 'chat') expect(row.chat.executorId).toBe(owner);
+			}
+			expect(new Set(model.rows.map((row) => row.key)).size).toBe(model.rows.length);
+			expect(new Set(model.visibleChatIds)).toEqual(new Set(chats.map((item) => item.id)));
+		},
+	);
+
+	it('keeps configured executor order stable when chat recency changes', () => {
+		const chats = [
+			chat('worker-b', '/same', { executorId: 'worker-b' }),
+			chat('local', '/same'),
+			chat('worker-a', '/same', { executorId: 'worker-a' }),
+		];
+		for (const displayedChats of [chats, chats.toReversed()]) {
+			const model = buildSidebarRowModel({
+				displayedChats,
+				orders: buildSidebarChatOrderMap(displayedChats),
+				grouping: 'project',
+				currentTime: TEST_NOW,
+				executorOrder: ['worker-a', 'local', 'worker-b'],
+			});
+			expect(
+				model.rows.filter((row) => row.type === 'executor-header').map((row) => row.executorId),
+			).toEqual(['local', 'worker-a', 'worker-b']);
+		}
 	});
+
+	it.each(['local', 'worker'])(
+		'retains the executor heading for %s-only filtered results',
+		(executorId) => {
+			const chats = [chat('result', '/workspace', { executorId })];
+			const model = buildSidebarRowModel({
+				displayedChats: chats,
+				orders: buildSidebarChatOrderMap(chats),
+				grouping: 'project',
+				currentTime: TEST_NOW,
+				executorOrder: ['local', 'worker'],
+			});
+			expect(rowLabels(model)).toEqual([`executor:${executorId}`, 'header:/workspace', 'result']);
+		},
+	);
+
+	it('collapses an activity section on only its owning executor', () => {
+		const chats = [
+			chat('local', '/workspace'),
+			chat('remote', '/workspace', { executorId: 'worker' }),
+		];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'activity',
+			currentTime: TEST_NOW,
+			collapsedProjectKeys: new Set([sidebarSectionKey('active', 'worker')]),
+		});
+		expect(model.visibleChatIds).toEqual(['local']);
+		expect(model.rows.at(-1)).toMatchObject({
+			type: 'section-header',
+			executorId: 'worker',
+			isCollapsed: true,
+		});
+	});
+
+	it('scopes activity reordering to one executor and keeps no grouping flat', () => {
+		const chats = [
+			chat('local', '/workspace'),
+			chat('remote', '/workspace', { executorId: 'worker' }),
+		];
+		const input = {
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			currentTime: TEST_NOW,
+		};
+		const grouped = buildSidebarRowModel({ ...input, grouping: 'activity' });
+		expect(grouped.reorderScopesByChatId.get('local')).toEqual(['local']);
+		expect(grouped.reorderScopesByChatId.get('remote')).toEqual(['remote']);
+		const scopes = grouped.rows
+			.filter((row) => row.type === 'chat')
+			.map((row) => row.reorderScopeKey);
+		expect(new Set(scopes).size).toBe(2);
+		expect(rowLabels(buildSidebarRowModel({ ...input, grouping: 'none' }))).toEqual([
+			'local',
+			'remote',
+		]);
+	});
+
+	it('renders an explicit executor level above project groups when chats span executors', () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const chats = [
+			chat('local-a', '/workspace/zeta'),
+			chat('remote-a', '/workspace/alpha', { executorId }),
+			chat('local-b', '/workspace/alpha'),
+		];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project',
+			currentTime: TEST_NOW,
+		});
+
+		expect(rowLabels(model)).toEqual([
+			'executor:local',
+			'header:/workspace/alpha',
+			'local-b',
+			'header:/workspace/zeta',
+			'local-a',
+			`executor:${executorId}`,
+			'header:/workspace/alpha',
+			'remote-a',
+		]);
+		expect(model.rows.filter((row) => row.type === 'executor-header')).toHaveLength(2);
+		expect(
+			model.rows.filter((row) => row.type === 'project-header').every((row) => row.executorGrouped),
+		).toBe(true);
+	});
+
+	it('nests rows beneath executor and project headers but not beneath section labels', () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const chats = ['local', executorId].flatMap((id) => [
+			chat(`${id}-active`, '/workspace', { executorId: id }),
+			chat(`${id}-inactive`, '/workspace', { executorId: id, status: 'running' }),
+			chat(`${id}-archived`, '/workspace', { executorId: id, isArchived: true }),
+		]);
+		const input = {
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project-and-activity' as const,
+			currentTime: TEST_NOW,
+		};
+		const depths = (model: ReturnType<typeof buildSidebarRowModel>) => {
+			const labels = rowLabels(model);
+			return model.rows.map((row, index) => `${labels[index]}@${row.depth}`);
+		};
+
+		expect(depths(buildSidebarRowModel(input)).slice(0, 7)).toEqual([
+			'executor:local@0',
+			'header:/workspace@1',
+			'local-active@2',
+			'section:inactive@1',
+			'header:/workspace@1',
+			'local-inactive@2',
+			'section:archived@1',
+		]);
+		expect(
+			buildSidebarRowModel(input)
+				.rows.filter((row) => row.type === 'chat')
+				.every((row) => row.executorGrouped),
+		).toBe(true);
+
+		const localChats = chats.filter((entry) => !entry.executorId || entry.executorId === 'local');
+		const ungrouped = buildSidebarRowModel({
+			...input,
+			displayedChats: localChats,
+			orders: buildSidebarChatOrderMap(localChats),
+		});
+		expect(depths(ungrouped)).toEqual([
+			'header:/workspace@0',
+			'local-active@1',
+			'section:inactive@0',
+			'header:/workspace@0',
+			'local-inactive@1',
+			'section:archived@0',
+			'local-archived@0',
+		]);
+		expect(ungrouped.rows.some((row) => 'executorGrouped' in row)).toBe(false);
+	});
+
+	it('marks project names that collide under one executor', () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const chats = [
+			chat('a', '/workspace/clients/app'),
+			chat('b', '/workspace/forks/app'),
+			chat('c', '/workspace/notes'),
+			chat('d', '/remote/app', { executorId }),
+		];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project',
+			currentTime: TEST_NOW,
+		});
+
+		const ambiguity = Object.fromEntries(
+			model.rows
+				.filter((row) => row.type === 'project-header')
+				.map((row) => [row.projectPath, row.showParentPath ?? false]),
+		);
+		expect(ambiguity).toEqual({
+			'/workspace/clients/app': true,
+			'/workspace/forks/app': true,
+			'/workspace/notes': false,
+			'/remote/app': false,
+		});
+	});
+
+	it('collapses an executor without losing its project anchor', () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const chats = [chat('local', '/local'), chat('remote', '/remote', { executorId })];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'project',
+			currentTime: TEST_NOW,
+			collapsedProjectKeys: new Set([sidebarExecutorKey(executorId)]),
+		});
+
+		expect(rowLabels(model)).toEqual([
+			'executor:local',
+			'header:/local',
+			'local',
+			`executor:${executorId}`,
+		]);
+		expect(model.visibleChatIds).toEqual(['local']);
+		expect(
+			model.rows.find((row) => row.type === 'executor-header' && row.executorId === executorId),
+		).toMatchObject({
+			collapseKey: sidebarExecutorKey(executorId),
+			count: 1,
+			isCollapsed: true,
+		});
+	});
+
+	it('keeps executor collapse keys available for section-specific projections', () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const chats = [chat('local', '/local'), chat('remote', '/remote', { executorId })];
+		const keys = buildSidebarExecutorCollapseKeys({ displayedChats: chats });
+
+		expect(keys).toContain(sidebarExecutorKey(executorId));
+		expect(keys).toContain(sidebarSectionKey('active', executorId));
+		expect(keys).toContain(sidebarSectionKey('inactive', executorId));
+	});
+
+	it.each([false, true])(
+		'keeps same-path projects on different executors separate with nested grouping=%s',
+		(groupNestedProjectPaths) => {
+			const executorId = '22222222-2222-4222-8222-222222222222';
+			const chats = [chat('local', '/repo'), chat('remote', '/repo', { executorId })];
+			const model = buildSidebarRowModel({
+				displayedChats: chats,
+				orders: buildSidebarChatOrderMap(chats),
+				grouping: 'project',
+				currentTime: TEST_NOW,
+				groupNestedProjectPaths,
+			});
+			expect(model.projectKeys).toEqual([
+				sidebarProjectKey('/repo'),
+				sidebarProjectKey('/repo', executorId),
+			]);
+			expect(
+				model.rows.filter((row) => row.type === 'project-header').map((row) => row.executorId),
+			).toEqual(['local', executorId]);
+			expect(model.reorderScopesByChatId.get('local')).toEqual(['local']);
+			expect(model.reorderScopesByChatId.get('remote')).toEqual(['remote']);
+		},
+	);
 
 	it('keeps ungrouped rows in pinned, normal, archived order', () => {
 		const chats = [

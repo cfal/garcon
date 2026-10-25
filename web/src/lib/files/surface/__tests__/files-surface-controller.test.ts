@@ -7,6 +7,7 @@ import { ApiError } from '$lib/api/client.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
+import { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures.js';
@@ -40,7 +41,7 @@ function createController(executors?: ExecutorsStore) {
 		...deps,
 		executors,
 		createCommit: () => new CommitController(deps),
-		createPullRequests: () => new PullRequestsStore(),
+		createPullRequests: () => new PullRequestsStore({ reviews: new PullRequestReviewsStore() }),
 	});
 	cleanups.push(() => registry.destroy());
 	const controller = registry.files();
@@ -188,7 +189,7 @@ describe('FilesSurfaceController executor browsing', () => {
 			localExecutor,
 			{
 				...remoteExecutor,
-				machineServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
+				executorServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
 			},
 		]);
 		return executors;

@@ -15,6 +15,7 @@ import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { ChatProcessingPresentationRegistry } from '$lib/ws/chat-processing-reconciler.svelte.js';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import type { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
+import type { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 import type { ConversationLifecyclePort } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
 import type { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
@@ -29,6 +30,7 @@ import type { AppTitleStore } from '$lib/stores/app-title';
 import type { MinuteClockStore } from '$lib/stores/minute-clock.svelte';
 import type { GhCapabilityContext } from '$lib/git/pull-requests/gh-capability.svelte';
 import type { ScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte';
+import type { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte';
 import type { ChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
 import type { SnippetsStore } from '$lib/snippets/snippets-store.svelte';
@@ -79,6 +81,7 @@ export const [getSidebarProjectCollapse, setSidebarProjectCollapse] =
 export const [getAppTitle, setAppTitle] = createContext<AppTitleStore>();
 export const [getMinuteClock, setMinuteClock] = createContext<MinuteClockStore>();
 export const [getScheduledPrompts, setScheduledPrompts] = createContext<ScheduledPromptsStore>();
+export const [getPullRequestReviews, setPullRequestReviews] = createContext<PullRequestReviewsStore>();
 export const [getPreambles, setPreambles] = createContext<PreamblesStore>();
 export const [getChatPreambleSelectionInvalidationHub, setChatPreambleSelectionInvalidationHub] =
 	createContext<ChatPreambleSelectionInvalidationHub>();
@@ -146,6 +149,8 @@ export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettin
 // Chat-level contexts (set in ConversationWorkspace.svelte)
 export const [getComposerState, setComposerState] = createContext<ComposerState>();
 export const [getChatDrafts, setChatDrafts] = createContext<ChatDraftStore>();
+export const [getNewChatPromptDrafts, setNewChatPromptDrafts] =
+	createContext<NewChatPromptDraftStore>();
 export const [getAgentState, setAgentState] = createContext<AgentState>();
 export const [getConversationUi, setConversationUi] = createContext<ConversationUiPort>();
 export const [getConversationLifecycles, setConversationLifecycles] =

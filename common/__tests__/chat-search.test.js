@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { parseChatSearch, serializeChatFilter } from '../chat-filter-query.ts';
 import {
   CHAT_SEARCH_MAX_FAILED_CHAT_DETAILS,
   classifyChatSearchFailureRecovery,
@@ -83,6 +84,84 @@ describe('chat search contracts', () => {
           tokens: [{ text: 'needle', normalized: 'needle', match: 'prefix' }],
         }],
       });
+  });
+
+  it('preserves punctuation-bearing identifiers for raw and web-token queries', () => {
+    for (const text of ['#731', 'ABC-123', '/workspace/src/index.ts', 'file_name', 'C++', 'dev@example.test']) {
+      for (const query of [text, `"${text}"`, `'${text}'`]) {
+        const compiled = compileChatSearchQuery(query);
+        expect(compiled.clauses[0]).toMatchObject({ kind: 'literal', text });
+        expect(compiled.clauses[0].tokens.every((token) => token.match === 'exact')).toBe(true);
+        expect(compileChatSearchQuery(query, [text])).toEqual(compiled);
+      }
+    }
+    expect(compileChatSearchQuery('"PR #731"', ['PR #731']).clauses[0])
+      .toMatchObject({ kind: 'literal', text: 'PR #731' });
+    expect(compileChatSearchQuery('"PR\t#731"').clauses[0])
+      .toMatchObject({ kind: 'literal', text: 'PR #731' });
+    expect(compileChatSearchQuery('#731 marker').clauses.map((clause) => clause.kind))
+      .toEqual(['literal', 'all-words']);
+    expect(compileChatSearchQuery('731 cafe\u0301').clauses.map((clause) => clause.kind))
+      .toEqual(['all-words', 'all-words']);
+    expect(compileChatSearchQuery('###').clauses).toEqual([]);
+  });
+
+  it('recovers original literal spelling from normalized browser tokens', () => {
+    for (const query of [
+      '#K\u0130-123', '"#K\u0130-123"', '"PR #K\u0130-123"',
+      'PR\u00a0#K\u0130-123', 'foo"#K\u0130-123"', '"PR #K\u0130-123', '#K\u0130-123"',
+    ]) {
+      const { textTokens } = parseChatSearch(query);
+      const browser = compileChatSearchQuery(query, textTokens);
+      const raw = compileChatSearchQuery(query);
+      expect(browser.clauses.filter((clause) => clause.kind === 'literal'))
+        .toEqual(raw.clauses.filter((clause) => clause.kind === 'literal'));
+      expect(browser.clauses.some((clause) =>
+        clause.kind === 'literal' && clause.text.includes('#K\u0130-123'))).toBe(true);
+    }
+  });
+
+  it('retains supplied browser spelling for lexical prefixes', () => {
+    const query = '\u1c90\u1c91\u1c92';
+    expect(compileChatSearchQuery(query, parseChatSearch(query).textTokens).clauses).toEqual([{
+      kind: 'all-words',
+      tokens: [{ text: '\u10d0\u10d1\u10d2', normalized: '\u10d0\u10d1\u10d2', match: 'prefix' }],
+    }]);
+  });
+
+  it('recovers repeated normalized tokens in their original order', () => {
+    const query = 'ABC-123 abc-123';
+    expect(compileChatSearchQuery(query, parseChatSearch(query).textTokens))
+      .toEqual(compileChatSearchQuery(query));
+  });
+
+  it('does not recover literal spelling from metadata filter values', () => {
+    const query = 'title:"synthetic #ki\u0307-123 label" #K\u0130-123';
+    expect(compileChatSearchQuery(query, parseChatSearch(query).textTokens))
+      .toEqual(compileChatSearchQuery('#K\u0130-123'));
+  });
+
+  it('keeps Unicode format characters lexical and asterisks literal', () => {
+    for (const query of ['\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645', 'soft\u00adhyphen']) {
+      const clause = compileChatSearchQuery(query).clauses[0];
+      expect(clause.kind).toBe('all-words');
+      expect(clause.tokens.some((token) => token.match === 'prefix')).toBe(true);
+    }
+    expect(compileChatSearchQuery('needle*').clauses[0])
+      .toMatchObject({ kind: 'literal', text: 'needle*' });
+  });
+
+  it('separates all unquoted whitespace but retains quoted Unicode whitespace', () => {
+    for (const whitespace of [' ', '\t', '\n', '\r\n', '\u00a0', '\u2003', '\u0085', '\ufeff']) {
+      const query = `alpha${whitespace}beta`;
+      const expected = compileChatSearchQuery('alpha beta');
+      expect(compileChatSearchQuery(query)).toEqual(expected);
+      expect(compileChatSearchQuery(query, parseChatSearch(query).textTokens)).toEqual(expected);
+    }
+    for (const whitespace of ['\u00a0', '\u0085', '\ufeff']) {
+      const filter = parseChatSearch(`"alpha${whitespace}beta"`);
+      expect(parseChatSearch(serializeChatFilter(filter))).toEqual(filter);
+    }
   });
 
   it('parses a correlated search page and rejects malformed relations', () => {

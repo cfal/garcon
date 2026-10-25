@@ -78,6 +78,18 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 export const SNIPPET_SLASH_COMMAND_NAMES = ['s', 'snippet'] as const;
 const SNIPPET_SLASH_COMMAND_NAME_SET: ReadonlySet<string> = new Set(SNIPPET_SLASH_COMMAND_NAMES);
 
+export const LITERAL_APP_COMMAND_NAMES: readonly string[] = [
+	'clear', 'fork', 'in', 'rename', 'move', 'tag',
+];
+
+export function isLiteralAppCommand(input: string): boolean {
+	const name = /^\/([a-z]+)(?=[ \t\r\n\v\f]|$)/.exec(input)?.[1];
+	if (!name || !LITERAL_APP_COMMAND_NAMES.includes(name)) return false;
+	if (name === 'clear') return isClearCommand(input);
+	if (name === 'fork') return /^\/fork[ \t\r\n\v\f]*$/.test(input);
+	return true;
+}
+
 export interface SlashCommandTrigger {
 	start: number;
 	end: number;
@@ -213,16 +225,18 @@ export type ScheduleInCommandParseResult =
 	  };
 
 const IN_COMMAND_RE = /^\s*\/in(?=\s|$)(?:\s+(\S+))?(?:\s+([\s\S]*))?$/i;
+const LITERAL_IN_COMMAND_RE = /^\/in(?=[ \t\r\n\v\f]|$)(?:[ \t]+([^ \t\r\n\v\f]+))?(?:(?:\r\n|[ \t\r\n\v\f])([\s\S]*))?$/;
 
-export function parseScheduleInCommand(input: string): ScheduleInCommandParseResult {
-	const match = IN_COMMAND_RE.exec(input);
+export function parseScheduleInCommand(input: string, policy: 'conversation' | 'literal' = 'conversation'): ScheduleInCommandParseResult {
+	const match = (policy === 'literal' ? LITERAL_IN_COMMAND_RE : IN_COMMAND_RE).exec(input);
 	if (!match) return { kind: 'not-command' };
 	const durationToken = match[1] ?? '';
 	const duration = parseScheduleDuration(durationToken);
 	if (!duration.ok) return { kind: 'invalid', error: duration.error };
-	const prompt = (match[2] ?? '').trim();
-	if (!prompt) return { kind: 'invalid', error: 'prompt-required' };
-	if (hasLeadingSlashCommand(prompt)) {
+	const source = match[2] ?? '';
+	const prompt = policy === 'literal' ? source : source.trim();
+	if (!prompt.trim()) return { kind: 'invalid', error: 'prompt-required' };
+	if (policy === 'conversation' && hasLeadingSlashCommand(prompt)) {
 		return { kind: 'invalid', error: 'slash-prompt-unsupported' };
 	}
 	return {
@@ -233,7 +247,8 @@ export function parseScheduleInCommand(input: string): ScheduleInCommandParseRes
 	};
 }
 
-export function isControllerSlashCommand(input: string): boolean {
+export function isControllerSlashCommand(input: string, policy: 'conversation' | 'literal' = 'conversation'): boolean {
+	if (policy === 'literal') return isLiteralAppCommand(input);
 	return isClearCommand(input) || parseRenameCommand(input) !== null ||
 		parseMoveChatBoundaryCommand(input).kind !== 'not-command' ||
 		parseTagCommand(input).kind !== 'not-command' ||

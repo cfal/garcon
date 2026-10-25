@@ -135,7 +135,7 @@
 					style={`height:${REF_OPTION_ROW_HEIGHT}px; transform:translateY(${virtualWindow.getOffset(index)}px);`}
 					data-git-ref-virtual-row={`unavailable-${index}`}
 				>
-					<TriangleAlert class="-ml-2 h-3.5 w-3.5 text-status-warning-foreground" />
+					<TriangleAlert class="-ml-2 h-3.5 w-3.5 text-status-warning-muted-foreground" />
 					<span class="-ml-2 truncate">{m.git_branch_selector_ref_unavailable()}</span>
 					<span aria-hidden="true" class="text-right text-xs">—</span>
 				</button>

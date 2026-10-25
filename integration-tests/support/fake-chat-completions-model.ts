@@ -20,6 +20,7 @@ export type ChatCompletionsBlock =
       readonly id: string;
       readonly name: string;
       readonly input: Record<string, unknown>;
+      readonly rawArguments?: string;
       readonly usage?: ChatCompletionsUsage;
     };
 
@@ -70,9 +71,11 @@ export function chatCompletionsToolUse(
   id: string,
   name: string,
   input: Record<string, unknown>,
-  options: ChatCompletionsBlockOptions = {},
+  options: ChatCompletionsBlockOptions & { readonly rawArguments?: string } = {},
 ): ChatCompletionsBlock {
-  return { kind: 'tool_use', id, name, input, ...(options.usage ? { usage: options.usage } : {}) };
+  return { kind: 'tool_use', id, name, input,
+    ...(options.rawArguments === undefined ? {} : { rawArguments: options.rawArguments }),
+    ...(options.usage ? { usage: options.usage } : {}) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -190,7 +193,7 @@ function turnChunks(
     chunks.push(chunk(model, request.id, {
       index: 0,
       delta: {
-        tool_calls: [{ index: toolIndex, function: { arguments: JSON.stringify(block.input) } }],
+        tool_calls: [{ index: toolIndex, function: { arguments: block.rawArguments ?? JSON.stringify(block.input) } }],
       },
       finish_reason: null,
     }));

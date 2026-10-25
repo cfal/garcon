@@ -1,14 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const deployment = vi.hoisted(() => ({ base: '' }));
-vi.mock('$service-worker', () => ({
-	get base() {
-		return deployment.base;
-	},
-	build: [],
-	files: [],
-	version: 'test',
-}));
+vi.mock('$app/env', () => ({ version: 'test' }));
+vi.mock('$app/manifest', () => ({ immutable: [], assets: [] }));
 
 interface FetchEventPort {
 	request: Request;
@@ -17,7 +11,7 @@ interface FetchEventPort {
 }
 
 // Keeps the worker's global declarations outside the application's DOM type environment.
-const installWorker = () => vi.importActual('../service-worker');
+const installWorker = () => vi.importActual('../service-worker/index.js');
 
 function harness() {
 	const scope = new EventTarget();
@@ -36,6 +30,7 @@ function harness() {
 	} satisfies Pick<CacheStorage, 'open' | 'match'>;
 	const network = vi.fn<typeof fetch>();
 	vi.stubGlobal('self', {
+		registration: { scope: `https://garcon.test${deployment.base}/` },
 		addEventListener: scope.addEventListener.bind(scope),
 		location: { origin: 'https://garcon.test' },
 	});
@@ -146,13 +141,16 @@ describe('installed service worker fetch handler', () => {
 		expect(cache.put).not.toHaveBeenCalled();
 	});
 
-	it.each(['/api/v1/chats', '/ws', '/site.webmanifest'])('does not intercept %s', async (path) => {
-		const { dispatch } = harness();
-		await installWorker();
-		const event = dispatch(path);
-		expect(event.response).toBeUndefined();
-		expect(event.lifetimes).toEqual([]);
-	});
+	it.each(['/api/v1/chats', '/ws', '/site.webmanifest', '/_app/version.json'])(
+		'does not intercept %s',
+		async (path) => {
+			const { dispatch } = harness();
+			await installWorker();
+			const event = dispatch(path);
+			expect(event.response).toBeUndefined();
+			expect(event.lifetimes).toEqual([]);
+		},
+	);
 
 	it('limits interception and offline lookup to the configured mount', async () => {
 		deployment.base = '/tools/garcon';
@@ -165,6 +163,7 @@ describe('installed service worker fetch handler', () => {
 			'/tools/garcon/api/v1/chats',
 			'/tools/garcon/ws',
 			'/tools/garcon/site.webmanifest',
+			'/tools/garcon/_app/version.json',
 		]) {
 			expect(dispatch(path).response).toBeUndefined();
 		}

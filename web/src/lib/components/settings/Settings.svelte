@@ -25,6 +25,7 @@
 	import SettingsExecutorSections from './SettingsExecutorSections.svelte';
 	import GeneralSettingsSection from './GeneralSettingsSection.svelte';
 	import GitHubCliSettingsCard from './GitHubCliSettingsCard.svelte';
+	import GitHubRepositoriesSettingsSection from './GitHubRepositoriesSettingsSection.svelte';
 	import NotificationsSettingsSection from './NotificationsSettingsSection.svelte';
 	import ExecutorsSection from '../executors/ExecutorsSection.svelte';
 	import LocalSettingsSection from './LocalSettingsSection.svelte';
@@ -236,6 +237,7 @@
 							<SettingsExecutorSections>
 								{#snippet children(executorId)}<GitHubCliSettingsCard {executorId} />{/snippet}
 							</SettingsExecutorSections>
+							<GitHubRepositoriesSettingsSection />
 						{/if}
 					</Tabs.Content>
 

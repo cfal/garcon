@@ -22,7 +22,7 @@
 	/>
 {:else if tone === 'warning'}
 	<CircleMinus
-		class={cn('shrink-0 text-status-warning-foreground', className)}
+		class={cn('shrink-0 text-status-warning-muted-foreground', className)}
 		aria-hidden="true"
 	/>
 {:else}

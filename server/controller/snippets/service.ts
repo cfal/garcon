@@ -15,6 +15,7 @@ import {
   type UpdateSnippetRequest,
 } from '../../../common/snippets.js';
 import { renderPreambleContent } from '../../../common/preambles.js';
+import { runtimeTemplateValues } from '../../../common/template-tokens.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { SnippetDomainError } from './errors.js';
 import { SnippetCatalogCommittedUnknownError, SnippetStore } from './store.js';
@@ -162,7 +163,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
           : expandSnippetTemplate(snippet.template, {
               arguments: argumentsText,
               projectPath: resolvedProjectPath,
-              chatId: input.context.chatId,
+              context: runtimeTemplateValues(input.context.chatId, this.#now()),
             });
       } catch (error) {
         if (error instanceof SnippetExpansionError) {
@@ -173,7 +174,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     } else {
       expandedText = input.context.type === 'scheduled-prompt'
         ? preamble!.content
-        : renderPreambleContent(preamble!.content, input.context.chatId);
+        : renderPreambleContent(preamble!.content, runtimeTemplateValues(input.context.chatId, this.#now()));
     }
     return {
       success: true,

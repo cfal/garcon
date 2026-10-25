@@ -128,6 +128,7 @@ describe('NewChatDialog', () => {
 
 	afterEach(() => {
 		cleanup();
+		localStorage.clear();
 		resetPromptEditorStub();
 		vi.mocked(refinementApi.refinePrompt).mockReset();
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
@@ -323,5 +324,56 @@ describe('NewChatDialog', () => {
 
 		pending.resolve({ success: true, refinedPrompt: 'Must not apply' });
 		await pending.promise;
+	});
+
+	async function openMessageInput(): Promise<HTMLTextAreaElement> {
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		return screen.getByPlaceholderText('How can I help you today?') as HTMLTextAreaElement;
+	}
+
+	async function closeDialog(): Promise<void> {
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+	}
+
+	it('restores the unsent prompt when New Chat is closed and reopened', async () => {
+		render(NewChatDialogTestHost);
+		await fireEvent.input(await openMessageInput(), { target: { value: 'Unsent prompt' } });
+		await closeDialog();
+
+		await fireEvent.click(screen.getByTestId('reopen-new-chat'));
+		expect((await openMessageInput()).value).toBe('Unsent prompt');
+	});
+
+	it('keeps the unsent prompt behind a prefilled New Chat that is edited', async () => {
+		render(NewChatDialogTestHost);
+		await fireEvent.input(await openMessageInput(), { target: { value: 'Unsent prompt' } });
+		await closeDialog();
+
+		await fireEvent.click(screen.getByTestId('reopen-new-chat-prefilled'));
+		const prefilled = await openMessageInput();
+		expect(prefilled.value).toBe('Prefilled prompt');
+		await fireEvent.input(prefilled, { target: { value: 'Prefilled prompt, edited' } });
+		await closeDialog();
+
+		await fireEvent.click(screen.getByTestId('reopen-new-chat'));
+		expect((await openMessageInput()).value).toBe('Unsent prompt');
+	});
+
+	it('starts New Chat empty after the prompt has started a chat', async () => {
+		render(NewChatDialogTestHost);
+		await fireEvent.input(await openMessageInput(), { target: { value: 'Sent prompt' } });
+		await waitFor(() => {
+			expect(
+				(screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled,
+			).toBe(false);
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+		await fireEvent.click(screen.getByTestId('reopen-new-chat'));
+		expect((await openMessageInput()).value).toBe('');
 	});
 });

@@ -24,6 +24,19 @@ const PROFILE_ROLE_PROPERTIES = [
 	'--native-select-border',
 	'--native-select-radius',
 	'--native-select-compact-radius',
+	'--control-surface',
+	'--control-hover-surface',
+	'--terminal-foreground',
+	'--terminal-cursor',
+	'--terminal-selection-bg',
+	'--terminal-selection-foreground',
+	'--editor-selection-background',
+	'--ticket-open',
+	'--ticket-urgent',
+	'--ticket-high',
+	'--ticket-progress',
+	'--ticket-review',
+	'--ticket-done',
 ] as const;
 
 function profileSource(themeId: ThemeId): string {
@@ -117,25 +130,26 @@ describe('theme profile CSS sources', () => {
 		const referenceProperties = [...declaredProperties(profileSource(reference.id))].sort();
 
 		for (const profile of rest) {
-			expect([...declaredProperties(profileSource(profile.id))].sort()).toEqual(
-				referenceProperties,
-			);
+			expect
+				.soft([...declaredProperties(profileSource(profile.id))].sort())
+				.toEqual(referenceProperties);
 		}
 	});
 
 	it('keeps viewport geometry outside visual profiles', () => {
 		for (const profile of THEME_PROFILES) {
 			const properties = declaredProperties(profileSource(profile.id));
-			expect(properties.has('--safe-area-inset-top')).toBe(false);
-			expect(properties.has('--mobile-nav-height')).toBe(false);
-			expect(properties.has('--app-height')).toBe(false);
+			expect.soft(properties.has('--safe-area-inset-top')).toBe(false);
+			expect.soft(properties.has('--mobile-nav-height')).toBe(false);
+			expect.soft(properties.has('--app-height')).toBe(false);
 		}
 	});
 
 	it('defines every primitive appearance role in every profile', () => {
 		for (const profile of THEME_PROFILES) {
 			const properties = declaredProperties(profileSource(profile.id));
-			for (const property of PROFILE_ROLE_PROPERTIES) expect(properties.has(property)).toBe(true);
+			for (const property of PROFILE_ROLE_PROPERTIES)
+				expect.soft(properties.has(property)).toBe(true);
 		}
 	});
 
@@ -143,30 +157,142 @@ describe('theme profile CSS sources', () => {
 		const light = profileSource('colorblind-light');
 		const dark = profileSource('colorblind-dark');
 
-		expect(light).toContain('--git-added: 210 80% 30%;');
-		expect(light).toContain('--git-deleted: 30 90% 26%;');
-		expect(dark).toContain('--git-added: 210 85% 77%;');
-		expect(dark).toContain('--git-deleted: 30 92% 68%;');
-		expect(light).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
-		expect(dark).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
+		expect.soft(light).toContain('--git-added: 210 80% 30%;');
+		expect.soft(light).toContain('--git-deleted: 30 90% 26%;');
+		expect.soft(dark).toContain('--git-added: 210 85% 77%;');
+		expect.soft(dark).toContain('--git-deleted: 30 92% 68%;');
+		expect.soft(light).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
+		expect.soft(dark).not.toMatch(/\.(?:dark\.)?colorblind(?:\s|\{|,)/);
 	});
 
 	it('pins the distinct Classic and Phosphor foundations', () => {
-		expect(profileSource('classic-light')).toContain('--radius: 0.5rem;');
-		expect(profileSource('classic-dark')).toContain('--background: 0 0% 10%;');
-		expect(profileSource('phosphor-light')).toContain('--radius: 0.75rem;');
-		expect(profileSource('phosphor-dark')).toContain('--background: 222 33% 5%;');
+		expect.soft(profileSource('classic-light')).toContain('--radius: 0.5rem;');
+		expect.soft(profileSource('classic-dark')).toContain('--background: 0 0% 10%;');
+		expect.soft(profileSource('phosphor-light')).toContain('--radius: 0.75rem;');
+		expect.soft(profileSource('phosphor-dark')).toContain('--background: 222 33% 5%;');
 	});
 
-	it('keeps Phosphor scrollbar fallbacks aligned with WebKit painting', () => {
-		for (const [themeId, opacity] of [
-			['phosphor-light', '0.52'],
-			['phosphor-dark', '0.42'],
-		] as const) {
-			const source = profileSource(themeId);
-			expect(
-				source.match(new RegExp(`hsl\\(var\\(--foreground\\) / ${opacity}\\)`, 'g')),
-			).toHaveLength(3);
+	it('keeps Paper surfaces warm and Slate dark visibly lifted', () => {
+		const paper = propertyValues(profileSource('paper-light'));
+		for (const role of ['background', 'card', 'popover']) {
+			const [red, green, blue] = hslToSrgbChannels(paper[role]);
+			expect(red).toBeGreaterThan(green);
+			expect(green).toBeGreaterThan(blue);
+			expect(red).toBeLessThan(1);
+		}
+		const neko = propertyValues(profileSource('neko-dark'));
+		for (const id of ['paper-dark', 'slate-dark'] as const) {
+			const values = propertyValues(profileSource(id));
+			expect(relativeLuminanceFromChannels(hslToSrgbChannels(values.background))).toBeGreaterThan(
+				relativeLuminanceFromChannels(hslToSrgbChannels(neko.background)),
+			);
+		}
+	});
+
+	it('keeps native painting shared and profile files token-only', () => {
+		const application = readFileSync(new URL('../../../app.css', import.meta.url), 'utf8');
+		expect.soft(application).toContain('scrollbar-color: var(--scroll-area-thumb) transparent;');
+		expect.soft(application).toContain('background: var(--scroll-area-thumb);');
+		expect.soft(application).toContain('background: var(--scroll-area-thumb-hover);');
+		for (const profile of THEME_PROFILES) {
+			expect
+				.soft(profileSource(profile.id))
+				.not.toMatch(/::selection|::-webkit-scrollbar|accent-color/);
+		}
+	});
+
+	it('keeps ticket text and opaque focus indicators legible on application surfaces', () => {
+		for (const profile of THEME_PROFILES) {
+			const values = propertyValues(profileSource(profile.id));
+			for (const surface of ['background', 'card', 'accent']) {
+				for (const role of ['urgent', 'high', 'progress', 'review', 'done']) {
+					const color = values[`ticket-${role}`]
+						.replace(/var\(--([a-z-]+)\)/g, (_match, name: string) => values[name])
+						.replace(/^hsl\((.*)\)$/, '$1');
+					expect
+						.soft(
+							contrastRatio(values[surface], color),
+							`${profile.id} ticket ${role} on ${surface}`,
+						)
+						.toBeGreaterThanOrEqual(4.5);
+				}
+			}
+			for (const surface of ['background', 'card', 'popover']) {
+				expect
+					.soft(contrastRatio(values[surface], values.ring), `${profile.id} focus on ${surface}`)
+					.toBeGreaterThanOrEqual(3);
+			}
+		}
+	});
+
+	it('keeps standalone warnings legible without an opaque warning fill', () => {
+		for (const profile of THEME_PROFILES) {
+			const values = propertyValues(profileSource(profile.id));
+			for (const surface of ['background', 'card', 'popover', 'accent']) {
+				for (const opacity of [0, 0.1, 0.2]) {
+					expect
+						.soft(
+							contrastRatioOnTint(
+								values[surface],
+								values['status-warning'],
+								values['status-warning-muted-foreground'],
+								opacity,
+							),
+							`${profile.id} standalone warning on ${surface} with ${opacity} fill`,
+						)
+						.toBeGreaterThanOrEqual(4.5);
+				}
+			}
+		}
+	});
+
+	it('distinguishes field boundaries from the canvas in every profile', () => {
+		for (const profile of THEME_PROFILES) {
+			const values = propertyValues(profileSource(profile.id));
+			expect
+				.soft(contrastRatio(values.background, values.input), profile.id)
+				.toBeGreaterThanOrEqual(3);
+		}
+	});
+
+	it('keeps Paper and Slate error text and merged badges readable on their surfaces', () => {
+		for (const id of ['paper-light', 'paper-dark', 'slate-light', 'slate-dark'] as const) {
+			const values = propertyValues(profileSource(id));
+			for (const surface of ['background', 'card', 'popover', 'accent']) {
+				expect
+					.soft(contrastRatio(values[surface], values.destructive), `${id} error on ${surface}`)
+					.toBeGreaterThanOrEqual(4.5);
+			}
+			const destructive = hslToSrgbChannels(values.destructive);
+			const popover = hslToSrgbChannels(values.popover);
+			const mutedPopover = blendChannels(popover, hslToSrgbChannels(values.muted), 0.5);
+			for (const [surface, channels] of [
+				['popover', popover],
+				['muted popover', mutedPopover],
+			] as const) {
+				expect
+					.soft(
+						contrastRatioFromChannels(blendChannels(channels, destructive, 0.1), destructive),
+						`${id} tinted error on ${surface}`,
+					)
+					.toBeGreaterThanOrEqual(4.5);
+			}
+			expect
+				.soft(contrastRatioOnTint(values.card, values['pr-merged'], values['pr-merged'], 0.15), id)
+				.toBeGreaterThanOrEqual(4.5);
+		}
+	});
+
+	it('keeps Slate Dark hover and highlight surfaces distinct', () => {
+		const values = propertyValues(profileSource('slate-dark'));
+		for (const [surface, highlight] of [
+			['sidebar-chat-item-bg', 'sidebar-chat-item-hover-bg'],
+			['popover', 'accent'],
+			['popover', 'muted'],
+		]) {
+			expect
+				.soft(contrastRatio(values[surface], values[highlight]), highlight)
+				.toBeGreaterThan(1.12);
 		}
 	});
 
@@ -263,25 +389,36 @@ describe('theme profile CSS sources', () => {
 				0.4,
 			);
 			for (const [background, foreground] of pairs) {
-				expect(
-					contrastRatio(values[background], values[foreground]),
-					`${profile.id}: ${background}/${foreground}`,
-				).toBeGreaterThanOrEqual(4.5);
+				expect
+					.soft(
+						contrastRatio(values[background], values[foreground]),
+						`${profile.id}: ${background}/${foreground}`,
+					)
+					.toBeGreaterThanOrEqual(4.5);
 			}
 			for (const foreground of foregrounds) {
 				for (const surface of surfaces) {
-					expect(
-						contrastRatio(values[surface], values[foreground]),
-						`${profile.id}: ${foreground} on ${surface}`,
-					).toBeGreaterThanOrEqual(4.5);
+					expect
+						.soft(
+							contrastRatio(values[surface], values[foreground]),
+							`${profile.id}: ${foreground} on ${surface}`,
+						)
+						.toBeGreaterThanOrEqual(4.5);
 				}
 			}
 			for (const foreground of selfTintedForegrounds) {
 				for (const opacity of [0.2, 0.3]) {
-					expect(
-						contrastRatioOnTint(values.background, values[foreground], values[foreground], opacity),
-						`${profile.id}: ${foreground} on ${opacity * 100}% self tint`,
-					).toBeGreaterThanOrEqual(4.5);
+					expect
+						.soft(
+							contrastRatioOnTint(
+								values.background,
+								values[foreground],
+								values[foreground],
+								opacity,
+							),
+							`${profile.id}: ${foreground} on ${opacity * 100}% self tint`,
+						)
+						.toBeGreaterThanOrEqual(4.5);
 				}
 			}
 			for (const foreground of selectedDiffForegrounds) {
@@ -289,10 +426,12 @@ describe('theme profile CSS sources', () => {
 					['composer', composerSurface],
 					['selected', selectedSurface],
 				] as const) {
-					expect(
-						contrastRatioFromChannels(diffSurface, hslToSrgbChannels(values[foreground])),
-						`${profile.id}: ${foreground} on ${selection} diff`,
-					).toBeGreaterThanOrEqual(4.5);
+					expect
+						.soft(
+							contrastRatioFromChannels(diffSurface, hslToSrgbChannels(values[foreground])),
+							`${profile.id}: ${foreground} on ${selection} diff`,
+						)
+						.toBeGreaterThanOrEqual(4.5);
 				}
 			}
 			for (const [selection, diffSurface] of [
@@ -300,13 +439,15 @@ describe('theme profile CSS sources', () => {
 				['composer', composerSurface],
 				['selected', selectedSurface],
 			] as const) {
-				expect(
-					contrastRatioFromChannels(
-						diffSurface,
-						blendChannels(diffSurface, hslToSrgbChannels(values.foreground), 0.7),
-					),
-					`${profile.id}: context line number on ${selection} diff`,
-				).toBeGreaterThanOrEqual(4.5);
+				expect
+					.soft(
+						contrastRatioFromChannels(
+							diffSurface,
+							blendChannels(diffSurface, hslToSrgbChannels(values.foreground), 0.7),
+						),
+						`${profile.id}: context line number on ${selection} diff`,
+					)
+					.toBeGreaterThanOrEqual(4.5);
 			}
 			for (const foreground of syntaxForegrounds) {
 				const syntaxColor = hslToSrgbChannels(values[foreground]);
@@ -320,30 +461,38 @@ describe('theme profile CSS sources', () => {
 					['inline tool', hslToSrgbChannels(values.card)],
 					['plain-text tool', mutedToolSurface],
 				] as const) {
-					expect(
-						contrastRatioFromChannels(syntaxSurface, syntaxColor),
-						`${profile.id}: ${foreground} on ${surfaceName} diff`,
-					).toBeGreaterThanOrEqual(4.5);
+					expect
+						.soft(
+							contrastRatioFromChannels(syntaxSurface, syntaxColor),
+							`${profile.id}: ${foreground} on ${surfaceName} diff`,
+						)
+						.toBeGreaterThanOrEqual(4.5);
 				}
-				expect(
-					contrastRatio(values['markdown-code-background'], values[foreground]),
-					`${profile.id}: ${foreground} on markdown code`,
-				).toBeGreaterThanOrEqual(4.5);
+				expect
+					.soft(
+						contrastRatio(values['markdown-code-background'], values[foreground]),
+						`${profile.id}: ${foreground} on markdown code`,
+					)
+					.toBeGreaterThanOrEqual(4.5);
 			}
 			for (const background of ['diff-add-bg', 'diff-del-bg'] as const) {
-				expect(
-					contrastRatio(values[background], values['muted-foreground']),
-					`${profile.id}: line action on ${background}`,
-				).toBeGreaterThanOrEqual(3);
+				expect
+					.soft(
+						contrastRatio(values[background], values['muted-foreground']),
+						`${profile.id}: line action on ${background}`,
+					)
+					.toBeGreaterThanOrEqual(3);
 			}
 			for (const [selection, diffSurface] of [
 				['composer', composerSurface],
 				['selected', selectedSurface],
 			] as const) {
-				expect(
-					contrastRatioFromChannels(diffSurface, hslToSrgbChannels(values['muted-foreground'])),
-					`${profile.id}: line action on ${selection} diff`,
-				).toBeGreaterThanOrEqual(3);
+				expect
+					.soft(
+						contrastRatioFromChannels(diffSurface, hslToSrgbChannels(values['muted-foreground'])),
+						`${profile.id}: line action on ${selection} diff`,
+					)
+					.toBeGreaterThanOrEqual(3);
 			}
 		}
 	});

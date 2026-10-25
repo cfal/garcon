@@ -17,6 +17,7 @@ interface PromptComposerEditorControllerOptions {
 	get promptTransformPending(): boolean;
 	get snippetTrigger(): unknown;
 	get conversationInput(): boolean;
+	onSourceEditing(): void;
 }
 
 export class PromptComposerEditorController {
@@ -46,7 +47,7 @@ export class PromptComposerEditorController {
 		if (ui.formattedDraft) {
 			textarea.setSelectionRange(textarea.value.length, textarea.value.length);
 		}
-		ui.closeFormattedDraft();
+		this.options.onSourceEditing();
 		ui.closeSlashMenu();
 		ui.snippetPalette.dismiss();
 		const selection = promptEditorSelectionFromTextarea(textarea);

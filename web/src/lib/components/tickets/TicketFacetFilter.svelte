@@ -121,7 +121,7 @@
 				{#if !selected}<Check size={15} aria-hidden="true" />{/if}
 			</button>
 			<input
-				class="my-2 w-full rounded-lg border border-input bg-background px-3 py-2 text-base outline-none sm:pointer-fine:text-sm"
+				class="my-2 w-full rounded-lg border border-input bg-background px-3 py-2 text-base outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 				aria-label={messages.search}
 				placeholder={messages.search}
 				bind:value={prefix}
@@ -136,8 +136,9 @@
 						onclick={() => select(value)}
 					>
 						<Icon size={15} aria-hidden="true" />
-						<span class="ticket-project" data-path={field === 'project' && isTicketProjectPath(value)}
-							>{value}</span
+						<span
+							class="ticket-project"
+							data-path={field === 'project' && isTicketProjectPath(value)}>{value}</span
 						>
 						{#if selected === value}<Check size={15} aria-hidden="true" />{/if}
 					</button>

@@ -1,5 +1,5 @@
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
-import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
+import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 import { CLAUDE_MODELS } from '@garcon/common/models';
 import {
   AgentIntegrationError,
@@ -75,7 +75,8 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   readonly literalExecution = null;
   readonly readiness = null;
   readonly attachments = {
-    fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
+    fileMimeTypes: ANY_FILE_ATTACHMENT_MIME_TYPE,
+    inlineTextMaxBytes: null,
   } as const;
   readonly execution;
   readonly producers;

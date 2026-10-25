@@ -36,6 +36,12 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+function requiredString(value: unknown): string {
+  // Matches Pi's primitive coercion; rejected malformed calls retain empty canonical inputs.
+  // https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/ai/src/utils/validation.ts#L318-L325
+  return value === null || ['string', 'number', 'boolean'].includes(typeof value) ? String(value) : '';
+}
+
 function asNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
@@ -132,14 +138,12 @@ export function convertPiToolUse(
       return new McpToolUseMessage(timestamp, toolCallId, asString(input.server) ?? '', toolName, input);
 
     case 'bash': {
-      const command = asString(input.command);
-      if (command === undefined) break;
+      const command = requiredString(input.command);
       return new BashToolUseMessage(timestamp, toolCallId, command);
     }
 
     case 'read': {
-      const filePath = asString(input.path);
-      if (filePath === undefined) break;
+      const filePath = requiredString(input.path);
       return new ReadToolUseMessage(
         timestamp,
         toolCallId,
@@ -153,14 +157,13 @@ export function convertPiToolUse(
       return new ListToolUseMessage(timestamp, toolCallId, asString(input.path));
 
     case 'write': {
-      const filePath = asString(input.path);
-      if (filePath === undefined) break;
+      const filePath = requiredString(input.path);
       return new WriteToolUseMessage(timestamp, toolCallId, filePath, asString(input.content));
     }
 
     case 'edit': {
       const { oldText, newText } = firstEdit(input);
-      return new EditToolUseMessage(timestamp, toolCallId, asString(input.path), oldText, newText);
+      return new EditToolUseMessage(timestamp, toolCallId, requiredString(input.path), oldText, newText);
     }
 
     case 'grep':

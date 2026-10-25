@@ -4,6 +4,7 @@ import {
 	createScheduledPrompt,
 	getScheduledPrompts,
 	removeScheduledPrompt,
+	setScheduledPromptEnabled,
 	reorderScheduledPrompts,
 	updateScheduledPrompt,
 } from '$lib/api/scheduled-prompts.js';
@@ -19,6 +20,7 @@ export interface ScheduledPromptsStoreDeps {
 	create?: typeof createScheduledPrompt;
 	update?: typeof updateScheduledPrompt;
 	remove?: typeof removeScheduledPrompt;
+	setEnabled?: typeof setScheduledPromptEnabled;
 	reorder?: typeof reorderScheduledPrompts;
 }
 
@@ -119,6 +121,18 @@ export class ScheduledPromptsStore {
 				id,
 				scheduledPrompt: definition,
 			});
+			return this.applySnapshot(result.snapshot);
+		} catch (error) {
+			await this.#refreshAfterConflict(error);
+			throw error;
+		}
+	}
+
+	async setEnabled(id: string, enabled: boolean): Promise<ScheduledPromptsSnapshot> {
+		const snapshot = await this.#requireSnapshot();
+		try {
+			const setEnabled = this.deps.setEnabled ?? setScheduledPromptEnabled;
+			const result = await setEnabled({ expectedRevision: snapshot.revision, id, enabled });
 			return this.applySnapshot(result.snapshot);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);

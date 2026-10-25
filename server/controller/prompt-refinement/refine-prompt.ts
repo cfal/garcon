@@ -34,7 +34,7 @@ const logger = createLogger('prompt-refinement');
 const RENDERED_PROMPT_MAX_LENGTH = 512_000;
 const SNIPPET_TEMPLATE_REFINEMENT_CONSTRAINT = [
   'The draft is a Garcon snippet template. Preserve every supported template token verbatim, in the same order and with the same count.',
-  'Supported tokens are {{arguments}}, {{project_path}}, and {{chat_id}}, including their escaped forms \\{{arguments}}, \\{{project_path}}, and \\{{chat_id}}.',
+  'Supported tokens are {{arguments}}, {{project_path}}, {{chat_id}}, {{current_date}}, and {{current_date_local}}, including their escaped forms \\{{arguments}}, \\{{project_path}}, \\{{chat_id}}, \\{{current_date}}, and \\{{current_date_local}}.',
   'Do not add, remove, reorder, escape, or unescape these tokens.',
 ].join(' ');
 const TICKET_DESCRIPTION_REFINEMENT_CONSTRAINT = [

@@ -10,6 +10,8 @@ const child = Bun.spawn([realBinary, ...process.argv.slice(2)], {
 });
 const decoder = new TextDecoder();
 let pending = '';
+const approvalIndexes = new Map<string | number, number>();
+let nextApprovalIndex = 0;
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name];
@@ -43,19 +45,34 @@ function observe(line: string): void {
     ? params.item as Record<string, unknown>
     : {};
   if (
-    message.method === 'item/started'
+    message.method === 'serverRequest/resolved'
+    && (typeof params.requestId === 'string' || typeof params.requestId === 'number')
+  ) {
+    const approvalIndex = approvalIndexes.get(params.requestId);
+    if (approvalIndex !== undefined) {
+      approvalIndexes.delete(params.requestId);
+      appendFileSync(approvalPath, `${JSON.stringify({ type: 'approval-resolved', approvalIndex })}\n`);
+    }
+    return;
+  }
+  if (
+    (message.method === 'item/started' || message.method === 'item/completed')
     && item.type === 'commandExecution'
     && typeof item.id === 'string'
   ) {
     appendFileSync(
       approvalPath,
-      `${JSON.stringify({ type: 'command-item', itemId: item.id })}\n`,
+      `${JSON.stringify({
+        type: message.method === 'item/started' ? 'command-item' : 'completed-command-item',
+        itemId: item.id,
+      })}\n`,
     );
     return;
   }
-  if (!isApprovalMethod(message.method) || !['number', 'string'].includes(typeof message.id)) {
+  if (!isApprovalMethod(message.method) || (typeof message.id !== 'number' && typeof message.id !== 'string')) {
     return;
   }
+  approvalIndexes.set(message.id, nextApprovalIndex++);
   appendFileSync(
     approvalPath,
     `${JSON.stringify({

@@ -57,6 +57,30 @@ describe('PromptComposerAttachmentController', () => {
 		expect(onAttachmentInput).not.toHaveBeenCalled();
 	});
 
+	it('accepts pasted non-image files the agent supports', () => {
+		const addImages = vi.fn<ComposerState['addImages']>();
+		const onAttachmentInput = vi.fn();
+		const support: ChatAttachmentSupport = { allowImages: true, fileMimeTypes: 'any' };
+		const controller = new PromptComposerAttachmentController({
+			composer: { addImages, isDragActive: false },
+			get attachmentInputBlocked() {
+				return false;
+			},
+			get attachmentPickerBlocked() {
+				return false;
+			},
+			get attachmentSupport() {
+				return support;
+			},
+			onAttachmentInput,
+		});
+		const sheet = new File(['sheet'], 'budget.xlsx', { type: '' });
+
+		controller.handlePaste(new ClipboardEvent('paste', { clipboardData: fileTransfer(sheet) }));
+		expect(addImages).toHaveBeenCalledWith([sheet], support);
+		expect(onAttachmentInput).toHaveBeenCalledOnce();
+	});
+
 	it('cancels expansion only when a pasted image is supported', () => {
 		let support: ChatAttachmentSupport = { allowImages: false, fileMimeTypes: [] };
 		const addImages = vi.fn<ComposerState['addImages']>();

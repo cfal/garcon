@@ -3,7 +3,8 @@ import { Database } from 'bun:sqlite';
 import { chmodSync, existsSync, mkdirSync, renameSync, statSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { ticketFixture, caller } from './fixture.js';
-import { TicketStore, configureTicketDatabase } from '../store.js';
+import { TicketStore } from '../store.js';
+import { configureDurableSqlite } from '../../lib/private-sqlite.js';
 
 let fixture;
 beforeEach(() => { fixture = ticketFixture(); });
@@ -27,7 +28,7 @@ test('verifies requested durability settings and refuses a VFS that cannot provi
     expect(database.query('PRAGMA synchronous').get().synchronous).toBe(2);
   });
   const memory = new Database(':memory:');
-  try { expect(() => configureTicketDatabase(memory)).toThrow('Unsupported ticket durability configuration'); }
+  try { expect(() => configureDurableSqlite(memory)).toThrow('Unsupported SQLite durability configuration'); }
   finally { memory.close(); }
 });
 

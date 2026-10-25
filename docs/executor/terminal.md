@@ -23,7 +23,7 @@ Make the existing interactive terminal experience work on Local and remote execu
 - Preserve desktop/mobile placement, retained xterm runtimes, keyboard/paste controls, and single-browser attachment ownership.
 - Keep unrelated executors and chats usable when one terminal or executor becomes unavailable.
 
-Terminals are executor-level machine services, independent of agents and chats. A chat may supply the initial executor and directory; it does not own the resulting shell. Chat handoff must not move an existing terminal or restart it elsewhere.
+Terminals are executor services, independent of agents and chats. A chat may supply the initial executor and directory; it does not own the resulting shell. Chat handoff must not move an existing terminal or restart it elsewhere.
 
 Out of scope: durable terminal recovery, command execution queues, cross-executor process migration, a general ProcessService, shared multi-writer terminals, arbitrary binary PTY transport, shell integration for tracking the live working directory, and terminal output in chat ledgers. Full terminal-screen reconstruction after missing output is not an initial requirement.
 
@@ -319,7 +319,7 @@ The session cap is eight per principal per executor, counting exited retained se
 
 ## Security And Operational Limits
 
-A terminal is a shell with the executor OS user's privileges. Validating its initial directory does not sandbox it: the shell can `cd` elsewhere, run programs, and access anything that OS user can access. Principal ownership prevents one app user attaching to another's terminal; it is not machine isolation.
+A terminal is a shell with the executor OS user's privileges. Validating its initial directory does not sandbox it: the shell can `cd` elsewhere, run programs, and access anything that OS user can access. Principal ownership prevents one app user attaching to another's terminal; it is not OS-level isolation.
 
 Use the worker's shell, environment, and root, not values silently inherited from controller configuration. Do not send the controller's environment or credentials as part of terminal creation. Keep the worker's existing remote-CLI restrictions: a remote shell does not automatically gain a functioning controller-connected `garcon` CLI. That requires a separate authenticated CLI design.
 

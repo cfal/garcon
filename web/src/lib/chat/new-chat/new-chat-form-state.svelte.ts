@@ -26,6 +26,7 @@ import type {
 import { NewChatAgentSettingsState } from './new-chat-agent-settings-state.svelte';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
 import { firstSelectableExecutorRecent, newChatExecutorPreferences } from './new-chat-executor-preferences';
+import type { NewChatPromptDraft } from './new-chat-prompt-draft';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import {
@@ -39,7 +40,7 @@ import {
 	isPinnedProjectPath,
 	nextPinnedProjectPaths,
 } from '$lib/project-paths/project-pinned-paths.js';
-import { savePinnedProjectPathsOptimistically } from '$lib/project-paths/pinned-project-path-settings.js';
+import { executorPinnedProjectPaths, savePinnedProjectPathsOptimistically } from '$lib/project-paths/pinned-project-path-settings.js';
 import { normalizeTagSlug } from '$lib/utils/tags.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -49,6 +50,8 @@ export interface NewChatFormStateOptions {
 	executors?: ExecutorsStore;
 	remoteSettings: RemoteSettingsStore;
 	get selectableAgentIds(): readonly SessionAgentId[];
+	/** Retains the unsent prompt across reseeds. Omitted where the prompt is persisted elsewhere. */
+	promptDraft?: NewChatPromptDraft;
 }
 
 export class NewChatFormState {
@@ -63,7 +66,7 @@ export class NewChatFormState {
 
 	// Path
 	projectPath = $state('');
-	pinnedProjectPaths = $state<string[]>([]);
+	#pinnedProjectPaths = $state<string[]>([]);
 	browseStartPath = $state('');
 	#localProjectBasePath = $state('/');
 
@@ -123,6 +126,14 @@ export class NewChatFormState {
 	}
 
 	// Derived accessors
+	get pinnedProjectPaths(): string[] {
+		return this.isUpdatingPinnedPath || !this.#remoteSettings.snapshot
+			? this.#pinnedProjectPaths
+			: executorPinnedProjectPaths(this.#remoteSettings.snapshot, this.executorId);
+	}
+	set pinnedProjectPaths(paths: string[]) {
+		this.#pinnedProjectPaths = paths;
+	}
 
 	get #modelCatalog(): ModelCatalogStore {
 		return this.executorId === 'local'
@@ -130,11 +141,11 @@ export class NewChatFormState {
 			: this.#options.modelCatalog.forExecutor(this.executorId);
 	}
 
-	get localMachine(): boolean {
+	get isLocalExecutor(): boolean {
 		return this.executorId === 'local';
 	}
 	get projectBasePath(): string {
-		return this.localMachine
+		return this.isLocalExecutor
 			? this.#localProjectBasePath
 			: (this.#options.executors?.get(this.executorId)?.projectBasePath ?? '');
 	}
@@ -142,10 +153,10 @@ export class NewChatFormState {
 		return this.#options.executors?.pathContextKey(this.executorId) ?? this.executorId;
 	}
 	get filesAvailable(): boolean {
-		return this.#options.executors?.filesAvailable(this.executorId) ?? this.localMachine;
+		return this.#options.executors?.filesAvailable(this.executorId) ?? this.isLocalExecutor;
 	}
 	get gitAvailable(): boolean {
-		return this.#options.executors?.gitAvailable(this.executorId) ?? this.localMachine;
+		return this.#options.executors?.gitAvailable(this.executorId) ?? this.isLocalExecutor;
 	}
 	get executorReady(): boolean {
 		return this.#options.executors?.isReady(this.executorId) ?? true;
@@ -225,7 +236,12 @@ export class NewChatFormState {
 
 	set firstMessage(value: string) {
 		this.#firstMessage = value;
+		this.#contentChanged();
+	}
+
+	#contentChanged(): void {
 		this.#contentRevision += 1;
+		this.#options.promptDraft?.retain(this.#firstMessage, this.#images.images);
 	}
 
 	get contentRevision(): number {
@@ -478,7 +494,7 @@ export class NewChatFormState {
 
 	set attachedImages(files: File[]) {
 		this.#images.images = files;
-		this.#contentRevision += 1;
+		this.#contentChanged();
 	}
 
 	imageUrlFor(file: File, idx: number): string | undefined {
@@ -488,13 +504,13 @@ export class NewChatFormState {
 	addImages(files: File[], support?: ChatAttachmentSupport): void {
 		const previousImages = this.#images.images;
 		this.#images.add(files, support);
-		if (this.#images.images !== previousImages) this.#contentRevision += 1;
+		if (this.#images.images !== previousImages) this.#contentChanged();
 	}
 
 	removeImage(index: number): void {
 		const previousImages = this.#images.images;
 		this.#images.remove(index);
-		if (this.#images.images !== previousImages) this.#contentRevision += 1;
+		if (this.#images.images !== previousImages) this.#contentChanged();
 	}
 
 	reconcileImageUrls(): void {
@@ -816,11 +832,13 @@ export class NewChatFormState {
 
 	// Reseed / reset
 
-	/** Resets form state when the dialog opens. */
+	/** Resets form state when the dialog opens. An explicit prefill wins over the retained draft. */
 	reseed(prefill: string): void {
 		this.#pathCompletion.reset();
-		this.firstMessage = prefill;
-		this.attachedImages = [];
+		const retained = this.#options.promptDraft?.seed(prefill);
+		this.#firstMessage = retained?.text ?? prefill;
+		this.#images.images = [...(retained?.attachments ?? [])];
+		this.#contentRevision += 1;
 		this.error = null;
 		this.showBrowser = false;
 		this.hasAutoOpened = false;
@@ -896,7 +914,7 @@ export class NewChatFormState {
 		this.#executionDefaults = snap.executionDefaults;
 		this.#startupRecents = snap.recentAgentSettings;
 
-		// A path already entered on the provisional host must not move to another machine.
+		// A path already entered on the provisional executor must not move to another executor.
 		if (
 			!this.settingsLoaded &&
 			this.#startupSelectionAutomatic &&

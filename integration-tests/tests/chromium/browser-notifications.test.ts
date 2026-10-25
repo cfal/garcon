@@ -52,7 +52,8 @@ test('two Garcon pages suppress notifications while either is focused and delive
     await context.addInitScript(() => {
       const capture = window as typeof window & { notificationTitles: string[]; notificationFocused: boolean; finishedTurns: string[] };
       capture.notificationTitles = []; capture.notificationFocused = false; capture.finishedTurns = [];
-      localStorage.setItem('pref_local_settings', JSON.stringify({ browserNotifications: true }));
+      const settings = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
+      localStorage.setItem('pref_local_settings', JSON.stringify({ ...settings, browserNotifications: true }));
       class DesktopNotification {
         static permission = 'granted';
         constructor(title: string) { capture.notificationTitles.push(title); }

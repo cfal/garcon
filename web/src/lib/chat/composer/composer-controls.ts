@@ -93,15 +93,15 @@ const THINKING_ICON_METADATA: Record<
 	},
 	xhigh: {
 		iconId: 'thinking-xhigh',
-		toneClass: 'bg-destructive/20 text-destructive border-destructive/40 hover:bg-destructive/30',
+		toneClass: 'bg-destructive/20 text-foreground border-destructive/40 hover:bg-destructive/30',
 	},
 	max: {
 		iconId: 'thinking-max',
-		toneClass: 'bg-destructive/30 text-destructive border-destructive/50 hover:bg-destructive/40',
+		toneClass: 'bg-destructive/30 text-foreground border-destructive/50 hover:bg-destructive/40',
 	},
 	ultra: {
 		iconId: 'thinking-ultra',
-		toneClass: 'bg-destructive/40 text-destructive border-destructive/60 hover:bg-destructive/50',
+		toneClass: 'bg-destructive/40 text-foreground border-destructive/60 hover:bg-destructive/50',
 	},
 };
 

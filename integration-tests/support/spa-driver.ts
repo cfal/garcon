@@ -1137,6 +1137,13 @@ export class SpaDriver {
   }
 
   async clickSidebarChatById(chatId: string): Promise<void> {
+    await this.#page.waitForFunction((expectedChatId) => {
+      const row = [
+        ...document.querySelectorAll<HTMLElement>('[data-sidebar-virtual-row]'),
+      ].find((element) => element.dataset.sidebarVirtualRow === expectedChatId);
+      const button = row?.querySelector('[data-slot="sidebar-chat-summary"]')?.closest('button');
+      return button !== null && button !== undefined && !button.disabled;
+    }, { timeout: 20_000 }, chatId);
     await this.#page.evaluate((expectedChatId) => {
       const row = [
         ...document.querySelectorAll<HTMLElement>('[data-sidebar-virtual-row]'),

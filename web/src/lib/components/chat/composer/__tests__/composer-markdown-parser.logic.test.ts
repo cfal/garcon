@@ -11,11 +11,10 @@ import {
 } from '../composer-markdown-blocks.js';
 import { composerMarkdownEditorExtensions } from '../composer-markdown-extensions.js';
 import {
-	isMarkdownCandidate,
-	isMarkdownTableCandidate,
 	MAX_COMPOSER_MARKDOWN_LENGTH,
 } from '../composer-markdown-limits.js';
 import { configureComposerMarkdown, serializeComposerMarkdown } from '../composer-markdown.js';
+import { composerMarkdownCodec } from '../composer-markdown-codec.js';
 
 const table = '| Check | Example |\n| - | - |\n| **Ready** | First<br>Second |';
 function nodes(document: JSONContent): JSONContent[] {
@@ -56,6 +55,28 @@ function editFirstCell(table: JSONContent, text: string): JSONContent {
 
 describe('composer Markdown parsing', () => {
 	it.each([
+		'[destination]: https://example.test/resource',
+		'Review this\n\n[destination]: https://example.test/resource',
+		'[Read][destination]\n\n[destination]: https://example.test/resource',
+		'> [destination]: https://example.test/resource',
+		'- item\n\n  [destination]: https://example.test/resource',
+	])('keeps unrepresented reference definitions in Source: %s', (source) => {
+		expect(parseComposerMarkdown({ source })).toBeNull();
+	});
+	it('does not reject reference-like text in code', () => {
+		expect(parseComposerMarkdown({ source: '```\n[destination]: https://example.test/resource\n```' })).not.toBeNull();
+	});
+	it.each([
+		'[label](https://example.test/\ue000 "title\ue001")',
+		'![alt\ue002](https://example.test/\ue000 "title\ue001")',
+		'| Resource |\n| --- |\n| [label](https://example.test/\ue000 "title\ue001") |',
+	])('preserves private-use resource attributes: %s', (source) => {
+		const document = parseDocument(source);
+		const serialized = serializeComposerMarkdown(editingManager(), document);
+		expect(serialized).toBe(source);
+		expect(parseDocument(serialized)).toEqual(document);
+	});
+	it.each([
 		table,
 		table
 			.split('\n')
@@ -67,15 +88,15 @@ describe('composer Markdown parsing', () => {
 				.map((line) => `  ${line}`)
 				.join('\n'),
 	])('detects tables recursively and preserves editable formatting: %s', (source) => {
-		const parsed = parseComposerMarkdown({ source, pastedText: source });
+		const parsed = parseComposerMarkdown({ source });
 		expect(parsed).not.toBeNull();
 		const content = nodes(parsed!.document);
 		expect(content.some((node) => node.type === 'table')).toBe(true);
 		expect(content.some((node) => node.type === 'hardBreak')).toBe(true);
 		expect(content.some((node) => node.marks?.some((mark) => mark.type === 'bold'))).toBe(true);
 	});
-	it('does not format unrelated clipboard text in an existing table draft', () => {
-		expect(parseComposerMarkdown({ source: table + '\nnotes', pastedText: 'notes' })).toBeNull();
+	it('accepts an explicit draft containing a table and prose', () => {
+		expect(parseComposerMarkdown({ source: table + '\nnotes' })).not.toBeNull();
 	});
 	it('rejects oversized documents and documents with too many nodes', () => {
 		expect(
@@ -85,7 +106,7 @@ describe('composer Markdown parsing', () => {
 	});
 	it('does not mistake fenced table syntax for a table', () => {
 		const source = '```\n' + table + '\n```';
-		const content = nodes(parseComposerMarkdown({ source, pastedText: source })!.document);
+		const content = nodes(parseComposerMarkdown({ source })!.document);
 		expect(content.some((node) => node.type === 'codeBlock')).toBe(true);
 		expect(content.some((node) => node.type === 'table')).toBe(false);
 	});
@@ -94,7 +115,7 @@ describe('composer Markdown parsing', () => {
 		['italic text', 'Ship the *first* change', 'italic'],
 		['inline code', 'Run `bun test` first', 'code'],
 	])('formats pasted %s', (_name, source, mark) => {
-		const parsed = parseComposerMarkdown({ source, pastedText: source });
+		const parsed = parseComposerMarkdown({ source });
 		expect(
 			nodes(parsed!.document).some((node) => node.marks?.some((entry) => entry.type === mark)),
 		).toBe(true);
@@ -107,7 +128,7 @@ describe('composer Markdown parsing', () => {
 		['a block quote', '> quoted', 'blockquote'],
 		['a fenced code block', '```ts\nconst a = 1;\n```', 'codeBlock'],
 	])('formats pasted %s', (_name, source, type) => {
-		const parsed = parseComposerMarkdown({ source, pastedText: source });
+		const parsed = parseComposerMarkdown({ source });
 		expect(nodes(parsed!.document).some((node) => node.type === type)).toBe(true);
 	});
 	it.each([
@@ -117,8 +138,8 @@ describe('composer Markdown parsing', () => {
 		['spaced operators', '2 * 3 * 4 and a _ b'],
 		['indented text', '    indented continuation\n    of a log line'],
 		['a divider', 'above\n\n---\n\nbelow'],
-	])('leaves pasted %s in the plain editor', (_name, source) => {
-		expect(parseComposerMarkdown({ source, pastedText: source })).toBeNull();
+	])('accepts explicit formatted editing of %s', (_name, source) => {
+		expect(parseComposerMarkdown({ source })).not.toBeNull();
 	});
 	it.each([
 		'Hello ![Icon](https://example.test/icon.png) world',
@@ -211,9 +232,7 @@ describe('composer Markdown source preservation', () => {
 		const output = serializeAfterEdit(prompt, (content) =>
 			content.map((node) => (node.type === 'table' ? editFirstCell(node, 'top_p') : node)),
 		);
-		expect(output).toBe(
-			prompt.replace('| - | - |\n| max_tokens |', '| --- | --- |\n| top_p |'),
-		);
+		expect(output).toBe(prompt.replace('| - | - |\n| max_tokens |', '| --- | --- |\n| top_p |'));
 	});
 	it('restores the exact draft when an edit is undone', () => {
 		// Undo yields nodes equal to the parsed ones that are no longer the same objects.
@@ -239,6 +258,31 @@ describe('composer Markdown source preservation', () => {
 		expect(output).toBe('two_b\n\none_a\n\nthree_c');
 	});
 	it.each([
+		{ order: [1], expected: 'a\\.b' },
+		{ order: [1, 0], expected: 'a\\.b\n\na.b' },
+	])('keeps equivalent retained blocks tied to their own sources: $order', ({ order, expected }) => {
+		const output = serializeAfterEdit(
+			'a.b\n\na\\.b',
+			(content) => order.map((index) => content[index]),
+			(a, b) => JSON.stringify(a) === JSON.stringify(b),
+		);
+		expect(output).toBe(expected);
+	});
+	it('does not borrow source from an equivalent deleted suffix block', () => {
+		const output = serializeAfterEdit(
+			'head\n\na.b\n\na\\.b',
+			(content) => [{ type: 'paragraph', content: [{ type: 'text', text: 'edited' }] }, content[1]],
+			(a, b) => JSON.stringify(a) === JSON.stringify(b),
+		);
+		expect(output).toBe('edited\n\na.b');
+	});
+	it('does not borrow a source for an untraceable retained block', () => {
+		const original = [{ type: 'paragraph' }, { type: 'paragraph' }];
+		expect(
+			planComposerMarkdownBlocks(original, ['', null], [original[1]], () => true),
+		).toEqual([{ nodes: [original[1]] }]);
+	});
+	it.each([
 		['snake case, paths, and comparisons', 'my_var ~/cfg C:\\Users\\me a < b && c <tag>'],
 		['a bare link', 'see https://x.test/a_b now'],
 		['increments', 'i++ and j++'],
@@ -248,6 +292,12 @@ describe('composer Markdown source preservation', () => {
 		['brackets', 'see [x] and arr[0]'],
 		['an escaped emphasis marker', 'not \\*emphasis\\*'],
 		['an escaped entity', 'literal &amp;lt; text'],
+		['character references', 'Replace &lt; with &amp;, &#60; and &copy;'],
+		['an ampersand in prose', 'AT&T and a & b'],
+		['a line break tag in prose', 'Use flex instead of <br> tags'],
+		['underscore emphasis in an identifier', 'edit __init__.py and _private_ names'],
+		['mixed emphasis delimiters', '__a _b_ c__ then **d** and *e*'],
+		['single-tilde strikethrough', '~~x~~ and ~y~'],
 		['an escaped link', '\\[label](https://x.test)'],
 		['a soft line break', 'line one\nline two'],
 	])('writes %s back as it was typed', (_name, source) => {
@@ -264,6 +314,13 @@ describe('composer Markdown source preservation', () => {
 			const output = serializeComposerMarkdown(manager, paragraph(text));
 			expect(manager.parse(output)).toEqual(paragraph(text));
 		}
+	});
+	it('does not turn an exclamation before a link into an image', () => {
+		const document = parseDocument('Wow[x](https://example.test)');
+		document.content![0].content![0].text = 'Wow!';
+		const source = composerMarkdownCodec.serialize(document);
+		expect(source).toBe('Wow\\![x](https://example.test)');
+		expect(parseDocument(source)).toEqual(document);
 	});
 	it.each([
 		['a code block', '````md\n```\ninner\n```\n````'],
@@ -329,35 +386,75 @@ describe('composer Markdown source preservation', () => {
 });
 
 describe('Markdown detection', () => {
-	it('screens long input in linear time', () => {
-		const started = performance.now();
-		isMarkdownCandidate(' '.repeat(30_000) + 'x');
-		isMarkdownCandidate('1'.repeat(30_000));
-		isMarkdownCandidate(('\t'.repeat(300) + 'x\n').repeat(100));
-		expect(performance.now() - started).toBeLessThan(250);
+	it('maps a caret after completed bold in the middle of a draft without changing source', () => {
+		const source = 'Before **bold** after';
+		const parsed = parseComposerMarkdown({ source, caret: 15 })!;
+		expect(parsed.selection).toBe(12);
+		expect(parsed.selectionMarks).toEqual([]);
+		expect(parsed.sources.join('')).toBe(source);
 	});
-});
-
-describe('Markdown table detection', () => {
+	it('preserves the active mark when conversion happens inside bold text', () => {
+		const source = 'Before **bold** after';
+		const parsed = parseComposerMarkdown({ source, caret: 11 })!;
+		expect(parsed.selection).toBe(10);
+		expect(parsed.selectionMarks).toEqual([{ type: 'bold' }]);
+	});
+	it('places a caret after closing underscores that end the draft', () => {
+		const parsed = parseComposerMarkdown({ source: '__bold__', caret: 8 })!;
+		expect(parsed.selection).toBe(5);
+		expect(parsed.selectionMarks).toEqual([]);
+	});
 	it.each([
-		'| a | b |\n| --- | --- |\n| 1 | 2 |',
-		'a | b\n--- | ---\n1 | 2',
-		'> | a |\n> | - |',
-		'- Review\n\n  | a |\n  | :-: |',
-		'1. item\n   |a|\n   |-|',
-	])('accepts a delimiter row: %s', (source) => {
-		expect(isMarkdownTableCandidate(source)).toBe(true);
+		['a bold closer missing its last delimiter', '**Note*'],
+		['an underscore closer missing its last delimiter', 'This is __very important_'],
+		['a list started under a line of text', 'my_var is broken:\n-'],
+		['an underline started under a line of text', 'a_b = c\n='],
+		['a nested list marker', '- one **x**\n  -'],
+		['a quote marker on a new line', '> quote **x**\n>'],
+		['a delimiter row with fewer columns than its header', '| a | b |\n|---|'],
+		['a table row missing its closing pipe', '| a | b |\n|---|---|\n| 1 | 2'],
+		['a table row missing a cell', '| a | b |\n|---|---|\n| 1 |'],
+		['a task marker missing its closing bracket', '- ['],
+		['a task marker missing its space', '- [ ]'],
+		['a checked task marker being typed', '1. [x'],
+	])('accepts explicit conversion with best-effort selection: %s', (_name, source) => {
+		expect(parseComposerMarkdown({ source, caret: source.length })).not.toBeNull();
 	});
-	it.each(['text | more\nno delimiter', '---\n\ntext | x', 'plain notes'])(
-		'rejects text without a delimiter row: %s',
+	it.each([
+		['x **y**\n\n| a | b |\n|---|---|', 15],
+		['| a | b |\n|---|---|\n| 1 | 2 |', 22],
+	])('takes the caret in the last cell of a table that ends the draft: %j', (source, selection) => {
+		const parsed = parseComposerMarkdown({ source, caret: source.length })!;
+		expect(parsed.document.content?.at(-1)?.type).toBe('table');
+		expect(parsed.selection).toBe(selection);
+	});
+	it('maps a caret inside a table cell that is followed by more of its row', () => {
+		const source = '| a | b |\n|---|---|\n| 1 | 2 |';
+		expect(parseComposerMarkdown({ source, caret: 23 })?.selection).toBe(17);
+	});
+	it('formats a completed task marker and a bracket that opens a link label', () => {
+		for (const source of ['- [ ] ', '- [l']) {
+			expect(
+				parseComposerMarkdown({ source, caret: source.length }),
+			).not.toBeNull();
+		}
+	});
+	it.each(['**bold**\n\n', '**bold**\n', '- item\n\n', '```\ncode\n```', '```\ncode\n```\n'])(
+		'falls back to the document end when a source caret has no exact position: %j',
 		(source) => {
-			expect(isMarkdownTableCandidate(source)).toBe(false);
+			expect(parseComposerMarkdown({ source, caret: source.length })).not.toBeNull();
 		},
 	);
-	it('scans long runs of leading whitespace once', () => {
-		const started = performance.now();
-		expect(isMarkdownTableCandidate('\t'.repeat(3_000) + '|')).toBe(false);
-		expect(isMarkdownTableCandidate(('x|\n' + ' '.repeat(300)).repeat(100))).toBe(false);
-		expect(performance.now() - started).toBeLessThan(250);
+	it('places text typed after a closed fence in its own paragraph', () => {
+		const source = '```\ncode\n```\nx';
+		const parsed = parseComposerMarkdown({ source, caret: source.length })!;
+		expect(parsed.document.content?.map((node) => node.type)).toEqual(['codeBlock', 'paragraph']);
+		expect(parsed.selection).toBe(8);
 	});
+	it.each(['```js\n', '```js\nconst a', 'Intro **x**\n\n```\ncode'])(
+		'accepts an explicit switch inside an unfinished code fence: %j',
+		(source) => {
+			expect(parseComposerMarkdown({ source, caret: source.length })).not.toBeNull();
+		},
+	);
 });

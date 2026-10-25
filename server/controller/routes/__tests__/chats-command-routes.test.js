@@ -417,6 +417,7 @@ function createRouteAgent(sessionOverrides = {}) {
   const agents = {
     hasAgent: mock(() => true),
     assertExecutorReady: mock(() => undefined),
+    assertAgentAvailable: mock(() => undefined),
     supportsFork: mock(() => true),
     supportsForkAtMessage: mock(() => true),
     supportsForkWhileRunning: mock(() => false),
@@ -715,9 +716,8 @@ describe('REST chat command routes', () => {
       agent.routes['/api/v1/chats/run'].POST,
       agentRunBody({
         images: [{
-          data: `data:application/octet-stream;base64,${Buffer.from('bad').toString('base64')}`,
-          name: 'bad.bin',
-          mimeType: 'application/octet-stream',
+          data: `data:not a mime;base64,${Buffer.from('bad').toString('base64')}`,
+          name: 'bad',
         }],
       }),
     );

@@ -22,7 +22,7 @@ export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze
     'executor-session-setup', 'executor-shutdown',
     'executor-terminal-pressure', 'executor-terminals', 'executor-ticket-defaults',
     'executor-unknown-agent', 'git-input-boundaries', 'lazy-native-compaction',
-    'lazy-native-sessions', 'shell-notes',
+    'lazy-native-sessions', 'pull-request-reviews', 'shell-notes', 'shell-offline-fork', 'shell-schedules',
   ].map(name => [name, 'Owns its Local/remote fixtures or explicit transport/management matrix.'])),
   ...Object.fromEntries([
     'agent-settings-migration', 'carryover-bootstrap-migration', 'scheduled-prompt-migration',
@@ -33,7 +33,7 @@ export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze
     'tickets', 'websocket-backpressure', 'websocket-payload-limit', 'websocket-request-validation',
   ].map(name => [name, 'Controller persistence, ordering or browser delivery; no runtime contract under test.'])),
   ...Object.fromEntries([
-    'fake-chat-completions-model', 'fixture-auth', 'git-fixture', 'support-contract',
+    'execution-backend', 'fake-chat-completions-model', 'fixture-auth', 'git-fixture', 'support-contract',
     'persisted-chat-support', 'reload-helper', 'live-claude-protocol-probe',
     'live-codex-protocol-probe', 'live-codex-credential-proxy',
     'garcon-agent-command-reload', 'garcon-schedule-pipeline',

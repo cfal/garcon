@@ -78,7 +78,7 @@ test('CLI access defaults off, persists separately, and older stored executors r
 test('executor configuration is private, durable, and never persists a Local executor', async () => {
   const { root, store } = await fixture();
   expect(store.list()).toEqual([]);
-  const executor = await store.create({ direction: 'executor-connects', label: 'Build machine' });
+  const executor = await store.create({ direction: 'executor-connects', label: 'Build executor' });
   expect(executor.connection).toEqual({ kind: 'executor-connects', advertisedUrl: null });
   expect(store.connection(executor.id).connectionUrl).toBe('');
   expect(store.connection(executor.id, 'https://controller.test/base/').connectionUrl)
@@ -187,17 +187,17 @@ test('pasted worker credentials are unique and concurrent creates do not overwri
 
 test('executor labels are case-insensitively unique across serialized creates and reserve Local', async () => {
   const { root, store } = await fixture();
-  const results = await Promise.allSettled([' Build Machine ', 'BUILD MACHINE'].map((label) =>
+  const results = await Promise.allSettled([' Build Executor ', 'BUILD EXECUTOR'].map((label) =>
     store.create({ direction: 'executor-connects', label })));
   expect(results.map((result) => result.status)).toEqual(['fulfilled', 'rejected']);
   expect(results[1]).toMatchObject({ reason: { code: 'VALIDATION_FAILED', message: expect.stringContaining('already exists') } });
   for (const label of ['Local', 'local', ' LOCAL ']) {
     await expect(store.create({ direction: 'executor-connects', label })).rejects.toThrow('reserved');
   }
-  expect(store.list().map((entry) => entry.label)).toEqual(['Build Machine']);
+  expect(store.list().map((entry) => entry.label)).toEqual(['Build Executor']);
   const restarted = new ExecutorConfigStore(root);
   await restarted.initialize();
-  await expect(restarted.create({ direction: 'executor-connects', label: 'build machine' })).rejects.toThrow('already exists');
+  await expect(restarted.create({ direction: 'executor-connects', label: 'build executor' })).rejects.toThrow('already exists');
 });
 
 test('renames reject collisions with disabled executors but allow changing their own capitalization', async () => {

@@ -35,7 +35,7 @@
 			onclick={() => (expanded = !expanded)}
 		></button>
 	{/if}
-	<span role="status" class="truncate" class:text-status-warning-foreground={session.dirty}
+	<span role="status" class="truncate" class:text-status-warning-muted-foreground={session.dirty}
 		>{saveLabel}</span
 	>
 	{#if status}

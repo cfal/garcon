@@ -78,6 +78,32 @@ describe('convertPiToolUse', () => {
     });
   });
 
+  it.each([
+    ['bash', { type: 'bash-tool-use', command: '' }],
+    ['read', { type: 'read-tool-use', filePath: '' }],
+    ['write', { type: 'write-tool-use', filePath: '' }],
+    ['edit', { type: 'edit-tool-use', filePath: '' }],
+  ])('keeps %s canonical when Pi rejects malformed arguments', (name, expected) => {
+    for (const input of [{}, null, [], { command: {}, path: [] }]) {
+      expect(convertPiToolUse(ts, 'invalid', name, input)).toMatchObject({ toolId: 'invalid', ...expected });
+    }
+  });
+
+  it.each([42, false, null])('displays Pi-coerced required primitive strings: %j', (value) => {
+    expect(convertPiToolUse(ts, 'primitive', 'bash', { command: value }).command).toBe(String(value));
+    for (const name of ['read', 'write', 'edit']) {
+      expect(convertPiToolUse(ts, 'primitive', name, { path: value }).filePath).toBe(String(value));
+    }
+  });
+
+  it('never classifies a known Pi family as unknown when arguments are empty', () => {
+    for (const name of ['bash', 'read', 'write', 'edit', 'ls', 'grep', 'find', 'powershell',
+      'codemode', 'tool_search', 'list_mcp_resources', 'list_mcp_resource_templates',
+      'read_mcp_resource', 'mcp__synthetic__tool']) {
+      expect(convertPiToolUse(ts, name, name, {}).type).not.toBe('unknown-tool-use');
+    }
+  });
+
   it('keeps truncated MCP names canonical without inventing a server identity', () => {
     const tool = `mcp__${'s'.repeat(50)}_01234567`;
     expect(tool).toHaveLength(64);

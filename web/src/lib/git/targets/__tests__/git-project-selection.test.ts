@@ -17,7 +17,7 @@ function setup() {
 	const executors = new ExecutorsStore();
 	const remote = {
 		...remoteExecutor,
-		machineServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: true },
+		executorServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: true },
 	};
 	executors.applySnapshot([localExecutor, remote]);
 	const read = vi.fn(
@@ -218,7 +218,7 @@ describe('Git project selection', () => {
 		const gitContext = executors.gitContextKey(remote.id);
 		executors.applySnapshot([
 			localExecutor,
-			{ ...remote, machineServices: { ...remote.machineServices, files: false } },
+			{ ...remote, executorServices: { ...remote.executorServices, files: false } },
 		]);
 		expect(executors.gitContextKey(remote.id)).toBe(gitContext);
 		pending.resolve({
