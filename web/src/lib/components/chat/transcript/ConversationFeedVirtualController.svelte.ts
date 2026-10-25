@@ -1,4 +1,5 @@
 import { untrack } from 'svelte';
+import { observeFontChanges } from '$lib/theme/fonts.js';
 import type { Attachment } from 'svelte/attachments';
 import type { ConversationNativeScrollActivity } from '$lib/chat/transcript/conversation-native-scroll-settlement.js';
 import type {
@@ -13,6 +14,7 @@ import type {
 import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import type {
 	VirtualListSnapshot,
+	VirtualMutationAnchor,
 	VirtualResumeTarget,
 	VirtualTransactionRecord,
 } from '$lib/virt/virtual-list-types.js';
@@ -157,6 +159,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		$effect(() => this.#acknowledgeData(options.projectedDataRevision));
 		$effect(() => this.#publishPinned(options.pinned));
 		$effect(() => this.#publishVisibility(options.visible));
+		$effect(() => observeFontChanges(document, () => this.#invalidateMeasurements()));
 		$effect(() => {
 			void options.viewport;
 			void options.virtualRoot;
@@ -837,18 +840,31 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		}
 	}
 
+	#invalidateMeasurements(): void {
+		if (this.#destroyed) return;
+		let anchor: VirtualMutationAnchor = { kind: 'none' };
+		if (this.#configuredVisible && this.#activeTargetScrolls === 0) {
+			const readingAnchor = this.#captureVirtualAnchor(true);
+			if (this.#measurementAnchor() === 'end') anchor = { kind: 'end' };
+			else if (readingAnchor) anchor = { kind: 'item', key: readingAnchor.key };
+		}
+		const result = this.#virt.apply({
+			kind: 'reset-measurements',
+			keys: this.#configuredGeometry.keys,
+			estimates: this.#configuredGeometry.estimates,
+			anchor,
+		});
+		if (result.kind !== 'applied') return;
+		if (this.#configuredVisible) this.#virt.remeasureAll();
+		else this.#remeasureOnShow = true;
+	}
+
 	#invalidateMeasurementsAfterHiddenResize(): void {
 		const previousWidth = this.#hiddenViewportWidth;
 		const currentWidth = this.#viewportWidth();
 		this.#hiddenViewportWidth = null;
 		if (previousWidth === null || currentWidth === null || previousWidth === currentWidth) return;
-		const result = this.#virt.apply({
-			kind: 'reset-measurements',
-			keys: this.#configuredGeometry.keys,
-			estimates: this.#configuredGeometry.estimates,
-			anchor: { kind: 'none' },
-		});
-		if (result.kind === 'applied') this.#remeasureOnShow = true;
+		this.#invalidateMeasurements();
 	}
 
 	#viewportWidth(): number | null {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import { onDestroy, tick, untrack, type Snippet } from 'svelte';
+	import { observeFontChanges } from '$lib/theme/fonts.js';
 	import type {
 		GitVirtualFileHeaderRow,
 		GitVirtualReviewRow,
@@ -258,6 +259,17 @@
 			presentedMeasurementRevision = nextMeasurementRevision;
 		});
 	});
+
+	$effect(() =>
+		observeFontChanges(document, () => {
+			virtual.apply({
+				kind: 'reset-measurements',
+				...source.buildVirtualMeasurements(rowLineHeight),
+				anchor: currentAnchor(),
+			});
+			virtual.remeasureAll();
+		}),
+	);
 
 	$effect(() => {
 		const scrollElement = viewportRef;

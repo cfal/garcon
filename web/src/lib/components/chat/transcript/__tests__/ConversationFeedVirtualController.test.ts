@@ -531,6 +531,52 @@ describe('ConversationFeedVirtualController', () => {
 		);
 	});
 
+	it.each(['data-interface-font', 'data-monospace-font'])(
+		'remeasures hidden typography and restores the reading row after %s changes', async (attribute) => {
+			const { exposure, unmount } = await renderController({ initialPinned: false });
+			exposure.controller.scrollToStart();
+			await settleController();
+			exposure.controller.scrollBy(240);
+			await settleController();
+			const viewport = exposure.viewport()!;
+			const offset = exposure.controller.snapshot.positions.itemAt(6)!.start - viewport.scrollTop;
+			await exposure.hide();
+			document.documentElement.setAttribute(attribute, 'departure-mono');
+			await settleController();
+			await exposure.showAtLayout(400, 80);
+			await settleController();
+			const row = exposure.controller.snapshot.positions.itemAt(6)!;
+			expect(row.size).toBe(80);
+			expect(Math.abs(row.start - viewport.scrollTop - offset)).toBeLessThanOrEqual(0.5);
+			unmount();
+			document.documentElement.removeAttribute(attribute);
+		},
+	);
+
+	it('preserves end following and releases font observers on removal', async () => {
+		const fonts = new EventTarget();
+		const original = Object.getOwnPropertyDescriptor(document, 'fonts');
+		Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
+		try {
+			const { exposure, unmount } = await renderController();
+			exposure.controller.scrollToEnd();
+			await settleController();
+			const before = exposure.transactions.length;
+			fonts.dispatchEvent(new Event('loadingdone'));
+			await settleController();
+			expect(exposure.controller.isAtEnd()).toBe(true);
+			expect(exposure.transactions.slice(before).some(record => record.source === 'items' && record.anchorKind === 'end')).toBe(true);
+			unmount();
+			const count = exposure.transactions.length;
+			fonts.dispatchEvent(new Event('loadingdone'));
+			await settleController();
+			expect(exposure.transactions).toHaveLength(count);
+		} finally {
+			if (original) Object.defineProperty(document, 'fonts', original);
+			else Reflect.deleteProperty(document, 'fonts');
+		}
+	});
+
 	it('owns every programmatic scroll synchronously and destroys idempotently', async () => {
 		const { exposure, unmount } = await renderController();
 
