@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
 	applySlashCommand,
 	BUILTIN_SLASH_COMMANDS,
+	completeSnippetCommand,
 	findSlashCommandTrigger,
+	findSnippetCommandTrigger,
 	isClearCommand,
 	isControllerSlashCommand,
 	isLiteralAppCommand,
@@ -13,6 +15,7 @@ import {
 	parseSnippetCommand,
 	parseSteerCommand,
 	parseTagCommand,
+	replaceSnippetCommandName,
 } from '$lib/chat/composer/slash-commands.js';
 
 describe('slash command helpers', () => {
@@ -286,6 +289,66 @@ describe('parseSnippetCommand', () => {
 		expect(parseSnippetCommand('/ss review')).toEqual({ kind: 'not-command' });
 		expect(parseSnippetCommand('please /snippet review')).toEqual({ kind: 'not-command' });
 		expect(parseSnippetCommand(' /snippet review')).toEqual({ kind: 'not-command' });
+	});
+});
+
+describe('findSnippetCommandTrigger', () => {
+	it('tracks the short name typed after either snippet command', () => {
+		expect(findSnippetCommandTrigger('/s ', 3)).toEqual({ nameStart: 3, end: 3, query: '' });
+		expect(findSnippetCommandTrigger('/snippet  rev', 13)).toEqual({
+			nameStart: 10,
+			end: 13,
+			query: 'rev',
+		});
+	});
+
+	it('covers the rest of the name token when the caret is inside it', () => {
+		expect(findSnippetCommandTrigger('/s review the API', 5)).toEqual({
+			nameStart: 3,
+			end: 9,
+			query: 're',
+		});
+	});
+
+	it('closes once arguments start or the command is not leading', () => {
+		expect(findSnippetCommandTrigger('/s', 2)).toBeNull();
+		expect(findSnippetCommandTrigger('/s review ', 10)).toBeNull();
+		expect(findSnippetCommandTrigger('/s\nreview', 9)).toBeNull();
+		expect(findSnippetCommandTrigger(' /s review', 10)).toBeNull();
+		expect(findSnippetCommandTrigger('/ss review', 10)).toBeNull();
+		expect(findSnippetCommandTrigger('/steer review', 13)).toBeNull();
+	});
+});
+
+describe('snippet command completion', () => {
+	const trigger = { nameStart: 3, end: 5, query: 're' };
+
+	it('replaces the name token for immediate expansion', () => {
+		expect(replaceSnippetCommandName('/s re', trigger, 'review')).toBe('/s review');
+		expect(replaceSnippetCommandName('/s re the API', trigger, 'review')).toBe(
+			'/s review the API',
+		);
+	});
+
+	it('appends and selects default arguments when nothing follows the name', () => {
+		expect(completeSnippetCommand('/s re', trigger, 'review', 'the API')).toEqual({
+			text: '/s review the API',
+			selectionStart: 10,
+			selectionEnd: 17,
+		});
+		expect(completeSnippetCommand('/s re', trigger, 'review', '')).toEqual({
+			text: '/s review ',
+			selectionStart: 10,
+			selectionEnd: 10,
+		});
+	});
+
+	it('keeps typed arguments instead of adding defaults', () => {
+		expect(completeSnippetCommand('/s re typed', trigger, 'review', 'default')).toEqual({
+			text: '/s review typed',
+			selectionStart: 9,
+			selectionEnd: 9,
+		});
 	});
 });
 

@@ -292,3 +292,65 @@ export function parseSnippetCommand(input: string): SnippetCommandParseResult {
 				: { type: 'value', value: stripSnippetArgumentSeparator(remainder) },
 	};
 }
+
+/** The snippet short name being typed after a leading `/s` or `/snippet` command. */
+export interface SnippetCommandTrigger {
+	nameStart: number;
+	/** End of the whole name token, which may extend past the caret. */
+	end: number;
+	query: string;
+}
+
+export interface SnippetCommandCompletion {
+	text: string;
+	selectionStart: number;
+	selectionEnd: number;
+}
+
+const SNIPPET_COMMAND_TRIGGER_RE = new RegExp(
+	`^\\/(?:${SNIPPET_SLASH_COMMAND_NAMES.join('|')})[ \\t]+(\\S*)$`,
+);
+
+// The snippet menu stays open while the caret is inside the name token; the
+// whitespace that starts the arguments closes it, like the slash-command menu.
+export function findSnippetCommandTrigger(
+	value: string,
+	caret: number,
+): SnippetCommandTrigger | null {
+	const boundedCaret = Math.max(0, Math.min(caret, value.length));
+	const match = SNIPPET_COMMAND_TRIGGER_RE.exec(value.slice(0, boundedCaret));
+	if (!match) return null;
+	const query = match[1] ?? '';
+	const tokenRest = /^\S*/.exec(value.slice(boundedCaret))?.[0] ?? '';
+	return { nameStart: boundedCaret - query.length, end: boundedCaret + tokenRest.length, query };
+}
+
+export function replaceSnippetCommandName(
+	value: string,
+	trigger: SnippetCommandTrigger,
+	shortName: string,
+): string {
+	return value.slice(0, trigger.nameStart) + shortName + value.slice(trigger.end);
+}
+
+// Completes the name so arguments can be typed inline. When nothing follows
+// the name, the default arguments are appended and selected: typing replaces
+// them and submitting keeps them.
+export function completeSnippetCommand(
+	value: string,
+	trigger: SnippetCommandTrigger,
+	shortName: string,
+	defaultArguments: string,
+): SnippetCommandCompletion {
+	const nameEnd = trigger.nameStart + shortName.length;
+	const named = replaceSnippetCommandName(value, trigger, shortName);
+	if (trigger.end < value.length) {
+		return { text: named, selectionStart: nameEnd, selectionEnd: nameEnd };
+	}
+	const argumentsStart = nameEnd + 1;
+	return {
+		text: `${named} ${defaultArguments}`,
+		selectionStart: argumentsStart,
+		selectionEnd: argumentsStart + defaultArguments.length,
+	};
+}

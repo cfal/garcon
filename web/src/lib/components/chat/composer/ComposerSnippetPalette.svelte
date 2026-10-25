@@ -7,10 +7,8 @@
 	import { getAppShell, getLocalSettings, getPreambles, getSnippets } from '$lib/context';
 	import type { SnippetInsertionHandler } from '$lib/chat/composer/snippet-insertion.js';
 	import { normalizeSnippetTrigger } from '$lib/chat/composer/snippet-trigger.js';
-	import {
-		selectableSnippetPreview,
-		selectableSnippets,
-	} from '$lib/snippets/selectable-snippet.js';
+	import { selectableSnippetPreview } from '$lib/snippets/selectable-snippet.js';
+	import { SelectableSnippetCatalog } from '$lib/snippets/selectable-snippet-catalog.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		SNIPPET_ARGUMENTS_TOKEN,
@@ -52,8 +50,7 @@
 		onEditSnippets,
 	}: Props = $props();
 
-	const snippets = getSnippets();
-	const preambles = getPreambles();
+	const catalog = new SelectableSnippetCatalog(getSnippets(), getPreambles());
 	const appShell = getAppShell();
 	const localSettings = getLocalSettings();
 	const uid = $props.id();
@@ -62,22 +59,9 @@
 		triggerPrefix ?? normalizeSnippetTrigger(localSettings.snippetTrigger),
 	);
 	const mobileKeyboardVisible = $derived(appShell.isMobile && appShell.keyboardHeight > 0);
-	const catalogsLoading = $derived(
-		(snippets.status === 'loading' && !snippets.hasLoaded) ||
-			(preambles.status === 'loading' && !preambles.hasLoaded),
-	);
-	const catalogsFailed = $derived(
-		(snippets.status === 'error' && !snippets.hasLoaded) ||
-			(preambles.status === 'error' && !preambles.hasLoaded),
-	);
-	const paletteItems = $derived.by(() =>
-		catalogsLoading || catalogsFailed
-			? []
-			: selectableSnippets(snippets.snippets, preambles.preambles),
-	);
 	const palette = new ComposerSnippetPaletteState(uid, {
 		get snippets() {
-			return paletteItems;
+			return catalog.items;
 		},
 		get interactionKey() {
 			return interactionKey;
@@ -97,21 +81,12 @@
 	});
 
 	$effect(() => {
-		if (open) {
-			void Promise.all([snippets.ensureLoaded(), preambles.ensureLoaded()]).catch(() => undefined);
-		}
+		if (open) catalog.ensureLoaded();
 	});
 
 	$effect(() => {
 		palette.syncInteractionKey(interactionKey, open);
 	});
-
-	function retryLoad(): void {
-		void Promise.all([
-			snippets.refresh({ initial: true }),
-			preambles.refresh({ initial: true }),
-		]).catch(() => undefined);
-	}
 
 	function handleOpenChange(nextOpen: boolean): void {
 		if (nextOpen) onOpenChange(true);
@@ -146,14 +121,14 @@
 		</div>
 
 		<div id={listId} role="listbox" class="min-h-0 flex-1 overflow-y-auto p-2">
-			{#if catalogsLoading}
+			{#if catalog.loading}
 				<p class="px-3 py-8 text-center text-sm text-muted-foreground">{m.snippets_loading()}</p>
-			{:else if catalogsFailed}
+			{:else if catalog.failed}
 				<div class="flex flex-col items-center gap-3 px-3 py-8 text-center">
 					<p class="text-sm text-destructive">{m.snippets_catalog_load_error()}</p>
 					<button
 						type="button"
-						onclick={retryLoad}
+						onclick={() => catalog.retry()}
 						class="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 					>
 						<RefreshCw class="mr-2 inline size-4" />

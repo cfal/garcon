@@ -379,6 +379,7 @@ export class PromptComposerMarkdownController {
 		this.options.ui.formattedDraft = { source, ...parsed };
 		this.options.ui.closeFileMenu();
 		this.options.ui.closeSlashMenu();
+		this.options.ui.closeSnippetCommandMenu();
 		this.options.ui.snippetPalette.dismiss();
 	}
 

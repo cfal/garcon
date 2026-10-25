@@ -7,8 +7,10 @@ import {
 	type FileMentionTrigger,
 } from '$lib/chat/composer/file-mentions.js';
 import {
+	findSnippetCommandTrigger,
 	findSlashCommandTrigger,
 	LITERAL_APP_COMMAND_NAMES,
+	type SnippetCommandTrigger,
 	type SlashCommandTrigger,
 } from '$lib/chat/composer/slash-commands.js';
 import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
@@ -23,6 +25,7 @@ export class PromptComposerUiState {
 	showSlashMenu = $state(false);
 	slashQuery = $state('');
 	slashCommandTrigger = $state<SlashCommandTrigger | null>(null);
+	snippetCommandTrigger = $state<SnippetCommandTrigger | null>(null);
 	readonly snippetPalette = new SnippetPaletteTriggerState();
 	previousChatId = $state<string | null>(null);
 	composerEditorOpen = $state(false);
@@ -59,6 +62,10 @@ export class PromptComposerUiState {
 		this.setSlashCommandTrigger(null);
 	}
 
+	closeSnippetCommandMenu(): void {
+		this.snippetCommandTrigger = null;
+	}
+
 	updateTriggers(
 		value: string,
 		caret: number,
@@ -68,6 +75,7 @@ export class PromptComposerUiState {
 	): void {
 		if (mode === 'literal') {
 			this.closeFileMenu();
+			this.closeSnippetCommandMenu();
 			const trigger = findSlashCommandTrigger(value, caret);
 			const matchesLiteralCommand = trigger && LITERAL_APP_COMMAND_NAMES.some(name => name.startsWith(trigger.query));
 			this.setSlashCommandTrigger(matchesLiteralCommand ? trigger : null);
@@ -78,11 +86,13 @@ export class PromptComposerUiState {
 		this.setFileMentionTrigger(fileTrigger);
 		if (fileTrigger) {
 			this.setSlashCommandTrigger(null);
+			this.closeSnippetCommandMenu();
 			this.snippetPalette.updateDetectedTrigger(null, value);
 			return;
 		}
 
 		this.setSlashCommandTrigger(findSlashCommandTrigger(value, caret));
+		this.snippetCommandTrigger = findSnippetCommandTrigger(value, caret);
 		if (isComposing) return;
 		this.snippetPalette.updateDetectedTrigger(
 			findSnippetTrigger(value, caret, snippetTrigger),
@@ -128,6 +138,7 @@ export class PromptComposerUiState {
 		this.previousChatId = nextChatId;
 		this.closeFileMenu();
 		this.closeSlashMenu();
+		this.closeSnippetCommandMenu();
 		this.snippetPalette.reset();
 		this.closeComposerEditor();
 		this.closeFormattedDraft();

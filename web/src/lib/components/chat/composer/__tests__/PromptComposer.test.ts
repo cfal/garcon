@@ -1803,6 +1803,68 @@ describe('PromptComposer focus', () => {
 		);
 	});
 
+	it('lists snippets after choosing /s and inserts the highlighted one on Enter', async () => {
+		const commands = vi.spyOn(commandsApi, 'getSlashCommands').mockResolvedValue([]);
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'Review the code',
+		});
+		try {
+			const onsubmit = vi.fn();
+			render(PromptComposerTestHost, {
+				selectedChatId: 'chat-snippet-menu',
+				selectedStatus: 'running',
+				onsubmit,
+			});
+			const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+			await inputAtCaret(textarea, '/s', 2);
+			await fireEvent.click(await screen.findByRole('button', { name: /^\/s\b/ }));
+
+			const menu = await screen.findByRole('listbox', { name: 'Snippets' });
+			await waitFor(() => expect(menu.textContent).toContain('review'));
+			await fireEvent.keyDown(textarea, { key: 'Enter' });
+
+			await waitFor(() => expect(textarea.value).toBe('Review the code'));
+			expect(screen.queryByRole('listbox', { name: 'Snippets' })).toBeNull();
+			expect(onsubmit).not.toHaveBeenCalled();
+			expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+				{
+					shortName: 'review',
+					arguments: { type: 'default' },
+					context: { type: 'chat', chatId: 'chat-snippet-menu' },
+				},
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			);
+		} finally {
+			commands.mockRestore();
+		}
+	});
+
+	it('completes a snippet name on Tab and selects its default arguments', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-complete',
+			selectedStatus: 'running',
+			snippetDefaultArguments: 'the API',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(textarea, '/s re', 5);
+		const menu = await screen.findByRole('listbox', { name: 'Snippets' });
+		await waitFor(() => expect(menu.textContent).toContain('review'));
+
+		await fireEvent.keyDown(textarea, { key: 'Tab' });
+
+		await waitFor(() => expect(textarea.value).toBe('/s review the API'));
+		expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([10, 17]);
+		expect(screen.queryByRole('listbox', { name: 'Snippets' })).toBeNull();
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+	});
+
 	it('keeps submission controls gated during expansion and Escape preserves the invocation', async () => {
 		const pending = deferredSnippetExpansion();
 		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);

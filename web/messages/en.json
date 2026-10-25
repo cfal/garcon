@@ -2526,6 +2526,8 @@
 	"snippets_changed_before_expansion": "That snippet changed. Select it again.",
 	"snippets_command_name_required": "Enter a snippet name after the command.",
 	"snippets_command_name_invalid": "Snippet names use lowercase letters, numbers, underscores, and hyphens.",
+	"snippets_command_menu_insert_hint": "Enter to insert",
+	"snippets_command_menu_arguments_hint": "Tab to add arguments",
 	"snippets_title": "Snippets",
 	"snippets_description": "Manage reusable prompts for this workspace.",
 	"snippets_add": "Add snippet",
