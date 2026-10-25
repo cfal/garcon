@@ -1,0 +1,46 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index b20aa9d84be6ff4b85b126bdd930065277668a26..6ae333b65abe6c804aa99278e1e58a36e44123c5 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -3017,7 +3017,8 @@ class DocView {
+     // Used by update and the constructor do perform the actual DOM
+     // update
+     updateInner(changes, composition) {
+-        this.view.viewState.mustMeasureContent = true;
++        if (this.view.viewState.mustMeasureContent !== "refresh")
++            this.view.viewState.mustMeasureContent = true;
+         let { observer } = this.view;
+         observer.ignore(() => {
+             if (composition || changes.length) {
+@@ -8065,7 +8066,7 @@ class EditorView {
+             this.updateState = 0 /* UpdateState.Idle */;
+         }
+         if (update.startState.facet(theme) != update.state.facet(theme))
+-            this.viewState.mustMeasureContent = true;
++            this.viewState.mustMeasureContent = "refresh";
+         if (redrawn || attrsChanged || scrollTarget || this.viewState.mustEnforceCursorAssoc || this.viewState.mustMeasureContent)
+             this.requestMeasure();
+         if (redrawn)
+diff --git a/dist/index.js b/dist/index.js
+index 216f754db06f65f7f17f056b47d8f6fab45067bf..c259fa8adbfa319bc6c6c0c58caf60859d6200e2 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -3013,7 +3013,8 @@ class DocView {
+     // Used by update and the constructor do perform the actual DOM
+     // update
+     updateInner(changes, composition) {
+-        this.view.viewState.mustMeasureContent = true;
++        if (this.view.viewState.mustMeasureContent !== "refresh")
++            this.view.viewState.mustMeasureContent = true;
+         let { observer } = this.view;
+         observer.ignore(() => {
+             if (composition || changes.length) {
+@@ -8060,7 +8061,7 @@ class EditorView {
+             this.updateState = 0 /* UpdateState.Idle */;
+         }
+         if (update.startState.facet(theme) != update.state.facet(theme))
+-            this.viewState.mustMeasureContent = true;
++            this.viewState.mustMeasureContent = "refresh";
+         if (redrawn || attrsChanged || scrollTarget || this.viewState.mustEnforceCursorAssoc || this.viewState.mustMeasureContent)
+             this.requestMeasure();
+         if (redrawn)
