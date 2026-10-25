@@ -329,6 +329,7 @@ test('ANSI workspace keeps drafts and composer geometry through chat switches', 
       await browserExpect(page.locator('[data-ansi-startup]')).toHaveCount(0);
       await page.clock.resume();
       expect(await startupMounts(page)).toBe(1);
+      await browserExpect(page.getByText('GARCON://', { exact: true })).toHaveCount(0);
       await page.evaluate(() => document.fonts.ready);
       const composer = page.locator('[data-composer]');
       const editor = composer.locator('textarea');
@@ -389,11 +390,26 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
       (element) => getComputedStyle(element).borderRadius,
     );
     const originalFont = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
-    const appearance = page.getByRole('checkbox', { name: 'Terminal appearance', exact: true });
-    await browserExpect(appearance).not.toBeChecked();
+    const appearance = page.getByRole('combobox', {
+      name: 'Appearance',
+      exact: true,
+    });
+    const font = page.getByRole('combobox', { name: 'Font', exact: true });
+    const mono = page.getByRole('combobox', {
+      name: 'Monospace Font',
+      exact: true,
+    });
+    await browserExpect(appearance).toHaveValue('default');
     const originalPalette = await select.inputValue();
-    await appearance.check();
+    await appearance.selectOption('terminal');
     expect(await select.inputValue()).toBe(originalPalette);
+    expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toBe(
+      originalFont,
+    );
+    await browserExpect(font).toHaveValue('default');
+    await browserExpect(mono).toHaveValue('default');
+    await font.selectOption('departure-mono');
+    await mono.selectOption('departure-mono');
     await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
 
     for (const id of ['ansi-dark', 'ansi-light']) {
@@ -411,8 +427,22 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
       );
       await select.focus();
       await browserExpect(select).toBeFocused();
-      for (const width of [1440, 390]) {
+      for (const width of [1440, 390, 320]) {
         await page.setViewportSize({ width, height: 900 });
+        await mono.scrollIntoViewIfNeeded();
+        for (const control of [appearance, font, mono]) {
+          const fits = await control.evaluate((element: HTMLSelectElement) => {
+            const styles = getComputedStyle(element);
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d')!;
+            context.font = `${styles.fontWeight} ${styles.fontSize} ${styles.fontFamily}`;
+            return (
+              context.measureText(element.selectedOptions[0].text).width <=
+              element.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight)
+            );
+          });
+          expect(fits).toBe(true);
+        }
         await page.screenshot({ path: join(ARTIFACT_DIRECTORY, `${id}-${width}.png`) });
         const box = await dialog.boundingBox();
         expect(box!.x).toBeGreaterThanOrEqual(0);
@@ -422,16 +452,20 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
     }
     await select.selectOption('phosphor-light');
     await browserExpect(dialog).toHaveCSS('border-top-style', 'double');
-    await appearance.uncheck();
+    await appearance.selectOption('default');
     expect(await select.inputValue()).toBe('phosphor-light');
     await browserExpect(dialog).toHaveCSS('border-radius', originalRadius);
+    expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toContain(
+      'Departure Mono',
+    );
+    await font.selectOption('default');
     expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toBe(
       originalFont,
     );
     await browserExpect(dialog).toHaveCSS('border-top-style', 'solid');
     await select.selectOption('ansi-dark');
     await browserExpect(dialog).toHaveCSS('border-top-style', 'solid');
-    await appearance.check();
+    await appearance.selectOption('terminal');
     await browserExpect(dialog).toHaveCSS('border-top-style', 'double');
     await page.keyboard.press('Escape');
     await browserExpect(dialog).toHaveCount(0);

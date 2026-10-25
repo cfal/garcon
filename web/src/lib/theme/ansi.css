@@ -1,17 +1,8 @@
-@font-face {
-	font-family: 'Departure Mono';
-	src: url('./assets/DepartureMono-1.500.woff2') format('woff2');
-	font-style: normal;
-	font-weight: 400;
-	font-display: swap;
-}
-
 .ansi-glyph {
 	display: none;
 }
 
 :root:where([data-theme-appearance='terminal']) {
-	--font-sans: 'Departure Mono', ui-monospace, 'Cascadia Mono', 'Noto Sans Mono', monospace;
 	--control-radius: 0px;
 	--menu-radius: 0px;
 	--menu-item-radius: 0px;
@@ -26,11 +17,6 @@
 	--tooltip-shadow: var(--menu-shadow);
 	--dialog-shadow: 10px 10px 0 hsl(var(--border) / 0.65);
 	--primary-hover-shadow: 0 0 #0000;
-
-	body {
-		font-family: var(--font-sans);
-		letter-spacing: 0;
-	}
 
 	:where(
 		button,
@@ -48,10 +34,6 @@
 		.user-message-context-target
 	) {
 		border-radius: 0;
-	}
-
-	:where(button, input, textarea, select) {
-		font-family: inherit;
 	}
 
 	:where(button, a, input, textarea, select, [role='menuitem'], [role='tab']) {
@@ -93,7 +75,7 @@
 	}
 	.ansi-glyph {
 		display: inline;
-		font: 11px/1 var(--font-sans);
+		font: 11px/1 var(--font-mono);
 		user-select: none;
 	}
 
@@ -150,7 +132,7 @@
 		}
 		[data-slot='switch']::before {
 			content: '[ ]' / '';
-			font-size: 11px;
+			font: 11px/1 var(--font-mono);
 		}
 		[data-slot='switch'][data-state='checked']::before {
 			content: '[x]' / '';

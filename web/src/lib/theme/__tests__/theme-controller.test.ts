@@ -61,6 +61,8 @@ describe('ThemeController', () => {
 			'<meta name="theme-color" content="#000000"><meta name="apple-mobile-web-app-status-bar-style" content="default">';
 		document.documentElement.removeAttribute('data-theme');
 		document.documentElement.removeAttribute('data-theme-appearance');
+		document.documentElement.removeAttribute('data-interface-font');
+		document.documentElement.removeAttribute('data-monospace-font');
 		document.documentElement.className = '';
 		document.documentElement.style.cssText = `
 			--terminal-bg: 0 0% 100%;
@@ -170,6 +172,27 @@ describe('ThemeController', () => {
 			rendererPalette: 'standard',
 		});
 		computedStyle.mockRestore();
+	});
+
+	it('projects independent fonts without changing appearance or renderer palettes', async () => {
+		installMatchMedia();
+		const rendered = renderController({ mode: 'fixed', themeId: 'ansi-light' });
+		await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());
+		expect(document.documentElement.dataset.interfaceFont).toBe('default');
+		expect(document.documentElement.dataset.monospaceFont).toBe('default');
+		for (const [ui, mono] of [
+			['departure-mono', 'default'],
+			['default', 'departure-mono'],
+			['departure-mono', 'departure-mono'],
+		] as const) {
+			rendered.component.setFonts(ui, mono);
+			await waitFor(() => expect(document.documentElement.dataset.interfaceFont).toBe(ui));
+			expect(document.documentElement.dataset.monospaceFont).toBe(mono);
+			expect(document.documentElement.dataset.themeAppearance).toBe('standard');
+			expect(document.documentElement.dataset.theme).toBe('ansi-light');
+			expect(rendered.setEditorPresentation).toHaveBeenCalledOnce();
+			expect(rendered.setTerminalPresentation).toHaveBeenCalledOnce();
+		}
 	});
 
 	it.each([

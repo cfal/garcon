@@ -1,4 +1,5 @@
 import { untrack } from 'svelte';
+import type { FontPreference } from './fonts.js';
 import {
 	getThemeProfile,
 	resolveThemeId,
@@ -16,6 +17,8 @@ const SYSTEM_DARK_MODE_QUERY = '(prefers-color-scheme: dark)';
 export interface ThemeControllerDeps {
 	readonly getPreference: () => ThemePreference;
 	readonly getTerminalAppearance: () => boolean;
+	readonly getInterfaceFont: () => FontPreference;
+	readonly getMonospaceFont: () => FontPreference;
 	readonly setTerminalPresentation: (
 		presentation: ThemeRendererPresentation & TerminalThemeColors,
 	) => void;
@@ -39,6 +42,11 @@ export class ThemeController {
 	#reportedMissingTerminalThemeIds = new Set<ThemeId>();
 
 	constructor(private readonly deps: ThemeControllerDeps) {
+		$effect(() => {
+			document.documentElement.dataset.interfaceFont = this.deps.getInterfaceFont();
+			document.documentElement.dataset.monospaceFont = this.deps.getMonospaceFont();
+		});
+
 		$effect(() => {
 			document.documentElement.dataset.themeAppearance = this.deps.getTerminalAppearance()
 				? 'terminal'

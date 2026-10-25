@@ -49,12 +49,4 @@
 	<div class="mt-3">
 		<ThemePreferenceFields preference={localSettings.themePreference} {selection} />
 	</div>
-	<label class="mt-3 flex cursor-pointer items-center gap-2 text-sm text-foreground">
-		<input
-			type="checkbox"
-			checked={localSettings.terminalAppearance}
-			onchange={(event) => localSettings.set('terminalAppearance', event.currentTarget.checked)}
-		/>
-		{m.settings_terminal_appearance()}
-	</label>
 </div>

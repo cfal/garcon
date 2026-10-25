@@ -53,31 +53,6 @@ describe('ThemeSettingsCard', () => {
 		localSettings.destroy();
 	});
 
-	it('persists terminal appearance independently of fixed and system palette choices', async () => {
-		const localSettings = createLocalSettingsStore();
-		render(ThemeSettingsCardTestHost, { localSettings, resolvedThemeId: 'phosphor-light' });
-		const appearance = screen.getByRole<HTMLInputElement>('checkbox', {
-			name: 'Terminal appearance',
-		});
-		expect(appearance.checked).toBe(false);
-		const preference = localSettings.themePreference;
-		await fireEvent.click(appearance);
-		expect(localSettings.terminalAppearance).toBe(true);
-		expect(localSettings.themePreference).toEqual(preference);
-		await fireEvent.click(screen.getByRole('radio', { name: 'Use one theme' }));
-		await fireEvent.change(screen.getByRole('combobox', { name: 'Theme' }), {
-			target: { value: 'ansi-dark' },
-		});
-		expect(appearance.checked).toBe(true);
-		await fireEvent.click(appearance);
-		expect(localSettings.themePreference).toEqual({ mode: 'fixed', themeId: 'ansi-dark' });
-		const restored = createLocalSettingsStore();
-		expect(restored.terminalAppearance).toBe(false);
-		expect(restored.themePreference).toEqual(localSettings.themePreference);
-		restored.destroy();
-		localSettings.destroy();
-	});
-
 	it('enters Fixed mode with the currently resolved profile', async () => {
 		const localSettings = createLocalSettingsStore();
 		render(ThemeSettingsCardTestHost, {

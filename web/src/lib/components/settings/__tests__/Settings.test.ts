@@ -51,6 +51,64 @@ const completionSound = await import('$lib/notifications/completion-sound.js');
 const SettingsTestHost = (await import('./SettingsTestHost.svelte')).default;
 
 describe('Settings', () => {
+	it('persists appearance and fonts independently of system and fixed palettes', async () => {
+		localStorage.clear();
+		const appShell = createAppShellStore();
+		appShell.openSettings('interface');
+		const props = { appShell, remoteSettings: new RemoteSettingsStore() };
+		let rendered = render(SettingsTestHost, props);
+		try {
+			let appearance = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Appearance' });
+			expect(appearance.value).toBe('default');
+			const font = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Font' });
+			const mono = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Monospace Font' });
+			expect([...font.options].map((option) => option.text)).toEqual(['Default', 'Departure Mono']);
+			expect([...mono.options].map((option) => option.text)).toEqual(['Default', 'Departure Mono']);
+			const lightTheme = screen.getByRole<HTMLSelectElement>('combobox', {
+				name: 'Light theme',
+			}).value;
+			const darkTheme = screen.getByRole<HTMLSelectElement>('combobox', {
+				name: 'Dark theme',
+			}).value;
+			await fireEvent.change(appearance, { target: { value: 'terminal' } });
+			expect(font.value).toBe('default');
+			expect(mono.value).toBe('default');
+			await fireEvent.change(font, { target: { value: 'departure-mono' } });
+			expect(mono.value).toBe('default');
+			expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
+				terminalAppearance: true,
+				interfaceFont: 'departure-mono',
+				monospaceFont: 'default',
+				themePreference: { mode: 'system', lightThemeId: lightTheme, darkThemeId: darkTheme },
+			});
+			await fireEvent.click(screen.getByRole('radio', { name: 'Use one theme' }));
+			await fireEvent.change(screen.getByRole('combobox', { name: 'Theme' }), {
+				target: { value: 'ansi-dark' },
+			});
+			expect(appearance.value).toBe('terminal');
+			await fireEvent.change(mono, { target: { value: 'departure-mono' } });
+			rendered.unmount();
+			rendered = render(SettingsTestHost, props);
+			appearance = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Appearance' });
+			expect(appearance.value).toBe('terminal');
+			expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Font' }).value).toBe('departure-mono');
+			expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Monospace Font' }).value).toBe('departure-mono');
+			expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Theme' }).value).toBe(
+				'ansi-dark',
+			);
+			await fireEvent.change(appearance, { target: { value: 'default' } });
+			expect(appearance.value).toBe('default');
+			expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
+				terminalAppearance: false,
+				interfaceFont: 'departure-mono',
+				monospaceFont: 'departure-mono',
+				themePreference: { mode: 'fixed', themeId: 'ansi-dark' },
+			});
+		} finally {
+			rendered.unmount();
+		}
+	});
+
 	it('stores the message format in App Interface and restores it on remount', async () => {
 		localStorage.clear();
 		const appShell = createAppShellStore();

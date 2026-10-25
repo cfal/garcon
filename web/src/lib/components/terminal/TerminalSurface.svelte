@@ -199,6 +199,10 @@
 	});
 
 	$effect(() => {
+		runtime?.applyMonospaceFont(localSettings.monospaceFont);
+	});
+
+	$effect(() => {
 		const retainedRuntime = runtime;
 		const element = terminalHost;
 		if (!element || !retainedRuntime) return;

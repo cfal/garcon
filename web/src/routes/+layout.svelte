@@ -220,6 +220,8 @@
 	const themeController = new ThemeController({
 		getPreference: () => localSettings.themePreference,
 		getTerminalAppearance: () => localSettings.terminalAppearance,
+		getInterfaceFont: () => localSettings.interfaceFont,
+		getMonospaceFont: () => localSettings.monospaceFont,
 		setTerminalPresentation: (presentation) => terminals.setThemePresentation(presentation),
 		setEditorPresentation: (presentation) => fileSessions.setThemePresentation(presentation),
 		reportError: (message) => console.error(message),

@@ -14,7 +14,7 @@ async function withVisibleScrollbars(name: string, run: (fixture: ChromiumFixtur
   }
 }
 
-test('terminal font completion and cached appearance changes refit existing text without editing', async () => {
+test('font completion and cached font changes refit existing text without editing', async () => {
   await withChromiumFixture('terminal-font-textarea', async ({ page, integration, assertNoBrowserErrors }) => {
     let releaseFont!: () => void;
     const fontReady = new Promise<void>((resolve) => { releaseFont = resolve; });
@@ -25,7 +25,7 @@ test('terminal font completion and cached appearance changes refit existing text
     try {
       await page.addInitScript(() => {
         const settings = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
-        localStorage.setItem('pref_local_settings', JSON.stringify({ ...settings, terminalAppearance: true, reduceMotion: true }));
+        localStorage.setItem('pref_local_settings', JSON.stringify({ ...settings, interfaceFont: 'departure-mono', reduceMotion: true }));
       });
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
       await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
@@ -41,9 +41,9 @@ test('terminal font completion and cached appearance changes refit existing text
       await page.evaluate(() => document.fonts.ready);
       await browserExpect(input).toHaveCSS('height', '72px');
       expect(await input.evaluate(node => node.scrollHeight <= node.clientHeight)).toBe(true);
-      await page.evaluate(() => { document.documentElement.dataset.themeAppearance = 'standard'; });
+      await page.evaluate(() => { document.documentElement.dataset.interfaceFont = 'default'; });
       await browserExpect.poll(() => input.evaluate(node => node.clientHeight)).toBeLessThan(72);
-      await page.evaluate(() => { document.documentElement.dataset.themeAppearance = 'terminal'; });
+      await page.evaluate(() => { document.documentElement.dataset.interfaceFont = 'departure-mono'; });
       await browserExpect(input).toHaveCSS('height', '72px');
       await browserExpect(input).toHaveValue('i'.repeat(62));
       assertNoBrowserErrors();

@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { chromium } from "playwright";
 import {
+  FONT_OPTIONS,
+  type FontPreference,
+} from "../../../web/src/lib/theme/fonts";
+import {
   DEFAULT_THEME_PREFERENCE,
   THEME_PROFILES,
   getThemeProfile,
@@ -16,6 +20,8 @@ const STARTUP_MARKER = `<script>
 globalThis.__themeBeforeApplicationStartup = {
   themeId: document.documentElement.dataset.theme,
   appearance: document.documentElement.dataset.themeAppearance,
+  interfaceFont: document.documentElement.dataset.interfaceFont,
+  monospaceFont: document.documentElement.dataset.monospaceFont,
   dark: document.documentElement.classList.contains('dark'),
   colorScheme: document.documentElement.style.colorScheme,
   themeColor: document.querySelector('meta[name="theme-color"]')?.getAttribute('content'),
@@ -29,6 +35,8 @@ interface ThemeScenario {
   systemColorScheme: ColorScheme;
   expectedThemeId: ThemeId;
   terminalAppearance?: boolean;
+  interfaceFont?: FontPreference;
+  monospaceFont?: FontPreference;
   storageUnavailable?: boolean;
 }
 
@@ -36,16 +44,18 @@ function defaultThemeId(systemColorScheme: ColorScheme): ThemeId {
   return resolveThemeId(DEFAULT_THEME_PREFERENCE, systemColorScheme);
 }
 
-const fixedScenarios: ThemeScenario[] = THEME_PROFILES.flatMap((profile) => [false, true].map((terminalAppearance) => ({
-  name: `fixed ${profile.id}, terminal=${terminalAppearance} ignores the opposite system scheme`,
-  storedSettings: JSON.stringify({
-    themePreference: { mode: "fixed", themeId: profile.id },
+const fixedScenarios: ThemeScenario[] = THEME_PROFILES.flatMap((profile) =>
+  [false, true].map((terminalAppearance) => ({
+    name: `fixed ${profile.id}, terminal=${terminalAppearance} ignores the opposite system scheme`,
+    storedSettings: JSON.stringify({
+      themePreference: { mode: "fixed", themeId: profile.id },
+      terminalAppearance,
+    }),
+    systemColorScheme: profile.colorScheme === "dark" ? "light" : "dark",
+    expectedThemeId: profile.id,
     terminalAppearance,
-  }),
-  systemColorScheme: profile.colorScheme === "dark" ? "light" : "dark",
-  expectedThemeId: profile.id,
-  terminalAppearance,
-})));
+  })),
+);
 
 const malformedSettings = [
   ["missing settings", null],
@@ -82,11 +92,35 @@ const malformedSettings = [
 
 const scenarios: ThemeScenario[] = [
   ...fixedScenarios,
-  ...[null, 'true', 1, {}, []].map((terminalAppearance) => ({
+  ...FONT_OPTIONS.flatMap((interfaceFont) =>
+    FONT_OPTIONS.map((monospaceFont) => ({
+      name: `fonts ${interfaceFont} and ${monospaceFont}`,
+      storedSettings: JSON.stringify({
+        interfaceFont,
+        monospaceFont,
+        terminalAppearance: true,
+      }),
+      interfaceFont,
+      monospaceFont,
+      terminalAppearance: true,
+      systemColorScheme: "light" as const,
+      expectedThemeId: defaultThemeId("light"),
+    })),
+  ),
+  ...[null, "serif", "toString", {}, [], 1].map((value) => ({
+    name: `invalid fonts ${JSON.stringify(value)}`,
+    storedSettings: JSON.stringify({
+      interfaceFont: value,
+      monospaceFont: value,
+    }),
+    systemColorScheme: "light" as const,
+    expectedThemeId: defaultThemeId("light"),
+  })),
+  ...[null, "true", 1, {}, []].map((terminalAppearance) => ({
     name: `invalid terminal appearance ${JSON.stringify(terminalAppearance)}`,
     storedSettings: JSON.stringify({ terminalAppearance }),
-    systemColorScheme: 'light' as const,
-    expectedThemeId: defaultThemeId('light'),
+    systemColorScheme: "light" as const,
+    expectedThemeId: defaultThemeId("light"),
   })),
   {
     name: "a mixed System pair resolves its light selection",
@@ -140,10 +174,14 @@ describe("theme bootstrap", () => {
       const context = await browser.newContext({ javaScriptEnabled: false });
       const page = await context.newPage();
       await page.setContent(appTemplate);
-      expect(await page.locator('meta[name="viewport"]').getAttribute("content"))
-        .toContain("viewport-fit=auto");
-      expect(await page.locator('meta[name="apple-mobile-web-app-status-bar-style"]').getAttribute("content"))
-        .toBe("default");
+      expect(
+        await page.locator('meta[name="viewport"]').getAttribute("content"),
+      ).toContain("viewport-fit=auto");
+      expect(
+        await page
+          .locator('meta[name="apple-mobile-web-app-status-bar-style"]')
+          .getAttribute("content"),
+      ).toBe("default");
     } finally {
       await browser.close();
     }
@@ -209,6 +247,8 @@ describe("theme bootstrap", () => {
             __themeBeforeApplicationStartup?: {
               themeId: string;
               appearance: string;
+              interfaceFont: string;
+              monospaceFont: string;
               dark: boolean;
               colorScheme: string;
               themeColor: string | null;
@@ -220,7 +260,9 @@ describe("theme bootstrap", () => {
         const expectedProfile = getThemeProfile(scenario.expectedThemeId);
         expect(startupTheme, scenario.name).toEqual({
           themeId: expectedProfile.id,
-          appearance: scenario.terminalAppearance ? 'terminal' : 'standard',
+          appearance: scenario.terminalAppearance ? "terminal" : "standard",
+          interfaceFont: scenario.interfaceFont ?? "default",
+          monospaceFont: scenario.monospaceFont ?? "default",
           dark: expectedProfile.colorScheme === "dark",
           colorScheme: expectedProfile.colorScheme,
           themeColor: expectedProfile.browserThemeColor,

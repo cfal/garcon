@@ -1,4 +1,5 @@
 import { history, historyKeymap } from '@codemirror/commands';
+import { editorFont, SYSTEM_EDITOR_FONT } from '$lib/theme/editor-font.js';
 import {
 	Annotation,
 	Compartment,
@@ -71,6 +72,7 @@ export class PromptEditorController {
 			doc: options.initialText,
 			selection: EditorSelection.single(initialSelection.anchor, initialSelection.head),
 			extensions: [
+				editorFont(SYSTEM_EDITOR_FONT),
 				this.#readOnlyCompartment.of([
 					EditorState.readOnly.of(this.#readOnly),
 					EditorView.editable.of(!this.#readOnly),
@@ -101,7 +103,6 @@ export class PromptEditorController {
 					},
 					'&.cm-focused': { outline: 'none' },
 					'.cm-scroller': {
-						fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
 						fontSize: '16px',
 						lineHeight: '1.55',
 						overflow: 'auto',

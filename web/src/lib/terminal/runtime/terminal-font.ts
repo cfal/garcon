@@ -1,3 +1,5 @@
+import { DEPARTURE_MONO_FAMILY, loadDepartureMono, type FontPreference } from '$lib/theme/fonts.js';
+
 const TERMINAL_FONT_NAME = 'Monaspace Neon NF';
 const TERMINAL_FONT_LOAD_TIMEOUT_MS = 4_000;
 const MONASPACE_RELEASE_COMMIT = 'f31794b6e9e65698a062262e2f826f679dcb7070';
@@ -13,13 +15,13 @@ export const TERMINAL_FALLBACK_FONT_FAMILY =
 	'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
 export const TERMINAL_FONT_FAMILY = `"${TERMINAL_FONT_NAME}", ${TERMINAL_FALLBACK_FONT_FAMILY}`;
 
-export type TerminalFontFamily = typeof TERMINAL_FONT_FAMILY | typeof TERMINAL_FALLBACK_FONT_FAMILY;
+export type TerminalFontFamily = string;
 
 type TerminalFontFaceFactory = () => readonly FontFace[];
 type FontFaceRegistrar = (fontFace: FontFace) => void;
 
 export interface TerminalFontResolver {
-	load(): Promise<TerminalFontFamily>;
+	load(preference: FontPreference): Promise<TerminalFontFamily>;
 }
 
 export class TerminalFontLoader implements TerminalFontResolver {
@@ -27,6 +29,7 @@ export class TerminalFontLoader implements TerminalFontResolver {
 	readonly #registerFontFace: FontFaceRegistrar;
 	readonly #timeoutMs: number;
 	#loadPromise: Promise<TerminalFontFamily> | null = null;
+	#departurePromise: Promise<TerminalFontFamily> | null = null;
 
 	constructor(
 		createFontFaces: TerminalFontFaceFactory = () =>
@@ -45,7 +48,14 @@ export class TerminalFontLoader implements TerminalFontResolver {
 		this.#timeoutMs = timeoutMs;
 	}
 
-	load(): Promise<TerminalFontFamily> {
+	load(preference: FontPreference = 'default'): Promise<TerminalFontFamily> {
+		if (preference === 'departure-mono') {
+			// Retains the default Nerd Font as fallback for private-use terminal glyphs.
+			this.#departurePromise ??= Promise.all([this.load(), loadDepartureMono()]).then(
+				([fallback, loaded]) => (loaded ? `${DEPARTURE_MONO_FAMILY}, ${fallback}` : fallback),
+			);
+			return this.#departurePromise;
+		}
 		// Shares one browser font request across every terminal runtime.
 		this.#loadPromise ??= this.#loadOnce();
 		return this.#loadPromise;

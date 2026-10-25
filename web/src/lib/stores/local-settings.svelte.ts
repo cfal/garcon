@@ -2,6 +2,7 @@
 // browser-only preferences to persisted storage.
 
 import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
+import { parseFontPreference, type FontPreference } from '$lib/theme/fonts.js';
 import {
 	getLocalStorageItem,
 	LOCAL_STORAGE_KEYS,
@@ -141,6 +142,8 @@ export type HideableToolType = (typeof HIDEABLE_TOOL_GROUPS)[number]['toolTypes'
 export interface LocalSettingsSnapshot {
 	themePreference: ThemePreference;
 	terminalAppearance: boolean;
+	interfaceFont: FontPreference;
+	monospaceFont: FontPreference;
 	overlayBackdropEffects: boolean;
 	highlightActiveWindow: boolean;
 	autoExpandTools: boolean;
@@ -220,6 +223,8 @@ type BooleanLocalSettingKey =
 const DEFAULTS: LocalSettingsSnapshot = {
 	themePreference: DEFAULT_THEME_PREFERENCE,
 	terminalAppearance: false,
+	interfaceFont: 'default',
+	monospaceFont: 'default',
 	overlayBackdropEffects: true,
 	highlightActiveWindow: true,
 	autoExpandTools: false,
@@ -417,6 +422,8 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	return {
 		themePreference: parseThemePreference(parsed.themePreference),
 		terminalAppearance: parseBoolean(parsed.terminalAppearance, DEFAULTS.terminalAppearance),
+		interfaceFont: parseFontPreference(parsed.interfaceFont),
+		monospaceFont: parseFontPreference(parsed.monospaceFont),
 		highlightActiveWindow: parseBoolean(
 			parsed.highlightActiveWindow,
 			DEFAULTS.highlightActiveWindow,
@@ -551,6 +558,8 @@ function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
 export class LocalSettingsStore {
 	themePreference = $state<ThemePreference>(DEFAULTS.themePreference);
 	terminalAppearance = $state(DEFAULTS.terminalAppearance);
+	interfaceFont = $state(DEFAULTS.interfaceFont);
+	monospaceFont = $state(DEFAULTS.monospaceFont);
 	overlayBackdropEffects = $state(DEFAULTS.overlayBackdropEffects);
 	highlightActiveWindow = $state(DEFAULTS.highlightActiveWindow);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
@@ -685,6 +694,8 @@ export class LocalSettingsStore {
 		return {
 			themePreference: this.themePreference,
 			terminalAppearance: this.terminalAppearance,
+			interfaceFont: this.interfaceFont,
+			monospaceFont: this.monospaceFont,
 			overlayBackdropEffects: this.overlayBackdropEffects,
 			highlightActiveWindow: this.highlightActiveWindow,
 			autoExpandTools: this.autoExpandTools,
@@ -742,6 +753,8 @@ export class LocalSettingsStore {
 	#apply(snap: LocalSettingsSnapshot): void {
 		this.themePreference = snap.themePreference;
 		this.terminalAppearance = snap.terminalAppearance;
+		this.interfaceFont = snap.interfaceFont;
+		this.monospaceFont = snap.monospaceFont;
 		this.overlayBackdropEffects = snap.overlayBackdropEffects;
 		this.highlightActiveWindow = snap.highlightActiveWindow;
 		this.autoExpandTools = snap.autoExpandTools;

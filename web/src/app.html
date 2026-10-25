@@ -83,9 +83,15 @@
 					typeof value === 'string' && Object.prototype.hasOwnProperty.call(profiles, value);
 				let preference = defaultPreference;
 				let terminalAppearance = false;
+				let interfaceFont = 'default';
+				let monospaceFont = 'default';
 				try {
 					const stored = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
 					terminalAppearance = isRecord(stored) && stored.terminalAppearance === true;
+					if (isRecord(stored)) {
+						if (stored.interfaceFont === 'departure-mono') interfaceFont = 'departure-mono';
+						if (stored.monospaceFont === 'departure-mono') monospaceFont = 'departure-mono';
+					}
 					const candidate = isRecord(stored) ? stored.themePreference : undefined;
 					if (isRecord(candidate) && candidate.mode === 'fixed' && isThemeId(candidate.themeId)) {
 						preference = { mode: 'fixed', themeId: candidate.themeId };
@@ -120,6 +126,8 @@
 				const root = document.documentElement;
 				root.dataset.theme = themeId;
 				root.dataset.themeAppearance = terminalAppearance ? 'terminal' : 'standard';
+				root.dataset.interfaceFont = interfaceFont;
+				root.dataset.monospaceFont = monospaceFont;
 				root.classList.toggle('dark', profile.colorScheme === 'dark');
 				root.style.colorScheme = profile.colorScheme;
 				document

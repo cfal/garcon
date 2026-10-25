@@ -21,6 +21,7 @@
 @import './lib/theme/profiles/slate-dark.css';
 @import './lib/theme/profiles/ansi-light.css';
 @import './lib/theme/profiles/ansi-dark.css';
+@import './lib/theme/fonts.css';
 @import './lib/theme/ansi.css';
 @plugin '@tailwindcss/typography';
 
@@ -646,7 +647,8 @@
 		background-color: theme(--color-background);
 		color: theme(--color-foreground);
 		font-family:
-			-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+			var(--interface-font-override, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+				'Helvetica Neue', Arial, sans-serif);
 		-webkit-font-smoothing: antialiased;
 		-moz-osx-font-smoothing: grayscale;
 		overscroll-behavior: none;

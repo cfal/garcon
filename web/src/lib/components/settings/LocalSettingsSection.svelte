@@ -32,6 +32,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import CompletionSoundSettings from './CompletionSoundSettings.svelte';
 	import ThemeSettingsCard from './ThemeSettingsCard.svelte';
+	import TypographySettings from './TypographySettings.svelte';
 
 	interface SettingRowOptions {
 		disabled?: boolean;
@@ -214,6 +215,7 @@
 
 		<div class="px-4">
 			<div class="border-t border-border">
+				<TypographySettings />
 				{@render settingRow(m.settings_highlight_active_window(), ls.highlightActiveWindow, () =>
 					ls.toggle('highlightActiveWindow'),
 				)}

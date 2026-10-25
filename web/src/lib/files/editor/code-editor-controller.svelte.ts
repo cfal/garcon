@@ -64,6 +64,7 @@ import {
 	type FileDocumentViewAdapter,
 } from '$lib/files/editor/file-document-runtime.js';
 import { FileVimMode } from '$lib/files/editor/file-vim-mode.svelte.js';
+import { editorFont, SYSTEM_EDITOR_FONT } from '$lib/theme/editor-font.js';
 import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 import { editorThemeExtension, type EditorThemeId } from '$lib/files/editor/editor-themes.js';
 
@@ -499,6 +500,7 @@ export class CodeEditorController {
 					{ key: 'Tab', run: indentMore, shift: indentLess },
 				]),
 				this.#languageCompartment.of([]),
+				editorFont(SYSTEM_EDITOR_FONT),
 				this.#dynamicCompartment.of(this.dynamicExtensions()),
 			],
 		});
@@ -512,7 +514,6 @@ export class CodeEditorController {
 				'&': { isolation: 'isolate' },
 				'.cm-content, .cm-gutters': {
 					fontSize: `${Math.max(MIN_TOUCH_EDITOR_FONT_SIZE, configuredFontSize)}px`,
-					fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
 				},
 				'.cm-panel input, .cm-panel select, .cm-panel button': {
 					fontSize: `${MIN_TOUCH_EDITOR_FONT_SIZE}px`,

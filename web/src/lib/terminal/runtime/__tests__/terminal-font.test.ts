@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { loadDepartureMono } from '$lib/theme/fonts.js';
 import {
 	TERMINAL_FALLBACK_FONT_FAMILY,
 	TERMINAL_FONT_FAMILY,
 	TerminalFontLoader,
 } from '../terminal-font.js';
+
+vi.mock('$lib/theme/fonts.js', async (importOriginal) => ({
+	...await importOriginal<typeof import('$lib/theme/fonts.js')>(),
+	loadDepartureMono: vi.fn(),
+}));
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -11,6 +17,14 @@ afterEach(() => {
 });
 
 describe('TerminalFontLoader', () => {
+	it.each([true, false])('retains Nerd Font fallback when Departure loaded=%s', async (loaded) => {
+		vi.mocked(loadDepartureMono).mockResolvedValue(loaded);
+		const loader = new TerminalFontLoader(() => [], vi.fn());
+		const first = loader.load('departure-mono');
+		expect(loader.load('departure-mono')).toBe(first);
+		await expect(first).resolves.toBe(loaded ? `"Departure Mono", ${TERMINAL_FONT_FAMILY}` : TERMINAL_FONT_FAMILY);
+	});
+
 	it('loads and registers the pinned regular and bold faces once', async () => {
 		const loadedFontFaces = [{}, {}] as FontFace[];
 		let loadedFaceIndex = 0;

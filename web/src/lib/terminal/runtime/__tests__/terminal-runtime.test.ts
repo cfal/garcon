@@ -388,6 +388,116 @@ describe('TerminalRuntime', () => {
 		expect(fakes.terminals[0].options.fontFamily).toBe(TERMINAL_FONT_FAMILY);
 	});
 
+	it('attaches with the latest font when preference changes during the initial load', async () => {
+		const original = deferred<string>();
+		const selected = deferred<string>();
+		const load = vi.fn<TerminalFontResolver['load']>((preference) =>
+			preference === 'default' ? original.promise : selected.promise,
+		);
+		const runtime = createRuntime(vi.fn(), vi.fn(), { load });
+		const host = measurableHost();
+		const attachment = runtime.attach(host);
+		runtime.applyMonospaceFont('departure-mono');
+		selected.resolve('"Departure Mono", monospace');
+		await attachment.ready;
+		original.resolve(TERMINAL_FONT_FAMILY);
+		expect(fakes.terminals).toHaveLength(1);
+		expect(fakes.terminals[0].options.fontFamily).toBe('"Departure Mono", monospace');
+		expect(fakes.terminals[0].element?.parentElement).toBe(host);
+		expect(load.mock.calls.map(([preference]) => preference)).toEqual([
+			'default',
+			'departure-mono',
+		]);
+		runtime.dispose();
+	});
+
+	it('ignores superseded font loads without replacing the renderer or resetting controls', async () => {
+		const selected = deferred<string>();
+		const runtime = createRuntime(vi.fn(), vi.fn(), {
+			load: (preference) =>
+				preference === 'default' ? Promise.resolve(TERMINAL_FONT_FAMILY) : selected.promise,
+		});
+		const host = measurableHost();
+		const lease = await attach(runtime, host);
+		const scheduleFit = vi.spyOn(runtime, 'scheduleFit');
+		const element = runtime.terminal.element;
+		runtime.write('retained output');
+		runtime.inputControls.toggleModifier('ctrl');
+		runtime.applyMonospaceFont('departure-mono');
+		runtime.applyMonospaceFont('default');
+		selected.resolve('"Departure Mono", monospace');
+		await vi.waitFor(() => expect(scheduleFit).toHaveBeenCalledOnce());
+		expect(runtime.terminal.options.fontFamily).toBe(TERMINAL_FONT_FAMILY);
+		expect(runtime.terminal.element).toBe(element);
+		expect(runtime.inputControls.hasActiveModifiers).toBe(true);
+		expect(fakes.terminals[0].dispose).not.toHaveBeenCalled();
+		runtime.park(lease);
+		runtime.applyMonospaceFont('departure-mono');
+		await Promise.resolve();
+		expect(runtime.terminal.options.fontFamily).toBe(TERMINAL_FONT_FAMILY);
+		await attach(runtime, measurableHost());
+		expect(runtime.terminal.options.fontFamily).toBe('"Departure Mono", monospace');
+		expect(runtime.terminal.element).toBe(element);
+		expect(fakes.terminals[0].write).toHaveBeenCalledOnce();
+		runtime.dispose();
+	});
+
+	it.each(['same', 'new'])(
+		'waits for connected DOM when a font finishes during transfer to the %s host',
+		async (target) => {
+			const selected = deferred<string>();
+			const runtime = createRuntime(vi.fn(), vi.fn(), {
+				load: (preference) =>
+					preference === 'default' ? Promise.resolve(TERMINAL_FONT_FAMILY) : selected.promise,
+			});
+			const host = measurableHost();
+			const lease = await attach(runtime, host);
+			const terminal = fakes.terminals[0];
+			let family = terminal.options.fontFamily;
+			const assignments: Array<{
+				family: unknown;
+				connected: boolean;
+				parent: HTMLElement | null;
+			}> = [];
+			Object.defineProperty(terminal.options, 'fontFamily', {
+				get: () => family,
+				set: (value) => {
+					family = value;
+					assignments.push({
+						family,
+						connected: terminal.element!.isConnected,
+						parent: terminal.element!.parentElement,
+					});
+				},
+			});
+			runtime.applyMonospaceFont('departure-mono');
+			runtime.park(lease);
+			const nextHost = target === 'same' ? host : measurableHost();
+			const attachment = runtime.attach(nextHost);
+			selected.resolve('"Departure Mono", monospace');
+			await attachment.ready;
+			expect(assignments).toEqual([
+				{ family: '"Departure Mono", monospace', connected: true, parent: nextHost },
+			]);
+			runtime.dispose();
+		},
+	);
+
+	it('does not apply a font after disposal', async () => {
+		const selected = deferred<string>();
+		const runtime = createRuntime(vi.fn(), vi.fn(), {
+			load: (preference) =>
+				preference === 'default' ? Promise.resolve(TERMINAL_FONT_FAMILY) : selected.promise,
+		});
+		await attach(runtime, measurableHost());
+		runtime.applyMonospaceFont('departure-mono');
+		runtime.dispose();
+		selected.resolve('"Departure Mono", monospace');
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(runtime.terminal.options.fontFamily).toBe(TERMINAL_FONT_FAMILY);
+	});
+
 	it('opens with the fallback family when font resolution fails', async () => {
 		const runtime = createRuntime(vi.fn(), vi.fn(), {
 			load: () => Promise.reject(new Error('font unavailable')),

@@ -1,0 +1,19 @@
+@font-face {
+	font-family: 'Departure Mono';
+	src: url('./assets/DepartureMono-1.500.woff2') format('woff2');
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+}
+
+:root:where([data-interface-font='departure-mono']) {
+	--font-sans: 'Departure Mono', ui-monospace, 'Cascadia Mono', 'Noto Sans Mono', monospace;
+	--interface-font-override: var(--font-sans);
+}
+
+:root:where([data-monospace-font='departure-mono']) {
+	--font-mono:
+		'Departure Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+		'Courier New', monospace;
+	--monospace-font-override: var(--font-mono);
+}

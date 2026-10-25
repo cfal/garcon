@@ -4,6 +4,7 @@
 	import { EditorState } from '@codemirror/state';
 	import { EditorView, lineNumbers } from '@codemirror/view';
 	import { MergeView } from '@codemirror/merge';
+	import { editorFont } from '$lib/theme/editor-font.js';
 
 	let {
 		comparison,
@@ -28,6 +29,7 @@
 			a: {
 				doc: comparison,
 				extensions: [
+					editorFont(),
 					lineNumbers(),
 					EditorState.readOnly.of(true),
 					EditorView.editable.of(false),
@@ -37,6 +39,7 @@
 			b: {
 				doc: initialLocal,
 				extensions: [
+					editorFont(),
 					lineNumbers(),
 					EditorView.contentAttributes.of({ 'aria-label': localLabel }),
 					EditorState.readOnly.of(false),

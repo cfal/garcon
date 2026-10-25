@@ -222,7 +222,7 @@ describe("Mermaid theme contrast", () => {
           renderMermaid: (source: string, theme: string) => Promise<string>;
         };
         const root = document.querySelector('#diagram')!;
-        const source = 'flowchart TB\nA[Terminal appearance checkbox] --> B[A longer label that wraps across several lines inside a fixed diagram node]';
+        const source = 'flowchart TB\nA[Independent font selections] --> B[A longer label that wraps across several lines inside a fixed diagram node]';
         const read = () => Array.from(root.querySelectorAll('foreignObject')).map((box) => {
           const label = box.querySelector('.nodeLabel')!;
           const bounds = label.getBoundingClientRect();
@@ -230,10 +230,14 @@ describe("Mermaid theme contrast", () => {
             boxWidth: box.getAttribute('width'), boxHeight: box.getAttribute('height') };
         });
         document.documentElement.dataset.themeAppearance = 'standard';
+        document.documentElement.dataset.interfaceFont = 'default';
+        document.documentElement.dataset.monospaceFont = 'default';
         const cachedSvg = await scope.renderMermaid(source, 'standard-light');
         root.innerHTML = cachedSvg;
         const standard = read();
         document.documentElement.dataset.themeAppearance = 'terminal';
+        document.documentElement.dataset.interfaceFont = 'departure-mono';
+        document.documentElement.dataset.monospaceFont = 'departure-mono';
         await document.fonts.ready;
         const toggled = read();
         root.innerHTML = await scope.renderMermaid(source, 'standard-light');

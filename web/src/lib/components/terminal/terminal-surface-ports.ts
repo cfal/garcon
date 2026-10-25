@@ -17,6 +17,7 @@ export interface TerminalSurfaceRuntimePort {
 	focus(): void;
 	pasteFromClipboard(): Promise<unknown>;
 	applyFontSize(fontSize: number): void;
+	applyMonospaceFont(preference: FontPreference): void;
 }
 
 export interface TerminalSurfaceRegistryPort extends Pick<
@@ -49,3 +50,5 @@ export interface TerminalSurfaceWorkspacePort {
 	closeSurface(surfaceId: string): Promise<boolean>;
 	isSurfaceCloseBlocked(surfaceId: string): boolean;
 }
+
+import type { FontPreference } from '$lib/theme/fonts.js';

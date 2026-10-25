@@ -116,6 +116,12 @@ describe('content-sized textarea', () => {
 			measuredHeight = 48;
 			document.documentElement.dataset.themeAppearance = 'standard';
 			await waitFor(() => expect(textarea.style.height).toBe('48px'));
+			measuredHeight = 96;
+			document.documentElement.dataset.interfaceFont = 'departure-mono';
+			await waitFor(() => expect(textarea.style.height).toBe('96px'));
+			measuredHeight = 64;
+			document.documentElement.dataset.monospaceFont = 'departure-mono';
+			await waitFor(() => expect(textarea.style.height).toBe('64px'));
 			unmount();
 			const request = vi.spyOn(globalThis, 'requestAnimationFrame');
 			fonts.dispatchEvent(new Event('loadingdone'));
