@@ -322,8 +322,12 @@ export class CodexAppServerClient extends EventEmitter {
     const startedAt = performance.now();
     const resolved = await this.#resolveCli();
     if (this.#shutdownRequested) throw new Error('Codex app-server client is shut down');
-    // Disables persisted goal continuation before any native thread can resume.
-    const args = ['app-server', '--listen', 'stdio://', '--config', 'features.goals=false'];
+    // Disables native goal continuation and idle agent-message wakes before loading threads.
+    const args = [
+      'app-server', '--listen', 'stdio://',
+      '--config', 'features.goals=false',
+      '--config', 'features.wake_on_agent_messages=false',
+    ];
     if (this.#modelCatalogPath) {
       args.push('--config', `model_catalog_json=${JSON.stringify(this.#modelCatalogPath)}`);
     }

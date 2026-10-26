@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { rejectionOf } from '../../support/promise-assertions.js';
 import {
   chatCompletionsText,
   chatCompletionsToolUse,
@@ -17,6 +18,36 @@ const OVERRIDE_USAGE = {
 };
 
 describe('FakeChatCompletionsModel usage scripting', () => {
+  test('stalls after an initial SSE chunk until the caller aborts', async () => {
+    const model = FakeChatCompletionsModel.start();
+    const controller = new AbortController();
+    try {
+      model.scriptFault({ kind: 'stream-stall' });
+      const response = await fetch(`${model.baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'scripted-model', stream: true, messages: [] }),
+        signal: controller.signal,
+      });
+      expect(response.headers.get('content-type')).toContain('text/event-stream');
+      const reader = response.body!.getReader();
+      const first = await reader.read();
+      expect(new TextDecoder().decode(first.value)).toContain('chat.completion.chunk');
+      expect(new TextDecoder().decode(first.value)).not.toContain('[DONE]');
+      const next = reader.read();
+      controller.abort();
+      expect(await rejectionOf(next)).toBeInstanceOf(Error);
+      const request = model.requests()[0]!;
+      const deadline = Date.now() + 2_000;
+      while (request.abortedAt === null && Date.now() < deadline) await Bun.sleep(10);
+      expect(request.abortedAt).not.toBeNull();
+      model.assertSettled();
+    } finally {
+      controller.abort();
+      model.stop();
+    }
+  });
+
   test('streams raw malformed tool arguments without JSON normalization', async () => {
     const model = FakeChatCompletionsModel.start();
     const rawArguments = '{"path":"synthetic.txt","invalid":.5}';
