@@ -4,6 +4,7 @@ import { buildWebBrowserEntry } from "../../support/web-browser-bundle";
 import type {
   mountFontEditor,
   reattachFontEditor,
+  scrollFontEditor,
   undo,
 } from "../../../web/src/lib/theme/__tests__/editor-font-fixture";
 
@@ -27,13 +28,14 @@ test("live editor fonts refresh cached metrics while preserving document, select
     );
     await page.addScriptTag({
       type: "module",
-      content: `${bundle}\nwindow.fontFixture = { mountFontEditor, reattachFontEditor, undo };`,
+      content: `${bundle}\nwindow.fontFixture = { mountFontEditor, reattachFontEditor, scrollFontEditor, undo };`,
     });
     const result = await page.evaluate(async () => {
       const scope = window as typeof window & {
         fontFixture: {
           mountFontEditor: typeof mountFontEditor;
           reattachFontEditor: typeof reattachFontEditor;
+          scrollFontEditor: typeof scrollFontEditor;
           undo: typeof undo;
         };
       };
@@ -54,6 +56,16 @@ test("live editor fonts refresh cached metrics while preserving document, select
           cached: view.defaultCharacterWidth,
           actual: range.getBoundingClientRect().width / view.state.doc.length,
         };
+      };
+      const selectFont = async (departure: boolean) => {
+        document.documentElement.style.setProperty(
+          "--monospace-font-override",
+          departure ? '"Departure Mono"' : "monospace",
+        );
+        document.documentElement.dataset.monospaceFont = departure
+          ? "departure-mono"
+          : "default";
+        await settle();
       };
       const before = measure();
       view.dispatch({
@@ -105,6 +117,42 @@ test("live editor fonts refresh cached metrics while preserving document, select
         await settle();
         overlappingEdits.push(measure());
       }
+      const offscreenSwitches = [];
+      const host = view.dom.parentElement!;
+      for (const mode of [
+        "offscreen",
+        "hidden",
+        "hidden-scroll-before",
+        "hidden-scroll-during",
+      ]) {
+        await selectFont(false);
+        const retainedDom = view.dom;
+        const retainedDoc = view.state.doc;
+        if (mode === "offscreen") host.style.marginTop = "200vh";
+        else host.style.display = "none";
+        view.requestMeasure();
+        await settle();
+        const wasOffscreen = !view.inView;
+        if (mode === "hidden-scroll-before") {
+          scope.fontFixture.scrollFontEditor(view, 8);
+          await settle();
+        }
+        const fontChange = selectFont(true);
+        if (mode === "hidden-scroll-during") {
+          scope.fontFixture.scrollFontEditor(view, 8);
+        }
+        await fontChange;
+        host.style.marginTop = "";
+        host.style.display = "";
+        view.requestMeasure();
+        await settle();
+        offscreenSwitches.push({
+          mode,
+          wasOffscreen,
+          ...measure(),
+          retained: view.dom === retainedDom && view.state.doc === retainedDoc,
+        });
+      }
       const ruleCount = () =>
         Array.from(document.styleSheets).reduce(
           (count, sheet) => count + sheet.cssRules.length,
@@ -118,16 +166,6 @@ test("live editor fonts refresh cached metrics while preserving document, select
       const rulesAfter = ruleCount();
       view.destroy();
       const transfers = [];
-      const selectFont = async (departure: boolean) => {
-        document.documentElement.style.setProperty(
-          "--monospace-font-override",
-          departure ? '"Departure Mono"' : "monospace",
-        );
-        document.documentElement.dataset.monospaceFont = departure
-          ? "departure-mono"
-          : "default";
-        await settle();
-      };
       for (const triggers of [1, 2]) {
         await selectFont(false);
         view = scope.fontFixture.mountFontEditor(
@@ -161,6 +199,7 @@ test("live editor fonts refresh cached metrics while preserving document, select
         rulesBefore,
         rulesAfter,
         transfers,
+        offscreenSwitches,
       };
     });
     expect(result.changed.actual).not.toBeCloseTo(result.before.actual, 1);
@@ -173,6 +212,11 @@ test("live editor fonts refresh cached metrics while preserving document, select
       expect(measurement.cached).toBeCloseTo(measurement.actual, 1);
     }
     expect(result.rulesAfter).toBe(result.rulesBefore);
+    for (const measurement of result.offscreenSwitches) {
+      expect(measurement.wasOffscreen).toBe(true);
+      expect(measurement.cached).toBeCloseTo(measurement.actual, 1);
+      expect(measurement.retained).toBe(true);
+    }
     for (const transfer of result.transfers) {
       expect(transfer.after.actual).not.toBeCloseTo(transfer.before.actual, 1);
       expect(transfer.after.cached).toBeCloseTo(transfer.after.actual, 1);

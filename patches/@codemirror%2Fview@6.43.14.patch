@@ -12,7 +12,28 @@ index b20aa9d84be6ff4b85b126bdd930065277668a26..6ae333b65abe6c804aa99278e1e58a36
          let { observer } = this.view;
          observer.ignore(() => {
              if (composition || changes.length) {
-@@ -8065,7 +8066,7 @@ class EditorView {
+@@ -6416,7 +6417,10 @@ class ViewState {
+                 measureContent = true;
+         }
+-        if (!this.inView && !this.scrollTarget && !inWindow(view.dom))
++        if (!this.inView && !this.scrollTarget && !inWindow(view.dom)) {
++            if (refresh)
++                this.mustMeasureContent = "refresh";
+             return 0;
++        }
+         let contentWidth = domRect.width;
+         if (this.contentDOMWidth != contentWidth || this.editorHeight != view.scrollDOM.clientHeight) {
+             this.contentDOMWidth = domRect.width;
+@@ -6430,6 +6434,8 @@ class ViewState {
+             if (refresh || oracle.lineWrapping && Math.abs(contentWidth - this.contentDOMWidth) > oracle.charWidth) {
+                 let { lineHeight, charWidth, textHeight } = view.docView.measureTextSize();
++                if (lineHeight <= 0)
++                    this.mustMeasureContent = "refresh";
+                 refresh = lineHeight > 0 && oracle.refresh(whiteSpace, lineHeight, charWidth, textHeight, Math.max(5, contentWidth / charWidth), lineHeights);
+                 if (refresh) {
+                     view.docView.minWidth = 0;
+                     result |= 16 /* UpdateFlag.Geometry */;
+@@ -8065,7 +8071,7 @@ class EditorView {
              this.updateState = 0 /* UpdateState.Idle */;
          }
          if (update.startState.facet(theme) != update.state.facet(theme))
@@ -35,7 +56,28 @@ index 216f754db06f65f7f17f056b47d8f6fab45067bf..c259fa8adbfa319bc6c6c0c58caf6085
          let { observer } = this.view;
          observer.ignore(() => {
              if (composition || changes.length) {
-@@ -8060,7 +8061,7 @@ class EditorView {
+@@ -6411,7 +6412,10 @@ class ViewState {
+                 measureContent = true;
+         }
+-        if (!this.inView && !this.scrollTarget && !inWindow(view.dom))
++        if (!this.inView && !this.scrollTarget && !inWindow(view.dom)) {
++            if (refresh)
++                this.mustMeasureContent = "refresh";
+             return 0;
++        }
+         let contentWidth = domRect.width;
+         if (this.contentDOMWidth != contentWidth || this.editorHeight != view.scrollDOM.clientHeight) {
+             this.contentDOMWidth = domRect.width;
+@@ -6425,6 +6429,8 @@ class ViewState {
+             if (refresh || oracle.lineWrapping && Math.abs(contentWidth - this.contentDOMWidth) > oracle.charWidth) {
+                 let { lineHeight, charWidth, textHeight } = view.docView.measureTextSize();
++                if (lineHeight <= 0)
++                    this.mustMeasureContent = "refresh";
+                 refresh = lineHeight > 0 && oracle.refresh(whiteSpace, lineHeight, charWidth, textHeight, Math.max(5, contentWidth / charWidth), lineHeights);
+                 if (refresh) {
+                     view.docView.minWidth = 0;
+                     result |= 16 /* UpdateFlag.Geometry */;
+@@ -8060,7 +8066,7 @@ class EditorView {
              this.updateState = 0 /* UpdateState.Idle */;
          }
          if (update.startState.facet(theme) != update.state.facet(theme))

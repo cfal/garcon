@@ -19,6 +19,10 @@ export function mountFontEditor(parent: HTMLElement): EditorView {
 
 export { undo };
 
+export function scrollFontEditor(view: EditorView, position: number): void {
+	view.dispatch({ effects: EditorView.scrollIntoView(position) });
+}
+
 export function reattachFontEditor(view: EditorView): EditorView {
 	const parent = view.dom.parentElement!;
 	const retained = view.state;
