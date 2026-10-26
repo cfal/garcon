@@ -100,11 +100,13 @@ describe('Pi against a scripted model', () => {
 
   test('publishes a boundary when the pinned Pi CLI automatically compacts', async () => {
     environment?.dispose();
-    environment = startScriptedPiTestEnvironment({ compactionKeepRecentTokens: 1 });
+    // Distinguishes the old turn-prefix cap (half the 8192 reserve) from the model's 8192 output limit.
+    environment = startScriptedPiTestEnvironment({ compaction: { keepRecentTokens: 1, reserveTokens: 8192 } });
     const testEnvironment = environment;
     const prompt = marker('COMPACTION_PROMPT');
     const reply = marker('COMPACTION_REPLY');
     const summary = marker('COMPACTION_SUMMARY');
+    const requestCursor = testEnvironment.model.markRequests();
     testEnvironment.model.scriptTurn([chatCompletionsText(reply, {
       usage: {
         prompt_tokens: 120_000,
@@ -145,6 +147,10 @@ describe('Pi against a scripted model', () => {
           preTokens: 121_000,
         }),
       ]);
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(2);
+      expect(requests[1]!.body).not.toHaveProperty('max_tokens');
+      expect(requests[1]!.body.max_completion_tokens).toBe(8192);
       testEnvironment.model.assertSettled();
     }, withScriptedPi());
   }, 120_000);
