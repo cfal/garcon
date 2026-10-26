@@ -86,8 +86,8 @@
 				let typography = {};
 				try {
 					const stored = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
-					terminalAppearance = isRecord(stored) && stored.terminalAppearance === true;
 					if (isRecord(stored)) {
+						terminalAppearance = stored.terminalAppearance === true;
 						typography = stored;
 					}
 					const candidate = isRecord(stored) ? stored.themePreference : undefined;
@@ -146,6 +146,10 @@
 					'inter',
 				];
 				const monoFonts = ['default', 'system-mono', 'departure-mono', 'jetbrains-mono'];
+				const parentKeys = {
+					'chat-output': ['chatCodeFont', 'chatCodeFontSize'],
+					'expanded-editor': ['codeEditorFont', 'codeEditorFontSize'],
+				};
 				// Earlier snapshots persisted these renderer defaults as numeric selections.
 				if (!Object.hasOwn(typography, 'interfaceFontSize')) {
 					if (typography.codeEditorFontSize === '12') typography.codeEditorFontSize = 'default';
@@ -153,10 +157,7 @@
 					if (typography.terminalFontSize === '13') typography.terminalFontSize = 'default';
 				}
 				for (const [id, fontKey, sizeKey, defaultSize] of surfaces) {
-					const parent = {
-						'chat-output': ['chatCodeFont', 'chatCodeFontSize'],
-						'expanded-editor': ['codeEditorFont', 'codeEditorFontSize'],
-					}[id];
+					const parent = parentKeys[id];
 					if (parent) {
 						if (!Object.hasOwn(typography, fontKey)) typography[fontKey] = typography[parent[0]];
 						if (!Object.hasOwn(typography, sizeKey)) typography[sizeKey] = typography[parent[1]];

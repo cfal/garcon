@@ -24,8 +24,8 @@ export const TYPOGRAPHY_SURFACES = [
 ] as const;
 
 export type TypographySurface = (typeof TYPOGRAPHY_SURFACES)[number]['id'];
-export type FontSettingKey = (typeof TYPOGRAPHY_SURFACES)[number]['fontKey'];
-export type FontSizeSettingKey = (typeof TYPOGRAPHY_SURFACES)[number]['sizeKey'];
+type FontSettingKey = (typeof TYPOGRAPHY_SURFACES)[number]['fontKey'];
+type FontSizeSettingKey = (typeof TYPOGRAPHY_SURFACES)[number]['sizeKey'];
 export const TYPOGRAPHY_SIZE_OPTIONS = ['default', ...FONT_SIZE_OPTIONS] as const;
 export type FontSizePreference = (typeof TYPOGRAPHY_SIZE_OPTIONS)[number];
 export type TypographyPreferences = Record<FontSettingKey, FontPreference> &
@@ -51,6 +51,10 @@ export const TYPOGRAPHY_DEFAULTS: TypographyPreferences = {
 	terminalFont: 'default',
 	terminalFontSize: 'default',
 };
+
+export function getTypographySurface(surface: TypographySurface) {
+	return TYPOGRAPHY_SURFACES.find(({ id }) => id === surface)!;
+}
 
 export function parseFontSizePreference(value: unknown): FontSizePreference {
 	return isFontSizeOption(value) ? value : 'default';
@@ -115,7 +119,7 @@ export function observeTypographyChanges(
 
 export function typographyScale(surface: TypographySurface, size: FontSizePreference): number {
 	if (size === 'default') return 1;
-	const definition = TYPOGRAPHY_SURFACES.find(({ id }) => id === surface)!;
+	const definition = getTypographySurface(surface);
 	return Number(size) / definition.defaultSize;
 }
 

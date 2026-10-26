@@ -1,5 +1,6 @@
 import { history, historyKeymap } from '@codemirror/commands';
-import { editorFont, SYSTEM_EDITOR_FONT } from '$lib/theme/editor-font.js';
+import { editorFont } from '$lib/theme/editor-font.js';
+import { SYSTEM_EDITOR_FONT } from '$lib/theme/fonts.js';
 import {
 	Annotation,
 	Compartment,

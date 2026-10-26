@@ -64,7 +64,8 @@ import {
 	type FileDocumentViewAdapter,
 } from '$lib/files/editor/file-document-runtime.js';
 import { FileVimMode } from '$lib/files/editor/file-vim-mode.svelte.js';
-import { editorFont, SYSTEM_EDITOR_FONT } from '$lib/theme/editor-font.js';
+import { editorFont } from '$lib/theme/editor-font.js';
+import { SYSTEM_EDITOR_FONT } from '$lib/theme/fonts.js';
 import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 import { editorThemeExtension, type EditorThemeId } from '$lib/files/editor/editor-themes.js';
 

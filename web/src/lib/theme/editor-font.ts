@@ -2,9 +2,6 @@ import { Compartment, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin } from '@codemirror/view';
 import { observeTypographyChanges } from './typography.js';
 
-export const SYSTEM_EDITOR_FONT =
-	'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
-
 const fontThemes = new Map<string, readonly [Extension, Extension]>();
 
 type EditorTypography = 'code-editor' | 'expanded-editor' | 'code-diff';
@@ -29,7 +26,7 @@ function themesFor(
 }
 
 export function editorFont(
-	defaultFamily: string = 'monospace',
+	defaultFamily: string,
 	surface: EditorTypography = 'code-editor',
 ): Extension {
 	const font = new Compartment();

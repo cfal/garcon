@@ -4,10 +4,14 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { getLocalSettings } from '$lib/context';
-	import { fontControlLabel, fontLabel } from '$lib/components/shared/typography-labels.js';
+	import {
+		fontControlLabel,
+		fontLabel,
+		typographyDefaultSizeLabel,
+	} from '$lib/components/shared/typography-labels.js';
 	import { FONT_OPTIONS, type FontPreference } from '$lib/theme/fonts.js';
 	import {
-		TYPOGRAPHY_SURFACES,
+		getTypographySurface,
 		TYPOGRAPHY_SIZE_OPTIONS,
 		parseSurfaceFont,
 		parseFontSizePreference,
@@ -19,7 +23,7 @@
 
 	let { surface, onClose }: { surface: TypographySurface; onClose: () => void } = $props();
 	const settings = getLocalSettings();
-	const definition = untrack(() => TYPOGRAPHY_SURFACES.find(({ id }) => id === surface)!);
+	const definition = untrack(() => getTypographySurface(surface));
 	let font = $state<FontPreference>(untrack(() => settings[definition.fontKey]));
 	let size = $state<FontSizePreference>(untrack(() => settings[definition.sizeKey]));
 	const fonts = $derived(
@@ -27,11 +31,7 @@
 	);
 	const scaled = $derived(surface === 'interface' || surface === 'chat-list');
 	const editing = $derived(['code-editor', 'expanded-editor', 'code-diff'].includes(surface));
-	const defaultSizeLabel = $derived.by(() => {
-		if (surface === 'code-diff') return '11-13';
-		if (surface === 'chat-code') return '11/12';
-		return String(definition.defaultSize);
-	});
+	const defaultSizeLabel = $derived(typographyDefaultSizeLabel(surface));
 
 	function apply(event: SubmitEvent): void {
 		event.preventDefault();

@@ -198,9 +198,7 @@ body {
 	[data-typography-conflict] .cm-scroller {
 		font-size: max(16px, var(--code-diff-font-size, 13px));
 	}
-}
 
-@media (pointer: coarse) {
 	:where(input, textarea, select):not([type='checkbox'], [type='radio'], [type='range']) {
 		font-size: max(16px, calc(14px * var(--interface-font-scale, 1)));
 	}

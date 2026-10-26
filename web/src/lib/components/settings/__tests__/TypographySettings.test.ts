@@ -93,6 +93,17 @@ describe('TypographySettings', () => {
 		});
 	});
 
+	it.each(['File Editors Font', 'Expanded Text Editors Font'])(
+		'previews the default editor stack for %s',
+		async (label) => {
+			render(TypographySettingsTestHost);
+			await open(label);
+			expect(document.querySelector<HTMLElement>('[data-font-preview]')!.style.fontFamily).toBe(
+				'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+			);
+		},
+	);
+
 	it('restricts terminal choices while allowing proportional expanded text', async () => {
 		render(TypographySettingsTestHost);
 		let dialog = await open('Terminal Font');

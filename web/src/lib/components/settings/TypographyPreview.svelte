@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { FontPreference } from '$lib/theme/fonts.js';
+	import { SYSTEM_EDITOR_FONT, type FontPreference } from '$lib/theme/fonts.js';
 	import {
-		TYPOGRAPHY_SURFACES,
+		getTypographySurface,
 		typographyFontOverride,
 		type TypographySurface,
 		type FontSizePreference,
@@ -12,14 +12,14 @@
 		font,
 		size,
 	}: { surface: TypographySurface; font: FontPreference; size: FontSizePreference } = $props();
-	const baseSize = $derived(TYPOGRAPHY_SURFACES.find(({ id }) => id === surface)!.defaultSize);
+	const baseSize = $derived(getTypographySurface(surface).defaultSize);
 	const pixels = $derived(size === 'default' ? baseSize : Number(size));
 	const family = $derived.by(() => {
 		if (font !== 'default') return typographyFontOverride(surface, font);
 		switch (surface) {
 			case 'code-editor':
 			case 'expanded-editor':
-				return 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+				return SYSTEM_EDITOR_FONT;
 			case 'chat-code':
 			case 'code-diff':
 				return 'var(--system-code-font)';

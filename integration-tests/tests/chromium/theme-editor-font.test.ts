@@ -75,12 +75,7 @@ test("live editor fonts refresh cached metrics while preserving document, select
       const originalDom = view.dom;
       const originalDoc = view.state.doc;
       // Equal line height makes stale horizontal metrics visible rather than incidentally refreshed.
-      document.documentElement.style.setProperty(
-        "--code-editor-font-override",
-        '"Departure Mono"',
-      );
-      document.documentElement.dataset.codeEditorFont = "departure-mono";
-      await settle();
+      await selectFont(true);
       const changed = measure();
       const preserved =
         view.dom === originalDom &&

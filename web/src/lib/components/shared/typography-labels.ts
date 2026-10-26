@@ -1,6 +1,6 @@
 import * as m from '$lib/paraglide/messages.js';
 import {
-	TYPOGRAPHY_SURFACES,
+	getTypographySurface,
 	type FontSizePreference,
 	type TypographySurface,
 } from '$lib/theme/typography.js';
@@ -26,14 +26,17 @@ export function fontSizeControlLabel(surface: TypographySurface): string {
 	return `${TYPOGRAPHY_SURFACE_LABELS[surface]()} ${m.settings_font_size()}`;
 }
 
+export function typographyDefaultSizeLabel(surface: TypographySurface): string {
+	if (surface === 'chat-code') return '11/12';
+	if (surface === 'code-diff') return '11-13';
+	return String(getTypographySurface(surface).defaultSize);
+}
+
 export function typographySizeLabel(surface: TypographySurface, size: FontSizePreference): string {
-	const { defaultSize } = TYPOGRAPHY_SURFACES.find(({ id }) => id === surface)!;
+	const value = size === 'default' ? typographyDefaultSizeLabel(surface) : size;
 	if (surface === 'interface' || surface === 'chat-list')
-		return m.settings_font_base_value({ size: size === 'default' ? defaultSize : size });
-	if (size !== 'default') return `${size}px`;
-	if (surface === 'chat-code') return '11/12px';
-	if (surface === 'code-diff') return '11-13px';
-	return `${defaultSize}px`;
+		return m.settings_font_base_value({ size: value });
+	return `${value}px`;
 }
 
 export function fontSizeLabel(size: FontSizePreference, surface: TypographySurface): string {

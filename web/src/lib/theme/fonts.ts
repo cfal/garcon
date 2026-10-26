@@ -1,3 +1,6 @@
+export const SYSTEM_EDITOR_FONT =
+	'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+
 export const FONT_OPTIONS = [
 	'default',
 	'system-sans',
@@ -38,9 +41,8 @@ export function observeFontChanges(
 	};
 }
 
-export const DEPARTURE_MONO_FAMILY = '"Departure Mono"';
 export const BUNDLED_FONT_FAMILIES = {
-	'departure-mono': DEPARTURE_MONO_FAMILY,
+	'departure-mono': '"Departure Mono"',
 	'jetbrains-mono': '"JetBrains Mono"',
 	inter: '"Inter"',
 } as const;

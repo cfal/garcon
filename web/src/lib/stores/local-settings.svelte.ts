@@ -7,7 +7,7 @@ import {
 	parseSurfaceFont,
 	parseFontSizePreference,
 	TYPOGRAPHY_DEFAULTS,
-	TYPOGRAPHY_SURFACES,
+	getTypographySurface,
 	type TypographySurface,
 	type FontSizePreference,
 	type TypographyPreferences,
@@ -669,7 +669,7 @@ export class LocalSettingsStore {
 	}
 
 	setTypography(surface: TypographySurface, font: FontPreference, size: FontSizePreference): void {
-		const { fontKey, sizeKey } = TYPOGRAPHY_SURFACES.find(({ id }) => id === surface)!;
+		const { fontKey, sizeKey } = getTypographySurface(surface);
 		const next = {
 			...this.snapshot(),
 			[fontKey]: parseSurfaceFont(surface, font),
