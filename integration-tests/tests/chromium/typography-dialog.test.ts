@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
 import { expect as browserExpect } from "playwright/test";
+import type { Route } from "playwright";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
+import { Deferred } from "../../support/deferred.js";
 import {
   expectFontSizeMenuFits,
   setTypography,
@@ -14,6 +16,37 @@ import {
   WebSearchToolUseMessage,
 } from "../../../common/chat-types.js";
 import { TranscriptLedgerStore } from "../../../server/controller/ledger/store.js";
+
+test("typography readiness does not imply authenticated settings are mounted", async () => {
+  await withChromiumFixture(
+    "typography-auth-readiness",
+    async ({ page, integration, assertNoBrowserErrors }) => {
+      const authStatus = new Deferred<Route>();
+      await page.route("**/api/v1/auth/status", (route) => {
+        authStatus.resolve(route);
+      });
+      await page.goto(integration.garcon.baseUrl);
+      const route = await authStatus.promise;
+      await setTypography(page, { interfaceFontSize: "20" });
+      await browserExpect(
+        page.getByRole("button", { name: "New Chat", exact: true }),
+      ).toHaveCount(0);
+      await page.keyboard.press("Control+,");
+      await route.continue();
+      await browserExpect(
+        page.getByRole("button", { name: "New Chat", exact: true }).first(),
+      ).toBeVisible();
+      await browserExpect(
+        page.getByRole("dialog", { name: "Settings", exact: true }),
+      ).toHaveCount(0);
+      await page.keyboard.press("Control+,");
+      await browserExpect(
+        page.getByRole("dialog", { name: "Settings", exact: true }),
+      ).toBeVisible();
+      assertNoBrowserErrors();
+    },
+  );
+}, 120_000);
 
 test("plain and formatted composers share Interface sizing on mouse and touch", async () => {
   await withChromiumFixture(
@@ -28,6 +61,10 @@ test("plain and formatted composers share Interface sizing on mouse and touch", 
       });
       await integration.client.waitForTurnTerminal(chatId, turn.turnId);
       await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      // Typography settles before authentication mounts the workspace shortcuts.
+      await browserExpect(
+        page.getByRole("button", { name: "New Chat", exact: true }).first(),
+      ).toBeVisible();
       const cdp = await context.newCDPSession(page);
       for (const hasTouch of [false, true]) {
         await cdp.send("Emulation.setTouchEmulationEnabled", {
@@ -230,6 +267,9 @@ test("font dialog titles clear the close button at the narrowest supported width
     "font-dialog-heading-fit",
     async ({ page, integration }) => {
       await page.goto(integration.garcon.baseUrl);
+      await browserExpect(
+        page.getByRole("button", { name: "New Chat", exact: true }).first(),
+      ).toBeVisible();
       await setTypography(page, {
         interfaceFont: "departure-mono",
         interfaceFontSize: "20",
