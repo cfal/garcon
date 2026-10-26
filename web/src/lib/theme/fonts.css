@@ -1,0 +1,216 @@
+@font-face {
+	font-family: 'Departure Mono';
+	src: url('./assets/DepartureMono-1.500.woff2') format('woff2');
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'JetBrains Mono';
+	/* https://github.com/JetBrains/JetBrainsMono/tree/19371302b95d218af43299bce79ddbddd0bc364d/fonts/webfonts */
+	src: url('./assets/JetBrainsMono.woff2') format('woff2');
+	font-style: normal;
+	font-weight: 100 800;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'JetBrains Mono';
+	src: url('./assets/JetBrainsMono-Italic.woff2') format('woff2');
+	font-style: italic;
+	font-weight: 100 800;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Inter';
+	/* https://github.com/rsms/inter/tree/353b61b9f4430d5f420d56605a6e7993e0941470/docs/font-files */
+	src: url('./assets/InterVariable.woff2') format('woff2');
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Inter';
+	src: url('./assets/InterVariable-Italic.woff2') format('woff2');
+	font-style: italic;
+	font-weight: 100 900;
+	font-display: swap;
+}
+
+:root:where([data-interface-font]:not([data-interface-font='default'])) {
+	--font-sans: var(--interface-font-override);
+}
+
+:root:where(
+	[data-interface-font='departure-mono'],
+	[data-interface-font='jetbrains-mono'],
+	[data-interface-font='system-mono']
+) {
+	--font-mono: var(--interface-font-override);
+	--interface-mono-font-override: var(--interface-font-override);
+}
+
+:root {
+	--system-ui-font:
+		-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+	--system-code-font:
+		ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+		monospace;
+	--font-choice-system-sans: var(--system-ui-font);
+	--font-choice-system-serif: ui-serif, Georgia, 'Times New Roman', serif;
+	--font-choice-system-mono: var(--system-code-font);
+	--font-choice-departure-mono:
+		'Departure Mono', ui-monospace, 'Cascadia Mono', 'Noto Sans Mono', monospace;
+	--font-choice-jetbrains-mono: 'JetBrains Mono', var(--system-code-font);
+	--font-choice-inter: 'Inter', var(--system-ui-font);
+	--chat-list-font-family: var(--chat-list-font-override, var(--system-ui-font));
+	--chat-feed-font-family: var(--chat-feed-font-override, var(--system-ui-font));
+	--chat-code-font-family: var(--chat-code-font-override, var(--system-code-font));
+	--chat-output-font-family: var(--chat-output-font-override, var(--system-ui-font));
+	--code-diff-font-family: var(--code-diff-font-override, var(--system-code-font));
+	--text-scale: var(--interface-font-scale, 1);
+}
+
+body {
+	font-size: calc(1rem * var(--text-scale));
+}
+
+/* Absolute-size labels retain their hierarchy without scaling rem-based spacing. */
+[class~='text-[9px]'] {
+	font-size: calc(9px * var(--text-scale, 1));
+}
+[class~='text-[10px]'] {
+	font-size: calc(10px * var(--text-scale, 1));
+}
+[class~='text-[10.5px]'] {
+	font-size: calc(10.5px * var(--text-scale, 1));
+}
+[class~='text-[11px]'] {
+	font-size: calc(11px * var(--text-scale, 1));
+}
+[class~='text-[12px]'] {
+	font-size: calc(12px * var(--text-scale, 1));
+}
+[class~='text-[13px]'] {
+	font-size: calc(13px * var(--text-scale, 1));
+}
+[class~='text-[14px]'] {
+	font-size: calc(14px * var(--text-scale, 1));
+}
+[class~='text-[16px]'] {
+	font-size: calc(16px * var(--text-scale, 1));
+}
+
+[data-typography-chat-list] {
+	--text-scale: var(--chat-list-font-scale, 1);
+	--font-sans: var(--chat-list-font-family);
+	--font-mono: var(--system-code-font);
+	font-family: var(--chat-list-font-family);
+	font-size: calc(14px * var(--text-scale));
+	line-height: calc(20px * var(--text-scale));
+}
+
+[data-chat-feed-content] .markdown-body,
+.typography-chat-prose {
+	--text-scale: var(--chat-feed-font-scale, 1);
+	--font-sans: var(--chat-feed-font-family);
+	--font-mono: var(--chat-code-font-family);
+	font-family: var(--chat-feed-font-family);
+	font-size: var(--chat-feed-font-size, 14px);
+	line-height: 1.4285714;
+}
+
+[data-chat-feed-content] .markdown-body {
+	line-height: 1.7142857;
+}
+
+[data-chat-feed-content] .markdown-body th,
+[data-chat-feed-content] .markdown-body td {
+	font-size: var(--chat-feed-font-size, 14px);
+}
+
+[data-chat-feed-content] .markdown-body :not(pre) > code,
+.typography-chat-inline-code {
+	font-family: var(--chat-code-font-family);
+}
+
+.typography-chat-plain {
+	font-family: var(--chat-code-font-family);
+	font-size: inherit;
+}
+
+.typography-chat-source {
+	--text-scale: var(--chat-feed-font-scale, 1);
+	font-family: var(--chat-code-font-family);
+	font-size: var(--chat-feed-font-size, var(--chat-source-default-size, 14px));
+}
+
+[data-chat-feed-content] .markdown-code-block pre,
+.typography-chat-code {
+	--text-scale: var(--chat-code-font-scale, 1);
+	--font-mono: var(--chat-code-font-family);
+	font-family: var(--chat-code-font-family);
+	font-size: var(--chat-code-font-size, var(--chat-code-default-size, 12px));
+}
+
+[data-chat-feed-content] .markdown-code-block pre > code {
+	font-family: inherit;
+}
+
+.typography-chat-output {
+	--text-scale: var(--chat-output-font-scale, 1);
+	font-family: var(--chat-output-font-family);
+	font-size: var(--chat-output-font-size, 14px);
+	line-height: 1.4285714;
+}
+
+:root:where(
+		[data-chat-list-font='departure-mono'],
+		[data-chat-list-font='jetbrains-mono'],
+		[data-chat-list-font='system-mono']
+	)
+	[data-typography-chat-list] {
+	--font-mono: var(--chat-list-font-family);
+}
+
+.typography-code-diff {
+	--text-scale: 1;
+	--font-mono: var(--code-diff-font-family);
+	font-family: var(--code-diff-font-family);
+}
+
+.typography-inline-diff {
+	font-size: var(--code-diff-font-size, 11px);
+	line-height: max(18px, calc(var(--code-diff-font-size, 11px) * 1.5));
+}
+
+[data-chat-feed-content] .markdown-code-block > div {
+	--text-scale: var(--interface-font-scale, 1);
+	font-family: var(--interface-font-override, var(--system-ui-font));
+}
+
+[data-typography-chat-list] .leading-4 {
+	line-height: calc(16px * var(--text-scale));
+}
+
+[data-typography-conflict] .cm-scroller {
+	font-size: var(--code-diff-font-size, 13px);
+}
+
+@media (pointer: coarse) {
+	[data-typography-conflict] .cm-scroller {
+		font-size: max(16px, var(--code-diff-font-size, 13px));
+	}
+
+	:where(input, textarea, select):not([type='checkbox'], [type='radio'], [type='range']) {
+		font-size: max(16px, calc(14px * var(--interface-font-scale, 1)));
+	}
+
+	[data-composer-plain-input],
+	[data-composer-markdown-editor] {
+		font-size: max(16px, calc(16px * var(--interface-font-scale, 1)));
+	}
+}

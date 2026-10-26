@@ -241,7 +241,7 @@ describe('GitHistoryView', () => {
 				presentation: 'window-main',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});
@@ -299,7 +299,7 @@ describe('GitHistoryView', () => {
 				presentation: 'window-main',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});
@@ -372,7 +372,7 @@ describe('GitHistoryView', () => {
 				presentation: 'window-main',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});
@@ -412,7 +412,7 @@ describe('GitHistoryView', () => {
 				presentation: 'window-main',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});
@@ -462,7 +462,7 @@ describe('GitHistoryView', () => {
 				presentation: 'mobile',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});
@@ -520,7 +520,7 @@ describe('GitHistoryView', () => {
 				presentation: 'window-main',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});
@@ -603,7 +603,7 @@ describe('GitHistoryView', () => {
 				presentation: 'window-main',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});
@@ -659,7 +659,7 @@ describe('GitHistoryView', () => {
 				presentation: 'window-main',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});
@@ -719,7 +719,7 @@ describe('GitHistoryView', () => {
 				presentation: 'window-main',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});
@@ -773,7 +773,7 @@ describe('GitHistoryView', () => {
 				presentation: 'window-main',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});
@@ -800,7 +800,7 @@ describe('GitHistoryView', () => {
 				presentation: 'window-main',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});
@@ -826,7 +826,7 @@ describe('GitHistoryView', () => {
 				presentation: 'window-main',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});
@@ -880,7 +880,7 @@ describe('GitHistoryView', () => {
 				presentation: 'window-main',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});
@@ -931,7 +931,7 @@ describe('GitHistoryView', () => {
 				presentation: 'window-sidebar',
 				diffMode: 'unified',
 				contextLines: 5,
-				diffFontSize: 12,
+				diffFontSize: '12',
 				onRevertCommit,
 			},
 		});

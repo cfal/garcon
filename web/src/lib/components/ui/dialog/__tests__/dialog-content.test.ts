@@ -8,6 +8,15 @@ describe('Dialog content focus restoration', () => {
 		document.body.innerHTML = '';
 	});
 
+	it('labels the close button independently of its decorative terminal glyph', async () => {
+		render(DialogFocusRestoreHost, { showCloseButton: true });
+		await fireEvent.click(screen.getByRole('button', { name: 'Open focus dialog' }));
+		const close = await screen.findByRole('button', { name: 'Close' });
+		expect(close.getAttribute('aria-label')).toBe('Close');
+		await fireEvent.click(close);
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+	});
+
 	it('restores the trigger when registry Escape closes with body focused', async () => {
 		render(DialogFocusRestoreHost);
 		const trigger = screen.getByRole('button', { name: 'Open focus dialog' });

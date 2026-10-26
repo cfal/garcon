@@ -531,6 +531,103 @@ describe('ConversationFeedVirtualController', () => {
 		);
 	});
 
+	it.each([
+		'data-interface-font',
+		'data-chat-feed-font',
+		'data-chat-feed-font-size',
+		'data-chat-code-font',
+		'data-chat-output-font',
+		'data-chat-output-font-size',
+		'data-code-diff-font-size',
+	])(
+		'remeasures hidden typography and restores the reading row after %s changes',
+		async (attribute) => {
+			const { exposure, unmount } = await renderController({ initialPinned: false });
+			try {
+				exposure.controller.scrollToStart();
+				await settleController();
+				exposure.controller.scrollBy(240);
+				await settleController();
+				const viewport = exposure.viewport()!;
+				const offset = exposure.controller.snapshot.positions.itemAt(6)!.start - viewport.scrollTop;
+				await exposure.hide();
+				document.documentElement.setAttribute(attribute, 'departure-mono');
+				await settleController();
+				await exposure.showAtLayout(400, 80);
+				await settleController();
+				const row = exposure.controller.snapshot.positions.itemAt(6)!;
+				expect(row.size).toBe(80);
+				expect(Math.abs(row.start - viewport.scrollTop - offset)).toBeLessThanOrEqual(0.5);
+			} finally {
+				unmount();
+				document.documentElement.removeAttribute(attribute);
+			}
+		},
+	);
+
+	it('preserves the visible reading row when typography changes while unpinned', async () => {
+		const { exposure, unmount } = await renderController({ initialPinned: false });
+		try {
+			exposure.controller.scrollToStart();
+			await settleController();
+			exposure.controller.scrollBy(240);
+			await settleController();
+			const viewport = exposure.viewport()!;
+			const before = exposure.controller.snapshot.positions.itemAt(6)!;
+			const offset = before.start - viewport.scrollTop;
+			const transactionCount = exposure.transactions.length;
+			await exposure.showAtLayout(400, 80);
+			document.documentElement.dataset.chatFeedFont = 'departure-mono';
+			await settleController();
+			expect(
+				exposure.transactions.slice(transactionCount).find((record) => record.source === 'items'),
+			).toMatchObject({ anchorKind: 'item', anchorIndex: 6 });
+			const after = exposure.controller.snapshot.positions.itemAt(6)!;
+			expect(after.size).toBe(80);
+			expect(after.key).toBe(before.key);
+			expect(Math.abs(after.start - viewport.scrollTop - offset)).toBeLessThanOrEqual(0.5);
+		} finally {
+			unmount();
+			delete document.documentElement.dataset.chatFeedFont;
+		}
+	});
+
+	it('preserves end following and releases font observers on removal', async () => {
+		const fonts = new EventTarget();
+		const addListener = vi.spyOn(fonts, 'addEventListener');
+		const removeListener = vi.spyOn(fonts, 'removeEventListener');
+		const original = Object.getOwnPropertyDescriptor(document, 'fonts');
+		Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
+		try {
+			const { exposure, unmount } = await renderController();
+			const fontListener = addListener.mock.calls.find(([type]) => type === 'loadingdone')?.[1];
+			expect(fontListener).toBeTypeOf('function');
+			exposure.controller.scrollToEnd();
+			await settleController();
+			const before = exposure.transactions.length;
+			fonts.dispatchEvent(new Event('loadingdone'));
+			await settleController();
+			expect(exposure.controller.isAtEnd()).toBe(true);
+			expect(
+				exposure.transactions
+					.slice(before)
+					.some((record) => record.source === 'items' && record.anchorKind === 'end'),
+			).toBe(true);
+			unmount();
+			expect(removeListener).toHaveBeenCalledWith('loadingdone', fontListener);
+			const count = exposure.transactions.length;
+			fonts.dispatchEvent(new Event('loadingdone'));
+			await settleController();
+			expect(exposure.transactions).toHaveLength(count);
+		} finally {
+			cleanup();
+			addListener.mockRestore();
+			removeListener.mockRestore();
+			if (original) Object.defineProperty(document, 'fonts', original);
+			else Reflect.deleteProperty(document, 'fonts');
+		}
+	});
+
 	it('owns every programmatic scroll synchronously and destroys idempotently', async () => {
 		const { exposure, unmount } = await renderController();
 

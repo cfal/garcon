@@ -3,6 +3,8 @@ import { chromium } from 'playwright';
 import { expect as browserExpect } from 'playwright/test';
 import { closeChromiumBrowser, withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { setTypography } from '../../support/typography.js';
 
 // Headless Chromium hides scrollbars, while desktop browsers reserve the themed scrollbar width.
 async function withVisibleScrollbars(name: string, run: (fixture: ChromiumFixture) => Promise<void>): Promise<void> {
@@ -13,6 +15,45 @@ async function withVisibleScrollbars(name: string, run: (fixture: ChromiumFixtur
     await closeChromiumBrowser(browser);
   }
 }
+
+test('font completion and cached font changes refit existing text without editing', async () => {
+  await withChromiumFixture('terminal-font-textarea', async ({ page, integration, assertNoBrowserErrors }) => {
+    let releaseFont!: () => void;
+    const fontReady = new Promise<void>((resolve) => { releaseFont = resolve; });
+    await page.route('**/DepartureMono*.woff2', async (route) => {
+      await fontReady;
+      await route.continue();
+    });
+    try {
+      await page.addInitScript(seedLocalSettings, {
+        interfaceFont: 'departure-mono',
+        reduceMotion: true,
+      });
+      await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+      await page.getByRole('status', { name: 'Loading chat defaults...' }).waitFor({ state: 'detached' });
+      const input = page.locator('[data-slot="new-chat-composer"] textarea');
+      await input.evaluate((node: HTMLTextAreaElement) => {
+        node.style.cssText = 'width:300px;font-size:16px;line-height:24px;padding:0;border:0';
+      });
+      await input.fill('i'.repeat(62));
+      await browserExpect(input).toHaveCSS('height', '48px');
+      expect(await page.evaluate(() => document.fonts.check('16px "Departure Mono"'))).toBe(false);
+      releaseFont();
+      await page.evaluate(() => document.fonts.ready);
+      await browserExpect(input).toHaveCSS('height', '72px');
+      expect(await input.evaluate(node => node.scrollHeight <= node.clientHeight)).toBe(true);
+      await setTypography(page, { interfaceFont: 'default' });
+      await browserExpect.poll(() => input.evaluate(node => node.clientHeight)).toBeLessThan(72);
+      await setTypography(page, { interfaceFont: 'departure-mono' });
+      await browserExpect(input).toHaveCSS('height', '72px');
+      await browserExpect(input).toHaveValue('i'.repeat(62));
+      assertNoBrowserErrors();
+    } finally {
+      releaseFont();
+    }
+  });
+}, 60_000);
 
 test('composer grows a line at a time, shrinks, caps long drafts, and refits wrapping without losing focus', async () => {
   await withChromiumFixture('content-sized-composer', async ({ page, integration, assertNoBrowserErrors }) => {

@@ -496,6 +496,33 @@ describe('Git virtual diff refresh', () => {
 		);
 	});
 
+	it('invalidates font measurements without losing the reading anchor and cleans up observers', async () => {
+		const rows = [makeHeaderRow(0), makeHeaderRow(1), makeHeaderRow(2)];
+		const { container, unmount } = render(GitVirtualDiffSurface, { props: makeSurfaceProps(rows) });
+		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
+		await waitFor(() => expect(virtualDiffControllerCalls.mutations).toHaveLength(1));
+		viewport.scrollTop = 45;
+		const scrollResets = virtualDiffControllerCalls.scrollToStarts;
+		const remeasures = virtualDiffControllerCalls.remeasures;
+		try {
+			document.documentElement.dataset.codeDiffFont = 'departure-mono';
+			await waitFor(() => expect(virtualDiffControllerCalls.mutations).toHaveLength(2));
+			expect(virtualDiffControllerCalls.mutations.at(-1)).toMatchObject({
+				kind: 'reset-measurements',
+				anchor: { kind: 'item', key: `string:${rows[1].id}` },
+			});
+			expect(virtualDiffControllerCalls.scrollToStarts).toBe(scrollResets);
+			expect(virtualDiffControllerCalls.remeasures).toBe(remeasures + 1);
+			expect(viewport.scrollTop).toBe(45);
+		} finally {
+			unmount();
+			delete document.documentElement.dataset.codeDiffFont;
+		}
+		const mutationsAfterUnmount = virtualDiffControllerCalls.mutations.length;
+		await new Promise(requestAnimationFrame);
+		expect(virtualDiffControllerCalls.mutations).toHaveLength(mutationsAfterUnmount);
+	});
+
 	it('does not republish geometry for presentation-only source rebuilds', async () => {
 		const rows = [makeHeaderRow(0), makeHeaderRow(1), makeHeaderRow(2)];
 		const props = {

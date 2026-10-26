@@ -485,6 +485,7 @@ describe('ConversationMessage actions', () => {
 		expect(textSurface.textContent).toBe(text);
 		expect(textSurface.className).toContain('select-text');
 		expect(textSurface.className).not.toContain('chat-mobile-compact-textarea');
+		expect(textSurface.classList.contains('typography-chat-source')).toBe(true);
 		expect(window.getSelection()?.toString()).not.toBe(text);
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Select All' }));

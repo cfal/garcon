@@ -217,6 +217,7 @@
 		const nextRows = rows;
 		const chatItemLayout = displayOptions.chatItemLayout;
 		const showProjectPath = displayOptions.showProjectPath;
+		const chatFontScale = displayOptions.chatFontScale;
 		const explicitRowHeight = rowHeight;
 		const rowOverscan = overscan;
 		untrack(() =>
@@ -224,6 +225,7 @@
 				rows: nextRows,
 				chatItemLayout,
 				showProjectPath,
+				chatFontScale,
 				rowHeight: explicitRowHeight,
 				overscan: rowOverscan,
 			}),

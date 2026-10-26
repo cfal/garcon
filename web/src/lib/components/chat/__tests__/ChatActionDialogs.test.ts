@@ -89,6 +89,10 @@ describe('ChatActionDialogs', () => {
 		expect(nativePath.textContent).toBe('/tmp/chat.jsonl');
 		expect(agentSessionId.textContent).toBe('agent-session-1');
 		expect(firstMessage.textContent).toBe('First message');
+		expect(firstMessage.classList.contains('typography-chat-source')).toBe(true);
+		for (const identifier of [chatId, projectPath, agentSessionId, nativePath]) {
+			expect(identifier.classList.contains('typography-chat-source')).toBe(false);
+		}
 		const carryover = screen.getByRole('region', { name: 'Carryover history' });
 		expect(carryover.textContent).toContain('claude');
 		expect(carryover.textContent).toContain('codex');

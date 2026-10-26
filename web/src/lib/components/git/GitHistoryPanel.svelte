@@ -44,7 +44,6 @@
 	);
 	const projectPath = $derived(controller.target.activeProjectPath);
 	const activeTarget = $derived(controller.target.activeTarget ?? controller.target.fallbackTarget);
-	const diffFontSize = $derived(Number.parseInt(localSettings.gitDiffFontSize, 10) || 12);
 	const closeDisabled = $derived(
 		workspace.isSurfaceCloseBlocked(singletonSurfaceId('git-history')),
 	);
@@ -149,7 +148,7 @@
 			active={presentationVisible}
 			diffMode={reviewDisplay.diffMode}
 			contextLines={reviewDisplay.contextLines}
-			{diffFontSize}
+			diffFontSize={localSettings.gitDiffFontSize}
 			onRevertCommit={requestRevert}
 			onOpenInEditor={openInEditor}
 			onOpenSelectedComparison={() => controller.openSelectedComparison()}

@@ -352,6 +352,27 @@ describe('TerminalSurface', () => {
 		expect(onReattach).toHaveBeenCalledWith('terminal-1');
 	});
 
+	it('applies cross-tab font changes without reattaching the renderer', async () => {
+		const onFontPreference = vi.fn();
+		const onAttach = vi.fn();
+		render(TerminalSurfaceTestHost, { host: 'mobile', onFontPreference, onAttach });
+		await waitFor(() => expect(onFontPreference).toHaveBeenLastCalledWith('default'));
+		const attachments = onAttach.mock.calls.length;
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ terminalFont: 'departure-mono' }),
+		);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				storageArea: localStorage,
+				newValue: JSON.stringify({ terminalFont: 'departure-mono' }),
+			}),
+		);
+		await waitFor(() => expect(onFontPreference).toHaveBeenLastCalledWith('departure-mono'));
+		expect(onAttach).toHaveBeenCalledTimes(attachments);
+	});
+
 	it('changes and persists the terminal font size from the toolbar settings', async () => {
 		const onFontSize = vi.fn();
 		render(TerminalSurfaceTestHost, { host: 'mobile', onFontSize });

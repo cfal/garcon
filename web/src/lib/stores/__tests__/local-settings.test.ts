@@ -16,11 +16,90 @@ describe('LocalSettingsStore', () => {
 		localStorage.clear();
 	});
 
+	it.each([true, false, 'true', 1, null, [], {}])(
+		'validates terminal appearance independently: %j',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ terminalAppearance: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.terminalAppearance).toBe(value === true);
+			expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+			store.destroy();
+		},
+	);
+
+	it('persists and synchronizes terminal appearance independently of the palette', () => {
+		const store = createLocalSettingsStore();
+		store.set('terminalAppearance', true);
+		const restored = createLocalSettingsStore();
+		expect(restored.terminalAppearance).toBe(true);
+		expect(restored.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+		const changed = JSON.stringify({ ...store.snapshot(), terminalAppearance: false });
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, changed);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: changed,
+				storageArea: localStorage,
+			}),
+		);
+		expect(restored.terminalAppearance).toBe(false);
+		expect(restored.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it.each(['departure-mono', 'default', 'serif', null, true, [], {}])(
+		'validates font preferences: %j',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({
+					terminalAppearance: true,
+					interfaceFont: value,
+					chatCodeFont: value,
+				}),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.interfaceFont).toBe(value === 'departure-mono' ? value : 'default');
+			expect(store.chatCodeFont).toBe(store.interfaceFont);
+			expect(store.terminalAppearance).toBe(true);
+			store.destroy();
+		},
+	);
+
+	it('persists and synchronizes fonts independently, including storage removal', () => {
+		const store = createLocalSettingsStore();
+		store.set('interfaceFont', 'departure-mono');
+		const restored = createLocalSettingsStore();
+		expect(restored.interfaceFont).toBe('departure-mono');
+		expect(restored.chatCodeFont).toBe('default');
+		store.set('chatCodeFont', 'departure-mono');
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				storageArea: localStorage,
+			}),
+		);
+		expect(restored.chatCodeFont).toBe('departure-mono');
+		expect(restored.terminalAppearance).toBe(false);
+		expect(restored.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+		localStorage.clear();
+		window.dispatchEvent(new StorageEvent('storage', { key: null, storageArea: localStorage }));
+		expect(restored.interfaceFont).toBe('default');
+		expect(restored.chatCodeFont).toBe('default');
+		store.destroy();
+		restored.destroy();
+	});
+
 	it('defaults max chat width and file opening preferences', () => {
 		const store = createLocalSettingsStore();
 
 		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
 		expect(store.chatListDock).toBe('left');
+		expect(store.terminalAppearance).toBe(false);
 		expect(store.chatListAutohide).toBe(false);
 		expect(store.fullscreenCoversSidebar).toBe(true);
 		expect(store.chatMaxWidth).toBe('none');
@@ -47,7 +126,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.textEditorOpenPlacement).toBe('same-window');
 		expect(store.imageViewerOpenPlacement).toBe('same-window');
 		expect(store.markdownViewerOpenPlacement).toBe('same-window');
-		expect(store.terminalFontSize).toBe('13');
+		expect(store.terminalFontSize).toBe('default');
 		expect(store.hiddenToolTypes).toEqual([]);
 		expect(store.steerWithCtrlEnter).toBe(true);
 		expect(store.codeEditorVimMode).toBe(false);
@@ -726,7 +805,7 @@ describe('LocalSettingsStore', () => {
 
 		const store = createLocalSettingsStore();
 
-		expect(store.terminalFontSize).toBe('13');
+		expect(store.terminalFontSize).toBe('default');
 		store.destroy();
 	});
 

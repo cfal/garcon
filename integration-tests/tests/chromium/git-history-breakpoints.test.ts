@@ -3,6 +3,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { expect as browserExpect } from 'playwright/test';
+import { setTypography } from '../../support/typography.js';
 import {
   createIntegrationFixture,
   type IntegrationFixture,
@@ -456,6 +458,72 @@ describe('Chromium Git responsive presentation', () => {
       markPhase('opening the chat workspace');
       await openChatWorkspace(fixture, project, 'git-responsive-presentation-seed');
       await verifyHistoryBreakpoints(fixture, markPhase);
+
+      markPhase('checking commit diff settings at maximum Interface size');
+      const page = fixture.page;
+      await setTypography(page, {
+        interfaceFont: 'departure-mono',
+        interfaceFontSize: '20',
+      });
+      const settingsButton = page.locator('button[aria-label="Diff settings"]:visible');
+      const popover = page.locator('[data-slot="popover-content"]');
+      const selections = popover.locator('[data-slot="select-trigger"]');
+      await settingsButton.click();
+      await selections.nth(1).click();
+      await page.getByRole('option', { name: 'Unified', exact: true }).click();
+      await selections.nth(2).click();
+      await page.getByRole('option', { name: '20 lines', exact: true }).click();
+      await browserExpect(popover).not.toBeVisible();
+      for (const width of [1440, 320]) {
+        await page.setViewportSize({ width, height: 900 });
+        await settingsButton.click();
+        await browserExpect(selections.nth(1)).toContainText('Unified');
+        await browserExpect(selections.nth(2)).toContainText('20 lines');
+        if (width === 320) {
+          await selections.nth(2).evaluate((element) => {
+            const label = [...element.childNodes].find(
+              (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.includes('20 lines'),
+            );
+            if (!label) throw new Error('Expected context selection text');
+            label.textContent = '20 lines of surrounding context';
+          });
+        }
+        await browserExpect
+          .poll(() =>
+            popover.evaluate((element) => {
+              const bounds = element.getBoundingClientRect();
+              return (
+                bounds.left >= 0 &&
+                bounds.right <= innerWidth &&
+                [
+                  ...element.querySelectorAll<HTMLElement>(
+                    '[data-slot="select-trigger"]',
+                  ),
+                ].every((control) => {
+                  const rect = control.getBoundingClientRect();
+                  const range = document.createRange();
+                  range.selectNodeContents(control);
+                  const content = range.getBoundingClientRect();
+                  return (
+                    control.scrollWidth <= control.clientWidth + 1 &&
+                    rect.left >= bounds.left &&
+                    rect.right <= bounds.right &&
+                    content.top >= rect.top &&
+                    content.bottom <= rect.bottom
+                  );
+                })
+              );
+            }),
+          )
+          .toBe(true);
+        await page.screenshot({ path: join(ARTIFACT_ROOT, `commit-diff-settings-${width}.png`) });
+        await page.keyboard.press('Escape');
+      }
+      await setTypography(page, {
+        interfaceFont: 'default',
+        interfaceFontSize: 'default',
+      });
+      await page.setViewportSize(WIDE_VIEWPORT);
 
       markPhase('creating the Compare working tree change');
       await writeFile(join(project, 'review.txt'), 'working tree revision\n', 'utf8');

@@ -75,6 +75,7 @@
 	{/if}
 	<div class="relative z-10" hidden={Boolean(draft)}>
 		<textarea
+			data-composer-plain-input
 			{@attach contentSizing}
 			rows="1"
 			bind:this={textarea}

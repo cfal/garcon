@@ -1,3 +1,10 @@
+import {
+	BUNDLED_FONT_FAMILIES,
+	isMonospaceFont,
+	loadFont,
+	type FontPreference,
+} from '$lib/theme/fonts.js';
+
 const TERMINAL_FONT_NAME = 'Monaspace Neon NF';
 const TERMINAL_FONT_LOAD_TIMEOUT_MS = 4_000;
 const MONASPACE_RELEASE_COMMIT = 'f31794b6e9e65698a062262e2f826f679dcb7070';
@@ -13,20 +20,19 @@ export const TERMINAL_FALLBACK_FONT_FAMILY =
 	'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
 export const TERMINAL_FONT_FAMILY = `"${TERMINAL_FONT_NAME}", ${TERMINAL_FALLBACK_FONT_FAMILY}`;
 
-export type TerminalFontFamily = typeof TERMINAL_FONT_FAMILY | typeof TERMINAL_FALLBACK_FONT_FAMILY;
-
 type TerminalFontFaceFactory = () => readonly FontFace[];
 type FontFaceRegistrar = (fontFace: FontFace) => void;
 
 export interface TerminalFontResolver {
-	load(): Promise<TerminalFontFamily>;
+	load(preference: FontPreference): Promise<string>;
 }
 
 export class TerminalFontLoader implements TerminalFontResolver {
 	readonly #createFontFaces: TerminalFontFaceFactory;
 	readonly #registerFontFace: FontFaceRegistrar;
 	readonly #timeoutMs: number;
-	#loadPromise: Promise<TerminalFontFamily> | null = null;
+	#loadPromise: Promise<string> | null = null;
+	#selectedPromises = new Map<FontPreference, Promise<string>>();
 
 	constructor(
 		createFontFaces: TerminalFontFaceFactory = () =>
@@ -45,13 +51,32 @@ export class TerminalFontLoader implements TerminalFontResolver {
 		this.#timeoutMs = timeoutMs;
 	}
 
-	load(): Promise<TerminalFontFamily> {
+	load(preference: FontPreference = 'default'): Promise<string> {
+		if (preference !== 'default' && isMonospaceFont(preference)) {
+			// Retains the default Nerd Font as fallback for private-use terminal glyphs.
+			let pending = this.#selectedPromises.get(preference);
+			if (!pending) {
+				const family =
+					preference === 'system-mono'
+						? TERMINAL_FALLBACK_FONT_FAMILY
+						: BUNDLED_FONT_FAMILIES[preference];
+				pending = Promise.all([this.load(), loadFont(preference)]).then(([fallback, loaded]) => {
+					if (!loaded) {
+						this.#selectedPromises.delete(preference);
+						return fallback;
+					}
+					return `${family}, ${fallback}`;
+				});
+				this.#selectedPromises.set(preference, pending);
+			}
+			return pending;
+		}
 		// Shares one browser font request across every terminal runtime.
 		this.#loadPromise ??= this.#loadOnce();
 		return this.#loadPromise;
 	}
 
-	async #loadOnce(): Promise<TerminalFontFamily> {
+	async #loadOnce(): Promise<string> {
 		let timeout: ReturnType<typeof setTimeout> | undefined;
 		try {
 			const fontFaces = this.#createFontFaces();

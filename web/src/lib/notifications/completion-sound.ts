@@ -138,7 +138,7 @@ export async function unlockCompletionSound(): Promise<void> {
 export function installCompletionSoundUnlockListeners(isEnabled: () => boolean): () => void {
 	if (typeof window === 'undefined') return () => undefined;
 	const removeUnlockListeners = () => {
-		window.removeEventListener('pointerdown', unlock);
+		window.removeEventListener('pointerdown', unlock, true);
 		document.removeEventListener('keydown', unlock);
 	};
 	const unlock = () => {
@@ -152,7 +152,8 @@ export function installCompletionSoundUnlockListeners(isEnabled: () => boolean):
 			customBufferLoading = null;
 		}
 	};
-	window.addEventListener('pointerdown', unlock);
+	// Unlocks on the trusted gesture even when its target stops propagation.
+	window.addEventListener('pointerdown', unlock, true);
 	document.addEventListener('keydown', unlock);
 	window.addEventListener('storage', invalidateCustomSound);
 	return () => {

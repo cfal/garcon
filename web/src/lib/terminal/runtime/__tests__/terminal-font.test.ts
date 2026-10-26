@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { loadFont } from '$lib/theme/fonts.js';
 import {
 	TERMINAL_FALLBACK_FONT_FAMILY,
 	TERMINAL_FONT_FAMILY,
 	TerminalFontLoader,
 } from '../terminal-font.js';
+
+vi.mock('$lib/theme/fonts.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/theme/fonts.js')>()),
+	loadFont: vi.fn(),
+}));
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -11,6 +17,42 @@ afterEach(() => {
 });
 
 describe('TerminalFontLoader', () => {
+	it.each([true, false])('retains Nerd Font fallback when Departure loaded=%s', async (loaded) => {
+		vi.mocked(loadFont).mockResolvedValue(loaded);
+		const loader = new TerminalFontLoader(() => [], vi.fn());
+		const first = loader.load('departure-mono');
+		expect(loader.load('departure-mono')).toBe(first);
+		await expect(first).resolves.toBe(
+			loaded ? `"Departure Mono", ${TERMINAL_FONT_FAMILY}` : TERMINAL_FONT_FAMILY,
+		);
+	});
+
+	it.each(['jetbrains-mono', 'system-mono'] as const)(
+		'keeps Nerd Font fallback for %s',
+		async (font) => {
+			vi.mocked(loadFont).mockResolvedValue(true);
+			const loader = new TerminalFontLoader(() => [], vi.fn());
+			const pending = loader.load(font);
+			expect(loader.load(font)).toBe(pending);
+			await expect(pending).resolves.toBe(
+				`${font === 'jetbrains-mono' ? '"JetBrains Mono"' : TERMINAL_FALLBACK_FONT_FAMILY}, ${TERMINAL_FONT_FAMILY}`,
+			);
+		},
+	);
+
+	it('retries a failed selected font while retaining the default font request', async () => {
+		vi.mocked(loadFont).mockResolvedValueOnce(false).mockResolvedValue(true);
+		const createFaces = vi.fn(() => []);
+		const loader = new TerminalFontLoader(createFaces, vi.fn());
+		const failed = loader.load('jetbrains-mono');
+		await expect(failed).resolves.toBe(TERMINAL_FONT_FAMILY);
+		const retry = loader.load('jetbrains-mono');
+		expect(retry).not.toBe(failed);
+		await expect(retry).resolves.toBe(`"JetBrains Mono", ${TERMINAL_FONT_FAMILY}`);
+		expect(loader.load('jetbrains-mono')).toBe(retry);
+		expect(createFaces).toHaveBeenCalledTimes(1);
+	});
+
 	it('loads and registers the pinned regular and bold faces once', async () => {
 		const loadedFontFaces = [{}, {}] as FontFace[];
 		let loadedFaceIndex = 0;

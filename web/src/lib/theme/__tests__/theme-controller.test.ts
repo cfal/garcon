@@ -1,5 +1,7 @@
 import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
+import { TYPOGRAPHY_SURFACES } from '../typography';
 import ThemeControllerTestHost from './ThemeControllerTestHost.svelte';
 import { THEME_PROFILES, type ThemePreference } from '../themes.js';
 
@@ -60,6 +62,9 @@ describe('ThemeController', () => {
 		document.head.innerHTML =
 			'<meta name="theme-color" content="#000000"><meta name="apple-mobile-web-app-status-bar-style" content="default">';
 		document.documentElement.removeAttribute('data-theme');
+		document.documentElement.removeAttribute('data-theme-appearance');
+		document.documentElement.removeAttribute('data-interface-font');
+		document.documentElement.removeAttribute('data-code-editor-font');
 		document.documentElement.className = '';
 		document.documentElement.style.cssText = `
 			--terminal-bg: 0 0% 100%;
@@ -111,12 +116,34 @@ describe('ThemeController', () => {
 		installMatchMedia();
 		renderController({ mode: 'fixed', themeId: profile.id });
 		await waitFor(() => expect(document.documentElement.dataset.theme).toBe(profile.id));
+		expect(document.documentElement.dataset.themeAppearance).toBe('standard');
 
 		expect(
 			document
 				.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
 				?.getAttribute('content'),
 		).toBe('default');
+	});
+
+	it('changes appearance without changing palette or resetting renderer presentation', async () => {
+		const media = installMatchMedia();
+		const rendered = renderController({
+			mode: 'system',
+			lightThemeId: 'rose-light',
+			darkThemeId: 'moss-dark',
+		});
+		await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());
+		rendered.component.setTerminalAppearance(true);
+		await waitFor(() => expect(document.documentElement.dataset.themeAppearance).toBe('terminal'));
+		expect(document.documentElement.dataset.theme).toBe('rose-light');
+		expect(rendered.setEditorPresentation).toHaveBeenCalledOnce();
+		expect(rendered.setTerminalPresentation).toHaveBeenCalledOnce();
+		media.setDark(true);
+		await waitFor(() => expect(document.documentElement.dataset.theme).toBe('moss-dark'));
+		expect(document.documentElement.dataset.themeAppearance).toBe('terminal');
+		rendered.component.setTerminalAppearance(false);
+		await waitFor(() => expect(document.documentElement.dataset.themeAppearance).toBe('standard'));
+		expect(document.documentElement.dataset.theme).toBe('moss-dark');
 	});
 
 	it('projects root state and metadata before resolving the terminal background', async () => {
@@ -148,6 +175,83 @@ describe('ThemeController', () => {
 		});
 		computedStyle.mockRestore();
 	});
+
+	it('projects independent fonts without changing appearance or renderer palettes', async () => {
+		installMatchMedia();
+		const rendered = renderController({ mode: 'fixed', themeId: 'ansi-light' });
+		await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());
+		expect(document.documentElement.dataset.interfaceFont).toBe('default');
+		expect(document.documentElement.dataset.codeEditorFont).toBe('default');
+		for (const [interfaceFont, codeEditorFont] of [
+			['departure-mono', 'default'],
+			['default', 'departure-mono'],
+			['departure-mono', 'departure-mono'],
+		] as const) {
+			rendered.component.setTypography({ interfaceFont, codeEditorFont });
+			await waitFor(() =>
+				expect(document.documentElement.dataset.interfaceFont).toBe(interfaceFont),
+			);
+			expect(document.documentElement.dataset.codeEditorFont).toBe(codeEditorFont);
+			expect(document.documentElement.dataset.themeAppearance).toBe('standard');
+			expect(document.documentElement.dataset.theme).toBe('ansi-light');
+			expect(rendered.setEditorPresentation).toHaveBeenCalledOnce();
+			expect(rendered.setTerminalPresentation).toHaveBeenCalledOnce();
+		}
+	});
+
+	it('projects only the changed font and clears its override on reset', async () => {
+		installMatchMedia();
+		const rendered = renderController({ mode: 'fixed', themeId: 'ansi-light' });
+		await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());
+		const observer = new MutationObserver(() => {});
+		observer.observe(document.documentElement, { attributes: true });
+		try {
+			flushSync(() => rendered.component.setTypography({ interfaceFont: 'departure-mono' }));
+			expect(observer.takeRecords().map((record) => record.attributeName)).toEqual([
+				'style',
+				'data-interface-font',
+			]);
+			flushSync(() => rendered.component.setTypography({ codeEditorFont: 'departure-mono' }));
+			expect(observer.takeRecords().map((record) => record.attributeName)).toEqual([
+				'style',
+				'data-code-editor-font',
+			]);
+			expect(document.documentElement.style.getPropertyValue('--code-editor-font-override')).toBe(
+				'"Departure Mono", var(--system-code-font)',
+			);
+			flushSync(() => rendered.component.setTypography({ codeEditorFont: 'default' }));
+			expect(document.documentElement.style.getPropertyValue('--code-editor-font-override')).toBe(
+				'',
+			);
+			expect(document.documentElement.style.getPropertyValue('--interface-font-override')).toBe(
+				'var(--font-choice-departure-mono)',
+			);
+		} finally {
+			observer.disconnect();
+		}
+	});
+
+	it.each(TYPOGRAPHY_SURFACES)(
+		'projects and clears $id size without touching other surfaces',
+		async ({ id, sizeKey, defaultSize }) => {
+			installMatchMedia();
+			const rendered = renderController({ mode: 'fixed', themeId: 'ansi-light' });
+			await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());
+			flushSync(() => rendered.component.setTypography({ [sizeKey]: '20' }));
+			const root = document.documentElement;
+			expect(root.getAttribute(`data-${id}-font-size`)).toBe('20');
+			expect(root.style.getPropertyValue(`--${id}-font-size`)).toBe('20px');
+			expect(root.style.getPropertyValue(`--${id}-font-scale`)).toBe(String(20 / defaultSize));
+			for (const other of TYPOGRAPHY_SURFACES) {
+				if (other.id !== id)
+					expect(root.getAttribute(`data-${other.id}-font-size`)).toBe('default');
+			}
+			flushSync(() => rendered.component.setTypography({ [sizeKey]: 'default' }));
+			expect(root.style.getPropertyValue(`--${id}-font-size`)).toBe('');
+			expect(root.style.getPropertyValue(`--${id}-font-scale`)).toBe('1');
+			expect(rendered.setEditorPresentation).toHaveBeenCalledOnce();
+		},
+	);
 
 	it.each([
 		'--terminal-bg',

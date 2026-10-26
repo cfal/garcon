@@ -78,6 +78,8 @@ describe('mermaid-loader', () => {
 		for (const [config] of mermaid.initialize.mock.calls) {
 			expect(config).toMatchObject({
 				startOnLoad: false,
+				fontFamily:
+					'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
 				securityLevel: 'strict',
 				suppressErrorRendering: true,
 				themeVariables: {

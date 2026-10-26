@@ -61,7 +61,7 @@
 					: undefined}
 			>
 				{#if message.format === 'markdown'}
-					<div class="mt-1 text-sm">
+					<div class="typography-chat-prose mt-1 text-sm">
 						<Markdown
 							source={message.content}
 							variant="presented"
@@ -74,7 +74,9 @@
 						/>
 					</div>
 				{:else}
-					<div class="mt-1 whitespace-pre-wrap break-words text-sm">{message.content}</div>
+					<div class="typography-chat-prose mt-1 whitespace-pre-wrap break-words text-sm">
+						{message.content}
+					</div>
 				{/if}
 			</CollapsibleBody>
 		{/snippet}
