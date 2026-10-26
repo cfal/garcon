@@ -349,7 +349,7 @@
 		status={panel.lifecycle.loadingStatus}
 		agentId={chat.agentId}
 		spinnerSelectionKey={`${surfaceId}:${chatId}`}
-		quickCommitEnabled={localSettings.showQuickCommitTray}
+		quickCommitEnabled={localSettings.showQuickCommitTray && quickGit.canShowTrayFor(gitProject)}
 		quickCommitTrayVisible={quickGitTrayVisible}
 		quickCommitSummary={quickGitSummary}
 		quickCommitRefreshing={quickGitRefreshing}

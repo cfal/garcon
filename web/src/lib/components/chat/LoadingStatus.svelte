@@ -5,7 +5,7 @@
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import { attachProcessingPulse } from '$lib/chat/sessions/processing-pulse.js';
 	import type { LoadingStatus as ChatLoadingStatus } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
+	import GitSummaryButton from '$lib/components/git/GitSummaryButton.svelte';
 	import Square from '@lucide/svelte/icons/square';
 
 	interface Props {
@@ -16,6 +16,8 @@
 		spinnerSelectionKey?: string | null;
 		quickCommitVisible?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
+		quickCommitRefreshing?: boolean;
+		quickCommitError?: string | null;
 		onQuickCommit?: (() => void) | null;
 		announcementsEnabled?: boolean;
 	}
@@ -28,6 +30,8 @@
 		spinnerSelectionKey = null,
 		quickCommitVisible = false,
 		quickCommitSummary = null,
+		quickCommitRefreshing = false,
+		quickCommitError = null,
 		onQuickCommit = null,
 		announcementsEnabled = true,
 	}: Props = $props();
@@ -105,11 +109,6 @@
 		agentId === 'codex' ? m.chat_loading_thinking() : status?.text || m.chat_loading_thinking(),
 	);
 	const canInterrupt = $derived(status?.can_interrupt !== false);
-	const quickCommitHasDiffStats = $derived(
-		Boolean(
-			quickCommitSummary && (quickCommitSummary.additions > 0 || quickCommitSummary.deletions > 0),
-		),
-	);
 	// The cap stays out of flow while sliding underneath the rounded composer
 	// edge; feed/queue reservation still owns the vertical space above.
 	const statusTrayClass = cn('absolute bottom-full left-0 right-0 z-10 translate-y-3');
@@ -145,34 +144,12 @@
 			{#if quickCommitVisible || (canInterrupt && onAbort)}
 				<div class="flex shrink-0 items-center gap-2">
 					{#if quickCommitVisible && onQuickCommit}
-						<button
-							type="button"
-							onclick={onQuickCommit}
-							aria-label={m.git_changes_commit()}
-							title={m.git_changes_commit()}
-							class="inline-flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md border border-border bg-background/70 px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-						>
-							{#if quickCommitHasDiffStats && quickCommitSummary}
-								<span class="inline-flex items-center gap-1 tabular-nums">
-									{#if quickCommitSummary.additions > 0}
-										<span class="text-git-added">
-											{m.git_quick_status_additions({ count: quickCommitSummary.additions })}
-										</span>
-									{/if}
-									{#if quickCommitSummary.additions > 0 && quickCommitSummary.deletions > 0}
-										<span class="text-muted-foreground">/</span>
-									{/if}
-									{#if quickCommitSummary.deletions > 0}
-										<span class="text-git-deleted">
-											{m.git_quick_status_deletions({ count: quickCommitSummary.deletions })}
-										</span>
-									{/if}
-								</span>
-							{:else}
-								<GitCommitHorizontal class="h-3.5 w-3.5" aria-hidden="true" />
-								<span class="hidden sm:inline">{m.git_changes_commit()}</span>
-							{/if}
-						</button>
+						<GitSummaryButton
+							summary={quickCommitSummary}
+							isRefreshing={quickCommitRefreshing}
+							lastError={quickCommitError}
+							onCommit={onQuickCommit}
+						/>
 					{/if}
 					{#if canInterrupt && onAbort}
 						<button

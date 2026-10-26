@@ -176,7 +176,7 @@ export class GitQuickSummaryStore {
 	}
 
 	get hasChanges(): boolean {
-		return Boolean(this.summary && this.summary.changedFiles > 0);
+		return this.summary?.hasChanges ?? false;
 	}
 
 	summaryFor(project: GitProjectTarget | null): GitQuickSummaryReady | null {
@@ -413,7 +413,9 @@ export class GitQuickSummaryStore {
 	}
 
 	pruneExecutors(executorIds: ReadonlySet<string>): void {
-		this.setVisibleProjects(this.visibleProjects.filter((project) => executorIds.has(project.executorId)));
+		this.setVisibleProjects(
+			this.visibleProjects.filter((project) => executorIds.has(project.executorId)),
+		);
 		for (const entry of Object.values(this.entries)) {
 			if (!executorIds.has(entry.project.executorId)) this.#cancelProjectWork(entry.project);
 		}
