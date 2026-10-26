@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isRecord } from '../../../common/json.js';
 import {
   assistantContents,
   countUserContent,
@@ -16,6 +17,7 @@ import { forkAfterSourceSettles } from '../../support/fork-test-support.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import {
   LIVE_TURN_TIMEOUT_MS,
+  reloadUntilNativeContains,
   reloadUntilNativeStableAfterPrompt,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
@@ -90,6 +92,118 @@ describe('scripted Claude persistence', () => {
       serverEnvironment: testEnvironment.serverEnvironment,
     });
   });
+
+  test('preserves parallel tool branches through reload, fork, and resume', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const prompt = 'Read both synthetic parallel files.';
+    const reply = 'SCRIPTED_PARALLEL_COMPLETE';
+    const resumedPrompt = 'Resume the synthetic parallel history.';
+    const resumedReply = 'SCRIPTED_PARALLEL_RESUMED';
+    const tools = ['alpha', 'beta'].map((name) => ({
+      id: `toolu_parallel_${name}`,
+      output: `SCRIPTED_PARALLEL_${name.toUpperCase()}`,
+      file: `parallel-${name}.txt`,
+    }));
+
+    await withIntegrationFixture('claude-parallel-history', async (fixture) => {
+      for (const tool of tools) {
+        await writeFile(join(fixture.dirs.project, tool.file), tool.output, 'utf8');
+      }
+      testEnvironment.model.scriptTurn(tools.map((tool) => claudeToolUse(tool.id, 'Read', {
+        file_path: join(fixture.dirs.project, tool.file),
+      })));
+      testEnvironment.model.scriptTurn((request) => {
+        for (const tool of tools) {
+          expect(request.toolResults).toContainEqual(expect.objectContaining({
+            toolUseId: tool.id,
+            content: expect.stringContaining(tool.output),
+          }));
+        }
+        return [claudeText(reply)];
+      });
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor,
+      });
+
+      const expectParallelTurn = (transcript: Awaited<ReturnType<GarconTestClient['getMessages']>>) => {
+        const calls = messagesOfType(transcript.messages, 'read-tool-use');
+        const results = messagesOfType(transcript.messages, 'tool-result');
+        expect(calls).toHaveLength(tools.length);
+        expect(results).toHaveLength(tools.length);
+        expect(countUserContent(transcript.messages, prompt)).toBe(1);
+        expect(assistantContents(transcript.messages)).toContain(reply);
+        return tools.map((tool) => {
+          expect(calls).toContainEqual(expect.objectContaining({
+            toolId: tool.id, filePath: join(fixture.dirs.project, tool.file),
+          }));
+          const result = results.find((candidate) => candidate.toolId === tool.id);
+          expect(result?.isError).toBe(false);
+          expect(JSON.stringify(result?.content)).toContain(tool.output);
+          return result?.content;
+        });
+      };
+      const live = expectParallelTurn(await fixture.client.getMessages(chatId));
+      await reloadUntilNativeContains(fixture, chatId, reply);
+      expect(expectParallelTurn(await fixture.client.getMessages(chatId))).toEqual(live);
+
+      const binding = await waitForPersistedNativeSession({
+        directories: fixture.dirs, chatId, agentId: 'claude',
+      });
+      const nativePath = binding.nativeSession?.value.path;
+      if (typeof nativePath !== 'string') throw new Error('Claude native path was not persisted.');
+      const parents = (await readFile(nativePath, 'utf8')).split('\n')
+        .filter(Boolean)
+        .map((line): unknown => JSON.parse(line))
+        .filter(isRecord)
+        .filter((entry) => entry.type === 'assistant' || entry.type === 'user')
+        .map((entry) => entry.parentUuid)
+        .filter((parent): parent is string => typeof parent === 'string');
+      // A single parent-chain walk would lose a branch of this real CLI transcript.
+      // https://github.com/anthropics/claude-agent-sdk-python/blob/0e89b298e771259378a6cd3734e00d323dff5703/src/claude_agent_sdk/_internal/sessions.py#L1095-L1115
+      expect(new Set(parents).size).toBeLessThan(parents.length);
+
+      const forkChatId = fixture.newChatId();
+      await forkAfterSourceSettles(fixture, chatId, forkChatId);
+      expect(expectParallelTurn(await fixture.client.getMessages(forkChatId))).toEqual(live);
+      const forkBinding = await waitForPersistedNativeSession({
+        directories: fixture.dirs, chatId: forkChatId, agentId: 'claude',
+      });
+      expect(forkBinding.agentSessionId).not.toBe(binding.agentSessionId);
+
+      await fixture.restartGarcon();
+      for (const targetChatId of [chatId, forkChatId]) {
+        expect(expectParallelTurn(await fixture.client.getMessages(targetChatId))).toEqual(live);
+        testEnvironment.model.scriptTurn((request) => {
+          expect(request.lastUserText).toContain(resumedPrompt);
+          for (const tool of tools) {
+            expect(request.toolResults).toContainEqual(expect.objectContaining({
+              toolUseId: tool.id,
+              content: expect.stringContaining(tool.output),
+            }));
+          }
+          return [claudeText(resumedReply)];
+        });
+        const resumedCursor = fixture.client.markEvents();
+        const resumed = await fixture.client.runChat(liveClaudeRunRequest({
+          chatId: targetChatId, command: resumedPrompt, permissionMode: 'bypassPermissions',
+        }));
+        await waitForVisibleResponse({
+          fixture, chatId: targetChatId, turnId: resumed.turnId,
+          marker: resumedReply, afterIndex: resumedCursor,
+        });
+      }
+      testEnvironment.model.assertSettled();
+    }, { serverEnvironment: testEnvironment.serverEnvironment });
+  }, 60_000);
 
   test('keeps provider-origin native rows out of an explicit reload', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');

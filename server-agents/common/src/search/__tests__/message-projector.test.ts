@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { CommandOutputMessage, CommandResultMessage, PiToolSearchToolUseMessage, UserMessage } from '@garcon/common/chat-types';
+import { ClaudeMonitorToolUseMessage, ClaudeToolSearchToolUseMessage, CommandOutputMessage, CommandResultMessage, PiToolSearchToolUseMessage, UserMessage } from '@garcon/common/chat-types';
 import { projectSearchMessage } from '../message-projector.js';
 import { SEARCH_TIMESTAMP_MAX_BYTES } from '../schema.js';
 import type { CommandOutcome } from '@garcon/common/command-output';
@@ -45,6 +45,18 @@ describe('transcript search message projector', () => {
   test('indexes Pi tool discovery queries', () => {
     expect(projectSearchMessage(new PiToolSearchToolUseMessage('', 'search', 'issue tools', 3)))
       .toMatchObject({ role: 'tool', body: 'issue tools' });
+  });
+
+  test('indexes typed Claude discovery and Monitor parameters', () => {
+    expect(projectSearchMessage(new ClaudeToolSearchToolUseMessage('', 'search', 'select:Monitor', 1)))
+      .toMatchObject({ role: 'tool', body: 'select:Monitor' });
+    const projection = projectSearchMessage(new ClaudeMonitorToolUseMessage('', 'monitor', 'Synthetic watch', 300_000,
+      'printf synthetic', 'ws://synthetic.invalid/events', ['synthetic-events'], true, ['synthetic-allowed.invalid']));
+    expect(projection?.body).toContain('Synthetic watch');
+    expect(projection?.body).toContain('printf synthetic');
+    expect(projection?.body).toContain('ws://synthetic.invalid/events');
+    expect(projection?.body).toContain('synthetic-events');
+    expect(projection?.body).toContain('synthetic-allowed.invalid');
   });
 
   test('[TLV5-SEARCH.07-PROJECT-01] bounds provider timestamps without dropping content', () => {

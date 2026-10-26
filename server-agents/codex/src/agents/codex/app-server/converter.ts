@@ -119,8 +119,12 @@ export function convertCodexAppServerItem(
       )];
     case 'mcpToolCall':
       return convertMcpToolCall(item, timestamp);
-    case 'imageGeneration':
-      return item.result ? [new ToolResultMessage(timestamp, item.id, normalizeToolResultContent(item.result), item.status === 'failed')] : [];
+    case 'imageGeneration': {
+      const result = item.fileId !== undefined
+        ? { fileId: item.fileId, ...(item.savedPath ? { savedPath: item.savedPath } : {}) }
+        : item.result;
+      return result ? [new ToolResultMessage(timestamp, item.id, normalizeToolResultContent(result), item.status === 'failed')] : [];
+    }
     case 'contextCompaction':
       // The app-server exposes only a marker for compaction (no summary or
       // tokens); the trigger is supplied by the runtime, which knows whether

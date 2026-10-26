@@ -93,7 +93,12 @@ describe('Codex scripted default effort model switching', () => {
     });
   }, 120_000);
 
-  test('restores configured Default after an explicit turn', async () => {
+  test.each([
+    ['catalog', 'turn', undefined],
+    ['configured medium', 'turn', 'medium'],
+    ['catalog', 'settings update', undefined],
+    ['configured medium', 'settings update', 'medium'],
+  ] as const)('restores %s Default after an explicit %s', async (_label, writer, configuredEffort) => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
 
@@ -106,17 +111,32 @@ describe('Codex scripted default effort model switching', () => {
         model: 'gpt-6-astra',
         command: 'Use an explicit effort.',
         start: true,
-        thinkingMode: 'high',
-        expectedEffort: 'high',
+        thinkingMode: writer === 'turn' ? 'high' : 'none',
+        expectedEffort: writer === 'turn'
+          ? 'high'
+          : configuredEffort ?? SCRIPTED_MODEL_DEFAULTS['gpt-6-astra'],
       });
+      if (writer === 'settings update') {
+        for (const thinkingMode of ['high', 'none'] as const) {
+          const response = await fixture.client.fetch('/api/v1/chats/execution-settings', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ chatId, thinkingMode }),
+          });
+          expect({ status: response.status, body: await response.json() }).toMatchObject({
+            status: 200,
+            body: { success: true, chatId, thinkingMode },
+          });
+        }
+      }
       await runScriptedTurn({
         fixture,
         testEnvironment,
         chatId,
         model: 'gpt-6-astra',
-        command: 'Return to the configured default.',
+        command: 'Return to the provider default.',
         thinkingMode: 'none',
-        expectedEffort: 'low',
+        expectedEffort: configuredEffort ?? SCRIPTED_MODEL_DEFAULTS['gpt-6-astra'],
       });
 
       testEnvironment.model.assertSettled();
@@ -125,7 +145,9 @@ describe('Codex scripted default effort model switching', () => {
       prepareWorkspace: async (directories) => {
         await testEnvironment.prepareWorkspace(directories);
         await overlayScriptedModelDefaults(directories);
-        await configureReasoningEffort(directories, 'low');
+        if (configuredEffort) {
+          await configureReasoningEffort(directories, configuredEffort);
+        }
       },
     });
   }, 120_000);
