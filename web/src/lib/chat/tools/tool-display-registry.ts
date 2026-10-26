@@ -148,6 +148,21 @@ const WEB_FETCH_RULE: ToolDisplayRule = {
 	},
 };
 
+const TOOL_SEARCH_RULE: ToolDisplayRule = {
+	input: {
+		mode: 'inline',
+		label: 'ToolSearch',
+		getValue: (input) => String(input.query ?? ''),
+		action: 'jumpToResult',
+	},
+	result: {
+		mode: 'collapsible',
+		defaultOpen: false,
+		contentKind: 'text',
+		getContentProps: (result) => ({ content: extractContentString(result?.content) }),
+	},
+};
+
 function parametersToolRule(label: string): ToolDisplayRule {
 	return {
 		input: {
@@ -933,36 +948,8 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 
-	'pi-tool-search-tool-use': {
-		input: {
-			mode: 'inline',
-			label: 'ToolSearch',
-			getValue: (input) => String(input.query ?? ''),
-			action: 'jumpToResult',
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (result) => ({ content: extractContentString(result?.content) }),
-		},
-	},
-
-	'claude-tool-search-tool-use': {
-		input: {
-			mode: 'inline',
-			label: 'ToolSearch',
-			getValue: (input) => String(input.query ?? ''),
-			action: 'jumpToResult',
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (result) => ({ content: extractContentString(result?.content) }),
-		},
-	},
-
+	'pi-tool-search-tool-use': TOOL_SEARCH_RULE,
+	'claude-tool-search-tool-use': TOOL_SEARCH_RULE,
 	'claude-monitor-tool-use': parametersToolRule('Monitor'),
 	'external-tool-use': parametersToolRule('Tool'),
 	'mcp-tool-use': parametersToolRule('MCP'),
