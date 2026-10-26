@@ -71,6 +71,8 @@
 <div
 	bind:this={composerElement}
 	class="m-1 space-y-2 rounded border border-interactive-accent/50 bg-background p-3 shadow-sm"
+	style:font-family="var(--interface-font-override, var(--font-mono))"
+	style:line-height="calc(18px * var(--interface-font-scale, 1))"
 	data-git-comment-composer
 >
 	<div class="flex gap-2">

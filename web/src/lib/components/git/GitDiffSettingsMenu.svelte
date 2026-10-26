@@ -57,8 +57,8 @@
 		</Button>
 	</Popover.Trigger>
 
-	<Popover.Content class="w-72 p-0" align="end" sideOffset={8}>
-		<div class="flex items-center justify-between px-4 py-2.5">
+	<Popover.Content class="w-72 max-w-[calc(100vw-16px)] p-0" align="end" sideOffset={8}>
+		<div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
 			<div class="text-sm font-medium text-foreground">{m.git_diff_font_size()}</div>
 			<Select.Root
 				type="single"
@@ -67,7 +67,7 @@
 					if (v) onSetDiffFontSize(parseFontSizePreference(v));
 				}}
 			>
-				<Select.Trigger class="h-auto min-h-8 w-36 shrink-0 whitespace-normal" size="sm">
+				<Select.Trigger class="h-auto min-h-8 w-auto max-w-full whitespace-normal" size="sm">
 					{typographySizeLabel('code-diff', diffFontSize)}
 				</Select.Trigger>
 				<Select.Content>
@@ -80,7 +80,7 @@
 			</Select.Root>
 		</div>
 
-		<div class="flex items-center justify-between px-4 py-2.5">
+		<div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
 			<div class="text-sm font-medium text-foreground">{m.git_diff_mode()}</div>
 			<Select.Root
 				type="single"
@@ -89,7 +89,7 @@
 					if (v) onSetDiffMode(v as DiffMode);
 				}}
 			>
-				<Select.Trigger class="w-[100px]" size="sm">
+				<Select.Trigger class="h-auto min-h-8 w-auto max-w-full whitespace-normal" size="sm">
 					{diffMode === 'unified' ? m.git_diff_unified() : m.git_diff_split()}
 				</Select.Trigger>
 				<Select.Content>
@@ -101,10 +101,10 @@
 			</Select.Root>
 		</div>
 
-		<div class="flex items-center justify-between px-4 py-2.5">
+		<div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
 			<div class="text-sm font-medium text-foreground">{m.git_diff_context_lines()}</div>
 			<Select.Root type="single" value={String(contextLines)} onValueChange={handleContextLines}>
-				<Select.Trigger class="w-28" size="sm">
+				<Select.Trigger class="h-auto min-h-8 w-auto max-w-full whitespace-normal" size="sm">
 					{m.git_diff_lines({ count: contextLines })}
 				</Select.Trigger>
 				<Select.Content>

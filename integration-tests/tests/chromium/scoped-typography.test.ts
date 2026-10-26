@@ -328,10 +328,43 @@ test("chat list, prose, inline code, blocks and Git diffs have independent typog
               .toBe(lineHeight + 12);
           }
         }
+        await setTypography(page, {
+          interfaceFont: "system-serif",
+          interfaceFontSize: "14",
+          codeDiffFont: "departure-mono",
+          gitDiffFontSize: "20",
+        });
+        await gitSurface
+          .locator(".code-highlight")
+          .filter({ hasText: "changed" })
+          .first()
+          .click();
+        const reviewComposer = gitSurface.locator(
+          "[data-git-comment-composer]",
+        );
+        const severity = reviewComposer.locator("label").first();
+        await browserExpect(severity).toHaveCSS("font-family", /Georgia/);
+        await browserExpect(severity).toHaveCSS("line-height", "18px");
+        await setTypography(page, {
+          interfaceFontSize: "20",
+          gitDiffFontSize: "10",
+        });
+        await browserExpect
+          .poll(async () =>
+            severity.evaluate((element) =>
+              parseFloat(getComputedStyle(element).lineHeight),
+            ),
+          )
+          .toBeCloseTo((18 * 20) / 14, 2);
+        await browserExpect(severity).toHaveCSS("font-family", /Georgia/);
+        await reviewComposer
+          .getByRole("button", { name: "Cancel", exact: true })
+          .click();
       }
       await setTypography(page, {
         chatCodeFont: "default",
         chatCodeFontSize: "10",
+        gitDiffFontSize: "20",
       });
       await browserExpect(diff).toHaveCSS("font-size", "20px");
       await browserExpect(diff).toHaveCSS("font-family", /Departure Mono/);
