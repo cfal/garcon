@@ -489,6 +489,24 @@ describe('TerminalRuntime', () => {
 		},
 	);
 
+	it('settles attachment on disposal without waiting for the initial font load', async () => {
+		const font = deferred<string>();
+		const runtime = createRuntime(vi.fn(), vi.fn(), { load: () => font.promise });
+		const host = measurableHost();
+		const attachment = runtime.attach(host);
+		const scheduleFit = vi.spyOn(runtime, 'scheduleFit');
+
+		runtime.dispose();
+		await attachment.ready;
+		expect(runtime.terminal.element).toBeUndefined();
+		expect(host.children).toHaveLength(0);
+
+		font.resolve(TERMINAL_FONT_FAMILY);
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+		expect(runtime.terminal.element).toBeUndefined();
+		expect(scheduleFit).not.toHaveBeenCalled();
+	});
+
 	it('does not apply a font after disposal', async () => {
 		const selected = deferred<string>();
 		const runtime = createRuntime(vi.fn(), vi.fn(), {

@@ -126,20 +126,8 @@ export class TerminalRuntime {
 		let fontGeneration: number;
 		do {
 			fontGeneration = this.#fontGeneration;
-			fontFamily = await new Promise<string | null>((resolve) => {
-				this.#fontWaiters.add(resolve);
-				void this.#resolveFont(this.#monospaceFont).then((family) => {
-					this.#fontWaiters.delete(resolve);
-					resolve(family);
-				});
-			});
-			if (
-				this.#disposed ||
-				lease !== this.#rendererGeneration ||
-				!this.#presentationActive ||
-				this.#host !== host
-			)
-				return;
+			fontFamily = await this.#waitForFont(this.#monospaceFont);
+			if (!this.#isCurrentRendererAttachment(lease, host)) return;
 		} while (fontFamily === null || fontGeneration !== this.#fontGeneration);
 		if (!this.terminal.element) {
 			this.terminal.options.fontFamily = fontFamily;
@@ -151,6 +139,15 @@ export class TerminalRuntime {
 		}
 		this.terminal.refresh(0, Math.max(0, this.terminal.rows - 1));
 		this.scheduleFit();
+	}
+
+	#isCurrentRendererAttachment(lease: number, host: HTMLElement | null): boolean {
+		return (
+			!this.#disposed &&
+			this.#presentationActive &&
+			lease === this.#rendererGeneration &&
+			host === this.#host
+		);
 	}
 
 	park(lease: number): void {
@@ -210,18 +207,14 @@ export class TerminalRuntime {
 		if (this.#disposed || preference === this.#monospaceFont) return;
 		this.#monospaceFont = preference;
 		const generation = ++this.#fontGeneration;
-		for (const resolve of this.#fontWaiters) resolve(null);
-		this.#fontWaiters.clear();
+		this.#interruptFontWaits();
 		if (!this.terminal.element || !this.#presentationActive) return;
 		const rendererGeneration = this.#rendererGeneration;
 		const host = this.#host;
 		void this.#resolveFont(preference).then((family) => {
 			if (
-				this.#disposed ||
-				!this.#presentationActive ||
 				generation !== this.#fontGeneration ||
-				rendererGeneration !== this.#rendererGeneration ||
-				host !== this.#host ||
+				!this.#isCurrentRendererAttachment(rendererGeneration, host) ||
 				!this.terminal.element?.isConnected ||
 				this.terminal.element.parentElement !== host
 			)
@@ -229,6 +222,22 @@ export class TerminalRuntime {
 			this.terminal.options.fontFamily = family;
 			this.scheduleFit();
 		});
+	}
+
+	// Resolves null when a font change or disposal supersedes the wait.
+	#waitForFont(preference: FontPreference): Promise<string | null> {
+		return new Promise<string | null>((resolve) => {
+			this.#fontWaiters.add(resolve);
+			void this.#resolveFont(preference).then((family) => {
+				this.#fontWaiters.delete(resolve);
+				resolve(family);
+			});
+		});
+	}
+
+	#interruptFontWaits(): void {
+		for (const resolve of this.#fontWaiters) resolve(null);
+		this.#fontWaiters.clear();
 	}
 
 	async #resolveFont(preference: FontPreference): Promise<string> {
@@ -268,8 +277,7 @@ export class TerminalRuntime {
 	dispose(): void {
 		if (this.#disposed) return;
 		this.#disposed = true;
-		for (const resolve of this.#fontWaiters) resolve(null);
-		this.#fontWaiters.clear();
+		this.#interruptFontWaits();
 		this.#rendererGeneration += 1;
 		this.#presentationActive = false;
 		cancelAnimationFrame(this.#fitFrame);

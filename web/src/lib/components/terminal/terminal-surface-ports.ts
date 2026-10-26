@@ -6,6 +6,7 @@ import type {
 	TerminalClientSession,
 	TerminalRegistry,
 } from '$lib/terminal/sessions/terminal-registry.svelte.js';
+import type { FontPreference } from '$lib/theme/fonts.js';
 import type { WorkspaceLayoutSnapshot } from '$lib/workspace/surface-types.js';
 
 export interface TerminalSurfaceRuntimePort {
@@ -50,5 +51,3 @@ export interface TerminalSurfaceWorkspacePort {
 	closeSurface(surfaceId: string): Promise<boolean>;
 	isSurfaceCloseBlocked(surfaceId: string): boolean;
 }
-
-import type { FontPreference } from '$lib/theme/fonts.js';
