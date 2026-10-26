@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import FileConflictDiffTestHost from './FileConflictDiffTestHost.svelte';
 
 describe('FileConflictDiff', () => {
-	it('refreshes both retained editors only for Code Diffs typography', async () => {
+	it('refreshes both retained editors for Code Diffs typography', async () => {
 		const rendered = render(FileConflictDiffTestHost, { onChange: vi.fn() });
 		await vi.waitFor(() =>
 			expect(
@@ -21,7 +21,7 @@ describe('FileConflictDiff', () => {
 			await vi.waitFor(() => {
 				for (const [index, editor] of editors.entries()) {
 					expect(editor.dom.className).not.toBe(themes[index]);
-					expect(EditorView.findFromDOM(editor.dom)).toBe(editor);
+					expect(rendered.container.querySelectorAll('.cm-editor')[index]).toBe(editor.dom);
 				}
 			});
 		} finally {
