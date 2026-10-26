@@ -40,6 +40,7 @@ export type ChatCompletionsFault =
     }
   // Clean close before the [DONE] sentinel; some SDKs accept this as a complete response.
   | { readonly kind: 'stream-error'; readonly message: string }
+  | { readonly kind: 'stream-stall' }
   // A provider error frame mid-stream, as OpenAI emits for overloaded models.
   | { readonly kind: 'stream-error-frame'; readonly message: string };
 
@@ -256,6 +257,23 @@ function sseErrorFrameResponse(chunks: Chunk[], message: string): Response {
   });
 }
 
+function stalledSseResponse(chunks: Chunk[], signal: AbortSignal): Response {
+  let onAbort: () => void;
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunks[0])}\n\n`));
+      onAbort = () => controller.close();
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    },
+    cancel() {
+      signal.removeEventListener('abort', onAbort);
+    },
+  }), {
+    headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+  });
+}
+
 export class FakeChatCompletionsModel {
   readonly #server: Bun.Server<undefined>;
   readonly #turns: Array<ChatCompletionsTurn | ChatCompletionsFault> = [];
@@ -442,6 +460,9 @@ export class FakeChatCompletionsModel {
       }
       if (turn.kind === 'stream-error-frame') {
         return sseErrorFrameResponse(turnChunks([], recorded), turn.message);
+      }
+      if (turn.kind === 'stream-stall') {
+        return stalledSseResponse(turnChunks([], recorded), request.signal);
       }
       return sseResponse(turnChunks([], recorded), { truncated: true });
     }

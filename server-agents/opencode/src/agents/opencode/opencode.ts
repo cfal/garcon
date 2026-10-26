@@ -1210,12 +1210,14 @@ export class OpenCodeRuntime {
   }
 
   async #quiesceRetiredProviderWork(
-    client: any,
+    instance: OpenCodeInstance,
     agentSessionId: string,
     session: OpenCodeSession,
     scope: OpenCodeRequestScope,
   ): Promise<void> {
     if (!session.providerWorkRequiresQuiescence) return;
+    const client: any = instance.client;
+    const turn = session.turn;
     const result = await this.#runScopedSessionRequest(
       'OpenCode retired session abort',
       scope,
@@ -1224,10 +1226,12 @@ export class OpenCodeRuntime {
         { signal },
       ),
     );
+    this.#assertInstanceCurrent(instance);
     throwOpenCodeResultError(result, 'OpenCode retired session abort failed');
     await this.#awaitGlobalEventBarrier(client, scope.directory);
-    this.#operationRoutes.retireTurn(session.turn);
-    session.providerWorkRequiresQuiescence = false;
+    this.#assertInstanceCurrent(instance);
+    this.#operationRoutes.retireTurn(turn);
+    if (session.turn === turn) session.providerWorkRequiresQuiescence = false;
   }
 
   async #quiesceSessionBeforeTurn(
@@ -1281,7 +1285,16 @@ export class OpenCodeRuntime {
     }
 
     const turn = createOpenCodeTurnContext(operation);
-    const thinkingVariant = await this.#resolveThinkingVariant(model, thinkingMode);
+    let thinkingVariant: string | undefined;
+    try {
+      // Native creation must stay covered by cleanup even before registration.
+      this.#assertInstanceCurrent(instance);
+      thinkingVariant = await this.#resolveThinkingVariant(model, thinkingMode);
+      this.#assertInstanceCurrent(instance);
+    } catch (error) {
+      await this.#deleteSessionBestEffort(agentSessionId, scope, { client, generation });
+      throw error;
+    }
     this.#sessions.set(agentSessionId, {
       status: 'running',
       chatId,
@@ -1385,14 +1398,16 @@ export class OpenCodeRuntime {
     const turn = createOpenCodeTurnContext(operation);
     const client: any = instance.client;
     if (session) {
-      await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
+      await this.#quiesceRetiredProviderWork(instance, agentSessionId, session, scope);
+      this.#assertInstanceCurrent(instance);
       await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
     }
     this.#assertInstanceCurrent(instance);
-    const waiter = this.#createTurnWaiter(agentSessionId);
     // One resolution per turn: the stored variant steering reuses must be the
     // variant this prompt submits, even if discovery refreshes mid-admission.
     const thinkingVariant = await this.#resolveThinkingVariant(model, thinkingMode);
+    this.#assertInstanceCurrent(instance);
+    const waiter = this.#createTurnWaiter(agentSessionId);
     this.#activateTurn(agentSessionId, session, {
       chatId,
       model,
@@ -1481,7 +1496,8 @@ export class OpenCodeRuntime {
       turn = createOpenCodeTurnContext(operation, { compaction: true });
       const client: any = instance.client;
       if (session) {
-        await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
+        await this.#quiesceRetiredProviderWork(instance, agentSessionId, session, scope);
+        this.#assertInstanceCurrent(instance);
         await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
       }
       this.#assertInstanceCurrent(instance);
@@ -1634,10 +1650,10 @@ export class OpenCodeRuntime {
     await this.#endpointCoordinator.runProtectedNativeCleanup(async () => {
       await this.#pendingSessionAborts.get(session);
       if (this.#sessions.get(agentSessionId) !== session) return;
-      const client = this.getClientIfInitialized();
-      if (client) {
+      const instance = this.#instance;
+      if (instance) {
         if (session.status === 'running') session.providerWorkRequiresQuiescence = true;
-        await this.#quiesceRetiredProviderWork(client, agentSessionId, session, {
+        await this.#quiesceRetiredProviderWork(instance, agentSessionId, session, {
           directory: session.directory,
         });
       }
@@ -1774,6 +1790,7 @@ export class OpenCodeRuntime {
         };
         if (parsedModel) body.model = parsedModel;
         const thinkingVariant = await this.#resolveThinkingVariant(model, thinkingMode);
+        assertCurrent();
         if (thinkingVariant) body.variant = thinkingVariant;
 
         const promptResult: any = await this.#runScopedSessionRequest<any>(
