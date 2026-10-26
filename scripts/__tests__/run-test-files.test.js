@@ -68,18 +68,21 @@ async function run(directory, args = []) {
   return { exitCode: await child.exited, stdout: await stdout, stderr: await stderr };
 }
 
-test('CLI partitions files before spawning isolated Bun processes', async () => {
+test.each([
+  [1, ['a.test.js', 'c.test.js']],
+  [2, ['b.test.js', 'd.test.js']],
+])('CLI shard %i/2 partitions files before spawning isolated Bun processes', async (index, expectedFiles) => {
   const source = `import { test } from 'bun:test';
     test('synthetic runner fixture', () => {
       console.log('RUNNER_RECORD ' + JSON.stringify({ file: import.meta.file, pid: process.pid }));
     });`;
   const directory = await fixture(Object.fromEntries(['d', 'c', 'b', 'a'].map(name => [`${name}.test.js`, source])));
-  const result = await run(directory, ['--shard=1/2', '--max-concurrency=1', '--timeout=120000']);
+  const result = await run(directory, [`--shard=${index}/2`, '--max-concurrency=1', '--timeout=120000']);
   expect(result.exitCode, result.stderr).toBe(0);
-  expect(result.stdout).toContain('Test shard 1/2: 2 of 4 files');
+  expect(result.stdout).toContain(`Test shard ${index}/2: 2 of 4 files`);
   const records = result.stdout.split('\n').filter(line => line.startsWith('RUNNER_RECORD '))
     .map(line => JSON.parse(line.slice('RUNNER_RECORD '.length)));
-  expect(records.map(record => record.file)).toEqual(['a.test.js', 'c.test.js']);
+  expect(records.map(record => record.file)).toEqual(expectedFiles);
   expect(new Set(records.map(record => record.pid)).size).toBe(2);
 });
 
