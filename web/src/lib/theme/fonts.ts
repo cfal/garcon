@@ -53,7 +53,12 @@ export function loadFont(font: FontPreference): Promise<boolean> {
 	if (!Object.hasOwn(BUNDLED_FONT_FAMILIES, font)) return Promise.resolve(true);
 	let pending = fontLoads.get(font);
 	if (!pending) {
-		pending = loadFace(BUNDLED_FONT_FAMILIES[font as keyof typeof BUNDLED_FONT_FAMILIES]);
+		pending = loadFace(BUNDLED_FONT_FAMILIES[font as keyof typeof BUNDLED_FONT_FAMILIES]).then(
+			(loaded) => {
+				if (!loaded) fontLoads.delete(font);
+				return loaded;
+			},
+		);
 		fontLoads.set(font, pending);
 	}
 	return pending;

@@ -40,6 +40,19 @@ describe('TerminalFontLoader', () => {
 		},
 	);
 
+	it('retries a failed selected font while retaining the default font request', async () => {
+		vi.mocked(loadFont).mockResolvedValueOnce(false).mockResolvedValue(true);
+		const createFaces = vi.fn(() => []);
+		const loader = new TerminalFontLoader(createFaces, vi.fn());
+		const failed = loader.load('jetbrains-mono');
+		await expect(failed).resolves.toBe(TERMINAL_FONT_FAMILY);
+		const retry = loader.load('jetbrains-mono');
+		expect(retry).not.toBe(failed);
+		await expect(retry).resolves.toBe(`"JetBrains Mono", ${TERMINAL_FONT_FAMILY}`);
+		expect(loader.load('jetbrains-mono')).toBe(retry);
+		expect(createFaces).toHaveBeenCalledTimes(1);
+	});
+
 	it('loads and registers the pinned regular and bold faces once', async () => {
 		const loadedFontFaces = [{}, {}] as FontFace[];
 		let loadedFaceIndex = 0;

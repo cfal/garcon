@@ -60,9 +60,13 @@ export class TerminalFontLoader implements TerminalFontResolver {
 					preference === 'system-mono'
 						? TERMINAL_FALLBACK_FONT_FAMILY
 						: BUNDLED_FONT_FAMILIES[preference];
-				pending = Promise.all([this.load(), loadFont(preference)]).then(([fallback, loaded]) =>
-					loaded ? `${family}, ${fallback}` : fallback,
-				);
+				pending = Promise.all([this.load(), loadFont(preference)]).then(([fallback, loaded]) => {
+					if (!loaded) {
+						this.#selectedPromises.delete(preference);
+						return fallback;
+					}
+					return `${family}, ${fallback}`;
+				});
 				this.#selectedPromises.set(preference, pending);
 			}
 			return pending;
