@@ -523,7 +523,29 @@ describe('scripted Claude fork lifecycle matrix', () => {
     });
   });
 
-  test.each(['shell', 'fork'])('does not inherit task notification state from an outstanding %s task', async (taskKind) => {
+  test.each([
+    {
+      kind: 'shell',
+      toolName: 'Bash',
+      input: { command: 'sleep 600', run_in_background: true },
+      activationMarker: 'backgroundTaskId',
+    },
+    {
+      kind: 'fork',
+      toolName: 'Agent',
+      input: {
+        subagent_type: 'fork', description: 'Synthetic outstanding fork',
+        prompt: 'Synthetic held fork directive',
+      },
+      activationMarker: 'async_launched',
+    },
+    {
+      kind: 'monitor',
+      toolName: 'Monitor',
+      input: { command: 'sleep 600', description: 'Synthetic outstanding monitor', timeout_ms: 600_000 },
+      activationMarker: '"timeoutMs"',
+    },
+  ])('does not inherit task notification state from an outstanding $kind task', async ({ kind, toolName, input, activationMarker }) => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     const sourcePrompt = marker('BACKGROUND_SOURCE_PROMPT');
@@ -532,16 +554,13 @@ describe('scripted Claude fork lifecycle matrix', () => {
     const childReply = marker('BACKGROUND_CHILD_REPLY');
     const forkGate = Promise.withResolvers<void>();
     const forkRequested = Promise.withResolvers<void>();
-    testEnvironment.model.scriptTurn([
-      taskKind === 'shell' ? claudeToolUse('toolu_background', 'Bash', {
-        command: 'sleep 600',
-        run_in_background: true,
-      }) : claudeToolUse('toolu_background', 'Agent', {
-        subagent_type: 'fork', description: 'Synthetic outstanding fork',
-        prompt: 'Synthetic held fork directive',
-      }),
-    ]);
-    for (let index = 0; index < (taskKind === 'fork' ? 2 : 1); index += 1) {
+    if (kind === 'monitor') {
+      testEnvironment.model.scriptTurn([
+        claudeToolUse('toolu_discover_monitor', 'ToolSearch', { query: 'select:Monitor', max_results: 1 }),
+      ]);
+    }
+    testEnvironment.model.scriptTurn([claudeToolUse('toolu_background', toolName, input)]);
+    for (let index = 0; index < (kind === 'fork' ? 2 : 1); index += 1) {
       testEnvironment.model.scriptTurn(async (request) => {
         if (JSON.stringify(request.body.messages).includes('<fork-boilerplate>')) {
           forkRequested.resolve();
@@ -578,9 +597,9 @@ describe('scripted Claude fork lifecycle matrix', () => {
       await waitForNativeFileContains(
         fixture.dirs.workspace,
         sourceChatId,
-        taskKind === 'shell' ? 'backgroundTaskId' : 'async_launched',
+        activationMarker,
       );
-      if (taskKind === 'fork') await forkRequested.promise;
+      if (kind === 'fork') await forkRequested.promise;
       const forkChatId = fixture.newChatId();
       await forkWhenTranscriptPersists(fixture, sourceChatId, forkChatId);
       expect(JSON.stringify((await fixture.client.getMessages(forkChatId)).messages))
