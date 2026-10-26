@@ -71,7 +71,9 @@ describe('scoped typography preferences', () => {
 		'keeps numeric sizes literal regardless of Interface size %s',
 		(interfaceFontSize) => {
 			const sizes = { codeEditorFontSize: '12', gitDiffFontSize: '12', terminalFontSize: '13' };
-			const preferences = Object.freeze({ ...sizes, interfaceFontSize });
+			const preferences = Object.freeze(
+				interfaceFontSize === undefined ? sizes : { ...sizes, interfaceFontSize },
+			);
 			expect(parseTypographyPreferences(preferences)).toEqual({ ...TYPOGRAPHY_DEFAULTS, ...sizes });
 		},
 	);
