@@ -2,334 +2,68 @@ import { expect, test } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
-import type { Page } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 const ARTIFACT_DIRECTORY = join(import.meta.dirname, '../../artifacts/chromium');
 
-async function recordStartupMounts(page: Page) {
-  await page.addInitScript(() => {
-    let count = 0;
-    Object.defineProperty(window, '__startupMounts', { get: () => count });
-    new MutationObserver((records) => {
-      for (const record of records) {
-        for (const node of record.addedNodes) {
-          if (!(node instanceof Element)) continue;
-          if (node.matches('[data-ansi-startup]') || node.querySelector('[data-ansi-startup]')) {
-            count++;
-          }
-        }
-      }
-    }).observe(document, { childList: true, subtree: true });
-  });
-}
-
-async function startupMounts(page: Page) {
-  return page.evaluate(
-    () => (window as typeof window & { __startupMounts: number }).__startupMounts,
-  );
-}
-
-async function pauseStartupClock(page: Page) {
-  const start = Date.now();
-  await page.clock.install({ time: start });
-  await page.clock.pauseAt(start + 1000);
-}
-
-test('ANSI startup paints moving ASCII, expires, and respects interaction and motion preferences', async () => {
-  await withChromiumFixture(
-    'ANSI startup',
-    async ({ page, integration, assertNoBrowserErrors }) => {
-      await pauseStartupClock(page);
-      await recordStartupMounts(page);
-      await page.addInitScript(() => {
-        const key = 'pref_local_settings';
-        const settings = JSON.parse(localStorage.getItem(key) ?? '{}');
-        settings.terminalAppearance = true;
-        if (!settings.themePreference) {
-          settings.themePreference = { mode: 'fixed', themeId: 'ansi-dark' };
-          localStorage.setItem(key, JSON.stringify(settings));
-        }
-      });
-      await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
-      const canvas = page.locator('[data-ansi-startup] canvas');
-      await browserExpect(canvas).toBeVisible();
-      const fingerprint = await canvas.evaluate((element: HTMLCanvasElement) => {
-        const pixels = element
-          .getContext('2d')!
-          .getImageData(0, 0, element.width, element.height).data;
-        return pixels.reduce((sum, value) => sum + value, 0);
-      });
-      await page.clock.runFor(200);
-      const nextFingerprint = await canvas.evaluate((element: HTMLCanvasElement) => {
-        const pixels = element
-          .getContext('2d')!
-          .getImageData(0, 0, element.width, element.height).data;
-        return pixels.reduce((sum, value) => sum + value, 0);
-      });
-      expect(nextFingerprint).not.toBe(fingerprint);
-      const dimensions = await canvas.evaluate((element: HTMLCanvasElement) => ({
-        width: element.width,
-        height: element.height,
-        focused: document.activeElement === element,
-        inert: document.body.inert,
-      }));
-      expect(dimensions.width).toBeLessThanOrEqual(840);
-      expect(dimensions.height).toBeLessThanOrEqual(495);
-      expect(dimensions.focused).toBe(false);
-      expect(dimensions.inert).toBe(false);
-      await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
-      await page.screenshot({ path: join(ARTIFACT_DIRECTORY, 'ansi-startup-desktop.png') });
-      await page.clock.runFor(2600);
-      await browserExpect(canvas).toHaveCount(0, { timeout: 5000 });
-      await browserExpect(page.locator('[data-workspace-content]')).toBeVisible();
-      await page.evaluate(() => document.fonts.ready);
-      expect(await page.evaluate(() => document.fonts.check('11px "Departure Mono"'))).toBe(true);
-
-      await page.setViewportSize({ width: 390, height: 844 });
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await browserExpect(canvas).toBeVisible();
-      await page.screenshot({ path: join(ARTIFACT_DIRECTORY, 'ansi-startup-mobile.png') });
-      await browserExpect(page.locator('[data-workspace-content]')).toBeVisible();
-      await page.keyboard.press('Shift');
-      await browserExpect(canvas).toHaveCount(0, { timeout: 300 });
-
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await browserExpect(canvas).toBeVisible();
-      await page.evaluate(() => {
-        const target = document.createElement('button');
-        target.style.cssText = 'position:fixed;inset:0;z-index:99';
-        target.dataset.clickThrough = 'false';
-        target.onclick = () => {
-          target.dataset.clickThrough = 'true';
-        };
-        document.body.append(target);
-      });
-      await page.mouse.click(2, 2);
-      await browserExpect(canvas).toHaveCount(0, { timeout: 300 });
-      await browserExpect(page.locator('[data-click-through]')).toHaveAttribute(
-        'data-click-through',
-        'false',
-      );
-
-      await page.emulateMedia({ forcedColors: 'active' });
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await browserExpect(page.locator('[data-workspace-content]')).toBeVisible();
-      await browserExpect(canvas).toHaveCount(0);
-      await page.emulateMedia({ forcedColors: 'none' });
-      expect(await startupMounts(page)).toBe(0);
-
-      await page.emulateMedia({ reducedMotion: 'reduce' });
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await browserExpect(page.locator('[data-workspace-content]')).toBeVisible();
-      await browserExpect(canvas).toHaveCount(0);
-
-      await page.emulateMedia({ reducedMotion: 'no-preference' });
-      expect(await startupMounts(page)).toBe(0);
-      await page.evaluate(() => {
-        const settings = JSON.parse(localStorage.getItem('pref_local_settings')!);
-        settings.reduceMotion = true;
-        localStorage.setItem('pref_local_settings', JSON.stringify(settings));
-      });
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await browserExpect(page.locator('[data-workspace-content]')).toBeVisible();
-      await browserExpect(canvas).toHaveCount(0);
-      expect(await startupMounts(page)).toBe(0);
-      assertNoBrowserErrors();
-    },
-  );
-}, 60_000);
-
-test('startup consumes double-click presses over menus without losing composer focus', async () => {
-  await withChromiumFixture(
-    'ANSI startup pointer gestures',
-    async ({ page, integration, assertNoBrowserErrors }) => {
-      await pauseStartupClock(page);
-      const chatId = integration.newChatId();
-      const started = await integration.client.startDirectChat({
-        chatId,
-        content: 'Synthetic startup focus sample',
-        projectPath: integration.dirs.project,
-        agent: integration.directAgents.openAi,
-      });
-      await integration.client.waitForTurnTerminal(chatId, started.turnId);
-      await page.addInitScript(seedLocalSettings, { terminalAppearance: true });
-      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`, {
-        waitUntil: 'domcontentloaded',
-      });
-      const splash = page.locator('[data-ansi-startup]');
-      await browserExpect(splash).toBeVisible();
-      const editor = page.locator('[data-composer] textarea');
-      await editor.evaluate((element) => element.focus());
-      const trigger = page.locator(
-        '[data-slot="sidebar-controls-row"] [data-slot="dropdown-menu-trigger"]',
-      );
-      await browserExpect(trigger).toBeVisible();
-      const bounds = await trigger.boundingBox();
-      expect(bounds).not.toBeNull();
-      await page.mouse.dblclick(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2, {
-        delay: 60,
-      });
-      await browserExpect(splash).toHaveCount(0, { timeout: 300 });
-      await browserExpect(trigger).toHaveAttribute('aria-expanded', 'false');
-      await browserExpect(editor).toBeFocused();
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await browserExpect(splash).toBeVisible();
-      const newChat = page
-        .locator('[data-slot="sidebar-controls-row"]')
-        .getByRole('button', { name: 'New Chat', exact: true });
-      const actionBounds = (await newChat.boundingBox())!;
-      const x = actionBounds.x + actionBounds.width / 2;
-      const y = actionBounds.y + actionBounds.height / 2;
-      await page.mouse.click(x, y);
-      await browserExpect(splash).toHaveCount(0, { timeout: 300 });
-      await page.mouse.down({ clickCount: 2 });
-      await page.mouse.move(x + 10, y);
-      await page.mouse.up({ clickCount: 2 });
-      await browserExpect(page.getByRole('dialog')).toHaveCount(0);
-      await page.clock.runFor(400);
-      await page.clock.resume();
-      await newChat.click({ position: { x: 8, y: 18 } });
-      await browserExpect(
-        page.getByRole('dialog').getByRole('textbox', { name: 'Project Path', exact: true }),
-      ).toBeVisible();
-
-      assertNoBrowserErrors();
-    },
-  );
-}, 60_000);
-
-test('startup consumes complete taps, swipes and double taps over mobile menus', async () => {
-  await withChromiumFixture(
-    'ANSI startup touch gestures',
-    async ({ page, context, integration, assertNoBrowserErrors }) => {
-      await pauseStartupClock(page);
-      await page.addInitScript(seedLocalSettings, { terminalAppearance: true });
-      await page.setViewportSize({ width: 390, height: 844 });
-      const protocol = await context.newCDPSession(page);
-      try {
-        await protocol.send('Emulation.setTouchEmulationEnabled', {
-          enabled: true,
-          maxTouchPoints: 2,
+test.each([1440, 390])(
+  'Terminal UI Style opens directly into an interactive workspace at %ipx',
+  async (width) => {
+    await withChromiumFixture(
+      `terminal immediate workspace ${width}`,
+      async ({ page, context, integration, assertNoBrowserErrors }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.emulateMedia({ reducedMotion: 'no-preference' });
+        await page.addInitScript(seedLocalSettings, {
+          terminalAppearance: true,
+          reduceMotion: false,
         });
-        for (const gesture of [
-          'tap',
-          'swipe',
-          'double-tap',
-          'slow-repeat',
-          'deadline',
-          'multi-touch',
-        ]) {
-          await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
-          const splash = page.locator('[data-ansi-startup]');
-          await browserExpect(splash).toBeVisible();
-          const trigger = page.locator(
-            '[data-slot="dropdown-menu-trigger"][aria-label="Settings"]:visible',
-          );
-          const bounds = await trigger.boundingBox();
-          expect(bounds).not.toBeNull();
-          const point = {
-            x: bounds!.x + bounds!.width / 2,
-            y: bounds!.y + bounds!.height / 2,
-            id: 1,
-          };
-          const swipeOffset = point.y < 422 ? 100 : -100;
-          const start = gesture === 'swipe' ? { ...point, y: point.y + swipeOffset } : point;
-          expect(start.y, gesture).toBeGreaterThan(0);
-          expect(start.y, gesture).toBeLessThan(844);
-          await protocol.send('Input.dispatchTouchEvent', {
-            type: 'touchStart',
-            touchPoints: [start],
+        const start = Date.now();
+        await page.clock.install({ time: start });
+        await page.clock.pauseAt(start + 1000);
+        const protocol = await context.newCDPSession(page);
+        try {
+          await protocol.send('Emulation.setTouchEmulationEnabled', {
+            enabled: width === 390,
           });
-          if (gesture === 'swipe') {
-            await protocol.send('Input.dispatchTouchEvent', {
-              type: 'touchMove',
-              touchPoints: [point],
-            });
-          }
-          if (gesture === 'deadline') {
-            await page.clock.runFor(2600);
-            await browserExpect(splash).toBeVisible();
-          }
-          if (gesture === 'multi-touch') {
+          await page.goto(integration.garcon.baseUrl);
+          await browserExpect(
+            page.locator('[data-workspace-content]'),
+          ).toBeVisible();
+          await browserExpect(page.locator('html')).toHaveAttribute(
+            'data-theme-appearance',
+            'terminal',
+          );
+          await browserExpect(page.locator('[data-ansi-startup]')).toHaveCount(0);
+          await page.clock.resume();
+          const newChat = page
+            .getByRole('button', { name: 'New Chat', exact: true })
+            .first();
+          if (width === 390) {
+            const bounds = (await newChat.boundingBox())!;
             await protocol.send('Input.dispatchTouchEvent', {
               type: 'touchStart',
-              touchPoints: [point, { ...point, x: point.x - 60, id: 2 }],
+              touchPoints: [
+                {
+                  x: bounds.x + bounds.width / 2,
+                  y: bounds.y + bounds.height / 2,
+                  id: 1,
+                },
+              ],
             });
             await protocol.send('Input.dispatchTouchEvent', {
               type: 'touchEnd',
-              touchPoints: [point],
+              touchPoints: [],
             });
-            await browserExpect(splash).toBeVisible();
-          }
-          await protocol.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-          await browserExpect(splash, gesture).toHaveCount(0, { timeout: 300 });
-          if (gesture === 'double-tap' || gesture === 'slow-repeat') {
-            if (gesture === 'slow-repeat') await page.clock.runFor(330);
-            await protocol.send('Input.dispatchTouchEvent', {
-              type: 'touchStart',
-              touchPoints: [{ ...point, x: point.x + 10, y: point.y + 10 }],
-            });
-            if (gesture === 'slow-repeat') await page.clock.runFor(300);
-            await protocol.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-          }
-          await browserExpect(trigger).toHaveAttribute('aria-expanded', 'false');
-        }
-      } finally {
-        await protocol.detach();
-      }
-      assertNoBrowserErrors();
-    },
-  );
-}, 60_000);
-
-test.each(['mouse', 'touch'] as const)(
-  'startup keeps onboarding open through a delayed %s dismissal',
-  async (pointer) => {
-    await withChromiumFixture(
-      `ANSI onboarding ${pointer}`,
-      async ({ page, context, integration, assertNoBrowserErrors }) => {
-        await pauseStartupClock(page);
-        await page.addInitScript(seedLocalSettings, { terminalAppearance: true });
-        await page.addInitScript(() => localStorage.setItem('just-registered', '1'));
-        const protocol = await context.newCDPSession(page);
-        try {
-          if (pointer === 'touch') {
-            await protocol.send('Emulation.setTouchEmulationEnabled', {
-              enabled: true,
-              maxTouchPoints: 1,
-            });
-          }
-          await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
-          const splash = page.locator('[data-ansi-startup]');
-          const dialog = page.getByRole('dialog', { name: 'Choose your theme' });
-          await browserExpect(splash).toBeVisible();
-          await browserExpect(dialog).toBeVisible();
-          await page.clock.runFor(50);
-          if (pointer === 'mouse') {
-            await page.mouse.move(2, 2);
-            await page.mouse.down();
           } else {
-            await protocol.send('Input.dispatchTouchEvent', {
-              type: 'touchStart',
-              touchPoints: [{ x: 2, y: 2, id: 1 }],
-            });
+            await newChat.click();
           }
-          await page.clock.runFor(50);
+          const dialog = page.getByRole('dialog');
           await browserExpect(dialog).toBeVisible();
-          if (pointer === 'mouse') {
-            await page.mouse.up();
-          } else {
-            await protocol.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-          }
-          await page.clock.runFor(50);
-          await browserExpect(splash).toHaveCount(0);
-          await browserExpect(dialog).toBeVisible();
-          await page.clock.runFor(400);
-          await page.clock.resume();
-          await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
-          await browserExpect(page.getByRole('dialog', { name: 'Chat list layout' })).toBeVisible();
+          const prompt = dialog.getByPlaceholder('How can I help you today?');
+          await prompt.fill('Synthetic immediate input');
+          await browserExpect(prompt).toHaveValue('Synthetic immediate input');
           assertNoBrowserErrors();
         } finally {
           await protocol.detach();
@@ -344,8 +78,6 @@ test('ANSI workspace keeps drafts and composer geometry through chat switches', 
   await withChromiumFixture(
     'ANSI chat switches',
     async ({ page, integration, assertNoBrowserErrors }) => {
-      await pauseStartupClock(page);
-      await recordStartupMounts(page);
       const ids = [integration.newChatId(), integration.newChatId()];
       for (const [index, chatId] of ids.entries()) {
         const started = await integration.client.startDirectChat({
@@ -362,11 +94,6 @@ test('ANSI workspace keeps drafts and composer geometry through chat switches', 
         terminalAppearance: true,
       });
       await page.goto(`${integration.garcon.baseUrl}/chat/${ids[0]}`);
-      await browserExpect(page.locator('[data-ansi-startup]')).toBeVisible();
-      await page.clock.runFor(2600);
-      await browserExpect(page.locator('[data-ansi-startup]')).toHaveCount(0);
-      await page.clock.resume();
-      expect(await startupMounts(page)).toBe(1);
       await browserExpect(page.getByText('GARCON://', { exact: true })).toHaveCount(0);
       await page.evaluate(() => document.fonts.ready);
       const composer = page.locator('[data-composer]');
@@ -391,8 +118,6 @@ test('ANSI workspace keeps drafts and composer geometry through chat switches', 
         await browserExpect(editor).toHaveValue(chatId === ids[0] ? draft : '');
         await browserExpect(editor).toHaveAttribute('data-retained-editor', 'true');
         expect((await composer.boundingBox())!.y).toBe(before!.y);
-        await browserExpect(page.locator('[data-ansi-startup]')).toHaveCount(0);
-        expect(await startupMounts(page)).toBe(1);
       }
       await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
       for (const width of [1440, 390, 360, 320]) {
@@ -453,7 +178,6 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
     for (const id of ['ansi-dark', 'ansi-light']) {
       await select.selectOption(id);
       await page.evaluate(() => document.fonts.ready);
-      await browserExpect(page.locator('[data-ansi-startup]')).toHaveCount(0);
       await browserExpect(dialog).toHaveCSS('border-radius', '0px');
       await browserExpect(dialog).toHaveCSS('border-top-style', 'double');
       await browserExpect(dialog).toHaveCSS(
@@ -546,7 +270,6 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
       );
     });
     await page.reload();
-    await browserExpect(page.locator('[data-ansi-startup]')).toHaveCount(0);
     const panel = page.locator('[data-workspace-chat-list-panel]');
     await browserExpect(panel).toHaveAttribute('data-divider-edge', 'start');
     await browserExpect(panel).toHaveCSS('border-inline-start-style', 'double');
@@ -554,30 +277,5 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
     await browserExpect(page.locator('html')).toHaveAttribute('data-theme-appearance', 'terminal');
     await browserExpect(page.locator('html')).toHaveAttribute('data-theme', 'ansi-dark');
     assertNoBrowserErrors();
-  });
-}, 60_000);
-
-test('terminal startup never covers public login or shared pages', async () => {
-  await withChromiumFixture('terminal public routes', async ({ browser, integration }) => {
-    const context = await browser.newContext({ serviceWorkers: 'block' });
-    try {
-      const page = await context.newPage();
-      await recordStartupMounts(page);
-      await page.addInitScript(() =>
-        localStorage.setItem('pref_local_settings', JSON.stringify({ terminalAppearance: true })),
-      );
-      for (const path of ['/login', '/shared/synthetic-missing-share']) {
-        await page.goto(`${integration.garcon.baseUrl}${path}`);
-        await browserExpect(page.locator('html')).toHaveAttribute(
-          'data-theme-appearance',
-          'terminal',
-        );
-        await page.keyboard.press('Shift');
-        expect(await startupMounts(page)).toBe(0);
-        await browserExpect(page.locator('[data-ansi-startup]')).toHaveCount(0, { timeout: 300 });
-      }
-    } finally {
-      await context.close();
-    }
   });
 }, 60_000);

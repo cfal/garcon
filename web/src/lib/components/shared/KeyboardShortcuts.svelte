@@ -4,19 +4,13 @@
 
 	interface KeyboardShortcutsProps {
 		onToggleCommandMenu?: () => void;
-		onKeyboardInteraction?: () => void;
 		authSuspended?: boolean;
 	}
 
-	let {
-		onToggleCommandMenu,
-		onKeyboardInteraction,
-		authSuspended = false,
-	}: KeyboardShortcutsProps = $props();
+	let { onToggleCommandMenu, authSuspended = false }: KeyboardShortcutsProps = $props();
 
 	const shortcuts = getWorkspaceShortcuts();
 	const handleKeydown = (event: KeyboardEvent) => {
-		onKeyboardInteraction?.();
 		if (authSuspended) {
 			event.stopImmediatePropagation();
 			return;
