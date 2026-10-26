@@ -9,22 +9,10 @@ import {
   type CommandOutcome, type CommandOutputContext,
 } from './command-output.js';
 import {
-  asAllowedPrompts,
-  asAskUserQuestions,
-  asChatImages,
-  asCodexSubagentInputItems,
-  asCursorAskQuestions,
-  asCursorPlanPhases,
-  asCursorPlanTodos,
-  asOptionalBoolean,
-  asOptionalChanges,
-  asOptionalNumber,
-  asOptionalString,
-  asRecord,
-  asStringArray,
-  coerceTodoItems,
-  parseChatMessageMetadata,
-  str,
+  asAllowedPrompts, asAskUserQuestions, asChatImages, asCodexSubagentInputItems,
+  asCursorAskQuestions, asCursorPlanPhases, asCursorPlanTodos,
+  asOptionalBoolean, asOptionalChanges, asOptionalNumber, asOptionalString, asOptionalStringArray,
+  asRecord, asStringArray, coerceTodoItems, parseChatMessageMetadata, str,
 } from './chat-message-coercion.js';
 import {
   coerceDurableCliBodyDisclosure,
@@ -625,6 +613,8 @@ export class ClaudeMonitorToolUseMessage {
     public command?: string,
     public webSocketUrl?: string,
     public webSocketProtocols?: string[],
+    public persistent?: boolean,
+    public allowedDomains?: string[],
   ) {}
 }
 
@@ -1140,7 +1130,8 @@ const TOOL_USE_MESSAGE_PARSERS = {
   'claude-monitor-tool-use': (data) =>
     new ClaudeMonitorToolUseMessage(
       str(data.timestamp), str(data.toolId), str(data.description), asOptionalNumber(data.timeoutMs),
-      asOptionalString(data.command), asOptionalString(data.webSocketUrl), asStringArray(data.webSocketProtocols)),
+      asOptionalString(data.command), asOptionalString(data.webSocketUrl), asOptionalStringArray(data.webSocketProtocols),
+      asOptionalBoolean(data.persistent), asOptionalStringArray(data.allowedDomains)),
 
   'external-tool-use': (data) =>
     new ExternalToolUseMessage(

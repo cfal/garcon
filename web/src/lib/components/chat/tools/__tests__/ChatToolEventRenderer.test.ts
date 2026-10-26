@@ -123,7 +123,7 @@ describe('ChatToolEventRenderer', () => {
 	it('discloses full typed Monitor command and socket parameters', async () => {
 		const { container } = render(ChatToolEventRenderer, {
 			toolMessage: new ClaudeMonitorToolUseMessage('', 'monitor', 'Synthetic watch', 300_000,
-				'printf synthetic', 'ws://synthetic.invalid/events', ['synthetic-events']),
+				'printf synthetic', 'ws://synthetic.invalid/events', ['synthetic-events'], true, ['synthetic.invalid']),
 			mode: 'input',
 		});
 		expect(screen.getByText('Monitor')).toBeTruthy();
@@ -134,6 +134,8 @@ describe('ChatToolEventRenderer', () => {
 		expect(container.textContent).toContain('300000');
 		expect(container.textContent).toContain('ws://synthetic.invalid/events');
 		expect(container.textContent).toContain('synthetic-events');
+		expect(container.textContent).toContain('"persistent": true');
+		expect(container.textContent).toContain('synthetic.invalid');
 	});
 
 	it('keeps Edit collapsed when autoExpandTools is disabled and defaultOpen is false', () => {

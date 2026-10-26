@@ -107,7 +107,7 @@ describe('parseServerWsMessage', () => {
 	it('receives Claude discovery, Monitor calls, and nested permissions as typed messages', () => {
 		const search = new ClaudeToolSearchToolUseMessage('', 'search', 'select:Monitor', 1);
 		const monitor = new ClaudeMonitorToolUseMessage('', 'monitor', 'Synthetic watch', 300_000,
-			undefined, 'ws://synthetic.invalid/events', ['synthetic-events']);
+			undefined, 'ws://synthetic.invalid/events', ['', 'synthetic-events'], true, ['synthetic.invalid']);
 		const messages = [search, monitor, new PermissionRequestMessage('', 'permission-synthetic', monitor)]
 			.map((message, index) => ({ ordinal: index + 1, message }));
 		const parsed = parseServerWsMessage(JSON.parse(JSON.stringify({
@@ -123,6 +123,7 @@ describe('parseServerWsMessage', () => {
 		expect(permission).toBeInstanceOf(PermissionRequestMessage);
 		if (permission.type !== 'permission-request') throw new Error('Expected typed permission');
 		expect(permission.requestedTool).toBeInstanceOf(ClaudeMonitorToolUseMessage);
+		expect(permission.requestedTool).toMatchObject({ persistent: true, allowedDomains: ['synthetic.invalid'] });
 	});
 
 	it('parses chat-messages', () => {

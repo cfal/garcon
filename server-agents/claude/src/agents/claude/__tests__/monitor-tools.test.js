@@ -11,6 +11,10 @@ const examples = [
     new ClaudeToolSearchToolUseMessage(timestamp, 'synthetic-tool', 'select:Monitor', 1)],
   ['Monitor', { description: 'Synthetic command watch', timeout_ms: 123.5, command: 'printf synthetic' },
     new ClaudeMonitorToolUseMessage(timestamp, 'synthetic-tool', 'Synthetic command watch', 123.5, 'printf synthetic')],
+  ['Monitor', { description: 'Synthetic session watch', timeout_ms: 300_000, persistent: true,
+    command: 'printf synthetic', allowed_domains: ['synthetic.invalid'] },
+    new ClaudeMonitorToolUseMessage(timestamp, 'synthetic-tool', 'Synthetic session watch', 300_000,
+      'printf synthetic', undefined, undefined, true, ['synthetic.invalid'])],
   ['Monitor', { description: 'Synthetic socket watch', timeout_ms: 300_000,
     ws: { url: 'ws://synthetic.invalid/events', protocols: ['synthetic-events'] } },
     new ClaudeMonitorToolUseMessage(timestamp, 'synthetic-tool', 'Synthetic socket watch', 300_000,
@@ -30,6 +34,24 @@ describe('Claude discovery and Monitor conversion', () => {
     });
     expect(permission.requestedTool).toEqual(expected);
   });
+
+  it.each([{ values: [] }, { values: ['', ' ', 'synthetic-events', 7] }])(
+    'preserves string-only Monitor arrays for live, reload, and permissions: $values', ({ values }) => {
+      const input = { description: 'Synthetic watch', command: 'printf synthetic', persistent: false,
+        allowed_domains: values, ws: { protocols: values } };
+      const expected = { persistent: false,
+        allowedDomains: values.filter((value) => typeof value === 'string'),
+        webSocketProtocols: values.filter((value) => typeof value === 'string') };
+      const part = { type: 'tool_use', name: 'Monitor', id: 'synthetic-tool', input };
+      const native = { type: 'assistant', uuid: 'synthetic-row', timestamp,
+        message: { role: 'assistant', content: [part] } };
+      expect(convertClaudeToolUse(timestamp, part)).toMatchObject(expected);
+      expect(convertClaudeEntries([native])[0]).toMatchObject(expected);
+      expect(convertCLIMessageToChatMessages(native)[0]).toMatchObject(expected);
+      expect(convertClaudePermissionRequest(timestamp, 'synthetic-permission', {
+        subtype: 'can_use_tool', tool_name: 'Monitor', tool_use_id: part.id, input,
+      }).requestedTool).toMatchObject(expected);
+    });
 
   it.each(['ToolSearch', 'Monitor'])('keeps rejected %s calls typed with absent or malformed input', (name) => {
     for (const input of [undefined, null, {}, { query: 3, description: [], timeout_ms: Infinity, max_results: NaN }, 'invalid']) {

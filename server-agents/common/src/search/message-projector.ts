@@ -176,7 +176,7 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
       return joinTool(message.description, message.command);
     case 'claude-monitor-tool-use':
       return joinTool(message.description, message.command, message.webSocketUrl,
-        boundedUnknownForJoin(message.webSocketProtocols, budget));
+        boundedUnknownForJoin(message.webSocketProtocols, budget), boundedUnknownForJoin(message.allowedDomains, budget));
     case 'exec-tool-use':
       return joinTool(message.language, message.code);
     case 'wait-tool-use':

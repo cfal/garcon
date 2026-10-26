@@ -52,6 +52,11 @@ function asString(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
 
+function asStringArray(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  return v.filter((value): value is string => typeof value === 'string');
+}
+
 function asNumber(v: unknown): number | undefined {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string') {
@@ -129,12 +134,11 @@ export function convertClaudeToolUse(ts: string, part: unknown): ToolUseChatMess
 
     case 'monitor': {
       const ws = asObject(input.ws);
-      const protocols = Array.isArray(ws.protocols)
-        ? ws.protocols.filter((value): value is string => typeof value === 'string')
-        : undefined;
+      const protocols = asStringArray(ws.protocols);
       return new ClaudeMonitorToolUseMessage(
         ts, toolId, asString(input.description) ?? '', asNumber(input.timeout_ms),
         asString(input.command), asString(ws.url), protocols,
+        asBoolean(input.persistent), asStringArray(input.allowed_domains),
       );
     }
 

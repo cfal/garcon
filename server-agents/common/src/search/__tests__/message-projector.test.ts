@@ -51,11 +51,12 @@ describe('transcript search message projector', () => {
     expect(projectSearchMessage(new ClaudeToolSearchToolUseMessage('', 'search', 'select:Monitor', 1)))
       .toMatchObject({ role: 'tool', body: 'select:Monitor' });
     const projection = projectSearchMessage(new ClaudeMonitorToolUseMessage('', 'monitor', 'Synthetic watch', 300_000,
-      'printf synthetic', 'ws://synthetic.invalid/events', ['synthetic-events']));
+      'printf synthetic', 'ws://synthetic.invalid/events', ['synthetic-events'], true, ['synthetic-allowed.invalid']));
     expect(projection?.body).toContain('Synthetic watch');
     expect(projection?.body).toContain('printf synthetic');
     expect(projection?.body).toContain('ws://synthetic.invalid/events');
     expect(projection?.body).toContain('synthetic-events');
+    expect(projection?.body).toContain('synthetic-allowed.invalid');
   });
 
   test('[TLV5-SEARCH.07-PROJECT-01] bounds provider timestamps without dropping content', () => {

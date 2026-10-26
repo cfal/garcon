@@ -32,6 +32,7 @@ describe('scripted Claude Monitor', () => {
         const monitorInput = {
           description: 'Synthetic event watch', timeout_ms: 120_000,
           ...(watchServer ? { ws: { url: `ws://127.0.0.1:${watchServer.port}/events`, protocols: ['synthetic-events'] } } : {
+            persistent: false, allowed_domains: [],
             command: `while [ ! -f ${eventGate} ]; do sleep 0.05; done; printf 'synthetic-watch-event\n'; `
               + `while [ ! -f ${endGate} ]; do sleep 0.05; done`,
           }),
@@ -118,6 +119,10 @@ describe('scripted Claude Monitor', () => {
         expect(messagesOfType(live.messages, 'unknown-tool-use')).toEqual([]);
         expect(messagesOfType(live.messages, 'claude-tool-search-tool-use')).toHaveLength(1);
         expect(messagesOfType(live.messages, 'claude-monitor-tool-use')).toHaveLength(1);
+        if (mode === 'command') {
+          expect(messagesOfType(live.messages, 'claude-monitor-tool-use')[0])
+            .toMatchObject({ persistent: false, allowedDomains: [] });
+        }
         expect(messagesOfType(live.messages, 'tool-result').find((message) => message.toolId === 'toolu_discover_monitor')?.content)
           .toMatchObject({ items: [{ type: 'tool_reference', tool_name: 'Monitor' }], toolUseResult: { matches: ['Monitor'] } });
         const reloaded = await reloadUntilNativeStableAfterPrompt(fixture, chatId, 'Synthetic successor input');
