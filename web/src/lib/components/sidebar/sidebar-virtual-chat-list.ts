@@ -130,6 +130,7 @@ export function estimateSidebarVirtualRowSize(
 	row: SidebarVirtualRow | undefined,
 	chatItemLayout: ChatItemLayout,
 	showProjectPath = false,
+	chatFontScale = 1,
 ): number {
 	if (row?.type === 'executor-header') {
 		return EXECUTOR_HEADER_ROW_HEIGHT;
@@ -142,13 +143,14 @@ export function estimateSidebarVirtualRowSize(
 	}
 	const pathHeight =
 		showProjectPath && row?.chat.projectPath?.trim() ? PROJECT_PATH_LINE_HEIGHT : 0;
+	const scale = Math.max(1, chatFontScale);
 	switch (chatItemLayout) {
 		case 'single-line':
-			return SINGLE_LINE_CHAT_ROW_HEIGHT + pathHeight;
+			return Math.ceil((SINGLE_LINE_CHAT_ROW_HEIGHT + pathHeight) * scale);
 		case 'compact':
-			return COMPACT_CHAT_ROW_HEIGHT + pathHeight;
+			return Math.ceil((COMPACT_CHAT_ROW_HEIGHT + pathHeight) * scale);
 		case 'detailed':
-			return DESKTOP_CHAT_ROW_HEIGHT + pathHeight;
+			return Math.ceil((DESKTOP_CHAT_ROW_HEIGHT + pathHeight) * scale);
 	}
 }
 

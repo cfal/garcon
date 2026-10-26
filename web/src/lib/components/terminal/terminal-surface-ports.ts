@@ -18,7 +18,7 @@ export interface TerminalSurfaceRuntimePort {
 	focus(): void;
 	pasteFromClipboard(): Promise<unknown>;
 	applyFontSize(fontSize: number): void;
-	applyMonospaceFont(preference: FontPreference): void;
+	applyFontPreference(preference: FontPreference): void;
 }
 
 export interface TerminalSurfaceRegistryPort extends Pick<

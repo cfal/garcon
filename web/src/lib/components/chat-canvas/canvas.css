@@ -7,8 +7,8 @@
 	border: 1px solid hsl(var(--border));
 	border-radius: 0.375rem;
 	padding: 0.375rem 0.625rem;
-	font-size: 0.75rem;
-	line-height: 1rem;
+	font-size: calc(0.75rem * var(--interface-font-scale, 1));
+	line-height: 1.3333333;
 	color: hsl(var(--foreground));
 	background: hsl(var(--card));
 }
@@ -41,8 +41,8 @@
 	background: hsl(var(--background));
 	color: hsl(var(--foreground));
 	padding: 0.5rem 0.625rem;
-	font-size: 1rem;
-	line-height: 1.25rem;
+	font-size: max(16px, calc(1rem * var(--interface-font-scale, 1)));
+	line-height: 1.25;
 }
 .canvas-input:focus-visible {
 	outline: 2px solid hsl(var(--ring));
@@ -50,7 +50,7 @@
 }
 @media (pointer: fine) and (min-width: 640px) {
 	.canvas-input {
-		font-size: 0.875rem;
+		font-size: calc(0.875rem * var(--interface-font-scale, 1));
 	}
 }
 .canvas-flow {

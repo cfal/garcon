@@ -29,7 +29,7 @@
 			a: {
 				doc: comparison,
 				extensions: [
-					editorFont(),
+					editorFont('monospace', 'code-diff'),
 					lineNumbers(),
 					EditorState.readOnly.of(true),
 					EditorView.editable.of(false),
@@ -39,7 +39,7 @@
 			b: {
 				doc: initialLocal,
 				extensions: [
-					editorFont(),
+					editorFont('monospace', 'code-diff'),
 					lineNumbers(),
 					EditorView.contentAttributes.of({ 'aria-label': localLabel }),
 					EditorState.readOnly.of(false),
@@ -67,6 +67,7 @@
 
 <div
 	bind:this={host}
+	data-typography-conflict
 	class="h-[min(50dvh,36rem)] min-h-64 overflow-auto rounded-md border border-border bg-card [&_.cm-editor]:min-w-0 [&_.cm-mergeView]:h-full [&_.cm-scroller]:overflow-auto"
 	aria-label={m.file_conflict_comparison()}
 	role="group"

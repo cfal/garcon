@@ -71,7 +71,7 @@ export class TerminalRuntime {
 	#rendererGeneration = 0;
 	#fontGeneration = 0;
 	#fontWaiters = new Set<(family: string | null) => void>();
-	#monospaceFont: FontPreference = 'default';
+	#fontPreference: FontPreference = 'default';
 	#fitFrame = 0;
 	#lastSentSize: { cols: number; rows: number } | null = null;
 	#pasteCleanup: (() => void) | null = null;
@@ -126,7 +126,7 @@ export class TerminalRuntime {
 		let fontGeneration: number;
 		do {
 			fontGeneration = this.#fontGeneration;
-			fontFamily = await this.#waitForFont(this.#monospaceFont);
+			fontFamily = await this.#waitForFont(this.#fontPreference);
 			if (!this.#isCurrentRendererAttachment(lease, host)) return;
 		} while (fontFamily === null || fontGeneration !== this.#fontGeneration);
 		if (!this.terminal.element) {
@@ -203,9 +203,9 @@ export class TerminalRuntime {
 		this.scheduleFit();
 	}
 
-	applyMonospaceFont(preference: FontPreference): void {
-		if (this.#disposed || preference === this.#monospaceFont) return;
-		this.#monospaceFont = preference;
+	applyFontPreference(preference: FontPreference): void {
+		if (this.#disposed || preference === this.#fontPreference) return;
+		this.#fontPreference = preference;
 		const generation = ++this.#fontGeneration;
 		this.#interruptFontWaits();
 		if (!this.terminal.element || !this.#presentationActive) return;

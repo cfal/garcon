@@ -59,10 +59,10 @@ test("live editor fonts refresh cached metrics while preserving document, select
       };
       const selectFont = async (departure: boolean) => {
         document.documentElement.style.setProperty(
-          "--monospace-font-override",
+          "--code-editor-font-override",
           departure ? '"Departure Mono"' : "monospace",
         );
-        document.documentElement.dataset.monospaceFont = departure
+        document.documentElement.dataset.codeEditorFont = departure
           ? "departure-mono"
           : "default";
         await settle();
@@ -76,10 +76,10 @@ test("live editor fonts refresh cached metrics while preserving document, select
       const originalDoc = view.state.doc;
       // Equal line height makes stale horizontal metrics visible rather than incidentally refreshed.
       document.documentElement.style.setProperty(
-        "--monospace-font-override",
+        "--code-editor-font-override",
         '"Departure Mono"',
       );
-      document.documentElement.dataset.monospaceFont = "departure-mono";
+      document.documentElement.dataset.codeEditorFont = "departure-mono";
       await settle();
       const changed = measure();
       const preserved =
@@ -87,7 +87,7 @@ test("live editor fonts refresh cached metrics while preserving document, select
         view.state.doc === originalDoc &&
         view.state.selection.main.anchor === 8;
       document.documentElement.style.setProperty(
-        "--monospace-font-override",
+        "--code-editor-font-override",
         "monospace",
       );
       document.fonts.dispatchEvent(new Event("loadingdone"));
@@ -98,17 +98,17 @@ test("live editor fonts refresh cached metrics while preserving document, select
       const overlappingEdits = [];
       for (const trigger of ["attribute", "loadingdone"]) {
         document.documentElement.style.setProperty(
-          "--monospace-font-override",
+          "--code-editor-font-override",
           "monospace",
         );
-        document.documentElement.dataset.monospaceFont = "default";
+        document.documentElement.dataset.codeEditorFont = "default";
         await settle();
         document.documentElement.style.setProperty(
-          "--monospace-font-override",
+          "--code-editor-font-override",
           '"Departure Mono"',
         );
         if (trigger === "attribute") {
-          document.documentElement.dataset.monospaceFont = "departure-mono";
+          document.documentElement.dataset.codeEditorFont = "departure-mono";
           await Promise.resolve();
         } else {
           document.fonts.dispatchEvent(new Event("loadingdone"));
@@ -153,6 +153,46 @@ test("live editor fonts refresh cached metrics while preserving document, select
           retained: view.dom === retainedDom && view.state.doc === retainedDoc,
         });
       }
+      const diffHost = document.createElement("div");
+      document.body.append(diffHost);
+      const diffView = scope.fontFixture.mountFontEditor(diffHost, "code-diff");
+      await settle();
+      const editorStateBeforeDiff = view.state;
+      const diffStateBeforeChange = diffView.state;
+      document.documentElement.style.setProperty(
+        "--code-diff-font-override",
+        '"Departure Mono"',
+      );
+      document.documentElement.style.setProperty(
+        "--code-diff-font-size",
+        "20px",
+      );
+      document.documentElement.dataset.codeDiffFont = "departure-mono";
+      document.documentElement.dataset.codeDiffFontSize = "20";
+      await settle();
+      const scopedDiff = {
+        editorUnchanged: view.state === editorStateBeforeDiff,
+        diffRefreshed: diffView.state !== diffStateBeforeChange,
+        family: getComputedStyle(diffView.contentDOM).fontFamily,
+        size: getComputedStyle(diffView.contentDOM).fontSize,
+      };
+      const retainedDiffState = diffView.state;
+      document.documentElement.style.setProperty(
+        "--code-editor-font-size",
+        "18px",
+      );
+      document.documentElement.dataset.codeEditorFontSize = "18";
+      await settle();
+      const scopedEditor = {
+        diffUnchanged: diffView.state === retainedDiffState,
+        size: getComputedStyle(view.contentDOM).fontSize,
+        ...measure(),
+      };
+      diffView.destroy();
+      diffHost.remove();
+      document.documentElement.style.removeProperty("--code-editor-font-size");
+      document.documentElement.dataset.codeEditorFontSize = "default";
+      await settle();
       const ruleCount = () =>
         Array.from(document.styleSheets).reduce(
           (count, sheet) => count + sheet.cssRules.length,
@@ -185,10 +225,12 @@ test("live editor fonts refresh cached metrics while preserving document, select
         });
         view.destroy();
       }
-      document.documentElement.dataset.monospaceFont = "default";
+      document.documentElement.dataset.codeEditorFont = "default";
       document.fonts.dispatchEvent(new Event("loadingdone"));
       await settle();
       return {
+        scopedDiff,
+        scopedEditor,
         before,
         changed,
         loaded,
@@ -202,6 +244,16 @@ test("live editor fonts refresh cached metrics while preserving document, select
         offscreenSwitches,
       };
     });
+    expect(result.scopedDiff.editorUnchanged).toBe(true);
+    expect(result.scopedDiff.diffRefreshed).toBe(true);
+    expect(result.scopedDiff.family).toContain("Departure Mono");
+    expect(result.scopedDiff.size).toBe("20px");
+    expect(result.scopedEditor.diffUnchanged).toBe(true);
+    expect(result.scopedEditor.size).toBe("18px");
+    expect(result.scopedEditor.cached).toBeCloseTo(
+      result.scopedEditor.actual,
+      1,
+    );
     expect(result.changed.actual).not.toBeCloseTo(result.before.actual, 1);
     expect(result.changed.cached).toBeCloseTo(result.changed.actual, 1);
     expect(result.loaded.cached).toBeCloseTo(result.loaded.actual, 1);

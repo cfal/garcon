@@ -18,6 +18,7 @@ interface SidebarVirtualGeometryUpdate {
 	readonly rows: readonly SidebarVirtualRow[];
 	readonly chatItemLayout: ChatItemLayout;
 	readonly showProjectPath: boolean;
+	readonly chatFontScale?: number;
 	readonly rowHeight: number | undefined;
 	readonly overscan: number;
 }
@@ -36,6 +37,7 @@ export class SidebarVirtualChatListController {
 	#overscan = DEFAULT_CHAT_ROW_OVERSCAN;
 	#lastEstimatedLayout: ChatItemLayout | undefined;
 	#lastShowProjectPath = false;
+	#lastChatFontScale = 1;
 
 	constructor() {
 		const getOverscan = () => this.#overscan;
@@ -60,9 +62,11 @@ export class SidebarVirtualChatListController {
 		const sizingOptionsChanged =
 			this.#lastEstimatedLayout !== undefined &&
 			(this.#lastEstimatedLayout !== input.chatItemLayout ||
-				this.#lastShowProjectPath !== input.showProjectPath);
+				this.#lastShowProjectPath !== input.showProjectPath ||
+				this.#lastChatFontScale !== (input.chatFontScale ?? 1));
 		this.#lastEstimatedLayout = input.chatItemLayout;
 		this.#lastShowProjectPath = input.showProjectPath;
+		this.#lastChatFontScale = input.chatFontScale ?? 1;
 		this.#overscan = input.overscan;
 		const normalizedAnchor =
 			sizingOptionsChanged && input.rowHeight === undefined ? this.#normalizedAnchor() : null;
@@ -118,7 +122,12 @@ export class SidebarVirtualChatListController {
 
 	#estimateRow(row: SidebarVirtualRow, input: SidebarVirtualGeometryUpdate): number {
 		if (row.type === 'chat' && input.rowHeight !== undefined) return input.rowHeight;
-		return estimateSidebarVirtualRowSize(row, input.chatItemLayout, input.showProjectPath);
+		return estimateSidebarVirtualRowSize(
+			row,
+			input.chatItemLayout,
+			input.showProjectPath,
+			input.chatFontScale,
+		);
 	}
 
 	#currentAnchor(): VirtualMutationAnchor {

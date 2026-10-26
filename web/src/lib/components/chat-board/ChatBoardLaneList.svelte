@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy, tick, untrack } from 'svelte';
+	import { observeTypographyChanges, readTypographyScale } from '$lib/theme/typography.js';
 	import type { ChatBoardOccurrence } from '$lib/chat-board/projection/chat-board-projection.js';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
@@ -80,7 +81,21 @@
 		}
 	}
 
-	let estimate = $derived(estimatedRowHeight(layout));
+	let interfaceScale = $state(readTypographyScale(document, 'interface'));
+	let estimate = $derived(Math.ceil(estimatedRowHeight(layout) * Math.max(1, interfaceScale)));
+	$effect(() =>
+		observeTypographyChanges(document, () => {
+			interfaceScale = readTypographyScale(document, 'interface');
+			const keys = occurrences.map((occurrence) => occurrence.key);
+			virtual.apply({
+				kind: 'reset-measurements',
+				keys,
+				estimates: keys.map(() => estimate),
+				anchor: currentAnchor(),
+			});
+			virtual.remeasureAll();
+		}, ['interface']),
+	);
 	let snapshot = $derived(virtual.snapshot);
 	let renderedIndexes = $derived.by(() => {
 		const indexes = indexesInRange(snapshot.overscanRange);

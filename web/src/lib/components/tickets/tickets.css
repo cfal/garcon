@@ -6,7 +6,7 @@
 	min-height: 0;
 	color: hsl(var(--foreground));
 	background: hsl(var(--background));
-	font-size: 13px;
+	font-size: calc(13px * var(--interface-font-scale, 1));
 }
 .tickets-surface *,
 .ticket-dialog * {
@@ -47,7 +47,7 @@
 	border-radius: var(--control-radius);
 	background: var(--control-surface);
 	color: hsl(var(--foreground));
-	font-size: 12px;
+	font-size: calc(12px * var(--interface-font-scale, 1));
 	font-weight: 550;
 	cursor: pointer;
 }
@@ -154,7 +154,7 @@
 	width: 100%;
 	padding: 8px;
 	border-radius: var(--menu-item-radius);
-	font-size: 14px;
+	font-size: calc(14px * var(--interface-font-scale, 1));
 	text-align: start;
 	cursor: pointer;
 }
@@ -170,7 +170,7 @@
 	flex-direction: column;
 	gap: 5px;
 	min-width: 0;
-	font-size: 12px;
+	font-size: calc(12px * var(--interface-font-scale, 1));
 	font-weight: 550;
 }
 .ticket-field-label {
@@ -188,7 +188,7 @@
 	min-height: 34px;
 	background: var(--control-surface);
 	color: hsl(var(--foreground));
-	font-size: 13px;
+	font-size: calc(13px * var(--interface-font-scale, 1));
 	font-weight: 400;
 }
 textarea.ticket-input {
@@ -239,7 +239,7 @@ select.ticket-input {
 	padding: 12px 0 4px;
 }
 .ticket-filter-options .ticket-field {
-	font-size: 11px;
+	font-size: calc(11px * var(--interface-font-scale, 1));
 	font-weight: 500;
 	color: hsl(var(--muted-foreground));
 }
@@ -253,7 +253,7 @@ select.ticket-input {
 	display: flex;
 	gap: 8px;
 	align-items: center;
-	font-size: 12px;
+	font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .tickets-body {
 	display: flex;
@@ -308,13 +308,13 @@ select.ticket-input {
 	padding: 4px;
 }
 .ticket-row-title {
-	font-size: 13px;
+	font-size: calc(13px * var(--interface-font-scale, 1));
 	line-height: 1.5;
 	overflow-wrap: anywhere;
 	font-weight: 550;
 }
 .ticket-id {
-	font: 11px var(--font-mono, monospace);
+	font: calc(11px * var(--interface-font-scale, 1)) var(--font-mono, monospace);
 	color: hsl(var(--muted-foreground));
 	white-space: nowrap;
 	font-variant-numeric: tabular-nums;
@@ -332,7 +332,7 @@ select.ticket-input {
 }
 .ticket-open .ticket-project {
 	grid-column: 2;
-	font-size: 11px;
+	font-size: calc(11px * var(--interface-font-scale, 1));
 	max-width: 100%;
 }
 .ticket-row .ticket-project {
@@ -361,7 +361,7 @@ select.ticket-input {
 	flex-wrap: wrap;
 	gap: 7px;
 	max-width: 46%;
-	font-size: 11px;
+	font-size: calc(11px * var(--interface-font-scale, 1));
 }
 .ticket-priority[data-priority='0'] {
 	color: var(--ticket-urgent);
@@ -381,7 +381,7 @@ select.ticket-input {
 	white-space: nowrap;
 	border-radius: 5px;
 	padding: 3px 5px;
-	font-size: 11px;
+	font-size: calc(11px * var(--interface-font-scale, 1));
 	cursor: pointer;
 }
 [data-status='open'] {
@@ -441,12 +441,12 @@ select.ticket-input {
 	align-items: center;
 	gap: 7px;
 	padding: 12px;
-	font-size: 12px;
+	font-size: calc(12px * var(--interface-font-scale, 1));
 	font-weight: 600;
 }
 .ticket-counts {
 	color: hsl(var(--muted-foreground));
-	font-size: 11px;
+	font-size: calc(11px * var(--interface-font-scale, 1));
 	font-weight: 400;
 	text-align: center;
 	padding: 8px;
@@ -543,7 +543,7 @@ select.ticket-input {
 	margin-bottom: 6px;
 }
 .ticket-detail-identity .ticket-id {
-	font-size: 13px;
+	font-size: calc(13px * var(--interface-font-scale, 1));
 }
 .ticket-assignee-value {
 	display: flex;
@@ -582,7 +582,7 @@ select.ticket-input {
 	text-align: center;
 }
 .ticket-detail-title {
-	font-size: 22px;
+	font-size: calc(22px * var(--interface-font-scale, 1));
 	font-weight: 620;
 	line-height: 1.4;
 	letter-spacing: -0.02em;
@@ -600,7 +600,7 @@ select.ticket-input {
 	grid-template-columns: 90px minmax(0, 1fr);
 	gap: 9px;
 	margin: 22px 0;
-	font-size: 12px;
+	font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .ticket-properties-read dt {
 	color: hsl(var(--muted-foreground));
@@ -609,7 +609,7 @@ select.ticket-input {
 	overflow-wrap: anywhere;
 }
 .ticket-markdown {
-	font-size: 13px;
+	font-size: calc(13px * var(--interface-font-scale, 1));
 	line-height: 1.65;
 	overflow-wrap: anywhere;
 	min-width: 0;
@@ -663,7 +663,7 @@ select.ticket-input {
 	flex-wrap: wrap;
 	gap: 7px;
 	margin-bottom: 8px;
-	font-size: 11px;
+	font-size: calc(11px * var(--interface-font-scale, 1));
 	color: hsl(var(--muted-foreground));
 }
 .ticket-actor {
@@ -681,19 +681,19 @@ select.ticket-input {
 	gap: 8px;
 }
 .ticket-composer-footer .ticket-muted {
-	font-size: 10px;
+	font-size: calc(10px * var(--interface-font-scale, 1));
 	margin-right: auto;
 }
 .ticket-muted {
 	color: hsl(var(--muted-foreground));
-	font-size: 12px;
+	font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .ticket-notice {
 	padding: 10px 14px;
 	background: hsl(var(--muted));
 	border: 1px solid hsl(var(--border));
 	border-radius: 6px;
-	font-size: 12px;
+	font-size: calc(12px * var(--interface-font-scale, 1));
 	overflow-wrap: anywhere;
 }
 .ticket-notice .ticket-actions {
@@ -705,7 +705,7 @@ select.ticket-input {
 	color: hsl(var(--muted-foreground));
 }
 .ticket-empty h3 {
-	font-size: 16px;
+	font-size: calc(16px * var(--interface-font-scale, 1));
 	font-weight: 550;
 	color: hsl(var(--foreground));
 	margin-bottom: 6px;
@@ -735,14 +735,14 @@ select.ticket-input {
 .ticket-dialog {
 	max-height: calc(100dvh - 32px);
 	overflow-y: auto;
-	font-size: 13px;
+	font-size: calc(13px * var(--interface-font-scale, 1));
 }
 .ticket-conflict {
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
 	max-height: 240px;
 	overflow: auto;
-	font-size: 11px;
+	font-size: calc(11px * var(--interface-font-scale, 1));
 }
 .ticket-activity li {
 	padding: 16px 0;
@@ -751,7 +751,7 @@ select.ticket-input {
 }
 .ticket-changes {
 	margin-top: 8px;
-	font-size: 11px;
+	font-size: calc(11px * var(--interface-font-scale, 1));
 }
 .ticket-changes dt {
 	font-weight: 600;
@@ -765,7 +765,7 @@ select.ticket-input {
 .ticket-recovery {
 	padding: 8px 18px;
 	border-bottom: 1px solid hsl(var(--border));
-	font-size: 12px;
+	font-size: calc(12px * var(--interface-font-scale, 1));
 	max-height: 35%;
 	overflow: auto;
 }
@@ -842,7 +842,7 @@ select.ticket-input {
 }
 @media (pointer: coarse) {
 	.ticket-input {
-		font-size: 16px;
+		font-size: max(16px, calc(16px * var(--interface-font-scale, 1)));
 	}
 	.ticket-button {
 		min-height: 38px;

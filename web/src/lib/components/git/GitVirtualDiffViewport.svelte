@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import { onDestroy, tick, untrack, type Snippet } from 'svelte';
-	import { observeFontChanges } from '$lib/theme/fonts.js';
+	import { observeTypographyChanges } from '$lib/theme/typography.js';
 	import type {
 		GitVirtualFileHeaderRow,
 		GitVirtualReviewRow,
@@ -261,14 +261,14 @@
 	});
 
 	$effect(() =>
-		observeFontChanges(document, () => {
+		observeTypographyChanges(document, () => {
 			virtual.apply({
 				kind: 'reset-measurements',
 				...source.buildVirtualMeasurements(rowLineHeight),
 				anchor: currentAnchor(),
 			});
 			virtual.remeasureAll();
-		}),
+		}, ['code-diff', 'interface']),
 	);
 
 	$effect(() => {

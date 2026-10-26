@@ -505,7 +505,7 @@ describe('Git virtual diff refresh', () => {
 		const scrollResets = virtualDiffControllerCalls.scrollToStarts;
 		const remeasures = virtualDiffControllerCalls.remeasures;
 		try {
-			document.documentElement.dataset.monospaceFont = 'departure-mono';
+			document.documentElement.dataset.codeDiffFont = 'departure-mono';
 			await waitFor(() => expect(virtualDiffControllerCalls.mutations).toHaveLength(2));
 			expect(virtualDiffControllerCalls.mutations.at(-1)).toMatchObject({
 				kind: 'reset-measurements',
@@ -516,7 +516,7 @@ describe('Git virtual diff refresh', () => {
 			expect(viewport.scrollTop).toBe(45);
 		} finally {
 			unmount();
-			delete document.documentElement.dataset.monospaceFont;
+			delete document.documentElement.dataset.codeDiffFont;
 		}
 		const mutationsAfterUnmount = virtualDiffControllerCalls.mutations.length;
 		await new Promise(requestAnimationFrame);

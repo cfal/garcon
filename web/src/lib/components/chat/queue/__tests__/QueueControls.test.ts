@@ -64,6 +64,32 @@ async function openMenu(id: string) {
 }
 
 describe('inline queue', () => {
+	it('invalidates cached queue measurements on Interface changes and releases the observer', async () => {
+		const controller = new QueuedInputListController();
+		controller.update('chat-1', makeQueue().entries);
+		const apply = vi.spyOn(controller.virtual, 'apply');
+		const stop = controller.observeTypography();
+		try {
+			document.documentElement.dataset.interfaceFontSize = '20';
+			await waitFor(() =>
+				expect(apply).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: 'reset-measurements',
+						estimates: [63, 63, 63],
+					}),
+				),
+			);
+			stop();
+			apply.mockClear();
+			document.documentElement.dataset.interfaceFontSize = 'default';
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(apply).not.toHaveBeenCalled();
+		} finally {
+			stop();
+			controller.virtual.destroy();
+			delete document.documentElement.dataset.interfaceFontSize;
+		}
+	});
 	it('keeps moved rows mounted before virtual geometry catches up to the queue order', () => {
 		const controller = new QueuedInputListController();
 		const { entries } = makeQueue();

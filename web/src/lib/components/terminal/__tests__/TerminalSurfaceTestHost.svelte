@@ -31,7 +31,7 @@
 		onRename?: (terminalId: string, title: string | null) => void;
 		onFocus?: () => void;
 		onFontSize?: (fontSize: number) => void;
-		onMonospaceFont?: (font: FontPreference) => void;
+		onFontPreference?: (font: FontPreference) => void;
 		onAttach?: () => void;
 		onReattach?: (terminalId: string) => void;
 		focusRequestToken?: number;
@@ -57,7 +57,7 @@
 		onRename = () => undefined,
 		onFocus = () => undefined,
 		onFontSize = () => undefined,
-		onMonospaceFont = () => undefined,
+		onFontPreference = () => undefined,
 		onAttach = () => undefined,
 		onReattach = () => undefined,
 		focusRequestToken = 0,
@@ -127,7 +127,7 @@
 		},
 		pasteFromClipboard: () => Promise.resolve(),
 		applyFontSize: (fontSize: number) => onFontSize(fontSize),
-		applyMonospaceFont: (font) => onMonospaceFont(font),
+		applyFontPreference: (font) => onFontPreference(font),
 	};
 	const frameBridge = new SurfaceFrameBridge();
 	const layout = createWorkspaceLayoutStore();

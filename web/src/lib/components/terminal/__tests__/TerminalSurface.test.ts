@@ -353,23 +353,23 @@ describe('TerminalSurface', () => {
 	});
 
 	it('applies cross-tab font changes without reattaching the renderer', async () => {
-		const onMonospaceFont = vi.fn();
+		const onFontPreference = vi.fn();
 		const onAttach = vi.fn();
-		render(TerminalSurfaceTestHost, { host: 'mobile', onMonospaceFont, onAttach });
-		await waitFor(() => expect(onMonospaceFont).toHaveBeenLastCalledWith('default'));
+		render(TerminalSurfaceTestHost, { host: 'mobile', onFontPreference, onAttach });
+		await waitFor(() => expect(onFontPreference).toHaveBeenLastCalledWith('default'));
 		const attachments = onAttach.mock.calls.length;
 		localStorage.setItem(
 			LOCAL_STORAGE_KEYS.localSettings,
-			JSON.stringify({ monospaceFont: 'departure-mono' }),
+			JSON.stringify({ terminalFont: 'departure-mono' }),
 		);
 		window.dispatchEvent(
 			new StorageEvent('storage', {
 				key: LOCAL_STORAGE_KEYS.localSettings,
 				storageArea: localStorage,
-				newValue: JSON.stringify({ monospaceFont: 'departure-mono' }),
+				newValue: JSON.stringify({ terminalFont: 'departure-mono' }),
 			}),
 		);
-		await waitFor(() => expect(onMonospaceFont).toHaveBeenLastCalledWith('departure-mono'));
+		await waitFor(() => expect(onFontPreference).toHaveBeenLastCalledWith('departure-mono'));
 		expect(onAttach).toHaveBeenCalledTimes(attachments);
 	});
 

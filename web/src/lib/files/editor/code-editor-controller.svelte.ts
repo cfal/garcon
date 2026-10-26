@@ -516,15 +516,19 @@ export class CodeEditorController {
 					fontSize: `${Math.max(MIN_TOUCH_EDITOR_FONT_SIZE, configuredFontSize)}px`,
 				},
 				'.cm-panel input, .cm-panel select, .cm-panel button': {
-					fontSize: `${MIN_TOUCH_EDITOR_FONT_SIZE}px`,
+					fontSize: 'max(16px, calc(12px * var(--interface-font-scale, 1)))',
 				},
-				'.cm-panels': { backgroundColor: 'hsl(var(--card))', color: 'hsl(var(--foreground))' },
+				'.cm-panels': {
+					backgroundColor: 'hsl(var(--card))',
+					color: 'hsl(var(--foreground))',
+					fontFamily: 'var(--interface-font-override, var(--system-ui-font))',
+				},
 				'.cm-searchMatch': { backgroundColor: 'hsl(var(--accent) / 0.45)' },
 				'.cm-searchMatch.cm-searchMatch-selected': { outline: '2px solid hsl(var(--ring))' },
 				'@media (pointer: fine)': {
 					'.cm-content, .cm-gutters': { fontSize: `${configuredFontSize}px` },
 					'.cm-panel input, .cm-panel select, .cm-panel button': {
-						fontSize: `${configuredFontSize}px`,
+						fontSize: 'calc(12px * var(--interface-font-scale, 1))',
 					},
 				},
 			}),

@@ -7,6 +7,7 @@
 
 	interface SidebarSearchResultRowProps {
 		chat: ChatSessionRecord;
+		rowHeight?: number;
 		index: number;
 		transcriptMatch?: ChatSearchResult;
 		currentTime: Date;
@@ -17,6 +18,7 @@
 
 	let {
 		chat,
+		rowHeight = SEARCH_RESULT_ROW_HEIGHT,
 		index,
 		transcriptMatch,
 		currentTime,
@@ -44,7 +46,7 @@
 		'h-full min-w-0 w-full bg-transparent px-3 py-1.5 text-left font-normal transition-colors duration-150',
 		isHighlighted ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/40',
 	)}
-	style={`min-height:${SEARCH_RESULT_ROW_HEIGHT}px;`}
+	style={`min-height:${rowHeight}px;`}
 	onclick={() => onSelectChat(chat.id)}
 	onmouseenter={() => onHighlightChange(index)}
 >

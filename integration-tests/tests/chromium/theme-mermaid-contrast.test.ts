@@ -231,13 +231,15 @@ describe("Mermaid theme contrast", () => {
         });
         document.documentElement.dataset.themeAppearance = 'standard';
         document.documentElement.dataset.interfaceFont = 'default';
-        document.documentElement.dataset.monospaceFont = 'default';
+        document.documentElement.dataset.chatFeedFont = 'default';
+        document.documentElement.dataset.chatCodeFont = 'default';
         const cachedSvg = await scope.renderMermaid(source, 'standard-light');
         root.innerHTML = cachedSvg;
         const standard = read();
         document.documentElement.dataset.themeAppearance = 'terminal';
         document.documentElement.dataset.interfaceFont = 'departure-mono';
-        document.documentElement.dataset.monospaceFont = 'departure-mono';
+        document.documentElement.dataset.chatFeedFont = 'departure-mono';
+        document.documentElement.dataset.chatCodeFont = 'departure-mono';
         await document.fonts.ready;
         const toggled = read();
         root.innerHTML = await scope.renderMermaid(source, 'standard-light');

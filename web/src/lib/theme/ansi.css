@@ -58,7 +58,7 @@
 	}
 
 	:where([data-slot='dialog-title']) {
-		font-size: 16px;
+		font-size: calc(16px * var(--interface-font-scale, 1));
 		line-height: 1.5;
 		color: hsl(var(--foreground));
 	}
@@ -194,7 +194,7 @@
 	}
 
 	[data-terminal-input-controls] > button {
-		font-size: 11px;
+		font-size: calc(11px * var(--interface-font-scale, 1));
 		padding-inline: 6px;
 	}
 

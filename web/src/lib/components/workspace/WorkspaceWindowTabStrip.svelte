@@ -442,7 +442,7 @@
 		)}
 		style:height={`${titlebarMetrics.controlSizePx}px`}
 		style:width={iconOnlyWidth(renderedLabelMode)}
-		style:font-size={`${titlebarMetrics.labelFontSizePx}px`}
+		style:font-size={`calc(${titlebarMetrics.labelFontSizePx}px * var(--interface-font-scale, 1))`}
 		style:padding-left={tabPaddingInlineStart(renderedLabelMode)}
 		style:padding-right={tabPaddingInlineEnd(renderedLabelMode, supportsInlineClose(surfaceId))}
 		title={tooltipFor(surfaceId)}

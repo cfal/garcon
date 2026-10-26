@@ -54,14 +54,16 @@ describe('Settings', () => {
 	it('persists appearance and fonts independently of system and fixed palettes', async () => {
 		localStorage.clear();
 		const appShell = createAppShellStore();
-		appShell.openSettings('interface');
+		appShell.openSettings('appearance');
 		const props = { appShell, remoteSettings: new RemoteSettingsStore() };
 		let rendered = render(SettingsTestHost, props);
 		try {
-			let appearance = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Appearance' });
+			let appearance = screen.getByRole<HTMLSelectElement>('combobox', { name: 'UI Style' });
 			expect(appearance.value).toBe('default');
-			const font = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Font' });
-			const mono = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Monospace Font' });
+			const font = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Interface Font' });
+			const mono = screen.getByRole<HTMLSelectElement>('combobox', {
+				name: 'Chat Code & Output Font',
+			});
 			expect([...font.options].map((option) => option.text)).toEqual(['Default', 'Departure Mono']);
 			expect([...mono.options].map((option) => option.text)).toEqual(['Default', 'Departure Mono']);
 			const lightTheme = screen.getByRole<HTMLSelectElement>('combobox', {
@@ -78,7 +80,7 @@ describe('Settings', () => {
 			expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
 				terminalAppearance: true,
 				interfaceFont: 'departure-mono',
-				monospaceFont: 'default',
+				chatCodeFont: 'default',
 				themePreference: { mode: 'system', lightThemeId: lightTheme, darkThemeId: darkTheme },
 			});
 			await fireEvent.click(screen.getByRole('radio', { name: 'Use one theme' }));
@@ -89,13 +91,13 @@ describe('Settings', () => {
 			await fireEvent.change(mono, { target: { value: 'departure-mono' } });
 			rendered.unmount();
 			rendered = render(SettingsTestHost, props);
-			appearance = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Appearance' });
+			appearance = screen.getByRole<HTMLSelectElement>('combobox', { name: 'UI Style' });
 			expect(appearance.value).toBe('terminal');
-			expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Font' }).value).toBe(
-				'departure-mono',
-			);
 			expect(
-				screen.getByRole<HTMLSelectElement>('combobox', { name: 'Monospace Font' }).value,
+				screen.getByRole<HTMLSelectElement>('combobox', { name: 'Interface Font' }).value,
+			).toBe('departure-mono');
+			expect(
+				screen.getByRole<HTMLSelectElement>('combobox', { name: 'Chat Code & Output Font' }).value,
 			).toBe('departure-mono');
 			expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Theme' }).value).toBe(
 				'ansi-dark',
@@ -105,7 +107,7 @@ describe('Settings', () => {
 			expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
 				terminalAppearance: false,
 				interfaceFont: 'departure-mono',
-				monospaceFont: 'departure-mono',
+				chatCodeFont: 'departure-mono',
 				themePreference: { mode: 'fixed', themeId: 'ansi-dark' },
 			});
 		} finally {
@@ -113,10 +115,10 @@ describe('Settings', () => {
 		}
 	});
 
-	it('stores the message format in App Interface and restores it on remount', async () => {
+	it('stores the message format in App Behavior and restores it on remount', async () => {
 		localStorage.clear();
 		const appShell = createAppShellStore();
-		appShell.openSettings('interface');
+		appShell.openSettings('behavior');
 		const props = { appShell, remoteSettings: new RemoteSettingsStore() };
 		let rendered = render(SettingsTestHost, props);
 		try {
@@ -166,7 +168,7 @@ describe('Settings', () => {
 	});
 	it('preserves an unsaved setting draft while searching', async () => {
 		const appShell = createAppShellStore();
-		appShell.openSettings('interface');
+		appShell.openSettings('behavior');
 		const rendered = render(SettingsTestHost, {
 			appShell,
 			remoteSettings: new RemoteSettingsStore(),
@@ -186,7 +188,7 @@ describe('Settings', () => {
 	});
 	it('finds controls across tabs, opens their section, and keeps browser searches independent of server loading', async () => {
 		const appShell = createAppShellStore();
-		appShell.openSettings('interface');
+		appShell.openSettings('appearance');
 		const remoteSettings = new RemoteSettingsStore();
 		remoteSettings.applySnapshot(makeRemoteSettingsSnapshot());
 		const refresh = vi.spyOn(remoteSettings, 'refreshInBackground').mockResolvedValue();
@@ -194,11 +196,11 @@ describe('Settings', () => {
 		try {
 			const input = screen.getByRole('searchbox', { name: 'Search settings' });
 			await fireEvent.input(input, { target: { value: 'MAX width' } });
-			const result = screen.getByRole('button', { name: 'Max chat width Interface' });
+			const result = screen.getByRole('button', { name: 'Max chat width Appearance' });
 			expect(refresh).not.toHaveBeenCalled();
 			await fireEvent.click(result);
 			expect((input as HTMLInputElement).value).toBe('');
-			expect(screen.getByRole('tabpanel', { name: 'Interface' })).toBeTruthy();
+			expect(screen.getByRole('tabpanel', { name: 'Appearance' })).toBeTruthy();
 			await fireEvent.input(input, { target: { value: 'commit model' } });
 			await fireEvent.click(
 				screen.getByRole('button', { name: 'Commit message model Automation' }),
@@ -207,7 +209,7 @@ describe('Settings', () => {
 			expect(refresh).toHaveBeenCalledOnce();
 			await fireEvent.input(input, { target: { value: 'zzzz-no-result' } });
 			expect(screen.getByRole('status').textContent).toContain('No matching settings');
-			await fireEvent.click(screen.getByRole('tab', { name: 'Interface' }));
+			await fireEvent.click(screen.getByRole('tab', { name: 'Appearance' }));
 			expect((input as HTMLInputElement).value).toBe('');
 		} finally {
 			rendered.unmount();
@@ -215,7 +217,7 @@ describe('Settings', () => {
 	});
 	it('reports recovery cleanup failures and allows retry without concurrent cleanup', async () => {
 		const appShell = createAppShellStore();
-		appShell.openSettings('interface');
+		appShell.openSettings('behavior');
 		const pending = Promise.withResolvers<boolean>();
 		const onClearRecovery = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(true);
 		const report = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -257,7 +259,7 @@ describe('Settings', () => {
 
 	it('finds fullscreen sidebar coverage and preserves it while auto-hide disables the control', async () => {
 		const appShell = createAppShellStore();
-		appShell.openSettings('interface');
+		appShell.openSettings('appearance');
 		const onLocalToggle = vi.fn();
 		const rendered = render(SettingsTestHost, {
 			appShell,
@@ -269,7 +271,7 @@ describe('Settings', () => {
 			await fireEvent.input(search, { target: { value: 'cover sidebar' } });
 			await fireEvent.click(
 				screen.getByRole('button', {
-					name: 'Always cover chat sidebar in fullscreen Interface',
+					name: 'Always cover chat sidebar in fullscreen Appearance',
 				}),
 			);
 			const control = screen.getByRole('switch', {
@@ -324,7 +326,8 @@ describe('Settings', () => {
 			expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy();
 			expect(screen.getByRole('tablist').getAttribute('aria-orientation')).toBe('vertical');
 			expect(screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))).toEqual([
-				'Interface',
+				'Appearance',
+				'Behavior',
 				'Shortcuts',
 				'Providers',
 				'Authentication',
@@ -412,9 +415,9 @@ describe('Settings', () => {
 			expect(screen.queryByRole('heading', { name: 'Local' })).toBeNull();
 			expect(screen.queryByRole('combobox')).toBeNull();
 
-			await fireEvent.click(screen.getByRole('tab', { name: 'Interface' }));
+			await fireEvent.click(screen.getByRole('tab', { name: 'Appearance' }));
 			const titlebarSize = await screen.findByRole('slider', { name: 'Titlebar size adjustment' });
-			expect(appShell.settingsTab).toBe('interface');
+			expect(appShell.settingsTab).toBe('appearance');
 			expect(screen.getByText('These settings are stored in your browser.')).toBeTruthy();
 			expect((titlebarSize as HTMLInputElement).value).toBe('0');
 			await fireEvent.input(titlebarSize, { target: { value: '6' } });
@@ -438,6 +441,7 @@ describe('Settings', () => {
 				expect(onLocalSet).toHaveBeenCalledWith('inlineImageThumbnailSize', value);
 				expect((thumbnailSize as HTMLSelectElement).value).toBe(value);
 			}
+			await fireEvent.click(screen.getByRole('tab', { name: 'Behavior' }));
 			const imageCacheSize = screen.getByRole('combobox', { name: 'Inline image cache size' });
 			expect((imageCacheSize as HTMLSelectElement).value).toBe('64');
 			expect(within(imageCacheSize).getAllByRole('option')).toHaveLength(7);
@@ -447,6 +451,7 @@ describe('Settings', () => {
 				expect(onLocalSet).toHaveBeenCalledWith('imageCacheSizeMiB', size);
 				expect((imageCacheSize as HTMLSelectElement).value).toBe(String(size));
 			}
+			await fireEvent.click(screen.getByRole('tab', { name: 'Appearance' }));
 			const mermaidSize = screen.getByRole('combobox', {
 				name: 'Inline Mermaid thumbnail size (px)',
 			});
@@ -462,6 +467,7 @@ describe('Settings', () => {
 				expect(onLocalSet).toHaveBeenCalledWith('inlineMermaidThumbnailSize', value);
 				expect((mermaidSize as HTMLSelectElement).value).toBe(value);
 			}
+			await fireEvent.click(screen.getByRole('tab', { name: 'Behavior' }));
 			const inactivityDuration = screen.getByRole('combobox', {
 				name: 'Inactivity duration',
 			});
@@ -505,6 +511,7 @@ describe('Settings', () => {
 			).toBeTruthy();
 			await fireEvent.click(allowDirectChats);
 			expect(onLocalToggle).toHaveBeenCalledWith('allowDirectChats');
+			await fireEvent.click(screen.getByRole('tab', { name: 'Appearance' }));
 			const reduceMotion = screen.getByRole('switch', { name: 'Reduce motion' });
 			const highlightActiveWindow = screen.getByRole('switch', { name: 'Highlight active window' });
 			expect(highlightActiveWindow.getAttribute('aria-checked')).toBe('true');
@@ -514,6 +521,7 @@ describe('Settings', () => {
 			expect(reduceMotion.getAttribute('aria-checked')).toBe('false');
 			await fireEvent.click(reduceMotion);
 			expect(onLocalToggle).toHaveBeenCalledWith('reduceMotion');
+			await fireEvent.click(screen.getByRole('tab', { name: 'Behavior' }));
 			expect(screen.getByText('Hide tool calls')).toBeTruthy();
 			expect(screen.getByRole('switch', { name: 'Bash' })).toBeTruthy();
 			expect(screen.getByRole('switch', { name: 'Exec' })).toBeTruthy();
@@ -522,19 +530,33 @@ describe('Settings', () => {
 			expect(screen.getByText('Web searches and fetches')).toBeTruthy();
 			expect(screen.getByText('Tasks and plans')).toBeTruthy();
 			expect(screen.getByText('Provider and MCP tools')).toBeTruthy();
+			await fireEvent.click(screen.getByRole('tab', { name: 'Appearance' }));
 			const overlayBackdropEffects = screen.getByRole('switch', {
 				name: 'Dim and blur behind overlays',
 			});
 			expect(overlayBackdropEffects.getAttribute('aria-checked')).toBe('true');
 			await fireEvent.click(overlayBackdropEffects);
 			expect(onLocalToggle).toHaveBeenCalledWith('overlayBackdropEffects');
+			await fireEvent.click(screen.getByRole('tab', { name: 'Behavior' }));
 			expect(screen.getByText('Task completion sound')).toBeTruthy();
 			const completionSoundMode = screen.getByRole('combobox', { name: 'Sound' });
+			const unfocusedSound = screen.getByRole('switch', {
+				name: 'Only when tab is unfocused',
+			});
 			expect((completionSoundMode as HTMLSelectElement).value).toBe('off');
+			expect(unfocusedSound.hasAttribute('disabled')).toBe(true);
+			expect(unfocusedSound.getAttribute('aria-checked')).toBe('true');
 			expect(screen.getByRole('option', { name: 'Custom' }).hasAttribute('disabled')).toBe(true);
 			await fireEvent.change(completionSoundMode, { target: { value: 'default' } });
 			expect(onLocalSet).toHaveBeenCalledWith('completionSoundMode', 'default');
 			expect(completionSound.unlockCompletionSound).toHaveBeenCalledOnce();
+			expect(unfocusedSound.hasAttribute('disabled')).toBe(false);
+			await fireEvent.click(unfocusedSound);
+			expect(unfocusedSound.getAttribute('aria-checked')).toBe('false');
+			expect(onLocalSet).toHaveBeenLastCalledWith('completionSoundVisibility', 'always');
+			await fireEvent.click(unfocusedSound);
+			expect(unfocusedSound.getAttribute('aria-checked')).toBe('true');
+			expect(onLocalSet).toHaveBeenLastCalledWith('completionSoundVisibility', 'unfocused');
 			await fireEvent.click(screen.getByRole('button', { name: 'Test sound' }));
 			expect(completionSound.playCompletionSound).toHaveBeenCalledWith(
 				expect.objectContaining({ mode: 'default', visibility: 'always' }),
@@ -605,7 +627,7 @@ describe('Settings', () => {
 
 	it('refreshes server data once, only after a server tab opens', async () => {
 		const appShell = createAppShellStore();
-		appShell.openSettings('interface');
+		appShell.openSettings('appearance');
 		const remoteSettings = new RemoteSettingsStore();
 		const refreshSpy = vi.spyOn(remoteSettings, 'refreshInBackground').mockResolvedValue();
 		const executorStore = new ExecutorsStore(async () => []);
@@ -620,7 +642,7 @@ describe('Settings', () => {
 
 			await fireEvent.click(screen.getByRole('tab', { name: 'Providers' }));
 			await fireEvent.click(screen.getByRole('tab', { name: 'General' }));
-			await fireEvent.click(screen.getByRole('tab', { name: 'Interface' }));
+			await fireEvent.click(screen.getByRole('tab', { name: 'Appearance' }));
 			await fireEvent.click(screen.getByRole('tab', { name: 'Automation' }));
 			expect(refreshSpy).toHaveBeenCalledOnce();
 			expect(executorRefreshSpy).toHaveBeenCalledOnce();
@@ -632,14 +654,14 @@ describe('Settings', () => {
 
 	it('describes each tab with its App or Server group', () => {
 		const appShell = createAppShellStore();
-		appShell.openSettings('interface');
+		appShell.openSettings('appearance');
 		const rendered = render(SettingsTestHost, {
 			appShell,
 			remoteSettings: new RemoteSettingsStore(),
 		});
 
 		try {
-			for (const name of ['Interface', 'Shortcuts']) {
+			for (const name of ['Appearance', 'Behavior', 'Shortcuts']) {
 				expect(screen.getByRole('tab', { name, description: 'App' })).toBeTruthy();
 			}
 			for (const name of [
@@ -697,14 +719,15 @@ describe('Settings', () => {
 
 	it('uses tab labels without repeating them as content headings', async () => {
 		const appShell = createAppShellStore();
-		appShell.openSettings('interface');
+		appShell.openSettings('appearance');
 		const rendered = render(SettingsTestHost, {
 			appShell,
 			remoteSettings: new RemoteSettingsStore(),
 		});
 		try {
 			for (const name of [
-				'Interface',
+				'Appearance',
+				'Behavior',
 				'Shortcuts',
 				'Other Agents',
 				'General',
@@ -723,9 +746,9 @@ describe('Settings', () => {
 		}
 	});
 
-	it('opens the onboarding wizard from the Interface tab', async () => {
+	it('opens the onboarding wizard from the Behavior tab', async () => {
 		const appShell = createAppShellStore();
-		appShell.openSettings('interface');
+		appShell.openSettings('behavior');
 		const rendered = render(SettingsTestHost, {
 			appShell,
 			remoteSettings: new RemoteSettingsStore(),
@@ -907,7 +930,7 @@ describe('Settings', () => {
 	});
 	it('finds repositories through search and updates the shared repository settings', async () => {
 		const appShell = createAppShellStore();
-		appShell.openSettings('interface');
+		appShell.openSettings('appearance');
 		const reviews = new PullRequestReviewsStore();
 		const snapshot = makeReviewsSnapshot();
 		reviews.apply(snapshot);

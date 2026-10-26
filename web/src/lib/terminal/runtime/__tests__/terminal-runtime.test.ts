@@ -397,7 +397,7 @@ describe('TerminalRuntime', () => {
 		const runtime = createRuntime(vi.fn(), vi.fn(), { load });
 		const host = measurableHost();
 		const attachment = runtime.attach(host);
-		runtime.applyMonospaceFont('departure-mono');
+		runtime.applyFontPreference('departure-mono');
 		selected.resolve('"Departure Mono", monospace');
 		await attachment.ready;
 		original.resolve(TERMINAL_FONT_FAMILY);
@@ -423,8 +423,8 @@ describe('TerminalRuntime', () => {
 		const element = runtime.terminal.element;
 		runtime.write('retained output');
 		runtime.inputControls.toggleModifier('ctrl');
-		runtime.applyMonospaceFont('departure-mono');
-		runtime.applyMonospaceFont('default');
+		runtime.applyFontPreference('departure-mono');
+		runtime.applyFontPreference('default');
 		selected.resolve('"Departure Mono", monospace');
 		await vi.waitFor(() => expect(scheduleFit).toHaveBeenCalledOnce());
 		expect(runtime.terminal.options.fontFamily).toBe(TERMINAL_FONT_FAMILY);
@@ -432,7 +432,7 @@ describe('TerminalRuntime', () => {
 		expect(runtime.inputControls.hasActiveModifiers).toBe(true);
 		expect(fakes.terminals[0].dispose).not.toHaveBeenCalled();
 		runtime.park(lease);
-		runtime.applyMonospaceFont('departure-mono');
+		runtime.applyFontPreference('departure-mono');
 		await Promise.resolve();
 		expect(runtime.terminal.options.fontFamily).toBe(TERMINAL_FONT_FAMILY);
 		await attach(runtime, measurableHost());
@@ -475,11 +475,11 @@ describe('TerminalRuntime', () => {
 					});
 				},
 			});
-			if (timing === 'before transfer') runtime.applyMonospaceFont('departure-mono');
+			if (timing === 'before transfer') runtime.applyFontPreference('departure-mono');
 			runtime.park(lease);
 			const nextHost = target === 'same' ? host : measurableHost();
 			const attachment = runtime.attach(nextHost);
-			if (timing === 'during reattachment') runtime.applyMonospaceFont('departure-mono');
+			if (timing === 'during reattachment') runtime.applyFontPreference('departure-mono');
 			selected.resolve('"Departure Mono", monospace');
 			await attachment.ready;
 			expect(assignments).toEqual([
@@ -514,7 +514,7 @@ describe('TerminalRuntime', () => {
 				preference === 'default' ? Promise.resolve(TERMINAL_FONT_FAMILY) : selected.promise,
 		});
 		await attach(runtime, measurableHost());
-		runtime.applyMonospaceFont('departure-mono');
+		runtime.applyFontPreference('departure-mono');
 		runtime.dispose();
 		selected.resolve('"Departure Mono", monospace');
 		await Promise.resolve();

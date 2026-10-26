@@ -83,14 +83,12 @@
 					typeof value === 'string' && Object.prototype.hasOwnProperty.call(profiles, value);
 				let preference = defaultPreference;
 				let terminalAppearance = false;
-				let interfaceFont = 'default';
-				let monospaceFont = 'default';
+				let typography = {};
 				try {
 					const stored = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
 					terminalAppearance = isRecord(stored) && stored.terminalAppearance === true;
 					if (isRecord(stored)) {
-						if (stored.interfaceFont === 'departure-mono') interfaceFont = 'departure-mono';
-						if (stored.monospaceFont === 'departure-mono') monospaceFont = 'departure-mono';
+						typography = stored;
 					}
 					const candidate = isRecord(stored) ? stored.themePreference : undefined;
 					if (isRecord(candidate) && candidate.mode === 'fixed' && isThemeId(candidate.themeId)) {
@@ -126,8 +124,33 @@
 				const root = document.documentElement;
 				root.dataset.theme = themeId;
 				root.dataset.themeAppearance = terminalAppearance ? 'terminal' : 'standard';
-				root.dataset.interfaceFont = interfaceFont;
-				root.dataset.monospaceFont = monospaceFont;
+				const surfaces = [
+					['interface', 'interfaceFont', 'interfaceFontSize', 14],
+					['chat-list', 'chatListFont', 'chatListFontSize', 14],
+					['chat-feed', 'chatFeedFont', 'chatFeedFontSize', 14],
+					['chat-code', 'chatCodeFont', 'chatCodeFontSize', 12],
+					['code-editor', 'codeEditorFont', 'codeEditorFontSize', 12],
+					['code-diff', 'codeDiffFont', 'gitDiffFontSize', 12],
+					['terminal', 'terminalFont', 'terminalFontSize', 13],
+				];
+				const fontSizes = ['10', '11', '12', '13', '14', '15', '16', '18', '20'];
+				// Earlier snapshots persisted these renderer defaults as numeric selections.
+				if (!Object.hasOwn(typography, 'interfaceFontSize')) {
+					if (typography.codeEditorFontSize === '12') typography.codeEditorFontSize = 'default';
+					if (typography.gitDiffFontSize === '12') typography.gitDiffFontSize = 'default';
+					if (typography.terminalFontSize === '13') typography.terminalFontSize = 'default';
+				}
+				for (const [id, fontKey, sizeKey, defaultSize] of surfaces) {
+					const font = typography[fontKey] === 'departure-mono' ? 'departure-mono' : 'default';
+					const size = fontSizes.includes(typography[sizeKey]) ? typography[sizeKey] : 'default';
+					root.setAttribute(`data-${id}-font`, font);
+					root.setAttribute(`data-${id}-font-size`, size);
+					if (size !== 'default') root.style.setProperty(`--${id}-font-size`, `${size}px`);
+					root.style.setProperty(
+						`--${id}-font-scale`,
+						size === 'default' ? '1' : String(Number(size) / defaultSize),
+					);
+				}
 				root.classList.toggle('dark', profile.colorScheme === 'dark');
 				root.style.colorScheme = profile.colorScheme;
 				document

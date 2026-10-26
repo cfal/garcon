@@ -8,7 +8,7 @@ export function parseFontPreference(value: unknown): FontPreference {
 export function observeFontChanges(
 	root: Document,
 	onChange: () => void,
-	attributes = ['data-interface-font', 'data-monospace-font'],
+	attributes: string[],
 ): () => void {
 	const observer = new MutationObserver(onChange);
 	observer.observe(root.documentElement, { attributes: true, attributeFilter: attributes });

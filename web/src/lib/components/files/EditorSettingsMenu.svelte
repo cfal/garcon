@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { fontSizeLabel } from '$lib/components/shared/typography-labels.js';
 	import {
 		DropdownMenu,
 		DropdownMenuTrigger,
@@ -14,7 +15,7 @@
 	import Settings from '@lucide/svelte/icons/settings';
 	import { MediaQuery } from 'svelte/reactivity';
 	import { getLocalSettings } from '$lib/context';
-	import { FONT_SIZE_OPTIONS } from '$lib/utils/font-size.js';
+	import { TYPOGRAPHY_SIZE_OPTIONS, parseFontSizePreference } from '$lib/theme/typography.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	const localSettings = getLocalSettings();
@@ -36,17 +37,20 @@
 			<DropdownMenuSubTrigger>
 				<span class="flex min-w-0 flex-1 items-center justify-between gap-4">
 					<span>{m.settings_appearance_settings_code_editor_font_size_label()}</span>
-					<span class="text-xs text-muted-foreground">{localSettings.codeEditorFontSize}px</span>
+					<span class="text-xs text-muted-foreground"
+						>{fontSizeLabel(localSettings.codeEditorFontSize)}</span
+					>
 				</span>
 			</DropdownMenuSubTrigger>
 			<DropdownMenuSubContent class="w-36" side={narrow.current ? 'bottom' : 'right'} align="end">
 				<DropdownMenuRadioGroup
 					value={localSettings.codeEditorFontSize}
-					onValueChange={(value) => localSettings.set('codeEditorFontSize', value)}
+					onValueChange={(value) =>
+						localSettings.set('codeEditorFontSize', parseFontSizePreference(value))}
 				>
-					{#each FONT_SIZE_OPTIONS as size (size)}
+					{#each TYPOGRAPHY_SIZE_OPTIONS as size (size)}
 						<DropdownMenuRadioItem value={size} closeOnSelect={false}
-							>{size}px</DropdownMenuRadioItem
+							>{fontSizeLabel(size)}</DropdownMenuRadioItem
 						>
 					{/each}
 				</DropdownMenuRadioGroup>

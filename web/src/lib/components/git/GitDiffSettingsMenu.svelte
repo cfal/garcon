@@ -1,8 +1,13 @@
 <script lang="ts">
+	import { fontSizeLabel } from '$lib/components/shared/typography-labels.js';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
-	import { FONT_SIZE_OPTIONS } from '$lib/utils/font-size.js';
+	import {
+		TYPOGRAPHY_SIZE_OPTIONS,
+		parseFontSizePreference,
+		type FontSizePreference,
+	} from '$lib/theme/typography.js';
 	import Settings from '@lucide/svelte/icons/settings';
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -10,10 +15,10 @@
 	interface Props {
 		diffMode: DiffMode;
 		contextLines: number;
-		diffFontSize: string;
+		diffFontSize: FontSizePreference;
 		onSetDiffMode: (mode: DiffMode) => void;
 		onSetContextLines: (lines: number) => boolean | void;
-		onSetDiffFontSize: (size: string) => void;
+		onSetDiffFontSize: (size: FontSizePreference) => void;
 	}
 
 	let {
@@ -59,15 +64,16 @@
 				type="single"
 				value={diffFontSize}
 				onValueChange={(v) => {
-					if (v) onSetDiffFontSize(v);
+					if (v) onSetDiffFontSize(parseFontSizePreference(v));
 				}}
 			>
-				<Select.Trigger class="w-[80px]" size="sm">
-					{diffFontSize}px
+				<Select.Trigger class="w-28" size="sm">
+					{fontSizeLabel(diffFontSize)}
 				</Select.Trigger>
 				<Select.Content>
-					{#each FONT_SIZE_OPTIONS as size (size)}
-						<Select.Item value={size} label="{size}px">{size}px</Select.Item>
+					{#each TYPOGRAPHY_SIZE_OPTIONS as size (size)}
+						<Select.Item value={size} label={fontSizeLabel(size)}>{fontSizeLabel(size)}</Select.Item
+						>
 					{/each}
 				</Select.Content>
 			</Select.Root>
@@ -97,7 +103,7 @@
 		<div class="flex items-center justify-between px-4 py-2.5">
 			<div class="text-sm font-medium text-foreground">{m.git_diff_context_lines()}</div>
 			<Select.Root type="single" value={String(contextLines)} onValueChange={handleContextLines}>
-				<Select.Trigger class="w-[80px]" size="sm">
+				<Select.Trigger class="w-28" size="sm">
 					{m.git_diff_lines({ count: contextLines })}
 				</Select.Trigger>
 				<Select.Content>

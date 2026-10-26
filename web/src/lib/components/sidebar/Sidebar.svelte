@@ -157,6 +157,7 @@
 		inactivityDuration: localSettings.sidebarInactivityDuration,
 		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 		chatItemLayout: localSettings.sidebarChatItemLayout,
+		chatFontScale: (Number(localSettings.chatListFontSize) || 14) / 14,
 		showProjectPath: localSettings.sidebarShowProjectPath,
 		sortMode: localSettings.sidebarSortMode,
 		pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',

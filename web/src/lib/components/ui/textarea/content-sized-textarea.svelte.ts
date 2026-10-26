@@ -66,7 +66,7 @@ export function contentSizedTextarea(
 		const stopObservingFonts = observeFontChanges(target.ownerDocument, scheduleResize, [
 			'data-theme-appearance',
 			'data-interface-font',
-			'data-monospace-font',
+			'data-interface-font-size',
 		]);
 		return () => {
 			observer.disconnect();

@@ -1,6 +1,7 @@
 import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
+import { TYPOGRAPHY_SURFACES } from '../typography';
 import ThemeControllerTestHost from './ThemeControllerTestHost.svelte';
 import { THEME_PROFILES, type ThemePreference } from '../themes.js';
 
@@ -63,7 +64,7 @@ describe('ThemeController', () => {
 		document.documentElement.removeAttribute('data-theme');
 		document.documentElement.removeAttribute('data-theme-appearance');
 		document.documentElement.removeAttribute('data-interface-font');
-		document.documentElement.removeAttribute('data-monospace-font');
+		document.documentElement.removeAttribute('data-code-editor-font');
 		document.documentElement.className = '';
 		document.documentElement.style.cssText = `
 			--terminal-bg: 0 0% 100%;
@@ -180,15 +181,17 @@ describe('ThemeController', () => {
 		const rendered = renderController({ mode: 'fixed', themeId: 'ansi-light' });
 		await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());
 		expect(document.documentElement.dataset.interfaceFont).toBe('default');
-		expect(document.documentElement.dataset.monospaceFont).toBe('default');
-		for (const [ui, mono] of [
+		expect(document.documentElement.dataset.codeEditorFont).toBe('default');
+		for (const [interfaceFont, codeEditorFont] of [
 			['departure-mono', 'default'],
 			['default', 'departure-mono'],
 			['departure-mono', 'departure-mono'],
 		] as const) {
-			rendered.component.setFonts(ui, mono);
-			await waitFor(() => expect(document.documentElement.dataset.interfaceFont).toBe(ui));
-			expect(document.documentElement.dataset.monospaceFont).toBe(mono);
+			rendered.component.setTypography({ interfaceFont, codeEditorFont });
+			await waitFor(() =>
+				expect(document.documentElement.dataset.interfaceFont).toBe(interfaceFont),
+			);
+			expect(document.documentElement.dataset.codeEditorFont).toBe(codeEditorFont);
 			expect(document.documentElement.dataset.themeAppearance).toBe('standard');
 			expect(document.documentElement.dataset.theme).toBe('ansi-light');
 			expect(rendered.setEditorPresentation).toHaveBeenCalledOnce();
@@ -203,18 +206,40 @@ describe('ThemeController', () => {
 		const observer = new MutationObserver(() => {});
 		observer.observe(document.documentElement, { attributes: true });
 		try {
-			flushSync(() => rendered.component.setFonts('departure-mono', 'default'));
+			flushSync(() => rendered.component.setTypography({ interfaceFont: 'departure-mono' }));
 			expect(observer.takeRecords().map((record) => record.attributeName)).toEqual([
 				'data-interface-font',
 			]);
-			flushSync(() => rendered.component.setFonts('departure-mono', 'departure-mono'));
+			flushSync(() => rendered.component.setTypography({ codeEditorFont: 'departure-mono' }));
 			expect(observer.takeRecords().map((record) => record.attributeName)).toEqual([
-				'data-monospace-font',
+				'data-code-editor-font',
 			]);
 		} finally {
 			observer.disconnect();
 		}
 	});
+
+	it.each(TYPOGRAPHY_SURFACES)(
+		'projects and clears $id size without touching other surfaces',
+		async ({ id, sizeKey, defaultSize }) => {
+			installMatchMedia();
+			const rendered = renderController({ mode: 'fixed', themeId: 'ansi-light' });
+			await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());
+			flushSync(() => rendered.component.setTypography({ [sizeKey]: '20' }));
+			const root = document.documentElement;
+			expect(root.getAttribute(`data-${id}-font-size`)).toBe('20');
+			expect(root.style.getPropertyValue(`--${id}-font-size`)).toBe('20px');
+			expect(root.style.getPropertyValue(`--${id}-font-scale`)).toBe(String(20 / defaultSize));
+			for (const other of TYPOGRAPHY_SURFACES) {
+				if (other.id !== id)
+					expect(root.getAttribute(`data-${other.id}-font-size`)).toBe('default');
+			}
+			flushSync(() => rendered.component.setTypography({ [sizeKey]: 'default' }));
+			expect(root.style.getPropertyValue(`--${id}-font-size`)).toBe('');
+			expect(root.style.getPropertyValue(`--${id}-font-scale`)).toBe('1');
+			expect(rendered.setEditorPresentation).toHaveBeenCalledOnce();
+		},
+	);
 
 	it.each([
 		'--terminal-bg',

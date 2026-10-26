@@ -12,6 +12,7 @@ export interface SidebarDisplayOptions {
 	groupNestedProjectPaths: boolean;
 	chatItemLayout: ChatItemLayout;
 	showProjectPath: boolean;
+	chatFontScale?: number;
 	sortMode: SidebarSortMode;
 	pinnedInsertPosition: PinnedInsertPosition;
 }

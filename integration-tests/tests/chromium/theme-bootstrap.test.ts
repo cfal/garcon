@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { chromium } from "playwright";
+import { FONT_OPTIONS } from "../../../web/src/lib/theme/fonts";
 import {
-  FONT_OPTIONS,
-  type FontPreference,
-} from "../../../web/src/lib/theme/fonts";
+  TYPOGRAPHY_SURFACES,
+  TYPOGRAPHY_SIZE_OPTIONS,
+  TYPOGRAPHY_DEFAULTS,
+  type TypographyPreferences,
+} from "../../../web/src/lib/theme/typography";
 import {
   DEFAULT_THEME_PREFERENCE,
   THEME_PROFILES,
@@ -20,8 +23,12 @@ const STARTUP_MARKER = `<script>
 globalThis.__themeBeforeApplicationStartup = {
   themeId: document.documentElement.dataset.theme,
   appearance: document.documentElement.dataset.themeAppearance,
-  interfaceFont: document.documentElement.dataset.interfaceFont,
-  monospaceFont: document.documentElement.dataset.monospaceFont,
+  typography: Object.fromEntries(["interface","chat-list","chat-feed","chat-code","code-editor","code-diff","terminal"].map(id => [id, {
+    font: document.documentElement.getAttribute('data-' + id + '-font'),
+    size: document.documentElement.getAttribute('data-' + id + '-font-size'),
+    cssSize: document.documentElement.style.getPropertyValue('--' + id + '-font-size'),
+    scale: document.documentElement.style.getPropertyValue('--' + id + '-font-scale'),
+  }])),
   dark: document.documentElement.classList.contains('dark'),
   colorScheme: document.documentElement.style.colorScheme,
   themeColor: document.querySelector('meta[name="theme-color"]')?.getAttribute('content'),
@@ -35,8 +42,7 @@ interface ThemeScenario {
   systemColorScheme: ColorScheme;
   expectedThemeId: ThemeId;
   terminalAppearance?: boolean;
-  interfaceFont?: FontPreference;
-  monospaceFont?: FontPreference;
+  typography?: Partial<TypographyPreferences>;
   storageUnavailable?: boolean;
 }
 
@@ -91,28 +97,77 @@ const malformedSettings = [
 ] as const;
 
 const scenarios: ThemeScenario[] = [
-  ...fixedScenarios,
-  ...FONT_OPTIONS.flatMap((interfaceFont) =>
-    FONT_OPTIONS.map((monospaceFont) => ({
-      name: `fonts ${interfaceFont} and ${monospaceFont}`,
-      storedSettings: JSON.stringify({
-        interfaceFont,
-        monospaceFont,
-        terminalAppearance: true,
-      }),
-      interfaceFont,
-      monospaceFont,
-      terminalAppearance: true,
-      systemColorScheme: "light" as const,
-      expectedThemeId: defaultThemeId("light"),
-    })),
-  ),
-  ...[null, "serif", "toString", {}, [], 1].map((value) => ({
-    name: `invalid fonts ${JSON.stringify(value)}`,
+  {
+    name: "shipped explicit sizes survive renderer-default migration",
     storedSettings: JSON.stringify({
-      interfaceFont: value,
-      monospaceFont: value,
+      codeEditorFontSize: "18",
+      gitDiffFontSize: "16",
+      terminalFontSize: "15",
     }),
+    typography: {
+      codeEditorFontSize: "18",
+      gitDiffFontSize: "16",
+      terminalFontSize: "15",
+    },
+    systemColorScheme: "light",
+    expectedThemeId: defaultThemeId("light"),
+  },
+  {
+    name: "shipped renderer defaults preserve per-owner default sizes",
+    storedSettings: JSON.stringify({
+      codeEditorFontSize: "12",
+      gitDiffFontSize: "12",
+      terminalFontSize: "13",
+      chatCodeFontSize: "12",
+    }),
+    typography: { chatCodeFontSize: "12" },
+    systemColorScheme: "light",
+    expectedThemeId: defaultThemeId("light"),
+  },
+  {
+    name: "a present but invalid migration marker preserves explicit sizes",
+    storedSettings: JSON.stringify({
+      interfaceFontSize: null,
+      codeEditorFontSize: "12",
+      gitDiffFontSize: "12",
+      terminalFontSize: "13",
+    }),
+    typography: {
+      codeEditorFontSize: "12",
+      gitDiffFontSize: "12",
+      terminalFontSize: "13",
+    },
+    systemColorScheme: "light",
+    expectedThemeId: defaultThemeId("light"),
+  },
+  ...fixedScenarios,
+  ...TYPOGRAPHY_SURFACES.flatMap(({ id, fontKey, sizeKey }) =>
+    FONT_OPTIONS.flatMap((font) =>
+      TYPOGRAPHY_SIZE_OPTIONS.map((size) => ({
+        name: `${id}: ${font} at ${size}`,
+        storedSettings: JSON.stringify({
+          interfaceFontSize: "default",
+          [fontKey]: font,
+          [sizeKey]: size,
+          terminalAppearance: true,
+        }),
+        typography: { [fontKey]: font, [sizeKey]: size },
+        terminalAppearance: true,
+        systemColorScheme: "light" as const,
+        expectedThemeId: defaultThemeId("light"),
+      })),
+    ),
+  ),
+  ...[null, "serif", "toString", {}, [], 1, "99", "14px"].map((value) => ({
+    name: `invalid typography ${JSON.stringify(value)}`,
+    storedSettings: JSON.stringify(
+      Object.fromEntries(
+        TYPOGRAPHY_SURFACES.flatMap(({ fontKey, sizeKey }) => [
+          [fontKey, value],
+          [sizeKey, value],
+        ]),
+      ),
+    ),
     systemColorScheme: "light" as const,
     expectedThemeId: defaultThemeId("light"),
   })),
@@ -247,8 +302,10 @@ describe("theme bootstrap", () => {
             __themeBeforeApplicationStartup?: {
               themeId: string;
               appearance: string;
-              interfaceFont: string;
-              monospaceFont: string;
+              typography: Record<
+                string,
+                { font: string; size: string; cssSize: string; scale: string }
+              >;
               dark: boolean;
               colorScheme: string;
               themeColor: string | null;
@@ -261,8 +318,24 @@ describe("theme bootstrap", () => {
         expect(startupTheme, scenario.name).toEqual({
           themeId: expectedProfile.id,
           appearance: scenario.terminalAppearance ? "terminal" : "standard",
-          interfaceFont: scenario.interfaceFont ?? "default",
-          monospaceFont: scenario.monospaceFont ?? "default",
+          typography: Object.fromEntries(
+            TYPOGRAPHY_SURFACES.map(({ id, fontKey, sizeKey, defaultSize }) => {
+              const typography = {
+                ...TYPOGRAPHY_DEFAULTS,
+                ...scenario.typography,
+              };
+              const size = typography[sizeKey];
+              return [
+                id,
+                {
+                  font: typography[fontKey],
+                  size,
+                  cssSize: size === "default" ? "" : `${size}px`,
+                  scale: String((Number(size) || defaultSize) / defaultSize),
+                },
+              ];
+            }),
+          ),
           dark: expectedProfile.colorScheme === "dark",
           colorScheme: expectedProfile.colorScheme,
           themeColor: expectedProfile.browserThemeColor,

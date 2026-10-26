@@ -1248,6 +1248,32 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(anchoredRow.parentElement?.style.transform).toContain('translateY(1040px)');
 	});
 
+	it('preserves the normalized reading anchor when chat typography grows', async () => {
+		const rows = makeRows(60);
+		const displayOptions = {
+			grouping: 'none' as const,
+			groupNestedProjectPaths: false,
+			chatItemLayout: 'single-line' as const,
+			sortMode: 'manual' as const,
+			chatFontScale: 1,
+		};
+		const view = render(SidebarVirtualSortableChatListHost, { rows, displayOptions });
+		const viewport = document.querySelector<HTMLElement>(
+			'[data-testid="virtual-sidebar-viewport"]',
+		)!;
+		viewport.scrollTop = 810;
+		viewport.dispatchEvent(new Event('scroll'));
+		await tick();
+		await view.rerender({ rows, displayOptions: { ...displayOptions, chatFontScale: 20 / 14 } });
+		await waitFor(() => expect(viewport.scrollTop).toBe(1175));
+		viewport.dispatchEvent(new Event('scroll'));
+		await tick();
+		const row = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-20"]')!;
+		expect(row.parentElement?.style.height).toBe('58px');
+		await view.rerender({ rows, displayOptions });
+		await waitFor(() => expect(viewport.scrollTop).toBe(810));
+	});
+
 	it('leaves the scroll offset untouched for explicit row heights', async () => {
 		const view = render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(60),

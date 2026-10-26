@@ -2,10 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import GitWorktreePickerList from '../GitWorktreePickerList.svelte';
-import {
-	WORKTREE_ROW_HEIGHT,
-	worktreeOptionId,
-} from '../git-worktree-picker-list.js';
+import { WORKTREE_ROW_HEIGHT, worktreeOptionId } from '../git-worktree-picker-list.js';
 
 const LISTBOX_ID = 'worktree-list';
 
@@ -82,6 +79,47 @@ afterEach(() => {
 });
 
 describe('GitWorktreePickerList', () => {
+	it('retains the manually scrolled worktree through typography growth and shrinkage', async () => {
+		const view = renderList(makeWorktrees(5_000));
+		try {
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			const viewport = screen.getByRole('listbox', { name: 'Select worktree' });
+			viewport.scrollTop = 2_500 * WORKTREE_ROW_HEIGHT + WORKTREE_ROW_HEIGHT / 2;
+			await fireEvent.scroll(viewport);
+			document.documentElement.dataset.interfaceFontSize = '20';
+			await waitFor(() => expect(viewport.scrollTop).toBe(2_500 * 98 + 49));
+			expect(screen.getByRole('option', { name: /worktree-2500/ })).toBeTruthy();
+			expect(screen.queryByRole('option', { name: /worktree-0/ })).toBeNull();
+
+			viewport.scrollTop = 2_500 * 98 + 84;
+			await fireEvent.scroll(viewport);
+			document.documentElement.dataset.interfaceFontSize = 'default';
+			await waitFor(() =>
+				expect(viewport.scrollTop).toBeCloseTo(
+					2_500 * WORKTREE_ROW_HEIGHT + (84 / 98) * WORKTREE_ROW_HEIGHT,
+				),
+			);
+			expect(screen.getByRole('option', { name: /worktree-2500/ })).toBeTruthy();
+		} finally {
+			view.unmount();
+			delete document.documentElement.dataset.interfaceFontSize;
+		}
+	});
+
+	it('uses the Interface-scaled height for virtual worktrees and offsets', async () => {
+		const view = renderList(makeWorktrees(100));
+		try {
+			document.documentElement.dataset.interfaceFontSize = '20';
+			await waitFor(() => expect(virtualRows()[0]?.style.height).toBe('98px'));
+			expect(virtualRows()[1]?.style.transform).toBe('translateY(98px)');
+			expect(
+				view.container.querySelector<HTMLElement>('[data-worktree-virtual-list]')?.style.height,
+			).toBe('9800px');
+		} finally {
+			view.unmount();
+			delete document.documentElement.dataset.interfaceFontSize;
+		}
+	});
 	it('switches to bounded virtualization only above eighty worktrees', async () => {
 		const worktrees = makeWorktrees(81);
 		const view = renderList(worktrees.slice(0, 80));

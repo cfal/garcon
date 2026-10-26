@@ -1,30 +1,39 @@
 import { Compartment, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin } from '@codemirror/view';
-import { observeFontChanges } from './fonts.js';
+import { observeTypographyChanges } from './typography.js';
 
 export const SYSTEM_EDITOR_FONT =
 	'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
 const fontThemes = new Map<string, readonly [Extension, Extension]>();
 
-function themesFor(defaultFamily: string): readonly [Extension, Extension] {
-	let themes = fontThemes.get(defaultFamily);
+type EditorTypography = 'code-editor' | 'code-diff';
+
+function themesFor(
+	defaultFamily: string,
+	surface: EditorTypography,
+): readonly [Extension, Extension] {
+	const key = `${surface}:${defaultFamily}`;
+	let themes = fontThemes.get(key);
 	if (!themes) {
 		const create = () =>
 			EditorView.theme({
 				'.cm-scroller, .cm-content, .cm-gutters': {
-					fontFamily: `var(--monospace-font-override, ${defaultFamily})`,
+					fontFamily: `var(--${surface}-font-override, ${defaultFamily})`,
 				},
 			});
 		themes = [create(), create()];
-		fontThemes.set(defaultFamily, themes);
+		fontThemes.set(key, themes);
 	}
 	return themes;
 }
 
-export function editorFont(defaultFamily: string = 'monospace'): Extension {
+export function editorFont(
+	defaultFamily: string = 'monospace',
+	surface: EditorTypography = 'code-editor',
+): Extension {
 	const font = new Compartment();
-	const themes = themesFor(defaultFamily);
+	const themes = themesFor(defaultFamily, surface);
 	return [
 		font.of(themes[0]),
 		ViewPlugin.define((view) => {
@@ -34,7 +43,7 @@ export function editorFont(defaultFamily: string = 'monospace'): Extension {
 				view.dispatch({ effects: font.reconfigure(next) });
 			};
 			return {
-				destroy: observeFontChanges(view.dom.ownerDocument, refresh, ['data-monospace-font']),
+				destroy: observeTypographyChanges(view.dom.ownerDocument, refresh, [surface]),
 			};
 		}),
 	];

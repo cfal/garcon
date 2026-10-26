@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { fontSizeLabel } from '$lib/components/shared/typography-labels.js';
 	import {
 		DropdownMenuLabel,
 		DropdownMenuRadioGroup,
@@ -8,7 +9,11 @@
 		DropdownMenuSubTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
-	import { FONT_SIZE_OPTIONS } from '$lib/utils/font-size.js';
+	import {
+		TYPOGRAPHY_SIZE_OPTIONS,
+		parseFontSizePreference,
+		type FontSizePreference,
+	} from '$lib/theme/typography.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -21,10 +26,10 @@
 	}: {
 		diffMode: DiffMode;
 		contextLines: number;
-		diffFontSize: string;
+		diffFontSize: FontSizePreference;
 		onSetDiffMode: (mode: DiffMode) => void;
 		onSetContextLines: (lines: number) => boolean | void;
-		onSetDiffFontSize: (size: string) => void;
+		onSetDiffFontSize: (size: FontSizePreference) => void;
 	} = $props();
 
 	const contextOptions = [3, 5, 10, 20] as const;
@@ -49,14 +54,19 @@
 	<DropdownMenuSubTrigger>
 		<span class="flex min-w-0 flex-1 items-center justify-between gap-4">
 			<span>{m.git_diff_font_size()}</span>
-			<span class="text-xs text-muted-foreground">{diffFontSize}px</span>
+			<span class="text-xs text-muted-foreground"
+				>{fontSizeLabel(diffFontSize)}</span
+			>
 		</span>
 	</DropdownMenuSubTrigger>
 	<DropdownMenuSubContent class="w-36">
-		<DropdownMenuRadioGroup value={diffFontSize} onValueChange={onSetDiffFontSize}>
-			{#each FONT_SIZE_OPTIONS as size (size)}
+		<DropdownMenuRadioGroup
+			value={diffFontSize}
+			onValueChange={(value) => onSetDiffFontSize(parseFontSizePreference(value))}
+		>
+			{#each TYPOGRAPHY_SIZE_OPTIONS as size (size)}
 				<DropdownMenuRadioItem value={size} closeOnSelect={false}>
-					{size}px
+					{fontSizeLabel(size)}
 				</DropdownMenuRadioItem>
 			{/each}
 		</DropdownMenuRadioGroup>

@@ -1,4 +1,9 @@
 import * as m from '$lib/paraglide/messages.js';
+import {
+	fontControlLabel,
+	fontSizeControlLabel,
+} from '$lib/components/shared/typography-labels.js';
+import { TYPOGRAPHY_SURFACES } from '$lib/theme/typography.js';
 import { CONFIGURABLE_SHORTCUTS, SLASH_COMMANDS } from './keyboard-shortcut-entries';
 import type { SettingsTab } from '$lib/stores/app-shell.svelte';
 
@@ -22,22 +27,29 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			section: m.settings_tab_authentication(),
 		})),
 		...[
-			m.settings_tab_interface(),
+			m.settings_tab_appearance(),
+			m.settings_theme_title(),
+			m.settings_ui_style(),
+			m.settings_typography(),
 			m.settings_highlight_active_window(),
 			m.settings_fullscreen_covers_sidebar(),
 			m.settings_workspace_titlebar_size(),
 			m.settings_chat_max_width(),
 			m.settings_inline_image_thumbnail_size(),
-			m.settings_image_cache_size(),
 			m.settings_inline_mermaid_thumbnail_size(),
-			m.settings_sidebar_inactivity_duration(),
 			m.settings_overlay_backdrop_effects(),
+			m.settings_chat_reduce_motion(),
+			...TYPOGRAPHY_SURFACES.flatMap(({ id }) => [fontControlLabel(id), fontSizeControlLabel(id)]),
+		].map((label) => ({ tab: 'appearance' as const, label, section: m.settings_tab_appearance() })),
+		...[
+			m.settings_tab_behavior(),
+			m.settings_image_cache_size(),
+			m.settings_sidebar_inactivity_duration(),
 			m.settings_chat_auto_expand_tools(),
 			m.settings_chat_combine_tool_use_messages(),
 			m.settings_chat_always_expand_cli_messages(),
 			m.settings_chat_show_thinking(),
 			m.settings_chat_allow_direct_chats(),
-			m.settings_chat_reduce_motion(),
 			m.settings_chat_hidden_tools(),
 			m.settings_chat_show_quick_commit_tray(),
 			m.settings_chat_auto_scroll_to_bottom(),
@@ -48,12 +60,8 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			m.settings_markdown_viewer_open_placement(),
 			m.settings_file_recovery_title(),
 			m.onboarding_setup_wizard_label(),
-			m.settings_theme_title(),
-			m.settings_appearance(),
-			m.settings_font(),
-			m.settings_monospace_font(),
 			m.settings_completion_sound_title(),
-		].map((label) => ({ tab: 'interface' as const, label, section: m.settings_tab_interface() })),
+		].map((label) => ({ tab: 'behavior' as const, label, section: m.settings_tab_behavior() })),
 		...[
 			m.settings_tab_shortcuts(),
 			m.settings_chat_send_by_shift_enter(),

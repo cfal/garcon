@@ -11,6 +11,7 @@ import {
 	type GitHistoryListPosition,
 } from '$lib/git/history/git-history.svelte.js';
 import GitCommitListScreen from '../GitCommitListScreen.svelte';
+import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import {
 	GIT_HISTORY_ESTIMATED_ROW_HEIGHT,
 	retainedGitHistoryFocusRange,
@@ -129,6 +130,31 @@ function nextFrame(): Promise<void> {
 }
 
 describe('GitCommitListVirtualController', () => {
+	it('resets typography measurements around the current commit', async () => {
+		const apply = vi.spyOn(VirtualListController.prototype, 'apply');
+		const view = renderList(commits(200));
+		try {
+			const list = mockViewportGeometry(view.container);
+			await nextFrame();
+			list.scrollTop = 640;
+			await fireEvent.scroll(list);
+			apply.mockClear();
+			document.documentElement.dataset.interfaceFontSize = '20';
+			await waitFor(() =>
+				expect(apply).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: 'reset-measurements',
+						anchor: { kind: 'item', key: commit(10).hash },
+						estimates: Array(200).fill(92),
+					}),
+				),
+			);
+		} finally {
+			view.unmount();
+			apply.mockRestore();
+			delete document.documentElement.dataset.interfaceFontSize;
+		}
+	});
 	let restoreResizeObserver: () => void;
 
 	beforeEach(() => {

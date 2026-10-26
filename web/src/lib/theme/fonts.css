@@ -9,11 +9,168 @@
 :root:where([data-interface-font='departure-mono']) {
 	--font-sans: 'Departure Mono', ui-monospace, 'Cascadia Mono', 'Noto Sans Mono', monospace;
 	--interface-font-override: var(--font-sans);
+	--font-mono: var(--font-sans);
 }
 
-:root:where([data-monospace-font='departure-mono']) {
-	--font-mono:
-		'Departure Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-		'Courier New', monospace;
-	--monospace-font-override: var(--font-mono);
+:root {
+	--system-ui-font:
+		-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+	--system-code-font:
+		ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+		monospace;
+	--chat-list-font-family: var(--system-ui-font);
+	--chat-feed-font-family: var(--system-ui-font);
+	--chat-code-font-family: var(--system-code-font);
+	--chat-output-font-family: var(--system-ui-font);
+	--code-diff-font-family: var(--system-code-font);
+	--text-scale: var(--interface-font-scale, 1);
+}
+
+:root:where([data-chat-list-font='departure-mono']) {
+	--chat-list-font-family: 'Departure Mono', var(--system-ui-font);
+}
+:root:where([data-chat-feed-font='departure-mono']) {
+	--chat-feed-font-family: 'Departure Mono', var(--system-ui-font);
+}
+:root:where([data-chat-code-font='departure-mono']) {
+	--chat-code-font-family: 'Departure Mono', var(--system-code-font);
+	--chat-output-font-family: 'Departure Mono', var(--system-ui-font);
+}
+:root:where([data-code-editor-font='departure-mono']) {
+	--code-editor-font-override: 'Departure Mono', var(--system-code-font);
+}
+:root:where([data-code-diff-font='departure-mono']) {
+	--code-diff-font-family: 'Departure Mono', var(--system-code-font);
+	--code-diff-font-override: var(--code-diff-font-family);
+}
+
+body {
+	font-size: calc(1rem * var(--text-scale));
+}
+
+/* Absolute-size labels retain their hierarchy without scaling rem-based spacing. */
+[class~='text-[9px]'] {
+	font-size: calc(9px * var(--text-scale, 1));
+}
+[class~='text-[10px]'] {
+	font-size: calc(10px * var(--text-scale, 1));
+}
+[class~='text-[10.5px]'] {
+	font-size: calc(10.5px * var(--text-scale, 1));
+}
+[class~='text-[11px]'] {
+	font-size: calc(11px * var(--text-scale, 1));
+}
+[class~='text-[12px]'] {
+	font-size: calc(12px * var(--text-scale, 1));
+}
+[class~='text-[13px]'] {
+	font-size: calc(13px * var(--text-scale, 1));
+}
+[class~='text-[14px]'] {
+	font-size: calc(14px * var(--text-scale, 1));
+}
+[class~='text-[16px]'] {
+	font-size: calc(16px * var(--text-scale, 1));
+}
+
+[data-typography-chat-list] {
+	--text-scale: var(--chat-list-font-scale, 1);
+	--font-sans: var(--chat-list-font-family);
+	--font-mono: var(--system-code-font);
+	font-family: var(--chat-list-font-family);
+	font-size: calc(14px * var(--text-scale));
+	line-height: calc(20px * var(--text-scale));
+}
+
+[data-chat-feed-content] .markdown-body,
+.typography-chat-prose {
+	--text-scale: var(--chat-feed-font-scale, 1);
+	--font-sans: var(--chat-feed-font-family);
+	--font-mono: var(--chat-code-font-family);
+	font-family: var(--chat-feed-font-family);
+	font-size: var(--chat-feed-font-size, 14px);
+	line-height: 1.4285714;
+}
+
+[data-chat-feed-content] .markdown-body {
+	line-height: 1.7142857;
+}
+
+[data-chat-feed-content] .markdown-body th,
+[data-chat-feed-content] .markdown-body td {
+	font-size: var(--chat-feed-font-size, 14px);
+}
+
+[data-chat-feed-content] .markdown-body :not(pre) > code,
+.typography-chat-inline-code {
+	font-family: var(--chat-code-font-family);
+}
+
+.typography-chat-plain {
+	font-family: var(--chat-code-font-family);
+	font-size: inherit;
+}
+
+[data-chat-feed-content] .markdown-code-block pre,
+.typography-chat-code {
+	--text-scale: var(--chat-code-font-scale, 1);
+	--font-mono: var(--chat-code-font-family);
+	font-family: var(--chat-code-font-family);
+	font-size: var(--chat-code-font-size, var(--chat-code-default-size, 12px));
+}
+
+[data-chat-feed-content] .markdown-code-block pre > code {
+	font-family: inherit;
+}
+
+.typography-chat-output {
+	--text-scale: var(--chat-code-font-scale, 1);
+	font-family: var(--chat-output-font-family);
+	font-size: var(--chat-code-font-size, 14px);
+	line-height: 1.4285714;
+}
+
+:root:where([data-chat-list-font='departure-mono']) [data-typography-chat-list] {
+	--font-mono: var(--chat-list-font-family);
+}
+
+.typography-code-diff {
+	--text-scale: 1;
+	--font-mono: var(--code-diff-font-family);
+	font-family: var(--code-diff-font-family);
+}
+
+.typography-inline-diff {
+	font-size: var(--code-diff-font-size, 11px);
+	line-height: max(18px, calc(var(--code-diff-font-size, 11px) * 1.5));
+}
+
+[data-chat-feed-content] .markdown-code-block > div {
+	--text-scale: var(--interface-font-scale, 1);
+	font-family: var(--interface-font-override, var(--system-ui-font));
+}
+
+[data-typography-chat-list] .leading-4 {
+	line-height: calc(16px * var(--text-scale));
+}
+
+[data-typography-conflict] .cm-scroller {
+	font-size: var(--code-diff-font-size, 13px);
+}
+
+@media (pointer: coarse) {
+	[data-typography-conflict] .cm-scroller {
+		font-size: max(16px, var(--code-diff-font-size, 13px));
+	}
+}
+
+@media (pointer: coarse) {
+	:where(input, textarea, select):not([type='checkbox'], [type='radio'], [type='range']) {
+		font-size: max(16px, calc(14px * var(--interface-font-scale, 1)));
+	}
+
+	[data-composer-markdown-editor] {
+		font-size: max(16px, calc(16px * var(--interface-font-scale, 1)));
+	}
 }

@@ -1,4 +1,5 @@
 import { tick, untrack } from 'svelte';
+import { observeTypographyChanges, readTypographyScale } from '$lib/theme/typography.js';
 import type { Attachment } from 'svelte/attachments';
 import type { GitHistoryCommitListItem } from '$lib/api/git.js';
 import type {
@@ -67,6 +68,7 @@ export class GitCommitListVirtualController {
 	readonly sizer: Attachment<HTMLElement>;
 
 	#virt: VirtualListController;
+	#estimatedRowHeight = $state(GIT_HISTORY_ESTIMATED_ROW_HEIGHT);
 	#virtualCommits: readonly GitHistoryCommitListItem[] = [];
 	#indexByHash = new Map<string, number>();
 	#virtualScrollElement: HTMLDivElement | null = null;
@@ -98,7 +100,29 @@ export class GitCommitListVirtualController {
 		});
 		this.viewport = this.#virt.viewport;
 		this.sizer = this.#virt.sizer;
+		this.#estimatedRowHeight = Math.ceil(
+			GIT_HISTORY_ESTIMATED_ROW_HEIGHT * Math.max(1, readTypographyScale(document, 'interface')),
+		);
 		this.#applyVirtualSource('replace');
+		$effect(() =>
+			observeTypographyChanges(document, () => {
+				const position = this.#virt.viewportPosition;
+				const anchor = position
+					? this.#virt.snapshot.positions.itemAtOffset(position.paintedOffset)
+					: undefined;
+				this.#estimatedRowHeight = Math.ceil(
+					GIT_HISTORY_ESTIMATED_ROW_HEIGHT *
+						Math.max(1, readTypographyScale(document, 'interface')),
+				);
+				this.#virt.apply({
+					kind: 'reset-measurements',
+					keys: this.#virtualCommits.map((commit) => commit.hash),
+					estimates: this.#virtualCommits.map(() => this.#estimatedRowHeight),
+					anchor: anchor ? { kind: 'item', key: anchor.key } : { kind: 'none' },
+				});
+				this.#virt.remeasureAll();
+			}, ['interface']),
+		);
 
 		$effect(() => {
 			const commits = options.commits;
@@ -246,7 +270,7 @@ export class GitCommitListVirtualController {
 
 	get #pageSize(): number {
 		const height = this.options.viewport?.clientHeight || FALLBACK_VIEWPORT_HEIGHT;
-		return Math.max(1, Math.floor(height / GIT_HISTORY_ESTIMATED_ROW_HEIGHT));
+		return Math.max(1, Math.floor(height / this.#estimatedRowHeight));
 	}
 
 	#fallbackRange(snapshot: VirtualListSnapshot): VirtualRange | null {
@@ -255,7 +279,7 @@ export class GitCommitListVirtualController {
 		const offset = viewport?.scrollTop ?? 0;
 		const start = snapshot.positions.itemAtOffset(offset)?.index ?? 0;
 		const visibleCount = Math.ceil(
-			(viewport?.clientHeight || FALLBACK_VIEWPORT_HEIGHT) / GIT_HISTORY_ESTIMATED_ROW_HEIGHT,
+			(viewport?.clientHeight || FALLBACK_VIEWPORT_HEIGHT) / this.#estimatedRowHeight,
 		);
 		return {
 			startIndex: Math.max(0, start - GIT_HISTORY_VIRTUAL_OVERSCAN),
@@ -311,7 +335,7 @@ export class GitCommitListVirtualController {
 			keys: this.#virtualCommits.map((commit) => commit.hash),
 			estimates: Array.from(
 				{ length: this.#virtualCommits.length },
-				() => GIT_HISTORY_ESTIMATED_ROW_HEIGHT,
+				() => this.#estimatedRowHeight,
 			),
 			anchor: { kind: 'none' },
 		});

@@ -103,7 +103,7 @@ export class PromptEditorController {
 					},
 					'&.cm-focused': { outline: 'none' },
 					'.cm-scroller': {
-						fontSize: '16px',
+						fontSize: 'max(16px, var(--code-editor-font-size, 14px))',
 						lineHeight: '1.55',
 						overflow: 'auto',
 					},
@@ -120,7 +120,7 @@ export class PromptEditorController {
 							backgroundColor: 'var(--editor-selection-background)',
 						},
 					'@media (pointer: fine)': {
-						'.cm-scroller': { fontSize: '14px' },
+						'.cm-scroller': { fontSize: 'var(--code-editor-font-size, 14px)' },
 					},
 				}),
 			],

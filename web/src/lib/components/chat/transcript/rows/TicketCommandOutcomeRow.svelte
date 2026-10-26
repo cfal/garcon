@@ -37,7 +37,10 @@
 
 <ChatEventCard variant={detail.status === 'error' ? 'error' : 'info'} compact>
 	{#snippet body()}
-		<div class="text-sm whitespace-pre-wrap break-words" data-ticket-command={detail.command}>
+		<div
+			class="typography-chat-prose text-sm whitespace-pre-wrap break-words"
+			data-ticket-command={detail.command}
+		>
 			{#each parts as part, index (index)}
 				{#if part.kind === 'ticket'}
 					{#if onOpenTicket}
@@ -53,7 +56,8 @@
 						<span class="font-medium">{part.ticketId}</span>
 					{/if}
 				{:else if part.kind === 'code'}
-					<code class="rounded bg-muted px-1 font-mono text-[0.9em] [overflow-wrap:anywhere]"
+					<code
+						class="typography-chat-inline-code rounded bg-muted px-1 font-mono text-[0.9em] [overflow-wrap:anywhere]"
 						>{part.text}</code
 					>
 				{:else}{part.text}{/if}

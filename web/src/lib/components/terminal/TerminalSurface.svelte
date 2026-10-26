@@ -194,12 +194,12 @@
 
 	$effect(() => {
 		const retainedRuntime = runtime;
-		const fontSize = Number(localSettings.terminalFontSize);
+		const fontSize = Number(localSettings.terminalFontSize) || 13;
 		retainedRuntime?.applyFontSize(fontSize);
 	});
 
 	$effect(() => {
-		runtime?.applyMonospaceFont(localSettings.monospaceFont);
+		runtime?.applyFontPreference(localSettings.terminalFont);
 	});
 
 	$effect(() => {

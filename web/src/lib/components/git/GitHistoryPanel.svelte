@@ -44,7 +44,7 @@
 	);
 	const projectPath = $derived(controller.target.activeProjectPath);
 	const activeTarget = $derived(controller.target.activeTarget ?? controller.target.fallbackTarget);
-	const diffFontSize = $derived(Number.parseInt(localSettings.gitDiffFontSize, 10) || 12);
+	const diffFontSize = $derived(localSettings.gitDiffFontSize);
 	const closeDisabled = $derived(
 		workspace.isSurfaceCloseBlocked(singletonSurfaceId('git-history')),
 	);

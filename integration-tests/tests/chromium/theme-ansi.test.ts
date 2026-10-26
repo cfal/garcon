@@ -429,12 +429,12 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
     );
     const originalFont = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
     const appearance = page.getByRole('combobox', {
-      name: 'Appearance',
+      name: 'UI Style',
       exact: true,
     });
-    const font = page.getByRole('combobox', { name: 'Font', exact: true });
+    const font = page.getByRole('combobox', { name: 'Interface Font', exact: true });
     const mono = page.getByRole('combobox', {
-      name: 'Monospace Font',
+      name: 'Chat Code & Output Font',
       exact: true,
     });
     await browserExpect(appearance).toHaveValue('default');

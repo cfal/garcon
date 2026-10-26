@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import type { FontPreference } from './fonts.js';
+import { TYPOGRAPHY_SURFACES, type TypographyPreferences } from './typography.js';
 import {
 	getThemeProfile,
 	resolveThemeId,
@@ -17,8 +17,7 @@ const SYSTEM_DARK_MODE_QUERY = '(prefers-color-scheme: dark)';
 export interface ThemeControllerDeps {
 	readonly getPreference: () => ThemePreference;
 	readonly getTerminalAppearance: () => boolean;
-	readonly getInterfaceFont: () => FontPreference;
-	readonly getMonospaceFont: () => FontPreference;
+	readonly typography: TypographyPreferences;
 	readonly setTerminalPresentation: (
 		presentation: ThemeRendererPresentation & TerminalThemeColors,
 	) => void;
@@ -42,13 +41,26 @@ export class ThemeController {
 	#reportedMissingTerminalThemeIds = new Set<ThemeId>();
 
 	constructor(private readonly deps: ThemeControllerDeps) {
-		$effect(() => {
-			document.documentElement.dataset.interfaceFont = this.deps.getInterfaceFont();
-		});
-
-		$effect(() => {
-			document.documentElement.dataset.monospaceFont = this.deps.getMonospaceFont();
-		});
+		for (const { id, fontKey, sizeKey, defaultSize } of TYPOGRAPHY_SURFACES) {
+			$effect(() => {
+				const root = document.documentElement;
+				const attribute = `data-${id}-font`;
+				const font = this.deps.typography[fontKey];
+				if (root.getAttribute(attribute) !== font) root.setAttribute(attribute, font);
+			});
+			$effect(() => {
+				const root = document.documentElement;
+				const size = this.deps.typography[sizeKey];
+				if (size === 'default') root.style.removeProperty(`--${id}-font-size`);
+				else root.style.setProperty(`--${id}-font-size`, `${size}px`);
+				root.style.setProperty(
+					`--${id}-font-scale`,
+					String(size === 'default' ? 1 : Number(size) / defaultSize),
+				);
+				const attribute = `data-${id}-font-size`;
+				if (root.getAttribute(attribute) !== size) root.setAttribute(attribute, size);
+			});
+		}
 
 		$effect(() => {
 			document.documentElement.dataset.themeAppearance = this.deps.getTerminalAppearance()

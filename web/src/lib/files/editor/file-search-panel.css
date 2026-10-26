@@ -12,7 +12,7 @@
 	background: hsl(var(--card));
 	color: hsl(var(--foreground));
 	font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
-	font-size: 12px;
+	font-size: calc(12px * var(--interface-font-scale, 1));
 	line-height: 1.4;
 }
 
@@ -45,7 +45,7 @@
 	background: hsl(var(--background));
 	color: hsl(var(--foreground));
 	font: inherit;
-	font-size: 13px;
+	font-size: calc(13px * var(--interface-font-scale, 1));
 	outline: none;
 }
 
@@ -181,7 +181,7 @@
 
 @media (pointer: coarse) {
 	.cm-editor .cm-file-search input.cm-file-search-input {
-		font-size: 16px;
+		font-size: max(16px, calc(13px * var(--interface-font-scale, 1)));
 		min-height: 36px;
 	}
 	.cm-editor .cm-file-search .cm-file-search-button,

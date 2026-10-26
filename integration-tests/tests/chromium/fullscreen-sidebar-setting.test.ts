@@ -5,10 +5,10 @@ import type { Locator, Page } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
-async function openInterfaceSettings(page: Page): Promise<Locator> {
-  await page.keyboard.press('Control+,');
-  const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
-  await settings.getByRole('tab', { name: 'Interface', exact: true }).click();
+async function openAppearanceSettings(page: Page): Promise<Locator> {
+  await page.keyboard.press("Control+,");
+  const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+  await settings.getByRole("tab", { name: "Appearance", exact: true }).click();
   return settings;
 }
 
@@ -83,7 +83,7 @@ test('fullscreen sidebar setting persists, resizes on either dock, and yields to
       await composer.press('Control+Shift+F');
       await expectFullscreenBounds(page, 'hidden');
 
-      const settings = await openInterfaceSettings(page);
+      const settings = await openAppearanceSettings(page);
       const closeSettings = settings.getByRole('button', {
         name: 'Close',
         exact: true,
@@ -155,7 +155,7 @@ test('fullscreen sidebar setting persists, resizes on either dock, and yields to
       await fullscreen.click();
 
       await toggleSidebarOption(page, 'Autohide sidebar');
-      await openInterfaceSettings(page);
+      await openAppearanceSettings(page);
       expect(await coverage.isDisabled()).toBe(true);
       expect(await coverage.getAttribute('aria-checked')).toBe('false');
       await closeSettings.click();
@@ -167,7 +167,7 @@ test('fullscreen sidebar setting persists, resizes on either dock, and yields to
         .getByRole('button', { name: 'Show chat sidebar', exact: true })
         .press('Enter');
       await toggleSidebarOption(page, 'Autohide sidebar');
-      await openInterfaceSettings(page);
+      await openAppearanceSettings(page);
       expect(await coverage.isEnabled()).toBe(true);
       expect(await coverage.getAttribute('aria-checked')).toBe('false');
       await closeSettings.click();

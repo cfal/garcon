@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import { observeFontChanges } from '$lib/theme/fonts.js';
+import { observeTypographyChanges } from '$lib/theme/typography.js';
 import type { Attachment } from 'svelte/attachments';
 import type { ConversationNativeScrollActivity } from '$lib/chat/transcript/conversation-native-scroll-settlement.js';
 import type {
@@ -56,6 +56,7 @@ const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
 const MAX_SETTLE_ITERATIONS = 8;
 const MAX_TARGET_READY_ITERATIONS = 180;
 const OFFSET_TOLERANCE_PX = 0.5;
+const FONT_SCOPES = ['interface', 'chat-feed', 'chat-code', 'code-diff'] as const;
 
 interface ConversationFeedVirtualControllerOptions {
 	get model(): ConversationVirtualFeedModel;
@@ -159,7 +160,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		$effect(() => this.#acknowledgeData(options.projectedDataRevision));
 		$effect(() => this.#publishPinned(options.pinned));
 		$effect(() => this.#publishVisibility(options.visible));
-		$effect(() => observeFontChanges(document, () => this.#invalidateMeasurements()));
+		$effect(() =>
+			observeTypographyChanges(document, () => this.#invalidateMeasurements(), FONT_SCOPES),
+		);
 		$effect(() => {
 			void options.viewport;
 			void options.virtualRoot;

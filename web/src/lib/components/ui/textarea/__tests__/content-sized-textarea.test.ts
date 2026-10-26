@@ -120,7 +120,7 @@ describe('content-sized textarea', () => {
 			document.documentElement.dataset.interfaceFont = 'departure-mono';
 			await waitFor(() => expect(textarea.style.height).toBe('96px'));
 			measuredHeight = 64;
-			document.documentElement.dataset.monospaceFont = 'departure-mono';
+			document.documentElement.dataset.interfaceFontSize = '18';
 			await waitFor(() => expect(textarea.style.height).toBe('64px'));
 			unmount();
 			const request = vi.spyOn(globalThis, 'requestAnimationFrame');
@@ -128,6 +128,10 @@ describe('content-sized textarea', () => {
 			expect(request).not.toHaveBeenCalled();
 			request.mockRestore();
 		} finally {
+			cleanup();
+			document.documentElement.removeAttribute('data-theme-appearance');
+			document.documentElement.removeAttribute('data-interface-font');
+			document.documentElement.removeAttribute('data-interface-font-size');
 			if (descriptor) Object.defineProperty(document, 'fonts', descriptor);
 			else Reflect.deleteProperty(document, 'fonts');
 		}

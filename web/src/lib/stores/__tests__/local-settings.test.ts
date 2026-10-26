@@ -59,12 +59,12 @@ describe('LocalSettingsStore', () => {
 				JSON.stringify({
 					terminalAppearance: true,
 					interfaceFont: value,
-					monospaceFont: value,
+					chatCodeFont: value,
 				}),
 			);
 			const store = createLocalSettingsStore();
 			expect(store.interfaceFont).toBe(value === 'departure-mono' ? value : 'default');
-			expect(store.monospaceFont).toBe(store.interfaceFont);
+			expect(store.chatCodeFont).toBe(store.interfaceFont);
 			expect(store.terminalAppearance).toBe(true);
 			store.destroy();
 		},
@@ -75,21 +75,21 @@ describe('LocalSettingsStore', () => {
 		store.set('interfaceFont', 'departure-mono');
 		const restored = createLocalSettingsStore();
 		expect(restored.interfaceFont).toBe('departure-mono');
-		expect(restored.monospaceFont).toBe('default');
-		store.set('monospaceFont', 'departure-mono');
+		expect(restored.chatCodeFont).toBe('default');
+		store.set('chatCodeFont', 'departure-mono');
 		window.dispatchEvent(
 			new StorageEvent('storage', {
 				key: LOCAL_STORAGE_KEYS.localSettings,
 				storageArea: localStorage,
 			}),
 		);
-		expect(restored.monospaceFont).toBe('departure-mono');
+		expect(restored.chatCodeFont).toBe('departure-mono');
 		expect(restored.terminalAppearance).toBe(false);
 		expect(restored.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
 		localStorage.clear();
 		window.dispatchEvent(new StorageEvent('storage', { key: null, storageArea: localStorage }));
 		expect(restored.interfaceFont).toBe('default');
-		expect(restored.monospaceFont).toBe('default');
+		expect(restored.chatCodeFont).toBe('default');
 		store.destroy();
 		restored.destroy();
 	});
@@ -126,7 +126,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.textEditorOpenPlacement).toBe('same-window');
 		expect(store.imageViewerOpenPlacement).toBe('same-window');
 		expect(store.markdownViewerOpenPlacement).toBe('same-window');
-		expect(store.terminalFontSize).toBe('13');
+		expect(store.terminalFontSize).toBe('default');
 		expect(store.hiddenToolTypes).toEqual([]);
 		expect(store.steerWithCtrlEnter).toBe(true);
 		expect(store.codeEditorVimMode).toBe(false);
@@ -805,7 +805,7 @@ describe('LocalSettingsStore', () => {
 
 		const store = createLocalSettingsStore();
 
-		expect(store.terminalFontSize).toBe('13');
+		expect(store.terminalFontSize).toBe('default');
 		store.destroy();
 	});
 

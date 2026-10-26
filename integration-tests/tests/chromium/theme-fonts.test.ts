@@ -5,12 +5,18 @@ import { expect as browserExpect } from "playwright/test";
 import type { Page } from "playwright";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
 import { clickWorkspaceWindowAddAction } from "../../support/chromium-workspace.js";
+import {
+  TYPOGRAPHY_SURFACES,
+  type FontSettingKey,
+  type FontSizeSettingKey,
+  type FontSizePreference,
+} from "../../../web/src/lib/theme/typography.js";
 import type { FontPreference } from "../../../web/src/lib/theme/fonts.js";
 
 async function setFont(
   page: Page,
-  key: "interfaceFont" | "monospaceFont",
-  value: FontPreference,
+  key: FontSettingKey | FontSizeSettingKey,
+  value: FontPreference | FontSizePreference,
 ) {
   await page.evaluate(
     ({ key, value }) => {
@@ -29,10 +35,14 @@ async function setFont(
     },
     { key, value },
   );
-  await browserExpect(page.locator("html")).toHaveAttribute(
-    key === "interfaceFont" ? "data-interface-font" : "data-monospace-font",
-    value,
-  );
+  const surface = TYPOGRAPHY_SURFACES.find(
+    (surface) => surface.fontKey === key || surface.sizeKey === key,
+  )!;
+  const attribute =
+    key === surface.sizeKey
+      ? `data-${surface.id}-font-size`
+      : `data-${surface.id}-font`;
+  await browserExpect(page.locator("html")).toHaveAttribute(attribute, value);
   await page.evaluate(() => document.fonts.ready);
 }
 
@@ -79,7 +89,7 @@ test("independent fonts preserve an edited file and undo history", async () => {
           (element) => getComputedStyle(element).fontFamily,
         ),
       ).toBe(originalFont);
-      await setFont(page, "monospaceFont", "departure-mono");
+      await setFont(page, "codeEditorFont", "departure-mono");
       await browserExpect
         .poll(() =>
           content.evaluate((element) => getComputedStyle(element).fontFamily),
@@ -95,6 +105,10 @@ test("independent fonts preserve an edited file and undo history", async () => {
       expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(
         selection,
       );
+      await setFont(page, "codeEditorFontSize", "18");
+      await browserExpect(content).toHaveCSS("font-size", "18px");
+      await setFont(page, "interfaceFontSize", "20");
+      await browserExpect(content).toHaveCSS("font-size", "18px");
       await setFont(page, "interfaceFont", "default");
       expect(
         await page.evaluate(() => getComputedStyle(document.body).fontFamily),
@@ -106,12 +120,69 @@ test("independent fonts preserve an edited file and undo history", async () => {
         .toContain("Departure Mono");
       await content.press("Control+z");
       await browserExpect(content).toHaveText("Synthetic retained document");
-      await setFont(page, "monospaceFont", "default");
+      await setFont(page, "codeEditorFont", "default");
       await browserExpect(content).toHaveCSS("font-family", originalFont);
       await browserExpect(editor).toHaveAttribute(
         "data-retained-font-editor",
         "true",
       );
+      assertNoBrowserErrors();
+    },
+  );
+}, 60_000);
+
+test("standalone Markdown keeps its own typography while Interface and chat fonts change", async () => {
+  await withChromiumFixture(
+    "standalone Markdown typography",
+    async ({ page, integration, assertNoBrowserErrors }) => {
+      const filename = "typography.md";
+      await writeFile(
+        join(integration.dirs.project, filename),
+        "Synthetic prose with `inline code`.\n\n```js\nconst example = 1;\n```\n",
+      );
+      const chatId = integration.newChatId();
+      const started = await integration.client.startDirectChat({
+        chatId,
+        content: "Synthetic Markdown fixture",
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(chatId, started.turnId);
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      await page
+        .locator("[data-file-tree-entry-text]")
+        .filter({ hasText: filename })
+        .click();
+      const viewer = page.locator(".markdown-viewer-content");
+      await browserExpect(viewer).toBeVisible();
+      await viewer.evaluate((element) =>
+        element.setAttribute("data-retained-viewer", "true"),
+      );
+      const prose = viewer.locator(".markdown-body > div").first();
+      const inline = prose.locator("code");
+      const block = viewer.locator("pre code");
+      const fonts = await Promise.all(
+        [prose, inline, block].map((locator) =>
+          locator.evaluate((element) => getComputedStyle(element).fontFamily),
+        ),
+      );
+      await setFont(page, "interfaceFont", "departure-mono");
+      await setFont(page, "interfaceFontSize", "20");
+      await setFont(page, "chatFeedFont", "departure-mono");
+      await setFont(page, "chatFeedFontSize", "18");
+      await setFont(page, "chatCodeFont", "departure-mono");
+      await setFont(page, "chatCodeFontSize", "20");
+      for (const [index, locator] of [prose, inline, block].entries()) {
+        await browserExpect(locator).toHaveCSS("font-family", fonts[index]);
+        await browserExpect(locator).toHaveCSS("font-size", "12px");
+      }
+      await browserExpect(viewer).toHaveAttribute(
+        "data-retained-viewer",
+        "true",
+      );
+      await browserExpect(
+        viewer.locator(".markdown-code-block > div"),
+      ).toHaveCSS("font-family", /Departure Mono/);
       assertNoBrowserErrors();
     },
   );
@@ -143,7 +214,7 @@ test("terminal fonts update without clearing output or replacing the shell", asy
       );
       await setFont(page, "interfaceFont", "departure-mono");
       await browserExpect(rows).toHaveCSS("font-family", originalFont);
-      await setFont(page, "monospaceFont", "departure-mono");
+      await setFont(page, "terminalFont", "departure-mono");
       await browserExpect
         .poll(() =>
           rows.evaluate((element) => getComputedStyle(element).fontFamily),
@@ -162,7 +233,9 @@ test("terminal fonts update without clearing output or replacing the shell", asy
       await browserExpect(terminal.locator(".xterm-screen")).toContainText(
         "shell-retained",
       );
-      await setFont(page, "monospaceFont", "default");
+      await setFont(page, "terminalFontSize", "18");
+      await browserExpect(rows).toHaveCSS("font-size", "18px");
+      await setFont(page, "terminalFont", "default");
       await browserExpect(rows).toHaveCSS("font-family", originalFont);
       await browserExpect(terminal).toHaveAttribute(
         "data-retained-font-terminal",

@@ -33,7 +33,9 @@ describe('OnboardingWizard', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: "You're all set" });
 		expect(
-			screen.getByText('Your preferences are saved. Adjust them anytime in Settings > Interface.'),
+			screen.getByText(
+				'Your preferences are saved. Adjust them anytime in Settings > Appearance or Behavior.',
+			),
 		).toBeTruthy();
 	}
 

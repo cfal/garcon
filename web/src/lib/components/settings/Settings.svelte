@@ -28,7 +28,9 @@
 	import GitHubRepositoriesSettingsSection from './GitHubRepositoriesSettingsSection.svelte';
 	import NotificationsSettingsSection from './NotificationsSettingsSection.svelte';
 	import ExecutorsSection from '../executors/ExecutorsSection.svelte';
-	import LocalSettingsSection from './LocalSettingsSection.svelte';
+	import AppearanceSettingsSection from './AppearanceSettingsSection.svelte';
+	import BehaviorSettingsSection from './BehaviorSettingsSection.svelte';
+	import MousePointer from '@lucide/svelte/icons/mouse-pointer';
 	import KeyboardShortcutsSection from './KeyboardShortcutsSection.svelte';
 
 	const appShell = getAppShell();
@@ -43,7 +45,8 @@
 			id: 'app',
 			label: m.settings_group_app(),
 			tabs: [
-				{ value: 'interface', label: m.settings_tab_interface(), icon: Palette },
+				{ value: 'appearance', label: m.settings_tab_appearance(), icon: Palette },
+				{ value: 'behavior', label: m.settings_tab_behavior(), icon: MousePointer },
 				{ value: 'shortcuts', label: m.settings_tab_shortcuts(), icon: Keyboard },
 			],
 		},
@@ -125,7 +128,7 @@
 		>
 			<Tabs.List
 				aria-label={m.settings_title()}
-				class="h-full w-14 shrink-0 flex-col items-stretch justify-start gap-1 overflow-y-auto rounded-none border-r border-border bg-muted/30 p-1.5 sm:w-48 sm:p-3"
+				class="h-full w-14 shrink-0 flex-col items-stretch justify-start gap-1 overflow-y-auto rounded-none border-r border-border bg-muted/30 p-1.5 sm:w-[calc(12rem*max(1,var(--interface-font-scale,1)))] sm:p-3"
 			>
 				{#each tabGroups as group, index (group.id)}
 					{#if index > 0}
@@ -150,7 +153,7 @@
 							class="h-auto min-h-10 flex-none px-2 py-2 sm:justify-start sm:gap-2 sm:whitespace-normal sm:text-left"
 						>
 							<tab.icon class="size-4" />
-							<span class="hidden sm:inline">{tab.label}</span>
+							<span class="hidden min-w-0 break-words sm:inline">{tab.label}</span>
 						</Tabs.Trigger>
 					{/each}
 				{/each}
@@ -183,10 +186,17 @@
 					<Tabs.Content value="authentication" class="mt-0">
 						{#if appShell.settingsTab === 'authentication'}<AuthenticationSection />{/if}
 					</Tabs.Content>
-					<Tabs.Content value="interface" class="mt-0 space-y-6">
-						{#if appShell.settingsTab === 'interface'}
+					<Tabs.Content value="appearance" class="mt-0 space-y-6">
+						{#if appShell.settingsTab === 'appearance'}
 							<p class="text-sm text-muted-foreground">{m.settings_scope_local_description()}</p>
-							<LocalSettingsSection />
+							<AppearanceSettingsSection />
+						{/if}
+					</Tabs.Content>
+
+					<Tabs.Content value="behavior" class="mt-0 space-y-6">
+						{#if appShell.settingsTab === 'behavior'}
+							<p class="text-sm text-muted-foreground">{m.settings_scope_local_description()}</p>
+							<BehaviorSettingsSection />
 						{/if}
 					</Tabs.Content>
 

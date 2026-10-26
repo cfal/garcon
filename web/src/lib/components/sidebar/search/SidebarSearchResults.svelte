@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
+	import { observeTypographyScale } from '$lib/theme/typography.js';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import * as m from '$lib/paraglide/messages.js';
 	import { FixedVirtualWindow } from '$lib/components/virtual/fixed-virtual-window.svelte';
@@ -58,12 +59,20 @@
 		onRetryTranscriptSearchRevalidation,
 	}: SidebarSearchResultsProps = $props();
 
+	let interfaceScale = $state(1);
+	$effect(() =>
+		observeTypographyScale(document, 'interface', (scale) => {
+			interfaceScale = scale;
+		}),
+	);
+	const rowHeight = $derived(Math.ceil(SEARCH_RESULT_ROW_HEIGHT * Math.max(1, interfaceScale)));
+	let previousRowHeight = SEARCH_RESULT_ROW_HEIGHT;
 	let viewportRef = $state<HTMLElement | null>(null);
 	let sentinelRef = $state<HTMLElement | null>(null);
 	let sentinelObserver: IntersectionObserver | null = null;
 	let paginationWasBusy = false;
 	let previousChatIds: string[] = [];
-	let pendingAnchor: { chatId: string; offset: number; scrollTop: number } | null = null;
+	let pendingAnchor: { chatId: string; offsetRatio: number; scrollTop: number } | null = null;
 	let useVirtualResults = $derived(filteredChats.length > SEARCH_RESULTS_VIRTUALIZATION_THRESHOLD);
 	let resultsBusy = $derived(
 		loadingMoreTranscriptResults || transcriptSearchRevalidating,
@@ -86,7 +95,7 @@
 			return filteredChats.length;
 		},
 		get rowHeight() {
-			return SEARCH_RESULT_ROW_HEIGHT;
+			return rowHeight;
 		},
 		get overscan() {
 			return SEARCH_RESULTS_OVERSCAN;
@@ -183,12 +192,15 @@
 		const viewport = viewportRef;
 		const sentinel = sentinelRef;
 		if (!viewport || !sentinel || typeof IntersectionObserver === 'undefined') return;
-		const observer = new IntersectionObserver((entries) => {
-			if (entries.some((entry) => entry.isIntersecting)) loadAutomatically();
-		}, {
-			root: viewport,
-			rootMargin: `0px 0px ${SEARCH_RESULT_ROW_HEIGHT * 6}px 0px`,
-		});
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries.some((entry) => entry.isIntersecting)) loadAutomatically();
+			},
+			{
+				root: viewport,
+				rootMargin: `0px 0px ${rowHeight * 6}px 0px`,
+			},
+		);
 		sentinelObserver = observer;
 		observer.observe(sentinel);
 		return () => {
@@ -209,21 +221,23 @@
 	});
 
 	$effect.pre(() => {
+		rowHeight;
 		revalidationVersion;
 		const viewport = untrack(() => viewportRef);
 		if (!viewport || previousChatIds.length === 0) return;
 		const index = Math.min(
 			previousChatIds.length - 1,
-			Math.max(0, Math.floor(viewport.scrollTop / SEARCH_RESULT_ROW_HEIGHT)),
+			Math.max(0, Math.floor(viewport.scrollTop / previousRowHeight)),
 		);
 		pendingAnchor = {
 			chatId: previousChatIds[index],
-			offset: viewport.scrollTop - index * SEARCH_RESULT_ROW_HEIGHT,
+			offsetRatio: (viewport.scrollTop - index * previousRowHeight) / previousRowHeight,
 			scrollTop: viewport.scrollTop,
 		};
 	});
 
 	$effect(() => {
+		rowHeight;
 		filteredChats;
 		revalidationVersion;
 		void tick().then(() => {
@@ -231,11 +245,12 @@
 			const anchor = pendingAnchor;
 			if (viewport && anchor) {
 				const index = filteredChats.findIndex((chat) => chat.id === anchor.chatId);
-				viewport.scrollTop = index >= 0
-					? index * SEARCH_RESULT_ROW_HEIGHT + anchor.offset
-					: anchor.scrollTop;
+				viewport.scrollTop =
+					index >= 0 ? index * rowHeight + anchor.offsetRatio * rowHeight : anchor.scrollTop;
+				virtualWindow.scrollTop = viewport.scrollTop;
 			}
 			pendingAnchor = null;
+			previousRowHeight = rowHeight;
 			previousChatIds = filteredChats.map((chat) => chat.id);
 		});
 	});
@@ -261,11 +276,12 @@
 			{#each visibleResults as entry (entry.chat.id)}
 				<div
 					class="absolute left-0 right-0 top-0 overflow-hidden"
-					style={`height:${SEARCH_RESULT_ROW_HEIGHT}px; transform:translateY(${virtualWindow.getOffset(entry.index)}px);`}
+					style={`height:${rowHeight}px; transform:translateY(${virtualWindow.getOffset(entry.index)}px);`}
 					data-search-dialog-virtual-row={entry.chat.id}
 				>
 					<svelte:boundary>
 						<SidebarSearchResultRow
+							{rowHeight}
 							chat={entry.chat}
 							index={entry.index}
 							transcriptMatch={transcriptMatchesByChatId.get(entry.chat.id)}
@@ -296,6 +312,7 @@
 				<svelte:boundary>
 					<SidebarSearchResultRow
 						{chat}
+						{rowHeight}
 						{index}
 						transcriptMatch={transcriptMatchesByChatId.get(chat.id)}
 						{currentTime}
