@@ -9,7 +9,7 @@ describe('typography size labels', () => {
 	it.each([
 		['interface', '14', '14px base'],
 		['chat-list', '14', '14px base'],
-		['chat-feed', '14', '14px'],
+		['chat-feed', '12/14', '12/14px'],
 		['chat-code', '11/12', '11/12px'],
 		['chat-output', '14', '14px'],
 		['code-editor', '12', '12px'],

@@ -27,6 +27,7 @@ export function fontSizeControlLabel(surface: TypographySurface): string {
 }
 
 export function typographyDefaultSizeLabel(surface: TypographySurface): string {
+	if (surface === 'chat-feed') return '12/14';
 	if (surface === 'chat-code') return '11/12';
 	if (surface === 'code-diff') return '11-13';
 	return String(getTypographySurface(surface).defaultSize);
