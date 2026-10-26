@@ -64,6 +64,21 @@ afterEach(() => {
 });
 
 describe('terminal startup', () => {
+	it('consumes startup pointer presses before outside-interaction listeners', () => {
+		render(AnsiStartup, props);
+		const outsidePress = vi.fn();
+		document.addEventListener('pointerdown', outsidePress);
+		try {
+			const press = pointerEvent('pointerdown', { pointerType: 'mouse' });
+			splash()!.dispatchEvent(press);
+			expect(press.defaultPrevented).toBe(true);
+			expect(outsidePress).not.toHaveBeenCalled();
+			expect(splash()).not.toBeNull();
+		} finally {
+			document.removeEventListener('pointerdown', outsidePress);
+		}
+	});
+
 	it('ends permanently when workspace readiness is lost before the deadline', async () => {
 		const { rerender } = render(AnsiStartup, props);
 		expect(splash()).not.toBeNull();

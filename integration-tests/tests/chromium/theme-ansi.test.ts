@@ -284,6 +284,62 @@ test('startup consumes complete taps, swipes and double taps over mobile menus',
   );
 }, 60_000);
 
+test.each(['mouse', 'touch'] as const)(
+  'startup keeps onboarding open through a delayed %s dismissal',
+  async (pointer) => {
+    await withChromiumFixture(
+      `ANSI onboarding ${pointer}`,
+      async ({ page, context, integration, assertNoBrowserErrors }) => {
+        await pauseStartupClock(page);
+        await page.addInitScript(seedLocalSettings, { terminalAppearance: true });
+        await page.addInitScript(() => localStorage.setItem('just-registered', '1'));
+        const protocol = await context.newCDPSession(page);
+        try {
+          if (pointer === 'touch') {
+            await protocol.send('Emulation.setTouchEmulationEnabled', {
+              enabled: true,
+              maxTouchPoints: 1,
+            });
+          }
+          await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+          const splash = page.locator('[data-ansi-startup]');
+          const dialog = page.getByRole('dialog', { name: 'Choose your theme' });
+          await browserExpect(splash).toBeVisible();
+          await browserExpect(dialog).toBeVisible();
+          await page.clock.runFor(50);
+          if (pointer === 'mouse') {
+            await page.mouse.move(2, 2);
+            await page.mouse.down();
+          } else {
+            await protocol.send('Input.dispatchTouchEvent', {
+              type: 'touchStart',
+              touchPoints: [{ x: 2, y: 2, id: 1 }],
+            });
+          }
+          await page.clock.runFor(50);
+          await browserExpect(dialog).toBeVisible();
+          if (pointer === 'mouse') {
+            await page.mouse.up();
+          } else {
+            await protocol.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+          }
+          await page.clock.runFor(50);
+          await browserExpect(splash).toHaveCount(0);
+          await browserExpect(dialog).toBeVisible();
+          await page.clock.runFor(400);
+          await page.clock.resume();
+          await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+          await browserExpect(page.getByRole('dialog', { name: 'Chat list layout' })).toBeVisible();
+          assertNoBrowserErrors();
+        } finally {
+          await protocol.detach();
+        }
+      },
+    );
+  },
+  60_000,
+);
+
 test('ANSI workspace keeps drafts and composer geometry through chat switches', async () => {
   await withChromiumFixture(
     'ANSI chat switches',
