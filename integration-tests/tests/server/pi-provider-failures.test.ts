@@ -39,12 +39,19 @@ describe('scripted Pi provider failures', () => {
     environment = undefined;
   });
 
-  test.each(['server_busy', 'servers are currently busy', 'The pending stream has been canceled'])(
+  test.each([
+    'server_busy',
+    'servers are currently busy',
+    'The pending stream has been canceled',
+    'upstream_stream_read_error',
+    'stream disconnected before completion: stream closed before response.completed',
+    'request to https://synthetic.invalid/token failed, reason:',
+  ])(
     'keeps the turn active while retrying %s and publishes only the recovered final response', async (message) => {
       const testEnvironment = requireEnvironment();
       const reply = marker('RETRY_REPLY');
       const requestCursor = testEnvironment.model.markRequests();
-      testEnvironment.model.scriptFault({ kind: 'http-error', status: 400, message });
+      testEnvironment.model.scriptFault({ kind: 'http-error', status: 400, message, code: 'invalid_request_error' });
       const retry = testEnvironment.model.scriptHeldTurn([chatCompletionsText(reply)]);
 
       await withIntegrationFixture('pi-scripted-retry-classification', async (fixture) => {
@@ -69,6 +76,97 @@ describe('scripted Pi provider failures', () => {
       }, withScriptedPi());
     }, 120_000,
   );
+
+  test.each([
+    'request id abc503def exceeded 1520421 bytes',
+    'subscription_sharing_workplace_individual_usage_limit_exceeded: rate limit',
+  ])('does not retry a non-transient error containing %s', async (message) => {
+    const testEnvironment = requireEnvironment();
+    const requestCursor = testEnvironment.model.markRequests();
+    testEnvironment.model.scriptFault({ kind: 'http-error', status: 400, message, code: 'invalid_request_error' });
+
+    await withIntegrationFixture('pi-scripted-non-transient-failure', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedPiStartRequest({
+        chatId, projectPath: fixture.dirs.project, command: marker('NON_TRANSIENT_PROMPT'),
+      }));
+      const terminal = await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
+        afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      expect(terminal.type).toBe('agent-run-failed');
+      await expectFailedReceipt(fixture, chatId, turn.turnId);
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(1);
+      expect(JSON.stringify(messagesOfType((await fixture.client.getMessages(chatId)).messages, 'error')))
+        .toContain(message);
+
+      const reply = marker('NON_TRANSIENT_RECOVERY_REPLY');
+      testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
+      const recoveryCursor = fixture.client.markEvents();
+      const recovery = await fixture.client.runChat(scriptedPiRunRequest({
+        chatId, command: marker('NON_TRANSIENT_RECOVERY_PROMPT'),
+      }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: recovery.turnId, marker: reply, afterIndex: recoveryCursor });
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(2);
+      testEnvironment.model.assertSettled();
+    }, withScriptedPi());
+  }, 120_000);
+
+  test('compacts an HTTP 413 overflow and continues the same turn', async () => {
+    environment?.dispose();
+    environment = startScriptedPiTestEnvironment({ compaction: { keepRecentTokens: 1 } });
+    const testEnvironment = environment;
+    testEnvironment.model.scriptTurn([chatCompletionsText(marker('INITIAL_REPLY'))]);
+
+    await withIntegrationFixture('pi-scripted-request-size-overflow', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const initialCursor = fixture.client.markEvents();
+      const initial = await fixture.client.startChat(scriptedPiStartRequest({
+        chatId, projectPath: fixture.dirs.project, command: marker('INITIAL_PROMPT'),
+      }));
+      expect((await fixture.client.waitForTurnTerminal(chatId, initial.turnId, {
+        afterIndex: initialCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      })).type).toBe('agent-run-finished');
+
+      const requestCursor = testEnvironment.model.markRequests();
+      const summary = marker('OVERFLOW_SUMMARY');
+      const turnSummary = marker('OVERFLOW_TURN_SUMMARY');
+      const reply = marker('OVERFLOW_REPLY');
+      testEnvironment.model.scriptFault({
+        kind: 'http-error', status: 413, message: 'failed to parse request', code: 'invalid_request_error',
+      });
+      testEnvironment.model.scriptTurn([chatCompletionsText(summary)]);
+      testEnvironment.model.scriptTurn([chatCompletionsText(turnSummary)]);
+      const recovered = testEnvironment.model.scriptHeldTurn([chatCompletionsText(reply)]);
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.runChat(scriptedPiRunRequest({ chatId, command: marker('OVERFLOW_PROMPT') }));
+      try {
+        await recovered.requested;
+        const requests = testEnvironment.model.requestsSince(requestCursor);
+        expect(requests).toHaveLength(4);
+        expect(JSON.stringify(requests[1]!.body.messages)).toContain('conversation to summarize');
+        expect(JSON.stringify(requests[2]!.body.messages)).toContain('Only summarize information explicitly present above');
+        expect(JSON.stringify(requests[3]!.body.messages)).toContain(summary);
+        expect(JSON.stringify(requests[3]!.body.messages)).toContain(turnSummary);
+        await fixture.client.waitForEvent(
+          (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === chatId
+            && event.messages.some(({ message }) => message.type === 'compaction' && message.summary.includes(summary)),
+          'overflow compaction boundary', { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        );
+        expect(fixture.client.eventsSince(cursor).some((event) =>
+          (event.type === 'agent-run-finished' || event.type === 'agent-run-failed')
+          && event.chatId === chatId)).toBe(false);
+        expect(messagesOfType((await fixture.client.getMessages(chatId)).messages, 'compaction')).toEqual([
+          expect.objectContaining({ trigger: 'auto', summary: expect.stringContaining(summary) }),
+        ]);
+      } finally {
+        recovered.release();
+      }
+      await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor });
+      expect(messagesOfType((await fixture.client.getMessages(chatId)).messages, 'compaction')).toHaveLength(1);
+      testEnvironment.model.assertSettled();
+    }, withScriptedPi());
+  }, 120_000);
 
   test.each([
     [500, 'scripted http failure'],
