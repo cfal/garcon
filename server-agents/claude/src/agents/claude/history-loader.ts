@@ -263,7 +263,9 @@ function createClaudeEntryConverter(compactions: readonly CompactionInfo[]): {
       || deterministicTranscriptTimestamp(source?.lineNumber, source?.byteOffset);
     const message = asRecord(entry.message);
 
-    if (entry.type === 'progress' || entry.type === 'queue-operation' ||
+    // Request-cache blobs repeat model input, not conversational transcript rows.
+    // https://github.com/anthropics/claude-agent-sdk-python/blob/0e89b298e771259378a6cd3734e00d323dff5703/src/claude_agent_sdk/_internal/sessions.py#L893-L928
+    if (entry.type === 'api-request-blob' || entry.type === 'progress' || entry.type === 'queue-operation' ||
       entry.type === 'file-history-snapshot' || entry.type === 'summary') {
       return;
     }
