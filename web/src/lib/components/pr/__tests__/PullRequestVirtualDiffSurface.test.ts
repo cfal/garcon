@@ -64,8 +64,8 @@ describe('PullRequestVirtualDiffSurface', () => {
 		const rendered = render(PullRequestVirtualDiffSurface, {
 			documentId: 'synthetic-pr',
 			source,
-			viewedFiles: new Set(),
-			collapsedFiles: new Set(),
+			viewedFiles: new Set<string>(),
+			collapsedFiles: new Set<string>(),
 			threadsById: new Map(),
 			threadCountByFile: new Map(),
 			onToggleViewed: vi.fn(),

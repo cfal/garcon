@@ -49,10 +49,10 @@ describe('Departure font loading', () => {
 
 	it.each(['failure', 'timeout'] as const)('retries after a bundled font %s', async (result) => {
 		vi.useFakeTimers();
-		const load = vi.fn<FontFaceSet['load']>();
+		const load = vi.fn();
 		if (result === 'failure') load.mockRejectedValueOnce(new Error('unavailable'));
 		else load.mockImplementationOnce(() => new Promise(() => {}));
-		load.mockResolvedValue([{ status: 'loaded' } as FontFace]);
+		load.mockResolvedValue([{ status: 'loaded' } satisfies Pick<FontFace, 'status'>]);
 		installFonts(load);
 		const { loadFont } = await import('../fonts.js');
 		const failed = loadFont('jetbrains-mono');
