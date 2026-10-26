@@ -169,6 +169,8 @@ bun test --max-concurrency=1 --timeout=120000 tests/chromium/transcript-virtuali
 
 Keep the configured single-test concurrency. The suites exercise process lifecycle and ordered race scenarios deliberately.
 
+CI splits Chromium files across two runners, retaining a separate Bun process per file and serial tests within each runner. Run one shard locally with `bun run test:integration:chromium --shard=1/2`; omit `--shard` to run the full suite.
+
 ## Provider Scope
 
 The deterministic lane exercises `direct-openai-compatible` and `direct-anthropic-compatible` through separate protocol fakes. Both providers are present in every fixture and remain alive across Garcon restarts. The Anthropic fake covers the Messages HTTP and SSE contract; it is not a fake Claude Code process or Claude Agent SDK. Together the fakes prove Garcon's multi-agent routing, lifecycle, queue, transcript, persistence, search, and SPA behavior without spending credentials or depending on external availability. They do not prove the native behavior of Claude, Codex, Pi, OpenCode, Factory, Amp, Cursor, or other provider binaries.

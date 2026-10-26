@@ -444,10 +444,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  chromium-e2e:
-    name: Chromium E2E
+  chromium-e2e-shard:
+    name: Chromium E2E / ${{ matrix.shard }} of 2
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - name: Check out repository
@@ -492,13 +496,32 @@ jobs:
         run: bun run typecheck
 
       - name: Run Chromium E2E
-        run: bun run test:integration:chromium
+        env:
+          CHROMIUM_SHARD: ${{ matrix.shard }}/2
+        run: bun run test:integration:chromium --shard="$CHROMIUM_SHARD"
 
       - name: Upload Chromium diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: chromium-e2e-diagnostics
+          name: chromium-e2e-diagnostics-${{ matrix.shard }}-of-2
           path: integration-tests/artifacts/chromium/
           if-no-files-found: ignore
           retention-days: 7
+
+  chromium-e2e:
+    name: Chromium E2E
+    needs: chromium-e2e-shard
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+
+    steps:
+      - name: Verify Chromium shards
+        env:
+          SHARDS_RESULT: ${{ needs.chromium-e2e-shard.result }}
+        run: |
+          if [ "$SHARDS_RESULT" != "success" ]; then
+            echo "::error::Chromium shards finished with result: $SHARDS_RESULT"
+            exit 1
+          fi
