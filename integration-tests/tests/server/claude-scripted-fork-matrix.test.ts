@@ -523,7 +523,7 @@ describe('scripted Claude fork lifecycle matrix', () => {
     });
   });
 
-  test.each(['shell', 'fork'])('does not inherit task notification state from an outstanding %s task', async (taskKind) => {
+  test.each(['shell', 'fork', 'monitor'])('does not inherit task notification state from an outstanding %s task', async (taskKind) => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     const sourcePrompt = marker('BACKGROUND_SOURCE_PROMPT');
@@ -532,10 +532,17 @@ describe('scripted Claude fork lifecycle matrix', () => {
     const childReply = marker('BACKGROUND_CHILD_REPLY');
     const forkGate = Promise.withResolvers<void>();
     const forkRequested = Promise.withResolvers<void>();
+    if (taskKind === 'monitor') {
+      testEnvironment.model.scriptTurn([
+        claudeToolUse('toolu_discover_monitor', 'ToolSearch', { query: 'select:Monitor', max_results: 1 }),
+      ]);
+    }
     testEnvironment.model.scriptTurn([
       taskKind === 'shell' ? claudeToolUse('toolu_background', 'Bash', {
         command: 'sleep 600',
         run_in_background: true,
+      }) : taskKind === 'monitor' ? claudeToolUse('toolu_background', 'Monitor', {
+        command: 'sleep 600', description: 'Synthetic outstanding monitor', timeout_ms: 600_000,
       }) : claudeToolUse('toolu_background', 'Agent', {
         subagent_type: 'fork', description: 'Synthetic outstanding fork',
         prompt: 'Synthetic held fork directive',
@@ -578,7 +585,7 @@ describe('scripted Claude fork lifecycle matrix', () => {
       await waitForNativeFileContains(
         fixture.dirs.workspace,
         sourceChatId,
-        taskKind === 'shell' ? 'backgroundTaskId' : 'async_launched',
+        taskKind === 'shell' ? 'backgroundTaskId' : taskKind === 'monitor' ? '"timeoutMs"' : 'async_launched',
       );
       if (taskKind === 'fork') await forkRequested.promise;
       const forkChatId = fixture.newChatId();

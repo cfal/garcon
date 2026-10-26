@@ -102,6 +102,10 @@ describe('projectClaudeForkEntry', () => {
 describe('transformClaudeForkTranscript', () => {
   const taskActivationShapes = [
     [
+      'a Monitor',
+      { taskId: 'synthetic-monitor', timeoutMs: 300_000, persistent: false },
+    ],
+    [
       'an asynchronous fork subagent',
       {
         isAsync: true,
@@ -189,6 +193,15 @@ describe('transformClaudeForkTranscript', () => {
       );
     },
   );
+
+  it('preserves descriptive task IDs that do not activate a Monitor on resume', async () => {
+    const entry = { type: 'user', uuid: 'source-task-update', parentUuid: null,
+      sessionId: context.sourceAgentSessionId, toolUseResult: { taskId: 'synthetic-task', status: 'completed' },
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'synthetic-update', content: 'Updated.' }] } };
+    const result = await transformClaudeForkTranscript({ selectedEntries: [entry], sourceEntries: [entry], ...context });
+    expect(result.entries[0].toolUseResult).toEqual(entry.toolUseResult);
+    expect(entry.toolUseResult.taskId).toBe('synthetic-task');
+  });
 
   it('creates an independent graph and preserves provider replacement metadata', async () => {
     const uuids = [
@@ -388,6 +401,7 @@ function withoutTaskActivationFields(toolUseResult) {
   delete projected.backgroundTaskId;
   delete projected.outputTaskId;
   delete projected.agentId;
+  if (typeof projected.taskId === 'string' && typeof projected.timeoutMs === 'number') delete projected.taskId;
   return projected;
 }
 
@@ -401,6 +415,7 @@ function renderedWithoutTaskActivation(entries, forkTimestamp) {
     delete toolUseResult.backgroundTaskId;
     delete toolUseResult.outputTaskId;
     delete toolUseResult.agentId;
+    if (typeof toolUseResult.taskId === 'string' && typeof toolUseResult.timeoutMs === 'number') delete toolUseResult.taskId;
   }
   return rendered;
 }
