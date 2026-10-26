@@ -797,6 +797,8 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
       '--config',
       'features.goals=false',
       '--config',
+      'features.wake_on_agent_messages=false',
+      '--config',
       'model_catalog_json="/opt/garcon/codex-models.json"',
     ], expect.any(Object));
     expect(writes).toContainEqual(expect.objectContaining({ method: 'thread/loaded/list', params: {} }));
