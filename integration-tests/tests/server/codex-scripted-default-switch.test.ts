@@ -152,13 +152,14 @@ describe('Codex scripted default effort model switching', () => {
     });
   }, 120_000);
 
-  test('uses bundled metadata to preserve GPT-6 Sol Ultra semantics', async () => {
+  test('uses bundled metadata to preserve Sol and Terra Ultra semantics', async () => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
 
     await withIntegrationFixture('codex-scripted-sol-ultra', async (fixture) => {
       for (const [model, ultraEffort] of [
         ['gpt-6.1-sol', 'xhigh'],
+        ['gpt-6.1-terra', 'xhigh'],
         ['gpt-6-sol', 'max'],
       ] as const) {
         await runScriptedTurn({
@@ -177,7 +178,7 @@ describe('Codex scripted default effort model switching', () => {
           testEnvironment,
           chatId: fixture.newChatId(),
           model,
-          command: 'Use the highest Sol effort.',
+          command: 'Use the highest effort.',
           start: true,
           thinkingMode: 'ultra',
           expectedEffort: ultraEffort,
@@ -194,6 +195,79 @@ describe('Codex scripted default effort model switching', () => {
       prepareWorkspace: (directories) => testEnvironment.prepareWorkspace(directories, {
         useFixtureModelCatalog: false,
       }),
+    });
+  }, 120_000);
+
+  test.each([
+    ['catalog', undefined],
+    ['configured medium', 'medium'],
+  ] as const)('preserves GPT-6.1 Terra %s Default with published metadata', async (_label, configuredEffort) => {
+    if (!environment) throw new Error('Scripted Codex environment was not initialized.');
+    const testEnvironment = environment;
+
+    await withIntegrationFixture('codex-scripted-terra-default', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const terraTurn = {
+        fixture,
+        testEnvironment,
+        chatId,
+        model: 'gpt-6.1-terra' as const,
+      };
+      const runTerra = (thinkingMode: 'none' | 'max') => runScriptedTurn({
+        ...terraTurn,
+        command: `Continue with Terra ${thinkingMode}.`,
+        thinkingMode,
+        expectedEffort: thinkingMode === 'max' ? 'max' : configuredEffort ?? 'low',
+      });
+
+      await runScriptedTurn({
+        ...terraTurn,
+        command: 'Start with Terra Default.',
+        start: true,
+        expectedEffort: configuredEffort ?? 'low',
+      });
+      await runTerra('max');
+      await runTerra('none');
+
+      for (const thinkingMode of ['high', 'none'] as const) {
+        const response = await fixture.client.fetch('/api/v1/chats/execution-settings', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ chatId, thinkingMode }),
+        });
+        expect({ status: response.status, body: await response.json() }).toMatchObject({
+          status: 200,
+          body: { success: true, chatId, thinkingMode },
+        });
+      }
+      await runTerra('none');
+
+      for (const model of ['gpt-6-sol', 'gpt-6.1-terra'] as const) {
+        const response = await fixture.client.fetch('/api/v1/chats/model', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ chatId, model }),
+        });
+        expect(response.status).toBe(200);
+        await runScriptedTurn({
+          fixture,
+          testEnvironment,
+          chatId,
+          model,
+          command: `Continue with ${model} Default.`,
+          expectedEffort: configuredEffort ?? (model === 'gpt-6-sol' ? 'medium' : 'low'),
+        });
+      }
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: {
+        ...testEnvironment.serverEnvironment,
+        OPENAI_API_KEY: 'garcon-scripted-terra-catalog-key',
+      },
+      prepareWorkspace: async (directories) => {
+        await testEnvironment.prepareWorkspace(directories, { useFixtureModelCatalog: false });
+        if (configuredEffort) await configureReasoningEffort(directories, configuredEffort);
+      },
     });
   }, 120_000);
 
@@ -256,7 +330,7 @@ async function runScriptedTurn(options: {
   fixture: Parameters<Parameters<typeof withIntegrationFixture>[1]>[0];
   testEnvironment: ScriptedCodexTestEnvironment;
   chatId: string;
-  model: keyof typeof SCRIPTED_MODEL_DEFAULTS;
+  model: keyof typeof SCRIPTED_MODEL_DEFAULTS | 'gpt-6.1-terra';
   command: string;
   start?: boolean;
   thinkingMode?: 'none' | 'high' | 'max' | 'ultra';
