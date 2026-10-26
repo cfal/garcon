@@ -497,4 +497,176 @@ describe('GitQuickSummaryStore', () => {
 		expect(getSummary).toHaveBeenCalledTimes(1);
 		expect(store.canShowTray).toBe(true);
 	});
+
+	it('lets a slow summary finish across multiple polls and visibility refreshes', async () => {
+		const pending = deferred<GitQuickSummaryResponse>();
+		const getSummary = vi.fn<GetSummary>().mockReturnValue(pending.promise);
+		const store = new GitQuickSummaryStore({ getSummary });
+		showProject(store, '/project');
+		const stop = store.startPolling();
+		await vi.advanceTimersByTimeAsync(100);
+		const signal = getSummary.mock.calls[0]?.[1]?.signal;
+		await vi.advanceTimersByTimeAsync(QUICK_GIT_IDLE_POLL_MS * 3);
+		const visibilityRefresh = store.refresh('visibility');
+		expect(getSummary).toHaveBeenCalledOnce();
+		expect(signal?.aborted).toBe(false);
+		pending.resolve(readySummary());
+		await visibilityRefresh;
+		expect(store.summary?.branch).toBe('main');
+		expect(store.isLoading).toBe(false);
+		stop();
+		store.destroy();
+	});
+
+	it('coalesces mutations during a read into one follow-up, even across a poll', async () => {
+		const first = deferred<GitQuickSummaryResponse>();
+		const second = deferred<GitQuickSummaryResponse>();
+		const getSummary = vi
+			.fn<GetSummary>()
+			.mockReturnValueOnce(first.promise)
+			.mockReturnValueOnce(second.promise);
+		const store = new GitQuickSummaryStore({ getSummary });
+		showProject(store, '/project');
+		const initial = store.refresh('dialog-open');
+		const signal = getSummary.mock.calls[0]?.[1]?.signal;
+		store.scheduleRefresh('dialog-mutation');
+		store.scheduleRefresh('invalidation');
+		store.scheduleRefresh('commit-complete');
+		void store.refresh('idle-poll');
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(getSummary).toHaveBeenCalledOnce();
+		expect(signal?.aborted).toBe(false);
+		first.resolve(readySummary({ branch: 'before-mutation' }));
+		await initial;
+		expect(getSummary).toHaveBeenCalledTimes(2);
+		expect(store.summary?.branch).toBe('before-mutation');
+		expect(store.isLoading).toBe(true);
+		second.resolve(readySummary({ branch: 'after-mutation' }));
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(getSummary).toHaveBeenCalledTimes(2);
+		expect(store.summary?.branch).toBe('after-mutation');
+		expect(store.isLoading).toBe(false);
+		store.destroy();
+	});
+
+	it.each(
+		(['disable', 'remove', 'context', 'destroy'] as const).flatMap((action) =>
+			(['scheduled', 'queued'] as const).map((phase) => [action, phase] as const),
+		),
+	)(
+		'fences the old response on %s with a %s follow-up',
+		async (action, phase) => {
+			const pending = deferred<GitQuickSummaryResponse>();
+			const getSummary = vi.fn<GetSummary>().mockReturnValue(pending.promise);
+			const store = new GitQuickSummaryStore({ getSummary });
+			showProject(store, '/project');
+			const refresh = store.refresh('dialog-open');
+			const signal = getSummary.mock.calls[0]?.[1]?.signal;
+			store.scheduleRefresh('invalidation');
+			if (phase === 'queued') await vi.advanceTimersByTimeAsync(300);
+			if (action === 'disable') store.setEnabled(false);
+			if (action === 'remove') store.setVisibleProjects([]);
+			if (action === 'destroy') store.destroy();
+			if (action === 'context')
+				store.setVisibleProjects([
+					{
+						executorId: 'local',
+						projectPath: '/project',
+						isProcessing: false,
+						executorContextKey: 'replacement',
+					},
+				]);
+			expect(signal?.aborted).toBe(true);
+			pending.resolve(readySummary({ branch: 'obsolete' }));
+			await refresh;
+			expect(store.summary).toBeNull();
+			expect(getSummary).toHaveBeenCalledOnce();
+			store.destroy();
+		},
+	);
+
+	it('awaits the post-mutation summary when a mutation joins an active read', async () => {
+		const first = deferred<GitQuickSummaryResponse>();
+		const second = deferred<GitQuickSummaryResponse>();
+		const getSummary = vi
+			.fn<GetSummary>()
+			.mockReturnValueOnce(first.promise)
+			.mockReturnValueOnce(second.promise);
+		const store = new GitQuickSummaryStore({ getSummary });
+		showProject(store, '/project');
+		const initial = store.refresh('dialog-open');
+		let mutationFinished = false;
+		let branchAtMutationCompletion: string | undefined;
+		const mutation = store.refresh('invalidation').then(() => {
+			mutationFinished = true;
+			branchAtMutationCompletion = store.summary?.branch;
+		});
+		first.resolve(readySummary({ branch: 'before-mutation' }));
+		await initial;
+		await vi.advanceTimersByTimeAsync(0);
+		expect(mutationFinished).toBe(false);
+		expect(store.summary?.branch).toBe('before-mutation');
+		expect(getSummary).toHaveBeenCalledTimes(2);
+		second.resolve(readySummary({ branch: 'after-mutation' }));
+		await mutation;
+		expect(branchAtMutationCompletion).toBe('after-mutation');
+		expect(store.summary?.branch).toBe('after-mutation');
+		expect(mutationFinished).toBe(true);
+		store.destroy();
+	});
+
+	it('retains the stopped debounce when an active read finishes before the settling window', async () => {
+		const pending = deferred<GitQuickSummaryResponse>();
+		const getSummary = vi
+			.fn<GetSummary>()
+			.mockReturnValueOnce(pending.promise)
+			.mockResolvedValue(readySummary());
+		const store = new GitQuickSummaryStore({ getSummary });
+		showProject(store, '/project', true);
+		const initial = store.refresh('dialog-open');
+		store.setVisibleProjects([
+			{ executorId: 'local', projectPath: '/project', isProcessing: false },
+		]);
+		pending.resolve(readySummary());
+		await initial;
+		await vi.advanceTimersByTimeAsync(QUICK_GIT_STOPPED_DEBOUNCE_MS - 1);
+		expect(getSummary).toHaveBeenCalledOnce();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(getSummary).toHaveBeenCalledTimes(2);
+		store.destroy();
+	});
+
+	it('keeps a stopped refresh scheduled when an idle poll finishes inside its settling window', async () => {
+		const getSummary = vi.fn<GetSummary>().mockResolvedValue(readySummary());
+		const store = new GitQuickSummaryStore({ getSummary });
+		showProject(store, '/project', true);
+		await store.refresh('dialog-open');
+		getSummary.mockClear();
+		store.setVisibleProjects([
+			{ executorId: 'local', projectPath: '/project', isProcessing: false },
+		]);
+		await store.refresh('idle-poll');
+		await vi.advanceTimersByTimeAsync(QUICK_GIT_STOPPED_DEBOUNCE_MS - 1);
+		expect(getSummary).toHaveBeenCalledOnce();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(getSummary).toHaveBeenCalledTimes(2);
+		store.destroy();
+	});
+
+	it('clears a cached first-load error after returning to the project and succeeding', async () => {
+		const getSummary = vi
+			.fn<GetSummary>()
+			.mockRejectedValueOnce(new Error('status timed out'))
+			.mockResolvedValueOnce(readySummary());
+		const store = new GitQuickSummaryStore({ getSummary });
+		showProject(store, '/project');
+		await store.refresh('dialog-open');
+		expect(store.lastError).toBe('status timed out');
+		store.setVisibleProjects([]);
+		showProject(store, '/project');
+		await store.refresh('dialog-open');
+		expect(store.lastError).toBeNull();
+		expect(store.summary?.branch).toBe('main');
+		store.destroy();
+	});
 });

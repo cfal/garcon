@@ -95,6 +95,15 @@ function systemNow(): number {
 	return Date.now();
 }
 
+function invalidatesSummary(reason: GitQuickRefreshReason): boolean {
+	return (
+		reason === 'invalidation' ||
+		reason === 'dialog-mutation' ||
+		reason === 'commit-complete' ||
+		reason === 'agent-stopped'
+	);
+}
+
 export class GitQuickSummaryStore {
 	project = $state<GitProjectTarget | null>(null);
 	visibleProjects = $state.raw<readonly GitQuickProjectLease[]>([]);
@@ -103,7 +112,14 @@ export class GitQuickSummaryStore {
 
 	private readonly requestGenerationByProject = new Map<string, number>();
 	private requestSequence = 0;
-	private readonly inFlightByProject = new Map<string, AbortController>();
+	private readonly inFlightByProject = new Map<
+		string,
+		{
+			controller: AbortController;
+			settled: Promise<void>;
+			needsRefresh: boolean;
+		}
+	>();
 	private readonly pendingRefreshByProject = new Map<string, GitQuickRefreshReason>();
 	private readonly debounceTimerByProject = new Map<string, QuickSummaryTimeoutHandle>();
 	private readonly getSummary: typeof getGitQuickSummary;
@@ -268,6 +284,8 @@ export class GitQuickSummaryStore {
 		delayMs = 300,
 	): void {
 		if (!this.isEnabled || !this.#hasVisibleProject(project)) return;
+		const active = this.inFlightByProject.get(gitProjectKey(project));
+		if (active && !invalidatesSummary(reason)) return;
 		this.pendingRefreshByProject.set(gitProjectKey(project), reason);
 		this.#clearProjectDebounce(project);
 		const timer = this.setTimeoutFn(() => {
@@ -284,15 +302,34 @@ export class GitQuickSummaryStore {
 		await this.refreshFor(this.project, reason);
 	}
 
-	async refreshFor(project: GitProjectTarget, _reason: GitQuickRefreshReason): Promise<void> {
+	async refreshFor(project: GitProjectTarget, reason: GitQuickRefreshReason): Promise<void> {
 		if (!this.isEnabled || !this.#hasVisibleProject(project)) return;
-		this.#clearProjectDebounce(project);
-		this.pendingRefreshByProject.delete(gitProjectKey(project));
+		const key = gitProjectKey(project);
+		const active = this.inFlightByProject.get(key);
+		if (active) {
+			const invalidates = invalidatesSummary(reason);
+			active.needsRefresh ||= invalidates;
+			await active.settled;
+			if (invalidates) await this.inFlightByProject.get(key)?.settled;
+			return;
+		}
+		const scheduled = this.pendingRefreshByProject.get(key);
+		if (!scheduled || !invalidatesSummary(scheduled)) {
+			this.#clearProjectDebounce(project);
+			this.pendingRefreshByProject.delete(key);
+		}
 		const generation = ++this.requestSequence;
 		this.requestGenerationByProject.set(gitProjectKey(project), generation);
-		this.inFlightByProject.get(gitProjectKey(project))?.abort();
 		const controller = new AbortController();
-		this.inFlightByProject.set(gitProjectKey(project), controller);
+		let settle!: () => void;
+		const request = {
+			controller,
+			settled: new Promise<void>((resolve) => {
+				settle = resolve;
+			}),
+			needsRefresh: false,
+		};
+		this.inFlightByProject.set(key, request);
 		this.updateEntry(project, { isRefreshing: true, lastAccessedAt: this.now() });
 
 		try {
@@ -305,12 +342,14 @@ export class GitQuickSummaryStore {
 			this.applyRefreshError(project, error);
 			this.pruneCache();
 		} finally {
-			if (this.inFlightByProject.get(gitProjectKey(project)) === controller) {
-				this.inFlightByProject.delete(gitProjectKey(project));
+			if (this.inFlightByProject.get(key) === request) {
+				this.inFlightByProject.delete(key);
 			}
 			if (this.isCurrentResponse(project, generation)) {
 				this.updateEntry(project, { isRefreshing: false });
+				if (request.needsRefresh) void this.refreshFor(project, 'invalidation');
 			}
+			settle();
 		}
 	}
 
@@ -509,7 +548,7 @@ export class GitQuickSummaryStore {
 		this.#clearProjectDebounce(project);
 		this.pendingRefreshByProject.delete(gitProjectKey(project));
 		this.requestGenerationByProject.delete(gitProjectKey(project));
-		this.inFlightByProject.get(gitProjectKey(project))?.abort();
+		this.inFlightByProject.get(gitProjectKey(project))?.controller.abort();
 		this.inFlightByProject.delete(gitProjectKey(project));
 	}
 
