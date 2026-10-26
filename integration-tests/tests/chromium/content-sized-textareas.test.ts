@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 import { expect as browserExpect } from 'playwright/test';
 import { closeChromiumBrowser, withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 // Headless Chromium hides scrollbars, while desktop browsers reserve the themed scrollbar width.
 async function withVisibleScrollbars(name: string, run: (fixture: ChromiumFixture) => Promise<void>): Promise<void> {
@@ -23,9 +24,9 @@ test('font completion and cached font changes refit existing text without editin
       await route.continue();
     });
     try {
-      await page.addInitScript(() => {
-        const settings = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
-        localStorage.setItem('pref_local_settings', JSON.stringify({ ...settings, interfaceFont: 'departure-mono', reduceMotion: true }));
+      await page.addInitScript(seedLocalSettings, {
+        interfaceFont: 'departure-mono',
+        reduceMotion: true,
       });
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
       await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();

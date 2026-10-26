@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
 import type { Page } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 const ARTIFACT_DIRECTORY = join(import.meta.dirname, '../../artifacts/chromium');
 
@@ -153,13 +154,7 @@ test('startup consumes double-click presses over menus without losing composer f
         agent: integration.directAgents.openAi,
       });
       await integration.client.waitForTurnTerminal(chatId, started.turnId);
-      await page.addInitScript(() => {
-        const settings = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
-        localStorage.setItem(
-          'pref_local_settings',
-          JSON.stringify({ ...settings, terminalAppearance: true }),
-        );
-      });
+      await page.addInitScript(seedLocalSettings, { terminalAppearance: true });
       await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`, {
         waitUntil: 'domcontentloaded',
       });
@@ -210,13 +205,7 @@ test('startup consumes complete taps, swipes and double taps over mobile menus',
     'ANSI startup touch gestures',
     async ({ page, context, integration, assertNoBrowserErrors }) => {
       await pauseStartupClock(page);
-      await page.addInitScript(() => {
-        const settings = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
-        localStorage.setItem(
-          'pref_local_settings',
-          JSON.stringify({ ...settings, terminalAppearance: true }),
-        );
-      });
+      await page.addInitScript(seedLocalSettings, { terminalAppearance: true });
       await page.setViewportSize({ width: 390, height: 844 });
       const protocol = await context.newCDPSession(page);
       try {
@@ -312,16 +301,9 @@ test('ANSI workspace keeps drafts and composer geometry through chat switches', 
         await integration.client.waitForTurnTerminal(chatId, started.turnId);
         await integration.client.waitForProcessing(chatId, false);
       }
-      await page.addInitScript(() => {
-        const settings = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
-        localStorage.setItem(
-          'pref_local_settings',
-          JSON.stringify({
-            ...settings,
-            themePreference: { mode: 'fixed', themeId: 'ansi-dark' },
-            terminalAppearance: true,
-          }),
-        );
+      await page.addInitScript(seedLocalSettings, {
+        themePreference: { mode: 'fixed', themeId: 'ansi-dark' },
+        terminalAppearance: true,
       });
       await page.goto(`${integration.garcon.baseUrl}/chat/${ids[0]}`);
       await browserExpect(page.locator('[data-ansi-startup]')).toBeVisible();
