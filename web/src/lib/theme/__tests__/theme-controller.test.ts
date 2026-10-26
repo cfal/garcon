@@ -1,5 +1,6 @@
 import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import ThemeControllerTestHost from './ThemeControllerTestHost.svelte';
 import { THEME_PROFILES, type ThemePreference } from '../themes.js';
 
@@ -192,6 +193,26 @@ describe('ThemeController', () => {
 			expect(document.documentElement.dataset.theme).toBe('ansi-light');
 			expect(rendered.setEditorPresentation).toHaveBeenCalledOnce();
 			expect(rendered.setTerminalPresentation).toHaveBeenCalledOnce();
+		}
+	});
+
+	it('mutates only the font attribute whose preference changed', async () => {
+		installMatchMedia();
+		const rendered = renderController({ mode: 'fixed', themeId: 'ansi-light' });
+		await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());
+		const observer = new MutationObserver(() => {});
+		observer.observe(document.documentElement, { attributes: true });
+		try {
+			flushSync(() => rendered.component.setFonts('departure-mono', 'default'));
+			expect(observer.takeRecords().map((record) => record.attributeName)).toEqual([
+				'data-interface-font',
+			]);
+			flushSync(() => rendered.component.setFonts('departure-mono', 'departure-mono'));
+			expect(observer.takeRecords().map((record) => record.attributeName)).toEqual([
+				'data-monospace-font',
+			]);
+		} finally {
+			observer.disconnect();
 		}
 	});
 

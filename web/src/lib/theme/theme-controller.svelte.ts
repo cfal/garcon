@@ -44,6 +44,9 @@ export class ThemeController {
 	constructor(private readonly deps: ThemeControllerDeps) {
 		$effect(() => {
 			document.documentElement.dataset.interfaceFont = this.deps.getInterfaceFont();
+		});
+
+		$effect(() => {
 			document.documentElement.dataset.monospaceFont = this.deps.getMonospaceFont();
 		});
 
