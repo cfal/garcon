@@ -129,9 +129,13 @@ export function convertClaudeToolUse(ts: string, part: unknown): ToolUseChatMess
 
     case 'monitor': {
       const ws = asObject(input.ws);
-      return new ClaudeMonitorToolUseMessage(ts, toolId, asString(input.description) ?? '',
-        asNumber(input.timeout_ms), asString(input.command), asString(ws.url),
-        Array.isArray(ws.protocols) ? ws.protocols.filter((value): value is string => typeof value === 'string') : undefined);
+      const protocols = Array.isArray(ws.protocols)
+        ? ws.protocols.filter((value): value is string => typeof value === 'string')
+        : undefined;
+      return new ClaudeMonitorToolUseMessage(
+        ts, toolId, asString(input.description) ?? '', asNumber(input.timeout_ms),
+        asString(input.command), asString(ws.url), protocols,
+      );
     }
 
     case 'bash':

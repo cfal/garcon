@@ -21,11 +21,13 @@ export function coerceTodoItems(raw: unknown): TodoItem[] | undefined {
     const obj = entry as Record<string, unknown>;
     const content = obj.content ?? obj.text ?? obj.step;
     if (typeof content !== 'string') continue;
-    const s = obj.status;
-    const completed = obj.completed;
-    const status: TodoStatus =
-      completed === true || s === 'completed' || s === 'done' ? 'completed' :
-      s === 'in_progress' || s === 'in-progress' ? 'in_progress' : 'pending';
+    const rawStatus = obj.status;
+    let status: TodoStatus = 'pending';
+    if (obj.completed === true || rawStatus === 'completed' || rawStatus === 'done') {
+      status = 'completed';
+    } else if (rawStatus === 'in_progress' || rawStatus === 'in-progress') {
+      status = 'in_progress';
+    }
     items.push({ content, status });
   }
   return items.length > 0 ? items : undefined;

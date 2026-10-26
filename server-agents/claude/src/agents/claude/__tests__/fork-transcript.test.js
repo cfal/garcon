@@ -412,10 +412,7 @@ function renderedWithoutTaskActivation(entries, forkTimestamp) {
   for (const message of rendered) {
     const toolUseResult = message.content?.toolUseResult;
     if (typeof toolUseResult !== 'object' || toolUseResult === null) continue;
-    delete toolUseResult.backgroundTaskId;
-    delete toolUseResult.outputTaskId;
-    delete toolUseResult.agentId;
-    if (typeof toolUseResult.taskId === 'string' && typeof toolUseResult.timeoutMs === 'number') delete toolUseResult.taskId;
+    message.content.toolUseResult = withoutTaskActivationFields(toolUseResult);
   }
   return rendered;
 }
