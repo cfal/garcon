@@ -39,9 +39,9 @@ describe('Claude discovery and Monitor conversion', () => {
     'preserves string-only Monitor arrays for live, reload, and permissions: $values', ({ values }) => {
       const input = { description: 'Synthetic watch', command: 'printf synthetic', persistent: false,
         allowed_domains: values, ws: { protocols: values } };
+      const stringValues = values.filter((value) => typeof value === 'string');
       const expected = { persistent: false,
-        allowedDomains: values.filter((value) => typeof value === 'string'),
-        webSocketProtocols: values.filter((value) => typeof value === 'string') };
+        allowedDomains: stringValues, webSocketProtocols: stringValues };
       const part = { type: 'tool_use', name: 'Monitor', id: 'synthetic-tool', input };
       const native = { type: 'assistant', uuid: 'synthetic-row', timestamp,
         message: { role: 'assistant', content: [part] } };

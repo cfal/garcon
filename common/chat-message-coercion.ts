@@ -57,6 +57,7 @@ export function asOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+// Unlike asStringArray, keeps blank strings and empty arrays for lossless Monitor round-trips.
 export function asOptionalStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return value.filter((item): item is string => typeof item === 'string');

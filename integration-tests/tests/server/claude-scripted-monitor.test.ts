@@ -25,13 +25,14 @@ describe('scripted Claude Monitor', () => {
       },
       websocket: { open(socket) { connected.resolve(socket); }, message() {} },
     }) : null;
+    const watchUrl = watchServer ? `ws://127.0.0.1:${watchServer.port}/events` : undefined;
     try {
       await withIntegrationFixture(`claude-scripted-monitor-${mode}`, async (fixture) => {
         const eventGate = join(fixture.executionDirs.project, 'synthetic-event-gate');
         const endGate = join(fixture.executionDirs.project, 'synthetic-end-gate');
         const monitorInput = {
           description: 'Synthetic event watch', timeout_ms: 120_000,
-          ...(watchServer ? { ws: { url: `ws://127.0.0.1:${watchServer.port}/events`, protocols: ['synthetic-events'] } } : {
+          ...(watchUrl ? { ws: { url: watchUrl, protocols: ['synthetic-events'] } } : {
             persistent: false, allowed_domains: [],
             command: `while [ ! -f ${eventGate} ]; do sleep 0.05; done; printf 'synthetic-watch-event\n'; `
               + `while [ ! -f ${endGate} ]; do sleep 0.05; done`,
@@ -74,7 +75,7 @@ describe('scripted Claude Monitor', () => {
             { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS });
           if (permission.message.type !== 'permission-request') throw new Error('Expected a Monitor permission request');
           expect(permission.message.requestedTool).toMatchObject({
-            type: 'claude-monitor-tool-use', webSocketUrl: 'ws' in monitorInput ? monitorInput.ws.url : undefined,
+            type: 'claude-monitor-tool-use', webSocketUrl: watchUrl,
             webSocketProtocols: ['synthetic-events'],
           });
           expect((await fixture.client.sendPermissionDecision({
@@ -102,14 +103,12 @@ describe('scripted Claude Monitor', () => {
         expect((await fixture.client.waitForTurnTerminal(chatId, undefined, {
           afterIndex: fixture.client.events().lastIndexOf(successor) + 1, timeoutMs: LIVE_TURN_TIMEOUT_MS,
         })).type).toBe('agent-run-finished');
+        const finalOutput = await waitForAssistant(fixture, chatId, 'Synthetic watch ended', cursor);
         const events = fixture.client.eventsSince(cursor);
         const terminals = events.filter((event) => event.type === 'agent-run-finished'
           && event.chatId === chatId && event.turnId === turn.turnId);
         expect(terminals).toHaveLength(1);
-        const finalOutputIndex = events.findIndex((event) => event.type === 'chat-messages'
-          && event.chatId === chatId && event.messages.some((entry) =>
-            entry.message.type === 'assistant-message' && entry.message.content === 'Synthetic watch ended'));
-        expect(events.indexOf(terminals[0]!)).toBeGreaterThan(finalOutputIndex);
+        expect(events.indexOf(terminals[0]!)).toBeGreaterThan(events.indexOf(finalOutput));
         expect(events.indexOf(successor)).toBeGreaterThan(events.indexOf(terminals[0]!));
         const live = await fixture.client.getMessages(chatId);
         expect(assistantContents(live.messages)).toEqual([
@@ -118,10 +117,10 @@ describe('scripted Claude Monitor', () => {
         expect(userContents(live.messages)).toEqual(['Synthetic watch input', 'Synthetic successor input']);
         expect(messagesOfType(live.messages, 'unknown-tool-use')).toEqual([]);
         expect(messagesOfType(live.messages, 'claude-tool-search-tool-use')).toHaveLength(1);
-        expect(messagesOfType(live.messages, 'claude-monitor-tool-use')).toHaveLength(1);
+        const monitorCalls = messagesOfType(live.messages, 'claude-monitor-tool-use');
+        expect(monitorCalls).toHaveLength(1);
         if (mode === 'command') {
-          expect(messagesOfType(live.messages, 'claude-monitor-tool-use')[0])
-            .toMatchObject({ persistent: false, allowedDomains: [] });
+          expect(monitorCalls[0]).toMatchObject({ persistent: false, allowedDomains: [] });
         }
         expect(messagesOfType(live.messages, 'tool-result').find((message) => message.toolId === 'toolu_discover_monitor')?.content)
           .toMatchObject({ items: [{ type: 'tool_reference', tool_name: 'Monitor' }], toolUseResult: { matches: ['Monitor'] } });

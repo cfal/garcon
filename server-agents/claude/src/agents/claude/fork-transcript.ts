@@ -25,9 +25,9 @@ const CLAUDE_SOURCE_ONLY_FIELDS = [
   'slug',
   'sourceToolAssistantUUID',
 ] as const;
-// Resume reconstructs shell, Monitor, and async subagent tasks from result fields.
-// A native fork cannot own the source's tasks; retaining their identity triggers
-// orphan-task notifications on its first resume. Descriptive fields stay.
+// Resume reconstructs shell and async subagent tasks from these result fields,
+// and Monitor tasks from taskId plus numeric timeoutMs; other taskId fields stay.
+// A native fork cannot own source tasks: their identity triggers orphan-task notifications.
 const CLAUDE_TASK_ACTIVATION_FIELDS = ['backgroundTaskId', 'outputTaskId', 'agentId'] as const;
 
 type ClaudeTranscriptEntry = Record<string, unknown> & { uuid: string };
@@ -40,11 +40,12 @@ interface ClaudeForkTransformerOptions {
 function stripTaskActivation(rewritten: Record<string, unknown>): void {
   const toolUseResult = rewritten.toolUseResult;
   if (!isRecord(toolUseResult)) return;
-  const isMonitor = typeof toolUseResult.taskId === 'string' && typeof toolUseResult.timeoutMs === 'number';
-  if (!isMonitor && !CLAUDE_TASK_ACTIVATION_FIELDS.some((field) => field in toolUseResult)) return;
+  const hasMonitorActivationShape = typeof toolUseResult.taskId === 'string'
+    && typeof toolUseResult.timeoutMs === 'number';
+  if (!hasMonitorActivationShape && !CLAUDE_TASK_ACTIVATION_FIELDS.some((field) => field in toolUseResult)) return;
   const projected = { ...toolUseResult };
   for (const field of CLAUDE_TASK_ACTIVATION_FIELDS) delete projected[field];
-  if (isMonitor) delete projected.taskId;
+  if (hasMonitorActivationShape) delete projected.taskId;
   rewritten.toolUseResult = projected;
 }
 
