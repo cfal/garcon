@@ -88,6 +88,8 @@ function snapshotFromEntry(entry: ChatTranscriptEntry): ChatTranscriptSnapshot {
 class ChatTranscriptPersistenceQueue {
 	#pending = new Map<string, ChatTranscriptPersistDraft>();
 	#timer: TimeoutHandle | null = null;
+	#batch: string[] = [];
+	#batchIndex = 0;
 	#delayMs: number;
 	#persist: (draft: ChatTranscriptPersistDraft) => void;
 	#setTimeout: SetTimeoutFn;
@@ -108,8 +110,11 @@ class ChatTranscriptPersistenceQueue {
 
 	schedule(draft: ChatTranscriptPersistDraft): void {
 		this.#pending.set(draft.chatId, draft);
-		if (this.#timer) return;
-		this.#timer = this.#setTimeout(() => this.flush(), this.#delayMs);
+		this.#scheduleDrain(this.#delayMs);
+	}
+
+	hasPending(chatId: string): boolean {
+		return this.#pending.has(chatId);
 	}
 
 	remove(chatId: string): void {
@@ -119,11 +124,38 @@ class ChatTranscriptPersistenceQueue {
 	flush(): void {
 		const drafts = [...this.#pending.values()];
 		this.#pending.clear();
-		if (this.#timer) {
+		this.#batch = [];
+		this.#batchIndex = 0;
+		if (this.#timer !== null) {
 			this.#clearTimeout(this.#timer);
 			this.#timer = null;
 		}
 		for (const draft of drafts) this.#persist(draft);
+	}
+
+	#scheduleDrain(delayMs: number): void {
+		if (this.#timer !== null) return;
+		this.#timer = this.#setTimeout(() => this.#drainNext(), delayMs);
+	}
+
+	#drainNext(): void {
+		this.#timer = null;
+		if (this.#batch.length === 0) this.#batch = [...this.#pending.keys()];
+		const chatId = this.#batch[this.#batchIndex++];
+		const draft = chatId === undefined ? undefined : this.#pending.get(chatId);
+		if (draft) this.#pending.delete(draft.chatId);
+		try {
+			if (draft) this.#persist(draft);
+		} finally {
+			if (this.#batchIndex < this.#batch.length) {
+				this.#scheduleDrain(0);
+			} else {
+				this.#batch = [];
+				this.#batchIndex = 0;
+				// New traffic waits for the next coalescing window, even during a long drain.
+				if (this.#pending.size > 0) this.#scheduleDrain(this.#delayMs);
+			}
+		}
 	}
 }
 
@@ -154,7 +186,6 @@ export class ChatTranscriptCache {
 					},
 					{ limit: this.#limit },
 				);
-				this.#storage.markValidated(draft.chatId);
 			},
 		});
 	}
@@ -340,7 +371,7 @@ export class ChatTranscriptCache {
 		const current = this.#entries.get(chatId);
 		const now = nowIso();
 		if (current) this.#entries.set(chatId, { ...current, stale: false, lastValidatedAt: now });
-		this.#storage.markValidated(chatId);
+		if (!this.#persistence.hasPending(chatId)) this.#storage.markValidated(chatId);
 	}
 
 	listCursors(limit = 20): ChatTranscriptCursor[] {
