@@ -106,6 +106,10 @@ describe('transformClaudeForkTranscript', () => {
       { taskId: 'synthetic-monitor', timeoutMs: 300_000, persistent: false },
     ],
     [
+      'a persistent Monitor',
+      { taskId: 'synthetic-persistent-monitor', timeoutMs: 0, persistent: true },
+    ],
+    [
       'an asynchronous fork subagent',
       {
         isAsync: true,
