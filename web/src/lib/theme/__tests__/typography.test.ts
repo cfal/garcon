@@ -9,6 +9,8 @@ import {
 	TYPOGRAPHY_SURFACES,
 	TYPOGRAPHY_SIZE_OPTIONS,
 	parseTypographyPreferences,
+	typographyScale,
+	readTypographyScale,
 } from '../typography';
 
 describe('scoped typography preferences', () => {
@@ -27,6 +29,27 @@ describe('scoped typography preferences', () => {
 		expect(parseTypographyPreferences({})).toEqual(TYPOGRAPHY_DEFAULTS);
 		expect(createStore().snapshot()).toMatchObject(TYPOGRAPHY_DEFAULTS);
 	});
+
+	it.each(TYPOGRAPHY_SURFACES)(
+		'uses the $id scale for preferences and DOM reads',
+		({ id, defaultSize }) => {
+			const attribute = `data-${id}-font-size`;
+			try {
+				for (const size of TYPOGRAPHY_SIZE_OPTIONS) {
+					const expected = size === 'default' ? 1 : Number(size) / defaultSize;
+					expect(typographyScale(id, size)).toBe(expected);
+					document.documentElement.setAttribute(attribute, size);
+					expect(readTypographyScale(document, id)).toBe(expected);
+				}
+				document.documentElement.setAttribute(attribute, 'invalid');
+				expect(readTypographyScale(document, id)).toBe(1);
+				document.documentElement.removeAttribute(attribute);
+				expect(readTypographyScale(document, id)).toBe(1);
+			} finally {
+				document.documentElement.removeAttribute(attribute);
+			}
+		},
+	);
 
 	it('preserves renderer defaults from older full settings snapshots', () => {
 		const legacy = { codeEditorFontSize: '12', gitDiffFontSize: '12', terminalFontSize: '13' };

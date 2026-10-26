@@ -67,12 +67,17 @@ export function observeTypographyChanges(
 	);
 }
 
-export function readTypographyScale(root: Document, surface: TypographySurface): number {
+export function typographyScale(surface: TypographySurface, size: FontSizePreference): number {
+	if (size === 'default') return 1;
 	const definition = TYPOGRAPHY_SURFACES.find(({ id }) => id === surface)!;
+	return Number(size) / definition.defaultSize;
+}
+
+export function readTypographyScale(root: Document, surface: TypographySurface): number {
 	const size = parseFontSizePreference(
 		root.documentElement.getAttribute(`data-${surface}-font-size`),
 	);
-	return size === 'default' ? 1 : Number(size) / definition.defaultSize;
+	return typographyScale(surface, size);
 }
 
 export function observeTypographyScale(

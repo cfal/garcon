@@ -217,7 +217,7 @@
 		const nextRows = rows;
 		const chatItemLayout = displayOptions.chatItemLayout;
 		const showProjectPath = displayOptions.showProjectPath;
-		const chatFontScale = displayOptions.chatFontScale ?? 1;
+		const chatFontScale = displayOptions.chatFontScale;
 		const explicitRowHeight = rowHeight;
 		const rowOverscan = overscan;
 		untrack(() =>

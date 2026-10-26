@@ -18,7 +18,7 @@ interface SidebarVirtualGeometryUpdate {
 	readonly rows: readonly SidebarVirtualRow[];
 	readonly chatItemLayout: ChatItemLayout;
 	readonly showProjectPath: boolean;
-	readonly chatFontScale?: number;
+	readonly chatFontScale: number;
 	readonly rowHeight: number | undefined;
 	readonly overscan: number;
 }
@@ -63,10 +63,10 @@ export class SidebarVirtualChatListController {
 			this.#lastEstimatedLayout !== undefined &&
 			(this.#lastEstimatedLayout !== input.chatItemLayout ||
 				this.#lastShowProjectPath !== input.showProjectPath ||
-				this.#lastChatFontScale !== (input.chatFontScale ?? 1));
+				this.#lastChatFontScale !== input.chatFontScale);
 		this.#lastEstimatedLayout = input.chatItemLayout;
 		this.#lastShowProjectPath = input.showProjectPath;
-		this.#lastChatFontScale = input.chatFontScale ?? 1;
+		this.#lastChatFontScale = input.chatFontScale;
 		this.#overscan = input.overscan;
 		const normalizedAnchor =
 			sizingOptionsChanged && input.rowHeight === undefined ? this.#normalizedAnchor() : null;

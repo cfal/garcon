@@ -15,21 +15,19 @@ export const TERMINAL_FALLBACK_FONT_FAMILY =
 	'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
 export const TERMINAL_FONT_FAMILY = `"${TERMINAL_FONT_NAME}", ${TERMINAL_FALLBACK_FONT_FAMILY}`;
 
-export type TerminalFontFamily = string;
-
 type TerminalFontFaceFactory = () => readonly FontFace[];
 type FontFaceRegistrar = (fontFace: FontFace) => void;
 
 export interface TerminalFontResolver {
-	load(preference: FontPreference): Promise<TerminalFontFamily>;
+	load(preference: FontPreference): Promise<string>;
 }
 
 export class TerminalFontLoader implements TerminalFontResolver {
 	readonly #createFontFaces: TerminalFontFaceFactory;
 	readonly #registerFontFace: FontFaceRegistrar;
 	readonly #timeoutMs: number;
-	#loadPromise: Promise<TerminalFontFamily> | null = null;
-	#departurePromise: Promise<TerminalFontFamily> | null = null;
+	#loadPromise: Promise<string> | null = null;
+	#departurePromise: Promise<string> | null = null;
 
 	constructor(
 		createFontFaces: TerminalFontFaceFactory = () =>
@@ -48,7 +46,7 @@ export class TerminalFontLoader implements TerminalFontResolver {
 		this.#timeoutMs = timeoutMs;
 	}
 
-	load(preference: FontPreference = 'default'): Promise<TerminalFontFamily> {
+	load(preference: FontPreference = 'default'): Promise<string> {
 		if (preference === 'departure-mono') {
 			// Retains the default Nerd Font as fallback for private-use terminal glyphs.
 			this.#departurePromise ??= Promise.all([this.load(), loadDepartureMono()]).then(
@@ -61,7 +59,7 @@ export class TerminalFontLoader implements TerminalFontResolver {
 		return this.#loadPromise;
 	}
 
-	async #loadOnce(): Promise<TerminalFontFamily> {
+	async #loadOnce(): Promise<string> {
 		let timeout: ReturnType<typeof setTimeout> | undefined;
 		try {
 			const fontFaces = this.#createFontFaces();

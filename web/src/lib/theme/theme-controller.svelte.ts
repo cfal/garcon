@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import { TYPOGRAPHY_SURFACES, type TypographyPreferences } from './typography.js';
+import { TYPOGRAPHY_SURFACES, typographyScale, type TypographyPreferences } from './typography.js';
 import {
 	getThemeProfile,
 	resolveThemeId,
@@ -41,7 +41,7 @@ export class ThemeController {
 	#reportedMissingTerminalThemeIds = new Set<ThemeId>();
 
 	constructor(private readonly deps: ThemeControllerDeps) {
-		for (const { id, fontKey, sizeKey, defaultSize } of TYPOGRAPHY_SURFACES) {
+		for (const { id, fontKey, sizeKey } of TYPOGRAPHY_SURFACES) {
 			$effect(() => {
 				const root = document.documentElement;
 				const attribute = `data-${id}-font`;
@@ -53,10 +53,7 @@ export class ThemeController {
 				const size = this.deps.typography[sizeKey];
 				if (size === 'default') root.style.removeProperty(`--${id}-font-size`);
 				else root.style.setProperty(`--${id}-font-size`, `${size}px`);
-				root.style.setProperty(
-					`--${id}-font-scale`,
-					String(size === 'default' ? 1 : Number(size) / defaultSize),
-				);
+				root.style.setProperty(`--${id}-font-scale`, String(typographyScale(id, size)));
 				const attribute = `data-${id}-font-size`;
 				if (root.getAttribute(attribute) !== size) root.setAttribute(attribute, size);
 			});
