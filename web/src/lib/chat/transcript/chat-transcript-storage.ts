@@ -95,32 +95,37 @@ function windowEntries(
 	return entries.slice(-limit);
 }
 
-// Caps visited values and string input before allocating JSON; escaped size is checked afterward.
-function fitsSnapshotSerializationBudget(envelope: ChatSnapshotEnvelope): boolean {
-	let characters = 0;
-	let values = 0;
+// Uses a conservative 32-character allowance for non-string values before allocating JSON.
+// Checks the exact escaped size after serialization.
+function serializeSnapshotWithinBudget(envelope: ChatSnapshotEnvelope): string | null {
+	let estimatedCharacters = 0;
+	let visitedValues = 0;
 	function visit(value: unknown, depth: number): boolean {
-		if (++values > MAX_SNAPSHOT_VALUES || depth > MAX_SNAPSHOT_DEPTH) return false;
-		characters += typeof value === 'string' ? value.length + 2 : 32;
-		if (characters > MAX_SNAPSHOT_CHARACTERS) return false;
+		visitedValues += 1;
+		if (visitedValues > MAX_SNAPSHOT_VALUES || depth > MAX_SNAPSHOT_DEPTH) return false;
+		estimatedCharacters += typeof value === 'string' ? value.length + 2 : 32;
+		if (estimatedCharacters > MAX_SNAPSHOT_CHARACTERS) return false;
 		if (value === null || typeof value !== 'object') return true;
 		if ('toJSON' in value) return false;
 		if (Array.isArray(value)) {
-			if (value.length > MAX_SNAPSHOT_VALUES - values) return false;
+			if (value.length > MAX_SNAPSHOT_VALUES - visitedValues) return false;
 			for (const item of value) {
 				if (!visit(item, depth + 1)) return false;
 			}
-		} else {
-			for (const key in value) {
-				if (!Object.hasOwn(value, key)) continue;
-				characters += key.length + 3;
-				if (characters > MAX_SNAPSHOT_CHARACTERS) return false;
-				if (!visit((value as Record<string, unknown>)[key], depth + 1)) return false;
-			}
+			return true;
+		}
+		const record = value as Record<string, unknown>;
+		for (const key in record) {
+			if (!Object.hasOwn(record, key)) continue;
+			estimatedCharacters += key.length + 3;
+			if (estimatedCharacters > MAX_SNAPSHOT_CHARACTERS) return false;
+			if (!visit(record[key], depth + 1)) return false;
 		}
 		return true;
 	}
-	return visit(envelope, 0);
+	if (!visit(envelope, 0)) return null;
+	const serialized = JSON.stringify(envelope);
+	return serialized.length <= MAX_SNAPSHOT_CHARACTERS ? serialized : null;
 }
 
 function upsertEntry(
@@ -266,12 +271,8 @@ export class LocalChatTranscriptStorage {
 			entries: retainedEntries,
 		};
 		try {
-			if (!fitsSnapshotSerializationBudget(envelope)) {
-				this.remove(chatId);
-				return;
-			}
-			const serialized = JSON.stringify(envelope);
-			if (serialized.length > MAX_SNAPSHOT_CHARACTERS) {
+			const serialized = serializeSnapshotWithinBudget(envelope);
+			if (serialized === null) {
 				this.remove(chatId);
 				return;
 			}

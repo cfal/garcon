@@ -274,16 +274,34 @@ describe('LocalChatTranscriptStorage', () => {
 		expect(storage.restore('chat-1')).toBeNull();
 	});
 
-	it('bounds traversal of deeply nested or excessively wide tool payloads', () => {
-		for (const payload of [Array(20_000).fill(0), Array(100).fill(0).reduce((child) => [child], [])]) {
-			const message = entry(1, 'Synthetic message');
-			Object.assign(message.message, { payload });
-			const stringify = vi.spyOn(JSON, 'stringify');
-			persist(storage, 'chat-1', [message]);
-			expect(stringify.mock.calls.some(([value]) => value?.chatId === 'chat-1')).toBe(false);
-			expect(storage.restore('chat-1')).toBeNull();
-			stringify.mockRestore();
+	it.each(['wide', 'deep'] as const)('rejects %s arrays before serialization', (kind) => {
+		let payload: unknown;
+		if (kind === 'wide') {
+			payload = Array(20_000).fill('');
+		} else {
+			payload = [];
+			for (let depth = 0; depth < 100; depth += 1) {
+				payload = [payload];
+			}
 		}
+		const message = entry(1, 'Synthetic message');
+		Object.assign(message.message, { payload });
+		const stringify = vi.spyOn(JSON, 'stringify');
+		persist(storage, 'chat-1', [message]);
+		expect(stringify.mock.calls.some(([value]) => value?.chatId === 'chat-1')).toBe(false);
+		expect(storage.restore('chat-1')).toBeNull();
+	});
+
+	it.each(['own', 'inherited'] as const)('rejects %s toJSON hooks before serialization', (kind) => {
+		const toJSON = vi.fn(() => 'Synthetic serialization');
+		const payload = kind === 'own' ? { toJSON } : Object.create({ toJSON });
+		const message = entry(1, 'Synthetic message');
+		Object.assign(message.message, { payload });
+		const stringify = vi.spyOn(JSON, 'stringify');
+		persist(storage, 'chat-1', [message]);
+		expect(stringify.mock.calls.some(([value]) => value?.chatId === 'chat-1')).toBe(false);
+		expect(toJSON).not.toHaveBeenCalled();
+		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
 	});
 
 	it('removes the previous snapshot when its replacement write fails', () => {
@@ -295,6 +313,8 @@ describe('LocalChatTranscriptStorage', () => {
 			write(target, key, value);
 		});
 		storage.persist('chat-1', [entry(1, 'new')], { ...cursor(), transcriptViewId: 'generation-2' });
+		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
+		expect(JSON.parse(localStorage.getItem(INDEX_KEY)!).entries).toEqual([]);
 		expect(storage.restore('chat-1')).toBeNull();
 		expect(storage.listCursors()).toEqual([]);
 	});
@@ -318,8 +338,12 @@ describe('LocalChatTranscriptStorage', () => {
 		}
 		const retained = JSON.parse(localStorage.getItem(INDEX_KEY)!).entries as { chatId: string }[];
 		expect(retained).toHaveLength(7);
-		expect(retained.reduce((total, item) => total + localStorage.getItem(snapshotKey(item.chatId))!.length, 0)).toBeLessThanOrEqual(1_500_000);
-		localStorage.setItem(snapshotKey('chat-7'), 'x'.repeat(2_000_000));
+		const retainedCharacters = retained.reduce(
+			(total, item) => total + localStorage.getItem(snapshotKey(item.chatId))!.length,
+			0,
+		);
+		expect(retainedCharacters).toBeLessThanOrEqual(1_500_000);
+		localStorage.setItem(snapshotKey('chat-7'), 'x'.repeat(300_000));
 		vi.setSystemTime(new Date(TS));
 		persist(storage, 'chat-older', [entry(1, 'small')]);
 		expect(localStorage.getItem(snapshotKey('chat-7'))).toBeNull();

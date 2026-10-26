@@ -35,12 +35,8 @@ describe('HighlightedCodeText', () => {
 	});
 
 	it('ignores highlighting completed after the source has changed', async () => {
-		let complete!: (segments: CodeHighlightSegment[]) => void;
-		vi.mocked(highlightCodeFence).mockReturnValue(
-			new Promise((resolve) => {
-				complete = resolve;
-			}),
-		);
+		const highlight = Promise.withResolvers<CodeHighlightSegment[]>();
+		vi.mocked(highlightCodeFence).mockReturnValue(highlight.promise);
 		const { container, rerender } = render(HighlightedCodeText, {
 			language: 'js',
 			text: 'const first = 1;',
@@ -48,8 +44,8 @@ describe('HighlightedCodeText', () => {
 		await waitFor(() => expect(highlightCodeFence).toHaveBeenCalled());
 
 		await rerender({ language: 'text', text: 'Synthetic replacement' });
-		complete([{ text: 'const first = 1;', className: 'cm-code-keyword' }]);
-		await Promise.resolve();
+		highlight.resolve([{ text: 'const first = 1;', className: 'cm-code-keyword' }]);
+		await highlight.promise;
 		await tick();
 		expect(container.textContent).toBe('Synthetic replacement');
 		expect(container.querySelector('span')).toBeNull();
