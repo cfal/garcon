@@ -91,8 +91,12 @@ describe('Settings', () => {
 			rendered = render(SettingsTestHost, props);
 			appearance = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Appearance' });
 			expect(appearance.value).toBe('terminal');
-			expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Font' }).value).toBe('departure-mono');
-			expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Monospace Font' }).value).toBe('departure-mono');
+			expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Font' }).value).toBe(
+				'departure-mono',
+			);
+			expect(
+				screen.getByRole<HTMLSelectElement>('combobox', { name: 'Monospace Font' }).value,
+			).toBe('departure-mono');
 			expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Theme' }).value).toBe(
 				'ansi-dark',
 			);

@@ -358,12 +358,17 @@ describe('TerminalSurface', () => {
 		render(TerminalSurfaceTestHost, { host: 'mobile', onMonospaceFont, onAttach });
 		await waitFor(() => expect(onMonospaceFont).toHaveBeenLastCalledWith('default'));
 		const attachments = onAttach.mock.calls.length;
-		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ monospaceFont: 'departure-mono' }));
-		window.dispatchEvent(new StorageEvent('storage', {
-			key: LOCAL_STORAGE_KEYS.localSettings,
-			storageArea: localStorage,
-			newValue: JSON.stringify({ monospaceFont: 'departure-mono' }),
-		}));
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ monospaceFont: 'departure-mono' }),
+		);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				storageArea: localStorage,
+				newValue: JSON.stringify({ monospaceFont: 'departure-mono' }),
+			}),
+		);
 		await waitFor(() => expect(onMonospaceFont).toHaveBeenLastCalledWith('departure-mono'));
 		expect(onAttach).toHaveBeenCalledTimes(attachments);
 	});

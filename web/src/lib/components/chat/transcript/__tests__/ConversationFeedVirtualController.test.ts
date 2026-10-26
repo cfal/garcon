@@ -532,7 +532,8 @@ describe('ConversationFeedVirtualController', () => {
 	});
 
 	it.each(['data-interface-font', 'data-monospace-font'])(
-		'remeasures hidden typography and restores the reading row after %s changes', async (attribute) => {
+		'remeasures hidden typography and restores the reading row after %s changes',
+		async (attribute) => {
 			const { exposure, unmount } = await renderController({ initialPinned: false });
 			exposure.controller.scrollToStart();
 			await settleController();
@@ -565,7 +566,11 @@ describe('ConversationFeedVirtualController', () => {
 			fonts.dispatchEvent(new Event('loadingdone'));
 			await settleController();
 			expect(exposure.controller.isAtEnd()).toBe(true);
-			expect(exposure.transactions.slice(before).some(record => record.source === 'items' && record.anchorKind === 'end')).toBe(true);
+			expect(
+				exposure.transactions
+					.slice(before)
+					.some((record) => record.source === 'items' && record.anchorKind === 'end'),
+			).toBe(true);
 			unmount();
 			const count = exposure.transactions.length;
 			fonts.dispatchEvent(new Event('loadingdone'));

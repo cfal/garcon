@@ -4,8 +4,8 @@
 	border-top: 1px solid hsl(var(--border));
 	background: hsl(var(--card));
 	color: hsl(var(--muted-foreground));
-	font:
-		12px/18px var(--monospace-font-override, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+	font: 12px/18px
+		var(--monospace-font-override, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
 }
 
 .cm-editor .cm-vim-panel input {

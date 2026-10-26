@@ -7,7 +7,7 @@ import {
 } from '../terminal-font.js';
 
 vi.mock('$lib/theme/fonts.js', async (importOriginal) => ({
-	...await importOriginal<typeof import('$lib/theme/fonts.js')>(),
+	...(await importOriginal<typeof import('$lib/theme/fonts.js')>()),
 	loadDepartureMono: vi.fn(),
 }));
 
@@ -22,7 +22,9 @@ describe('TerminalFontLoader', () => {
 		const loader = new TerminalFontLoader(() => [], vi.fn());
 		const first = loader.load('departure-mono');
 		expect(loader.load('departure-mono')).toBe(first);
-		await expect(first).resolves.toBe(loaded ? `"Departure Mono", ${TERMINAL_FONT_FAMILY}` : TERMINAL_FONT_FAMILY);
+		await expect(first).resolves.toBe(
+			loaded ? `"Departure Mono", ${TERMINAL_FONT_FAMILY}` : TERMINAL_FONT_FAMILY,
+		);
 	});
 
 	it('loads and registers the pinned regular and bold faces once', async () => {

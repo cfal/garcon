@@ -115,7 +115,10 @@
 			inputControls.buildToolbarSequence(key);
 			onToolbarKey(key);
 		},
-		attach: () => { onAttach(); return { lease: 1, ready: Promise.resolve() }; },
+		attach: () => {
+			onAttach();
+			return { lease: 1, ready: Promise.resolve() };
+		},
 		park: () => undefined,
 		scheduleFit: () => undefined,
 		focus: () => {

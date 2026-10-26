@@ -51,16 +51,24 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it.each(['departure-mono', 'default', 'serif', null, true, [], {}])('validates font preferences: %j', (value) => {
-		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({
-			terminalAppearance: true, interfaceFont: value, monospaceFont: value,
-		}));
-		const store = createLocalSettingsStore();
-		expect(store.interfaceFont).toBe(value === 'departure-mono' ? value : 'default');
-		expect(store.monospaceFont).toBe(store.interfaceFont);
-		expect(store.terminalAppearance).toBe(true);
-		store.destroy();
-	});
+	it.each(['departure-mono', 'default', 'serif', null, true, [], {}])(
+		'validates font preferences: %j',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({
+					terminalAppearance: true,
+					interfaceFont: value,
+					monospaceFont: value,
+				}),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.interfaceFont).toBe(value === 'departure-mono' ? value : 'default');
+			expect(store.monospaceFont).toBe(store.interfaceFont);
+			expect(store.terminalAppearance).toBe(true);
+			store.destroy();
+		},
+	);
 
 	it('persists and synchronizes fonts independently, including storage removal', () => {
 		const store = createLocalSettingsStore();
@@ -69,7 +77,12 @@ describe('LocalSettingsStore', () => {
 		expect(restored.interfaceFont).toBe('departure-mono');
 		expect(restored.monospaceFont).toBe('default');
 		store.set('monospaceFont', 'departure-mono');
-		window.dispatchEvent(new StorageEvent('storage', { key: LOCAL_STORAGE_KEYS.localSettings, storageArea: localStorage }));
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				storageArea: localStorage,
+			}),
+		);
 		expect(restored.monospaceFont).toBe('departure-mono');
 		expect(restored.terminalAppearance).toBe(false);
 		expect(restored.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);

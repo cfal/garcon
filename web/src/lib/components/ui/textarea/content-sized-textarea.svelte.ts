@@ -64,7 +64,9 @@ export function contentSizedTextarea(
 		window.addEventListener('resize', scheduleResize);
 		// Switching to an already loaded font need not resize the field's width.
 		const stopObservingFonts = observeFontChanges(target.ownerDocument, scheduleResize, [
-			'data-theme-appearance', 'data-interface-font', 'data-monospace-font',
+			'data-theme-appearance',
+			'data-interface-font',
+			'data-monospace-font',
 		]);
 		return () => {
 			observer.disconnect();
