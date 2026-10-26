@@ -479,6 +479,15 @@ describe('Chromium Git responsive presentation', () => {
         await settingsButton.click();
         await browserExpect(selections.nth(1)).toContainText('Unified');
         await browserExpect(selections.nth(2)).toContainText('20 lines');
+        if (width === 320) {
+          await selections.nth(2).evaluate((element) => {
+            const label = [...element.childNodes].find(
+              (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.includes('20 lines'),
+            );
+            if (!label) throw new Error('Expected context selection text');
+            label.textContent = '20 lines of surrounding context';
+          });
+        }
         await browserExpect
           .poll(() =>
             popover.evaluate((element) => {

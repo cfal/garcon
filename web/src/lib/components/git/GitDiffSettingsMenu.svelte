@@ -67,7 +67,10 @@
 					if (v) onSetDiffFontSize(parseFontSizePreference(v));
 				}}
 			>
-				<Select.Trigger class="h-auto min-h-8 w-auto max-w-full whitespace-normal" size="sm">
+				<Select.Trigger
+					class="data-[size=sm]:h-auto min-h-8 w-auto max-w-full py-1 whitespace-normal"
+					size="sm"
+				>
 					{typographySizeLabel('code-diff', diffFontSize)}
 				</Select.Trigger>
 				<Select.Content>
@@ -89,7 +92,10 @@
 					if (v) onSetDiffMode(v as DiffMode);
 				}}
 			>
-				<Select.Trigger class="h-auto min-h-8 w-auto max-w-full whitespace-normal" size="sm">
+				<Select.Trigger
+					class="data-[size=sm]:h-auto min-h-8 w-auto max-w-full py-1 whitespace-normal"
+					size="sm"
+				>
 					{diffMode === 'unified' ? m.git_diff_unified() : m.git_diff_split()}
 				</Select.Trigger>
 				<Select.Content>
@@ -104,7 +110,10 @@
 		<div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
 			<div class="text-sm font-medium text-foreground">{m.git_diff_context_lines()}</div>
 			<Select.Root type="single" value={String(contextLines)} onValueChange={handleContextLines}>
-				<Select.Trigger class="h-auto min-h-8 w-auto max-w-full whitespace-normal" size="sm">
+				<Select.Trigger
+					class="data-[size=sm]:h-auto min-h-8 w-auto max-w-full py-1 whitespace-normal"
+					size="sm"
+				>
 					{m.git_diff_lines({ count: contextLines })}
 				</Select.Trigger>
 				<Select.Content>
