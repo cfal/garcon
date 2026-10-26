@@ -618,6 +618,9 @@ select.ticket-input {
 	max-width: 100%;
 	overflow: auto;
 }
+.ticket-markdown .markdown-body {
+	font-size: calc(14px * var(--interface-font-scale, 1));
+}
 .ticket-relationships {
 	border-top: 1px solid hsl(var(--border));
 	padding: 12px 0;

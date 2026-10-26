@@ -580,7 +580,7 @@
 		padding: 0.5rem 0.75rem;
 		border: 1px solid hsl(var(--border));
 		text-align: left;
-		font-size: 0.875rem;
+		font-size: calc(0.875rem * var(--text-scale, 1));
 	}
 
 	.markdown-body thead {
