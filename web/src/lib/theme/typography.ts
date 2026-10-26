@@ -88,20 +88,6 @@ export function parseTypographyPreferences(values: Record<string, unknown>): Typ
 		typography[fontKey] = parseSurfaceFont(id, values[fontKey]);
 		typography[sizeKey] = parseFontSizePreference(values[sizeKey]);
 	}
-	// Earlier snapshots persisted these renderer defaults as numeric selections.
-	if (!Object.hasOwn(values, 'interfaceFontSize')) {
-		if (values.codeEditorFontSize === '12') typography.codeEditorFontSize = 'default';
-		if (values.gitDiffFontSize === '12') typography.gitDiffFontSize = 'default';
-		if (values.terminalFontSize === '13') typography.terminalFontSize = 'default';
-	}
-	// New owners inherit existing choices once; explicit new defaults stay independent.
-	if (!Object.hasOwn(values, 'chatOutputFont')) typography.chatOutputFont = typography.chatCodeFont;
-	if (!Object.hasOwn(values, 'chatOutputFontSize'))
-		typography.chatOutputFontSize = typography.chatCodeFontSize;
-	if (!Object.hasOwn(values, 'expandedEditorFont'))
-		typography.expandedEditorFont = typography.codeEditorFont;
-	if (!Object.hasOwn(values, 'expandedEditorFontSize'))
-		typography.expandedEditorFontSize = typography.codeEditorFontSize;
 	return typography;
 }
 

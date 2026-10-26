@@ -146,29 +146,12 @@
 					'inter',
 				];
 				const monoFonts = ['default', 'system-mono', 'departure-mono', 'jetbrains-mono'];
-				const parentKeys = {
-					'chat-output': ['chatCodeFont', 'chatCodeFontSize'],
-					'expanded-editor': ['codeEditorFont', 'codeEditorFontSize'],
-				};
-				// Earlier snapshots persisted these renderer defaults as numeric selections.
-				if (!Object.hasOwn(typography, 'interfaceFontSize')) {
-					if (typography.codeEditorFontSize === '12') typography.codeEditorFontSize = 'default';
-					if (typography.gitDiffFontSize === '12') typography.gitDiffFontSize = 'default';
-					if (typography.terminalFontSize === '13') typography.terminalFontSize = 'default';
-				}
 				for (const [id, fontKey, sizeKey, defaultSize] of surfaces) {
-					const parent = parentKeys[id];
-					if (parent) {
-						if (!Object.hasOwn(typography, fontKey)) typography[fontKey] = typography[parent[0]];
-						if (!Object.hasOwn(typography, sizeKey)) typography[sizeKey] = typography[parent[1]];
-					}
 					const allowedFonts = ['chat-code', 'code-editor', 'code-diff', 'terminal'].includes(id)
 						? monoFonts
 						: fonts;
 					const font = allowedFonts.includes(typography[fontKey]) ? typography[fontKey] : 'default';
 					const size = fontSizes.includes(typography[sizeKey]) ? typography[sizeKey] : 'default';
-					typography[fontKey] = font;
-					typography[sizeKey] = size;
 					if (font !== 'default') {
 						let family = `var(--font-choice-${font})`;
 						if (font === 'departure-mono') {

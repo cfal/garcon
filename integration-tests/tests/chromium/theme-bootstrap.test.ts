@@ -102,17 +102,18 @@ const malformedSettings = [
 
 const scenarios: ThemeScenario[] = [
   {
-    name: "split owners inherit eligible normalized parents, not raw values",
+    name: "font eligibility is independent of other scopes",
     storedSettings: JSON.stringify({
       chatCodeFont: "inter",
       codeEditorFont: "system-serif",
       codeEditorFontSize: "12",
     }),
+    typography: { codeEditorFontSize: "12" },
     systemColorScheme: "light",
     expectedThemeId: defaultThemeId("light"),
   },
   {
-    name: "shipped explicit sizes survive renderer-default migration",
+    name: "saved sizes apply only to their own scope",
     storedSettings: JSON.stringify({
       codeEditorFontSize: "18",
       gitDiffFontSize: "16",
@@ -120,7 +121,7 @@ const scenarios: ThemeScenario[] = [
     }),
     typography: {
       codeEditorFontSize: "18",
-      expandedEditorFontSize: "18",
+      expandedEditorFontSize: "default",
       gitDiffFontSize: "16",
       terminalFontSize: "15",
     },
@@ -128,19 +129,24 @@ const scenarios: ThemeScenario[] = [
     expectedThemeId: defaultThemeId("light"),
   },
   {
-    name: "shipped renderer defaults preserve per-owner default sizes",
+    name: "numeric sizes remain explicit even when matching renderer defaults",
     storedSettings: JSON.stringify({
       codeEditorFontSize: "12",
       gitDiffFontSize: "12",
       terminalFontSize: "13",
       chatCodeFontSize: "12",
     }),
-    typography: { chatCodeFontSize: "12", chatOutputFontSize: "12" },
+    typography: {
+      codeEditorFontSize: "12",
+      gitDiffFontSize: "12",
+      terminalFontSize: "13",
+      chatCodeFontSize: "12",
+    },
     systemColorScheme: "light",
     expectedThemeId: defaultThemeId("light"),
   },
   {
-    name: "a present but invalid migration marker preserves explicit sizes",
+    name: "an invalid Interface size does not affect other sizes",
     storedSettings: JSON.stringify({
       interfaceFontSize: null,
       codeEditorFontSize: "12",
@@ -149,7 +155,6 @@ const scenarios: ThemeScenario[] = [
     }),
     typography: {
       codeEditorFontSize: "12",
-      expandedEditorFontSize: "12",
       gitDiffFontSize: "12",
       terminalFontSize: "13",
     },
@@ -180,7 +185,7 @@ const scenarios: ThemeScenario[] = [
     })),
   ),
   {
-    name: "split defaults and invalid values do not inherit explicit parent preferences",
+    name: "default and invalid values stay independent of other scopes",
     storedSettings: JSON.stringify({
       codeEditorFont: "jetbrains-mono",
       codeEditorFontSize: "20",
@@ -201,20 +206,18 @@ const scenarios: ThemeScenario[] = [
     expectedThemeId: defaultThemeId("light"),
   },
   {
-    name: "split owners inherit normalized existing choices",
+    name: "missing owners use defaults rather than another scope's preferences",
     storedSettings: JSON.stringify({
+      interfaceFontSize: "default",
       codeEditorFont: "jetbrains-mono",
-      codeEditorFontSize: "12",
+      codeEditorFontSize: "bad",
       chatCodeFont: "departure-mono",
       chatCodeFontSize: "18",
     }),
     typography: {
       codeEditorFont: "jetbrains-mono",
-      expandedEditorFont: "jetbrains-mono",
       chatCodeFont: "departure-mono",
       chatCodeFontSize: "18",
-      chatOutputFont: "departure-mono",
-      chatOutputFontSize: "18",
     },
     systemColorScheme: "light",
     expectedThemeId: defaultThemeId("light"),

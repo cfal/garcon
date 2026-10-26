@@ -67,59 +67,32 @@ describe('scoped typography preferences', () => {
 		},
 	);
 
-	it('preserves renderer defaults from older full settings snapshots', () => {
-		const legacy = { codeEditorFontSize: '12', gitDiffFontSize: '12', terminalFontSize: '13' };
-		expect(parseTypographyPreferences(legacy)).toEqual(TYPOGRAPHY_DEFAULTS);
-		expect(legacy).toEqual({
-			codeEditorFontSize: '12',
-			gitDiffFontSize: '12',
-			terminalFontSize: '13',
-		});
-		expect(parseTypographyPreferences({ ...legacy, chatCodeFontSize: '12' })).toEqual({
-			...TYPOGRAPHY_DEFAULTS,
-			chatCodeFontSize: '12',
-			chatOutputFontSize: '12',
-		});
-		expect(parseTypographyPreferences({ ...legacy, gitDiffFontSize: '18' }).gitDiffFontSize).toBe(
-			'18',
-		);
-		expect(parseTypographyPreferences({ ...legacy, interfaceFontSize: 'default' })).toMatchObject(
-			legacy,
-		);
-		expect(parseTypographyPreferences({ ...legacy, interfaceFontSize: null })).toMatchObject(
-			legacy,
-		);
-		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify(legacy));
-		const store = createStore();
-		store.set('gitDiffFontSize', '12');
-		expect(createStore().gitDiffFontSize).toBe('12');
-	});
+	it.each([undefined, null, 'default'])(
+		'keeps numeric sizes literal regardless of Interface size %s',
+		(interfaceFontSize) => {
+			const sizes = { codeEditorFontSize: '12', gitDiffFontSize: '12', terminalFontSize: '13' };
+			const preferences = Object.freeze({ ...sizes, interfaceFontSize });
+			expect(parseTypographyPreferences(preferences)).toEqual({ ...TYPOGRAPHY_DEFAULTS, ...sizes });
+		},
+	);
 
-	it('seeds split owners after normalization and respects explicitly present keys', () => {
-		expect(
-			parseTypographyPreferences({
-				codeEditorFontSize: '12',
-				codeEditorFont: 'jetbrains-mono',
-				chatCodeFont: 'departure-mono',
-				chatCodeFontSize: '18',
-			}),
-		).toMatchObject({
-			expandedEditorFont: 'jetbrains-mono',
-			expandedEditorFontSize: 'default',
-			chatOutputFont: 'departure-mono',
-			chatOutputFontSize: '18',
-		});
-		for (const value of ['default', null, 'bad']) {
+	it.each([undefined, 'default', null, 'bad'])(
+		'keeps missing or defaulted owners independent (%s)',
+		(value) => {
 			expect(
 				parseTypographyPreferences({
 					codeEditorFont: 'jetbrains-mono',
 					codeEditorFontSize: '20',
-					expandedEditorFont: value,
-					expandedEditorFontSize: value,
 					chatCodeFont: 'departure-mono',
 					chatCodeFontSize: '18',
-					chatOutputFont: value,
-					chatOutputFontSize: value,
+					...(value === undefined
+						? {}
+						: {
+								expandedEditorFont: value,
+								expandedEditorFontSize: value,
+								chatOutputFont: value,
+								chatOutputFontSize: value,
+							}),
 				}),
 			).toMatchObject({
 				expandedEditorFont: 'default',
@@ -127,8 +100,8 @@ describe('scoped typography preferences', () => {
 				chatOutputFont: 'default',
 				chatOutputFontSize: 'default',
 			});
-		}
-	});
+		},
+	);
 
 	it.each(TYPOGRAPHY_SURFACES)('enforces font eligibility for $id', ({ id, fontKey }) => {
 		const mono = ['chat-code', 'code-editor', 'code-diff', 'terminal'].includes(id);
