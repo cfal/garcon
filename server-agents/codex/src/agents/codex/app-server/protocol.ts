@@ -263,7 +263,14 @@ export type CodexThreadItem =
   | { type: 'webSearch'; id: string; query: string; action: CodexWebSearchAction | null }
   | { type: 'imageView'; id: string; path: string }
   | { type: 'sleep'; id: string; durationMs: number }
-  | { type: 'imageGeneration'; id: string; status: string; revisedPrompt: string | null; result: string; savedPath?: string }
+  | ({
+      type: 'imageGeneration';
+      id: string;
+      status: string;
+      revisedPrompt: string | null;
+      savedPath?: string | null;
+      inputImages?: Array<{ path: string; sha256: string }>;
+    } & ({ fileId: string; result?: string } | { result: string; fileId?: never }))
   | { type: 'enteredReviewMode'; id: string; review: string }
   | { type: 'exitedReviewMode'; id: string; review: string }
   | { type: 'contextCompaction'; id: string };
@@ -549,7 +556,17 @@ function validateCodexThreadItem(item: Record<string, unknown>, label: string): 
     case 'imageGeneration':
       protocolString(item.status, `${label} status`);
       nullableProtocolString(item.revisedPrompt, `${label} revisedPrompt`);
-      protocolString(item.result, `${label} result`);
+      if (item.fileId !== undefined) protocolString(item.fileId, `${label} fileId`);
+      else protocolString(item.result, `${label} result`);
+      if (item.result !== undefined) protocolString(item.result, `${label} result`);
+      nullableProtocolString(item.savedPath, `${label} savedPath`);
+      if (item.inputImages !== undefined) {
+        for (const [index, value] of protocolArray(item.inputImages, `${label} inputImages`).entries()) {
+          const input = protocolRecord(value, `${label} inputImages ${index}`);
+          protocolString(input.path, `${label} inputImages ${index} path`);
+          protocolString(input.sha256, `${label} inputImages ${index} sha256`);
+        }
+      }
       return;
     case 'enteredReviewMode':
     case 'exitedReviewMode':

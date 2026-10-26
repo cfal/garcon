@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { parseChatMessage } from '@garcon/common/chat-types';
 import { resolveCodexCli } from '../cli.ts';
 import { convertCodexAppServerItem } from '../converter.ts';
 import { parseThreadItemsListResponse, parseThreadTurnsListResponse } from '../protocol.ts';
@@ -96,6 +97,51 @@ describe('bundled Codex experimental schema compatibility', () => {
         type: 'subAgentActivity', id: 'synthetic-activity', ...itemFields.subAgentActivity, kind,
       });
       expect(convertCodexAppServerItem(parsed)[0].type).toBe('codex-subagent-tool-use');
+    }
+  });
+
+  it('decodes both generated-image representations without dropping stored file references', () => {
+    const schema = definitions.ThreadItem.oneOf.find((variant) => (
+      variant.properties.type.enum.includes('imageGeneration')
+    ));
+    expect(schema.anyOf.map((variant) => variant.required)).toEqual([['fileId'], ['result']]);
+    for (const image of [
+      { result: 'synthetic-image' },
+      { fileId: 'synthetic-file' },
+      { fileId: 'synthetic-file', result: '' },
+    ]) {
+      const item = {
+        type: 'imageGeneration', id: 'synthetic-image', status: 'completed',
+        revisedPrompt: null, savedPath: '/synthetic/image.png',
+        inputImages: [{ path: '/synthetic/input.png', sha256: 'ab'.repeat(32) }],
+        ...image,
+      };
+      const parsed = decodeItem(item);
+      expect(parsed).toEqual(item);
+      const messages = convertCodexAppServerItem(parsed);
+      expect(messages).toHaveLength(1);
+      const [message] = messages;
+      expect(message.type).toBe('tool-result');
+      expect(message.content).toEqual(image.fileId
+        ? { fileId: image.fileId, savedPath: item.savedPath }
+        : { raw: image.result });
+      expect(parseChatMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
+    }
+    expect(decodeItem({
+      type: 'imageGeneration', id: 'synthetic-image', status: 'completed',
+      result: 'synthetic-image', savedPath: null,
+    }).savedPath).toBeNull();
+    for (const fields of [
+      {}, { fileId: null }, { fileId: 3 }, { result: 3 },
+      { fileId: 'synthetic-file', result: 3 },
+      { result: 'synthetic', savedPath: 3 },
+      { result: 'synthetic', inputImages: {} },
+      { result: 'synthetic', inputImages: [{ path: 3, sha256: 'synthetic' }] },
+      { result: 'synthetic', inputImages: [{ path: '/synthetic/input.png', sha256: 3 }] },
+    ]) {
+      expect(() => decodeItem({
+        type: 'imageGeneration', id: 'synthetic-image', status: 'completed', ...fields,
+      })).toThrow('Invalid');
     }
   });
 
