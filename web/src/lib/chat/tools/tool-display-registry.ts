@@ -148,6 +148,25 @@ const WEB_FETCH_RULE: ToolDisplayRule = {
 	},
 };
 
+function parametersToolRule(label: string): ToolDisplayRule {
+	return {
+		input: {
+			mode: 'collapsible',
+			label,
+			title: m.chat_tool_parameters(),
+			defaultOpen: false,
+			contentKind: 'text',
+			getContentProps: (input) => ({ content: JSON.stringify(input, null, 2), format: 'code' }),
+		},
+		result: {
+			mode: 'collapsible',
+			defaultOpen: false,
+			contentKind: 'text',
+			getContentProps: (result) => ({ content: extractContentString(result?.content), format: 'plain' }),
+		},
+	};
+}
+
 function appendDetailLine(lines: string[], label: string, value: string | undefined): void {
 	if (!value) return;
 	lines.push(
@@ -944,68 +963,9 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 
-	'claude-monitor-tool-use': {
-		input: {
-			mode: 'collapsible',
-			label: 'Monitor',
-			title: m.chat_tool_parameters(),
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (input) => ({ content: JSON.stringify(input, null, 2), format: 'code' }),
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (result) => ({ content: extractContentString(result?.content), format: 'plain' }),
-		},
-	},
-
-	'external-tool-use': {
-		input: {
-			mode: 'collapsible',
-			label: 'Tool',
-			title: m.chat_tool_parameters(),
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (input) => ({
-				content: JSON.stringify(input, null, 2),
-				format: 'code',
-			}),
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-				format: 'plain',
-			}),
-		},
-	},
-
-	'mcp-tool-use': {
-		input: {
-			mode: 'collapsible',
-			label: 'MCP',
-			title: m.chat_tool_parameters(),
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (input) => ({
-				content: JSON.stringify(input, null, 2),
-				format: 'code',
-			}),
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-				format: 'plain',
-			}),
-		},
-	},
+	'claude-monitor-tool-use': parametersToolRule('Monitor'),
+	'external-tool-use': parametersToolRule('Tool'),
+	'mcp-tool-use': parametersToolRule('MCP'),
 
 	'request-permissions-tool-use': {
 		input: {

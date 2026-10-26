@@ -103,6 +103,21 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 			.toMatchObject({ content: 'Synthetic result' });
 	});
 
+	it.each([
+		['claude-monitor-tool-use', 'Monitor'],
+		['external-tool-use', 'Tool'],
+		['mcp-tool-use', 'MCP'],
+	])('preserves JSON parameters and plain results for %s', (type, label) => {
+		const rule = TOOL_DISPLAY_REGISTRY[type];
+		const input = { description: 'Synthetic parameters', nested: { value: 1 } };
+		expect(rule.input).toMatchObject({ mode: 'collapsible', label, defaultOpen: false });
+		expect(rule.input.getContentProps?.(input))
+			.toEqual({ content: JSON.stringify(input, null, 2), format: 'code' });
+		expect(rule.result).toMatchObject({ mode: 'collapsible', defaultOpen: false });
+		expect(rule.result?.getContentProps?.({ content: { raw: 'Synthetic result' } }))
+			.toEqual({ content: 'Synthetic result', format: 'plain' });
+	});
+
 	it('renders unknown tool inputs as highlighted JSON', () => {
 		const rule = TOOL_DISPLAY_REGISTRY['unknown-tool-use'];
 		const message = new UnknownToolUseMessage('', 'unknown-1', 'custom_tool', {
