@@ -201,19 +201,17 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
         for (const control of [font, mono]) {
           expect(await control.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
         }
-        for (const control of [appearance]) {
-          const fits = await control.evaluate((element: HTMLSelectElement) => {
-            const styles = getComputedStyle(element);
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d')!;
-            context.font = `${styles.fontWeight} ${styles.fontSize} ${styles.fontFamily}`;
-            return (
-              context.measureText(element.selectedOptions[0].text).width <=
-              element.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight)
-            );
-          });
-          expect(fits).toBe(true);
-        }
+        const fits = await appearance.evaluate((element: HTMLSelectElement) => {
+          const styles = getComputedStyle(element);
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d')!;
+          context.font = `${styles.fontWeight} ${styles.fontSize} ${styles.fontFamily}`;
+          return (
+            context.measureText(element.selectedOptions[0].text).width <=
+            element.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight)
+          );
+        });
+        expect(fits).toBe(true);
         await page.screenshot({ path: join(ARTIFACT_DIRECTORY, `${id}-${width}.png`) });
         const box = await dialog.boundingBox();
         expect(box!.x).toBeGreaterThanOrEqual(0);

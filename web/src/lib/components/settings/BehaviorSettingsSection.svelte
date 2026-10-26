@@ -22,10 +22,6 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import CompletionSoundSettings from './CompletionSoundSettings.svelte';
 
-	interface SettingRowOptions {
-		description?: string;
-	}
-
 	const ls = getLocalSettings();
 	const appShell = getAppShell();
 	const files = getFileSessions();
@@ -122,13 +118,13 @@
 	label: string,
 	checked: boolean,
 	onToggle: () => void,
-	options: SettingRowOptions = {},
+	description?: string,
 )}
 	<div class="flex items-center justify-between gap-4 py-2">
 		<div class="min-w-0">
 			<div class="text-sm font-medium text-foreground">{label}</div>
-			{#if options.description}
-				<div class="mt-0.5 text-xs text-muted-foreground">{options.description}</div>
+			{#if description}
+				<div class="mt-0.5 text-xs text-muted-foreground">{description}</div>
 			{/if}
 		</div>
 		<Switch {checked} onCheckedChange={() => onToggle()} aria-label={label} />
@@ -214,7 +210,7 @@
 				m.settings_chat_always_expand_cli_messages(),
 				ls.alwaysExpandCliMessages,
 				() => ls.toggle('alwaysExpandCliMessages'),
-				{ description: m.settings_chat_always_expand_cli_messages_description() },
+				m.settings_chat_always_expand_cli_messages_description(),
 			)}
 			{@render settingRow(m.settings_chat_show_thinking(), ls.showThinking, () =>
 				ls.toggle('showThinking'),
@@ -223,7 +219,7 @@
 				m.settings_chat_allow_direct_chats(),
 				ls.allowDirectChats,
 				() => ls.toggle('allowDirectChats'),
-				{ description: m.settings_chat_allow_direct_chats_description() },
+				m.settings_chat_allow_direct_chats_description(),
 			)}
 			<div class="py-2">
 				<div class="text-sm font-medium text-foreground">{m.settings_chat_hidden_tools()}</div>

@@ -6,9 +6,9 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
 async function openAppearanceSettings(page: Page): Promise<Locator> {
-  await page.keyboard.press("Control+,");
-  const settings = page.getByRole("dialog", { name: "Settings", exact: true });
-  await settings.getByRole("tab", { name: "Appearance", exact: true }).click();
+  await page.keyboard.press('Control+,');
+  const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
+  await settings.getByRole('tab', { name: 'Appearance', exact: true }).click();
   return settings;
 }
 
