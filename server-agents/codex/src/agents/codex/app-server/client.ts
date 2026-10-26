@@ -322,7 +322,7 @@ export class CodexAppServerClient extends EventEmitter {
     const startedAt = performance.now();
     const resolved = await this.#resolveCli();
     if (this.#shutdownRequested) throw new Error('Codex app-server client is shut down');
-    // Disables autonomous native turns before any thread can start or resume.
+    // Disables native goal continuation and idle agent-message wakes before loading threads.
     const args = [
       'app-server', '--listen', 'stdio://',
       '--config', 'features.goals=false',
