@@ -7,7 +7,8 @@ export const COMPILED_CODEX_MODEL_CATALOG_PATH = Symbol.for(
 );
 
 // The catalog preserves Garcon's supported entries and overlays live model metadata
-// captured from OpenAI's catalog through 2026-09-29.
+// captured from OpenAI's catalog through 2026-09-29, plus the published Terra entry:
+// https://github.com/openai/codex/blob/126a0ee92ed2c5e73cd8a8f7e37563e8527552d7/codex-rs/models-manager/models.json#L352-L527
 export function resolveCodexModelCatalogPath(): string {
   const compiledPath = Reflect.get(globalThis, COMPILED_CODEX_MODEL_CATALOG_PATH);
   const catalogPath = typeof compiledPath === 'string'
