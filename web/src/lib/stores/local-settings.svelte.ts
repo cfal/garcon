@@ -86,7 +86,7 @@ export const FILE_OPEN_PLACEMENT_VALUES = [
 export const HIDEABLE_TOOL_GROUPS = [
 	{
 		id: 'bash',
-		toolTypes: ['bash-tool-use', 'write-stdin-tool-use'],
+		toolTypes: ['bash-tool-use', 'write-stdin-tool-use', 'claude-monitor-tool-use'],
 	},
 	{
 		id: 'exec',
@@ -132,6 +132,7 @@ export const HIDEABLE_TOOL_GROUPS = [
 			'external-tool-use',
 			'mcp-tool-use',
 			'pi-tool-search-tool-use',
+			'claude-tool-search-tool-use',
 		],
 	},
 ] as const;

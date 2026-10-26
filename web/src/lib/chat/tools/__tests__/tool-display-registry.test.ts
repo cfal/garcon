@@ -11,6 +11,8 @@ import {
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
 	BashToolUseMessage,
+	ClaudeMonitorToolUseMessage,
+	ClaudeToolSearchToolUseMessage,
 	ExecToolUseMessage,
 	CodexSubagentToolUseMessage,
 	ExternalToolUseMessage,
@@ -29,6 +31,8 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 	it('contains entries for explicit tool-use message types', () => {
 		const expected = [
 			'bash-tool-use',
+			'claude-tool-search-tool-use',
+			'claude-monitor-tool-use',
 			'exec-tool-use',
 			'wait-tool-use',
 			'read-tool-use',
@@ -78,6 +82,25 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 		expect(TOOL_DISPLAY_REGISTRY['wait-tool-use'].input.mode).toBe('hidden');
 		expect(TOOL_DISPLAY_REGISTRY['wait-tool-use'].result).toEqual({ hidden: true });
 		expect(TOOL_DISPLAY_REGISTRY['write-stdin-tool-use'].input.mode).toBe('hidden');
+	});
+
+	it('displays typed Claude discovery and full Monitor parameters without raw-name aliases', () => {
+		const search = new ClaudeToolSearchToolUseMessage('', 'search', 'select:Monitor', 1);
+		expect(getToolDisplayLabel(search)).toBe('ToolSearch');
+		expect(TOOL_DISPLAY_REGISTRY[search.type].input.getValue?.(getToolDisplayDetails(search)))
+			.toBe('select:Monitor');
+		const monitor = new ClaudeMonitorToolUseMessage('', 'monitor', 'Synthetic watch', 300_000,
+			'printf synthetic', 'ws://synthetic.invalid/events', ['synthetic-events']);
+		expect(getToolDisplayLabel(monitor)).toBe('Monitor');
+		const rule = TOOL_DISPLAY_REGISTRY[monitor.type];
+		expect(rule.input.mode).toBe('collapsible');
+		const props = rule.input.getContentProps?.(getToolDisplayDetails(monitor));
+		expect(JSON.parse(String(props?.content))).toMatchObject({
+			description: 'Synthetic watch', timeoutMs: 300_000, command: 'printf synthetic',
+			webSocketUrl: 'ws://synthetic.invalid/events', webSocketProtocols: ['synthetic-events'],
+		});
+		expect(rule.result?.getContentProps?.({ content: { raw: 'Synthetic result' } }))
+			.toMatchObject({ content: 'Synthetic result' });
 	});
 
 	it('renders unknown tool inputs as highlighted JSON', () => {

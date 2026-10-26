@@ -28,6 +28,10 @@ export function resolveToolResultDisplayRule(
 ): ToolResultDisplayRule | undefined {
 	const emptyRequiredInput = tool?.type === 'bash-tool-use'
 		? tool.command === ''
+		: tool?.type === 'claude-tool-search-tool-use'
+			? tool.query === ''
+			: tool?.type === 'claude-monitor-tool-use'
+				? tool.description === ''
 		: tool?.type === 'exec-tool-use'
 			? tool.code === ''
 			: (tool?.type === 'read-tool-use' || tool?.type === 'write-tool-use' || tool?.type === 'edit-tool-use') && tool.filePath === '';

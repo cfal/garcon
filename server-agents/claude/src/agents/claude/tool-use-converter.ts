@@ -19,6 +19,8 @@ import {
   EnterPlanModeToolUseMessage,
   ExitPlanModeToolUseMessage,
   AskUserQuestionToolUseMessage,
+  ClaudeToolSearchToolUseMessage,
+  ClaudeMonitorToolUseMessage,
   UnknownToolUseMessage,
   type AskUserQuestionPrompt,
   type ToolUseChatMessage,
@@ -122,6 +124,16 @@ export function convertClaudeToolUse(ts: string, part: unknown): ToolUseChatMess
   const key = canonicalize(rawName);
 
   switch (key) {
+    case 'toolsearch':
+      return new ClaudeToolSearchToolUseMessage(ts, toolId, asString(input.query) ?? '', asNumber(input.max_results));
+
+    case 'monitor': {
+      const ws = asObject(input.ws);
+      return new ClaudeMonitorToolUseMessage(ts, toolId, asString(input.description) ?? '',
+        asNumber(input.timeout_ms), asString(input.command), asString(ws.url),
+        Array.isArray(ws.protocols) ? ws.protocols.filter((value): value is string => typeof value === 'string') : undefined);
+    }
+
     case 'bash':
     case 'shellcommand':
     case 'execcommand': {

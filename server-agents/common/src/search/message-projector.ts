@@ -174,6 +174,9 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
       return messageText(message.requestedTool, budget);
     case 'bash-tool-use':
       return joinTool(message.description, message.command);
+    case 'claude-monitor-tool-use':
+      return joinTool(message.description, message.command, message.webSocketUrl,
+        boundedUnknownForJoin(message.webSocketProtocols, budget));
     case 'exec-tool-use':
       return joinTool(message.language, message.code);
     case 'wait-tool-use':
@@ -201,6 +204,7 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
       return joinTool(message.pattern, message.path);
     case 'web-search-tool-use':
     case 'pi-tool-search-tool-use':
+    case 'claude-tool-search-tool-use':
     case 'amp-finder-tool-use':
     case 'amp-librarian-tool-use':
     case 'amp-find-thread-tool-use':

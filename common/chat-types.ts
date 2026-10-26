@@ -12,6 +12,7 @@ import {
   asAllowedPrompts,
   asAskUserQuestions,
   asChatImages,
+  asCodexSubagentInputItems,
   asCursorAskQuestions,
   asCursorPlanPhases,
   asCursorPlanTodos,
@@ -21,6 +22,7 @@ import {
   asOptionalString,
   asRecord,
   asStringArray,
+  coerceTodoItems,
   parseChatMessageMetadata,
   str,
 } from './chat-message-coercion.js';
@@ -42,6 +44,7 @@ import {
 } from './transcript-notice-details.js';
 export { parseUserMessagePresentation } from './user-message-presentation.js';
 export type { UserMessagePresentation } from './user-message-presentation.js';
+export { coerceTodoItems } from './chat-message-coercion.js';
 
 export interface ChatImage {
   data: string;
@@ -76,26 +79,6 @@ export type TodoStatus = 'pending' | 'in_progress' | 'completed';
 export interface TodoItem {
   content: string;
   status: TodoStatus;
-}
-
-// Lightweight coercion for already-serialized TodoItem arrays.
-// Agent-specific normalization lives in server/controller/agents/shared/normalize-util.
-export function coerceTodoItems(raw: unknown): TodoItem[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
-  const items: TodoItem[] = [];
-  for (const entry of raw) {
-    if (entry == null || typeof entry !== 'object') continue;
-    const obj = entry as Record<string, unknown>;
-    const content = obj.content ?? obj.text ?? obj.step;
-    if (typeof content !== 'string') continue;
-    const s = obj.status;
-    const completed = obj.completed;
-    const status: TodoStatus =
-      completed === true || s === 'completed' || s === 'done' ? 'completed' :
-      s === 'in_progress' || s === 'in-progress' ? 'in_progress' : 'pending';
-    items.push({ content, status });
-  }
-  return items.length > 0 ? items : undefined;
 }
 
 export class UserMessage {
@@ -622,6 +605,29 @@ export class AmpTaskListToolUseMessage {
   ) {}
 }
 
+export class ClaudeToolSearchToolUseMessage {
+  readonly type = 'claude-tool-search-tool-use' as const;
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public query: string,
+    public maxResults?: number,
+  ) {}
+}
+
+export class ClaudeMonitorToolUseMessage {
+  readonly type = 'claude-monitor-tool-use' as const;
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public description: string,
+    public timeoutMs?: number,
+    public command?: string,
+    public webSocketUrl?: string,
+    public webSocketProtocols?: string[],
+  ) {}
+}
+
 export class PiToolSearchToolUseMessage {
   readonly type = 'pi-tool-search-tool-use' as const;
 
@@ -787,6 +793,8 @@ export class AgentSwitchMessage {
 // Union of all explicit tool-use message classes.
 export type ToolUseChatMessage =
   | PiToolSearchToolUseMessage
+  | ClaudeToolSearchToolUseMessage
+  | ClaudeMonitorToolUseMessage
   | BashToolUseMessage
   | ExecToolUseMessage
   | WaitToolUseMessage
@@ -850,22 +858,6 @@ function asCodexSubagentAction(v: unknown): CodexSubagentAction | undefined {
   return typeof v === 'string' && CODEX_SUBAGENT_ACTION_SET.has(v)
     ? v as CodexSubagentAction
     : undefined;
-}
-
-function asCodexSubagentInputItems(v: unknown): CodexSubagentInputItem[] | undefined {
-  if (!Array.isArray(v)) return undefined;
-  const items: CodexSubagentInputItem[] = [];
-  for (const entry of v) {
-    const raw = asRecord(entry);
-    const item: CodexSubagentInputItem = {};
-    if (typeof raw.type === 'string') item.type = raw.type;
-    if (typeof raw.text === 'string') item.text = raw.text;
-    if (typeof raw.imageUrl === 'string') item.imageUrl = raw.imageUrl;
-    if (typeof raw.path === 'string') item.path = raw.path;
-    if (typeof raw.name === 'string') item.name = raw.name;
-    if (Object.keys(item).length > 0) items.push(item);
-  }
-  return items.length > 0 || v.length === 0 ? items : undefined;
 }
 
 function asCodexSubagentStates(v: unknown): Record<string, CodexSubagentState> | undefined {
@@ -1140,6 +1132,15 @@ const TOOL_USE_MESSAGE_PARSERS = {
   'pi-tool-search-tool-use': (data) =>
     new PiToolSearchToolUseMessage(
       str(data.timestamp), str(data.toolId), str(data.query), asOptionalNumber(data.limit)),
+
+  'claude-tool-search-tool-use': (data) =>
+    new ClaudeToolSearchToolUseMessage(
+      str(data.timestamp), str(data.toolId), str(data.query), asOptionalNumber(data.maxResults)),
+
+  'claude-monitor-tool-use': (data) =>
+    new ClaudeMonitorToolUseMessage(
+      str(data.timestamp), str(data.toolId), str(data.description), asOptionalNumber(data.timeoutMs),
+      asOptionalString(data.command), asOptionalString(data.webSocketUrl), asStringArray(data.webSocketProtocols)),
 
   'external-tool-use': (data) =>
     new ExternalToolUseMessage(

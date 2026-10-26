@@ -33,7 +33,7 @@ import {
 	WsPingRequest,
 	parseClientWsMessage,
 } from '$shared/ws-requests';
-import { CHAT_STOP_OUTCOMES, ErrorMessage } from '$shared/chat-types';
+import { CHAT_STOP_OUTCOMES, ClaudeMonitorToolUseMessage, ClaudeToolSearchToolUseMessage, ErrorMessage, PermissionRequestMessage } from '$shared/chat-types';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 const chatViewMessage = {
@@ -104,6 +104,27 @@ function makeSettingsSnapshot(
 }
 
 describe('parseServerWsMessage', () => {
+	it('receives Claude discovery, Monitor calls, and nested permissions as typed messages', () => {
+		const search = new ClaudeToolSearchToolUseMessage('', 'search', 'select:Monitor', 1);
+		const monitor = new ClaudeMonitorToolUseMessage('', 'monitor', 'Synthetic watch', 300_000,
+			undefined, 'ws://synthetic.invalid/events', ['synthetic-events']);
+		const messages = [search, monitor, new PermissionRequestMessage('', 'permission-synthetic', monitor)]
+			.map((message, index) => ({ ordinal: index + 1, message }));
+		const parsed = parseServerWsMessage(JSON.parse(JSON.stringify({
+			type: 'chat-messages', chatId: 'synthetic-chat', transcriptViewId: 'synthetic-view',
+			messages, firstOrdinal: 1, lastOrdinal: 3, resendCandidates: [],
+		})));
+		expect(parsed).toBeInstanceOf(ChatMessagesMessage);
+		if (parsed?.type !== 'chat-messages') throw new Error('Expected typed chat messages');
+		expect(parsed.messages).toEqual(messages);
+		expect(parsed.messages[0].message).toBeInstanceOf(ClaudeToolSearchToolUseMessage);
+		expect(parsed.messages[1].message).toBeInstanceOf(ClaudeMonitorToolUseMessage);
+		const permission = parsed.messages[2].message;
+		expect(permission).toBeInstanceOf(PermissionRequestMessage);
+		if (permission.type !== 'permission-request') throw new Error('Expected typed permission');
+		expect(permission.requestedTool).toBeInstanceOf(ClaudeMonitorToolUseMessage);
+	});
+
 	it('parses chat-messages', () => {
 		const msg = parseServerWsMessage({
 			type: 'chat-messages',
