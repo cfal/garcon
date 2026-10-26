@@ -79,8 +79,6 @@
 └──────────┘</pre>
 	{:else}
 		<pre style:font-family="inherit" class="whitespace-pre-wrap">{codeSample}</pre>
-		{#if surface === 'chat-code'}<p style:font-size={`${size === 'default' ? 11 : pixels}px`}>
-				$ bun run test
-			</p>{/if}
+		{#if surface === 'chat-code'}<p>$ bun run test</p>{/if}
 	{/if}
 </div>

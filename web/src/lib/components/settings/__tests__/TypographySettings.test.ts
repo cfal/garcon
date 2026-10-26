@@ -114,6 +114,16 @@ describe('TypographySettings', () => {
 		expect(dialog.getByRole('radio', { name: 'Inter' })).toBeTruthy();
 	});
 
+	it('previews commands at the default Chat Code size', async () => {
+		render(TypographySettingsTestHost);
+		const dialog = await open('Chat Code & Commands Font');
+		const command = dialog.getByText('$ bun run test');
+		expect(command.style.fontSize).toBe('');
+		expect(command.closest<HTMLElement>('[data-font-preview]')!.style.fontSize).toBe('12px');
+		await fireEvent.change(dialog.getByRole('combobox'), { target: { value: '18' } });
+		expect(command.closest<HTMLElement>('[data-font-preview]')!.style.fontSize).toBe('18px');
+	});
+
 	it('reflects external changes on rows and reopening without replacing an open draft', async () => {
 		render(TypographySettingsTestHost);
 		const dialog = await open('File Editors Font');
