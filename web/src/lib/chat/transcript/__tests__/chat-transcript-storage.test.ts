@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LocalChatTranscriptStorage } from '$lib/chat/transcript/chat-transcript-storage.js';
 import * as lifetime from '$lib/utils/browser-data-lifetime';
+import * as recovery from '$lib/utils/local-storage-cache-recovery';
 import { TranscriptNoticeMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 
@@ -248,5 +249,104 @@ describe('LocalChatTranscriptStorage', () => {
 		storage.persist('', [entry(1, 'hello')], cursor(1));
 		expect(storage.restore('')).toBeNull();
 		expect(localStorage.getItem(INDEX_KEY)).toBeNull();
+	});
+
+	it('keeps ordinary large ASCII snapshots without worst-case escape accounting', () => {
+		persist(storage, 'chat-1', [entry(1, 'x'.repeat(200_000))]);
+		expect(storage.restore('chat-1')?.entries).toEqual([entry(1, 'x'.repeat(200_000))]);
+	});
+
+	it('rejects oversized input before serialization without evicting other chats', () => {
+		persist(storage, 'chat-1', [entry(1, 'old')]);
+		persist(storage, 'chat-2', [entry(1, 'retained')]);
+		const stringify = vi.spyOn(JSON, 'stringify');
+		persist(storage, 'chat-1', [entry(2, 'x'.repeat(300_000))]);
+		expect(stringify.mock.calls.some(([value]) => value?.chatId === 'chat-1')).toBe(false);
+		expect(storage.restore('chat-1')).toBeNull();
+		expect(storage.restore('chat-2')?.entries).toEqual([entry(1, 'retained')]);
+	});
+
+	it('rejects escape-expanded snapshots before attempting a storage write', () => {
+		persist(storage, 'chat-1', [entry(1, 'old')]);
+		const write = vi.spyOn(recovery, 'setLocalStorageWithCacheRecovery');
+		persist(storage, 'chat-1', [entry(2, '\u0000'.repeat(60_000))]);
+		expect(write.mock.calls.some(([, key]) => key === snapshotKey('chat-1'))).toBe(false);
+		expect(storage.restore('chat-1')).toBeNull();
+	});
+
+	it.each(['wide', 'deep'] as const)('rejects %s arrays before serialization', (kind) => {
+		let payload: unknown;
+		if (kind === 'wide') {
+			payload = Array(20_000).fill('');
+		} else {
+			payload = [];
+			for (let depth = 0; depth < 100; depth += 1) {
+				payload = [payload];
+			}
+		}
+		const message = entry(1, 'Synthetic message');
+		Object.assign(message.message, { payload });
+		const stringify = vi.spyOn(JSON, 'stringify');
+		persist(storage, 'chat-1', [message]);
+		expect(stringify.mock.calls.some(([value]) => value?.chatId === 'chat-1')).toBe(false);
+		expect(storage.restore('chat-1')).toBeNull();
+	});
+
+	it.each(['own', 'inherited'] as const)('rejects %s toJSON hooks before serialization', (kind) => {
+		const toJSON = vi.fn(() => 'Synthetic serialization');
+		const payload = kind === 'own' ? { toJSON } : Object.create({ toJSON });
+		const message = entry(1, 'Synthetic message');
+		Object.assign(message.message, { payload });
+		const stringify = vi.spyOn(JSON, 'stringify');
+		persist(storage, 'chat-1', [message]);
+		expect(stringify.mock.calls.some(([value]) => value?.chatId === 'chat-1')).toBe(false);
+		expect(toJSON).not.toHaveBeenCalled();
+		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
+	});
+
+	it('removes the previous snapshot when its replacement write fails', () => {
+		persist(storage, 'chat-1', [entry(1, 'old')]);
+		storage.markStale('chat-1');
+		const write = recovery.setLocalStorageWithCacheRecovery;
+		vi.spyOn(recovery, 'setLocalStorageWithCacheRecovery').mockImplementation((target, key, value) => {
+			if (key === snapshotKey('chat-1')) throw new Error('Synthetic write failure');
+			write(target, key, value);
+		});
+		storage.persist('chat-1', [entry(1, 'new')], { ...cursor(), transcriptViewId: 'generation-2' });
+		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
+		expect(JSON.parse(localStorage.getItem(INDEX_KEY)!).entries).toEqual([]);
+		expect(storage.restore('chat-1')).toBeNull();
+		expect(storage.listCursors()).toEqual([]);
+	});
+
+	it.each(['restore', 'listCursors'] as const)('rejects stored oversized snapshots before parsing in %s', (method) => {
+		persist(storage, 'chat-1', [entry(1, 'old')]);
+		const oversized = ' '.repeat(300_000);
+		localStorage.setItem(snapshotKey('chat-1'), oversized);
+		const parse = vi.spyOn(JSON, 'parse');
+		if (method === 'restore') expect(storage.restore('chat-1')).toBeNull();
+		else expect(storage.listCursors()).toEqual([]);
+		expect(parse).not.toHaveBeenCalledWith(oversized);
+		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
+	});
+
+	it('bounds aggregate retention and does not exempt the newest oversized snapshot', () => {
+		vi.useFakeTimers();
+		for (let index = 0; index < 8; index += 1) {
+			vi.setSystemTime(new Date(TS).getTime() + index * 1000);
+			persist(storage, `chat-${index}`, [entry(1, 'x'.repeat(200_000))]);
+		}
+		const retained = JSON.parse(localStorage.getItem(INDEX_KEY)!).entries as { chatId: string }[];
+		expect(retained).toHaveLength(7);
+		const retainedCharacters = retained.reduce(
+			(total, item) => total + localStorage.getItem(snapshotKey(item.chatId))!.length,
+			0,
+		);
+		expect(retainedCharacters).toBeLessThanOrEqual(1_500_000);
+		localStorage.setItem(snapshotKey('chat-7'), 'x'.repeat(300_000));
+		vi.setSystemTime(new Date(TS));
+		persist(storage, 'chat-older', [entry(1, 'small')]);
+		expect(localStorage.getItem(snapshotKey('chat-7'))).toBeNull();
+		expect(storage.restore('chat-older')?.entries).toEqual([entry(1, 'small')]);
 	});
 });

@@ -29,7 +29,7 @@ The raw source remains visible while the language package loads.
 	let { language = '', text = '' }: Props = $props();
 
 	const plainSegments = $derived(plainCodeSegments(text));
-	let asyncSegments = $state<CodeHighlightSegment[] | null>(null);
+	let asyncSegments = $state.raw<CodeHighlightSegment[] | null>(null);
 	const segments = $derived(asyncSegments ?? plainSegments);
 
 	// Highlights asynchronously while preserving immediate plain-text rendering.
