@@ -19,7 +19,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	const localSettings = getLocalSettings();
-	const narrow = new MediaQuery('(max-width: 480px)');
+	const narrow = new MediaQuery('(max-width: 640px)');
 	let trigger = $state<HTMLElement | null>(null);
 </script>
 

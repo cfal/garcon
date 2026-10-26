@@ -64,7 +64,7 @@ test("proportional Interface fonts preserve monospace composer code and Vim comm
         interfaceFont: "departure-mono",
         interfaceFontSize: "20",
       });
-      for (const width of [1440, 320]) {
+      for (const width of [1440, 641, 640, 560, 481, 480, 320]) {
         await page.setViewportSize({ width, height: 900 });
         await page
           .getByRole("button", { name: "Editor settings", exact: true })

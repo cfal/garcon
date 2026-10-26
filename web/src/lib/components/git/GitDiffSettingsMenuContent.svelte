@@ -34,7 +34,7 @@
 	} = $props();
 
 	const contextOptions = [3, 5, 10, 20] as const;
-	const narrow = new MediaQuery('(max-width: 480px)');
+	const narrow = new MediaQuery('(max-width: 640px)');
 	let contextChangeBlocked = $state(false);
 
 	function setDiffMode(value: string): void {

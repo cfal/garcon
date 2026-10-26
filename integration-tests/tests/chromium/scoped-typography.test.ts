@@ -339,7 +339,7 @@ test("chat list, prose, inline code, blocks and Git diffs have independent typog
         interfaceFont: "departure-mono",
         interfaceFontSize: "20",
       });
-      for (const width of [1440, 320]) {
+      for (const width of [1440, 641, 640, 560, 481, 480, 320]) {
         await page.setViewportSize({ width, height: 900 });
         await gitSurface
           .getByRole("button", { name: "More Git actions", exact: true })
