@@ -142,6 +142,12 @@ body {
 	font-size: inherit;
 }
 
+.typography-chat-source {
+	--text-scale: var(--chat-feed-font-scale, 1);
+	font-family: var(--chat-code-font-family);
+	font-size: var(--chat-feed-font-size, var(--chat-source-default-size, 14px));
+}
+
 [data-chat-feed-content] .markdown-code-block pre,
 .typography-chat-code {
 	--text-scale: var(--chat-code-font-scale, 1);
@@ -203,6 +209,7 @@ body {
 		font-size: max(16px, calc(14px * var(--interface-font-scale, 1)));
 	}
 
+	[data-composer-plain-input],
 	[data-composer-markdown-editor] {
 		font-size: max(16px, calc(16px * var(--interface-font-scale, 1)));
 	}

@@ -8,6 +8,78 @@ import {
   setTypography,
 } from "../../support/typography.js";
 import { seedLocalSettings } from "../../support/local-settings-seed.js";
+import {
+  BashToolUseMessage,
+  ToolResultMessage,
+  WebSearchToolUseMessage,
+} from "../../../common/chat-types.js";
+import { TranscriptLedgerStore } from "../../../server/controller/ledger/store.js";
+
+test("plain and formatted composers share Interface sizing on mouse and touch", async () => {
+  await withChromiumFixture(
+    "composer-typography",
+    async ({ page, context, integration, assertNoBrowserErrors }) => {
+      const chatId = integration.newChatId();
+      const turn = await integration.client.startDirectChat({
+        chatId,
+        content: "Synthetic composer typography",
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      const cdp = await context.newCDPSession(page);
+      for (const hasTouch of [false, true]) {
+        await cdp.send("Emulation.setTouchEmulationEnabled", {
+          enabled: hasTouch,
+        });
+        await page.setViewportSize({
+          width: hasTouch ? 390 : 1440,
+          height: 900,
+        });
+        expect(
+          await page.evaluate(() => matchMedia("(pointer: coarse)").matches),
+        ).toBe(hasTouch);
+        for (const size of ["20", "10"] as const) {
+          await setTypography(page, { interfaceFontSize: size });
+          const expected = hasTouch
+            ? Math.max(16, (16 * Number(size)) / 14)
+            : (16 * Number(size)) / 14;
+          for (const mode of ["source", "formatted"] as const) {
+            await page.keyboard.press("Control+,");
+            const settings = page.getByRole("dialog", {
+              name: "Settings",
+              exact: true,
+            });
+            await settings
+              .getByRole("tab", { name: "Behavior", exact: true })
+              .click();
+            await settings
+              .getByRole("combobox", { name: "Message format", exact: true })
+              .selectOption(mode);
+            await settings
+              .getByRole("button", { name: "Close", exact: true })
+              .click();
+            const input =
+              mode === "source"
+                ? page.locator("[data-composer] textarea")
+                : page.getByRole("textbox", { name: "Formatted message" });
+            await browserExpect(input).toBeVisible();
+            await browserExpect
+              .poll(() =>
+                input.evaluate((element) =>
+                  parseFloat(getComputedStyle(element).fontSize),
+                ),
+              )
+              .toBeCloseTo(expected, 3);
+          }
+        }
+      }
+      await cdp.detach();
+      assertNoBrowserErrors();
+    },
+  );
+}, 180_000);
 
 test("proportional Interface fonts preserve monospace composer code and Vim commands", async () => {
   await withChromiumFixture(
@@ -78,6 +150,81 @@ test("proportional Interface fonts preserve monospace composer code and Vim comm
   );
 }, 180_000);
 
+test("raw message dialogs follow chat typography without changing identifier fields", async () => {
+  await withChromiumFixture(
+    "raw-message-typography",
+    async ({ page, integration, assertNoBrowserErrors }) => {
+      const content = "Synthetic raw message";
+      const chatId = integration.newChatId();
+      const turn = await integration.client.startDirectChat({
+        chatId,
+        content,
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      for (const kind of ["selection", "details"] as const) {
+        await setTypography(page, {
+          interfaceFont: "default",
+          interfaceFontSize: "default",
+          chatFeedFont: "default",
+          chatFeedFontSize: "default",
+          chatCodeFont: "default",
+          chatCodeFontSize: "default",
+        });
+        if (kind === "selection") {
+          await page
+            .locator("[data-chat-feed-content]")
+            .getByText(content, { exact: true })
+            .click({ button: "right" });
+          await page
+            .getByRole("menuitem", { name: "Select text", exact: true })
+            .click();
+        } else {
+          await page
+            .locator(`[data-sidebar-virtual-row="${chatId}"]`)
+            .click({ button: "right" });
+          await page
+            .getByRole("menuitem", { name: "Details", exact: true })
+            .click();
+        }
+        const region = page.getByRole("region", {
+          name: kind === "selection" ? "Select text" : "First message",
+          exact: true,
+        });
+        await browserExpect(region).toHaveText(content);
+        const defaultSize = kind === "selection" ? "14px" : "12px";
+        await browserExpect(region).toHaveCSS("font-size", defaultSize);
+        await setTypography(page, {
+          interfaceFont: "departure-mono",
+          interfaceFontSize: "20",
+        });
+        await browserExpect(region).toHaveCSS("font-size", defaultSize);
+        await browserExpect(region).not.toHaveCSS(
+          "font-family",
+          /Departure Mono/,
+        );
+        await setTypography(page, {
+          chatFeedFont: "inter",
+          chatFeedFontSize: "18",
+          chatCodeFont: "jetbrains-mono",
+          chatCodeFontSize: "10",
+        });
+        await browserExpect(region).toHaveCSS("font-size", "18px");
+        await browserExpect(region).toHaveCSS("font-family", /JetBrains Mono/);
+        if (kind === "details") {
+          await browserExpect(
+            page.getByRole("region", { name: "Chat ID", exact: true }),
+          ).toHaveCSS("font-family", /Departure Mono/);
+        }
+        await page.keyboard.press("Escape");
+      }
+      assertNoBrowserErrors();
+    },
+  );
+}, 180_000);
+
 test("font dialog titles clear the close button at the narrowest supported width", async () => {
   await withChromiumFixture(
     "font-dialog-heading-fit",
@@ -127,28 +274,76 @@ test("plain output preserves its proportional default and is independent of code
   await withChromiumFixture(
     "plain-output-typography",
     async ({ page, integration, assertNoBrowserErrors }) => {
-      await page.goto(integration.garcon.baseUrl);
+      await page.addInitScript(seedLocalSettings, {
+        autoExpandTools: true,
+        combineToolUseMessages: false,
+      });
+      const chatId = integration.newChatId();
+      const turn = await integration.client.startDirectChat({
+        chatId,
+        content: "Synthetic tool typography",
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+      await integration.restartGarcon({
+        beforeStart: async () => {
+          const ledger = new TranscriptLedgerStore(
+            join(integration.dirs.workspace, "transcript-ledgers"),
+          );
+          try {
+            const view = ledger.currentView(chatId)!;
+            const at = "2026-01-01T00:00:00.000Z";
+            ledger.append(
+              chatId,
+              view.viewId,
+              [
+                new BashToolUseMessage(
+                  at,
+                  "font-command",
+                  "printf 'Synthetic command'",
+                ),
+                new WebSearchToolUseMessage(
+                  at,
+                  "font-search",
+                  "Synthetic search",
+                ),
+                new ToolResultMessage(
+                  at,
+                  "font-search",
+                  { raw: "Synthetic tool result" },
+                  false,
+                ),
+              ].map((message) => ({
+                kind: "provider-row" as const,
+                at,
+                message,
+                providerMeta: null,
+              })),
+            );
+          } finally {
+            ledger.close();
+          }
+        },
+      });
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
       await setTypography(page, {
         chatOutputFont: "default",
         chatOutputFontSize: "default",
       });
-      await page.evaluate(() => {
-        for (const kind of ["code", "output"]) {
-          const sample = document.createElement("pre");
-          sample.id = `font-${kind}-sample`;
-          sample.className = `typography-chat-${kind}`;
-          sample.textContent = "Synthetic tool result";
-          document.body.append(sample);
-        }
-      });
-      const code = page.locator("#font-code-sample");
-      const output = page.locator("#font-output-sample");
+      const code = page
+        .locator("code")
+        .filter({ hasText: "printf 'Synthetic command'" });
+      const output = page.getByText("Synthetic tool result", { exact: true });
       await browserExpect(code).toHaveCSS("font-size", "12px");
       await browserExpect(output).toHaveCSS("font-size", "14px");
       const original = await output.evaluate(
         (element) => getComputedStyle(element).fontFamily,
       );
+      expect(original).not.toMatch(/monospace|Departure|JetBrains/);
       await setTypography(page, {
+        interfaceFont: "departure-mono",
+        interfaceFontSize: "20",
         chatCodeFont: "jetbrains-mono",
         chatCodeFontSize: "18",
       });

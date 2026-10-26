@@ -20,6 +20,7 @@ import {
 	ReadToolUseMessage,
 	UnknownToolUseMessage,
 	WebFetchToolUseMessage,
+	WebSearchToolUseMessage,
 	WriteStdinToolUseMessage,
 	WriteToolUseMessage,
 } from '$shared/chat-types';
@@ -30,6 +31,18 @@ beforeAll(async () => {
 });
 
 describe('ChatToolEventRenderer', () => {
+	it('scopes plain tool results independently of commands', () => {
+		const toolMessage = new WebSearchToolUseMessage('', 'plain-output', 'Synthetic search');
+		render(ChatToolEventRenderer, {
+			toolMessage,
+			mode: 'result',
+			toolResult: { content: { raw: 'Synthetic plain output' } },
+			autoExpandTools: true,
+		});
+		const output = screen.getByText('Synthetic plain output');
+		expect(output.classList.contains('typography-chat-output')).toBe(true);
+		expect(output.classList.contains('typography-chat-code')).toBe(false);
+	});
 	it.each([
 		new BashToolUseMessage('', 'invalid-bash', ''),
 		new ReadToolUseMessage('', 'invalid-read', ''),
