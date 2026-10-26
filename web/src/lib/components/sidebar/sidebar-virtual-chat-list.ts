@@ -130,7 +130,7 @@ export function estimateSidebarVirtualRowSize(
 	row: SidebarVirtualRow | undefined,
 	chatItemLayout: ChatItemLayout,
 	showProjectPath = false,
-	chatFontScale = 1,
+	chatFontScale: number,
 ): number {
 	if (row?.type === 'executor-header') {
 		return EXECUTOR_HEADER_ROW_HEIGHT;

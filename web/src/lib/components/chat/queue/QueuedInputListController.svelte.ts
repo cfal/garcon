@@ -1,6 +1,10 @@
 import { observeTypographyChanges, readTypographyScale } from '$lib/theme/typography.js';
 import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
-import { virtualItems, type VirtualListSnapshot } from '$lib/virt/virtual-list-types.js';
+import {
+	virtualItems,
+	type VirtualListSnapshot,
+	type VirtualMutationAnchor,
+} from '$lib/virt/virtual-list-types.js';
 import type { QueueEntry } from '$lib/types/chat.js';
 
 export class QueuedInputListController {
@@ -18,19 +22,24 @@ export class QueuedInputListController {
 		return Math.ceil(44 * Math.max(1, readTypographyScale(document, 'interface')));
 	}
 
+	#currentAnchor(): VirtualMutationAnchor {
+		const position = this.virtual.viewportPosition;
+		const item = position
+			? this.virtual.snapshot.positions.itemAtOffset(position.paintedOffset)
+			: undefined;
+		return item ? { kind: 'item', key: item.key } : { kind: 'none' };
+	}
+
 	observeTypography(): () => void {
 		return observeTypographyChanges(document, () => {
-			const position = this.virtual.viewportPosition;
-			const anchor = position
-				? this.virtual.snapshot.positions.itemAtOffset(position.paintedOffset)
-				: undefined;
+			const anchor = this.#currentAnchor();
 			const keys = [...this.#indexById.keys()];
 			const estimatedRowHeight = this.#estimatedRowHeight;
 			this.virtual.apply({
 				kind: 'reset-measurements',
 				keys,
 				estimates: keys.map(() => estimatedRowHeight),
-				anchor: anchor ? { kind: 'item', key: anchor.key } : { kind: 'none' },
+				anchor,
 			});
 			this.virtual.remeasureAll();
 		}, ['interface']);
@@ -50,16 +59,13 @@ export class QueuedInputListController {
 			: Object.fromEntries(
 					Object.entries(this.#retained).filter(([, id]) => this.#indexById.has(id)),
 				);
-		const position = this.virtual.viewportPosition;
-		const anchor = position
-			? this.virtual.snapshot.positions.itemAtOffset(position.paintedOffset)
-			: undefined;
+		const anchor = this.#currentAnchor();
 		const estimatedRowHeight = this.#estimatedRowHeight;
 		this.virtual.apply({
 			kind: changedChat ? 'reset-measurements' : 'update',
 			keys: entries.map((entry) => entry.id),
 			estimates: entries.map(() => estimatedRowHeight),
-			anchor: !changedChat && anchor ? { kind: 'item', key: anchor.key } : { kind: 'none' },
+			anchor: changedChat ? { kind: 'none' } : anchor,
 		});
 	}
 

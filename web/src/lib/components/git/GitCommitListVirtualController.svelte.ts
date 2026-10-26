@@ -61,6 +61,12 @@ function measureCommitRow(element: HTMLElement, entry: ResizeObserverEntry | und
 	return Math.round(size > 0 ? size : GIT_HISTORY_ESTIMATED_ROW_HEIGHT);
 }
 
+function estimatedCommitRowHeight(): number {
+	return Math.ceil(
+		GIT_HISTORY_ESTIMATED_ROW_HEIGHT * Math.max(1, readTypographyScale(document, 'interface')),
+	);
+}
+
 export class GitCommitListVirtualController {
 	activeHash = $state<string | null>(null);
 	focusedHash = $state<string | null>(null);
@@ -100,9 +106,7 @@ export class GitCommitListVirtualController {
 		});
 		this.viewport = this.#virt.viewport;
 		this.sizer = this.#virt.sizer;
-		this.#estimatedRowHeight = Math.ceil(
-			GIT_HISTORY_ESTIMATED_ROW_HEIGHT * Math.max(1, readTypographyScale(document, 'interface')),
-		);
+		this.#estimatedRowHeight = estimatedCommitRowHeight();
 		this.#applyVirtualSource('replace');
 		$effect(() =>
 			observeTypographyChanges(document, () => {
@@ -110,10 +114,7 @@ export class GitCommitListVirtualController {
 				const anchor = position
 					? this.#virt.snapshot.positions.itemAtOffset(position.paintedOffset)
 					: undefined;
-				this.#estimatedRowHeight = Math.ceil(
-					GIT_HISTORY_ESTIMATED_ROW_HEIGHT *
-						Math.max(1, readTypographyScale(document, 'interface')),
-				);
+				this.#estimatedRowHeight = estimatedCommitRowHeight();
 				this.#virt.apply({
 					kind: 'reset-measurements',
 					keys: this.#virtualCommits.map((commit) => commit.hash),

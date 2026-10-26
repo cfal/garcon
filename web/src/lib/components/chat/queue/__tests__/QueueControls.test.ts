@@ -67,6 +67,12 @@ describe('inline queue', () => {
 	it('invalidates cached queue measurements on Interface changes and releases the observer', async () => {
 		const controller = new QueuedInputListController();
 		controller.update('chat-1', makeQueue().entries);
+		const position = vi.spyOn(controller.virtual, 'viewportPosition', 'get').mockReturnValue({
+			paintedOffset: 48,
+			logicalOffset: 48,
+			distanceFromStart: 48,
+			leadingContentReachable: true,
+		});
 		const apply = vi.spyOn(controller.virtual, 'apply');
 		const stop = controller.observeTypography();
 		try {
@@ -76,6 +82,7 @@ describe('inline queue', () => {
 					expect.objectContaining({
 						kind: 'reset-measurements',
 						estimates: [63, 63, 63],
+						anchor: { kind: 'item', key: 'q1' },
 					}),
 				),
 			);
@@ -86,6 +93,7 @@ describe('inline queue', () => {
 			expect(apply).not.toHaveBeenCalled();
 		} finally {
 			stop();
+			position.mockRestore();
 			controller.virtual.destroy();
 			delete document.documentElement.dataset.interfaceFontSize;
 		}

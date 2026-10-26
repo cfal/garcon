@@ -847,9 +847,12 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		if (this.#destroyed) return;
 		let anchor: VirtualMutationAnchor = { kind: 'none' };
 		if (this.#configuredVisible && this.#activeTargetScrolls === 0) {
-			const readingAnchor = this.#captureVirtualAnchor(true);
-			if (this.#measurementAnchor() === 'end') anchor = { kind: 'end' };
-			else if (readingAnchor) anchor = { kind: 'item', key: readingAnchor.key };
+			if (this.#measurementAnchor() === 'end') {
+				anchor = { kind: 'end' };
+			} else {
+				const readingAnchor = this.#captureVirtualAnchor(true);
+				if (readingAnchor) anchor = { kind: 'item', key: readingAnchor.key };
+			}
 		}
 		const result = this.#virt.apply({
 			kind: 'reset-measurements',

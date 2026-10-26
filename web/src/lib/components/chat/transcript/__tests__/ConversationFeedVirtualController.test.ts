@@ -565,6 +565,33 @@ describe('ConversationFeedVirtualController', () => {
 		},
 	);
 
+	it('preserves the visible reading row when typography changes while unpinned', async () => {
+		const { exposure, unmount } = await renderController({ initialPinned: false });
+		try {
+			exposure.controller.scrollToStart();
+			await settleController();
+			exposure.controller.scrollBy(240);
+			await settleController();
+			const viewport = exposure.viewport()!;
+			const before = exposure.controller.snapshot.positions.itemAt(6)!;
+			const offset = before.start - viewport.scrollTop;
+			const transactionCount = exposure.transactions.length;
+			await exposure.showAtLayout(400, 80);
+			document.documentElement.dataset.chatFeedFont = 'departure-mono';
+			await settleController();
+			expect(
+				exposure.transactions.slice(transactionCount).find((record) => record.source === 'items'),
+			).toMatchObject({ anchorKind: 'item', anchorIndex: 6 });
+			const after = exposure.controller.snapshot.positions.itemAt(6)!;
+			expect(after.size).toBe(80);
+			expect(after.key).toBe(before.key);
+			expect(Math.abs(after.start - viewport.scrollTop - offset)).toBeLessThanOrEqual(0.5);
+		} finally {
+			unmount();
+			delete document.documentElement.dataset.chatFeedFont;
+		}
+	});
+
 	it('preserves end following and releases font observers on removal', async () => {
 		const fonts = new EventTarget();
 		const addListener = vi.spyOn(fonts, 'addEventListener');
