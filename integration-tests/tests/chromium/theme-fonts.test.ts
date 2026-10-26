@@ -2,49 +2,9 @@ import { expect, test } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect as browserExpect } from "playwright/test";
-import type { Page } from "playwright";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
 import { clickWorkspaceWindowAddAction } from "../../support/chromium-workspace.js";
-import {
-  TYPOGRAPHY_SURFACES,
-  type FontSettingKey,
-  type FontSizeSettingKey,
-  type FontSizePreference,
-} from "../../../web/src/lib/theme/typography.js";
-import type { FontPreference } from "../../../web/src/lib/theme/fonts.js";
-
-async function setFont(
-  page: Page,
-  key: FontSettingKey | FontSizeSettingKey,
-  value: FontPreference | FontSizePreference,
-) {
-  await page.evaluate(
-    ({ key, value }) => {
-      const storageKey = "pref_local_settings";
-      const settings = JSON.parse(localStorage.getItem(storageKey) ?? "{}");
-      localStorage.setItem(
-        storageKey,
-        JSON.stringify({ ...settings, [key]: value }),
-      );
-      window.dispatchEvent(
-        new StorageEvent("storage", {
-          key: storageKey,
-          storageArea: localStorage,
-        }),
-      );
-    },
-    { key, value },
-  );
-  const surface = TYPOGRAPHY_SURFACES.find(
-    (surface) => surface.fontKey === key || surface.sizeKey === key,
-  )!;
-  const attribute =
-    key === surface.sizeKey
-      ? `data-${surface.id}-font-size`
-      : `data-${surface.id}-font`;
-  await browserExpect(page.locator("html")).toHaveAttribute(attribute, value);
-  await page.evaluate(() => document.fonts.ready);
-}
+import { setTypography } from "../../support/typography.js";
 
 test("independent fonts preserve an edited file and undo history", async () => {
   await withChromiumFixture(
@@ -83,13 +43,13 @@ test("independent fonts preserve an edited file and undo history", async () => {
       const selection = await page.evaluate(() =>
         window.getSelection()?.toString(),
       );
-      await setFont(page, "interfaceFont", "departure-mono");
+      await setTypography(page, { interfaceFont: "departure-mono" });
       expect(
         await content.evaluate(
           (element) => getComputedStyle(element).fontFamily,
         ),
       ).toBe(originalFont);
-      await setFont(page, "codeEditorFont", "departure-mono");
+      await setTypography(page, { codeEditorFont: "departure-mono" });
       await browserExpect
         .poll(() =>
           content.evaluate((element) => getComputedStyle(element).fontFamily),
@@ -105,11 +65,11 @@ test("independent fonts preserve an edited file and undo history", async () => {
       expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(
         selection,
       );
-      await setFont(page, "codeEditorFontSize", "18");
+      await setTypography(page, { codeEditorFontSize: "18" });
       await browserExpect(content).toHaveCSS("font-size", "18px");
-      await setFont(page, "interfaceFontSize", "20");
+      await setTypography(page, { interfaceFontSize: "20" });
       await browserExpect(content).toHaveCSS("font-size", "18px");
-      await setFont(page, "interfaceFont", "default");
+      await setTypography(page, { interfaceFont: "default" });
       expect(
         await page.evaluate(() => getComputedStyle(document.body).fontFamily),
       ).not.toContain("Departure Mono");
@@ -120,7 +80,7 @@ test("independent fonts preserve an edited file and undo history", async () => {
         .toContain("Departure Mono");
       await content.press("Control+z");
       await browserExpect(content).toHaveText("Synthetic retained document");
-      await setFont(page, "codeEditorFont", "default");
+      await setTypography(page, { codeEditorFont: "default" });
       await browserExpect(content).toHaveCSS("font-family", originalFont);
       await browserExpect(editor).toHaveAttribute(
         "data-retained-font-editor",
@@ -166,12 +126,12 @@ test("standalone Markdown keeps its own typography while Interface and chat font
           locator.evaluate((element) => getComputedStyle(element).fontFamily),
         ),
       );
-      await setFont(page, "interfaceFont", "departure-mono");
-      await setFont(page, "interfaceFontSize", "20");
-      await setFont(page, "chatFeedFont", "departure-mono");
-      await setFont(page, "chatFeedFontSize", "18");
-      await setFont(page, "chatCodeFont", "departure-mono");
-      await setFont(page, "chatCodeFontSize", "20");
+      await setTypography(page, { interfaceFont: "departure-mono" });
+      await setTypography(page, { interfaceFontSize: "20" });
+      await setTypography(page, { chatFeedFont: "departure-mono" });
+      await setTypography(page, { chatFeedFontSize: "18" });
+      await setTypography(page, { chatCodeFont: "departure-mono" });
+      await setTypography(page, { chatCodeFontSize: "20" });
       for (const [index, locator] of [prose, inline, block].entries()) {
         await browserExpect(locator).toHaveCSS("font-family", fonts[index]);
         await browserExpect(locator).toHaveCSS("font-size", "12px");
@@ -212,9 +172,9 @@ test("terminal fonts update without clearing output or replacing the shell", asy
       const originalFont = await rows.evaluate(
         (element) => getComputedStyle(element).fontFamily,
       );
-      await setFont(page, "interfaceFont", "departure-mono");
+      await setTypography(page, { interfaceFont: "departure-mono" });
       await browserExpect(rows).toHaveCSS("font-family", originalFont);
-      await setFont(page, "terminalFont", "departure-mono");
+      await setTypography(page, { terminalFont: "departure-mono" });
       await browserExpect
         .poll(() =>
           rows.evaluate((element) => getComputedStyle(element).fontFamily),
@@ -233,9 +193,9 @@ test("terminal fonts update without clearing output or replacing the shell", asy
       await browserExpect(terminal.locator(".xterm-screen")).toContainText(
         "shell-retained",
       );
-      await setFont(page, "terminalFontSize", "18");
+      await setTypography(page, { terminalFontSize: "18" });
       await browserExpect(rows).toHaveCSS("font-size", "18px");
-      await setFont(page, "terminalFont", "default");
+      await setTypography(page, { terminalFont: "default" });
       await browserExpect(rows).toHaveCSS("font-family", originalFont);
       await browserExpect(terminal).toHaveAttribute(
         "data-retained-font-terminal",

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect as browserExpect } from "playwright/test";
-import type { Locator, Page } from "playwright";
+import type { Locator } from "playwright";
 import { buildWebBrowserEntry } from "../../support/web-browser-bundle.js";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
 import {
@@ -10,10 +10,8 @@ import {
   collapseCanonicalFilesWindow,
 } from "../../support/chromium-workspace.js";
 import { initializeFixtureRepository } from "../../support/git-fixture.js";
-import {
-  TYPOGRAPHY_SURFACES,
-  type TypographyPreferences,
-} from "../../../web/src/lib/theme/typography.js";
+import { setTypography } from "../../support/typography.js";
+import { TYPOGRAPHY_SURFACES } from "../../../web/src/lib/theme/typography.js";
 import type { CanvasContent } from "../../../common/chat-canvas.js";
 
 async function measureSelects(container: Locator) {
@@ -80,38 +78,6 @@ test("conflict diffs preserve their default and apply independent sizes with a t
     },
   );
 }, 180_000);
-
-async function setTypography(
-  page: Page,
-  preferences: Partial<TypographyPreferences>,
-) {
-  await page.evaluate((values) => {
-    const key = "pref_local_settings";
-    localStorage.setItem(
-      key,
-      JSON.stringify({
-        ...JSON.parse(localStorage.getItem(key) ?? "{}"),
-        ...values,
-      }),
-    );
-    window.dispatchEvent(
-      new StorageEvent("storage", { key, storageArea: localStorage }),
-    );
-  }, preferences);
-  for (const { id, fontKey, sizeKey } of TYPOGRAPHY_SURFACES) {
-    if (preferences[fontKey])
-      await browserExpect(page.locator("html")).toHaveAttribute(
-        `data-${id}-font`,
-        preferences[fontKey]!,
-      );
-    if (preferences[sizeKey])
-      await browserExpect(page.locator("html")).toHaveAttribute(
-        `data-${id}-font-size`,
-        preferences[sizeKey]!,
-      );
-  }
-  await page.evaluate(() => document.fonts.ready);
-}
 
 test("canvas previews stay outside Chat List typography and preserve wheel panning", async () => {
   await withChromiumFixture(
