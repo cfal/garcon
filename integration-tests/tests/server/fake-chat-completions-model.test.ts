@@ -37,6 +37,10 @@ describe('FakeChatCompletionsModel usage scripting', () => {
       const next = reader.read();
       controller.abort();
       expect(await rejectionOf(next)).toBeInstanceOf(Error);
+      const request = model.requests()[0]!;
+      const deadline = Date.now() + 2_000;
+      while (request.abortedAt === null && Date.now() < deadline) await Bun.sleep(10);
+      expect(request.abortedAt).not.toBeNull();
       model.assertSettled();
     } finally {
       controller.abort();
