@@ -56,6 +56,12 @@ interface GitQuickSummaryCacheEntry {
 	lastUpdatedAt: number;
 }
 
+interface QuickSummaryRead {
+	controller: AbortController;
+	settled: Promise<void>;
+	needsRefresh: boolean;
+}
+
 export interface GitQuickProjectLease extends GitProjectTarget {
 	readonly executorContextKey?: string;
 	readonly isProcessing: boolean;
@@ -110,18 +116,11 @@ export class GitQuickSummaryStore {
 	entries = $state<Record<string, GitQuickSummaryCacheEntry>>({});
 	isEnabled = $state(true);
 
-	private readonly requestGenerationByProject = new Map<string, number>();
-	private requestSequence = 0;
-	private readonly inFlightByProject = new Map<
+	private readonly inFlightByProject = new Map<string, QuickSummaryRead>();
+	private readonly scheduledRefreshByProject = new Map<
 		string,
-		{
-			controller: AbortController;
-			settled: Promise<void>;
-			needsRefresh: boolean;
-		}
+		{ reason: GitQuickRefreshReason; timer: QuickSummaryTimeoutHandle }
 	>();
-	private readonly pendingRefreshByProject = new Map<string, GitQuickRefreshReason>();
-	private readonly debounceTimerByProject = new Map<string, QuickSummaryTimeoutHandle>();
 	private readonly getSummary: typeof getGitQuickSummary;
 	private readonly setTimeoutFn: QuickSummarySetTimeout;
 	private readonly clearTimeoutFn: QuickSummaryClearTimeout;
@@ -173,10 +172,6 @@ export class GitQuickSummaryStore {
 		if (entry.summary) return true;
 		if (entry.status === 'error') return Boolean(entry.lastError);
 		return !entry.hasResponse;
-	}
-
-	get hasChanges(): boolean {
-		return this.summary?.hasChanges ?? false;
 	}
 
 	summaryFor(project: GitProjectTarget | null): GitQuickSummaryReady | null {
@@ -284,17 +279,15 @@ export class GitQuickSummaryStore {
 		delayMs = 300,
 	): void {
 		if (!this.isEnabled || !this.#hasVisibleProject(project)) return;
-		const active = this.inFlightByProject.get(gitProjectKey(project));
+		const key = gitProjectKey(project);
+		const active = this.inFlightByProject.get(key);
 		if (active && !invalidatesSummary(reason)) return;
-		this.pendingRefreshByProject.set(gitProjectKey(project), reason);
-		this.#clearProjectDebounce(project);
+		this.#clearScheduledRefresh(project);
 		const timer = this.setTimeoutFn(() => {
-			this.debounceTimerByProject.delete(gitProjectKey(project));
-			const pendingReason = this.pendingRefreshByProject.get(gitProjectKey(project)) ?? reason;
-			this.pendingRefreshByProject.delete(gitProjectKey(project));
-			void this.refreshFor(project, pendingReason);
+			this.scheduledRefreshByProject.delete(key);
+			void this.refreshFor(project, reason);
 		}, delayMs);
-		this.debounceTimerByProject.set(gitProjectKey(project), timer);
+		this.scheduledRefreshByProject.set(key, { reason, timer });
 	}
 
 	async refresh(reason: GitQuickRefreshReason): Promise<void> {
@@ -313,16 +306,13 @@ export class GitQuickSummaryStore {
 			if (invalidates) await this.inFlightByProject.get(key)?.settled;
 			return;
 		}
-		const scheduled = this.pendingRefreshByProject.get(key);
-		if (!scheduled || !invalidatesSummary(scheduled)) {
-			this.#clearProjectDebounce(project);
-			this.pendingRefreshByProject.delete(key);
+		const scheduled = this.scheduledRefreshByProject.get(key);
+		if (!scheduled || !invalidatesSummary(scheduled.reason)) {
+			this.#clearScheduledRefresh(project);
 		}
-		const generation = ++this.requestSequence;
-		this.requestGenerationByProject.set(gitProjectKey(project), generation);
 		const controller = new AbortController();
 		let settle!: () => void;
-		const request = {
+		const request: QuickSummaryRead = {
 			controller,
 			settled: new Promise<void>((resolve) => {
 				settle = resolve;
@@ -334,19 +324,21 @@ export class GitQuickSummaryStore {
 
 		try {
 			const result = await this.getSummary(project, { signal: controller.signal });
-			if (!this.isCurrentResponse(project, generation)) return;
+			if (!this.isCurrentRequest(project, request)) return;
 			this.applyResponse(project, result);
 			this.pruneCache();
 		} catch (error) {
-			if (isAbortError(error) || !this.isCurrentResponse(project, generation)) return;
+			if (isAbortError(error) || !this.isCurrentRequest(project, request)) return;
 			this.applyRefreshError(project, error);
 			this.pruneCache();
 		} finally {
+			const isCurrent = this.isCurrentRequest(project, request);
 			if (this.inFlightByProject.get(key) === request) {
 				this.inFlightByProject.delete(key);
 			}
-			if (this.isCurrentResponse(project, generation)) {
+			if (isCurrent) {
 				this.updateEntry(project, { isRefreshing: false });
+				// Registers the follow-up before releasing callers waiting for fresh data.
 				if (request.needsRefresh) void this.refreshFor(project, 'invalidation');
 			}
 			settle();
@@ -409,7 +401,6 @@ export class GitQuickSummaryStore {
 		for (const project of this.visibleProjects) this.#cancelProjectWork(project);
 		this.visibleProjects = [];
 		this.entries = {};
-		this.requestGenerationByProject.clear();
 	}
 
 	pruneExecutors(executorIds: ReadonlySet<string>): void {
@@ -457,9 +448,9 @@ export class GitQuickSummaryStore {
 		this.applySummaryError(project, result.message, now);
 	}
 
-	private isCurrentResponse(project: GitProjectTarget, generation: number): boolean {
+	private isCurrentRequest(project: GitProjectTarget, request: QuickSummaryRead): boolean {
 		return (
-			generation === this.requestGenerationByProject.get(gitProjectKey(project)) &&
+			this.inFlightByProject.get(gitProjectKey(project)) === request &&
 			this.#hasVisibleProject(project) &&
 			this.isEnabled
 		);
@@ -536,10 +527,6 @@ export class GitQuickSummaryStore {
 		this.entries = Object.fromEntries(
 			bounded.map((entry) => [gitProjectKey(entry.project), entry]),
 		);
-		for (const key of this.requestGenerationByProject.keys()) {
-			if (!this.entries[key] && !this.inFlightByProject.has(key))
-				this.requestGenerationByProject.delete(key);
-		}
 	}
 
 	#hasVisibleProject(target: GitProjectTarget): boolean {
@@ -547,17 +534,17 @@ export class GitQuickSummaryStore {
 	}
 
 	#cancelProjectWork(project: GitProjectTarget): void {
-		this.#clearProjectDebounce(project);
-		this.pendingRefreshByProject.delete(gitProjectKey(project));
-		this.requestGenerationByProject.delete(gitProjectKey(project));
-		this.inFlightByProject.get(gitProjectKey(project))?.controller.abort();
-		this.inFlightByProject.delete(gitProjectKey(project));
+		const key = gitProjectKey(project);
+		this.#clearScheduledRefresh(project);
+		this.inFlightByProject.get(key)?.controller.abort();
+		this.inFlightByProject.delete(key);
 	}
 
-	#clearProjectDebounce(project: GitProjectTarget): void {
-		const timer = this.debounceTimerByProject.get(gitProjectKey(project));
-		if (timer === undefined) return;
-		this.clearTimeoutFn(timer);
-		this.debounceTimerByProject.delete(gitProjectKey(project));
+	#clearScheduledRefresh(project: GitProjectTarget): void {
+		const key = gitProjectKey(project);
+		const scheduled = this.scheduledRefreshByProject.get(key);
+		if (!scheduled) return;
+		this.clearTimeoutFn(scheduled.timer);
+		this.scheduledRefreshByProject.delete(key);
 	}
 }

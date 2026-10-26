@@ -604,6 +604,76 @@ describe('GitQuickSummaryStore', () => {
 		store.destroy();
 	});
 
+	it.each(['success', 'failure'] as const)(
+		'keeps a replacement read active when an obsolete read settles with %s',
+		async (outcome) => {
+			const obsolete = deferred<GitQuickSummaryResponse>();
+			const replacement = deferred<GitQuickSummaryResponse>();
+			const getSummary = vi
+				.fn<GetSummary>()
+				.mockReturnValueOnce(obsolete.promise)
+				.mockReturnValueOnce(replacement.promise);
+			const store = new GitQuickSummaryStore({ getSummary });
+			showProject(store, '/project');
+			const initial = store.refresh('dialog-open');
+			store.scheduleRefresh('invalidation');
+			await vi.advanceTimersByTimeAsync(300);
+			const obsoleteSignal = getSummary.mock.calls[0]?.[1]?.signal;
+			store.setVisibleProjects([
+				{
+					executorId: 'local',
+					projectPath: '/project',
+					isProcessing: false,
+					executorContextKey: 'replacement',
+				},
+			]);
+			const refreshed = store.refresh('dialog-open');
+			const replacementSignal = getSummary.mock.calls[1]?.[1]?.signal;
+			expect(obsoleteSignal?.aborted).toBe(true);
+			if (outcome === 'success') obsolete.resolve(readySummary({ branch: 'obsolete' }));
+			else obsolete.reject(new Error('obsolete error'));
+			await initial;
+			expect(store.summary).toBeNull();
+			expect(store.lastError).toBeNull();
+			expect(store.isLoading).toBe(true);
+			const joined = store.refresh('idle-poll');
+			expect(getSummary).toHaveBeenCalledTimes(2);
+			expect(replacementSignal?.aborted).toBe(false);
+			replacement.resolve(readySummary({ branch: 'replacement' }));
+			await Promise.all([refreshed, joined]);
+			expect(store.summary?.branch).toBe('replacement');
+			expect(store.isLoading).toBe(false);
+			store.destroy();
+		},
+	);
+
+	it('resets the debounce deadline and preserves the latest scheduled reason', async () => {
+		const pending = deferred<GitQuickSummaryResponse>();
+		const getSummary = vi
+			.fn<GetSummary>()
+			.mockResolvedValueOnce(readySummary())
+			.mockReturnValueOnce(pending.promise)
+			.mockResolvedValue(readySummary({ branch: 'after-mutation' }));
+		const store = new GitQuickSummaryStore({ getSummary });
+		showProject(store, '/project');
+		await store.refresh('dialog-open');
+		store.scheduleRefresh('visibility');
+		await vi.advanceTimersByTimeAsync(200);
+		store.scheduleRefresh('invalidation');
+		await vi.advanceTimersByTimeAsync(100);
+		expect(getSummary).toHaveBeenCalledOnce();
+		const refresh = store.refresh('idle-poll');
+		await vi.advanceTimersByTimeAsync(199);
+		expect(getSummary).toHaveBeenCalledTimes(2);
+		pending.resolve(readySummary({ branch: 'before-mutation' }));
+		await refresh;
+		expect(getSummary).toHaveBeenCalledTimes(2);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(getSummary).toHaveBeenCalledTimes(3);
+		expect(store.summary?.branch).toBe('after-mutation');
+		store.destroy();
+	});
+
 	it('retains the stopped debounce when an active read finishes before the settling window', async () => {
 		const pending = deferred<GitQuickSummaryResponse>();
 		const getSummary = vi
