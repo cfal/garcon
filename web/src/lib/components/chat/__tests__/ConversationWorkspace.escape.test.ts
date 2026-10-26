@@ -3,14 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConversationWorkspaceEscapeHost from './ConversationWorkspaceEscapeHost.svelte';
 import { getChatExecutionControl, getChatMessages, stopChat } from '$lib/api/chats.js';
-import { getGitRefs } from '$lib/api/git.js';
+import { getGitRefs, type GitQuickSummaryReady } from '$lib/api/git.js';
 import { ToolResultMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
-import { GIT_QUICK_SUMMARY_FINGERPRINT_VERSION } from '$shared/git';
 import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
 import { mountConversationRouter } from '$lib/chat/conversation/conversation-router-adapter.svelte.js';
@@ -202,26 +201,11 @@ describe('ConversationWorkspace Escape abort handling', () => {
 		expect(patchActivity).toHaveBeenCalledWith('chat-background', timestamp);
 	});
 
-	it.each(['/other', '/workspace/project'])('opens busy quick Commit with a notice only for a different target (%s)', async (projectPath) => {
+	it.each(['/other', '/workspace/project'])('opens busy quick Commit without a summary, notifying only for a different target (%s)', async (projectPath) => {
 		const commit = new CommitController(createGitSurfaceTestDeps());
 		const quickSummary = new GitQuickSummaryStore();
 		const notifications = createNotificationsStore();
-		vi.spyOn(quickSummary, 'summaryFor').mockReturnValue({
-			status: 'ready',
-			project: '/workspace/project',
-			branch: 'main',
-			changedFiles: 1,
-			stagedFiles: 1,
-			unstagedFiles: 0,
-			untrackedFiles: 0,
-			additions: 1,
-			deletions: 0,
-			repoRoot: '/workspace/project',
-			hasCommits: true,
-			trackedChangedFiles: 1,
-			fingerprintVersion: GIT_QUICK_SUMMARY_FINGERPRINT_VERSION,
-			fingerprint: 'synthetic',
-		});
+
 		const onOpenCommit = vi.fn(async () => {});
 		render(ConversationWorkspaceEscapeHost, { commit, quickSummary, onOpenCommit, notifications });
 		expect(commit.target.selectProject({ executorId: 'local', projectPath })).toBe(true);
@@ -355,6 +339,33 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			chatId: 'chat-1',
 			agentId: 'claude',
 		});
+	});
+
+	it.each(['keyboard', 'pointer'] as const)('lets only a %s-focused Git tooltip own Escape before stopping the chat', async (interaction) => {
+		const quickSummary = new GitQuickSummaryStore({
+			getSummary: vi.fn().mockResolvedValue({
+				status: 'ready', project: '/workspace/project', branch: 'main',
+				hasChanges: true, hasUntracked: true, diffStats: { additions: 0, deletions: 0 },
+			} satisfies GitQuickSummaryReady),
+		});
+		try {
+			render(ConversationWorkspaceEscapeHost, { showQuickCommitTray: true, quickSummary });
+			const button = screen.getByRole('button', { name: /^Commit/ });
+			const focusTarget = interaction === 'keyboard' ? button : screen.getByRole('button', { name: 'Abort' });
+			focusTarget.focus();
+			if (interaction === 'pointer') await fireEvent.pointerEnter(button, { pointerType: 'mouse' });
+			await screen.findByRole('tooltip');
+			expect(document.activeElement).toBe(focusTarget);
+			await fireEvent.keyDown(focusTarget, { key: 'Escape' });
+			await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+			if (interaction === 'keyboard') {
+				expect(mockStopChat).not.toHaveBeenCalled();
+				await fireEvent.keyDown(button, { key: 'Escape' });
+			}
+			await waitFor(() => expect(mockStopChat).toHaveBeenCalledOnce());
+		} finally {
+			quickSummary.destroy();
+		}
 	});
 
 	it('derives queued steering from the selected agent capability and processing state', async () => {
