@@ -15,6 +15,33 @@ const ready: GitQuickSummaryReady = {
 describe('GitSummaryButton', () => {
 	afterEach(cleanup);
 
+	it.each([
+		[{ additions: 0, deletions: 0 }, 'Commit New files'],
+		[{ additions: 42, deletions: 7 }, 'Commit +42 / -7'],
+	] satisfies [GitQuickSummaryReady['diffStats'], string][])(
+		'shows untracked files as text without changing the accessible name (%j)',
+		async (diffStats, name) => {
+			render(GitSummaryButton, {
+				summary: { ...ready, hasUntracked: true, diffStats },
+				isRefreshing: false,
+				onCommit: vi.fn(),
+			});
+			const button = screen.getByRole('button', { name });
+			const marker = screen.getByText('?');
+			expect(marker.tagName).toBe('SPAN');
+			expect(marker.getAttribute('aria-hidden')).toBe('true');
+			expect(button.contains(marker)).toBe(true);
+			button.focus();
+			const tooltip = await screen.findByRole('tooltip');
+			expect(tooltip.textContent).toContain('New files');
+		},
+	);
+
+	it('omits the question mark when there are no untracked files', () => {
+		render(GitSummaryButton, { summary: ready, isRefreshing: false, onCommit: vi.fn() });
+		expect(screen.queryByText('?')).toBeNull();
+	});
+
 	it('keeps cached totals on refresh and exposes errors on hover or keyboard focus', async () => {
 		const onCommit = vi.fn();
 		const { container } = render(GitSummaryButton, {

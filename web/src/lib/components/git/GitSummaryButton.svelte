@@ -1,5 +1,4 @@
 <script lang="ts">
-	import FilePlus from '@lucide/svelte/icons/file-plus';
 	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -95,7 +94,7 @@
 					{/if}
 				{/if}
 				{#if summary?.hasUntracked}
-					<FilePlus class="size-3.5" aria-hidden="true" />
+					<span aria-hidden="true">?</span>
 					{#if !lineStats}
 						<span>{m.git_quick_status_new_files()}</span>
 					{/if}
