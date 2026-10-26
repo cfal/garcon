@@ -70,6 +70,8 @@ const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'external-tool-use': 'Tool',
 	'mcp-tool-use': 'MCP',
 	'pi-tool-search-tool-use': 'ToolSearch',
+	'claude-tool-search-tool-use': 'ToolSearch',
+	'claude-monitor-tool-use': 'Monitor',
 	'request-permissions-tool-use': 'Permissions',
 };
 
@@ -145,6 +147,40 @@ const WEB_FETCH_RULE: ToolDisplayRule = {
 		}),
 	},
 };
+
+const TOOL_SEARCH_RULE: ToolDisplayRule = {
+	input: {
+		mode: 'inline',
+		label: 'ToolSearch',
+		getValue: (input) => String(input.query ?? ''),
+		action: 'jumpToResult',
+	},
+	result: {
+		mode: 'collapsible',
+		defaultOpen: false,
+		contentKind: 'text',
+		getContentProps: (result) => ({ content: extractContentString(result?.content) }),
+	},
+};
+
+function parametersToolRule(label: string): ToolDisplayRule {
+	return {
+		input: {
+			mode: 'collapsible',
+			label,
+			title: m.chat_tool_parameters(),
+			defaultOpen: false,
+			contentKind: 'text',
+			getContentProps: (input) => ({ content: JSON.stringify(input, null, 2), format: 'code' }),
+		},
+		result: {
+			mode: 'collapsible',
+			defaultOpen: false,
+			contentKind: 'text',
+			getContentProps: (result) => ({ content: extractContentString(result?.content), format: 'plain' }),
+		},
+	};
+}
 
 function appendDetailLine(lines: string[], label: string, value: string | undefined): void {
 	if (!value) return;
@@ -912,66 +948,11 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 
-	'pi-tool-search-tool-use': {
-		input: {
-			mode: 'inline',
-			label: 'ToolSearch',
-			getValue: (input) => String(input.query ?? ''),
-			action: 'jumpToResult',
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (result) => ({ content: extractContentString(result?.content) }),
-		},
-	},
-
-	'external-tool-use': {
-		input: {
-			mode: 'collapsible',
-			label: 'Tool',
-			title: m.chat_tool_parameters(),
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (input) => ({
-				content: JSON.stringify(input, null, 2),
-				format: 'code',
-			}),
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-				format: 'plain',
-			}),
-		},
-	},
-
-	'mcp-tool-use': {
-		input: {
-			mode: 'collapsible',
-			label: 'MCP',
-			title: m.chat_tool_parameters(),
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (input) => ({
-				content: JSON.stringify(input, null, 2),
-				format: 'code',
-			}),
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-				format: 'plain',
-			}),
-		},
-	},
+	'pi-tool-search-tool-use': TOOL_SEARCH_RULE,
+	'claude-tool-search-tool-use': TOOL_SEARCH_RULE,
+	'claude-monitor-tool-use': parametersToolRule('Monitor'),
+	'external-tool-use': parametersToolRule('Tool'),
+	'mcp-tool-use': parametersToolRule('MCP'),
 
 	'request-permissions-tool-use': {
 		input: {
