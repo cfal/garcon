@@ -9,6 +9,49 @@ import { initializeFixtureRepository, runFixtureGit, runFixtureGitAt } from '../
 import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
+  test(`Git quick summary reports untracked presence without weakening full review (${executionBackend})`, async () => {
+    await withIntegrationFixture(`git-quick-summary-${executionBackend}`, async fixture => {
+      const { client } = fixture;
+      const project = fixture.executionDirs.project;
+      const target = { executorId: client.executorId, project };
+      await initializeFixtureRepository(project);
+      if (client.executorId !== 'local') await initializeFixtureRepository(fixture.dirs.project);
+      const summary = () => client.post<ExecutionGitResults['getQuickSummary']>('/api/v1/git/quick-summary', target);
+      expect(await summary()).toMatchObject({
+        ...target, status: 'ready', branch: 'main', hasChanges: false, hasUntracked: false,
+        diffStats: { additions: 0, deletions: 0 }, instanceId: expect.any(String),
+      });
+      await mkdir(join(project, 'artifacts/nested'), { recursive: true });
+      const files = Array.from({ length: 32 }, (_, i) => `artifacts/nested/${i}.txt`);
+      for (const file of files) await writeFile(join(project, file), 'new\n');
+      const untracked = await summary();
+      expect(untracked).toMatchObject({
+        ...target, status: 'ready', hasChanges: true, hasUntracked: true,
+        diffStats: { additions: 0, deletions: 0 },
+      });
+      expect(untracked).not.toHaveProperty('untrackedFiles');
+      expect(untracked).not.toHaveProperty('fingerprint');
+      const snapshot = await client.post<ExecutionGitResults['getWorkbenchSnapshot']>(
+        '/api/v1/git/workbench/snapshot', { ...target, mode: 'working', context: 3 },
+      );
+      if (snapshot.status !== 'ready') throw new Error('Expected full review');
+      expect(snapshot.reviewSummary.files.map(file => file.path).sort()).toEqual(files.sort());
+      const fingerprint = await client.post<ExecutionGitResults['getWorkingTreeFingerprint']>(
+        '/api/v1/git/working-tree/fingerprint', target,
+      );
+      expect(fingerprint).toMatchObject({ status: 'ready', fingerprintVersion: 1, changedPathCount: 32 });
+      await runFixtureGit(project, 'add', '--', 'artifacts');
+      expect(await summary()).toMatchObject({
+        status: 'ready', hasChanges: true, hasUntracked: false, diffStats: { additions: 32, deletions: 0 },
+      });
+      await runFixtureGit(project, 'commit', '-m', 'Track artifacts');
+      expect(await summary()).toMatchObject({ status: 'ready', hasChanges: false, hasUntracked: false });
+      if (client.executorId !== 'local') {
+        expect(await runFixtureGit(fixture.dirs.project, 'rev-list', '--count', 'HEAD')).toBe('1\n');
+      }
+    }, { executionBackend, projectRoots: 'separate' });
+  }, 60_000);
+
   test(`Git destructive selections stay literal and preserve tracked descendants (${executionBackend})`, async () => {
     await withIntegrationFixture(`git-literal-${executionBackend}`, async fixture => {
       const { client } = fixture;

@@ -19,18 +19,10 @@ function summary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSummary
 	return {
 		status: 'ready',
 		project: '/project',
-		repoRoot: '/project',
 		branch: 'main',
-		hasCommits: true,
-		changedFiles: 2,
-		trackedChangedFiles: 1,
-		untrackedFiles: 1,
-		stagedFiles: 1,
-		unstagedFiles: 1,
-		additions: 3,
-		deletions: 1,
-		fingerprintVersion: 1,
-		fingerprint: 'v1:quick',
+		hasChanges: true,
+		hasUntracked: true,
+		diffStats: { additions: 3, deletions: 1 },
 		...overrides,
 	};
 }
@@ -40,7 +32,7 @@ describe('GitQuickStatusTray', () => {
 		cleanup();
 	});
 
-	it('renders a centered loading indicator before the first summary', () => {
+	it('keeps Commit available and right-aligned before the first summary', () => {
 		const { container } = render(GitQuickStatusTray, {
 			props: {
 				isVisible: true,
@@ -53,7 +45,9 @@ describe('GitQuickStatusTray', () => {
 		const tray = screen.getByRole('status', { name: 'Loading...' });
 		expect(tray.getAttribute('aria-busy')).toBe('true');
 		expect(tray.className).toContain('min-h-14');
-		expect(screen.queryByRole('button')).toBeNull();
+		const commit = screen.getByRole('button', { name: /^Commit/ });
+		expect((commit as HTMLButtonElement).disabled).toBe(false);
+		expect(commit.parentElement?.className).toContain('ml-auto');
 		expect(screen.queryByTestId('commit-file-summary')).toBeNull();
 		expect(container.querySelector('.animate-spin')).toBeTruthy();
 	});
@@ -74,7 +68,7 @@ describe('GitQuickStatusTray', () => {
 		expect(screen.queryByText('Loading...')).toBeNull();
 	});
 
-	it('renders dirty repo counts and runs commit action', async () => {
+	it('uses the dirty summary as the Commit label without separate counts', async () => {
 		const onCommit = vi.fn();
 		render(GitQuickStatusTray, {
 			props: {
@@ -89,11 +83,8 @@ describe('GitQuickStatusTray', () => {
 		expect(screen.getByText('+3')).toBeTruthy();
 		expect(screen.getByText('/')).toBeTruthy();
 		expect(screen.getByText('-1')).toBeTruthy();
-		expect(screen.getByText('•')).toBeTruthy();
-		expect(screen.getByText('1 unstaged, 1 staged, 1 untracked')).toBeTruthy();
-		expect(screen.getByTestId('commit-file-summary').className).toContain(
-			'min-[480px]:inline-flex',
-		);
+		expect(screen.queryByTestId('commit-file-summary')).toBeNull();
+		expect(screen.getByRole('button', { name: /^Commit/ }).textContent).toContain('+3');
 
 		await fireEvent.click(screen.getByRole('button', { name: /Commit/ }));
 		expect(onCommit).toHaveBeenCalledOnce();
@@ -121,46 +112,38 @@ describe('GitQuickStatusTray', () => {
 			props: {
 				isVisible: true,
 				summary: summary({
-					changedFiles: 45,
-					trackedChangedFiles: 40,
-					untrackedFiles: 5,
-					stagedFiles: 0,
-					unstagedFiles: 40,
-					additions: 0,
-					deletions: 0,
+					hasChanges: true,
+					hasUntracked: true,
+					diffStats: { additions: 0, deletions: 0 },
 				}),
 				isRefreshing: false,
 				onCommit: vi.fn(),
 			},
 		});
 
-		expect(screen.getByText('40 unstaged, 5 untracked')).toBeTruthy();
+		expect(screen.getByText('New files')).toBeTruthy();
 		expect(screen.queryByText('+0')).toBeNull();
 		expect(screen.queryByText('-0')).toBeNull();
 		expect(screen.queryByText('0 staged')).toBeNull();
 		expect(screen.queryByText('•')).toBeNull();
 	});
 
-	it('renders clean repo branch and disables commit', () => {
+	it('renders a muted clean button that still opens Commit', () => {
 		render(GitQuickStatusTray, {
 			props: {
 				isVisible: true,
 				summary: summary({
-					changedFiles: 0,
-					trackedChangedFiles: 0,
-					untrackedFiles: 0,
-					stagedFiles: 0,
-					unstagedFiles: 0,
-					additions: 0,
-					deletions: 0,
+					hasChanges: false,
+					hasUntracked: false,
+					diffStats: { additions: 0, deletions: 0 },
 				}),
 				isRefreshing: false,
 				onCommit: vi.fn(),
 			},
 		});
 
-		expect(screen.getByText('no changes')).toBeTruthy();
-		expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(true);
+		expect(screen.getByRole('button').className).toContain('text-muted-foreground');
+		expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(false);
 	});
 
 	it('renders the shared branch selector when branch controls are provided', async () => {

@@ -24,7 +24,6 @@ export const GIT_REVIEW_DOCUMENT_LIMITS = Object.freeze({
 });
 
 export const GIT_WORKING_TREE_FINGERPRINT_VERSION = 1;
-export const GIT_QUICK_SUMMARY_FINGERPRINT_VERSION = 1;
 
 export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
 
@@ -575,33 +574,22 @@ export type GitQuickSummaryResponse =
 export interface GitQuickSummaryReady {
   status: 'ready';
   project: string;
-  repoRoot: string;
   branch: string;
-  hasCommits: boolean;
-  changedFiles: number;
-  trackedChangedFiles: number;
-  untrackedFiles: number;
-  stagedFiles: number;
-  unstagedFiles: number;
-  additions: number;
-  deletions: number;
-  fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
-  fingerprint: string;
+  hasChanges: boolean;
+  hasUntracked: boolean;
+  /** Null when tracked line totals could not be collected within the summary budget. */
+  diffStats: { additions: number; deletions: number } | null;
 }
 
 export interface GitQuickSummaryNotRepository {
   status: 'not-git-repository';
   project: string;
-  fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
-  fingerprint: null;
   message: string;
 }
 
 export interface GitQuickSummaryUnknown {
   status: 'unknown';
   project: string;
-  fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
-  fingerprint: null;
   message: string;
 }
 

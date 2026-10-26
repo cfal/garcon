@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
@@ -71,18 +71,10 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 	return {
 		status: 'ready',
 		project: '/workspace/project',
-		repoRoot: '/workspace/project',
 		branch: 'main',
-		hasCommits: true,
-		changedFiles: 1,
-		trackedChangedFiles: 1,
-		untrackedFiles: 0,
-		stagedFiles: 0,
-		unstagedFiles: 1,
-		additions: 1,
-		deletions: 0,
-		fingerprintVersion: 1,
-		fingerprint: 'v1:test',
+		hasChanges: true,
+		hasUntracked: false,
+		diffStats: { additions: 1, deletions: 0 },
 		...overrides,
 	};
 }
@@ -1240,7 +1232,7 @@ describe('PromptComposer focus', () => {
 			selectedChatId: 'chat-1',
 			selectedStatus: 'running',
 			quickCommitTrayVisible: true,
-			quickCommitSummary: quickSummary({ fingerprint: 'v1:refreshing' }),
+			quickCommitSummary: quickSummary({ branch: 'refreshing' }),
 			quickCommitRefreshing: true,
 		});
 		await expectComposerFocus(textarea);
@@ -1370,12 +1362,12 @@ describe('PromptComposer focus', () => {
 			selectedStatus: 'running',
 			selectedIsProcessing: true,
 			quickCommitTrayVisible: false,
-			quickCommitSummary: quickSummary({ additions: 3, deletions: 1 }),
+			quickCommitSummary: quickSummary({ diffStats: { additions: 3, deletions: 1 } }),
 			onAbort,
 			onQuickCommit,
 		});
 
-		const commitButton = screen.getByRole('button', { name: 'Commit' });
+		const commitButton = screen.getByRole('button', { name: /^Commit/ });
 		const stopButton = screen.getByRole('button', { name: 'Stop' });
 
 		expect(
@@ -1384,7 +1376,7 @@ describe('PromptComposer focus', () => {
 		expect(commitButton.textContent).toContain('+3');
 		expect(commitButton.textContent).toContain('/');
 		expect(commitButton.textContent).toContain('-1');
-		expect(commitButton.textContent).not.toContain('Commit');
+		expect(within(commitButton).getByText('Commit').className).toContain('sr-only');
 		expect(screen.getByText('+3').className).toContain('text-git-added');
 		expect(screen.getByText('-1').className).toContain('text-git-deleted');
 
@@ -1394,25 +1386,21 @@ describe('PromptComposer focus', () => {
 		expect(onAbort).not.toHaveBeenCalled();
 	});
 
-	it('hides quick commit while processing when the ready summary has no changes', () => {
+	it('keeps the shared clean Git button before Stop while processing', () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',
 			selectedStatus: 'running',
 			selectedIsProcessing: true,
 			quickCommitTrayVisible: false,
 			quickCommitSummary: quickSummary({
-				changedFiles: 0,
-				trackedChangedFiles: 0,
-				untrackedFiles: 0,
-				stagedFiles: 0,
-				unstagedFiles: 0,
-				additions: 0,
-				deletions: 0,
+				hasChanges: false,
+				hasUntracked: false,
+				diffStats: { additions: 0, deletions: 0 },
 			}),
 			onQuickCommit: vi.fn(),
 		});
 
-		expect(screen.queryByRole('button', { name: 'Commit' })).toBeNull();
+		expect(screen.getByRole('button', { name: /^Commit/ }).className).toContain('text-muted-foreground');
 		expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
 	});
 

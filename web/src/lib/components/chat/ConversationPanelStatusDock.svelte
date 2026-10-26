@@ -54,9 +54,6 @@
 		cn(CHAT_DOCK_SHELL_BASE_CLASS, CHAT_MAX_WIDTH_DOCK_SHELL_CLASS[chatMaxWidth]),
 	);
 	const frameClass = $derived(chatDockFrameClass(chatMaxWidth));
-	const runningQuickCommitVisible = $derived(
-		quickCommitEnabled && Boolean(quickCommitSummary && quickCommitSummary.changedFiles > 0),
-	);
 </script>
 
 <div class={shellClass} data-conversation-panel-status-dock>
@@ -76,8 +73,10 @@
 					{status}
 					{agentId}
 					{spinnerSelectionKey}
-					quickCommitVisible={runningQuickCommitVisible}
+					quickCommitVisible={quickCommitEnabled}
 					{quickCommitSummary}
+					{quickCommitRefreshing}
+					{quickCommitError}
 					{onQuickCommit}
 					{onAbort}
 					{announcementsEnabled}
