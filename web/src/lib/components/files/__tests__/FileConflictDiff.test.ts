@@ -4,6 +4,32 @@ import { describe, expect, it, vi } from 'vitest';
 import FileConflictDiffTestHost from './FileConflictDiffTestHost.svelte';
 
 describe('FileConflictDiff', () => {
+	it('refreshes both retained editors only for Code Diffs typography', async () => {
+		const rendered = render(FileConflictDiffTestHost, { onChange: vi.fn() });
+		await vi.waitFor(() =>
+			expect(
+				rendered.container.querySelectorAll('[data-typography-conflict] .cm-editor'),
+			).toHaveLength(2),
+		);
+		const editors = [...rendered.container.querySelectorAll<HTMLElement>('.cm-editor')].map(
+			(element) => EditorView.findFromDOM(element)!,
+		);
+		const themes = editors.map((editor) => editor.dom.className);
+		const root = document.documentElement;
+		try {
+			root.setAttribute('data-code-diff-font', 'jetbrains-mono');
+			await vi.waitFor(() => {
+				for (const [index, editor] of editors.entries()) {
+					expect(editor.dom.className).not.toBe(themes[index]);
+					expect(EditorView.findFromDOM(editor.dom)).toBe(editor);
+				}
+			});
+		} finally {
+			rendered.unmount();
+			root.removeAttribute('data-code-diff-font');
+		}
+	});
+
 	it('projects edits from the resolution pane to its bound content', async () => {
 		const onChange = vi.fn();
 		const rendered = render(FileConflictDiffTestHost, { onChange });
