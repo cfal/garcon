@@ -122,7 +122,7 @@ export function createQuickSummaryOperations(run = runGitTraced) {
     }
 
     const [
-      repoRootResult,
+      repositoryResult,
       headResult,
       statusResult,
     ] = await Promise.allSettled([
@@ -137,7 +137,7 @@ export function createQuickSummaryOperations(run = runGitTraced) {
     ]);
 
     signal?.throwIfAborted();
-    if (repoRootResult.status === 'rejected') return notRepositoryQuickSummary(projectPath);
+    if (repositoryResult.status === 'rejected') return notRepositoryQuickSummary(projectPath);
     if (statusResult.status === 'rejected') {
       return unknownSummary(projectPath, errorText(statusResult.reason));
     }
@@ -165,14 +165,22 @@ export function createQuickSummaryOperations(run = runGitTraced) {
   return { getQuickSummary };
 }
 
-async function collectDiffStats(projectPath: string, trace: GitCommandTrace[] | undefined, signal: AbortSignal | undefined, run: typeof runGitTraced) {
+async function collectDiffStats(
+  projectPath: string,
+  trace: GitCommandTrace[] | undefined,
+  signal: AbortSignal | undefined,
+  run: typeof runGitTraced,
+): Promise<{ additions: number; deletions: number } | null> {
   // Optional totals must not hold branch/change presence behind a costly diff or external filter.
-  const results = await Promise.allSettled([false, true].map((cached) => run(
-    projectPath,
-    ['diff', ...(cached ? ['--cached'] : []), '--numstat', '-z', '--no-ext-diff', '--no-textconv'],
-    trace,
-    readOnlyGitOptions({ signal, timeoutMs: DIFF_STATS_TIMEOUT_MS, maxStdoutBytes: DIFF_STATS_MAX_BYTES }),
-  )));
+  const options = readOnlyGitOptions({
+    signal,
+    timeoutMs: DIFF_STATS_TIMEOUT_MS,
+    maxStdoutBytes: DIFF_STATS_MAX_BYTES,
+  });
+  const results = await Promise.allSettled([
+    run(projectPath, ['diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv'], trace, options),
+    run(projectPath, ['diff', '--cached', '--numstat', '-z', '--no-ext-diff', '--no-textconv'], trace, options),
+  ]);
   signal?.throwIfAborted();
   let additions = 0;
   let deletions = 0;
