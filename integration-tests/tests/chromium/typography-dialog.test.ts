@@ -22,9 +22,13 @@ test("typography readiness does not imply authenticated settings are mounted", a
     "typography-auth-readiness",
     async ({ page, integration, assertNoBrowserErrors }) => {
       const authStatus = new Deferred<Route>();
-      await page.route("**/api/v1/auth/status", (route) => {
-        authStatus.resolve(route);
-      });
+      await page.route(
+        "**/api/v1/auth/status",
+        (route) => {
+          authStatus.resolve(route);
+        },
+        { times: 1 },
+      );
       await page.goto(integration.garcon.baseUrl);
       const route = await authStatus.promise;
       await setTypography(page, { interfaceFontSize: "20" });
