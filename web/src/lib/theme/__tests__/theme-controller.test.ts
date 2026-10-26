@@ -199,7 +199,7 @@ describe('ThemeController', () => {
 		}
 	});
 
-	it('mutates only the font attribute whose preference changed', async () => {
+	it('projects only the changed font and clears its override on reset', async () => {
 		installMatchMedia();
 		const rendered = renderController({ mode: 'fixed', themeId: 'ansi-light' });
 		await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());
@@ -208,12 +208,24 @@ describe('ThemeController', () => {
 		try {
 			flushSync(() => rendered.component.setTypography({ interfaceFont: 'departure-mono' }));
 			expect(observer.takeRecords().map((record) => record.attributeName)).toEqual([
+				'style',
 				'data-interface-font',
 			]);
 			flushSync(() => rendered.component.setTypography({ codeEditorFont: 'departure-mono' }));
 			expect(observer.takeRecords().map((record) => record.attributeName)).toEqual([
+				'style',
 				'data-code-editor-font',
 			]);
+			expect(document.documentElement.style.getPropertyValue('--code-editor-font-override')).toBe(
+				'"Departure Mono", var(--system-code-font)',
+			);
+			flushSync(() => rendered.component.setTypography({ codeEditorFont: 'default' }));
+			expect(document.documentElement.style.getPropertyValue('--code-editor-font-override')).toBe(
+				'',
+			);
+			expect(document.documentElement.style.getPropertyValue('--interface-font-override')).toBe(
+				'var(--font-choice-departure-mono)',
+			);
 		} finally {
 			observer.disconnect();
 		}

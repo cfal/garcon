@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { fontSizeLabel } from '$lib/components/shared/typography-labels.js';
+	import { fontSizeLabel, typographySizeLabel } from '$lib/components/shared/typography-labels.js';
 	import {
 		DropdownMenu,
 		DropdownMenuTrigger,
@@ -38,11 +38,15 @@
 				<span class="flex min-w-0 flex-1 items-center justify-between gap-4">
 					<span>{m.settings_appearance_settings_code_editor_font_size_label()}</span>
 					<span class="text-xs text-muted-foreground"
-						>{fontSizeLabel(localSettings.codeEditorFontSize)}</span
+						>{typographySizeLabel('code-editor', localSettings.codeEditorFontSize)}</span
 					>
 				</span>
 			</DropdownMenuSubTrigger>
-			<DropdownMenuSubContent class="w-36" side={narrow.current ? 'bottom' : 'right'} align="end">
+			<DropdownMenuSubContent
+				class="w-max min-w-36 max-w-[calc(100vw-2rem)]"
+				side={narrow.current ? 'bottom' : 'right'}
+				align="end"
+			>
 				<DropdownMenuRadioGroup
 					value={localSettings.codeEditorFontSize}
 					onValueChange={(value) =>
@@ -50,7 +54,7 @@
 				>
 					{#each TYPOGRAPHY_SIZE_OPTIONS as size (size)}
 						<DropdownMenuRadioItem value={size} closeOnSelect={false}
-							>{fontSizeLabel(size)}</DropdownMenuRadioItem
+							>{fontSizeLabel(size, 'code-editor')}</DropdownMenuRadioItem
 						>
 					{/each}
 				</DropdownMenuRadioGroup>

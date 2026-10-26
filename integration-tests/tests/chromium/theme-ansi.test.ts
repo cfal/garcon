@@ -157,11 +157,17 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
       name: 'UI Style',
       exact: true,
     });
-    const font = page.getByRole('combobox', { name: 'Interface Font', exact: true });
-    const mono = page.getByRole('combobox', {
-      name: 'Chat Code & Output Font',
-      exact: true,
+    const font = page.getByRole('button', { name: /^Interface Font:/ });
+    const mono = page.getByRole('button', {
+      name: /^Chat Code & Commands Font:/,
     });
+    async function chooseFont(button: typeof font, value: string) {
+      await button.click();
+      const picker = page.getByRole('dialog', { name: / Font$/ });
+      await picker.locator(`input[type="radio"][value="${value}"]`).check();
+      await picker.getByRole('button', { name: 'Apply', exact: true }).click();
+      await browserExpect(picker).toHaveCount(0);
+    }
     await browserExpect(appearance).toHaveValue('default');
     const originalPalette = await select.inputValue();
     await appearance.selectOption('terminal');
@@ -169,10 +175,10 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
     expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toBe(
       originalFont,
     );
-    await browserExpect(font).toHaveValue('default');
-    await browserExpect(mono).toHaveValue('default');
-    await font.selectOption('departure-mono');
-    await mono.selectOption('departure-mono');
+    await browserExpect(font).toContainText('System UI');
+    await browserExpect(mono).toContainText('System monospace');
+    await chooseFont(font, 'departure-mono');
+    await chooseFont(mono, 'departure-mono');
     await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
 
     for (const id of ['ansi-dark', 'ansi-light']) {
@@ -192,7 +198,10 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
       for (const width of [1440, 390, 320]) {
         await page.setViewportSize({ width, height: 900 });
         await mono.scrollIntoViewIfNeeded();
-        for (const control of [appearance, font, mono]) {
+        for (const control of [font, mono]) {
+          expect(await control.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+        }
+        for (const control of [appearance]) {
           const fits = await control.evaluate((element: HTMLSelectElement) => {
             const styles = getComputedStyle(element);
             const canvas = document.createElement('canvas');
@@ -220,7 +229,7 @@ test('ANSI chrome stays usable on desktop and mobile, and leaves other themes un
     expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toContain(
       'Departure Mono',
     );
-    await font.selectOption('default');
+    await chooseFont(font, 'default');
     expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toBe(
       originalFont,
     );

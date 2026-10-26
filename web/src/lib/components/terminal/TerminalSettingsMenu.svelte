@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { fontSizeLabel } from '$lib/components/shared/typography-labels.js';
+	import { fontSizeLabel, typographySizeLabel } from '$lib/components/shared/typography-labels.js';
 	import Settings from '@lucide/svelte/icons/settings';
 	import { getLocalSettings } from '$lib/context';
 	import { TYPOGRAPHY_SIZE_OPTIONS, parseFontSizePreference } from '$lib/theme/typography.js';
@@ -36,11 +36,12 @@
 				}}
 			>
 				<Select.Trigger class="w-28" size="sm" aria-label={m.terminal_font_size()}>
-					{fontSizeLabel(localSettings.terminalFontSize)}
+					{typographySizeLabel('terminal', localSettings.terminalFontSize)}
 				</Select.Trigger>
 				<Select.Content>
 					{#each TYPOGRAPHY_SIZE_OPTIONS as size (size)}
-						<Select.Item value={size} label={fontSizeLabel(size)}>{fontSizeLabel(size)}</Select.Item
+						<Select.Item value={size} label={fontSizeLabel(size, 'terminal')}
+							>{fontSizeLabel(size, 'terminal')}</Select.Item
 						>
 					{/each}
 				</Select.Content>

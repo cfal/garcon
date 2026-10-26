@@ -1,4 +1,9 @@
-import { DEPARTURE_MONO_FAMILY, loadDepartureMono, type FontPreference } from '$lib/theme/fonts.js';
+import {
+	BUNDLED_FONT_FAMILIES,
+	isMonospaceFont,
+	loadFont,
+	type FontPreference,
+} from '$lib/theme/fonts.js';
 
 const TERMINAL_FONT_NAME = 'Monaspace Neon NF';
 const TERMINAL_FONT_LOAD_TIMEOUT_MS = 4_000;
@@ -27,7 +32,7 @@ export class TerminalFontLoader implements TerminalFontResolver {
 	readonly #registerFontFace: FontFaceRegistrar;
 	readonly #timeoutMs: number;
 	#loadPromise: Promise<string> | null = null;
-	#departurePromise: Promise<string> | null = null;
+	#selectedPromises = new Map<FontPreference, Promise<string>>();
 
 	constructor(
 		createFontFaces: TerminalFontFaceFactory = () =>
@@ -47,12 +52,20 @@ export class TerminalFontLoader implements TerminalFontResolver {
 	}
 
 	load(preference: FontPreference = 'default'): Promise<string> {
-		if (preference === 'departure-mono') {
+		if (preference !== 'default' && isMonospaceFont(preference)) {
 			// Retains the default Nerd Font as fallback for private-use terminal glyphs.
-			this.#departurePromise ??= Promise.all([this.load(), loadDepartureMono()]).then(
-				([fallback, loaded]) => (loaded ? `${DEPARTURE_MONO_FAMILY}, ${fallback}` : fallback),
-			);
-			return this.#departurePromise;
+			let pending = this.#selectedPromises.get(preference);
+			if (!pending) {
+				const family =
+					preference === 'system-mono'
+						? TERMINAL_FALLBACK_FONT_FAMILY
+						: BUNDLED_FONT_FAMILIES[preference];
+				pending = Promise.all([this.load(), loadFont(preference)]).then(([fallback, loaded]) =>
+					loaded ? `${family}, ${fallback}` : fallback,
+				);
+				this.#selectedPromises.set(preference, pending);
+			}
+			return pending;
 		}
 		// Shares one browser font request across every terminal runtime.
 		this.#loadPromise ??= this.#loadOnce();

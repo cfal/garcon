@@ -6,7 +6,15 @@
 	color: hsl(var(--muted-foreground));
 	font: calc(12px * var(--interface-font-scale, 1)) /
 		max(18px, calc(18px * var(--interface-font-scale, 1)))
-		var(--interface-font-override, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+		var(
+			--interface-mono-font-override,
+			ui-monospace,
+			SFMono-Regular,
+			Menlo,
+			Monaco,
+			Consolas,
+			monospace
+		);
 }
 
 .cm-editor .cm-vim-panel input {

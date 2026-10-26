@@ -10,7 +10,10 @@ import {
   collapseCanonicalFilesWindow,
 } from "../../support/chromium-workspace.js";
 import { initializeFixtureRepository } from "../../support/git-fixture.js";
-import { setTypography } from "../../support/typography.js";
+import {
+  expectFontSizeMenuFits,
+  setTypography,
+} from "../../support/typography.js";
 import { TYPOGRAPHY_SURFACES } from "../../../web/src/lib/theme/typography.js";
 import type { CanvasContent } from "../../../common/chat-canvas.js";
 
@@ -332,6 +335,17 @@ test("chat list, prose, inline code, blocks and Git diffs have independent typog
       });
       await browserExpect(diff).toHaveCSS("font-size", "20px");
       await browserExpect(diff).toHaveCSS("font-family", /Departure Mono/);
+      await setTypography(page, {
+        interfaceFont: "departure-mono",
+        interfaceFontSize: "20",
+      });
+      for (const width of [1440, 320]) {
+        await page.setViewportSize({ width, height: 900 });
+        await gitSurface
+          .getByRole("button", { name: "More Git actions", exact: true })
+          .click();
+        await expectFontSizeMenuFits(page, "11-13px (Default)");
+      }
       assertNoBrowserErrors();
     },
   );
@@ -376,14 +390,13 @@ test("all typography controls fit at maximum size on desktop and touch screens",
           'section[aria-labelledby="typography-heading"]',
         );
         await typography.scrollIntoViewIfNeeded();
-        const fit = await measureSelects(typography);
-        expect(fit).toHaveLength(14);
-        for (const control of fit) {
+        await browserExpect(typography.getByRole("button")).toHaveCount(9);
+        for (const button of await typography.getByRole("button").all()) {
           expect(
-            control.textWidth,
-            `${width}: ${JSON.stringify(control)}`,
-          ).toBeLessThanOrEqual(control.available + 1);
-          if (width < 640) expect(control.fontSize).toBeGreaterThanOrEqual(16);
+            await button.evaluate(
+              (element) => element.scrollWidth <= element.clientWidth,
+            ),
+          ).toBe(true);
         }
         expect(
           await dialog.evaluate(
@@ -393,6 +406,43 @@ test("all typography controls fit at maximum size on desktop and touch screens",
         await page.screenshot({
           path: join(artifacts, `typography-settings-${width}.png`),
         });
+        await typography
+          .getByRole("button", {
+            name: /^Expanded Text Editors Font:/,
+          })
+          .click();
+        const picker = page.getByRole("dialog", {
+          name: "Expanded Text Editors Font",
+          exact: true,
+        });
+        await picker.getByRole("radio", { name: /\(Default\)/ }).check();
+        await picker.getByRole("combobox").selectOption("default");
+        await page.evaluate(() => document.fonts.ready);
+        const fit = await measureSelects(picker);
+        expect(fit).toHaveLength(1);
+        for (const label of await picker.locator("fieldset label").all()) {
+          expect(
+            await label.evaluate(
+              (element) => element.scrollWidth <= element.clientWidth,
+            ),
+          ).toBe(true);
+        }
+        for (const control of fit) {
+          expect(
+            control.textWidth,
+            `${width}: ${JSON.stringify(control)}`,
+          ).toBeLessThanOrEqual(control.available + 1);
+          if (width < 640) expect(control.fontSize).toBeGreaterThanOrEqual(16);
+        }
+        expect(
+          await picker.evaluate(
+            (element) => element.scrollWidth <= element.clientWidth + 1,
+          ),
+        ).toBe(true);
+        await page.screenshot({
+          path: join(artifacts, `font-dialog-${width}.png`),
+        });
+        await picker.getByRole("button", { name: "Cancel" }).click();
         await dialog
           .getByRole("tab", { name: "Behavior", exact: true })
           .click();

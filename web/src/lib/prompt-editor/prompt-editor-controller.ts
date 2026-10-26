@@ -72,7 +72,7 @@ export class PromptEditorController {
 			doc: options.initialText,
 			selection: EditorSelection.single(initialSelection.anchor, initialSelection.head),
 			extensions: [
-				editorFont(SYSTEM_EDITOR_FONT),
+				editorFont(SYSTEM_EDITOR_FONT, 'expanded-editor'),
 				this.#readOnlyCompartment.of([
 					EditorState.readOnly.of(this.#readOnly),
 					EditorView.editable.of(!this.#readOnly),
@@ -103,7 +103,7 @@ export class PromptEditorController {
 					},
 					'&.cm-focused': { outline: 'none' },
 					'.cm-scroller': {
-						fontSize: 'max(16px, var(--code-editor-font-size, 14px))',
+						fontSize: 'max(16px, var(--expanded-editor-font-size, 14px))',
 						lineHeight: '1.55',
 						overflow: 'auto',
 					},
@@ -120,7 +120,7 @@ export class PromptEditorController {
 							backgroundColor: 'var(--editor-selection-background)',
 						},
 					'@media (pointer: fine)': {
-						'.cm-scroller': { fontSize: 'var(--code-editor-font-size, 14px)' },
+						'.cm-scroller': { fontSize: 'var(--expanded-editor-font-size, 14px)' },
 					},
 				}),
 			],

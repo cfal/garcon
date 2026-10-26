@@ -1,5 +1,10 @@
 import { untrack } from 'svelte';
-import { TYPOGRAPHY_SURFACES, typographyScale, type TypographyPreferences } from './typography.js';
+import {
+	TYPOGRAPHY_SURFACES,
+	typographyScale,
+	typographyFontOverride,
+	type TypographyPreferences,
+} from './typography.js';
 import {
 	getThemeProfile,
 	resolveThemeId,
@@ -46,6 +51,8 @@ export class ThemeController {
 				const root = document.documentElement;
 				const attribute = `data-${id}-font`;
 				const font = this.deps.typography[fontKey];
+				if (font === 'default') root.style.removeProperty(`--${id}-font-override`);
+				else root.style.setProperty(`--${id}-font-override`, typographyFontOverride(id, font));
 				if (root.getAttribute(attribute) !== font) root.setAttribute(attribute, font);
 			});
 			$effect(() => {

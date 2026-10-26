@@ -98,7 +98,7 @@ describe('TerminalWindowMenuItems', () => {
 
 		expect(screen.getByRole('menuitem', { name: m.terminal_rename() })).toBeTruthy();
 		expect(screen.getByRole('menuitem', { name: m.terminal_paste() })).toBeTruthy();
-		expect(screen.getByRole('menuitem', { name: /Font size Default/ })).toBeTruthy();
+		expect(screen.getByRole('menuitem', { name: /Font size 13px/ })).toBeTruthy();
 		expect(screen.getByRole('menuitem', { name: m.terminal_terminate() })).toBeTruthy();
 		expect(screen.queryByRole('menuitem', { name: m.terminal_reattach() })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: m.workspace_new_terminal() })).toBeNull();
@@ -125,7 +125,7 @@ describe('TerminalWindowMenuItems', () => {
 		render(TerminalWindowMenuItemsTestHost, { terminalId: 'terminal-1' });
 		await openMenu();
 
-		const fontSize = screen.getByRole('menuitem', { name: /Font size Default/ });
+		const fontSize = screen.getByRole('menuitem', { name: /Font size 13px/ });
 		fontSize.focus();
 		await fireEvent.keyDown(fontSize, { key: 'ArrowRight' });
 		await fireEvent.click(await screen.findByRole('menuitemradio', { name: '18px' }));

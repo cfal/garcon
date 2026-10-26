@@ -4,9 +4,15 @@
 import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
 import {
 	parseTypographyPreferences,
+	parseSurfaceFont,
+	parseFontSizePreference,
 	TYPOGRAPHY_DEFAULTS,
+	TYPOGRAPHY_SURFACES,
+	type TypographySurface,
+	type FontSizePreference,
 	type TypographyPreferences,
 } from '$lib/theme/typography.js';
+import type { FontPreference } from '$lib/theme/fonts.js';
 import {
 	getLocalStorageItem,
 	LOCAL_STORAGE_KEYS,
@@ -556,6 +562,10 @@ export class LocalSettingsStore {
 	chatFeedFontSize = $state(DEFAULTS.chatFeedFontSize);
 	chatCodeFont = $state(DEFAULTS.chatCodeFont);
 	chatCodeFontSize = $state(DEFAULTS.chatCodeFontSize);
+	chatOutputFont = $state(DEFAULTS.chatOutputFont);
+	chatOutputFontSize = $state(DEFAULTS.chatOutputFontSize);
+	expandedEditorFont = $state(DEFAULTS.expandedEditorFont);
+	expandedEditorFontSize = $state(DEFAULTS.expandedEditorFontSize);
 	codeEditorFont = $state(DEFAULTS.codeEditorFont);
 	codeDiffFont = $state(DEFAULTS.codeDiffFont);
 	terminalFont = $state(DEFAULTS.terminalFont);
@@ -658,6 +668,17 @@ export class LocalSettingsStore {
 		persistLocalSettings(next);
 	}
 
+	setTypography(surface: TypographySurface, font: FontPreference, size: FontSizePreference): void {
+		const { fontKey, sizeKey } = TYPOGRAPHY_SURFACES.find(({ id }) => id === surface)!;
+		const next = {
+			...this.snapshot(),
+			[fontKey]: parseSurfaceFont(surface, font),
+			[sizeKey]: parseFontSizePreference(size),
+		};
+		this.#apply(next);
+		persistLocalSettings(next);
+	}
+
 	toggle(key: BooleanLocalSettingKey): void {
 		this.set(key, !this[key]);
 	}
@@ -701,6 +722,10 @@ export class LocalSettingsStore {
 			chatFeedFontSize: this.chatFeedFontSize,
 			chatCodeFont: this.chatCodeFont,
 			chatCodeFontSize: this.chatCodeFontSize,
+			chatOutputFont: this.chatOutputFont,
+			chatOutputFontSize: this.chatOutputFontSize,
+			expandedEditorFont: this.expandedEditorFont,
+			expandedEditorFontSize: this.expandedEditorFontSize,
 			codeEditorFont: this.codeEditorFont,
 			codeDiffFont: this.codeDiffFont,
 			terminalFont: this.terminalFont,
@@ -769,6 +794,10 @@ export class LocalSettingsStore {
 		this.chatFeedFontSize = snap.chatFeedFontSize;
 		this.chatCodeFont = snap.chatCodeFont;
 		this.chatCodeFontSize = snap.chatCodeFontSize;
+		this.chatOutputFont = snap.chatOutputFont;
+		this.chatOutputFontSize = snap.chatOutputFontSize;
+		this.expandedEditorFont = snap.expandedEditorFont;
+		this.expandedEditorFontSize = snap.expandedEditorFontSize;
 		this.codeEditorFont = snap.codeEditorFont;
 		this.codeDiffFont = snap.codeDiffFont;
 		this.terminalFont = snap.terminalFont;

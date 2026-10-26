@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { fontSizeLabel } from '$lib/components/shared/typography-labels.js';
+	import { fontSizeLabel, typographySizeLabel } from '$lib/components/shared/typography-labels.js';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
@@ -67,12 +67,13 @@
 					if (v) onSetDiffFontSize(parseFontSizePreference(v));
 				}}
 			>
-				<Select.Trigger class="w-28" size="sm">
-					{fontSizeLabel(diffFontSize)}
+				<Select.Trigger class="h-auto min-h-8 w-36 shrink-0 whitespace-normal" size="sm">
+					{typographySizeLabel('code-diff', diffFontSize)}
 				</Select.Trigger>
 				<Select.Content>
 					{#each TYPOGRAPHY_SIZE_OPTIONS as size (size)}
-						<Select.Item value={size} label={fontSizeLabel(size)}>{fontSizeLabel(size)}</Select.Item
+						<Select.Item value={size} label={fontSizeLabel(size, 'code-diff')}
+							>{fontSizeLabel(size, 'code-diff')}</Select.Item
 						>
 					{/each}
 				</Select.Content>

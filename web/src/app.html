@@ -129,11 +129,23 @@
 					['chat-list', 'chatListFont', 'chatListFontSize', 14],
 					['chat-feed', 'chatFeedFont', 'chatFeedFontSize', 14],
 					['chat-code', 'chatCodeFont', 'chatCodeFontSize', 12],
+					['chat-output', 'chatOutputFont', 'chatOutputFontSize', 14],
 					['code-editor', 'codeEditorFont', 'codeEditorFontSize', 12],
+					['expanded-editor', 'expandedEditorFont', 'expandedEditorFontSize', 14],
 					['code-diff', 'codeDiffFont', 'gitDiffFontSize', 12],
 					['terminal', 'terminalFont', 'terminalFontSize', 13],
 				];
 				const fontSizes = ['10', '11', '12', '13', '14', '15', '16', '18', '20'];
+				const fonts = [
+					'default',
+					'system-sans',
+					'system-serif',
+					'system-mono',
+					'departure-mono',
+					'jetbrains-mono',
+					'inter',
+				];
+				const monoFonts = ['default', 'system-mono', 'departure-mono', 'jetbrains-mono'];
 				// Earlier snapshots persisted these renderer defaults as numeric selections.
 				if (!Object.hasOwn(typography, 'interfaceFontSize')) {
 					if (typography.codeEditorFontSize === '12') typography.codeEditorFontSize = 'default';
@@ -141,8 +153,31 @@
 					if (typography.terminalFontSize === '13') typography.terminalFontSize = 'default';
 				}
 				for (const [id, fontKey, sizeKey, defaultSize] of surfaces) {
-					const font = typography[fontKey] === 'departure-mono' ? 'departure-mono' : 'default';
+					const parent = {
+						'chat-output': ['chatCodeFont', 'chatCodeFontSize'],
+						'expanded-editor': ['codeEditorFont', 'codeEditorFontSize'],
+					}[id];
+					if (parent) {
+						if (!Object.hasOwn(typography, fontKey)) typography[fontKey] = typography[parent[0]];
+						if (!Object.hasOwn(typography, sizeKey)) typography[sizeKey] = typography[parent[1]];
+					}
+					const allowedFonts = ['chat-code', 'code-editor', 'code-diff', 'terminal'].includes(id)
+						? monoFonts
+						: fonts;
+					const font = allowedFonts.includes(typography[fontKey]) ? typography[fontKey] : 'default';
 					const size = fontSizes.includes(typography[sizeKey]) ? typography[sizeKey] : 'default';
+					typography[fontKey] = font;
+					typography[sizeKey] = size;
+					if (font !== 'default') {
+						let family = `var(--font-choice-${font})`;
+						if (font === 'departure-mono') {
+							if (['chat-list', 'chat-feed', 'chat-output'].includes(id))
+								family = '"Departure Mono", var(--system-ui-font)';
+							else if (['chat-code', 'code-editor', 'expanded-editor', 'code-diff'].includes(id))
+								family = '"Departure Mono", var(--system-code-font)';
+						}
+						root.style.setProperty(`--${id}-font-override`, family);
+					}
 					root.setAttribute(`data-${id}-font`, font);
 					root.setAttribute(`data-${id}-font-size`, size);
 					if (size !== 'default') root.style.setProperty(`--${id}-font-size`, `${size}px`);

@@ -536,6 +536,8 @@ describe('ConversationFeedVirtualController', () => {
 		'data-chat-feed-font',
 		'data-chat-feed-font-size',
 		'data-chat-code-font',
+		'data-chat-output-font',
+		'data-chat-output-font-size',
 		'data-code-diff-font-size',
 	])(
 		'remeasures hidden typography and restores the reading row after %s changes',

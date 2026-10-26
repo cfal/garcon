@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { expect as browserExpect } from "playwright/test";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
 import { clickWorkspaceWindowAddAction } from "../../support/chromium-workspace.js";
-import { setTypography } from "../../support/typography.js";
+import {
+  expectFontSizeMenuFits,
+  setTypography,
+} from "../../support/typography.js";
 
 test("independent fonts preserve an edited file and undo history", async () => {
   await withChromiumFixture(
@@ -193,6 +196,28 @@ test("terminal fonts update without clearing output or replacing the shell", asy
       await browserExpect(terminal.locator(".xterm-screen")).toContainText(
         "shell-retained",
       );
+      await setTypography(page, { terminalFont: "jetbrains-mono" });
+      await browserExpect(rows).toHaveCSS(
+        "font-family",
+        /^"?JetBrains Mono"?,/,
+      );
+      expect(
+        await page.evaluate(() =>
+          [...document.fonts].some(
+            (face) =>
+              face.family.replaceAll(/["']/g, "") === "JetBrains Mono" &&
+              face.status === "loaded",
+          ),
+        ),
+      ).toBe(true);
+      await setTypography(page, { terminalFont: "system-mono" });
+      await browserExpect(rows).toHaveCSS(
+        "font-family",
+        /^ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,/,
+      );
+      await browserExpect(terminal.locator(".xterm-screen")).toContainText(
+        "shell-retained",
+      );
       await setTypography(page, { terminalFontSize: "18" });
       await browserExpect(rows).toHaveCSS("font-size", "18px");
       await setTypography(page, { terminalFont: "default" });
@@ -201,6 +226,41 @@ test("terminal fonts update without clearing output or replacing the shell", asy
         "data-retained-font-terminal",
         "true",
       );
+      await setTypography(page, { interfaceFontSize: "20" });
+      for (const width of [1440, 320]) {
+        await page.setViewportSize({ width, height: 900 });
+        if (width < 640) {
+          await page
+            .getByRole("button", { name: "Terminal settings", exact: true })
+            .click();
+          await page
+            .getByRole("button", { name: "Font size", exact: true })
+            .click();
+          const option = page.getByRole("option", {
+            name: "13px (Default)",
+            exact: true,
+          });
+          await browserExpect(option).toBeVisible();
+          expect(
+            await option.evaluate((element) => {
+              const rect = element.getBoundingClientRect();
+              return (
+                element.scrollWidth <= element.clientWidth &&
+                rect.left >= 0 &&
+                rect.right <= innerWidth
+              );
+            }),
+          ).toBe(true);
+          await page.keyboard.press("Escape");
+          await page.keyboard.press("Escape");
+        } else {
+          await page
+            .locator('[data-workspace-window-active-surface^="terminal:"]')
+            .getByRole("button", { name: "Window actions", exact: true })
+            .click();
+          await expectFontSizeMenuFits(page, "13px (Default)");
+        }
+      }
       assertNoBrowserErrors();
     },
     undefined,

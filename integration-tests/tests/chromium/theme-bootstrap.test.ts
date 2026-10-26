@@ -6,6 +6,9 @@ import {
   TYPOGRAPHY_SURFACES,
   TYPOGRAPHY_SIZE_OPTIONS,
   TYPOGRAPHY_DEFAULTS,
+  parseSurfaceFont,
+  parseTypographyPreferences,
+  typographyFontOverride,
   type TypographyPreferences,
 } from "../../../web/src/lib/theme/typography";
 import {
@@ -23,11 +26,12 @@ const STARTUP_MARKER = `<script>
 globalThis.__themeBeforeApplicationStartup = {
   themeId: document.documentElement.dataset.theme,
   appearance: document.documentElement.dataset.themeAppearance,
-  typography: Object.fromEntries(["interface","chat-list","chat-feed","chat-code","code-editor","code-diff","terminal"].map(id => [id, {
+  typography: Object.fromEntries(${JSON.stringify(TYPOGRAPHY_SURFACES.map(({ id }) => id))}.map(id => [id, {
     font: document.documentElement.getAttribute('data-' + id + '-font'),
     size: document.documentElement.getAttribute('data-' + id + '-font-size'),
     cssSize: document.documentElement.style.getPropertyValue('--' + id + '-font-size'),
     scale: document.documentElement.style.getPropertyValue('--' + id + '-font-scale'),
+    family: document.documentElement.style.getPropertyValue('--' + id + '-font-override'),
   }])),
   dark: document.documentElement.classList.contains('dark'),
   colorScheme: document.documentElement.style.colorScheme,
@@ -98,6 +102,16 @@ const malformedSettings = [
 
 const scenarios: ThemeScenario[] = [
   {
+    name: "split owners inherit eligible normalized parents, not raw values",
+    storedSettings: JSON.stringify({
+      chatCodeFont: "inter",
+      codeEditorFont: "system-serif",
+      codeEditorFontSize: "12",
+    }),
+    systemColorScheme: "light",
+    expectedThemeId: defaultThemeId("light"),
+  },
+  {
     name: "shipped explicit sizes survive renderer-default migration",
     storedSettings: JSON.stringify({
       codeEditorFontSize: "18",
@@ -106,6 +120,7 @@ const scenarios: ThemeScenario[] = [
     }),
     typography: {
       codeEditorFontSize: "18",
+      expandedEditorFontSize: "18",
       gitDiffFontSize: "16",
       terminalFontSize: "15",
     },
@@ -120,7 +135,7 @@ const scenarios: ThemeScenario[] = [
       terminalFontSize: "13",
       chatCodeFontSize: "12",
     }),
-    typography: { chatCodeFontSize: "12" },
+    typography: { chatCodeFontSize: "12", chatOutputFontSize: "12" },
     systemColorScheme: "light",
     expectedThemeId: defaultThemeId("light"),
   },
@@ -134,6 +149,7 @@ const scenarios: ThemeScenario[] = [
     }),
     typography: {
       codeEditorFontSize: "12",
+      expandedEditorFontSize: "12",
       gitDiffFontSize: "12",
       terminalFontSize: "13",
     },
@@ -142,22 +158,67 @@ const scenarios: ThemeScenario[] = [
   },
   ...fixedScenarios,
   ...TYPOGRAPHY_SURFACES.flatMap(({ id, fontKey, sizeKey }) =>
-    FONT_OPTIONS.flatMap((font) =>
-      TYPOGRAPHY_SIZE_OPTIONS.map((size) => ({
-        name: `${id}: ${font} at ${size}`,
-        storedSettings: JSON.stringify({
-          interfaceFontSize: "default",
-          [fontKey]: font,
-          [sizeKey]: size,
-          terminalAppearance: true,
-        }),
-        typography: { [fontKey]: font, [sizeKey]: size },
-        terminalAppearance: true,
-        systemColorScheme: "light" as const,
-        expectedThemeId: defaultThemeId("light"),
+    [
+      ...FONT_OPTIONS.map((font) => ({ font, size: "default" as const })),
+      ...TYPOGRAPHY_SIZE_OPTIONS.map((size) => ({
+        font: "jetbrains-mono" as const,
+        size,
       })),
-    ),
+    ].map(({ font, size }) => ({
+      name: `${id}: ${font} at ${size}`,
+      storedSettings: JSON.stringify({
+        ...TYPOGRAPHY_DEFAULTS,
+        interfaceFontSize: "default",
+        [fontKey]: font,
+        [sizeKey]: size,
+        terminalAppearance: true,
+      }),
+      typography: { [fontKey]: parseSurfaceFont(id, font), [sizeKey]: size },
+      terminalAppearance: true,
+      systemColorScheme: "light" as const,
+      expectedThemeId: defaultThemeId("light"),
+    })),
   ),
+  {
+    name: "split defaults and invalid values do not inherit explicit parent preferences",
+    storedSettings: JSON.stringify({
+      codeEditorFont: "jetbrains-mono",
+      codeEditorFontSize: "20",
+      expandedEditorFont: "default",
+      expandedEditorFontSize: null,
+      chatCodeFont: "departure-mono",
+      chatCodeFontSize: "18",
+      chatOutputFont: null,
+      chatOutputFontSize: "default",
+    }),
+    typography: {
+      codeEditorFont: "jetbrains-mono",
+      codeEditorFontSize: "20",
+      chatCodeFont: "departure-mono",
+      chatCodeFontSize: "18",
+    },
+    systemColorScheme: "light",
+    expectedThemeId: defaultThemeId("light"),
+  },
+  {
+    name: "split owners inherit normalized existing choices",
+    storedSettings: JSON.stringify({
+      codeEditorFont: "jetbrains-mono",
+      codeEditorFontSize: "12",
+      chatCodeFont: "departure-mono",
+      chatCodeFontSize: "18",
+    }),
+    typography: {
+      codeEditorFont: "jetbrains-mono",
+      expandedEditorFont: "jetbrains-mono",
+      chatCodeFont: "departure-mono",
+      chatCodeFontSize: "18",
+      chatOutputFont: "departure-mono",
+      chatOutputFontSize: "18",
+    },
+    systemColorScheme: "light",
+    expectedThemeId: defaultThemeId("light"),
+  },
   ...[null, "serif", "toString", {}, [], 1, "99", "14px"].map((value) => ({
     name: `invalid typography ${JSON.stringify(value)}`,
     storedSettings: JSON.stringify(
@@ -304,7 +365,13 @@ describe("theme bootstrap", () => {
               appearance: string;
               typography: Record<
                 string,
-                { font: string; size: string; cssSize: string; scale: string }
+                {
+                  font: string;
+                  size: string;
+                  cssSize: string;
+                  scale: string;
+                  family: string;
+                }
               >;
               dark: boolean;
               colorScheme: string;
@@ -315,20 +382,33 @@ describe("theme bootstrap", () => {
           return annotatedGlobal.__themeBeforeApplicationStartup;
         });
         const expectedProfile = getThemeProfile(scenario.expectedThemeId);
+        let stored: unknown = {};
+        try {
+          if (!scenario.storageUnavailable)
+            stored = JSON.parse(scenario.storedSettings ?? "{}");
+        } catch {
+          // Malformed storage is treated as an empty snapshot by both parsers.
+        }
+        const typography = parseTypographyPreferences(
+          stored && typeof stored === "object" && !Array.isArray(stored)
+            ? (stored as Record<string, unknown>)
+            : {},
+        );
+        expect(typography, scenario.name).toEqual({
+          ...TYPOGRAPHY_DEFAULTS,
+          ...scenario.typography,
+        });
         expect(startupTheme, scenario.name).toEqual({
           themeId: expectedProfile.id,
           appearance: scenario.terminalAppearance ? "terminal" : "standard",
           typography: Object.fromEntries(
             TYPOGRAPHY_SURFACES.map(({ id, fontKey, sizeKey, defaultSize }) => {
-              const typography = {
-                ...TYPOGRAPHY_DEFAULTS,
-                ...scenario.typography,
-              };
               const size = typography[sizeKey];
               return [
                 id,
                 {
                   font: typography[fontKey],
+                  family: typographyFontOverride(id, typography[fontKey]),
                   size,
                   cssSize: size === "default" ? "" : `${size}px`,
                   scale: String((Number(size) || defaultSize) / defaultSize),

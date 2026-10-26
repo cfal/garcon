@@ -6,10 +6,51 @@
 	font-display: swap;
 }
 
-:root:where([data-interface-font='departure-mono']) {
-	--font-sans: 'Departure Mono', ui-monospace, 'Cascadia Mono', 'Noto Sans Mono', monospace;
-	--interface-font-override: var(--font-sans);
-	--font-mono: var(--font-sans);
+@font-face {
+	font-family: 'JetBrains Mono';
+	/* https://github.com/JetBrains/JetBrainsMono/tree/19371302b95d218af43299bce79ddbddd0bc364d/fonts/webfonts */
+	src: url('./assets/JetBrainsMono.woff2') format('woff2');
+	font-style: normal;
+	font-weight: 100 800;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'JetBrains Mono';
+	src: url('./assets/JetBrainsMono-Italic.woff2') format('woff2');
+	font-style: italic;
+	font-weight: 100 800;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Inter';
+	/* https://github.com/rsms/inter/tree/353b61b9f4430d5f420d56605a6e7993e0941470/docs/font-files */
+	src: url('./assets/InterVariable.woff2') format('woff2');
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Inter';
+	src: url('./assets/InterVariable-Italic.woff2') format('woff2');
+	font-style: italic;
+	font-weight: 100 900;
+	font-display: swap;
+}
+
+:root:where([data-interface-font]:not([data-interface-font='default'])) {
+	--font-sans: var(--interface-font-override);
+}
+
+:root:where(
+	[data-interface-font='departure-mono'],
+	[data-interface-font='jetbrains-mono'],
+	[data-interface-font='system-mono']
+) {
+	--font-mono: var(--interface-font-override);
+	--interface-mono-font-override: var(--interface-font-override);
 }
 
 :root {
@@ -18,30 +59,19 @@
 	--system-code-font:
 		ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
 		monospace;
-	--chat-list-font-family: var(--system-ui-font);
-	--chat-feed-font-family: var(--system-ui-font);
-	--chat-code-font-family: var(--system-code-font);
-	--chat-output-font-family: var(--system-ui-font);
-	--code-diff-font-family: var(--system-code-font);
+	--font-choice-system-sans: var(--system-ui-font);
+	--font-choice-system-serif: ui-serif, Georgia, 'Times New Roman', serif;
+	--font-choice-system-mono: var(--system-code-font);
+	--font-choice-departure-mono:
+		'Departure Mono', ui-monospace, 'Cascadia Mono', 'Noto Sans Mono', monospace;
+	--font-choice-jetbrains-mono: 'JetBrains Mono', var(--system-code-font);
+	--font-choice-inter: 'Inter', var(--system-ui-font);
+	--chat-list-font-family: var(--chat-list-font-override, var(--system-ui-font));
+	--chat-feed-font-family: var(--chat-feed-font-override, var(--system-ui-font));
+	--chat-code-font-family: var(--chat-code-font-override, var(--system-code-font));
+	--chat-output-font-family: var(--chat-output-font-override, var(--system-ui-font));
+	--code-diff-font-family: var(--code-diff-font-override, var(--system-code-font));
 	--text-scale: var(--interface-font-scale, 1);
-}
-
-:root:where([data-chat-list-font='departure-mono']) {
-	--chat-list-font-family: 'Departure Mono', var(--system-ui-font);
-}
-:root:where([data-chat-feed-font='departure-mono']) {
-	--chat-feed-font-family: 'Departure Mono', var(--system-ui-font);
-}
-:root:where([data-chat-code-font='departure-mono']) {
-	--chat-code-font-family: 'Departure Mono', var(--system-code-font);
-	--chat-output-font-family: 'Departure Mono', var(--system-ui-font);
-}
-:root:where([data-code-editor-font='departure-mono']) {
-	--code-editor-font-override: 'Departure Mono', var(--system-code-font);
-}
-:root:where([data-code-diff-font='departure-mono']) {
-	--code-diff-font-family: 'Departure Mono', var(--system-code-font);
-	--code-diff-font-override: var(--code-diff-font-family);
 }
 
 body {
@@ -125,13 +155,18 @@ body {
 }
 
 .typography-chat-output {
-	--text-scale: var(--chat-code-font-scale, 1);
+	--text-scale: var(--chat-output-font-scale, 1);
 	font-family: var(--chat-output-font-family);
-	font-size: var(--chat-code-font-size, 14px);
+	font-size: var(--chat-output-font-size, 14px);
 	line-height: 1.4285714;
 }
 
-:root:where([data-chat-list-font='departure-mono']) [data-typography-chat-list] {
+:root:where(
+		[data-chat-list-font='departure-mono'],
+		[data-chat-list-font='jetbrains-mono'],
+		[data-chat-list-font='system-mono']
+	)
+	[data-typography-chat-list] {
 	--font-mono: var(--chat-list-font-family);
 }
 

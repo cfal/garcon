@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { fontSizeLabel } from '$lib/components/shared/typography-labels.js';
+	import { fontSizeLabel, typographySizeLabel } from '$lib/components/shared/typography-labels.js';
 	import {
 		DropdownMenuLabel,
 		DropdownMenuRadioGroup,
@@ -15,6 +15,7 @@
 		type FontSizePreference,
 	} from '$lib/theme/typography.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { MediaQuery } from 'svelte/reactivity';
 
 	let {
 		diffMode,
@@ -33,6 +34,7 @@
 	} = $props();
 
 	const contextOptions = [3, 5, 10, 20] as const;
+	const narrow = new MediaQuery('(max-width: 480px)');
 	let contextChangeBlocked = $state(false);
 
 	function setDiffMode(value: string): void {
@@ -55,18 +57,22 @@
 		<span class="flex min-w-0 flex-1 items-center justify-between gap-4">
 			<span>{m.git_diff_font_size()}</span>
 			<span class="text-xs text-muted-foreground"
-				>{fontSizeLabel(diffFontSize)}</span
+				>{typographySizeLabel('code-diff', diffFontSize)}</span
 			>
 		</span>
 	</DropdownMenuSubTrigger>
-	<DropdownMenuSubContent class="w-36">
+	<DropdownMenuSubContent
+		class="w-max min-w-36 max-w-[calc(100vw-2rem)]"
+		side={narrow.current ? 'bottom' : 'right'}
+		align="end"
+	>
 		<DropdownMenuRadioGroup
 			value={diffFontSize}
 			onValueChange={(value) => onSetDiffFontSize(parseFontSizePreference(value))}
 		>
 			{#each TYPOGRAPHY_SIZE_OPTIONS as size (size)}
 				<DropdownMenuRadioItem value={size} closeOnSelect={false}>
-					{fontSizeLabel(size)}
+					{fontSizeLabel(size, 'code-diff')}
 				</DropdownMenuRadioItem>
 			{/each}
 		</DropdownMenuRadioGroup>
@@ -84,8 +90,12 @@
 	</DropdownMenuSubTrigger>
 	<DropdownMenuSubContent class="w-36">
 		<DropdownMenuRadioGroup value={diffMode} onValueChange={setDiffMode}>
-			<DropdownMenuRadioItem value="unified" closeOnSelect={false}>{m.git_diff_unified()}</DropdownMenuRadioItem>
-			<DropdownMenuRadioItem value="split" closeOnSelect={false}>{m.git_diff_split()}</DropdownMenuRadioItem>
+			<DropdownMenuRadioItem value="unified" closeOnSelect={false}
+				>{m.git_diff_unified()}</DropdownMenuRadioItem
+			>
+			<DropdownMenuRadioItem value="split" closeOnSelect={false}
+				>{m.git_diff_split()}</DropdownMenuRadioItem
+			>
 		</DropdownMenuRadioGroup>
 	</DropdownMenuSubContent>
 </DropdownMenuSub>

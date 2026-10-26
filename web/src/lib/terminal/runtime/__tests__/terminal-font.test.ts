@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loadDepartureMono } from '$lib/theme/fonts.js';
+import { loadFont } from '$lib/theme/fonts.js';
 import {
 	TERMINAL_FALLBACK_FONT_FAMILY,
 	TERMINAL_FONT_FAMILY,
@@ -8,7 +8,7 @@ import {
 
 vi.mock('$lib/theme/fonts.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/theme/fonts.js')>()),
-	loadDepartureMono: vi.fn(),
+	loadFont: vi.fn(),
 }));
 
 afterEach(() => {
@@ -18,7 +18,7 @@ afterEach(() => {
 
 describe('TerminalFontLoader', () => {
 	it.each([true, false])('retains Nerd Font fallback when Departure loaded=%s', async (loaded) => {
-		vi.mocked(loadDepartureMono).mockResolvedValue(loaded);
+		vi.mocked(loadFont).mockResolvedValue(loaded);
 		const loader = new TerminalFontLoader(() => [], vi.fn());
 		const first = loader.load('departure-mono');
 		expect(loader.load('departure-mono')).toBe(first);
@@ -26,6 +26,19 @@ describe('TerminalFontLoader', () => {
 			loaded ? `"Departure Mono", ${TERMINAL_FONT_FAMILY}` : TERMINAL_FONT_FAMILY,
 		);
 	});
+
+	it.each(['jetbrains-mono', 'system-mono'] as const)(
+		'keeps Nerd Font fallback for %s',
+		async (font) => {
+			vi.mocked(loadFont).mockResolvedValue(true);
+			const loader = new TerminalFontLoader(() => [], vi.fn());
+			const pending = loader.load(font);
+			expect(loader.load(font)).toBe(pending);
+			await expect(pending).resolves.toBe(
+				`${font === 'jetbrains-mono' ? '"JetBrains Mono"' : TERMINAL_FALLBACK_FONT_FAMILY}, ${TERMINAL_FONT_FAMILY}`,
+			);
+		},
+	);
 
 	it('loads and registers the pinned regular and bold faces once', async () => {
 		const loadedFontFaces = [{}, {}] as FontFace[];

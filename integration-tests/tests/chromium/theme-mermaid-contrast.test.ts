@@ -233,6 +233,7 @@ describe("Mermaid theme contrast", () => {
         document.documentElement.dataset.interfaceFont = 'default';
         document.documentElement.dataset.chatFeedFont = 'default';
         document.documentElement.dataset.chatCodeFont = 'default';
+        for (const surface of ['interface', 'chat-feed', 'chat-code']) document.documentElement.style.removeProperty(`--${surface}-font-override`);
         const cachedSvg = await scope.renderMermaid(source, 'standard-light');
         root.innerHTML = cachedSvg;
         const standard = read();
@@ -240,6 +241,7 @@ describe("Mermaid theme contrast", () => {
         document.documentElement.dataset.interfaceFont = 'departure-mono';
         document.documentElement.dataset.chatFeedFont = 'departure-mono';
         document.documentElement.dataset.chatCodeFont = 'departure-mono';
+        for (const surface of ['interface', 'chat-feed', 'chat-code']) document.documentElement.style.setProperty(`--${surface}-font-override`, 'var(--font-choice-departure-mono)');
         await document.fonts.ready;
         const toggled = read();
         root.innerHTML = await scope.renderMermaid(source, 'standard-light');

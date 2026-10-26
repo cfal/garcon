@@ -7,7 +7,7 @@ export const SYSTEM_EDITOR_FONT =
 
 const fontThemes = new Map<string, readonly [Extension, Extension]>();
 
-type EditorTypography = 'code-editor' | 'code-diff';
+type EditorTypography = 'code-editor' | 'expanded-editor' | 'code-diff';
 
 function themesFor(
 	defaultFamily: string,

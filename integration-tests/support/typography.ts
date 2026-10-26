@@ -40,3 +40,30 @@ export async function setTypography(
   }
   await page.evaluate(() => document.fonts.ready);
 }
+
+export async function expectFontSizeMenuFits(
+  page: Page,
+  defaultLabel: string,
+): Promise<void> {
+  const trigger = page.getByRole("menuitem").filter({ hasText: "Font size" });
+  await trigger.hover();
+  const option = page.getByRole("menuitemradio", {
+    name: defaultLabel,
+    exact: true,
+  });
+  await browserExpect(option).toBeVisible();
+  await browserExpect
+    .poll(() =>
+      option.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          element.scrollWidth <= element.clientWidth &&
+          rect.left >= 0 &&
+          rect.right <= innerWidth
+        );
+      }),
+    )
+    .toBe(true);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+}

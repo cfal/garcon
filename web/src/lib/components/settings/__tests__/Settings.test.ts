@@ -60,12 +60,16 @@ describe('Settings', () => {
 		try {
 			let appearance = screen.getByRole<HTMLSelectElement>('combobox', { name: 'UI Style' });
 			expect(appearance.value).toBe('default');
-			const font = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Interface Font' });
-			const mono = screen.getByRole<HTMLSelectElement>('combobox', {
-				name: 'Chat Code & Output Font',
-			});
-			expect([...font.options].map((option) => option.text)).toEqual(['Default', 'Departure Mono']);
-			expect([...mono.options].map((option) => option.text)).toEqual(['Default', 'Departure Mono']);
+			const font = screen.getByRole('button', { name: /^Interface Font:/ });
+			const mono = screen.getByRole('button', { name: /^Chat Code & Commands Font:/ });
+			async function chooseFont(button: HTMLElement) {
+				await fireEvent.click(button);
+				const picker = within(
+					await screen.findByRole('dialog', { name: / Font$/ }),
+				);
+				await fireEvent.click(picker.getByRole('radio', { name: 'Departure Mono' }));
+				await fireEvent.click(picker.getByRole('button', { name: 'Apply' }));
+			}
 			const lightTheme = screen.getByRole<HTMLSelectElement>('combobox', {
 				name: 'Light theme',
 			}).value;
@@ -73,10 +77,10 @@ describe('Settings', () => {
 				name: 'Dark theme',
 			}).value;
 			await fireEvent.change(appearance, { target: { value: 'terminal' } });
-			expect(font.value).toBe('default');
-			expect(mono.value).toBe('default');
-			await fireEvent.change(font, { target: { value: 'departure-mono' } });
-			expect(mono.value).toBe('default');
+			expect(font.textContent).toContain('System UI');
+			expect(mono.textContent).toContain('System monospace');
+			await chooseFont(font);
+			expect(mono.textContent).toContain('System monospace');
 			expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
 				terminalAppearance: true,
 				interfaceFont: 'departure-mono',
@@ -88,17 +92,17 @@ describe('Settings', () => {
 				target: { value: 'ansi-dark' },
 			});
 			expect(appearance.value).toBe('terminal');
-			await fireEvent.change(mono, { target: { value: 'departure-mono' } });
+			await chooseFont(mono);
 			rendered.unmount();
 			rendered = render(SettingsTestHost, props);
 			appearance = screen.getByRole<HTMLSelectElement>('combobox', { name: 'UI Style' });
 			expect(appearance.value).toBe('terminal');
+			expect(screen.getByRole('button', { name: /^Interface Font:/ }).textContent).toContain(
+				'Departure Mono',
+			);
 			expect(
-				screen.getByRole<HTMLSelectElement>('combobox', { name: 'Interface Font' }).value,
-			).toBe('departure-mono');
-			expect(
-				screen.getByRole<HTMLSelectElement>('combobox', { name: 'Chat Code & Output Font' }).value,
-			).toBe('departure-mono');
+				screen.getByRole('button', { name: /^Chat Code & Commands Font:/ }).textContent,
+			).toContain('Departure Mono');
 			expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Theme' }).value).toBe(
 				'ansi-dark',
 			);

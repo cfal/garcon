@@ -796,7 +796,7 @@ describe('WorkspaceRoot', () => {
 
 		expect(screen.getByRole('menuitem', { name: m.terminal_rename() })).toBeTruthy();
 		expect(screen.getByRole('menuitem', { name: m.terminal_paste() })).toBeTruthy();
-		expect(screen.getByRole('menuitem', { name: /Font size Default/ })).toBeTruthy();
+		expect(screen.getByRole('menuitem', { name: /Font size 13px/ })).toBeTruthy();
 		await fireEvent.keyDown(document, { key: 'Escape' });
 		await waitFor(() =>
 			expect(screen.queryByRole('menuitem', { name: m.terminal_rename() })).toBeNull(),
@@ -806,9 +806,9 @@ describe('WorkspaceRoot', () => {
 		const rename = await screen.findByRole('menuitem', { name: m.terminal_rename() });
 		expect(rename.getAttribute('data-slot')).toBe('context-menu-item');
 		expect(screen.getByRole('menuitem', { name: m.terminal_paste() })).toBeTruthy();
-		expect(
-			screen.getByRole('menuitem', { name: /Font size Default/ }).getAttribute('data-slot'),
-		).toBe('context-menu-sub-trigger');
+		expect(screen.getByRole('menuitem', { name: /Font size 13px/ }).getAttribute('data-slot')).toBe(
+			'context-menu-sub-trigger',
+		);
 		await fireEvent.click(rename);
 		await waitFor(() => expect(rename.isConnected).toBe(false));
 		const renameInput = await screen.findByRole('textbox', { name: m.terminal_name() });

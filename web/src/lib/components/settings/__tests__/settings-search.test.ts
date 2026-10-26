@@ -8,8 +8,10 @@ describe('settings search', () => {
 		interface: 'Interface',
 		'chat-list': 'Chat List',
 		'chat-feed': 'Chat Feed',
-		'chat-code': 'Chat Code & Output',
-		'code-editor': 'Code Editor',
+		'chat-code': 'Chat Code & Commands',
+		'chat-output': 'Plain Tool Output',
+		'code-editor': 'File Editors',
+		'expanded-editor': 'Expanded Text Editors',
 		'code-diff': 'Code Diffs',
 		terminal: 'Terminal',
 	};

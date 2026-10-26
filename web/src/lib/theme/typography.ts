@@ -1,4 +1,9 @@
-import { observeFontChanges, parseFontPreference, type FontPreference } from './fonts.js';
+import {
+	isMonospaceFont,
+	observeFontChanges,
+	parseFontPreference,
+	type FontPreference,
+} from './fonts.js';
 import { FONT_SIZE_OPTIONS, isFontSizeOption } from '../utils/font-size.js';
 
 export const TYPOGRAPHY_SURFACES = [
@@ -6,7 +11,14 @@ export const TYPOGRAPHY_SURFACES = [
 	{ id: 'chat-list', fontKey: 'chatListFont', sizeKey: 'chatListFontSize', defaultSize: 14 },
 	{ id: 'chat-feed', fontKey: 'chatFeedFont', sizeKey: 'chatFeedFontSize', defaultSize: 14 },
 	{ id: 'chat-code', fontKey: 'chatCodeFont', sizeKey: 'chatCodeFontSize', defaultSize: 12 },
+	{ id: 'chat-output', fontKey: 'chatOutputFont', sizeKey: 'chatOutputFontSize', defaultSize: 14 },
 	{ id: 'code-editor', fontKey: 'codeEditorFont', sizeKey: 'codeEditorFontSize', defaultSize: 12 },
+	{
+		id: 'expanded-editor',
+		fontKey: 'expandedEditorFont',
+		sizeKey: 'expandedEditorFontSize',
+		defaultSize: 14,
+	},
 	{ id: 'code-diff', fontKey: 'codeDiffFont', sizeKey: 'gitDiffFontSize', defaultSize: 12 },
 	{ id: 'terminal', fontKey: 'terminalFont', sizeKey: 'terminalFontSize', defaultSize: 13 },
 ] as const;
@@ -28,8 +40,12 @@ export const TYPOGRAPHY_DEFAULTS: TypographyPreferences = {
 	chatFeedFontSize: 'default',
 	chatCodeFont: 'default',
 	chatCodeFontSize: 'default',
+	chatOutputFont: 'default',
+	chatOutputFontSize: 'default',
 	codeEditorFont: 'default',
 	codeEditorFontSize: 'default',
+	expandedEditorFont: 'default',
+	expandedEditorFontSize: 'default',
 	codeDiffFont: 'default',
 	gitDiffFontSize: 'default',
 	terminalFont: 'default',
@@ -40,10 +56,32 @@ export function parseFontSizePreference(value: unknown): FontSizePreference {
 	return isFontSizeOption(value) ? value : 'default';
 }
 
+export function typographyFontOverride(surface: TypographySurface, font: FontPreference): string {
+	if (font === 'default') return '';
+	if (font === 'departure-mono') {
+		// Keeps the existing owner-specific fallback for glyphs Departure does not provide.
+		if (['chat-list', 'chat-feed', 'chat-output'].includes(surface))
+			return '"Departure Mono", var(--system-ui-font)';
+		if (['chat-code', 'code-editor', 'expanded-editor', 'code-diff'].includes(surface))
+			return '"Departure Mono", var(--system-code-font)';
+	}
+	return `var(--font-choice-${font})`;
+}
+
+export function parseSurfaceFont(surface: TypographySurface, value: unknown): FontPreference {
+	const font = parseFontPreference(value);
+	if (
+		['chat-code', 'code-editor', 'code-diff', 'terminal'].includes(surface) &&
+		!isMonospaceFont(font)
+	)
+		return 'default';
+	return font;
+}
+
 export function parseTypographyPreferences(values: Record<string, unknown>): TypographyPreferences {
 	const typography = { ...TYPOGRAPHY_DEFAULTS };
-	for (const { fontKey, sizeKey } of TYPOGRAPHY_SURFACES) {
-		typography[fontKey] = parseFontPreference(values[fontKey]);
+	for (const { id, fontKey, sizeKey } of TYPOGRAPHY_SURFACES) {
+		typography[fontKey] = parseSurfaceFont(id, values[fontKey]);
 		typography[sizeKey] = parseFontSizePreference(values[sizeKey]);
 	}
 	// Earlier snapshots persisted these renderer defaults as numeric selections.
@@ -52,6 +90,14 @@ export function parseTypographyPreferences(values: Record<string, unknown>): Typ
 		if (values.gitDiffFontSize === '12') typography.gitDiffFontSize = 'default';
 		if (values.terminalFontSize === '13') typography.terminalFontSize = 'default';
 	}
+	// New owners inherit existing choices once; explicit new defaults stay independent.
+	if (!Object.hasOwn(values, 'chatOutputFont')) typography.chatOutputFont = typography.chatCodeFont;
+	if (!Object.hasOwn(values, 'chatOutputFontSize'))
+		typography.chatOutputFontSize = typography.chatCodeFontSize;
+	if (!Object.hasOwn(values, 'expandedEditorFont'))
+		typography.expandedEditorFont = typography.codeEditorFont;
+	if (!Object.hasOwn(values, 'expandedEditorFontSize'))
+		typography.expandedEditorFontSize = typography.codeEditorFontSize;
 	return typography;
 }
 

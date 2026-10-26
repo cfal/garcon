@@ -56,7 +56,7 @@ const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
 const MAX_SETTLE_ITERATIONS = 8;
 const MAX_TARGET_READY_ITERATIONS = 180;
 const OFFSET_TOLERANCE_PX = 0.5;
-const FONT_SCOPES = ['interface', 'chat-feed', 'chat-code', 'code-diff'] as const;
+const FONT_SCOPES = ['interface', 'chat-feed', 'chat-code', 'chat-output', 'code-diff'] as const;
 
 interface ConversationFeedVirtualControllerOptions {
 	get model(): ConversationVirtualFeedModel;

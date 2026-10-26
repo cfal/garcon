@@ -84,6 +84,19 @@
 
 	<div>
 		<div class="border-t border-border">
+			<div class="flex flex-wrap items-center justify-between gap-2 py-3">
+				<label class="text-sm font-medium" for="local-appearance">{m.settings_ui_style()}</label>
+				<select
+					id="local-appearance"
+					class="select-native w-full sm:w-52"
+					value={ls.terminalAppearance ? 'terminal' : 'default'}
+					onchange={(event) =>
+						ls.set('terminalAppearance', event.currentTarget.value === 'terminal')}
+				>
+					<option value="default">{m.settings_appearance_default()}</option>
+					<option value="terminal">{m.settings_appearance_terminal()}</option>
+				</select>
+			</div>
 			<TypographySettings />
 			<h3 class="pt-4 pb-2 text-sm font-semibold">{m.settings_layout()}</h3>
 			{@render settingRow(m.settings_highlight_active_window(), ls.highlightActiveWindow, () =>
