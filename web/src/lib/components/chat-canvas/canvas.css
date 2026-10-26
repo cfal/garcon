@@ -42,7 +42,7 @@
 	color: hsl(var(--foreground));
 	padding: 0.5rem 0.625rem;
 	font-size: max(16px, calc(1rem * var(--interface-font-scale, 1)));
-	line-height: 1.25;
+	line-height: max(1.25rem, calc(1.25rem * var(--interface-font-scale, 1)));
 }
 .canvas-input:focus-visible {
 	outline: 2px solid hsl(var(--ring));
