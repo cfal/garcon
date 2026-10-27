@@ -43,17 +43,35 @@ describe('ModelCatalogResponseCache', () => {
     expect(load).toHaveBeenCalledTimes(3);
   });
 
-  it('rejects all original waiters after invalidation', async () => {
+  it('returns same-generation results to evicted waiters without replacing the new cache', async () => {
     const pending = Promise.withResolvers();
     const { cache, catalog, load } = fixture(mock(() => pending.promise));
     const first = cache.getSnapshot(catalog);
     const second = cache.getSnapshot(catalog);
+    cache.clear();
+    load.mockResolvedValue([{ id: 'fresh-agent' }]);
+    const refreshed = await cache.getSnapshot(catalog);
+    pending.resolve([{ id: 'original-agent' }]);
+    const snapshot = await first;
+    expect(await second).toBe(snapshot);
+    expect(snapshot.body.catalog.agents).toEqual([{ id: 'original-agent' }]);
+    expect(() => snapshot.assertCurrent()).not.toThrow();
+    expect(await cache.getSnapshot(catalog)).toBe(refreshed);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects all original waiters after generation replacement and invalidation', async () => {
+    const pending = Promise.withResolvers();
+    const { cache, catalog, load, replace } = fixture(mock(() => pending.promise));
+    const first = cache.getSnapshot(catalog);
+    const second = cache.getSnapshot(catalog);
     const results = Promise.allSettled([first, second]);
+    replace();
     cache.clear();
     pending.resolve([{ id: 'stale-agent' }]);
     expect(await results).toEqual([
-      { status: 'rejected', reason: expect.objectContaining({ message: 'Model catalog changed. Refresh and try again.' }) },
-      { status: 'rejected', reason: expect.objectContaining({ message: 'Model catalog changed. Refresh and try again.' }) },
+      { status: 'rejected', reason: expect.objectContaining({ message: 'Generation retired' }) },
+      { status: 'rejected', reason: expect.objectContaining({ message: 'Generation retired' }) },
     ]);
     load.mockResolvedValue([{ id: 'new-agent' }]);
     expect((await cache.getSnapshot(catalog)).body.catalog.agents).toEqual([{ id: 'new-agent' }]);
@@ -84,9 +102,11 @@ describe('ModelCatalogResponseCache', () => {
   });
 
   it('fences an already-completed snapshot at HTTP publication', async () => {
-    const { cache, catalog } = fixture();
+    const { cache, catalog, replace } = fixture();
     const snapshot = await cache.getSnapshot(catalog);
     cache.clear();
-    expect(() => snapshot.assertCurrent()).toThrow('Model catalog changed');
+    expect(() => snapshot.assertCurrent()).not.toThrow();
+    replace();
+    expect(() => snapshot.assertCurrent()).toThrow('Generation retired');
   });
 });
