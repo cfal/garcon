@@ -44,7 +44,7 @@ import type {
   NativeForkCleanup,
 } from './session-types.js';
 import { assertExecutionAdmissionOpen } from './session-types.js';
-import { requireAgentChatEntry, toAgentEndpointSelection } from './execution-planning.js';
+import { executionSettings, requireAgentChatEntry, toAgentEndpointSelection } from './execution-planning.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import { resolveCarryOverOutcome, type CarryOverOutcome } from '../chats/carryover/outcome.js';
@@ -62,6 +62,7 @@ import { ProducerBindings, type LaunchSettledEvent } from './producer-bindings.j
 import { retryAfterSessionLoss } from './session-loss-retry.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START, EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
 import { readBefore } from '../../common/interactive-deadline.js';
+import { DeferredExecutionAborts } from './deferred-execution-aborts.js';
 const logger = createLogger('agents:runtime-router');
 const EXECUTOR_OUTPUT_GAP_NOTICE = 'Some agent output could not be delivered from the executor. Reload from native history after this turn finishes to recover it.';
 
@@ -138,14 +139,12 @@ export class AgentRuntimeRouter {
       void this.#events.publishRunSteerable(chatId);
     },
   );
-  // Stops requested while a remote executor is unavailable, delivered when it is
-  // ready again. They outlive a lost session because the same worker may still
-  // run the turn; a replaced worker rejects the stale handle.
-  readonly #deferredAborts = new Map<string, { readonly integration: AgentIntegration; readonly handle: AgentExecutionHandle }>();
+  readonly #aborts: DeferredExecutionAborts;
 
   constructor(options: AgentRuntimeRouterOptions) {
     this.#registry = options.registry;
     this.#directory = options.directory;
+    this.#aborts = new DeferredExecutionAborts(options.directory);
     this.#endpointResolver = options.endpointResolver;
     this.#events = options.events;
     this.#getCarryOverRevision = options.getCarryOverRevision;
@@ -177,11 +176,12 @@ export class AgentRuntimeRouter {
       }
       const initial = requireAgentChatEntryWithModel(chatId, this.#registry.getChat(chatId), opts.model);
       const integration = this.#directory.require(initial.agentId, initial.executorId);
-      const settings = executionSettings(integration, initial, opts.agentSettings);
+      executionSettings(integration, initial, opts.agentSettings);
       await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
       this.#assertCurrent(integration);
       const persistedEntry = this.#registry.getChat(chatId);
       const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
+      const settings = executionSettings(integration, entry, opts.agentSettings);
       const selection = this.#resolveExecutionSelection(persistedEntry, entry, opts);
       await this.#validateEndpoint(integration, selection, opts.executionAdmission?.signal, opts.dispatchDeadline);
       const prepared = await this.#preparePrompt(integration, chatId, prompt, opts);
@@ -256,11 +256,12 @@ export class AgentRuntimeRouter {
       assertExecutionAdmissionOpen(opts);
       const initial = requireAgentChatEntryWithModel(chatId, this.#registry.getChat(chatId), opts.model);
       const integration = this.#directory.require(initial.agentId, initial.executorId);
-      const settings = executionSettings(integration, initial, opts.agentSettings);
+      executionSettings(integration, initial, opts.agentSettings);
       await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
       this.#assertCurrent(integration);
       const persistedEntry = this.#registry.getChat(chatId);
       const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
+      const settings = executionSettings(integration, entry, opts.agentSettings);
       if (!entry.agentSessionId) {
         // The delegated start classifies its own dispatch outcome.
         return this.startSession(chatId, prompt, {
@@ -369,11 +370,12 @@ export class AgentRuntimeRouter {
       assertExecutionAdmissionOpen(opts);
       const initial = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
       const integration = this.#directory.require(initial.agentId, initial.executorId);
-      const settings = executionSettings(integration, initial);
+      executionSettings(integration, initial);
       await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
       this.#assertCurrent(integration);
       assertExecutionAdmissionOpen(opts);
       const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+      const settings = executionSettings(integration, entry);
       if (!entry.agentSessionId) throw new Error(`Session missing agent session ID: ${chatId}`);
       const selection = this.#endpointResolver.resolveSelection({
         executorId: entry.executorId,
@@ -456,11 +458,7 @@ export class AgentRuntimeRouter {
   }
 
   executionSessionResumed(executorId: string): void {
-    for (const [chatId, deferred] of this.#deferredAborts) {
-      if (deferred.handle.executorId !== executorId) continue;
-      this.#deferredAborts.delete(chatId);
-      this.#abortHandleBestEffort(chatId, deferred.integration, deferred.handle, 'executor reconnect');
-    }
+    this.#aborts.resumed(executorId);
   }
 
   executionSessionLost(executorId = LOCAL_EXECUTOR_ID): void {
@@ -519,7 +517,7 @@ export class AgentRuntimeRouter {
       return Promise.resolve(true);
     }
     this.#executionHandles.delete(chatId);
-    this.#abortHandleBestEffort(chatId, active.integration, active.handle, 'accepted interruption');
+    this.#aborts.request(chatId, active.integration, active.handle, 'accepted interruption');
     return Promise.resolve(true);
   }
 
@@ -875,7 +873,7 @@ export class AgentRuntimeRouter {
     const active = this.#ledger.isRunActive(chatId, event.runId);
     if (event.handle) {
       if (active) this.#executionHandles.set(chatId, { integration, runId: event.runId, handle: event.handle });
-      else this.#abortHandleBestEffort(chatId, integration, event.handle, 'lost launch');
+      else this.#aborts.request(chatId, integration, event.handle, 'lost launch');
       return;
     }
     if (!active) return;
@@ -890,7 +888,7 @@ export class AgentRuntimeRouter {
     handle: AgentExecutionHandle,
   ): Promise<void> {
     if (this.#pendingAbortRuns.delete(runKey(chatId, runId))) {
-      this.#abortHandleBestEffort(chatId, integration, handle, 'interrupted launch');
+      this.#aborts.request(chatId, integration, handle, 'interrupted launch');
       return;
     }
     if (this.#ledger.isRunActive(chatId, runId)) {
@@ -902,33 +900,9 @@ export class AgentRuntimeRouter {
     const active = this.#executionHandles.get(chatId);
     if (active?.runId === runId) {
       this.#executionHandles.delete(chatId);
-      this.#abortHandleBestEffort(chatId, active.integration, active.handle, 'publication failure');
+      this.#aborts.request(chatId, active.integration, active.handle, 'publication failure');
     } else this.#pendingAbortRuns.add(runKey(chatId, runId));
     this.#bindings.forgetRun(runId);
-  }
-
-  #abortHandleBestEffort(
-    chatId: string,
-    integration: AgentIntegration,
-    handle: AgentExecutionHandle,
-    context: string,
-  ): void {
-    const failed = (error: unknown) => {
-      if (error instanceof AgentCallError && error.code === 'STALE_RESOURCE') return;
-      if (!this.#directory.isReady(handle.executorId)) {
-        this.#deferredAborts.set(chatId, { integration, handle });
-        return;
-      }
-      logger.warn(`Provider abort after ${context} failed`, {
-        chatId,
-        reason: error instanceof Error ? error.message : String(error),
-      });
-    };
-    try {
-      void integration.execution.abort(handle).catch(failed);
-    } catch (error) {
-      failed(error);
-    }
   }
 
   #producer(chatId: string): TranscriptProducerLease {
@@ -1020,10 +994,4 @@ function supportedValue<T extends string>(values: readonly string[], value: T, f
 
 function runKey(chatId: string, runId: string): string {
   return `${chatId}\u0000${runId}`;
-}
-
-function executionSettings(
-  integration: AgentIntegration, entry: AgentChatEntry, submitted?: AgentSettingsEnvelope,
-): AgentSettingsEnvelope {
-  return integration.settings.parse(submitted ?? entry.agentSettingsById?.[entry.agentId] ?? integration.settings.defaults());
 }

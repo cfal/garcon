@@ -1,4 +1,7 @@
 import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
+import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
+import { AgentCallError, type AgentIntegration } from '@garcon/server-agent-interface';
+import { effectiveExecutorId } from '../../../common/executors.js';
 import type {
   ApiProviderEndpointResolver,
   ResolvedModelSelection,
@@ -15,6 +18,16 @@ export function requireAgentChatEntry(
   const execution = requireChatExecutionConfig(chatId, entry);
   if (!entry) throw new Error(`Session not initialized: ${chatId}`);
   return { ...entry, ...execution };
+}
+
+export function executionSettings(
+  integration: AgentIntegration, entry: AgentChatEntry, submitted?: AgentSettingsEnvelope,
+): AgentSettingsEnvelope {
+  if (entry.agentId !== integration.descriptor.id
+    || effectiveExecutorId(entry.executorId) !== integration.producers.scope.executorId) {
+    throw new AgentCallError('not-dispatched', 'Chat execution target changed during preparation', 'STALE_RESOURCE');
+  }
+  return integration.settings.parse(submitted ?? entry.agentSettingsById?.[entry.agentId] ?? integration.settings.defaults());
 }
 
 export function toAgentEndpointSelection(
