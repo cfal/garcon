@@ -25,7 +25,10 @@ import type {
 } from '$shared/settings';
 import { NewChatAgentSettingsState } from './new-chat-agent-settings-state.svelte';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
-import { firstSelectableExecutorRecent, newChatExecutorPreferences } from './new-chat-executor-preferences';
+import {
+	firstSelectableExecutorRecent,
+	newChatExecutorPreferences,
+} from './new-chat-executor-preferences';
 import type { NewChatPromptDraft } from './new-chat-prompt-draft';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import type { ResolvedModelSelection } from '$shared/start-selection';
@@ -40,7 +43,10 @@ import {
 	isPinnedProjectPath,
 	nextPinnedProjectPaths,
 } from '$lib/project-paths/project-pinned-paths.js';
-import { executorPinnedProjectPaths, savePinnedProjectPathsOptimistically } from '$lib/project-paths/pinned-project-path-settings.js';
+import {
+	executorPinnedProjectPaths,
+	savePinnedProjectPathsOptimistically,
+} from '$lib/project-paths/pinned-project-path-settings.js';
 import { normalizeTagSlug } from '$lib/utils/tags.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -75,6 +81,7 @@ export class NewChatFormState {
 	validationError = $state<string | null>(null);
 	#validationTimer: ReturnType<typeof setTimeout> | null = null;
 	#validationRequestVersion = 0;
+	#validationTargetKey: string | null = null;
 	#worktreeRequestVersion = 0;
 	#worktreeAbort: AbortController | null = null;
 
@@ -294,10 +301,14 @@ export class NewChatFormState {
 		const agent = this.#modelCatalog.getAgent(this.agentId);
 		if (!agent) return null;
 		const support = {
-			allowImages: this.#modelCatalog.supportsImages(this.agentId, this.modelValue, this.modelSelectionTarget?.modelEndpointId),
+			allowImages: this.#modelCatalog.supportsImages(
+				this.agentId,
+				this.modelValue,
+				this.modelSelectionTarget?.modelEndpointId,
+			),
 			fileMimeTypes: this.#modelCatalog.fileAttachmentMimeTypes(this.agentId),
 		};
-		return this.attachedImages.some(file => !isSupportedChatAttachment(file, support))
+		return this.attachedImages.some((file) => !isSupportedChatAttachment(file, support))
 			? m.chat_composer_remove_attachments({ agent: agent.label })
 			: null;
 	}
@@ -411,7 +422,14 @@ export class NewChatFormState {
 		if (this.settingsLoaded && this.#startupSelectionPending) this.#reconcileStartupSelection();
 		const candidate = this.#executorModelCandidate;
 		this.#executorModelCandidate = null;
-		if (candidate && this.#modelCatalog.getModelForSelection(this.agentId, candidate.model, candidate.modelEndpointId)) {
+		if (
+			candidate &&
+			this.#modelCatalog.getModelForSelection(
+				this.agentId,
+				candidate.model,
+				candidate.modelEndpointId,
+			)
+		) {
 			this.restoreSelection(this.agentId, candidate);
 		}
 		for (const agentId of this.#selectableAgentIds) {
@@ -596,9 +614,8 @@ export class NewChatFormState {
 	selectWorktree(worktreePath: string): void {
 		if (!this.gitAvailable) return;
 		this.#cancelWorktreeLoad();
-		this.projectPath = worktreePath;
+		this.selectProjectPath(worktreePath);
 		this.worktreeModalOpen = false;
-		this.clearError();
 	}
 
 	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<boolean> {
@@ -641,14 +658,35 @@ export class NewChatFormState {
 
 	// Path validation
 
+	selectProjectPath(path: string): void {
+		this.projectPath = path;
+		this.clearError();
+		const validate = this.#preparePathValidation();
+		if (validate) void validate();
+	}
+
+	validateChangedPath(): void {
+		if (this.#validationTargetKey === this.#currentValidationTargetKey) return;
+		this.validatePath();
+	}
+
+	get #currentValidationTargetKey(): string {
+		return `${this.pathContextKey}\u0000${this.nonblankPath}`;
+	}
+
 	/** Debounced validation of the project path against the server. */
 	validatePath(): void {
+		const validate = this.#preparePathValidation();
+		if (validate) this.#validationTimer = setTimeout(() => void validate(), 300);
+	}
+
+	#preparePathValidation(): (() => Promise<void>) | null {
 		const path = this.nonblankPath;
 		const executorId = this.executorId;
 		const contextKey = this.pathContextKey;
 		if (!path) {
 			this.#clearValidation();
-			return;
+			return null;
 		}
 
 		this.preambles.pathValidationStarted();
@@ -657,13 +695,20 @@ export class NewChatFormState {
 		this.validationError = null;
 
 		if (this.#validationTimer) clearTimeout(this.#validationTimer);
+		this.#validationTimer = null;
+		this.#validationTargetKey = this.#currentValidationTargetKey;
 		const requestVersion = ++this.#validationRequestVersion;
+		const current = () =>
+			requestVersion === this.#validationRequestVersion &&
+			contextKey === this.pathContextKey &&
+			executorId === this.executorId &&
+			path === this.nonblankPath;
 
-		this.#validationTimer = setTimeout(async () => {
+		return async () => {
+			this.#validationTimer = null;
 			try {
 				const data = await validateStart(path, { executorId });
-				if (requestVersion !== this.#validationRequestVersion || contextKey !== this.pathContextKey)
-					return;
+				if (!current()) return;
 				if (data.valid) {
 					this.validationStatus = 'valid';
 					this.validationError = null;
@@ -676,8 +721,7 @@ export class NewChatFormState {
 					this.preambles.invalidatePreview();
 				}
 			} catch (err) {
-				if (requestVersion !== this.#validationRequestVersion || contextKey !== this.pathContextKey)
-					return;
+				if (!current()) return;
 				this.validationStatus = 'invalid';
 				this.validationError =
 					err instanceof Error ? err.message : m.chat_new_chat_errors_invalid_directory();
@@ -685,7 +729,7 @@ export class NewChatFormState {
 				this.preambles.invalidatePreview();
 				console.warn('[NewChatFormState] Path validation request failed', err);
 			}
-		}, 300);
+		};
 	}
 
 	#validationErrorMessage(errorCode?: ValidateStartErrorCode): string {
@@ -697,6 +741,7 @@ export class NewChatFormState {
 	}
 
 	#clearValidation(): void {
+		this.#validationTargetKey = null;
 		if (this.#validationTimer) {
 			clearTimeout(this.#validationTimer);
 			this.#validationTimer = null;
@@ -934,7 +979,11 @@ export class NewChatFormState {
 		this.browseStartPath = preferences.browseStartPath;
 		if (!this.projectPath) this.projectPath = preferences.projectPath;
 
-		this.#agentSettings.hydrate(snap.executionDefaults, this.#selectableAgentIds, this.#modelCatalog);
+		this.#agentSettings.hydrate(
+			snap.executionDefaults,
+			this.#selectableAgentIds,
+			this.#modelCatalog,
+		);
 		if (!this.#startupSelectionAutomatic) {
 			this.#applyExecutionDefaultsForAgent(this.agentId);
 			return;
@@ -959,7 +1008,12 @@ export class NewChatFormState {
 		recents: RecentAgentSetting[],
 		selectableAgentIds: readonly SessionAgentId[] = this.#selectableAgentIds,
 	): RecentAgentSetting | null {
-		return firstSelectableExecutorRecent(recents, this.executorId, selectableAgentIds, this.#modelCatalog);
+		return firstSelectableExecutorRecent(
+			recents,
+			this.executorId,
+			selectableAgentIds,
+			this.#modelCatalog,
+		);
 	}
 
 	#applyExecutionDefaultsForAgent(agentId: SessionAgentId): void {
