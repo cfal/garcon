@@ -18,12 +18,15 @@ for (const direction of directions) {
     test(`${artifacts.stage}: core workflows and independent restart ${controller.sourceSha.slice(0, 8)}/${worker.sourceSha.slice(0, 8)} (${direction})`, async () => {
       const pair = await CompatibilityPair.start(controller, worker, direction);
       try {
+        expect(pair.controller.authToken).toBeNull();
+        expect(pair.controller.credentials).toBeNull();
         const result = await pair.driver({ kind: 'core-workflow', executorId: pair.executorId, projectPath: pair.workerDirs.project,
           controllerConfig: pair.controllerDirs.config, workerConfig: pair.workerDirs.config, home: pair.workerDirs.home,
           cliArtifacts: [artifacts.current, ...artifacts.baselines],
         });
         expect(result.checked).toEqual(['files', 'mkdir', 'git-primary', 'git-bulk', 'cli-direct', 'cli-gateway', 'execution', 'schedules', 'terminals']);
         await pair.restartController(artifacts.current);
+        expect(pair.controller.authToken).toBeNull();
         expect(await pair.driver({ kind: 'terminal-resume', executorId: pair.executorId,
           terminalId: stringField(result, 'terminalId'), terminalRuntimeId: stringField(result, 'terminalRuntimeId'),
           previousControllerId: stringField(result, 'controllerId'), workerConfig: pair.workerDirs.config,
