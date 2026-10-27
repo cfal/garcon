@@ -1,12 +1,15 @@
 import type { ChatSessionRecord } from '../src/lib/chat/sessions/chat-session-types.js';
 import {
 	buildSidebarChatOrderMap,
-	buildSidebarDisplayChatIds,
+	buildSidebarChatListProjection,
 	buildSidebarProjectKeys,
 	buildSidebarRowModel,
 	partitionSidebarChats,
 } from '../src/lib/components/sidebar/sidebar-row-model.js';
-import { sortChatsByRecencyDesc } from '../src/lib/components/sidebar/chat-recency-sort.js';
+import {
+	sortChatsByRecencyDesc,
+	sortSidebarChatsByRecency,
+} from '../src/lib/components/sidebar/chat-recency-sort.js';
 import { matchesChatFilter, parseChatSearch } from '../../common/chat-filter-query.js';
 
 const SIZES = [200, 500, 2_000];
@@ -133,6 +136,31 @@ function scenario(size: number, nestedProjects: boolean, activeSearch: boolean) 
 		collapsedProjectKeys: new Set<string>(),
 	};
 
+	const projectionInput = {
+		displayedChats,
+		optimisticArchiveOrder: chats,
+		grouping: 'project-and-activity' as const,
+		currentTime: CURRENT_TIME,
+		inactivityDuration: '3-days' as const,
+		sortMode: 'recent' as const,
+		pinnedInsertPosition: 'top' as const,
+		groupNestedProjectPaths: nestedProjects,
+	};
+	// Reproduces the former shell, sidebar, and list calculations on the same fixture.
+	const legacyRowModel = () => {
+		const sorted = sortSidebarChatsByRecency(displayedChats, 'top');
+		return buildSidebarRowModel({
+			...rowInput,
+			displayedChats: sorted,
+			orders: buildSidebarChatOrderMap(sorted),
+		});
+	};
+	const expectedIds = legacyRowModel().visibleChatIds;
+	const shared = buildSidebarChatListProjection(projectionInput);
+	if (JSON.stringify(expectedIds) !== JSON.stringify(shared.rowModel.visibleChatIds)) {
+		throw new Error('Shared projection changed visible chat order.');
+	}
+
 	return {
 		size,
 		nestedProjects,
@@ -150,10 +178,7 @@ function scenario(size: number, nestedProjects: boolean, activeSearch: boolean) 
 			iterations,
 		),
 		sort: profile(() => sortChatsByRecencyDesc(displayedChats).length, iterations),
-		partition: profile(
-			() => partitionSidebarChats(displayedChats).byId.normal.size,
-			iterations,
-		),
+		partition: profile(() => partitionSidebarChats(displayedChats).byId.normal.size, iterations),
 		projectKeys: profile(
 			() =>
 				buildSidebarProjectKeys({
@@ -162,18 +187,17 @@ function scenario(size: number, nestedProjects: boolean, activeSearch: boolean) 
 				}).length,
 			iterations,
 		),
-		displayIds: profile(
-			() =>
-				buildSidebarDisplayChatIds({
-					displayedChats,
-					grouping: 'project-and-activity',
-					currentTime: CURRENT_TIME,
-					inactivityDuration: '3-days',
-					sortMode: 'recent',
-					groupNestedProjectPaths: nestedProjects,
-				}).length,
+		sharedProjection: profile(
+			() => buildSidebarChatListProjection(projectionInput).rowModel.rows.length,
 			iterations,
 		),
+		repeatedProjections: profile(() => {
+			const navigationIds = legacyRowModel().visibleChatIds;
+			const selectionIds = legacyRowModel().visibleChatIds;
+			const rows = legacyRowModel().rows;
+			const hasPinnedChats = partitionSidebarChats(chats).hasPinned;
+			return navigationIds.length + selectionIds.length + rows.length + Number(hasPinnedChats);
+		}, iterations),
 		rowModel: profile(() => buildSidebarRowModel(rowInput).rows.length, iterations),
 	};
 }

@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
 import type { Locator, Page } from 'playwright';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
 async function openSidebar(page: Page): Promise<void> {
@@ -104,6 +106,9 @@ for (const executionBackend of ['in-process', 'remote-controller-dials'] as cons
             await browserExpect(row.locator('[data-slot="chat-preview"]')).toHaveCount(layout === 'detailed' ? 1 : 0);
           }
         }
+        const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
+        await mkdir(artifacts, { recursive: true });
+        await page.screenshot({ path: join(artifacts, `shared-sidebar-${executionBackend}-${width}.png`) });
       }
 
       phase('restoring persisted layout and path visibility');
