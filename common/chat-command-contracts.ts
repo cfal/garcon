@@ -484,13 +484,19 @@ export interface CompactCommandRequest {
   instructions?: string;
 }
 
-export interface ExecutionSettingsPatchRequest {
+export interface AgentSettingsPatchFence {
+  expectedExecutorInstanceId: string;
+  expectedSettingsSchemaVersion: number;
+}
+
+export type ExecutionSettingsPatchRequest = {
   chatId: string;
-  expectedAgentOwnershipEpoch?: string;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
-  agentSettingsPatch?: JsonObject;
-}
+} & (
+  | ({ agentSettingsPatch: JsonObject; expectedAgentOwnershipEpoch: string } & AgentSettingsPatchFence)
+  | { agentSettingsPatch?: never; expectedAgentOwnershipEpoch?: string }
+);
 
 export interface ExecutionSettingsPatchResponse {
   success: true;

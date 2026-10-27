@@ -1,4 +1,4 @@
-import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { AgentCallError, AgentIntegrationError } from '@garcon/server-agent-interface';
 import {
   parseAgentHandoffCommandRequest,
   parseAgentInterruptAndSendCommandRequest,
@@ -13,6 +13,7 @@ import {
 import type {
   CommandAcceptedResponse,
   ExecutionSettingsPatchRequest,
+  AgentSettingsPatchFence,
   ModelPatchRequest,
   QueueCommandErrorResponse,
   QueueEntrySteerErrorResponse,
@@ -109,6 +110,9 @@ function optionalStringOrNull(value: unknown): string | null | undefined {
 }
 
 function chatSettingsPatchErrorResponse(error: unknown): Response {
+  if (error instanceof AgentCallError && error.code === 'STALE_RESOURCE' && error.outcome === 'not-dispatched') {
+    return jsonError('Provider settings changed. Refresh the executor catalog before editing settings.', 422, 'VALIDATION_FAILED', false);
+  }
   if (error instanceof ModelSelectionError) {
     return jsonError(error.message, 422, 'MODEL_SELECTION_ERROR');
   }
@@ -409,6 +413,7 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
       const chat = registry.getChat(chatId);
       if (!chat) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       const patch: AgentSessionSettingsPatch = {};
+      let settingsFence: AgentSettingsPatchFence | undefined;
       if (body.permissionMode !== undefined) {
         patch.permissionMode = normalizePermissionMode(body.permissionMode);
       }
@@ -416,6 +421,14 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
         patch.thinkingMode = normalizeThinkingMode(body.thinkingMode);
       }
       if (body.agentSettingsPatch !== undefined) {
+        if (!expectedEpoch || typeof body.expectedExecutorInstanceId !== 'string' || !body.expectedExecutorInstanceId
+          || !Number.isSafeInteger(body.expectedSettingsSchemaVersion) || Number(body.expectedSettingsSchemaVersion) < 1) {
+          return jsonError('Provider edits require the captured ownership, executor instance and settings schema. Refresh the executor catalog.', 422, 'VALIDATION_FAILED', false);
+        }
+        settingsFence = {
+          expectedExecutorInstanceId: body.expectedExecutorInstanceId,
+          expectedSettingsSchemaVersion: body.expectedSettingsSchemaVersion,
+        };
         if (!body.agentSettingsPatch || typeof body.agentSettingsPatch !== 'object' || Array.isArray(body.agentSettingsPatch)) {
           return jsonError('agentSettingsPatch must be an object', 400, 'VALIDATION_FAILED');
         }
@@ -423,7 +436,9 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
       }
       const hasPatch = Object.keys(patch).length > 0;
       const updated = hasPatch
-        ? await agents.updateSessionSettings(chatId, patch, expectedEpoch, request.signal)
+        ? settingsFence
+          ? await agents.updateSessionSettings(chatId, patch, expectedEpoch, request.signal, settingsFence)
+          : await agents.updateSessionSettings(chatId, patch, expectedEpoch, request.signal)
         : chat;
       return Response.json({
         success: true,

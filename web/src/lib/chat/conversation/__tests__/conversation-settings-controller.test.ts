@@ -97,6 +97,10 @@ function createHarness() {
 		}),
 	};
 	const modelCatalog = {
+		executorInstanceId: 'synthetic-instance',
+		isValidated: true,
+		getDefaultAgentSettings: () => ({ ownerId: 'claude', schemaVersion: 1, values: { effort: 'low' } }),
+		getAgentSettingsDescriptors: () => [effort],
 		getModelForSelection: vi.fn<
 			ConversationSettingsControllerOptions['modelCatalog']['getModelForSelection']
 		>(() => ({ value: 'opus', label: 'Opus' })),
@@ -154,6 +158,33 @@ describe('ConversationSettingsController', () => {
 			chatId: 'chat-1',
 			agentSettings: chat().agentSettings,
 		});
+	});
+
+	it('captures the rendered catalog fence before a settings request waits in the queue', async () => {
+		const first = deferred<ExecutionSettingsPatchResponse>();
+		vi.mocked(updateExecutionSettings).mockReturnValueOnce(first.promise);
+		const { controller, modelCatalog } = createHarness();
+		controller.handlePermissionModeChange('plan');
+		controller.handleAgentSettingChange(effort, 'high');
+		modelCatalog.executorInstanceId = 'replacement-instance';
+		modelCatalog.getDefaultAgentSettings = () => ({ ownerId: 'claude', schemaVersion: 3, values: { effort: 'low' } });
+		first.resolve({ success: true, chatId: 'chat-1', permissionMode: 'plan', agentSettings: chat().agentSettings });
+		await controller.settlePending('chat-1');
+		expect(updateExecutionSettings).toHaveBeenLastCalledWith({
+			chatId: 'chat-1', agentSettingsPatch: { effort: 'high' }, expectedAgentOwnershipEpoch: 'epoch-1',
+			expectedExecutorInstanceId: 'synthetic-instance', expectedSettingsSchemaVersion: 1,
+		});
+	});
+
+	it.each([false, true])('preserves incompatible settings without applying new descriptors (draft=%s)', draft => {
+		const { controller, sessions, agentState, modelCatalog } = createHarness();
+		sessions.isDraft.mockReturnValue(draft);
+		const saved = agentState.agentSettings;
+		modelCatalog.getDefaultAgentSettings = () => ({ ownerId: 'claude', schemaVersion: 3, values: { effort: 'low' } });
+		controller.handleAgentSettingChange(effort, 'high');
+		expect(agentState.agentSettings).toBe(saved);
+		expect(sessions.patchDraftStartup).not.toHaveBeenCalled();
+		expect(updateExecutionSettings).not.toHaveBeenCalled();
 	});
 
 	for (const setting of ['model', 'permission', 'thinking', 'agentSettings'] as const) {

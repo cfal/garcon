@@ -8,7 +8,7 @@ import type {
   ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import type { AgentAuthStatus } from '../../../common/agent-execution.js';
-import type { PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
+import type { AgentSettingsPatchFence, PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { ChatTransientControlAction } from '../../../common/chat-transient-feed.js';
 import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
@@ -182,7 +182,7 @@ export interface AgentRegistryServiceContract {
   ): Promise<AgentTranscriptSourceLocation | null>;
   validateConfiguration(input: AgentConfigurationInput, options?: ExecutorCallOptions): Promise<void>;
   updateSessionSettings(
-    chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string, signal?: AbortSignal,
+    chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string, signal?: AbortSignal, settingsFence?: AgentSettingsPatchFence,
   ): Promise<AgentChatEntry>;
 }
 
@@ -418,8 +418,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   validateConfiguration(input: AgentConfigurationInput, options?: ExecutorCallOptions): Promise<void> {
     return this.#settings.validateConfiguration(input, options);
   }
-  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string, signal?: AbortSignal) {
-    return this.#settings.updateSessionSettings(chatId, patch, expectedAgentOwnershipEpoch, signal);
+  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string, signal?: AbortSignal, settingsFence?: AgentSettingsPatchFence) {
+    return this.#settings.updateSessionSettings(chatId, patch, expectedAgentOwnershipEpoch, signal, settingsFence);
   }
   runSingleQuery(prompt: string, options: RunSingleQueryOptions) {
     return this.#runtime.runSingleQuery(prompt, options);
