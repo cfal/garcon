@@ -65,7 +65,7 @@ export class AgentHandoffService {
 
   constructor(private readonly deps: {
     readonly registry: IChatRegistry;
-    readonly integrations: Pick<AgentDirectory, 'get' | 'require'>;
+    readonly integrations: Pick<AgentDirectory, 'list' | 'require'>;
     readonly inspectProject: ProjectInspector;
     readonly endpointResolver: ApiProviderEndpointResolver;
     readonly catalog: {
@@ -142,10 +142,11 @@ export class AgentHandoffService {
         400,
       );
     }
-    if (!this.deps.integrations.get(requested.agentId, executorId)) {
+    const integration = this.deps.integrations.list(executorId)
+      .find(candidate => candidate.descriptor.id === requested.agentId);
+    if (!integration) {
       throw new DomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${requested.agentId}`, 422);
     }
-    const integration = this.deps.integrations.require(requested.agentId, executorId);
     assertHandoffDestination(integration);
     const agentSettings = integration.settings.parse(
       requested.agentSettings
