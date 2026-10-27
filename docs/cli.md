@@ -68,6 +68,13 @@ also clears browser-local preferences and drafts, but not server-side chats.
 
 ## Executor Connections
 
+Executor core 1 replaces package/revision equality. Its first deployment is a
+coordinated breaking cutover: drain work and update controller, workers, CLI and
+browser together. There is no legacy handshake or preparatory migration release.
+Later compliant core-1 workers and baseline CLIs may remain on earlier builds;
+package version does not establish compatibility. See the
+[compatibility and rollback procedure](./executor/compatibility.md).
+
 Set `--base-path /garcon` with `--public-url https://controller.example.com/garcon/` (or the corresponding environment variables)
 on a proxied controller. The flag wins; the base path is retained when generating
 `wss://controller.example.com/garcon/executor/<id>`. Without configuration, the
@@ -905,7 +912,7 @@ automatically. Structured validation and pre-dispatch rejections remain definiti
 The CLI reconciles any earlier uncertain tag save with `GET chats/tags`, then
 uses the atomic desired-set `PUT chats/tags`. Browser `PATCH chats/tags` retains
 its compare-and-set baseline. Upgrade controller and workers together for this
-forwarded API change (executor protocol revision 12).
+forwarded API contract, now part of frozen executor core 1.
 
 ## Export
 

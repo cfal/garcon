@@ -1,6 +1,6 @@
 # Executor Transport
 
-Current implementation reference, 2026-10-02. This supersedes the transport
+Current implementation reference, 2026-10-27. This supersedes the transport
 descriptions in the historical [first-stage](./interface.md) and
 [second-stage](./app-integration.md) designs.
 
@@ -9,11 +9,14 @@ two bidirectional Noise-encrypted WebSockets, regardless of which side dials:
 an authoritative primary and a subordinate bulk lane. One executor client,
 runtime, producer relay, and reply journal serve both lanes.
 The shared secret authenticates Noise and the application handshake binding
-executor, runtime, version, and the fresh connection. The version is the
-package version followed by the executor protocol revision, as in
-`0.3.4+protocol.13`. The revision changes with anything either side sends or
-accepts, so builds that disagree fail the handshake with "Executor version
-mismatch" instead of failing mid-session. TLS is required unless explicitly
+executor, runtime, protocol profile, and the fresh connection. Both peers exchange
+locally compiled offers and role-bound proofs over the exact hello frame strings
+and selected decision. Equal core generations and exact optional-version
+intersections establish an immutable profile before application setup. Package
+and build labels are diagnostic only. Core 1 advertises no optional contracts.
+Pre-cutover package/revision hellos are unsupported; there is no legacy mode.
+See [Compatibility](./compatibility.md) for rollout and evolution rules.
+TLS is required unless explicitly
 disabled with `noTls` (`--no-tls` for workers). Worker listeners require a PEM
 `--tls-cert` and `--tls-private-key` pair or `--no-tls`; see the
 [operator guide](../cli.md#executor-connections). Noise remains mandatory when outer TLS certificate
@@ -57,10 +60,27 @@ Unchanged executors and Local remain available.
 ## Lanes And Authority
 
 The primary session ID is the connection generation. Both application proofs
-bind the lane, executor, peer runtime, protocol version, primary session ID, and
+bind the lane, executor, peer runtime, protocol profile, primary session ID, and
 the lane's own session ID. Bulk attaches only to its current authenticated
 primary. Possession of the same secret alone cannot attach an old bulk socket
 to a replacement primary.
+
+Bulk inherits its primary's exact profile rather than independently negotiating.
+Authenticated continuity consists of executor, controller runtime, worker runtime
+and profile ID. Journal receipts/replies and producer bindings retain that owner
+through socket replacement. A new controller or worker cannot adopt old calls,
+bindings, permissions, or launch outcomes. A continuity mismatch never proves
+non-receipt or authorizes retransmission.
+
+The connector publishes one validated worker generation containing info,
+manifests, provider registry and runtime/service facades. Same-worker reconnect
+preserves object identity and lifecycle intent. Confirmed replacement retires
+every old facade before initializing and atomically publishing the new bundle.
+Calls held by old references fail rather than following the replacement; sent
+calls retain their actual or uncertain outcomes. Reconnect-grace expiry abandons
+bindings without permanently retiring the worker generation. Catalog and terminal
+responses are fenced against their captured instance. Changed provider inventory
+is allowed on a new worker; incompatible saved settings are preserved, not migrated.
 
 Primary carries launches, Stop/abort, permissions, credentials, producer and
 terminal frames, small file identity/revision calls, and `git.getQuickSummary`.

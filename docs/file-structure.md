@@ -39,13 +39,18 @@ Agent-specific integrations remain in `server-agents/<id>/`. Browser/server cont
 - Product/configuration term: executor. Local is the built-in executor label.
 - `ExecutionRuntime` owns concrete executor services and provider integrations.
 - `ExecutionRuntimeApi` is the service-facing contract implemented by the runtime and remote proxy.
-- `RemoteExecutorClient` implements that contract over RPC.
+- `RemoteExecutorClient` owns reconnecting sockets and publishes immutable worker generations. Each generation owns its `ExecutionRuntimeApi`, integration registry and service facades; old references cannot follow a replacement worker.
 - `serveExecutionRuntime` returns an `ExecutorRpcServer`; `ExecutorRpc` carries the typed agent and executor-service protocol.
 - Controller configuration uses `ExecutorManager`, `ExecutorConfigStore`, executor snapshots/targets, and executor-specific reference guards.
 - `executorId` identifies execution targets across persistence, APIs, RPC, resource scopes, UI, CLI, fixtures, and tests. Generic graph/DOM nodes, Node.js imports, linked carryover nodes, and provider-native node concepts retain their names.
 - Commands, routes, storage, events, errors, and environment vocabulary use executor consistently: `garcon executor`, `garcon-cli --runtime executor`, and `GARCON_RUNTIME=executor`.
 
-Controller, worker, CLI, and browser must run the same revision: command selectors, configuration filenames, persisted fields, URLs, events, and RPC names change together.
+The browser ships with its controller. Independently upgraded workers and CLIs
+preserve the frozen core and exact optional contracts described in
+[Executor Compatibility](./executor/compatibility.md). That contract supersedes
+same-build requirements in historical executor proposals. Protocol support,
+provider facets, executor services, settings compatibility and authorization
+remain separate ownership boundaries.
 
 Dependency direction:
 
