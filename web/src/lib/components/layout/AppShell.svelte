@@ -224,6 +224,7 @@
 					mobileActiveDescriptor.kind === 'pull-requests' ||
 					mobileActiveDescriptor.kind === 'chat-board' ||
 					mobileActiveDescriptor.kind === 'tickets' ||
+					mobileActiveDescriptor.kind === 'usage' ||
 					mobileActiveDescriptor.kind === 'git-history' ||
 					mobileActiveDescriptor.kind === 'git-compare')),
 	);
@@ -546,6 +547,17 @@
 		restoreMobileSidebarFocus();
 	}
 
+	async function handleShowUsage(): Promise<void> {
+		if (isMobile) closeMobileSidebar();
+		// Completes drawer focus restoration before the surface owns focus.
+		await tick();
+		try {
+			await workspace.openSingleton('usage');
+		} catch (error) {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		}
+	}
+
 	function handleMobileChatSelect(chatId: string): void {
 		handleChatSelect(chatId);
 		closeMobileSidebar();
@@ -714,6 +726,7 @@
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
 		onShowPreambles={() => appShell.openPreambles()}
 		onShowSnippets={() => appShell.openSnippets()}
+		onShowUsage={() => void handleShowUsage()}
 		onShowSettings={() => appShell.openSettings()}
 		{newWindowEdges}
 	/>

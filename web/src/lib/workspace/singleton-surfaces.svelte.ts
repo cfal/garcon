@@ -17,6 +17,7 @@ import { CanvasExitGuard } from '$lib/chat-canvas/canvas-exit-guard.js';
 import { browserCanvasRecovery } from '$lib/chat-canvas/canvas-recovery.js';
 import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
 import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
+import { UsageController } from '$lib/usage/usage-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 
@@ -41,6 +42,7 @@ export interface SingletonControllerByKind {
 	'chat-canvas': CanvasController;
 	'chat-board': ChatBoardController;
 	tickets: TicketsController;
+	usage: UsageController;
 }
 
 type SingletonControllerFactories = {
@@ -68,6 +70,7 @@ export class SingletonSurfaceRegistry {
 		'chat-canvas': false,
 		'chat-board': false,
 		tickets: false,
+		usage: false,
 	};
 	#hasVisibleProjectSurface = $state(false);
 	readonly #canvasExitGuard = new CanvasExitGuard(
@@ -88,6 +91,7 @@ export class SingletonSurfaceRegistry {
 			'chat-canvas': () => new CanvasController(),
 			'chat-board': () => this.deps.createChatBoard(),
 			'pull-requests': () => this.deps.createPullRequests(),
+			usage: () => new UsageController(),
 		};
 	}
 
@@ -111,6 +115,10 @@ export class SingletonSurfaceRegistry {
 		return (
 			(this.#controllers.get('files')?.controller as FilesSurfaceController | undefined) ?? null
 		);
+	}
+
+	usage(): UsageController {
+		return this.#controller('usage');
 	}
 
 	chatMap(): ChatMapController {
@@ -214,6 +222,7 @@ export class SingletonSurfaceRegistry {
 				candidate !== 'chat-board' &&
 				candidate !== 'tickets' &&
 				candidate !== 'pull-requests' &&
+				candidate !== 'usage' &&
 				this.#visible[candidate],
 		);
 	}

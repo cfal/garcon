@@ -237,6 +237,7 @@
 		onShowScheduledPrompts={() => {}}
 		onShowPreambles={() => {}}
 		onShowSnippets={() => {}}
+		onShowUsage={() => {}}
 		onShowSettings={() => {}}
 		newWindowEdges={workspaceSplitAdmissions()}
 	/>

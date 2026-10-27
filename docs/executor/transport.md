@@ -65,8 +65,8 @@ to a replacement primary.
 Primary carries launches, Stop/abort, permissions, credentials, producer and
 terminal frames, small file identity/revision calls, and `git.getQuickSummary`.
 Bulk carries every other Git/GitHub method, file bodies, directory lists and
-directory creation, the complete history reader sequence, and large-capable
-reverse CLI operations.
+directory creation, the complete history reader sequence, usage reports, and
+large-capable reverse CLI operations.
 The exhaustive routing policy is checked before dispatch on both peers. There
 is no size-triggered fallback to primary. Primary CLI context, turn receipts,
 Stop, and permission decisions have a 64 KiB encoded request/reply cap, as does
@@ -450,7 +450,7 @@ session rather than introducing values outside the typed error contract.
 - `launch` calls (start, resume, and compaction) keep running on the worker;
   the producer relay reports their outcomes, as described above.
 - `journaled` calls are all others, including Files, Git, projects, catalogs,
-  permission answers, abort, steering, single queries, and validation. They
+  permission answers, abort, steering, single queries, usage reads, and validation. They
   keep running on the worker, and their replies survive the loss.
 
 Every request carries a per-session sequence number, and the worker records the

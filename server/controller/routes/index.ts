@@ -74,8 +74,11 @@ import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import type { ExecutorManager } from '../executors/manager.js';
 import { PreambleProjectPathService } from '../preambles/project-path-service.js';
 import { createExecutorRoutes } from './executors.js';
+import { createUsageRoutes } from './usage.js';
+import { UsageService } from '../usage/usage-service.js';
 import { getHttpIdleTimeoutSeconds } from '../config.js';
 import { GIT_OPERATION_TIMEOUT_MS, GH_DETAIL_TIMEOUT_MS } from '../../../common/git-execution.js';
+import { USAGE_READ_TIMEOUT_MS } from '../../../common/usage.js';
 
 export default function createAllRoutes(workspaceDir: string, {
   registry,
@@ -166,8 +169,10 @@ export default function createAllRoutes(workspaceDir: string, {
   const inspectProject = executors.inspectProject;
   const httpIdleSeconds = getHttpIdleTimeoutSeconds();
   const gitBudget = httpIdleSeconds > 0 ? Math.max(1000, httpIdleSeconds * 1000 - 2000) : GH_DETAIL_TIMEOUT_MS;
+  const usageBudget = httpIdleSeconds > 0 ? Math.min(USAGE_READ_TIMEOUT_MS, Math.max(1000, httpIdleSeconds * 1000 - 2000)) : USAGE_READ_TIMEOUT_MS;
   return composeRoutes(
     createExecutorRoutes(executors),
+    createUsageRoutes(new UsageService(executors), usageBudget),
     createRuntimeRoutes(runtimeState, workspaceName),
     createAgentTurnReceiptRoutes(commandLedger),
     createChatSnapshotRoutes({

@@ -33,6 +33,7 @@ const NULLABLE_FACET_METHODS = {
   configurationValidation: ['validate'],
   sessionConfiguration: ['apply'],
   projectPathUpdates: ['prepare', 'commit', 'rollback'],
+  usageHistory: ['read'],
 } as const;
 
 export interface AgentIntegrationConformanceOptions {

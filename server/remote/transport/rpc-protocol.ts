@@ -32,13 +32,13 @@ type Call<Q, R> = { readonly request: Q; readonly result: R };
 // frames. Bump it with any change to what either side sends or accepts. Builds
 // of one release share a package version, so without the bump a mismatched
 // pair passes the handshake and fails mid-session instead.
-export const EXECUTOR_PROTOCOL_REVISION = 37;
+export const EXECUTOR_PROTOCOL_REVISION = 38;
 
 export const NULLABLE_AGENT_FACETS = [
   'readiness',
   'auth', 'commands', 'compaction', 'forking', 'steering', 'endpoints', 'singleQuery',
   'legacyHistoryImport', 'nativeHistoryImport', 'nativeActivity', 'nativeSessions',
-  'configurationValidation', 'sessionConfiguration', 'projectPathUpdates',
+  'configurationValidation', 'sessionConfiguration', 'projectPathUpdates', 'usageHistory',
 ] as const satisfies readonly (keyof AgentIntegration)[];
 
 export interface IntegrationManifest {
@@ -113,6 +113,7 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'projectPathUpdates.prepare': Call<Request<'projectPathUpdates', 'prepare'>, Result<'projectPathUpdates', 'prepare'>>;
   'projectPathUpdates.commit': Call<Request<'projectPathUpdates', 'commit'>, void>;
   'projectPathUpdates.rollback': Call<Request<'projectPathUpdates', 'rollback'>, void>;
+  'usageHistory.read': Call<WithoutSignal<Request<'usageHistory', 'read'>>, Result<'usageHistory', 'read'>>;
   'credentials.resolve': Call<WithoutSignal<Parameters<AgentHost['apiProviders']['resolveCredential']>[0]>, Awaited<ReturnType<AgentHost['apiProviders']['resolveCredential']>>>;
   // Settles the journaled calls lost sessions left outstanding; see `RpcContinuity`.
   'calls.reconcile': Call<{ readonly calls: readonly OutstandingCall[] }, { readonly states: readonly OutstandingCallState[] }>;
@@ -194,6 +195,7 @@ const CONTINUITY: Readonly<Record<ClassifiedMethod, RpcContinuity>> = {
   'projectPathUpdates.prepare': 'session',
   'projectPathUpdates.commit': 'journaled',
   'projectPathUpdates.rollback': 'journaled',
+  'usageHistory.read': 'journaled',
   'credentials.resolve': 'session',
   'calls.reconcile': 'session',
   'terminals.list': 'session',

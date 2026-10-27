@@ -38,6 +38,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
     configurationValidation: null,
     sessionConfiguration: null,
     projectPathUpdates: null,
+    usageHistory: null,
     catalog: {
       snapshot: async () => ({
         models: [],

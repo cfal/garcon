@@ -1302,6 +1302,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
 			m.workspace_open_surface({ surface: m.tickets_title() }),
+			m.workspace_open_surface({ surface: m.workspace_surface_usage() }),
 			m.workspace_chat_views(),
 			m.workspace_github_views(),
 			m.workspace_new_terminal(),
@@ -1344,7 +1345,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(
 				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
-			).toHaveLength(9),
+			).toHaveLength(10),
 		);
 		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
 
@@ -1501,7 +1502,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(
 				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
-			).toHaveLength(8),
+			).toHaveLength(9),
 		);
 		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
 		const trigger = screen.getByRole('button', { name: m.workspace_terminal_actions() });
@@ -1572,6 +1573,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			'chat-map',
 			'chat-canvas',
 			'chat-board',
+			'usage',
 		] as const;
 		const singletonSurfaces = kinds.map((kind) => portableSingletonDescriptor(kind));
 		runtime.surfaces = Object.fromEntries(
@@ -1660,6 +1662,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
 			m.workspace_open_surface({ surface: m.tickets_title() }),
+			m.workspace_open_surface({ surface: m.workspace_surface_usage() }),
 			m.workspace_chat_views(),
 			m.workspace_github_views(),
 		];
