@@ -4,17 +4,41 @@ import { resolveCodexModelCatalogPath, withCodexModelCatalog } from '../model-ca
 
 describe('Codex fallback model catalog', () => {
   it.each([
-    ['gpt-6.1-sol', 'low', ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], '2x speed, increased usage', 272_000],
-    ['gpt-6.1-terra', 'low', ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], '1.5x speed', 500_000],
-    ['gpt-6-sol', 'medium', ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], '1.5x speed', 272_000],
-    ['gpt-6-luna', 'medium', ['low', 'medium', 'high', 'xhigh', 'max'], '1.5x speed', 272_000],
-  ])('supplies verified native metadata for %s', async (
+    {
+      slug: 'gpt-6.1-sol',
+      defaultEffort: 'low',
+      expectedEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+      serviceTierDescription: '2x speed, increased usage',
+      contextWindow: 272_000,
+    },
+    {
+      slug: 'gpt-6.1-terra',
+      defaultEffort: 'low',
+      expectedEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+      serviceTierDescription: '1.5x speed',
+      contextWindow: 500_000,
+    },
+    {
+      slug: 'gpt-6-sol',
+      defaultEffort: 'medium',
+      expectedEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+      serviceTierDescription: '1.5x speed',
+      contextWindow: 272_000,
+    },
+    {
+      slug: 'gpt-6-luna',
+      defaultEffort: 'medium',
+      expectedEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      serviceTierDescription: '1.5x speed',
+      contextWindow: 272_000,
+    },
+  ])('supplies verified native metadata for $slug', async ({
     slug,
     defaultEffort,
     expectedEfforts,
     serviceTierDescription,
     contextWindow,
-  ) => {
+  }) => {
     const catalog = JSON.parse(await readFile(resolveCodexModelCatalogPath(), 'utf8'));
     const model = catalog.models.find((candidate) => candidate.slug === slug);
 

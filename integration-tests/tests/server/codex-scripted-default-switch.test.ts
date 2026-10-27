@@ -207,27 +207,28 @@ describe('Codex scripted default effort model switching', () => {
 
     await withIntegrationFixture('codex-scripted-terra-default', async (fixture) => {
       const chatId = fixture.newChatId();
-      const terraTurn = {
+      const terraDefaultEffort = configuredEffort ?? 'low';
+      const terraTurnOptions = {
         fixture,
         testEnvironment,
         chatId,
         model: 'gpt-6.1-terra' as const,
       };
-      const runTerra = (thinkingMode: 'none' | 'max') => runScriptedTurn({
-        ...terraTurn,
+      const runTerraTurn = (thinkingMode: 'none' | 'max') => runScriptedTurn({
+        ...terraTurnOptions,
         command: `Continue with Terra ${thinkingMode}.`,
         thinkingMode,
-        expectedEffort: thinkingMode === 'max' ? 'max' : configuredEffort ?? 'low',
+        expectedEffort: thinkingMode === 'max' ? 'max' : terraDefaultEffort,
       });
 
       await runScriptedTurn({
-        ...terraTurn,
+        ...terraTurnOptions,
         command: 'Start with Terra Default.',
         start: true,
-        expectedEffort: configuredEffort ?? 'low',
+        expectedEffort: terraDefaultEffort,
       });
-      await runTerra('max');
-      await runTerra('none');
+      await runTerraTurn('max');
+      await runTerraTurn('none');
 
       for (const thinkingMode of ['high', 'none'] as const) {
         const response = await fixture.client.fetch('/api/v1/chats/execution-settings', {
@@ -240,9 +241,12 @@ describe('Codex scripted default effort model switching', () => {
           body: { success: true, chatId, thinkingMode },
         });
       }
-      await runTerra('none');
+      await runTerraTurn('none');
 
-      for (const model of ['gpt-6-sol', 'gpt-6.1-terra'] as const) {
+      for (const [model, expectedEffort] of [
+        ['gpt-6-sol', configuredEffort ?? 'medium'],
+        ['gpt-6.1-terra', terraDefaultEffort],
+      ] as const) {
         const response = await fixture.client.fetch('/api/v1/chats/model', {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
@@ -255,7 +259,7 @@ describe('Codex scripted default effort model switching', () => {
           chatId,
           model,
           command: `Continue with ${model} Default.`,
-          expectedEffort: configuredEffort ?? (model === 'gpt-6-sol' ? 'medium' : 'low'),
+          expectedEffort,
         });
       }
       testEnvironment.model.assertSettled();
