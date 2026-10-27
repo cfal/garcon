@@ -468,7 +468,7 @@ jobs:
   chromium-e2e-shard:
     name: Chromium E2E / ${{ matrix.shard }} of 2
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

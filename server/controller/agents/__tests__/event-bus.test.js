@@ -34,6 +34,24 @@ function runEnded(outcome, error) {
 }
 
 describe('AgentEventBus', () => {
+  it('publishes an unpersisted failure once and fences it from a successor', async () => {
+    const bus = new AgentEventBus();
+    const failed = mock(() => undefined);
+    bus.onFailed(failed);
+    bus.trackTurn('chat-1', operation('turn-1'));
+    const failure = { code: 'TRANSCRIPT_UNAVAILABLE', message: 'Transcript storage failed' };
+
+    await bus.publishRunFailed('chat-1', 'turn-1', failure);
+    expect(failed).toHaveBeenCalledWith('chat-1', failure.message, failure.code,
+      expect.objectContaining({ turnId: 'turn-1', clientRequestId: 'request-turn-1' }));
+    expect(bus.getActiveTurn('chat-1')).toBeUndefined();
+    await bus.publishRunFailed('chat-1', 'turn-1', failure);
+    bus.trackTurn('chat-1', operation('turn-2'));
+    await bus.publishRunFailed('chat-1', 'turn-1', failure);
+    expect(failed).toHaveBeenCalledTimes(1);
+    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-2');
+  });
+
   it('returns a defensive snapshot and rejects an active identity overwrite', () => {
     const bus = new AgentEventBus();
     bus.trackTurn('chat-1', operation('turn-1'));

@@ -87,7 +87,10 @@ test("plain and formatted composers share Interface sizing on mouse and touch", 
             ? Math.max(16, (16 * Number(size)) / 14)
             : (16 * Number(size)) / 14;
           for (const mode of ["source", "formatted"] as const) {
-            await page.keyboard.press("Control+,");
+            await page
+              .locator("[data-composer]")
+              .getByRole("textbox")
+              .press("Control+,");
             const settings = page.getByRole("dialog", {
               name: "Settings",
               exact: true,

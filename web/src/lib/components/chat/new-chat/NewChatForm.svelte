@@ -701,6 +701,8 @@
 							if (form.isUpdatingPinnedPath) return;
 							form.projectPath = path;
 							form.clearError();
+							// Rechecks a newly created directory even when the field's path is unchanged.
+							form.validatePath();
 						},
 						onClose: () => (form.showBrowser = false),
 					}}

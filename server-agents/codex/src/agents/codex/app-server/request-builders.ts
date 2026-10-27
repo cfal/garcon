@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import { GPT_6_ASTRA_MODEL, GPT_6_1_SOL_MODEL, GPT_6_SOL_MODEL, GPT_6_LUNA_MODEL } from '@garcon/common/models';
+import { GPT_6_ASTRA_MODEL, GPT_6_1_SOL_MODEL, GPT_6_1_TERRA_MODEL, GPT_6_SOL_MODEL, GPT_6_LUNA_MODEL } from '@garcon/common/models';
 import type { CodexProviderConfig, CodexStartRequest } from '../runtime-types.js';
 import type { CodexSkillRef } from '../slash-command-discovery.js';
 import type {
@@ -184,7 +184,7 @@ function sandboxPolicyMatches(
 }
 
 function codexModelSupportsMaxEffort(model: string | undefined): boolean {
-  const maxEffortModels = [GPT_6_ASTRA_MODEL, GPT_6_1_SOL_MODEL, GPT_6_SOL_MODEL, GPT_6_LUNA_MODEL, 'gpt-5.6'];
+  const maxEffortModels = [GPT_6_ASTRA_MODEL, GPT_6_1_SOL_MODEL, GPT_6_1_TERRA_MODEL, GPT_6_SOL_MODEL, GPT_6_LUNA_MODEL, 'gpt-5.6'];
   return maxEffortModels.some(value => model === value || model?.endsWith(`:${value}`) === true)
     || model?.startsWith('gpt-5.6-') === true;
 }
