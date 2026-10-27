@@ -242,7 +242,7 @@ export class SessionCommands {
       );
     }
     const agentSettings = input.agentSettings ?? chat.agentSettingsById[chat.agentId];
-    if (!agentSettings || agentSettings.ownerId !== chat.agentId) {
+    if (agentSettings !== undefined && agentSettings.ownerId !== chat.agentId) {
       throw new CommandValidationError(
         'INCOMPLETE_EXECUTION_CONFIG',
         `The chat has no valid settings for agent ${chat.agentId}`,
