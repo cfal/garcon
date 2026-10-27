@@ -166,7 +166,7 @@
 		executorLabel: () => 'Local',
 		executorIdFor: () => 'local',
 		displayName: terminalDisplayName,
-		hosts: [{ id: 'local', label: 'Local', available: true, full: false }],
+		hosts: [{ id: 'local', instanceId: 'local-instance', label: 'Local', available: true, full: false }],
 		hasRemoteHosts: false,
 		canCreate: () => true,
 		ensureRuntime: async (selectedTerminalId: string) => {

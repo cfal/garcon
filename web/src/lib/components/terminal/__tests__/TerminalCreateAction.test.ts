@@ -18,8 +18,8 @@ it('keeps the launcher creation progress visible and blocks another create', asy
 function hosts(remoteAvailable = true, localFull = false) {
 	return {
 		hosts: [
-			{ id: 'local', label: 'Local', available: true, full: localFull },
-			{ id: 'remote', label: 'Build Server', available: remoteAvailable, full: false },
+			{ id: 'local', instanceId: 'local-instance', label: 'Local', available: true, full: localFull },
+			{ id: 'remote', instanceId: 'remote-instance', label: 'Build Server', available: remoteAvailable, full: false },
 		],
 		hasRemoteHosts: remoteAvailable,
 		canCreate: (executorId: string) => (executorId === 'local' ? !localFull : remoteAvailable),
