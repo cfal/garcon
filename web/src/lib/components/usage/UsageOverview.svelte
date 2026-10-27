@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import { agentLabelFor } from '$lib/agents/agent-labels';
-	import type { UsageMetric, UsageReport } from '$lib/usage/usage-report';
+	import { isCostUnknown, type UsageMetric, type UsageReport } from '$lib/usage/usage-report';
 	import {
 		formatCount,
 		formatPercent,
@@ -21,16 +21,19 @@
 	let { report, metric, dimmed }: Props = $props();
 
 	const format = $derived(metric === 'cost' ? formatUsd : formatTokens);
+	// An agent with no priced usage has an unknown cost, so it has no cost series.
 	const series = $derived(
-		report.agents.map((agent) => ({
-			id: agent.agentId,
-			label: agentLabelFor(agent.agentId),
-			color: usageAgentColor(agent.agentId),
-			values: report.daily.map((day) => {
-				const point = day.byAgent.get(agent.agentId);
-				return metric === 'cost' ? (point?.costUsd ?? 0) : (point?.totalTokens ?? 0);
-			}),
-		})),
+		report.agents
+			.filter((agent) => metric === 'tokens' || !isCostUnknown(agent))
+			.map((agent) => ({
+				id: agent.agentId,
+				label: agentLabelFor(agent.agentId),
+				color: usageAgentColor(agent.agentId),
+				values: report.daily.map((day) => {
+					const point = day.byAgent.get(agent.agentId);
+					return metric === 'cost' ? (point?.costUsd ?? 0) : (point?.totalTokens ?? 0);
+				}),
+			})),
 	);
 </script>
 
@@ -57,6 +60,7 @@
 		</div>
 
 		{#each report.agents as agent (agent.agentId)}
+			{@const costUnknown = isCostUnknown(agent)}
 			<svelte:boundary>
 				<div class="flex flex-col gap-1" data-usage-agent={agent.agentId}>
 					<div class="flex items-baseline justify-between gap-4">
@@ -77,19 +81,29 @@
 							</span>
 						</span>
 						<span class="shrink-0 text-sm font-medium text-foreground tabular-nums">
-							{metric === 'cost' ? formatUsd(agent.costUsd) : formatTokens(agent.totalTokens)}
+							{#if metric === 'tokens'}
+								{formatTokens(agent.totalTokens)}
+							{:else if costUnknown}
+								<span class="text-muted-foreground">{m.usage_unpriced()}</span>
+							{:else}
+								{formatUsd(agent.costUsd)}
+							{/if}
 						</span>
 					</div>
 					<span class="text-xs text-muted-foreground">
-						{metric === 'cost'
-							? m.usage_agent_cost_share({
-									share: formatPercent(agent.costShare),
-									tokens: formatTokens(agent.totalTokens),
-								})
-							: m.usage_agent_token_share({
-									share: formatPercent(agent.tokenShare),
-									cost: formatUsd(agent.costUsd),
-								})}
+						{#if metric === 'tokens'}
+							{m.usage_agent_token_share({
+								share: formatPercent(agent.tokenShare),
+								cost: costUnknown ? m.usage_unpriced() : formatUsd(agent.costUsd),
+							})}
+						{:else if costUnknown}
+							{m.usage_agent_unpriced({ tokens: formatTokens(agent.totalTokens) })}
+						{:else}
+							{m.usage_agent_cost_share({
+								share: formatPercent(agent.costShare),
+								tokens: formatTokens(agent.totalTokens),
+							})}
+						{/if}
 					</span>
 				</div>
 				{#snippet failed()}

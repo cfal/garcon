@@ -78,6 +78,15 @@ test('bounds slow reads and reports them as timed out', async () => {
   expect(summary.agents[0]).toMatchObject({ status: 'failed', message: 'Reading usage took too long' });
 });
 
+test('answers on time even when a read ignores its signal', async () => {
+  const service = new UsageService(executors({
+    claude: { read: () => new Promise(() => {}) },
+    codex: { read: async () => report() },
+  }));
+  const summary = await service.readSummary('local', WINDOW, { timeoutMs: 20 });
+  expect(summary.agents.map((agent) => [agent.agentId, agent.status])).toEqual([['claude', 'failed'], ['codex', 'ok']]);
+});
+
 test('propagates caller cancellation and executor unavailability', async () => {
   const caller = new AbortController();
   const service = new UsageService(executors({

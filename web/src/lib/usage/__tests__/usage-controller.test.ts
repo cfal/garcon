@@ -85,9 +85,7 @@ describe('UsageController', () => {
 		reads[1]!.reject(new Error('Executor is unavailable'));
 		await vi.waitFor(() => expect(controller.error).toBe('Executor is unavailable'));
 		expect(controller.summary?.executorId).toBe('local');
-
-		controller.reconcileExecutors(new Set(['local']));
-		expect(controller.executorId).toBe('local');
+		expect(controller.executorId).toBe('22222222-2222-4222-8222-222222222222');
 	});
 
 	it('defers reads while hidden and persists window and metric only', () => {

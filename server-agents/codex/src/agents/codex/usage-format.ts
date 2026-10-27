@@ -1,4 +1,5 @@
 import { isRecord } from '@garcon/common/json';
+import { parseFirstJsonlValue } from '@garcon/server-agent-common/lib/jsonl';
 import {
   parseTimestampMs,
   type MalformedUsage,
@@ -121,12 +122,12 @@ function codexSpeed(serviceTier: unknown): UsageSpeed {
 }
 
 export function parseCodexUsageLine(line: string, state: CodexUsageState): UsageRecord | MalformedUsage | null {
-  let entry: unknown;
-  try {
-    entry = JSON.parse(line);
-  } catch {
-    return null;
-  }
+  // Tolerates a line that lost its newline the way the history loader does.
+  const parsed = parseFirstJsonlValue(line);
+  // Only marked lines are parsed, so a corrupt one may have held a request or its context.
+  if (parsed.kind === 'invalid' || parsed.kind === 'incomplete') return { malformed: true, timestampMs: null };
+  if (parsed.kind === 'empty') return null;
+  const entry = parsed.value;
   if (!isRecord(entry) || !isRecord(entry.payload)) return null;
   const payload = entry.payload;
 
@@ -225,7 +226,9 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
     },
     cacheWrite1hTokens: 0,
     speed: state.speed,
-    dedupeKey: null,
+    // Garcon's JSONL fork copies these events verbatim under a new session id, so the
+    // event's time and counters, not its session, identify the request across copies.
+    dedupeKey: `codex:${timestampMs}:${state.model}:${signature}:${cumulative === null ? '' : JSON.stringify(cumulative)}`,
   };
 }
 

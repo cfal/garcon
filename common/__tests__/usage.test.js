@@ -8,6 +8,7 @@ import {
   parseUsageReadRequest,
   parseUsageSummary,
   usageDayFormatter,
+  isUsageWindowRetained,
   usageTotalTokens,
   usageWindowLength,
 } from '../usage.ts';
@@ -52,6 +53,12 @@ describe('usage contract', () => {
     expect(usageDayFormatter('America/Los_Angeles')(instant)).toBe('2026-10-14');
     expect(usageDayFormatter('Pacific/Kiritimati')(new Date('2026-12-31T11:00:00Z'))).toBe('2027-01-01');
     expect(() => usageDayFormatter('Nowhere/Zone')).toThrow(RangeError);
+  });
+
+  it('accepts only windows executors still retain', () => {
+    const now = Date.parse('2026-10-27T12:00:00Z');
+    expect(isUsageWindowRetained({ sinceDay: '2026-07-30', untilDay: '2026-10-27', timeZone: 'UTC' }, now)).toBe(true);
+    expect(isUsageWindowRetained({ sinceDay: '2026-07-01', untilDay: '2026-07-20', timeZone: 'UTC' }, now)).toBe(false);
   });
 
   it('accepts windows of one to ninety days in a known zone', () => {

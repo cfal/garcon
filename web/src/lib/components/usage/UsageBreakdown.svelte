@@ -147,9 +147,15 @@
 								{#each report.agents as agent (agent.agentId)}
 									{@const point = day.byAgent.get(agent.agentId)}
 									<td class="py-2 pl-4 text-muted-foreground">
-										{metric === 'cost'
-											? formatUsd(point?.costUsd ?? 0)
-											: formatTokens(point?.totalTokens ?? 0)}
+										{#if metric === 'tokens'}
+											{formatTokens(point?.totalTokens ?? 0)}
+										{:else if isCostUnknown(agent)}
+											<span aria-hidden="true">–</span><span class="sr-only"
+												>{m.usage_unpriced()}</span
+											>
+										{:else}
+											{formatUsd(point?.costUsd ?? 0)}
+										{/if}
 									</td>
 								{/each}
 								<td class="py-2 pl-4 text-foreground">

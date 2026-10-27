@@ -1,5 +1,7 @@
 import { promises as fs, type Dirent } from 'node:fs';
 import path from 'node:path';
+import { createZstdDecompress } from 'node:zlib';
+import { USAGE_RETENTION_DAYS } from '@garcon/common/usage';
 import { hasNodeErrorCode } from '../lib/errors.js';
 import type { EventLoopSteps } from '../shared/event-loop.js';
 import {
@@ -20,7 +22,7 @@ const MAX_DIRECTORY_DEPTH = 6;
 const MAX_LINE_BYTES = 32 * 1024 * 1024;
 // Usage older than any selectable window is dropped at parse time, and cached
 // files untouched for this long are forgotten.
-const RETENTION_MS = 92 * 86_400_000;
+const RETENTION_MS = USAGE_RETENTION_DAYS * 86_400_000;
 const GUARD_BYTES = 64;
 const PLAIN_SUFFIX = '.jsonl';
 // Codex can compress cold rollouts in place; compressed files are complete and never grow.
@@ -116,7 +118,14 @@ export class TranscriptUsageScanner<State> {
       const cached = this.#cache.get(file.path);
       let entry: CachedTranscript<State> | null = cached ?? null;
       if (!cached || cached.size !== file.size || cached.mtimeMs !== file.mtimeMs) {
-        entry = await this.#read(file, cached, retainedSinceMs, steps);
+        const read = await this.#read(file, cached, retainedSinceMs, steps);
+        if (read === 'gone') {
+          // Removed or moved since listing, as Codex does when archiving or compressing;
+          // a moved copy is read where it now lives.
+          this.#cache.delete(file.path);
+          continue;
+        }
+        entry = read;
         if (entry) this.#cache.set(file.path, entry);
       }
       if (!entry) {
@@ -139,19 +148,22 @@ export class TranscriptUsageScanner<State> {
     cached: CachedTranscript<State> | undefined,
     retainedSinceMs: number,
     steps: EventLoopSteps,
-  ): Promise<CachedTranscript<State> | null> {
+  ): Promise<CachedTranscript<State> | 'gone' | null> {
     let handle: fs.FileHandle;
     try {
       handle = await fs.open(file.path, 'r');
-    } catch {
-      return null;
+    } catch (error) {
+      return hasNodeErrorCode(error, 'ENOENT') ? 'gone' : null;
     }
     try {
       let parsed: ParsedLines<State>;
       let base: Pick<CachedTranscript<State>, 'records' | 'malformed'> = { records: [], malformed: [] };
       if (file.path.endsWith(COMPRESSED_SUFFIX)) {
-        const content = await Bun.zstdDecompress(await handle.readFile());
-        parsed = await this.#parseLines([content], 0, this.#options.format.createState(), steps);
+        // Streams the decompressed lines, so a large rollout is never held whole.
+        const source = handle.createReadStream({ highWaterMark: READ_CHUNK_BYTES, autoClose: false });
+        const decompressed = source.pipe(createZstdDecompress());
+        source.on('error', (error) => decompressed.destroy(error));
+        parsed = await this.#parseLines(decompressed as AsyncIterable<Buffer>, 0, this.#options.format.createState(), steps);
       } else {
         // Only a strictly grown file resumes; same size with a new mtime means rewritten content.
         const resume = cached && file.size > cached.size

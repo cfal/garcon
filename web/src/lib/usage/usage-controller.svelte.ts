@@ -36,7 +36,9 @@ interface UsageRequest {
  * Owns the Usage surface: the selected executor, window, and metric, and the
  * summary read for them. Each read is fenced by generation, so a slow reply for
  * a previous selection never replaces a newer one, and the previous summary
- * stays visible, marked stale, while its replacement loads.
+ * stays visible, marked stale, while its replacement loads. A selected executor
+ * that disappears stays selected and reports its unavailability; the surface never
+ * falls back to Local on its own.
  */
 export class UsageController implements PortableSingletonController {
 	windowDays = $state<UsageWindowDays>(30);
@@ -121,11 +123,6 @@ export class UsageController implements PortableSingletonController {
 		this.executorId = executorId;
 		this.selectedModelKey = null;
 		this.#refreshIfVisible();
-	}
-
-	/** Returns to Local when the selected executor no longer exists. */
-	reconcileExecutors(executorIds: ReadonlySet<string>): void {
-		if (!executorIds.has(this.executorId)) this.selectExecutor(LOCAL_EXECUTOR_ID);
 	}
 
 	openModel(key: string): void {

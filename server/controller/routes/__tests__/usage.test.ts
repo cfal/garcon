@@ -8,7 +8,7 @@ const REMOTE_EXECUTOR = '22222222-2222-4222-8222-222222222222';
 const WINDOW = { sinceDay: '2026-09-28', untilDay: '2026-10-27', timeZone: 'Europe/Berlin' };
 
 function route(readSummary: UsageService['readSummary']) {
-  const routes = createUsageRoutes({ readSummary }, 1_000);
+  const routes = createUsageRoutes({ readSummary }, 1_000, () => Date.parse('2026-10-27T12:00:00Z'));
   return (query: string, signal?: AbortSignal) => {
     const url = new URL(`http://localhost/api/v1/usage?${query}`);
     return routes['/api/v1/usage']!.GET!(new Request(url, { signal }), url);
@@ -44,6 +44,7 @@ test('rejects malformed, duplicated, or oversized windows before reading', async
     new URLSearchParams({ ...WINDOW, untilDay: '2026-09-01' }),
     new URLSearchParams({ ...WINDOW, timeZone: 'Mars/Olympus' }),
     new URLSearchParams({ ...WINDOW, executorId: 'not-an-executor' }),
+    new URLSearchParams({ sinceDay: '2026-07-01', untilDay: '2026-07-20', timeZone: 'UTC' }),
     new URLSearchParams([...Object.entries(WINDOW), ['sinceDay', '2026-10-01']]),
   ];
   for (const query of invalid) {

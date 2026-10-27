@@ -4,6 +4,8 @@ import { isRecord } from './json.js';
 export const USAGE_WINDOW_DAYS = [7, 30, 90] as const;
 export type UsageWindowDays = typeof USAGE_WINDOW_DAYS[number];
 export const MAX_USAGE_WINDOW_DAYS = 90;
+// Executors keep parsed usage for this long; older usage cannot be reported.
+export const USAGE_RETENTION_DAYS = 92;
 // Bounds one agent's report: a day-by-model bucket per used model per day.
 export const MAX_USAGE_BUCKETS = 10_000;
 export const MAX_USAGE_MODEL_NAME_LENGTH = 200;
@@ -144,6 +146,15 @@ export function usageDayFormatter(timeZone: string): (time: number | Date) => st
     }
     return `${year.padStart(4, '0')}-${month}-${day}`;
   };
+}
+
+/**
+ * Whether a window starts recently enough for executors to still hold its usage.
+ * Compares UTC days with a day of slack, so every zone's "today" window passes.
+ */
+export function isUsageWindowRetained(request: UsageReadRequest, nowMs: number): boolean {
+  const oldest = new Date(nowMs - (USAGE_RETENTION_DAYS - 1) * DAY_MS).toISOString().slice(0, 10);
+  return request.sinceDay >= oldest;
 }
 
 /** Number of calendar days in an inclusive window. */

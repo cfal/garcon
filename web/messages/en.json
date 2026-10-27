@@ -3204,6 +3204,7 @@
 	"usage_excludes_unpriced": "Excludes {tokens} tokens without a known price",
 	"usage_agent_cost_share": "{share} of cost · {tokens} tokens",
 	"usage_agent_token_share": "{share} of tokens · {cost}",
+	"usage_agent_unpriced": "No known price · {tokens} tokens",
 	"usage_daily_cost": "Daily cost",
 	"usage_daily_tokens": "Daily processed tokens",
 	"usage_total": "Total",

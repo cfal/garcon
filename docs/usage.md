@@ -1,7 +1,8 @@
 # Usage
 
 The Usage surface reports token usage and estimated API cost per executor, for
-7, 30, or 90 calendar days in the viewer's time zone. It reads the native
+7, 30, or 90 calendar days in the viewer's time zone. Executors keep 92 days of
+usage, so windows that start earlier are rejected. It reads the native
 Claude and Codex transcripts on that executor, so it includes sessions Garcon
 did not start. Open it from the sidebar menu, a window's add menu, or the
 command palette.
@@ -19,16 +20,19 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
   `$CLAUDE_CONFIG_DIR/projects` (default `~/.claude/projects`), including
   subagent transcripts. Codex reads `$CODEX_HOME/sessions` and
   `$CODEX_HOME/archived_sessions` (default `~/.codex`), including rollouts
-  Codex compressed to `.jsonl.zst`; while both forms of one rollout exist, the
-  plain file is read. Other integrations report no usage facet.
+  Codex compressed to `.jsonl.zst`, which are decompressed as a stream; while both
+  forms of one rollout exist, the plain file is read, and a file moved away
+  mid-scan is read where it now lives. Other integrations report no usage facet.
 - Transcripts are parsed on the executor that owns them. A remote executor
   answers over the bulk lane with day-by-model buckets, not raw records; the
   controller validates the report and never reads worker paths itself.
 - The controller validates every integration report, Local or remote. A failed,
   invalid, or timed-out read becomes a `failed` agent entry, so one provider
   cannot hide another's usage, and the surface shows the failure rather than an
-  empty period. An unavailable executor fails the request with
-  `EXECUTOR_UNAVAILABLE`.
+  empty period. The controller stops waiting at its deadline even if a read has
+  not yet observed its signal. An unavailable executor fails the request with
+  `EXECUTOR_UNAVAILABLE`; the surface keeps that executor selected and never
+  falls back to Local.
 - A transcript root that is absent reports `missing`; one that exists but
   cannot be read, and unreadable transcripts, report `partial`. Malformed usage
   lines mark a report `partial` only when they fall inside the window, or when
@@ -45,14 +49,21 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
 
 - Claude writes one line per assistant content block, each repeating the
   message usage. Lines sharing `message.id:requestId` count once, at their
-  earliest timestamp; forks and resumed sessions copy the same keys.
+  earliest timestamp; Claude Code's own resumes copy the same keys. Entries a
+  Garcon fork copied carry `forkedFrom` and are skipped, because their requests
+  were billed in the source session (the fork also restamps its last copy).
 - Codex `token_count` events take their model from the latest `turn_context`
   and their tier from the latest `thread_settings_applied`. Cumulative counters
   reconcile each request delta; inconsistent events are skipped and reported as
-  malformed. Fork sessions skip the parent history they copy, recognized as the
-  burst of restamped events right after the fork's `session_meta`: legacy
-  rollouts record no explicit boundary (`forked_from_ordinal_exclusive` is set
-  only for reverts and paginated history).
+  malformed. Garcon's JSONL fork copies events verbatim under a new session id,
+  so a request's identity is its event time, model, and counters, and copies
+  count once. Codex's native forks restamp the copied history; those copies are
+  recognized as the burst of events right after the fork's `session_meta`,
+  since legacy rollouts record no explicit boundary
+  (`forked_from_ordinal_exclusive` is set only for reverts and paginated
+  history).
+- Both parsers read the first JSON value of a line that lost its newline, as
+  the history loaders do; an unparseable usage line counts as malformed.
 - Reasoning tokens are part of output and are never billed twice.
 - Cache hit rate is cache reads over all input, so cache writes count as misses.
 

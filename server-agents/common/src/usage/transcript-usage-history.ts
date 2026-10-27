@@ -1,4 +1,9 @@
-import { MAX_USAGE_BUCKETS, parseUsageReadRequest, type AgentUsageReport } from '@garcon/common/usage';
+import {
+  isUsageWindowRetained,
+  MAX_USAGE_BUCKETS,
+  parseUsageReadRequest,
+  type AgentUsageReport,
+} from '@garcon/common/usage';
 import { AgentIntegrationError, type AgentUsageHistory } from '@garcon/server-agent-interface';
 import { EventLoopSteps } from '../shared/event-loop.js';
 import { USAGE_PRICING_AS_OF } from './model-prices.js';
@@ -17,7 +22,9 @@ export function createTranscriptUsageHistory<State>(
   return {
     async read(request): Promise<AgentUsageReport> {
       const window = parseUsageReadRequest(request);
-      if (!window) throw new AgentIntegrationError('OPERATION_UNSUPPORTED', 'Invalid usage window', false);
+      if (!window || !isUsageWindowRetained(window, (options.now ?? Date.now)())) {
+        throw new AgentIntegrationError('OPERATION_UNSUPPORTED', 'Invalid usage window', false);
+      }
       // One read is one operation: scanning and aggregation share its step budget.
       const steps = new EventLoopSteps(options.operation);
       const sinceMs = Date.parse(`${window.sinceDay}T00:00:00Z`) - MTIME_SLACK_MS;

@@ -33,7 +33,6 @@ const format: TranscriptUsageFormat<null> = {
       dedupeKey: typeof entry.id === 'string' ? entry.id : null,
     };
   },
-  malformedRecords: () => 0,
 };
 
 let root: string;
@@ -47,6 +46,8 @@ afterEach(async () => {
 });
 
 const window = { sinceDay: '2026-10-01', untilDay: '2026-10-31', timeZone: 'UTC' };
+// Fixed, so retention bounds do not drift with the real date.
+const now = () => Date.parse('2026-10-27T12:00:00Z');
 
 test('reports priced day-by-model buckets that satisfy the wire contract', async () => {
   await mkdir(path.join(root, 'project'), { recursive: true });
@@ -56,7 +57,7 @@ test('reports priced day-by-model buckets that satisfy the wire contract', async
     { at: '2026-10-06T12:00:00Z', model: 'unknown-model', session: 's2', input: 10, output: 5 },
   ];
   await writeFile(path.join(root, 'project', 'a.jsonl'), rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
-  const history = createTranscriptUsageHistory({ operation: 'usage-test', format, roots: () => [root] });
+  const history = createTranscriptUsageHistory({ operation: 'usage-test', format, roots: () => [root], now });
   const report = await history.read(window);
   expect(parseAgentUsageReport(report)).toEqual(report);
   expect(report).toMatchObject({ status: 'ok', scannedFiles: 1, distinctSessions: 2, pricingAsOf: USAGE_PRICING_AS_OF });
@@ -78,23 +79,25 @@ test('marks a report partial only for malformed usage inside the window', async 
     { at: '2026-09-20T12:00:00Z', model: 'claude-opus-5-5', broken: true },
     { at: '2026-10-05T12:00:00Z', model: 'claude-opus-5-5', input: 10, output: 1 },
   ].map((row) => JSON.stringify(row)).join('\n') + '\n');
-  const history = createTranscriptUsageHistory({ operation: 'usage-test', format: malformedFormat, roots: () => [root] });
+  const history = createTranscriptUsageHistory({ operation: 'usage-test', format: malformedFormat, roots: () => [root], now });
   expect(await history.read(window)).toMatchObject({ status: 'ok', malformedRecords: 0 });
   expect(await history.read({ ...window, sinceDay: '2026-09-15' })).toMatchObject({ status: 'partial', malformedRecords: 1 });
 });
 
 test('reports missing transcript roots as missing, not as an error', async () => {
-  const history = createTranscriptUsageHistory({ operation: 'usage-test', format, roots: () => [path.join(root, 'absent')] });
+  const history = createTranscriptUsageHistory({ operation: 'usage-test', format, roots: () => [path.join(root, 'absent')], now });
   expect(await history.read(window)).toMatchObject({ status: 'missing', buckets: [], scannedFiles: 0 });
 });
 
 test('rejects invalid windows', async () => {
-  const history = createTranscriptUsageHistory({ operation: 'usage-test', format, roots: () => [root] });
+  const history = createTranscriptUsageHistory({ operation: 'usage-test', format, roots: () => [root], now });
   for (const invalid of [
     { ...window, untilDay: '2026-09-01' },
     { ...window, sinceDay: '2026-01-01' },
     { ...window, timeZone: 'Not/AZone' },
     { ...window, sinceDay: '2026-02-30' },
+    // Older than the usage executors retain.
+    { sinceDay: '2026-07-01', untilDay: '2026-07-20', timeZone: 'UTC' },
   ]) {
     await expect(history.read(invalid)).rejects.toBeInstanceOf(AgentIntegrationError);
   }

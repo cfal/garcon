@@ -56,8 +56,29 @@ describe('Codex usage lines', () => {
       totals: { uncachedInputTokens: 19_239 - 11_008, cachedInputTokens: 11_008, cacheWriteTokens: 0, outputTokens: 299, reasoningTokens: 116 },
       cacheWrite1hTokens: 0,
       speed: 'standard',
-      dedupeKey: null,
+      dedupeKey: expect.stringMatching(/^codex:/),
     });
+  });
+
+  test('give a verbatim fork copy the same request identity under its new session', () => {
+    const parent = started();
+    const copy = createCodexUsageState();
+    parseCodexUsageLine(JSON.stringify({ type: 'session_meta', timestamp: '2026-10-02T00:00:00Z', payload: { id: 'forked-session' } }), copy);
+    parseCodexUsageLine(turnContext(), copy);
+    const line = tokenCount(counters(100, 10), counters(100, 10));
+    const original = parseCodexUsageLine(line, parent);
+    const copied = parseCodexUsageLine(line, copy);
+    expect(copied?.sessionId).toBe('forked-session');
+    expect(copied?.dedupeKey).toBe(original?.dedupeKey ?? 'missing');
+    const next = parseCodexUsageLine(tokenCount(counters(50, 5), counters(150, 15), '2026-10-01T05:20:00.000Z'), parent);
+    expect(next?.dedupeKey).not.toBe(original?.dedupeKey);
+  });
+
+  test('report a corrupt marked line as malformed and parse a line that lost its newline', () => {
+    const state = started();
+    expect(parseLine('{"type":"event_msg","payload":{"type":"token_count"', state)).toEqual({ malformed: true, timestampMs: null });
+    const joined = tokenCount(counters(100, 10)) + JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message' } });
+    expect(parseCodexUsageLine(joined, state)?.totals.outputTokens).toBe(10);
   });
 
   test('do not consume counters before a model is known', () => {

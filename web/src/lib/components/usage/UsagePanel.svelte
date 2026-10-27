@@ -2,7 +2,6 @@
 	import ChartSpline from '@lucide/svelte/icons/chart-spline';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import { untrack } from 'svelte';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getExecutors } from '$lib/context';
@@ -27,7 +26,10 @@
 
 	const executors = getExecutors();
 	const titleId = $derived(`usage-title-${presentation.replace(/[^a-zA-Z0-9_-]/g, '-')}`);
-	const report = $derived(controller.report);
+	// A failed read for a new executor or window must not leave the previous selection's
+	// numbers on screen under it.
+	const shownSummary = $derived(controller.stale && controller.error ? null : controller.summary);
+	const report = $derived(shownSummary ? controller.report : null);
 	const dimmed = $derived(controller.stale || (controller.loading && report !== null));
 	const windowOptions = $derived(
 		USAGE_WINDOW_DAYS.map((days) => ({ value: days, label: m.usage_window_days({ days }) })),
@@ -37,18 +39,12 @@
 		{ value: 'tokens' as const, label: m.usage_metric_tokens() },
 	]);
 	const missingAgents = $derived(
-		controller.summary?.agents
+		shownSummary?.agents
 			.filter((agent) => agent.status === 'missing')
 			.map((agent) => agentLabelFor(agent.agentId)) ?? [],
 	);
 	// An empty window with a failed read is unknown usage, not zero usage.
 	const readFailed = $derived(report?.issues.some((issue) => issue.status === 'failed') ?? false);
-
-	$effect(() => {
-		if (!executors.hasSnapshot) return;
-		const executorIds = new Set(executors.executors.map((executor) => executor.id));
-		untrack(() => controller.reconcileExecutors(executorIds));
-	});
 </script>
 
 <section
@@ -67,10 +63,10 @@
 				<div class="min-w-0">
 					<h1 id={titleId} class="text-base font-semibold">{m.workspace_surface_usage()}</h1>
 					<p class="text-xs text-muted-foreground">
-						{#if controller.summary}
+						{#if shownSummary}
 							{m.usage_window_range({
-								since: formatDayWithYear(controller.summary.sinceDay),
-								until: formatDayWithYear(controller.summary.untilDay),
+								since: formatDayWithYear(shownSummary.sinceDay),
+								until: formatDayWithYear(shownSummary.untilDay),
 							})}
 						{:else}
 							{m.usage_description()}
@@ -152,18 +148,25 @@
 
 			{#if report}
 				{#each report.issues as issue (issue.agentId)}
-					<p
-						class="flex items-start gap-2 text-xs text-muted-foreground"
-						data-usage-issue={issue.agentId}
-					>
-						<CircleAlert class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-						{issue.status === 'failed'
-							? m.usage_issue_failed({
-									agent: agentLabelFor(issue.agentId),
-									message: issue.message ?? '',
-								})
-							: m.usage_issue_partial({ agent: agentLabelFor(issue.agentId) })}
-					</p>
+					<svelte:boundary>
+						<p
+							class="flex items-start gap-2 text-xs text-muted-foreground"
+							data-usage-issue={issue.agentId}
+						>
+							<CircleAlert class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+							{issue.status === 'failed'
+								? m.usage_issue_failed({
+										agent: agentLabelFor(issue.agentId),
+										message: issue.message ?? '',
+									})
+								: m.usage_issue_partial({ agent: agentLabelFor(issue.agentId) })}
+						</p>
+						{#snippet failed()}
+							<p class="text-xs text-muted-foreground">
+								{m.usage_row_failed({ name: agentLabelFor(issue.agentId) })}
+							</p>
+						{/snippet}
+					</svelte:boundary>
 				{/each}
 			{/if}
 

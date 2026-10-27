@@ -1,4 +1,5 @@
 import { isRecord } from '@garcon/common/json';
+import { parseFirstJsonlValue } from '@garcon/server-agent-common/lib/jsonl';
 import {
   parseTimestampMs,
   tokenCount,
@@ -17,14 +18,16 @@ const CLAUDE_SYNTHETIC_MODEL = '<synthetic>';
  * the same key.
  */
 export function parseClaudeUsageLine(line: string): UsageRecord | MalformedUsage | null {
-  let entry: unknown;
-  try {
-    entry = JSON.parse(line);
-  } catch {
-    // Only lines carrying a usage key are parsed, so a corrupt one may have held a request.
-    return { malformed: true, timestampMs: null };
-  }
+  // Tolerates a line that lost its newline the way the history loader does.
+  const parsed = parseFirstJsonlValue(line);
+  // Only lines carrying a usage key are parsed, so a corrupt one may have held a request.
+  if (parsed.kind === 'invalid' || parsed.kind === 'incomplete') return { malformed: true, timestampMs: null };
+  if (parsed.kind === 'empty') return null;
+  const entry = parsed.value;
   if (!isRecord(entry) || entry.type !== 'assistant' || !isRecord(entry.message)) return null;
+  // Garcon's fork copies source entries with this marker, restamping the last one. The
+  // request was billed in the source session.
+  if (isRecord(entry.forkedFrom)) return null;
   const message = entry.message;
   const usage = message.usage;
   if (!isRecord(usage)) return null;

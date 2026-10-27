@@ -69,6 +69,16 @@ describe('Claude usage lines', () => {
     expect(parseClaudeUsageLine(JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5-5', usage: {} } }))).toBeNull();
   });
 
+  test('skip entries a Garcon fork copied from another session', () => {
+    const entry = JSON.parse(assistantLine({})) as Record<string, unknown>;
+    const copied = JSON.stringify({ ...entry, timestamp: '2026-10-27T00:00:00.000Z', forkedFrom: { sessionId: 'source', messageUuid: 'uuid' } });
+    expect(parseClaudeUsageLine(copied)).toBeNull();
+  });
+
+  test('parse the first value of a line that lost its newline', () => {
+    expect(usageOf(assistantLine({}) + JSON.stringify({ type: 'user' }))?.model).toBe('claude-opus-5-5');
+  });
+
   test('report a corrupt line that carried a usage key as malformed', () => {
     expect(parseClaudeUsageLine('{"type":"assistant","usage":')).toEqual({ malformed: true, timestampMs: null });
   });

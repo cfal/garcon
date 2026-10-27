@@ -5,7 +5,7 @@ import type { getUsageSummary } from '$lib/api/usage';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import { UsageController } from '$lib/usage/usage-controller.svelte';
-import { usageAgent, usageSummary } from '$lib/usage/__tests__/usage-fixtures';
+import { usageAgent, usageBucket, usageSummary } from '$lib/usage/__tests__/usage-fixtures';
 import UsagePanel from '../UsagePanel.svelte';
 
 const executors = new ExecutorsStore(async () => [localExecutor]);
@@ -87,6 +87,45 @@ describe('UsagePanel', () => {
 			screen.getByText('Claude usage could not be read: Reading usage took too long'),
 		).toBeTruthy();
 		expect(screen.queryByText('No usage in this period')).toBeNull();
+	});
+
+	it('shows an agent with no priced usage as unpriced, not free', async () => {
+		renderPanel(
+			resolved(
+				usageSummary({
+					agents: [
+						usageAgent('claude', [usageBucket('2026-10-26', 'claude-opus-5-5', { costUsd: 4 })]),
+						usageAgent('codex', [
+							usageBucket('2026-10-26', 'custom-model', {
+								costUsd: 0,
+								categoryCostUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
+								cacheSavingsUsd: 0,
+								unpricedRecords: 3,
+								unpricedTokens: 1_050,
+							}),
+						]),
+					],
+				}),
+			),
+		);
+		await screen.findByText('No known price · 1.05K tokens');
+		const codex = document.querySelector<HTMLElement>('[data-usage-agent="codex"]')!;
+		expect(within(codex).getByText('Unpriced')).toBeTruthy();
+		expect(within(codex).getByText('No known price · 1.05K tokens')).toBeTruthy();
+		expect(within(codex).queryByText('$0.00')).toBeNull();
+	});
+
+	it("drops the previous executor's numbers when switching to it fails", async () => {
+		const read = vi
+			.fn<typeof getUsageSummary>()
+			.mockImplementationOnce(resolved(usageSummary()))
+			.mockRejectedValueOnce(new Error('Executor is unavailable'));
+		const controller = renderPanel(read);
+		await screen.findByText('$13.00');
+		controller.selectExecutor(remoteExecutor.id);
+		expect(await screen.findByRole('alert')).toBeTruthy();
+		expect(screen.queryByText('$13.00')).toBeNull();
+		expect(document.querySelector('[data-usage-overview]')).toBeNull();
 	});
 
 	it('reports a failed read and retries it', async () => {
