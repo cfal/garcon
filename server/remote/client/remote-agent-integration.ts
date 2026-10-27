@@ -164,7 +164,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
     };
     this.producers = {
       detach: (binding) => { this.#forgetBinding(binding.id); },
-      get scope() { return sessions.latest().manifests.get(manifest.descriptor.id)!.scope; },
+      scope: manifest.scope,
       bind: async (request, options) => {
         const { backing, timeoutMs } = await sessions.acquire('primary', options);
         if (!isAgentResourceRef(request.binding, 'producer', backing.manifests.get(this.descriptor.id)!.scope)) throw new AgentCallError('rejected', 'Producer scope mismatch', 'STALE_RESOURCE');
@@ -214,6 +214,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
       }),
       migrate: (request) => call('settings.migrate', request),
     };
+    this.settings.parse(manifest.settings.defaults);
     this.lifecycle = {
       start: async () => { if (!this.#started) { await call('lifecycle.start', null); this.#started = true; } },
       stop: async () => { this.#started = false; await call('lifecycle.stop', null); },
@@ -330,13 +331,17 @@ export class RemoteAgentIntegration implements AgentIntegration {
     } : null;
   }
 
-  async initializeReplacement(backing: RemoteSessionBacking, initial = false): Promise<void> {
-    if (initial || this.#migrated) await backing.rpc.call(this.descriptor.id, 'lifecycle.migrateOwnedStorage', null);
-    if (initial || this.#started) await backing.rpc.call(this.descriptor.id, 'lifecycle.start', null);
-    if (initial) { this.#migrated = true; this.#started = true; }
+  async initialize(backing: RemoteSessionBacking, assertCurrent: () => void): Promise<void> {
+    assertCurrent();
+    await backing.rpc.call(this.descriptor.id, 'lifecycle.migrateOwnedStorage', null);
+    assertCurrent();
+    this.#migrated = true;
+    await backing.rpc.call(this.descriptor.id, 'lifecycle.start', null);
+    assertCurrent();
+    this.#started = true;
   }
 
-  retire(): void {
+  abandonBindings(): void {
     for (const id of [...this.#bindings.keys()]) this.#forgetBinding(id);
     this.#failedBindings.clear();
     if (this.#ackTimer) clearTimeout(this.#ackTimer);
@@ -379,7 +384,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
       });
     }
     for (const state of suspended) {
-      if (this.#bindings.get(state.ref.id) !== state) continue;
+      if (this.#bindings.get(state.ref.id) !== state || state.backing !== backing) continue;
       const report = reports.get(state.ref.id);
       if (report) {
         state.resumeReport = { report, runIds: lostRunIds.get(state)! };

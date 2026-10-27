@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TerminalStreamServerMessage } from '../../../common/terminal.js';
 import { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
-import { SessionTransport } from '../../../server/remote/transport/session-transport.js';
+import { TestSessionTransport as SessionTransport } from '../../../server/remote/__tests__/test-session-transport.js';
 import { TerminalRpcServer } from '../../../server/remote/server/terminal-rpc-server.js';
 import { TerminalRuntime } from '../../../server/runtime/terminals/runtime.js';
 import { withTimeout } from '../../support/deferred.js';

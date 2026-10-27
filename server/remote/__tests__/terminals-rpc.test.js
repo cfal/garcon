@@ -26,13 +26,15 @@ for (const dialer of ['controller', 'worker']) test(`terminal RPC preserves proc
   const worker = new WebSocketLink({ ...options, role: 'worker' });
   const controller = new WebSocketLink({ ...options, role: 'controller' });
   const scopes = [];
-  worker.onSession(transport => scopes.push(servePairedRuntime(worker, transport, new ExecutionRuntime({
+  const native = new ExecutionRuntime({
     id: options.executorId, workspaceDir: homedir(), projectBasePath: homedir(), integrations: [], terminalRuntime: runtime, resolveCredential: async () => null,
-  }), new ProducerRelay())));
+  });
+  const relay = new ProducerRelay();
+  worker.onSession(transport => scopes.push(servePairedRuntime(worker, transport, native, relay)));
   const connected = connectRemoteExecutor(controller);
   if (dialer === 'controller') controller.dial(worker.listen()); else worker.dial(controller.listen());
   try {
-    const executor = await connected;
+    const executor = (await connected).runtime;
     const service = await executor.getTerminalService();
     const inventory = await service.list(authority);
     const request = { executorId: options.executorId, expectedTerminalRuntimeId: inventory.terminalRuntimeId, requestId: 'create', requestedInitialWorkingDirectory: null };
@@ -56,7 +58,7 @@ for (const dialer of ['controller', 'worker']) test(`terminal RPC preserves proc
     controller.current.close(new Error('Replace logical session'));
     await until(() => executor.availability === 'ready' && scopes.length === 2);
     const nextInventory = await service.list(authority);
-    expect((await executor.getInfo()).instanceId).not.toBe(before.instanceId);
+    expect((await executor.getInfo()).instanceId).toBe(before.instanceId);
     expect(nextInventory.terminalRuntimeId).toBe(inventory.terminalRuntimeId);
     expect(nextInventory.attachmentEpoch).not.toBe(inventory.attachmentEpoch);
     expect(nextInventory.terminals[0].terminalId).toBe(terminal.terminalId);
@@ -72,6 +74,8 @@ for (const dialer of ['controller', 'worker']) test(`terminal RPC preserves proc
   } finally {
     await controller.dispose(); await worker.dispose();
     for (const scope of scopes) await scope.dispose();
+    relay.dispose();
+    await native.dispose();
     runtime.shutdown();
   }
 }, 15000);

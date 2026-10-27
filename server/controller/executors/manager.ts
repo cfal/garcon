@@ -11,7 +11,8 @@ import { DomainError } from '../../common/domain-error.js';
 import { createLogger, type Logger } from '../../common/log.js';
 import { ExecutorConfigStore, type RemoteExecutorConfig } from './config-store.js';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.js';
-import { RemoteExecutorClient, type RemoteExecutorInventory } from '../../remote/client/executor-client.js';
+import { RemoteExecutorClient } from '../../remote/client/executor-client.js';
+import type { RemoteExecutorGeneration } from '../../remote/client/executor-generation.js';
 import { shouldLogLinkFailure, WebSocketLink } from '../../remote/transport/websocket-link.js';
 import { ExecutorSocketAdmission } from '../../remote/transport/socket-admission.js';
 import { ExecutorReferenceWrites } from './reference-writes.js';
@@ -27,12 +28,8 @@ interface ManagedRemote {
   config: RemoteExecutorConfig;
   executor: RemoteExecutorClient | null;
   link: WebSocketLink | null;
-  integrations: IntegrationRegistry | null;
-  knownIntegrations: IntegrationRegistry | null;
-  inventory: RemoteExecutorInventory | null;
-  info: ExecutorInfo | null;
+  published: { readonly generation: RemoteExecutorGeneration; readonly integrations: IntegrationRegistry } | null;
   error: ExecutorSnapshot['lastError'];
-  preparation: object | null;
   cliLease: AbortController;
 }
 
@@ -87,7 +84,8 @@ export class ExecutorManager {
     if (this.#disposed || this.#changing.has(executorId)) return false;
     if (executorId === LOCAL_EXECUTOR_ID) return this.local.availability === 'ready';
     const entry = this.#remotes.get(executorId);
-    return Boolean(entry?.config.enabled && !entry.preparation && entry.integrations && entry.executor?.availability === 'ready');
+    return Boolean(entry?.config.enabled && entry.published && !entry.published.generation.token.retired
+      && entry.executor?.generation === entry.published.generation && entry.executor.availability === 'ready');
   }
 
   isReconnecting(executorId: string): boolean {
@@ -101,16 +99,16 @@ export class ExecutorManager {
     if (!this.isReady(executorId) && !this.#holdsCalls(executorId)) {
       throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
     }
-    return executorId === LOCAL_EXECUTOR_ID ? this.local : this.#remotes.get(executorId)!.executor!;
+    return executorId === LOCAL_EXECUTOR_ID ? this.local : this.#remotes.get(executorId)!.published!.generation.runtime;
   }
 
   integrationsFor(executorId: string): IntegrationRegistry {
     this.requireExecutor(executorId);
-    return executorId === LOCAL_EXECUTOR_ID ? this.localIntegrations : this.#remotes.get(executorId)!.integrations!;
+    return executorId === LOCAL_EXECUTOR_ID ? this.localIntegrations : this.#remotes.get(executorId)!.published!.integrations;
   }
 
   knownIntegration(target: AgentExecutionTarget): AgentIntegration | null {
-    return (target.executorId === LOCAL_EXECUTOR_ID ? this.localIntegrations : this.#remotes.get(target.executorId)?.knownIntegrations)?.get(target.agentId) ?? null;
+    return (target.executorId === LOCAL_EXECUTOR_ID ? this.localIntegrations : this.#remotes.get(target.executorId)?.published?.integrations)?.get(target.agentId) ?? null;
   }
 
   requireIntegration(target: AgentExecutionTarget): AgentIntegration {
@@ -144,10 +142,10 @@ export class ExecutorManager {
       allowExecutorManagement: entry.config.allowExecutorManagement,
       direction: entry.config.connection.kind,
       availability: this.#snapshotAvailability(entry.config.id),
-      projectBasePath: entry.info?.projectBasePath ?? null, lastError: entry.error,
-      instanceId: entry.info?.instanceId ?? null,
+      projectBasePath: entry.published?.generation.info.projectBasePath ?? null, lastError: entry.error,
+      instanceId: entry.published?.generation.info.instanceId ?? null,
       bulk: entry.executor?.bulkStatus ?? { availability: 'offline', lastError: null },
-      executorServices: { files: entry.info?.services.files === true, git: entry.info?.services.git === true, gh: entry.info?.services.gh === true, terminals: entry.info?.services.terminals === true, directoryCreation: entry.info?.services.directoryCreation === true },
+      executorServices: { files: entry.published?.generation.info.services.files === true, git: entry.published?.generation.info.services.git === true, gh: entry.published?.generation.info.services.gh === true, terminals: entry.published?.generation.info.services.terminals === true, directoryCreation: entry.published?.generation.info.services.directoryCreation === true },
     }))];
   }
 
@@ -254,9 +252,8 @@ export class ExecutorManager {
     for (const config of executors) {
       if (this.#remotes.has(config.id)) continue;
       const known = previous.get(config.id);
-      const entry: ManagedRemote = { config, executor: null, link: null, integrations: null,
-        knownIntegrations: known?.knownIntegrations ?? null, inventory: known?.inventory ?? null,
-        info: known?.info ?? null, error: null, preparation: null, cliLease: new AbortController() };
+      const entry: ManagedRemote = { config, executor: null, link: null,
+        published: known?.published ?? null, error: null, cliLease: new AbortController() };
       this.#remotes.set(config.id, entry);
       if (!this.config.isDurable(config.id)) {
         entry.error = { code: 'EXECUTOR_UNAVAILABLE', message: 'Executor configuration durability is unknown. Restart the controller.' };
@@ -318,54 +315,39 @@ export class ExecutorManager {
           }
           return this.#cliDispatcher.request(call.request, access, guardReply);
         }
-        if (call.method !== 'credentials.resolve' || !this.#current(entry)
-          || !this.options.integrations.some((integration) => integration.integrationId === call.integrationId)) {
+        if (call.method !== 'credentials.resolve' || !this.#current(entry)) {
           throw new AgentCallError('rejected', 'Operation is not permitted on the controller');
         }
+        const assertOrigin = () => {
+          const lane = rpc.transport.lane === 'primary' ? link.current : link.bulk;
+          if (!this.#current(entry) || lane !== rpc.transport) throw new AgentCallError('rejected', 'Executor credential origin expired');
+          entry.executor!.assertIntegrationOrigin(rpc, call.integrationId);
+        };
+        assertOrigin();
+        guardReply(assertOrigin);
         return this.options.resolveCredential({ executorId: config.id, agentId: call.integrationId, reference: call.request.reference, signal });
-      }), reportError, entry.inventory, { logger: this.logger });
+      }), reportError, { logger: this.logger, prepareGeneration: (generation) => {
+        const published = entry.published?.generation === generation ? entry.published : {
+          generation, integrations: new IntegrationRegistry({ instances: [...generation.integrations.values()] }),
+        };
+        return () => { entry.published = published; entry.error = null; };
+      } });
       entry.executor.onBulkChanged(() => { if (this.#current(entry)) this.#changed(); });
       entry.executor.onAvailabilityChanged((value) => {
         if (!this.#current(entry)) return;
-        if (value === 'ready') {
-          const preparation = {};
-          entry.preparation = preparation;
-          void this.#prepare(entry, preparation).catch(() => {
-            if (!this.#current(entry) || entry.preparation !== preparation) return;
-            reportError('Executor inventory could not be initialized');
-            link.current?.close(new Error('Executor inventory initialization failed'));
-          });
-        } else {
-          entry.preparation = null;
-          this.#publishAvailability(config.id, value);
-          this.#changed();
-        }
+        this.#publishAvailability(config.id, value);
+        this.#changed();
       });
       if (config.connection.kind === 'controller-connects') link.dial(config.connection.targetUrl);
     }
   }
 
-  async #prepare(entry: ManagedRemote, preparation: object): Promise<void> {
-    const executor = entry.executor!;
-    const info = await executor.getInfo();
-    const integrations = entry.integrations ?? new IntegrationRegistry({ instances: await Promise.all(info.integrationIds.map((id) => executor.getAgentIntegration(id))) });
-    if (!this.#current(entry) || entry.preparation !== preparation || executor.availability !== 'ready') return;
-    entry.info = info;
-    entry.integrations = integrations;
-    entry.knownIntegrations = integrations;
-    entry.inventory = executor.inventory;
-    entry.error = null;
-    entry.preparation = null;
-    this.#publishAvailability(entry.config.id, 'ready');
-    this.#changed();
-  }
-
-  // A reconnected session is being prepared while the client reports ready.
   #holdsCalls(executorId: string): boolean {
     if (this.#disposed || this.#changing.has(executorId)) return false;
     const entry = this.#remotes.get(executorId);
     const availability = entry?.executor?.availability;
-    return Boolean(entry?.config.enabled && entry.integrations && (availability === 'reconnecting' || availability === 'ready'));
+    return Boolean(entry?.config.enabled && entry.published && !entry.published.generation.token.retired
+      && entry.executor?.generation === entry.published.generation && availability === 'reconnecting');
   }
 
   #current(entry: ManagedRemote): boolean { return !this.#disposed && this.#remotes.get(entry.config.id) === entry; }

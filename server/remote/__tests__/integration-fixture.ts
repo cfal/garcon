@@ -121,11 +121,12 @@ export async function remoteFixture(
   const connected = connectRemoteExecutor(controller, undefined, resumption.client);
   if (dialer === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
-  const executor = await connected;
+  const client = await connected;
+  const executor = client.runtime;
   return {
-    controller, worker, executor, generations, journal,
+    controller, worker, executor, client, generations, journal,
     async dispose() {
-      await executor.dispose(); await worker.dispose();
+      await client.dispose(); await worker.dispose();
       await Promise.all(scopes.map((scope) => scope.dispose()));
       relay.dispose();
       journal.dispose();

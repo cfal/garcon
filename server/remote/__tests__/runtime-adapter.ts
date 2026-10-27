@@ -16,7 +16,7 @@ export async function connectRemoteExecutor(
 ) {
   if (!link.executorId) throw new Error('A controller link is required');
   const ready = Promise.withResolvers<void>();
-  const executor = new RemoteExecutorClient(link.executorId, link, setupRpc, undefined, null, options);
+  const executor = new RemoteExecutorClient(link.executorId, link, setupRpc, undefined, options);
   const unsubscribe = executor.onAvailabilityChanged(value => {
     if (value === 'ready') ready.resolve();
     if (value === 'disposed') ready.reject(new Error('Executor disposed before readiness'));
@@ -69,6 +69,6 @@ export async function runtimeAdapter(runtime: ExecutionRuntimeApi, backend: Runt
     relay.dispose();
     journal.dispose();
   };
-  try { return { executor: await connected, dispose }; }
+  try { return { executor: (await connected).runtime, dispose }; }
   catch (error) { await dispose(); throw error; }
 }

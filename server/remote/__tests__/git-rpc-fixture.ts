@@ -30,7 +30,7 @@ export async function gitRpcFixture(dialer: 'controller' | 'worker' = 'controlle
   const connecting = connectRemoteExecutor(controller);
   if (dialer === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
-  const executor = await connecting;
+  const executor = (await connecting).runtime;
   return {
     root, projectPath, local, executor, controller, worker,
     async dispose() {

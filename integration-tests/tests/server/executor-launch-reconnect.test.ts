@@ -53,7 +53,7 @@ type RemoteRouterContext = Awaited<ReturnType<typeof remoteRouter>> & {
   readonly ledger: TranscriptLedgerService;
   readonly native: ReturnType<typeof integrationFixture>;
   readonly controller: WebSocketLink;
-  readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>;
+  readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>['runtime'];
   readonly controllerFault: ReturnType<typeof outgoingFault>;
   readonly workerFault: ReturnType<typeof outgoingFault>;
   readonly workerPath: ReturnType<typeof outgoingHold>;
@@ -107,7 +107,7 @@ async function withRemoteRouter(
   }), options);
   if (dialer === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
-  const remote = await connected;
+  const remote = (await connected).runtime;
   try {
     const routed = await remoteRouter({ root, chats, ledger, remote });
     await run({
@@ -131,7 +131,7 @@ async function remoteRouter({ root, chats, ledger, remote }: {
   readonly root: string;
   readonly chats: ChatRegistry;
   readonly ledger: TranscriptLedgerService;
-  readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>;
+  readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>['runtime'];
 }) {
   const integration = await remote.getAgentIntegration('test');
   const integrations = new IntegrationRegistry({ instances: [integration] });
@@ -175,7 +175,7 @@ async function remoteRouter({ root, chats, ledger, remote }: {
   return { router, integration, restored };
 }
 
-function availability(remote: Awaited<ReturnType<typeof connectRemoteExecutor>>, expected: ExecutorAvailability): Promise<void> {
+function availability(remote: Awaited<ReturnType<typeof connectRemoteExecutor>>['runtime'], expected: ExecutorAvailability): Promise<void> {
   return new Promise(resolve => {
     const off = remote.onAvailabilityChanged(value => { if (value === expected) { off(); resolve(); } });
   });
@@ -195,7 +195,7 @@ function holdNextReconnect(native: ReturnType<typeof integrationFixture>): () =>
 }
 
 // A round trip on the current session, after which earlier requests have reached the worker.
-async function integrationRoundTrip(remote: Awaited<ReturnType<typeof connectRemoteExecutor>>): Promise<void> {
+async function integrationRoundTrip(remote: Awaited<ReturnType<typeof connectRemoteExecutor>>['runtime']): Promise<void> {
   await (await remote.getAgentIntegration('test')).execution.runningSessions();
 }
 

@@ -183,6 +183,7 @@ export class ExecutorRpc {
   #replyAcks: string[] = [];
   #replyAckTimer: ReturnType<typeof setTimeout> | null = null;
   #handler: RpcHandler | null = null;
+  #assertDispatch: (() => void) | null = null;
   #producer: ((frame: AgentProducerFrame) => void) | null = null;
   #producerAck: ((acknowledgements: readonly ProducerAcknowledgement[]) => void) | null = null;
   #terminal: ((frame: TerminalNotification) => void) | null = null;
@@ -258,6 +259,7 @@ export class ExecutorRpc {
   }
 
   handle(handler: RpcHandler): void { this.#handler = handler; }
+  guardDispatch(assertCurrent: () => void): void { this.#assertDispatch = assertCurrent; }
   get reconciled(): boolean { return this.#reconciled; }
   get active(): boolean { return !this.#retired && this.#outgoingOpen && this.transport.connected; }
   onBulkControl(handler: (frame: BulkConnectionControl) => void): void { this.#bulkControl = handler; }
@@ -302,6 +304,7 @@ export class ExecutorRpc {
     }
     if (options?.signal?.aborted) throw new AgentCallError('not-dispatched', 'Executor is unavailable');
     if (this.#retired || !this.transport.connected) throw new ExecutorSessionLostError('not-dispatched', 'Executor is unavailable');
+    this.#assertDispatch?.();
     assertRpcSupported(this.transport.profile, method, request);
     assertRpcLane(method, request, this.transport.lane);
     if (!this.#outgoingOpen && method !== 'calls.reconcile') throw new AgentCallError('not-dispatched', 'Executor bulk connection is recovering');
@@ -426,6 +429,7 @@ export class ExecutorRpc {
     if (!sameContinuity(call.protocol.continuity, this.transport.continuity)) {
       throw new ExecutorSessionLostError('unknown', 'A call cannot be replayed in another executor continuity.');
     }
+    this.#assertDispatch?.();
     assertRpcSupported(call.protocol.profile, call.method, call.request);
     const seq = this.#sent + 1;
     const payload = JSON.stringify({

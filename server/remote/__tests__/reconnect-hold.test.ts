@@ -7,7 +7,7 @@ import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../common/executor-discon
 import { readBefore } from '../../common/interactive-deadline.js';
 import { integrationFixture, outgoingFault, outgoingHold, remoteFixture, requestFor } from './integration-fixture.js';
 
-function nextAvailability(executor: RemoteExecutorClient, expected: ExecutorAvailability): Promise<void> {
+function nextAvailability(executor: Pick<RemoteExecutorClient, 'onAvailabilityChanged'>, expected: ExecutorAvailability): Promise<void> {
   return new Promise((resolve) => {
     const off = executor.onAvailabilityChanged((value) => { if (value === expected) { off(); resolve(); } });
   });
@@ -283,7 +283,7 @@ for (const dialer of ['controller', 'worker'] as const) {
           return 'disconnect';
         }
         // Holds the replacement worker's replies after this one, so reconciliation stalls.
-        if (lost && frame.method === 'lifecycle.start') hold.holdAfter((reply) => JSON.parse(reply).id === frame.id);
+        if (lost && frame.method === 'executor.describe') hold.holdAfter((reply) => JSON.parse(reply).id === frame.id);
         return null;
       };
     });
@@ -435,7 +435,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       const pinned = { timeoutMs: 5_000, instanceId: crypto.randomUUID() };
 
       await expect(projects.inspect({ projectPath: '/test-project' }, pinned))
-        .rejects.toMatchObject({ outcome: 'not-dispatched', message: 'The executor restarted before the request was sent.' });
+        .rejects.toMatchObject({ outcome: 'not-dispatched', code: 'STALE_RESOURCE' });
       expect(inspect).not.toHaveBeenCalled();
     } finally { await fixture.dispose(); }
   });
