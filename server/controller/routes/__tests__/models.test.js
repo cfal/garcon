@@ -247,7 +247,6 @@ function discoveryFixture() {
         captureCatalog: service.capture.bind(service),
         getAgentCatalogEntry: service.getAgentCatalogEntry.bind(service),
         getAgentCatalogEntries: service.getAgentCatalogEntries.bind(service),
-        requiresStrictModelDiscovery: service.requiresStrictModelDiscovery.bind(service),
         assertAgentAvailable: (agentId, id) => {
           if (!directory.list(id).some(item => item.descriptor.id === agentId)) throw new Error('Unknown agent');
         },

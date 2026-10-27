@@ -1678,7 +1678,7 @@ describe('REST chat command routes', () => {
     expect(body.permissionMode).toBe('manualBypass');
     expect(agent.agents.updateSessionSettings).toHaveBeenCalledWith(CHAT_ID, {
       permissionMode: 'manualBypass',
-    }, undefined, expect.any(AbortSignal));
+    }, undefined, expect.any(AbortSignal), undefined);
   });
 
   it.each(['expectedAgentOwnershipEpoch', 'expectedExecutorInstanceId', 'expectedSettingsSchemaVersion'])(

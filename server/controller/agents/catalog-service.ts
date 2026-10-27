@@ -73,11 +73,6 @@ export class AgentCatalogService {
     return this.deps.endpointResolver.getModelOptions(agentId, effectiveExecutorId(executorId)).length > 0;
   }
 
-  requiresStrictModelDiscovery(agentId: string, executorId?: string | null): boolean {
-    const integration = this.deps.directory.get(agentId, executorId);
-    return integration ? this.#requiresStrictByAgent.get(integration) ?? false : false;
-  }
-
   capture(executorId?: string | null): AgentCatalogCapture {
     const inventory = this.deps.directory.captureInventory(executorId);
     const byId = new Map(inventory.integrations.map(integration => [integration.descriptor.id, integration]));

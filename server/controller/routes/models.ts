@@ -2,7 +2,8 @@
 // the registry.
 
 import { catalogResponseFromSnapshot } from './model-catalog-response.js';
-import { type ModelCatalog, type ModelCatalogResponseCache, type ModelCatalogResponseBody } from '../agents/model-catalog-cache.js';
+import { type ModelCatalog, type ModelCatalogResponseCache } from '../agents/model-catalog-cache.js';
+import type { ModelCatalogResponse } from '../../../common/model-catalog.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { AgentCatalogEntry, AgentModelOption } from '../../../common/agents.js';
 import { executorIdFromUrl } from './executor-target.js';
@@ -23,8 +24,8 @@ function staleModelsFromDiscoveryError(error: unknown): AgentModelOption[] {
 function modelDiscoveryUnavailableResponse(
   error: unknown,
   executorInstanceId: string,
-  catalog: ModelCatalogResponseBody['catalog'],
-  entry: AgentCatalogEntry | undefined,
+  apiProviders: ModelCatalogResponse['catalog']['apiProviders'],
+  entry: AgentCatalogEntry,
 ): Response {
   const reason = error instanceof Error ? error.message : String(error);
   const staleModels = staleModelsFromDiscoveryError(error);
@@ -32,20 +33,20 @@ function modelDiscoveryUnavailableResponse(
     executorInstanceId: string;
     error: string;
     reason: string;
-    catalog?: ModelCatalogResponseBody['catalog'];
+    catalog?: ModelCatalogResponse['catalog'];
   } = {
     executorInstanceId,
     error: 'Model discovery unavailable',
     reason,
   };
-  if (staleModels.length > 0 && entry) {
+  if (staleModels.length > 0) {
     body.catalog = {
       agents: [{
         ...entry,
         defaultModel: entry.defaultModel || staleModels[0]?.value || '',
         models: staleModels,
       }],
-      apiProviders: catalog.apiProviders,
+      apiProviders,
     };
   }
   return Response.json(body, { status: 503 });
@@ -80,7 +81,7 @@ export default function createModelsRoutes({
           entry = await captured.getAgentCatalogEntry(agentId, { strict: true }) ?? entry;
         } catch (error) {
           captured.assertCurrent();
-          return modelDiscoveryUnavailableResponse(error, captured.executorInstanceId, { agents: [entry], apiProviders }, entry);
+          return modelDiscoveryUnavailableResponse(error, captured.executorInstanceId, apiProviders, entry);
         }
         captured.assertCurrent();
       }

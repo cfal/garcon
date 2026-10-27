@@ -110,7 +110,6 @@ export interface AgentRegistryServiceContract {
     attachment: { readonly mimeType: string; readonly sizeBytes: number },
     executorId?: string | null,
   ): FileAttachmentAdmission;
-  requiresStrictModelDiscovery(agentId: string, executorId?: string | null): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined, executorId?: string | null): boolean;
   currentTranscriptViewId(chatId: string, signal?: AbortSignal): Promise<string>;
   hasMatchingInput(
@@ -348,10 +347,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       return { kind: 'text-too-large', maxBytes: limit };
     }
     return { kind: 'accepted' };
-  }
-
-  requiresStrictModelDiscovery(agentId: string, executorId?: string | null): boolean {
-    return this.#catalog.requiresStrictModelDiscovery(agentId, executorId);
   }
 
   startSession(chatId: string, command: string, opts: StartSessionOptions = {}): Promise<void> {

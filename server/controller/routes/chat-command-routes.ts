@@ -436,9 +436,7 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
       }
       const hasPatch = Object.keys(patch).length > 0;
       const updated = hasPatch
-        ? settingsFence
-          ? await agents.updateSessionSettings(chatId, patch, expectedEpoch, request.signal, settingsFence)
-          : await agents.updateSessionSettings(chatId, patch, expectedEpoch, request.signal)
+        ? await agents.updateSessionSettings(chatId, patch, expectedEpoch, request.signal, settingsFence)
         : chat;
       return Response.json({
         success: true,
