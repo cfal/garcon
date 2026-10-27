@@ -16,19 +16,23 @@ for (const direction of directions) {
   ];
   for (const [controller, worker] of pairs) {
     test(`${artifacts.stage}: core workflows and controller restart ${controller.sourceSha.slice(0, 8)}/${worker.sourceSha.slice(0, 8)} (${direction})`, async () => {
-      const pair = await CompatibilityPair.start(controller, worker, direction);
+      let pair: CompatibilityPair | undefined;
       try {
+        pair = await CompatibilityPair.start(controller, worker, direction);
         expect(pair.controller.authToken).toBeNull();
         expect(pair.controller.credentials).toBeNull();
         const result = await coreWorkflow(pair);
+        await cliRestartContexts(pair, 'capture-cli-context');
         await pair.restartController(artifacts.current);
         expect(pair.controller.authToken).toBeNull();
         expect(await pair.driver({ kind: 'terminal-resume', executorId: pair.executorId,
           terminalId: stringField(result, 'terminalId'), terminalRuntimeId: stringField(result, 'terminalRuntimeId'),
           previousControllerId: stringField(result, 'controllerId'), workerConfig: pair.workerDirs.config,
         })).toEqual({ retained: true });
-      } catch (error) { await diagnostics(pair, error); throw error; }
-      finally { await pair.dispose(); }
+        await cliRestartContexts(pair, 'check-cli-restart');
+        await coreWorkflow(pair);
+      } catch (error) { await diagnostics(direction, pair, error); throw error; }
+      finally { await pair?.dispose(); }
     }, 240_000);
   }
 
@@ -36,12 +40,14 @@ for (const direction of directions) {
     ? artifacts.baselines.flatMap(baseline => [[baseline, baseline], [artifacts.current, baseline]] as const)
     : [[artifacts.current, artifacts.current]];
   for (const [controller, initialWorker] of replacements) {
-    test(`${artifacts.stage}: fixed controller ${controller.sourceSha.slice(0, 8)}, worker ${initialWorker.sourceSha.slice(0, 8)} -> current -> original (${direction})`, async () => {
-      const pair = await CompatibilityPair.start(controller, initialWorker, direction);
+    const successors = initialWorker === artifacts.current ? [artifacts.current] : [artifacts.current, initialWorker];
+    const sequence = [initialWorker, ...successors].map(worker => worker.sourceSha.slice(0, 8)).join(' -> ');
+    test(`${artifacts.stage}: fixed controller ${controller.sourceSha.slice(0, 8)}, worker ${sequence} (${direction})`, async () => {
+      let pair: CompatibilityPair | undefined;
       try {
+        pair = await CompatibilityPair.start(controller, initialWorker, direction);
         const controllerPid = pair.controller.pid;
         await coreWorkflow(pair);
-        const successors = artifacts.baselines.length ? [artifacts.current, initialWorker] : [artifacts.current];
         for (const worker of successors) {
           const ready = await pair.replaceWorker(worker);
           expect(pair.controller.pid).toBe(controllerPid);
@@ -50,14 +56,15 @@ for (const direction of directions) {
           expect(catalog.agents).toContainEqual(expect.objectContaining({ id: 'shell' }));
           await coreWorkflow(pair);
         }
-      } catch (error) { await diagnostics(pair, error); throw error; }
-      finally { await pair.dispose(); }
+      } catch (error) { await diagnostics(direction, pair, error); throw error; }
+      finally { await pair?.dispose(); }
     }, 360_000);
   }
 
   test(`real worker inventory/schema replacement preserves incompatible saved settings (${direction})`, async () => {
-    const pair = await CompatibilityPair.start(artifacts.current, artifacts.current, direction, 'original');
+    let pair: CompatibilityPair | undefined;
     try {
+      pair = await CompatibilityPair.start(artifacts.current, artifacts.current, direction, 'original');
       const before = await pair.driver({ kind: 'catalog', executorId: pair.executorId });
       expect(before.agents).toContainEqual({ id: 'compat-primary', label: 'Original', schemaVersion: 1, fileMimeTypes: ['text/plain'] });
       expect(before.agents).toContainEqual(expect.objectContaining({ id: 'compat-removed' }));
@@ -81,7 +88,7 @@ for (const direction of directions) {
           const resumed = await pair.driver({ kind: 'synthetic-turn', executorId: pair.executorId,
             projectPath: pair.workerDirs.project, schemaVersion: 1, chatId });
           if (inventory === 'schema') {
-            expect(resumed).toMatchObject({ accepted: true, finished: false });
+            expect(resumed).toMatchObject({ accepted: true, finished: false, error: 'Invalid settings for compat-primary' });
             expect(await readFile(join(pair.workerDirs.root, 'effects.jsonl'), 'utf8')).toBe(effects);
             const fresh = await pair.driver({ kind: 'synthetic-turn', executorId: pair.executorId,
               projectPath: pair.workerDirs.project, schemaVersion: 2 });
@@ -90,8 +97,8 @@ for (const direction of directions) {
         }
         expect(await pair.driver({ kind: 'saved-settings', chatId })).toEqual(saved);
       }
-    } catch (error) { await diagnostics(pair, error); throw error; }
-    finally { await pair.dispose(); }
+    } catch (error) { await diagnostics(direction, pair, error); throw error; }
+    finally { await pair?.dispose(); }
   }, 240_000);
 }
 
@@ -104,8 +111,20 @@ async function coreWorkflow(pair: CompatibilityPair): Promise<Record<string, unk
   return result;
 }
 
-async function diagnostics(pair: CompatibilityPair, error: unknown): Promise<void> {
+async function cliRestartContexts(pair: CompatibilityPair, kind: 'capture-cli-context' | 'check-cli-restart'): Promise<void> {
+  for (const [index, artifact] of [artifacts.current, ...artifacts.baselines].entries()) {
+    for (const runtime of ['controller', 'executor'] as const) {
+      const result = await pair.cliDriver(artifact, { version: 1, kind, runtime,
+        configDir: runtime === 'controller' ? pair.controllerDirs.config : pair.workerDirs.config,
+        contextPath: join(pair.root, `cli-context-${index}-${runtime}.json`),
+      });
+      expect(result).toEqual(kind === 'capture-cli-context' ? { captured: true } : { staleRejected: true, freshSucceeded: true });
+    }
+  }
+}
+
+async function diagnostics(direction: string, pair: CompatibilityPair | undefined, error: unknown): Promise<void> {
   const directory = join(artifacts.current.repoRoot, 'integration-tests/artifacts/compatibility');
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, `${Date.now()}-${pair.direction}.log`), `${String(error)}\n${pair.diagnostics()}`);
+  await writeFile(join(directory, `${Date.now()}-${direction}.log`), `${String(error)}\n${pair?.diagnostics() ?? ''}`);
 }

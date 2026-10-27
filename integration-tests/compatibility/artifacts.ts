@@ -63,7 +63,7 @@ export async function downloadArchive(url: string, destination: string, digest: 
   assert.equal(sha256(await readFile(destination)), digest, 'Immutable artifact digest mismatch');
 }
 
-export async function prepareArtifacts(): Promise<{
+export async function prepareArtifacts(input?: unknown): Promise<{
   current: CompatibilityArtifact;
   baselines: readonly CompatibilityArtifact[];
   stage: BaselineManifest['stage'];
@@ -71,7 +71,7 @@ export async function prepareArtifacts(): Promise<{
 }> {
   const current = { ...CURRENT_ARTIFACT, sourceSha: await commandOutput(['git', 'rev-parse', 'HEAD']) };
   const packageVersion = (await Bun.file(join(current.repoRoot, 'package.json')).json()).version;
-  const manifest = validateManifest(await Bun.file(new URL('./baselines.json', import.meta.url)).json(), packageVersion);
+  const manifest = validateManifest(input ?? await Bun.file(new URL('./baselines.json', import.meta.url)).json(), packageVersion);
   const scratch = join(homedir(), 'tmp');
   await mkdir(scratch, { recursive: true });
   const root = await mkdtemp(join(scratch, 'garcon-compatibility-artifacts-'));

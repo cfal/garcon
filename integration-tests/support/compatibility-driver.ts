@@ -74,7 +74,8 @@ async function execute(client: GarconTestClient, command: CompatibilityCommand):
           agentSettings: { ownerId: 'compat-primary', schemaVersion: command.schemaVersion, values: { mode: 'synthetic' } },
         });
         const terminal = await client.waitForTurnTerminal(chatId, receipt.turnId);
-        return { chatId, accepted: true, finished: terminal.type === 'agent-run-finished' };
+        return { chatId, accepted: true, finished: terminal.type === 'agent-run-finished',
+          error: terminal.type === 'agent-run-failed' ? terminal.error : null };
       } catch (error) {
         if (!(error instanceof Error) || !('status' in error)) throw error;
         return { chatId, accepted: false, status: error.status, message: error.message };
@@ -163,6 +164,26 @@ async function execute(client: GarconTestClient, command: CompatibilityCommand):
 
 async function run(): Promise<Record<string, unknown>> {
   if (input.kind === 'prepare-auth') return prepareFixtureAuth(input.configDir);
+  if (input.kind === 'capture-cli-context') {
+    const connection = await discoverRuntime({ configDir: input.configDir, runtime: input.runtime });
+    await writeFile(input.contextPath, JSON.stringify(connection), { mode: 0o600 });
+    return { captured: true };
+  }
+  if (input.kind === 'check-cli-restart') {
+    const previous: Awaited<ReturnType<typeof discoverRuntime>> = JSON.parse(await readFile(input.contextPath, 'utf8'));
+    const stale = new GarconClient(previous);
+    assert.equal(await stale.verifyRuntime(), false);
+    const failure = await rejectionOf(stale.getScheduledPrompts());
+    assert(failure instanceof Error && 'status' in failure);
+    if (input.runtime === 'executor') {
+      assert('errorCode' in failure);
+      assert.equal(failure.errorCode, 'CLI_CONTROLLER_CHANGED');
+    } else assert.equal(failure.status, 401);
+    const current = await discoverRuntime({ configDir: input.configDir, runtime: input.runtime });
+    assert.notEqual(current.instanceId, previous.instanceId);
+    await new GarconClient(current).getScheduledPrompts();
+    return { staleRejected: true, freshSucceeded: true };
+  }
   assert.equal(input.kind, 'command');
   const { command } = input;
   // Short-lived driver processes share only their own login cache, avoiding auth rate limits.

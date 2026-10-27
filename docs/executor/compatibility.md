@@ -109,6 +109,14 @@ by its own artifact's parsers through the frozen test-only JSON protocol in
 passes credentials, not tokens or private auth files. HEAD's browser parsers never
 drive an old controller. The contract also names the frozen process launch and
 readiness signals used by the orchestrator.
+The frozen driver also depends on `cli/main.ts`, `--config-dir`/`--runtime`,
+`list agents --executor --json`, `start --agent shell --model sh --executor --cwd --json`,
+and `schedule create/show/delete` with `--definition`/`--expected-revision`/`--json`.
+Their JSON results retain `agents[].id`, `receipt.chatId`, `scheduledPrompt.id`,
+and `revision`. The production `shell` agent's `sh` model and
+`GARCON_TERMINAL_SHELL` remain available. Restart checks capture CLI context with
+each artifact's own discovery code and read that opaque context with the same
+artifact after restart, for both direct and gateway access.
 Separate installations own dependencies and generated outputs. Synthetic changed-
 inventory workers inject integrations through production worker composition,
 without protocol-offer overrides or a production CLI mode.

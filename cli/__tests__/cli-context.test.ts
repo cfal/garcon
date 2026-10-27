@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { runtimeProofPayload } from '@garcon/common/server-runtime';
 import { parseCliArgs } from '../args.js';
 import { GarconClient, GarconHttpError } from '../garcon-client.js';
+import { CliError } from '../errors.js';
 
 const connection = {
   baseUrl: 'http://127.0.0.1:8080', instanceId: 'controller', endpointInstanceId: 'gateway',
@@ -21,6 +22,14 @@ function runtimeResponse(input: string | URL | Request, controller = 'controller
 }
 
 describe('CLI endpoint context', () => {
+  test.each([undefined, null, '', 42, {}])('rejects a catalog with invalid executor instance %j', async executorInstanceId => {
+    const client = new GarconClient({ ...connection, fetch: async () => Response.json({
+      executorInstanceId, catalog: { agents: [], apiProviders: [] },
+    }) });
+    const result = client.getModelCatalog();
+    await expect(result).rejects.toBeInstanceOf(CliError);
+    await expect(result).rejects.toMatchObject({ phase: 'catalog resolution' });
+  });
   test('catalogs, native lookups and project defaults use the authenticated executor', async () => {
     const client = new GarconClient({ ...connection, fetch: async (input, init) => {
       const url = new URL(String(input));

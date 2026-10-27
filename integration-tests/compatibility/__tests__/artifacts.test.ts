@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { downloadArchive, sha256, validateManifest, type BaselineManifest } from '../artifacts.js';
+import { commandOutput, downloadArchive, prepareArtifacts, sha256, validateManifest, type BaselineManifest } from '../artifacts.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 
 test('bootstrap is explicit and cannot extend into another release', () => {
@@ -47,4 +47,23 @@ test('cross-build pins source, runtime and both independent lockfiles', () => {
     { ...baseline, lockfiles: {} }, { ...baseline, runtime: { ...baseline.runtime, archiveUrl: 'file:///synthetic' } }]) {
     expect(() => validateManifest({ core: 1, stage: 'cross-build', baselines: [invalid] }, '0.3.5')).toThrow();
   }
+});
+
+test.each(['same revision', 'missing', 'corrupt'])('artifact selection rejects a %s baseline without fallback', async failure => {
+  const current = await commandOutput(['git', 'rev-parse', 'HEAD']);
+  const baseline = {
+    sourceSha: failure === 'same revision' ? current : 'a'.repeat(40),
+    archiveUrl: 'https://example.invalid/source.tar.gz', archiveSha256: 'b'.repeat(64),
+    lockfiles: { 'bun.lock': 'c'.repeat(64), 'integration-tests/bun.lock': 'd'.repeat(64) },
+    runtime: { version: '1.4.3', archiveUrl: 'https://example.invalid/runtime.zip', archiveSha256: 'e'.repeat(64) },
+  };
+  const download = spyOn(globalThis, 'fetch').mockResolvedValue(
+    failure === 'missing' ? new Response(null, { status: 404 }) : new Response('Synthetic corrupt archive'));
+  try {
+    await expect(prepareArtifacts({ core: 1, stage: 'cross-build', baselines: [baseline] })).rejects.toThrow(
+      failure === 'same revision' ? 'distinct source revisions'
+        : failure === 'missing' ? 'Baseline download failed: 404' : 'Immutable artifact digest mismatch',
+    );
+    expect(download).toHaveBeenCalledTimes(failure === 'same revision' ? 0 : 1);
+  } finally { download.mockRestore(); }
 });
