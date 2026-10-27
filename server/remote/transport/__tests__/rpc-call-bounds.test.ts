@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from 'bun:test';
 import { ExecutorRpc } from '../rpc.js';
-import { SessionTransport } from '../session-transport.js';
+import { TestSessionTransport as SessionTransport } from '../../__tests__/test-session-transport.js';
 import { AgentCallError } from '@garcon/server-agent-interface';
 
 function pair() {

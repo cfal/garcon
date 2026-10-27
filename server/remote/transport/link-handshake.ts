@@ -1,10 +1,13 @@
 import { isSessionId, type RpcLane } from './rpc-lane.js';
+import { isRecord } from '../../../common/json.js';
+import { canonicalProfile, isProtocolDecision, isProtocolOffer, type ProtocolDecision, type ProtocolOffer } from './protocol-compatibility.js';
 
 export type LinkRole = 'controller' | 'worker';
 
 export interface LinkHello {
   readonly type: 'hello';
-  readonly version: string;
+  readonly build: string;
+  readonly protocol: ProtocolOffer | null;
   readonly role: LinkRole;
   readonly executorId: string | null;
   readonly runtimeId: string;
@@ -12,6 +15,13 @@ export interface LinkHello {
   readonly lane: RpcLane;
   readonly sessionId: string | null;
   readonly primarySessionId: string | null;
+  readonly primaryProfileId: string | null;
+}
+
+export interface LinkProof {
+  readonly type: 'proof';
+  readonly decision: ProtocolDecision;
+  readonly signature: string;
 }
 
 export interface LinkDialTarget {
@@ -21,15 +31,34 @@ export interface LinkDialTarget {
 }
 
 export function isLinkHello(value: unknown): value is LinkHello {
-  if (!value || typeof value !== 'object') return false;
-  const frame = value as Record<string, unknown>;
-  return Object.keys(frame).length === 9 && frame.type === 'hello'
+  if (!isRecord(value)) return false;
+  const frame = value;
+  return Object.keys(frame).length === 11 && frame.type === 'hello'
     && (frame.role === 'controller' || frame.role === 'worker')
     && (frame.lane === 'primary' || frame.lane === 'bulk')
-    && ['version', 'runtimeId'].every(key => typeof frame[key] === 'string' && frame[key].length > 0 && frame[key].length <= 128)
+    && typeof frame.build === 'string' && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/.test(frame.build)
+    && typeof frame.runtimeId === 'string' && frame.runtimeId.length > 0 && frame.runtimeId.length <= 128
     && typeof frame.nonce === 'string' && /^[a-f0-9]{64}$/.test(frame.nonce)
     && (typeof frame.executorId === 'string' && frame.executorId.length > 0 && frame.executorId.length <= 128
       || frame.role === 'worker' && frame.lane === 'primary' && frame.executorId === null)
     && (isSessionId(frame.sessionId) || frame.role === 'worker' && frame.lane === 'primary' && frame.sessionId === null)
-    && (frame.lane === 'primary' ? frame.primarySessionId === null : isSessionId(frame.primarySessionId));
+    && (frame.lane === 'primary'
+      ? frame.primarySessionId === null && frame.primaryProfileId === null && isProtocolOffer(frame.protocol)
+      : isSessionId(frame.primarySessionId) && isProfileId(frame.primaryProfileId) && frame.protocol === null);
+}
+
+export function isLinkProof(value: unknown): value is LinkProof {
+  return isRecord(value) && Object.keys(value).length === 3 && value.type === 'proof'
+    && isProtocolDecision(value.decision) && isProfileId(value.signature);
+}
+
+function isProfileId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+}
+
+export function proofPayload(purpose: LinkRole, controllerHelloFrame: string, workerHelloFrame: string, decision: ProtocolDecision): string {
+  return JSON.stringify([
+    'garcon-executor-handshake-v1', purpose, controllerHelloFrame, workerHelloFrame,
+    decision.ok ? ['accepted', canonicalProfile(decision.profile)] : ['rejected', decision.code],
+  ]);
 }

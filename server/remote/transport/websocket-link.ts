@@ -8,9 +8,9 @@ import { failureReason } from './failure-reason.js';
 import { MessageContinuityError } from './message-session.js';
 import { SESSION_SOCKET_BUFFER_BYTES, SessionSocketFrames } from './session-socket.js';
 import { SessionTransport } from './session-transport.js';
-import { EXECUTOR_PROTOCOL_REVISION } from './rpc-protocol.js';
 import { version as packageVersion } from '../../../package.json';
-import { isLinkHello, type LinkHello, type LinkDialTarget, type LinkRole } from './link-handshake.js';
+import { isLinkHello, isLinkProof, proofPayload, type LinkHello, type LinkDialTarget, type LinkRole } from './link-handshake.js';
+import { canonicalProfile, EXECUTOR_PROTOCOL, protocolProfileId, selectProtocol, type ProtocolDecision, type SessionProtocol } from './protocol-compatibility.js';
 import { isSessionId, type RpcLane } from './rpc-lane.js';
 import { MessageQueueBudget, type MessageQueueSnapshot } from './message-queue-budget.js';
 import type { ExecutorSocketAdmission, SocketAdmissionLease } from './socket-admission.js';
@@ -40,9 +40,6 @@ export interface ExecutorListenerTls {
 
 export const EXECUTOR_NOISE_CONTEXT = 'garcon-executor/v1';
 const LISTENER_STOP_SETTLE_MS = 25;
-
-// Peers must share both the release and the wire protocol revision.
-const LINK_VERSION = `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION}`;
 
 // VS Code's reconnection delays: one immediate attempt, then backing off to 30 s.
 // https://github.com/microsoft/vscode/blob/815dd9c54b76316974aa8fe7d485375e2bc3b194/src/vs/platform/remote/common/remoteAgentConnection.ts#L649-L663
@@ -90,7 +87,7 @@ export interface LinkFailure {
   readonly reason?: string;
 }
 
-type LinkFailureKind = NoiseErrorCode | 'authentication-timeout' | 'authentication-failed' | 'version-mismatch' | 'connection-lost';
+type LinkFailureKind = NoiseErrorCode | 'authentication-timeout' | 'authentication-failed' | 'protocol-mismatch' | 'connection-lost';
 
 // Logs keep each kind of failure at its 1st, 2nd, 4th, 8th, ... occurrence since
 // the last session started. A peer without the secret reaches only kinds whose
@@ -103,8 +100,11 @@ export function shouldLogLinkFailure(failure: LinkFailure): boolean {
 interface Connection {
   readonly socket: NoiseWebSocket;
   hello: LinkHello | null;
+  helloFrame: string | null;
   readonly timeout: ReturnType<typeof setTimeout>;
   peer: LinkHello | null;
+  peerFrame: string | null;
+  decision: ProtocolDecision | null;
   session: SessionTransport | null;
   hooks: ReturnType<SessionTransport['attach']> | null;
   heartbeat: ReturnType<typeof setInterval> | null;
@@ -132,6 +132,7 @@ export class WebSocketLink {
   readonly #failures = new Map<string, LinkFailure>();
   readonly #closures = new Set<(closure: LinkClosure) => void>();
   readonly #closureCounts = new Map<string, number>();
+  readonly #profiles = new Map<string, string>();
   #current: SessionTransport | null = null;
   #bulk: SessionTransport | null = null;
   #bulkGrant: { primary: SessionTransport; id: string } | null = null;
@@ -375,7 +376,8 @@ export class WebSocketLink {
   #open(socket: NoiseWebSocket, target?: LinkDialTarget): Connection {
     const hello = target ? this.#hello(target) : null;
     const connection: Connection = {
-      socket, hello, peer: null, session: null, hooks: null, heartbeat: null,
+      socket, hello, helloFrame: hello ? JSON.stringify(hello) : null, peer: null, peerFrame: null, decision: null,
+      session: null, hooks: null, heartbeat: null,
       closed: false, authenticated: false, frames: null, lastReceivedAt: Date.now(), closeCause: null, closeReason: null, sessionStartedAt: null,
       timeout: setTimeout(() => {
         this.#reportFailure('authentication-timeout', 'Executor authentication timed out', undefined, connection.hello?.lane);
@@ -384,7 +386,7 @@ export class WebSocketLink {
     };
     connection.timeout.unref();
     this.#connections.add(connection);
-    try { if (hello) socket.send(JSON.stringify(hello)); } catch (error) { this.#close(connection, 'socket-error', error); }
+    try { if (connection.helloFrame) socket.send(connection.helloFrame); } catch (error) { this.#close(connection, 'socket-error', error); }
     return connection;
   }
 
@@ -392,10 +394,11 @@ export class WebSocketLink {
     let sessionId = target.sessionId;
     if (target.lane === 'primary' && this.options.role === 'controller') sessionId = crypto.randomUUID();
     return {
-      type: 'hello', version: LINK_VERSION, role: this.options.role,
+      type: 'hello', build: packageVersion, protocol: target.lane === 'primary' ? EXECUTOR_PROTOCOL : null, role: this.options.role,
       executorId: this.options.executorId ?? this.#current?.executorId ?? peer?.executorId ?? null,
       runtimeId: this.runtimeId, nonce: randomBytes(32).toString('hex'),
       lane: target.lane, sessionId, primarySessionId: target.primarySessionId,
+      primaryProfileId: target.lane === 'bulk' ? this.#current?.continuity.profileId ?? null : null,
     };
   }
 
@@ -421,29 +424,37 @@ export class WebSocketLink {
       if (Buffer.byteLength(encoded) > 8192) throw new Error('Handshake exceeds budget');
       const frame = parseHandshakeFrame(encoded);
       if (isLinkHello(frame) && !connection.peer) {
-        if (frame.version !== LINK_VERSION) {
-          this.#reportFailure('version-mismatch', `Executor version mismatch: local ${LINK_VERSION}, peer ${JSON.stringify(frame.version.slice(0, 80))}. Use matching builds.`, undefined, frame.lane);
-          this.#close(connection, 'protocol-error');
-          return;
-        }
         if (frame.role === this.options.role) {
           throw new Error('Executor handshake mismatch');
         }
         connection.peer = frame;
+        connection.peerFrame = encoded;
         if (!connection.hello) {
           connection.hello = this.#hello(frame, frame);
-          connection.socket.send(JSON.stringify(connection.hello));
+          connection.helloFrame = JSON.stringify(connection.hello);
+          connection.socket.send(connection.helloFrame);
         }
         this.#validateIdentity(connection);
-        connection.socket.send(JSON.stringify({ type: 'proof', signature: this.#signature(connection, this.options.role) }));
+        connection.decision = this.#selectProtocol(connection);
+        connection.socket.send(JSON.stringify({ type: 'proof', decision: connection.decision,
+          signature: this.#signature(connection, this.options.role, connection.decision) }));
         return;
       }
-      if (!connection.peer || !frame || typeof frame !== 'object' || !('type' in frame) || frame.type !== 'proof'
-        || !('signature' in frame) || typeof frame.signature !== 'string' || !/^[a-f0-9]{64}$/.test(frame.signature)
-        || !timingSafeEqual(Buffer.from(frame.signature, 'hex'), Buffer.from(this.#signature(connection, connection.peer.role), 'hex'))) {
+      if (!connection.peer || !connection.decision || !isLinkProof(frame)
+        || !timingSafeEqual(Buffer.from(frame.signature, 'hex'), Buffer.from(this.#signature(connection, connection.peer.role, frame.decision), 'hex'))) {
         throw new Error('Executor proof is missing or invalid');
       }
       connection.authenticated = true;
+      const decision = connection.decision;
+      if (!decision.ok || !frame.decision.ok) {
+        const code = !decision.ok ? decision.code : !frame.decision.ok ? frame.decision.code : 'CONTINUITY_MISMATCH';
+        const hello = connection.hello!;
+        const peer = connection.peer;
+        this.#reportFailure('protocol-mismatch', `Executor protocol mismatch (${code}): local core ${hello.protocol?.core ?? 'bulk'} build ${hello.build}, peer core ${peer.protocol?.core ?? 'bulk'} build ${peer.build}.`, undefined, hello.lane);
+        this.#close(connection, 'protocol-error');
+        return;
+      }
+      if (canonicalProfile(decision.profile) !== canonicalProfile(frame.decision.profile)) throw new Error('Executor selected profile mismatch');
       this.#accept(connection);
     } catch (error) {
       // Closing the session closes this connection first, so the cause is recorded before.
@@ -467,10 +478,18 @@ export class WebSocketLink {
     const lane = hello.lane;
     const executorId = controller.executorId!;
     const sessionId = controller.sessionId!;
+    const decision = connection.decision!;
+    if (!decision.ok) throw new Error('Executor protocol was not selected');
+    const worker = hello.role === 'worker' ? hello : peer;
+    const protocol: SessionProtocol = Object.freeze({
+      profile: decision.profile,
+      continuity: Object.freeze({ executorId, controllerRuntimeId: controller.runtimeId, workerRuntimeId: worker.runtimeId,
+        profileId: protocolProfileId(decision.profile) }),
+    });
     if (lane === 'primary' ? this.#current : this.#bulk) throw new Error('Executor session already attached');
     const lease = this.#socketLeases.get(connection.socket);
     if (lease && !lease.promote(lane)) throw new Error('Executor socket role capacity exhausted');
-    const session = new SessionTransport(sessionId, peer.runtimeId, (error) => {
+    const session = new SessionTransport(sessionId, peer.runtimeId, protocol, (error) => {
       if (this.#current === session) this.#current = null;
       if (this.#bulk === session) this.#bulk = null;
       for (const attached of this.#connections) {
@@ -478,6 +497,7 @@ export class WebSocketLink {
       }
     }, { ...this.options, budget: this.#queueBudget }, executorId, lane, hello.primarySessionId ?? sessionId);
     if (lane === 'primary') {
+      this.#profiles.set(this.#continuityKey(connection), protocol.continuity.profileId);
       this.#current = session;
       session.onAvailability((connected) => {
         if (!connected && this.#current === session) {
@@ -538,11 +558,31 @@ export class WebSocketLink {
     }
   }
 
-  #signature(connection: Connection, purpose: LinkRole): string {
+  #continuityKey(connection: Connection): string {
+    const controller = connection.hello!.role === 'controller' ? connection.hello! : connection.peer!;
+    const worker = connection.hello!.role === 'worker' ? connection.hello! : connection.peer!;
+    return JSON.stringify([controller.executorId, controller.runtimeId, worker.runtimeId]);
+  }
+
+  #selectProtocol(connection: Connection): ProtocolDecision {
     const hello = connection.hello!;
     const peer = connection.peer!;
-    const transcript = hello.role === 'controller' ? [hello, peer] : [peer, hello];
-    return createHmac('sha256', this.options.secret).update(JSON.stringify(['garcon-executor', purpose, transcript])).digest('hex');
+    if (hello.lane === 'bulk') {
+      const primary = this.#bulkGrant!.primary;
+      return hello.primaryProfileId === primary.continuity.profileId && peer.primaryProfileId === primary.continuity.profileId
+        ? { ok: true, profile: primary.profile } : { ok: false, code: 'BULK_PROFILE_MISMATCH' };
+    }
+    const decision = selectProtocol(EXECUTOR_PROTOCOL, peer.protocol!);
+    if (!decision.ok) return decision;
+    const retained = this.#profiles.get(this.#continuityKey(connection));
+    return retained !== undefined && retained !== protocolProfileId(decision.profile)
+      ? { ok: false, code: 'CONTINUITY_MISMATCH' } : decision;
+  }
+
+  #signature(connection: Connection, purpose: LinkRole, decision: ProtocolDecision): string {
+    const frames = connection.hello!.role === 'controller'
+      ? [connection.helloFrame!, connection.peerFrame!] : [connection.peerFrame!, connection.helloFrame!];
+    return createHmac('sha256', this.options.secret).update(proofPayload(purpose, frames[0]!, frames[1]!, decision)).digest('hex');
   }
 
   // The oldest socket whose peer has not proven the secret, or else the oldest

@@ -1,10 +1,9 @@
 import { expect, test } from 'bun:test';
-import { createHmac } from 'node:crypto';
 import { connectNoiseWebSocket } from '@cfal/noise-ws';
 import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../websocket-link.js';
 import { ExecutorSocketAdmission } from '../socket-admission.js';
 import { isLinkHello, type LinkHello } from '../link-handshake.js';
-import { primaryHello } from '../../__tests__/link-hello.js';
+import { primaryHello, signedProof } from '../../__tests__/link-hello.js';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
 
@@ -55,18 +54,17 @@ for (const dialer of ['controller', 'worker'] as const) {
 }
 
 function rawPeer(address: string, hello: LinkHello) {
-  let peer: LinkHello;
+  let peer: string;
+  const local = JSON.stringify(hello);
   return connectNoiseWebSocket(address, {
     psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
-    onOpen(socket) { socket.send(JSON.stringify(hello)); },
+    onOpen(socket) { socket.send(local); },
     onMessage(socket, data) {
       if (typeof data !== 'string') return;
       const frame = JSON.parse(data);
-      if (isLinkHello(frame)) peer = frame;
+      if (isLinkHello(frame)) peer = data;
       else if (frame.type === 'proof') {
-        const transcript = hello.role === 'controller' ? [hello, peer] : [peer, hello];
-        const signature = createHmac('sha256', secret).update(JSON.stringify(['garcon-executor', hello.role, transcript])).digest('hex');
-        socket.send(JSON.stringify({ type: 'proof', signature }));
+        socket.send(JSON.stringify(signedProof(secret, hello.role, local, peer, { ok: true, profile: { core: 1, contracts: {} } })));
       }
     },
   });
@@ -83,10 +81,10 @@ test('bulk rejects stale grants, different peer runtimes, executor IDs and dupli
     controller.prepareBulk(parent, id);
     worker.prepareBulk(peer, id);
     const valid: LinkHello = { ...primaryHello('worker'), lane: 'bulk', executorId: parent.executorId,
-      runtimeId: worker.runtimeId, sessionId: id, primarySessionId: parent.id };
+      runtimeId: worker.runtimeId, sessionId: id, primarySessionId: parent.id, protocol: null, primaryProfileId: parent.continuity.profileId };
     for (const change of [
       { sessionId: crypto.randomUUID() }, { primarySessionId: crypto.randomUUID() },
-      { runtimeId: crypto.randomUUID() }, { executorId: 'another-executor' }, { version: 'wrong-version' },
+      { runtimeId: crypto.randomUUID() }, { executorId: 'another-executor' }, { primaryProfileId: '0'.repeat(64) },
     ]) {
       await rawPeer(address, { ...valid, ...change }).closed;
       expect(controller.bulk).toBeNull();

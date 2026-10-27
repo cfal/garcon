@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { ExecutorRpc, ParkedRpcCalls } from '../rpc.js';
-import { SessionTransport } from '../session-transport.js';
+import { TestSessionTransport as SessionTransport } from '../../__tests__/test-session-transport.js';
 
 interface SentFrame {
   readonly type: string;

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { createAgentResourceRef } from '@garcon/server-agent-interface';
 import { integrationFixture } from '../../__tests__/integration-fixture.js';
 import { ExecutorRpc } from '../../transport/rpc.js';
-import { SessionTransport } from '../../transport/session-transport.js';
+import { TestSessionTransport as SessionTransport } from '../../__tests__/test-session-transport.js';
 import { serveExecutionRuntime } from '../executor-rpc-server.js';
 import { ProducerRelay } from '../producer-relay.js';
 

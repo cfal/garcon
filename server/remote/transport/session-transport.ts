@@ -1,6 +1,7 @@
 import { MessageSession, type MessageSessionOptions, type SessionSocket } from './message-session.js';
 import { SESSION_MESSAGE_BYTES } from './session-socket.js';
 import type { RpcLane } from './rpc-lane.js';
+import type { SessionProtocol } from './protocol-compatibility.js';
 
 export class SessionTransport {
   readonly channel: MessageSession;
@@ -14,6 +15,7 @@ export class SessionTransport {
   constructor(
     readonly id: string,
     readonly peerRuntimeId: string,
+    readonly protocol: SessionProtocol,
     retired: (error: Error) => void,
     limits: Pick<MessageSessionOptions, 'maxQueuedBytes' | 'maxQueuedFrames' | 'budget'> = {},
     readonly executorId: string = 'local',
@@ -44,6 +46,8 @@ export class SessionTransport {
   }
 
   get connected(): boolean { return this.channel.connected; }
+  get profile() { return this.protocol.profile; }
+  get continuity() { return this.protocol.continuity; }
 
   attach(socket: SessionSocket) {
     return this.channel.attach(socket);

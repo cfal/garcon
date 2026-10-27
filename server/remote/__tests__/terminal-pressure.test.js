@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { homedir } from 'node:os';
 import { ExecutorRpc } from '../transport/rpc.ts';
-import { SessionTransport } from '../transport/session-transport.ts';
+import { TestSessionTransport as SessionTransport } from './test-session-transport.ts';
 import { TerminalRpcServer } from '../server/terminal-rpc-server.ts';
 import { TerminalRuntime } from '../../runtime/terminals/runtime.ts';
 import { RemoteTerminalService } from '../client/remote-terminals.ts';
