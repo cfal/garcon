@@ -95,6 +95,48 @@ function installFakeTimers() {
 }
 
 describe('AgentHandoffService', () => {
+  it('rejects incompatible target settings before project or catalog work', async () => {
+    const deps = targetResolutionDeps();
+    deps.integrations.require('target-agent').settings.parse = () => { throw new Error('Incompatible settings'); };
+    const inspectProject = mock(async () => { throw new Error('Must not inspect'); });
+    const getAgentCatalogEntry = mock(async () => { throw new Error('Must not discover'); });
+    const service = createService({ ...deps, inspectProject, catalog: { getAgentCatalogEntry } });
+    await expect(resolveTarget(service)).rejects.toThrow('Incompatible settings');
+    expect(inspectProject).not.toHaveBeenCalled();
+    expect(getAgentCatalogEntry).not.toHaveBeenCalled();
+  });
+
+  it.each(['project', 'catalog', 'preparation', 'decision'])('fences replacement at %s before committing a handoff', async (phase) => {
+    const deps = targetResolutionDeps();
+    let captured = deps.integrations.require('target-agent');
+    const replace = () => { captured = integration('target-agent'); };
+    const calls = [];
+    const current = sourceChat();
+    const ownership = handoffState(current, calls).ownership;
+    const service = createService({
+      ...deps, registry: { getChat: () => current }, ownership, ledger: ledgerState(calls),
+      integrations: { get: () => captured, require: () => captured },
+      inspectProject: async projectPath => {
+        if (phase === 'project') replace();
+        return { kind: 'available', effectiveProjectKey: projectPath };
+      },
+      catalog: { getAgentCatalogEntry: async (...args) => {
+        if (phase === 'catalog') replace();
+        return deps.catalog.getAgentCatalogEntry(...args);
+      } },
+    });
+    const operation = async () => {
+      const resolved = await resolveTarget(service);
+      if (phase === 'preparation') replace();
+      await service.createPreparation({
+        chatId: 'chat', clientRequestId: 'request', handoff: handoff(), source: current, target: resolved, command: null,
+        guardDecision: async decide => { if (phase === 'decision') replace(); return decide(); },
+      }).prepare(context());
+    };
+    await expect(operation()).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+    expect(ownership.decideHandoff).not.toHaveBeenCalled();
+    expect(current).toEqual(sourceChat());
+  });
   it('rejects literal destinations during resolution without changing ownership', async () => {
     const deps = targetResolutionDeps();
     deps.integrations.get('target-agent').literalExecution = { selectionLabel: 'Runtime', inputFormatByModel: {} };
@@ -108,7 +150,6 @@ describe('AgentHandoffService', () => {
     const calls = [];
     const deps = targetResolutionDeps();
     const destination = deps.integrations.get('target-agent');
-    if (when === 'before-preparation') destination.literalExecution = { selectionLabel: 'Runtime', inputFormatByModel: {} };
     const ownership = handoffState(current, calls).ownership;
     const service = createService({
       ...deps, registry: { getChat: () => current }, ownership, ledger: ledgerState(calls),
@@ -118,8 +159,10 @@ describe('AgentHandoffService', () => {
       } },
       reopenProducer: () => calls.push('reopen'),
     });
+    const resolved = await resolveTarget(service);
+    if (when === 'before-preparation') destination.literalExecution = { selectionLabel: 'Runtime', inputFormatByModel: {} };
     await expect(service.createPreparation({ chatId: 'chat', clientRequestId: 'request-1',
-      handoff: handoff(), source: current, target: target(), command: 'continue',
+      handoff: handoff(), source: current, target: resolved, command: 'continue',
     }).prepare(context())).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
     expect(current.agentId).toBe('source-agent');
     expect(ownership.pendingHandoffs()).toEqual([]);
@@ -149,7 +192,7 @@ describe('AgentHandoffService', () => {
     });
     const preparing = service.createPreparation({
       chatId: 'chat', clientRequestId: 'synthetic-request', source: current,
-      handoff: handoff(), target: target(), command: null,
+      handoff: handoff(), target: await resolveTarget(service), command: null,
       guardDecision: async (decide) => {
         decisionReached.resolve();
         await release.promise;
@@ -184,23 +227,24 @@ describe('AgentHandoffService', () => {
     const executorId = '22222222-2222-4222-8222-222222222222';
     const current = sourceChat();
     const inspectProject = mock(async () => ({ kind: 'available', effectiveProjectKey: '/destination/canonical' }));
+    const captured = integration(current.agentId);
     const getIntegration = mock((agentId, targetExecutor) => {
       expect(targetExecutor).toBe(executorId);
-      return integration(agentId);
+      return captured;
     });
     const request = handoff(current.agentId);
     request.target.executorId = executorId;
     request.target.projectPath = '/destination/alias';
     const service = createService({
       ...targetResolutionDeps(), inspectProject,
-      integrations: { get: getIntegration, require: () => { throw new Error('Unexpected readiness recheck during resolution'); } },
+      integrations: { get: getIntegration, require: getIntegration },
     });
     const deadline = performance.now() + 20_000;
     await expect(service.resolveTarget({ chat: current, handoff: request, deadline })).resolves.toMatchObject({
       agentId: current.agentId, executorId, projectPath: '/destination/canonical',
     });
     expect(inspectProject).toHaveBeenCalledWith('/destination/alias', executorId, expect.objectContaining({ dispatchDeadline: deadline }));
-    expect(getIntegration).toHaveBeenCalledTimes(1);
+    expect(getIntegration).toHaveBeenCalled();
     expect(current.agentSessionId).toBe('source-session');
   });
 
@@ -216,7 +260,8 @@ describe('AgentHandoffService', () => {
       });
       const validate = mock(async () => {});
       const deps = targetResolutionDeps();
-      const withEndpoints = (agentId) => ({ ...integration(agentId), endpoints: { validate } });
+      const captured = { ...integration('target-agent'), endpoints: { validate } };
+      const withEndpoints = () => captured;
       const service = createService({
         ...deps, inspectProject, catalog: { getAgentCatalogEntry },
         integrations: { get: withEndpoints, require: withEndpoints },
@@ -341,7 +386,7 @@ describe('AgentHandoffService', () => {
       clientRequestId: 'request-1',
       handoff: handoff(),
       source: current,
-      target: target(),
+      target: await resolveTarget(service),
       command: 'continue the work',
     }).prepare(admission);
 
@@ -411,7 +456,7 @@ describe('AgentHandoffService', () => {
       clientRequestId: 'request-1',
       handoff: handoff(),
       source: current,
-      target: target(),
+      target: await resolveTarget(service),
       command: 'continue',
     }).prepare(context())).rejects.toThrow(LedgerFencedError);
 
@@ -444,7 +489,7 @@ describe('AgentHandoffService', () => {
       clientRequestId: 'request-1',
       handoff: handoff(),
       source: current,
-      target: target(),
+      target: await resolveTarget(service),
       command: 'continue',
     });
 
@@ -491,7 +536,7 @@ describe('AgentHandoffService', () => {
         clientRequestId: `request-${index}`,
         handoff: { target: destination, expectedAgentOwnershipEpoch: previousEpoch },
         source: current,
-        target: destination,
+        target: await resolveTarget(service, { target: destination, expectedAgentOwnershipEpoch: previousEpoch }, current),
         command: null,
       }).prepare(context());
       expect(current.agentId).toBe(destination.agentId);
@@ -532,7 +577,7 @@ describe('AgentHandoffService', () => {
       clientRequestId: 'request-1',
       handoff: handoff(),
       source: current,
-      target: target(),
+      target: await resolveTarget(service),
       command: 'continue',
     });
     const task = preparation.prepare(context());
@@ -568,7 +613,7 @@ describe('AgentHandoffService', () => {
       clientRequestId: 'request-1',
       handoff: handoff(),
       source: current,
-      target: target(),
+      target: await resolveTarget(service),
       command: 'continue',
     }).prepare(context());
 
@@ -599,7 +644,7 @@ describe('AgentHandoffService', () => {
       clientRequestId: 'request-1',
       handoff: handoff(),
       source: current,
-      target: target(),
+      target: await resolveTarget(service),
       command: 'continue',
     }).prepare(context());
 
@@ -649,12 +694,12 @@ describe('AgentHandoffService', () => {
       ownership: state.ownership,
       ledger: ledgerState(calls),
     });
-    const prepare = () => service.createPreparation({
+    const prepare = async () => service.createPreparation({
       chatId: 'chat',
       clientRequestId: 'request-1',
       handoff: handoff(),
       source: current,
-      target: target(),
+      target: await resolveTarget(service),
       command: 'continue',
     }).prepare(context());
     const startupRecovery = service.recoverPendingHandoffs();
@@ -749,7 +794,7 @@ describe('AgentHandoffService', () => {
         clientRequestId: 'request-1',
         handoff: handoff(),
         source: current,
-        target: target(),
+        target: await resolveTarget(service),
         command: 'continue',
       }).prepare(context());
       for (let tick = 0; tick < 20 && timers.length < 1; tick += 1) await Promise.resolve();
@@ -816,7 +861,7 @@ describe('AgentHandoffService', () => {
       clientRequestId: 'request-1',
       handoff: handoff(),
       source: current,
-      target: target(),
+      target: await resolveTarget(service),
       command: 'continue',
     }).prepare(context());
 
@@ -859,12 +904,12 @@ describe('AgentHandoffService', () => {
         reopenAttempts += 1;
       },
     });
-    const prepare = () => service.createPreparation({
+    const prepare = async () => service.createPreparation({
       chatId: 'chat',
       clientRequestId: 'request-1',
       handoff: handoff(),
       source: current,
-      target: target(),
+      target: await resolveTarget(service),
       command: 'continue',
     }).prepare(context());
     const first = prepare();
@@ -1182,7 +1227,7 @@ describe('AgentHandoffService', () => {
       clientRequestId: 'request-1',
       handoff: handoff(),
       source: current,
-      target: target(),
+      target: await resolveTarget(service),
       command: 'continue',
     }).prepare(context());
     let outcome = null;
@@ -1381,6 +1426,7 @@ describe('AgentHandoffService', () => {
 });
 
 function createService(overrides = {}) {
+  const resolution = targetResolutionDeps();
   const integrations = new Map([
     ['source-agent', integration('source-agent')],
     ['target-agent', integration('target-agent')],
@@ -1401,11 +1447,15 @@ function createService(overrides = {}) {
       get: (agentId) => integrations.get(agentId),
       require: (agentId) => integrations.get(agentId),
     },
-    endpointResolver: overrides.endpointResolver ?? { resolveSelection: (input) => input },
-    catalog: overrides.catalog ?? {},
+    endpointResolver: overrides.endpointResolver ?? resolution.endpointResolver,
+    catalog: overrides.catalog ?? resolution.catalog,
     reopenProducer: overrides.reopenProducer ?? (() => {}),
     onCommitted: overrides.onCommitted,
   });
+}
+
+function resolveTarget(service, request = handoff(), chat = sourceChat()) {
+  return service.resolveTarget({ chat, handoff: request, deadline: performance.now() + 20_000 });
 }
 
 function handoffState(current, calls) {
