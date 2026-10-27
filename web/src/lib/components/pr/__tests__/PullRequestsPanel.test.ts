@@ -196,6 +196,13 @@ describe('PullRequestsPanel', () => {
 		await screen.findByText('Post recovery was abandoned.');
 		expect(screen.queryByRole('button', { name: 'Post to GitHub' })).toBeNull();
 	});
+	it('links the selected pull request title to GitHub', async () => {
+		setup();
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		const link = await screen.findByRole('link', { name: 'Change 7' });
+		expect(link.getAttribute('href')).toBe('https://github.com/acme/app/pull/7');
+		expect(link.getAttribute('target')).toBe('_blank');
+	});
 	it('keeps selected history and its body when only another repository scan changes the snapshot', async () => {
 		const { controller, getRuns, getRun } = setup();
 		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
