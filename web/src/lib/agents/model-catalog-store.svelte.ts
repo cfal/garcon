@@ -186,7 +186,7 @@ function normalizeSettingDescriptors(value: unknown): AgentSettingDescriptor[] {
 	});
 }
 
-function normalizeDefaultSettings(
+function requireDefaultSettings(
 	agentId: string,
 	value: unknown,
 ): AgentSettingsEnvelope {
@@ -310,7 +310,7 @@ function normalizeAgentMetadataMap(agentMetadata: AgentMetadataMap): AgentMetada
 						supportedPermissionModes: normalizePermissionModes(metadata.supportedPermissionModes),
 						supportedThinkingModes: normalizeThinkingModes(metadata.supportedThinkingModes),
 						settings: normalizeSettingDescriptors(metadata.settings),
-						defaultSettings: normalizeDefaultSettings(id, metadata.defaultSettings),
+						defaultSettings: requireDefaultSettings(id, metadata.defaultSettings),
 						defaultModel: metadata.defaultModel ?? '',
 					},
 				];
@@ -362,7 +362,7 @@ function parseCatalogResponse(data: unknown): {
 			supportedPermissionModes: normalizePermissionModes(entry.supportedPermissionModes),
 			supportedThinkingModes: normalizeThinkingModes(entry.supportedThinkingModes),
 			settings: normalizeSettingDescriptors(entry.settings),
-			defaultSettings: normalizeDefaultSettings(id, entry.defaultSettings),
+			defaultSettings: requireDefaultSettings(id, entry.defaultSettings),
 			defaultModel: typeof entry.defaultModel === 'string' ? entry.defaultModel : '',
 		};
 
@@ -452,24 +452,6 @@ function persist(executorId: string, snapshot: ModelCatalogSnapshot): void {
 	}
 }
 
-interface CatalogApplyResult {
-	agentModels: AgentModels;
-	agentMetadata: AgentMetadataMap;
-	apiProviderCatalog: ApiProviderCatalogEntry[];
-}
-
-function applyCatalogResult(
-	catalogResult: NonNullable<ReturnType<typeof parseCatalogResponse>>,
-): CatalogApplyResult {
-	const agentModels = catalogResult.agentModels;
-	const agentMetadata = normalizeAgentMetadataMap(catalogResult.agentMetadata);
-	return {
-		agentModels,
-		agentMetadata,
-		apiProviderCatalog: catalogResult.apiProviderCatalog,
-	};
-}
-
 export class ModelCatalogStore {
 	executorInstanceId = $state<string | null>(null);
 	agentModels = $state<AgentModels>({});
@@ -516,9 +498,14 @@ export class ModelCatalogStore {
 		for (const executor of executors) {
 			const previous = this.executors.get(executor.id);
 			const cachedInstance = this.catalogs.get(executor.id)?.executorInstanceId ?? persisted[executor.id]?.executorInstanceId;
-			if ((previous && (executor.enabled !== previous.enabled || executor.availability !== previous.availability || executor.instanceId !== previous.instanceId))
-				|| (cachedInstance && cachedInstance !== executor.instanceId)
-				|| (!previous && (!executor.enabled || executor.availability !== 'ready'))) {
+			const executorChanged = previous && (
+				executor.enabled !== previous.enabled
+				|| executor.availability !== previous.availability
+				|| executor.instanceId !== previous.instanceId
+			);
+			const cachedInstanceChanged = cachedInstance && cachedInstance !== executor.instanceId;
+			const initiallyUnavailable = !previous && (!executor.enabled || executor.availability !== 'ready');
+			if (executorChanged || cachedInstanceChanged || initiallyUnavailable) {
 				if (executor.id === 'local') {
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog);
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
@@ -791,16 +778,12 @@ export class ModelCatalogStore {
 			if (requestVersion !== this.#requestVersion) return;
 
 			const catalogResult = parseCatalogResponse(data);
-			if (catalogResult) {
-				this.#assertResponseInstance(catalogResult.executorInstanceId, expectedInstanceId);
-				const applied = applyCatalogResult(catalogResult);
-				this.executorInstanceId = catalogResult.executorInstanceId;
-				this.agentModels = applied.agentModels;
-				this.agentMetadata = applied.agentMetadata;
-				this.apiProviderCatalog = applied.apiProviderCatalog;
-			} else {
-				throw new Error('Model catalog response is invalid');
-			}
+			if (!catalogResult) throw new Error('Model catalog response is invalid');
+			this.#assertResponseInstance(catalogResult.executorInstanceId, expectedInstanceId);
+			this.executorInstanceId = catalogResult.executorInstanceId;
+			this.agentModels = catalogResult.agentModels;
+			this.agentMetadata = catalogResult.agentMetadata;
+			this.apiProviderCatalog = catalogResult.apiProviderCatalog;
 
 			const now = Date.now();
 			this.etag = responseEtag;
