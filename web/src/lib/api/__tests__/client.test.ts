@@ -3,6 +3,7 @@ import {
 	apiGet,
 	apiPost,
 	apiPut,
+	apiPatch,
 	apiDelete,
 	apiPostForm,
 	ApiError,
@@ -13,23 +14,27 @@ import {
 	clearAuthToken,
 } from '../client';
 
-// Stub localStorage for token management.
 const store: Record<string, string> = {};
-vi.stubGlobal('localStorage', {
-	getItem: (k: string) => store[k] ?? null,
-	setItem: (k: string, v: string) => {
-		store[k] = v;
-	},
-	removeItem: (k: string) => {
-		delete store[k];
-	},
+beforeEach(() => {
+	for (const key of Object.keys(store)) delete store[key];
+	vi.stubGlobal('localStorage', {
+		getItem: (key: string) => store[key] ?? null,
+		setItem: (key: string, value: string) => {
+			store[key] = value;
+		},
+		removeItem: (key: string) => {
+			delete store[key];
+		},
+	});
+	clearAuthToken();
+});
+afterEach(() => {
+	clearAuthToken();
+	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 });
 
 describe('token management', () => {
-	afterEach(() => {
-		for (const k of Object.keys(store)) delete store[k];
-	});
-
 	it('getAuthToken returns null when no token set', () => {
 		expect(getAuthToken()).toBeNull();
 	});
@@ -50,14 +55,9 @@ describe('API client helpers', () => {
 	let fetchMock: ReturnType<typeof vi.fn>;
 
 	beforeEach(() => {
-		for (const k of Object.keys(store)) delete store[k];
 		setAuthToken('test-token');
 		fetchMock = vi.fn();
 		vi.stubGlobal('fetch', fetchMock);
-	});
-
-	afterEach(() => {
-		vi.restoreAllMocks();
 	});
 
 	function jsonResponse(body: unknown, status = 200) {
@@ -79,32 +79,24 @@ describe('API client helpers', () => {
 		expect(opts.headers.get('Content-Type')).toBe('application/json');
 	});
 
-	it('apiPost sends POST with JSON body', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
-
-		await apiPost('/api/create', { name: 'test' });
-
-		const [, opts] = fetchMock.mock.calls[0];
-		expect(opts.method).toBe('POST');
-		expect(JSON.parse(opts.body)).toEqual({ name: 'test' });
-	});
-
-	it('apiPut sends PUT with JSON body', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
-
-		await apiPut('/api/update', { name: 'updated' });
-
-		const [, opts] = fetchMock.mock.calls[0];
-		expect(opts.method).toBe('PUT');
-	});
-
-	it('apiDelete sends DELETE', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
-
-		await apiDelete('/api/remove');
-
-		const [, opts] = fetchMock.mock.calls[0];
-		expect(opts.method).toBe('DELETE');
+	describe.each([
+		['POST', apiPost],
+		['PUT', apiPut],
+		['PATCH', apiPatch],
+		['DELETE', apiDelete],
+	] as const)('%s requests', (method, send) => {
+		it.each([{ name: 'synthetic' }, null, false, undefined])(
+			'preserves the JSON body %j and parses its response',
+			async (body) => {
+				fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+				expect(await send('/api/mutate', body)).toEqual({ ok: true });
+				const [url, options] = fetchMock.mock.calls[0];
+				expect(url).toBe('/api/mutate');
+				expect(options.method).toBe(method);
+				expect(options.body).toBe(body === undefined ? undefined : JSON.stringify(body));
+				expect(options.headers.get('Authorization')).toBe('Bearer test-token');
+			},
+		);
 	});
 
 	it('apiPostForm sends FormData without Content-Type', async () => {
@@ -135,8 +127,20 @@ describe('API client helpers', () => {
 
 	it.each<{ headers: HeadersInit }>([
 		{ headers: { authorization: 'Custom token', 'content-type': 'text/plain', 'X-Test': 'kept' } },
-		{ headers: new Headers({ authorization: 'Custom token', 'content-type': 'text/plain', 'X-Test': 'kept' }) },
-		{ headers: [['authorization', 'Custom token'], ['content-type', 'text/plain'], ['X-Test', 'kept']] },
+		{
+			headers: new Headers({
+				authorization: 'Custom token',
+				'content-type': 'text/plain',
+				'X-Test': 'kept',
+			}),
+		},
+		{
+			headers: [
+				['authorization', 'Custom token'],
+				['content-type', 'text/plain'],
+				['X-Test', 'kept'],
+			],
+		},
 	])('preserves caller overrides in every HeadersInit form: %j', async ({ headers }) => {
 		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
 		await apiGet('/api/test', { headers });
@@ -189,20 +193,29 @@ describe('API client helpers', () => {
 		}
 	});
 
-	it.each([true, false])('distinguishes a coded share failure from an intermediary: %s', async (coded) => {
-		fetchMock.mockResolvedValue(jsonResponse({
-			success: false, error: 'Internal server error',
-			...(coded ? { errorCode: 'INTERNAL_ERROR', retryable: true } : {}),
-		}, 500));
-		try {
-			await apiPost('/api/v1/chats/share', { chatId: '123' });
-			expect.unreachable('should have thrown');
-		} catch (error) {
-			expect(error).toBeInstanceOf(ApiError);
-			expect(isIntermediaryResponse(error as ApiError)).toBe(!coded);
-			expect((error as ApiError).message).toBe('Internal server error');
-		}
-	});
+	it.each([true, false])(
+		'distinguishes a coded share failure from an intermediary: %s',
+		async (coded) => {
+			fetchMock.mockResolvedValue(
+				jsonResponse(
+					{
+						success: false,
+						error: 'Internal server error',
+						...(coded ? { errorCode: 'INTERNAL_ERROR', retryable: true } : {}),
+					},
+					500,
+				),
+			);
+			try {
+				await apiPost('/api/v1/chats/share', { chatId: '123' });
+				expect.unreachable('should have thrown');
+			} catch (error) {
+				expect(error).toBeInstanceOf(ApiError);
+				expect(isIntermediaryResponse(error as ApiError)).toBe(!coded);
+				expect((error as ApiError).message).toBe('Internal server error');
+			}
+		},
+	);
 
 	it('keeps legacy error bodies working without using message fallback', async () => {
 		fetchMock.mockResolvedValue(
@@ -247,12 +260,58 @@ describe('API client helpers', () => {
 	});
 
 	it('includes timeout signal in requests', async () => {
+		const timeout = vi.spyOn(AbortSignal, 'timeout');
 		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
 
 		await apiGet('/api/test');
 
 		const [, opts] = fetchMock.mock.calls[0];
 		expect(opts.signal).toBeDefined();
+		expect(timeout).toHaveBeenCalledWith(30_000);
+	});
+
+	describe.each([
+		['authenticated', apiGet],
+		['public', publicApiFetch],
+	] as const)('%s request cancellation', (_, send) => {
+		it.each(['caller', 'deadline', 'already aborted'] as const)(
+			'rejects on %s without retrying or aborting the other signal',
+			async (source) => {
+				const caller = new AbortController();
+				const deadline = new AbortController();
+				const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadline.signal);
+				const reason = new DOMException(
+					'Synthetic cancellation',
+					source === 'deadline' ? 'TimeoutError' : 'AbortError',
+				);
+				fetchMock.mockImplementation(
+					(_url: string, options: RequestInit) =>
+						new Promise<Response>((_resolve, reject) => {
+							const signal = options.signal!;
+							if (signal.aborted) reject(signal.reason);
+							else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+						}),
+				);
+				if (source === 'already aborted') caller.abort(reason);
+				const pending = send('/api/wait', { signal: caller.signal, timeoutMs: 5000 }).catch(
+					(error) => error,
+				);
+				try {
+					(source === 'deadline' ? deadline : caller).abort(reason);
+					const signal = fetchMock.mock.calls[0][1].signal;
+					expect(signal.aborted).toBe(true);
+					expect(signal.reason).toBe(reason);
+					expect(await pending).toBe(reason);
+					expect(timeout).toHaveBeenCalledWith(5000);
+					expect(fetchMock).toHaveBeenCalledTimes(1);
+					expect((source === 'deadline' ? caller : deadline).signal.aborted).toBe(false);
+				} finally {
+					caller.abort();
+					deadline.abort();
+					await pending;
+				}
+			},
+		);
 	});
 
 	it('uses the standard timeout without credentials for public requests', async () => {
