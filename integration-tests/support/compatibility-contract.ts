@@ -6,6 +6,11 @@ import type { SourceArtifact } from './source-artifact.js';
 // and executor connection-url --advertise-url --no-tls. Readiness is the controller's
 // `Started at http://...` line and the worker's JSON `executor-listening` (url) and
 // `executor-connected` frames. Other log fields and private auth formats are not frozen.
+// CLI launch uses cli/main.ts, --config-dir/--runtime, list agents --executor --json,
+// start --agent shell --model sh --executor --cwd --json, and schedule create/show/delete
+// with --definition/--expected-revision/--json. Results retain agents[].id, receipt.chatId,
+// scheduledPrompt.id and revision. The shell agent's sh model and GARCON_TERMINAL_SHELL
+// also remain available. Saved CLI contexts are opaque and read only by their own artifact.
 export type CompatibilityCommand =
   | { kind: 'enroll'; direction: 'controller-connects' | 'executor-connects'; connectionUrl?: string }
   | { kind: 'inventory'; executorId: string }
@@ -22,6 +27,8 @@ export interface CompatibilityCredentials {
 
 export type CompatibilityDriverRequest =
   | { readonly version: 1; readonly kind: 'prepare-auth'; readonly configDir: string }
+  | { readonly version: 1; readonly kind: 'capture-cli-context' | 'check-cli-restart';
+      readonly configDir: string; readonly runtime: 'controller' | 'executor'; readonly contextPath: string }
   | { readonly version: 1; readonly kind: 'command'; readonly baseUrl: string;
       readonly credentials: CompatibilityCredentials; readonly command: CompatibilityCommand };
 

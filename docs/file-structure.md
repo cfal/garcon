@@ -45,10 +45,10 @@ Agent-specific integrations remain in `server-agents/<id>/`. Browser/server cont
 - `executorId` identifies execution targets across persistence, APIs, RPC, resource scopes, UI, CLI, fixtures, and tests. Generic graph/DOM nodes, Node.js imports, linked carryover nodes, and provider-native node concepts retain their names.
 - Commands, routes, storage, events, errors, and environment vocabulary use executor consistently: `garcon executor`, `garcon-cli --runtime executor`, and `GARCON_RUNTIME=executor`.
 
-The browser ships with its controller. Independently upgraded workers and CLIs
-preserve the frozen core and exact optional contracts described in
-[Executor Compatibility](./executor/compatibility.md). That contract supersedes
-same-build requirements in historical executor proposals. Protocol support,
+The browser ships with its controller. Controller/worker/CLI compatibility and
+deployment rules, including the baseline qualification gate for independent
+upgrades, are defined in [Executor Compatibility](./executor/compatibility.md).
+Protocol support,
 provider facets, executor services, settings compatibility and authorization
 remain separate ownership boundaries.
 

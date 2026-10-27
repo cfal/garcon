@@ -310,7 +310,7 @@ The changes can be built and reviewed in these bounded slices without inventing 
 4. Route all HTTP entry points and generation by captured targets, then executor-qualify browser APIs, stores, invalidations, gh capability, and worktree workflows. Remove Local-only guards only after both ends enforce the new contract.
 5. Verify real Git repositories through public controller/worker startup in both connection directions, then run browser acceptance. Remove obsolete controller-only service construction and duplicate DTOs in the same slices that replace them.
 
-There is no persisted mutation state, new repository metadata database, or chat-registry migration. Missing executor selection retains the deliberate Local default. The browser ships with its controller; independently upgraded workers preserve executor core 1. Do not keep competing legacy and executor-aware protocols. Rollback disables the executor capability and remote UI while preserving repository state and user drafts; it cannot undo completed Git operations.
+There is no persisted mutation state, new repository metadata database, or chat-registry migration. Missing executor selection retains the deliberate Local default. The browser ships with its controller; worker upgrades follow the [executor compatibility and qualification rules](./compatibility.md). Do not keep competing legacy and executor-aware protocols. Rollback disables the executor capability and remote UI while preserving repository state and user drafts; it cannot undo completed Git operations.
 
 ## Verification Criteria
 

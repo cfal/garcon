@@ -98,9 +98,13 @@ export class CompatibilityPair {
       credentials: this.#credentials, command });
   }
 
-  async #invokeDriver(request: CompatibilityDriverRequest): Promise<Record<string, unknown>> {
-    const child = Bun.spawn([this.controllerArtifact.bunExecutable, 'integration-tests/support/compatibility-driver.ts'], {
-      cwd: this.controllerArtifact.repoRoot, env: isolatedEnvironment(this.controllerDirs.home),
+  cliDriver(artifact: SourceArtifact, request: Extract<CompatibilityDriverRequest, { kind: 'capture-cli-context' | 'check-cli-restart' }>): Promise<Record<string, unknown>> {
+    return this.#invokeDriver(request, artifact);
+  }
+
+  async #invokeDriver(request: CompatibilityDriverRequest, artifact = this.controllerArtifact): Promise<Record<string, unknown>> {
+    const child = Bun.spawn([artifact.bunExecutable, 'integration-tests/support/compatibility-driver.ts'], {
+      cwd: artifact.repoRoot, env: isolatedEnvironment(this.controllerDirs.home),
       stdin: new Blob([JSON.stringify(request)]), stdout: 'pipe', stderr: 'pipe',
     });
     try {

@@ -29,8 +29,8 @@ Upgrade behavior: JWTs without the owner/revision claims are rejected. Existing
 tickets are preserved through historical readers, not a database rewrite.
 The browser must match its controller. Ticket-owner and other authority contracts
 are mandatory in executor core 1; negotiation cannot weaken them. The initial
-core-1 release requires a coordinated controller/worker/CLI cutover; later compliant
-core-1 artifacts may be upgraded independently. See
+core-1 release requires a coordinated controller/worker/CLI cutover. Independent
+upgrades require baseline publication and mixed-artifact qualification. See
 [Executor Compatibility](./executor/compatibility.md). Build labels are not security
 policy: withdrawal of a vulnerable build requires an explicit operational decision,
 not a protocol revision floor.
