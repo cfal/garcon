@@ -12,17 +12,15 @@ import { GarconClient } from '../../cli/garcon-client.js';
 import { GarconTestClient } from './garcon-client.js';
 import { initializeFixtureRepository } from './git-fixture.js';
 import { cliEnvironment } from './cli-environment.js';
-import type { CompatibilityDriverRequest, CompatibilityDriverResult } from './compatibility-contract.js';
+import type { CompatibilityCommand, CompatibilityDriverRequest, CompatibilityDriverResult } from './compatibility-contract.js';
 import { withTimeout } from './deferred.js';
 import { rejectionOf } from './promise-assertions.js';
+import { fixtureAuthToken, prepareFixtureAuth } from './fixture-auth.js';
 
 const input: CompatibilityDriverRequest = JSON.parse(await Bun.stdin.text());
 assert.equal(input.version, 1);
-const command = input.command;
-const client = await GarconTestClient.connect(input.baseUrl, { authToken: input.authToken,
-  executorId: 'executorId' in command ? command.executorId : 'local' });
 
-async function terminalRoundTrip(terminalId: string, inventory: TerminalListResponse, data: string, marker: string): Promise<void> {
+async function terminalRoundTrip(client: GarconTestClient, terminalId: string, inventory: TerminalListResponse, data: string, marker: string): Promise<void> {
   const attachmentId = crypto.randomUUID();
   client.sendTerminal({ type: 'terminal-attach', terminalId, attachmentId,
     attachmentEpoch: inventory.attachmentEpoch, clientId: 'compatibility-driver', afterSequence: 0, intent: 'takeover' });
@@ -34,7 +32,7 @@ async function terminalRoundTrip(terminalId: string, inventory: TerminalListResp
     && message.attachmentId === attachmentId && message.data.includes(marker), 'compatibility terminal output', { afterIndex });
 }
 
-async function execute(): Promise<Record<string, unknown>> {
+async function execute(client: GarconTestClient, command: CompatibilityCommand): Promise<Record<string, unknown>> {
   switch (command.kind) {
     case 'enroll': {
       const created = await client.post<{ id: string } & Partial<ExecutorConnection>>('/api/v1/executors', {
@@ -133,7 +131,7 @@ async function execute(): Promise<Record<string, unknown>> {
       const inventory = await client.get<TerminalListResponse>(`/api/v1/terminals?executorId=${executorId}`);
       const { terminal } = await client.post<TerminalCreateResponse>('/api/v1/terminals', { executorId,
         expectedTerminalRuntimeId: inventory.terminalRuntimeId, requestId: crypto.randomUUID(), requestedInitialWorkingDirectory: projectPath });
-      await terminalRoundTrip(terminal.terminalId, inventory,
+      await terminalRoundTrip(client, terminal.terminalId, inventory,
         "stty -echo; export COMPATIBILITY_VALUE=retained; printf 'compat-%s\\n' ready\r", 'compat-ready');
       const context = await discoverRuntime({ configDir: command.workerConfig, runtime: 'executor' });
       return { terminalId: terminal.terminalId, terminalRuntimeId: inventory.terminalRuntimeId, controllerId: context.instanceId,
@@ -143,7 +141,7 @@ async function execute(): Promise<Record<string, unknown>> {
       const inventory = await client.get<TerminalListResponse>(`/api/v1/terminals?executorId=${command.executorId}`);
       assert.equal(inventory.terminalRuntimeId, command.terminalRuntimeId);
       assert(inventory.terminals.some(terminal => terminal.terminalId === command.terminalId));
-      await terminalRoundTrip(command.terminalId, inventory, 'printf "compat-%s\\n" "$COMPATIBILITY_VALUE"\r', 'compat-retained');
+      await terminalRoundTrip(client, command.terminalId, inventory, 'printf "compat-%s\\n" "$COMPATIBILITY_VALUE"\r', 'compat-retained');
       const connection = await discoverRuntime({ configDir: command.workerConfig, runtime: 'executor' });
       assert.notEqual(connection.instanceId, command.previousControllerId);
       const stale = new GarconClient({ ...connection, instanceId: command.previousControllerId });
@@ -157,7 +155,16 @@ async function execute(): Promise<Record<string, unknown>> {
   }
 }
 
-try {
-  const result: CompatibilityDriverResult = { version: 1, result: await execute() };
-  console.log(JSON.stringify(result));
-} finally { await client.close(); }
+async function run(): Promise<Record<string, unknown>> {
+  if (input.kind === 'prepare-auth') return prepareFixtureAuth(input.configDir);
+  assert.equal(input.kind, 'command');
+  const { command } = input;
+  const authToken = await fixtureAuthToken(input.baseUrl, input.credentials);
+  const client = await GarconTestClient.connect(input.baseUrl, { authToken,
+    executorId: 'executorId' in command ? command.executorId : 'local' });
+  try { return await execute(client, command); }
+  finally { await client.close(); }
+}
+
+const result: CompatibilityDriverResult = { version: 1, result: await run() };
+console.log(JSON.stringify(result));

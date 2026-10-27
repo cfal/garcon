@@ -6,7 +6,7 @@ import { GarconProcess, isolatedEnvironment } from './garcon-process.js';
 import { ExecutorProcess, reusableListenPort } from './execution-backend.js';
 import type { IntegrationDirectories } from './integration-fixture.js';
 import type { SourceArtifact } from './source-artifact.js';
-import type { CompatibilityCommand, CompatibilityDriverRequest, CompatibilityDriverResult } from './compatibility-contract.js';
+import type { CompatibilityCommand, CompatibilityCredentials, CompatibilityDriverRequest, CompatibilityDriverResult } from './compatibility-contract.js';
 import { withTimeout } from './deferred.js';
 
 type Direction = 'remote-controller-dials' | 'remote-executor-dials';
@@ -17,6 +17,7 @@ export class CompatibilityPair {
   worker!: ExecutorProcess;
   executorId = '';
   #workerLaunch!: WorkerLaunch;
+  #credentials!: CompatibilityCredentials;
   #port = 0;
   readonly #logs: string[] = [];
 
@@ -73,16 +74,22 @@ export class CompatibilityPair {
     }
   }
 
-  #startController(): Promise<GarconProcess> {
+  async #startController(): Promise<GarconProcess> {
+    const credentials = await this.#invokeDriver({ version: 1, kind: 'prepare-auth', configDir: this.controllerDirs.config });
+    this.#credentials = { username: stringField(credentials, 'username'), password: stringField(credentials, 'password') };
     return GarconProcess.start({ ...this.controllerArtifact, configDir: this.controllerDirs.config,
       workspaceDir: this.controllerDirs.workspace, projectDir: this.controllerDirs.project,
       homeDir: this.controllerDirs.home, environment: { GARCON_TERMINAL_SHELL: '/bin/sh' }, port: this.#port,
+      authentication: 'existing',
     });
   }
 
-  async driver(command: CompatibilityCommand): Promise<Record<string, unknown>> {
-    const request: CompatibilityDriverRequest = { version: 1, baseUrl: this.controller.baseUrl,
-      authToken: this.controller.authToken, command };
+  driver(command: CompatibilityCommand): Promise<Record<string, unknown>> {
+    return this.#invokeDriver({ version: 1, kind: 'command', baseUrl: this.controller.baseUrl,
+      credentials: this.#credentials, command });
+  }
+
+  async #invokeDriver(request: CompatibilityDriverRequest): Promise<Record<string, unknown>> {
     const child = Bun.spawn([this.controllerArtifact.bunExecutable, 'integration-tests/support/compatibility-driver.ts'], {
       cwd: this.controllerArtifact.repoRoot, env: isolatedEnvironment(this.controllerDirs.home),
       stdin: new Blob([JSON.stringify(request)]), stdout: 'pipe', stderr: 'pipe',
@@ -90,7 +97,7 @@ export class CompatibilityPair {
     try {
       const [code, stdout, stderr] = await withTimeout(Promise.all([child.exited,
         new Response(child.stdout).text(), new Response(child.stderr).text()]), 120_000, () => 'Compatibility driver timed out');
-      assert.equal(code, 0, `Artifact-local driver ${command.kind} failed:\n${stderr}\n${stdout}`);
+      assert.equal(code, 0, `Artifact-local driver ${request.kind === 'command' ? request.command.kind : request.kind} failed:\n${stderr}`);
       const response: CompatibilityDriverResult = JSON.parse(stdout);
       assert.equal(response.version, 1);
       assert(response.result && typeof response.result === 'object');

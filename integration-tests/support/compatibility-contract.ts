@@ -1,6 +1,11 @@
 import type { SourceArtifact } from './source-artifact.js';
 
 // Core-1 artifacts keep this test protocol readable by future matrix orchestrators.
+// The process harness also freezes these launch surfaces: server/main.ts (controller
+// and executor modes), config/workspace/project/port/bind flags, GARCON_CONTROLLER_URL,
+// and executor connection-url --advertise-url --no-tls. Readiness is the controller's
+// `Started at http://...` line and the worker's JSON `executor-listening` (url) and
+// `executor-connected` frames. Other log fields and private auth formats are not frozen.
 export type CompatibilityCommand =
   | { kind: 'enroll'; direction: 'controller-connects' | 'executor-connects'; connectionUrl?: string }
   | { kind: 'inventory'; executorId: string }
@@ -10,12 +15,15 @@ export type CompatibilityCommand =
   | { kind: 'synthetic-turn'; executorId: string; projectPath: string; schemaVersion: number; chatId?: string }
   | { kind: 'saved-settings'; chatId: string };
 
-export interface CompatibilityDriverRequest {
-  readonly version: 1;
-  readonly baseUrl: string;
-  readonly authToken: string | null;
-  readonly command: CompatibilityCommand;
+export interface CompatibilityCredentials {
+  readonly username: string;
+  readonly password: string;
 }
+
+export type CompatibilityDriverRequest =
+  | { readonly version: 1; readonly kind: 'prepare-auth'; readonly configDir: string }
+  | { readonly version: 1; readonly kind: 'command'; readonly baseUrl: string;
+      readonly credentials: CompatibilityCredentials; readonly command: CompatibilityCommand };
 
 export interface CompatibilityDriverResult {
   readonly version: 1;
