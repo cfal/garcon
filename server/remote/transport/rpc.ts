@@ -26,6 +26,7 @@ import { parseBulkControl, type BulkConnectionControl } from './rpc-lane.js';
 import { BULK_CONTROL_BYTES, RPC_CALL_LIMIT, RPC_INSTALLATION_CALL_LIMIT } from './limits.js';
 import { assertRpcLane, assertRpcReplySize, assertRpcRequestSize } from './rpc-routing.js';
 import { sameContinuity, type SessionProtocol } from './protocol-compatibility.js';
+import { assertRpcSupported } from './protocol-policy.js';
 
 interface Failure {
   readonly code: AgentIntegrationErrorCode | ErrorCode | TerminalErrorCode | GitServiceErrorCode;
@@ -53,6 +54,7 @@ export interface RpcCallOptions<Result = unknown> extends Omit<ExecutorCallOptio
 }
 
 interface LateResult {
+  readonly call: Pick<OutgoingCall, 'method' | 'request' | 'protocol'>;
   readonly release: () => void;
   readonly receive: (value: unknown) => void | Promise<unknown>;
   readonly lost: (() => void) | undefined;
@@ -300,6 +302,7 @@ export class ExecutorRpc {
     }
     if (options?.signal?.aborted) throw new AgentCallError('not-dispatched', 'Executor is unavailable');
     if (this.#retired || !this.transport.connected) throw new ExecutorSessionLostError('not-dispatched', 'Executor is unavailable');
+    assertRpcSupported(this.transport.profile, method, request);
     assertRpcLane(method, request, this.transport.lane);
     if (!this.#outgoingOpen && method !== 'calls.reconcile') throw new AgentCallError('not-dispatched', 'Executor bulk connection is recovering');
     if (method === 'calls.reconcile') {
@@ -326,6 +329,7 @@ export class ExecutorRpc {
       if (holder && onLateResult) {
         retainedForLateResult = true;
         holder.#lateResults.set(call.id, {
+          call,
           release,
           receive: (value) => onLateResult(value as ExecutorRpcMethods[K]['result']),
           lost: options?.onLateResultLost,
@@ -422,6 +426,7 @@ export class ExecutorRpc {
     if (!sameContinuity(call.protocol.continuity, this.transport.continuity)) {
       throw new ExecutorSessionLostError('unknown', 'A call cannot be replayed in another executor continuity.');
     }
+    assertRpcSupported(call.protocol.profile, call.method, call.request);
     const seq = this.#sent + 1;
     const payload = JSON.stringify({
       type: 'request', id: call.id, seq, integrationId: call.integrationId, method: call.method, request: call.request,
@@ -489,9 +494,14 @@ export class ExecutorRpc {
     }
     if (!('id' in frame) || typeof frame.id !== 'string') throw new Error('RPC request ID is required');
     if (frame.type === 'result' || frame.type === 'error') {
+      let failure = frame.type === 'error' ? decodeFailure(frame.error) : null;
       const call = this.#pending.get(frame.id);
       if (!call) {
         const late = this.#lateResults.get(frame.id);
+        if (late) {
+          assertRpcSupported(late.call.protocol.profile, late.call.method, late.call.request);
+          assertRpcReplySize(late.call.method, late.call.request, this.transport.lane, Buffer.byteLength(payload));
+        }
         this.#lateResults.delete(frame.id);
         late?.release();
         if (frame.type === 'result' && late) {
@@ -502,7 +512,7 @@ export class ExecutorRpc {
         }
         return;
       }
-      let failure = frame.type === 'error' ? decodeFailure(frame.error) : null;
+      assertRpcSupported(call.protocol.profile, call.method, call.request);
       try { assertRpcReplySize(call.method, call.request, this.transport.lane, Buffer.byteLength(payload)); }
       catch (error) { failure = error instanceof Error ? error : new Error(String(error)); }
       this.#pending.delete(frame.id); call.cleanup();
@@ -522,18 +532,18 @@ export class ExecutorRpc {
       throw new Error('Invalid executor RPC request');
     }
     if (!Number.isSafeInteger(frame.seq) || frame.seq < 1) throw new Error('Invalid RPC request sequence');
-    // Tracking the highest sequence stays safe if another sender numbers the
-    // same session: a request received is never reported as not received.
-    this.#received = Math.max(this.#received, frame.seq);
-    this.#journal?.received(this.#journalOwner, this.#received);
     if (this.#incoming.has(frame.id) || this.#journal?.has(frame.id)) throw new Error('Duplicate RPC request ID');
     try {
+      assertRpcSupported(this.transport.profile, frame.method, frame.request);
       assertRpcLane(frame.method, frame.request, this.transport.lane);
       assertRpcRequestSize(frame.method, this.transport.lane, Buffer.byteLength(payload));
     } catch (error) {
       this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) });
       return;
     }
+    // Rejected protocol traffic never acquires receipt or journal ownership.
+    this.#received = Math.max(this.#received, frame.seq);
+    this.#journal?.received(this.#journalOwner, this.#received);
     if (frame.method === 'calls.reconcile') {
       this.#reconcile(frame);
       return;
@@ -586,13 +596,13 @@ export class ExecutorRpc {
       // Only launches, which the journal does not carry, observe undelivered replies.
       return withActivity(rpcActivity(frame.method), () => handler(frame, call.signal, (guard) => { replyGuard = guard; }, () => {}));
     }).then(
-      (value) => this.#encodeReply({ type: 'result', id: frame.id, value }, this.#guardReply(frame, replyGuard)) ?? undeliverableReply(frame.id),
+      (value) => this.#encodeReply({ type: 'result', id: frame.id, value }, this.#guardReply(frame, replyGuard)) ?? this.#undeliverableReply(frame.id),
       (error) => {
         logRedactedFailure(frame, error);
-        return this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }, this.#guardReply(frame)) ?? undeliverableReply(frame.id);
+        return this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }, this.#guardReply(frame)) ?? this.#undeliverableReply(frame.id);
       },
-    ).catch((error) => JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(error) } satisfies RpcFrame))
-      .then((reply) => journal.complete(call, reply, undeliverableReply(frame.id))).finally(release);
+    ).catch((error) => this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }) ?? this.#undeliverableReply(frame.id))
+      .then((reply) => journal.complete(call, reply, this.#undeliverableReply(frame.id))).finally(release);
   }
 
   #reconcile(frame: Extract<ExecutorRpcRequest, { readonly method: 'calls.reconcile' }>): void {
@@ -628,6 +638,7 @@ export class ExecutorRpc {
 
   #guardReply(call: ExecutorRpcRequest, guard?: RpcReplyGuard): RpcReplyGuard {
     return (bytes) => {
+      assertRpcSupported(this.transport.profile, call.method, call.request);
       guard?.(bytes);
       assertRpcReplySize(call.method, call.request, this.transport.lane, bytes);
     };
@@ -656,12 +667,18 @@ export class ExecutorRpc {
 
   // Returns null for a reply too large to send.
   #encodeReply(frame: ReplyFrame, guard?: RpcReplyGuard): string | null {
-    let payload = JSON.stringify(frame);
+    const payload = JSON.stringify(frame);
     if (guard) {
       try { guard(Buffer.byteLength(payload)); }
-      catch (error) { payload = JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(error) } satisfies RpcFrame); }
+      catch (error) { return this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }); }
     }
     return this.transport.channel.fitsFrame(payload) ? payload : null;
+  }
+
+  #undeliverableReply(id: string): string {
+    return this.#encodeReply({ type: 'error', id, error: encodeFailure(
+      new AgentCallError('unknown', "The executor's reply could not be delivered, so the outcome is unknown."),
+    ) })!;
   }
 
   // Sends an unknown outcome in place of a reply that is too large or that the
@@ -670,7 +687,7 @@ export class ExecutorRpc {
   #reply(frame: ReplyFrame, guard?: RpcReplyGuard): boolean {
     const payload = this.#encodeReply(frame, guard);
     const deliverable = payload !== null && this.transport.channel.canAdmit(payload);
-    this.transport.send(deliverable ? payload : undeliverableReply(frame.id));
+    this.transport.send(deliverable ? payload : this.#undeliverableReply(frame.id));
     return deliverable;
   }
 }
@@ -679,12 +696,6 @@ export class ExecutorRpc {
 function parseFrame(payload: string): RpcFrame {
   try { return JSON.parse(payload); }
   catch { throw new Error('Malformed executor RPC frame'); }
-}
-
-function undeliverableReply(id: string): string {
-  return JSON.stringify({ type: 'error', id, error: encodeFailure(
-    new AgentCallError('unknown', "The executor's reply could not be delivered, so the outcome is unknown."),
-  ) } satisfies RpcFrame);
 }
 
 function reconciledStates(value: unknown): ReadonlyMap<string, OutstandingCallState['state']> {

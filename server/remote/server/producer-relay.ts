@@ -14,6 +14,11 @@ import { SESSION_MESSAGE_BYTES } from '../transport/session-socket.js';
 import { EXECUTOR_RECONNECT_GRACE_MS } from '../transport/limits.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../common/executor-disconnect.js';
 import { sameContinuity, type SessionProtocol } from '../transport/protocol-compatibility.js';
+import { decodeProducerEvent, UNREADABLE_EVENT_FAILURE } from '../transport/producer-protocol.js';
+import { createLogger } from '../../common/log.js';
+import { failureReason } from '../transport/failure-reason.js';
+
+const log = createLogger('executor-producer-relay');
 
 // A controller resumes every binding it still holds while installing a new
 // session, so bindings still suspended this long after one starts belong to a
@@ -293,17 +298,25 @@ export class ProducerRelay {
   #publish(integration: AgentIntegration, notification: AgentProducerNotification): void {
     const binding = this.#bindings.get(notification.binding.id);
     if (binding?.integration !== integration) return;
-    const { event } = notification;
+    let event: AgentProducerNotification['event'];
+    try {
+      event = decodeProducerEvent(notification.event, binding.ref, binding.protocol.profile);
+    } catch (error) {
+      log.warn('Provider event could not be encoded', { integrationId: integration.descriptor.id, bindingId: binding.ref.id, reason: failureReason(error) });
+      event = notification.event?.type === 'rows'
+        ? { type: 'publication-gap' }
+        : { type: 'publication-failed', error: UNREADABLE_EVENT_FAILURE };
+    }
     if (event.type === 'run-ended' && binding.launch?.runId === event.runId) binding.launch = null;
     binding.seq += 1;
     this.#published += 1;
-    const payload = encodeProducerFrame(binding.seq, notification);
+    const payload = encodeProducerFrame(binding.seq, { binding: binding.ref, event });
     const frame: RetainedFrame = {
       seq: binding.seq,
       order: this.#published,
       payload,
       bytes: Buffer.byteLength(payload),
-      droppable: notification.event.type === 'rows',
+      droppable: event.type === 'rows',
     };
     binding.retained.push(frame);
     binding.retainedBytes += frame.bytes;

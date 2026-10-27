@@ -37,3 +37,15 @@ test.each([
     expect(f.transport.connected).toBe(false);
   } finally { f.transport.close(); }
 });
+
+test('a malformed error for an already settled call remains a protocol fault', async () => {
+  const f = fixture();
+  try {
+    const pending = f.rpc.call('test', 'execution.runningSessions', null);
+    const id = f.sent[0]!.id;
+    f.connection.receive(JSON.stringify({ type: 'result', id, value: [] }));
+    await expect(pending).resolves.toEqual([]);
+    f.connection.receive(JSON.stringify({ type: 'error', id, error: { code: 'UNKNOWN_ERROR', message: 'Synthetic', retryable: false } }));
+    expect(f.transport.connected).toBe(false);
+  } finally { f.transport.close(); }
+});
