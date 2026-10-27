@@ -36,5 +36,6 @@ test('pauses and resumes a scheduled prompt through the SPA', async () => {
     await page.$eval(selector, element => (element as HTMLButtonElement).click());
     await page.waitForSelector(selector + '[aria-checked="true"]');
     expect((await integration.client.getScheduledPrompts()).prompts[0]?.enabled).toBe(true);
+    fixture.assertNoBrowserErrors();
   });
 }, 120_000);

@@ -37,7 +37,7 @@ async function assertMountedAssets(baseUrl: string, basePath: string): Promise<v
 
 for (const basePath of ['', '/garcon', '/tools/garcon']) {
   test(`one build supports navigation, lazy assets and offline shell at ${basePath || '/'}`, async () => {
-    await withChromiumFixture(`runtime-mount-${basePath}`, async ({ page, context, integration, assertNoBrowserErrors }) => {
+    await withChromiumFixture(`runtime-mount-${basePath}`, async ({ page, context, integration, withExpectedConsoleErrors, assertNoBrowserErrors }) => {
       const baseUrl = integration.garcon.baseUrl;
       await assertMountedAssets(baseUrl, basePath);
       const manifest: Record<string, { name?: string; file: string }> = JSON.parse(await readFile(
@@ -95,12 +95,22 @@ for (const basePath of ['', '/garcon', '/tools/garcon']) {
       expect(worker.caches.some(name => name.startsWith(`garcon:${encodeURIComponent(basePath)}:`))).toBe(true);
       expect(worker.caches.includes('garcon-pre-prefix-version')).toBe(basePath !== '');
       expect(worker.caches).toContain('unrelated');
-      await context.setOffline(true);
-      const offline = await page.goto(`${baseUrl}/chat/synthetic-offline`);
-      expect(offline?.fromServiceWorker()).toBe(true);
-      expect(offline?.status()).toBe(200);
-      expect(await offline?.text()).toContain(`base: "${basePath}"`);
-      await context.setOffline(false);
+      await page.waitForLoadState('networkidle');
+      await withExpectedConsoleErrors([
+        'Failed to load resource: net::ERR_INTERNET_DISCONNECTED',
+        /^\[ChatSessionsStore\] Failed to fetch chats: TypeError: Failed to fetch\n[\s\S]*$/,
+      ], async () => {
+        await context.setOffline(true);
+        try {
+          const offline = await page.goto(`${baseUrl}/chat/synthetic-offline`);
+          expect(offline?.fromServiceWorker()).toBe(true);
+          expect(offline?.status()).toBe(200);
+          expect(await offline?.text()).toContain(`base: "${basePath}"`);
+          await page.waitForLoadState('networkidle');
+        } finally {
+          await context.setOffline(false);
+        }
+      });
     }, undefined, { serverEnvironment: { GARCON_BASE_PATH: basePath }, serviceWorkers: 'allow' });
   }, 120_000);
 }

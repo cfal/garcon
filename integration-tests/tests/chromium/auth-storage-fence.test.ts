@@ -3,8 +3,9 @@ import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
 test('cold login and setup show storage recovery without accepting credentials', async () => {
-  await withChromiumFixture('cold-auth-storage-fence', async ({ browser, integration }) => {
+  await withChromiumFixture('cold-auth-storage-fence', async ({ browser, integration, watchBrowserErrors, consumeExpectedBrowserErrors }) => {
     const context = await browser.newContext({ serviceWorkers: 'block' });
+    watchBrowserErrors(context);
     const page = await context.newPage();
     let mutations = 0;
     page.on('request', request => {
@@ -24,6 +25,7 @@ test('cold login and setup show storage recovery without accepting credentials',
         expect(await page.evaluate(() => localStorage.getItem('bearer-token'))).toBeNull();
       }
       expect(mutations).toBe(0);
+      consumeExpectedBrowserErrors(Array(2).fill('console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)'));
     } finally { await context.close(); }
   });
 }, 120_000);

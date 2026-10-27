@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { captureBrowserErrors } from '../../support/browser-errors.js';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -39,6 +40,8 @@ describe('File draft storage failures', () => {
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage();
+      const browserErrors: string[] = [];
+      captureBrowserErrors(page.context(), browserErrors);
       await page.goto(`http://127.0.0.1:${server.port}`);
       const result = await page.evaluate(async (source) => {
         const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
@@ -216,6 +219,7 @@ describe('File draft storage failures', () => {
         recentLine: 1,
         bounded: Array.from({ length: 20 }, (_, i) => 20 - i + '.txt'),
       });
+      expect(browserErrors).toEqual([]);
     } finally {
       await browser.close();
       server.stop(true);

@@ -222,6 +222,7 @@ describe('Lightpanda queue workflow', () => {
 				(message) => !message.startsWith('console.error: WebSocket error:'),
 			)).toEqual([]);
 			expect(fixture.browserErrors.slice(errorsAfterReconnect)).toEqual([]);
+			fixture.consumeExpectedBrowserErrors(reconnectWindowErrors);
 		});
 	});
 

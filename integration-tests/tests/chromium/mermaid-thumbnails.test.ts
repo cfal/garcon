@@ -65,7 +65,7 @@ async function openSettings(page: Page): Promise<Locator> {
 }
 
 test('sizes unframed Mermaid thumbnails and opens the viewer by click, keyboard, and touch', async () => {
-  await withChromiumFixture('mermaid-thumbnails', async ({ page, context, integration, assertNoBrowserErrors }) => {
+  await withChromiumFixture('mermaid-thumbnails', async ({ page, context, integration, assertNoBrowserErrors, watchBrowserErrors }) => {
     const { client, executionDirs, directAgents } = integration;
     const chatId = integration.newChatId();
     const started = await client.startDirectChat({
@@ -220,6 +220,7 @@ test('sizes unframed Mermaid thumbnails and opens the viewer by click, keyboard,
       serviceWorkers: 'block',
     });
     try {
+      watchBrowserErrors(touchContext);
       const touchPage = await touchContext.newPage();
       await touchPage.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
       const touchThumbnail = touchPage.locator('[data-chat-message-type="assistant-message"] .mermaid-thumbnail').first();
