@@ -142,6 +142,24 @@ function setup(options: { realTransport?: boolean } = {}) {
 }
 
 describe('executor-qualified terminal registry', () => {
+	it('fences late lists and refreshes when a ready host changes instance without an offline snapshot', async () => {
+		const { registry, executors, list } = setup();
+		await registry.initialize();
+		const oldList = Promise.withResolvers<TerminalListResponse>();
+		list.mockImplementationOnce(() => oldList.promise);
+		const stale = registry.list(remoteId);
+		await Promise.resolve();
+		list.mockImplementation(async id => inventory([terminal(id, 1, replacementRuntimeId)], replacementRuntimeId));
+		executors.applySnapshot([executor('local'), { ...executor(remoteId), instanceId: 'replacement-instance' }]);
+		await registry.list(remoteId);
+		expect(registry.executorInventories[remoteId].runtimeId).toBe(replacementRuntimeId);
+		oldList.resolve(inventory([terminal(remoteId)]));
+		await stale;
+		expect(registry.executorInventories[remoteId].runtimeId).toBe(replacementRuntimeId);
+		expect(registry.sessions[terminal(remoteId).terminalId]).toBeUndefined();
+		expect(registry.sessions[terminal(remoteId, 1, replacementRuntimeId).terminalId]).toBeDefined();
+		expect(registry.sessions[terminal('local').terminalId]).toBeDefined();
+	});
 	it('restores terminals without Promise.withResolvers support', async () => {
 		const unsupported = vi.spyOn(Promise, 'withResolvers').mockImplementation(() => {
 			throw new TypeError('Promise.withResolvers is not a function');

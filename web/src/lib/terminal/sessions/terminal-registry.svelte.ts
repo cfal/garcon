@@ -80,6 +80,7 @@ export class TerminalRegistry {
 	readonly #lists = new Map<string, Promise<void>>();
 	readonly #executorVersions = new Map<string, symbol>();
 	readonly #executorAvailability = new Map<string, string>();
+	readonly #executorInstances = new Map<string, string | null>();
 	readonly #attachmentIds = new Map<string, string>();
 	readonly #gapRecovery = new Set<string>();
 	readonly #drainingOutput = new Set<string>();
@@ -145,6 +146,7 @@ export class TerminalRegistry {
 				label: 'Local',
 				enabled: true,
 				availability: 'ready',
+				instanceId: null,
 				executorServices: { terminals: true },
 			},
 		];
@@ -157,6 +159,7 @@ export class TerminalRegistry {
 			})
 			.map((executor) => ({
 				id: executor.id,
+				instanceId: executor.instanceId,
 				label: executor.label,
 				available: executor.enabled && executor.availability === 'ready' && executor.executorServices.terminals,
 				full:
@@ -920,6 +923,7 @@ export class TerminalRegistry {
 			if (known.has(executorId)) continue;
 			this.#loseExecutor(executorId);
 			this.#executorAvailability.delete(executorId);
+			this.#executorInstances.delete(executorId);
 			this.#executorVersions.delete(executorId);
 			delete this.executorInventories[executorId];
 			for (const id of Object.keys(this.sessions))
@@ -933,10 +937,13 @@ export class TerminalRegistry {
 		for (const host of hosts) {
 			const availability = host.available ? 'ready' : 'offline';
 			const previous = this.#executorAvailability.get(host.id);
+			const replaced = this.#executorInstances.has(host.id)
+				&& this.#executorInstances.get(host.id) !== host.instanceId;
 			this.#executorAvailability.set(host.id, availability);
-			if (previous === availability) continue;
-			if (!host.available) this.#loseExecutor(host.id);
-			else if (this.#initialized && !this.#authSuspended) {
+			this.#executorInstances.set(host.id, host.instanceId);
+			if (previous === availability && !replaced) continue;
+			if (!host.available || replaced) this.#loseExecutor(host.id);
+			if (host.available && this.#initialized && !this.#authSuspended) {
 				void this.#refreshExecutor(host.id);
 			}
 		}
