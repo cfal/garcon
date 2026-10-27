@@ -86,6 +86,40 @@ describe('AgentRuntimeRouter ownership fence', () => {
     expect(integration.compaction.compact).not.toHaveBeenCalled();
   });
 
+  it.each(launches)('uses one post-adoption configuration for %s', async (operation, method) => {
+    const { router, entry, integration, adoption, endpointResolver, execution } = makeRouter(() => false);
+    entry.agentSettingsById = { test: { ownerId: 'test', schemaVersion: 1, values: { mode: 'before' } } };
+    const ensure = adoption.ensure.getMockImplementation();
+    adoption.ensure.mockImplementation(async (...args) => {
+      await ensure(...args);
+      entry.model = 'model-b';
+      entry.agentSettingsById.test = { ownerId: 'test', schemaVersion: 1, values: { mode: 'after' } };
+    });
+    endpointResolver.resolveSelection.mockImplementation(({ model }) => ({
+      model, apiProviderId: null, endpointId: null, protocol: null, isLocal: false,
+    }));
+    await launch(router, method, {});
+    const invoke = operation === 'compact' ? integration.compaction.compact : execution[operation];
+    expect(invoke.mock.calls[0][0]).toMatchObject({
+      model: 'model-b', settings: { ownerId: 'test', schemaVersion: 1, values: { mode: 'after' } },
+    });
+  });
+
+  for (const field of ['agentId', 'executorId']) {
+    it.each(launches)(`rejects a changed ${field} during adoption before %s`, async (_operation, method) => {
+      const { router, entry, integration, adoption, execution } = makeRouter(() => false);
+      const ensure = adoption.ensure.getMockImplementation();
+      adoption.ensure.mockImplementation(async (...args) => {
+        await ensure(...args);
+        entry[field] = 'replacement';
+      });
+      await expect(launch(router, method, {})).rejects.toMatchObject({ code: 'STALE_RESOURCE', outcome: 'not-dispatched' });
+      expect(execution.start).not.toHaveBeenCalled();
+      expect(execution.resume).not.toHaveBeenCalled();
+      expect(integration.compaction.compact).not.toHaveBeenCalled();
+    });
+  }
+
   it.each(launches)('never combines a replaced integration with a captured %s binding', async (_operation, method) => {
     const { router, integration, producer, directory, execution } = makeRouter(() => false);
     const replacement = { ...integration, settings: { ...integration.settings, parse: mock(value => value) } };
@@ -105,15 +139,20 @@ describe('AgentRuntimeRouter ownership fence', () => {
     const { router, integration, directory, execution } = makeRouter(() => false);
     await router.runAgentTurn('chat-1', 'prompt', { turnId: 'turn-1' });
     directory.isReady.mockReturnValue(false);
-    execution.abort.mockRejectedValueOnce(new AgentCallError('not-dispatched', 'Disconnected', 'UNAVAILABLE'));
     await router.abortSession('chat-1');
     await Promise.resolve();
+    expect(execution.abort).not.toHaveBeenCalled();
+    router.executionSessionResumed(integration.producers.scope.executorId);
+    expect(execution.abort).not.toHaveBeenCalled();
+    execution.abort.mockRejectedValueOnce(new AgentCallError('not-dispatched', 'Retired worker', 'STALE_RESOURCE'));
     const replacementAbort = mock(async () => true);
     directory.require.mockReturnValue({ ...integration, execution: { ...execution, abort: replacementAbort } });
     directory.isReady.mockReturnValue(true);
     router.executionSessionResumed(integration.producers.scope.executorId);
     await Promise.resolve();
-    expect(execution.abort).toHaveBeenCalledTimes(2);
+    expect(execution.abort).toHaveBeenCalledTimes(1);
+    router.executionSessionResumed(integration.producers.scope.executorId);
+    expect(execution.abort).toHaveBeenCalledTimes(1);
     expect(replacementAbort).not.toHaveBeenCalled();
   });
 

@@ -50,6 +50,7 @@ function makeRouter(execution) {
       getChatByAgentSessionId: mock(() => null),
     },
     directory: {
+      isReady: () => true,
       require: mock(() => integration),
       get: mock(() => integration),
       list: mock(() => [integration]),
