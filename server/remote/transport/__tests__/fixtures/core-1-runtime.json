@@ -1,0 +1,26 @@
+{
+  "context": {
+    "serverInstanceId": "synthetic-controller",
+    "defaultExecutorId": "11111111-1111-4111-8111-111111111111",
+    "workspaceName": null
+  },
+  "cli": [
+    { "status": 200, "body": { "success": true } },
+    { "status": 422, "body": { "error": "Unsupported operation", "errorCode": "OPERATION_UNSUPPORTED" } },
+    { "status": 503, "body": { "error": "Busy", "errorCode": "CLI_BUSY" }, "retryAfter": "1" },
+    { "status": 503, "body": { "error": "Unknown outcome", "errorCode": "CLI_OUTCOME_UNKNOWN" } }
+  ],
+  "failures": [
+    { "code": "UNAVAILABLE", "message": "Synthetic failure", "retryable": false, "outcome": "not-dispatched" },
+    { "code": "OPERATION_UNSUPPORTED", "message": "Synthetic failure", "retryable": false, "outcome": "not-dispatched" },
+    { "code": "INVALID_SETTINGS", "message": "Synthetic failure", "retryable": false, "outcome": "rejected" },
+    { "code": "OUTCOME_UNKNOWN", "message": "Synthetic failure", "retryable": false, "outcome": "unknown" },
+    { "domain": "executor", "code": "FILE_REVISION_CONFLICT", "message": "Synthetic failure", "retryable": false, "status": 409 },
+    { "domain": "git", "code": "GIT_MUTATION_OUTCOME_UNKNOWN", "message": "Synthetic failure", "retryable": false, "status": 503 },
+    { "domain": "terminal", "code": "terminal-runtime-changed", "message": "Synthetic failure", "retryable": false, "status": 409 }
+  ],
+  "terminal": [
+    { "type": "terminal-output", "terminalId": "local/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222", "attachmentId": "synthetic-attachment", "sequence": 1, "data": "Synthetic output\n" },
+    { "type": "terminal-error", "code": "terminal-runtime-changed", "message": "Synthetic failure" }
+  ]
+}
