@@ -61,6 +61,7 @@ export interface TerminalExecutorInventory {
 
 export interface PendingTerminalCreate {
 	executorId: string;
+	executorInstanceId: string | null | undefined;
 	terminalRuntimeId?: string;
 	requestId: string;
 	requestedInitialWorkingDirectory: string | null;

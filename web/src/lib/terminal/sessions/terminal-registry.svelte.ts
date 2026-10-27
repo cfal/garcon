@@ -317,6 +317,7 @@ export class TerminalRegistry {
 		if (!attempt) {
 			const createdAttempt: PendingTerminalCreate = {
 				executorId,
+				executorInstanceId: this.#executorInstances.get(executorId),
 				terminalRuntimeId: this.executorInventories[executorId]?.runtimeId,
 				requestId,
 				requestedInitialWorkingDirectory,
@@ -338,7 +339,8 @@ export class TerminalRegistry {
 			attempt.requestedInitialWorkingDirectory !== requestedInitialWorkingDirectory
 		)
 			throw new Error('Terminal retry cannot change its target');
-		if (attempt.terminalRuntimeId !== this.executorInventories[executorId]?.runtimeId)
+		if (attempt.terminalRuntimeId !== this.executorInventories[executorId]?.runtimeId
+			|| attempt.executorInstanceId !== this.#executorInstances.get(executorId))
 			attempt.requiresList = true;
 		if (attempt.requiresList) {
 			await this.list(executorId);
@@ -354,7 +356,8 @@ export class TerminalRegistry {
 			if (this.#destroyed || !this.#executorVersions.has(executorId))
 				throw new ApiError(503, m.terminal_unavailable(), 'terminal-unavailable');
 			const observedRuntime = this.executorInventories[executorId]?.runtimeId;
-			if (observedRuntime && observedRuntime !== attempt.terminalRuntimeId)
+			if (attempt.executorInstanceId !== this.#executorInstances.get(executorId)
+				|| observedRuntime && observedRuntime !== attempt.terminalRuntimeId)
 				throw new ApiError(409, m.terminal_create_requires_list(), 'terminal-runtime-changed');
 			this.#upsert(result.terminal, 'detached');
 			this.#clearCreateAttempt(requestId);
