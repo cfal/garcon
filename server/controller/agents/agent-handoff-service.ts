@@ -56,6 +56,7 @@ export interface AgentHandoffPreparation {
 }
 
 export class AgentHandoffService {
+  readonly #targetIntegrations = new WeakMap<ResolvedAgentHandoffTarget, AgentIntegration>();
   readonly #recoveries = new Map<string, PendingHandoffRecovery>();
   readonly #activeRecoveryAttempts = new Map<string, Promise<void>>();
   readonly #recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -141,21 +142,34 @@ export class AgentHandoffService {
         400,
       );
     }
+    if (!this.deps.integrations.get(requested.agentId, executorId)) {
+      throw new DomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${requested.agentId}`, 422);
+    }
+    const integration = this.deps.integrations.require(requested.agentId, executorId);
+    assertHandoffDestination(integration);
+    const agentSettings = integration.settings.parse(
+      requested.agentSettings
+        ?? input.chat.agentSettingsById[requested.agentId]
+        ?? integration.settings.defaults(),
+    );
+    if (agentSettings.ownerId !== requested.agentId) {
+      throw new DomainError('INCOMPLETE_EXECUTION_CONFIG', `The chat has no valid settings for agent ${requested.agentId}.`, 422);
+    }
     const projectPath = await resolveStartProjectPath(
       requested.projectPath ?? input.chat.projectPath, this.deps.inspectProject, executorId, readBefore(deadline, input.signal),
     );
-    const integration = this.deps.integrations.get(requested.agentId, executorId);
+    this.#assertIntegrationCurrent(integration, executorId);
     const catalog = await this.deps.catalog.getAgentCatalogEntry(requested.agentId, {
       executorId, ...readBefore(deadline, input.signal),
     });
-    if (!integration || !catalog) {
+    this.#assertIntegrationCurrent(integration, executorId);
+    if (!catalog) {
       throw new DomainError(
         'UNSUPPORTED_AGENT',
         `Unsupported agent: ${requested.agentId}`,
         422,
       );
     }
-    assertHandoffDestination(integration);
     const selection = this.deps.endpointResolver.resolveSelection({
       executorId,
       agentId: requested.agentId,
@@ -196,6 +210,7 @@ export class AgentHandoffService {
           revision: endpoint.apiProvider.revision,
         },
       }, readBefore(deadline, input.signal));
+      this.#assertIntegrationCurrent(integration, executorId);
     }
 
     const permissionMode = requested.permissionMode ?? preferredValue(
@@ -223,19 +238,7 @@ export class AgentHandoffService {
         422,
       );
     }
-    const agentSettings = integration.settings.parse(
-      requested.agentSettings
-        ?? input.chat.agentSettingsById[requested.agentId]
-        ?? integration.settings.defaults(),
-    );
-    if (agentSettings.ownerId !== requested.agentId) {
-      throw new DomainError(
-        'INCOMPLETE_EXECUTION_CONFIG',
-        `The chat has no valid settings for agent ${requested.agentId}.`,
-        422,
-      );
-    }
-    return {
+    const target: ResolvedAgentHandoffTarget = {
       executorId,
       projectPath,
       agentId: requested.agentId,
@@ -247,6 +250,8 @@ export class AgentHandoffService {
       thinkingMode,
       agentSettings,
     };
+    this.#targetIntegrations.set(target, integration);
+    return target;
   }
 
   createPreparation(input: {
@@ -283,7 +288,7 @@ export class AgentHandoffService {
           }
 
           context.assertAdmissionActive();
-          assertHandoffDestination(this.deps.integrations.require(input.target.agentId, input.target.executorId));
+          this.#assertTargetCurrent(input.target);
           this.deps.ledger.closeProducer(input.chatId);
           producerClosed = true;
           const watermark = this.deps.ledger.highWatermark(input.chatId);
@@ -318,7 +323,7 @@ export class AgentHandoffService {
           const decide = () => {
             this.#requireUnchangedSource(input.chatId, sourceFence);
             context.assertAdmissionActive();
-            assertHandoffDestination(this.deps.integrations.require(input.target.agentId, input.target.executorId));
+            this.#assertTargetCurrent(input.target);
             this.deps.endpointResolver.resolveSelection(input.target);
             decisionAttempted = true;
             return this.deps.ownership.decideHandoff({
@@ -330,6 +335,11 @@ export class AgentHandoffService {
               target: input.target,
               targetAgentOwnershipEpoch: crypto.randomUUID(),
               watermark,
+              assertCurrent: () => {
+                this.#requireUnchangedSource(input.chatId, sourceFence);
+                context.assertAdmissionActive();
+                this.#assertTargetCurrent(input.target);
+              },
             });
           };
           const intent = await (input.guardDecision ? input.guardDecision(decide) : decide());
@@ -366,6 +376,19 @@ export class AgentHandoffService {
         this.deps.preparedCarryover.discard(input.chatId);
       },
     };
+  }
+
+  #assertTargetCurrent(target: ResolvedAgentHandoffTarget): void {
+    const integration = this.#targetIntegrations.get(target);
+    if (!integration) throw new Error('Handoff target was not resolved by this service');
+    this.#assertIntegrationCurrent(integration, target.executorId);
+    assertHandoffDestination(integration);
+  }
+
+  #assertIntegrationCurrent(integration: AgentIntegration, executorId?: string | null): void {
+    if (this.deps.integrations.require(integration.descriptor.id, executorId) !== integration) {
+      throw new DomainError('VALIDATION_FAILED', 'The handoff destination changed. Refresh its configuration and try again.', 422);
+    }
   }
 
   async recoverPendingHandoffs(): Promise<void> {

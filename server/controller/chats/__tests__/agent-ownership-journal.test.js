@@ -120,6 +120,24 @@ describe('AgentOwnershipJournal', () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
+  it('rechecks the captured generation when a queued handoff reaches its first durable write', async () => {
+    const registry = createRegistry({ chat: chat() });
+    const options = { workspaceDir, registry, integrations: createIntegrations(), ledger: { deleteChat() {} } };
+    const journal = new AgentOwnershipJournal(options);
+    await journal.initialize();
+    let current = true;
+    const deciding = journal.decideHandoff(decisionInput(registry, {
+      assertCurrent() { if (!current) throw new Error('Destination replaced'); },
+    }));
+    current = false;
+    await expect(deciding).rejects.toThrow('Destination replaced');
+    expect(journal.pendingHandoffs()).toEqual([]);
+    const reopened = new AgentOwnershipJournal(options);
+    await reopened.initialize();
+    expect(reopened.pendingHandoffs()).toEqual([]);
+    expect(registry.getChat('chat').agentId).toBe('source-agent');
+  });
+
   it('reloads and applies executor/path ownership without live integration discovery', async () => {
     const executorId = '22222222-2222-4222-8222-222222222222';
     const registry = createRegistry({ chat: chat() });

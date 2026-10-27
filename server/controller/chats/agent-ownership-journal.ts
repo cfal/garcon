@@ -144,6 +144,7 @@ export class AgentOwnershipJournal {
     readonly target: ResolvedAgentHandoffTarget;
     readonly targetAgentOwnershipEpoch: string;
     readonly watermark: TranscriptWatermark;
+    readonly assertCurrent?: () => void;
   }): Promise<AgentHandoffIntent> {
     const intent: AgentHandoffIntent = {
       version: 5,
@@ -187,7 +188,7 @@ export class AgentOwnershipJournal {
         },
         result: intent,
       };
-    }, [options.source.executorId]);
+    }, [options.source.executorId], options.assertCurrent);
     return this.#requireHandoff(options.operationId);
   }
 
@@ -436,6 +437,7 @@ export class AgentOwnershipJournal {
       | AgentOwnershipJournalFileV5
       | { journal: AgentOwnershipJournalFileV5; result: T },
     inheritedExecutors: readonly (string | null | undefined)[] = [],
+    beforeWrite?: () => void,
   ): Promise<T> {
     const operation = this.#mutationPromise.catch(() => undefined).then(async () => {
       const outcome = mutation(this.#journal);
@@ -446,6 +448,7 @@ export class AgentOwnershipJournal {
         const release = this.#retainExecutorReferences?.(executors, [...journalExecutors(this.#journal), ...inheritedExecutors]);
         try {
           await this.#providerReferences.publish(journalProviders(journal), async () => {
+            beforeWrite?.();
             let ambiguous = false;
             for (let attempt = 0; ; attempt += 1) {
               try {
