@@ -27,8 +27,13 @@ the mutation automatically. Passwords and bearer tokens must not enter logs.
 
 Upgrade behavior: JWTs without the owner/revision claims are rejected. Existing
 tickets are preserved through historical readers, not a database rewrite.
-Deploy matching controller, browser, and workers; executor protocol revision 26
-rejects mixed builds carrying different ticket-owner contracts.
+The browser must match its controller. Ticket-owner and other authority contracts
+are mandatory in executor core 1; negotiation cannot weaken them. The initial
+core-1 release requires a coordinated controller/worker/CLI cutover; later compliant
+core-1 artifacts may be upgraded independently. See
+[Executor Compatibility](./executor/compatibility.md). Build labels are not security
+policy: withdrawal of a vulnerable build requires an explicit operational decision,
+not a protocol revision floor.
 
 ## Browser Logout
 
