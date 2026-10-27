@@ -1,11 +1,14 @@
 import { expect, spyOn, test } from 'bun:test';
 import { createHmac } from 'node:crypto';
+import { connectNoiseWebSocket } from '@cfal/noise-ws';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import { isLinkHello, isLinkProof, proofPayload } from '../link-handshake.js';
 import { isProtocolOffer } from '../protocol-compatibility.js';
 import { ExecutorRpc } from '../rpc.js';
 import { SESSION_MESSAGE_BYTES, SessionSocketFrames } from '../session-socket.js';
 import { TestSessionTransport } from '../../__tests__/test-session-transport.js';
+import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../websocket-link.js';
+import { primaryHello, signedProof } from '../../__tests__/link-hello.js';
 
 // These bytes are independent of the current serializers and fixture generator.
 const secret = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
@@ -136,6 +139,49 @@ test('core RPC cancellation keeps its literal envelope in both directions', asyn
     await released.promise;
   } finally { uuid.mockRestore(); released.resolve(); caller.transport.close(); callee.transport.close(); }
 });
+
+test('core terminal detach keeps its literal envelope in both directions', async () => {
+  const fixture = rpcFixture();
+  const detached = Promise.withResolvers<unknown>();
+  const encoded = '{"type":"terminal-detach","request":{"type":"terminal-detach","terminalId":"fixture-terminal","attachmentId":"fixture-attachment","authority":{"key":"fixture-authority","expiresAtMs":null}}}';
+  const request = { type: 'terminal-detach' as const, terminalId: 'fixture-terminal', attachmentId: 'fixture-attachment',
+    authority: { key: 'fixture-authority', expiresAtMs: null } };
+  fixture.rpc.onTerminalDetach(async value => { detached.resolve(value); });
+  try {
+    fixture.rpc.detachTerminal(request);
+    expect(fixture.frames).toEqual([encoded]);
+    fixture.socket.receive(encoded);
+    expect(await detached.promise).toEqual(request);
+  } finally { fixture.transport.close(); }
+});
+
+test.each(['controller', 'worker'] as const)('core %s heartbeats retain literal ping and pong envelopes', async role => {
+  const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true });
+  const hello = primaryHello(role === 'controller' ? 'worker' : 'controller');
+  const local = JSON.stringify(hello);
+  const ping = Promise.withResolvers<string>();
+  const pong = Promise.withResolvers<string>();
+  const socket = connectNoiseWebSocket(link.listen(), {
+    psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+    onOpen(socket) { socket.send(local); },
+    onMessage(socket, data) {
+      if (typeof data !== 'string') throw new Error('Expected a text heartbeat or handshake');
+      const frame = JSON.parse(data);
+      if (frame.type === 'hello') socket.send(JSON.stringify(signedProof(secret, hello.role, local, data,
+        { ok: true, profile: { core: 1, contracts: {} } })));
+      else if (frame.type === 'ping') { ping.resolve(data); socket.send('{"type":"pong"}'); }
+      else if (frame.type === 'pong') pong.resolve(data);
+    },
+  });
+  try {
+    const session = await link.ready;
+    socket.send('{"type":"pong"}');
+    socket.send('{"type":"ping"}');
+    expect(await pong.promise).toBe('{"type":"pong"}');
+    expect(await ping.promise).toBe('{"type":"ping"}');
+    expect(session.connected).toBe(true);
+  } finally { socket.close(); await link.dispose(); }
+}, 10_000);
 
 test('core session framing retains the 32768-byte fragment and 16777216-byte message limits', () => {
   const fragments: Uint8Array[] = [];
