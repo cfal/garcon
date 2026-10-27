@@ -6130,10 +6130,12 @@ describe('Chromium transcript virtualization', () => {
   for (const scenario of [
     {
       caseId: '[TLV5-UX.11-COMPACT-SWITCH-01]',
+      reloadCaseId: '[TLV5-UX.11-COMPACT-RELOAD-01]',
       viewport: TRANSCRIPT_VIEWPORTS[0],
     },
     {
       caseId: '[TLV5-UX.11-WIDE-SWITCH-01]',
+      reloadCaseId: '[TLV5-UX.11-WIDE-RELOAD-01]',
       viewport: TRANSCRIPT_VIEWPORTS[1],
     },
   ] as const) {
@@ -6152,11 +6154,7 @@ describe('Chromium transcript virtualization', () => {
       );
     }, 180_000);
 
-    const reloadCaseId =
-      viewport.label === 'compact'
-        ? '[TLV5-UX.11-COMPACT-RELOAD-01]'
-        : '[TLV5-UX.11-WIDE-RELOAD-01]';
-    test(`${reloadCaseId} replaces an idle detached ${viewport.label} transcript from native history`, async () => {
+    test(`${scenario.reloadCaseId} replaces an idle detached ${viewport.label} transcript from native history`, async () => {
       if (!environment) throw new Error('Scripted Claude environment was not initialized.');
       const testEnvironment = environment;
       await withChromiumFixture(

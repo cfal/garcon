@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parseTestArguments, selectTestFiles } from '../run-test-files.js';
@@ -52,12 +52,15 @@ test('rejects duplicate shard arguments and empty selections', () => {
 async function fixture(files) {
   const directory = await mkdtemp(join(tmpdir(), 'garcon-test-runner-'));
   directories.push(directory);
-  for (const [name, content] of Object.entries(files)) await writeFile(join(directory, name), content);
+  for (const [name, content] of Object.entries(files)) {
+    await mkdir(dirname(join(directory, name)), { recursive: true });
+    await writeFile(join(directory, name), content);
+  }
   return directory;
 }
 
-async function run(directory, args = []) {
-  const child = Bun.spawn([process.execPath, runner, '*.test.js', ...args], {
+async function run(directory, args = [], pattern = '*.test.js') {
+  const child = Bun.spawn([process.execPath, runner, pattern, ...args], {
     cwd: directory,
     env: { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH}` },
     stdout: 'pipe',
@@ -94,6 +97,17 @@ test('CLI preserves child failures and does not run later files', async () => {
   const result = await run(directory);
   expect(result.exitCode).toBe(7);
   expect(result.stdout).not.toContain('UNEXPECTED_LATER_FILE');
+});
+
+test('CLI runs selected paths exactly, not every file containing the same suffix', async () => {
+  const directory = await fixture({
+    'a/x.test.js': "import { test } from 'bun:test'; test('selected', () => console.log('SELECTED_FILE'));",
+    'b/a/x.test.js': "import { test } from 'bun:test'; test('unselected', () => console.log('UNSELECTED_FILE'));",
+  });
+  const result = await run(directory, [], 'a/*.test.js');
+  expect(result.exitCode, result.stderr).toBe(0);
+  expect(result.stdout.match(/SELECTED_FILE/g)).toHaveLength(1);
+  expect(result.stdout).not.toContain('UNSELECTED_FILE');
 });
 
 test('CLI fails on an empty glob instead of reporting success', async () => {

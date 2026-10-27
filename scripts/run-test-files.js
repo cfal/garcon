@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+import { resolve } from 'node:path';
+
 export function parseTestArguments(args) {
   let shard;
   const testArgs = [];
@@ -39,7 +41,7 @@ if (import.meta.main) {
   if (shard) console.log(`Test shard ${shard.index}/${shard.total}: ${selected.length} of ${files.length} files`);
 
   for (const file of selected) {
-    const child = Bun.spawn(['bun', 'test', ...testArgs, file], {
+    const child = Bun.spawn(['bun', 'test', ...testArgs, resolve(file)], {
       cwd: process.cwd(),
       stdin: 'inherit',
       stdout: 'inherit',
