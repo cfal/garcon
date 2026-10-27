@@ -48,6 +48,7 @@ export function createExecutorStartupFixture() {
 			{ value: `${prefix}-edited`, label: `${prefix} edited` },
 		]]));
 		catalog.lastValidatedAt = Date.now();
+		catalog.executorInstanceId = `${prefix}-instance`;
 		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
 	}
 	const remoteSettings = new RemoteSettingsStore();

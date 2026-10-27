@@ -222,6 +222,7 @@ export class NewChatFormState {
 			this.settingsLoaded &&
 			this.executorReady &&
 			this.modelCatalogValidated &&
+			this.agentSettingsCompatible &&
 			this.#selectableAgentIds.includes(this.agentId) &&
 			!this.modelSelectionPending &&
 			!this.modelSelectionError &&
@@ -311,8 +312,12 @@ export class NewChatFormState {
 			: null;
 	}
 
-	get agentSettings(): AgentSettingsEnvelope {
+	get agentSettings(): AgentSettingsEnvelope | null {
 		return this.#agentSettings.forAgent(this.agentId, this.#modelCatalog);
+	}
+
+	get agentSettingsCompatible(): boolean {
+		return this.#agentSettings.isCompatible(this.agentId, this.#modelCatalog);
 	}
 
 	get agentSettingsById(): Record<string, AgentSettingsEnvelope> {
@@ -747,6 +752,11 @@ export class NewChatFormState {
 			this.error = m.chat_new_chat_errors_agent_unavailable();
 			return null;
 		}
+		const agentSettings = this.agentSettings;
+		if (!agentSettings || !this.agentSettingsCompatible) {
+			this.error = 'Saved provider settings are unavailable or incompatible with this executor.';
+			return null;
+		}
 		if (!this.modelCatalogValidated || this.modelSelectionPending || this.modelSelectionError || this.attachmentError)
 			return null;
 		if (!this.nonblankPath) {
@@ -779,7 +789,7 @@ export class NewChatFormState {
 			modelProtocol: selection.modelProtocol,
 			permissionMode: normalizeSupportedPermissionMode(this.permissionMode, this.permissionModes),
 			thinkingMode: normalizeSupportedThinkingMode(this.thinkingMode, this.thinkingModes),
-			agentSettings: this.agentSettings,
+			agentSettings,
 			firstMessage: this.firstMessage,
 			initialImages: this.attachedImages,
 			tags: this.chatTags.length > 0 ? this.chatTags : undefined,

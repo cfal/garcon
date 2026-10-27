@@ -829,14 +829,10 @@
 					{promptTransformStatus}
 					{permissionOptions}
 					selectedPermission={form.permissionMode}
-					onPermissionSelect={(mode) => {
-						form.setPermissionMode(mode);
-					}}
+					onPermissionSelect={(mode) => form.setPermissionMode(mode)}
 					{thinkingOptions}
 					selectedThinking={form.thinkingMode}
-					onThinkingSelect={(mode) => {
-						form.setThinkingMode(mode);
-					}}
+					onThinkingSelect={(mode) => form.setThinkingMode(mode)}
 					canSend={form.canSubmit && !promptTransformPending}
 					onSend={handleSubmit}
 					sendTitle={m.chat_new_chat_start_session()}
@@ -846,6 +842,7 @@
 						<AgentSettingsControls
 							descriptors={form.agentSettingDescriptors}
 							envelope={form.agentSettings}
+							compatible={form.agentSettingsCompatible}
 							onChange={(descriptor, value) => form.setAgentSetting(descriptor, value)}
 						/>
 					{/snippet}
@@ -969,9 +966,7 @@
 		onCreate={async (path, branch, baseRef) => {
 			await form.createWorktree(path, branch, baseRef);
 		}}
-		onRefresh={() => {
-			void form.loadWorktrees();
-		}}
+		onRefresh={() => void form.loadWorktrees()}
 		onClose={() => form.closeWorktreeModal()}
 	/>
 {/if}

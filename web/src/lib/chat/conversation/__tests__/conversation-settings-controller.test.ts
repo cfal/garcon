@@ -26,7 +26,7 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
-function chat(): ChatSessionRecord {
+function chat(): ChatSessionRecord & { agentSettings: AgentSettingsEnvelope } {
 	return {
 		id: 'chat-1',
 		parentChat: null,

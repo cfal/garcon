@@ -52,7 +52,10 @@ import * as m from '$lib/paraglide/messages.js';
 import {
 	executionSelectionFromProjection,
 	type ConversationExecutionSelection,
+	type ConversationExecutionSnapshot,
 } from './conversation-execution-selection.js';
+import { areAgentSettingsCompatible } from '$shared/agent-settings';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { ApiError } from '$lib/api/client.js';
 import { CommandOutcomeUnknownError } from './idempotent-command.js';
 import { resolveConversationModelSelection } from './conversation-model-selection.js';
@@ -173,8 +176,14 @@ export class ConversationSessionController {
 	#executionSelectionForChat(chatId: string): ConversationExecutionSelection | null {
 		const selection = executionSelectionFromProjection(this.deps.sessions.byId[chatId]);
 		if (!selection) return null;
+		const catalog = this.deps.modelCatalogForExecutor(selection.executorId ?? 'local');
+		const defaults = catalog.getDefaultAgentSettings(selection.agentId);
+		const agentSettings = selection.agentSettings ?? defaults;
+		if (!catalog.isValidated || !defaults || !agentSettings
+			|| !areAgentSettingsCompatible(agentSettings, defaults, catalog.getAgentSettingsDescriptors(selection.agentId))) return null;
 		return {
 			...selection,
+			agentSettings,
 			...resolveConversationModelSelection(
 				selection,
 				this.deps.modelCatalogForExecutor(selection.executorId ?? 'local'),
@@ -182,7 +191,7 @@ export class ConversationSessionController {
 		};
 	}
 
-	#applyExecutionSelection(selection: ConversationExecutionSelection): void {
+	#applyExecutionSelection(selection: ConversationExecutionSnapshot): void {
 		const { agentState } = this.deps;
 		agentState.executorId = selection.executorId ?? 'local';
 		agentState.projectPath = selection.projectPath ?? '';
@@ -558,6 +567,7 @@ export class ConversationSessionController {
 			return 'no-op';
 		let selection: Parameters<typeof isCustomProviderSelectionAvailable>[1] & {
 			executorId?: string | null;
+			agentSettings: ChatSessionRecord['agentSettings'];
 		} = selected;
 		if (selected.status === 'draft' && startup) {
 			selection = startup;
@@ -565,7 +575,8 @@ export class ConversationSessionController {
 			selection = deps.agentState;
 		}
 		const executorId = selection.executorId ?? 'local';
-		const agent = deps.modelCatalogForExecutor(executorId).getAgent(selection.agentId ?? '');
+		const catalog = deps.modelCatalogForExecutor(executorId);
+		const agent = catalog.getAgent(selection.agentId ?? '');
 		if (!agent) return isDraft && source === 'automatic-start' ? rejectUnavailableDraftStart(deps, chatId) : 'no-op';
 		const literal = agent.executionPolicy === 'literal';
 		const contentMode = literal ? 'literal' as const : undefined;
@@ -584,6 +595,13 @@ export class ConversationSessionController {
 			return selected.status === 'draft' && source === 'automatic-start'
 				? rejectUnavailableDraftStart(deps, chatId)
 				: 'no-op';
+		}
+		const defaults = catalog.getDefaultAgentSettings(agent.id);
+		const envelope = selection.agentSettings ?? defaults;
+		if ((isDraft || !isControllerSlashCommand(text, agent.executionPolicy))
+			&& (!defaults || !envelope || !areAgentSettingsCompatible(envelope, defaults, agent.settings))) {
+			deps.chatState.appendLocalNoticeForChat(chatId, 'error', 'Saved provider settings are incompatible with this executor.');
+			return 'rejected';
 		}
 		if (!text.trim() && submissionImages.length === 0) return 'no-op';
 		const previousText = draft.text;

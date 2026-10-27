@@ -65,6 +65,16 @@ function makeDeps() {
 }
 
 describe('ChatListProjector', () => {
+  it('preserves absent and incompatible saved settings without consulting provider defaults', () => {
+    const { deps, session } = makeDeps();
+    const projector = new ChatListProjector(deps);
+    session.agentSettingsById = {};
+    expect(projector.buildOne(CHAT_ID).agentSettings).toBeNull();
+    const saved = { ownerId: session.agentId, schemaVersion: 9, values: { effort: 'synthetic' } };
+    session.agentSettingsById[session.agentId] = saved;
+    expect(projector.buildOne(CHAT_ID).agentSettings).toEqual(saved);
+    expect(session.agentSettingsById[session.agentId]).toBe(saved);
+  });
   it('projects the complete canonical list entry for list and command paths', async () => {
     const { deps, session } = makeDeps();
     const projector = new ChatListProjector(deps);

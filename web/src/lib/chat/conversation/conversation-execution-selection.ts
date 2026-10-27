@@ -26,13 +26,17 @@ interface ConversationExecutionProjection {
 	modelProtocol?: ApiProtocol | null;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
-	agentSettings: AgentSettingsEnvelope;
+	agentSettings: AgentSettingsEnvelope | null;
 }
+
+export type ConversationExecutionSnapshot = Omit<ConversationExecutionSelection, 'agentSettings'> & {
+	agentSettings: AgentSettingsEnvelope | null;
+};
 
 export function executionSelectionFromProjection(
 	projection: ConversationExecutionProjection | null | undefined,
-): ConversationExecutionSelection | null {
-	if (!projection?.model || projection.agentSettings.ownerId !== projection.agentId) return null;
+): ConversationExecutionSnapshot | null {
+	if (!projection?.model) return null;
 	return {
 		executorId: effectiveExecutorId(projection.executorId),
 		projectPath: projection.projectPath,
@@ -43,6 +47,6 @@ export function executionSelectionFromProjection(
 		modelProtocol: projection.modelProtocol ?? null,
 		permissionMode: projection.permissionMode,
 		thinkingMode: projection.thinkingMode,
-		agentSettings: cloneAgentSettings(projection.agentSettings),
+		agentSettings: projection.agentSettings === null ? null : cloneAgentSettings(projection.agentSettings),
 	};
 }

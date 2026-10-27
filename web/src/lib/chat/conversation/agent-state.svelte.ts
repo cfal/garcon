@@ -7,7 +7,6 @@ import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import { THINKING_MODES, MODE_LABELS } from '$lib/chat/composer/chat-ui-constants.js';
 import type { ThinkingModeOption } from '$lib/chat/composer/chat-ui-constants.js';
-import { createEmptyAgentSettings } from '$shared/agent-settings';
 
 export { THINKING_MODES, MODE_LABELS };
 export type { ThinkingModeOption };
@@ -59,7 +58,7 @@ export class AgentState {
 	modelProtocol = $state<ApiProtocol | null>(null);
 	permissionMode = $state<PermissionMode>('default');
 	thinkingMode = $state<ThinkingMode>('none');
-	agentSettings = $state<AgentSettingsEnvelope>(createEmptyAgentSettings('claude'));
+	agentSettings = $state<AgentSettingsEnvelope | null>(null);
 
 	/** Returns the current thinking mode option. */
 	get currentThinkingMode(): ThinkingModeOption {
@@ -87,8 +86,7 @@ export class AgentState {
 		this.agentId = agentId;
 	}
 
-	setAgentSettings(settings: AgentSettingsEnvelope): void {
-		if (settings.ownerId !== this.agentId) return;
+	setAgentSettings(settings: AgentSettingsEnvelope | null): void {
 		this.agentSettings = settings;
 	}
 

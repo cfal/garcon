@@ -1176,28 +1176,21 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.byId['a']?.permissionMode).toBe('acceptEdits');
 		expect(store.byId['a']?.thinkingMode).toBe('medium');
-		expect(store.byId['a']?.agentSettings.values.thinkingMode).toBe('off');
+		expect(store.byId['a']?.agentSettings?.values.thinkingMode).toBe('off');
 	});
 
-	it('toRecord defaults missing integration settings for partial persisted sessions', () => {
+	it('preserves absent settings through unrelated record patches', () => {
 		const store = new ChatSessionsStore();
-
-		const partial = makeServerSession({ id: 'a' }) as Partial<ChatListEntry> & {
-			agentSettings?: ChatListEntry['agentSettings'];
-		};
-		delete partial.agentSettings;
-		store.upsertFromServer([partial as ChatListEntry]);
+		store.upsertFromServer([makeServerSession({ id: 'a', agentSettings: null })]);
 
 		expect(store.byId['a']?.permissionMode).toBe('default');
 		expect(store.byId['a']?.thinkingMode).toBe('none');
-		expect(store.byId['a']?.agentSettings).toEqual({
-			ownerId: 'claude',
-			schemaVersion: 1,
-			values: {},
-		});
+		expect(store.byId['a']?.agentSettings).toBeNull();
+		store.patchChat('a', { title: 'Updated title' });
+		expect(store.byId['a']?.agentSettings).toBeNull();
 	});
 
-	it('toRecord normalizes invalid universal modes and mismatched integration settings', () => {
+	it('normalizes universal modes without replacing incompatible settings', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([
@@ -1211,7 +1204,7 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.byId['a']?.permissionMode).toBe('default');
 		expect(store.byId['a']?.thinkingMode).toBe('none');
-		expect(store.byId['a']?.agentSettings.ownerId).toBe('claude');
+		expect(store.byId['a']?.agentSettings?.ownerId).toBe('codex');
 	});
 
 	it('sameRecord detects permissionMode changes', () => {
@@ -1269,7 +1262,7 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 
 		expect(store.byId['a']).not.toBe(ref);
-		expect(store.byId['a']?.agentSettings.values.thinkingMode).toBe('auto');
+		expect(store.byId['a']?.agentSettings?.values.thinkingMode).toBe('auto');
 	});
 
 	it('createDraft maps permissionMode and thinkingMode from startup config', () => {
@@ -1304,7 +1297,7 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.byId['a']?.permissionMode).toBe('bypassPermissions');
 		expect(store.byId['a']?.thinkingMode).toBe('low');
-		expect(store.byId['a']?.agentSettings.values.thinkingMode).toBe('on');
+		expect(store.byId['a']?.agentSettings?.values.thinkingMode).toBe('on');
 	});
 
 	it('patchDraftStartup updates startup config for draft chats', () => {

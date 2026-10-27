@@ -5,6 +5,18 @@ import AgentSettingsControls from '../AgentSettingsControls.svelte';
 describe('AgentSettingsControls', () => {
 	afterEach(cleanup);
 
+	it.each([null, { ownerId: 'sample-agent', schemaVersion: 1, values: { review: false } }])(
+		'keeps unavailable or incompatible settings read-only', envelope => {
+			const onChange = vi.fn();
+			render(AgentSettingsControls, {
+				descriptors: [{ key: 'review', type: 'boolean', label: 'Review changes' }],
+				envelope, compatible: false, onChange,
+			});
+			expect(screen.getByRole('status').textContent).toContain('unavailable or incompatible');
+			expect(screen.queryByRole('checkbox')).toBeNull();
+			expect(onChange).not.toHaveBeenCalled();
+		});
+
 	it('renders runtime descriptors and reports provider-neutral changes', async () => {
 		const onChange = vi.fn();
 		render(AgentSettingsControls, {

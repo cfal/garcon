@@ -202,7 +202,7 @@ export class ConversationSettingsController {
 				patch.thinkingMode,
 				modelCatalog.getThinkingModes(agentState.agentId),
 			);
-		if (patch.agentSettings) agentState.setAgentSettings(patch.agentSettings);
+		if ('agentSettings' in patch) agentState.setAgentSettings(patch.agentSettings ?? null);
 	}
 
 	handleModelSelectionChange(next: AgentSwitchSelection): void {
@@ -347,8 +347,9 @@ export class ConversationSettingsController {
 		if (!chatId) return;
 		const expectedExecutorInstanceId = modelCatalog.executorInstanceId;
 		const defaults = modelCatalog.getDefaultAgentSettings(agentState.agentId);
-		const previous = agentState.agentSettings;
+		const previous = agentState.agentSettings ?? defaults;
 		if (!modelCatalog.isValidated || !expectedExecutorInstanceId || !defaults
+			|| !previous
 			|| !areAgentSettingsCompatible(previous, defaults, modelCatalog.getAgentSettingsDescriptors(agentState.agentId))) return;
 		const expectedSettingsSchemaVersion = defaults.schemaVersion;
 		const next = withAgentSetting(previous, descriptor, value);
