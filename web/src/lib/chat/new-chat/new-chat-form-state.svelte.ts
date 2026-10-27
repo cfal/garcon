@@ -4,7 +4,6 @@
 
 import { ProjectPathCompletionController } from '$lib/project-paths/project-path-completion.js';
 import { effectiveExecutorId } from '$shared/executors';
-import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
 import {
 	ImageAttachmentState,
@@ -26,7 +25,7 @@ import type {
 import { NewChatAgentSettingsState } from './new-chat-agent-settings-state.svelte';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
 import { firstSelectableExecutorRecent, newChatExecutorPreferences } from './new-chat-executor-preferences';
-import type { NewChatPromptDraft } from './new-chat-prompt-draft';
+import type { NewChatFormStateOptions } from './new-chat-form-options';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import {
@@ -44,15 +43,6 @@ import { executorPinnedProjectPaths, savePinnedProjectPathsOptimistically } from
 import { normalizeTagSlug } from '$lib/utils/tags.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
-
-export interface NewChatFormStateOptions {
-	modelCatalog: ModelCatalogStore;
-	executors?: ExecutorsStore;
-	remoteSettings: RemoteSettingsStore;
-	get selectableAgentIds(): readonly SessionAgentId[];
-	/** Retains the unsent prompt across reseeds. Omitted where the prompt is persisted elsewhere. */
-	promptDraft?: NewChatPromptDraft;
-}
 
 export class NewChatFormState {
 	// Agent and model

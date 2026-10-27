@@ -19,6 +19,7 @@ import { TERMINAL_SESSION_LIMIT, terminalIdForMessage } from '$shared/terminal';
 import { terminalDisplayName } from './terminal-display-name.js';
 import { TerminalOutputFragments, decodeTerminalOutput } from './terminal-output-fragments.js';
 import type {
+	PendingTerminalCreate,
 	TerminalAttachmentState,
 	TerminalClientSession,
 	TerminalExecutorInventory,
@@ -37,16 +38,6 @@ export type {
 } from './terminal-registry-types.js';
 
 export const TERMINAL_CREATE_RETRY_WINDOW_MS = 10 * 60 * 1000;
-
-interface PendingTerminalCreate {
-	executorId: string;
-	terminalRuntimeId?: string;
-	requestId: string;
-	requestedInitialWorkingDirectory: string | null;
-	startedAt: number;
-	requiresList: boolean;
-	timer: ReturnType<typeof setTimeout> | null;
-}
 
 async function loadRuntime(): Promise<TerminalRuntimeModule> {
 	try {
