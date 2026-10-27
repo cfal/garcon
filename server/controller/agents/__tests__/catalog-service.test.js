@@ -101,7 +101,7 @@ describe("AgentCatalogService", () => {
     await captured.getAgentCatalogEntry('sample-agent');
     expect(captured.requiresStrictModelDiscovery('sample-agent')).toBe(true);
     replace([createIntegration()]);
-    expect(service.requiresStrictModelDiscovery('sample-agent')).toBe(false);
+    expect(service.capture().requiresStrictModelDiscovery('sample-agent')).toBe(false);
     await expect(captured.getAgentCatalogEntry('sample-agent', { strict: true })).rejects.toThrow('Generation retired');
   });
 

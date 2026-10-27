@@ -14,10 +14,8 @@ export interface ModelCatalog {
   apiProviders: ApiProviderService;
 }
 
-export type ModelCatalogResponseBody = ModelCatalogResponse;
-
 export interface ModelCatalogSnapshot {
-  body: ModelCatalogResponseBody;
+  body: ModelCatalogResponse;
   etag: string;
   createdAt: number;
   assertCurrent(): void;
@@ -44,7 +42,7 @@ function sortedByStringField<T>(items: T[], field: keyof T): T[] {
   );
 }
 
-function catalogForHash(body: ModelCatalogResponseBody): unknown {
+function catalogForHash(body: ModelCatalogResponse): unknown {
   const agents = sortedByStringField(body.catalog.agents, 'id')
     .map((agent) => ({
       ...agent,
@@ -76,7 +74,7 @@ function catalogForHash(body: ModelCatalogResponseBody): unknown {
   });
 }
 
-export function createCatalogEtag(body: ModelCatalogResponseBody): string {
+export function createCatalogEtag(body: ModelCatalogResponse): string {
   const canonical = JSON.stringify(catalogForHash(body));
   const hash = crypto.createHash('sha256').update(canonical).digest('base64url');
   return `W/"model-catalog:${hash}"`;
@@ -86,7 +84,9 @@ function isFresh(snapshot: ModelCatalogSnapshot): boolean {
   return Date.now() - snapshot.createdAt < MODEL_CATALOG_RESPONSE_CACHE_TTL_MS;
 }
 
-async function buildCatalogResponse(modelCatalog: ModelCatalog, executorId: string, captured: AgentCatalogCapture): Promise<Omit<ModelCatalogSnapshot, 'assertCurrent'>> {
+async function buildCatalogResponse(
+  modelCatalog: ModelCatalog, executorId: string, captured: AgentCatalogCapture,
+): Promise<ModelCatalogSnapshot> {
   const body = {
     executorInstanceId: captured.executorInstanceId,
     catalog: {
@@ -100,6 +100,7 @@ async function buildCatalogResponse(modelCatalog: ModelCatalog, executorId: stri
     body,
     etag: createCatalogEtag(body),
     createdAt: Date.now(),
+    assertCurrent: () => captured.assertCurrent(),
   };
 }
 
@@ -114,8 +115,12 @@ export class ModelCatalogResponseCache {
     const captured = modelCatalog.agents.captureCatalog(executorId);
     let entry = this.#executors.get(executorId);
     if (entry) {
-      try { entry.owner.assertCurrent(); }
-      catch { this.#executors.delete(executorId); entry = undefined; }
+      try {
+        entry.owner.assertCurrent();
+      } catch {
+        this.#executors.delete(executorId);
+        entry = undefined;
+      }
     }
     if (!entry) {
       entry = { owner: captured, cached: null, inflight: null };
@@ -124,11 +129,9 @@ export class ModelCatalogResponseCache {
     if (entry.cached && isFresh(entry.cached)) return entry.cached;
     if (entry.inflight) return entry.inflight;
     const current = entry;
-    const assertCurrent = () => captured.assertCurrent();
     current.inflight = buildCatalogResponse(modelCatalog, executorId, captured)
-      .then((result) => {
-        assertCurrent();
-        const snapshot = { ...result, assertCurrent };
+      .then((snapshot) => {
+        snapshot.assertCurrent();
         if (this.#executors.get(executorId) === current) current.cached = snapshot;
         return snapshot;
       })
