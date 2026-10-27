@@ -15,6 +15,7 @@ import { CliAdmission } from '../transport/cli-admission.js';
 import { CLI_OPERATIONS, cliRequestBytes, cliRequestTooLarge, cliRoute, cliPolicy, parseCliHttpResponse, parseControllerCliRequest } from '../transport/cli-protocol.js';
 import type { ExecutorRpcConnection } from '../transport/rpc-connection.js';
 import type { RpcLane } from '../transport/rpc-lane.js';
+import { assertCliSupported } from '../transport/protocol-policy.js';
 
 function gatewayError(error: unknown): Response {
   if (error instanceof DomainError) {
@@ -122,6 +123,7 @@ export async function startCliGateway(options: {
             } finally { release(); }
           } else {
             const route = cliRoute(request.method, url.pathname);
+            assertCliSupported(rpc.transport.profile, route.operation);
             const lane = CLI_OPERATIONS[route.operation].lane;
             reserveHttp(lane);
             if (expectedServerInstanceId === null) throw new DomainError('VALIDATION_FAILED', 'Expected controller instance is required', 400);

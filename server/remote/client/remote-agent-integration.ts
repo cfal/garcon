@@ -1,6 +1,4 @@
-import { parseChatMessage, isToolUseMessage } from '@garcon/common/chat-types';
 import { isInputFormatByModel } from '@garcon/common/input-format';
-import { parseCommandWorkingDirectory } from '@garcon/common/command-output';
 import {
   AgentCallError,
   assertAgentResourceScope,
@@ -23,6 +21,8 @@ import type { RemoteSessionBacking, RemoteSessions } from './executor-client.js'
 import { failureReason } from '../transport/failure-reason.js';
 import { createLogger, type Logger } from '../../common/log.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START, EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
+import { decodeProducerEvent, decodeProducerMessage, UNREADABLE_EVENT_FAILURE } from '../transport/producer-protocol.js';
+import type { ProtocolProfile } from '../transport/protocol-compatibility.js';
 
 const SINGLE_QUERY_RPC_GRACE_MS = 30_000;
 // Answers the browser, whose requests time out after 30 s, even while the
@@ -31,10 +31,6 @@ const PERMISSION_RESPONSE_TIMEOUT_MS = 20_000;
 const PRODUCER_ACK_DELAY_MS = 250;
 // Each page carries at most 1 MiB, so a reader holds at most 4 MiB of replies.
 const HISTORY_PAGES_IN_FLIGHT = 4;
-const UNREADABLE_EVENT_FAILURE = {
-  code: 'OUTCOME_UNKNOWN',
-  message: 'An event from the executor could not be read, so this turn\'s outcome is unknown. Native history may contain additional output.',
-} as const;
 
 // A start, resume, or compaction whose outcome never reached the controller.
 interface UnsettledLaunch {
@@ -297,7 +293,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
             }
             const batch = await inFlight.shift()!;
             if (batch.done) return;
-            yield decodeRows(batch.rows);
+            yield decodeRows(batch.rows, rpc.transport.profile);
           }
         } finally {
           await close(ref).catch(() => undefined);
@@ -411,7 +407,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
     state.receivedSeq = seq;
     this.#scheduleAcknowledgement();
     if (gap) this.#reportLostOutput(state);
-    const event = this.#decode(notification.event, scope, binding, seq);
+    const event = this.#decode(notification.event, scope, binding, seq, backing.rpc.transport.profile);
     if (event.type === 'publication-gap') this.#reportLostOutput(state);
     else {
       state.lostOutputReported = false;
@@ -439,15 +435,16 @@ export class RemoteAgentIntegration implements AgentIntegration {
   // the session, interrupting every binding it carries, and a failure that recurs on
   // replayed events would retire each replacement in turn.
   #decode(
-    event: AgentProducerNotification['event'],
+    event: unknown,
     scope: AgentResourceScope,
     binding: AgentProducerBinding,
     seq: number,
+    profile: ProtocolProfile,
   ): AgentProducerNotification['event'] {
     try {
-      return decodeProducerEvent(event, scope);
+      return decodeProducerEvent(event, scope, profile);
     } catch (error) {
-      const type = typeof event?.type === 'string' ? event.type : 'unknown';
+      const type = event && typeof event === 'object' && 'type' in event && typeof event.type === 'string' ? event.type : 'unknown';
       this.#log.warn('Executor producer event could not be decoded', {
         integrationId: this.descriptor.id, bindingId: binding.id, seq, type, reason: failureReason(error),
       });
@@ -549,12 +546,6 @@ export class RemoteAgentIntegration implements AgentIntegration {
   }
 }
 
-function isFailureDetail(value: unknown): value is { readonly code: string; readonly message?: string } {
-  if (!value || typeof value !== 'object') return false;
-  const detail = value as Record<string, unknown>;
-  return typeof detail.code === 'string' && (detail.message === undefined || typeof detail.message === 'string');
-}
-
 function isResumeState(value: unknown, scope: AgentResourceScope): value is ProducerResumeState {
   const report = value as Partial<ProducerResumeState> | null;
   const launch = report?.launch;
@@ -564,44 +555,7 @@ function isResumeState(value: unknown, scope: AgentResourceScope): value is Prod
     && Array.isArray(report.receivedRunIds) && report.receivedRunIds.every((runId) => typeof runId === 'string');
 }
 
-// Rebuilds a producer event received from the worker; throws when it is malformed.
-function decodeProducerEvent(
-  event: AgentProducerNotification['event'],
-  scope: AgentResourceScope,
-): AgentProducerNotification['event'] {
-  if (event.type === 'run-ended' && event.workingDirectory !== undefined) {
-    const workingDirectory = parseCommandWorkingDirectory(event.workingDirectory);
-    if (!workingDirectory) throw new Error('Invalid completion working directory');
-    return { ...event, workingDirectory };
-  }
-  if (event.type === 'publication-failed') {
-    if (!isFailureDetail(event.error)) throw new Error('Invalid producer publication failure');
-    return event;
-  }
-  if (event.type === 'launch-settled') {
-    if (typeof event.runId !== 'string' || (event.handle ? !isAgentResourceRef(event.handle, 'execution', scope) : !isFailureDetail(event.error))) {
-      throw new Error('Invalid launch outcome');
-    }
-    return event;
-  }
-  if (event.type === 'rows') return { ...event, rows: decodeRows(event.rows) };
-  if (event.type === 'permission' && event.lifecycle.kind === 'requested') {
-    const tool = decodeMessage(event.lifecycle.requestedTool);
-    if (!isToolUseMessage(tool)) throw new Error('Invalid permission tool');
-    if (!event.decision) throw new Error('Permission response capability is missing');
-    return { type: 'permission', runId: event.runId, lifecycle: { ...event.lifecycle, requestedTool: tool }, decision: event.decision };
-  }
-  return event;
-}
-
-function decodeRows(rows: readonly AgentImportedTranscriptRow[]): readonly AgentImportedTranscriptRow[] {
+function decodeRows(rows: readonly AgentImportedTranscriptRow[], profile: ProtocolProfile): readonly AgentImportedTranscriptRow[] {
   if (!Array.isArray(rows)) throw new Error('Invalid imported rows');
-  return rows.map((row) => ({ ...row, message: decodeMessage(row.message) }));
-}
-
-function decodeMessage(value: unknown) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid normalized message');
-  const message = parseChatMessage(value as Record<string, unknown>);
-  if (!message) throw new Error('Unknown normalized message');
-  return message;
+  return rows.map((row) => ({ ...row, message: decodeProducerMessage(row.message, profile) }));
 }

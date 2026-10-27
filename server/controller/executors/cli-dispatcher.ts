@@ -8,6 +8,7 @@ import type { RouteMap } from '../lib/http-route-types.js';
 import type { ExecutorRpc, GuardRpcReply } from '../../remote/transport/rpc.js';
 import { CliAdmission } from '../../remote/transport/cli-admission.js';
 import { CLI_ENVELOPE_BYTES, CLI_REPLY_BYTES, CLI_SMALL_REPLY_BYTES, cliPolicy, cliReplyBytes, parseControllerCliRequest, type CliHttpResponse } from '../../remote/transport/cli-protocol.js';
+import { assertCliSupported } from '../../remote/transport/protocol-policy.js';
 
 export interface CliDispatchAccess {
   readonly executorId: string;
@@ -39,6 +40,8 @@ export class ControllerCliDispatcher {
   async request(value: unknown, access: CliDispatchAccess, guardReply: GuardRpcReply): Promise<CliHttpResponse> {
     this.#assertAdmission(access);
     const request = parseControllerCliRequest(value);
+    const profile = access.rpc.transport.profile;
+    assertCliSupported(profile, request.http.operation);
     if (request.expectedServerInstanceId !== this.options.serverInstanceId) {
       throw new DomainError('CLI_CONTROLLER_CHANGED', 'Garcon restarted; start a new CLI invocation', 409);
     }
@@ -46,6 +49,7 @@ export class ControllerCliDispatcher {
     if (access.rpc.transport.lane !== policy.lane) throw new DomainError('CLI_ACCESS_DENIED', 'CLI operation arrived on the wrong lane', 403);
     const assertAdmission = () => {
       this.#assertAdmission(access);
+      assertCliSupported(profile, request.http.operation);
       if (policy.management) access.assertManagement();
     };
     assertAdmission();
