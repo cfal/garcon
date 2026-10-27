@@ -102,3 +102,16 @@ test('rejects invalid windows', async () => {
     await expect(history.read(invalid)).rejects.toBeInstanceOf(AgentIntegrationError);
   }
 });
+
+test('rejects a cancelled read with its reason and serves the read queued behind it', async () => {
+  await writeFile(path.join(root, 'a.jsonl'), Array.from({ length: 5_000 }, (_, index) =>
+    JSON.stringify({ at: '2026-10-05T12:00:00Z', model: 'claude-opus-5-5', session: 's1', id: `r${index}`, input: 1, output: 1 }),
+  ).join('\n') + '\n');
+  const history = createTranscriptUsageHistory({ operation: 'usage-test', format, roots: () => [root], now });
+  const controller = new AbortController();
+  const cancelled = history.read({ ...window, signal: controller.signal });
+  const queued = history.read(window);
+  controller.abort(new Error('cancelled'));
+  await expect(cancelled).rejects.toThrow('cancelled');
+  expect((await queued).buckets.map((bucket) => bucket.records)).toEqual([5_000]);
+});

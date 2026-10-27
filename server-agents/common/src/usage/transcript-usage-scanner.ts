@@ -4,9 +4,10 @@ import { createZstdDecompress } from 'node:zlib';
 import { USAGE_RETENTION_DAYS } from '@garcon/common/usage';
 import { hasNodeErrorCode } from '../lib/errors.js';
 import type { EventLoopSteps } from '../shared/event-loop.js';
+import type { Readable } from 'node:stream';
 import {
-  collapseUsageCopies,
   isMalformedUsage,
+  mergeUsageCopies,
   type MalformedUsage,
   type TranscriptUsageFormat,
   type UsageRecord,
@@ -34,12 +35,18 @@ interface TranscriptFile {
   readonly mtimeMs: number;
 }
 
+// Owned by the scanner. A grown file merges its new lines into these collections
+// in place, so a resume costs work proportional to the appended bytes.
 interface CachedTranscript<State> {
   readonly size: number;
   readonly mtimeMs: number;
-  // Records from newline-terminated lines, one per request; a grown file appends to these.
-  readonly records: readonly UsageRecord[];
-  readonly malformed: readonly MalformedUsage[];
+  // Records from newline-terminated lines, one per request.
+  readonly records: UsageRecord[];
+  // Index into records of each dedupe key, so a copy of a request merges in place.
+  readonly keyIndex: Map<string, number>;
+  readonly malformed: MalformedUsage[];
+  // The earliest time held, which tells a resume whether anything has aged out.
+  readonly oldestMs: number;
   // Records from an unterminated last line, reread once the line completes.
   readonly tailRecords: readonly UsageRecord[];
   readonly resumeOffset: number;
@@ -48,9 +55,11 @@ interface CachedTranscript<State> {
   readonly state: State;
 }
 
+// Valid until the next scan, which may update a grown file's records in place.
 export interface ScannedTranscript {
   readonly path: string;
   readonly records: readonly UsageRecord[];
+  readonly tailRecords: readonly UsageRecord[];
   readonly malformed: readonly MalformedUsage[];
 }
 
@@ -83,6 +92,7 @@ interface ParsedLines<State> {
  * files stay cached in memory by size and modification time, and a grown file
  * resumes after its last complete line, so repeated scans read only new bytes.
  * Scans run one at a time; a queued scan reuses what the previous one parsed.
+ * Cancellation stops the file being read and leaves its cached parse unchanged.
  */
 export class TranscriptUsageScanner<State> {
   readonly #options: TranscriptUsageScannerOptions<State>;
@@ -118,7 +128,7 @@ export class TranscriptUsageScanner<State> {
       const cached = this.#cache.get(file.path);
       let entry: CachedTranscript<State> | null = cached ?? null;
       if (!cached || cached.size !== file.size || cached.mtimeMs !== file.mtimeMs) {
-        const read = await this.#read(file, cached, retainedSinceMs, steps);
+        const read = await this.#read(file, cached, retainedSinceMs, steps, signal);
         if (read === 'gone') {
           // Removed or moved since listing, as Codex does when archiving or compressing;
           // a moved copy is read where it now lives.
@@ -134,11 +144,7 @@ export class TranscriptUsageScanner<State> {
         if (!cached) continue;
         entry = cached;
       }
-      files.push({
-        path: file.path,
-        records: entry.tailRecords.length === 0 ? entry.records : [...entry.records, ...entry.tailRecords],
-        malformed: entry.malformed,
-      });
+      files.push({ path: file.path, records: entry.records, tailRecords: entry.tailRecords, malformed: entry.malformed });
     }
     return { rootFound: listing.rootFound, files, unreadablePaths };
   }
@@ -148,6 +154,7 @@ export class TranscriptUsageScanner<State> {
     cached: CachedTranscript<State> | undefined,
     retainedSinceMs: number,
     steps: EventLoopSteps,
+    signal: AbortSignal | undefined,
   ): Promise<CachedTranscript<State> | 'gone' | null> {
     let handle: fs.FileHandle;
     try {
@@ -155,41 +162,65 @@ export class TranscriptUsageScanner<State> {
     } catch (error) {
       return hasNodeErrorCode(error, 'ENOENT') ? 'gone' : null;
     }
+    const streams: Readable[] = [];
     try {
+      const { format } = this.#options;
       let parsed: ParsedLines<State>;
-      let base: Pick<CachedTranscript<State>, 'records' | 'malformed'> = { records: [], malformed: [] };
+      let base: CachedTranscript<State> | null = null;
       if (file.path.endsWith(COMPRESSED_SUFFIX)) {
         // Streams the decompressed lines, so a large rollout is never held whole.
         const source = handle.createReadStream({ highWaterMark: READ_CHUNK_BYTES, autoClose: false });
         const decompressed = source.pipe(createZstdDecompress());
         source.on('error', (error) => decompressed.destroy(error));
-        parsed = await this.#parseLines(decompressed as AsyncIterable<Buffer>, 0, this.#options.format.createState(), steps);
+        streams.push(source, decompressed);
+        parsed = await this.#parseLines(decompressed as AsyncIterable<Buffer>, 0, format.createState(), steps, signal);
       } else {
         // Only a strictly grown file resumes; same size with a new mtime means rewritten content.
         const resume = cached && file.size > cached.size
           && await guardMatches(handle, cached.resumeOffset, cached.guardHash);
         const start = resume ? cached.resumeOffset : 0;
         if (resume) base = cached;
-        const state = resume ? this.#options.format.cloneState(cached.state) : this.#options.format.createState();
-        const chunks = file.size > start
-          ? handle.createReadStream({ start, end: file.size - 1, highWaterMark: READ_CHUNK_BYTES, autoClose: false }) as AsyncIterable<Buffer>
-          : [];
-        parsed = await this.#parseLines(chunks, start, state, steps);
+        const state = resume ? format.cloneState(cached.state) : format.createState();
+        let chunks: AsyncIterable<Buffer> | Buffer[] = [];
+        if (file.size > start) {
+          const stream = handle.createReadStream({ start, end: file.size - 1, highWaterMark: READ_CHUNK_BYTES, autoClose: false });
+          streams.push(stream);
+          chunks = stream as AsyncIterable<Buffer>;
+        }
+        parsed = await this.#parseLines(chunks, start, state, steps, signal);
       }
-      const retained = (record: UsageRecord) => record.timestampMs >= retainedSinceMs;
+      const guardHash = file.path.endsWith(COMPRESSED_SUFFIX) ? 0 : await readGuardHash(handle, parsed.resumeOffset);
+      // Past this point nothing awaits I/O or observes cancellation, so a cached entry is never half merged.
+      const merged: MergedRecords = base ?? { records: [], keyIndex: new Map(), malformed: [], oldestMs: Number.POSITIVE_INFINITY };
+      let oldestMs = merged.oldestMs;
+      await steps.forEach(parsed.records, (record) => {
+        if (record.timestampMs < retainedSinceMs) return;
+        oldestMs = Math.min(oldestMs, record.timestampMs);
+        appendRecord(merged.records, merged.keyIndex, record);
+      });
+      for (const entry of parsed.malformed) {
+        if (entry.timestampMs !== null && entry.timestampMs < retainedSinceMs) continue;
+        if (entry.timestampMs !== null) oldestMs = Math.min(oldestMs, entry.timestampMs);
+        merged.malformed.push(entry);
+      }
+      const retained = oldestMs < retainedSinceMs
+        ? await pruneExpired(merged, retainedSinceMs, steps)
+        : { ...merged, oldestMs };
       return {
+        ...retained,
         size: file.size,
         mtimeMs: file.mtimeMs,
-        records: collapseUsageCopies([...base.records, ...parsed.records.filter(retained)]),
-        malformed: [...base.malformed, ...parsed.malformed.filter((entry) => entry.timestampMs === null || entry.timestampMs >= retainedSinceMs)],
-        tailRecords: parsed.tailRecords.filter(retained),
+        tailRecords: newTailRecords(parsed.tailRecords, retained.keyIndex, retainedSinceMs),
         resumeOffset: parsed.resumeOffset,
-        guardHash: file.path.endsWith(COMPRESSED_SUFFIX) ? 0 : await readGuardHash(handle, parsed.resumeOffset),
+        guardHash,
         state: parsed.state,
       };
-    } catch {
+    } catch (error) {
+      // A cancelled read propagates; any other failure leaves the file unreadable for this scan.
+      if (signal?.aborted) throw signal.reason;
       return null;
     } finally {
+      for (const stream of streams) stream.destroy();
       await handle.close().catch(() => undefined);
     }
   }
@@ -201,6 +232,7 @@ export class TranscriptUsageScanner<State> {
     offset: number,
     state: State,
     steps: EventLoopSteps,
+    signal: AbortSignal | undefined,
   ): Promise<ParsedLines<State>> {
     const { format } = this.#options;
     const markers = format.lineMarkers.map((marker) => Buffer.from(marker, 'latin1'));
@@ -224,6 +256,7 @@ export class TranscriptUsageScanner<State> {
     let position = offset;
     let resumeOffset = offset;
     for await (const raw of chunks) {
+      signal?.throwIfAborted();
       const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
       let lineStart = 0;
       while (lineStart < chunk.length) {
@@ -251,7 +284,10 @@ export class TranscriptUsageScanner<State> {
         oversizedHasMarker = false;
         lineStart = newline + 1;
         resumeOffset = position + lineStart;
-        if (steps.due) await steps.next();
+        if (steps.due) {
+          await steps.next();
+          signal?.throwIfAborted();
+        }
       }
       position += chunk.length;
     }
@@ -264,6 +300,50 @@ export class TranscriptUsageScanner<State> {
     }
     return { records, malformed, tailRecords, resumeOffset, state: committedState };
   }
+}
+
+type MergedRecords = Pick<CachedTranscript<unknown>, 'records' | 'keyIndex' | 'malformed' | 'oldestMs'>;
+
+function appendRecord(records: UsageRecord[], keyIndex: Map<string, number>, record: UsageRecord): void {
+  const index = record.dedupeKey === null ? undefined : keyIndex.get(record.dedupeKey);
+  if (index !== undefined) {
+    records[index] = mergeUsageCopies(records[index]!, record);
+    return;
+  }
+  if (record.dedupeKey !== null) keyIndex.set(record.dedupeKey, records.length);
+  records.push(record);
+}
+
+// A tail copy of a request already counted from a complete line adds nothing until
+// its own line completes and merges in place.
+function newTailRecords(tail: readonly UsageRecord[], keyIndex: ReadonlyMap<string, number>, retainedSinceMs: number): UsageRecord[] {
+  const records: UsageRecord[] = [];
+  const tailIndex = new Map<string, number>();
+  for (const record of tail) {
+    if (record.timestampMs < retainedSinceMs) continue;
+    if (record.dedupeKey !== null && keyIndex.has(record.dedupeKey)) continue;
+    appendRecord(records, tailIndex, record);
+  }
+  return records;
+}
+
+// Rebuilds a file's collections without usage older than retention, in bounded steps.
+async function pruneExpired(merged: MergedRecords, retainedSinceMs: number, steps: EventLoopSteps): Promise<MergedRecords> {
+  const records: UsageRecord[] = [];
+  const keyIndex = new Map<string, number>();
+  let oldestMs = Number.POSITIVE_INFINITY;
+  await steps.forEach(merged.records, (record) => {
+    if (record.timestampMs < retainedSinceMs) return;
+    oldestMs = Math.min(oldestMs, record.timestampMs);
+    appendRecord(records, keyIndex, record);
+  });
+  const malformed = merged.malformed.filter((entry) => {
+    if (entry.timestampMs === null) return true;
+    if (entry.timestampMs < retainedSinceMs) return false;
+    oldestMs = Math.min(oldestMs, entry.timestampMs);
+    return true;
+  });
+  return { records, keyIndex, malformed, oldestMs };
 }
 
 interface TranscriptListing {

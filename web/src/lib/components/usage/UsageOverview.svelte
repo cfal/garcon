@@ -33,17 +33,26 @@
 					const point = day.byAgent.get(agent.agentId);
 					return metric === 'cost' ? (point?.costUsd ?? 0) : (point?.totalTokens ?? 0);
 				}),
+				unknown: report.daily.map((day) => {
+					const point = day.byAgent.get(agent.agentId);
+					return metric === 'cost' && point !== undefined && isCostUnknown(point);
+				}),
 			})),
 	);
+	const totalCostUnknown = $derived(isCostUnknown(report.totals));
 </script>
 
 <section class="grid gap-6 lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]" data-usage-overview>
 	<div class="flex min-w-0 flex-col gap-5 transition-opacity" class:opacity-40={dimmed}>
 		<div class="flex flex-col gap-1">
 			<span class="text-4xl font-semibold text-foreground tabular-nums" data-usage-headline>
-				{metric === 'cost'
-					? formatUsd(report.totals.costUsd)
-					: formatTokens(report.totals.totalTokens)}
+				{#if metric === 'tokens'}
+					{formatTokens(report.totals.totalTokens)}
+				{:else if totalCostUnknown}
+					<span class="text-muted-foreground">{m.usage_unpriced()}</span>
+				{:else}
+					{formatUsd(report.totals.costUsd)}
+				{/if}
 			</span>
 			<span class="text-xs text-muted-foreground">
 				{m.usage_sessions({
@@ -125,6 +134,7 @@
 			{format}
 			formatAxis={metric === 'cost' ? formatUsdAxis : formatTokens}
 			ariaLabel={metric === 'cost' ? m.usage_daily_cost() : m.usage_daily_tokens()}
+			unknownLabel={m.usage_unpriced()}
 			{dimmed}
 		/>
 	</div>

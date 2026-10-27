@@ -38,6 +38,15 @@ function tokenCount(last: unknown, total?: unknown, timestamp = '2026-10-01T05:1
   return JSON.stringify({ type: 'event_msg', timestamp, payload: { type: 'token_count', info: { last_token_usage: last, total_token_usage: total } } });
 }
 
+// Mirrors the pinned 0.164.0 rollout line written for each billed response.
+function usageRecordLine(responseId: unknown, usage: unknown, timestamp = '2026-10-01T05:17:49.900Z'): string {
+  return JSON.stringify({
+    type: 'token_usage_record',
+    timestamp,
+    payload: { thread_id: SESSION_ID, turn_id: 'turn-1', session_id: SESSION_ID, root_turn_id: 'turn-1', response_id: responseId, usage },
+  });
+}
+
 function started(): CodexUsageState {
   const state = createCodexUsageState();
   parseCodexUsageLine(sessionMeta(), state);
@@ -155,5 +164,53 @@ describe('Codex usage lines', () => {
     parseCodexUsageLine(tokenCount(counters(50, 5), counters(150, 25)), state);
     expect(copy.lastCumulativeUsage).toEqual(first);
     expect(parseCodexUsageLine(tokenCount(counters(50, 5), counters(150, 25)), copy)?.totals.uncachedInputTokens).toBe(50);
+  });
+
+  test('bill usage records, including remote compaction the context counters never show', () => {
+    const state = started();
+    const first = counters(1_000, 100);
+    expect(parseCodexUsageLine(usageRecordLine('resp_1', first), state)).toMatchObject({
+      totals: { uncachedInputTokens: 1_000, outputTokens: 100 },
+      dedupeKey: 'codex-response:resp_1',
+    });
+    expect(parseCodexUsageLine(tokenCount(first, first), state)).toBeNull();
+    // A remote compaction is billed by its record; the next snapshot is a context estimate.
+    expect(parseCodexUsageLine(usageRecordLine('resp_compact', counters(5_000, 400), '2026-10-01T05:18:00.000Z'), state)?.totals.outputTokens).toBe(400);
+    expect(parseCodexUsageLine(tokenCount(counters(300, 0), counters(1_300, 100), '2026-10-01T05:18:00.100Z'), state)).toBeNull();
+    expect(parseCodexUsageLine(usageRecordLine('resp_2', counters(0, 0)), state)).toBeNull();
+  });
+
+  test('keep billing token_count deltas in rollouts written before usage records', () => {
+    const state = started();
+    const first = counters(100, 10);
+    expect(parseCodexUsageLine(tokenCount(first, first), state)?.dedupeKey).toMatch(/^codex:/);
+    expect(parseCodexUsageLine(tokenCount(counters(20, 2), counters(120, 12)), state)?.totals.outputTokens).toBe(2);
+  });
+
+  test('give a verbatim fork copy of a usage record the same identity', () => {
+    const parent = started();
+    const copy = createCodexUsageState();
+    parseCodexUsageLine(sessionMeta({}, '2026-10-02T00:00:00Z'), copy);
+    parseCodexUsageLine(turnContext(), copy);
+    const line = usageRecordLine('resp_1', counters(100, 10));
+    expect(parseCodexUsageLine(line, copy)?.dedupeKey).toBe(parseCodexUsageLine(line, parent)?.dedupeKey ?? 'missing');
+  });
+
+  test('skip restamped usage records copied into a native fork', () => {
+    const state = createCodexUsageState();
+    parseCodexUsageLine(sessionMeta({ forked_from_id: '00000000-0000-4000-8000-0000000000c0' }, '2026-10-01T05:00:00.000Z'), state);
+    parseCodexUsageLine(turnContext(), state);
+    expect(parseCodexUsageLine(usageRecordLine('resp_parent', counters(100, 10), '2026-10-01T05:00:00.010Z'), state)).toBeNull();
+    expect(parseCodexUsageLine(tokenCount(counters(100, 10), counters(100, 10), '2026-10-01T05:00:00.020Z'), state)).toBeNull();
+    const child = parseCodexUsageLine(usageRecordLine('resp_child', counters(40, 4), '2026-10-01T05:00:09.000Z'), state);
+    expect(child?.dedupeKey).toBe('codex-response:resp_child');
+    expect(parseCodexUsageLine(tokenCount(counters(40, 4), counters(140, 14), '2026-10-01T05:00:09.100Z'), state)).toBeNull();
+  });
+
+  test('count a usage record without a response, usage, or model as malformed', () => {
+    const at = Date.parse('2026-10-01T05:17:49.900Z');
+    expect(parseLine(usageRecordLine(null, counters(1, 1)), started())).toEqual({ malformed: true, timestampMs: at });
+    expect(parseLine(usageRecordLine('resp_1', { input_tokens: 1 }), started())).toEqual({ malformed: true, timestampMs: at });
+    expect(parseLine(usageRecordLine('resp_1', counters(1, 1)), createCodexUsageState())).toEqual({ malformed: true, timestampMs: at });
   });
 });

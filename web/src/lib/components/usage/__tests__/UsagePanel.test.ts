@@ -14,7 +14,19 @@ vi.mock('$lib/context', async (original) => ({
 	getExecutors: () => executors,
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+	cleanup();
+	executors.applySnapshot([localExecutor]);
+});
+
+const unpricedBucket = (day: string) =>
+	usageBucket(day, 'custom-model', {
+		costUsd: 0,
+		categoryCostUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
+		cacheSavingsUsd: 0,
+		unpricedRecords: 3,
+		unpricedTokens: 1_050,
+	});
 
 function renderPanel(read: typeof getUsageSummary) {
 	const controller = new UsageController({
@@ -115,6 +127,42 @@ describe('UsagePanel', () => {
 		expect(within(codex).queryByText('$0.00')).toBeNull();
 	});
 
+	it('shows a window with no priced usage as unpriced, not free', async () => {
+		renderPanel(
+			resolved(
+				usageSummary({ agents: [usageAgent('codex', [unpricedBucket('2026-10-26')])] }),
+			),
+		);
+		await screen.findByText('No known price · 1.05K tokens');
+		const headline = document.querySelector('[data-usage-headline]')!;
+		expect(headline.textContent?.trim()).toBe('Unpriced');
+		await fireEvent.click(screen.getByRole('button', { name: 'Day' }));
+		const total = document.querySelector('[data-usage-day-table] [data-usage-day-total]')!;
+		expect(total.textContent).toContain('Unpriced');
+		expect(total.textContent).not.toContain('$0.00');
+	});
+
+	it('marks only the unpriced days of mixed usage as unknown', async () => {
+		renderPanel(
+			resolved(
+				usageSummary({
+					agents: [
+						usageAgent('codex', [
+							usageBucket('2026-10-27', 'gpt-6-sol', { costUsd: 2 }),
+							unpricedBucket('2026-10-26'),
+						]),
+					],
+				}),
+			),
+		);
+		await screen.findByText('$2.00', { selector: '[data-usage-headline]' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Day' }));
+		const totals = [
+			...document.querySelectorAll('[data-usage-day-table] [data-usage-day-total]'),
+		].map((cell) => cell.textContent?.trim());
+		expect(totals).toEqual(['$2.00', expect.stringContaining('Unpriced')]);
+	});
+
 	it("drops the previous executor's numbers when switching to it fails", async () => {
 		const read = vi
 			.fn<typeof getUsageSummary>()
@@ -148,5 +196,16 @@ describe('UsagePanel', () => {
 		executors.applySnapshot([localExecutor, remoteExecutor]);
 		const selector = await screen.findByLabelText('Executor');
 		expect(selector.textContent).toContain('Local');
+	});
+
+	it('keeps a selected executor visible after it is removed', async () => {
+		executors.applySnapshot([localExecutor, remoteExecutor]);
+		const controller = renderPanel(resolved(usageSummary()));
+		await screen.findByText('$13.00');
+		controller.selectExecutor(remoteExecutor.id);
+		executors.applySnapshot([localExecutor]);
+		const selector = await screen.findByLabelText('Executor');
+		await waitFor(() => expect(selector.textContent).toContain('Unavailable executor'));
+		expect(controller.executorId).toBe(remoteExecutor.id);
 	});
 });

@@ -31,6 +31,8 @@ export interface UsageAgentTotals extends UsageTotals {
 export interface UsageDayPoint {
 	readonly costUsd: number;
 	readonly totalTokens: number;
+	readonly records: number;
+	readonly unpricedRecords: number;
 }
 
 export interface UsageModelTotals extends UsageTotals {
@@ -115,6 +117,17 @@ function addBucket(totals: MutableTotals, bucket: UsageBucket): void {
 	totals.unpricedTokens += bucket.unpricedTokens;
 }
 
+function emptyDayPoint(): Mutable<UsageDayPoint> {
+	return { costUsd: 0, totalTokens: 0, records: 0, unpricedRecords: 0 };
+}
+
+function addBucketToDay(point: Mutable<UsageDayPoint>, bucket: UsageBucket): void {
+	point.costUsd += bucket.costUsd;
+	point.totalTokens += usageTotalTokens(bucket.totals);
+	point.records += bucket.records;
+	point.unpricedRecords += bucket.unpricedRecords;
+}
+
 function freeze(totals: MutableTotals): UsageTotals {
 	return { ...totals, totalTokens: usageTotalTokens(totals.tokens) };
 }
@@ -138,8 +151,7 @@ export function buildUsageReport(summary: UsageSummary): UsageReport {
 		{ agentId: string; model: string; totals: MutableTotals; daily: Mutable<UsageDayPoint>[] }
 	>();
 	const daily = days.map(() => ({
-		costUsd: 0,
-		totalTokens: 0,
+		...emptyDayPoint(),
 		byAgent: new Map<string, Mutable<UsageDayPoint>>(),
 	}));
 	const issues: UsageIssue[] = [];
@@ -169,26 +181,20 @@ export function buildUsageReport(summary: UsageSummary): UsageReport {
 					agentId: agent.agentId,
 					model: bucket.model,
 					totals: emptyTotals(),
-					daily: days.map(() => ({ costUsd: 0, totalTokens: 0 })),
+					daily: days.map(emptyDayPoint),
 				};
 				modelTotals.set(key, model);
 			}
 			addBucket(model.totals, bucket);
 			const index = dayIndex.get(bucket.day);
 			if (index === undefined) continue;
-			const tokens = usageTotalTokens(bucket.totals);
-			model.daily[index]!.costUsd += bucket.costUsd;
-			model.daily[index]!.totalTokens += tokens;
 			const day = daily[index]!;
-			day.costUsd += bucket.costUsd;
-			day.totalTokens += tokens;
 			let agentDay = day.byAgent.get(agent.agentId);
 			if (!agentDay) {
-				agentDay = { costUsd: 0, totalTokens: 0 };
+				agentDay = emptyDayPoint();
 				day.byAgent.set(agent.agentId, agentDay);
 			}
-			agentDay.costUsd += bucket.costUsd;
-			agentDay.totalTokens += tokens;
+			for (const point of [model.daily[index]!, day, agentDay]) addBucketToDay(point, bucket);
 		}
 	}
 
@@ -242,7 +248,7 @@ export function sortModels(
 }
 
 /** Cost is unknown, not zero, when no record had a known price. */
-export function isCostUnknown(totals: UsageTotals): boolean {
+export function isCostUnknown(totals: Pick<UsageTotals, 'records' | 'unpricedRecords'>): boolean {
 	return totals.records > 0 && totals.unpricedRecords >= totals.records;
 }
 

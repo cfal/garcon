@@ -85,10 +85,11 @@ export class UsageAggregator {
     return day >= this.#window.sinceDay && day <= this.#window.untilDay;
   }
 
-  async finish(steps: EventLoopSteps): Promise<UsageAggregation> {
+  async finish(steps: EventLoopSteps, signal?: AbortSignal): Promise<UsageAggregation> {
     const buckets = new Map<string, MutableBucket>();
     const sessions = new Set<string>();
     const accumulate = (record: UsageRecord) => {
+      signal?.throwIfAborted();
       const day = this.#toDay(record.timestampMs);
       if (!this.#inWindow(day)) return;
       // Bounds what a provider-chosen model name can add to the report.

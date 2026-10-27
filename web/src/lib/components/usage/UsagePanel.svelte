@@ -6,6 +6,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { getExecutors } from '$lib/context';
 	import { agentLabelFor } from '$lib/agents/agent-labels';
+	import { LOCAL_EXECUTOR_ID } from '$shared/executors';
 	import { USAGE_WINDOW_DAYS } from '$shared/usage';
 	import type { UsageController } from '$lib/usage/usage-controller.svelte';
 	import { formatDayWithYear } from '$lib/usage/usage-format';
@@ -43,6 +44,33 @@
 			.filter((agent) => agent.status === 'missing')
 			.map((agent) => agentLabelFor(agent.agentId)) ?? [],
 	);
+	// A selected executor that is no longer listed stays selected and visible, so the
+	// surface never silently reports another executor's usage.
+	const showExecutorSelector = $derived(
+		executors.hasRemoteExecutors || controller.executorId !== LOCAL_EXECUTOR_ID,
+	);
+	const executorOptions = $derived.by(() => {
+		const options = executors.executors.map((executor) => ({
+			value: executor.id,
+			label: executor.label,
+			disabled: false,
+		}));
+		if (!options.some((option) => option.value === LOCAL_EXECUTOR_ID)) {
+			options.unshift({
+				value: LOCAL_EXECUTOR_ID,
+				label: executors.label(LOCAL_EXECUTOR_ID),
+				disabled: false,
+			});
+		}
+		if (!options.some((option) => option.value === controller.executorId)) {
+			options.push({
+				value: controller.executorId,
+				label: executors.label(controller.executorId),
+				disabled: true,
+			});
+		}
+		return options;
+	});
 	// An empty window with a failed read is unknown usage, not zero usage.
 	const readFailed = $derived(report?.issues.some((issue) => issue.status === 'failed') ?? false);
 </script>
@@ -76,7 +104,7 @@
 			</div>
 
 			<div class="flex flex-wrap items-center gap-1.5">
-				{#if executors.hasRemoteExecutors}
+				{#if showExecutorSelector}
 					<Select.Root
 						type="single"
 						value={controller.executorId}
@@ -88,9 +116,9 @@
 							<span class="truncate">{executors.label(controller.executorId)}</span>
 						</Select.Trigger>
 						<Select.Content>
-							{#each executors.executors as executor (executor.id)}
-								<Select.Item value={executor.id} label={executor.label}
-									>{executor.label}</Select.Item
+							{#each executorOptions as option (option.value)}
+								<Select.Item value={option.value} label={option.label} disabled={option.disabled}
+									>{option.label}</Select.Item
 								>
 							{/each}
 						</Select.Content>

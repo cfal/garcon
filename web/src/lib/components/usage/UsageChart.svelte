@@ -18,10 +18,20 @@
 		format: (value: number) => string;
 		formatAxis: (value: number) => string;
 		ariaLabel: string;
+		// Shown in place of a value the series marks unknown.
+		unknownLabel?: string;
 		dimmed?: boolean;
 	}
 
-	let { days, series, format, formatAxis, ariaLabel, dimmed = false }: Props = $props();
+	let {
+		days,
+		series,
+		format,
+		formatAxis,
+		ariaLabel,
+		unknownLabel = '–',
+		dimmed = false,
+	}: Props = $props();
 
 	const TOOLTIP_GAP_PX = 12;
 
@@ -72,6 +82,10 @@
 		hoverIndex === null
 			? 0
 			: series.reduce((sum, entry) => sum + (entry.values[hoverIndex!] ?? 0), 0),
+	);
+	// A total over only unknown values is itself unknown.
+	const hoverTotalUnknown = $derived(
+		hoverIndex !== null && series.every((entry) => entry.unknown?.[hoverIndex!] === true),
 	);
 
 	function handlePointerMove(event: PointerEvent): void {
@@ -171,14 +185,18 @@
 								<span class="truncate">{entry.label}</span>
 							</span>
 							<span class="text-foreground tabular-nums"
-								>{format(entry.values[hoverIndex] ?? 0)}</span
+								>{entry.unknown?.[hoverIndex]
+									? unknownLabel
+									: format(entry.values[hoverIndex] ?? 0)}</span
 							>
 						</div>
 					{/each}
 					{#if series.length > 1}
 						<div class="mt-1 flex items-center justify-between gap-3 border-t border-border pt-1">
 							<span class="text-muted-foreground">{m.usage_total()}</span>
-							<span class="text-foreground tabular-nums">{format(hoverTotal)}</span>
+							<span class="text-foreground tabular-nums"
+								>{hoverTotalUnknown ? unknownLabel : format(hoverTotal)}</span
+							>
 						</div>
 					{/if}
 				</div>

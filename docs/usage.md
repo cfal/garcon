@@ -31,19 +31,27 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
   cannot hide another's usage, and the surface shows the failure rather than an
   empty period. The controller stops waiting at its deadline even if a read has
   not yet observed its signal. An unavailable executor fails the request with
-  `EXECUTOR_UNAVAILABLE`; the surface keeps that executor selected and never
-  falls back to Local.
+  `EXECUTOR_UNAVAILABLE`; the surface keeps that executor selected, and shown
+  in its executor menu even after it is removed, and never falls back to Local.
 - A transcript root that is absent reports `missing`; one that exists but
   cannot be read, and unreadable transcripts, report `partial`. Malformed usage
   lines mark a report `partial` only when they fall inside the window, or when
   their time is unknown.
 - Parsed transcripts are cached in memory by size and modification time, and a
-  grown file resumes after its last complete line. Each cached file keeps one
-  record per request and drops usage older than any selectable window. The
-  cache lives as long as the integration; restart rereads every transcript in
-  the window.
-- One read is one `EventLoopSteps` operation, `claude-usage-history` or
-  `codex-usage-history`, shared by scanning and aggregation.
+  grown file resumes after its last complete line, merging its new requests
+  into the cached ones by key, so a resume costs work proportional to the
+  appended bytes. Each cached file keeps one record per request and drops usage
+  older than any selectable window, pruning in bounded steps once something
+  ages out. The cache lives as long as the integration; restart rereads every
+  transcript in the window.
+- Reads on one integration run whole, one at a time, because a scan updates
+  cached records in place. One read is one `EventLoopSteps` operation,
+  `claude-usage-history` or `codex-usage-history`, shared by scanning and
+  aggregation.
+- Cancellation reaches reading, decompression, parsing, and aggregation: the
+  read rejects with the signal's reason, its streams are destroyed, the cached
+  parse of the file being read stays as it was, and the next queued read
+  proceeds.
 
 ## Counting Rules
 
@@ -52,10 +60,15 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
   earliest timestamp; Claude Code's own resumes copy the same keys. Entries a
   Garcon fork copied carry `forkedFrom` and are skipped, because their requests
   were billed in the source session (the fork also restamps its last copy).
-- Codex `token_count` events take their model from the latest `turn_context`
-  and their tier from the latest `thread_settings_applied`. Cumulative counters
-  reconcile each request delta; inconsistent events are skipped and reported as
-  malformed. Garcon's JSONL fork copies events verbatim under a new session id,
+- Codex 0.164.0 writes a `token_usage_record` for every billed response,
+  including remote compaction, before that response's `token_count`. Once a
+  rollout has records, only records are billed, keyed by `response_id`, and
+  `token_count` only reports context size. Records with no response id or
+  usage, or with no known model, are malformed.
+- Rollouts written before records existed bill `token_count` events, which
+  take their model from the latest `turn_context` and their tier from the
+  latest `thread_settings_applied`. Cumulative counters reconcile each request
+  delta; inconsistent events are skipped and reported as malformed. Garcon's JSONL fork copies events verbatim under a new session id,
   so a request's identity is its event time, model, and counters, and copies
   count once. Codex's native forks restamp the copied history; those copies are
   recognized as the burst of events right after the fork's `session_meta`,
@@ -79,4 +92,5 @@ processing, flex processing, and the 272K-token long-context tier. Model names a
 removing provider prefixes, snapshot dates, and context variants such as
 `[1m]`. A model missing from the table is reported as unpriced: its tokens
 count, its cost is shown as unknown rather than zero, and totals note the
-excluded tokens. Update the table and its date together.
+excluded tokens. A total, agent, model, or day whose usage is entirely unpriced
+shows as unpriced in headlines, tables, and chart tooltips rather than as $0. Update the table and its date together.

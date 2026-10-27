@@ -11,6 +11,7 @@ interface CountingState {
 }
 
 const NOW = Date.parse('2026-10-27T00:00:00Z');
+const DAY_MS = 86_400_000;
 
 // Context lines set the model; usage lines carry a token count for that model.
 function countingFormat(parsedLines: string[]): TranscriptUsageFormat<CountingState> {
@@ -46,12 +47,14 @@ describe('transcript usage scanner', () => {
   let root: string;
   let parsed: string[];
   let scanner: TranscriptUsageScanner<CountingState>;
+  let now: number;
   const scan = (sinceMs = 0, signal?: AbortSignal) => scanner.scan(sinceMs, new EventLoopSteps('usage-test'), signal);
 
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), 'usage-scanner-'));
     parsed = [];
-    scanner = new TranscriptUsageScanner({ operation: 'usage-test', format: countingFormat(parsed), roots: () => [root], now: () => NOW });
+    now = NOW;
+    scanner = new TranscriptUsageScanner({ operation: 'usage-test', format: countingFormat(parsed), roots: () => [root], now: () => now });
   });
 
   afterEach(async () => {
@@ -60,7 +63,28 @@ describe('transcript usage scanner', () => {
   });
 
   const usage = (result: Awaited<ReturnType<typeof scan>>) =>
-    result.files.flatMap((file) => file.records.map((record) => `${record.model}:${record.totals.uncachedInputTokens}`));
+    result.files.flatMap((file) => [...file.records, ...file.tailRecords].map((record) => `${record.model}:${record.totals.uncachedInputTokens}`));
+
+  // Writes a transcript spanning several read chunks.
+  const writeLarge = (file: string, lines: number) =>
+    writeFile(file, line({ model: 'm1' }) + Array.from({ length: lines }, () => line({ usage: 1, pad: 'x'.repeat(96) })).join(''));
+
+  // Runs work while a timer measures the longest the event loop went without a turn.
+  async function longestTimerGap(work: () => Promise<unknown>): Promise<number> {
+    let last = performance.now();
+    let longest = 0;
+    const timer = setInterval(() => {
+      const at = performance.now();
+      longest = Math.max(longest, at - last);
+      last = at;
+    }, 1);
+    try {
+      await work();
+      return Math.max(longest, performance.now() - last);
+    } finally {
+      clearInterval(timer);
+    }
+  }
 
   test('reports a missing root without failing', async () => {
     const missing = new TranscriptUsageScanner({ operation: 'usage-test', format: countingFormat([]), roots: () => [path.join(root, 'absent')] });
@@ -114,6 +138,14 @@ describe('transcript usage scanner', () => {
     expect(usage(await scan())).toEqual(['m1:6', 'm1:1']);
   });
 
+  test('counts a request on an unterminated last line once', async () => {
+    const file = path.join(root, 'partial.jsonl');
+    await writeFile(file, line({ model: 'm1' }) + line({ usage: 5, id: 'a' }) + JSON.stringify({ usage: 5, id: 'a' }));
+    expect(usage(await scan())).toEqual(['m1:5']);
+    await appendFile(file, `\n${JSON.stringify({ usage: 2, id: 'b' })}`);
+    expect(usage(await scan())).toEqual(['m1:5', 'm1:2']);
+  });
+
   test('rereads an unterminated last line once it completes', async () => {
     const file = path.join(root, 'tail.jsonl');
     await writeFile(file, line({ model: 'm1' }) + JSON.stringify({ usage: 3 }));
@@ -155,6 +187,74 @@ describe('transcript usage scanner', () => {
     const result = await scan();
     expect(usage(result)).toEqual(['m1:6']);
     expect(result.files[0]!.malformed).toEqual([{ malformed: true, timestampMs: Date.parse('2026-10-20T00:00:00Z') }]);
+  });
+
+  test('prunes usage that aged out of retention when a cached file grows', async () => {
+    const file = path.join(root, 'aging.jsonl');
+    await writeFile(file, line({ model: 'm1' }) + line({ usage: 1, at: '2026-08-01T00:00:00Z' }) + line({ usage: 2 }));
+    expect(usage(await scan())).toEqual(['m1:1', 'm1:2']);
+    now = NOW + 30 * DAY_MS;
+    await appendFile(file, line({ usage: 3, at: '2026-11-20T00:00:00Z' }));
+    parsed.length = 0;
+    expect(usage(await scan())).toEqual(['m1:2', 'm1:3']);
+    expect(parsed).toHaveLength(1);
+  });
+
+  // A scanner whose format cancels the scan after it has parsed `after` lines.
+  function cancellingScanner(after: number) {
+    const controller = new AbortController();
+    const format = countingFormat(parsed);
+    const cancelling = new TranscriptUsageScanner({
+      operation: 'usage-test',
+      format: {
+        ...format,
+        parseLine(text, state) {
+          if (parsed.length === after) controller.abort(new Error('cancelled'));
+          return format.parseLine(text, state);
+        },
+      },
+      roots: () => [root],
+      now: () => NOW,
+    });
+    return { controller, scan: (signal?: AbortSignal) => cancelling.scan(0, new EventLoopSteps('usage-test'), signal) };
+  }
+
+  test('stops reading a file when a scan is cancelled mid-stream', async () => {
+    const lines = 40_000;
+    await writeLarge(path.join(root, 'large.jsonl'), lines);
+    const cancelling = cancellingScanner(100);
+    await expect(cancelling.scan(cancelling.controller.signal)).rejects.toThrow('cancelled');
+    expect(parsed.length).toBeLessThan(lines / 2);
+    const next = await cancelling.scan();
+    expect(next.files[0]!.records).toHaveLength(lines);
+  });
+
+  test('keeps the cached parse of a file whose resume was cancelled', async () => {
+    const file = path.join(root, 'resume.jsonl');
+    await writeFile(file, line({ model: 'm1' }) + line({ usage: 1 }));
+    const cancelling = cancellingScanner(100);
+    await cancelling.scan();
+    await appendFile(file, Array.from({ length: 20_000 }, () => line({ usage: 1, pad: 'x'.repeat(96) })).join(''));
+    await expect(cancelling.scan(cancelling.controller.signal)).rejects.toThrow('cancelled');
+    expect(parsed.length).toBeLessThan(10_000);
+    const result = await cancelling.scan();
+    expect(result.files[0]!.records).toHaveLength(20_001);
+  });
+
+  test('parses a large transcript and resumes it without holding the event loop', async () => {
+    const file = path.join(root, 'large.jsonl');
+    const lines = 200_000;
+    await writeLarge(file, lines);
+    let cold: Awaited<ReturnType<typeof scan>> | null = null;
+    expect(await longestTimerGap(async () => { cold = await scan(); })).toBeLessThan(200);
+    expect(cold!.files[0]!.records).toHaveLength(lines);
+
+    await appendFile(file, line({ usage: 2 }));
+    parsed.length = 0;
+    let warm: Awaited<ReturnType<typeof scan>> | null = null;
+    expect(await longestTimerGap(async () => { warm = await scan(); })).toBeLessThan(200);
+    expect(parsed).toHaveLength(1);
+    expect(warm!.files[0]!.records).toHaveLength(lines + 1);
   });
 
   test('stops at a cancelled scan and still serves the next one', async () => {

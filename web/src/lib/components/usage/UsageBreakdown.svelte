@@ -6,6 +6,7 @@
 		isCostUnknown,
 		metricValue,
 		sortModels,
+		type UsageDayPoint,
 		type UsageMetric,
 		type UsageReport,
 	} from '$lib/usage/usage-report';
@@ -39,6 +40,14 @@
 		{ value: 'day' as const, label: m.usage_breakdown_day() },
 	]);
 </script>
+
+{#snippet dayCost(point: UsageDayPoint | undefined)}
+	{#if point && isCostUnknown(point)}
+		<span aria-hidden="true">–</span><span class="sr-only">{m.usage_unpriced()}</span>
+	{:else}
+		{formatUsd(point?.costUsd ?? 0)}
+	{/if}
+{/snippet}
 
 <section class="flex flex-col gap-3" data-usage-breakdown>
 	<div class="flex items-center justify-between gap-3">
@@ -149,20 +158,20 @@
 									<td class="py-2 pl-4 text-muted-foreground">
 										{#if metric === 'tokens'}
 											{formatTokens(point?.totalTokens ?? 0)}
-										{:else if isCostUnknown(agent)}
-											<span aria-hidden="true">–</span><span class="sr-only"
-												>{m.usage_unpriced()}</span
-											>
 										{:else}
-											{formatUsd(point?.costUsd ?? 0)}
+											{@render dayCost(point)}
 										{/if}
 									</td>
 								{/each}
-								<td class="py-2 pl-4 text-foreground">
-									{metric === 'cost' ? formatUsd(day.costUsd) : formatTokens(day.totalTokens)}
+								<td class="py-2 pl-4 text-foreground" data-usage-day-total>
+									{#if metric === 'cost'}{@render dayCost(day)}{:else}{formatTokens(
+											day.totalTokens,
+										)}{/if}
 								</td>
 								<td class="py-2 pl-4 text-muted-foreground">
-									{metric === 'cost' ? formatTokens(day.totalTokens) : formatUsd(day.costUsd)}
+									{#if metric === 'cost'}{formatTokens(day.totalTokens)}{:else}{@render dayCost(
+											day,
+										)}{/if}
 								</td>
 							</tr>
 							{#snippet failed()}

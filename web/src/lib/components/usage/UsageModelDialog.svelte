@@ -54,6 +54,7 @@
 			values: model.daily.map((point) =>
 				chartMetric === 'cost' ? point.costUsd : point.totalTokens,
 			),
+			unknown: model.daily.map((point) => chartMetric === 'cost' && isCostUnknown(point)),
 		},
 	]);
 </script>

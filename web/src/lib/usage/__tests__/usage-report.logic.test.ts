@@ -36,7 +36,7 @@ describe('usage report', () => {
 			'codex:gpt-5.3-codex-spark',
 		]);
 		expect(report.models[0]!.daily.map((point) => point.costUsd)).toEqual([0, 0, 0, 0, 6, 4, 0]);
-		expect(report.daily.at(-1)!.byAgent.get('codex')).toEqual({ costUsd: 2, totalTokens: 2_100 });
+		expect(report.daily.at(-1)!.byAgent.get('codex')).toMatchObject({ costUsd: 2, totalTokens: 2_100 });
 		expect(report.daily[0]).toMatchObject({ day: '2026-10-21', costUsd: 0, totalTokens: 0 });
 		expect(report.pricingAsOf).toBe('2026-10-27');
 	});
@@ -119,5 +119,34 @@ describe('usage report', () => {
 		expect(isCostUnknown(spark)).toBe(true);
 		expect(costPerMillionTokens(spark)).toBeNull();
 		expect(costPerMillionTokens(report.totals)).toBeCloseTo((13 / (5_250 - 1_050)) * 1_000_000, 6);
+	});
+
+	it('keeps unknown cost on daily points, not only on totals', () => {
+		const report = buildUsageReport(
+			usageSummary({
+				agents: [
+					usageAgent('codex', [
+						usageBucket('2026-10-26', 'custom-model', {
+							costUsd: 0,
+							unpricedRecords: 3,
+							unpricedTokens: 1_050,
+						}),
+						usageBucket('2026-10-27', 'gpt-6-sol', { costUsd: 2 }),
+						usageBucket('2026-10-27', 'custom-model', {
+							costUsd: 0,
+							unpricedRecords: 3,
+							unpricedTokens: 1_050,
+						}),
+					]),
+				],
+			}),
+		);
+		const [unpricedDay, mixedDay] = report.daily.slice(-2);
+		expect(isCostUnknown(unpricedDay!)).toBe(true);
+		expect(isCostUnknown(unpricedDay!.byAgent.get('codex')!)).toBe(true);
+		expect(isCostUnknown(mixedDay!)).toBe(false);
+		expect(isCostUnknown(report.daily[0]!)).toBe(false);
+		const custom = report.models.find((model) => model.model === 'custom-model')!;
+		expect(custom.daily.slice(-2).map(isCostUnknown)).toEqual([true, true]);
 	});
 });

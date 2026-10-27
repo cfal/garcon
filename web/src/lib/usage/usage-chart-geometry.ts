@@ -9,6 +9,8 @@ export interface UsageChartSeries {
 	readonly color: string;
 	// One value per charted day.
 	readonly values: readonly number[];
+	// Days whose value is unknown rather than zero, such as cost with no known price.
+	readonly unknown?: readonly boolean[];
 }
 
 export interface ChartScale {
