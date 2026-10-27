@@ -67,7 +67,7 @@ for (const phase of ['before dispatch', 'after creation'] as const) {
       return result;
     });
     try {
-      const executor = await connecting;
+      const executor = (await connecting).runtime;
       const files = await executor.getFilesService();
       expect(await files.browse({ directoryPath: directory })).toEqual([]);
       if (phase === 'before dispatch') await controller.dispose();
@@ -104,7 +104,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     if (dialer === 'controller') controller.dial(worker.listen());
     else worker.dial(controller.listen());
     try {
-      const executor = await connecting;
+      const executor = (await connecting).runtime;
       const files = await executor.getFilesService();
       const target = { projectPath: directory, filePath: 'example.txt' };
       const content = '\u001f'.repeat(MAX_FILE_VIEW_BYTES);
@@ -152,7 +152,7 @@ for (const phase of ['before dispatch', 'after commit'] as const) {
       return result;
     });
     try {
-      const executor = await connecting;
+      const executor = (await connecting).runtime;
       const files = await executor.getFilesService();
       const target = { projectPath: directory, filePath: 'file.txt' };
       await fs.writeFile(path.join(directory, target.filePath), 'original');

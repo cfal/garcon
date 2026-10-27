@@ -2,12 +2,12 @@ import { expect, test } from 'bun:test';
 import { AssistantMessage } from '@garcon/common/chat-types';
 import type { AgentProducerNotification, ExecutorAvailability } from '@garcon/server-agent-interface';
 import type { AgentRuntimeEvent } from '@garcon/server-agent-common/execution/runtime-events';
-import type { RemoteExecutorClient } from '../client/executor-client.js';
+import type { ExecutionRuntimeApi } from '@garcon/server-agent-interface';
 import type { Logger } from '../../common/log.js';
 import { remoteFixture, requestFor } from './integration-fixture.js';
 
 type Fixture = Awaited<ReturnType<typeof remoteFixture>>;
-type Integration = Awaited<ReturnType<RemoteExecutorClient['getAgentIntegration']>>;
+type Integration = Awaited<ReturnType<ExecutionRuntimeApi['getAgentIntegration']>>;
 
 function capturingLogger() {
   const entries: { readonly level: 'warn' | 'error'; readonly message: unknown; readonly detail: unknown }[] = [];
@@ -35,7 +35,7 @@ function workerSessions(fixture: Fixture) {
   return counter;
 }
 
-function nextAvailability(executor: RemoteExecutorClient, value: ExecutorAvailability) {
+function nextAvailability(executor: ExecutionRuntimeApi, value: ExecutorAvailability) {
   const reached = Promise.withResolvers<void>();
   const off = executor.onAvailabilityChanged((next) => { if (next === value) { off(); reached.resolve(); } });
   return reached.promise;

@@ -25,13 +25,13 @@ import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-async function fixture(logger?: Logger) {
+async function fixture(logger?: Logger, resolveCredential: Parameters<typeof ExecutorManager.create>[0]['resolveCredential'] = async () => null) {
   const temporary = join(homedir(), 'tmp');
   await mkdir(temporary, { recursive: true });
   const root = await mkdtemp(join(temporary, 'executor-manager-'));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const manager = await ExecutorManager.create({
-    id: 'local', workspaceDir: root, projectBasePath: root, integrations: [], resolveCredential: async () => null,
+    id: 'local', workspaceDir: root, projectBasePath: root, integrations: [], resolveCredential,
   }, logger);
   cleanups.push(() => manager.dispose());
   return { root, manager };
@@ -128,14 +128,58 @@ function waitBulkReady(manager: ExecutorManager, id: string): Promise<void> {
 function worker(secret: string, projectPath: string, configure: (fixture: ReturnType<typeof integrationFixture>) => void = () => {}) {
   const link = new WebSocketLink({ role: 'worker', secret, noTls: true, redialDelaysMs: [20] });
   cleanups.push(() => link.dispose());
+  let provider: ReturnType<typeof integrationFixture> | null = null;
+  const relay = new ProducerRelay();
+  cleanups.push(async () => relay.dispose());
   link.onSession((transport) => {
-    const provider = integrationFixture(projectPath, transport.executorId);
-    configure(provider);
-    const serving = servePairedRuntime(link, transport, provider.executor, new ProducerRelay());
+    if (!provider) { provider = integrationFixture(projectPath, transport.executorId); configure(provider); }
+    const serving = servePairedRuntime(link, transport, provider.executor, relay);
     cleanups.push(() => serving.dispose());
   });
   return link;
 }
+
+test('candidate credentials use described membership before publication and fence stale replies', async () => {
+  const credential = { kind: 'synthetic', value: 'synthetic-value' };
+  const requested = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let hold = false;
+  const resolved: string[] = [];
+  const { manager, root } = await fixture(undefined, async request => {
+    resolved.push(request.agentId);
+    if (hold) { requested.resolve(); await release.promise; }
+    return credential;
+  });
+  const config = await manager.create({ label: 'Candidate', direction: 'executor-connects' });
+  const link = new WebSocketLink({ role: 'worker', secret: config.secret, noTls: true });
+  cleanups.push(() => link.dispose());
+  const reference = { kind: 'api-provider-endpoint' as const, apiProviderId: 'synthetic', endpointId: 'synthetic', revision: 1 };
+  let endpoint!: ExecutorRpc;
+  link.onSession(transport => {
+    const native = integrationFixture(root, transport.executorId);
+    native.hooks.initialize = async () => {
+      expect(manager.isReady(config.id)).toBe(false);
+      expect(() => manager.requireExecutor(config.id)).toThrow();
+      expect(await endpoint.call('test', 'credentials.resolve', { reference })).toEqual(credential);
+      await expect(endpoint.call('missing', 'credentials.resolve', { reference })).rejects.toThrow();
+    };
+    const relay = new ProducerRelay();
+    const serving = servePairedRuntime(link, transport, native.executor, relay);
+    endpoint = serving.connection.primary;
+    cleanups.push(async () => { await serving.dispose(); relay.dispose(); });
+  });
+  try {
+    link.dial(sharedListener(manager).url(config.id));
+    await waitReady(manager, config.id);
+    expect(resolved).toEqual(['test']);
+    hold = true;
+    const pending = endpoint.call('test', 'credentials.resolve', { reference }).catch((error: unknown) => error);
+    await requested.promise;
+    await manager.update(config.id, { enabled: false });
+    release.resolve();
+    expect(await pending).not.toEqual(credential);
+  } finally { release.resolve(); }
+});
 
 test('reverse CLI dispatch checks initialization, executor grant, revocation lease and quiescence on the live link', async () => {
   const { manager, root } = await fixture();
@@ -270,7 +314,7 @@ test('offline configuration never blocks Local or fabricates remote inventory', 
   await expect(manager.inspectProject(root, crypto.randomUUID())).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
 });
 
-test('connector replacement retains provider checks but accepts a new project base', async () => {
+test('connector replacement publishes fresh providers and project base', async () => {
   const { manager, root } = await fixture();
   const narrow = join(root, 'narrow');
   await mkdir(narrow);
@@ -292,21 +336,36 @@ test('connector replacement retains provider checks but accepts a new project ba
   await manager.update(config.id, { enabled: false });
   await replacement.dispose();
   await manager.update(config.id, { enabled: true });
-  const rejected = Promise.withResolvers<void>();
-  const off = manager.onChanged(() => {
-    if (manager.list().find((item) => item.id === config.id)?.lastError) rejected.resolve();
-  });
-  const incompatible = worker(config.secret, narrow, (provider) => { provider.integration.descriptor.label = 'Incompatible'; });
-  incompatible.dial(url(config.id));
-  await rejected.promise;
-  off();
-  // Setup closes the session after reporting why, and the closure keeps that report.
-  expect(manager.list().find((item) => item.id === config.id)?.lastError?.message).not.toContain('Executor connection lost');
+  const refreshed = worker(config.secret, narrow, (provider) => { provider.integration.descriptor.label = 'Changed'; });
+  refreshed.dial(url(config.id));
+  await waitReady(manager, config.id);
   expect(manager.list().find((item) => item.id === config.id)).toMatchObject({
-    projectBasePath: root, instanceId: accepted.instanceId, availability: 'offline',
-    lastError: { message: expect.stringContaining('provider inventory changed') },
+    projectBasePath: narrow, availability: 'ready', lastError: null,
   });
+  expect(manager.requireIntegration({ executorId: config.id, agentId: 'test' }).descriptor.label).toBe('Changed');
   expect(manager.isReady('local')).toBe(true);
+});
+
+test('invalid candidate registries never initialize or publish', async () => {
+  const failed = Promise.withResolvers<void>();
+  const { manager, root } = await fixture({ debug() {}, info() {}, error() {}, warn(message) {
+    if (message === 'Executor session setup failed') failed.resolve();
+  } });
+  const config = await manager.create({ label: 'Invalid candidate', direction: 'executor-connects' });
+  let initialized = false;
+  const link = worker(config.secret, root, provider => {
+    Object.assign(provider.integration.descriptor, { configuration: [
+      { key: 'SYNTHETIC', source: 'environment', description: '' },
+      { key: 'SYNTHETIC', source: 'environment', description: '' },
+    ] });
+    provider.hooks.initialize = async () => { initialized = true; };
+  });
+  link.dial(sharedListener(manager).url(config.id));
+  await failed.promise;
+  expect(initialized).toBe(false);
+  expect(manager.isReady(config.id)).toBe(false);
+  expect(manager.knownIntegration({ executorId: config.id, agentId: 'test' })).toBeNull();
+  expect(manager.list().find(entry => entry.id === config.id)?.instanceId).toBeNull();
 });
 
 test('manager readiness waits for replacement metadata publication', async () => {
@@ -317,28 +376,28 @@ test('manager readiness waits for replacement metadata publication', async () =>
   first.dial(url(config.id));
   await waitReady(manager, config.id);
   const executor = manager.requireExecutor(config.id);
-  const original = executor.getInfo.bind(executor);
+  const previousIntegration = manager.requireIntegration({ executorId: config.id, agentId: 'test' });
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
-  const pending = spyOn(executor, 'getInfo').mockImplementation(async () => {
-    const info = await original();
-    entered.resolve();
-    await release.promise;
-    return info;
-  });
   try {
     await first.dispose();
-    const replacement = worker(config.secret, '/');
+    const replacement = worker(config.secret, '/', provider => {
+      provider.hooks.initialize = async () => { entered.resolve(); await release.promise; };
+    });
     replacement.dial(url(config.id));
     await entered.promise;
-    expect(executor.availability).toBe('ready');
+    expect(executor.availability).toBe('disposed');
+    expect(() => manager.requireExecutor(config.id)).toThrow('Executor is unavailable');
+    expect(() => manager.integrationsFor(config.id)).toThrow('Executor is unavailable');
     expect(manager.isReady(config.id)).toBe(false);
     expect(manager.list().find((item) => item.id === config.id)?.projectBasePath).toBe(root);
     const ready = waitReady(manager, config.id);
     release.resolve();
     await ready;
     expect(manager.list().find((item) => item.id === config.id)?.projectBasePath).toBe('/');
-  } finally { release.resolve(); pending.mockRestore(); }
+    expect(manager.requireExecutor(config.id)).not.toBe(executor);
+    expect(manager.requireIntegration({ executorId: config.id, agentId: 'test' })).not.toBe(previousIntegration);
+  } finally { release.resolve(); }
 });
 
 test('a reconnecting executor holds calls instead of reporting itself unavailable', async () => {

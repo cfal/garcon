@@ -48,7 +48,7 @@ async function withPendingPermission(
   const connected = connectRemoteExecutor(controller, undefined, resumption.client);
   if (dialer === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
-  const remote = await connected;
+  const remote = (await connected).runtime;
   try {
     await run(await pendingPermission({ root, chats, ledger, controller, native, remote, serving, respond }));
   } finally {
@@ -69,7 +69,7 @@ async function pendingPermission({ root, chats, ledger, controller, native, remo
   readonly ledger: TranscriptLedgerService;
   readonly controller: WebSocketLink;
   readonly native: ReturnType<typeof integrationFixture>;
-  readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>;
+  readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>['runtime'];
   readonly serving: readonly ReturnType<typeof servePairedRuntime>[];
   readonly respond: (decision: { readonly allow: boolean }) => Promise<void>;
 }) {
