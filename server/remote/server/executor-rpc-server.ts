@@ -12,6 +12,7 @@ import { GitRpcServer } from './git-rpc-server.js';
 import { isGitRpcMethod, type GitRpcRequest } from '../transport/git-protocol.js';
 import { HistoryRpcServer } from './history-rpc-server.js';
 import type { ProducerRelay, ProducerRelaySession } from './producer-relay.js';
+import { sameContinuity } from '../transport/protocol-compatibility.js';
 
 export interface ExecutorRpcServer {
   readonly ready: Promise<void>;
@@ -32,7 +33,7 @@ export function serveExecutionRuntime(
   let disconnectTerminals = () => {};
   const unsubscribeAvailability = rpc.transport.onAvailability((connected) => { if (!connected) disconnectTerminals(); });
   const integrations = new Map<string, AgentIntegration>();
-  const producerSession: ProducerRelaySession = { offer: (payload) => rpc.offerProducer(payload) };
+  const producerSession: ProducerRelaySession = { protocol: rpc.transport.protocol, offer: (payload) => rpc.offerProducer(payload) };
   relay.shortenSuspendedGrace();
   const historyScopes = new Set<HistoryRpcServer>();
   const ready = (async () => {
@@ -129,7 +130,7 @@ export function serveExecutionRuntime(
       case 'producers.close': {
         // No session owns a suspended binding, so the controller may close it from a
         // replacement session without resuming it first.
-        if (!relay.owns(producerSession, integration, call.request) && !relay.suspended(integration, call.request)) {
+        if (!relay.owns(producerSession, integration, call.request) && !relay.suspended(producerSession, integration, call.request)) {
           throw new AgentCallError('rejected', 'Producer binding belongs to a retired session', 'STALE_RESOURCE');
         }
         await integration.producers.close(call.request, options);
@@ -140,7 +141,7 @@ export function serveExecutionRuntime(
         if (typeof call.request?.binding?.id !== 'string' || typeof call.request.runId !== 'string') {
           throw new AgentCallError('rejected', 'Invalid launch cancellation request');
         }
-        relay.cancelLaunch(integration, call.request.binding, call.request.runId);
+        relay.cancelLaunch(producerSession, integration, call.request.binding, call.request.runId);
         return;
       }
       case 'producers.resume': {
@@ -208,7 +209,8 @@ export function serveExecutionRuntime(
   return {
     ready, dispose,
     attachBulk(endpoint) {
-      if (disposed || endpoint.transport.lane !== 'bulk' || endpoint.transport.primarySessionId !== rpc.transport.id) {
+      if (disposed || endpoint.transport.lane !== 'bulk' || endpoint.transport.primarySessionId !== rpc.transport.id
+        || !sameContinuity(endpoint.transport.continuity, rpc.transport.continuity)) {
         throw new AgentCallError('not-dispatched', 'Bulk endpoint does not belong to this runtime generation');
       }
       const history = new HistoryRpcServer(integrations);

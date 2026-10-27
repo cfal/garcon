@@ -3,6 +3,7 @@ import { BULK_ACQUIRE_TIMEOUT_MS, BULK_SETUP_TIMEOUT_MS } from './limits.js';
 import type { BulkConnectionControl } from './rpc-lane.js';
 import { DEFAULT_RPC_TIMEOUT_MS, type ExecutorRpc } from './rpc.js';
 import type { SessionTransport } from './session-transport.js';
+import { sameContinuity } from './protocol-compatibility.js';
 import { REDIAL_DELAYS_MS, type WebSocketLink } from './websocket-link.js';
 import { failureReason } from './failure-reason.js';
 import type { MessageQueueSnapshot } from './message-queue-budget.js';
@@ -187,6 +188,10 @@ export class BulkConnection {
   #install(transport: SessionTransport): void {
     const attempt = this.#attempt;
     if (!this.#live() || !attempt || transport.id !== attempt.id || transport.primarySessionId !== this.primary.transport.id) return;
+    if (!sameContinuity(transport.continuity, this.primary.transport.continuity)) {
+      transport.close(new Error('Bulk protocol continuity differs from its primary'));
+      return;
+    }
     if (attempt.rpc) { transport.close(new Error('Duplicate bulk endpoint')); return; }
     const rpc = this.options.install(transport);
     attempt.rpc = rpc;

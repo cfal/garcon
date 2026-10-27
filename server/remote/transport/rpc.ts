@@ -25,6 +25,7 @@ import { RpcAdmission, type RpcAdmissionBudgets } from './rpc-admission.js';
 import { parseBulkControl, type BulkConnectionControl } from './rpc-lane.js';
 import { BULK_CONTROL_BYTES, RPC_CALL_LIMIT, RPC_INSTALLATION_CALL_LIMIT } from './limits.js';
 import { assertRpcLane, assertRpcReplySize, assertRpcRequestSize } from './rpc-routing.js';
+import { sameContinuity, type SessionProtocol } from './protocol-compatibility.js';
 
 interface Failure {
   readonly code: AgentIntegrationErrorCode | ErrorCode | TerminalErrorCode | GitServiceErrorCode;
@@ -81,6 +82,7 @@ interface OutgoingCall {
   readonly method: keyof ExecutorRpcMethods;
   readonly request: unknown;
   readonly journaled: boolean;
+  readonly protocol: SessionProtocol;
   // Where the call was last sent, which a reconcile names.
   session: string;
   seq: number;
@@ -205,6 +207,7 @@ export class ExecutorRpc {
     this.#journalOwner = {
       lane: transport.lane,
       session: transport.id,
+      continuity: transport.continuity,
       offer: (payload) => {
         if (this.#retired || !this.transport.channel.canAdmit(payload)) return false;
         try { this.transport.send(payload); return true; } catch { return false; }
@@ -308,6 +311,7 @@ export class ExecutorRpc {
     const result = Promise.withResolvers<unknown>();
     const call: OutgoingCall = {
       id: crypto.randomUUID(), integrationId, method, request,
+      protocol: this.transport.protocol,
       journaled: this.#parked !== null && rpcContinuity(method) === 'journaled',
       session: this.transport.id, seq: 0, rpc: this, dispatchDeadline: options?.dispatchDeadline, expiry: null,
       resolve: result.resolve, reject: result.reject, cleanup: () => {}, expire: () => {},
@@ -360,7 +364,12 @@ export class ExecutorRpc {
   // yields.
   async reconcileParked(): Promise<void> {
     const parked = this.#parked;
-    const calls = parked?.take() ?? [];
+    const calls = (parked?.take() ?? []).filter(call => {
+      if (sameContinuity(call.protocol.continuity, this.transport.continuity)) return true;
+      call.cleanup();
+      call.reject(new ExecutorSessionLostError('unknown', 'The executor continuity changed before its reply was recovered.'));
+      return false;
+    });
     const reconciling = this.call('', 'calls.reconcile', {
       calls: calls.map(({ id, session, seq }): OutstandingCall => ({ id, session, seq })),
     });
@@ -410,6 +419,9 @@ export class ExecutorRpc {
   // Sends a call on this session: its first dispatch, or again once the worker
   // reports that a lost session never delivered it.
   #dispatch(call: OutgoingCall): void {
+    if (!sameContinuity(call.protocol.continuity, this.transport.continuity)) {
+      throw new ExecutorSessionLostError('unknown', 'A call cannot be replayed in another executor continuity.');
+    }
     const seq = this.#sent + 1;
     const payload = JSON.stringify({
       type: 'request', id: call.id, seq, integrationId: call.integrationId, method: call.method, request: call.request,
