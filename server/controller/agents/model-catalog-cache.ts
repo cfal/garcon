@@ -5,7 +5,6 @@ import { isRecord } from '../../../common/json.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import type { AgentRegistryServiceContract } from './registry.js';
 import type { AgentCatalogCapture } from './catalog-service.js';
-import { DomainError } from '../../common/domain-error.js';
 
 
 const MODEL_CATALOG_RESPONSE_CACHE_TTL_MS = 60_000;
@@ -125,17 +124,12 @@ export class ModelCatalogResponseCache {
     if (entry.cached && isFresh(entry.cached)) return entry.cached;
     if (entry.inflight) return entry.inflight;
     const current = entry;
-    const assertCurrent = () => {
-      captured.assertCurrent();
-      if (this.#executors.get(executorId) !== current) {
-        throw new DomainError('EXECUTOR_UNAVAILABLE', 'Model catalog changed. Refresh and try again.', 503, true);
-      }
-    };
+    const assertCurrent = () => captured.assertCurrent();
     current.inflight = buildCatalogResponse(modelCatalog, executorId, captured)
       .then((result) => {
         assertCurrent();
         const snapshot = { ...result, assertCurrent };
-        current.cached = snapshot;
+        if (this.#executors.get(executorId) === current) current.cached = snapshot;
         return snapshot;
       })
       .catch((error: unknown) => {
