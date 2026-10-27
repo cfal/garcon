@@ -9,7 +9,6 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { hasNodeErrorCode } from '../../server/common/errors.js';
 import {
   DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
@@ -31,8 +30,7 @@ import { GarconProcess } from './garcon-process.js';
 import { ExecutionBackendFixture, executionBackend, type ExecutionBackend } from './execution-backend.js';
 import { CURRENT_ARTIFACT } from './source-artifact.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
-const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'server');
+const ARTIFACT_ROOT = join(CURRENT_ARTIFACT.repoRoot, 'integration-tests', 'artifacts', 'server');
 let chatIdSequence = 0;
 
 function directAgent(

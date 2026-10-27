@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AssistantMessage, BashToolUseMessage } from '../../../common/chat-types.js';
+import type { ExecutionRuntimeApi } from '../../../server-agents/interface/src/index.js';
 import { ApiProviderEndpointResolver } from '../../../server/controller/api-providers/endpoint-resolver.js';
 import { ChatRegistry } from '../../../server/controller/chats/store.js';
 import { ChatTransientFeedStore } from '../../../server/controller/chats/chat-transient-feed.js';
@@ -69,7 +70,7 @@ async function pendingPermission({ root, chats, ledger, controller, native, remo
   readonly ledger: TranscriptLedgerService;
   readonly controller: WebSocketLink;
   readonly native: ReturnType<typeof integrationFixture>;
-  readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>['runtime'];
+  readonly remote: ExecutionRuntimeApi;
   readonly serving: readonly ReturnType<typeof servePairedRuntime>[];
   readonly respond: (decision: { readonly allow: boolean }) => Promise<void>;
 }) {

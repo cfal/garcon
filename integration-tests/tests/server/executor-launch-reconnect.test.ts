@@ -7,7 +7,7 @@ import { AssistantMessage } from '../../../common/chat-types.js';
 import type { AgentRuntimeEvent } from '../../../server-agents/common/src/execution/runtime-events.js';
 import { resolveAgentEndpoint } from '../../../server-agents/common/src/execution/resolve-endpoint.js';
 import {
-  AgentCallError, AgentIntegrationError, type AgentHost, type ExecutorAvailability,
+  AgentCallError, AgentIntegrationError, type AgentHost, type ExecutionRuntimeApi, type ExecutorAvailability,
 } from '../../../server-agents/interface/src/index.js';
 import { ApiProviderEndpointResolver } from '../../../server/controller/api-providers/endpoint-resolver.js';
 import { ChatRegistry } from '../../../server/controller/chats/store.js';
@@ -53,7 +53,7 @@ type RemoteRouterContext = Awaited<ReturnType<typeof remoteRouter>> & {
   readonly ledger: TranscriptLedgerService;
   readonly native: ReturnType<typeof integrationFixture>;
   readonly controller: WebSocketLink;
-  readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>['runtime'];
+  readonly remote: ExecutionRuntimeApi;
   readonly controllerFault: ReturnType<typeof outgoingFault>;
   readonly workerFault: ReturnType<typeof outgoingFault>;
   readonly workerPath: ReturnType<typeof outgoingHold>;
@@ -131,7 +131,7 @@ async function remoteRouter({ root, chats, ledger, remote }: {
   readonly root: string;
   readonly chats: ChatRegistry;
   readonly ledger: TranscriptLedgerService;
-  readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>['runtime'];
+  readonly remote: ExecutionRuntimeApi;
 }) {
   const integration = await remote.getAgentIntegration('test');
   const integrations = new IntegrationRegistry({ instances: [integration] });
@@ -178,7 +178,7 @@ async function remoteRouter({ root, chats, ledger, remote }: {
   return { router, integration, restored };
 }
 
-function availability(remote: Awaited<ReturnType<typeof connectRemoteExecutor>>['runtime'], expected: ExecutorAvailability): Promise<void> {
+function availability(remote: ExecutionRuntimeApi, expected: ExecutorAvailability): Promise<void> {
   return new Promise(resolve => {
     const off = remote.onAvailabilityChanged(value => { if (value === expected) { off(); resolve(); } });
   });
@@ -198,7 +198,7 @@ function holdNextReconnect(native: ReturnType<typeof integrationFixture>): () =>
 }
 
 // A round trip on the current session, after which earlier requests have reached the worker.
-async function integrationRoundTrip(remote: Awaited<ReturnType<typeof connectRemoteExecutor>>['runtime']): Promise<void> {
+async function integrationRoundTrip(remote: ExecutionRuntimeApi): Promise<void> {
   await (await remote.getAgentIntegration('test')).execution.runningSessions();
 }
 
