@@ -17,7 +17,7 @@ export function buildComposerSendPresentation(
 		&& areAgentSettingsCompatible(settingsEnvelope, defaults, catalog.getAgentSettingsDescriptors(selection.agentId)));
 	const { executorReady, controllerCommand, requiresQueuedSubmission } = availability;
 	const modelsLoading = executorReady && !catalog.isValidated && !catalog.error;
-	let sendTitle = m.chat_composer_send_message();
+	let sendTitle: string = m.chat_composer_send_message();
 	if (!controllerCommand) {
 		// Loading is explained by the disabled send button so the composer keeps its height.
 		if (modelsLoading) sendTitle = m.chat_composer_loading_models();
