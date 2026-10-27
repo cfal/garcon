@@ -20,11 +20,12 @@ for (const executionBackend of [selectedExecutionBackend()].filter(backend => ba
           chatId, agentId: 'shell', model: 'sh', projectPath: executionDirs.project,
           permissionMode: 'default', thinkingMode: 'none', agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} },
           origin: 'interactive', clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
-          command: 'printf once >> executions; printf ready; while [ ! -f release ]; do sleep 0.05; done; printf retained; printf diagnostic >&2',
+          command: 'printf once >> executions; printf ready; touch ready; while [ ! -f release ]; do sleep 0.05; done; printf retained; printf diagnostic >&2',
         });
-        for (let retry = 0; retry < 1000 && !await Bun.file(join(executionDirs.project, 'executions')).exists(); retry++) {
+        for (let retry = 0; retry < 1000 && !await Bun.file(join(executionDirs.project, 'ready')).exists(); retry++) {
           await Bun.sleep(10);
         }
+        expect(await Bun.file(join(executionDirs.project, 'ready')).exists()).toBe(true);
         expect(await readFile(join(executionDirs.project, 'executions'), 'utf8')).toBe('once');
         expect((await client.getMessages(chatId)).messages.some(row => row.message.type === 'command-output')).toBe(false);
         const cursor = client.markEvents();
