@@ -1,0 +1,6 @@
+{
+  "core": 1,
+  "stage": "bootstrap",
+  "bootstrapPackageVersion": "0.3.4",
+  "baselines": []
+}

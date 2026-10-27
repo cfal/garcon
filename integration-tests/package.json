@@ -6,6 +6,7 @@
     "test": "bun run test:server",
     "test:server": "bun run test:server:lane && bun run test:sacs",
     "test:server:lane": "bun run run-server-tests.ts",
+    "test:compatibility": "bun test --max-concurrency=1 --timeout=30000 compatibility/__tests__ tests/server/compatibility/executor-version.test.ts",
     "test:sacs": "bun test --max-concurrency=1 --timeout=120000 tests/sacs",
     "test:e2e": "bun test --max-concurrency=1 --timeout=60000 tests/e2e",
     "test:chromium": "bun ../scripts/run-test-files.js 'tests/chromium/*.test.ts' --max-concurrency=1 --timeout=120000",
