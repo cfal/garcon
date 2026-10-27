@@ -77,5 +77,8 @@ export function coreWireShapes(): Record<string, JsonValue> {
   const failure = program.getSourceFile(`${root}/remote/transport/rpc.ts`)!.statements.find(statement => ts.isInterfaceDeclaration(statement) && statement.name.text === 'Failure');
   if (!failure) throw new Error('Missing RPC failure contract');
   shapes.Failure = shape(checker.getTypeAtLocation(failure));
+  const frame = program.getSourceFile(`${root}/remote/transport/rpc.ts`)!.statements.find(statement => ts.isTypeAliasDeclaration(statement) && statement.name.text === 'RpcFrame');
+  if (!frame) throw new Error('Missing RPC frame contract');
+  shapes.RpcFrame = shape(checker.getTypeAtLocation(frame));
   return shapes;
 }
