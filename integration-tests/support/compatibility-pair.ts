@@ -131,7 +131,7 @@ export class CompatibilityPair {
     assert.equal(after.instanceId, before.instanceId);
   }
 
-  async replaceWorker(artifact: SourceArtifact, inventory?: string): Promise<void> {
+  async replaceWorker(artifact: SourceArtifact, inventory?: string): Promise<Record<string, unknown>> {
     const previous = await this.ready();
     await this.worker.stop();
     this.#logs.push(...this.worker.logs);
@@ -144,7 +144,7 @@ export class CompatibilityPair {
     };
     this.worker = await ExecutorProcess.start(this.#workerLaunch);
     await this.worker.connected();
-    await this.ready(stringField(previous, 'instanceId'));
+    return this.ready(stringField(previous, 'instanceId'));
   }
 
   diagnostics(): string {

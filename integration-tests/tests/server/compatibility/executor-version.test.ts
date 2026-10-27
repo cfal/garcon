@@ -15,28 +15,44 @@ for (const direction of directions) {
     ...artifacts.baselines.flatMap(baseline => [[baseline, baseline], [artifacts.current, baseline], [baseline, artifacts.current]] as const),
   ];
   for (const [controller, worker] of pairs) {
-    test(`${artifacts.stage}: core workflows and independent restart ${controller.sourceSha.slice(0, 8)}/${worker.sourceSha.slice(0, 8)} (${direction})`, async () => {
+    test(`${artifacts.stage}: core workflows and controller restart ${controller.sourceSha.slice(0, 8)}/${worker.sourceSha.slice(0, 8)} (${direction})`, async () => {
       const pair = await CompatibilityPair.start(controller, worker, direction);
       try {
         expect(pair.controller.authToken).toBeNull();
         expect(pair.controller.credentials).toBeNull();
-        const result = await pair.driver({ kind: 'core-workflow', executorId: pair.executorId, projectPath: pair.workerDirs.project,
-          controllerConfig: pair.controllerDirs.config, workerConfig: pair.workerDirs.config, home: pair.workerDirs.home,
-          cliArtifacts: [artifacts.current, ...artifacts.baselines],
-        });
-        expect(result.checked).toEqual(['files', 'mkdir', 'git-primary', 'git-bulk', 'cli-direct', 'cli-gateway', 'execution', 'schedules', 'terminals']);
+        const result = await coreWorkflow(pair);
         await pair.restartController(artifacts.current);
         expect(pair.controller.authToken).toBeNull();
         expect(await pair.driver({ kind: 'terminal-resume', executorId: pair.executorId,
           terminalId: stringField(result, 'terminalId'), terminalRuntimeId: stringField(result, 'terminalRuntimeId'),
           previousControllerId: stringField(result, 'controllerId'), workerConfig: pair.workerDirs.config,
         })).toEqual({ retained: true });
-        await pair.replaceWorker(artifacts.current);
-        const catalog = await pair.driver({ kind: 'catalog', executorId: pair.executorId });
-        expect(catalog.agents).toBeArray();
       } catch (error) { await diagnostics(pair, error); throw error; }
       finally { await pair.dispose(); }
     }, 240_000);
+  }
+
+  const replacements: readonly (readonly [CompatibilityArtifact, CompatibilityArtifact])[] = artifacts.baselines.length
+    ? artifacts.baselines.flatMap(baseline => [[baseline, baseline], [artifacts.current, baseline]] as const)
+    : [[artifacts.current, artifacts.current]];
+  for (const [controller, initialWorker] of replacements) {
+    test(`${artifacts.stage}: fixed controller ${controller.sourceSha.slice(0, 8)}, worker ${initialWorker.sourceSha.slice(0, 8)} -> current -> original (${direction})`, async () => {
+      const pair = await CompatibilityPair.start(controller, initialWorker, direction);
+      try {
+        const controllerPid = pair.controller.pid;
+        await coreWorkflow(pair);
+        const successors = artifacts.baselines.length ? [artifacts.current, initialWorker] : [artifacts.current];
+        for (const worker of successors) {
+          const ready = await pair.replaceWorker(worker);
+          expect(pair.controller.pid).toBe(controllerPid);
+          const catalog = await pair.driver({ kind: 'catalog', executorId: pair.executorId });
+          expect(catalog.instanceId).toBe(ready.instanceId);
+          expect(catalog.agents).toContainEqual(expect.objectContaining({ id: 'shell' }));
+          await coreWorkflow(pair);
+        }
+      } catch (error) { await diagnostics(pair, error); throw error; }
+      finally { await pair.dispose(); }
+    }, 360_000);
   }
 
   test(`real worker inventory/schema replacement preserves incompatible saved settings (${direction})`, async () => {
@@ -51,10 +67,10 @@ for (const direction of directions) {
       const saved = await pair.driver({ kind: 'saved-settings', chatId });
       const controllerPid = pair.controller.pid;
       for (const inventory of ['changed', 'schema', 'empty', 'original']) {
-        await pair.replaceWorker(artifacts.current, inventory);
+        const ready = await pair.replaceWorker(artifacts.current, inventory);
         expect(pair.controller.pid).toBe(controllerPid);
         const catalog = await pair.driver({ kind: 'catalog', executorId: pair.executorId });
-        expect(catalog.instanceId).not.toBe(before.instanceId);
+        expect(catalog.instanceId).toBe(ready.instanceId);
         if (inventory === 'empty') expect(catalog.agents).toEqual([]);
         else {
           expect(catalog.agents).toContainEqual(expect.objectContaining({ id: inventory === 'original' ? 'compat-removed' : 'compat-added' }));
@@ -77,6 +93,15 @@ for (const direction of directions) {
     } catch (error) { await diagnostics(pair, error); throw error; }
     finally { await pair.dispose(); }
   }, 240_000);
+}
+
+async function coreWorkflow(pair: CompatibilityPair): Promise<Record<string, unknown>> {
+  const result = await pair.driver({ kind: 'core-workflow', executorId: pair.executorId, projectPath: pair.workerDirs.project,
+    controllerConfig: pair.controllerDirs.config, workerConfig: pair.workerDirs.config, home: pair.workerDirs.home,
+    cliArtifacts: [artifacts.current, ...artifacts.baselines],
+  });
+  expect(result.checked).toEqual(['files', 'mkdir', 'git-primary', 'git-bulk', 'cli-direct', 'cli-gateway', 'execution', 'rendered-rows', 'schedules', 'terminals']);
+  return result;
 }
 
 async function diagnostics(pair: CompatibilityPair, error: unknown): Promise<void> {
