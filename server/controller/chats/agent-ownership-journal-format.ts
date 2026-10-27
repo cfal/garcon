@@ -1,4 +1,4 @@
-import { parseAgentSettingsEnvelope } from '@garcon/common/agent-integration';
+import { parseAgentSettingsEnvelope, type AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import { isPermissionMode, isThinkingMode } from '@garcon/common/chat-modes';
 import { parseExecutorId } from '../../../common/executors.js';
 import type { AgentChatReference } from '@garcon/server-agent-interface';
@@ -28,6 +28,11 @@ export interface AgentHandoffIntent {
   readonly createdAt: string;
 }
 
+export type SavedDeleteReference = Omit<AgentChatReference, 'settings'> & {
+  readonly executorId?: string | null;
+  readonly settings: AgentSettingsEnvelope | null;
+};
+
 export interface DeleteIntentV2 {
   readonly version: 2;
   readonly operationId: string;
@@ -35,7 +40,7 @@ export interface DeleteIntentV2 {
   readonly chatId: string;
   readonly phase: 'prepared' | 'registry-removed';
   readonly sourceEpoch: string | null;
-  readonly releaseReferences: readonly (AgentChatReference & { readonly executorId?: string | null })[];
+  readonly releaseReferences: readonly SavedDeleteReference[];
   readonly createdAt: string;
 }
 
@@ -80,7 +85,7 @@ function isDeleteIntent(value: Record<string, unknown>): boolean {
     && (value.phase === 'prepared' || value.phase === 'registry-removed')
     && (value.sourceEpoch === null || typeof value.sourceEpoch === 'string')
     && Array.isArray(value.releaseReferences)
-    && value.releaseReferences.every(isAgentChatReference)
+    && value.releaseReferences.every(isSavedDeleteReference)
     && typeof value.createdAt === 'string';
 }
 
@@ -127,7 +132,7 @@ function isResolvedHandoffTarget(value: unknown): value is ResolvedAgentHandoffT
     && settings.ownerId === value.agentId;
 }
 
-function isAgentChatReference(value: unknown): value is AgentChatReference {
+export function isSavedDeleteReference(value: unknown): value is SavedDeleteReference {
   if (!isObject(value)) return false;
   const settings = parseAgentSettingsEnvelope(value.settings);
   return nonEmptyString(value.chatId)
@@ -138,8 +143,7 @@ function isAgentChatReference(value: unknown): value is AgentChatReference {
     && typeof value.model === 'string'
     && isNativeSessionOrNull(value.nativeSession, value.agentId)
     && typeof value.carryOverRevision === 'string'
-    && settings !== null
-    && settings.ownerId === value.agentId;
+    && (value.settings === null || (settings !== null && settings.ownerId === value.agentId));
 }
 
 function isNativeSessionOrNull(value: unknown, agentId: string): boolean {

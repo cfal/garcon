@@ -1,19 +1,20 @@
 import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { AgentChatReference } from '@garcon/server-agent-interface';
+import type { AgentChatReference, AgentIntegration } from '@garcon/server-agent-interface';
 import type { TranscriptWatermark } from '../ledger/contracts.js';
 import type { ResolvedAgentHandoffTarget } from '../agents/agent-handoff-types.js';
 import type { AgentDirectory } from '../agents/directory.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
-import { toAgentChatReference } from '../agents/integration-chat-reference.js';
 import {
   emptyOwnershipJournalV5,
   isEmptyEarlierJournal,
   isJournalV5,
+  isSavedDeleteReference,
   type AgentHandoffIntent,
   type AgentOwnershipJournalFileV5,
   type DeleteIntentV2,
+  type SavedDeleteReference,
 } from './agent-ownership-journal-format.js';
 import { AtomicJsonWriteError, writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { parseStoredJson } from '../../common/stored-json.js';
@@ -33,7 +34,7 @@ const DEFAULT_RELEASE_TIMEOUT_MS = 30_000;
 export class AgentOwnershipJournal {
   readonly #filePath: string;
   readonly #registry: IChatRegistry;
-  readonly #integrations: Pick<AgentDirectory, 'get' | 'require'>;
+  readonly #integrations: Pick<AgentDirectory, 'isReady' | 'require'>;
   readonly #ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
   readonly #releaseTimeoutMs: number;
   readonly #retainExecutorReferences?: RetainExecutorReferences;
@@ -49,7 +50,7 @@ export class AgentOwnershipJournal {
   constructor(options: {
     workspaceDir: string;
     registry: IChatRegistry;
-    integrations: Pick<AgentDirectory, 'get' | 'require'>;
+    integrations: Pick<AgentDirectory, 'isReady' | 'require'>;
     ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
     releaseTimeoutMs?: number;
     retainExecutorReferences?: RetainExecutorReferences;
@@ -257,16 +258,15 @@ export class AgentOwnershipJournal {
     const intent = await this.#mutate((journal) => {
       assertAvailable(journal, chatId, 'SESSION_BUSY');
       if (!current) return { journal, result: null };
-      const integration = this.#integrations.get(current.agentId, current.executorId);
       const revision = carryOverRevision(current.carryOverSegments, current.carryOverMigrationQuarantine);
-      const settings = current.agentSettingsById[current.agentId];
-      const reference = integration
-        ? toAgentChatReference(integration, chatId, current, revision)
-        : settings ? {
-            chatId, agentId: current.agentId, agentSessionId: current.agentSessionId,
-            nativeSession: current.nativeSession, nativeSeedReceipt: current.nativeSeedReceipt,
-            projectPath: current.projectPath, model: current.model, settings, carryOverRevision: revision,
-          } : null;
+      const reference: SavedDeleteReference = {
+        chatId, agentId: current.agentId, executorId: current.executorId,
+        agentSessionId: current.agentSessionId ?? null,
+        nativeSession: current.nativeSession ?? null, nativeSeedReceipt: current.nativeSeedReceipt,
+        projectPath: current.projectPath, model: current.model,
+        settings: current.agentSettingsById[current.agentId] ?? null, carryOverRevision: revision,
+      };
+      if (!isSavedDeleteReference(reference)) throw new Error(`Invalid native cleanup reference for ${chatId}`);
       const prepared: DeleteIntentV2 = {
         version: 2,
         operationId: crypto.randomUUID(),
@@ -274,7 +274,7 @@ export class AgentOwnershipJournal {
         chatId,
         phase: 'prepared',
         sourceEpoch: current.agentOwnershipEpoch,
-        releaseReferences: reference ? [{ ...reference, ...(current.executorId ? { executorId: current.executorId } : {}) }] : [],
+        releaseReferences: [reference],
         createdAt: new Date().toISOString(),
       };
       return {
@@ -341,10 +341,12 @@ export class AgentOwnershipJournal {
       const { executorId, ...chat } = reference;
       // Forgetting an executor abandons native cleanup, not controller ledger cleanup.
       if (this.#isExecutorConfigured(effectiveExecutorId(executorId))) {
-        const integration = this.#integrations.get(reference.agentId, executorId);
-        if (!integration) continue;
+        if (!this.#integrations.isReady(executorId)) continue;
         try {
-          await this.#releaseTranscript(integration, { chat, reason: 'deleted' });
+          const integration = this.#integrations.require(reference.agentId, executorId);
+          const nativeSessions = integration.nativeSessions;
+          if (!nativeSessions) continue;
+          await this.#releaseTranscript(nativeSessions, { ...chat, settings: chat.settings ?? integration.settings.defaults() });
         } catch (error) {
           logger.warn('Delete cleanup release failed', {
             chatId: intent.chatId,
@@ -402,8 +404,8 @@ export class AgentOwnershipJournal {
   }
 
   async #releaseTranscript(
-    integration: ReturnType<AgentDirectory['require']>,
-    request: { readonly chat: AgentChatReference; readonly reason: 'deleted' },
+    nativeSessions: NonNullable<AgentIntegration['nativeSessions']>,
+    chat: AgentChatReference,
   ): Promise<void> {
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -417,9 +419,9 @@ export class AgentOwnershipJournal {
     });
     try {
       await Promise.race([
-        integration.nativeSessions?.release({
-          ...request,
-          chat: request.chat,
+        nativeSessions.release({
+          chat,
+          reason: 'deleted',
           signal: controller.signal,
         }),
         deadline,
