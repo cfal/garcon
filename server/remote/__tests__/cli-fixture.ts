@@ -1,5 +1,5 @@
 import { ExecutorRpc } from '../transport/rpc.js';
-import { SessionTransport } from '../transport/session-transport.js';
+import { TestSessionTransport as SessionTransport } from './test-session-transport.js';
 import type { ControllerCliDispatcher } from '../../controller/executors/cli-dispatcher.js';
 import type { ExecutorRpcConnection } from '../transport/rpc-connection.js';
 import { RpcAdmissionBudgets } from '../transport/rpc-admission.js';

@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'bun:test';
 import { ExecutorRpc } from '../rpc.js';
-import { SessionTransport } from '../session-transport.js';
+import { TestSessionTransport as SessionTransport } from '../../__tests__/test-session-transport.js';
 
 function fixture() {
   const sent: Array<{ type: string; id: string }> = [];

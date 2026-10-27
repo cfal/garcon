@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { AGENT_INTEGRATION_ERROR_CODES, isAgentIntegrationErrorCode } from '@garcon/server-agent-interface';
 import { ExecutorRpc } from '../rpc.js';
-import { SessionTransport } from '../session-transport.js';
+import { TestSessionTransport as SessionTransport } from '../../__tests__/test-session-transport.js';
 
 function fixture() {
   const sent: { id: string }[] = [];

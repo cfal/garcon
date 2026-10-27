@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { ExecutorRpc } from '../rpc.js';
-import { SessionTransport } from '../session-transport.js';
+import { TestSessionTransport as SessionTransport } from '../../__tests__/test-session-transport.js';
 import type { RpcLane } from '../rpc-lane.js';
 import { PRIMARY_SMALL_RPC_BYTES } from '../limits.js';
 
