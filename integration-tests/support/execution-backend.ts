@@ -90,8 +90,9 @@ export class ExecutorProcess {
   }): Promise<ExecutorProcess> {
     const env = isolatedEnvironment(input.directories.home, input.environment);
     await mkdir(env.TMPDIR, { recursive: true });
+    const bunExecutable = input.bunExecutable ?? process.execPath;
     const child = Bun.spawn({
-      cmd: [input.bunExecutable ?? process.execPath, input.entrypoint ?? 'server/main.ts', 'executor',
+      cmd: [bunExecutable, input.entrypoint ?? 'server/main.ts', 'executor',
         ...(input.connection.kind === 'listen' ? ['--listen', String(input.connection.port)] : []),
         ...(input.connection.kind === 'listen' && input.connection.bindAddress ? ['--bind-address', input.connection.bindAddress] : []),
         '--no-tls', '--config-dir', input.directories.config,
@@ -100,7 +101,7 @@ export class ExecutorProcess {
       stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
     });
     return new ExecutorProcess(child, { repoRoot: input.repoRoot, configDir: input.directories.config,
-      bunExecutable: input.bunExecutable ?? process.execPath });
+      bunExecutable });
   }
 
   get logs(): readonly string[] { return this.#logs.values(); }

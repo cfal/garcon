@@ -46,12 +46,7 @@ export class CompatibilityPair {
     try {
       pair.#port = await reusableListenPort();
       pair.controller = await pair.#startController();
-      const workerOptions = { ...worker, directories: pair.workerDirs,
-        environment: { GARCON_TERMINAL_SHELL: '/bin/sh', ...(inventory ? {
-          GARCON_TEST_COMPATIBILITY_INVENTORY: inventory, GARCON_TEST_COMPATIBILITY_EFFECTS: join(pair.workerDirs.root, 'effects.jsonl'),
-        } : {}) },
-        ...(inventory ? { entrypoint: 'integration-tests/support/compatibility-worker.ts' } : {}),
-      };
+      const workerOptions = pair.#workerOptions(worker, inventory);
       if (direction === 'remote-controller-dials') {
         pair.#workerLaunch = { ...workerOptions, connection: { kind: 'listen', port: await reusableListenPort([pair.#port]), bindAddress: '0.0.0.0' } };
         pair.worker = await ExecutorProcess.start(pair.#workerLaunch);
@@ -72,6 +67,20 @@ export class CompatibilityPair {
       await pair.dispose().catch(() => undefined);
       throw new Error(`${String(error)}\n${logs}`);
     }
+  }
+
+  #workerOptions(artifact: SourceArtifact, inventory?: string): Omit<WorkerLaunch, 'connection'> {
+    const environment: Record<string, string> = { GARCON_TERMINAL_SHELL: '/bin/sh' };
+    if (inventory) {
+      environment.GARCON_TEST_COMPATIBILITY_INVENTORY = inventory;
+      environment.GARCON_TEST_COMPATIBILITY_EFFECTS = join(this.workerDirs.root, 'effects.jsonl');
+    }
+    return {
+      ...artifact,
+      directories: this.workerDirs,
+      environment,
+      entrypoint: inventory ? 'integration-tests/support/compatibility-worker.ts' : undefined,
+    };
   }
 
   async #startController(): Promise<GarconProcess> {
@@ -136,12 +145,7 @@ export class CompatibilityPair {
     await this.worker.stop();
     this.#logs.push(...this.worker.logs);
     this.workerArtifact = artifact;
-    this.#workerLaunch = { ...this.#workerLaunch, ...artifact,
-      environment: { GARCON_TERMINAL_SHELL: '/bin/sh', ...(inventory ? {
-        GARCON_TEST_COMPATIBILITY_INVENTORY: inventory, GARCON_TEST_COMPATIBILITY_EFFECTS: join(this.workerDirs.root, 'effects.jsonl'),
-      } : {}) },
-      entrypoint: inventory ? 'integration-tests/support/compatibility-worker.ts' : undefined,
-    };
+    this.#workerLaunch = { ...this.#workerLaunch, ...this.#workerOptions(artifact, inventory) };
     this.worker = await ExecutorProcess.start(this.#workerLaunch);
     await this.worker.connected();
     return this.ready(stringField(previous, 'instanceId'));
@@ -164,6 +168,6 @@ export class CompatibilityPair {
 
 export function stringField(value: Record<string, unknown>, key: string): string {
   const result = value[key];
-  assert.equal(typeof result, 'string', `Missing ${key} in compatibility result`);
-  return result as string;
+  assert(typeof result === 'string', `Missing ${key} in compatibility result`);
+  return result;
 }
