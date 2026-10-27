@@ -61,7 +61,8 @@ export function isProtocolDecision(value: unknown): value is ProtocolDecision {
     && (value.ok === true
       ? Object.hasOwn(value, 'profile') && isProtocolProfile(value.profile)
       : value.ok === false && Object.hasOwn(value, 'code')
-        && ['CORE_MISMATCH', 'CONTINUITY_MISMATCH', 'BULK_PROFILE_MISMATCH'].includes(String(value.code)));
+        && typeof value.code === 'string'
+        && ['CORE_MISMATCH', 'CONTINUITY_MISMATCH', 'BULK_PROFILE_MISMATCH'].includes(value.code));
 }
 
 export function selectProtocol(local: ProtocolOffer, peer: ProtocolOffer): ProtocolDecision {
