@@ -1,17 +1,11 @@
 import { expect, spyOn, test } from 'bun:test';
 import { AssistantMessage } from '@garcon/common/chat-types';
-import type { AgentProducerNotification, ExecutorAvailability } from '@garcon/server-agent-interface';
-import type { RemoteExecutorClient } from '../client/executor-client.js';
+import type { AgentProducerNotification } from '@garcon/server-agent-interface';
 import { ExecutorRpc } from '../transport/rpc.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../common/executor-disconnect.js';
 import { readBefore } from '../../common/interactive-deadline.js';
 import { integrationFixture, outgoingFault, outgoingHold, remoteFixture, requestFor } from './integration-fixture.js';
-
-function nextAvailability(executor: Pick<RemoteExecutorClient, 'onAvailabilityChanged'>, expected: ExecutorAvailability): Promise<void> {
-  return new Promise((resolve) => {
-    const off = executor.onAvailabilityChanged((value) => { if (value === expected) { off(); resolve(); } });
-  });
-}
+import { nextAvailability } from './replacement-fixture.js';
 
 async function until(condition: () => boolean): Promise<void> {
   const deadline = performance.now() + 10_000;

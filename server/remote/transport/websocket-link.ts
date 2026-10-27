@@ -447,7 +447,9 @@ export class WebSocketLink {
       connection.authenticated = true;
       const decision = connection.decision;
       if (!decision.ok || !frame.decision.ok) {
-        const code = !decision.ok ? decision.code : !frame.decision.ok ? frame.decision.code : 'CONTINUITY_MISMATCH';
+        let code = 'CONTINUITY_MISMATCH';
+        if (!decision.ok) code = decision.code;
+        else if (!frame.decision.ok) code = frame.decision.code;
         const hello = connection.hello!;
         const peer = connection.peer;
         this.#reportFailure('protocol-mismatch', `Executor protocol mismatch (${code}): local core ${hello.protocol?.core ?? 'bulk'} build ${hello.build}, peer core ${peer.protocol?.core ?? 'bulk'} build ${peer.build}.`, undefined, hello.lane);
@@ -580,9 +582,10 @@ export class WebSocketLink {
   }
 
   #signature(connection: Connection, purpose: LinkRole, decision: ProtocolDecision): string {
-    const frames = connection.hello!.role === 'controller'
-      ? [connection.helloFrame!, connection.peerFrame!] : [connection.peerFrame!, connection.helloFrame!];
-    return createHmac('sha256', this.options.secret).update(proofPayload(purpose, frames[0]!, frames[1]!, decision)).digest('hex');
+    const isController = connection.hello!.role === 'controller';
+    const controllerFrame = isController ? connection.helloFrame! : connection.peerFrame!;
+    const workerFrame = isController ? connection.peerFrame! : connection.helloFrame!;
+    return createHmac('sha256', this.options.secret).update(proofPayload(purpose, controllerFrame, workerFrame, decision)).digest('hex');
   }
 
   // The oldest socket whose peer has not proven the secret, or else the oldest

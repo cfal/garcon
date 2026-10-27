@@ -175,12 +175,8 @@ export const CLI_REQUIREMENTS: Readonly<Record<CliOperation, ProtocolRequirement
   'PUT /api/v1/scheduled-prompts/enabled': CORE_REQUIREMENT,
 });
 
-export function rpcRequirement(method: string): ProtocolRequirement | null {
+function rpcRequirement(method: string): ProtocolRequirement | null {
   return Object.hasOwn(RPC_REQUIREMENTS, method) ? RPC_REQUIREMENTS[method as keyof ExecutorRpcMethods] : null;
-}
-
-export function cliRequirement(operation: CliOperation): ProtocolRequirement {
-  return CLI_REQUIREMENTS[operation];
 }
 
 export function assertRpcSupported(profile: ProtocolProfile, method: string, request?: unknown): void {
@@ -192,7 +188,7 @@ export function assertRpcSupported(profile: ProtocolProfile, method: string, req
 }
 
 export function assertCliSupported(profile: ProtocolProfile, operation: CliOperation): void {
-  if (!supportsRequirement(profile, cliRequirement(operation))) {
+  if (!supportsRequirement(profile, CLI_REQUIREMENTS[operation])) {
     throw new DomainError('OPERATION_UNSUPPORTED', 'Executor protocol does not support this CLI operation', 422);
   }
 }

@@ -25,23 +25,21 @@ export class RemoteExecutorGeneration {
   readonly info;
   readonly manifests;
   readonly continuity;
-  readonly profile;
   readonly integrations: ReadonlyMap<string, RemoteAgentIntegration>;
   readonly terminals: RemoteTerminalService;
   readonly runtime: ExecutionRuntimeApi;
   readonly #listeners = new Set<(value: ExecutorAvailability) => void>();
   #availability: ExecutorAvailability = 'offline';
 
-  constructor(backing: RemoteSessionBacking, source: RemoteSessions, dispose: () => Promise<void>, log: Logger) {
+  constructor(backing: RemoteSessionBacking, source: Omit<RemoteSessions, 'call'>, dispose: () => Promise<void>, log: Logger) {
     this.info = backing.info;
     this.manifests = backing.manifests;
     this.continuity = backing.continuity;
-    this.profile = backing.rpc.transport.profile;
     const assertBacking = (session: RemoteSessionBacking) => {
       this.token.assertDispatch();
       if (session.info.instanceId !== this.info.instanceId || !sameContinuity(session.continuity, this.continuity)) throw staleGeneration();
     };
-    const pin = <T extends HeldCallOptions>(options: T): T & { instanceId: string } => {
+    const pin = (options: HeldCallOptions) => {
       this.token.assertDispatch();
       if (options.instanceId !== undefined && options.instanceId !== this.info.instanceId) throw staleGeneration();
       return { ...options, instanceId: this.info.instanceId };
@@ -89,7 +87,10 @@ export class RemoteExecutorGeneration {
     this.runtime = Object.freeze({
       id: this.info.executorId,
       get availability() { return generation.#availability; },
-      getInfo: async (options) => { assertAvailable(options); return this.info; },
+      getInfo: async (options) => {
+        assertAvailable(options);
+        return this.info;
+      },
       getAgentIntegration: async (id, options) => {
         assertAvailable(options);
         const integration = this.integrations.get(id);
@@ -99,11 +100,30 @@ export class RemoteExecutorGeneration {
       discoverApiProviderModels: (request, options) => sessions.call('', 'apiProviders.discoverModels', request, {
         ...options, timeoutMs: options?.timeoutMs ?? MODEL_DISCOVERY_TIMEOUT_MS + 5_000,
       }),
-      getProjectService: async (options) => { assertAvailable(options); return projects; },
-      getFilesService: async (options) => { assertAvailable(options); if (!this.info.services.files) throw unavailableService('files'); return files; },
-      getGitService: async (options) => { assertAvailable(options); if (!this.info.services.git) throw unavailableService('git'); return git.git; },
-      getGhService: async (options) => { assertAvailable(options); if (!this.info.services.gh) throw unavailableService('gh'); return git.gh; },
-      getTerminalService: async (options) => { assertAvailable(options); if (!this.info.services.terminals) throw unavailableService('terminals'); return this.terminals; },
+      getProjectService: async (options) => {
+        assertAvailable(options);
+        return projects;
+      },
+      getFilesService: async (options) => {
+        assertAvailable(options);
+        if (!this.info.services.files) throw unavailableService('files');
+        return files;
+      },
+      getGitService: async (options) => {
+        assertAvailable(options);
+        if (!this.info.services.git) throw unavailableService('git');
+        return git.git;
+      },
+      getGhService: async (options) => {
+        assertAvailable(options);
+        if (!this.info.services.gh) throw unavailableService('gh');
+        return git.gh;
+      },
+      getTerminalService: async (options) => {
+        assertAvailable(options);
+        if (!this.info.services.terminals) throw unavailableService('terminals');
+        return this.terminals;
+      },
       onAvailabilityChanged: (listener) => {
         this.#listeners.add(listener);
         return () => { this.#listeners.delete(listener); };

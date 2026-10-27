@@ -332,7 +332,7 @@ export class ExecutorRpc {
       if (holder && onLateResult) {
         retainedForLateResult = true;
         holder.#lateResults.set(call.id, {
-          call,
+          call: { method: call.method, request: call.request, protocol: call.protocol },
           release,
           receive: (value) => onLateResult(value as ExecutorRpcMethods[K]['result']),
           lost: options?.onLateResultLost,
@@ -593,6 +593,7 @@ export class ExecutorRpc {
   // journal delivers the reply to whichever session owns the call by then.
   #runJournaled(frame: ExecutorRpcRequest, call: JournaledCall, journal: RpcReplyJournal, release: () => void): void {
     const handler = this.#handler;
+    const undeliverable = this.#undeliverableReply(frame.id);
     let replyGuard: RpcReplyGuard | undefined;
     void Promise.resolve().then(() => {
       if (call.signal.aborted) throw new AgentCallError('not-dispatched', 'RPC request cancelled before dispatch');
@@ -600,13 +601,13 @@ export class ExecutorRpc {
       // Only launches, which the journal does not carry, observe undelivered replies.
       return withActivity(rpcActivity(frame.method), () => handler(frame, call.signal, (guard) => { replyGuard = guard; }, () => {}));
     }).then(
-      (value) => this.#encodeReply({ type: 'result', id: frame.id, value }, this.#guardReply(frame, replyGuard)) ?? this.#undeliverableReply(frame.id),
+      (value) => this.#encodeReply({ type: 'result', id: frame.id, value }, this.#guardReply(frame, replyGuard)) ?? undeliverable,
       (error) => {
         logRedactedFailure(frame, error);
-        return this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }, this.#guardReply(frame)) ?? this.#undeliverableReply(frame.id);
+        return this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }, this.#guardReply(frame)) ?? undeliverable;
       },
-    ).catch((error) => this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }) ?? this.#undeliverableReply(frame.id))
-      .then((reply) => journal.complete(call, reply, this.#undeliverableReply(frame.id))).finally(release);
+    ).catch((error) => this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }) ?? undeliverable)
+      .then((reply) => journal.complete(call, reply, undeliverable)).finally(release);
   }
 
   #reconcile(frame: Extract<ExecutorRpcRequest, { readonly method: 'calls.reconcile' }>): void {
