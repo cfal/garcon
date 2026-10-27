@@ -215,7 +215,7 @@ Tickets gain explicit UUID-based executor actor and executor owner variants. A c
 User ticket owners use `{kind:'user', ownerKey:string}` and CLI selectors
 `user:<ownerKey>`. This key is immutable, initially the original account username;
 login renames never change it. Historical actor usernames remain attribution,
-not assignment or retry authority. Protocol revision 26 carries this DTO in both
+not assignment or retry authority. Executor core 1 freezes this DTO in both
 forwarding directions. Account username/password endpoints are controller-browser
 only and remain excluded from the CLI allowlist.
 
@@ -268,8 +268,8 @@ CLI tag replacement uses `GET chats/tags` for durability recovery and
 `PUT chats/tags` for an atomic desired-state write. Browser optimistic PATCH is
 not forwarded. Title writes are bounded to 4 KiB UTF-8 at the common parser and
 persistence boundary; legacy oversized values remain readable but can still
-exceed reply bounds until renamed. Protocol revision 12 requires matched
-controller and worker builds for these forwarded-contract changes.
+exceed reply bounds until renamed. These forwarded contracts are mandatory in
+executor core 1.
 
 Ticket project inference is implemented on the selected executor at current HEAD. Send the context default executor with the CLI directory and reuse that resolver. Do not expand commands merely because their browser APIs exist.
 
@@ -280,7 +280,7 @@ CLI authority (`management:false`). GET is classified as a read despite its
 idempotent missed-occurrence housekeeping. `/in` and `/reorder` remain excluded.
 POST/PUT new-chat definitions must carry an explicit valid nested
 `scheduledPrompt.target.executorId`, including `local`; neither gateway nor
-dispatcher substitutes a default. Protocol revision 35 requires matching builds.
+dispatcher substitutes a default. These routes and target rules are mandatory in executor core 1.
 POST returns `{success:true, scheduledPrompt, snapshot}` with the created record
 and snapshot captured under the same scheduler lock. Other mutations retain
 `{success:true, snapshot}`. No storage migration is needed.

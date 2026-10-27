@@ -71,8 +71,10 @@ also clears browser-local preferences and drafts, but not server-side chats.
 Executor core 1 replaces package/revision equality. Its first deployment is a
 coordinated breaking cutover: drain work and update controller, workers, CLI and
 browser together. There is no legacy handshake or preparatory migration release.
-Later compliant core-1 workers and baseline CLIs may remain on earlier builds;
-package version does not establish compatibility. See the
+During bootstrap, only identical-build deployments are supported, including
+Docker `:main` and `sha-*` images. Once the cutover baseline is published and pinned
+and mixed-artifact CI passes, compliant core-1 workers and baseline CLIs may remain
+on earlier builds; package version does not establish compatibility. See the
 [compatibility and rollback procedure](./executor/compatibility.md).
 
 Set `--base-path /garcon` with `--public-url https://controller.example.com/garcon/` (or the corresponding environment variables)
@@ -156,7 +158,7 @@ worker cannot be recalled by revoking an assignment.
 
 Worker-launched terminals and provider subprocesses inherit the config root and `GARCON_RUNTIME=executor`. Ordinary shells default to automatic selection, described below. Access grants are workspace-wide, including permission decisions and agent execution on other hosts. Provider sandboxes may independently block loopback HTTP.
 
-Every executor connection requires [Noise NNpsk0 encryption](https://github.com/cfal/noise-ws/tree/6cf4a4b2ab25d300316a21c23cbcef1bb3558556), on both `ws:` and `wss:`. Each physical reconnect negotiates fresh keys before the existing authenticated Garcon session resumes. There is no plaintext fallback. Upgrade the controller and all workers together. The pinned library is new and unaudited; vector, interoperability, and integration tests are not a security audit. Bun 1.4.2 or later is required.
+Every executor connection requires [Noise NNpsk0 encryption](https://github.com/cfal/noise-ws/tree/6cf4a4b2ab25d300316a21c23cbcef1bb3558556), on both `ws:` and `wss:`. Each physical reconnect negotiates fresh keys before the existing authenticated Garcon session resumes. There is no plaintext fallback. Noise and paired lanes are mandatory in executor core 1. The pinned library is new and unaudited; vector, interoperability, and integration tests are not a security audit. Bun 1.4.2 or later is required.
 
 Remote executors use two sockets to the identical configured URL: primary control
 and subordinate bulk traffic. Proxies must allow both concurrent upgrades. Bulk
@@ -173,8 +175,8 @@ outcome, not permission to retry. See [Executor Transport](./executor/transport.
 
 WSS certificate verification is enabled by default. **Allow unverified TLS certificates** in an outbound executor's editor, or `--allow-unverified-tls` on a dialing worker, explicitly disables only outer certificate verification. Noise still requires the shared secret. Optional certificate pinning is deferred pending [Bun issue 43635](https://github.com/oven-sh/bun/issues/43635). Non-TLS connections require the separate **Allow connection without TLS** checkbox or `--no-tls` flag. HTTP metadata and traffic timing remain visible without outer TLS; Noise protects the execution payload, not the browser UI or other HTTP routes.
 
-Upgrade controller and workers together. Executor configuration and management
-payloads now use `noTls`, replacing `allowInsecureDevelopment`; stored executor
+Executor core 1 configuration and management
+payloads use `noTls`, replacing `allowInsecureDevelopment`; stored executor
 entries must use the new field before startup. The old startup flags are rejected,
 not treated as aliases. General controller HTTP TLS configuration is unchanged.
 
@@ -911,8 +913,8 @@ value before retrying; metadata and search-maintenance mutations are not retried
 automatically. Structured validation and pre-dispatch rejections remain definitive.
 The CLI reconciles any earlier uncertain tag save with `GET chats/tags`, then
 uses the atomic desired-set `PUT chats/tags`. Browser `PATCH chats/tags` retains
-its compare-and-set baseline. Upgrade controller and workers together for this
-forwarded API contract, now part of frozen executor core 1.
+its compare-and-set baseline. These forwarded API contracts are mandatory in
+frozen executor core 1.
 
 ## Export
 

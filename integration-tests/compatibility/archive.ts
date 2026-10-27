@@ -7,6 +7,7 @@ import { CURRENT_ARTIFACT } from '../support/source-artifact.js';
 
 const output = process.argv[2];
 assert(output, 'Usage: bun integration-tests/compatibility/archive.ts <source.tar.gz>');
+assert.equal(Bun.version, '1.4.3', 'Archive the core-1 baseline with the CI-pinned Bun 1.4.3');
 assert.equal(await commandOutput(['git', 'diff', 'HEAD', '--name-only']), '', 'Commit and validate implementation before archiving');
 const sourceSha = await commandOutput(['git', 'rev-parse', 'HEAD']);
 const sourceTime = await commandOutput(['git', 'show', '-s', '--format=%ct', sourceSha]);
