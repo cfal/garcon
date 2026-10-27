@@ -10,6 +10,7 @@ import {
 } from '@garcon/server-agent-interface';
 import { ProducerRelay } from '../producer-relay.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../../common/executor-disconnect.js';
+import { testSessionProtocol } from '../../__tests__/test-session-transport.js';
 
 const SCOPE: AgentResourceScope = { executorId: 'executor-1', instanceId: 'instance-1', integrationId: 'test' };
 
@@ -42,11 +43,12 @@ function pendingAdmission(signals: AbortSignal[]) {
   });
 }
 
-function session(capacity = Infinity) {
+function session(capacity = Infinity, protocol = testSessionProtocol(SCOPE.executorId)) {
   const sent: string[] = [];
   let limit = capacity;
   const frames = () => sent.map((payload) => JSON.parse(payload) as { seq: number; notification: AgentProducerNotification });
   return {
+    protocol,
     sent,
     frames,
     offer: (payload: string) => {
@@ -76,6 +78,36 @@ function rows(text: string): AgentProducerNotification['event'] {
 }
 
 describe('ProducerRelay', () => {
+  for (const field of ['controllerRuntimeId', 'workerRuntimeId', 'profileId'] as const) {
+    test(`retained producer bytes, launch cancellation and cleanup stay with their ${field}`, async () => {
+      const relay = new ProducerRelay();
+      const { integration, binding, publish } = integrationDouble();
+      const ref = binding();
+      const first = session();
+      const other = session(Infinity, { ...first.protocol, continuity: { ...first.protocol.continuity, [field]: 'changed' } });
+      relay.track(integration);
+      relay.bind(first, integration, ref);
+      publish({ binding: ref, event: rows('retained') });
+      const signals: AbortSignal[] = [];
+      const launch = relay.launch(first, integration, { producerBinding: ref, runId: 'run' }, new AbortController().signal,
+        undeliveredReplies().observe, pendingAdmission(signals)).catch(() => null);
+      relay.suspend(first);
+      relay.acknowledge(other, [{ bindingId: ref.id, seq: 1 }]);
+      relay.cancelLaunch(other, integration, ref, 'run');
+      expect(signals[0]!.aborted).toBe(false);
+      expect(relay.suspended(other, integration, ref)).toBe(false);
+      expect(relay.resume(other, integration, [{ binding: ref, acknowledgedSeq: 0 }])).toEqual([]);
+      expect(other.sent).toEqual([]);
+      expect(relay.suspended(first, integration, ref)).toBe(true);
+      const resumed = session();
+      expect(relay.resume(resumed, integration, [{ binding: ref, acknowledgedSeq: 0 }])).toHaveLength(1);
+      expect(resumed.texts()).toEqual(['retained']);
+      relay.cancelLaunch(resumed, integration, ref, 'run');
+      await launch;
+      relay.dispose();
+    });
+  }
+
   test('numbers frames per binding and replays only unacknowledged frames on resume', () => {
     const relay = new ProducerRelay();
     const { integration, binding, publish } = integrationDouble();
@@ -433,7 +465,7 @@ describe('ProducerRelay', () => {
       undeliveredReplies().observe, pendingAdmission(signals),
     ).catch(() => null);
     relay.suspend(first);
-    relay.cancelLaunch(integration, ref, 'run-1');
+    relay.cancelLaunch(first, integration, ref, 'run-1');
     await launch;
     const second = session();
     relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }]);
@@ -455,9 +487,9 @@ describe('ProducerRelay', () => {
     const signals: AbortSignal[] = [];
     const abandoned = relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, pendingAdmission(signals))
       .catch((error: unknown) => error);
-    relay.cancelLaunch(integration, ref, 'run-other');
+    relay.cancelLaunch(live, integration, ref, 'run-other');
     expect(signals[0]!.aborted).toBe(false);
-    relay.cancelLaunch(integration, ref, 'run-1');
+    relay.cancelLaunch(live, integration, ref, 'run-1');
     expect(signals[0]!.aborted).toBe(true);
     expect(await abandoned).toBeInstanceOf(Error);
 
@@ -486,7 +518,7 @@ describe('ProducerRelay', () => {
       await release.promise;
       return handle;
     });
-    relay.cancelLaunch(integration, ref, 'run-1');
+    relay.cancelLaunch(live, integration, ref, 'run-1');
     release.resolve();
 
     await expect(launch).rejects.toThrow('The launch was cancelled before it started.');

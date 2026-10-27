@@ -1,14 +1,15 @@
 import { expect, test } from 'bun:test';
 import { RpcReplyJournal, type RpcJournalOwner } from '../rpc-journal.js';
 import type { RpcLane } from '../rpc-lane.js';
+import { testSessionProtocol } from '../../__tests__/test-session-transport.js';
 
 const UNKNOWN = 'unknown-outcome';
 
-function owner(session: string, accepting = true, lane: RpcLane = 'primary') {
+function owner(session: string, accepting = true, lane: RpcLane = 'primary', continuity = testSessionProtocol().continuity) {
   const offered: string[] = [];
   const state = { accepting };
   const value: RpcJournalOwner & { offered: string[]; state: typeof state } = {
-    session, lane, offered, state,
+    session, lane, continuity, offered, state,
     offer(payload) {
       if (!state.accepting) return false;
       offered.push(payload);
@@ -30,6 +31,28 @@ test('delivers a reply to the owning session and releases it once acknowledged',
   journal.acknowledge(first, ['call-1']);
   expect(journal.has('call-1')).toBe(false);
 });
+
+for (const field of ['executorId', 'controllerRuntimeId', 'workerRuntimeId', 'profileId'] as const) {
+  test(`journal recovery cannot adopt replies or prove nonreceipt after ${field} changes`, () => {
+    const journal = new RpcReplyJournal();
+    const first = owner('first');
+    journal.received(first, 2);
+    const running = journal.begin(first, 'running');
+    journal.complete(journal.begin(first, 'completed'), 'old-encoded-reply', UNKNOWN);
+    journal.ownerLost(first);
+    const replacement = owner('replacement', true, 'primary', { ...first.continuity, [field]: 'changed' });
+    expect(journal.reconcile(replacement, [
+      { id: 'running', session: 'first', seq: 1 },
+      { id: 'completed', session: 'first', seq: 2 },
+      { id: 'unsent', session: 'first', seq: 3 },
+    ])).toEqual(['running', 'completed', 'unsent'].map(id => ({ id, state: 'unknown' })));
+    journal.complete(running, 'late-old-reply', UNKNOWN);
+    journal.deliver();
+    expect(replacement.offered).toEqual([]);
+    expect(journal.size).toBe(0);
+    journal.dispose();
+  });
+}
 
 test('reconciles running, completed, never-received, and forgotten calls of a lost session', () => {
   const journal = new RpcReplyJournal();
