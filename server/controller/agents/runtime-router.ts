@@ -58,6 +58,7 @@ import {
 } from './runtime-router-errors.js';
 import { operationIdentity, operationMetadata } from './turn-operation.js';
 import { ProducerBindings, type LaunchSettledEvent } from './producer-bindings.js';
+import { ExecutionAborts } from './execution-aborts.js';
 import { retryAfterSessionLoss } from './session-loss-retry.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START, EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
 import { readBefore } from '../../common/interactive-deadline.js';
@@ -117,11 +118,7 @@ export class AgentRuntimeRouter {
       if (this.#producerLeases.get(chatId)?.lease !== lease) return;
       const runId = this.#ledger.activeRunId(chatId);
       if (!runId) return;
-      const active = this.#executionHandles.get(chatId);
-      if (active) this.#abortHandleBestEffort(chatId, active.agentId, active.handle, 'publication failure');
-      else this.#pendingAbortRuns.add(runKey(chatId, runId));
-      this.#executionHandles.delete(chatId);
-      this.#bindings.forgetRun(runId);
+      this.#abortPublication(chatId, runId);
       this.#ledger.failRun(chatId, runId, error);
     },
     (chatId, lease) => {
@@ -141,14 +138,12 @@ export class AgentRuntimeRouter {
       void this.#events.publishRunSteerable(chatId);
     },
   );
-  // Stops requested while a remote executor is unavailable, delivered when it is
-  // ready again. They outlive a lost session because the same worker may still
-  // run the turn; a replaced worker rejects the stale handle.
-  readonly #deferredAborts = new Map<string, { readonly agentId: string; readonly handle: AgentExecutionHandle }>();
+  readonly #aborts: ExecutionAborts;
 
   constructor(options: AgentRuntimeRouterOptions) {
     this.#registry = options.registry;
     this.#directory = options.directory;
+    this.#aborts = new ExecutionAborts(options.directory);
     this.#endpointResolver = options.endpointResolver;
     this.#events = options.events;
     this.#getCarryOverRevision = options.getCarryOverRevision;
@@ -163,6 +158,7 @@ export class AgentRuntimeRouter {
         this.#executionHandles.delete(event.chatId);
       }
     });
+    this.#ledger.subscribeRunAbandoned((chatId, runId) => this.#abortPublication(chatId, runId));
   }
   async startSession(chatId: string, prompt: string, opts: StartSessionOptions = {}): Promise<void> {
     let runId: string | null = null;
@@ -445,11 +441,7 @@ export class AgentRuntimeRouter {
   }
 
   executionSessionResumed(executorId: string): void {
-    for (const [chatId, deferred] of this.#deferredAborts) {
-      if (deferred.handle.executorId !== executorId) continue;
-      this.#deferredAborts.delete(chatId);
-      this.#abortHandleBestEffort(chatId, deferred.agentId, deferred.handle, 'executor reconnect');
-    }
+    this.#aborts.sessionResumed(executorId);
   }
 
   executionSessionLost(executorId = LOCAL_EXECUTOR_ID): void {
@@ -508,7 +500,7 @@ export class AgentRuntimeRouter {
       return Promise.resolve(true);
     }
     this.#executionHandles.delete(chatId);
-    this.#abortHandleBestEffort(chatId, active.agentId, active.handle, 'accepted interruption');
+    this.#aborts.request(chatId, active.agentId, active.handle, 'accepted interruption');
     return Promise.resolve(true);
   }
 
@@ -855,7 +847,7 @@ export class AgentRuntimeRouter {
     const active = this.#ledger.isRunActive(chatId, event.runId);
     if (event.handle) {
       if (active) this.#executionHandles.set(chatId, { agentId, runId: event.runId, handle: event.handle });
-      else this.#abortHandleBestEffort(chatId, agentId, event.handle, 'lost launch');
+      else this.#aborts.request(chatId, agentId, event.handle, 'lost launch');
       return;
     }
     if (!active) return;
@@ -870,7 +862,7 @@ export class AgentRuntimeRouter {
     handle: AgentExecutionHandle,
   ): Promise<void> {
     if (this.#pendingAbortRuns.delete(runKey(chatId, runId))) {
-      this.#abortHandleBestEffort(chatId, agentId, handle, 'interrupted launch');
+      this.#aborts.request(chatId, agentId, handle, 'interrupted launch');
       return;
     }
     if (this.#ledger.isRunActive(chatId, runId)) {
@@ -878,27 +870,13 @@ export class AgentRuntimeRouter {
     }
   }
 
-  #abortHandleBestEffort(
-    chatId: string,
-    agentId: string,
-    handle: AgentExecutionHandle,
-    context: string,
-  ): void {
-    const failed = (error: unknown) => {
-      if (!this.#directory.isReady(handle.executorId)) {
-        this.#deferredAborts.set(chatId, { agentId, handle });
-        return;
-      }
-      logger.warn(`Provider abort after ${context} failed`, {
-        chatId,
-        reason: error instanceof Error ? error.message : String(error),
-      });
-    };
-    try {
-      void this.#directory.require(agentId, handle.executorId).execution.abort(handle).catch(failed);
-    } catch (error) {
-      failed(error);
-    }
+  #abortPublication(chatId: string, runId: string): void {
+    const active = this.#executionHandles.get(chatId);
+    if (active?.runId === runId) {
+      this.#executionHandles.delete(chatId);
+      this.#aborts.request(chatId, active.agentId, active.handle, 'publication failure');
+    } else this.#pendingAbortRuns.add(runKey(chatId, runId));
+    this.#bindings.forgetRun(runId);
   }
 
   #producer(chatId: string): TranscriptProducerLease {
@@ -960,7 +938,6 @@ export class AgentRuntimeRouter {
       runId,
     };
   }
-
 }
 
 function requireAgentChatEntryWithModel(

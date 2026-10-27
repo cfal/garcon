@@ -126,6 +126,7 @@ describe('ConversationFeed', () => {
 		expect(container.querySelector('[data-chat-tool-group]')).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
 		const group = await screen.findByRole('button', { name: 'Execute 3 commands' });
+		expect(group.classList.contains('typography-chat-prose')).toBe(true);
 		expect(group.getAttribute('aria-expanded')).toBe('false');
 		expect(group.hasAttribute('aria-controls')).toBe(false);
 		expect(group.firstElementChild?.querySelector('svg')).not.toBeNull();

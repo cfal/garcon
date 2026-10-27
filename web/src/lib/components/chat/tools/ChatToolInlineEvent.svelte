@@ -141,7 +141,7 @@
 					{/if}
 				</div>
 				<code
-					class="code-highlight block text-xs text-foreground font-mono {wrapText
+					class="typography-chat-code code-highlight block text-xs text-foreground font-mono {wrapText
 						? 'whitespace-pre-wrap break-all'
 						: 'truncate'}"
 				>

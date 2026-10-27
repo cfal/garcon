@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { FontSizePreference } from '$lib/theme/typography.js';
 	import type { GitCommitFileSummary, GitCommitSnapshotReady } from '$lib/api/git.js';
 	import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
 	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
@@ -26,14 +27,14 @@
 		fontSize: number;
 		diffMode: DiffMode;
 		contextLines: number;
-		diffFontSize: string;
+		diffFontSize: FontSizePreference;
 		onBack: () => void;
 		onRetry: () => void;
 		onSelectParent: (parent: string | null) => void;
 		onRevertCommit: () => void;
 		onSetDiffMode: (mode: DiffMode) => void;
 		onSetContextLines: (lines: number) => void;
-		onSetDiffFontSize: (size: string) => void;
+		onSetDiffFontSize: (size: FontSizePreference) => void;
 		onSelectFile: (file: string) => void;
 		onFileFilterChange: (value: string) => void;
 		onBodyDemand: (demand: GitReviewBodyDemand) => void;

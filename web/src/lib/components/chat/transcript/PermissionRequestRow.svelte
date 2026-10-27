@@ -569,7 +569,8 @@
 							</div>
 							{#if selectedQuestionPreview(question)}
 								<pre
-									class="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/40 p-2 text-[11px] text-foreground">{selectedQuestionPreview(
+									style:--chat-code-default-size="11px"
+									class="typography-chat-code max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/40 p-2 text-[11px] text-foreground">{selectedQuestionPreview(
 										question,
 									)}</pre>
 							{/if}
@@ -852,7 +853,7 @@
 						{m.chat_permission_view_tool_input()}
 					</summary>
 					<pre
-						class="mt-2 max-h-40 overflow-auto rounded-md border border-current/20 bg-background/50 p-2 text-xs font-mono whitespace-pre-wrap">{rawInput}</pre>
+						class="typography-chat-code mt-2 max-h-40 overflow-auto rounded-md border border-current/20 bg-background/50 p-2 text-xs font-mono whitespace-pre-wrap">{rawInput}</pre>
 				</details>
 			{/if}
 		{/snippet}

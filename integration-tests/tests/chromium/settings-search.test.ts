@@ -17,7 +17,7 @@ test('settings search preserves drafts and opens matching sections on desktop an
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: width < 640 });
-      await settings.getByRole('tab', { name: 'Interface', exact: true }).click();
+      await settings.getByRole('tab', { name: 'Behavior', exact: true }).click();
       await settings.getByLabel('Snippet trigger', { exact: true }).fill('@a');
       await input.fill('theme');
       await input.fill('');

@@ -37,6 +37,13 @@ function thinkingButtonFixture(surface: string): string {
   ).join("");
 }
 
+function switchFixture(checked: boolean): string {
+  const value = checked ? "checked" : "unchecked";
+  return `<button id="terminal-switch-${value}" role="switch" aria-checked="${checked}" data-slot="switch" data-state="${value}" class="peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=unchecked]:bg-input">
+    <span data-slot="switch-thumb" data-state="${value}" class="pointer-events-none block size-4 rounded-full bg-(color:--switch-thumb-unchecked) shadow-lg data-[state=checked]:bg-(color:--switch-thumb-checked) ring-0 transition-transform data-[state=checked]:translate-x-4 data-[state=unchecked]:translate-x-0"></span>
+  </button>`;
+}
+
 function focusButtonFixture(): string {
   const surfaces = [];
   const variants = [
@@ -100,6 +107,7 @@ async function applyProfile(
   await page.evaluate((theme) => {
     const root = document.documentElement;
     root.dataset.theme = theme.id;
+    root.dataset.themeAppearance = "standard";
     root.classList.toggle("dark", theme.colorScheme === "dark");
     root.style.colorScheme = theme.colorScheme;
   }, profile);
@@ -302,6 +310,7 @@ describe("compiled theme CSS", () => {
           ({ profile, properties }) => {
             const root = document.documentElement;
             root.dataset.theme = profile.id;
+            root.dataset.themeAppearance = "standard";
             root.classList.toggle("dark", profile.colorScheme === "dark");
             root.style.colorScheme = profile.colorScheme;
             const style = getComputedStyle(root);
@@ -323,6 +332,7 @@ describe("compiled theme CSS", () => {
             getComputedStyle(root).getPropertyValue("--background");
           root.dataset.theme =
             themeId === "classic-dark" ? "classic-light" : "classic-dark";
+          root.dataset.themeAppearance = "standard";
           const element = document.createElement("span");
           element.dataset.themePreview = themeId;
           document.body.append(element);
@@ -399,7 +409,9 @@ describe("compiled theme CSS", () => {
               colorsByInteraction.hovered.background,
               `${profile.id} ${option.value} thinking hover on ${surface}`,
             ).not.toBe(colorsByInteraction.normal.background);
-            for (const [interaction, colors] of Object.entries(colorsByInteraction)) {
+            for (const [interaction, colors] of Object.entries(
+              colorsByInteraction,
+            )) {
               expect(
                 contrastRatio(colors.foreground, colors.background),
                 `${profile.id} ${option.value} thinking icon ${interaction} on ${surface}`,
@@ -697,7 +709,8 @@ describe("compiled theme CSS", () => {
               "image/svg+xml",
             );
             const stroke = svg.documentElement.getAttribute("stroke");
-            if (!stroke) throw new Error("Missing native select chevron stroke");
+            if (!stroke)
+              throw new Error("Missing native select chevron stroke");
             const probe = document.createElement("span");
             probe.style.color = stroke;
             document.body.append(probe);
@@ -846,6 +859,171 @@ describe("compiled theme CSS", () => {
             contrastRatio(selection.foreground, selection.background),
             `${profile} ${label} selection`,
           ).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+      await page.evaluate(
+        (switches) => {
+          document.body.insertAdjacentHTML(
+            "beforeend",
+            `
+          <div data-slot="dialog-content" style="background:var(--dialog-surface)"><h2 id="terminal-dialog-title" data-slot="dialog-title">Settings</h2></div>
+          <div data-slot="dropdown-menu-item" data-highlighted><div id="terminal-description" data-menu-description class="text-xs text-muted-foreground">Description</div></div>
+          <div data-slot="dropdown-menu-sub-trigger" data-highlighted><span>Font size</span><span id="terminal-submenu-value" class="ml-auto text-xs text-muted-foreground">14</span></div>
+          <div data-slot="select-item" data-highlighted><span><svg id="terminal-check" class="text-muted-foreground" width="16" height="16"></svg></span></div>
+          <div data-workspace-window-tabs><button id="terminal-tab" role="tab" aria-selected="true"><span id="terminal-tab-close" data-workspace-window-tab-close class="text-muted-foreground">x</span><span id="terminal-tab-drop" data-workspace-tab-drop-position="before" class="bg-primary"></span></button></div>
+          <input id="terminal-checkbox" type="checkbox"><input id="terminal-radio" type="radio">
+          ${switches}
+        `,
+          );
+        },
+        switchFixture(false) + switchFixture(true),
+      );
+      for (const profile of THEME_PROFILES) {
+        await applyProfile(page, profile);
+        await page.evaluate(() => {
+          document.documentElement.dataset.themeAppearance = "terminal";
+        });
+        for (const [selector, minimum] of [
+          ["#terminal-description", 4.5],
+          ["#terminal-submenu-value", 4.5],
+          ["#terminal-dialog-title", 4.5],
+          ["#terminal-check", 3],
+          ["#terminal-tab-close", 3],
+        ] as const) {
+          const colors = await readRenderedColors(page, selector);
+          expect(
+            contrastRatio(colors.foreground, colors.background),
+            `${profile.id} ${selector}`,
+          ).toBeGreaterThanOrEqual(minimum);
+        }
+        const tab = await readRenderedColors(page, "#terminal-tab");
+        const drop = await readRenderedColors(page, "#terminal-tab-drop");
+        expect(
+          contrastRatio(drop.background, tab.background),
+          `${profile.id} selected-tab drop indicator`,
+        ).toBeGreaterThanOrEqual(3);
+        for (const value of ["checked", "unchecked"]) {
+          const control = page.locator(`#terminal-switch-${value}`);
+          expect(
+            await control.evaluate(
+              (element) => getComputedStyle(element, "::before").content,
+            ),
+          ).toContain(value === "checked" ? "[x]" : "[ ]");
+          expect(
+            await control
+              .locator('[data-slot="switch-thumb"]')
+              .evaluate((element) => getComputedStyle(element).display),
+          ).toBe("none");
+        }
+        const controls = await page.evaluate(() => {
+          const checkbox =
+            document.querySelector<HTMLInputElement>("#terminal-checkbox")!;
+          const read = () => {
+            const style = getComputedStyle(checkbox);
+            return {
+              background: style.backgroundImage,
+              shadow: style.boxShadow,
+              opacity: style.opacity,
+            };
+          };
+          checkbox.checked = false;
+          checkbox.indeterminate = false;
+          checkbox.disabled = false;
+          const unchecked = read();
+          checkbox.checked = true;
+          const checked = read();
+          checkbox.checked = false;
+          checkbox.indeterminate = true;
+          const mixed = read();
+          checkbox.disabled = true;
+          const disabled = read();
+          return {
+            unchecked,
+            checked,
+            mixed,
+            disabled,
+            radioRadius: getComputedStyle(
+              document.querySelector("#terminal-radio")!,
+            ).borderRadius,
+          };
+        });
+        expect(controls.mixed.background, profile.id).not.toBe(
+          controls.unchecked.background,
+        );
+        expect(controls.checked.shadow, profile.id).not.toBe(
+          controls.unchecked.shadow,
+        );
+        expect(controls.disabled.opacity, profile.id).toBe("0.5");
+        expect(controls.radioRadius, profile.id).toBe("50%");
+      }
+
+      // Exercises the Firefox 124 fallback using the compiled feature-query boundary.
+      const disabledQueries = await page.evaluate(() => {
+        let count = 0;
+        const disableGlyphSupport = (
+          container: CSSStyleSheet | CSSGroupingRule | CSSStyleRule,
+        ) => {
+          for (const [index, rule] of Array.from(
+            container.cssRules,
+          ).entries()) {
+            if (
+              rule instanceof CSSSupportsRule &&
+              rule.conditionText.includes("content:") &&
+              rule.conditionText.includes("[x]")
+            ) {
+              container.deleteRule(index);
+              container.insertRule(
+                `@supports (garcon-test-unsupported: true) { ${rule.cssText} }`,
+                index,
+              );
+              count++;
+            } else if (
+              rule instanceof CSSGroupingRule ||
+              rule instanceof CSSStyleRule
+            ) {
+              disableGlyphSupport(rule);
+            }
+          }
+        };
+        for (const sheet of document.styleSheets) disableGlyphSupport(sheet);
+        return count;
+      });
+      expect(disabledQueries).toBe(1);
+      for (const forcedColors of ["none", "active"] as const) {
+        await page.emulateMedia({ forcedColors });
+        for (const id of ["phosphor-dark", "ansi-dark", "ansi-light"]) {
+          await applyProfile(
+            page,
+            THEME_PROFILES.find((profile) => profile.id === id)!,
+          );
+          await page.evaluate(() => {
+            document.documentElement.dataset.themeAppearance = "terminal";
+          });
+          const switches = await page
+            .locator('[data-slot="switch"]')
+            .evaluateAll((elements) =>
+              elements.map((element) => {
+                const thumb = element.querySelector(
+                  '[data-slot="switch-thumb"]',
+                )!;
+                const bounds = thumb.getBoundingClientRect();
+                return {
+                  content: getComputedStyle(element, "::before").content,
+                  display: getComputedStyle(thumb).display,
+                  width: bounds.width,
+                  x: bounds.x - element.getBoundingClientRect().x,
+                };
+              }),
+            );
+          for (const control of switches) {
+            expect(control.content, `${id} ${forcedColors}`).toBe("none");
+            expect(control.display, `${id} ${forcedColors}`).toBe("block");
+            expect(control.width, `${id} ${forcedColors}`).toBeGreaterThan(0);
+          }
+          expect(
+            switches[1].x - switches[0].x,
+            `${id} ${forcedColors} thumb travel`,
+          ).toBe(16);
         }
       }
     } finally {

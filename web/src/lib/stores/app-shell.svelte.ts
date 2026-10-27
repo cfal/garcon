@@ -4,7 +4,7 @@ import { untrack } from 'svelte';
 import { createActionSignal } from '$lib/utils/action-signal';
 
 // App tabs are stored in this browser; every other tab is server-owned.
-const APP_SETTINGS_TABS = ['interface', 'shortcuts'] as const;
+const APP_SETTINGS_TABS = ['appearance', 'behavior', 'shortcuts'] as const;
 
 export const SETTINGS_TABS = [
 	...APP_SETTINGS_TABS,
@@ -26,7 +26,7 @@ export function isServerSettingsTab(tab: SettingsTab): boolean {
 function normalizeSettingsTab(value: string): SettingsTab {
 	return (SETTINGS_TABS as readonly string[]).includes(value)
 		? (value as SettingsTab)
-		: 'interface';
+		: 'appearance';
 }
 
 export interface NewChatDialogSeed {
@@ -46,7 +46,7 @@ export class AppShellStore {
 	showSnippets = $state(false);
 	showOnboardingWizard = $state(false);
 	chatPreambleSelectionTarget = $state<ChatPreambleSelectionTarget | null>(null);
-	settingsTab = $state<SettingsTab>('interface');
+	settingsTab = $state<SettingsTab>('appearance');
 	sidebarOpen = $state(false);
 	isMobile = $state(false);
 	composerFocusRequestId = $state(0);
@@ -69,7 +69,7 @@ export class AppShellStore {
 	#snippetsReturnFocus: (() => void) | null = null;
 	#preamblesReturnFocus: (() => void) | null = null;
 
-	openSettings(section: string = 'interface'): void {
+	openSettings(section: string = 'appearance'): void {
 		this.dismissSnippets();
 		this.showScheduledPrompts = false;
 		this.showOnboardingWizard = false;

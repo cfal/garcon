@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { typographyScale } from '$lib/theme/typography.js';
 	import { untrack } from 'svelte';
 	import SidebarContent from './SidebarContent.svelte';
 	import SidebarSearchDock from './search/SidebarSearchDock.svelte';
@@ -157,6 +158,7 @@
 		inactivityDuration: localSettings.sidebarInactivityDuration,
 		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 		chatItemLayout: localSettings.sidebarChatItemLayout,
+		chatFontScale: typographyScale('chat-list', localSettings.chatListFontSize),
 		showProjectPath: localSettings.sidebarShowProjectPath,
 		sortMode: localSettings.sidebarSortMode,
 		pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',

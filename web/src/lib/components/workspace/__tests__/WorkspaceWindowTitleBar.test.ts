@@ -360,7 +360,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			).toBe(`${height}px`);
 			const tab = screen.getByRole('tab', { name: 'Chat A' });
 			expect(tab.style.height).toBe(`${controlSize}px`);
-			expect(tab.style.fontSize).toBe(`${fontSize}px`);
+			expect(tab.style.fontSize).toBe(`calc(${fontSize}px * var(--interface-font-scale, 1))`);
 			expect(tab.querySelector('svg')?.getAttribute('height')).toBe(`${iconSize}`);
 			const fullscreen = screen.getByRole('button', { name: m.workspace_fullscreen() });
 			expect(fullscreen.style.height).toBe(`${controlSize}px`);

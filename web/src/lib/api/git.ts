@@ -68,10 +68,7 @@ export type GitStatusCode = ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'T' | 'U' | '?' 
 export type GitFileReviewCategory = Wire.GitFileReviewCategory;
 export type GitStageMode = Wire.GitStageMode;
 export const GIT_FRESHNESS_POLL_MS = 15_000;
-export {
-	GIT_WORKING_TREE_FINGERPRINT_VERSION,
-	GIT_QUICK_SUMMARY_FINGERPRINT_VERSION,
-} from '$shared/git';
+export { GIT_WORKING_TREE_FINGERPRINT_VERSION } from '$shared/git';
 export type GitChangeStats = Wire.DiffStats;
 
 export type GitTreeStatsState = Wire.GitTreeStatsState;

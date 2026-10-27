@@ -85,6 +85,7 @@ function setup(options: { realTransport?: boolean } = {}) {
 		focus() {},
 		pasteFromClipboard: async () => true,
 		applyFontSize() {},
+		applyFontPreference() {},
 		clipboardMessage: '',
 		sendToolbarKey() {},
 		inputControls: { ctrlMode: 'inactive', altMode: 'inactive', toggleModifier() {} },

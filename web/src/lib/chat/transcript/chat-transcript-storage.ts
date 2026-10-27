@@ -8,7 +8,10 @@ import {
 
 const SCHEMA_VERSION = 6;
 const MAX_ENTRIES = 25;
-const MAX_SNAPSHOT_CHARACTERS = 1_500_000;
+const MAX_SNAPSHOT_CHARACTERS = 250_000;
+const MAX_RETAINED_CHARACTERS = 1_500_000;
+const MAX_SNAPSHOT_VALUES = 10_000;
+const MAX_SNAPSHOT_DEPTH = 64;
 
 interface ChatSnapshotEnvelope {
 	version: 6;
@@ -92,6 +95,39 @@ function windowEntries(
 	return entries.slice(-limit);
 }
 
+// Uses a conservative 32-character allowance for non-string values before allocating JSON.
+// Checks the exact escaped size after serialization.
+function serializeSnapshotWithinBudget(envelope: ChatSnapshotEnvelope): string | null {
+	let estimatedCharacters = 0;
+	let visitedValues = 0;
+	function visit(value: unknown, depth: number): boolean {
+		visitedValues += 1;
+		if (visitedValues > MAX_SNAPSHOT_VALUES || depth > MAX_SNAPSHOT_DEPTH) return false;
+		estimatedCharacters += typeof value === 'string' ? value.length + 2 : 32;
+		if (estimatedCharacters > MAX_SNAPSHOT_CHARACTERS) return false;
+		if (value === null || typeof value !== 'object') return true;
+		if ('toJSON' in value) return false;
+		if (Array.isArray(value)) {
+			if (value.length > MAX_SNAPSHOT_VALUES - visitedValues) return false;
+			for (const item of value) {
+				if (!visit(item, depth + 1)) return false;
+			}
+			return true;
+		}
+		const record = value as Record<string, unknown>;
+		for (const key in record) {
+			if (!Object.hasOwn(record, key)) continue;
+			estimatedCharacters += key.length + 3;
+			if (estimatedCharacters > MAX_SNAPSHOT_CHARACTERS) return false;
+			if (!visit(record[key], depth + 1)) return false;
+		}
+		return true;
+	}
+	if (!visit(envelope, 0)) return null;
+	const serialized = JSON.stringify(envelope);
+	return serialized.length <= MAX_SNAPSHOT_CHARACTERS ? serialized : null;
+}
+
 function upsertEntry(
 	index: ChatSnapshotIndex,
 	chatId: string,
@@ -129,7 +165,10 @@ function pruneIndex(index: ChatSnapshotIndex): ChatSnapshotIndex {
 	let retainedCharacters = 0;
 	for (const entry of countBounded) {
 		const characters = localStorage.getItem(snapshotKey(entry.chatId))?.length ?? 0;
-		if (keep.length > 0 && retainedCharacters + characters > MAX_SNAPSHOT_CHARACTERS) {
+		if (
+			characters > MAX_SNAPSHOT_CHARACTERS
+			|| retainedCharacters + characters > MAX_RETAINED_CHARACTERS
+		) {
 			evicted.push(entry);
 			continue;
 		}
@@ -158,7 +197,7 @@ export class LocalChatTranscriptStorage {
 		if (!chatId || !canPersistBrowserData()) return null;
 		try {
 			const raw = localStorage.getItem(snapshotKey(chatId));
-			if (!raw) {
+			if (!raw || raw.length > MAX_SNAPSHOT_CHARACTERS) {
 				this.remove(chatId);
 				return null;
 			}
@@ -232,18 +271,25 @@ export class LocalChatTranscriptStorage {
 			entries: retainedEntries,
 		};
 		try {
-			setLocalStorageWithCacheRecovery(localStorage, snapshotKey(chatId), JSON.stringify(envelope));
+			const serialized = serializeSnapshotWithinBudget(envelope);
+			if (serialized === null) {
+				this.remove(chatId);
+				return;
+			}
+			setLocalStorageWithCacheRecovery(localStorage, snapshotKey(chatId), serialized);
 			const index = readIndex();
 			writeIndex(
 				pruneIndex(
 					upsertEntry(index, chatId, {
 						lastAccessedAt: nowIso(),
 						schemaVersion: SCHEMA_VERSION,
+						stale: false,
+						lastValidatedAt: nowIso(),
 					}),
 				),
 			);
 		} catch {
-			// Leaves storage best-effort.
+			this.remove(chatId);
 		}
 	}
 
@@ -305,7 +351,7 @@ export class LocalChatTranscriptStorage {
 			for (const entry of sorted) {
 				if (cursors.length >= boundedLimit) break;
 				const raw = localStorage.getItem(snapshotKey(entry.chatId));
-				if (!raw) {
+				if (!raw || raw.length > MAX_SNAPSHOT_CHARACTERS) {
 					this.remove(entry.chatId);
 					continue;
 				}

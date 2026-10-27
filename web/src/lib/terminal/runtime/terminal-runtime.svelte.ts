@@ -13,6 +13,7 @@ import {
 	type TerminalFontResolver,
 } from '$lib/terminal/runtime/terminal-font.js';
 import * as m from '$lib/paraglide/messages.js';
+import type { FontPreference } from '$lib/theme/fonts.js';
 
 let stylesheetPromise: Promise<void> | null = null;
 const MAX_QUEUED_OUTPUT_BYTES = 16 * 1024 * 1024;
@@ -68,6 +69,9 @@ export class TerminalRuntime {
 	#host: HTMLElement | null = null;
 	#presentationActive = false;
 	#rendererGeneration = 0;
+	#fontGeneration = 0;
+	#fontWaiters = new Set<(family: string | null) => void>();
+	#fontPreference: FontPreference = 'default';
 	#fitFrame = 0;
 	#lastSentSize: { cols: number; rows: number } | null = null;
 	#pasteCleanup: (() => void) | null = null;
@@ -118,29 +122,32 @@ export class TerminalRuntime {
 	}
 
 	async #attachWhenFontReady(host: HTMLElement, lease: number): Promise<void> {
-		let fontFamily = TERMINAL_FALLBACK_FONT_FAMILY;
-		try {
-			fontFamily = await this.#fontResolver.load();
-		} catch {
-			// Keeps the terminal usable when a custom resolver fails unexpectedly.
-		}
-		if (
-			this.#disposed ||
-			lease !== this.#rendererGeneration ||
-			!this.#presentationActive ||
-			this.#host !== host
-		) {
-			return;
-		}
-		this.terminal.options.fontFamily = fontFamily;
+		let fontFamily: string | null;
+		let fontGeneration: number;
+		do {
+			fontGeneration = this.#fontGeneration;
+			fontFamily = await this.#waitForFont(this.#fontPreference);
+			if (!this.#isCurrentRendererAttachment(lease, host)) return;
+		} while (fontFamily === null || fontGeneration !== this.#fontGeneration);
 		if (!this.terminal.element) {
+			this.terminal.options.fontFamily = fontFamily;
 			this.terminal.open(host);
 			this.#installDomHandlers();
 		} else {
 			host.append(this.terminal.element);
+			this.terminal.options.fontFamily = fontFamily;
 		}
 		this.terminal.refresh(0, Math.max(0, this.terminal.rows - 1));
 		this.scheduleFit();
+	}
+
+	#isCurrentRendererAttachment(lease: number, host: HTMLElement | null): boolean {
+		return (
+			!this.#disposed &&
+			this.#presentationActive &&
+			lease === this.#rendererGeneration &&
+			host === this.#host
+		);
 	}
 
 	park(lease: number): void {
@@ -196,6 +203,51 @@ export class TerminalRuntime {
 		this.scheduleFit();
 	}
 
+	applyFontPreference(preference: FontPreference): void {
+		if (this.#disposed || preference === this.#fontPreference) return;
+		this.#fontPreference = preference;
+		const generation = ++this.#fontGeneration;
+		this.#interruptFontWaits();
+		if (!this.terminal.element || !this.#presentationActive) return;
+		const rendererGeneration = this.#rendererGeneration;
+		const host = this.#host;
+		void this.#resolveFont(preference).then((family) => {
+			if (
+				generation !== this.#fontGeneration ||
+				!this.#isCurrentRendererAttachment(rendererGeneration, host) ||
+				!this.terminal.element?.isConnected ||
+				this.terminal.element.parentElement !== host
+			)
+				return;
+			this.terminal.options.fontFamily = family;
+			this.scheduleFit();
+		});
+	}
+
+	// Resolves null when a font change or disposal supersedes the wait.
+	#waitForFont(preference: FontPreference): Promise<string | null> {
+		return new Promise<string | null>((resolve) => {
+			this.#fontWaiters.add(resolve);
+			void this.#resolveFont(preference).then((family) => {
+				this.#fontWaiters.delete(resolve);
+				resolve(family);
+			});
+		});
+	}
+
+	#interruptFontWaits(): void {
+		for (const resolve of this.#fontWaiters) resolve(null);
+		this.#fontWaiters.clear();
+	}
+
+	async #resolveFont(preference: FontPreference): Promise<string> {
+		try {
+			return await this.#fontResolver.load(preference);
+		} catch {
+			return TERMINAL_FALLBACK_FONT_FAMILY;
+		}
+	}
+
 	focus(): void {
 		this.terminal.focus();
 		this.terminal.textarea?.focus();
@@ -225,6 +277,7 @@ export class TerminalRuntime {
 	dispose(): void {
 		if (this.#disposed) return;
 		this.#disposed = true;
+		this.#interruptFontWaits();
 		this.#rendererGeneration += 1;
 		this.#presentationActive = false;
 		cancelAnimationFrame(this.#fitFrame);

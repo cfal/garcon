@@ -118,18 +118,10 @@ function gitSummary(): GitQuickSummaryReady {
 	return {
 		status: 'ready',
 		project: '/project',
-		repoRoot: '/project',
 		branch: 'main',
-		hasCommits: true,
-		changedFiles: 2,
-		trackedChangedFiles: 1,
-		untrackedFiles: 1,
-		stagedFiles: 1,
-		unstagedFiles: 1,
-		additions: 3,
-		deletions: 1,
-		fingerprintVersion: 1,
-		fingerprint: 'v1:test',
+		hasChanges: true,
+		hasUntracked: true,
+		diffStats: { additions: 3, deletions: 1 },
 	};
 }
 

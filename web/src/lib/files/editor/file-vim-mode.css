@@ -4,13 +4,17 @@
 	border-top: 1px solid hsl(var(--border));
 	background: hsl(var(--card));
 	color: hsl(var(--muted-foreground));
-	font:
-		12px/18px ui-monospace,
-		SFMono-Regular,
-		Menlo,
-		Monaco,
-		Consolas,
-		monospace;
+	font: calc(12px * var(--interface-font-scale, 1)) /
+		max(18px, calc(18px * var(--interface-font-scale, 1)))
+		var(
+			--interface-mono-font-override,
+			ui-monospace,
+			SFMono-Regular,
+			Menlo,
+			Monaco,
+			Consolas,
+			monospace
+		);
 }
 
 .cm-editor .cm-vim-panel input {
@@ -29,6 +33,6 @@
 
 @media (pointer: coarse) {
 	.cm-editor .cm-vim-panel input {
-		font-size: 16px;
+		font-size: max(16px, calc(12px * var(--interface-font-scale, 1)));
 	}
 }

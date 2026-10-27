@@ -289,7 +289,7 @@
 {/snippet}
 
 {#snippet chatSummary()}
-	<div class="relative flex-1 min-w-0">
+	<div class="relative flex-1 min-w-0" data-typography-chat-list>
 		<ChatSummary
 			{session}
 			variant="sidebar"

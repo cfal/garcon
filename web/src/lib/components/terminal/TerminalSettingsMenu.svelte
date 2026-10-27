@@ -1,7 +1,8 @@
 <script lang="ts">
+	import { fontSizeLabel, typographySizeLabel } from '$lib/components/shared/typography-labels.js';
 	import Settings from '@lucide/svelte/icons/settings';
 	import { getLocalSettings } from '$lib/context';
-	import { FONT_SIZE_OPTIONS, isFontSizeOption } from '$lib/utils/font-size.js';
+	import { TYPOGRAPHY_SIZE_OPTIONS, parseFontSizePreference } from '$lib/theme/typography.js';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Select from '$lib/components/ui/select';
@@ -11,8 +12,7 @@
 	let menuOpen = $state(false);
 
 	function setFontSize(size: string): void {
-		if (!isFontSizeOption(size)) return;
-		localSettings.set('terminalFontSize', size);
+		localSettings.set('terminalFontSize', parseFontSizePreference(size));
 	}
 </script>
 
@@ -35,12 +35,14 @@
 					if (value) setFontSize(value);
 				}}
 			>
-				<Select.Trigger class="w-[80px]" size="sm" aria-label={m.terminal_font_size()}>
-					{localSettings.terminalFontSize}px
+				<Select.Trigger class="w-28" size="sm" aria-label={m.terminal_font_size()}>
+					{typographySizeLabel('terminal', localSettings.terminalFontSize)}
 				</Select.Trigger>
 				<Select.Content>
-					{#each FONT_SIZE_OPTIONS as size (size)}
-						<Select.Item value={size} label="{size}px">{size}px</Select.Item>
+					{#each TYPOGRAPHY_SIZE_OPTIONS as size (size)}
+						<Select.Item value={size} label={fontSizeLabel(size, 'terminal')}
+							>{fontSizeLabel(size, 'terminal')}</Select.Item
+						>
 					{/each}
 				</Select.Content>
 			</Select.Root>

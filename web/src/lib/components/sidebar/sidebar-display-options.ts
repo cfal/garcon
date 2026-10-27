@@ -12,6 +12,7 @@ export interface SidebarDisplayOptions {
 	groupNestedProjectPaths: boolean;
 	chatItemLayout: ChatItemLayout;
 	showProjectPath: boolean;
+	chatFontScale: number;
 	sortMode: SidebarSortMode;
 	pinnedInsertPosition: PinnedInsertPosition;
 }
@@ -22,6 +23,7 @@ export const DEFAULT_SIDEBAR_DISPLAY_OPTIONS: SidebarDisplayOptions = {
 	groupNestedProjectPaths: false,
 	chatItemLayout: 'single-line',
 	showProjectPath: false,
+	chatFontScale: 1,
 	sortMode: 'manual',
 	pinnedInsertPosition: 'top',
 };

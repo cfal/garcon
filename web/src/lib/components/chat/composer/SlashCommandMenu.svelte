@@ -3,6 +3,7 @@
 	// Fetches the command list for the active agent/project when first shown,
 	// then filters locally by query.
 
+	import { observeTypographyScale } from '$lib/theme/typography.js';
 	import Slash from '@lucide/svelte/icons/slash';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import { getSlashCommands, type SlashCommand } from '$lib/api/commands.js';
@@ -13,7 +14,13 @@
 	import { transientLayer } from '$lib/workspace/transient-layer-action';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id';
 
-	const COMMAND_ROW_HEIGHT = 48;
+	let interfaceScale = $state(1);
+	const commandRowHeight = $derived(Math.ceil(48 * Math.max(1, interfaceScale)));
+	$effect(() =>
+		observeTypographyScale(document, 'interface', (scale) => {
+			interfaceScale = scale;
+		}),
+	);
 	const COMMAND_OVERSCAN = 3;
 	const COMMAND_LIST_HEIGHT = 240;
 
@@ -159,7 +166,7 @@
 			return filteredCommands.length;
 		},
 		get rowHeight() {
-			return COMMAND_ROW_HEIGHT;
+			return commandRowHeight;
 		},
 		get overscan() {
 			return COMMAND_OVERSCAN;
@@ -264,7 +271,7 @@
 						aria-posinset={entry.index + 1}
 						aria-setsize={filteredCommands.length}
 						class="absolute left-0 right-0 top-0 overflow-hidden"
-						style={`height:${COMMAND_ROW_HEIGHT}px; transform:translateY(${virtualWindow.getOffset(entry.index)}px);`}
+						style={`height:${commandRowHeight}px; transform:translateY(${virtualWindow.getOffset(entry.index)}px);`}
 					>
 						<svelte:boundary>
 							<button

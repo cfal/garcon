@@ -3,6 +3,7 @@ import { appendFile, chmod, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Browser, CDPSession, Page, Request } from 'playwright';
+import { expect as browserExpect } from 'playwright/test';
 import {
   AssistantMessage,
   BashToolUseMessage,
@@ -34,6 +35,7 @@ import {
 } from '../../support/scripted-claude.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { setTypography } from '../../support/typography.js';
 import {
   canonicalFilesWindowId,
   clickWorkspaceWindowAddAction,
@@ -5551,9 +5553,27 @@ describe('Chromium combined tool-use presentation', () => {
         for (const viewport of TRANSCRIPT_VIEWPORTS) {
           markPhase(`checking ${viewport.label} combined-feed geometry`);
           await fixture.page.setViewportSize(viewport);
+          await setTypography(fixture.page, {
+            interfaceFont: 'default', interfaceFontSize: 'default',
+            chatFeedFont: 'default', chatFeedFontSize: 'default',
+            chatCodeFont: 'default', chatCodeFontSize: 'default',
+          });
           await setCombineToolUses(fixture.page, true);
           const summary = fixture.page.getByRole('button', { name: 'Execute 40 commands' });
           await summary.waitFor({ state: 'visible' });
+          await browserExpect(summary).toHaveCSS('font-size', '14px');
+          const defaultFamily = await summary.evaluate((button) => getComputedStyle(button).fontFamily);
+          await setTypography(fixture.page, {
+            interfaceFont: 'departure-mono', interfaceFontSize: '20',
+          });
+          await browserExpect(summary).toHaveCSS('font-family', defaultFamily);
+          await browserExpect(summary).toHaveCSS('font-size', '14px');
+          await setTypography(fixture.page, {
+            chatFeedFont: 'inter', chatFeedFontSize: '18',
+            chatCodeFont: 'jetbrains-mono', chatCodeFontSize: '10',
+          });
+          await browserExpect(summary).toHaveCSS('font-family', /^Inter,/);
+          await browserExpect(summary).toHaveCSS('font-size', '18px');
           expect(await summary.getAttribute('aria-expanded')).toBe('false');
           expect(await fixture.page.locator('[data-chat-tool-group]').count()).toBe(1);
           const restingStyle = await summary.evaluate((button) => {
@@ -5593,6 +5613,9 @@ describe('Chromium combined tool-use presentation', () => {
             const sizer = document.querySelector<HTMLElement>('[data-chat-virtual-sizer]');
             return Number(sizer?.dataset.chatVirtualModelCount) > 40;
           });
+          const command = fixture.page.locator('[data-chat-bash-command]').first();
+          await browserExpect(command).toHaveCSS('font-family', /JetBrains Mono/);
+          await browserExpect(command).toHaveCSS('font-size', '10px');
           const expanded = await transcriptGeometry(fixture.page);
           expect(expanded.modelCount).toBeGreaterThan(40);
           expect(expanded.itemCount).toBeLessThan(100);

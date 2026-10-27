@@ -65,6 +65,7 @@
 	const entries = $derived(queue?.entries ?? []);
 	const entriesById = $derived(new Map(entries.map((entry) => [entry.id, entry])));
 	const listController = new QueuedInputListController();
+	$effect(() => listController.observeTypography());
 	const snapshot = $derived(listController.virtual.snapshot);
 	const renderedItems = $derived(listController.items(snapshot, entriesById));
 	let notice = $state<{ chatId: string; message: string } | null>(null);

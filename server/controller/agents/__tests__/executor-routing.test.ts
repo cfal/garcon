@@ -1,4 +1,4 @@
-import { afterEach, expect, test, mock } from 'bun:test';
+import { afterEach, expect, test, mock, spyOn } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -158,6 +158,29 @@ test('executor loss closes every producer even when one chat cannot commit its t
   }
   expect(f.ledger.currentRows(healthyChat)).toEqual(before);
   expect(f.ledger.currentRows(failedChat).filter(row => row.kind === 'provider-row')).toEqual([]);
+});
+
+test.each(['rows', 'run-ended'] as const)('a rejected %s publication aborts only its captured execution', async (type) => {
+  const f = await fixture();
+  for (const chatId of CHAT_IDS) await f.router.startSession(chatId, 'synthetic input');
+  const failedChat = CHAT_IDS[1]!;
+  const runId = f.ledger.activeRunId(failedChat)!;
+  const abort = spyOn(f.providers[1]!.integration.execution, 'abort');
+  const db = new Database(join(f.root, 'ledger', failedChat, 'ledger.sqlite'));
+  db.exec("CREATE TRIGGER fail_publication BEFORE INSERT ON transcript_rows BEGIN SELECT RAISE(FAIL, 'synthetic failure'); END");
+  db.close();
+
+  f.providers[1]!.nativePublishers[0]!(type === 'rows'
+    ? { type, rows: [{ message: new AssistantMessage('2026-09-23T00:00:00.000Z', 'Undelivered response') }] }
+    : { type, runId, outcome: 'finished' });
+  await new Promise<void>(resolve => queueMicrotask(resolve));
+  expect(abort).toHaveBeenCalledTimes(1);
+  expect(f.providers[0]!.calls.abort).toBe(0);
+  expect(f.providers[2]!.calls.abort).toBe(0);
+  expect(f.router.isChatRunning(failedChat)).toBe(false);
+  expect(f.router.isChatRunning(CHAT_IDS[0]!)).toBe(true);
+  expect(f.router.isChatRunning(CHAT_IDS[2]!)).toBe(true);
+  expect(f.ledger.currentRows(failedChat).filter(row => row.kind === 'run-ended')).toEqual([]);
 });
 
 test('a permission reply remains actionable while its executor is reconnecting', async () => {

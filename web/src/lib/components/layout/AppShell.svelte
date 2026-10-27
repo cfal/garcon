@@ -758,6 +758,7 @@
 			bind:this={desktopChatListPanelElement}
 			id="desktop-chat-list-panel"
 			data-workspace-chat-list-panel
+			data-divider-edge={hideChatList ? undefined : dividerEdge}
 			class={[
 				'h-full border-border bg-card outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
 				chatListAutohide.active && 'absolute inset-y-0 z-40 shadow-2xl',

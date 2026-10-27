@@ -3,6 +3,7 @@
 	setExecutorsTestContext();
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
+	import { TYPOGRAPHY_DEFAULTS } from '$lib/theme/typography.js';
 	import SidebarSearchDialogs from '../search/SidebarSearchDialogs.svelte';
 	import {
 		setAppShell,
@@ -124,6 +125,7 @@
 		},
 	} as never);
 	setLocalSettings({
+		...TYPOGRAPHY_DEFAULTS,
 		get sidebarGrouping() {
 			return sidebarGrouping;
 		},

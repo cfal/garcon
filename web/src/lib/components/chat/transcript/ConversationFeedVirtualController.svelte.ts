@@ -1,4 +1,5 @@
 import { untrack } from 'svelte';
+import { observeTypographyChanges } from '$lib/theme/typography.js';
 import type { Attachment } from 'svelte/attachments';
 import type { ConversationNativeScrollActivity } from '$lib/chat/transcript/conversation-native-scroll-settlement.js';
 import type {
@@ -13,6 +14,7 @@ import type {
 import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import type {
 	VirtualListSnapshot,
+	VirtualMutationAnchor,
 	VirtualResumeTarget,
 	VirtualTransactionRecord,
 } from '$lib/virt/virtual-list-types.js';
@@ -54,6 +56,7 @@ const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
 const MAX_SETTLE_ITERATIONS = 8;
 const MAX_TARGET_READY_ITERATIONS = 180;
 const OFFSET_TOLERANCE_PX = 0.5;
+const FONT_SCOPES = ['interface', 'chat-feed', 'chat-code', 'chat-output', 'code-diff'] as const;
 
 interface ConversationFeedVirtualControllerOptions {
 	get model(): ConversationVirtualFeedModel;
@@ -157,6 +160,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		$effect(() => this.#acknowledgeData(options.projectedDataRevision));
 		$effect(() => this.#publishPinned(options.pinned));
 		$effect(() => this.#publishVisibility(options.visible));
+		$effect(() =>
+			observeTypographyChanges(document, () => this.#invalidateMeasurements(), FONT_SCOPES),
+		);
 		$effect(() => {
 			void options.viewport;
 			void options.virtualRoot;
@@ -837,18 +843,34 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		}
 	}
 
+	#invalidateMeasurements(): void {
+		if (this.#destroyed) return;
+		let anchor: VirtualMutationAnchor = { kind: 'none' };
+		if (this.#configuredVisible && this.#activeTargetScrolls === 0) {
+			if (this.#measurementAnchor() === 'end') {
+				anchor = { kind: 'end' };
+			} else {
+				const readingAnchor = this.#captureVirtualAnchor(true);
+				if (readingAnchor) anchor = { kind: 'item', key: readingAnchor.key };
+			}
+		}
+		const result = this.#virt.apply({
+			kind: 'reset-measurements',
+			keys: this.#configuredGeometry.keys,
+			estimates: this.#configuredGeometry.estimates,
+			anchor,
+		});
+		if (result.kind !== 'applied') return;
+		if (this.#configuredVisible) this.#virt.remeasureAll();
+		else this.#remeasureOnShow = true;
+	}
+
 	#invalidateMeasurementsAfterHiddenResize(): void {
 		const previousWidth = this.#hiddenViewportWidth;
 		const currentWidth = this.#viewportWidth();
 		this.#hiddenViewportWidth = null;
 		if (previousWidth === null || currentWidth === null || previousWidth === currentWidth) return;
-		const result = this.#virt.apply({
-			kind: 'reset-measurements',
-			keys: this.#configuredGeometry.keys,
-			estimates: this.#configuredGeometry.estimates,
-			anchor: { kind: 'none' },
-		});
-		if (result.kind === 'applied') this.#remeasureOnShow = true;
+		this.#invalidateMeasurements();
 	}
 
 	#viewportWidth(): number | null {

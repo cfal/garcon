@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { fontSizeLabel, typographySizeLabel } from '$lib/components/shared/typography-labels.js';
 	import Clipboard from '@lucide/svelte/icons/clipboard';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -14,7 +15,7 @@
 		getTerminalRegistry,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
-	import { FONT_SIZE_OPTIONS, isFontSizeOption } from '$lib/utils/font-size.js';
+	import { TYPOGRAPHY_SIZE_OPTIONS, parseFontSizePreference } from '$lib/theme/typography.js';
 	import { terminalSurfaceId } from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -56,8 +57,7 @@
 	}
 
 	function setFontSize(size: string): void {
-		if (!isFontSizeOption(size)) return;
-		localSettings.set('terminalFontSize', size);
+		localSettings.set('terminalFontSize', parseFontSizePreference(size));
 	}
 
 	function terminate(): void {
@@ -85,14 +85,16 @@
 		<Settings />
 		<span class="flex min-w-0 flex-1 items-center justify-between gap-4">
 			<span>{m.terminal_font_size()}</span>
-			<span class="text-xs text-muted-foreground">{localSettings.terminalFontSize}px</span>
+			<span class="text-xs text-muted-foreground"
+				>{typographySizeLabel('terminal', localSettings.terminalFontSize)}</span
+			>
 		</span>
 	</menu.SubTrigger>
-	<menu.SubContent class="w-36">
+	<menu.SubContent class="w-max min-w-36 max-w-[calc(100vw-2rem)]">
 		<menu.RadioGroup value={localSettings.terminalFontSize} onValueChange={setFontSize}>
-			{#each FONT_SIZE_OPTIONS as size (size)}
+			{#each TYPOGRAPHY_SIZE_OPTIONS as size (size)}
 				<menu.RadioItem value={size} closeOnSelect={false}>
-					{size}px
+					{fontSizeLabel(size, 'terminal')}
 				</menu.RadioItem>
 			{/each}
 		</menu.RadioGroup>

@@ -167,6 +167,7 @@
 				onclick={closeWindow}
 			>
 				<X size={titlebarMetrics.iconSizePx} />
+				<span class="ansi-glyph" aria-hidden="true">[x]</span>
 			</button>
 		{/if}
 	</div>
