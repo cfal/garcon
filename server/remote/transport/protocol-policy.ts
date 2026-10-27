@@ -196,4 +196,3 @@ export function assertCliSupported(profile: ProtocolProfile, operation: CliOpera
     throw new DomainError('OPERATION_UNSUPPORTED', 'Executor protocol does not support this CLI operation', 422);
   }
 }
-
