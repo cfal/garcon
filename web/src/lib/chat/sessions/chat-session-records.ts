@@ -1,5 +1,5 @@
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
-import { createEmptyAgentSettings, normalizeAgentSettings } from '$shared/agent-settings';
+import { cloneAgentSettings } from '$shared/agent-settings';
 import type { ChatOrderGroup } from '$shared/chat-list';
 import { normalizePermissionMode, normalizeThinkingMode } from '$shared/chat-modes';
 import { stableJsonStringify } from '$shared/json';
@@ -11,17 +11,23 @@ export function normalizeExecutionFields<
 		agentId: string;
 		permissionMode?: unknown;
 		thinkingMode?: unknown;
-		agentSettings?: AgentSettingsEnvelope;
+		agentSettings: AgentSettingsEnvelope;
 	},
->(value: T): Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'agentSettings'> {
+>(value: T): Pick<ChatStartupConfig, 'permissionMode' | 'thinkingMode' | 'agentSettings'> {
 	return {
 		permissionMode: normalizePermissionMode(value.permissionMode),
 		thinkingMode: normalizeThinkingMode(value.thinkingMode),
-		agentSettings: normalizeAgentSettings(
-			value.agentId,
-			value.agentSettings,
-			createEmptyAgentSettings(value.agentId),
-		),
+		agentSettings: cloneAgentSettings(value.agentSettings),
+	};
+}
+
+export function normalizeRecordExecutionFields(
+	value: Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'agentSettings'>,
+): Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'agentSettings'> {
+	return {
+		permissionMode: normalizePermissionMode(value.permissionMode),
+		thinkingMode: normalizeThinkingMode(value.thinkingMode),
+		agentSettings: value.agentSettings === null ? null : cloneAgentSettings(value.agentSettings),
 	};
 }
 
@@ -41,7 +47,7 @@ export function toRecord(session: ChatListEntry): ChatSessionRecord {
 		apiProviderId: session.apiProviderId ?? null,
 		modelEndpointId: session.modelEndpointId ?? null,
 		modelProtocol: session.modelProtocol ?? null,
-		...normalizeExecutionFields(session),
+		...normalizeRecordExecutionFields(session),
 		createdAt: session.activity?.createdAt ?? null,
 		lastActivityAt: session.activity?.lastActivityAt ?? null,
 		lastReadAt: session.activity?.lastReadAt ?? null,

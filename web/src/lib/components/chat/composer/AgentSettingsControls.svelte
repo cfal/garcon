@@ -19,24 +19,25 @@
 
 	interface Props {
 		descriptors: readonly AgentSettingDescriptor[];
-		envelope: AgentSettingsEnvelope;
+		envelope: AgentSettingsEnvelope | null;
+		compatible?: boolean;
 		onChange: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;
 		disabled?: boolean;
 	}
 
-	let { descriptors, envelope, onChange, disabled = false }: Props = $props();
+	let { descriptors, envelope, onChange, disabled = false, compatible = true }: Props = $props();
 
 	function controlId(descriptor: AgentSettingDescriptor): string {
-		return `agent-setting-${envelope.ownerId}-${descriptor.key}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+		return `agent-setting-${envelope?.ownerId ?? ''}-${descriptor.key}`.replace(/[^a-zA-Z0-9_-]/g, '-');
 	}
 
 	function numberValue(descriptor: Extract<AgentSettingDescriptor, { type: 'number' }>): number {
-		const value = settingValue(envelope, descriptor);
+		const value = envelope ? settingValue(envelope, descriptor) : undefined;
 		return typeof value === 'number' ? value : descriptor.min;
 	}
 
 	function stringValue(descriptor: AgentSettingDescriptor): string {
-		const value = settingValue(envelope, descriptor);
+		const value = envelope ? settingValue(envelope, descriptor) : undefined;
 		return typeof value === 'string' ? value : '';
 	}
 
@@ -49,7 +50,9 @@
 	}
 </script>
 
-{#if descriptors.length > 0}
+{#if !compatible || !envelope}
+	<p class="text-sm text-muted-foreground" role="status">Provider settings are unavailable or incompatible.</p>
+{:else if descriptors.length > 0}
 	<div class="flex flex-wrap items-center gap-2" data-slot="agent-settings-controls">
 		{#each descriptors as descriptor (descriptor.key)}
 			<svelte:boundary>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { areAgentSettingsCompatible } from '$shared/agent-settings';
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import ComposerInputSurface from './ComposerInputSurface.svelte';
 	import { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
@@ -708,8 +709,13 @@
 	const modelsLoading = $derived(
 		executors.isReady(agentState.executorId) && !modelCatalog.isValidated && !modelCatalog.error,
 	);
+	const catalogSettings = $derived(modelCatalog.getDefaultAgentSettings(agentState.agentId));
+	const settingsEnvelope = $derived(agentState.agentSettings ?? catalogSettings);
+	const settingsCompatible = $derived(Boolean(catalogSettings && settingsEnvelope
+		&& areAgentSettingsCompatible(settingsEnvelope, catalogSettings, modelCatalog.getAgentSettingsDescriptors(agentState.agentId))));
 	const sendTitle = $derived.by(() => {
 		if (modelsLoading && !controllerCommand) return m.chat_composer_loading_models();
+		if (!settingsCompatible && !controllerCommand) return 'Saved provider settings are unavailable or incompatible.';
 		if (requiresQueuedSubmission && !controllerCommand) return m.chat_composer_queue_message();
 		return m.chat_composer_send_message();
 	});
@@ -722,6 +728,7 @@
 				(!controllerCommand &&
 					(!executors.isReady(agentState.executorId) ||
 						!modelCatalog.isValidated ||
+						!settingsCompatible ||
 						!providerAvailable)),
 			composerState.inputText,
 			composerState.images.length,
@@ -921,7 +928,8 @@
 				{#snippet agentSettings()}
 					<AgentSettingsControls
 						descriptors={modelCatalog.getAgentSettingsDescriptors(agentState.agentId)}
-						envelope={agentState.agentSettings}
+						envelope={settingsEnvelope}
+						compatible={settingsCompatible}
 						onChange={(descriptor, value) => onAgentSettingChange?.(descriptor, value)}
 						disabled={!onAgentSettingChange || directAdmissionPending}
 					/>

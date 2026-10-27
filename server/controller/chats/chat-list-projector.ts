@@ -165,11 +165,7 @@ export class ChatListProjector {
       modelProtocol: chat.modelProtocol,
       permissionMode: chat.permissionMode,
       thinkingMode: chat.thinkingMode,
-      agentSettings: session.agentSettingsById[session.agentId] ?? {
-        ownerId: session.agentId,
-        schemaVersion: 1,
-        values: {},
-      },
+      agentSettings: session.agentSettingsById[session.agentId] ?? null,
       title,
       projectPath: chat.projectPath,
       orderGroup,

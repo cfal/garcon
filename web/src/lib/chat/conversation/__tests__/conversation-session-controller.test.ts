@@ -49,6 +49,7 @@ import type {
 import type { CommandAcceptedResponse } from '$shared/chat-command-contracts';
 import type { ChatSnapshotResponse } from '$shared/chat-snapshot';
 import type { ResolvedModelSelection } from '$shared/start-selection';
+import type { AgentSettingDescriptor } from '$shared/agent-integration';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
 import type {
@@ -66,6 +67,13 @@ import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/ch
 import { ConversationUiState } from '../conversation-ui-state.svelte.js';
 import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
+
+const settingDescriptors = (agentId: string): readonly AgentSettingDescriptor[] => [{
+	key: agentId === 'codex' ? 'reasoningEffort' : 'thinkingMode',
+	label: 'Synthetic setting',
+	type: 'enum',
+	options: ['auto', 'on', 'off', 'high'].map(value => ({ value, label: value })),
+}];
 
 vi.mock('$lib/api/chats.js', () => ({
 	createQueuedInput: vi.fn(),
@@ -158,6 +166,7 @@ function captureAnimationFrames() {
 
 function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	const isProcessing = overrides.isProcessing ?? false;
+	const agentId = overrides.agentId ?? 'claude';
 	return {
 		id: 'chat-1',
 		projectPath: '/workspace/project',
@@ -170,7 +179,7 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 		modelProtocol: null,
 		permissionMode: 'default',
 		thinkingMode: 'none',
-		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
+		agentSettings: { ownerId: agentId, schemaVersion: 1, values: agentId === 'claude' ? { thinkingMode: 'auto' } : {} },
 		createdAt: null,
 		lastActivityAt: '2026-03-27T08:00:00.000Z',
 		lastReadAt: null,
@@ -692,7 +701,7 @@ function createDeps(chat = createRunningChat()) {
 				supportsForkWhileRunning: false, supportsUpdateProjectPath: true,
 				supportsSteering: true, supportsImages: true, fileAttachmentMimeTypes: [],
 				acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false,
-				supportedPermissionModes: ['default'], supportedThinkingModes: ['none'], settings: [],
+				supportedPermissionModes: ['default'], supportedThinkingModes: ['none'], settings: settingDescriptors(id),
 				defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },
 			})),
 			getModelForSelection: vi.fn<SessionControllerDeps['modelCatalog']['getModelForSelection']>(
@@ -709,7 +718,7 @@ function createDeps(chat = createRunningChat()) {
 			getAgentLabel: vi.fn((agentId: string) => agentId),
 			executorInstanceId: 'synthetic-instance',
 			isValidated: true,
-			getAgentSettingsDescriptors: () => [],
+			getAgentSettingsDescriptors: settingDescriptors,
 			getDefaultAgentSettings: vi.fn((agentId: string) => ({
 				ownerId: agentId,
 				schemaVersion: 1,
@@ -1015,6 +1024,31 @@ describe('ConversationSessionController', () => {
 		deps.sessions.isDraft.mockReturnValue(true);
 		expect(controller.executorHandoff.canConfirm).toBe(true);
 		controller.executorHandoff.cancel();
+	});
+
+	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
+		'preserves incompatible settings and composer input through %s', async submit => {
+			const saved = { ownerId: 'claude', schemaVersion: 7, values: { preserved: true } };
+			const { deps } = createDeps(createRunningChat({ agentSettings: saved }));
+			const controller = new ConversationSessionController(deps);
+			controller.handleChatSwitchIfChanged('chat-1');
+			deps.composerState.inputText = 'Synthetic draft';
+			expect(await controller[submit]('chat-1')).toBe('rejected');
+			expect(deps.agentState.agentSettings).toEqual(saved);
+			expect(deps.composerState.inputText).toBe('Synthetic draft');
+			expect(mockRunChat).not.toHaveBeenCalled();
+			expect(mockSteerChat).not.toHaveBeenCalled();
+		});
+
+	it('resolves absent display settings from current defaults without changing the saved record', async () => {
+		const { deps } = createDeps(createRunningChat({ agentSettings: null }));
+		deps.modelCatalog.getDefaultAgentSettings.mockReturnValue({ ownerId: 'claude', schemaVersion: 3, values: {} });
+		const controller = new ConversationSessionController(deps);
+		controller.handleChatSwitchIfChanged('chat-1');
+		deps.composerState.inputText = 'Synthetic prompt';
+		await controller.submitForChat('chat-1');
+		expect(mockRunChat).toHaveBeenCalled();
+		expect(deps.sessions.byId['chat-1']?.agentSettings).toBeNull();
 	});
 
 	it('preserves saved remote settings while its catalog is empty and fences every submit route', async () => {

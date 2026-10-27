@@ -39,7 +39,7 @@ async function offlineForm(settings: PullRequestReviewSettings) {
 			modelProtocol: null,
 			permissionMode: 'default',
 			thinkingMode: 'high',
-			agentSettingsById: {},
+			agentSettingsById: { claude: { ownerId: 'claude', schemaVersion: 7, values: { saved: 'unchanged' } } },
 			tags: [],
 			preambleChoice: { mode: 'defaults' },
 		},
@@ -63,6 +63,7 @@ it('edits and round-trips every automatic-review filter and limit while offline'
 	};
 	const { form, repository } = await offlineForm(settings);
 	try {
+		expect(form.startup.agentSettingsCompatible).toBe(false);
 		expect(form.baseBranches).toBe('main\nrelease/stable');
 		expect(form.includeLabels).toBe('review, please');
 		expect(form.excludeLabels).toBe('blocked');

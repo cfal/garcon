@@ -38,6 +38,17 @@ function response() {
 }
 
 describe('chat list contract', () => {
+  it('distinguishes literal absence from a saved schema-one envelope', () => {
+    const value = response();
+    value.sessions[0].agentSettings = null;
+    expect(parseChatListResponse(value).sessions[0].agentSettings).toBeNull();
+    expect(parseChatListResponse(response()).sessions[0].agentSettings)
+      .toEqual({ ownerId: 'codex', schemaVersion: 1, values: {} });
+    for (const malformed of [undefined, {}, { ownerId: 'other', schemaVersion: 1, values: {} }, { ownerId: 'codex', schemaVersion: 0, values: {} }]) {
+      value.sessions[0].agentSettings = malformed;
+      expect(() => parseChatListResponse(value)).toThrow('agentSettings');
+    }
+  });
   it('preserves optional executor identity and rejects malformed explicit IDs', () => {
     for (const executorId of [undefined, null, 'local', '22222222-2222-4222-8222-222222222222']) {
       const value = response();

@@ -18,7 +18,6 @@ import {
 	type AgentSettingDescriptor,
 	type AgentSettingsEnvelope,
 } from '$shared/agent-integration';
-import { createEmptyAgentSettings } from '$shared/agent-settings';
 import {
 	ANY_FILE_ATTACHMENT_MIME_TYPE,
 	type FileAttachmentMimeTypes,
@@ -190,12 +189,10 @@ function normalizeSettingDescriptors(value: unknown): AgentSettingDescriptor[] {
 function normalizeDefaultSettings(
 	agentId: string,
 	value: unknown,
-	fallback?: AgentSettingsEnvelope,
 ): AgentSettingsEnvelope {
 	const parsed = parseAgentSettingsEnvelope(value);
 	if (parsed?.ownerId === agentId) return parsed;
-	if (fallback?.ownerId === agentId) return fallback;
-	return createEmptyAgentSettings(agentId);
+	throw new Error('Invalid provider defaults in model catalog');
 }
 
 function normalizeTemplateId(value: unknown): ApiProviderTemplateId | undefined {
@@ -583,8 +580,8 @@ export class ModelCatalogStore {
 		return this.agentMetadata[agentId]?.settings ?? [];
 	}
 
-	getDefaultAgentSettings(agentId: SessionAgentId): AgentSettingsEnvelope {
-		return this.agentMetadata[agentId]?.defaultSettings ?? createEmptyAgentSettings(agentId);
+	getDefaultAgentSettings(agentId: SessionAgentId): AgentSettingsEnvelope | null {
+		return this.agentMetadata[agentId]?.defaultSettings ?? null;
 	}
 
 	getPermissionModes(agentId: SessionAgentId): readonly PermissionMode[] {

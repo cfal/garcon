@@ -75,7 +75,7 @@ describe('scheduled chat executor initialization', () => {
 		const expectedTarget = { ...prompt.target };
 		if (executorId !== remoteExecutor.id) delete expectedTarget.executorId;
 		expect(form.buildDefinition(new Date('2029-12-01T00:00:00Z'))?.target).toMatchObject(expectedTarget);
-		expect(form.startup.agentSettings.values).toEqual({});
+		expect(form.startup.agentSettings?.values).toEqual({});
 	});
 
 	it('never restores saved values over user edits made while settings are pending', async () => {
@@ -127,7 +127,7 @@ describe('scheduled chat executor initialization', () => {
 		discovery.resolve();
 		await vi.waitFor(() => {
 			expect(form.startup.agentSettingsById.codex).toBeDefined();
-			expect(form.startup.agentSettings.values).toEqual(kind === 'omitted'
+			expect(form.startup.agentSettings?.values).toEqual(kind === 'omitted'
 				? { thinkingMode: 'catalog-default' }
 				: savedValues);
 		});

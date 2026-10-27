@@ -12,6 +12,7 @@ import type { GitWorktreeItem } from '$lib/api/git';
 import type { AgentMetadata, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
+import type { AgentSettingDescriptor } from '$shared/agent-integration';
 import {
 	findModelForSelection,
 	modelValueForSelection,
@@ -214,7 +215,12 @@ const mockModelCatalog = {
 		schemaVersion: 1,
 		values: agentId === 'claude' ? { thinkingMode: 'auto' } : {},
 	})),
-	getAgentSettingsDescriptors: vi.fn(() => []),
+	getAgentSettingsDescriptors: vi.fn((agentId: string): readonly AgentSettingDescriptor[] => [{
+		key: agentId === 'claude' ? 'thinkingMode' : 'effort',
+		label: 'Synthetic setting',
+		type: 'enum',
+		options: ['auto', 'high'].map(value => ({ value, label: value })),
+	}]),
 	getPermissionModes: vi.fn((agentId: string) =>
 		agentId === 'claude'
 			? ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan']
@@ -1436,7 +1442,7 @@ describe('NewChatFormState', () => {
 
 		expect(formState.permissionMode).toBe('default');
 		expect(formState.thinkingMode).toBe('none');
-		expect(formState.agentSettings.ownerId).toBe('claude');
+		expect(formState.agentSettings?.ownerId).toBe('claude');
 	});
 
 	it('does not replace manually touched execution modes when changing agent', async () => {
