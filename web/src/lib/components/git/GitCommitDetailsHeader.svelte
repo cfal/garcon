@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { FontSizePreference } from '$lib/theme/typography.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Copy from '@lucide/svelte/icons/copy';
@@ -16,10 +17,10 @@
 		onRevertCommit: () => void;
 		diffMode: DiffMode;
 		contextLines: number;
-		diffFontSize: string;
+		diffFontSize: FontSizePreference;
 		onSetDiffMode: (mode: DiffMode) => void;
 		onSetContextLines: (lines: number) => void;
-		onSetDiffFontSize: (size: string) => void;
+		onSetDiffFontSize: (size: FontSizePreference) => void;
 		showFileTreeToggle: boolean;
 		fileTreeVisible: boolean;
 		onToggleFileTree: () => void;

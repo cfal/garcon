@@ -117,7 +117,7 @@
 						? (expanded) => disclosureState.setOpen('notice-body', 'body', expanded, false)
 						: undefined}
 				>
-					<div class={['text-sm', message.title && 'mt-1']}>
+					<div class={['typography-chat-prose text-sm', message.title && 'mt-1']}>
 						<Markdown
 							source={message.content}
 							variant="presented"
@@ -131,7 +131,12 @@
 					</div>
 				</CollapsibleBody>
 			{:else}
-				<div class={['text-sm whitespace-pre-wrap break-words', message.title && 'mt-1']}>
+				<div
+					class={[
+						'typography-chat-prose text-sm whitespace-pre-wrap break-words',
+						message.title && 'mt-1',
+					]}
+				>
 					{message.content}
 				</div>
 			{/if}

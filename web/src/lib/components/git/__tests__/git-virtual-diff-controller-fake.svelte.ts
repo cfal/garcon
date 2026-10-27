@@ -19,6 +19,7 @@ export const virtualDiffControllerCalls = {
 	mutations: [] as VirtualItemsMutation[],
 	scrollToIndexes: [] as number[],
 	scrollToStarts: 0,
+	remeasures: 0,
 };
 
 const instances = new Set<FakeVirtualListController>();
@@ -31,6 +32,7 @@ type VirtualDiffControllerPort = Pick<
 	| 'item'
 	| 'apply'
 	| 'refreshLayout'
+	| 'remeasureAll'
 	| 'scrollToIndex'
 	| 'scrollToStart'
 	| 'scrollBy'
@@ -44,6 +46,7 @@ export function resetVirtualDiffControllerFake(): void {
 	virtualDiffControllerCalls.mutations.length = 0;
 	virtualDiffControllerCalls.scrollToIndexes.length = 0;
 	virtualDiffControllerCalls.scrollToStarts = 0;
+	virtualDiffControllerCalls.remeasures = 0;
 }
 
 export function publishVirtualDiffRange(startIndex: number, endIndex = startIndex): void {
@@ -141,6 +144,9 @@ export class FakeVirtualListController implements VirtualDiffControllerPort {
 	}
 
 	refreshLayout(): void {}
+	remeasureAll(): void {
+		virtualDiffControllerCalls.remeasures += 1;
+	}
 
 	scrollToIndex(index: number): VirtualIndexScrollResult {
 		virtualDiffControllerCalls.scrollToIndexes.push(index);

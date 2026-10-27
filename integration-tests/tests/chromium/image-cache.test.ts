@@ -54,6 +54,7 @@ test('retains inline images across chat switches and evicts them when the cache 
     async function openSettings(): Promise<void> {
       await page.getByRole('button', { name: 'More actions', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+      await dialog.getByRole('tab', { name: 'Behavior', exact: true }).click();
     }
     const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
     const sizeSelect = dialog.getByRole('combobox', { name: 'Inline image cache size', exact: true });

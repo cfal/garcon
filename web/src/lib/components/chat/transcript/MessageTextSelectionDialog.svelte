@@ -71,7 +71,7 @@
 			bind:this={textSurfaceRef}
 			role="region"
 			aria-label={m.chat_message_select_text_dialog_title()}
-			class="max-h-[60vh] min-h-48 select-text overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-input bg-background p-3 font-mono text-sm leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{text}</pre>
+			class="typography-chat-source max-h-[60vh] min-h-48 select-text overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-input bg-background p-3 font-mono text-sm leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{text}</pre>
 
 		<Dialog.Footer>
 			<Button variant="outline" onclick={onClose}>{m.sidebar_actions_cancel()}</Button>

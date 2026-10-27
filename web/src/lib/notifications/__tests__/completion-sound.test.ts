@@ -90,17 +90,25 @@ describe('completion sound', () => {
 			value: audioContextConstructor,
 		});
 		let enabled = false;
-		const removeListeners = installCompletionSoundUnlockListeners(() => enabled);
+		const isEnabled = vi.fn(() => enabled);
+		const removeListeners = installCompletionSoundUnlockListeners(isEnabled);
+		const target = document.createElement('button');
+		target.addEventListener('pointerdown', (event) => event.stopPropagation());
+		document.body.append(target);
 
 		try {
-			window.dispatchEvent(new Event('pointerdown'));
+			target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
 			expect(audioContextConstructor).not.toHaveBeenCalled();
 
 			enabled = true;
-			window.dispatchEvent(new Event('pointerdown'));
+			target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
 			expect(audioContextConstructor).toHaveBeenCalledOnce();
+			expect(isEnabled).toHaveBeenCalledTimes(2);
+			target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+			expect(isEnabled).toHaveBeenCalledTimes(2);
 		} finally {
 			removeListeners();
+			target.remove();
 			Object.defineProperty(window, 'AudioContext', {
 				configurable: true,
 				value: originalAudioContext,

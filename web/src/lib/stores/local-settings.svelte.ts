@@ -3,11 +3,21 @@
 
 import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
 import {
+	parseTypographyPreferences,
+	parseSurfaceFont,
+	parseFontSizePreference,
+	TYPOGRAPHY_DEFAULTS,
+	getTypographySurface,
+	type TypographySurface,
+	type FontSizePreference,
+	type TypographyPreferences,
+} from '$lib/theme/typography.js';
+import type { FontPreference } from '$lib/theme/fonts.js';
+import {
 	getLocalStorageItem,
 	LOCAL_STORAGE_KEYS,
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
-import { parseFontSizeOption, type FontSizeOption } from '$lib/utils/font-size.js';
 import {
 	DEFAULT_CHAT_LIST_DOCK,
 	normalizeChatListDock,
@@ -40,7 +50,7 @@ import {
 
 export const COMPLETION_SOUND_MODE_VALUES = ['off', 'default', 'custom'] as const;
 export type CompletionSoundMode = (typeof COMPLETION_SOUND_MODE_VALUES)[number];
-export const COMPLETION_SOUND_VISIBILITY_VALUES = ['always', 'unfocused'] as const;
+const COMPLETION_SOUND_VISIBILITY_VALUES = ['always', 'unfocused'] as const;
 export type CompletionSoundVisibility = (typeof COMPLETION_SOUND_VISIBILITY_VALUES)[number];
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
@@ -86,7 +96,7 @@ export const FILE_OPEN_PLACEMENT_VALUES = [
 export const HIDEABLE_TOOL_GROUPS = [
 	{
 		id: 'bash',
-		toolTypes: ['bash-tool-use', 'write-stdin-tool-use'],
+		toolTypes: ['bash-tool-use', 'write-stdin-tool-use', 'claude-monitor-tool-use'],
 	},
 	{
 		id: 'exec',
@@ -132,13 +142,15 @@ export const HIDEABLE_TOOL_GROUPS = [
 			'external-tool-use',
 			'mcp-tool-use',
 			'pi-tool-search-tool-use',
+			'claude-tool-search-tool-use',
 		],
 	},
 ] as const;
 export type HideableToolType = (typeof HIDEABLE_TOOL_GROUPS)[number]['toolTypes'][number];
 
-export interface LocalSettingsSnapshot {
+export interface LocalSettingsSnapshot extends TypographyPreferences {
 	themePreference: ThemePreference;
+	terminalAppearance: boolean;
 	overlayBackdropEffects: boolean;
 	highlightActiveWindow: boolean;
 	autoExpandTools: boolean;
@@ -176,10 +188,7 @@ export interface LocalSettingsSnapshot {
 	codeEditorWordWrap: boolean;
 	codeEditorVimMode: boolean;
 	codeEditorLineNumbers: boolean;
-	codeEditorFontSize: string;
-	gitDiffFontSize: string;
 	markdownViewerFontSize: string;
-	terminalFontSize: FontSizeOption;
 	textEditorOpenPlacement: FileOpenPlacementPreference;
 	imageViewerOpenPlacement: FileOpenPlacementPreference;
 	markdownViewerOpenPlacement: FileOpenPlacementPreference;
@@ -193,6 +202,7 @@ export interface LocalSettingsSnapshot {
 }
 
 type BooleanLocalSettingKey =
+	| 'terminalAppearance'
 	| 'overlayBackdropEffects'
 	| 'highlightActiveWindow'
 	| 'autoExpandTools'
@@ -216,6 +226,8 @@ type BooleanLocalSettingKey =
 
 const DEFAULTS: LocalSettingsSnapshot = {
 	themePreference: DEFAULT_THEME_PREFERENCE,
+	terminalAppearance: false,
+	...TYPOGRAPHY_DEFAULTS,
 	overlayBackdropEffects: true,
 	highlightActiveWindow: true,
 	autoExpandTools: false,
@@ -253,10 +265,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	codeEditorWordWrap: false,
 	codeEditorVimMode: false,
 	codeEditorLineNumbers: true,
-	codeEditorFontSize: '12',
-	gitDiffFontSize: '12',
 	markdownViewerFontSize: '12',
-	terminalFontSize: '13',
 	textEditorOpenPlacement: 'same-window',
 	imageViewerOpenPlacement: 'same-window',
 	markdownViewerOpenPlacement: 'same-window',
@@ -412,6 +421,8 @@ function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
 function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	return {
 		themePreference: parseThemePreference(parsed.themePreference),
+		terminalAppearance: parseBoolean(parsed.terminalAppearance, DEFAULTS.terminalAppearance),
+		...parseTypographyPreferences(parsed),
 		highlightActiveWindow: parseBoolean(
 			parsed.highlightActiveWindow,
 			DEFAULTS.highlightActiveWindow,
@@ -491,13 +502,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.codeEditorLineNumbers,
 			DEFAULTS.codeEditorLineNumbers,
 		),
-		codeEditorFontSize: parseString(parsed.codeEditorFontSize, DEFAULTS.codeEditorFontSize),
-		gitDiffFontSize: parseString(parsed.gitDiffFontSize, DEFAULTS.gitDiffFontSize),
 		markdownViewerFontSize: parseString(
 			parsed.markdownViewerFontSize,
 			DEFAULTS.markdownViewerFontSize,
 		),
-		terminalFontSize: parseFontSizeOption(parsed.terminalFontSize, DEFAULTS.terminalFontSize),
 		textEditorOpenPlacement: parseFileOpenPlacement(
 			parsed.textEditorOpenPlacement,
 			DEFAULTS.textEditorOpenPlacement,
@@ -545,6 +553,22 @@ function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
 
 export class LocalSettingsStore {
 	themePreference = $state<ThemePreference>(DEFAULTS.themePreference);
+	terminalAppearance = $state(DEFAULTS.terminalAppearance);
+	interfaceFont = $state(DEFAULTS.interfaceFont);
+	interfaceFontSize = $state(DEFAULTS.interfaceFontSize);
+	chatListFont = $state(DEFAULTS.chatListFont);
+	chatListFontSize = $state(DEFAULTS.chatListFontSize);
+	chatFeedFont = $state(DEFAULTS.chatFeedFont);
+	chatFeedFontSize = $state(DEFAULTS.chatFeedFontSize);
+	chatCodeFont = $state(DEFAULTS.chatCodeFont);
+	chatCodeFontSize = $state(DEFAULTS.chatCodeFontSize);
+	chatOutputFont = $state(DEFAULTS.chatOutputFont);
+	chatOutputFontSize = $state(DEFAULTS.chatOutputFontSize);
+	expandedEditorFont = $state(DEFAULTS.expandedEditorFont);
+	expandedEditorFontSize = $state(DEFAULTS.expandedEditorFontSize);
+	codeEditorFont = $state(DEFAULTS.codeEditorFont);
+	codeDiffFont = $state(DEFAULTS.codeDiffFont);
+	terminalFont = $state(DEFAULTS.terminalFont);
 	overlayBackdropEffects = $state(DEFAULTS.overlayBackdropEffects);
 	highlightActiveWindow = $state(DEFAULTS.highlightActiveWindow);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
@@ -644,6 +668,17 @@ export class LocalSettingsStore {
 		persistLocalSettings(next);
 	}
 
+	setTypography(surface: TypographySurface, font: FontPreference, size: FontSizePreference): void {
+		const { fontKey, sizeKey } = getTypographySurface(surface);
+		const next = {
+			...this.snapshot(),
+			[fontKey]: parseSurfaceFont(surface, font),
+			[sizeKey]: parseFontSizePreference(size),
+		};
+		this.#apply(next);
+		persistLocalSettings(next);
+	}
+
 	toggle(key: BooleanLocalSettingKey): void {
 		this.set(key, !this[key]);
 	}
@@ -678,6 +713,22 @@ export class LocalSettingsStore {
 	snapshot(): LocalSettingsSnapshot {
 		return {
 			themePreference: this.themePreference,
+			terminalAppearance: this.terminalAppearance,
+			interfaceFont: this.interfaceFont,
+			interfaceFontSize: this.interfaceFontSize,
+			chatListFont: this.chatListFont,
+			chatListFontSize: this.chatListFontSize,
+			chatFeedFont: this.chatFeedFont,
+			chatFeedFontSize: this.chatFeedFontSize,
+			chatCodeFont: this.chatCodeFont,
+			chatCodeFontSize: this.chatCodeFontSize,
+			chatOutputFont: this.chatOutputFont,
+			chatOutputFontSize: this.chatOutputFontSize,
+			expandedEditorFont: this.expandedEditorFont,
+			expandedEditorFontSize: this.expandedEditorFontSize,
+			codeEditorFont: this.codeEditorFont,
+			codeDiffFont: this.codeDiffFont,
+			terminalFont: this.terminalFont,
 			overlayBackdropEffects: this.overlayBackdropEffects,
 			highlightActiveWindow: this.highlightActiveWindow,
 			autoExpandTools: this.autoExpandTools,
@@ -734,6 +785,22 @@ export class LocalSettingsStore {
 
 	#apply(snap: LocalSettingsSnapshot): void {
 		this.themePreference = snap.themePreference;
+		this.terminalAppearance = snap.terminalAppearance;
+		this.interfaceFont = snap.interfaceFont;
+		this.interfaceFontSize = snap.interfaceFontSize;
+		this.chatListFont = snap.chatListFont;
+		this.chatListFontSize = snap.chatListFontSize;
+		this.chatFeedFont = snap.chatFeedFont;
+		this.chatFeedFontSize = snap.chatFeedFontSize;
+		this.chatCodeFont = snap.chatCodeFont;
+		this.chatCodeFontSize = snap.chatCodeFontSize;
+		this.chatOutputFont = snap.chatOutputFont;
+		this.chatOutputFontSize = snap.chatOutputFontSize;
+		this.expandedEditorFont = snap.expandedEditorFont;
+		this.expandedEditorFontSize = snap.expandedEditorFontSize;
+		this.codeEditorFont = snap.codeEditorFont;
+		this.codeDiffFont = snap.codeDiffFont;
+		this.terminalFont = snap.terminalFont;
 		this.overlayBackdropEffects = snap.overlayBackdropEffects;
 		this.highlightActiveWindow = snap.highlightActiveWindow;
 		this.autoExpandTools = snap.autoExpandTools;

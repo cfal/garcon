@@ -93,7 +93,7 @@
 	{/if}
 
 	<!-- Diff lines -->
-	<div class="text-[11px] font-mono leading-[18px]">
+	<div class="typography-code-diff typography-inline-diff text-[11px] font-mono leading-[18px]">
 		{#if diff.kind === 'too-large'}
 			<div class="px-2.5 py-2 text-muted-foreground">
 				{m.chat_tool_diff_too_large()}

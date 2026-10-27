@@ -154,11 +154,11 @@ describe('AppShellStore', () => {
 	});
 
 	describe('settings tabs', () => {
-		it('defaults unknown sections to interface', () => {
+		it('defaults unknown sections to appearance', () => {
 			const store = new AppShellStore();
 
 			store.openSettings('display');
-			expect(store.settingsTab).toBe('interface');
+			expect(store.settingsTab).toBe('appearance');
 
 			store.openSettings('shortcuts');
 			expect(store.settingsTab).toBe('shortcuts');
@@ -184,7 +184,7 @@ describe('AppShellStore', () => {
 			store.setSettingsTab('shortcuts');
 			expect(store.settingsTab).toBe('shortcuts');
 			store.openSettings();
-			expect(store.settingsTab).toBe('interface');
+			expect(store.settingsTab).toBe('appearance');
 			store.closeSettings();
 			expect(store.showSettings).toBe(false);
 		});

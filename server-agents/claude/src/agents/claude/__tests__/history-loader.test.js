@@ -19,6 +19,22 @@ async function withTempJsonl(lines, fn) {
 }
 
 describe('Claude strict history import', () => {
+  it('ignores request-cache blobs without filtering identically worded human input', async () => {
+    const text = 'Synthetic discovery acknowledgement';
+    await withTempJsonl([
+      JSON.stringify({ type: 'api-request-blob', sessionId: 'synthetic-session', hash: 'synthetic-cache-key',
+        message: { role: 'user', content: [
+          { type: 'tool_result', tool_use_id: 'synthetic-search', content: [{ type: 'tool_reference', tool_name: 'Monitor' }] },
+          { type: 'text', text },
+        ] } }),
+      JSON.stringify({ type: 'user', sessionId: 'synthetic-session', uuid: 'synthetic-user',
+        message: { role: 'user', content: text } }),
+    ], async (filePath) => {
+      const messages = await loadClaudeChatMessages(filePath, undefined, { throwOnError: true });
+      expect(messages).toMatchObject([{ type: 'user-message', content: text }]);
+    });
+  });
+
   it('[TLV5-ADOPT.07-CLAUDE-UNIT-01] rejects incomplete records and recognized content payloads before retry', async () => {
     const invalidEntry = JSON.stringify({ sessionId: 'session-1', type: 'user' });
     await withTempJsonl([invalidEntry], async (filePath) => {

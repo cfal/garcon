@@ -210,6 +210,197 @@ describe('OpenCode server death availability fencing', () => {
 });
 
 describe('OpenCode server death turn semantics', () => {
+  for (const admission of ['start', 'resume', 'one-shot']) {
+    it.each(['resolved', 'rejected'])(`fences ${admission} when %s discovery crosses death`, async (discoveryOutcome) => {
+      const termination = deferred();
+      const retired = deferred();
+      const discoveryEntered = deferred();
+      const providers = deferred();
+      const oldClient = deathClient({ prompt: mock(() => Promise.resolve({ data: { parts: [] } })) });
+      oldClient.config.providers = mock(() => {
+        discoveryEntered.resolve();
+        return providers.promise;
+      });
+      const replacement = {
+        client: deathClient(),
+        server: { close: mock(() => undefined) },
+      };
+      const createInstance = mock()
+        .mockImplementationOnce(() => Promise.resolve({
+          client: oldClient,
+          server: { close: () => retired.resolve(), termination: termination.promise },
+        }))
+        .mockImplementation(() => Promise.resolve(replacement));
+      const info = mock(() => undefined);
+      const runtime = new OpenCodeRuntime({
+        createInstance,
+        sseRetryDelayMs: 60_000,
+        logger: { debug() {}, info, warn() {}, error() {} },
+      });
+      const published = collectOperation('run-discovery');
+      const activated = mock(() => undefined);
+      const request = {
+        command: 'hello',
+        agentSessionId: 'session-1',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        model: 'provider/model',
+        thinkingMode: 'high',
+        permissionMode: 'default',
+        operation: published.operation,
+        onSessionActivated: activated,
+      };
+      const pending = admission === 'start'
+        ? runtime.startSession(request)
+        : admission === 'resume'
+          ? runtime.runTurn(request)
+          : runtime.runSingleQuery('hello', request);
+      const outcome = pending.then(() => null, (error) => error);
+      try {
+        await discoveryEntered.promise;
+        termination.resolve({ kind: 'exit', code: null, signal: 'SIGKILL' });
+        await retired.promise;
+        if (discoveryOutcome === 'resolved') providers.resolve({ data: { providers: [] } });
+        else providers.reject(new Error('discovery unavailable'));
+
+        expect(await outcome).toMatchObject({
+          message: 'OpenCode server process was retired while the request was in flight',
+        });
+        expect(oldClient.session.prompt).not.toHaveBeenCalled();
+        expect(oldClient.session.delete).not.toHaveBeenCalled();
+        expect(activated).not.toHaveBeenCalled();
+        expect(published.events).toEqual([]);
+        expect(runtime.isRunning('session-1')).toBe(false);
+        expect(info.mock.calls.some(([message]) => message === 'OpenCode session created and registered')).toBe(false);
+        expect(createInstance).toHaveBeenCalledTimes(1);
+        expect(await runtime.getClient()).toBe(replacement.client);
+        if (admission !== 'resume') {
+          await waitFor(() => replacement.client.session.delete.mock.calls.length === 1);
+          expect(replacement.client.session.delete.mock.calls[0][0]).toMatchObject({
+            sessionID: 'session-1', directory: '/repo',
+          });
+        }
+        expect(runtime.isTemporarilyUnavailable()).toBe(false);
+      } finally {
+        await runtime.shutdown();
+      }
+    });
+  }
+
+  it('preserves the replacement turn waiter when retired discovery finishes late', async () => {
+    const termination = deferred();
+    const retired = deferred();
+    const discoveryEntered = deferred();
+    const providers = deferred();
+    const promptEntered = deferred();
+    const prompt = deferred();
+    const oldClient = deathClient();
+    oldClient.config.providers = mock(() => {
+      discoveryEntered.resolve();
+      return providers.promise;
+    });
+    const replacement = {
+      client: deathClient({ prompt: mock(() => {
+        promptEntered.resolve();
+        return prompt.promise;
+      }) }),
+      server: { close: mock(() => undefined) },
+    };
+    const createInstance = mock()
+      .mockImplementationOnce(() => Promise.resolve({
+        client: oldClient,
+        server: { close: () => retired.resolve(), termination: termination.promise },
+      }))
+      .mockImplementation(() => Promise.resolve(replacement));
+    const runtime = new OpenCodeRuntime({ createInstance, sseRetryDelayMs: 60_000 });
+    const first = collectOperation('run-retired');
+    const second = collectOperation('run-replacement');
+    const request = { command: 'hello', agentSessionId: 'session-1', chatId: 'chat-1', projectPath: '/repo' };
+    const stale = runtime.runTurn({
+      ...request, model: 'provider/model', thinkingMode: 'high', operation: first.operation,
+    }).then(() => null, (error) => error);
+    try {
+      await discoveryEntered.promise;
+      termination.resolve({ kind: 'exit', code: null, signal: 'SIGKILL' });
+      await retired.promise;
+      const successor = runtime.runTurn({ ...request, operation: second.operation });
+      await promptEntered.promise;
+      providers.resolve({ data: { providers: [] } });
+      expect(await stale).toMatchObject({
+        message: 'OpenCode server process was retired while the request was in flight',
+      });
+      expect(runtime.isRunning('session-1')).toBe(true);
+      expect(first.events).toEqual([]);
+      prompt.resolve({ data: {
+        info: {
+          id: 'assistant-replacement', role: 'assistant', parentID: 'user-replacement',
+          sessionID: 'session-1', finish: 'stop', time: { completed: Date.now() },
+        },
+        parts: [],
+      } });
+      await successor;
+      expect(second.events.filter((event) => event.type === 'run-ended')).toEqual([{
+        type: 'run-ended', runId: 'run-replacement', outcome: 'finished',
+      }]);
+      expect(replacement.client.session.abort).not.toHaveBeenCalled();
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('waits for the turn terminal when the stream fails during discovery', async () => {
+    const discoveryEntered = deferred();
+    const providers = deferred();
+    const streamEnd = deferred();
+    const streamFailed = deferred();
+    const promptEntered = deferred();
+    const prompt = deferred();
+    const client = deathClient({ prompt: mock(() => {
+      promptEntered.resolve();
+      return prompt.promise;
+    }) });
+    client.config.providers = mock(() => {
+      discoveryEntered.resolve();
+      return providers.promise;
+    });
+    client.global.event.mockImplementationOnce(() => Promise.resolve({ stream: (async function* () {
+      yield connectedEnvelope();
+      await streamEnd.promise;
+    })() }));
+    const runtime = new OpenCodeRuntime({
+      createInstance: mock(() => Promise.resolve({ client, server: { close() {} } })),
+      sseRetryDelayMs: 60_000,
+      logger: { debug() {}, info() {}, warn() {}, error(message) {
+        if (message === 'OpenCode SSE listener failed and will reconnect') streamFailed.resolve();
+      } },
+    });
+    const published = collectOperation('run-discovery');
+    const outcome = runtime.runTurn({
+      command: 'hello', agentSessionId: 'session-1', chatId: 'chat-1', projectPath: '/repo',
+      model: 'provider/model', thinkingMode: 'high', operation: published.operation,
+    }).then(() => null, (error) => error);
+    try {
+      await discoveryEntered.promise;
+      streamEnd.resolve();
+      await streamFailed.promise;
+      providers.resolve({ data: { providers: [] } });
+      await promptEntered.promise;
+      prompt.resolve({ data: {
+        info: {
+          id: 'assistant-discovery', role: 'assistant', parentID: 'user-discovery',
+          sessionID: 'session-1', finish: 'stop', time: { completed: Date.now() },
+        },
+        parts: [],
+      } });
+      expect(await outcome).toBeNull();
+      expect(published.events.filter((event) => event.type === 'run-ended')).toEqual([{
+        type: 'run-ended', runId: 'run-discovery', outcome: 'finished',
+      }]);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
   it('publishes exactly one failure when a provider error terminal races the death', async () => {
     const termination = deferred();
     const close = mock(() => undefined);

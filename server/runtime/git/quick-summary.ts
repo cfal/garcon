@@ -1,34 +1,24 @@
-import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import {
-  GIT_QUICK_SUMMARY_FINGERPRINT_VERSION,
   type GitCommandTrace,
   type GitQuickSummaryOptions,
   type GitQuickSummaryResponse,
   type NumstatMap,
-  type PorcelainStatusEntry,
 } from './types.js';
 import {
   readOnlyGitOptions,
   runGitTraced,
 } from './run.js';
 import { parseNumstatZ } from './diff-file-list.js';
-import {
-  hasIndexChange,
-  hasWorkTreeChange,
-  parsePorcelainV1Z,
-} from './porcelain-status.js';
+import { parsePorcelainV1Z } from './porcelain-status.js';
 
-function hashString(input: string): string {
-  return createHash('sha256').update(input).digest('hex').slice(0, 16);
-}
+const DIFF_STATS_TIMEOUT_MS = 2_000;
+const DIFF_STATS_MAX_BYTES = 1024 * 1024;
 
 export function notRepositoryQuickSummary(projectPath: string): GitQuickSummaryResponse {
   return {
     status: 'not-git-repository',
     project: projectPath,
-    fingerprintVersion: GIT_QUICK_SUMMARY_FINGERPRINT_VERSION,
-    fingerprint: null,
     message: 'Git is not initialized in this directory.',
   };
 }
@@ -37,18 +27,12 @@ function unknownSummary(projectPath: string, message: string): GitQuickSummaryRe
   return {
     status: 'unknown',
     project: projectPath,
-    fingerprintVersion: GIT_QUICK_SUMMARY_FINGERPRINT_VERSION,
-    fingerprint: null,
     message,
   };
 }
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function cleanPath(filePath: string): string {
-  return filePath.replace(/\/+$/g, '');
 }
 
 function sumStats(stats: NumstatMap): { additions: number; deletions: number } {
@@ -59,10 +43,6 @@ function sumStats(stats: NumstatMap): { additions: number; deletions: number } {
     deletions += entry.deletions;
   }
   return { additions, deletions };
-}
-
-function hasUnstagedChange(entry: PorcelainStatusEntry): boolean {
-  return entry.indexStatus !== '?' && hasWorkTreeChange(entry.workTreeStatus);
 }
 
 function firstDetachedRefLabel(stdout: string): string {
@@ -78,9 +58,10 @@ async function resolveBranchLabel(
   hasCommits: boolean,
   trace?: GitCommandTrace[],
   signal?: AbortSignal,
+  run = runGitTraced,
 ): Promise<string> {
   try {
-    const { stdout } = await runGitTraced(
+    const { stdout } = await run(
       projectPath,
       ['symbolic-ref', '--quiet', '--short', 'HEAD'],
       trace,
@@ -95,7 +76,7 @@ async function resolveBranchLabel(
   if (!hasCommits) return 'main';
 
   try {
-    const { stdout } = await runGitTraced(
+    const { stdout } = await run(
       projectPath,
       [
         'for-each-ref',
@@ -115,7 +96,7 @@ async function resolveBranchLabel(
   }
 
   try {
-    const { stdout } = await runGitTraced(
+    const { stdout } = await run(
       projectPath,
       ['rev-parse', '--short', 'HEAD'],
       trace,
@@ -127,12 +108,13 @@ async function resolveBranchLabel(
   }
 }
 
-export function createQuickSummaryOperations() {
+export function createQuickSummaryOperations(run = runGitTraced) {
   async function getQuickSummary({
     projectPath,
     trace,
     signal,
   }: GitQuickSummaryOptions): Promise<GitQuickSummaryResponse> {
+    signal?.throwIfAborted();
     try {
       await fs.access(projectPath);
     } catch {
@@ -140,102 +122,73 @@ export function createQuickSummaryOperations() {
     }
 
     const [
-      repoRootResult,
+      repositoryResult,
       headResult,
       statusResult,
-      workingStatsResult,
-      cachedStatsResult,
-      unmergedResult,
     ] = await Promise.allSettled([
-      runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, readOnlyGitOptions({ signal })),
-      runGitTraced(projectPath, ['rev-parse', '--verify', 'HEAD'], trace, readOnlyGitOptions({ signal })),
-      runGitTraced(
+      run(projectPath, ['rev-parse', '--show-toplevel'], trace, readOnlyGitOptions({ signal })),
+      run(projectPath, ['rev-parse', '--verify', 'HEAD'], trace, readOnlyGitOptions({ signal })),
+      run(
         projectPath,
-        ['status', '--porcelain=v1', '-z', '-uall'],
+        ['status', '--porcelain=v1', '-z', '--untracked-files=normal'],
         trace,
         readOnlyGitOptions({ signal }),
       ),
-      runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, readOnlyGitOptions({ signal })),
-      runGitTraced(
-        projectPath,
-        ['diff', '--cached', '--numstat', '-z'],
-        trace,
-        readOnlyGitOptions({ signal }),
-      ),
-      runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, readOnlyGitOptions({ signal })),
     ]);
 
-    if (repoRootResult.status === 'rejected') return notRepositoryQuickSummary(projectPath);
+    signal?.throwIfAborted();
+    if (repositoryResult.status === 'rejected') return notRepositoryQuickSummary(projectPath);
     if (statusResult.status === 'rejected') {
       return unknownSummary(projectPath, errorText(statusResult.reason));
     }
 
-    const repoRoot = repoRootResult.value.stdout.trim() || projectPath;
     const head = headResult.status === 'fulfilled' ? headResult.value.stdout.trim() : '';
     const hasCommits = headResult.status === 'fulfilled';
-    const branch = await resolveBranchLabel(projectPath, head, hasCommits, trace, signal);
-    const statusOutput = statusResult.value.stdout;
-    const statusEntries = parsePorcelainV1Z(statusOutput).map((entry) => ({
-      ...entry,
-      path: cleanPath(entry.path),
-    }));
-    const workingStatsOutput =
-      workingStatsResult.status === 'fulfilled' ? workingStatsResult.value.stdout : '';
-    const cachedStatsOutput =
-      cachedStatsResult.status === 'fulfilled' ? cachedStatsResult.value.stdout : '';
-    const unmergedOutput = unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '';
-    const workingStats = parseNumstatZ(workingStatsOutput);
-    const cachedStats = parseNumstatZ(cachedStatsOutput);
-    const workingTotals = sumStats(workingStats);
-    const cachedTotals = sumStats(cachedStats);
-
-    const changedPaths = new Set<string>();
-    const trackedChangedPaths = new Set<string>();
-    const untrackedPaths = new Set<string>();
-    const stagedPaths = new Set<string>();
-    const unstagedPaths = new Set<string>();
-
-    for (const entry of statusEntries) {
-      if (!entry.path) continue;
-      changedPaths.add(entry.path);
-      if (entry.indexStatus === '?') {
-        untrackedPaths.add(entry.path);
-      } else {
-        trackedChangedPaths.add(entry.path);
-      }
-      if (hasIndexChange(entry.indexStatus)) stagedPaths.add(entry.path);
-      if (hasUnstagedChange(entry)) unstagedPaths.add(entry.path);
-    }
-
-    const fingerprint = `v${GIT_QUICK_SUMMARY_FINGERPRINT_VERSION}:${hashString([
-      `git-quick-summary-v${GIT_QUICK_SUMMARY_FINGERPRINT_VERSION}`,
-      projectPath,
-      repoRoot,
-      branch,
-      head,
-      statusOutput,
-      workingStatsOutput,
-      cachedStatsOutput,
-      unmergedOutput,
-    ].join('\x1f'))}`;
+    const entries = parsePorcelainV1Z(statusResult.value.stdout);
+    const hasTrackedChanges = entries.some((entry) => entry.indexStatus !== '?');
+    const [branch, diffStats] = await Promise.all([
+      resolveBranchLabel(projectPath, head, hasCommits, trace, signal, run),
+      hasTrackedChanges ? collectDiffStats(projectPath, trace, signal, run) : { additions: 0, deletions: 0 },
+    ]);
+    signal?.throwIfAborted();
 
     return {
       status: 'ready',
       project: projectPath,
-      repoRoot,
       branch,
-      hasCommits,
-      changedFiles: changedPaths.size,
-      trackedChangedFiles: trackedChangedPaths.size,
-      untrackedFiles: untrackedPaths.size,
-      stagedFiles: stagedPaths.size,
-      unstagedFiles: unstagedPaths.size,
-      additions: workingTotals.additions + cachedTotals.additions,
-      deletions: workingTotals.deletions + cachedTotals.deletions,
-      fingerprintVersion: GIT_QUICK_SUMMARY_FINGERPRINT_VERSION,
-      fingerprint,
+      hasChanges: entries.length > 0,
+      hasUntracked: entries.some((entry) => entry.indexStatus === '?'),
+      diffStats,
     };
   }
 
   return { getQuickSummary };
+}
+
+async function collectDiffStats(
+  projectPath: string,
+  trace: GitCommandTrace[] | undefined,
+  signal: AbortSignal | undefined,
+  run: typeof runGitTraced,
+): Promise<{ additions: number; deletions: number } | null> {
+  // Optional totals must not hold branch/change presence behind a costly diff or external filter.
+  const options = readOnlyGitOptions({
+    signal,
+    timeoutMs: DIFF_STATS_TIMEOUT_MS,
+    maxStdoutBytes: DIFF_STATS_MAX_BYTES,
+  });
+  const results = await Promise.allSettled([
+    run(projectPath, ['diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv'], trace, options),
+    run(projectPath, ['diff', '--cached', '--numstat', '-z', '--no-ext-diff', '--no-textconv'], trace, options),
+  ]);
+  signal?.throwIfAborted();
+  let additions = 0;
+  let deletions = 0;
+  for (const result of results) {
+    if (result.status === 'rejected') return null;
+    const totals = sumStats(parseNumstatZ(result.value.stdout));
+    additions += totals.additions;
+    deletions += totals.deletions;
+  }
+  return { additions, deletions };
 }

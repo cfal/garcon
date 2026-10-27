@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import type { FontPreference } from '$lib/theme/fonts.js';
 	import { terminalSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types';
 	import { setLocalSettings } from '$lib/context';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte';
@@ -30,6 +31,8 @@
 		onRename?: (terminalId: string, title: string | null) => void;
 		onFocus?: () => void;
 		onFontSize?: (fontSize: number) => void;
+		onFontPreference?: (font: FontPreference) => void;
+		onAttach?: () => void;
 		onReattach?: (terminalId: string) => void;
 		focusRequestToken?: number;
 		runtimeDelay?: Promise<void>;
@@ -54,6 +57,8 @@
 		onRename = () => undefined,
 		onFocus = () => undefined,
 		onFontSize = () => undefined,
+		onFontPreference = () => undefined,
+		onAttach = () => undefined,
 		onReattach = () => undefined,
 		focusRequestToken = 0,
 		runtimeDelay,
@@ -110,7 +115,10 @@
 			inputControls.buildToolbarSequence(key);
 			onToolbarKey(key);
 		},
-		attach: () => ({ lease: 1, ready: Promise.resolve() }),
+		attach: () => {
+			onAttach();
+			return { lease: 1, ready: Promise.resolve() };
+		},
 		park: () => undefined,
 		scheduleFit: () => undefined,
 		focus: () => {
@@ -119,6 +127,7 @@
 		},
 		pasteFromClipboard: () => Promise.resolve(),
 		applyFontSize: (fontSize: number) => onFontSize(fontSize),
+		applyFontPreference: (font) => onFontPreference(font),
 	};
 	const frameBridge = new SurfaceFrameBridge();
 	const layout = createWorkspaceLayoutStore();

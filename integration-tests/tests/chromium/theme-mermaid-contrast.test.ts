@@ -62,7 +62,14 @@ describe("Mermaid theme contrast", () => {
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
     const page = await context.newPage();
+    const departureFont = await readFile(fileURLToPath(new URL(
+      '../../../web/src/lib/theme/assets/DepartureMono-1.500.woff2', import.meta.url,
+    )));
     await page.route(`${APP_URL}**`, async (route) => {
+      if (new URL(route.request().url()).pathname.endsWith('.woff2')) {
+        await route.fulfill({ contentType: 'font/woff2', body: departureFont });
+        return;
+      }
       if (new URL(route.request().url()).pathname === "/loader.js") {
         await route.fulfill({
           contentType: "text/javascript",
@@ -95,6 +102,7 @@ describe("Mermaid theme contrast", () => {
         const themeId = rendererThemeIdFor(profile);
         await page.evaluate((theme) => {
           document.documentElement.dataset.theme = theme.id;
+          document.documentElement.dataset.themeAppearance = 'terminal';
           document.documentElement.classList.toggle(
             "dark",
             theme.colorScheme === "dark",
@@ -209,6 +217,43 @@ describe("Mermaid theme contrast", () => {
           );
         }
       }
+      const geometry = await page.evaluate(async () => {
+        const scope = globalThis as typeof globalThis & {
+          renderMermaid: (source: string, theme: string) => Promise<string>;
+        };
+        const root = document.querySelector('#diagram')!;
+        const source = 'flowchart TB\nA[Independent font selections] --> B[A longer label that wraps across several lines inside a fixed diagram node]';
+        const read = () => Array.from(root.querySelectorAll('foreignObject')).map((box) => {
+          const label = box.querySelector('.nodeLabel')!;
+          const bounds = label.getBoundingClientRect();
+          return { font: getComputedStyle(label).fontFamily, width: bounds.width, height: bounds.height,
+            boxWidth: box.getAttribute('width'), boxHeight: box.getAttribute('height') };
+        });
+        document.documentElement.dataset.themeAppearance = 'standard';
+        document.documentElement.dataset.interfaceFont = 'default';
+        document.documentElement.dataset.chatFeedFont = 'default';
+        document.documentElement.dataset.chatCodeFont = 'default';
+        for (const surface of ['interface', 'chat-feed', 'chat-code']) document.documentElement.style.removeProperty(`--${surface}-font-override`);
+        const cachedSvg = await scope.renderMermaid(source, 'standard-light');
+        root.innerHTML = cachedSvg;
+        const standard = read();
+        document.documentElement.dataset.themeAppearance = 'terminal';
+        document.documentElement.dataset.interfaceFont = 'departure-mono';
+        document.documentElement.dataset.chatFeedFont = 'departure-mono';
+        document.documentElement.dataset.chatCodeFont = 'departure-mono';
+        for (const surface of ['interface', 'chat-feed', 'chat-code']) document.documentElement.style.setProperty(`--${surface}-font-override`, 'var(--font-choice-departure-mono)');
+        await document.fonts.ready;
+        const toggled = read();
+        root.innerHTML = await scope.renderMermaid(source, 'standard-light');
+        const cached = read();
+        root.innerHTML = await scope.renderMermaid(source + '\n', 'standard-light');
+        return { standard, toggled, cached, fresh: read(), fontLoaded: document.fonts.check('11px "Departure Mono"') };
+      });
+      expect(geometry.fontLoaded).toBe(true);
+      expect(geometry.standard).toHaveLength(2);
+      expect(geometry.toggled).toEqual(geometry.standard);
+      expect(geometry.cached).toEqual(geometry.standard);
+      expect(geometry.fresh).toEqual(geometry.standard);
     } finally {
       await context.close();
       await browser.close();

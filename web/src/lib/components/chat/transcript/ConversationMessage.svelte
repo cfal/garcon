@@ -612,9 +612,12 @@
 											disclosureState.setOpen(userMessageDisclosureKind, 'body', expanded, false)
 									: undefined}
 							>
-								<div class={userMessagePresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
+								<div
+									class={['typography-chat-prose text-sm', userMessagePresentation?.style && 'mt-1']}
+								>
 									{#if isPlainTextInput(asUser)}
-										<pre class="whitespace-pre-wrap break-words font-mono">{asUser.content}</pre>
+										<pre
+											class="typography-chat-plain whitespace-pre-wrap break-words font-mono">{asUser.content}</pre>
 									{:else}
 									<Markdown
 										source={asUser.content}
@@ -783,7 +786,7 @@
 									/>
 								</button>
 								{#if thinkingOpen}
-									<div class="mt-0.5 text-sm text-foreground/90">
+									<div class="typography-chat-prose mt-0.5 text-sm text-foreground/90">
 										<Markdown
 											source={asThinking.content}
 											variant="thinking"
@@ -808,7 +811,7 @@
 								class="assistant-message-context-target chat-message-context-target message-context-menu-trigger relative -my-1 block w-full py-1"
 							>
 								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
-									<div class="px-px text-sm text-foreground">
+									<div class="typography-chat-prose px-px text-sm text-foreground">
 										{#if plainResponse}
 											<CodeBlock text={formattedContent} />
 										{:else}
@@ -871,7 +874,7 @@
 					{:else if asError}
 						<ChatEventCard variant="error">
 							{#snippet body()}
-								<div class="text-sm whitespace-pre-wrap break-words">
+								<div class="typography-chat-prose text-sm whitespace-pre-wrap break-words">
 									{formattedContent}
 								</div>
 							{/snippet}

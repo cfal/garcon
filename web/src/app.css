@@ -19,11 +19,23 @@
 @import './lib/theme/profiles/paper-dark.css';
 @import './lib/theme/profiles/slate-light.css';
 @import './lib/theme/profiles/slate-dark.css';
+@import './lib/theme/profiles/ansi-light.css';
+@import './lib/theme/profiles/ansi-dark.css';
+@import './lib/theme/fonts.css';
+@import './lib/theme/ansi.css';
 @plugin '@tailwindcss/typography';
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
+	--text-xs: calc(0.75rem * var(--text-scale, 1));
+	--text-sm: calc(0.875rem * var(--text-scale, 1));
+	--text-base: calc(1rem * var(--text-scale, 1));
+	--text-lg: calc(1.125rem * var(--text-scale, 1));
+	--text-xl: calc(1.25rem * var(--text-scale, 1));
+	--text-2xl: calc(1.5rem * var(--text-scale, 1));
+	--text-3xl: calc(1.875rem * var(--text-scale, 1));
+	--text-4xl: calc(2.25rem * var(--text-scale, 1));
 	--color-background: hsl(var(--background));
 	--color-foreground: hsl(var(--foreground));
 	--color-composer-foreground: color-mix(
@@ -317,7 +329,7 @@
 		background-position: right 0.625rem center;
 		padding: 0.25rem 2rem 0.25rem 0.5rem;
 		color: hsl(var(--foreground));
-		font-size: 1rem;
+		font-size: max(16px, calc(1rem * var(--text-scale, 1)));
 		line-height: 1.5;
 		transition:
 			border-color 140ms ease,
@@ -340,7 +352,7 @@
 
 	@media (min-width: 640px) and (pointer: fine) {
 		.select-native {
-			font-size: 0.875rem;
+			font-size: calc(0.875rem * var(--text-scale, 1));
 		}
 	}
 
@@ -568,7 +580,7 @@
 		padding: 0.5rem 0.75rem;
 		border: 1px solid hsl(var(--border));
 		text-align: left;
-		font-size: 0.875rem;
+		font-size: calc(0.875rem * var(--text-scale, 1));
 	}
 
 	.markdown-body thead {
@@ -642,8 +654,7 @@
 		margin: 0;
 		background-color: theme(--color-background);
 		color: theme(--color-foreground);
-		font-family:
-			-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+		font-family: var(--interface-font-override, var(--system-ui-font));
 		-webkit-font-smoothing: antialiased;
 		-moz-osx-font-smoothing: grayscale;
 		overscroll-behavior: none;

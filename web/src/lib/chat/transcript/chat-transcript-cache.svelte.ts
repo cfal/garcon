@@ -44,10 +44,6 @@ export interface ChatTranscriptSnapshot {
 	stale: boolean;
 }
 
-interface ChatTranscriptEntry extends ChatTranscriptSnapshot {
-	lastValidatedAt: string | null;
-}
-
 export interface ChatTranscriptCacheOptions {
 	limit: number;
 	maxEntries?: number;
@@ -73,7 +69,7 @@ function nowIso(): string {
 	return new Date().toISOString();
 }
 
-function snapshotFromEntry(entry: ChatTranscriptEntry): ChatTranscriptSnapshot {
+function snapshotFromEntry(entry: ChatTranscriptSnapshot): ChatTranscriptSnapshot {
 	return {
 		chatId: entry.chatId,
 		transcriptViewId: entry.transcriptViewId,
@@ -88,6 +84,8 @@ function snapshotFromEntry(entry: ChatTranscriptEntry): ChatTranscriptSnapshot {
 class ChatTranscriptPersistenceQueue {
 	#pending = new Map<string, ChatTranscriptPersistDraft>();
 	#timer: TimeoutHandle | null = null;
+	#batchChatIds: string[] = [];
+	#batchIndex = 0;
 	#delayMs: number;
 	#persist: (draft: ChatTranscriptPersistDraft) => void;
 	#setTimeout: SetTimeoutFn;
@@ -108,8 +106,11 @@ class ChatTranscriptPersistenceQueue {
 
 	schedule(draft: ChatTranscriptPersistDraft): void {
 		this.#pending.set(draft.chatId, draft);
-		if (this.#timer) return;
-		this.#timer = this.#setTimeout(() => this.flush(), this.#delayMs);
+		this.#scheduleDrain(this.#delayMs);
+	}
+
+	hasPending(chatId: string): boolean {
+		return this.#pending.has(chatId);
 	}
 
 	remove(chatId: string): void {
@@ -119,16 +120,44 @@ class ChatTranscriptPersistenceQueue {
 	flush(): void {
 		const drafts = [...this.#pending.values()];
 		this.#pending.clear();
-		if (this.#timer) {
+		this.#batchChatIds = [];
+		this.#batchIndex = 0;
+		if (this.#timer !== null) {
 			this.#clearTimeout(this.#timer);
 			this.#timer = null;
 		}
 		for (const draft of drafts) this.#persist(draft);
 	}
+
+	#scheduleDrain(delayMs: number): void {
+		if (this.#timer !== null) return;
+		this.#timer = this.#setTimeout(() => this.#drainNext(), delayMs);
+	}
+
+	#drainNext(): void {
+		this.#timer = null;
+		if (this.#batchChatIds.length === 0) this.#batchChatIds = [...this.#pending.keys()];
+		const chatId = this.#batchChatIds[this.#batchIndex];
+		this.#batchIndex += 1;
+		const draft = chatId === undefined ? undefined : this.#pending.get(chatId);
+		if (draft) this.#pending.delete(draft.chatId);
+		try {
+			if (draft) this.#persist(draft);
+		} finally {
+			if (this.#batchIndex < this.#batchChatIds.length) {
+				this.#scheduleDrain(0);
+			} else {
+				this.#batchChatIds = [];
+				this.#batchIndex = 0;
+				// New traffic waits for the next coalescing window, even during a long drain.
+				if (this.#pending.size > 0) this.#scheduleDrain(this.#delayMs);
+			}
+		}
+	}
 }
 
 export class ChatTranscriptCache {
-	#entries = new SvelteMap<string, ChatTranscriptEntry>();
+	#entries = new SvelteMap<string, ChatTranscriptSnapshot>();
 	#lastAccessedAt = new Map<string, string>();
 	#storage: LocalChatTranscriptStorage;
 	#limit: number;
@@ -154,7 +183,6 @@ export class ChatTranscriptCache {
 					},
 					{ limit: this.#limit },
 				);
-				this.#storage.markValidated(draft.chatId);
 			},
 		});
 	}
@@ -183,7 +211,7 @@ export class ChatTranscriptCache {
 		if (!chatId) return null;
 		const restored = this.#storage.restore(chatId, { limit: this.#limit });
 		if (!restored) return null;
-		const entry: ChatTranscriptEntry = {
+		const entry: ChatTranscriptSnapshot = {
 			chatId,
 			transcriptViewId: restored.transcriptViewId,
 			messages: restored.entries,
@@ -191,7 +219,6 @@ export class ChatTranscriptCache {
 			oldestOrdinal: restored.entries[0]?.ordinal ?? 0,
 			nextBeforeOrdinal: restored.nextBeforeOrdinal,
 			stale: restored.stale,
-			lastValidatedAt: null,
 		};
 		this.#entries.set(chatId, entry);
 		this.#lastAccessedAt.set(chatId, nowIso());
@@ -211,7 +238,7 @@ export class ChatTranscriptCache {
 			page.nextBeforeOrdinal,
 		);
 		const now = nowIso();
-		const entry: ChatTranscriptEntry = {
+		const entry: ChatTranscriptSnapshot = {
 			chatId,
 			transcriptViewId: page.transcriptViewId,
 			messages: windowed,
@@ -219,7 +246,6 @@ export class ChatTranscriptCache {
 			oldestOrdinal: windowed[0]?.ordinal ?? 0,
 			nextBeforeOrdinal,
 			stale: options.stale ?? false,
-			lastValidatedAt: now,
 		};
 		this.#entries.set(chatId, entry);
 		this.#lastAccessedAt.set(chatId, now);
@@ -266,7 +292,7 @@ export class ChatTranscriptCache {
 
 		const merged = mergeTranscriptEntriesByOrdinal(page.messages, entry.messages);
 		const windowed = merged.slice(-this.#limit);
-		const next: ChatTranscriptEntry = {
+		const next: ChatTranscriptSnapshot = {
 			...entry,
 			messages: windowed,
 			lastOrdinal: entry.lastOrdinal,
@@ -309,7 +335,7 @@ export class ChatTranscriptCache {
 			};
 		}
 		const windowed = applied.messages.slice(-this.#limit);
-		const next: ChatTranscriptEntry = {
+		const next: ChatTranscriptSnapshot = {
 			...entry,
 			messages: windowed,
 			lastOrdinal: applied.lastOrdinal,
@@ -338,9 +364,9 @@ export class ChatTranscriptCache {
 	markValidated(chatId: string): void {
 		if (!chatId) return;
 		const current = this.#entries.get(chatId);
-		const now = nowIso();
-		if (current) this.#entries.set(chatId, { ...current, stale: false, lastValidatedAt: now });
-		this.#storage.markValidated(chatId);
+		if (current) this.#entries.set(chatId, { ...current, stale: false });
+		// A pending replacement validates on write; the stored snapshot may still belong to an older view.
+		if (!this.#persistence.hasPending(chatId)) this.#storage.markValidated(chatId);
 	}
 
 	listCursors(limit = 20): ChatTranscriptCursor[] {
@@ -402,7 +428,7 @@ export class ChatTranscriptCache {
 		}
 		const windowed = applied.messages.slice(-this.#limit);
 		const now = nowIso();
-		const entry: ChatTranscriptEntry = {
+		const entry: ChatTranscriptSnapshot = {
 			chatId,
 			transcriptViewId,
 			messages: windowed,
@@ -410,7 +436,6 @@ export class ChatTranscriptCache {
 			oldestOrdinal: windowed[0]?.ordinal ?? 0,
 			nextBeforeOrdinal: retainedEarlierPageCursor(applied.messages, windowed, null),
 			stale: false,
-			lastValidatedAt: now,
 		};
 		this.#entries.set(chatId, entry);
 		this.#lastAccessedAt.set(chatId, now);

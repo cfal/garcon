@@ -69,6 +69,8 @@
 					'paper-dark': { colorScheme: 'dark', themeColor: '#272420' },
 					'slate-light': { colorScheme: 'light', themeColor: '#f6f7f9' },
 					'slate-dark': { colorScheme: 'dark', themeColor: '#282c34' },
+					'ansi-light': { colorScheme: 'light', themeColor: '#f0f0f0' },
+					'ansi-dark': { colorScheme: 'dark', themeColor: '#0d0d0d' },
 				};
 				const defaultPreference = {
 					mode: 'system',
@@ -80,8 +82,14 @@
 				const isThemeId = (value) =>
 					typeof value === 'string' && Object.prototype.hasOwnProperty.call(profiles, value);
 				let preference = defaultPreference;
+				let terminalAppearance = false;
+				let typography = {};
 				try {
 					const stored = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
+					if (isRecord(stored)) {
+						terminalAppearance = stored.terminalAppearance === true;
+						typography = stored;
+					}
 					const candidate = isRecord(stored) ? stored.themePreference : undefined;
 					if (isRecord(candidate) && candidate.mode === 'fixed' && isThemeId(candidate.themeId)) {
 						preference = { mode: 'fixed', themeId: candidate.themeId };
@@ -115,6 +123,53 @@
 				const profile = profiles[themeId];
 				const root = document.documentElement;
 				root.dataset.theme = themeId;
+				root.dataset.themeAppearance = terminalAppearance ? 'terminal' : 'standard';
+				const surfaces = [
+					['interface', 'interfaceFont', 'interfaceFontSize', 14],
+					['chat-list', 'chatListFont', 'chatListFontSize', 14],
+					['chat-feed', 'chatFeedFont', 'chatFeedFontSize', 14],
+					['chat-code', 'chatCodeFont', 'chatCodeFontSize', 12],
+					['chat-output', 'chatOutputFont', 'chatOutputFontSize', 14],
+					['code-editor', 'codeEditorFont', 'codeEditorFontSize', 12],
+					['expanded-editor', 'expandedEditorFont', 'expandedEditorFontSize', 14],
+					['code-diff', 'codeDiffFont', 'gitDiffFontSize', 12],
+					['terminal', 'terminalFont', 'terminalFontSize', 13],
+				];
+				const fontSizes = ['10', '11', '12', '13', '14', '15', '16', '18', '20'];
+				const fonts = [
+					'default',
+					'system-sans',
+					'system-serif',
+					'system-mono',
+					'departure-mono',
+					'jetbrains-mono',
+					'inter',
+				];
+				const monoFonts = ['default', 'system-mono', 'departure-mono', 'jetbrains-mono'];
+				for (const [id, fontKey, sizeKey, defaultSize] of surfaces) {
+					const allowedFonts = ['chat-code', 'code-editor', 'code-diff', 'terminal'].includes(id)
+						? monoFonts
+						: fonts;
+					const font = allowedFonts.includes(typography[fontKey]) ? typography[fontKey] : 'default';
+					const size = fontSizes.includes(typography[sizeKey]) ? typography[sizeKey] : 'default';
+					if (font !== 'default') {
+						let family = `var(--font-choice-${font})`;
+						if (font === 'departure-mono') {
+							if (['chat-list', 'chat-feed', 'chat-output'].includes(id))
+								family = '"Departure Mono", var(--system-ui-font)';
+							else if (['chat-code', 'code-editor', 'expanded-editor', 'code-diff'].includes(id))
+								family = '"Departure Mono", var(--system-code-font)';
+						}
+						root.style.setProperty(`--${id}-font-override`, family);
+					}
+					root.setAttribute(`data-${id}-font`, font);
+					root.setAttribute(`data-${id}-font-size`, size);
+					if (size !== 'default') root.style.setProperty(`--${id}-font-size`, `${size}px`);
+					root.style.setProperty(
+						`--${id}-font-scale`,
+						size === 'default' ? '1' : String(Number(size) / defaultSize),
+					);
+				}
 				root.classList.toggle('dark', profile.colorScheme === 'dark');
 				root.style.colorScheme = profile.colorScheme;
 				document

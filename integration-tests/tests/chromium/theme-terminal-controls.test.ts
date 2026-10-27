@@ -29,67 +29,81 @@ test("mobile terminal keys fit without shifting when modifiers activate or lock"
 
       for (const width of [360, 390]) {
         await page.setViewportSize({ width, height: 844 });
-        for (const profile of THEME_PROFILES) {
-          await page.evaluate((profile) => {
-            document.documentElement.dataset.theme = profile.id;
-            document.documentElement.classList.toggle(
-              "dark",
-              profile.colorScheme === "dark",
-            );
-          }, profile);
-          for (const label of ["Ctrl", "Alt"]) {
-            const modifier = page.getByRole("button", {
-              name: label,
-              exact: true,
-            });
-            const baseline = await inputRowGeometry(modifier);
-            const context = `${profile.id} ${width}px ${label}`;
-            expect(baseline.buttons).toHaveLength(8);
-            expect(baseline.contentWidth, context).toBeLessThanOrEqual(
-              baseline.width,
-            );
-            for (const bounds of baseline.buttons) {
-              expect(bounds.x, context).toBeGreaterThanOrEqual(0);
-              expect(bounds.x + bounds.width, context).toBeLessThanOrEqual(
-                width,
+        for (const appearance of ["standard", "terminal"]) {
+          for (const profile of THEME_PROFILES) {
+            await page.evaluate((appearance) => {
+              document.documentElement.dataset.themeAppearance = appearance;
+            }, appearance);
+            await page.evaluate((profile) => {
+              document.documentElement.dataset.theme = profile.id;
+              document.documentElement.classList.toggle(
+                "dark",
+                profile.colorScheme === "dark",
+              );
+            }, profile);
+            await page.evaluate(() => document.fonts.ready);
+            for (const label of ["Ctrl", "Alt"]) {
+              const modifier = page.getByRole("button", {
+                name: label,
+                exact: true,
+              });
+              await modifier.evaluate(async (button) => {
+                await document.fonts.ready;
+                await Promise.allSettled(
+                  button
+                    .parentElement!.getAnimations({ subtree: true })
+                    .map((animation) => animation.finished),
+                );
+              });
+              const baseline = await inputRowGeometry(modifier);
+              const context = `${profile.id} ${appearance} ${width}px ${label}`;
+              expect(baseline.buttons).toHaveLength(8);
+              expect(baseline.contentWidth, context).toBeLessThanOrEqual(
+                baseline.width,
+              );
+              for (const bounds of baseline.buttons) {
+                expect(bounds.x, context).toBeGreaterThanOrEqual(0);
+                expect(bounds.x + bounds.width, context).toBeLessThanOrEqual(
+                  width,
+                );
+              }
+
+              await modifier.click();
+              await browserExpect(modifier).toHaveAttribute(
+                "title",
+                `${label}: Next key`,
+              );
+              expect(
+                await inputRowGeometry(modifier),
+                `${context} pending`,
+              ).toEqual(baseline);
+              await page
+                .getByRole("button", { name: "Esc", exact: true })
+                .click();
+              await browserExpect(modifier).toHaveAttribute(
+                "aria-pressed",
+                "false",
+              );
+
+              await modifier.evaluate((button: HTMLButtonElement) => {
+                button.click();
+                button.click();
+              });
+              await browserExpect(modifier).toHaveAttribute(
+                "title",
+                `${label}: Locked`,
+              );
+              await browserExpect(modifier.locator("svg")).toBeVisible();
+              expect(
+                await inputRowGeometry(modifier),
+                `${context} locked`,
+              ).toEqual(baseline);
+              await modifier.click();
+              await browserExpect(modifier).toHaveAttribute(
+                "aria-pressed",
+                "false",
               );
             }
-
-            await modifier.click();
-            await browserExpect(modifier).toHaveAttribute(
-              "title",
-              `${label}: Next key`,
-            );
-            expect(
-              await inputRowGeometry(modifier),
-              `${context} pending`,
-            ).toEqual(baseline);
-            await page
-              .getByRole("button", { name: "Esc", exact: true })
-              .click();
-            await browserExpect(modifier).toHaveAttribute(
-              "aria-pressed",
-              "false",
-            );
-
-            await modifier.evaluate((button: HTMLButtonElement) => {
-              button.click();
-              button.click();
-            });
-            await browserExpect(modifier).toHaveAttribute(
-              "title",
-              `${label}: Locked`,
-            );
-            await browserExpect(modifier.locator("svg")).toBeVisible();
-            expect(
-              await inputRowGeometry(modifier),
-              `${context} locked`,
-            ).toEqual(baseline);
-            await modifier.click();
-            await browserExpect(modifier).toHaveAttribute(
-              "aria-pressed",
-              "false",
-            );
           }
         }
       }

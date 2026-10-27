@@ -7,6 +7,8 @@ import {
 	AmpOracleToolUseMessage,
 	AmpTaskListToolUseMessage,
 	BashToolUseMessage,
+	ClaudeMonitorToolUseMessage,
+	ClaudeToolSearchToolUseMessage,
 	CodexSubagentToolUseMessage,
 	EditToolUseMessage,
 	ExecToolUseMessage,
@@ -18,6 +20,7 @@ import {
 	ReadToolUseMessage,
 	UnknownToolUseMessage,
 	WebFetchToolUseMessage,
+	WebSearchToolUseMessage,
 	WriteStdinToolUseMessage,
 	WriteToolUseMessage,
 } from '$shared/chat-types';
@@ -28,6 +31,18 @@ beforeAll(async () => {
 });
 
 describe('ChatToolEventRenderer', () => {
+	it('scopes plain tool results independently of commands', () => {
+		const toolMessage = new WebSearchToolUseMessage('', 'plain-output', 'Synthetic search');
+		render(ChatToolEventRenderer, {
+			toolMessage,
+			mode: 'result',
+			toolResult: { content: { raw: 'Synthetic plain output' } },
+			autoExpandTools: true,
+		});
+		const output = screen.getByText('Synthetic plain output');
+		expect(output.classList.contains('typography-chat-output')).toBe(true);
+		expect(output.classList.contains('typography-chat-code')).toBe(false);
+	});
 	it.each([
 		new BashToolUseMessage('', 'invalid-bash', ''),
 		new ReadToolUseMessage('', 'invalid-read', ''),
@@ -53,6 +68,8 @@ describe('ChatToolEventRenderer', () => {
 
 	it.each([
 		new BashToolUseMessage('', 'invalid-bash', ''),
+		new ClaudeToolSearchToolUseMessage('', 'invalid-search', ''),
+		new ClaudeMonitorToolUseMessage('', 'invalid-monitor', ''),
 		new ReadToolUseMessage('', 'invalid-read', ''),
 		new WriteToolUseMessage('', 'invalid-write', ''),
 		new EditToolUseMessage('', 'invalid-edit', ''),
@@ -102,6 +119,36 @@ describe('ChatToolEventRenderer', () => {
 		});
 		expect(screen.getByText('ToolSearch')).toBeTruthy();
 		expect(screen.getByText('issue tools')).toBeTruthy();
+	});
+
+	it('renders Claude discovery and its structured reference result', () => {
+		const toolMessage = new ClaudeToolSearchToolUseMessage('', 'search', 'select:Monitor', 1);
+		render(ChatToolEventRenderer, { toolMessage, mode: 'input' });
+		expect(screen.getByText('ToolSearch')).toBeTruthy();
+		expect(screen.getByText('select:Monitor')).toBeTruthy();
+		const result = render(ChatToolEventRenderer, {
+			toolMessage, mode: 'result', autoExpandTools: true,
+			toolResult: { content: { items: [{ type: 'tool_reference', tool_name: 'Monitor' }] }, isError: false },
+		});
+		expect(result.container.textContent).toContain('Monitor');
+	});
+
+	it('discloses full typed Monitor command and socket parameters', async () => {
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage: new ClaudeMonitorToolUseMessage('', 'monitor', 'Synthetic watch', 300_000,
+				'printf synthetic', 'ws://synthetic.invalid/events', ['synthetic-events'], true, ['synthetic.invalid']),
+			mode: 'input',
+		});
+		expect(screen.getByText('Monitor')).toBeTruthy();
+		expect(container.textContent).not.toContain('printf synthetic');
+		await fireEvent.click(screen.getByRole('button'));
+		await waitFor(() => expect(container.textContent).toContain('printf synthetic'));
+		expect(container.textContent).toContain('Synthetic watch');
+		expect(container.textContent).toContain('300000');
+		expect(container.textContent).toContain('ws://synthetic.invalid/events');
+		expect(container.textContent).toContain('synthetic-events');
+		expect(container.textContent).toContain('"persistent": true');
+		expect(container.textContent).toContain('synthetic.invalid');
 	});
 
 	it('keeps Edit collapsed when autoExpandTools is disabled and defaultOpen is false', () => {

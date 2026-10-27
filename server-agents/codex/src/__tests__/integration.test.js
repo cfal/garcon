@@ -91,6 +91,9 @@ describe('CodexAgentIntegration', () => {
 
     expect(snapshot.defaultModel).toBe('gpt-6-sol');
     expect(snapshot.generation).toEqual({ priority: 30, model: 'gpt-6-sol' });
+    expect(snapshot.models).toContainEqual({
+      value: 'gpt-6.1-terra', label: 'GPT-6.1-Terra', supportsImages: true,
+    });
   });
 
   it('preserves version 1 settings and native-session migration envelopes', async () => {

@@ -117,6 +117,7 @@ class FakeRuntime implements TerminalSessionRuntime {
 	focus = vi.fn<TerminalSessionRuntime['focus']>();
 	pasteFromClipboard = vi.fn<TerminalSessionRuntime['pasteFromClipboard']>().mockResolvedValue(false);
 	applyFontSize = vi.fn<TerminalSessionRuntime['applyFontSize']>();
+	applyFontPreference = vi.fn<TerminalSessionRuntime['applyFontPreference']>();
 	sendToolbarKey = vi.fn<TerminalSessionRuntime['sendToolbarKey']>();
 	clipboardMessage = '';
 	inputControls = {

@@ -142,6 +142,18 @@ export const THEME_PROFILES = [
 		browserThemeColor: '#282c34',
 		rendererPalette: 'semantic',
 	},
+	{
+		id: 'ansi-light',
+		colorScheme: 'light',
+		browserThemeColor: '#f0f0f0',
+		rendererPalette: 'semantic',
+	},
+	{
+		id: 'ansi-dark',
+		colorScheme: 'dark',
+		browserThemeColor: '#0d0d0d',
+		rendererPalette: 'semantic',
+	},
 ] as const satisfies readonly ThemeProfileDescriptor[];
 
 export type ThemeProfile = (typeof THEME_PROFILES)[number];
@@ -180,6 +192,7 @@ export const THEME_FAMILIES = [
 	{ id: 'moss', lightThemeId: 'moss-light', darkThemeId: 'moss-dark' },
 	{ id: 'paper', lightThemeId: 'paper-light', darkThemeId: 'paper-dark' },
 	{ id: 'slate', lightThemeId: 'slate-light', darkThemeId: 'slate-dark' },
+	{ id: 'ansi', lightThemeId: 'ansi-light', darkThemeId: 'ansi-dark' },
 ] as const satisfies readonly {
 	readonly id: string;
 	readonly lightThemeId: LightThemeId;

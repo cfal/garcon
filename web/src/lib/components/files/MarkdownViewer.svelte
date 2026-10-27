@@ -126,6 +126,17 @@
 </div>
 
 <style>
+	.markdown-viewer-content :global(.markdown-body) {
+		--font-sans: var(--system-ui-font);
+		--font-mono: var(--system-code-font);
+		--default-mono-font-family: var(--system-code-font);
+		font-family: var(--system-ui-font);
+	}
+
+	.markdown-viewer-content :global(.markdown-code-block > div) {
+		font-family: var(--interface-font-override, var(--system-ui-font));
+	}
+
 	:global(.markdown-viewer-content .markdown-body),
 	:global(.markdown-viewer-content .markdown-body p),
 	:global(.markdown-viewer-content .markdown-body li),

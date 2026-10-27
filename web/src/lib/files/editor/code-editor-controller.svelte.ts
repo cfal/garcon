@@ -64,6 +64,8 @@ import {
 	type FileDocumentViewAdapter,
 } from '$lib/files/editor/file-document-runtime.js';
 import { FileVimMode } from '$lib/files/editor/file-vim-mode.svelte.js';
+import { editorFont } from '$lib/theme/editor-font.js';
+import { SYSTEM_EDITOR_FONT } from '$lib/theme/fonts.js';
 import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 import { editorThemeExtension, type EditorThemeId } from '$lib/files/editor/editor-themes.js';
 
@@ -499,6 +501,7 @@ export class CodeEditorController {
 					{ key: 'Tab', run: indentMore, shift: indentLess },
 				]),
 				this.#languageCompartment.of([]),
+				editorFont(SYSTEM_EDITOR_FONT),
 				this.#dynamicCompartment.of(this.dynamicExtensions()),
 			],
 		});
@@ -512,18 +515,21 @@ export class CodeEditorController {
 				'&': { isolation: 'isolate' },
 				'.cm-content, .cm-gutters': {
 					fontSize: `${Math.max(MIN_TOUCH_EDITOR_FONT_SIZE, configuredFontSize)}px`,
-					fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
 				},
 				'.cm-panel input, .cm-panel select, .cm-panel button': {
-					fontSize: `${MIN_TOUCH_EDITOR_FONT_SIZE}px`,
+					fontSize: 'max(16px, calc(12px * var(--interface-font-scale, 1)))',
 				},
-				'.cm-panels': { backgroundColor: 'hsl(var(--card))', color: 'hsl(var(--foreground))' },
+				'.cm-panels': {
+					backgroundColor: 'hsl(var(--card))',
+					color: 'hsl(var(--foreground))',
+					fontFamily: 'var(--interface-font-override, var(--system-ui-font))',
+				},
 				'.cm-searchMatch': { backgroundColor: 'hsl(var(--accent) / 0.45)' },
 				'.cm-searchMatch.cm-searchMatch-selected': { outline: '2px solid hsl(var(--ring))' },
 				'@media (pointer: fine)': {
 					'.cm-content, .cm-gutters': { fontSize: `${configuredFontSize}px` },
 					'.cm-panel input, .cm-panel select, .cm-panel button': {
-						fontSize: `${configuredFontSize}px`,
+						fontSize: 'calc(12px * var(--interface-font-scale, 1))',
 					},
 				},
 			}),

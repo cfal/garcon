@@ -9,7 +9,7 @@ import TerminalWindowMenuItemsTestHost from './TerminalWindowMenuItemsTestHost.s
 
 const fakes = vi.hoisted(() => ({
 	sessions: {} as Record<string, TerminalClientSession>,
-	fontSize: '13',
+	fontSize: 'default',
 	clipboardMessage: '',
 	closeBlocked: false,
 	pasteFromClipboard: vi.fn<() => Promise<boolean>>(),
@@ -75,7 +75,7 @@ describe('TerminalWindowMenuItems', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		fakes.sessions = { 'terminal-1': terminalSession('attached') };
-		fakes.fontSize = '13';
+		fakes.fontSize = 'default';
 		fakes.clipboardMessage = '';
 		fakes.closeBlocked = false;
 		fakes.pasteFromClipboard.mockResolvedValue(true);

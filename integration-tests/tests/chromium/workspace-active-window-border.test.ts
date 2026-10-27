@@ -197,6 +197,7 @@ test("one-pixel active borders cover shared separators across themes, nested spl
       for (const theme of THEME_PROFILES) {
         await page.evaluate(({ id, colorScheme }) => {
           document.documentElement.dataset.theme = id;
+          document.documentElement.dataset.themeAppearance = 'standard';
           document.documentElement.classList.toggle(
             "dark",
             colorScheme === "dark",
@@ -211,7 +212,18 @@ test("one-pixel active borders cover shared separators across themes, nested spl
           await expectSingleStroke(page, line.x, line.y + 100, "x");
         }
         await captureScreenshot(page, `active-window-${theme.id}`);
+        await page.evaluate(() => { document.documentElement.dataset.themeAppearance = 'terminal'; });
+        const box = await activeBorder.boundingBox();
+        if (!box) throw new Error('Missing terminal frame');
+        const style = await activeBorder.evaluate((element) => {
+          const computed = getComputedStyle(element);
+          return { width: computed.borderTopWidth, style: computed.borderTopStyle };
+        });
+        expect(style).toEqual({ width: '3px', style: 'double' });
+        await expectSingleStroke(page, box.x + 100, box.y + 2, 'y');
       }
+
+      await page.evaluate(() => { document.documentElement.dataset.themeAppearance = 'standard'; });
 
       await clickWorkspaceWindowAddAction(page, "Open Git History", "window-files");
       await page

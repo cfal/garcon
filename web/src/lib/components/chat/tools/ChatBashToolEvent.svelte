@@ -16,7 +16,7 @@
 			<!-- eslint-disable svelte/no-useless-mustaches -- The expression preserves the trailing ASCII space before the highlighted command. -->
 			<code
 				id={anchorId}
-				class="code-highlight scroll-mt-16 block whitespace-pre-wrap break-all font-mono text-xs leading-[1.25] text-foreground"
+				class="typography-chat-code code-highlight scroll-mt-16 block whitespace-pre-wrap break-all font-mono text-xs leading-[1.25] text-foreground"
 				data-chat-bash-command
 				><span class="inline-block w-5 text-center text-muted-foreground">{'$ '}</span
 				><HighlightedCodeText text={command} language="bash" /></code

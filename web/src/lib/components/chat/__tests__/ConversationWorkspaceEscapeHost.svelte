@@ -63,6 +63,7 @@
 	import { sameFocusOwner } from '$lib/workspace/workspace-presentation-controller.svelte.js';
 
 	interface ConversationWorkspaceEscapeHostProps {
+		showQuickCommitTray?: boolean;
 		executionPolicy?: 'conversation' | 'literal' | null;
 		onRegisterSubmit?: (submit: (message: string) => Promise<boolean>) => void;
 		onRegisterAppendToDraft?: (append: ChatDraftAppend) => void;
@@ -75,6 +76,7 @@
 	}
 
 	let {
+		showQuickCommitTray = false,
 		executionPolicy = 'conversation',
 		onRegisterSubmit,
 		onRegisterAppendToDraft,
@@ -173,7 +175,9 @@
 	setChatSessions(sessions as never);
 	setLocalSettings({
 		autoScrollToBottom: true,
-		showQuickCommitTray: false,
+		get showQuickCommitTray() {
+			return showQuickCommitTray;
+		},
 		chatMaxWidth: 'default',
 	} as never);
 	setNotifications(untrack(() => notifications ?? createNotificationsStore()));

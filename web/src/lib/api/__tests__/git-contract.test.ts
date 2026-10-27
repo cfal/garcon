@@ -415,18 +415,10 @@ describe('git API contract', () => {
 				status: 'ready',
 				executorId: scope.executorId,
 				project: '/project',
-				repoRoot: '/project',
 				branch: 'main',
-				hasCommits: true,
-				changedFiles: 2,
-				trackedChangedFiles: 1,
-				untrackedFiles: 1,
-				stagedFiles: 1,
-				unstagedFiles: 1,
-				additions: 4,
-				deletions: 1,
-				fingerprintVersion: 1,
-				fingerprint: 'v1:quick',
+				hasChanges: true,
+				hasUntracked: true,
+				diffStats: { additions: 4, deletions: 1 },
 			}),
 		);
 
@@ -435,7 +427,9 @@ describe('git API contract', () => {
 		expect(result.status).toBe('ready');
 		if (result.status === 'ready') {
 			expect(result.branch).toBe('main');
-			expect(result.changedFiles).toBe(2);
+			expect(result.hasChanges).toBe(true);
+			expect(result.hasUntracked).toBe(true);
+			expect(result.diffStats).toEqual({ additions: 4, deletions: 1 });
 		}
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/quick-summary');

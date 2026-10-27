@@ -13,11 +13,11 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
-    await browserExpect(dialog.getByRole('tab', { name: 'Interface', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await browserExpect(dialog.getByRole('tab', { name: 'Appearance', exact: true })).toHaveAttribute('aria-selected', 'true');
     for (const width of [1440, 768, 390, 320]) {
       phase(`settings at ${width}px`);
       await page.setViewportSize({ width, height: 900 });
-      for (const name of ['Interface', 'Shortcuts', 'Providers', 'Other Agents', 'General', 'Automation', 'Notifications', 'GitHub', 'Executors']) {
+      for (const name of ['Appearance', 'Behavior', 'Shortcuts', 'Providers', 'Other Agents', 'General', 'Automation', 'Notifications', 'GitHub', 'Executors']) {
         await dialog.getByRole('tab', { name, exact: true }).click();
         const panel = dialog.getByRole('tabpanel');
         await browserExpect(panel).toBeVisible();

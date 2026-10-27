@@ -104,9 +104,10 @@
 	);
 	const quickGitError = $derived(quickGit.lastErrorFor(gitProject) ?? quickGitBranchError);
 	const quickGitRefreshing = $derived(quickGit.isRefreshingFor(gitProject));
-	const quickGitTrayVisible = $derived(
-		!isProcessing && localSettings.showQuickCommitTray && quickGit.canShowTrayFor(gitProject),
+	const quickGitEnabled = $derived(
+		localSettings.showQuickCommitTray && quickGit.canShowTrayFor(gitProject),
 	);
+	const quickGitTrayVisible = $derived(!isProcessing && quickGitEnabled);
 	const statusTrayVisible = $derived(isProcessing || quickGitTrayVisible);
 	const reserveStatusCap = $derived(
 		shouldReserveComposerCapSlot({
@@ -349,7 +350,7 @@
 		status={panel.lifecycle.loadingStatus}
 		agentId={chat.agentId}
 		spinnerSelectionKey={`${surfaceId}:${chatId}`}
-		quickCommitEnabled={localSettings.showQuickCommitTray}
+		quickCommitEnabled={quickGitEnabled}
 		quickCommitTrayVisible={quickGitTrayVisible}
 		quickCommitSummary={quickGitSummary}
 		quickCommitRefreshing={quickGitRefreshing}

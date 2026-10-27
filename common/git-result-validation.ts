@@ -107,9 +107,9 @@ function gitResult(method: GitMethod, v: Record<string, unknown>): boolean {
     case 'getHistoryCommits': return shape(v, { project: str, ref: str, nextOffset: nullable(num), commits: array(commit, 200) });
     case 'getWorkingTreeFingerprint': return str(v.project) && v.fingerprintVersion === 1 && (v.status === 'ready'
       ? str(v.fingerprint) && num(v.changedPathCount) : oneOf('not-git-repository', 'unknown')(v.status) && v.fingerprint === null && str(v.message));
-    case 'getQuickSummary': return str(v.project) && v.fingerprintVersion === 1 && (v.status === 'ready'
-      ? shape(v, { repoRoot: str, branch: str, hasCommits: bool, changedFiles: num, trackedChangedFiles: num, untrackedFiles: num, stagedFiles: num, unstagedFiles: num, additions: num, deletions: num, fingerprint: str })
-      : oneOf('not-git-repository', 'unknown')(v.status) && v.fingerprint === null && str(v.message));
+    case 'getQuickSummary': return str(v.project) && (v.status === 'ready'
+      ? shape(v, { branch: str, hasChanges: bool, hasUntracked: bool, diffStats: nullable(x => shape(x, { additions: num, deletions: num })) })
+      : oneOf('not-git-repository', 'unknown')(v.status) && str(v.message));
     case 'getWorkbenchSnapshot': return str(v.project) && (v.status === 'not-git-repository' ? v.target === null && v.tree === null && v.reviewSummary === null && str(v.message)
       : v.status === 'ready' && target(v.target) && shape(v.tree, { root: array(tree), hasCommits: bool, statsState: oneOf('loaded') })
         && shape(v.reviewSummary, { documentId: str, project: str, mode, context: num, files: array(reviewFile, 10_000), limits })

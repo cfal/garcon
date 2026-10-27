@@ -79,6 +79,14 @@ describe('TranscriptNoticeRow', () => {
 			project,
 			'high',
 		]);
+		expect(
+			container.querySelector('[data-ticket-command]')?.classList.contains('typography-chat-prose'),
+		).toBe(true);
+		expect(
+			[...container.querySelectorAll('code')].every((node) =>
+				node.classList.contains('typography-chat-inline-code'),
+			),
+		).toBe(true);
 		expect(container.querySelector('script')).toBeNull();
 		expect(screen.queryByRole('link')).toBeNull();
 		expect(container.textContent).toContain('Listed tickets with filters project');

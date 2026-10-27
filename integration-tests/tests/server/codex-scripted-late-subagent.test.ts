@@ -25,7 +25,7 @@ describe('scripted Codex late subagent lifecycle', () => {
     await environment?.dispose();
   });
 
-  test('publishes completed child activity after the root terminal exactly once', async () => {
+  test('publishes completed child activity once after the root terminal without waking it', async () => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
     const childPrompt = `Complete child work ${crypto.randomUUID()}.`;
@@ -105,7 +105,8 @@ describe('scripted Codex late subagent lifecycle', () => {
       expect(completed[0]?.details.agentStates).toEqual({
         '/root/worker': { status: 'completed' },
       });
-      await Bun.sleep(100);
+      await Bun.sleep(1_000);
+      expect(testEnvironment.model.requests()).toHaveLength(3);
       const settledEvents = fixture.client.eventsSince(cursor);
       expect(settledEvents.filter((event) => (
         event.type === 'agent-run-finished'
@@ -127,6 +128,7 @@ describe('scripted Codex late subagent lifecycle', () => {
           features: Record<string, boolean>;
         };
         config.features.multi_agent_v2 = true;
+        config.features.wake_on_agent_messages = true;
         await writeFile(configPath, Bun.TOML.stringify(config));
       },
     });

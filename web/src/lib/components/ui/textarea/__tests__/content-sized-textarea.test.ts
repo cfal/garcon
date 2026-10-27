@@ -102,6 +102,41 @@ describe('content-sized textarea', () => {
 		}
 	});
 
+	it('refits restored drafts after font loading and appearance changes, with cleanup', async () => {
+		const fonts = new EventTarget();
+		const descriptor = Object.getOwnPropertyDescriptor(document, 'fonts');
+		Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
+		try {
+			const { unmount } = render(Textarea, { value: 'A synthetic restored draft' });
+			const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+			let measuredHeight = 72;
+			Object.defineProperty(textarea, 'scrollHeight', { get: () => measuredHeight });
+			fonts.dispatchEvent(new Event('loadingdone'));
+			await waitFor(() => expect(textarea.style.height).toBe('72px'));
+			measuredHeight = 48;
+			document.documentElement.dataset.themeAppearance = 'standard';
+			await waitFor(() => expect(textarea.style.height).toBe('48px'));
+			measuredHeight = 96;
+			document.documentElement.dataset.interfaceFont = 'departure-mono';
+			await waitFor(() => expect(textarea.style.height).toBe('96px'));
+			measuredHeight = 64;
+			document.documentElement.dataset.interfaceFontSize = '18';
+			await waitFor(() => expect(textarea.style.height).toBe('64px'));
+			unmount();
+			const request = vi.spyOn(globalThis, 'requestAnimationFrame');
+			fonts.dispatchEvent(new Event('loadingdone'));
+			expect(request).not.toHaveBeenCalled();
+			request.mockRestore();
+		} finally {
+			cleanup();
+			document.documentElement.removeAttribute('data-theme-appearance');
+			document.documentElement.removeAttribute('data-interface-font');
+			document.documentElement.removeAttribute('data-interface-font-size');
+			if (descriptor) Object.defineProperty(document, 'fonts', descriptor);
+			else Reflect.deleteProperty(document, 'fonts');
+		}
+	});
+
 	it('leaves explicitly fixed editor fields unsized', async () => {
 		render(Textarea, { value: 'Synthetic model configuration', autoSize: false, class: 'h-40' });
 		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');

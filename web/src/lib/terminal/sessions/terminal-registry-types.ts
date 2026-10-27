@@ -29,6 +29,7 @@ export type TerminalSessionRuntime = Pick<
 	| 'focus'
 	| 'pasteFromClipboard'
 	| 'applyFontSize'
+	| 'applyFontPreference'
 	| 'clipboardMessage'
 	| 'sendToolbarKey'
 > & {

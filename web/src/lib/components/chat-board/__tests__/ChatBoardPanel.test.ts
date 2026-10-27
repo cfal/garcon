@@ -11,6 +11,7 @@ import { tick } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { getChatBoardPanelMemory } from '../chat-board-panel-memory.js';
 import ChatBoardPanelTestHost from './ChatBoardPanelTestHost.svelte';
+import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 
 const column = {
 	id: '22222222-2222-4222-8222-222222222222',
@@ -153,6 +154,31 @@ afterEach(() => {
 });
 
 describe('ChatBoardPanel', () => {
+	it('invalidates measured lane rows when Interface typography changes', async () => {
+		const { controller } = createController({ revision: 1, boards: [board] });
+		await controller.refresh(true);
+		const sessions = new ChatSessionsStore();
+		sessions.byId = { 'chat-1': chat() };
+		sessions.order = ['chat-1'];
+		sessions.chatListStatus = 'ready';
+		const view = render(ChatBoardPanelTestHost, { controller, sessions, onOpenChat: vi.fn() });
+		const apply = vi.spyOn(VirtualListController.prototype, 'apply');
+		try {
+			document.documentElement.dataset.interfaceFontSize = '20';
+			await waitFor(() =>
+				expect(apply).toHaveBeenCalledWith(
+					expect.objectContaining({
+						kind: 'reset-measurements',
+						estimates: [185],
+					}),
+				),
+			);
+		} finally {
+			view.unmount();
+			apply.mockRestore();
+			delete document.documentElement.dataset.interfaceFontSize;
+		}
+	});
 	it('shows a truthful first-run state and creates an unseeded board', async () => {
 		const { controller, api } = createController({ revision: 0, boards: [] });
 		await controller.refresh(true);

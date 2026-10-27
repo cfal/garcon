@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { tick, untrack } from 'svelte';
+	import { observeTypographyScale } from '$lib/theme/typography.js';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Search from '@lucide/svelte/icons/search';
@@ -47,8 +49,16 @@
 		const value = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
 		return Number.isFinite(value) && value > 0 ? value : 16;
 	})();
-	const rowHeightScale = Math.max(1, rootFontSize / 16);
-	const rowHeight = WORKTREE_ROW_HEIGHT * rowHeightScale;
+	let interfaceScale = $state(1);
+	$effect(() =>
+		observeTypographyScale(document, 'interface', (scale) => {
+			interfaceScale = scale;
+		}),
+	);
+	const rowHeight = $derived(
+		Math.ceil(WORKTREE_ROW_HEIGHT * Math.max(1, rootFontSize / 16) * Math.max(1, interfaceScale)),
+	);
+	let previousRowHeight = untrack(() => rowHeight);
 	let useVirtualRows = $derived(worktrees.length > WORKTREE_VIRTUALIZATION_THRESHOLD);
 	let currentTime = $derived.by(() => {
 		worktrees;
@@ -98,6 +108,28 @@
 
 	$effect(() => {
 		onActiveOptionIdChange(activeOptionId);
+	});
+
+	$effect.pre(() => {
+		const height = rowHeight;
+		const oldHeight = previousRowHeight;
+		previousRowHeight = height;
+		const viewport = untrack(() => viewportRef);
+		if (!viewport || height === oldHeight) return;
+		const index = Math.floor(viewport.scrollTop / oldHeight);
+		const path = untrack(() => worktrees[index]?.path);
+		const offsetRatio = (viewport.scrollTop - index * oldHeight) / oldHeight;
+		let active = true;
+		void tick().then(() => {
+			if (!active || viewport !== viewportRef) return;
+			const nextIndex = worktrees.findIndex((worktree) => worktree.path === path);
+			if (nextIndex < 0) return;
+			viewport.scrollTop = (nextIndex + offsetRatio) * height;
+			virtualWindow.scrollTop = viewport.scrollTop;
+		});
+		return () => {
+			active = false;
+		};
 	});
 
 	$effect(() => {

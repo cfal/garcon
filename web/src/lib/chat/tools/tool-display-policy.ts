@@ -21,17 +21,31 @@ const FAILED_RESULT_RULE: ToolResultDisplayRule = {
 	},
 };
 
+function hasEmptyRequiredInput(tool: ToolUseChatMessage | undefined): boolean {
+	switch (tool?.type) {
+		case 'bash-tool-use':
+			return tool.command === '';
+		case 'claude-tool-search-tool-use':
+			return tool.query === '';
+		case 'claude-monitor-tool-use':
+			return tool.description === '';
+		case 'exec-tool-use':
+			return tool.code === '';
+		case 'read-tool-use':
+		case 'write-tool-use':
+		case 'edit-tool-use':
+			return tool.filePath === '';
+		default:
+			return false;
+	}
+}
+
 export function resolveToolResultDisplayRule(
 	rule: ToolDisplayRule,
 	toolResult: ToolPayload | null | undefined,
 	tool?: ToolUseChatMessage,
 ): ToolResultDisplayRule | undefined {
-	const emptyRequiredInput = tool?.type === 'bash-tool-use'
-		? tool.command === ''
-		: tool?.type === 'exec-tool-use'
-			? tool.code === ''
-			: (tool?.type === 'read-tool-use' || tool?.type === 'write-tool-use' || tool?.type === 'edit-tool-use') && tool.filePath === '';
-	if (toolResult?.isError === true && emptyRequiredInput) return FAILED_RESULT_RULE;
+	if (toolResult?.isError === true && hasEmptyRequiredInput(tool)) return FAILED_RESULT_RULE;
 	return rule.result;
 }
 

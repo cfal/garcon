@@ -3,12 +3,51 @@ import type {
   AskUserQuestionPrompt,
   ChatImage,
   ChatMessageMetadata,
+  CodexSubagentInputItem,
   CursorAskQuestionOption,
   CursorAskQuestionPrompt,
   CursorPlanPhase,
   CursorPlanTodo,
   CursorPlanTodoStatus,
+  TodoItem,
+  TodoStatus,
 } from './chat-types.js';
+
+export function coerceTodoItems(raw: unknown): TodoItem[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const items: TodoItem[] = [];
+  for (const entry of raw) {
+    if (entry == null || typeof entry !== 'object') continue;
+    const obj = entry as Record<string, unknown>;
+    const content = obj.content ?? obj.text ?? obj.step;
+    if (typeof content !== 'string') continue;
+    const rawStatus = obj.status;
+    let status: TodoStatus = 'pending';
+    if (obj.completed === true || rawStatus === 'completed' || rawStatus === 'done') {
+      status = 'completed';
+    } else if (rawStatus === 'in_progress' || rawStatus === 'in-progress') {
+      status = 'in_progress';
+    }
+    items.push({ content, status });
+  }
+  return items.length > 0 ? items : undefined;
+}
+
+export function asCodexSubagentInputItems(v: unknown): CodexSubagentInputItem[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const items: CodexSubagentInputItem[] = [];
+  for (const entry of v) {
+    const raw = asRecord(entry);
+    const item: CodexSubagentInputItem = {};
+    if (typeof raw.type === 'string') item.type = raw.type;
+    if (typeof raw.text === 'string') item.text = raw.text;
+    if (typeof raw.imageUrl === 'string') item.imageUrl = raw.imageUrl;
+    if (typeof raw.path === 'string') item.path = raw.path;
+    if (typeof raw.name === 'string') item.name = raw.name;
+    if (Object.keys(item).length > 0) items.push(item);
+  }
+  return items.length > 0 || v.length === 0 ? items : undefined;
+}
 
 export function str(value: unknown): string {
   return typeof value === 'string' ? value : '';
@@ -16,6 +55,12 @@ export function str(value: unknown): string {
 
 export function asOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+// Unlike asStringArray, keeps blank strings and empty arrays for lossless Monitor round-trips.
+export function asOptionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((item): item is string => typeof item === 'string');
 }
 
 export function asOptionalNumber(value: unknown): number | undefined {

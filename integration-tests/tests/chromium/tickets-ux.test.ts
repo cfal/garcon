@@ -7,6 +7,82 @@ import {
 } from "../../support/chromium-workspace.js";
 import { Deferred, withTimeout } from "../../support/deferred.js";
 import type { Route } from "playwright";
+import { expect as browserExpect } from "playwright/test";
+import { setTypography } from "../../support/typography.js";
+
+test("ticket descriptions, comments and tables follow Interface typography", async () => {
+  await withChromiumFixture(
+    "ticket-typography",
+    async ({ page, integration, assertNoBrowserErrors }) => {
+      const chatId = integration.newChatId();
+      const started = await integration.client.startDirectChat({
+        chatId,
+        content: "Synthetic ticket typography",
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(chatId, started.turnId);
+      const bootstrap = parseTicketBootstrap(
+        await integration.client.get("/api/v1/tickets/bootstrap"),
+      );
+      await integration.client.post("/api/v1/tickets/mutate", {
+        requestId: crypto.randomUUID(),
+        expectedStoreId: bootstrap.storeId,
+        payload: {
+          action: "create",
+          input: {
+            title: "Synthetic typography ticket",
+            project: "Typography",
+            labels: [],
+            description:
+              "Synthetic description\n\n| Description column |\n| --- |\n| Description value |",
+          },
+        },
+      });
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      await collapseCanonicalFilesWindow(page);
+      await clickWorkspaceWindowAddAction(page, "Open Tickets");
+      const panel = page.locator(
+        '[data-workspace-surface-id="singleton:tickets"]',
+      );
+      await panel
+        .getByRole("button", { name: "Open G-1", exact: true })
+        .click();
+      const composer = panel.locator(".ticket-composer");
+      await composer
+        .getByRole("textbox", { name: "Comment", exact: true })
+        .fill(
+          "Synthetic comment\n\n| Comment column |\n| --- |\n| Comment value |",
+        );
+      await composer
+        .getByRole("button", { name: "Comment", exact: true })
+        .click();
+      const description = panel
+        .locator(".ticket-markdown .markdown-body")
+        .getByText("Synthetic description", { exact: true });
+      const comment = panel
+        .locator(".ticket-comment .markdown-body")
+        .getByText("Synthetic comment", { exact: true });
+      const cells = panel.locator(
+        ".ticket-markdown .markdown-body th, .ticket-markdown .markdown-body td",
+      );
+      await browserExpect(cells).toHaveCount(4);
+      for (const size of ["default", "20", "10"] as const) {
+        await setTypography(page, {
+          interfaceFontSize: size,
+          chatFeedFontSize: "18",
+          chatCodeFontSize: "18",
+        });
+        const pixels = size === "default" ? "14px" : `${size}px`;
+        await browserExpect(description).toHaveCSS("font-size", pixels);
+        await browserExpect(comment).toHaveCSS("font-size", pixels);
+        for (const cell of await cells.all())
+          await browserExpect(cell).toHaveCSS("font-size", pixels);
+      }
+      assertNoBrowserErrors();
+    },
+  );
+}, 180_000);
 
 test("mobile Tickets opens, saves and closes without crypto.randomUUID", async () => {
   await withChromiumFixture(

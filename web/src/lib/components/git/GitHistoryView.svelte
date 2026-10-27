@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { FontSizePreference } from '$lib/theme/typography.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { GitProjectTarget } from '$lib/api/git-client.js';
 	import History from '@lucide/svelte/icons/history';
@@ -22,7 +23,7 @@
 		active?: boolean;
 		diffMode: DiffMode;
 		contextLines: number;
-		diffFontSize: number;
+		diffFontSize: FontSizePreference;
 		onRevertCommit: (commit: GitHistoryRevertTarget) => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
 		onOpenSelectedComparison: () => void;
@@ -30,7 +31,7 @@
 		onOpenChat: () => void;
 		onSetDiffMode?: (mode: DiffMode) => void;
 		onSetContextLines?: (lines: number) => void;
-		onSetDiffFontSize?: (size: string) => void;
+		onSetDiffFontSize?: (size: FontSizePreference) => void;
 	}
 
 	let {
@@ -104,7 +105,7 @@
 		fontSize={Number(diffFontSize) || 12}
 		{diffMode}
 		{contextLines}
-		diffFontSize={String(diffFontSize)}
+		{diffFontSize}
 		onBack={() => history.backToList()}
 		onRetry={() => history.retryCommit(project)}
 		onSelectParent={(parent) => history.selectParent(project, parent)}
