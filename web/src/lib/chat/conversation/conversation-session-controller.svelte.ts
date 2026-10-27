@@ -740,7 +740,8 @@ export class ConversationSessionController {
 			return 'no-op';
 		}
 		if (isClearCommand(deps.composerState.inputText)) return this.submitForChat(chatId);
-		const agent = deps.modelCatalogForExecutor(deps.agentState.executorId).getAgent(deps.agentState.agentId);
+		const catalog = deps.modelCatalogForExecutor(deps.agentState.executorId);
+		const agent = catalog.getAgent(deps.agentState.agentId);
 		if (!agent) return 'no-op';
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
@@ -760,6 +761,12 @@ export class ConversationSessionController {
 		}
 		if (selected.status !== 'running' || !selected.isProcessing || !text) {
 			return this.submitForChat(chatId);
+		}
+		const defaults = catalog.getDefaultAgentSettings(agent.id);
+		const envelope = deps.agentState.agentSettings ?? defaults;
+		if (!defaults || !envelope || !areAgentSettingsCompatible(envelope, defaults, agent.settings)) {
+			deps.chatState.appendLocalNoticeForChat(chatId, 'error', 'Saved provider settings are incompatible with this executor.');
+			return 'rejected';
 		}
 		return submitSteerPreferenceRoute(deps, this.#acceptedInputs, {
 			chatId,

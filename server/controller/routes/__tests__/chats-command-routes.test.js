@@ -1681,6 +1681,16 @@ describe('REST chat command routes', () => {
     }, undefined, expect.any(AbortSignal), undefined);
   });
 
+  it('PATCH /execution-settings represents absent provider settings as null', async () => {
+    const agent = createRouteAgent();
+    agent.registry.getChat(CHAT_ID).agentSettingsById = {};
+    const { response, body } = await callJson(agent.routes['/api/v1/chats/execution-settings'].PATCH,
+      { chatId: CHAT_ID, permissionMode: 'default' }, 'PATCH');
+    expect(response.status).toBe(200);
+    expect(body.agentSettings).toBeNull();
+    expect(agent.registry.getChat(CHAT_ID).agentSettingsById).toEqual({});
+  });
+
   it.each(['expectedAgentOwnershipEpoch', 'expectedExecutorInstanceId', 'expectedSettingsSchemaVersion'])(
     'PATCH /execution-settings requires %s before provider patch admission', async missing => {
       const agent = createRouteAgent();

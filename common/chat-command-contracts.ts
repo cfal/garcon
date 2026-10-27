@@ -499,7 +499,7 @@ export interface ExecutionSettingsPatchResponse {
   chatId: string;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
-  agentSettings: AgentSettingsEnvelope;
+  agentSettings: AgentSettingsEnvelope | null;
 }
 
 export interface ModelPatchRequest {

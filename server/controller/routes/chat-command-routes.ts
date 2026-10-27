@@ -443,7 +443,7 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
         chatId,
         permissionMode: updated.permissionMode,
         thinkingMode: updated.thinkingMode,
-        agentSettings: updated.agentSettingsById?.[updated.agentId] ?? chat.agentSettingsById[chat.agentId],
+        agentSettings: updated.agentSettingsById?.[updated.agentId] ?? null,
       });
     } catch (error: unknown) {
       return chatSettingsPatchErrorResponse(error);

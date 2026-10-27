@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import type { ChatRegistrySnapshot } from '../../../server/controller/chats/registry-contracts.js';
 
-test('runs with current defaults when saved settings are absent without persisting them', async () => {
+test('runs and edits unrelated settings with current defaults without persisting absent envelopes', async () => {
   await withIntegrationFixture('absent-chat-settings', async (fixture) => {
     const chatId = fixture.newChatId();
     const started = await fixture.client.startDirectChat({
@@ -22,7 +22,15 @@ test('runs with current defaults when saved settings are absent without persisti
       registry.sessions[chatId]!.agentSettingsById = {};
       await writeFile(registryPath, JSON.stringify(registry));
     } });
-    expect((await fixture.client.listChats()).sessions.find(chat => chat.id === chatId)?.agentSettings).toBeNull();
+    const chat = (await fixture.client.listChats()).sessions.find(chat => chat.id === chatId)!;
+    expect(chat.agentSettings).toBeNull();
+    const patched = await fixture.client.patch<{ agentSettings: unknown }>('/api/v1/chats/execution-settings', {
+      chatId, permissionMode: 'default',
+    });
+    expect(patched.agentSettings).toBeNull();
+    await fixture.client.patch('/api/v1/chats/model', { chatId, model: chat.model });
+    const edited: ChatRegistrySnapshot = JSON.parse(await readFile(registryPath, 'utf8'));
+    expect(edited.sessions[chatId]!.agentSettingsById).toEqual({});
 
     const resumed = await fixture.client.runChat({
       chatId,
