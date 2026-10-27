@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ReadTextResponse, SaveTextResponse } from '../../../common/file-contracts.js';
 import type { ExecutorsChangedMessage } from '../../../common/ws-events.js';
+import type { ModelCatalogResponse } from '../../../common/model-catalog.js';
 import { tcpLinkProxy } from '../../../server/remote/__tests__/tcp-link-proxy.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { waitForBulk } from '../../support/executor-bulk-fixture.js';
@@ -91,6 +92,9 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
           chatId, content: 'Synthetic running turn', projectPath: fixture.executionDirs.project, agent: fixture.directAgents.openAi,
         });
         await held.received;
+        const snapshot = await client.getChatSnapshot(chatId);
+        const catalog = await client.get<ModelCatalogResponse>(`/api/v1/models?executorId=${client.executorId}`);
+        const defaults = catalog.catalog.agents.find(agent => agent.id === snapshot.chat.agentId)!.defaultSettings;
         const cursor = client.markEvents();
         proxy!.blackhole();
         proxy!.disconnect();
@@ -102,7 +106,10 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
 
         const browser = await fixture.connectObserver('browser', { requestTimeoutMs: BROWSER_REQUEST_TIMEOUT_MS });
         const requested = performance.now();
-        const patching = browser.patch('/api/v1/chats/execution-settings', { chatId, agentSettingsPatch: {} })
+        const patching = browser.patch('/api/v1/chats/execution-settings', {
+          chatId, agentSettingsPatch: {}, expectedAgentOwnershipEpoch: snapshot.chat.agentOwnershipEpoch,
+          expectedExecutorInstanceId: catalog.executorInstanceId, expectedSettingsSchemaVersion: defaults.schemaVersion,
+        })
           .then(() => null, (error: unknown) => error);
         // Lets the settings change take the chat's lock first.
         await Bun.sleep(500);

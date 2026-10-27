@@ -12,6 +12,7 @@ vi.mock('$lib/api/client', async (importOriginal) => ({
 }));
 
 const catalogBody = {
+	executorInstanceId: 'synthetic-instance',
 	catalog: {
 		agents: [{
 			id: 'sample', label: 'Sample', executionPolicy: 'conversation', selectionLabel: 'Model', inputFormatByModel: {}, kind: 'agent', defaultModel: 'cached',

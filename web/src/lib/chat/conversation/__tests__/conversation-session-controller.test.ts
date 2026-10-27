@@ -707,6 +707,9 @@ function createDeps(chat = createRunningChat()) {
 			})),
 			selectionValueFor: vi.fn((_provider, model) => model),
 			getAgentLabel: vi.fn((agentId: string) => agentId),
+			executorInstanceId: 'synthetic-instance',
+			isValidated: true,
+			getAgentSettingsDescriptors: () => [],
 			getDefaultAgentSettings: vi.fn((agentId: string) => ({
 				ownerId: agentId,
 				schemaVersion: 1,

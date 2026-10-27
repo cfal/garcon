@@ -2,10 +2,12 @@ import { describe, expect, it, mock, spyOn } from 'bun:test';
 
 import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
 import { AgentSessionSettingsService } from '../session-settings-service.ts';
+import { AgentIntegrationError, AgentCallError } from '@garcon/server-agent-interface';
 
 function makeService(thinkingMode = 'high') {
   const entry = {
     agentId: 'amp',
+    agentOwnershipEpoch: 'current-owner',
     agentSessionId: null,
     model: 'medium',
     apiProviderId: null,
@@ -19,6 +21,7 @@ function makeService(thinkingMode = 'high') {
   };
   const updateChat = mock(async (_chatId, patch) => ({ ...entry, ...patch }));
   const integration = {
+    producers: { scope: { instanceId: 'synthetic-instance' } },
     descriptor: {
       supportedThinkingModes: [],
     },
@@ -50,6 +53,7 @@ function makeService(thinkingMode = 'high') {
     readChatExecutionControl: mock(async () => control),
     withChatExecutionControl: mock(async (_chatId, operation) => operation(control)),
   };
+  const directory = { require: () => integration };
   const service = new AgentSessionSettingsService({
     execution,
     onCommitted,
@@ -57,13 +61,86 @@ function makeService(thinkingMode = 'high') {
       getChat: () => entry,
       updateChat,
     },
-    directory: { require: () => integration },
+    directory,
     endpointResolver,
   });
-  return { service, updateChat, entry, integration, endpointResolver, onCommitted, execution, control };
+  return { service, updateChat, entry, integration, directory, endpointResolver, onCommitted, execution, control };
 }
 
 describe('AgentSessionSettingsService', () => {
+  const fence = { expectedExecutorInstanceId: 'synthetic-instance', expectedSettingsSchemaVersion: 2 };
+
+  it.each([undefined, { ...fence, expectedExecutorInstanceId: 'old-instance' }, { ...fence, expectedSettingsSchemaVersion: 1 }])(
+    'rejects a stale or missing settings fence before any provider work: %j', async settingsFence => {
+      const f = makeService();
+      const parse = spyOn(f.integration.settings, 'parse');
+      f.integration.configurationValidation = { validate: mock(async () => {}) };
+      await expect(f.service.updateSessionSettings('chat-1', { agentSettingsPatch: {} }, 'current-owner', undefined, settingsFence))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422, retryable: false });
+      expect(parse).not.toHaveBeenCalled();
+      expect(f.integration.configurationValidation.validate).not.toHaveBeenCalled();
+      expect(f.updateChat).not.toHaveBeenCalled();
+    },
+  );
+
+  it('requires ownership for provider patches even with a valid instance and schema', async () => {
+    const f = makeService();
+    await expect(f.service.updateSessionSettings('chat-1', { agentSettingsPatch: {} }, undefined, undefined, fence))
+      .rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+    expect(f.updateChat).not.toHaveBeenCalled();
+  });
+
+  it('rejects a patch delayed before handler entry across a schema-changing replacement', async () => {
+    const f = makeService();
+    const submit = () => f.service.updateSessionSettings('chat-1', { agentSettingsPatch: { mode: 'same-value' } }, 'current-owner', undefined, fence);
+    const replacement = { ...f.integration, producers: { scope: { instanceId: 'replacement' } },
+      settings: { ...f.integration.settings, defaults: () => ({ ownerId: 'amp', schemaVersion: 3, values: {} }) } };
+    f.directory.require = () => replacement;
+    await expect(submit()).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+    expect(f.updateChat).not.toHaveBeenCalled();
+    expect(f.entry.agentSettingsById.amp.schemaVersion).toBe(2);
+  });
+
+  it('parses settings before endpoints even when configuration validation is absent', async () => {
+    const f = makeService();
+    f.integration.settings.parse = mock(() => { throw new AgentIntegrationError('INVALID_SETTINGS', 'Saved settings are incompatible', false); });
+    const resolve = spyOn(f.endpointResolver, 'resolveSelection');
+    await expect(f.service.validateConfiguration({ agentId: 'amp', model: 'synthetic', permissionMode: 'default', thinkingMode: 'none',
+      agentSettings: { ownerId: 'amp', schemaVersion: 1, values: {} } })).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+    await expect(f.service.updateSessionSettings('chat-1', { model: 'new' })).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(f.updateChat).not.toHaveBeenCalled();
+  });
+
+  it('fences replacement during validation before applying or persisting settings', async () => {
+    const f = makeService();
+    f.entry.agentSessionId = 'native';
+    const replacement = { ...f.integration };
+    f.integration.configurationValidation = { validate: mock(async () => { f.directory.require = () => replacement; }) };
+    f.integration.sessionConfiguration = { apply: mock(async () => {}) };
+    await expect(f.service.updateSessionSettings('chat-1', { model: 'new' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+    expect(f.integration.sessionConfiguration.apply).not.toHaveBeenCalled();
+    expect(f.updateChat).not.toHaveBeenCalled();
+  });
+
+  it('persists a successful native apply even if its generation retires before completion', async () => {
+    const f = makeService();
+    f.entry.agentSessionId = 'native';
+    const replacement = { ...f.integration };
+    f.integration.sessionConfiguration = { apply: mock(async () => { f.directory.require = () => replacement; }) };
+    await f.service.updateSessionSettings('chat-1', { model: 'new' });
+    expect(f.updateChat).toHaveBeenCalledTimes(1);
+    expect(f.onCommitted).toHaveBeenCalledTimes(1);
+  });
+
+  it('never converts uncertain native application into refresh-required non-dispatch', async () => {
+    const f = makeService();
+    f.entry.agentSessionId = 'native';
+    f.integration.sessionConfiguration = { apply: mock(async () => { throw new AgentCallError('unknown', 'Lost application result'); }) };
+    await expect(f.service.updateSessionSettings('chat-1', { model: 'new' })).rejects.toMatchObject({ outcome: 'unknown', code: 'OUTCOME_UNKNOWN' });
+    expect(f.updateChat).not.toHaveBeenCalled();
+  });
+
   it.each(['entries', 'controlEntries'])('rejects literal mode changes with pending %s', async lane => {
     const f = makeService('none');
     f.integration.literalExecution = { selectionLabel: 'Mode', inputFormatByModel: {} };

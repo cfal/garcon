@@ -1,6 +1,7 @@
 import { normalizePermissionMode } from '../../../common/chat-modes.js';
 import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
 import type { AgentSettingsEnvelope } from '../../../common/agent-integration.js';
+import type { AgentSettingsPatchFence } from '../../../common/chat-command-contracts.js';
 import type { ExecutorCallOptions } from '@garcon/server-agent-interface';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
@@ -52,6 +53,7 @@ export class AgentSessionSettingsService {
 
   async validateConfiguration(input: AgentConfigurationInput, options?: ExecutorCallOptions): Promise<void> {
     const integration = this.deps.directory.require(input.agentId, input.executorId);
+    const settings = integration.settings.parse(input.agentSettings);
     const selection = this.deps.endpointResolver.resolveSelection(input);
     if (!integration.configurationValidation) return;
     await integration.configurationValidation.validate({
@@ -61,9 +63,10 @@ export class AgentSessionSettingsService {
         input.thinkingMode,
         integration.descriptor.supportedThinkingModes,
       ),
-      settings: integration.settings.parse(input.agentSettings),
+      settings,
       endpoint: toAgentEndpointSelection(this.deps.endpointResolver, selection),
     }, options);
+    if (this.deps.directory.require(input.agentId, input.executorId) !== integration) throw settingsRefreshRequired();
   }
 
   updateSessionSettings(
@@ -71,6 +74,7 @@ export class AgentSessionSettingsService {
     patch: AgentSessionSettingsPatch,
     expectedAgentOwnershipEpoch?: string,
     signal?: AbortSignal,
+    settingsFence?: AgentSettingsPatchFence,
   ): Promise<AgentChatEntry> {
     // Starts before the lock, so a change queued behind another gives up in turn.
     const deadline = interactiveDeadline();
@@ -81,6 +85,20 @@ export class AgentSessionSettingsService {
         throw new DomainError('STALE_CHAT_OWNERSHIP', 'Chat ownership changed before settings were updated.', 409);
       }
       const integration = this.deps.directory.require(entry.agentId, entry.executorId);
+      if (patch.agentSettingsPatch !== undefined && (
+        !expectedAgentOwnershipEpoch || !settingsFence
+        || settingsFence.expectedExecutorInstanceId !== integration.producers.scope.instanceId
+        || settingsFence.expectedSettingsSchemaVersion !== integration.settings.defaults().schemaVersion
+      )) throw settingsRefreshRequired();
+      const assertCurrent = () => {
+        if (this.deps.directory.require(entry.agentId, entry.executorId) !== integration) throw settingsRefreshRequired();
+      };
+      const currentSettings = integration.settings.parse(
+        entry.agentSettingsById[entry.agentId] ?? integration.settings.defaults(),
+      );
+      const settings = patch.agentSettingsPatch !== undefined
+        ? integration.settings.applyPatch(currentSettings, patch.agentSettingsPatch)
+        : currentSettings;
       const previous = this.deps.endpointResolver.describePrevious({
         model: entry.model,
         apiProviderId: entry.apiProviderId,
@@ -100,12 +118,14 @@ export class AgentSessionSettingsService {
         : null;
       try {
         if (reservation) assertEmptyQueue(await this.deps.execution.readChatExecutionControl(chatId));
+        assertCurrent();
         const endpoint = toAgentEndpointSelection(this.deps.endpointResolver, next);
         if (endpoint) {
           if (!integration.endpoints) {
             throw new Error(`Agent integration ${entry.agentId} does not accept API provider endpoints`);
           }
           await integration.endpoints.validate(endpoint, readBefore(deadline, signal));
+          assertCurrent();
         }
         assertSameApiProviderBoundary(previous, next);
 
@@ -127,13 +147,6 @@ export class AgentSessionSettingsService {
           patch.thinkingMode ?? entry.thinkingMode,
           integration.descriptor.supportedThinkingModes,
         );
-        const currentSettings = integration.settings.parse(
-          entry.agentSettingsById[entry.agentId] ?? integration.settings.defaults(),
-        );
-        const settings = patch.agentSettingsPatch
-          ? integration.settings.applyPatch(currentSettings, patch.agentSettingsPatch)
-          : currentSettings;
-
         const configuration = {
           model: next.model,
           permissionMode,
@@ -142,8 +155,10 @@ export class AgentSessionSettingsService {
           endpoint,
         };
         await integration.configurationValidation?.validate(configuration, readBefore(deadline, signal));
+        assertCurrent();
         this.deps.endpointResolver.resolveEndpointReference(next);
         const commit = async (): Promise<AgentChatEntry> => {
+          assertCurrent();
           if (entry.agentSessionId && integration.sessionConfiguration) {
             await integration.sessionConfiguration.apply(
               entry.agentSessionId,
@@ -162,6 +177,7 @@ export class AgentSessionSettingsService {
             );
           }
 
+          // A successful native apply remains applied even if its generation retired.
           const updated = await this.deps.registry.updateChat(chatId, {
             model: next.model,
             apiProviderId: next.apiProviderId,
@@ -188,6 +204,10 @@ export class AgentSessionSettingsService {
       }
     });
   }
+}
+
+function settingsRefreshRequired(): DomainError {
+  return new DomainError('VALIDATION_FAILED', 'Provider settings changed. Refresh the executor catalog before editing settings.', 422);
 }
 
 function assertEmptyQueue(control: StoredChatExecutionControlState): void {

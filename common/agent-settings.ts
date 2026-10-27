@@ -44,6 +44,19 @@ export function withAgentSetting(
   };
 }
 
+export function areAgentSettingsCompatible(
+  envelope: AgentSettingsEnvelope,
+  defaults: AgentSettingsEnvelope,
+  descriptors: readonly AgentSettingDescriptor[],
+): boolean {
+  if (envelope.ownerId !== defaults.ownerId || envelope.schemaVersion !== defaults.schemaVersion) return false;
+  const byKey = new Map(descriptors.map(descriptor => [descriptor.key, descriptor]));
+  return Object.entries(envelope.values).every(([key, value]) => {
+    const descriptor = byKey.get(key);
+    return descriptor !== undefined && isDescriptorValue(descriptor, value);
+  });
+}
+
 function isDescriptorValue(descriptor: AgentSettingDescriptor, value: JsonValue): boolean {
   switch (descriptor.type) {
     case 'boolean':

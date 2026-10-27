@@ -140,7 +140,7 @@ async function remoteRouter({ root, chats, ledger, remote }: {
     isReady: () => remote.availability === 'ready',
     integrationsFor() { return integrations; },
     captureInventory() {
-      return { instanceId: integration.producers.scope.instanceId, integrations: integrations.list(), assertCurrent: () => { this.requireIntegration({ agentId: 'test' }); } };
+      return { instanceId: integration.producers.scope.instanceId, integrations: integrations.list(), assertCurrent: () => { this.requireIntegration({ agentId: 'test', executorId: integration.producers.scope.executorId }); } };
     },
     knownIntegration: ({ agentId }) => integrations.get(agentId),
     requireIntegration({ agentId }) {
