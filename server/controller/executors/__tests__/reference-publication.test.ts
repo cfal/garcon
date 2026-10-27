@@ -44,7 +44,7 @@ async function fixture() {
   await chats.flush();
   const ownership = new AgentOwnershipJournal({
     workspaceDir: root, registry: chats, retainExecutorReferences,
-    integrations: { get: () => null, require: () => { throw new Error('No provider needed'); } },
+    integrations: { isReady: () => false, require: () => { throw new Error('No provider needed'); } },
     ledger: { deleteChat: () => {} },
   });
   await ownership.initialize();
@@ -282,7 +282,7 @@ test.each([false, true])('deletion inherits an unknown persisted chat executor (
   await chats.init();
   const ownership = new AgentOwnershipJournal({
     workspaceDir: root, registry: chats, retainExecutorReferences: manager.retainReferences,
-    integrations: { get: () => null, require: () => { throw new Error('No provider needed'); } },
+    integrations: { isReady: () => false, require: () => { throw new Error('No provider needed'); } },
     ledger: { deleteChat: () => {} },
   });
   await ownership.initialize();
@@ -299,7 +299,7 @@ test('deletion without a provider reference retains the source during registry r
   const deleting = ownership.delete(id);
   await gate.entered;
   expect(chats.getChat(id)).toBeNull();
-  expect(ownership.referencesExecutor(executor.id)).toBe(false);
+  expect(ownership.referencesExecutor(executor.id)).toBe(true);
   await expect(manager.remove(executor.id)).rejects.toMatchObject({ code: 'EXECUTOR_IN_USE' });
   gate.release();
   await deleting;
@@ -317,7 +317,7 @@ test('handoff inherits the persisted source executor but validates the new targe
   await chats.init();
   const ownership = new AgentOwnershipJournal({
     workspaceDir: root, registry: chats, retainExecutorReferences: manager.retainReferences,
-    integrations: { get: () => null, require: () => { throw new Error('No provider needed'); } },
+    integrations: { isReady: () => false, require: () => { throw new Error('No provider needed'); } },
     ledger: { deleteChat: () => {} },
   });
   await ownership.initialize();

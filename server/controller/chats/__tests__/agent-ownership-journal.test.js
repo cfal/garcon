@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { AgentOwnershipJournal } from '../agent-ownership-journal.js';
-import { emptyOwnershipJournalV5 } from '../agent-ownership-journal-format.js';
+import { emptyOwnershipJournalV5, isSavedDeleteReference, isJournalV5 } from '../agent-ownership-journal-format.js';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 
@@ -86,6 +86,7 @@ function createIntegrations(release = mock(async () => {})) {
   ]);
   return {
     get: (agentId) => byId.get(agentId),
+    isReady: () => true,
     require(agentId) {
       const value = byId.get(agentId);
       if (!value) throw new Error(`missing integration ${agentId}`);
@@ -122,7 +123,7 @@ describe('AgentOwnershipJournal', () => {
   it('reloads and applies executor/path ownership without live integration discovery', async () => {
     const executorId = '22222222-2222-4222-8222-222222222222';
     const registry = createRegistry({ chat: chat() });
-    const integrations = { get: () => null, require: () => { throw new Error('offline'); } };
+    const integrations = { isReady: () => false, require: () => { throw new Error('offline'); } };
     const options = { workspaceDir, registry, integrations, ledger: { deleteChat: mock(() => {}) } };
     const journal = new AgentOwnershipJournal(options);
     await journal.initialize();
@@ -381,6 +382,84 @@ describe('AgentOwnershipJournal', () => {
     expect((await readJournal(workspaceDir)).ownershipIntents).toEqual([]);
   });
 
+  it('deletes with incompatible saved settings without parsing or replacing them', async () => {
+    const saved = { ownerId: 'source-agent', schemaVersion: 1, values: { mode: 'saved' } };
+    const registry = createRegistry({ chat: chat('source-agent', { agentSettingsById: { 'source-agent': saved } }) });
+    const release = mock(async () => {});
+    const integrations = createIntegrations(release);
+    const integration = integrations.require('source-agent');
+    integration.settings.defaults = () => ({ ownerId: 'source-agent', schemaVersion: 3, values: { mode: 'new' } });
+    integration.settings.parse = mock(() => { throw new Error('Incompatible settings'); });
+    const journal = new AgentOwnershipJournal({ workspaceDir, registry, integrations, ledger: { deleteChat() {} } });
+    await journal.initialize();
+    await journal.delete('chat');
+    await journal.waitForProviderCleanup();
+    expect(registry.getChat('chat')).toBeNull();
+    expect(integration.settings.parse).not.toHaveBeenCalled();
+    expect(release.mock.calls[0][0].chat.settings).toEqual(saved);
+    expect(await readJournal(workspaceDir)).toEqual(emptyOwnershipJournalV5());
+  });
+
+  it('preserves absent-settings native cleanup across offline, removed facets, default failures and restart', async () => {
+    const nativeSession = { ownerId: 'source-agent', schemaVersion: 1, value: { id: 'synthetic-native' } };
+    const registry = createRegistry({ chat: chat('source-agent', { agentSettingsById: {}, nativeSession }) });
+    const release = mock(async () => {});
+    const integrations = createIntegrations(release);
+    const integration = integrations.require('source-agent');
+    let ready = false;
+    integrations.isReady = () => ready;
+    const requireIntegration = spyOn(integrations, 'require');
+    const options = { workspaceDir, registry, integrations, ledger: { deleteChat() {} } };
+    let journal = new AgentOwnershipJournal(options);
+    await journal.initialize();
+    await journal.delete('chat');
+    await journal.waitForProviderCleanup();
+    expect(requireIntegration).not.toHaveBeenCalled();
+    expect((await readJournal(workspaceDir)).ownershipIntents[0].releaseReferences[0]).toMatchObject({ settings: null, nativeSession });
+    journal = new AgentOwnershipJournal(options);
+    await journal.initialize();
+    await journal.waitForProviderCleanup();
+    ready = true;
+    integration.nativeSessions = null;
+    await journal.retryProviderCleanup('local');
+    expect(journal.hasPending('chat')).toBe(true);
+    expect(release).not.toHaveBeenCalled();
+    integration.nativeSessions = { release };
+    integration.settings.defaults = () => { throw new Error('Defaults unavailable'); };
+    await journal.retryProviderCleanup('local');
+    expect(journal.hasPending('chat')).toBe(true);
+    expect((await readJournal(workspaceDir)).ownershipIntents[0].releaseReferences[0].settings).toBeNull();
+    const defaults = { ownerId: 'source-agent', schemaVersion: 3, values: { mode: 'new' } };
+    integration.settings.defaults = () => defaults;
+    await journal.retryProviderCleanup('local');
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release.mock.calls[0][0].chat).toMatchObject({ settings: defaults, nativeSession });
+    expect(journal.hasPending('chat')).toBe(false);
+  });
+
+  it.each([
+    { agentSettingsById: { 'source-agent': { ownerId: 'wrong', schemaVersion: 1, values: {} } } },
+    { nativeSession: { ownerId: 'wrong', schemaVersion: 1, value: {} } },
+  ])('validates the built delete reference before registry or journal mutation: %j', async overrides => {
+    const registry = createRegistry({ chat: chat('source-agent', overrides) });
+    const journal = new AgentOwnershipJournal({ workspaceDir, registry, integrations: createIntegrations(), ledger: { deleteChat() {} } });
+    await journal.initialize();
+    await expect(journal.delete('chat')).rejects.toThrow('Invalid native cleanup reference');
+    expect(registry.removeChat).not.toHaveBeenCalled();
+    expect(journal.hasPending('chat')).toBe(false);
+  });
+
+  it('allows literal absence only in delete references, never malformed settings or handoff targets', () => {
+    expect(isSavedDeleteReference({ ...referenceFor('source-agent'), settings: null })).toBe(true);
+    expect(isSavedDeleteReference(referenceFor('source-agent'))).toBe(true);
+    for (const settings of [undefined, {}, { ownerId: 'other', schemaVersion: 1, values: {} }, { ownerId: 'source-agent', schemaVersion: 0, values: {} }]) {
+      expect(isSavedDeleteReference({ ...referenceFor('source-agent'), settings })).toBe(false);
+    }
+    const intent = persistedHandoff();
+    intent.target.execution.agentSettings = null;
+    expect(isJournalV5({ ...emptyOwnershipJournalV5(), ownershipIntents: [intent] })).toBe(false);
+  });
+
   it('does not let blocked cleanup A delay delete B', async () => {
     const registry = createRegistry({ chatA: chat(), chatB: chat('target-agent') });
     let releaseA;
@@ -468,7 +547,7 @@ describe('AgentOwnershipJournal', () => {
     const registry = createRegistry({ chat: chat('source-agent', { executorId }) });
     let configured = true;
     const journal = new AgentOwnershipJournal({
-      workspaceDir, registry, integrations: { get: () => null },
+      workspaceDir, registry, integrations: { isReady: () => false, require: () => { throw new Error('offline'); } },
       ledger: { deleteChat: mock(() => {}) },
       isExecutorConfigured: () => configured,
     });
@@ -495,7 +574,7 @@ describe('AgentOwnershipJournal', () => {
     const executorId = '22222222-2222-4222-8222-222222222222';
     const registry = createRegistry({ chat: chat('source-agent', { executorId }) });
     const options = { workspaceDir, registry, ledger: { deleteChat: mock(() => {}) } };
-    const journal = new AgentOwnershipJournal({ ...options, integrations: { get: () => null } });
+    const journal = new AgentOwnershipJournal({ ...options, integrations: { isReady: () => false, require: () => { throw new Error('offline'); } } });
     await journal.initialize();
     await journal.delete('chat');
     await journal.waitForProviderCleanup();
@@ -521,7 +600,7 @@ describe('AgentOwnershipJournal', () => {
     const native = createIntegrations(release);
     const options = {
       workspaceDir, registry, ledger: { deleteChat: mock(() => {}) },
-      integrations: { get: (agentId, executor) => available.has(executor) ? native.get(agentId) : null },
+      integrations: { isReady: executor => available.has(executor), require: agentId => native.require(agentId) },
     };
     let journal = new AgentOwnershipJournal(options);
     await journal.initialize();

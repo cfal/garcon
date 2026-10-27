@@ -34,7 +34,7 @@ async function fixture() {
   chats.addChat({ id: chatId, agentId: 'test', model: 'synthetic-model', projectPath: root, parentChat: null });
   await chats.flush();
   const ownership = new AgentOwnershipJournal({ workspaceDir: root, registry: chats, retainProviderReferences,
-    integrations: { get: () => null, require: () => { throw new Error('No integration needed'); } }, ledger: { deleteChat: () => {} } });
+    integrations: { isReady: () => false, require: () => { throw new Error('No integration needed'); } }, ledger: { deleteChat: () => {} } });
   await ownership.initialize();
   const selection = { agentId: 'test', model: 'synthetic-model', projectPath: root, apiProviderId: provider.id,
     modelEndpointId: provider.endpoints[0]!.id, modelProtocol: 'openai-compatible' as const,
