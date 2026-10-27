@@ -13,12 +13,12 @@ import {
 import type {
   CommandAcceptedResponse,
   ExecutionSettingsPatchRequest,
-  AgentSettingsPatchFence,
   ModelPatchRequest,
   QueueCommandErrorResponse,
   QueueEntrySteerErrorResponse,
   RunningChatsResponse,
 } from '../../../common/chat-command-contracts.ts';
+import type { AgentSettingsPatchFence } from '../../../common/agent-settings.js';
 import {
   parsePermissionDecisionCommandRequest,
   parseProjectPathPatchRequest,

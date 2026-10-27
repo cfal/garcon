@@ -701,7 +701,7 @@ function createDeps(chat = createRunningChat()) {
 				supportsForkWhileRunning: false, supportsUpdateProjectPath: true,
 				supportsSteering: true, supportsImages: true, fileAttachmentMimeTypes: [],
 				acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false,
-				supportedPermissionModes: ['default'], supportedThinkingModes: ['none'], settings: settingDescriptors(id),
+				supportedPermissionModes: ['default'], supportedThinkingModes: ['none'], settings: [...settingDescriptors(id)],
 				defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },
 			})),
 			getModelForSelection: vi.fn<SessionControllerDeps['modelCatalog']['getModelForSelection']>(

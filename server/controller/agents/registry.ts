@@ -8,7 +8,8 @@ import type {
   ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import type { AgentAuthStatus } from '../../../common/agent-execution.js';
-import type { AgentSettingsPatchFence, PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
+import type { PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
+import type { AgentSettingsPatchFence } from '../../../common/agent-settings.js';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { ChatTransientControlAction } from '../../../common/chat-transient-feed.js';
 import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
