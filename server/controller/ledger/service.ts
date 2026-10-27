@@ -17,9 +17,14 @@ import type { ChatTransientControlAction } from '../../../common/chat-transient-
 import type { ResendCandidate } from '../../../common/chat-view.js';
 import type { JsonObject } from '../../../common/json.js';
 import type {
+  ActivePermission,
   AppendChatRowResult,
   AppendSelectionChangeNoticeResult,
   InputComposition,
+  PermissionResolutionClaim,
+  RetiredPermissionControl,
+  TranscriptCommitEvent,
+  TranscriptSessionCommitEvent,
   LedgerAgentSwitchRow,
   LedgerNoticeRow,
   LedgerPreambleSelectionChangedNoticeDetail,
@@ -35,6 +40,7 @@ import type {
   TranscriptViewId,
   TranscriptWatermark,
 } from './contracts.js';
+export type { PermissionResolutionClaim, RetiredPermissionControl, TranscriptCommitEvent, TranscriptSessionCommitEvent } from './contracts.js';
 import type { PendingPreambleBoundary, Preamble } from '../../../common/preambles.js';
 import { isConversationalLedgerRow, transcriptViewId } from './contracts.js';
 import {
@@ -44,7 +50,7 @@ import {
   dispatchGarconCommands,
   type GarconCommandSinks,
 } from './garcon-command-publication.js';
-import { PermissionNotActionableError, TranscriptSinkClosedError } from './errors.js';
+import { LedgerFencedError, PermissionNotActionableError, TranscriptSinkClosedError } from './errors.js';
 import { permissionRowKind, validatePermissionDecision } from './permission-rows.js';
 import { ProducerLease } from './producer-lease.js';
 import { projectFinalResponse } from './final-response.js';
@@ -60,69 +66,11 @@ export interface TranscriptProducerLease {
   onClosed(listener: () => void): () => void;
 }
 
-export type TranscriptCommitEvent =
-  | {
-      readonly type: 'rows';
-      readonly chatId: string;
-      readonly viewId: TranscriptViewId;
-      readonly rows: readonly LedgerRow[];
-    }
-  | {
-      readonly type: 'session';
-      readonly chatId: string;
-      readonly viewId: TranscriptViewId;
-      readonly row: LedgerSessionRow;
-    }
-  | {
-      readonly type: 'permission';
-      readonly chatId: string;
-      readonly viewId: TranscriptViewId;
-      readonly runId: string | null;
-      readonly row: LedgerPermissionRow;
-    }
-  | {
-      readonly type: 'run-ended';
-      readonly chatId: string;
-      readonly viewId: TranscriptViewId;
-      readonly runId: string;
-      readonly row: LedgerRunEndedRow;
-      readonly finalResponse: AgentFinalResponse | null;
-      readonly workingDirectory?: CommandWorkingDirectory;
-    }
-  | {
-      readonly type: 'view-replaced';
-      readonly chatId: string;
-      readonly previousViewId: TranscriptViewId;
-      readonly view: TranscriptView;
-    };
-
-export type TranscriptSessionCommitEvent = Extract<TranscriptCommitEvent, { readonly type: 'session' }>;
-
 export interface TranscriptLedgerServiceOptions extends Partial<GarconCommandSinks> {
   readonly now?: () => string;
   readonly createRunId?: () => string;
   readonly serverInstanceId?: string;
   readonly onListenerError?: (error: unknown) => void;
-}
-
-export interface PermissionResolutionClaim {
-  readonly chatId: string;
-  readonly viewId: TranscriptViewId;
-  readonly runId: string;
-  readonly permissionOccurrenceId: string;
-  readonly claimId: string;
-  readonly decision: AgentPermissionResponseCapability;
-}
-
-export type RetiredPermissionControl = Pick<
-  PermissionResolutionClaim, 'chatId' | 'viewId' | 'runId' | 'permissionOccurrenceId'
->;
-
-interface ActivePermission {
-  readonly runId: string;
-  readonly permissionOccurrenceId: string;
-  readonly decision: AgentPermissionResponseCapability;
-  readonly claimId: string | null;
 }
 
 export class TranscriptLedgerService {
@@ -135,6 +83,7 @@ export class TranscriptLedgerService {
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
   readonly #runEndCommitListeners = new Set<(chatId: string, runId: string) => void>();
+  readonly #runAbandonedListeners = new Set<(chatId: string, runId: string) => void | Promise<void>>();
   readonly #permissionRetiredListeners = new Set<(control: RetiredPermissionControl) => void>();
   readonly #leases = new Map<string, ProducerLease>();
   readonly #activeRuns = new Map<string, string>();
@@ -175,6 +124,12 @@ export class TranscriptLedgerService {
     return () => this.#runEndCommitListeners.delete(listener);
   }
 
+  // Reports process-only failure when storage cannot commit the run's terminal row.
+  subscribeRunAbandoned(listener: (chatId: string, runId: string) => void | Promise<void>): () => void {
+    this.#runAbandonedListeners.add(listener);
+    return () => this.#runAbandonedListeners.delete(listener);
+  }
+
   subscribePermissionRetired(listener: (control: RetiredPermissionControl) => void): () => void {
     this.#permissionRetiredListeners.add(listener);
     return () => this.#permissionRetiredListeners.delete(listener);
@@ -211,7 +166,13 @@ export class TranscriptLedgerService {
     }
     const lease = new ProducerLease((event) => {
       if (this.#leases.get(chatId) !== lease) throw new TranscriptSinkClosedError();
-      this.#publish(chatId, view.viewId, ownerAgentId, event);
+      try {
+        this.#publish(chatId, view.viewId, ownerAgentId, event);
+      } catch (error) {
+        const runId = this.#activeRuns.get(chatId);
+        if (error instanceof LedgerFencedError && runId) this.#abandonRun(chatId, runId);
+        throw error;
+      }
     }, () => {
       if (this.#leases.get(chatId) === lease) this.#leases.delete(chatId);
       this.#activeRuns.delete(chatId);
@@ -740,6 +701,7 @@ export class TranscriptLedgerService {
     this.#preparedInputs.clear();
     this.#sessionCommitListeners.clear();
     this.#runEndCommitListeners.clear();
+    this.#runAbandonedListeners.clear();
     this.#permissionRetiredListeners.clear();
     this.#store.close();
   }
@@ -834,6 +796,7 @@ export class TranscriptLedgerService {
         }]);
         const hasLiveCapability = this.#applyPermissionLifecycle(
           chatId,
+          viewId,
           event.runId,
           event.lifecycle,
           decision,
@@ -876,16 +839,24 @@ export class TranscriptLedgerService {
     finalResponse: AgentFinalResponse | null = null,
     workingDirectory?: CommandWorkingDirectory,
   ): LedgerRunEndedRow {
-    const view = this.#store.currentView(chatId);
-    if (!view) throw new TypeError(`Transcript view is not initialized for ${chatId}`);
-    const [row] = this.#store.append(chatId, view.viewId, [{
-      kind: 'run-ended',
-      at: this.#now(),
-      outcome,
-      origin,
-      ...(error ? { error } : {}),
-      providerMeta: null,
-    }]);
+    let view: TranscriptView;
+    let row: LedgerRow;
+    try {
+      const current = this.#store.currentView(chatId);
+      if (!current) throw new TypeError(`Transcript view is not initialized for ${chatId}`);
+      view = current;
+      [row] = this.#store.append(chatId, view.viewId, [{
+        kind: 'run-ended',
+        at: this.#now(),
+        outcome,
+        origin,
+        ...(error ? { error } : {}),
+        providerMeta: null,
+      }]);
+    } catch (failure) {
+      if (failure instanceof LedgerFencedError) this.#abandonRun(chatId, runId);
+      throw failure;
+    }
     const ended = row as LedgerRunEndedRow;
     this.#clearRunPermissions(chatId, runId);
     for (const listener of this.#runEndCommitListeners) listener(chatId, runId);
@@ -893,8 +864,32 @@ export class TranscriptLedgerService {
     return ended;
   }
 
+  #abandonRun(chatId: string, runId: string): void {
+    const retired = [...(this.#activePermissions.get(chatId)?.values() ?? [])]
+      .filter(permission => permission.runId === runId)
+      .map(permission => ({ chatId, runId, viewId: permission.viewId, permissionOccurrenceId: permission.permissionOccurrenceId }));
+    this.#activeRuns.delete(chatId);
+    this.closeProducer(chatId);
+    // Prior committed rows reach their fanout before failure-derived lifecycle state.
+    queueMicrotask(() => {
+      for (const control of retired) {
+        for (const listener of this.#permissionRetiredListeners) {
+          try { listener(control); } catch (error) { this.#onListenerError(error); }
+        }
+      }
+      for (const listener of this.#runAbandonedListeners) {
+        try {
+          void Promise.resolve(listener(chatId, runId)).catch(this.#onListenerError);
+        } catch (error) {
+          this.#onListenerError(error);
+        }
+      }
+    });
+  }
+
   #applyPermissionLifecycle(
     chatId: string,
+    viewId: TranscriptViewId,
     runId: string,
     lifecycle: Exclude<AgentPermissionLifecycle, { readonly kind: 'resolved' }>,
     decision: AgentPermissionResponseCapability | null,
@@ -908,6 +903,7 @@ export class TranscriptLedgerService {
         this.#activePermissions.set(chatId, permissions);
       }
       permissions.set(lifecycle.permissionOccurrenceId, {
+        viewId,
         runId,
         permissionOccurrenceId: lifecycle.permissionOccurrenceId,
         decision,

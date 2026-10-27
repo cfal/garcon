@@ -15,6 +15,18 @@ async function setFormat(page: Page, composerInputMode: 'source' | 'formatted') 
   }, composerInputMode);
 }
 
+async function dismissDirectoryBrowser(page: Page): Promise<void> {
+  const mobile = page.getByRole('dialog', { name: 'Select Directory', exact: true });
+  const desktop = page.locator('[data-slot="directory-browser-dismiss"]');
+  if (await mobile.isVisible()) {
+    await mobile.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await browserExpect(mobile).toHaveCount(0);
+  } else if (await desktop.isVisible()) {
+    await page.keyboard.press('Escape');
+    await browserExpect(desktop).toHaveCount(0);
+  }
+}
+
 test('New Chat formats pasted Markdown, retains its source and draft, and submits edited content', async () => {
   await withChromiumFixture('new-chat-markdown', async ({ page, context, integration, assertNoBrowserErrors }, markPhase) => {
     await page.goto(integration.garcon.baseUrl);
@@ -107,6 +119,7 @@ test('New Chat keeps its 300px input cap in Source and formatted modes on deskto
     const longDraft = Array.from({ length: 24 }, (_, index) => `Synthetic paragraph ${index + 1}.`).join('\n\n');
     const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
     await mkdir(artifacts, { recursive: true });
+    await dismissDirectoryBrowser(page);
     await source.fill(longDraft);
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
@@ -122,6 +135,7 @@ test('New Chat keeps its 300px input cap in Source and formatted modes on deskto
       await composer.getByRole('button', { name: 'Add to prompt', exact: true }).focus();
       await setFormat(page, 'source');
       await browserExpect(source).toBeVisible();
+      await dismissDirectoryBrowser(page);
       await source.fill('');
       await browserExpect(source).toHaveValue('');
       await browserExpect.poll(() => source.evaluate(node => node.clientHeight)).toBeLessThanOrEqual(52);

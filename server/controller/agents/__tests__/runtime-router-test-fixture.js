@@ -72,6 +72,7 @@ export function createRuntimeTranscriptFixture(options = {}) {
     return row;
   };
   const ledger = {
+    subscribeRunAbandoned: () => () => {},
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
