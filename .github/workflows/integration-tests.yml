@@ -86,9 +86,37 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  executor-compatibility:
+    name: Executor core compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - name: Install current artifact dependencies
+        run: bun install --frozen-lockfile
+      - name: Install integration-test dependencies
+        working-directory: integration-tests
+        run: bun install --frozen-lockfile
+      - name: Compile messages
+        run: bun run --cwd web i18n:compile
+      - name: Run serial compatibility matrix in both dial directions
+        working-directory: integration-tests
+        run: bun run test:compatibility
+      - name: Upload compatibility diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: executor-compatibility-diagnostics
+          path: integration-tests/artifacts/compatibility/
+          if-no-files-found: ignore
+          retention-days: 7
+
   server-integration:
     name: Server protocol integration
-    needs: server-integration-lane
+    needs: [server-integration-lane, executor-compatibility]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -97,9 +125,10 @@ jobs:
       - name: Verify server protocol integration lanes
         env:
           LANES_RESULT: ${{ needs.server-integration-lane.result }}
+          COMPATIBILITY_RESULT: ${{ needs.executor-compatibility.result }}
         run: |
-          if [ "$LANES_RESULT" != "success" ]; then
-            echo "::error::Server protocol integration lanes finished with result: $LANES_RESULT"
+          if [ "$LANES_RESULT" != "success" ] || [ "$COMPATIBILITY_RESULT" != "success" ]; then
+            echo "::error::Required server checks did not succeed: lanes=$LANES_RESULT compatibility=$COMPATIBILITY_RESULT"
             exit 1
           fi
 
