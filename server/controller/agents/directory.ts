@@ -8,9 +8,17 @@ export interface ExecutionIntegrationDirectory {
   knownIntegration(target: AgentExecutionTarget): AgentIntegration | null;
   integrationsFor(executorId: string): IntegrationRegistry;
   isReady(executorId: string): boolean;
+  captureInventory(executorId: string): AgentInventorySnapshot;
+}
+
+export interface AgentInventorySnapshot {
+  readonly instanceId: string;
+  readonly integrations: readonly AgentIntegration[];
+  assertCurrent(): void;
 }
 
 export class AgentDirectory {
+  readonly #emptyLocalInstanceId = crypto.randomUUID();
   constructor(
     private readonly integrations: IntegrationRegistry,
     private readonly executors?: ExecutionIntegrationDirectory,
@@ -35,6 +43,12 @@ export class AgentDirectory {
     if (this.executors) return this.executors.integrationsFor(effectiveExecutorId(executorId)).list();
     if (effectiveExecutorId(executorId) !== LOCAL_EXECUTOR_ID) throw executorUnavailable();
     return this.integrations.list();
+  }
+
+  captureInventory(executorId?: string | null): AgentInventorySnapshot {
+    if (this.executors) return this.executors.captureInventory(effectiveExecutorId(executorId));
+    const integrations = this.list(executorId);
+    return { integrations, instanceId: integrations[0]?.producers.scope.instanceId ?? this.#emptyLocalInstanceId, assertCurrent() {} };
   }
 
   isReady(executorId?: string | null): boolean {

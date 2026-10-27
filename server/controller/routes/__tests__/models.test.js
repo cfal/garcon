@@ -197,6 +197,15 @@ const agentCatalogEntries = [
 
 const modelCatalog = {
   agents: {
+    captureCatalog(executorId) {
+      return {
+        executorInstanceId: 'synthetic-instance',
+        assertCurrent() {},
+        getAgentCatalogEntries: () => this.getAgentCatalogEntries(executorId),
+        getAgentCatalogEntry: (id, query = {}) => this.getAgentCatalogEntry(id, { ...query, executorId }),
+        requiresStrictModelDiscovery: id => this.requiresStrictModelDiscovery(id, executorId),
+      };
+    },
     assertAgentAvailable: mock(() => {}),
     requiresStrictModelDiscovery: mock(() => false),
     getAgentCatalogEntries: mock(() => Promise.resolve(agentCatalogEntries)),
@@ -229,11 +238,13 @@ function discoveryFixture() {
     requireIntegration: ({ agentId }) => requireRegistry().require(agentId),
     integrationsFor: requireRegistry,
     isReady: () => ready,
+    captureInventory: () => ({ instanceId: integration.producers.scope.instanceId, integrations: requireRegistry().list(), assertCurrent: requireRegistry }),
   });
   const service = new AgentCatalogService({ directory, endpointResolver: { getModelOptions: () => [] } });
   const route = createModelsRoutes({
     modelCatalog: {
       agents: {
+        captureCatalog: service.capture.bind(service),
         getAgentCatalogEntry: service.getAgentCatalogEntry.bind(service),
         getAgentCatalogEntries: service.getAgentCatalogEntries.bind(service),
         requiresStrictModelDiscovery: service.requiresStrictModelDiscovery.bind(service),
@@ -328,7 +339,8 @@ describe("GET /api/v1/models", () => {
 
     expect(response.headers.get("etag")).toMatch(/^W\/"model-catalog:/);
     expect(response.headers.get("cache-control")).toBe("private, no-cache");
-    expect(Object.keys(body)).toEqual(["catalog"]);
+    expect(Object.keys(body)).toEqual(["executorInstanceId", "catalog"]);
+    expect(body.executorInstanceId).toBe('synthetic-instance');
     expect(Array.isArray(body.catalog.agents)).toBe(true);
     expect(Array.isArray(body.catalog.apiProviders)).toBe(true);
     expect(body.catalog.agents[0]).toMatchObject({
@@ -671,6 +683,7 @@ describe("GET /api/v1/models", () => {
 
     expect(response.status).toBe(503);
     expect(body).toEqual({
+      executorInstanceId: 'synthetic-instance',
       error: "Model discovery unavailable",
       reason: "auth storage: auth.json is locked",
     });

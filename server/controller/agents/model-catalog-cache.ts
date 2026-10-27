@@ -1,10 +1,11 @@
 import crypto from 'crypto';
-import type { AgentCatalogEntry } from '../../../common/agents.js';
-import type { ApiProviderCatalogEntry } from '../../../common/api-providers.js';
+import type { ModelCatalogResponse } from '../../../common/model-catalog.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { isRecord } from '../../../common/json.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import type { AgentRegistryServiceContract } from './registry.js';
+import type { AgentCatalogCapture } from './catalog-service.js';
+import { DomainError } from '../../common/domain-error.js';
 
 
 const MODEL_CATALOG_RESPONSE_CACHE_TTL_MS = 60_000;
@@ -14,17 +15,13 @@ export interface ModelCatalog {
   apiProviders: ApiProviderService;
 }
 
-export interface ModelCatalogResponseBody {
-  catalog: {
-    agents: AgentCatalogEntry[];
-    apiProviders: ApiProviderCatalogEntry[];
-  };
-}
+export type ModelCatalogResponseBody = ModelCatalogResponse;
 
 export interface ModelCatalogSnapshot {
   body: ModelCatalogResponseBody;
   etag: string;
   createdAt: number;
+  assertCurrent(): void;
 }
 
 function stableObject(value: unknown): unknown {
@@ -72,6 +69,7 @@ function catalogForHash(body: ModelCatalogResponseBody): unknown {
     }));
 
   return stableObject({
+    executorInstanceId: body.executorInstanceId,
     catalog: {
       agents,
       apiProviders,
@@ -89,13 +87,15 @@ function isFresh(snapshot: ModelCatalogSnapshot): boolean {
   return Date.now() - snapshot.createdAt < MODEL_CATALOG_RESPONSE_CACHE_TTL_MS;
 }
 
-async function buildCatalogResponse(modelCatalog: ModelCatalog, executorId: string): Promise<ModelCatalogSnapshot> {
+async function buildCatalogResponse(modelCatalog: ModelCatalog, executorId: string, captured: AgentCatalogCapture): Promise<Omit<ModelCatalogSnapshot, 'assertCurrent'>> {
   const body = {
+    executorInstanceId: captured.executorInstanceId,
     catalog: {
-      agents: await modelCatalog.agents.getAgentCatalogEntries(executorId),
+      agents: await captured.getAgentCatalogEntries(),
       apiProviders: modelCatalog.apiProviders.getCatalog(executorId),
     },
   };
+  captured.assertCurrent();
 
   return {
     body,
@@ -106,22 +106,36 @@ async function buildCatalogResponse(modelCatalog: ModelCatalog, executorId: stri
 
 export class ModelCatalogResponseCache {
   readonly #executors = new Map<string, {
+    owner: AgentCatalogCapture;
     cached: ModelCatalogSnapshot | null;
     inflight: Promise<ModelCatalogSnapshot> | null;
   }>();
 
   async getSnapshot(modelCatalog: ModelCatalog, executorId = effectiveExecutorId(undefined)): Promise<ModelCatalogSnapshot> {
+    const captured = modelCatalog.agents.captureCatalog(executorId);
     let entry = this.#executors.get(executorId);
+    if (entry) {
+      try { entry.owner.assertCurrent(); }
+      catch { this.#executors.delete(executorId); entry = undefined; }
+    }
     if (!entry) {
-      entry = { cached: null, inflight: null };
+      entry = { owner: captured, cached: null, inflight: null };
       this.#executors.set(executorId, entry);
     }
     if (entry.cached && isFresh(entry.cached)) return entry.cached;
     if (entry.inflight) return entry.inflight;
     const current = entry;
-    current.inflight = buildCatalogResponse(modelCatalog, executorId)
-      .then((snapshot) => {
-        if (this.#executors.get(executorId) === current) current.cached = snapshot;
+    const assertCurrent = () => {
+      captured.assertCurrent();
+      if (this.#executors.get(executorId) !== current) {
+        throw new DomainError('EXECUTOR_UNAVAILABLE', 'Model catalog changed. Refresh and try again.', 503, true);
+      }
+    };
+    current.inflight = buildCatalogResponse(modelCatalog, executorId, captured)
+      .then((result) => {
+        assertCurrent();
+        const snapshot = { ...result, assertCurrent };
+        current.cached = snapshot;
         return snapshot;
       })
       .catch((error: unknown) => {

@@ -43,7 +43,7 @@ import type {
   NativeForkCleanup,
   StartSessionOptions,
 } from './session-types.js';
-import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js';
+import { AgentCatalogService, type AgentModelQuery, type AgentCatalogCapture } from './catalog-service.js';
 import { AgentDirectory, type ExecutionIntegrationDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
 import { AgentRuntimeRouter, type RunSingleQueryOptions } from './runtime-router.js';
@@ -144,6 +144,7 @@ export interface AgentRegistryServiceContract {
   getAgentReadinessMap(authByAgent?: Record<string, unknown>, executorId?: string | null): Promise<Record<string, unknown>>;
   getAgentAuthStatus(agentId: string, executorId?: string | null): Promise<unknown | null>;
   getAgentCatalogEntries(executorId?: string | null): Promise<AgentCatalogEntry[]>;
+  captureCatalog(executorId?: string | null): AgentCatalogCapture;
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
   assertExecutionModeSelectionSupported(agentId: string, selection: {
     readonly executorId?: string | null;
@@ -803,6 +804,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}) { return this.#catalog.getAgentCatalogEntry(agentId, query); }
   getAgentCatalogEntries(executorId?: string | null) { return this.#catalog.getAgentCatalogEntries(executorId); }
+  captureCatalog(executorId?: string | null) { return this.#catalog.capture(executorId); }
 }
 
 function inputAttachments(options: UserInputAdmissionOptions) {

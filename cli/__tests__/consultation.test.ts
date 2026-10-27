@@ -96,6 +96,7 @@ function snapshot(): ChatSnapshotResponse {
 
 function catalog(): ModelCatalogResponse {
   return {
+    executorInstanceId: 'synthetic-instance',
     catalog: {
       agents: [{
         id: 'codex', label: 'Codex', executionPolicy: 'conversation', selectionLabel: 'Model', inputFormatByModel: {}, kind: 'agent', supportsFork: true,

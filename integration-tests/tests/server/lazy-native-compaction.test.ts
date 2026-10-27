@@ -55,6 +55,7 @@ for (const backend of ['local', 'controller', 'worker'] as const) {
         const integrations = new IntegrationRegistry({ instances: [integration] });
         const directory = new AgentDirectory(integrations, {
           isReady: () => true,
+          captureInventory: () => ({ instanceId: integration.producers.scope.instanceId, integrations: integrations.list(), assertCurrent() {} }),
           integrationsFor: () => integrations,
           knownIntegration: ({ agentId }) => integrations.get(agentId),
           requireIntegration: ({ agentId }) => integrations.require(agentId),

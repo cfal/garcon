@@ -42,6 +42,10 @@ async function fixture(chatExecutors: readonly string[] = IDS) {
     },
     knownIntegration: ({ executorId, agentId }) => registries.get(executorId)?.get(agentId) ?? null,
     requireIntegration({ executorId, agentId }) { return this.integrationsFor(executorId).require(agentId); },
+    captureInventory(executorId: string) {
+      const integrations = this.integrationsFor(executorId).list();
+      return { instanceId: integrations[0]!.producers.scope.instanceId, integrations, assertCurrent: () => { this.integrationsFor(executorId); } };
+    },
   } satisfies ExecutionIntegrationDirectory;
   const directory = new AgentDirectory(registries.get('local')!, executors);
   const ledger = new TranscriptLedgerService(new TranscriptLedgerStore(join(root, 'ledger')), { serverInstanceId: 'synthetic-server' });

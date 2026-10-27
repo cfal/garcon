@@ -37,7 +37,8 @@ function fixture() {
     ref: 'task', async: true, fork: false, title: null, prompt: 'Synthetic task',
   };
   const service = new AgentStartSelectionService({
-    agents: { getAgentCatalogEntry: async () => entry }, apiProviders: { getCatalog: () => catalog.catalog.apiProviders },
+    agents: { captureCatalog: () => ({ executorInstanceId: 'synthetic-instance', assertCurrent() {}, getAgentCatalogEntry: async () => entry }) },
+    apiProviders: { getCatalog: () => catalog.catalog.apiProviders },
   });
   return { entry, catalog, parent, defaults, command,
     resolve: (overrides = {}) => service.resolve(catalog, { ...command, ...overrides }, defaults, parent) };

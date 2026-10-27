@@ -7,6 +7,7 @@ import { runCatalogQuery, type CatalogQueryClient } from '../catalog-query.js';
 import type { CliOutput } from '../output.js';
 
 const catalog: ModelCatalogResponse = {
+  executorInstanceId: 'synthetic-instance',
   catalog: {
     agents: [{
       id: 'codex',

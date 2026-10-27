@@ -6,6 +6,7 @@ import type { ApiProviderEndpointResolver } from "../api-providers/endpoint-reso
 import type { AgentDirectory } from "./directory.js";
 import { createLogger } from "../../common/log.js";
 import { effectiveExecutorId } from '../../../common/executors.js';
+import type { AgentIntegration } from '@garcon/server-agent-interface';
 
 const logger = createLogger("agents:catalog-service");
 
@@ -15,6 +16,14 @@ export interface AgentModelQuery {
   signal?: AbortSignal;
   timeoutMs?: number;
   dispatchDeadline?: number;
+}
+
+export interface AgentCatalogCapture {
+  readonly executorInstanceId: string;
+  assertCurrent(): void;
+  getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
+  getAgentCatalogEntries(): Promise<AgentCatalogEntry[]>;
+  requiresStrictModelDiscovery(agentId: string): boolean;
 }
 
 function dedupeModels(models: readonly AgentModelOption[]): AgentModelOption[] {
@@ -27,7 +36,7 @@ function dedupeModels(models: readonly AgentModelOption[]): AgentModelOption[] {
 }
 
 export class AgentCatalogService {
-  readonly #requiresStrictByAgent = new Map<string, boolean>();
+  readonly #requiresStrictByAgent = new WeakMap<AgentIntegration, boolean>();
 
   constructor(
     private readonly deps: {
@@ -40,9 +49,9 @@ export class AgentCatalogService {
     agentId: string,
     query: AgentModelQuery = {},
   ): Promise<AgentModelOption[]> {
-    const integration = this.deps.directory.get(agentId, query.executorId);
-    if (!integration) return [];
-    return [...(await this.#snapshot(agentId, query)).models];
+    const inventory = this.deps.directory.captureInventory(query.executorId);
+    const integration = inventory.integrations.find(value => value.descriptor.id === agentId);
+    return integration ? [...(await this.#snapshot(integration, query, () => inventory.assertCurrent())).models] : [];
   }
 
   // Synchronous so queued dequeue can recheck support inside its admission block.
@@ -65,16 +74,53 @@ export class AgentCatalogService {
   }
 
   requiresStrictModelDiscovery(agentId: string, executorId?: string | null): boolean {
-    return this.#requiresStrictByAgent.get(JSON.stringify([effectiveExecutorId(executorId), agentId])) ?? false;
+    const integration = this.deps.directory.get(agentId, executorId);
+    return integration ? this.#requiresStrictByAgent.get(integration) ?? false : false;
+  }
+
+  capture(executorId?: string | null): AgentCatalogCapture {
+    const inventory = this.deps.directory.captureInventory(executorId);
+    const byId = new Map(inventory.integrations.map(integration => [integration.descriptor.id, integration]));
+    const assertCurrent = () => inventory.assertCurrent();
+    return {
+      executorInstanceId: inventory.instanceId,
+      assertCurrent,
+      getAgentCatalogEntry: async (agentId, query = {}) => {
+        inventory.assertCurrent();
+        const integration = byId.get(agentId);
+        return integration ? this.#entry(integration, { ...query, executorId }, assertCurrent) : null;
+      },
+      getAgentCatalogEntries: async () => {
+        inventory.assertCurrent();
+        const entries = await Promise.all(inventory.integrations.map(integration => this.#entry(integration, { executorId }, assertCurrent)));
+        inventory.assertCurrent();
+        const priorities = new Set<number>();
+        for (const entry of entries) {
+          if (!entry.generation) continue;
+          if (priorities.has(entry.generation.priority)) throw new Error(`Duplicate generation priority: ${entry.generation.priority}`);
+          priorities.add(entry.generation.priority);
+        }
+        return entries;
+      },
+      requiresStrictModelDiscovery: agentId => {
+        inventory.assertCurrent();
+        const integration = byId.get(agentId);
+        return integration ? this.#requiresStrictByAgent.get(integration) ?? false : false;
+      },
+    };
   }
 
   async getAgentCatalogEntry(
     agentId: string,
     query: AgentModelQuery = {},
   ): Promise<AgentCatalogEntry | null> {
-    const integration = this.deps.directory.get(agentId, query.executorId);
-    if (!integration) return null;
-    const snapshot = await this.#snapshot(agentId, query);
+    return this.capture(query.executorId).getAgentCatalogEntry(agentId, query);
+  }
+
+  async #entry(integration: AgentIntegration, query: AgentModelQuery, assertCurrent: () => void): Promise<AgentCatalogEntry> {
+    const agentId = integration.descriptor.id;
+    const snapshot = await this.#snapshot(integration, query, assertCurrent);
+    assertCurrent();
     const endpointModels = integration.endpoints
       ? this.deps.endpointResolver.getModelOptions(agentId, effectiveExecutorId(query.executorId))
       : [];
@@ -110,30 +156,11 @@ export class AgentCatalogService {
   }
 
   async getAgentCatalogEntries(executorId?: string | null): Promise<AgentCatalogEntry[]> {
-    const entries = (
-      await Promise.all(
-        this.deps.directory
-          .list(executorId)
-          .map((integration) =>
-            this.getAgentCatalogEntry(integration.descriptor.id, { executorId }),
-          ),
-      )
-    ).filter((entry): entry is AgentCatalogEntry => entry !== null);
-    const priorities = new Set<number>();
-    for (const entry of entries) {
-      if (!entry.generation) continue;
-      if (priorities.has(entry.generation.priority)) {
-        throw new Error(
-          `Duplicate generation priority: ${entry.generation.priority}`,
-        );
-      }
-      priorities.add(entry.generation.priority);
-    }
-    return entries;
+    return this.capture(executorId).getAgentCatalogEntries();
   }
 
-  async #snapshot(agentId: string, query: AgentModelQuery) {
-    const integration = this.deps.directory.require(agentId, query.executorId);
+  async #snapshot(integration: AgentIntegration, query: AgentModelQuery, assertCurrent: () => void) {
+    assertCurrent();
     const signal = query.signal ?? new AbortController().signal;
     try {
       const snapshot = await integration.catalog.snapshot({
@@ -142,18 +169,17 @@ export class AgentCatalogService {
         timeoutMs: query.timeoutMs,
         dispatchDeadline: query.dispatchDeadline,
       });
-      this.#requiresStrictByAgent.set(
-        JSON.stringify([effectiveExecutorId(query.executorId), agentId]),
-        snapshot.requiresStrictModelDiscovery,
-      );
+      assertCurrent();
+      this.#requiresStrictByAgent.set(integration, snapshot.requiresStrictModelDiscovery);
       return snapshot;
     } catch (error) {
+      assertCurrent();
       signal.throwIfAborted();
       if (error instanceof Error && error.name === 'AbortError') throw error;
       if (query.strict) throw error;
       logger.warn('Agent catalog snapshot failed.', {
         code: 'CATALOG_SNAPSHOT_FAILED',
-        integrationId: agentId,
+        integrationId: integration.descriptor.id,
       });
       return {
         models: [] as AgentModelOption[],

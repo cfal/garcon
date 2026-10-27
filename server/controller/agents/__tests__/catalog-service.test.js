@@ -66,6 +66,51 @@ function createIntegration() {
 }
 
 describe("AgentCatalogService", () => {
+  function replacingFixture() {
+    let current = [createIntegration()];
+    const service = new AgentCatalogService({
+      directory: {
+        get: id => current.find(integration => integration.descriptor.id === id),
+        captureInventory() {
+          const integrations = current;
+          return {
+            instanceId: 'synthetic-instance', integrations,
+            assertCurrent() { if (integrations !== current) throw new Error('Generation retired'); },
+          };
+        },
+      },
+      endpointResolver: { getModelOptions: () => [] },
+    });
+    return { service, integration: current[0], replace: integrations => { current = integrations; } };
+  }
+
+  test.each(['success', 'failure'])('rejects a stale whole-inventory %s instead of fallback', async outcome => {
+    const { service, integration, replace } = replacingFixture();
+    const pending = Promise.withResolvers();
+    integration.catalog.snapshot = () => pending.promise;
+    const result = service.getAgentCatalogEntries();
+    replace([createIntegration()]);
+    if (outcome === 'success') pending.resolve({ models: [], defaultModel: '', generation: null, requiresStrictModelDiscovery: false });
+    else pending.reject(new Error('Old provider unavailable'));
+    await expect(result).rejects.toThrow('Generation retired');
+  });
+
+  test('a capture cannot escalate discovery through a replacement', async () => {
+    const { service, replace } = replacingFixture();
+    const captured = service.capture();
+    await captured.getAgentCatalogEntry('sample-agent');
+    expect(captured.requiresStrictModelDiscovery('sample-agent')).toBe(true);
+    replace([createIntegration()]);
+    expect(service.requiresStrictModelDiscovery('sample-agent')).toBe(false);
+    await expect(captured.getAgentCatalogEntry('sample-agent', { strict: true })).rejects.toThrow('Generation retired');
+  });
+
+  test('publishes a valid empty replacement inventory', async () => {
+    const { service, replace } = replacingFixture();
+    replace([]);
+    expect(await service.getAgentCatalogEntries()).toEqual([]);
+  });
+
   test("projects integration-owned capabilities, modes, and settings into the catalog", async () => {
     const integration = createIntegration();
     const service = new AgentCatalogService({
@@ -77,6 +122,7 @@ describe("AgentCatalogService", () => {
           return integration;
         },
         list: () => [integration],
+        captureInventory: () => ({ instanceId: 'synthetic-instance', integrations: [integration], assertCurrent() {} }),
       },
       endpointResolver: {
         getModelOptions: () => [],

@@ -81,6 +81,9 @@ async function pendingPermission({ root, chats, ledger, controller, native, remo
   const executors = {
     isReady: () => remote.availability === 'ready',
     integrationsFor() { return integrations; },
+    captureInventory() {
+      return { instanceId: integration.producers.scope.instanceId, integrations: integrations.list(), assertCurrent: () => { this.requireIntegration({ agentId: 'test' }); } };
+    },
     knownIntegration: ({ agentId }) => integrations.get(agentId),
     requireIntegration({ agentId }) {
       if (remote.availability !== 'ready') {
