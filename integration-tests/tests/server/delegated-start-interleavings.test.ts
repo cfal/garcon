@@ -91,7 +91,7 @@ describe('delegated startup admission interleavings', () => {
         permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {},
       }, byAgent: {} }) },
       selection: {
-        catalog: async () => ({ executorInstanceId: 'synthetic-instance', catalog: { agents: [], apiProviders: [] } }),
+        catalog: async () => ({ assertCurrent() {}, executorInstanceId: 'synthetic-instance', catalog: { agents: [], apiProviders: [] } }),
         resolve: () => ({ executorId: 'local', agentId: 'test', model: 'test', permissionMode: 'default', thinkingMode: 'none',
           apiProviderId: null, modelEndpointId: null, modelProtocol: null,
           agentSettings: { ownerId: 'test', schemaVersion: 1, values: {} } }),

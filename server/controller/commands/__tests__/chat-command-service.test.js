@@ -993,7 +993,7 @@ describe('ChatCommandService', () => {
       registry: f.chats, commands: f.service, turns: f.ledger, chatMutationLock: new KeyedPromiseLock(),
       chatIds: { allocate: () => TARGET_CHAT_ID }, isEnabled: () => true,
       settings: { getExecutionDefaults: () => ({}) },
-      selection: { catalog: async () => ({}), resolve: () => ({
+      selection: { catalog: async () => ({ assertCurrent() {} }), resolve: () => ({
         agentId: agentSettings().ownerId,
         permissionMode: 'default', thinkingMode: 'none', model: 'opus', agentSettings: agentSettings(),
       }) },
@@ -1208,7 +1208,7 @@ describe('ChatCommandService', () => {
       registry: f.chats, commands: f.service, turns: f.ledger, chatMutationLock: locks,
       chatIds: { allocate: () => TARGET_CHAT_ID }, isEnabled: () => true,
       settings: { getExecutionDefaults: () => ({}) },
-      selection: { catalog: async () => ({}), resolve: () => ({
+      selection: { catalog: async () => ({ assertCurrent() {} }), resolve: () => ({
         agentId: agentSettings().ownerId,
         permissionMode: 'default', thinkingMode: 'none', model: 'opus', agentSettings: agentSettings(),
       }) },

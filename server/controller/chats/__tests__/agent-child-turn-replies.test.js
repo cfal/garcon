@@ -49,7 +49,7 @@ function fixture(mode) {
   const controller = mode === 'start'
     ? new AgentStartController({ ...context, chatIds: { allocate: () => CHILD },
       settings: { getExecutionDefaults: () => ({}) },
-      selection: { catalog: async () => ({}), resolve: () => ({ permissionMode: 'default' }) },
+      selection: { catalog: async () => ({ assertCurrent() {} }), resolve: () => ({ permissionMode: 'default' }) },
       commands: { submitAgentCommandStartLocked: admit } })
     : new AgentResumeController({ ...context, commands: { submitAgentCommandResumeLocked: admit } });
   const command = mode === 'start' ? START : RESUME;
