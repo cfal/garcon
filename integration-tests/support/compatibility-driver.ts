@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseExecutors, type ExecutorConnection } from '../../common/executors.js';
 import type { ModelCatalogResponse } from '../../common/model-catalog.js';
@@ -118,9 +120,13 @@ async function execute(client: GarconTestClient, command: CompatibilityCommand):
           };
           const agents = await invoke<{ agents: { id: string }[] }>(['list', 'agents', '--executor', executorId, '--json']);
           assert(agents.agents.some((agent: { id: string }) => agent.id === 'shell'));
-          const started = await invoke<{ receipt: { chatId: string } }>(['start', '--agent', 'shell', '--model', 'notes', '--executor', executorId, '--cwd', projectPath, '--json', 'Synthetic compatibility note']);
+          const started = await invoke<{ receipt: { chatId: string } }>(['start', '--agent', 'shell', '--model', 'sh', '--executor', executorId, '--cwd', projectPath, '--json', "printf 'Synthetic compatibility output\\n'"]);
           const chatId = started.receipt.chatId;
           assert.equal(typeof chatId, 'string');
+          await client.waitForProcessing(chatId, false);
+          const messages = (await client.getMessages(chatId)).messages.map(row => row.message);
+          assert(messages.some(message => message.type === 'command-output' && message.content === 'Synthetic compatibility output\n'),
+            'Missing rendered row from the execution worker');
           const definition = { schedule: { type: 'once', runAtUtc: '2099-01-01T09:00:00.000Z' },
             target: { type: 'existing-chat', chatId, busyBehavior: 'skip' }, prompt: 'Synthetic scheduled note' };
           const created = await invoke<{ scheduledPrompt: { id: string }; revision: number }>(['schedule', 'create', '--definition', JSON.stringify(definition), '--json']);
@@ -135,7 +141,7 @@ async function execute(client: GarconTestClient, command: CompatibilityCommand):
         "stty -echo; export COMPATIBILITY_VALUE=retained; printf 'compat-%s\\n' ready\r", 'compat-ready');
       const context = await discoverRuntime({ configDir: command.workerConfig, runtime: 'executor' });
       return { terminalId: terminal.terminalId, terminalRuntimeId: inventory.terminalRuntimeId, controllerId: context.instanceId,
-        checked: ['files', 'mkdir', 'git-primary', 'git-bulk', 'cli-direct', 'cli-gateway', 'execution', 'schedules', 'terminals'] };
+        checked: ['files', 'mkdir', 'git-primary', 'git-bulk', 'cli-direct', 'cli-gateway', 'execution', 'rendered-rows', 'schedules', 'terminals'] };
     }
     case 'terminal-resume': {
       const inventory = await client.get<TerminalListResponse>(`/api/v1/terminals?executorId=${command.executorId}`);
@@ -159,7 +165,17 @@ async function run(): Promise<Record<string, unknown>> {
   if (input.kind === 'prepare-auth') return prepareFixtureAuth(input.configDir);
   assert.equal(input.kind, 'command');
   const { command } = input;
-  const authToken = await fixtureAuthToken(input.baseUrl, input.credentials);
+  // Short-lived driver processes share only their own login cache, avoiding auth rate limits.
+  const cacheKey = createHash('sha256').update(JSON.stringify([import.meta.url, input.baseUrl, input.credentials])).digest('hex');
+  const authPath = join(homedir(), 'tmp', `compatibility-auth-${cacheKey}`);
+  let authToken = await readFile(authPath, 'utf8').catch(error => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (authToken === null) {
+    authToken = await fixtureAuthToken(input.baseUrl, input.credentials);
+    await writeFile(authPath, authToken, { mode: 0o600 });
+  }
   const client = await GarconTestClient.connect(input.baseUrl, { authToken,
     executorId: 'executorId' in command ? command.executorId : 'local' });
   try { return await execute(client, command); }
