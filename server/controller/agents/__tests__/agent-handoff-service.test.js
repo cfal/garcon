@@ -115,7 +115,7 @@ describe('AgentHandoffService', () => {
     const ownership = handoffState(current, calls).ownership;
     const service = createService({
       ...deps, registry: { getChat: () => current }, ownership, ledger: ledgerState(calls),
-      integrations: { get: () => captured, require: () => captured },
+      integrations: { list: () => [captured], require: () => captured },
       inspectProject: async projectPath => {
         if (phase === 'project') replace();
         return { kind: 'available', effectiveProjectKey: projectPath };
@@ -139,7 +139,7 @@ describe('AgentHandoffService', () => {
   });
   it('rejects literal destinations during resolution without changing ownership', async () => {
     const deps = targetResolutionDeps();
-    deps.integrations.get('target-agent').literalExecution = { selectionLabel: 'Runtime', inputFormatByModel: {} };
+    deps.integrations.require('target-agent').literalExecution = { selectionLabel: 'Runtime', inputFormatByModel: {} };
     const service = createService(deps);
     await expect(service.resolveTarget({ chat: sourceChat(), handoff: handoff(), deadline: Date.now() + 10_000 }))
       .rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
@@ -149,7 +149,7 @@ describe('AgentHandoffService', () => {
     const current = sourceChat();
     const calls = [];
     const deps = targetResolutionDeps();
-    const destination = deps.integrations.get('target-agent');
+    const destination = deps.integrations.require('target-agent');
     const ownership = handoffState(current, calls).ownership;
     const service = createService({
       ...deps, registry: { getChat: () => current }, ownership, ledger: ledgerState(calls),
@@ -237,7 +237,7 @@ describe('AgentHandoffService', () => {
     request.target.projectPath = '/destination/alias';
     const service = createService({
       ...targetResolutionDeps(), inspectProject,
-      integrations: { get: getIntegration, require: getIntegration },
+      integrations: { list: targetExecutor => [getIntegration(current.agentId, targetExecutor)], require: getIntegration },
     });
     const deadline = performance.now() + 20_000;
     await expect(service.resolveTarget({ chat: current, handoff: request, deadline })).resolves.toMatchObject({
@@ -264,7 +264,7 @@ describe('AgentHandoffService', () => {
       const withEndpoints = () => captured;
       const service = createService({
         ...deps, inspectProject, catalog: { getAgentCatalogEntry },
-        integrations: { get: withEndpoints, require: withEndpoints },
+        integrations: { list: () => [captured], require: withEndpoints },
         endpointResolver: {
           ...deps.endpointResolver,
           resolveSelection: ({ model }) => ({ model, apiProviderId: 'provider', endpointId: 'endpoint', protocol: 'openai-chat', isLocal: false }),
@@ -306,6 +306,52 @@ describe('AgentHandoffService', () => {
       .rejects.toMatchObject({ code: 'UNSUPPORTED_AGENT', status: 422 });
   });
 
+  it('reports an unavailable destination before interpreting missing inventory', async () => {
+    const inspectProject = mock(async () => { throw new Error('Must not inspect'); });
+    const getAgentCatalogEntry = mock(async () => { throw new Error('Must not discover'); });
+    const service = createService({
+      integrations: new AgentDirectory(new IntegrationRegistry({ instances: [] })),
+      inspectProject,
+      catalog: { getAgentCatalogEntry },
+    });
+    const request = handoff();
+    request.target.executorId = '22222222-2222-4222-8222-222222222222';
+    await expect(resolveTarget(service, request))
+      .rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503, retryable: true });
+    expect(inspectProject).not.toHaveBeenCalled();
+    expect(getAgentCatalogEntry).not.toHaveBeenCalled();
+  });
+
+  it('allows a known reconnecting generation to hold handoff preparation', async () => {
+    const deps = targetResolutionDeps();
+    const captured = deps.integrations.require('target-agent');
+    const held = Promise.withResolvers();
+    const entered = Promise.withResolvers();
+    const executorId = '22222222-2222-4222-8222-222222222222';
+    const integrations = new AgentDirectory(new IntegrationRegistry({ instances: [] }), {
+      isReady: () => false,
+      integrationsFor: requested => {
+        expect(requested).toBe(executorId);
+        return { list: () => [captured] };
+      },
+      requireIntegration: () => captured,
+    });
+    const service = createService({
+      ...deps, integrations,
+      inspectProject: async projectPath => {
+        entered.resolve();
+        await held.promise;
+        return { kind: 'available', effectiveProjectKey: projectPath };
+      },
+    });
+    const request = handoff();
+    request.target.executorId = executorId;
+    const resolving = resolveTarget(service, request);
+    await entered.promise;
+    held.resolve();
+    await expect(resolving).resolves.toMatchObject({ agentId: 'target-agent', executorId });
+  });
+
   it('recovers a same-agent cross-executor decision with both executors offline', async () => {
     const current = sourceChat();
     const executorId = '22222222-2222-4222-8222-222222222222';
@@ -317,7 +363,7 @@ describe('AgentHandoffService', () => {
     const ledger = ledgerState(calls);
     const service = createService({
       registry: { getChat: () => current }, ownership: state.ownership, ledger,
-      integrations: { get: () => null, require: () => { throw new Error('offline'); } },
+      integrations: { list: () => { throw new Error('offline'); }, require: () => { throw new Error('offline'); } },
       inspectProject: async () => { throw new Error('offline'); },
       reopenProducer: () => calls.push('reopen'),
     });
@@ -1444,7 +1490,7 @@ function createService(overrides = {}) {
       discard: mock(() => {}),
     },
     integrations: overrides.integrations ?? {
-      get: (agentId) => integrations.get(agentId),
+      list: () => [...integrations.values()],
       require: (agentId) => integrations.get(agentId),
     },
     endpointResolver: overrides.endpointResolver ?? resolution.endpointResolver,
@@ -1579,7 +1625,7 @@ function targetResolutionDeps({
     ['target-agent', integration('target-agent')],
   ]);
   return {
-    integrations: { get: (agentId) => integrations.get(agentId), require: (agentId) => integrations.get(agentId) },
+    integrations: { list: () => [...integrations.values()], require: (agentId) => integrations.get(agentId) },
     endpointResolver: {
       describePrevious(input) { return this.resolveSelection(input); },
       resolveSelection: ({ model }) => ({
