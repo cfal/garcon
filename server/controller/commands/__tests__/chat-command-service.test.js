@@ -3450,6 +3450,39 @@ describe('ChatCommandService', () => {
     expect(prepare).toHaveBeenCalledTimes(1);
   });
 
+  it('admits a run with absent saved settings without persisting defaults', async () => {
+    const { service, chats, queue } = makeService({ session: { agentSettingsById: {} } });
+
+    const result = await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue with current defaults',
+      clientRequestId: 'req-absent-settings',
+      clientMessageId: 'msg-absent-settings',
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
+    expect(chats.getChat(SOURCE_CHAT_ID).agentSettingsById).toEqual({});
+    expect(chats.updateChat).not.toHaveBeenCalled();
+  });
+
+  it('rejects run settings owned by another agent without changing saved settings', async () => {
+    const { service, chats, queue } = makeService();
+    const saved = structuredClone(chats.getChat(SOURCE_CHAT_ID).agentSettingsById);
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue with mismatched settings',
+      clientRequestId: 'req-wrong-settings-owner',
+      clientMessageId: 'msg-wrong-settings-owner',
+      agentSettings: agentSettings('codex'),
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
+    expect(chats.getChat(SOURCE_CHAT_ID).agentSettingsById).toEqual(saved);
+    expect(chats.updateChat).not.toHaveBeenCalled();
+  });
+
   it('applies supported resume overrides to one turn without persisting them', async () => {
     const { service, chats, queue } = makeService();
 
