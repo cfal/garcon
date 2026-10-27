@@ -142,6 +142,28 @@ function setup(options: { realTransport?: boolean } = {}) {
 }
 
 describe('executor-qualified terminal registry', () => {
+	it('rejects a late create across ready-to-ready replacement before its list settles', async () => {
+		const { registry, executors, list, create, sent } = setup();
+		await registry.initialize();
+		const oldCreate = Promise.withResolvers<Awaited<ReturnType<typeof create>>>();
+		const replacementList = Promise.withResolvers<TerminalListResponse>();
+		create.mockImplementationOnce(() => oldCreate.promise);
+		const creating = registry.create('/project', 'old-create', remoteId);
+		list.mockImplementationOnce(() => replacementList.promise);
+		executors.applySnapshot([executor('local'), { ...executor(remoteId), instanceId: 'replacement-instance' }]);
+		const refreshing = registry.list(remoteId);
+		const oldTerminal = terminal(remoteId, 2);
+		oldCreate.resolve({ success: true, terminal: oldTerminal });
+		try {
+			await expect(creating).rejects.toMatchObject({ errorCode: 'terminal-runtime-changed' });
+			expect(registry.sessions[oldTerminal.terminalId]).toBeUndefined();
+			expect(sent.some(message => message.type === 'terminal-attach' && message.terminalId === oldTerminal.terminalId)).toBe(false);
+		} finally {
+			replacementList.resolve(inventory([], replacementRuntimeId));
+			await refreshing;
+		}
+	});
+
 	it('fences late lists and refreshes when a ready host changes instance without an offline snapshot', async () => {
 		const { registry, executors, list } = setup();
 		await registry.initialize();
