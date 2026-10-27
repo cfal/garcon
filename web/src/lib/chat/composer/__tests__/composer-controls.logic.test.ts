@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { buildComposerSendPresentation, buildThinkingOptions } from '$lib/chat/composer/composer-controls.js';
-import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -11,7 +10,7 @@ describe('buildComposerSendPresentation', () => {
 		error: null,
 		getDefaultAgentSettings: () => defaults,
 		getAgentSettingsDescriptors: () => [],
-	} satisfies Pick<ModelCatalogStore, 'isValidated' | 'error' | 'getDefaultAgentSettings' | 'getAgentSettingsDescriptors'>;
+	} satisfies Parameters<typeof buildComposerSendPresentation>[0];
 	const selection = { agentId: 'test-agent', agentSettings: null };
 	const availability = { executorReady: true, controllerCommand: false, requiresQueuedSubmission: false };
 

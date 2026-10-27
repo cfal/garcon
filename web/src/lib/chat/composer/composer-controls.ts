@@ -2,12 +2,16 @@ import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import { THINKING_MODES } from '$lib/chat/composer/chat-ui-constants.js';
 import { isCodexSolModel } from '@garcon/common/models';
 import { areAgentSettingsCompatible } from '$shared/agent-settings';
-import type { AgentSettingsEnvelope } from '$shared/agent-integration';
-import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
+import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
 import * as m from '$lib/paraglide/messages.js';
 
 export function buildComposerSendPresentation(
-	catalog: Pick<ModelCatalogStore, 'getDefaultAgentSettings' | 'getAgentSettingsDescriptors' | 'isValidated' | 'error'>,
+	catalog: {
+		readonly isValidated: boolean;
+		readonly error: string | null;
+		getDefaultAgentSettings(agentId: string): AgentSettingsEnvelope | null;
+		getAgentSettingsDescriptors(agentId: string): readonly AgentSettingDescriptor[];
+	},
 	selection: { readonly agentId: string; readonly agentSettings: AgentSettingsEnvelope | null },
 	availability: { executorReady: boolean; controllerCommand: boolean; requiresQueuedSubmission: boolean },
 ) {
