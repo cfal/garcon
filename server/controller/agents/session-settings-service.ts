@@ -185,10 +185,10 @@ export class AgentSessionSettingsService {
             modelProtocol: next.protocol,
             permissionMode,
             thinkingMode,
-            agentSettingsById: {
+            ...(patch.agentSettingsPatch === undefined ? {} : { agentSettingsById: {
               ...entry.agentSettingsById,
               [entry.agentId]: settings,
-            },
+            } }),
           }, { flush: true });
           if (!updated) throw new Error(`Session not found: ${chatId}`);
           this.deps.onCommitted?.(chatId);

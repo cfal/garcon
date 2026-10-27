@@ -70,6 +70,30 @@ function makeService(thinkingMode = 'high') {
 describe('AgentSessionSettingsService', () => {
   const fence = { expectedExecutorInstanceId: 'synthetic-instance', expectedSettingsSchemaVersion: 2 };
 
+  it.each([{ permissionMode: 'default' }, { model: 'new-model' }, { thinkingMode: 'none' }])(
+    'uses defaults without persisting absent settings for %j', async patch => {
+      const f = makeService();
+      f.entry.agentSettingsById = {};
+      f.entry.agentSessionId = 'native';
+      const defaults = { ownerId: 'amp', schemaVersion: 2, values: { mode: 'current-default' } };
+      f.integration.settings.defaults = () => defaults;
+      f.integration.configurationValidation = { validate: mock(async () => {}) };
+      f.integration.sessionConfiguration = { apply: mock(async () => {}) };
+      const updated = await f.service.updateSessionSettings('chat-1', patch);
+      expect(updated.agentSettingsById).toEqual({});
+      expect(f.updateChat.mock.calls[0][1]).not.toHaveProperty('agentSettingsById');
+      expect(f.integration.configurationValidation.validate.mock.calls[0][0].settings).toEqual(defaults);
+      expect(f.integration.sessionConfiguration.apply.mock.calls[0][1].settings).toEqual(defaults);
+    },
+  );
+
+  it('persists an explicit provider settings edit when no envelope was saved', async () => {
+    const f = makeService();
+    f.entry.agentSettingsById = {};
+    await expect(f.service.updateSessionSettings('chat-1', { agentSettingsPatch: {} }, 'current-owner', undefined, fence))
+      .resolves.toMatchObject({ agentSettingsById: { amp: f.integration.settings.defaults() } });
+  });
+
   it.each([undefined, { ...fence, expectedExecutorInstanceId: 'old-instance' }, { ...fence, expectedSettingsSchemaVersion: 1 }])(
     'rejects a stale or missing settings fence before any provider work: %j', async settingsFence => {
       const f = makeService();

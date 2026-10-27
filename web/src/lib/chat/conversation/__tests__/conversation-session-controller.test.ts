@@ -1026,10 +1026,14 @@ describe('ConversationSessionController', () => {
 		controller.executorHandoff.cancel();
 	});
 
-	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
-		'preserves incompatible settings and composer input through %s', async submit => {
+	it.each([
+		['submitForChat', false],
+		['submitComposerWithSteerPreference', false],
+		['submitComposerWithSteerPreference', true],
+	] as const)(
+		'preserves incompatible settings and composer input through %s while processing=%s', async (submit, isProcessing) => {
 			const saved = { ownerId: 'claude', schemaVersion: 7, values: { preserved: true } };
-			const { deps } = createDeps(createRunningChat({ agentSettings: saved }));
+			const { deps } = createDeps(createRunningChat({ agentSettings: saved, isProcessing }));
 			const controller = new ConversationSessionController(deps);
 			controller.handleChatSwitchIfChanged('chat-1');
 			deps.composerState.inputText = 'Synthetic draft';
