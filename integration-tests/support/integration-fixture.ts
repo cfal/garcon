@@ -29,7 +29,7 @@ import {
 } from './garcon-client.js';
 import { GarconProcess } from './garcon-process.js';
 import { ExecutionBackendFixture, executionBackend, type ExecutionBackend } from './execution-backend.js';
-import { CURRENT_ARTIFACT, type SourceArtifact } from './source-artifact.js';
+import { CURRENT_ARTIFACT } from './source-artifact.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'server');
@@ -55,9 +55,6 @@ export interface IntegrationDirectories {
 }
 
 export interface IntegrationFixtureOptions {
-  controllerArtifact?: SourceArtifact;
-  workerArtifact?: SourceArtifact;
-  cliArtifact?: SourceArtifact;
   executionBackend?: ExecutionBackend;
   interceptExecutorConnection?: (url: URL) => Promise<string>;
   projectRoots?: 'shared' | 'separate';
@@ -196,8 +193,6 @@ function redactedFailure(error: unknown, artifact: string | null, diagnostics: s
 }
 
 export class IntegrationFixture {
-  controllerArtifact: SourceArtifact;
-  readonly cliArtifact?: SourceArtifact;
   readonly dirs: IntegrationDirectories;
   readonly executionDirs: IntegrationDirectories;
   readonly #backend: ExecutionBackendFixture;
@@ -220,8 +215,6 @@ export class IntegrationFixture {
   #disposed = false;
 
   private constructor(input: {
-    controllerArtifact: SourceArtifact;
-    cliArtifact?: SourceArtifact;
     dirs: IntegrationDirectories;
     executionDirs: IntegrationDirectories;
     backend: ExecutionBackendFixture;
@@ -236,8 +229,6 @@ export class IntegrationFixture {
     afterGarconStop?: (directories: IntegrationDirectories) => Promise<void>;
     extraDiagnostics?: (directories: IntegrationDirectories) => Record<string, unknown>;
   }) {
-    this.controllerArtifact = input.controllerArtifact;
-    this.cliArtifact = input.cliArtifact;
     this.dirs = input.dirs;
     this.executionDirs = input.executionDirs;
     this.#backend = input.backend;
@@ -297,10 +288,9 @@ export class IntegrationFixture {
         ...(options.serverEnvironment ?? {}),
         ...resolvedEnvironment,
       };
-      backend = new ExecutionBackendFixture(backendKind, executionDirs, serverEnvironment,
-        options.interceptExecutorConnection, options.workerArtifact);
+      backend = new ExecutionBackendFixture(backendKind, executionDirs, serverEnvironment, options.interceptExecutorConnection);
       garcon = await backend.start({
-        ...(options.controllerArtifact ?? CURRENT_ARTIFACT),
+        ...CURRENT_ARTIFACT,
         configDir: dirs.config,
         workspaceDir: dirs.workspace,
         workspaceName: options.namedWorkspace,
@@ -351,8 +341,6 @@ export class IntegrationFixture {
         },
       });
       return new IntegrationFixture({
-        controllerArtifact: options.controllerArtifact ?? CURRENT_ARTIFACT,
-        cliArtifact: options.cliArtifact,
         dirs,
         executionDirs,
         backend,
@@ -424,18 +412,13 @@ export class IntegrationFixture {
     }
   }
 
-  runtimeArtifact(runtime: 'controller' | 'executor'): SourceArtifact {
-    return this.cliArtifact ?? (runtime === 'controller' ? this.controllerArtifact : this.#backend.artifact ?? this.controllerArtifact);
-  }
-
-  async restartGarcon(options: { beforeStart?: () => Promise<void>; artifact?: SourceArtifact } = {}): Promise<void> {
+  async restartGarcon(options: { beforeStart?: () => Promise<void> } = {}): Promise<void> {
     await this.#closeClients();
     await this.garcon.stop();
     await this.#backend.stop();
     this.#archiveCurrentRun();
     this.#clients.clear();
     await options.beforeStart?.();
-    if (options.artifact) this.controllerArtifact = options.artifact;
     await this.#startReplacementGarcon();
   }
 
@@ -443,7 +426,6 @@ export class IntegrationFixture {
     reusePort?: boolean;
     beforeStart?: () => Promise<void>;
     preserveExecutorWorker?: boolean;
-    artifact?: SourceArtifact;
   } = {}): Promise<void> {
     const previousPort = Number(new URL(this.garcon.baseUrl).port);
     await this.#closeClients();
@@ -456,12 +438,11 @@ export class IntegrationFixture {
     this.#archiveCurrentRun();
     this.#clients.clear();
     await options.beforeStart?.();
-    if (options.artifact) this.controllerArtifact = options.artifact;
     await this.#startReplacementGarcon(options.reusePort ? previousPort : undefined);
   }
 
-  async crashAndRestartExecutorWorker(projectBasePath?: string, artifact?: SourceArtifact): Promise<void> {
-    await this.#backend.crashAndRestartWorker(projectBasePath, artifact);
+  async crashAndRestartExecutorWorker(projectBasePath?: string): Promise<void> {
+    await this.#backend.crashAndRestartWorker(projectBasePath);
   }
 
   async directOpenAiNativePath(chatId: string): Promise<string> {
@@ -617,7 +598,7 @@ export class IntegrationFixture {
 
   async #startReplacementGarcon(port?: number): Promise<void> {
     this.garcon = await this.#backend.start({
-      ...this.controllerArtifact,
+      ...CURRENT_ARTIFACT,
       configDir: this.dirs.config,
       workspaceDir: this.dirs.workspace,
       workspaceName: this.#workspaceName,

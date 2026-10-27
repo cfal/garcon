@@ -3,7 +3,7 @@ import { cliRuntimeFile, type RuntimeKind } from '../../common/cli-runtime-paths
 import { parseCliRuntimeDescriptor } from '../../common/server-runtime.js';
 import { cliEnvironment } from './cli-environment.js';
 import { withIntegrationFixture, type IntegrationFixture, type IntegrationFixtureOptions } from './integration-fixture.js';
-import type { SourceArtifact } from './source-artifact.js';
+import { CURRENT_ARTIFACT } from './source-artifact.js';
 
 export type { IntegrationFixture, IntegrationFixtureOptions } from './integration-fixture.js';
 
@@ -27,11 +27,10 @@ export async function runCli(
   fixture: IntegrationFixture,
   arguments_: readonly string[],
   runtime = cliRuntime(fixture),
-  artifact: SourceArtifact = fixture.runtimeArtifact(runtime),
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const child = Bun.spawn({
-    cmd: [artifact.bunExecutable, 'cli/main.ts', ...cliConnectionArguments(fixture, runtime), ...arguments_],
-    cwd: artifact.repoRoot,
+    cmd: [CURRENT_ARTIFACT.bunExecutable, 'cli/main.ts', ...cliConnectionArguments(fixture, runtime), ...arguments_],
+    cwd: CURRENT_ARTIFACT.repoRoot,
     env: cliEnvironment({ HOME: cliDirectories(fixture, runtime).home }),
     stdin: 'ignore',
     stdout: 'pipe',

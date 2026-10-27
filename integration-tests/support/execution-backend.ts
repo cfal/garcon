@@ -6,7 +6,6 @@ import { withTimeout } from './deferred.js';
 import { BoundedLog } from './bounded-log.js';
 import type { IntegrationDirectories } from './integration-fixture.js';
 import { parseExecutors, type ExecutorConnection } from '../../common/executors.js';
-import type { SourceArtifact } from './source-artifact.js';
 
 export type ExecutionBackend = 'in-process' | 'remote-controller-dials' | 'remote-executor-dials';
 
@@ -162,17 +161,10 @@ export class ExecutionBackendFixture {
     readonly directories: IntegrationDirectories,
     readonly environment: Record<string, string>,
     private readonly interceptConnection?: (url: URL) => Promise<string>,
-    private readonly workerArtifact?: SourceArtifact,
   ) {}
 
   get logs(): readonly string[] { return [...this.#completedLogs, ...(this.#worker?.logs ?? [])]; }
   get executorId(): string { return this.#executorId ?? 'local'; }
-  get artifact(): SourceArtifact | null {
-    return this.#workerLaunch ? {
-      repoRoot: this.#workerLaunch.repoRoot,
-      bunExecutable: this.#workerLaunch.bunExecutable ?? process.execPath,
-    } : null;
-  }
 
   async start(options: GarconProcessOptions): Promise<GarconProcess> {
     // A stopped worker still owns its port for the next launch.
@@ -188,8 +180,8 @@ export class ExecutionBackendFixture {
     }
     const launchWorker = async (connection: Parameters<typeof ExecutorProcess.start>[0]['connection']) => {
       this.#workerLaunch = {
-        repoRoot: this.#workerLaunch?.repoRoot ?? this.workerArtifact?.repoRoot ?? options.repoRoot,
-        bunExecutable: this.#workerLaunch?.bunExecutable ?? this.workerArtifact?.bunExecutable ?? options.bunExecutable,
+        repoRoot: options.repoRoot,
+        bunExecutable: options.bunExecutable,
         directories: this.directories, environment: this.environment,
         connection,
       };
@@ -236,8 +228,8 @@ export class ExecutionBackendFixture {
           await this.#request(`/api/v1/executors/${this.#executorId}`, 'PATCH', {
             connection: { direction: 'executor-connects', connectionUrl, noTls: true },
           });
-          this.#workerLaunch = { repoRoot: this.workerArtifact?.repoRoot ?? options.repoRoot,
-            bunExecutable: this.workerArtifact?.bunExecutable ?? options.bunExecutable,
+          this.#workerLaunch = { repoRoot: options.repoRoot,
+            bunExecutable: options.bunExecutable,
             directories: this.directories, environment: this.environment,
             connection: { kind: 'dial', url: connectionUrl } };
         }
@@ -258,7 +250,7 @@ export class ExecutionBackendFixture {
     }
   }
 
-  async crashAndRestartWorker(projectBasePath?: string, artifact?: SourceArtifact): Promise<void> {
+  async crashAndRestartWorker(projectBasePath?: string): Promise<void> {
     if (!this.#worker || !this.#workerLaunch) throw new Error('No remote execution worker is running');
     await this.#worker.crash();
     const expiredAt = new Date(Date.now() - 60_000);
@@ -267,7 +259,6 @@ export class ExecutionBackendFixture {
     if (projectBasePath !== undefined) {
       this.#workerLaunch = { ...this.#workerLaunch, directories: { ...this.#workerLaunch.directories, project: projectBasePath } };
     }
-    if (artifact) this.#workerLaunch = { ...this.#workerLaunch, ...artifact };
     this.#worker = await ExecutorProcess.start(this.#workerLaunch);
     this.executionProcessIds.add(this.#worker.child.pid);
     await this.#worker.connected();
