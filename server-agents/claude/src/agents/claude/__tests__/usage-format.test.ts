@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import { isMalformedUsage, type UsageRecord } from '@garcon/server-agent-common/usage/usage-record';
 import { claudeUsageFormat, parseClaudeUsageLine } from '../usage-format.js';
+
+// Parses a line that must not be malformed.
+function usageOf(line: string): UsageRecord | null {
+  const result = parseClaudeUsageLine(line);
+  if (result !== null && isMalformedUsage(result)) throw new Error('Unexpected malformed usage');
+  return result;
+}
 
 function assistantLine(overrides: {
   messageId?: string;
@@ -32,7 +40,7 @@ function assistantLine(overrides: {
 
 describe('Claude usage lines', () => {
   test('extract token totals, one-hour cache writes, and a dedupe key', () => {
-    expect(parseClaudeUsageLine(assistantLine({}))).toEqual({
+    expect(usageOf(assistantLine({}))).toEqual({
       timestampMs: Date.parse('2026-10-07T04:05:13.944Z'),
       model: 'claude-opus-5-5',
       sessionId: '00000000-0000-4000-8000-000000000001',
@@ -44,14 +52,14 @@ describe('Claude usage lines', () => {
   });
 
   test('give every content block of one message the same key', () => {
-    const text = parseClaudeUsageLine(assistantLine({ contentType: 'text' }));
-    const toolUse = parseClaudeUsageLine(assistantLine({ contentType: 'tool_use' }));
+    const text = usageOf(assistantLine({ contentType: 'text' }));
+    const toolUse = usageOf(assistantLine({ contentType: 'tool_use' }));
     expect(text?.dedupeKey).toBe(toolUse?.dedupeKey);
     expect(text?.totals).toEqual(toolUse?.totals);
   });
 
   test('mark fast-mode requests', () => {
-    expect(parseClaudeUsageLine(assistantLine({ usage: { input_tokens: 1, output_tokens: 1, speed: 'fast' } }))?.speed).toBe('fast');
+    expect(usageOf(assistantLine({ usage: { input_tokens: 1, output_tokens: 1, speed: 'fast' } }))?.speed).toBe('fast');
   });
 
   test('skip local placeholders, non-assistant lines, and lines without usage or time', () => {
@@ -59,11 +67,14 @@ describe('Claude usage lines', () => {
     expect(parseClaudeUsageLine(JSON.stringify({ type: 'user', timestamp: '2026-10-07T00:00:00Z', message: { usage: {} } }))).toBeNull();
     expect(parseClaudeUsageLine(JSON.stringify({ type: 'assistant', timestamp: '2026-10-07T00:00:00Z', message: { model: 'claude-opus-5-5' } }))).toBeNull();
     expect(parseClaudeUsageLine(JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5-5', usage: {} } }))).toBeNull();
-    expect(parseClaudeUsageLine('{not json')).toBeNull();
+  });
+
+  test('report a corrupt line that carried a usage key as malformed', () => {
+    expect(parseClaudeUsageLine('{"type":"assistant","usage":')).toEqual({ malformed: true, timestampMs: null });
   });
 
   test('keep real zero-token responses and ignore invalid counts', () => {
-    const record = parseClaudeUsageLine(assistantLine({ usage: { input_tokens: 0, output_tokens: -4, cache_read_input_tokens: 'many' } }));
+    const record = usageOf(assistantLine({ usage: { input_tokens: 0, output_tokens: -4, cache_read_input_tokens: 'many' } }));
     expect(record?.totals).toEqual({ uncachedInputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 0, reasoningTokens: 0 });
   });
 

@@ -1,10 +1,20 @@
 import type { UsageAgentSummary, UsageBucket, UsageSummary } from '$shared/usage';
 
-export function usageBucket(day: string, model: string, overrides: Partial<UsageBucket> = {}): UsageBucket {
+export function usageBucket(
+	day: string,
+	model: string,
+	overrides: Partial<UsageBucket> = {},
+): UsageBucket {
 	return {
 		day,
 		model,
-		totals: { uncachedInputTokens: 100, cachedInputTokens: 900, cacheWriteTokens: 0, outputTokens: 50, reasoningTokens: 0 },
+		totals: {
+			uncachedInputTokens: 100,
+			cachedInputTokens: 900,
+			cacheWriteTokens: 0,
+			outputTokens: 50,
+			reasoningTokens: 0,
+		},
 		costUsd: 1,
 		categoryCostUsd: { input: 0.2, cacheRead: 0.3, cacheWrite: 0, output: 0.5 },
 		cacheSavingsUsd: 0.25,
@@ -16,7 +26,11 @@ export function usageBucket(day: string, model: string, overrides: Partial<Usage
 	};
 }
 
-export function usageAgent(agentId: string, buckets: readonly UsageBucket[], overrides: Partial<UsageAgentSummary> = {}): UsageAgentSummary {
+export function usageAgent(
+	agentId: string,
+	buckets: readonly UsageBucket[],
+	overrides: Partial<UsageAgentSummary> = {},
+): UsageAgentSummary {
 	return {
 		agentId,
 		status: 'ok',

@@ -1,4 +1,4 @@
-import type { UsageReadRequest, UsageWindowDays } from '$shared/usage';
+import { usageDayFormatter, type UsageReadRequest, type UsageWindowDays } from '$shared/usage';
 
 export function viewerTimeZone(): string {
 	try {
@@ -15,16 +15,18 @@ export function usageWindow(
 	timeZone: string = viewerTimeZone(),
 ): UsageReadRequest {
 	let zone = timeZone;
-	let format: Intl.DateTimeFormat;
+	let format: (time: Date) => string;
 	try {
-		format = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' });
+		format = usageDayFormatter(zone);
 	} catch {
 		zone = 'UTC';
-		format = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' });
+		format = usageDayFormatter(zone);
 	}
-	const untilDay = format.format(now);
+	const untilDay = format(now);
 	// Calendar arithmetic in UTC; subtracting fixed milliseconds would cross DST days unevenly.
 	const [year = 0, month = 1, dayOfMonth = 1] = untilDay.split('-').map((part) => Number(part));
-	const sinceDay = new Date(Date.UTC(year, month - 1, dayOfMonth - (days - 1))).toISOString().slice(0, 10);
+	const sinceDay = new Date(Date.UTC(year, month - 1, dayOfMonth - (days - 1)))
+		.toISOString()
+		.slice(0, 10);
 	return { sinceDay, untilDay, timeZone: zone };
 }

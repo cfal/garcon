@@ -17,12 +17,15 @@ export interface ModelPrice {
   readonly rates: TokenRates;
   // Anthropic fast mode and OpenAI priority processing bill every category at this multiple.
   readonly fastMultiplier: number | null;
+  // OpenAI flex processing bills every category at this multiple.
+  readonly flexMultiplier: number | null;
   // A request whose prompt, including cache reads and writes, exceeds the threshold bills at these rates.
   readonly longContext: { readonly promptTokensAbove: number; readonly rates: TokenRates } | null;
 }
 
 interface PriceOptions {
   readonly fast?: number;
+  readonly flex?: number;
   readonly longContext?: { readonly promptTokensAbove: number; readonly rates: TokenRates };
 }
 
@@ -35,6 +38,7 @@ function anthropic(input: number, output: number, cacheRead: number, options: Pr
   return {
     rates: anthropicRates(input, output, cacheRead),
     fastMultiplier: options.fast ?? null,
+    flexMultiplier: null,
     longContext: options.longContext ?? null,
   };
 }
@@ -45,7 +49,12 @@ function openAiRates(input: number, output: number, cacheRead: number, cacheWrit
 }
 
 function openAi(rates: TokenRates, options: PriceOptions = {}): ModelPrice {
-  return { rates, fastMultiplier: options.fast ?? null, longContext: options.longContext ?? null };
+  return {
+    rates,
+    fastMultiplier: options.fast ?? null,
+    flexMultiplier: options.flex ?? null,
+    longContext: options.longContext ?? null,
+  };
 }
 
 // Codex models above 272K prompt tokens bill 2x input and cache, 1.5x output.
@@ -62,8 +71,9 @@ function openAiLongContext(rates: TokenRates): PriceOptions['longContext'] {
   };
 }
 
+// Current Codex models also offer flex processing at half price.
 function openAiWithLongContext(rates: TokenRates, fast: number): ModelPrice {
-  return openAi(rates, { fast, longContext: openAiLongContext(rates) });
+  return openAi(rates, { fast, flex: 0.5, longContext: openAiLongContext(rates) });
 }
 
 export const MODEL_PRICES: ReadonlyMap<string, ModelPrice> = new Map<string, ModelPrice>([
@@ -102,7 +112,7 @@ export const MODEL_PRICES: ReadonlyMap<string, ModelPrice> = new Map<string, Mod
   ['gpt-5.6-luna', openAiWithLongContext(openAiRates(0.2, 1.2, 0.02, 0.25), 2)],
   ['gpt-5.5', openAiWithLongContext(openAiRates(5, 30, 0.5), 2.5)],
   ['gpt-5.4', openAiWithLongContext(openAiRates(2.5, 15, 0.25), 2)],
-  ['gpt-5.4-mini', openAi(openAiRates(0.75, 4.5, 0.075), { fast: 2 })],
+  ['gpt-5.4-mini', openAi(openAiRates(0.75, 4.5, 0.075), { fast: 2, flex: 0.5 })],
   ['gpt-5.4-nano', openAi(openAiRates(0.2, 1.25, 0.02))],
   ['gpt-5.3-codex', openAi(openAiRates(1.75, 14, 0.175), { fast: 2 })],
   ['gpt-5.2', openAi(openAiRates(1.75, 14, 0.175), { fast: 2 })],

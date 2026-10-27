@@ -18,19 +18,28 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
 - `usageHistory` is a nullable `AgentIntegration` facet. Claude reads
   `$CLAUDE_CONFIG_DIR/projects` (default `~/.claude/projects`), including
   subagent transcripts. Codex reads `$CODEX_HOME/sessions` and
-  `$CODEX_HOME/archived_sessions` (default `~/.codex`). Other integrations
-  report no usage facet.
+  `$CODEX_HOME/archived_sessions` (default `~/.codex`), including rollouts
+  Codex compressed to `.jsonl.zst`; while both forms of one rollout exist, the
+  plain file is read. Other integrations report no usage facet.
 - Transcripts are parsed on the executor that owns them. A remote executor
   answers over the bulk lane with day-by-model buckets, not raw records; the
   controller validates the report and never reads worker paths itself.
-- A failed or timed-out integration read becomes a `failed` agent entry, so one
-  provider cannot hide another's usage. An unavailable executor fails the
-  request with `EXECUTOR_UNAVAILABLE`.
+- The controller validates every integration report, Local or remote. A failed,
+  invalid, or timed-out read becomes a `failed` agent entry, so one provider
+  cannot hide another's usage, and the surface shows the failure rather than an
+  empty period. An unavailable executor fails the request with
+  `EXECUTOR_UNAVAILABLE`.
+- A transcript root that is absent reports `missing`; one that exists but
+  cannot be read, and unreadable transcripts, report `partial`. Malformed usage
+  lines mark a report `partial` only when they fall inside the window, or when
+  their time is unknown.
 - Parsed transcripts are cached in memory by size and modification time, and a
-  grown file resumes after its last complete line. The cache lives as long as
-  the integration; restart rereads every transcript in the window.
-- Parsing runs in `EventLoopSteps` bounded slices named `claude-usage-history`
-  and `codex-usage-history`.
+  grown file resumes after its last complete line. Each cached file keeps one
+  record per request and drops usage older than any selectable window. The
+  cache lives as long as the integration; restart rereads every transcript in
+  the window.
+- One read is one `EventLoopSteps` operation, `claude-usage-history` or
+  `codex-usage-history`, shared by scanning and aggregation.
 
 ## Counting Rules
 
@@ -40,7 +49,10 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
 - Codex `token_count` events take their model from the latest `turn_context`
   and their tier from the latest `thread_settings_applied`. Cumulative counters
   reconcile each request delta; inconsistent events are skipped and reported as
-  malformed. Fork sessions skip the parent history they copy.
+  malformed. Fork sessions skip the parent history they copy, recognized as the
+  burst of restamped events right after the fork's `session_meta`: legacy
+  rollouts record no explicit boundary (`forked_from_ordinal_exclusive` is set
+  only for reverts and paginated history).
 - Reasoning tokens are part of output and are never billed twice.
 - Cache hit rate is cache reads over all input, so cache writes count as misses.
 
@@ -52,7 +64,7 @@ Costs are API list-price estimates from the built-in table in
 plans. Anthropic rates follow the official pricing page, including per-model
 cache-read rates, one-hour cache writes, fast mode, and Haiku 5.5's long-prompt
 tier. OpenAI rates follow LiteLLM's published table, including priority
-processing and the 272K-token long-context tier. Model names are matched after
+processing, flex processing, and the 272K-token long-context tier. Model names are matched after
 removing provider prefixes, snapshot dates, and context variants such as
 `[1m]`. A model missing from the table is reported as unpriced: its tokens
 count, its cost is shown as unknown rather than zero, and totals note the

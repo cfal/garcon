@@ -1,5 +1,8 @@
 import type { AgentUsageHistory } from '@garcon/server-agent-interface';
-import type { UsageAgentSummary, UsageReadRequest, UsageSummary } from '../../../common/usage.js';
+import { parseAgentUsageReport, type UsageAgentSummary, type UsageReadRequest, type UsageSummary } from '../../../common/usage.js';
+
+// Keeps a provider's failure text within what the browser contract accepts.
+const MAX_FAILURE_MESSAGE_LENGTH = 500;
 
 interface UsageSource {
   readonly descriptor: { readonly id: string };
@@ -19,8 +22,9 @@ export interface UsageReadOptions {
 
 /**
  * Merges the usage each agent integration reads from its own native
- * transcripts on one executor. A failed integration read is reported in its
- * agent entry rather than failing the whole summary.
+ * transcripts on one executor. A failed or malformed integration read is
+ * reported in its agent entry rather than failing the whole summary; Local
+ * reports are validated like remote ones.
  */
 export class UsageService {
   readonly #executors: UsageExecutors;
@@ -53,15 +57,18 @@ async function readAgentUsage(
 ): Promise<{ readonly agent: UsageAgentSummary; readonly pricingAsOf: string | null }> {
   const agentId = integration.descriptor.id;
   try {
-    const { pricingAsOf, ...report } = await usage.read({ ...request, signal });
+    const parsed = parseAgentUsageReport(await usage.read({ ...request, signal }));
+    if (!parsed) throw new Error('The agent returned an invalid usage report');
+    const { pricingAsOf, ...report } = parsed;
     return { agent: { agentId, message: null, ...report }, pricingAsOf };
   } catch (error) {
     callerSignal?.throwIfAborted();
+    const message = signal.aborted ? 'Reading usage took too long' : error instanceof Error ? error.message : 'Usage could not be read';
     return {
       agent: {
         agentId,
         status: 'failed',
-        message: signal.aborted ? 'Reading usage took too long' : error instanceof Error ? error.message : 'Usage could not be read',
+        message: message.length > MAX_FAILURE_MESSAGE_LENGTH ? `${message.slice(0, MAX_FAILURE_MESSAGE_LENGTH - 1)}…` : message,
         buckets: [],
         scannedFiles: 0,
         unreadableFiles: 0,

@@ -1,5 +1,18 @@
 import { describe, expect, test } from 'bun:test';
-import { codexUsageFormat, createCodexUsageState, parseCodexUsageLine, type CodexUsageState } from '../usage-format.js';
+import { isMalformedUsage, type UsageRecord } from '@garcon/server-agent-common/usage/usage-record';
+import { codexUsageFormat, createCodexUsageState, parseCodexUsageLine as parseLine, type CodexUsageState } from '../usage-format.js';
+
+// Parses a line that must not be malformed.
+function parseCodexUsageLine(line: string, state: CodexUsageState): UsageRecord | null {
+  const result = parseLine(line, state);
+  if (result !== null && isMalformedUsage(result)) throw new Error('Unexpected malformed usage');
+  return result;
+}
+
+function isMalformed(line: string, state: CodexUsageState): boolean {
+  const result = parseLine(line, state);
+  return result !== null && isMalformedUsage(result);
+}
 
 const SESSION_ID = '00000000-0000-4000-8000-0000000000c1';
 const sessionMeta = (payload: Record<string, unknown> = {}, timestamp = '2026-10-01T05:17:41.289Z') =>
@@ -69,17 +82,15 @@ describe('Codex usage lines', () => {
     // A context-size report has zero request components.
     expect(parseCodexUsageLine(tokenCount({ ...counters(0, 0), total_tokens: 20_330 }, first), state)).toBeNull();
     expect(parseCodexUsageLine(tokenCount(counters(50, 5), counters(150, 25)), state)?.totals.uncachedInputTokens).toBe(50);
-    expect(codexUsageFormat.malformedRecords(state)).toBe(0);
   });
 
   test('count a request whose counters do not reconcile as malformed', () => {
     const state = started();
     const first = counters(100, 20);
     parseCodexUsageLine(tokenCount(first, first), state);
-    expect(parseCodexUsageLine(tokenCount(counters(50, 5), counters(400, 40)), state)).toBeNull();
-    expect(codexUsageFormat.malformedRecords(state)).toBe(1);
-    expect(parseCodexUsageLine(tokenCount({ input_tokens: 10, output_tokens: 1, cached_input_tokens: 20 }), state)).toBeNull();
-    expect(codexUsageFormat.malformedRecords(state)).toBe(2);
+    expect(parseLine(tokenCount(counters(50, 5), counters(400, 40), '2026-10-01T06:00:00.000Z'), state))
+      .toEqual({ malformed: true, timestampMs: Date.parse('2026-10-01T06:00:00.000Z') });
+    expect(isMalformed(tokenCount({ input_tokens: 10, output_tokens: 1, cached_input_tokens: 20 }), state)).toBe(true);
   });
 
   test('accept a resumed session whose counters restart at the current request', () => {
@@ -88,12 +99,14 @@ describe('Codex usage lines', () => {
     expect(parseCodexUsageLine(tokenCount(counters(30, 3), counters(30, 3)), state)?.totals.outputTokens).toBe(3);
   });
 
-  test('carry the priority tier from thread settings as fast', () => {
+  test('carry the service tier from thread settings', () => {
     const state = started();
     parseCodexUsageLine(threadSettings('priority'), state);
     expect(parseCodexUsageLine(tokenCount(counters(100, 10)), state)?.speed).toBe('fast');
+    parseCodexUsageLine(threadSettings('flex'), state);
+    expect(parseCodexUsageLine(tokenCount(counters(200, 10)), state)?.speed).toBe('flex');
     parseCodexUsageLine(threadSettings('default'), state);
-    expect(parseCodexUsageLine(tokenCount(counters(200, 10)), state)?.speed).toBe('standard');
+    expect(parseCodexUsageLine(tokenCount(counters(300, 10)), state)?.speed).toBe('standard');
   });
 
   test('suppress the copied parent history at the start of a fork', () => {
@@ -105,7 +118,6 @@ describe('Codex usage lines', () => {
     // Genuine child usage arrives after a model turn and extends the copied baseline.
     const child = parseCodexUsageLine(tokenCount(counters(40, 4), counters(140, 24), '2026-10-01T05:00:09.000Z'), state);
     expect(child?.totals.uncachedInputTokens).toBe(40);
-    expect(codexUsageFormat.malformedRecords(state)).toBe(0);
   });
 
   test('take the session from the first meta only', () => {

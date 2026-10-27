@@ -35,7 +35,9 @@ export function niceScale(peak: number, tickCount = 4): ChartScale {
 }
 
 export function valueToY(value: number, max: number): number {
-	return max === 0 ? CHART_VIEW_HEIGHT : CHART_VIEW_HEIGHT - (value / max) * (CHART_VIEW_HEIGHT - PLOT_TOP);
+	return max === 0
+		? CHART_VIEW_HEIGHT
+		: CHART_VIEW_HEIGHT - (value / max) * (CHART_VIEW_HEIGHT - PLOT_TOP);
 }
 
 export function indexToX(index: number, count: number): number {
@@ -81,13 +83,22 @@ function monotoneTangents(points: readonly Point[]): number[] {
 const coordinate = (value: number) => value.toFixed(2);
 
 /** Smooth line and filled area for one series, in view-box coordinates. */
-export function seriesPaths(values: readonly number[], max: number): { readonly line: string; readonly area: string } {
-	const points = values.map((value, index) => ({ x: indexToX(index, values.length), y: valueToY(value, max) }));
+export function seriesPaths(
+	values: readonly number[],
+	max: number,
+): { readonly line: string; readonly area: string } {
+	const points = values.map((value, index) => ({
+		x: indexToX(index, values.length),
+		y: valueToY(value, max),
+	}));
 	if (points.length === 0) return { line: '', area: '' };
 	if (points.length === 1) {
 		const y = coordinate(points[0]!.y);
 		const line = `M0,${y} L${CHART_VIEW_WIDTH},${y}`;
-		return { line, area: `${line} L${CHART_VIEW_WIDTH},${CHART_VIEW_HEIGHT} L0,${CHART_VIEW_HEIGHT} Z` };
+		return {
+			line,
+			area: `${line} L${CHART_VIEW_WIDTH},${CHART_VIEW_HEIGHT} L0,${CHART_VIEW_HEIGHT} Z`,
+		};
 	}
 	const tangents = monotoneTangents(points);
 	let line = `M${coordinate(points[0]!.x)},${coordinate(points[0]!.y)}`;
@@ -95,11 +106,15 @@ export function seriesPaths(values: readonly number[], max: number): { readonly 
 		const from = points[index]!;
 		const to = points[index + 1]!;
 		const dx = to.x - from.x;
-		line += ` C${coordinate(from.x + dx / 3)},${coordinate(from.y + (tangents[index]! * dx) / 3)}`
-			+ ` ${coordinate(to.x - dx / 3)},${coordinate(to.y - (tangents[index + 1]! * dx) / 3)}`
-			+ ` ${coordinate(to.x)},${coordinate(to.y)}`;
+		line +=
+			` C${coordinate(from.x + dx / 3)},${coordinate(from.y + (tangents[index]! * dx) / 3)}` +
+			` ${coordinate(to.x - dx / 3)},${coordinate(to.y - (tangents[index + 1]! * dx) / 3)}` +
+			` ${coordinate(to.x)},${coordinate(to.y)}`;
 	}
-	return { line, area: `${line} L${CHART_VIEW_WIDTH},${CHART_VIEW_HEIGHT} L0,${CHART_VIEW_HEIGHT} Z` };
+	return {
+		line,
+		area: `${line} L${CHART_VIEW_WIDTH},${CHART_VIEW_HEIGHT} L0,${CHART_VIEW_HEIGHT} Z`,
+	};
 }
 
 /** Nearest data index for a pointer position across the plot's width. */

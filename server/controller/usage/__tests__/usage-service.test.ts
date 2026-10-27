@@ -60,6 +60,16 @@ test('reports a failed integration read without failing the summary', async () =
   expect(summary.agents[1]).toMatchObject({ agentId: 'codex', status: 'ok' });
 });
 
+test('validates every report, including Local ones, and bounds failure text', async () => {
+  const service = new UsageService(executors({
+    claude: { read: async () => report({ buckets: [{ ...report().buckets[0]!, model: 'm'.repeat(201) }] }) },
+    codex: { read: async () => { throw new Error('x'.repeat(2_000)); } },
+  }));
+  const summary = await service.readSummary('local', WINDOW, { timeoutMs: 5_000 });
+  expect(summary.agents[0]).toMatchObject({ agentId: 'claude', status: 'failed', message: 'The agent returned an invalid usage report' });
+  expect(summary.agents[1]!.message).toHaveLength(500);
+});
+
 test('bounds slow reads and reports them as timed out', async () => {
   const service = new UsageService(executors({
     claude: { read: ({ signal }) => new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject(signal.reason))) },
@@ -75,6 +85,6 @@ test('propagates caller cancellation and executor unavailability', async () => {
   }));
   const pending = service.readSummary('local', WINDOW, { signal: caller.signal, timeoutMs: 5_000 });
   caller.abort(new Error('caller left'));
-  expect(pending).rejects.toThrow('caller left');
-  expect(service.readSummary('offline', WINDOW, { timeoutMs: 5_000 })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
+  await expect(pending).rejects.toThrow('caller left');
+  await expect(service.readSummary('offline', WINDOW, { timeoutMs: 5_000 })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
 });

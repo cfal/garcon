@@ -38,7 +38,10 @@
 		<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs">
 			{#each visible as segment (segment.id)}
 				<span class="flex items-center gap-1.5">
-					<span aria-hidden="true" class="size-2 rounded-[2px]" style:background-color={segment.color}
+					<span
+						aria-hidden="true"
+						class="size-2 rounded-[2px]"
+						style:background-color={segment.color}
 					></span>
 					<span class="text-muted-foreground">{segment.label}</span>
 					<span class="text-foreground tabular-nums">{format(segment.value)}</span>

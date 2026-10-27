@@ -124,6 +124,28 @@ export function isUsageTimeZone(value: unknown): value is string {
   }
 }
 
+/**
+ * Formats instants as `YYYY-MM-DD` calendar days in a zone. Builds the day from
+ * date parts so it does not depend on any locale's date order. Throws a
+ * RangeError for an unknown zone.
+ */
+export function usageDayFormatter(timeZone: string): (time: number | Date) => string {
+  const format = new Intl.DateTimeFormat('en-US', {
+    timeZone, numberingSystem: 'latn', year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  return (time) => {
+    let year = '';
+    let month = '';
+    let day = '';
+    for (const part of format.formatToParts(time)) {
+      if (part.type === 'year') year = part.value;
+      else if (part.type === 'month') month = part.value;
+      else if (part.type === 'day') day = part.value;
+    }
+    return `${year.padStart(4, '0')}-${month}-${day}`;
+  };
+}
+
 /** Number of calendar days in an inclusive window. */
 export function usageWindowLength(sinceDay: string, untilDay: string): number {
   return Math.round((Date.parse(`${untilDay}T00:00:00Z`) - Date.parse(`${sinceDay}T00:00:00Z`)) / DAY_MS) + 1;

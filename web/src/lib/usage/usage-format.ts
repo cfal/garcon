@@ -12,9 +12,23 @@ const COMPACT_CURRENCY = new Intl.NumberFormat('en-US', {
 	maximumFractionDigits: 1,
 });
 const INTEGER = new Intl.NumberFormat('en-US');
-const DAY_SHORT = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-const DAY_LONG = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
-const DAY_WITH_YEAR = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+const DAY_SHORT = new Intl.DateTimeFormat('en-US', {
+	month: 'short',
+	day: 'numeric',
+	timeZone: 'UTC',
+});
+const DAY_LONG = new Intl.DateTimeFormat('en-US', {
+	weekday: 'short',
+	month: 'short',
+	day: 'numeric',
+	timeZone: 'UTC',
+});
+const DAY_WITH_YEAR = new Intl.DateTimeFormat('en-US', {
+	month: 'short',
+	day: 'numeric',
+	year: 'numeric',
+	timeZone: 'UTC',
+});
 
 export function formatUsd(value: number): string {
 	if (value > 0 && value < 0.005) return '<$0.01';
@@ -66,5 +80,8 @@ export function formatDayWithYear(day: string): string {
 function trimFraction(value: number): string {
 	const abs = Math.abs(value);
 	const digits = abs >= 100 ? 0 : abs >= 10 ? 1 : 2;
-	return value.toFixed(digits).replace(/\.0+$/u, '').replace(/(\.\d*?)0+$/u, '$1');
+	return value
+		.toFixed(digits)
+		.replace(/\.0+$/u, '')
+		.replace(/(\.\d*?)0+$/u, '$1');
 }

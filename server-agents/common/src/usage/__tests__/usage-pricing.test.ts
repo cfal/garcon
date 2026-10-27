@@ -69,6 +69,12 @@ describe('pricing', () => {
     expect(priceUsageRecord(record('claude-sonnet-5-5', totals, { speed: 'fast' }))?.costUsd).toBeCloseTo(0.2 + 10, 10);
   });
 
+  test('applies the flex discount only to models that offer it', () => {
+    const totals = { uncachedInputTokens: 100_000, outputTokens: 1_000_000 };
+    expect(priceUsageRecord(record('gpt-6.1-terra', totals, { speed: 'flex' }))?.costUsd).toBeCloseTo((0.1 + 5) * 0.5, 10);
+    expect(priceUsageRecord(record('gpt-5.3-codex', totals, { speed: 'flex' }))?.costUsd).toBeCloseTo(0.175 + 14, 10);
+  });
+
   test('switches to long-context rates once the whole prompt crosses the threshold', () => {
     const short = priceUsageRecord(record('claude-haiku-5-5', { uncachedInputTokens: 10, cachedInputTokens: 99_990, outputTokens: 1_000_000 }));
     const long = priceUsageRecord(record('claude-haiku-5-5', { uncachedInputTokens: 11, cachedInputTokens: 99_990, outputTokens: 1_000_000 }));

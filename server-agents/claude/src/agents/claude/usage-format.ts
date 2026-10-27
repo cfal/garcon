@@ -2,6 +2,7 @@ import { isRecord } from '@garcon/common/json';
 import {
   parseTimestampMs,
   tokenCount,
+  type MalformedUsage,
   type TranscriptUsageFormat,
   type UsageRecord,
 } from '@garcon/server-agent-common/usage/usage-record';
@@ -15,12 +16,13 @@ const CLAUDE_SYNTHETIC_MODEL = '<synthetic>';
  * dedupe key. Forks and resumed sessions copy lines into other transcripts with
  * the same key.
  */
-export function parseClaudeUsageLine(line: string): UsageRecord | null {
+export function parseClaudeUsageLine(line: string): UsageRecord | MalformedUsage | null {
   let entry: unknown;
   try {
     entry = JSON.parse(line);
   } catch {
-    return null;
+    // Only lines carrying a usage key are parsed, so a corrupt one may have held a request.
+    return { malformed: true, timestampMs: null };
   }
   if (!isRecord(entry) || entry.type !== 'assistant' || !isRecord(entry.message)) return null;
   const message = entry.message;
@@ -56,5 +58,4 @@ export const claudeUsageFormat: TranscriptUsageFormat<null> = {
   createState: () => null,
   cloneState: () => null,
   parseLine: (line) => parseClaudeUsageLine(line),
-  malformedRecords: () => 0,
 };

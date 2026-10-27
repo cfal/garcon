@@ -6,7 +6,9 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 
 const DAY_MS = 86_400_000;
-const day = (offset: number) => new Date(Date.now() + offset * DAY_MS).toISOString().slice(0, 10);
+// Fixed once per run, so seeding, requests, and assertions agree across UTC midnight.
+const TODAY_MS = Date.now();
+const day = (offset: number) => new Date(TODAY_MS + offset * DAY_MS).toISOString().slice(0, 10);
 const window = () => ({ sinceDay: day(-6), untilDay: day(0), timeZone: 'UTC' });
 
 interface SeededUsage {

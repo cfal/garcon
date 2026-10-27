@@ -62,6 +62,19 @@ describe('usage aggregation', () => {
     expect(priced?.unpricedRecords).toBe(0);
   });
 
+  test('counts malformed usage only inside the window, and of unknown time always', async () => {
+    const aggregator = new UsageAggregator({ sinceDay: '2026-10-01', untilDay: '2026-10-31', timeZone: 'UTC' });
+    aggregator.addMalformed(Date.parse('2026-10-05T00:00:00Z'));
+    aggregator.addMalformed(Date.parse('2026-08-05T00:00:00Z'));
+    aggregator.addMalformed(null);
+    expect((await aggregator.finish(new EventLoopSteps('usage-test'))).malformedRecords).toBe(2);
+  });
+
+  test('bounds model names a provider writes', async () => {
+    const result = await aggregate([record('2026-10-10T10:00:00Z', { model: 'x'.repeat(500) })]);
+    expect(result.buckets[0]!.model).toHaveLength(200);
+  });
+
   test('sorts buckets by day and model and counts distinct sessions across them', async () => {
     const result = await aggregate([
       record('2026-10-11T10:00:00Z', { model: 'gpt-5.4', sessionId: 'session-b' }),

@@ -38,10 +38,15 @@
 	<div class="flex min-w-0 flex-col gap-5 transition-opacity" class:opacity-40={dimmed}>
 		<div class="flex flex-col gap-1">
 			<span class="text-4xl font-semibold text-foreground tabular-nums" data-usage-headline>
-				{metric === 'cost' ? formatUsd(report.totals.costUsd) : formatTokens(report.totals.totalTokens)}
+				{metric === 'cost'
+					? formatUsd(report.totals.costUsd)
+					: formatTokens(report.totals.totalTokens)}
 			</span>
 			<span class="text-xs text-muted-foreground">
-				{m.usage_sessions({ count: report.totals.sessions, formatted: formatCount(report.totals.sessions) })}
+				{m.usage_sessions({
+					count: report.totals.sessions,
+					formatted: formatCount(report.totals.sessions),
+				})}
 				{#if metric === 'cost'}· {m.usage_api_estimate()}{/if}
 			</span>
 			{#if metric === 'cost' && report.totals.unpricedTokens > 0}
@@ -52,29 +57,47 @@
 		</div>
 
 		{#each report.agents as agent (agent.agentId)}
-			<div class="flex flex-col gap-1" data-usage-agent={agent.agentId}>
-				<div class="flex items-baseline justify-between gap-4">
-					<span class="flex min-w-0 items-center gap-2 text-sm text-foreground">
-						<span
-							aria-hidden="true"
-							class="size-2 shrink-0 rounded-full"
-							style:background-color={usageAgentColor(agent.agentId)}
-						></span>
-						<span class="truncate">{agentLabelFor(agent.agentId)}</span>
-						<span class="shrink-0 text-[11px] whitespace-nowrap text-muted-foreground tabular-nums">
-							{m.usage_sessions({ count: agent.sessions, formatted: formatCount(agent.sessions) })}
+			<svelte:boundary>
+				<div class="flex flex-col gap-1" data-usage-agent={agent.agentId}>
+					<div class="flex items-baseline justify-between gap-4">
+						<span class="flex min-w-0 items-center gap-2 text-sm text-foreground">
+							<span
+								aria-hidden="true"
+								class="size-2 shrink-0 rounded-full"
+								style:background-color={usageAgentColor(agent.agentId)}
+							></span>
+							<span class="truncate">{agentLabelFor(agent.agentId)}</span>
+							<span
+								class="shrink-0 text-[11px] whitespace-nowrap text-muted-foreground tabular-nums"
+							>
+								{m.usage_sessions({
+									count: agent.sessions,
+									formatted: formatCount(agent.sessions),
+								})}
+							</span>
 						</span>
-					</span>
-					<span class="shrink-0 text-sm font-medium text-foreground tabular-nums">
-						{metric === 'cost' ? formatUsd(agent.costUsd) : formatTokens(agent.totalTokens)}
+						<span class="shrink-0 text-sm font-medium text-foreground tabular-nums">
+							{metric === 'cost' ? formatUsd(agent.costUsd) : formatTokens(agent.totalTokens)}
+						</span>
+					</div>
+					<span class="text-xs text-muted-foreground">
+						{metric === 'cost'
+							? m.usage_agent_cost_share({
+									share: formatPercent(agent.costShare),
+									tokens: formatTokens(agent.totalTokens),
+								})
+							: m.usage_agent_token_share({
+									share: formatPercent(agent.tokenShare),
+									cost: formatUsd(agent.costUsd),
+								})}
 					</span>
 				</div>
-				<span class="text-xs text-muted-foreground">
-					{metric === 'cost'
-						? m.usage_agent_cost_share({ share: formatPercent(agent.costShare), tokens: formatTokens(agent.totalTokens) })
-						: m.usage_agent_token_share({ share: formatPercent(agent.tokenShare), cost: formatUsd(agent.costUsd) })}
-				</span>
-			</div>
+				{#snippet failed()}
+					<p class="text-xs text-muted-foreground">
+						{m.usage_row_failed({ name: agentLabelFor(agent.agentId) })}
+					</p>
+				{/snippet}
+			</svelte:boundary>
 		{/each}
 	</div>
 

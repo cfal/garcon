@@ -27,7 +27,9 @@ function renderPanel(read: typeof getUsageSummary) {
 	return controller;
 }
 
-const resolved = (summary: UsageSummary): typeof getUsageSummary => async (executorId, window) => ({ ...summary, executorId, ...window });
+const resolved =
+	(summary: UsageSummary): typeof getUsageSummary =>
+	async (executorId, window) => ({ ...summary, executorId, ...window });
 
 describe('UsagePanel', () => {
 	it('shows totals, agents, and models, and opens a model detail dialog', async () => {
@@ -40,8 +42,12 @@ describe('UsagePanel', () => {
 		const table = document.querySelector<HTMLElement>('[data-usage-model-table]')!;
 		expect(within(table).getByText('Unpriced')).toBeTruthy();
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Show claude-opus-5-5 usage (Claude)' }));
-		const dialog = await waitFor(() => document.querySelector<HTMLElement>('[data-usage-model-dialog]')!);
+		await fireEvent.click(
+			screen.getByRole('button', { name: 'Show claude-opus-5-5 usage (Claude)' }),
+		);
+		const dialog = await waitFor(() =>
+			document.querySelector<HTMLElement>('[data-usage-model-dialog]')!,
+		);
 		expect(within(dialog).getByText('claude-opus-5-5')).toBeTruthy();
 		expect(within(dialog).getByText('Per 1M tokens')).toBeTruthy();
 		expect(within(dialog).getByText('90.0%')).toBeTruthy();
@@ -58,13 +64,34 @@ describe('UsagePanel', () => {
 	});
 
 	it('explains an empty window, including agents without transcripts', async () => {
-		renderPanel(resolved(usageSummary({ agents: [usageAgent('claude', [], { status: 'missing' })] })));
+		renderPanel(
+			resolved(usageSummary({ agents: [usageAgent('claude', [], { status: 'missing' })] })),
+		);
 		expect(await screen.findByText('No usage in this period')).toBeTruthy();
 		expect(screen.getByText('No transcripts were found for Claude on this executor.')).toBeTruthy();
 	});
 
+	it('reports a failed agent read instead of claiming an empty period', async () => {
+		renderPanel(
+			resolved(
+				usageSummary({
+					agents: [
+						usageAgent('claude', [], { status: 'failed', message: 'Reading usage took too long' }),
+						usageAgent('codex', [], { status: 'missing' }),
+					],
+				}),
+			),
+		);
+		expect(await screen.findByText('Usage could not be read for this period')).toBeTruthy();
+		expect(
+			screen.getByText('Claude usage could not be read: Reading usage took too long'),
+		).toBeTruthy();
+		expect(screen.queryByText('No usage in this period')).toBeNull();
+	});
+
 	it('reports a failed read and retries it', async () => {
-		const read = vi.fn<typeof getUsageSummary>()
+		const read = vi
+			.fn<typeof getUsageSummary>()
 			.mockRejectedValueOnce(new Error('Executor is unavailable'))
 			.mockImplementation(resolved(usageSummary()));
 		renderPanel(read);

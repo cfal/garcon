@@ -1,8 +1,15 @@
-import type { UsageBucket, UsageCategoryCost, UsageReadRequest, UsageTokenTotals } from '@garcon/common/usage';
-import { usageTotalTokens } from '@garcon/common/usage';
+import {
+  MAX_USAGE_MODEL_NAME_LENGTH,
+  usageDayFormatter,
+  usageTotalTokens,
+  type UsageBucket,
+  type UsageCategoryCost,
+  type UsageReadRequest,
+  type UsageTokenTotals,
+} from '@garcon/common/usage';
 import type { EventLoopSteps } from '../shared/event-loop.js';
 import { priceUsageRecord } from './usage-pricing.js';
-import type { UsageRecord } from './usage-record.js';
+import { mergeUsageCopies, type UsageRecord } from './usage-record.js';
 
 const QUARTER_HOUR_MS = 15 * 60 * 1000;
 
@@ -22,24 +29,24 @@ interface MutableBucket {
 export interface UsageAggregation {
   readonly buckets: readonly UsageBucket[];
   readonly distinctSessions: number;
+  readonly malformedRecords: number;
 }
 
-// en-CA formats ISO-ordered calendar days in the requested zone. Quarter-hour
-// slots that stay inside one day share a cached label, which avoids an Intl call
-// per record; a slot that crosses midnight formats each timestamp.
+// Quarter-hour slots that stay inside one day share a cached label, which avoids
+// an Intl call per record; a slot that crosses midnight formats each timestamp.
 function dayFormatter(timeZone: string): (timestampMs: number) => string {
-  const format = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const format = usageDayFormatter(timeZone);
   const slots = new Map<number, string | null>();
   return (timestampMs) => {
     const slot = Math.floor(timestampMs / QUARTER_HOUR_MS);
     let day = slots.get(slot);
     if (day === undefined) {
-      const first = format.format(slot * QUARTER_HOUR_MS);
-      const last = format.format((slot + 1) * QUARTER_HOUR_MS - 1);
+      const first = format(slot * QUARTER_HOUR_MS);
+      const last = format((slot + 1) * QUARTER_HOUR_MS - 1);
       day = first === last ? first : null;
       slots.set(slot, day);
     }
-    return day ?? format.format(timestampMs);
+    return day ?? format(timestampMs);
   };
 }
 
@@ -53,6 +60,7 @@ export class UsageAggregator {
   readonly #toDay: (timestampMs: number) => string;
   readonly #keyed = new Map<string, UsageRecord>();
   readonly #unkeyed: UsageRecord[] = [];
+  #malformedRecords = 0;
 
   constructor(window: UsageReadRequest) {
     this.#window = window;
@@ -65,7 +73,16 @@ export class UsageAggregator {
       return;
     }
     const existing = this.#keyed.get(record.dedupeKey);
-    this.#keyed.set(record.dedupeKey, existing ? mergeCopies(existing, record) : record);
+    this.#keyed.set(record.dedupeKey, existing ? mergeUsageCopies(existing, record) : record);
+  }
+
+  /** Counts a rejected usage line; one of unknown time counts toward every window. */
+  addMalformed(timestampMs: number | null): void {
+    if (timestampMs === null || this.#inWindow(this.#toDay(timestampMs))) this.#malformedRecords += 1;
+  }
+
+  #inWindow(day: string): boolean {
+    return day >= this.#window.sinceDay && day <= this.#window.untilDay;
   }
 
   async finish(steps: EventLoopSteps): Promise<UsageAggregation> {
@@ -73,8 +90,10 @@ export class UsageAggregator {
     const sessions = new Set<string>();
     const accumulate = (record: UsageRecord) => {
       const day = this.#toDay(record.timestampMs);
-      if (day < this.#window.sinceDay || day > this.#window.untilDay) return;
-      const key = `${day}\u0000${record.model}`;
+      if (!this.#inWindow(day)) return;
+      // Bounds what a provider-chosen model name can add to the report.
+      const model = record.model.slice(0, MAX_USAGE_MODEL_NAME_LENGTH);
+      const key = `${day}\u0000${model}`;
       let bucket = buckets.get(key);
       if (!bucket) {
         bucket = {
@@ -138,25 +157,8 @@ export class UsageAggregator {
       });
     }
     result.sort((left, right) => left.day.localeCompare(right.day) || left.model.localeCompare(right.model));
-    return { buckets: result, distinctSessions: sessions.size };
+    return { buckets: result, distinctSessions: sessions.size, malformedRecords: this.#malformedRecords };
   }
-}
-
-// Copies normally repeat identical usage; when a streamed copy recorded counts
-// before the response finished, the larger count is the final one.
-function mergeCopies(left: UsageRecord, right: UsageRecord): UsageRecord {
-  const earliest = right.timestampMs < left.timestampMs ? right : left;
-  return {
-    ...earliest,
-    totals: {
-      uncachedInputTokens: Math.max(left.totals.uncachedInputTokens, right.totals.uncachedInputTokens),
-      cachedInputTokens: Math.max(left.totals.cachedInputTokens, right.totals.cachedInputTokens),
-      cacheWriteTokens: Math.max(left.totals.cacheWriteTokens, right.totals.cacheWriteTokens),
-      outputTokens: Math.max(left.totals.outputTokens, right.totals.outputTokens),
-      reasoningTokens: Math.max(left.totals.reasoningTokens, right.totals.reasoningTokens),
-    },
-    cacheWrite1hTokens: Math.max(left.cacheWrite1hTokens, right.cacheWrite1hTokens),
-  };
 }
 
 function roundUsd(value: number): number {

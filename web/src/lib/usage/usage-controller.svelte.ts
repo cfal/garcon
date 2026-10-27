@@ -3,7 +3,12 @@ import type { UsageSummary, UsageWindowDays } from '$shared/usage';
 import { getUsageSummary } from '$lib/api/usage.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
-import { buildUsageReport, type UsageMetric, type UsageModelTotals, type UsageReport } from './usage-report.js';
+import {
+	buildUsageReport,
+	type UsageMetric,
+	type UsageModelTotals,
+	type UsageReport,
+} from './usage-report.js';
 import {
 	readUsagePreferences,
 	saveUsagePreferences,
@@ -81,9 +86,11 @@ export class UsageController implements PortableSingletonController {
 		const summary = this.#summary;
 		if (!summary) return false;
 		const window = usageWindow(this.windowDays, this.#now(), summary.timeZone);
-		return summary.executorId !== this.executorId
-			|| summary.sinceDay !== window.sinceDay
-			|| summary.untilDay !== window.untilDay;
+		return (
+			summary.executorId !== this.executorId ||
+			summary.sinceDay !== window.sinceDay ||
+			summary.untilDay !== window.untilDay
+		);
 	}
 
 	get selectedModel(): UsageModelTotals | null {
@@ -180,10 +187,12 @@ export class UsageController implements PortableSingletonController {
 	}
 
 	#needsRefresh(): boolean {
-		return this.#summary === null
-			|| this.#error !== null
-			|| this.stale
-			|| this.#now().getTime() - this.#readAtMs > STALE_AFTER_MS;
+		return (
+			this.#summary === null ||
+			this.#error !== null ||
+			this.stale ||
+			this.#now().getTime() - this.#readAtMs > STALE_AFTER_MS
+		);
 	}
 
 	#savePreferences(): void {

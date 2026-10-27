@@ -1,6 +1,7 @@
 import { isRecord } from '@garcon/common/json';
 import {
   parseTimestampMs,
+  type MalformedUsage,
   type TranscriptUsageFormat,
   type UsageRecord,
   type UsageSpeed,
@@ -43,7 +44,6 @@ export interface CodexUsageState {
   sawSessionMeta: boolean;
   lastUsageSignature: string | null;
   lastCumulativeUsage: CodexTokenUsage | null;
-  malformedRecords: number;
   suppressingForkCopies: boolean;
   forkCopyAnchorMs: number;
 }
@@ -56,7 +56,6 @@ export function createCodexUsageState(): CodexUsageState {
     sawSessionMeta: false,
     lastUsageSignature: null,
     lastCumulativeUsage: null,
-    malformedRecords: 0,
     suppressingForkCopies: false,
     forkCopyAnchorMs: 0,
   };
@@ -114,11 +113,14 @@ function isForkedSessionMeta(payload: Record<string, unknown>): boolean {
 }
 
 // Missing, default, and standard tiers bill as standard; `fast` aliases priority.
+// Mirrors codex-rs ServiceTier at the pinned 0.159.2:
+// https://github.com/openai/codex/blob/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/protocol/src/config_types.rs#L528-L531
 function codexSpeed(serviceTier: unknown): UsageSpeed {
-  return serviceTier === 'priority' || serviceTier === 'fast' ? 'fast' : 'standard';
+  if (serviceTier === 'priority' || serviceTier === 'fast') return 'fast';
+  return serviceTier === 'flex' ? 'flex' : 'standard';
 }
 
-export function parseCodexUsageLine(line: string, state: CodexUsageState): UsageRecord | null {
+export function parseCodexUsageLine(line: string, state: CodexUsageState): UsageRecord | MalformedUsage | null {
   let entry: unknown;
   try {
     entry = JSON.parse(line);
@@ -179,10 +181,8 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
   const previous = state.lastCumulativeUsage;
   // A valid snapshot stays the next baseline even when its paired request is malformed.
   if (cumulative !== null) state.lastCumulativeUsage = cumulative;
-  if (last === null || (hasCumulative && cumulative === null)) {
-    state.malformedRecords += 1;
-    return null;
-  }
+  const malformed: MalformedUsage = { malformed: true, timestampMs };
+  if (last === null || (hasCumulative && cumulative === null)) return malformed;
 
   // Zero-component counters report context size, not a request.
   if (last.input_tokens + last.output_tokens === 0) {
@@ -190,10 +190,7 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
     return null;
   }
   if (cumulative !== null && previous !== null && sameUsage(cumulative, previous)) return null;
-  if (last.total_tokens !== last.input_tokens + last.output_tokens) {
-    state.malformedRecords += 1;
-    return null;
-  }
+  if (last.total_tokens !== last.input_tokens + last.output_tokens) return malformed;
 
   const signature = JSON.stringify(last);
   if (cumulative !== null) {
@@ -204,18 +201,12 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
     const reconciled = previous === null
       ? combineUsage(cumulative, last, -1) !== null
       : USAGE_FIELDS.every((field) => cumulative[field] - previous[field] === last[field]);
-    if (!restarted && !reconciled) {
-      state.malformedRecords += 1;
-      return null;
-    }
+    if (!restarted && !reconciled) return malformed;
   } else {
     if (signature === state.lastUsageSignature) return null;
     // Advancing the expected totals makes a later cumulative re-emission of this request stale.
     const advanced = combineUsage(previous, last, 1);
-    if (advanced === null) {
-      state.malformedRecords += 1;
-      return null;
-    }
+    if (advanced === null) return malformed;
     state.lastCumulativeUsage = advanced;
   }
   state.lastUsageSignature = signature;
@@ -245,5 +236,4 @@ export const codexUsageFormat: TranscriptUsageFormat<CodexUsageState> = {
   // Usage snapshots are replaced, never mutated, so a shallow copy is independent.
   cloneState: (state) => ({ ...state }),
   parseLine: parseCodexUsageLine,
-  malformedRecords: (state) => state.malformedRecords,
 };

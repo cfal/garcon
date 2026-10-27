@@ -17,13 +17,33 @@
 	const hitRate = $derived(cacheHitRate(totals.tokens));
 	const metrics = $derived([
 		{ id: 'processed', label: m.usage_processed_tokens(), value: formatTokens(totals.totalTokens) },
-		{ id: 'cache-read', label: m.usage_type_cache_read(), value: formatTokens(totals.tokens.cachedInputTokens) },
-		{ id: 'cache-write', label: m.usage_type_cache_write(), value: formatTokens(totals.tokens.cacheWriteTokens) },
-		{ id: 'input', label: m.usage_uncached_input(), value: formatTokens(totals.tokens.uncachedInputTokens) },
+		{
+			id: 'cache-read',
+			label: m.usage_type_cache_read(),
+			value: formatTokens(totals.tokens.cachedInputTokens),
+		},
+		{
+			id: 'cache-write',
+			label: m.usage_type_cache_write(),
+			value: formatTokens(totals.tokens.cacheWriteTokens),
+		},
+		{
+			id: 'input',
+			label: m.usage_uncached_input(),
+			value: formatTokens(totals.tokens.uncachedInputTokens),
+		},
 		{ id: 'output', label: m.usage_type_output(), value: formatTokens(totals.tokens.outputTokens) },
-		...(hitRate === null ? [] : [{ id: 'hit-rate', label: m.usage_cache_hit(), value: formatPercent(hitRate) }]),
+		...(hitRate === null
+			? []
+			: [{ id: 'hit-rate', label: m.usage_cache_hit(), value: formatPercent(hitRate) }]),
 		...(totals.cacheSavingsUsd > 0
-			? [{ id: 'savings', label: m.usage_cache_savings(), value: formatUsd(totals.cacheSavingsUsd) }]
+			? [
+					{
+						id: 'savings',
+						label: m.usage_cache_savings(),
+						value: formatUsd(totals.cacheSavingsUsd),
+					},
+				]
 			: []),
 	]);
 </script>
@@ -41,13 +61,28 @@
 </section>
 
 {#if totals.totalTokens > 0}
-	<section class="grid gap-x-12 gap-y-8 transition-opacity lg:grid-cols-2" class:opacity-40={dimmed}>
+	<section
+		class="grid gap-x-12 gap-y-8 transition-opacity lg:grid-cols-2"
+		class:opacity-40={dimmed}
+	>
 		{#if metric === 'cost' && totals.costUsd > 0}
-			<UsageShareBar label={m.usage_cost_by_type()} segments={costTypeSegments(totals.categoryCostUsd)} format={formatUsd} />
+			<UsageShareBar
+				label={m.usage_cost_by_type()}
+				segments={costTypeSegments(totals.categoryCostUsd)}
+				format={formatUsd}
+			/>
 		{/if}
-		<UsageShareBar label={m.usage_tokens_by_type()} segments={tokenTypeSegments(totals.tokens)} format={formatTokens} />
+		<UsageShareBar
+			label={m.usage_tokens_by_type()}
+			segments={tokenTypeSegments(totals.tokens)}
+			format={formatTokens}
+		/>
 		{#if metric === 'tokens' && totals.costUsd > 0}
-			<UsageShareBar label={m.usage_cost_by_type()} segments={costTypeSegments(totals.categoryCostUsd)} format={formatUsd} />
+			<UsageShareBar
+				label={m.usage_cost_by_type()}
+				segments={costTypeSegments(totals.categoryCostUsd)}
+				format={formatUsd}
+			/>
 		{/if}
 	</section>
 {/if}

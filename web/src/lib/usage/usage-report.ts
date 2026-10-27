@@ -83,7 +83,13 @@ interface MutableTotals {
 function emptyTotals(): MutableTotals {
 	return {
 		costUsd: 0,
-		tokens: { uncachedInputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 0, reasoningTokens: 0 },
+		tokens: {
+			uncachedInputTokens: 0,
+			cachedInputTokens: 0,
+			cacheWriteTokens: 0,
+			outputTokens: 0,
+			reasoningTokens: 0,
+		},
 		categoryCostUsd: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
 		cacheSavingsUsd: 0,
 		records: 0,
@@ -127,8 +133,15 @@ export function buildUsageReport(summary: UsageSummary): UsageReport {
 	const dayIndex = new Map(days.map((day, index) => [day, index]));
 	const overall = emptyTotals();
 	const agentTotals = new Map<string, { totals: MutableTotals; sessions: number }>();
-	const modelTotals = new Map<string, { agentId: string; model: string; totals: MutableTotals; daily: Mutable<UsageDayPoint>[] }>();
-	const daily = days.map(() => ({ costUsd: 0, totalTokens: 0, byAgent: new Map<string, Mutable<UsageDayPoint>>() }));
+	const modelTotals = new Map<
+		string,
+		{ agentId: string; model: string; totals: MutableTotals; daily: Mutable<UsageDayPoint>[] }
+	>();
+	const daily = days.map(() => ({
+		costUsd: 0,
+		totalTokens: 0,
+		byAgent: new Map<string, Mutable<UsageDayPoint>>(),
+	}));
 	const issues: UsageIssue[] = [];
 	let sessions = 0;
 
@@ -152,7 +165,12 @@ export function buildUsageReport(summary: UsageSummary): UsageReport {
 			const key = `${agent.agentId}:${bucket.model}`;
 			let model = modelTotals.get(key);
 			if (!model) {
-				model = { agentId: agent.agentId, model: bucket.model, totals: emptyTotals(), daily: days.map(() => ({ costUsd: 0, totalTokens: 0 })) };
+				model = {
+					agentId: agent.agentId,
+					model: bucket.model,
+					totals: emptyTotals(),
+					daily: days.map(() => ({ costUsd: 0, totalTokens: 0 })),
+				};
 				modelTotals.set(key, model);
 			}
 			addBucket(model.totals, bucket);
@@ -175,28 +193,32 @@ export function buildUsageReport(summary: UsageSummary): UsageReport {
 	}
 
 	const totals = freeze(overall);
-	const agents = [...agentTotals].map(([agentId, entry]): UsageAgentTotals => {
-		const frozen = freeze(entry.totals);
-		return {
-			...frozen,
-			agentId,
-			sessions: entry.sessions,
-			costShare: share(frozen.costUsd, totals.costUsd),
-			tokenShare: share(frozen.totalTokens, totals.totalTokens),
-		};
-	}).sort(byCostThenTokens);
-	const models = [...modelTotals].map(([key, entry]): UsageModelTotals => {
-		const frozen = freeze(entry.totals);
-		return {
-			...frozen,
-			key,
-			agentId: entry.agentId,
-			model: entry.model,
-			costShare: share(frozen.costUsd, totals.costUsd),
-			tokenShare: share(frozen.totalTokens, totals.totalTokens),
-			daily: entry.daily,
-		};
-	}).sort(byCostThenTokens);
+	const agents = [...agentTotals]
+		.map(([agentId, entry]): UsageAgentTotals => {
+			const frozen = freeze(entry.totals);
+			return {
+				...frozen,
+				agentId,
+				sessions: entry.sessions,
+				costShare: share(frozen.costUsd, totals.costUsd),
+				tokenShare: share(frozen.totalTokens, totals.totalTokens),
+			};
+		})
+		.sort(byCostThenTokens);
+	const models = [...modelTotals]
+		.map(([key, entry]): UsageModelTotals => {
+			const frozen = freeze(entry.totals);
+			return {
+				...frozen,
+				key,
+				agentId: entry.agentId,
+				model: entry.model,
+				costShare: share(frozen.costUsd, totals.costUsd),
+				tokenShare: share(frozen.totalTokens, totals.totalTokens),
+				daily: entry.daily,
+			};
+		})
+		.sort(byCostThenTokens);
 
 	return {
 		days,
@@ -209,9 +231,14 @@ export function buildUsageReport(summary: UsageSummary): UsageReport {
 	};
 }
 
-export function sortModels(models: readonly UsageModelTotals[], metric: UsageMetric): readonly UsageModelTotals[] {
+export function sortModels(
+	models: readonly UsageModelTotals[],
+	metric: UsageMetric,
+): readonly UsageModelTotals[] {
 	if (metric === 'cost') return models;
-	return models.toSorted((left, right) => right.totalTokens - left.totalTokens || right.costUsd - left.costUsd);
+	return models.toSorted(
+		(left, right) => right.totalTokens - left.totalTokens || right.costUsd - left.costUsd,
+	);
 }
 
 /** Cost is unknown, not zero, when no record had a known price. */
@@ -228,7 +255,9 @@ export function cacheHitRate(tokens: UsageTokenTotals): number | null {
 /** Effective USD per million priced tokens, or null when none were priced. */
 export function costPerMillionTokens(totals: UsageTotals): number | null {
 	const pricedTokens = totals.totalTokens - totals.unpricedTokens;
-	return pricedTokens <= 0 || isCostUnknown(totals) ? null : (totals.costUsd / pricedTokens) * 1_000_000;
+	return pricedTokens <= 0 || isCostUnknown(totals)
+		? null
+		: (totals.costUsd / pricedTokens) * 1_000_000;
 }
 
 export function metricValue(point: UsageDayPoint | UsageTotals, metric: UsageMetric): number {

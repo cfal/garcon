@@ -46,7 +46,9 @@ export function priceUsageRecord(record: Pick<UsageRecord, 'model' | 'totals' | 
   const rates = price.longContext && promptTokens > price.longContext.promptTokensAbove
     ? price.longContext.rates
     : price.rates;
-  const scale = (record.speed === 'fast' ? price.fastMultiplier ?? 1 : 1) / 1_000_000;
+  const tier = record.speed === 'fast' ? price.fastMultiplier : record.speed === 'flex' ? price.flexMultiplier : null;
+  // A tier the table does not price for this model bills at standard rates.
+  const scale = (tier ?? 1) / 1_000_000;
   const write1h = Math.min(record.cacheWrite1hTokens, cacheWriteTokens);
   const categoryCostUsd = {
     input: uncachedInputTokens * rates.input * scale,

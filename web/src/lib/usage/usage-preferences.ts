@@ -26,7 +26,9 @@ const browserPersistence: UsagePreferencesPersistence = {
 	write: (value) => setLocalStorageItem(LOCAL_STORAGE_KEYS.usagePreferences, value),
 };
 
-export function readUsagePreferences(persistence: UsagePreferencesPersistence = browserPersistence): UsagePreferences {
+export function readUsagePreferences(
+	persistence: UsagePreferencesPersistence = browserPersistence,
+): UsagePreferences {
 	let value: unknown;
 	try {
 		value = JSON.parse(persistence.read() ?? 'null');
@@ -35,8 +37,13 @@ export function readUsagePreferences(persistence: UsagePreferencesPersistence = 
 	}
 	if (!isRecord(value)) return DEFAULT_USAGE_PREFERENCES;
 	return {
-		windowDays: isUsageWindowDays(value.windowDays) ? value.windowDays : DEFAULT_USAGE_PREFERENCES.windowDays,
-		metric: value.metric === 'cost' || value.metric === 'tokens' ? value.metric : DEFAULT_USAGE_PREFERENCES.metric,
+		windowDays: isUsageWindowDays(value.windowDays)
+			? value.windowDays
+			: DEFAULT_USAGE_PREFERENCES.windowDays,
+		metric:
+			value.metric === 'cost' || value.metric === 'tokens'
+				? value.metric
+				: DEFAULT_USAGE_PREFERENCES.metric,
 	};
 }
 

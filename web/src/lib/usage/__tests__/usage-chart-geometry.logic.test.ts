@@ -10,7 +10,9 @@ import {
 } from '../usage-chart-geometry';
 
 function pathPoints(path: string): number[][] {
-	return [...path.matchAll(/-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?/g)].map((match) => match[0].split(',').map(Number));
+	return [...path.matchAll(/-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?/g)].map((match) =>
+		match[0].split(',').map(Number),
+	);
 }
 
 describe('usage chart geometry', () => {
@@ -37,7 +39,9 @@ describe('usage chart geometry', () => {
 	it('draws a monotone curve that never leaves the plot', () => {
 		const { line, area } = seriesPaths([0, 10, 0, 30, 30, 0], 30);
 		expect(line.startsWith('M0.00,260.00')).toBe(true);
-		expect(area.endsWith(`L${CHART_VIEW_WIDTH},${CHART_VIEW_HEIGHT} L0,${CHART_VIEW_HEIGHT} Z`)).toBe(true);
+		expect(
+			area.endsWith(`L${CHART_VIEW_WIDTH},${CHART_VIEW_HEIGHT} L0,${CHART_VIEW_HEIGHT} Z`),
+		).toBe(true);
 		for (const [, y] of pathPoints(line)) {
 			expect(y).toBeGreaterThanOrEqual(8 - 1e-6);
 			expect(y).toBeLessThanOrEqual(CHART_VIEW_HEIGHT + 1e-6);
@@ -45,7 +49,9 @@ describe('usage chart geometry', () => {
 	});
 
 	it('draws a flat line for a single day and nothing for no days', () => {
-		expect(seriesPaths([5], 10).line).toBe(`M0,${valueToY(5, 10).toFixed(2)} L${CHART_VIEW_WIDTH},${valueToY(5, 10).toFixed(2)}`);
+		expect(seriesPaths([5], 10).line).toBe(
+			`M0,${valueToY(5, 10).toFixed(2)} L${CHART_VIEW_WIDTH},${valueToY(5, 10).toFixed(2)}`,
+		);
 		expect(seriesPaths([], 10)).toEqual({ line: '', area: '' });
 	});
 });

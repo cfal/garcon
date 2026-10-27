@@ -37,8 +37,12 @@
 		{ value: 'tokens' as const, label: m.usage_metric_tokens() },
 	]);
 	const missingAgents = $derived(
-		controller.summary?.agents.filter((agent) => agent.status === 'missing').map((agent) => agentLabelFor(agent.agentId)) ?? [],
+		controller.summary?.agents
+			.filter((agent) => agent.status === 'missing')
+			.map((agent) => agentLabelFor(agent.agentId)) ?? [],
 	);
+	// An empty window with a failed read is unknown usage, not zero usage.
+	const readFailed = $derived(report?.issues.some((issue) => issue.status === 'failed') ?? false);
 
 	$effect(() => {
 		if (!executors.hasSnapshot) return;
@@ -89,7 +93,9 @@
 						</Select.Trigger>
 						<Select.Content>
 							{#each executors.executors as executor (executor.id)}
-								<Select.Item value={executor.id} label={executor.label}>{executor.label}</Select.Item>
+								<Select.Item value={executor.id} label={executor.label}
+									>{executor.label}</Select.Item
+								>
 							{/each}
 						</Select.Content>
 					</Select.Root>
@@ -113,7 +119,10 @@
 					disabled={controller.loading}
 					onclick={() => void controller.refresh()}
 				>
-					<RefreshCw class={cn('size-3.5', controller.loading && 'animate-spin')} aria-hidden="true" />
+					<RefreshCw
+						class={cn('size-3.5', controller.loading && 'animate-spin')}
+						aria-hidden="true"
+					/>
 				</button>
 			</div>
 		</div>
@@ -141,6 +150,23 @@
 				</div>
 			{/if}
 
+			{#if report}
+				{#each report.issues as issue (issue.agentId)}
+					<p
+						class="flex items-start gap-2 text-xs text-muted-foreground"
+						data-usage-issue={issue.agentId}
+					>
+						<CircleAlert class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+						{issue.status === 'failed'
+							? m.usage_issue_failed({
+									agent: agentLabelFor(issue.agentId),
+									message: issue.message ?? '',
+								})
+							: m.usage_issue_partial({ agent: agentLabelFor(issue.agentId) })}
+					</p>
+				{/each}
+			{/if}
+
 			{#if !report}
 				{#if controller.loading || !controller.error}
 					<div class="flex flex-col gap-6" aria-hidden="true" data-usage-skeleton>
@@ -160,22 +186,18 @@
 			{:else if report.agents.length === 0}
 				<div class="flex flex-col items-center gap-2 py-16 text-center" data-usage-empty>
 					<ChartSpline class="size-6 text-muted-foreground" aria-hidden="true" />
-					<p class="text-sm text-foreground">{m.usage_empty()}</p>
-					<p class="max-w-md text-xs text-muted-foreground">
-						{missingAgents.length > 0
-							? m.usage_empty_missing({ agents: missingAgents.join(', ') })
-							: m.usage_empty_hint()}
+					<p class="text-sm text-foreground">
+						{readFailed ? m.usage_empty_failed() : m.usage_empty()}
 					</p>
+					{#if !readFailed}
+						<p class="max-w-md text-xs text-muted-foreground">
+							{missingAgents.length > 0
+								? m.usage_empty_missing({ agents: missingAgents.join(', ') })
+								: m.usage_empty_hint()}
+						</p>
+					{/if}
 				</div>
 			{:else}
-				{#each report.issues as issue (issue.agentId)}
-					<p class="flex items-start gap-2 text-xs text-muted-foreground" data-usage-issue={issue.agentId}>
-						<CircleAlert class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-						{issue.status === 'failed'
-							? m.usage_issue_failed({ agent: agentLabelFor(issue.agentId), message: issue.message ?? '' })
-							: m.usage_issue_partial({ agent: agentLabelFor(issue.agentId) })}
-					</p>
-				{/each}
 				<UsageOverview {report} metric={controller.metric} {dimmed} />
 				<UsageTotals {report} metric={controller.metric} {dimmed} />
 				<UsageBreakdown

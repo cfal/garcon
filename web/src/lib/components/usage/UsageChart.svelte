@@ -62,10 +62,16 @@
 		return Math.min(Math.max(0, preferred), Math.max(0, plotHeight - tooltipHeight));
 	});
 	const axisDays = $derived(
-		days.length === 0 ? [] : [...new Set([0, Math.floor((days.length - 1) / 2), days.length - 1])].map((index) => days[index]!),
+		days.length === 0
+			? []
+			: [...new Set([0, Math.floor((days.length - 1) / 2), days.length - 1])].map(
+					(index) => days[index]!,
+				),
 	);
 	const hoverTotal = $derived(
-		hoverIndex === null ? 0 : series.reduce((sum, entry) => sum + (entry.values[hoverIndex!] ?? 0), 0),
+		hoverIndex === null
+			? 0
+			: series.reduce((sum, entry) => sum + (entry.values[hoverIndex!] ?? 0), 0),
 	);
 
 	function handlePointerMove(event: PointerEvent): void {
@@ -160,10 +166,13 @@
 					{#each series as entry (entry.id)}
 						<div class="flex items-center justify-between gap-3">
 							<span class="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-								<span class="size-2 shrink-0 rounded-full" style:background-color={entry.color}></span>
+								<span class="size-2 shrink-0 rounded-full" style:background-color={entry.color}
+								></span>
 								<span class="truncate">{entry.label}</span>
 							</span>
-							<span class="text-foreground tabular-nums">{format(entry.values[hoverIndex] ?? 0)}</span>
+							<span class="text-foreground tabular-nums"
+								>{format(entry.values[hoverIndex] ?? 0)}</span
+							>
 						</div>
 					{/each}
 					{#if series.length > 1}
@@ -176,7 +185,10 @@
 			{/if}
 		</div>
 	</div>
-	<div class="flex justify-between pl-14 text-[10px] text-muted-foreground uppercase" aria-hidden="true">
+	<div
+		class="flex justify-between pl-14 text-[10px] text-muted-foreground uppercase"
+		aria-hidden="true"
+	>
 		{#each axisDays as day (day)}
 			<span>{formatDayShort(day)}</span>
 		{/each}

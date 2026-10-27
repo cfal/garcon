@@ -20,7 +20,10 @@
 <div
 	role="group"
 	aria-label={label}
-	class={cn('inline-flex shrink-0 items-center rounded-md border border-border bg-muted/40 p-0.5', className)}
+	class={cn(
+		'inline-flex shrink-0 items-center rounded-md border border-border bg-muted/40 p-0.5',
+		className,
+	)}
 >
 	{#each options as option (option.value)}
 		<button

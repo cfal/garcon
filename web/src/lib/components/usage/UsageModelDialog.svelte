@@ -10,7 +10,11 @@
 		type UsageModelTotals,
 	} from '$lib/usage/usage-report';
 	import { formatPercent, formatTokens, formatUsd, formatUsdAxis } from '$lib/usage/usage-format';
-	import { costTypeSegments, tokenTypeSegments, usageAgentColor } from '$lib/usage/usage-presentation';
+	import {
+		costTypeSegments,
+		tokenTypeSegments,
+		usageAgentColor,
+	} from '$lib/usage/usage-presentation';
 	import UsageChart from './UsageChart.svelte';
 	import UsageShareBar from './UsageShareBar.svelte';
 
@@ -31,9 +35,14 @@
 		const perMillion = costPerMillionTokens(model);
 		const hitRate = cacheHitRate(model.tokens);
 		return [
-			{ label: m.usage_metric_cost(), value: costUnknown ? m.usage_unpriced() : formatUsd(model.costUsd) },
+			{
+				label: m.usage_metric_cost(),
+				value: costUnknown ? m.usage_unpriced() : formatUsd(model.costUsd),
+			},
 			{ label: m.usage_metric_tokens(), value: formatTokens(model.totalTokens) },
-			...(perMillion === null ? [] : [{ label: m.usage_per_million_tokens(), value: formatUsd(perMillion) }]),
+			...(perMillion === null
+				? []
+				: [{ label: m.usage_per_million_tokens(), value: formatUsd(perMillion) }]),
 			...(hitRate === null ? [] : [{ label: m.usage_cache_hit(), value: formatPercent(hitRate) }]),
 		];
 	});
@@ -42,7 +51,9 @@
 			id: model.key,
 			label: model.model,
 			color: usageAgentColor(model.agentId),
-			values: model.daily.map((point) => (chartMetric === 'cost' ? point.costUsd : point.totalTokens)),
+			values: model.daily.map((point) =>
+				chartMetric === 'cost' ? point.costUsd : point.totalTokens,
+			),
 		},
 	]);
 </script>
@@ -53,14 +64,22 @@
 		if (!open) onClose();
 	}}
 >
-	<Dialog.Content class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-3xl" data-usage-model-dialog>
+	<Dialog.Content
+		class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-3xl"
+		data-usage-model-dialog
+	>
 		<Dialog.Header>
 			<Dialog.Title class="flex min-w-0 items-center gap-2 pr-6">
-				<span class="size-2.5 shrink-0 rounded-full" style:background-color={usageAgentColor(model.agentId)}></span>
+				<span
+					class="size-2.5 shrink-0 rounded-full"
+					style:background-color={usageAgentColor(model.agentId)}
+				></span>
 				<span class="truncate">{model.model}</span>
 			</Dialog.Title>
 			<Dialog.Description>
-				{costUnknown ? agentLabel : m.usage_model_cost_share({ agent: agentLabel, share: formatPercent(model.costShare) })}
+				{costUnknown
+					? agentLabel
+					: m.usage_model_cost_share({ agent: agentLabel, share: formatPercent(model.costShare) })}
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -69,7 +88,9 @@
 				{#each stats as stat (stat.label)}
 					<div class="flex min-w-0 flex-col gap-0.5">
 						<dt class="text-xs text-muted-foreground">{stat.label}</dt>
-						<dd class="truncate text-2xl font-semibold text-foreground tabular-nums">{stat.value}</dd>
+						<dd class="truncate text-2xl font-semibold text-foreground tabular-nums">
+							{stat.value}
+						</dd>
 					</div>
 				{/each}
 			</dl>

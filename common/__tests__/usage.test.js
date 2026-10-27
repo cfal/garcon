@@ -7,6 +7,7 @@ import {
   parseAgentUsageReport,
   parseUsageReadRequest,
   parseUsageSummary,
+  usageDayFormatter,
   usageTotalTokens,
   usageWindowLength,
 } from '../usage.ts';
@@ -43,6 +44,14 @@ describe('usage contract', () => {
     expect(enumerateUsageDays('2026-10-30', '2026-11-02')).toEqual(['2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02']);
     expect(enumerateUsageDays('2026-11-02', '2026-10-30')).toEqual([]);
     expect(usageTotalTokens(bucket.totals)).toBe(10);
+  });
+
+  it('formats calendar days in a zone from date parts', () => {
+    const instant = Date.parse('2026-10-15T06:30:00Z');
+    expect(usageDayFormatter('UTC')(instant)).toBe('2026-10-15');
+    expect(usageDayFormatter('America/Los_Angeles')(instant)).toBe('2026-10-14');
+    expect(usageDayFormatter('Pacific/Kiritimati')(new Date('2026-12-31T11:00:00Z'))).toBe('2027-01-01');
+    expect(() => usageDayFormatter('Nowhere/Zone')).toThrow(RangeError);
   });
 
   it('accepts windows of one to ninety days in a known zone', () => {

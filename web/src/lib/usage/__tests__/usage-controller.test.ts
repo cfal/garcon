@@ -19,7 +19,12 @@ function harness(stored: string | null = null) {
 	const read: typeof getUsageSummary = (executorId, window, signal) =>
 		new Promise((resolve, reject) => reads.push({ executorId, window, signal, resolve, reject }));
 	let persisted = stored;
-	const preferences = { read: () => persisted, write: (value: string) => { persisted = value; } };
+	const preferences = {
+		read: () => persisted,
+		write: (value: string) => {
+			persisted = value;
+		},
+	};
 	const now = vi.fn(() => NOW);
 	const controller = new UsageController({ read, preferences, now });
 	return { controller, reads, now, persisted: () => persisted };
@@ -34,7 +39,10 @@ describe('UsageController', () => {
 		const { controller, reads, now } = harness();
 		controller.setPresentationVisible(true);
 		expect(controller.loading).toBe(true);
-		expect(reads[0]).toMatchObject({ executorId: 'local', window: { sinceDay: '2026-09-28', untilDay: '2026-10-27' } });
+		expect(reads[0]).toMatchObject({
+			executorId: 'local',
+			window: { sinceDay: '2026-09-28', untilDay: '2026-10-27' },
+		});
 		reads[0]!.resolve(summaryFor(reads[0]!));
 		await vi.waitFor(() => expect(controller.loading).toBe(false));
 		expect(controller.report?.totals.costUsd).toBe(13);
@@ -83,7 +91,9 @@ describe('UsageController', () => {
 	});
 
 	it('defers reads while hidden and persists window and metric only', () => {
-		const { controller, reads, persisted } = harness(JSON.stringify({ windowDays: 90, metric: 'tokens' }));
+		const { controller, reads, persisted } = harness(
+			JSON.stringify({ windowDays: 90, metric: 'tokens' }),
+		);
 		expect(controller.windowDays).toBe(90);
 		expect(controller.metric).toBe('tokens');
 		controller.setWindowDays(7);

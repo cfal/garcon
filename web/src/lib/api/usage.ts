@@ -16,7 +16,10 @@ export async function getUsageSummary(
 ): Promise<UsageSummary> {
 	const params = new URLSearchParams({ executorId, ...window });
 	const summary = parseUsageSummary(
-		await apiGet<unknown>(`/api/v1/usage?${params}`, { signal, timeoutMs: USAGE_REQUEST_TIMEOUT_MS }),
+		await apiGet<unknown>(`/api/v1/usage?${params}`, {
+			signal,
+			timeoutMs: USAGE_REQUEST_TIMEOUT_MS,
+		}),
 	);
 	if (!summary) throw new Error('Invalid usage response');
 	return summary;
