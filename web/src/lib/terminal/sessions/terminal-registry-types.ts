@@ -59,6 +59,16 @@ export interface TerminalExecutorInventory {
 	error: string | null;
 }
 
+export interface PendingTerminalCreate {
+	executorId: string;
+	terminalRuntimeId?: string;
+	requestId: string;
+	requestedInitialWorkingDirectory: string | null;
+	startedAt: number;
+	requiresList: boolean;
+	timer: ReturnType<typeof setTimeout> | null;
+}
+
 export interface TerminalRegistryDeps {
 	executors?: Pick<ExecutorsStore, 'executors' | 'label' | 'onChanged'>;
 	connection: PrimaryWsConnectionPort;
