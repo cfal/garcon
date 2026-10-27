@@ -50,7 +50,9 @@ test('profile and decision envelopes are closed', () => {
   expect(isProtocolProfile({ core: 1, contracts: { 'synthetic.feature': [3] } })).toBe(false);
   expect(isProtocolDecision({ ok: true, profile: { core: 1, contracts: {} } })).toBe(true);
   expect(isProtocolDecision({ ok: false, code: 'CORE_MISMATCH' })).toBe(true);
-  for (const value of [{ ok: false, code: 'UNKNOWN' }, { ok: true }, { ok: 1, profile: EXECUTOR_PROTOCOL }, { ok: false, code: 'CORE_MISMATCH', extra: true }]) {
+  for (const value of [{ ok: false, code: 'UNKNOWN' }, { ok: true }, { ok: 1, profile: EXECUTOR_PROTOCOL },
+    { ok: false, code: 'CORE_MISMATCH', extra: true }, { ok: false, code: ['CORE_MISMATCH'] },
+    { ok: false, code: { toString: 'CORE_MISMATCH' } }]) {
     expect(isProtocolDecision(value)).toBe(false);
   }
 });
