@@ -12,7 +12,11 @@ describe('AgentSettingsControls', () => {
 				descriptors: [{ key: 'review', type: 'boolean', label: 'Review changes' }],
 				envelope, compatible: false, onChange,
 			});
-			expect(screen.getByRole('status').textContent).toContain('unavailable or incompatible');
+			const status = screen.getByRole('status');
+			expect(status.textContent).toContain('unavailable or incompatible');
+			expect(status.title).toBe('Provider settings are unavailable or incompatible.');
+			expect(status.className).toContain('size-9');
+			expect(status.querySelector('.sr-only')).toBeTruthy();
 			expect(screen.queryByRole('checkbox')).toBeNull();
 			expect(onChange).not.toHaveBeenCalled();
 		});

@@ -15,6 +15,7 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import BrainCircuit from '@lucide/svelte/icons/brain-circuit';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import AgentThinkingIcon from './AgentThinkingIcon.svelte';
 
 	interface Props {
@@ -51,7 +52,14 @@
 </script>
 
 {#if !compatible || !envelope}
-	<p class="text-sm text-muted-foreground" role="status">Provider settings are unavailable or incompatible.</p>
+	<span
+		class="inline-flex size-9 shrink-0 items-center justify-center text-muted-foreground"
+		role="status"
+		title="Provider settings are unavailable or incompatible."
+	>
+		<CircleAlert class="size-4" aria-hidden="true" />
+		<span class="sr-only">Provider settings are unavailable or incompatible.</span>
+	</span>
 {:else if descriptors.length > 0}
 	<div class="flex flex-wrap items-center gap-2" data-slot="agent-settings-controls">
 		{#each descriptors as descriptor (descriptor.key)}
