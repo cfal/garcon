@@ -284,6 +284,7 @@ describe('PromptComposer focus', () => {
 		vi.spyOn(remote, 'refreshIfStale').mockImplementation(async () => {
 			if (!remote.isValidated) {
 				await load();
+				remote.executorInstanceId = remoteExecutor.instanceId;
 				remote.lastValidatedAt = Date.now();
 			}
 		});
@@ -415,6 +416,7 @@ describe('PromptComposer focus', () => {
 		});
 		const retry = vi.spyOn(remote, 'forceRefresh').mockImplementation(async () => {
 			remote.error = null;
+			remote.executorInstanceId = remoteExecutor.instanceId;
 			remote.lastValidatedAt = Date.now();
 		});
 		const onsubmit = vi.fn();
@@ -462,6 +464,7 @@ describe('PromptComposer focus', () => {
 
 	it('submits file mentions with click and Enter when the ready executor has no Files capability', async () => {
 		const catalog = conversationalCatalog();
+		catalog.forExecutor(remoteExecutor.id).executorInstanceId = remoteExecutor.instanceId;
 		catalog.forExecutor(remoteExecutor.id).lastValidatedAt = Date.now();
 		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
 		vi.spyOn(catalog.forExecutor(remoteExecutor.id), 'refreshIfStale').mockResolvedValue();
@@ -2498,6 +2501,7 @@ describe('PromptComposer focus', () => {
 			await screen.findByText('Synthetic catalog failure');
 			expect(screen.queryByText('Project folder unavailable')).toBeNull();
 			remote.error = null;
+			remote.executorInstanceId = remoteExecutor.instanceId;
 			remote.lastValidatedAt = Date.now();
 			await waitFor(() => expect(screen.queryByText('Synthetic catalog failure')).toBeNull());
 			expect(screen.getByRole('textbox')).toBe(textarea);

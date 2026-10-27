@@ -1,7 +1,7 @@
 import { normalizePermissionMode } from '../../../common/chat-modes.js';
 import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
 import type { AgentSettingsEnvelope } from '../../../common/agent-integration.js';
-import type { AgentSettingsPatchFence } from '../../../common/chat-command-contracts.js';
+import type { AgentSettingsPatchFence } from '../../../common/agent-settings.js';
 import type { ExecutorCallOptions } from '@garcon/server-agent-interface';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';

@@ -381,7 +381,7 @@ describe('GET /api/chats includes read state', () => {
     });
   });
 
-  it('defaults canonical modes and settings for partial persisted sessions', async () => {
+  it('defaults canonical modes but preserves absent settings for partial persisted sessions', async () => {
     registry.listAllChats.mockImplementation(() => ({
       [CHAT_ID]: chatEntry({ agentSettingsById: {} }),
     }));
@@ -394,11 +394,7 @@ describe('GET /api/chats includes read state', () => {
 
     expect(body.sessions[0].permissionMode).toBe('default');
     expect(body.sessions[0].thinkingMode).toBe('none');
-    expect(body.sessions[0].agentSettings).toEqual({
-      ownerId: 'test-agent',
-      schemaVersion: 1,
-      values: {},
-    });
+    expect(body.sessions[0].agentSettings).toBeNull();
   });
 
   it('normalizes invalid canonical mode values', async () => {
