@@ -18,7 +18,7 @@ export class NewChatAgentSettingsState {
 
 	isCompatible(agentId: string, catalog: SettingsCatalog): boolean {
 		const defaults = catalog.getDefaultAgentSettings(agentId);
-		const envelope = this.forAgent(agentId, catalog);
+		const envelope = this.byId[agentId] ?? defaults;
 		return Boolean(defaults && envelope
 			&& areAgentSettingsCompatible(envelope, defaults, catalog.getAgentSettingsDescriptors(agentId)));
 	}

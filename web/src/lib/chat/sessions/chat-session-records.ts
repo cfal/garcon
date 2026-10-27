@@ -6,14 +6,13 @@ import { stableJsonStringify } from '$shared/json';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
 import type { ChatListEntry } from '$shared/chat-list';
 
-export function normalizeExecutionFields<
-	T extends {
-		agentId: string;
+export function normalizeExecutionFields(
+	value: {
 		permissionMode?: unknown;
 		thinkingMode?: unknown;
 		agentSettings: AgentSettingsEnvelope;
 	},
->(value: T): Pick<ChatStartupConfig, 'permissionMode' | 'thinkingMode' | 'agentSettings'> {
+): Pick<ChatStartupConfig, 'permissionMode' | 'thinkingMode' | 'agentSettings'> {
 	return {
 		permissionMode: normalizePermissionMode(value.permissionMode),
 		thinkingMode: normalizeThinkingMode(value.thinkingMode),

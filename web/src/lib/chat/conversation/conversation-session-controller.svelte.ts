@@ -184,10 +184,7 @@ export class ConversationSessionController {
 		return {
 			...selection,
 			agentSettings,
-			...resolveConversationModelSelection(
-				selection,
-				this.deps.modelCatalogForExecutor(selection.executorId ?? 'local'),
-			),
+			...resolveConversationModelSelection(selection, catalog),
 		};
 	}
 
@@ -587,10 +584,11 @@ export class ConversationSessionController {
 			expectedAgentOwnershipEpoch: selected.agentOwnershipEpoch ?? undefined,
 		};
 		if (!literal) text = text.trim();
+		const requiresExecutor = isDraft || !isControllerSlashCommand(text, agent.executionPolicy);
 		if (
-			(isDraft || !isControllerSlashCommand(text, agent.executionPolicy)) &&
+			requiresExecutor &&
 			(!deps.canSubmitToExecutor(executorId) ||
-				!isCustomProviderSelectionAvailable(deps.modelCatalogForExecutor(executorId), selection))
+				!isCustomProviderSelectionAvailable(catalog, selection))
 		) {
 			return selected.status === 'draft' && source === 'automatic-start'
 				? rejectUnavailableDraftStart(deps, chatId)
@@ -598,7 +596,7 @@ export class ConversationSessionController {
 		}
 		const defaults = catalog.getDefaultAgentSettings(agent.id);
 		const envelope = selection.agentSettings ?? defaults;
-		if ((isDraft || !isControllerSlashCommand(text, agent.executionPolicy))
+		if (requiresExecutor
 			&& (!defaults || !envelope || !areAgentSettingsCompatible(envelope, defaults, agent.settings))) {
 			deps.chatState.appendLocalNoticeForChat(chatId, 'error', 'Saved provider settings are incompatible with this executor.');
 			return 'rejected';
