@@ -6,6 +6,7 @@ import { withTimeout } from './deferred.js';
 import { BoundedLog } from './bounded-log.js';
 import type { IntegrationDirectories } from './integration-fixture.js';
 import { parseExecutors, type ExecutorConnection } from '../../common/executors.js';
+import type { SourceArtifact } from './source-artifact.js';
 
 export type ExecutionBackend = 'in-process' | 'remote-controller-dials' | 'remote-executor-dials';
 
@@ -54,7 +55,7 @@ export class ExecutorProcess {
   #stopping = false;
   #unexpectedExit: Error | null = null;
 
-  private constructor(readonly child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>, private readonly launch: { repoRoot: string; configDir: string }) {
+  private constructor(readonly child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>, private readonly launch: { repoRoot: string; configDir: string; bunExecutable: string }) {
     void this.#connected.promise.catch(() => undefined);
     void this.#listening.promise.catch(() => undefined);
     const capture = (line: string) => {
@@ -82,6 +83,8 @@ export class ExecutorProcess {
 
   static async start(input: {
     readonly repoRoot: string;
+    readonly bunExecutable?: string;
+    readonly entrypoint?: string;
     readonly directories: IntegrationDirectories;
     readonly environment: Record<string, string>;
     readonly connection: { readonly kind: 'listen'; readonly port: number; readonly bindAddress?: string } | { readonly kind: 'dial'; readonly url: string };
@@ -89,7 +92,7 @@ export class ExecutorProcess {
     const env = isolatedEnvironment(input.directories.home, input.environment);
     await mkdir(env.TMPDIR, { recursive: true });
     const child = Bun.spawn({
-      cmd: [process.execPath, 'server/main.ts', 'executor',
+      cmd: [input.bunExecutable ?? process.execPath, input.entrypoint ?? 'server/main.ts', 'executor',
         ...(input.connection.kind === 'listen' ? ['--listen', String(input.connection.port)] : []),
         ...(input.connection.kind === 'listen' && input.connection.bindAddress ? ['--bind-address', input.connection.bindAddress] : []),
         '--no-tls', '--config-dir', input.directories.config,
@@ -97,7 +100,8 @@ export class ExecutorProcess {
       cwd: input.repoRoot, env: { ...env, GARCON_CONTROLLER_URL: input.connection.kind === 'dial' ? input.connection.url : '' },
       stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
     });
-    return new ExecutorProcess(child, { repoRoot: input.repoRoot, configDir: input.directories.config });
+    return new ExecutorProcess(child, { repoRoot: input.repoRoot, configDir: input.directories.config,
+      bunExecutable: input.bunExecutable ?? process.execPath });
   }
 
   get logs(): readonly string[] { return this.#logs.values(); }
@@ -105,7 +109,7 @@ export class ExecutorProcess {
   async connectionUrl(): Promise<string> {
     const address = new URL(await this.listening());
     if (address.hostname === '0.0.0.0' || address.hostname === '[::]') address.hostname = '127.0.0.1';
-    const reveal = Bun.spawn([process.execPath, 'server/main.ts', 'executor', 'connection-url',
+    const reveal = Bun.spawn([this.launch.bunExecutable, 'server/main.ts', 'executor', 'connection-url',
       '--config-dir', this.launch.configDir, '--advertise-url', address.href, '--no-tls'],
     { cwd: this.launch.repoRoot, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
     const result = (await new Response(reveal.stdout).text()).trim();
@@ -158,10 +162,17 @@ export class ExecutionBackendFixture {
     readonly directories: IntegrationDirectories,
     readonly environment: Record<string, string>,
     private readonly interceptConnection?: (url: URL) => Promise<string>,
+    private readonly workerArtifact?: SourceArtifact,
   ) {}
 
   get logs(): readonly string[] { return [...this.#completedLogs, ...(this.#worker?.logs ?? [])]; }
   get executorId(): string { return this.#executorId ?? 'local'; }
+  get artifact(): SourceArtifact | null {
+    return this.#workerLaunch ? {
+      repoRoot: this.#workerLaunch.repoRoot,
+      bunExecutable: this.#workerLaunch.bunExecutable ?? process.execPath,
+    } : null;
+  }
 
   async start(options: GarconProcessOptions): Promise<GarconProcess> {
     // A stopped worker still owns its port for the next launch.
@@ -177,7 +188,9 @@ export class ExecutionBackendFixture {
     }
     const launchWorker = async (connection: Parameters<typeof ExecutorProcess.start>[0]['connection']) => {
       this.#workerLaunch = {
-        repoRoot: options.repoRoot, directories: this.directories, environment: this.environment,
+        repoRoot: this.#workerLaunch?.repoRoot ?? this.workerArtifact?.repoRoot ?? options.repoRoot,
+        bunExecutable: this.#workerLaunch?.bunExecutable ?? this.workerArtifact?.bunExecutable ?? options.bunExecutable,
+        directories: this.directories, environment: this.environment,
         connection,
       };
       this.#worker = await ExecutorProcess.start(this.#workerLaunch);
@@ -223,7 +236,9 @@ export class ExecutionBackendFixture {
           await this.#request(`/api/v1/executors/${this.#executorId}`, 'PATCH', {
             connection: { direction: 'executor-connects', connectionUrl, noTls: true },
           });
-          this.#workerLaunch = { repoRoot: options.repoRoot, directories: this.directories, environment: this.environment,
+          this.#workerLaunch = { repoRoot: this.workerArtifact?.repoRoot ?? options.repoRoot,
+            bunExecutable: this.workerArtifact?.bunExecutable ?? options.bunExecutable,
+            directories: this.directories, environment: this.environment,
             connection: { kind: 'dial', url: connectionUrl } };
         }
         if (!this.#worker) await launchWorker(this.#workerLaunch!.connection);
@@ -243,7 +258,7 @@ export class ExecutionBackendFixture {
     }
   }
 
-  async crashAndRestartWorker(projectBasePath?: string): Promise<void> {
+  async crashAndRestartWorker(projectBasePath?: string, artifact?: SourceArtifact): Promise<void> {
     if (!this.#worker || !this.#workerLaunch) throw new Error('No remote execution worker is running');
     await this.#worker.crash();
     const expiredAt = new Date(Date.now() - 60_000);
@@ -252,6 +267,7 @@ export class ExecutionBackendFixture {
     if (projectBasePath !== undefined) {
       this.#workerLaunch = { ...this.#workerLaunch, directories: { ...this.#workerLaunch.directories, project: projectBasePath } };
     }
+    if (artifact) this.#workerLaunch = { ...this.#workerLaunch, ...artifact };
     this.#worker = await ExecutorProcess.start(this.#workerLaunch);
     this.executionProcessIds.add(this.#worker.child.pid);
     await this.#worker.connected();

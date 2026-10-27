@@ -9,6 +9,7 @@ const LOG_CAPACITY = 2_000;
 
 export interface GarconProcessOptions {
   repoRoot: string;
+  bunExecutable?: string;
   configDir: string;
   workspaceDir: string;
   workspaceName?: string;
@@ -140,7 +141,7 @@ export class GarconProcess {
       : ['--workspace-dir', options.workspaceDir];
     const child = Bun.spawn({
       cmd: [
-        process.execPath,
+        options.bunExecutable ?? process.execPath,
         'server/main.ts',
         '--port',
         String(options.port ?? 0),

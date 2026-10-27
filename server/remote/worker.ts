@@ -1,4 +1,4 @@
-import { AgentCallError } from '@garcon/server-agent-interface';
+import { AgentCallError, type AgentIntegrationClass } from '@garcon/server-agent-interface';
 import { mkdir, rm } from 'node:fs/promises';
 import { defaultAgentIntegrations } from '../runtime/agents/default-agent-integrations.js';
 import { ExecutorRpc } from './transport/rpc.js';
@@ -25,6 +25,7 @@ export interface ExecutorWorkerOptions {
   readonly connection: { readonly kind: 'dial'; readonly url: string; readonly secret: string }
     | { readonly kind: 'listen'; readonly port: number; readonly bindAddress?: string; readonly tls?: ExecutorListenerTls };
   readonly advertisedUrl?: string;
+  readonly integrations?: readonly AgentIntegrationClass[];
 }
 
 export async function runExecutorWorker(
@@ -122,7 +123,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
       transport.onFailure(() => { if (currentConnection === connection) currentConnection = null; });
       runtime ??= new ExecutionRuntime({
         id: transport.executorId, workspaceDir: dataDir, projectBasePath: options.projectBasePath,
-        integrations: defaultAgentIntegrations,
+        integrations: options.integrations ?? defaultAgentIntegrations,
         terminalRuntime: terminals!,
         resolveCredential: ({ agentId, reference, signal }) => {
           if (!currentConnection) throw new AgentCallError('not-dispatched', 'Executor controller is disconnected');
