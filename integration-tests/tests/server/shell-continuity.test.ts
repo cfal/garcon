@@ -7,8 +7,9 @@ import { tcpLinkProxy } from '../../../server/remote/__tests__/tcp-link-proxy.js
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { waitForExecutorReconnect } from '../../support/executor-link.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
+import { executionBackend as selectedExecutionBackend } from '../../support/execution-backend.js';
 
-for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
+for (const executionBackend of [selectedExecutionBackend()].filter(backend => backend !== 'in-process')) {
   test(`Shell output and side effects survive reconnect without replay (${executionBackend})`, async () => {
     let proxy: Awaited<ReturnType<typeof tcpLinkProxy>> | undefined;
     try {

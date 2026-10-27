@@ -12,6 +12,7 @@ Integration coverage is required, not optional, when a change can fail only afte
 | Server behavior spanning HTTP, WebSocket, provider IO, persistence, process lifecycle, or multiple server services | `tests/server/` |
 | User behavior whose contract includes SPA routing, rendering, dialogs, browser events, or client/server coordination | `tests/e2e/` |
 | User behavior whose contract depends on rendered layout, measurement, scrolling, focus, or selection geometry | `tests/chromium/` |
+| Focused WebKit engine compatibility for login, chat delivery and draft reload on desktop/touch viewports | `tests/webkit/` |
 
 Prefer the lowest layer that can reproduce the failure, but do not mock away the boundary under test. Cross-boundary production regressions generally require both a focused unit test and a regression test in this package. Lightpanda tests complement server integration tests; they do not replace them.
 
@@ -116,6 +117,8 @@ Perform the behavior under test through the SPA. The typed client may prepare st
 
 Lightpanda validates DOM, routing, events, and browser/server coordination. It does not validate pixel layout or screenshots; use an appropriate rendered-browser workflow for visual assertions.
 
+Lightpanda 0.3.5 logs uncaught timer exceptions without emitting CDP `pageerror` events. Its fixture enforces reported console/page errors, but Chromium's injected-error contracts own verification of real uncaught exceptions, including sibling pages and additional contexts.
+
 ## Determinism And Cleanliness
 
 - Never use arbitrary sleeps. Wait on a correlated event, provider request, route change, DOM predicate, process state, or durable API result.
@@ -125,7 +128,7 @@ Lightpanda validates DOM, routing, events, and browser/server coordination. It d
 - Keep each test focused on one invariant. Split unrelated workflows instead of building a long scenario that obscures the failing boundary.
 - Use the fixture wrappers for teardown. Do not manually kill Garcon or Lightpanda processes.
 - Consume every fake-provider response plan and release or explicitly abort every hold. Cleanup intentionally fails on unused plans, protocol violations, leaked holds, or unexpected process exits.
-- Assert `fixture.assertNoBrowserErrors()` in successful E2E workflows. Do not swallow console, protocol, cleanup, or shutdown failures.
+- Both browser fixture wrappers reject unexpected page exceptions and console errors after successful scenarios. Keep mid-scenario `assertNoBrowserErrors()` checks where useful. For deliberate outages or revocations, wrap only the fault/recovery operation in `withExpectedConsoleErrors(messages, run)`, using exact console messages or full-message regexes. The operation must assert recovery independently; zero or repeated matching diagnostics are allowed, since network failures do not map one-to-one to browser logs. Prior errors, page exceptions, unrelated diagnostics, and later errors remain fatal. When logging itself is the contract, `consumeExpectedBrowserErrors(messages)` validates an exact batch, including duplicates. Chromium also observes sibling pages. Register additional contexts with `fixture.watchBrowserErrors(context)` before creating pages. Do not swallow protocol, cleanup, or shutdown failures.
 - Do not commit generated files under `artifacts/`. Successful runs remove their temporary directories automatically.
 
 Set `KEEP_INTEGRATION_ARTIFACTS=1` to retain isolated non-credential fixture directories for investigation. Credential-backed fixtures always remove their temporary provider homes and transcripts. Failed server tests write diagnostics under `artifacts/server/`; failed E2E tests write the DOM snapshot, browser errors, Lightpanda logs, server exchanges, WebSocket events, and provider requests under `artifacts/e2e/`.
@@ -151,6 +154,7 @@ DEEPSEEK_TESTING_KEY=... bun run test:live:opencode
 bun run build
 LIGHTPANDA_BIN=/path/to/lightpanda bun run test:integration:e2e
 bun run test:integration:chromium
+bun run test:integration:webkit
 
 bun run check
 bun run test
@@ -171,11 +175,19 @@ Keep the configured single-test concurrency. The suites exercise process lifecyc
 
 CI splits Chromium files across two runners, retaining a separate Bun process per file and serial tests within each runner. Run one shard locally with `bun run test:integration:chromium --shard=1/2`; omit `--shard` to run the full suite.
 
+The separate WebKit CI lane installs Playwright WebKit with its system dependencies and runs a focused desktop/touch-viewport smoke. Install it locally with `bunx playwright install --with-deps webkit` from `integration-tests/`. This checks another browser engine on Linux, not native Safari, iOS, or macOS. Chromium remains the full rendered-geometry lane.
+
+`scripts/__tests__/test-inventory.test.js` reconciles repository test filenames with primary discovery commands. Backend matrices and browser shards subdivide those lanes; live and endurance commands remain separate.
+
+Transcript inventory supports direct `test`/`it`/`describe` registrations, `each`, `skipIf`/`runIf`, and `concurrent`/`serial`. Titles may use literal strings, template fragments, and literal object tables in `for...of` loops. Keep case IDs in those forms: registration aliases, computed titles, arbitrary function bodies, focused/inverted tests, and statically skipped declarations do not count. Platform conditions and nonliteral loop bounds are not evaluated. This is a source-inventory guard, not a JavaScript interpreter or proof that every matrix case executed; runtime suites own that evidence.
+
 ## Provider Scope
 
 The deterministic lane exercises `direct-openai-compatible` and `direct-anthropic-compatible` through separate protocol fakes. Both providers are present in every fixture and remain alive across Garcon restarts. The Anthropic fake covers the Messages HTTP and SSE contract; it is not a fake Claude Code process or Claude Agent SDK. Together the fakes prove Garcon's multi-agent routing, lifecycle, queue, transcript, persistence, search, and SPA behavior without spending credentials or depending on external availability. They do not prove the native behavior of Claude, Codex, Pi, OpenCode, Factory, Amp, Cursor, or other provider binaries.
 
 Credential-backed provider suites remain isolated from the deterministic required lane and must be explicit about cost, rate limits, cleanup, and supported environments. The live Claude lane receives its DeepSeek testing key and Anthropic-compatible endpoint configuration only in the temporary Garcon process environment. Do not weaken or replace fake-provider coverage with live-provider tests.
+
+Missing live configuration fails trusted CI runs. Fork and Dependabot pull requests may skip when credentials are unavailable; a green workflow on those PRs does not establish live-provider coverage.
 
 Credential-backed Claude assertions may require visible assistant output, but must not require exact model text or a model-selected tool call. Exact queue, fork-point, native graph, permission, tool-result, and persistence semantics belong in the real-CLI scripted Claude tier, where model behavior is deterministic.
 

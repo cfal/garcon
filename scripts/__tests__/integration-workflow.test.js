@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { parseTestArguments, selectTestFiles } from '../run-test-files.js';
 
 const root = resolve(import.meta.dir, '../..');
@@ -52,5 +53,70 @@ test('stable Chromium gate always runs and rejects every non-success result', ()
       stdout: 'pipe', stderr: 'pipe',
     });
     expect(result.exitCode, outcome).toBe(outcome === 'success' ? 0 : 1);
+  }
+});
+
+test('WebKit smoke runs independently with bounded setup, tests and diagnostics', () => {
+  const webkit = workflow.jobs['webkit-e2e'];
+  expect(webkit.name).toBe('WebKit E2E');
+  expect(webkit['runs-on']).toBe('ubuntu-latest');
+  expect(webkit['continue-on-error']).toBeUndefined();
+  expect(webkit.if).toBeUndefined();
+  const install = webkit.steps.find(step => step.name === 'Install WebKit');
+  expect(install.run).toBe('bunx playwright install --with-deps webkit');
+  expect(install.if).toBeUndefined();
+  expect(install['timeout-minutes']).toBe(10);
+  const run = webkit.steps.find(step => step.name === 'Run WebKit E2E');
+  expect(run.run).toBe('bun run test:integration:webkit');
+  expect(run['timeout-minutes']).toBe(5);
+  expect(run['continue-on-error']).toBeUndefined();
+  expect(run.if).toBeUndefined();
+  const upload = webkit.steps.find(step => step.name === 'Upload WebKit diagnostics');
+  expect(upload.if).toBe('${{ failure() || cancelled() }}');
+  expect(upload['timeout-minutes']).toBe(2);
+  expect(upload.with.name).toBe('webkit-e2e-diagnostics');
+  expect(upload.with.path).toContain('integration-tests/artifacts/webkit/');
+});
+
+test('live lanes fail closed without configuration except on credential-free PRs', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'garcon-live-ci-contract-'));
+  try {
+    for (const agent of ['claude', 'codex', 'opencode']) {
+      const check = workflow.jobs[`${agent}-live`].steps[0];
+      expect(check.env).toMatchObject({
+        EVENT_NAME: '${{ github.event_name }}',
+        HEAD_REPO: '${{ github.event.pull_request.head.repo.full_name }}',
+        REPO: '${{ github.repository }}', ACTOR: '${{ github.actor }}',
+      });
+      const keys = Object.keys(check.env).filter(key => key.includes('TESTING'));
+      const configurations = [[], ...keys.map(key => keys.filter(other => other !== key)), keys];
+      for (const configured of configurations) {
+        for (const [event, head, actor, credentialFree] of [
+          ['push', '', 'owner', false],
+          ['workflow_dispatch', '', 'owner', false],
+          ['pull_request', 'owner/repo', 'owner', false],
+          ['pull_request', '', 'owner', false],
+          ['pull_request', 'fork/repo', 'contributor', true],
+          ['pull_request', 'owner/repo', 'dependabot[bot]', true],
+          ['push', '', 'dependabot[bot]', false],
+        ]) {
+          const output = join(directory, 'output');
+          writeFileSync(output, '');
+          const result = Bun.spawnSync(['bash', '-eu', '-c', check.run], {
+            env: {
+              PATH: process.env.PATH, GITHUB_OUTPUT: output,
+              EVENT_NAME: event, HEAD_REPO: head, REPO: 'owner/repo', ACTOR: actor,
+              ...Object.fromEntries(keys.map(key => [key, configured.includes(key) ? 'synthetic-test-value' : ''])),
+            }, stdout: 'pipe', stderr: 'pipe',
+          });
+          const complete = configured.length === keys.length;
+          expect(result.exitCode, `${agent}: ${event}/${head}/${actor}, ${configured}`)
+            .toBe(complete || credentialFree ? 0 : 1);
+          expect(readFileSync(output, 'utf8')).toBe(complete ? 'available=true\n' : '');
+        }
+      }
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
