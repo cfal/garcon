@@ -5,7 +5,7 @@
 import { ProjectPathCompletionController } from '$lib/project-paths/project-path-completion.js';
 import { effectiveExecutorId } from '$shared/executors';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
-import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
+import { NewChatPathValidationController } from './new-chat-path-validation-controller.js';
 import {
 	ImageAttachmentState,
 	isSupportedChatAttachment,
@@ -79,9 +79,7 @@ export class NewChatFormState {
 	// Path validation
 	validationStatus = $state<PathValidationStatus>('idle');
 	validationError = $state<string | null>(null);
-	#validationTimer: ReturnType<typeof setTimeout> | null = null;
-	#validationRequestVersion = 0;
-	#validationTargetKey: string | null = null;
+	readonly #pathValidation = new NewChatPathValidationController(this);
 	#worktreeRequestVersion = 0;
 	#worktreeAbort: AbortController | null = null;
 
@@ -180,7 +178,7 @@ export class NewChatFormState {
 		this.executorId = executorId;
 		this.#catalogRefreshCompleted = false;
 		this.#startupSelectionAutomatic = false;
-		this.#clearValidation();
+		this.#pathValidation.clear();
 		this.#cancelWorktreeLoad();
 		this.worktreeModalOpen = false;
 		this.showBrowser = false;
@@ -661,96 +659,15 @@ export class NewChatFormState {
 	selectProjectPath(path: string): void {
 		this.projectPath = path;
 		this.clearError();
-		const validate = this.#preparePathValidation();
-		if (validate) void validate();
+		this.#pathValidation.validateSelectedPath();
 	}
 
 	validateChangedPath(): void {
-		if (this.#validationTargetKey === this.#currentValidationTargetKey) return;
-		this.validatePath();
+		this.#pathValidation.validateChangedPath();
 	}
 
-	get #currentValidationTargetKey(): string {
-		return `${this.pathContextKey}\u0000${this.nonblankPath}`;
-	}
-
-	/** Debounced validation of the project path against the server. */
 	validatePath(): void {
-		const validate = this.#preparePathValidation();
-		if (validate) this.#validationTimer = setTimeout(() => void validate(), 300);
-	}
-
-	#preparePathValidation(): (() => Promise<void>) | null {
-		const path = this.nonblankPath;
-		const executorId = this.executorId;
-		const contextKey = this.pathContextKey;
-		if (!path) {
-			this.#clearValidation();
-			return null;
-		}
-
-		this.preambles.pathValidationStarted();
-
-		this.validationStatus = 'checking';
-		this.validationError = null;
-
-		if (this.#validationTimer) clearTimeout(this.#validationTimer);
-		this.#validationTimer = null;
-		this.#validationTargetKey = this.#currentValidationTargetKey;
-		const requestVersion = ++this.#validationRequestVersion;
-		const current = () =>
-			requestVersion === this.#validationRequestVersion &&
-			contextKey === this.pathContextKey &&
-			executorId === this.executorId &&
-			path === this.nonblankPath;
-
-		return async () => {
-			this.#validationTimer = null;
-			try {
-				const data = await validateStart(path, { executorId });
-				if (!current()) return;
-				if (data.valid) {
-					this.validationStatus = 'valid';
-					this.validationError = null;
-					this.gitRepoStatus = data.isGitRepo ? 'git' : 'non-git';
-					void this.preambles.refreshPreview();
-				} else {
-					this.validationStatus = 'invalid';
-					this.validationError = this.#validationErrorMessage(data.errorCode);
-					this.gitRepoStatus = 'non-git';
-					this.preambles.invalidatePreview();
-				}
-			} catch (err) {
-				if (!current()) return;
-				this.validationStatus = 'invalid';
-				this.validationError =
-					err instanceof Error ? err.message : m.chat_new_chat_errors_invalid_directory();
-				this.gitRepoStatus = 'non-git';
-				this.preambles.invalidatePreview();
-				console.warn('[NewChatFormState] Path validation request failed', err);
-			}
-		};
-	}
-
-	#validationErrorMessage(errorCode?: ValidateStartErrorCode): string {
-		if (errorCode === 'outside_base_dir') return m.chat_new_chat_errors_path_outside_base_dir();
-		if (errorCode === 'path_not_found') return m.chat_new_chat_errors_path_not_found();
-		if (errorCode === 'permission_denied') return m.chat_new_chat_errors_path_permission_denied();
-		if (errorCode === 'not_directory') return m.chat_new_chat_errors_path_not_directory();
-		return m.chat_new_chat_errors_invalid_directory();
-	}
-
-	#clearValidation(): void {
-		this.#validationTargetKey = null;
-		if (this.#validationTimer) {
-			clearTimeout(this.#validationTimer);
-			this.#validationTimer = null;
-		}
-		this.#validationRequestVersion += 1;
-		this.validationStatus = 'idle';
-		this.validationError = null;
-		this.gitRepoStatus = 'unknown';
-		this.preambles.invalidatePreview();
+		this.#pathValidation.validatePath();
 	}
 
 	// Pinned paths
@@ -807,12 +724,7 @@ export class NewChatFormState {
 
 	dispose(): void {
 		this.#pathCompletion.reset();
-		if (this.#validationTimer) {
-			clearTimeout(this.#validationTimer);
-			this.#validationTimer = null;
-		}
-		this.#validationRequestVersion += 1;
-		this.preambles.invalidatePreview();
+		this.#pathValidation.dispose();
 	}
 
 	// Form submission

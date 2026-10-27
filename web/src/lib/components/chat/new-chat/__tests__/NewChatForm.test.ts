@@ -1897,7 +1897,9 @@ describe('New Chat executor pin scope', () => {
 				executorId: remoteExecutor.id,
 			}),
 		);
-		expect(screen.queryByRole('button', { name: 'Local: /same' })).toBeNull();
+		await waitFor(() =>
+			expect(screen.queryByRole('button', { name: 'Local: /same' })).toBeNull(),
+		);
 		expect(screen.getByRole('button', { name: '/worker/pin' })).toBeTruthy();
 	});
 
