@@ -24,10 +24,10 @@ export function replacementFixture(dialer: 'controller' | 'worker', options: Rem
   return {
     controller, client, errors,
     get worker() { return worker!; },
-    async install(runtime: ExecutionRuntimeApi) {
+    async install(runtime: ExecutionRuntimeApi, runtimeId?: string) {
       const first = port === 0;
       await worker?.dispose();
-      const link = new WebSocketLink({ ...linkOptions, role: 'worker' });
+      const link = new WebSocketLink({ ...linkOptions, role: 'worker', runtimeId });
       worker = link;
       const relay = new ProducerRelay();
       const journal = new RpcReplyJournal();
