@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { createHash } from 'node:crypto';
 import {
   AgentCallError,
   type ExecutorInfo,
@@ -17,6 +18,7 @@ import type { BulkConnectionStatus } from '../transport/bulk-connection.js';
 import { createLogger, type Logger } from '../../common/log.js';
 import { ExecutorSessionLostError, reconnectTimedOut } from '../../common/executor-disconnect.js';
 import type { ExecutorBulkStatus } from '../../../common/executors.js';
+import { stableJsonStringify } from '../../../common/json.js';
 import { sameContinuity, type ProtocolContinuity } from '../transport/protocol-compatibility.js';
 import { RemoteExecutorGeneration, staleGeneration } from './executor-generation.js';
 import { freezeInventory, validateManifest } from './executor-inventory.js';
@@ -93,6 +95,9 @@ export class RemoteExecutorClient {
   #generation: RemoteExecutorGeneration | null = null;
   #candidateGeneration: RemoteExecutorGeneration | null = null;
   #candidateBacking: RemoteSessionBacking | null = null;
+  // Validated identities survive failed candidates and publication of other workers.
+  readonly #workerInventories = new Map<string, { readonly instanceId: string; readonly fingerprint: string }>();
+  readonly #instanceRuntimes = new Map<string, string>();
   readonly #listeners = new Set<(value: ExecutorAvailability) => void>();
   readonly #unsubscribe: () => void;
   #availability: ExecutorAvailability = 'offline';
@@ -185,11 +190,13 @@ export class RemoteExecutorClient {
   }
 
   assertIntegrationOrigin(rpc: ExecutorRpc, integrationId: string): void {
-    const backing = this.#candidateBacking;
+    const backing = this.#candidateBacking ?? this.#generation;
+    const candidate = this.#candidate;
     const transport = rpc.transport;
-    if (!backing || this.#candidateRetired(backing.rpc.transport) || !transport.connected
-      || transport.primarySessionId !== backing.rpc.transport.id || !sameContinuity(transport.continuity, backing.continuity)
-      || this.#candidateGeneration?.token.retired || !backing.manifests.has(integrationId)) {
+    const generation = this.#candidateBacking ? this.#candidateGeneration : this.#generation;
+    if (!backing || !candidate || this.#candidateRetired(candidate) || !transport.connected
+      || transport.primarySessionId !== candidate.id || !sameContinuity(transport.continuity, backing.continuity)
+      || !generation || generation.token.retired || !backing.manifests.has(integrationId)) {
       throw new AgentCallError('rejected', 'Operation is not permitted from this executor generation');
     }
   }
@@ -206,6 +213,8 @@ export class RemoteExecutorClient {
     this.#unsubscribe();
     this.#generation?.retire();
     this.#candidateGeneration?.retire();
+    this.#workerInventories.clear();
+    this.#instanceRuntimes.clear();
     this.#current = null;
     this.#bulkCurrent = null;
     this.#clearBulkReconnectTimer();
@@ -233,8 +242,12 @@ export class RemoteExecutorClient {
     if (!info.services || (['files', 'git', 'gh', 'terminals', 'directoryCreation'] as const).some(key => typeof info.services[key] !== 'boolean')) throw new ExecutorConfigurationError('Executor service capabilities are invalid');
     const previous = this.#generation;
     const sameInstance = previous?.info.instanceId === info.instanceId;
-    const sameRuntime = previous?.continuity.workerRuntimeId === transport.continuity.workerRuntimeId;
-    if (previous && sameInstance !== sameRuntime) throw new ExecutorConfigurationError('Executor runtime and instance identity disagree');
+    const workerRuntimeId = transport.continuity.workerRuntimeId;
+    const known = this.#workerInventories.get(workerRuntimeId);
+    const knownRuntime = this.#instanceRuntimes.get(info.instanceId);
+    if (known && known.instanceId !== info.instanceId || knownRuntime !== undefined && knownRuntime !== workerRuntimeId) {
+      throw new ExecutorConfigurationError('Executor runtime and instance identity disagree');
+    }
     if (previous && !sameInstance) this.#retireGeneration();
     const manifests = new Map<string, IntegrationManifest>();
     for (const manifest of integrations) {
@@ -249,10 +262,14 @@ export class RemoteExecutorClient {
       throw new ExecutorConfigurationError('Executor integration inventory mismatch');
     }
     const backing: RemoteSessionBacking = { rpc, info: freezeInventory(info), manifests, continuity: transport.continuity };
-    if (sameInstance && (!sameContinuity(previous!.continuity, backing.continuity)
-      || !isDeepStrictEqual(previous!.info, info) || !isDeepStrictEqual(previous!.manifests, manifests))) {
+    const fingerprint = createHash('sha256').update(stableJsonStringify({
+      info, manifests: Object.fromEntries(manifests), continuity: backing.continuity,
+    })).digest('hex');
+    if (known && known.fingerprint !== fingerprint) {
       throw new ExecutorConfigurationError('Executor inventory or protocol changed within one worker instance');
     }
+    this.#workerInventories.set(workerRuntimeId, { instanceId: info.instanceId, fingerprint });
+    this.#instanceRuntimes.set(info.instanceId, workerRuntimeId);
     const reconnect = previous && sameInstance && !previous.token.retired;
     const generation = reconnect ? previous : new RemoteExecutorGeneration(backing, this.#sessions, () => this.dispose(), this.#log);
     this.#candidateGeneration = generation;

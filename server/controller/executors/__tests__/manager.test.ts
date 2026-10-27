@@ -181,6 +181,60 @@ test('candidate credentials use described membership before publication and fenc
   } finally { release.resolve(); }
 });
 
+test.each(['executor-connects', 'controller-connects'] as const)(
+  'same-worker credentials remain authorized while reconnect description is pending (%s)', async direction => {
+    const credential = { kind: 'synthetic', value: 'synthetic-value' };
+    const resolve = mock(async () => credential);
+    const { manager, root } = await fixture(undefined, resolve);
+    let config = direction === 'executor-connects'
+      ? await manager.create({ label: 'Reconnect', direction, noTls: true }) : null;
+    const secret = config?.secret ?? Buffer.alloc(32, 7).toString('base64url');
+    const link = new WebSocketLink({ role: 'worker', secret, noTls: true, redialDelaysMs: [20] });
+    cleanups.push(() => link.dispose());
+    const relay = new ProducerRelay();
+    cleanups.push(async () => relay.dispose());
+    let native: ReturnType<typeof integrationFixture> | undefined;
+    let endpoint!: ExecutorRpc;
+    let describing = Promise.withResolvers<void>();
+    let release = Promise.withResolvers<void>();
+    link.onSession(transport => {
+      native ??= integrationFixture(root, transport.executorId);
+      const runtime = native.executor;
+      transport.onMessage(payload => {
+        if (JSON.parse(payload).method === 'executor.describe') describing.resolve();
+      });
+      const serving = servePairedRuntime(link, transport, { ...runtime, getInfo: async () => {
+        await release.promise;
+        return runtime.getInfo();
+      } }, relay);
+      endpoint = serving.connection.primary;
+      cleanups.push(() => serving.dispose());
+    });
+    const reference = { kind: 'api-provider-endpoint' as const, apiProviderId: 'synthetic', endpointId: 'synthetic', revision: 1 };
+    try {
+      if (config) link.dial(sharedListener(manager).url(config.id));
+      else config = await manager.create({ label: 'Reconnect', direction, noTls: true,
+        connectionUrl: executorConnectionUrl(link.listen(), secret) });
+      await describing.promise;
+      await expect(endpoint.call('test', 'credentials.resolve', { reference })).rejects.toMatchObject({ outcome: 'rejected' });
+      release.resolve();
+      await waitReady(manager, config.id);
+      const previous = manager.requireIntegration({ executorId: config.id, agentId: 'test' });
+      describing = Promise.withResolvers<void>();
+      release = Promise.withResolvers<void>();
+      link.disconnect();
+      await describing.promise;
+      expect(manager.isReady(config.id)).toBe(false);
+      expect(await endpoint.call('test', 'credentials.resolve', { reference })).toEqual(credential);
+      await expect(endpoint.call('missing', 'credentials.resolve', { reference })).rejects.toMatchObject({ outcome: 'rejected' });
+      expect(resolve).toHaveBeenCalledTimes(1);
+      release.resolve();
+      await waitReady(manager, config.id);
+      expect(manager.requireIntegration({ executorId: config.id, agentId: 'test' })).toBe(previous);
+    } finally { release.resolve(); }
+  },
+);
+
 test('reverse CLI dispatch checks initialization, executor grant, revocation lease and quiescence on the live link', async () => {
   const { manager, root } = await fixture();
   const config = await manager.create({ label: 'CLI worker', direction: 'executor-connects' });

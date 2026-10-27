@@ -13,6 +13,55 @@ import { servePairedRuntime } from './runtime-adapter.js';
 import { nextAvailability, replacementFixture } from './replacement-fixture.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test.each([
+    ['ready', 'inventory'], ['ready', 'instance'], ['ready', 'runtime'],
+    ['failed', 'inventory'], ['superseded', 'inventory'], ['ready', 'unchanged'],
+  ] as const)(`remembers %s worker identity after A -> B -> A with %s (${dialer} dials)`, async (phase, change) => {
+    let failure = Promise.withResolvers<void>();
+    const f = replacementFixture(dialer, { logger: { debug() {}, info() {}, error() {}, warn(message) {
+      if (message === 'Executor session setup failed') failure.resolve();
+    } } });
+    const original = integrationFixture();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let originalRuntime = crypto.randomUUID();
+    if (phase === 'failed') original.hooks.initialize = async () => { throw new Error('Synthetic failure'); };
+    if (phase === 'superseded') original.hooks.initialize = async () => { entered.resolve(); await release.promise; };
+    try {
+      const installed = phase === 'ready' ? nextAvailability(f.client, 'ready')
+        : phase === 'failed' ? failure.promise : entered.promise;
+      await f.install(original.executor, originalRuntime);
+      await installed;
+      const first = f.client.generation;
+      const replaced = nextAvailability(f.client, 'ready');
+      await f.install(integrationFixture().executor);
+      await replaced;
+      const second = f.client.generation!;
+      original.hooks.initialize = async () => {};
+      release.resolve();
+      if (change === 'inventory') original.integration.descriptor.label = 'Changed original';
+      if (change === 'instance') Object.assign(original.scope, { instanceId: crypto.randomUUID() });
+      if (change === 'runtime') originalRuntime = crypto.randomUUID();
+      failure = Promise.withResolvers<void>();
+      const returned = Promise.race([
+        nextAvailability(f.client, 'ready').then(() => 'ready'),
+        failure.promise.then(() => 'failed'),
+      ]);
+      await f.install(original.executor, originalRuntime);
+      expect(await returned).toBe(change === 'unchanged' ? 'ready' : 'failed');
+      if (change === 'unchanged') {
+        expect(f.client.generation).not.toBe(first);
+        expect(f.client.generation!.info.instanceId).toBe(original.scope.instanceId);
+        expect(first!.token.retired).toBe(true);
+        expect(f.errors).toEqual([]);
+      } else {
+        expect(f.client.availability).not.toBe('ready');
+        expect(f.client.generation).toBe(second);
+        expect(f.errors.at(-1)).toContain(change === 'inventory' ? 'changed within one worker' : 'identity disagree');
+      }
+    } finally { release.resolve(); await f.dispose(); }
+  });
+
   test.each(['inventory', 'instance'])(`same-worker identity cannot change its %s (${dialer} dials)`, async change => {
     const failed = Promise.withResolvers<void>();
     const f = replacementFixture(dialer, { logger: { debug() {}, info() {}, error() {}, warn(message) {
