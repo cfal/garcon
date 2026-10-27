@@ -12,7 +12,6 @@ import { failureReason } from '../transport/failure-reason.js';
 import { BULK_ACQUIRE_TIMEOUT_MS, EXECUTOR_RECONNECT_GRACE_MS } from '../transport/limits.js';
 import { ExecutorRpcConnection } from '../transport/rpc-connection.js';
 import { RpcAdmissionBudgets } from '../transport/rpc-admission.js';
-import { rpcLane } from '../transport/rpc-routing.js';
 import type { RpcLane } from '../transport/rpc-lane.js';
 import type { BulkConnectionStatus } from '../transport/bulk-connection.js';
 import { createLogger, type Logger } from '../../common/log.js';
@@ -92,7 +91,7 @@ type SessionSetupStage = 'describe' | 'start-integrations' | 'resume-bindings' |
 
 export class RemoteExecutorClient {
   #generation: RemoteExecutorGeneration | null = null;
-  #installingGeneration: RemoteExecutorGeneration | null = null;
+  #candidateGeneration: RemoteExecutorGeneration | null = null;
   #candidateBacking: RemoteSessionBacking | null = null;
   readonly #listeners = new Set<(value: ExecutorAvailability) => void>();
   readonly #unsubscribe: () => void;
@@ -112,13 +111,10 @@ export class RemoteExecutorClient {
   #bulkReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   readonly #reconnectGraceMs: number;
   readonly #log: Logger;
-  readonly #sessions: RemoteSessions = {
+  readonly #sessions: Omit<RemoteSessions, 'call'> = {
     latest: () => this.#latestSession(),
     acquire: (lane, options) => this.#acquire(lane, options),
     send: (lane, options, send) => this.#send(lane, options, send),
-    call: (integrationId, method, request, options) => this.#send(rpcLane(method, request), options, ({ backing, timeoutMs }) => (
-      backing.rpc.call(integrationId, method, request, { ...options, timeoutMs })
-    )),
   };
 
   constructor(
@@ -131,8 +127,8 @@ export class RemoteExecutorClient {
     this.#reconnectGraceMs = options.reconnectGraceMs ?? EXECUTOR_RECONNECT_GRACE_MS;
     this.#log = options.logger ?? createLogger('executors');
     this.#unsubscribe = link.onSession((transport) => {
-      if (this.#installingGeneration !== this.#generation) this.#installingGeneration?.retire();
-      this.#installingGeneration = null;
+      if (this.#candidateGeneration !== this.#generation) this.#candidateGeneration?.retire();
+      this.#candidateGeneration = null;
       this.#candidateBacking = null;
       this.#candidate = transport;
       const connection = new ExecutorRpcConnection(link, transport, {
@@ -193,7 +189,7 @@ export class RemoteExecutorClient {
     const transport = rpc.transport;
     if (!backing || this.#candidateRetired(backing.rpc.transport) || !transport.connected
       || transport.primarySessionId !== backing.rpc.transport.id || !sameContinuity(transport.continuity, backing.continuity)
-      || this.#installingGeneration?.token.retired || !backing.manifests.has(integrationId)) {
+      || this.#candidateGeneration?.token.retired || !backing.manifests.has(integrationId)) {
       throw new AgentCallError('rejected', 'Operation is not permitted from this executor generation');
     }
   }
@@ -209,7 +205,7 @@ export class RemoteExecutorClient {
     this.#setAvailability('disposed');
     this.#unsubscribe();
     this.#generation?.retire();
-    this.#installingGeneration?.retire();
+    this.#candidateGeneration?.retire();
     this.#current = null;
     this.#bulkCurrent = null;
     this.#clearBulkReconnectTimer();
@@ -244,7 +240,7 @@ export class RemoteExecutorClient {
     for (const manifest of integrations) {
       validateManifest(manifest);
       if (manifest.scope.executorId !== info.executorId || manifest.scope.instanceId !== info.instanceId
-        || manifest.scope.integrationId !== manifest.descriptor.id || manifests.has(manifest.descriptor.id)) {
+        || manifests.has(manifest.descriptor.id)) {
         throw new ExecutorConfigurationError('Executor integration scope mismatch');
       }
       manifests.set(manifest.descriptor.id, freezeInventory(manifest));
@@ -259,11 +255,11 @@ export class RemoteExecutorClient {
     }
     const reconnect = previous && sameInstance && !previous.token.retired;
     const generation = reconnect ? previous : new RemoteExecutorGeneration(backing, this.#sessions, () => this.dispose(), this.#log);
-    this.#installingGeneration = generation;
+    this.#candidateGeneration = generation;
     this.#candidateBacking = backing;
     rpc.guardDispatch(() => generation.token.assertDispatch());
     try {
-      const publish = this.options.prepareGeneration?.(generation) ?? (() => {});
+      const publish = this.options.prepareGeneration?.(generation);
       setup.stage = 'start-integrations';
       if (!reconnect) for (const integration of generation.integrations.values()) {
         await integration.initialize(backing, assertCandidate);
@@ -289,15 +285,17 @@ export class RemoteExecutorClient {
       this.#current = backing;
       this.#latest = backing;
       this.#generation = generation;
-      publish();
+      publish?.();
       connection.activate();
       assertCandidate();
       this.#clearReconnectTimer();
       this.#resolveWaiters('primary', backing);
       this.#setAvailability('ready');
     } catch (error) {
-      if (!reconnect) generation.retire();
-      if (!reconnect && this.#candidate === transport && this.#generation === generation) this.#abandonBindings();
+      if (!reconnect) {
+        generation.retire();
+        if (this.#candidate === transport && this.#generation === generation) this.#abandonBindings();
+      }
       throw error;
     }
   }

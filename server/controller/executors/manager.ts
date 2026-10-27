@@ -152,17 +152,27 @@ export class ExecutorManager {
       instanceId: this.localInfo.instanceId,
       bulk: null,
       lastError: null, executorServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: this.localInfo.services.directoryCreation },
-    }, ...[...this.#remotes.values()].map((entry): ExecutorSnapshot => ({
-      id: entry.config.id, label: entry.config.label, kind: 'remote', enabled: entry.config.enabled,
-      allowControllerCli: entry.config.allowControllerCli,
-      allowExecutorManagement: entry.config.allowExecutorManagement,
-      direction: entry.config.connection.kind,
-      availability: this.#snapshotAvailability(entry.config.id),
-      projectBasePath: entry.published?.generation.info.projectBasePath ?? null, lastError: entry.error,
-      instanceId: entry.published?.generation.info.instanceId ?? null,
-      bulk: entry.executor?.bulkStatus ?? { availability: 'offline', lastError: null },
-      executorServices: { files: entry.published?.generation.info.services.files === true, git: entry.published?.generation.info.services.git === true, gh: entry.published?.generation.info.services.gh === true, terminals: entry.published?.generation.info.services.terminals === true, directoryCreation: entry.published?.generation.info.services.directoryCreation === true },
-    }))];
+    }, ...[...this.#remotes.values()].map((entry): ExecutorSnapshot => {
+      const info = entry.published?.generation.info;
+      const services = info?.services;
+      return {
+        id: entry.config.id, label: entry.config.label, kind: 'remote', enabled: entry.config.enabled,
+        allowControllerCli: entry.config.allowControllerCli,
+        allowExecutorManagement: entry.config.allowExecutorManagement,
+        direction: entry.config.connection.kind,
+        availability: this.#snapshotAvailability(entry.config.id),
+        projectBasePath: info?.projectBasePath ?? null, lastError: entry.error,
+        instanceId: info?.instanceId ?? null,
+        bulk: entry.executor?.bulkStatus ?? { availability: 'offline', lastError: null },
+        executorServices: {
+          files: services?.files === true,
+          git: services?.git === true,
+          gh: services?.gh === true,
+          terminals: services?.terminals === true,
+          directoryCreation: services?.directoryCreation === true,
+        },
+      };
+    })];
   }
 
   inboundLink(executorId: string): WebSocketLink | null {

@@ -1,18 +1,12 @@
 import { expect, test } from 'bun:test';
-import type { AgentSingleQueryRequest, ExecutorAvailability } from '@garcon/server-agent-interface';
-import type { ExecutionRuntimeApi } from '@garcon/server-agent-interface';
+import type { AgentSingleQueryRequest, ExecutionRuntimeApi } from '@garcon/server-agent-interface';
 import { integrationFixture, linkOptions, outgoingFault, remoteFixture, requestFor } from '../../__tests__/integration-fixture.js';
 import { connectRemoteExecutor, servePairedRuntime } from '../../__tests__/runtime-adapter.js';
 import { serveExecutionRuntime } from '../../server/executor-rpc-server.js';
 import { ProducerRelay } from '../../server/producer-relay.js';
 import { RpcReplyJournal } from '../rpc-journal.js';
 import { WebSocketLink } from '../websocket-link.js';
-
-function nextAvailability(executor: Pick<ExecutionRuntimeApi, 'onAvailabilityChanged'>, value: ExecutorAvailability): Promise<void> {
-  return new Promise((resolve) => {
-    const off = executor.onAvailabilityChanged((next) => { if (next === value) { off(); resolve(); } });
-  });
-}
+import { nextAvailability } from '../../__tests__/replacement-fixture.js';
 
 async function query(executor: ExecutionRuntimeApi, signal = new AbortController().signal): Promise<string> {
   const integration = await executor.getAgentIntegration('test');

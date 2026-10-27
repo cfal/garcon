@@ -32,13 +32,20 @@ for (const failure of core.failures) {
     const replySocket = replyTransport.attach({ send: frame => { replies.push(JSON.parse(frame)); requestSocket.receive(frame); }, close() {} });
     const caller = new ExecutorRpc(requestTransport);
     const callee = new ExecutorRpc(replyTransport);
-    const error = failure.domain === 'executor'
-      ? new DomainError(failure.code as ErrorCode, failure.message, failure.status!, failure.retryable)
-      : failure.domain === 'git'
-        ? new GitServiceError(failure.code as GitServiceErrorCode, failure.message)
-        : failure.domain === 'terminal'
-          ? new TerminalError(failure.code as TerminalErrorCode, failure.message, failure.status!)
-          : new AgentCallError(failure.outcome as AgentDeliveryOutcome, failure.message, failure.code as AgentIntegrationErrorCode);
+    let error: Error;
+    switch (failure.domain) {
+      case 'executor':
+        error = new DomainError(failure.code as ErrorCode, failure.message, failure.status!, failure.retryable);
+        break;
+      case 'git':
+        error = new GitServiceError(failure.code as GitServiceErrorCode, failure.message);
+        break;
+      case 'terminal':
+        error = new TerminalError(failure.code as TerminalErrorCode, failure.message, failure.status!);
+        break;
+      default:
+        error = new AgentCallError(failure.outcome as AgentDeliveryOutcome, failure.message, failure.code as AgentIntegrationErrorCode);
+    }
     callee.handle(async () => { throw error; });
     try {
       await expect(caller.call('synthetic', 'execution.runningSessions', null)).rejects.toMatchObject({

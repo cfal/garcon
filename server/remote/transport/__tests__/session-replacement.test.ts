@@ -11,13 +11,7 @@ import { serveExecutionRuntime } from '../../server/executor-rpc-server.js';
 import { ProducerRelay } from '../../server/producer-relay.js';
 import { WebSocketLink } from '../websocket-link.js';
 import type { Logger } from '../../../common/log.js';
-import { replacementFixture } from '../../__tests__/replacement-fixture.js';
-
-function nextAvailability(executor: Pick<ExecutionRuntimeApi, 'onAvailabilityChanged'>, value: ExecutorAvailability) {
-  const reached = Promise.withResolvers<void>();
-  const off = executor.onAvailabilityChanged((next) => { if (next === value) { off(); reached.resolve(); } });
-  return reached.promise;
-}
+import { nextAvailability, replacementFixture } from '../../__tests__/replacement-fixture.js';
 
 function record(integration: Awaited<ReturnType<ExecutionRuntimeApi['getAgentIntegration']>>) {
   const events: string[] = [];
