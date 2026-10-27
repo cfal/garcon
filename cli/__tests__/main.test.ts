@@ -173,6 +173,7 @@ function completedTurnReceiptResponse(
 
 function startModelCatalogResponse(): Response {
   return Response.json({
+    executorInstanceId: 'synthetic-instance',
     catalog: {
       agents: [{
         id: 'codex',

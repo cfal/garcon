@@ -45,8 +45,8 @@ function agentEntry(id: string, overrides: Record<string, unknown> = {}): Record
 	};
 }
 
-function catalogBody(agents: unknown[], apiProviders: unknown[] = []): unknown {
-	return { catalog: { agents, apiProviders } };
+function catalogBody(agents: unknown[], apiProviders: unknown[] = [], executorInstanceId = localExecutor.instanceId): unknown {
+	return { executorInstanceId, catalog: { agents, apiProviders } };
 }
 
 describe('ModelCatalogStore', () => {
@@ -113,7 +113,7 @@ describe('ModelCatalogStore', () => {
 			{ selectionLabel: undefined }, { selectionLabel: '', inputFormatByModel: {} },
 		])('rejects incomplete HTTP and persisted metadata: %j', async missing => {
 			const entry = agentEntry('sample', missing);
-			const cached = { schemaVersion: 2, agentMetadata: { sample: entry },
+			const cached = { schemaVersion: 3, executorInstanceId: localExecutor.instanceId, agentMetadata: { sample: entry },
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] }, apiProviderCatalog: [],
 				etag: 'old-etag', lastFetchedAt: Date.now(), lastValidatedAt: Date.now() };
 			localStorage.setItem(executorId === 'local' ? STORAGE_KEY : LOCAL_STORAGE_KEYS.modelCatalogExecutors,
@@ -165,9 +165,9 @@ describe('ModelCatalogStore', () => {
 		const store = createModelCatalogStore();
 		const remote = store.forExecutor(remoteExecutor.id);
 		store.reconcileExecutors([localExecutor, remoteExecutor]);
-		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample', {
+		vi.mocked(clientApi.apiFetch).mockImplementation(async url => mockResponse(catalogBody([agentEntry('sample', {
 			models: [{ value: 'same', label: 'Cached model' }],
-		})])));
+		})], [], String(url).includes('executorId') ? remoteExecutor.instanceId : localExecutor.instanceId)));
 		await store.forceRefresh(); await remote.forceRefresh();
 		const stale = Promise.withResolvers<Response>();
 		vi.mocked(clientApi.apiFetch).mockReturnValueOnce(stale.promise);
@@ -232,7 +232,7 @@ describe('ModelCatalogStore', () => {
 		const store = createModelCatalogStore();
 		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample', {
 			executionPolicy: 'literal',
-		})])));
+		})], [], remoteExecutor.instanceId)));
 		await store.forExecutor(remoteExecutor.id).forceRefresh();
 		store.reconcileExecutors([localExecutor, remoteExecutor]);
 		const restored = createModelCatalogStore().forExecutor(remoteExecutor.id);
@@ -244,7 +244,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: { sample: [{ value: 'sample-model', label: 'Sample Model' }] },
 				agentMetadata: {
 					sample: agentEntry('sample', {
@@ -352,7 +353,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
 				apiProviderCatalog: [],
@@ -396,7 +398,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
 				apiProviderCatalog: [],
@@ -419,7 +422,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: { stale: [{ value: 'stale', label: 'Stale' }] },
 				agentMetadata: { stale: agentEntry('stale', { defaultModel: 'stale' }) },
 				apiProviderCatalog: [],
@@ -492,7 +496,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
 				apiProviderCatalog: [],
@@ -505,6 +510,38 @@ describe('ModelCatalogStore', () => {
 
 		expect(store.error).toBe('Model catalog response is invalid');
 		expect(store.getDefaultModel('sample')).toBe('cached');
+	});
+
+	it('accepts an empty inventory and removes obsolete providers', async () => {
+		const store = createModelCatalogStore();
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(catalogBody([agentEntry('removed')])));
+		await store.forceRefresh();
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(catalogBody([])));
+		await store.forceRefresh();
+		expect(store.error).toBeNull();
+		expect(store.isValidated).toBe(true);
+		expect(store.getSelectableAgents()).toEqual([]);
+		expect(createModelCatalogStore().getSelectableAgents()).toEqual([]);
+	});
+
+	it('rejects a response from a different instance than the request inventory', async () => {
+		const store = createModelCatalogStore();
+		store.reconcileExecutors([localExecutor]);
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(catalogBody([agentEntry('stale')], [], 'another-instance')));
+		await store.forceRefresh();
+		expect(store.isValidated).toBe(false);
+		expect(store.executorInstanceId).toBeNull();
+		expect(store.getSelectableAgents()).toEqual([]);
+	});
+
+	it('invalidates a persisted catalog on the first snapshot of a replacement', async () => {
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(catalogBody([agentEntry('sample')])));
+		await createModelCatalogStore().forceRefresh();
+		const restored = createModelCatalogStore();
+		restored.reconcileExecutors([{ ...localExecutor, instanceId: 'replacement-instance' }]);
+		expect(restored.isValidated).toBe(false);
+		expect(restored.getAgent('sample')).not.toBeNull();
+		expect(createModelCatalogStore().isValidated).toBe(false);
 	});
 
 	it('prefers model-level image capability over the integration default', async () => {
@@ -603,7 +640,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: {
 					sample: [
 						{ value: 'sol', label: 'Sol' },
@@ -665,7 +703,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: { 'Bad Id': [{ value: 'bad', label: 'Bad' }] },
 				agentMetadata: { 'Bad Id': agentEntry('Bad Id', { defaultModel: 'bad' }) },
 				apiProviderCatalog: [],

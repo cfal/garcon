@@ -17,6 +17,7 @@ import { shouldLogLinkFailure, WebSocketLink } from '../../remote/transport/webs
 import { ExecutorSocketAdmission } from '../../remote/transport/socket-admission.js';
 import { ExecutorReferenceWrites } from './reference-writes.js';
 import type { ControllerCliDispatcher } from './cli-dispatcher.js';
+import type { AgentInventorySnapshot } from '../agents/directory.js';
 
 type LocalExecutorOptions = ConstructorParameters<typeof ExecutionRuntime>[0];
 
@@ -105,6 +106,21 @@ export class ExecutorManager {
   integrationsFor(executorId: string): IntegrationRegistry {
     this.requireExecutor(executorId);
     return executorId === LOCAL_EXECUTOR_ID ? this.localIntegrations : this.#remotes.get(executorId)!.published!.integrations;
+  }
+
+  captureInventory(executorId: string): AgentInventorySnapshot {
+    const runtime = this.requireExecutor(executorId);
+    const registry = this.integrationsFor(executorId);
+    const info = executorId === LOCAL_EXECUTOR_ID ? this.localInfo : this.#remotes.get(executorId)!.published!.generation.info;
+    return {
+      instanceId: info.instanceId,
+      integrations: registry.list(),
+      assertCurrent: () => {
+        if (this.requireExecutor(executorId) !== runtime || this.integrationsFor(executorId) !== registry) {
+          throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor inventory changed. Refresh and try again.', 503, true);
+        }
+      },
+    };
   }
 
   knownIntegration(target: AgentExecutionTarget): AgentIntegration | null {

@@ -22,16 +22,19 @@ function staleModelsFromDiscoveryError(error: unknown): AgentModelOption[] {
 
 function modelDiscoveryUnavailableResponse(
   error: unknown,
+  executorInstanceId: string,
   catalog: ModelCatalogResponseBody['catalog'],
   entry: AgentCatalogEntry | undefined,
 ): Response {
   const reason = error instanceof Error ? error.message : String(error);
   const staleModels = staleModelsFromDiscoveryError(error);
   const body: {
+    executorInstanceId: string;
     error: string;
     reason: string;
     catalog?: ModelCatalogResponseBody['catalog'];
   } = {
+    executorInstanceId,
     error: 'Model discovery unavailable',
     reason,
   };
@@ -60,26 +63,29 @@ export default function createModelsRoutes({
     const agentId = url?.searchParams?.get('agent');
 
     if (agentId) {
-      let entry = await modelCatalog.agents.getAgentCatalogEntry(agentId, { executorId });
+      const captured = modelCatalog.agents.captureCatalog(executorId);
+      let entry = await captured.getAgentCatalogEntry(agentId);
       if (!entry) {
-        const agents = await modelCatalog.agents.getAgentCatalogEntries(executorId);
+        const agents = await captured.getAgentCatalogEntries();
+        captured.assertCurrent();
         const availableAgents = agents.map((agent) => agent.id).join(', ') || 'none';
         return Response.json({
           error: `Unknown agent: ${agentId}. Available agents: ${availableAgents}`,
         }, { status: 400 });
       }
-      modelCatalog.agents.assertAgentAvailable(agentId, executorId);
+      captured.assertCurrent();
       const apiProviders = modelCatalog.apiProviders.getCatalog(executorId);
-      if (entry.requiresStrictModelDiscovery || modelCatalog.agents.requiresStrictModelDiscovery(agentId, executorId)) {
+      if (entry.requiresStrictModelDiscovery || captured.requiresStrictModelDiscovery(agentId)) {
         try {
-          entry = await modelCatalog.agents.getAgentCatalogEntry(agentId, { strict: true, executorId }) ?? entry;
+          entry = await captured.getAgentCatalogEntry(agentId, { strict: true }) ?? entry;
         } catch (error) {
-          modelCatalog.agents.assertAgentAvailable(agentId, executorId);
-          return modelDiscoveryUnavailableResponse(error, { agents: [entry], apiProviders }, entry);
+          captured.assertCurrent();
+          return modelDiscoveryUnavailableResponse(error, captured.executorInstanceId, { agents: [entry], apiProviders }, entry);
         }
-        modelCatalog.agents.assertAgentAvailable(agentId, executorId);
+        captured.assertCurrent();
       }
       return Response.json({
+        executorInstanceId: captured.executorInstanceId,
         catalog: {
           agents: [entry],
           apiProviders,

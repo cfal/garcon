@@ -459,7 +459,8 @@ export class GarconClient {
     );
     const raw = record(value);
     const catalog = record(raw?.catalog);
-    if (!Array.isArray(catalog?.agents) || !Array.isArray(catalog.apiProviders)) {
+    if (typeof raw?.executorInstanceId !== 'string' || !raw.executorInstanceId
+      || !Array.isArray(catalog?.agents) || !Array.isArray(catalog.apiProviders)) {
       throw new CliError('catalog resolution', 'server returned an invalid model catalog', 3);
     }
     return value as ModelCatalogResponse;

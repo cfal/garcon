@@ -14,14 +14,16 @@ type ParentSelection = Pick<ChatRegistryEntry,
 
 export class AgentStartSelectionService {
   constructor(private readonly deps: {
-    readonly agents: Pick<AgentRegistryServiceContract, 'getAgentCatalogEntry'>;
+    readonly agents: Pick<AgentRegistryServiceContract, 'captureCatalog'>;
     readonly apiProviders: Pick<ApiProviderService, 'getCatalog'>;
   }) {}
 
   async catalog(agentId: string, executorId?: string | null): Promise<ModelCatalogResponse> {
     // Strict loading preserves discovery failures instead of enabling unlisted models.
-    const entry = await this.deps.agents.getAgentCatalogEntry(agentId, { strict: true, executorId });
-    return { catalog: {
+    const captured = this.deps.agents.captureCatalog(executorId);
+    const entry = await captured.getAgentCatalogEntry(agentId, { strict: true });
+    captured.assertCurrent();
+    return { executorInstanceId: captured.executorInstanceId, catalog: {
       agents: entry ? [entry] : [],
       apiProviders: this.deps.apiProviders.getCatalog(effectiveExecutorId(executorId)),
     } };

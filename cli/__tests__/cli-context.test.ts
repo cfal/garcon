@@ -26,7 +26,7 @@ describe('CLI endpoint context', () => {
       const url = new URL(String(input));
       if (url.pathname.endsWith('/models')) {
         expect(url.searchParams.get('executorId')).toBe(connection.defaultExecutorId);
-        return Response.json({ catalog: { agents: [], apiProviders: [] } });
+        return Response.json({ executorInstanceId: 'synthetic-instance', catalog: { agents: [], apiProviders: [] } });
       }
       expect(JSON.parse(String(init?.body)).executorId).toBe(connection.defaultExecutorId);
       return Response.json(url.pathname.endsWith('/project-default')

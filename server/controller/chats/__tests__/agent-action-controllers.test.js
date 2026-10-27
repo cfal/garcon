@@ -55,7 +55,12 @@ function fixture(options = {}) {
     supportedProtocols: [], acceptsApiProviderEndpoints: false, requiresStrictModelDiscovery: true,
     defaultSettings: { ownerId: 'test', schemaVersion: 1, values: {} },
   };
-  const agents = { getAgentCatalogEntry: mock(async () => entry) };
+  const agents = {
+    getAgentCatalogEntry: mock(async () => entry),
+    captureCatalog(executorId) {
+      return { executorInstanceId: 'synthetic-instance', assertCurrent() {}, getAgentCatalogEntry: (id, query) => this.getAgentCatalogEntry(id, { ...query, executorId }) };
+    },
+  };
   const selection = new AgentStartSelectionService({ agents, apiProviders: { getCatalog: () => options.providers ?? [] } });
   const commands = { submitAgentCommandStartLocked: mock(async (input) => {
     events.push('start'); chats.set(input.chatId, {}); return { chat: { id: input.chatId }, turnId: 'child-turn' };
