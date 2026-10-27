@@ -19,6 +19,7 @@ export const CLAUDE_MODELS = {
 
 export const GPT_6_ASTRA_MODEL = 'gpt-6-astra';
 export const GPT_6_1_SOL_MODEL = 'gpt-6.1-sol';
+export const GPT_6_1_TERRA_MODEL = 'gpt-6.1-terra';
 export const GPT_6_SOL_MODEL = 'gpt-6-sol';
 export const GPT_6_LUNA_MODEL = 'gpt-6-luna';
 
@@ -37,6 +38,7 @@ export const CODEX_MODELS = {
     { value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true },
     { value: GPT_6_ASTRA_MODEL, label: 'GPT-6-Astra', supportsImages: true },
     { value: GPT_6_1_SOL_MODEL, label: 'GPT-6.1-Sol', supportsImages: true },
+    { value: GPT_6_1_TERRA_MODEL, label: 'GPT-6.1-Terra', supportsImages: true },
     { value: GPT_6_SOL_MODEL, label: 'GPT-6-Sol', supportsImages: true },
     { value: GPT_6_LUNA_MODEL, label: 'GPT-6-Luna', supportsImages: true },
     { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol', supportsImages: true },
