@@ -1,5 +1,4 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
 	import type { ShareSegment } from '$lib/usage/usage-presentation';
 	import { formatPercent } from '$lib/usage/usage-format';
 
@@ -7,10 +6,9 @@
 		label: string;
 		segments: readonly ShareSegment[];
 		format: (value: number) => string;
-		aside?: Snippet;
 	}
 
-	let { label, segments, format, aside }: Props = $props();
+	let { label, segments, format }: Props = $props();
 
 	const visible = $derived(segments.filter((segment) => segment.value > 0));
 	const total = $derived(visible.reduce((sum, segment) => sum + segment.value, 0));
@@ -21,10 +19,7 @@
 
 {#if total > 0}
 	<div class="flex min-w-0 flex-col gap-2.5" data-usage-share-bar>
-		<div class="flex items-baseline justify-between gap-3">
-			<h3 class="text-sm font-medium text-foreground">{label}</h3>
-			{@render aside?.()}
-		</div>
+		<h3 class="text-sm font-medium text-foreground">{label}</h3>
 		<div role="img" aria-label={`${label}: ${description}`} class="flex h-2 gap-0.5">
 			{#each visible as segment (segment.id)}
 				<div

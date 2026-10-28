@@ -1,3 +1,5 @@
+import type { UsageChartAxis } from './usage-chart-geometry';
+
 // Costs are in US dollars, so amounts use en-US currency formatting like the price sources.
 const CURRENCY = new Intl.NumberFormat('en-US', {
 	style: 'currency',
@@ -38,9 +40,12 @@ export function formatUsd(value: number): string {
 /** Axis labels: whole and compact amounts stay short at every scale. */
 export function formatUsdAxis(value: number): string {
 	if (value >= 1000) return COMPACT_CURRENCY.format(value);
-	if (Number.isInteger(value)) return `$${value}`;
-	return value < 1 ? `$${value.toFixed(2)}` : `$${trimFraction(value)}`;
+	return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
 }
+
+// Ticks finer than a cent or a token would repeat the same label.
+export const USD_AXIS: UsageChartAxis = { format: formatUsdAxis, minStep: 0.01 };
+export const TOKEN_AXIS: UsageChartAxis = { format: formatTokens, minStep: 1 };
 
 export function formatTokens(value: number): string {
 	const abs = Math.abs(value);

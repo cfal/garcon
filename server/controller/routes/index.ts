@@ -169,7 +169,7 @@ export default function createAllRoutes(workspaceDir: string, {
   const inspectProject = executors.inspectProject;
   const httpIdleSeconds = getHttpIdleTimeoutSeconds();
   const gitBudget = httpIdleSeconds > 0 ? Math.max(1000, httpIdleSeconds * 1000 - 2000) : GH_DETAIL_TIMEOUT_MS;
-  const usageBudget = httpIdleSeconds > 0 ? Math.min(USAGE_READ_TIMEOUT_MS, Math.max(1000, httpIdleSeconds * 1000 - 2000)) : USAGE_READ_TIMEOUT_MS;
+  const usageBudget = httpIdleSeconds > 0 ? Math.min(USAGE_READ_TIMEOUT_MS, gitBudget) : USAGE_READ_TIMEOUT_MS;
   return composeRoutes(
     createExecutorRoutes(executors),
     createUsageRoutes(new UsageService(executors), usageBudget),

@@ -17,7 +17,8 @@ describe('usage formatting', () => {
 		expect(formatUsdAxis(3_000)).toBe('$3K');
 		expect(formatUsdAxis(20)).toBe('$20');
 		expect(formatUsdAxis(0.5)).toBe('$0.50');
-		expect(formatUsdAxis(2.5)).toBe('$2.5');
+		expect(formatUsdAxis(2.5)).toBe('$2.50');
+		expect(formatUsdAxis(0.07)).toBe('$0.07');
 	});
 
 	it('abbreviates token counts', () => {

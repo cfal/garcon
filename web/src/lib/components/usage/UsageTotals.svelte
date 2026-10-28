@@ -65,24 +65,20 @@
 		class="grid gap-x-12 gap-y-8 transition-opacity lg:grid-cols-2"
 		class:opacity-40={dimmed}
 	>
-		{#if metric === 'cost' && totals.costUsd > 0}
-			<UsageShareBar
-				label={m.usage_cost_by_type()}
-				segments={costTypeSegments(totals.categoryCostUsd)}
-				format={formatUsd}
-			/>
-		{/if}
 		<UsageShareBar
 			label={m.usage_tokens_by_type()}
 			segments={tokenTypeSegments(totals.tokens)}
 			format={formatTokens}
 		/>
-		{#if metric === 'tokens' && totals.costUsd > 0}
-			<UsageShareBar
-				label={m.usage_cost_by_type()}
-				segments={costTypeSegments(totals.categoryCostUsd)}
-				format={formatUsd}
-			/>
+		{#if totals.costUsd > 0}
+			<!-- The selected metric's breakdown comes first. -->
+			<div class="min-w-0" class:order-first={metric === 'cost'}>
+				<UsageShareBar
+					label={m.usage_cost_by_type()}
+					segments={costTypeSegments(totals.categoryCostUsd)}
+					format={formatUsd}
+				/>
+			</div>
 		{/if}
 	</section>
 {/if}

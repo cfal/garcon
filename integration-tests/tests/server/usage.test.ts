@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseUsageSummary, type UsageSummary } from '../../../common/usage.js';
+import { executionBackend } from '../../support/execution-backend.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 
@@ -48,54 +49,53 @@ function agent(summary: UsageSummary, agentId: string) {
 const EXECUTOR_USAGE = { claudeModel: 'claude-sonnet-5-5', codexModel: 'gpt-6.1-terra' };
 const CONTROLLER_USAGE = { claudeModel: 'claude-haiku-5-5', codexModel: 'gpt-6-luna' };
 
-for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
-  test(`usage reads Claude and Codex transcripts on the selected executor (${backend})`, async () => {
-    await withIntegrationFixture(`usage-${backend}`, async (fixture) => {
-      const { client } = fixture;
-      const executorId = backend === 'in-process' ? 'local' : client.executorId;
-      const read = async (target: string) => {
-        const summary = parseUsageSummary(await client.get(`/api/v1/usage?${new URLSearchParams({ executorId: target, ...window() })}`));
-        if (!summary) throw new Error('Invalid usage summary');
-        return summary;
-      };
+const backend = executionBackend();
 
-      const summary = await read(executorId);
-      expect(summary).toMatchObject({ executorId, ...window(), pricingAsOf: expect.any(String) });
-      const claude = agent(summary, 'claude');
-      expect(claude).toMatchObject({ status: 'ok', scannedFiles: 1, distinctSessions: 1 });
-      expect(claude.buckets).toHaveLength(1);
-      expect(claude.buckets[0]).toMatchObject({
-        day: day(-1),
-        model: EXECUTOR_USAGE.claudeModel,
-        records: 1,
-        totals: { uncachedInputTokens: 1_000, cachedInputTokens: 10_000, cacheWriteTokens: 0, outputTokens: 2_000, reasoningTokens: 0 },
-      });
-      expect(claude.buckets[0]!.costUsd).toBeCloseTo((1_000 * 2 + 10_000 * 0.1 + 2_000 * 10) / 1_000_000, 6);
-      const codex = agent(summary, 'codex');
-      expect(codex.buckets).toEqual([expect.objectContaining({
-        model: EXECUTOR_USAGE.codexModel,
-        totals: { uncachedInputTokens: 1_000, cachedInputTokens: 4_000, cacheWriteTokens: 0, outputTokens: 100, reasoningTokens: 40 },
-      })]);
-      expect(codex.buckets[0]!.costUsd).toBeCloseTo((1_000 * 1 + 4_000 * 0.05 + 100 * 5) / 1_000_000, 6);
-      for (const other of summary.agents.filter((entry) => entry.agentId !== 'claude' && entry.agentId !== 'codex')) {
-        expect(other.buckets).toEqual([]);
-      }
+test(`usage reads Claude and Codex transcripts on the selected executor (${backend})`, async () => {
+  await withIntegrationFixture(`usage-${backend}`, async (fixture) => {
+    const { client } = fixture;
+    const executorId = client.executorId;
+    const read = async (target: string) => {
+      const summary = parseUsageSummary(await client.get(`/api/v1/usage?${new URLSearchParams({ executorId: target, ...window() })}`));
+      if (!summary) throw new Error('Invalid usage summary');
+      return summary;
+    };
 
-      if (backend !== 'in-process') {
-        // Local reads the controller's own home, never the worker's.
-        const local = await read('local');
-        expect(agent(local, 'claude').buckets.map((bucket) => bucket.model)).toEqual([CONTROLLER_USAGE.claudeModel]);
-        expect(agent(local, 'codex').buckets.map((bucket) => bucket.model)).toEqual([CONTROLLER_USAGE.codexModel]);
-      }
-
-      expect(await rejectionOf(client.get(`/api/v1/usage?${new URLSearchParams({ executorId, ...window(), sinceDay: day(-120) })}`)))
-        .toMatchObject({ status: 400 });
-    }, {
-      executionBackend: backend,
-      prepareWorkspace: (directories) => seedTranscripts(directories.home, EXECUTOR_USAGE),
-      prepareControllerWorkspace: backend === 'in-process'
-        ? undefined
-        : (directories) => seedTranscripts(directories.home, CONTROLLER_USAGE),
+    const summary = await read(executorId);
+    expect(summary).toMatchObject({ executorId, ...window(), pricingAsOf: expect.any(String) });
+    const claude = agent(summary, 'claude');
+    expect(claude).toMatchObject({ status: 'ok', scannedFiles: 1, distinctSessions: 1 });
+    expect(claude.buckets).toHaveLength(1);
+    expect(claude.buckets[0]).toMatchObject({
+      day: day(-1),
+      model: EXECUTOR_USAGE.claudeModel,
+      records: 1,
+      totals: { uncachedInputTokens: 1_000, cachedInputTokens: 10_000, cacheWriteTokens: 0, outputTokens: 2_000, reasoningTokens: 0 },
     });
-  }, 60_000);
-}
+    expect(claude.buckets[0]!.costUsd).toBeCloseTo((1_000 * 2 + 10_000 * 0.1 + 2_000 * 10) / 1_000_000, 6);
+    const codex = agent(summary, 'codex');
+    expect(codex.buckets).toEqual([expect.objectContaining({
+      model: EXECUTOR_USAGE.codexModel,
+      totals: { uncachedInputTokens: 1_000, cachedInputTokens: 4_000, cacheWriteTokens: 0, outputTokens: 100, reasoningTokens: 40 },
+    })]);
+    expect(codex.buckets[0]!.costUsd).toBeCloseTo((1_000 * 1 + 4_000 * 0.05 + 100 * 5) / 1_000_000, 6);
+    for (const other of summary.agents.filter((entry) => entry.agentId !== 'claude' && entry.agentId !== 'codex')) {
+      expect(other.buckets).toEqual([]);
+    }
+
+    if (executorId !== 'local') {
+      // Local reads the controller's own home, never the worker's.
+      const local = await read('local');
+      expect(agent(local, 'claude').buckets.map((bucket) => bucket.model)).toEqual([CONTROLLER_USAGE.claudeModel]);
+      expect(agent(local, 'codex').buckets.map((bucket) => bucket.model)).toEqual([CONTROLLER_USAGE.codexModel]);
+    }
+
+    expect(await rejectionOf(client.get(`/api/v1/usage?${new URLSearchParams({ executorId, ...window(), sinceDay: day(-120) })}`)))
+      .toMatchObject({ status: 400 });
+  }, {
+    prepareWorkspace: (directories) => seedTranscripts(directories.home, EXECUTOR_USAGE),
+    prepareControllerWorkspace: backend === 'in-process'
+      ? undefined
+      : (directories) => seedTranscripts(directories.home, CONTROLLER_USAGE),
+  });
+}, 60_000);

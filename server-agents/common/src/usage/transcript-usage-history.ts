@@ -1,5 +1,4 @@
 import {
-  isUsageWindowRetained,
   MAX_USAGE_BUCKETS,
   parseUsageReadRequest,
   type AgentUsageReport,
@@ -53,7 +52,8 @@ export function createTranscriptUsageHistory<State>(
   return {
     read(request): Promise<AgentUsageReport> {
       const window = parseUsageReadRequest(request);
-      if (!window || !isUsageWindowRetained(window, (options.now ?? Date.now)())) {
+      // The controller bounds the window by its own clock; the worker's may differ.
+      if (!window) {
         return Promise.reject(new AgentIntegrationError('OPERATION_UNSUPPORTED', 'Invalid usage window', false));
       }
       const run = queue.then(() => read(request, window));

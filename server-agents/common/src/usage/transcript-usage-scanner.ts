@@ -57,7 +57,6 @@ interface CachedTranscript<State> {
 
 // Valid until the next scan, which may update a grown file's records in place.
 export interface ScannedTranscript {
-  readonly path: string;
   readonly records: readonly UsageRecord[];
   readonly tailRecords: readonly UsageRecord[];
   readonly malformed: readonly MalformedUsage[];
@@ -91,31 +90,27 @@ interface ParsedLines<State> {
  * Reads usage records from JSONL transcripts under the configured roots. Parsed
  * files stay cached in memory by size and modification time, and a grown file
  * resumes after its last complete line, so repeated scans read only new bytes.
- * Scans run one at a time; a queued scan reuses what the previous one parsed.
- * Cancellation stops the file being read and leaves its cached parse unchanged.
+ * Callers run one scan at a time and finish with its records before the next,
+ * because a scan updates cached records in place. Cancellation stops the file
+ * being read and leaves its cached parse unchanged.
  */
 export class TranscriptUsageScanner<State> {
   readonly #options: TranscriptUsageScannerOptions<State>;
   readonly #cache = new Map<string, CachedTranscript<State>>();
   readonly #now: () => number;
-  #queue: Promise<unknown> = Promise.resolve();
 
   constructor(options: TranscriptUsageScannerOptions<State>) {
     this.#options = options;
     this.#now = options.now ?? Date.now;
   }
 
-  scan(sinceMs: number, steps: EventLoopSteps, signal?: AbortSignal): Promise<TranscriptUsageScan> {
-    const run = this.#queue.then(() => this.#scan(sinceMs, steps, signal));
-    this.#queue = run.catch(() => undefined);
-    return run;
-  }
-
-  async #scan(sinceMs: number, steps: EventLoopSteps, signal: AbortSignal | undefined): Promise<TranscriptUsageScan> {
+  async scan(sinceMs: number, steps: EventLoopSteps, signal?: AbortSignal): Promise<TranscriptUsageScan> {
     signal?.throwIfAborted();
     const listing = await listTranscripts(this.#options.roots(), signal);
     const retainedSinceMs = this.#now() - RETENTION_MS;
+    const unstatable = new Set(listing.unstatablePaths);
     for (const filePath of [...this.#cache.keys()]) {
+      if (unstatable.has(filePath)) continue;
       const mtimeMs = listing.existing.get(filePath);
       if (mtimeMs === undefined || mtimeMs < retainedSinceMs) this.#cache.delete(filePath);
     }
@@ -130,9 +125,11 @@ export class TranscriptUsageScanner<State> {
       if (!cached || cached.size !== file.size || cached.mtimeMs !== file.mtimeMs) {
         const read = await this.#read(file, cached, retainedSinceMs, steps, signal);
         if (read === 'gone') {
-          // Removed or moved since listing, as Codex does when archiving or compressing;
-          // a moved copy is read where it now lives.
+          // Removed or moved since listing, as Codex does when archiving or compressing.
+          // A destination the listing missed goes unread until the next scan, so this
+          // scan reports itself partial rather than complete.
           this.#cache.delete(file.path);
+          unreadablePaths += 1;
           continue;
         }
         entry = read;
@@ -144,7 +141,12 @@ export class TranscriptUsageScanner<State> {
         if (!cached) continue;
         entry = cached;
       }
-      files.push({ path: file.path, records: entry.records, tailRecords: entry.tailRecords, malformed: entry.malformed });
+      files.push(entry);
+    }
+    // A file that could not be stat'ed is already counted unreadable; its last good parse still counts.
+    for (const filePath of unstatable) {
+      const cached = this.#cache.get(filePath);
+      if (cached) files.push(cached);
     }
     return { rootFound: listing.rootFound, files, unreadablePaths };
   }
@@ -192,17 +194,7 @@ export class TranscriptUsageScanner<State> {
       const guardHash = file.path.endsWith(COMPRESSED_SUFFIX) ? 0 : await readGuardHash(handle, parsed.resumeOffset);
       // Past this point nothing awaits I/O or observes cancellation, so a cached entry is never half merged.
       const merged: MergedRecords = base ?? { records: [], keyIndex: new Map(), malformed: [], oldestMs: Number.POSITIVE_INFINITY };
-      let oldestMs = merged.oldestMs;
-      await steps.forEach(parsed.records, (record) => {
-        if (record.timestampMs < retainedSinceMs) return;
-        oldestMs = Math.min(oldestMs, record.timestampMs);
-        appendRecord(merged.records, merged.keyIndex, record);
-      });
-      for (const entry of parsed.malformed) {
-        if (entry.timestampMs !== null && entry.timestampMs < retainedSinceMs) continue;
-        if (entry.timestampMs !== null) oldestMs = Math.min(oldestMs, entry.timestampMs);
-        merged.malformed.push(entry);
-      }
+      const oldestMs = Math.min(merged.oldestMs, await retainInto(merged, parsed, retainedSinceMs, steps));
       const retained = oldestMs < retainedSinceMs
         ? await pruneExpired(merged, retainedSinceMs, steps)
         : { ...merged, oldestMs };
@@ -327,23 +319,32 @@ function newTailRecords(tail: readonly UsageRecord[], keyIndex: ReadonlyMap<stri
   return records;
 }
 
-// Rebuilds a file's collections without usage older than retention, in bounded steps.
-async function pruneExpired(merged: MergedRecords, retainedSinceMs: number, steps: EventLoopSteps): Promise<MergedRecords> {
-  const records: UsageRecord[] = [];
-  const keyIndex = new Map<string, number>();
+// Adds the retained usage in `source` to `target` in bounded steps, returning the earliest time added.
+async function retainInto(
+  target: Omit<MergedRecords, 'oldestMs'>,
+  source: Pick<MergedRecords, 'records' | 'malformed'>,
+  retainedSinceMs: number,
+  steps: EventLoopSteps,
+): Promise<number> {
   let oldestMs = Number.POSITIVE_INFINITY;
-  await steps.forEach(merged.records, (record) => {
+  await steps.forEach(source.records, (record) => {
     if (record.timestampMs < retainedSinceMs) return;
     oldestMs = Math.min(oldestMs, record.timestampMs);
-    appendRecord(records, keyIndex, record);
+    appendRecord(target.records, target.keyIndex, record);
   });
-  const malformed = merged.malformed.filter((entry) => {
-    if (entry.timestampMs === null) return true;
-    if (entry.timestampMs < retainedSinceMs) return false;
-    oldestMs = Math.min(oldestMs, entry.timestampMs);
-    return true;
-  });
-  return { records, keyIndex, malformed, oldestMs };
+  for (const entry of source.malformed) {
+    if (entry.timestampMs !== null && entry.timestampMs < retainedSinceMs) continue;
+    if (entry.timestampMs !== null) oldestMs = Math.min(oldestMs, entry.timestampMs);
+    target.malformed.push(entry);
+  }
+  return oldestMs;
+}
+
+// Rebuilds a file's collections without usage older than retention.
+async function pruneExpired(merged: MergedRecords, retainedSinceMs: number, steps: EventLoopSteps): Promise<MergedRecords> {
+  const pruned = { records: [], keyIndex: new Map<string, number>(), malformed: [] };
+  const oldestMs = await retainInto(pruned, merged, retainedSinceMs, steps);
+  return { ...pruned, oldestMs };
 }
 
 interface TranscriptListing {
@@ -351,6 +352,8 @@ interface TranscriptListing {
   // Every transcript under the roots with its modification time, for cache pruning.
   readonly existing: ReadonlyMap<string, number>;
   readonly files: readonly TranscriptFile[];
+  // Counted in unreadablePaths; present but not stat-able, so not known to be gone.
+  readonly unstatablePaths: readonly string[];
   readonly unreadablePaths: number;
 }
 
@@ -389,6 +392,7 @@ async function listTranscripts(roots: readonly string[], signal: AbortSignal | u
     // Sorted paths make the scan order, and with it any first-seen tie, deterministic.
     .sort();
   const stats: Array<TranscriptFile | null> = new Array(paths.length).fill(null);
+  const unstatablePaths: string[] = [];
   let next = 0;
   const statNext = async () => {
     while (next < paths.length) {
@@ -397,7 +401,10 @@ async function listTranscripts(roots: readonly string[], signal: AbortSignal | u
         const stat = await fs.stat(paths[index]!);
         stats[index] = { path: paths[index]!, size: stat.size, mtimeMs: stat.mtimeMs };
       } catch (error) {
-        if (!hasNodeErrorCode(error, 'ENOENT')) unreadablePaths += 1;
+        if (!hasNodeErrorCode(error, 'ENOENT')) {
+          unreadablePaths += 1;
+          unstatablePaths.push(paths[index]!);
+        }
       }
     }
   };
@@ -407,6 +414,7 @@ async function listTranscripts(roots: readonly string[], signal: AbortSignal | u
     rootFound,
     existing: new Map(files.map((file) => [file.path, file.mtimeMs])),
     files,
+    unstatablePaths: unstatablePaths.sort(),
     unreadablePaths,
   };
 }

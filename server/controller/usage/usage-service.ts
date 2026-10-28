@@ -1,4 +1,5 @@
 import type { AgentUsageHistory } from '@garcon/server-agent-interface';
+import { waitAbortably } from '../../common/abortable-wait.js';
 import { parseAgentUsageReport, type UsageAgentSummary, type UsageReadRequest, type UsageSummary } from '../../../common/usage.js';
 
 // Keeps a provider's failure text within what the browser contract accepts.
@@ -57,7 +58,9 @@ async function readAgentUsage(
 ): Promise<{ readonly agent: UsageAgentSummary; readonly pricingAsOf: string | null }> {
   const agentId = integration.descriptor.id;
   try {
-    const parsed = parseAgentUsageReport(await untilAborted(usage.read({ ...request, signal }), signal));
+    // Stops waiting at the deadline even if the integration has not yet observed its
+    // signal, so one slow provider cannot hold the whole summary.
+    const parsed = parseAgentUsageReport(await waitAbortably(usage.read({ ...request, signal }), signal));
     if (!parsed) throw new Error('The agent returned an invalid usage report');
     const { pricingAsOf, ...report } = parsed;
     return { agent: { agentId, message: null, ...report }, pricingAsOf };
@@ -78,21 +81,4 @@ async function readAgentUsage(
       pricingAsOf: null,
     };
   }
-}
-
-// Stops waiting once the read is cancelled or times out, even if the integration has
-// not yet observed its signal, so one slow provider cannot hold the whole summary.
-function untilAborted<T>(read: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) {
-    read.catch(() => undefined);
-    return Promise.reject(signal.reason);
-  }
-  return new Promise((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
-    read.then(
-      (value) => { signal.removeEventListener('abort', onAbort); resolve(value); },
-      (error: unknown) => { signal.removeEventListener('abort', onAbort); reject(error); },
-    );
-  });
 }

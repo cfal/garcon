@@ -8,7 +8,7 @@ import {
   parseUsageReadRequest,
   parseUsageSummary,
   usageDayFormatter,
-  isUsageWindowRetained,
+  isUsageWindowInRange,
   usageTotalTokens,
   usageWindowLength,
 } from '../usage.ts';
@@ -55,10 +55,14 @@ describe('usage contract', () => {
     expect(() => usageDayFormatter('Nowhere/Zone')).toThrow(RangeError);
   });
 
-  it('accepts only windows executors still retain', () => {
+  it('accepts only windows executors still retain and that end by today', () => {
     const now = Date.parse('2026-10-27T12:00:00Z');
-    expect(isUsageWindowRetained({ sinceDay: '2026-07-30', untilDay: '2026-10-27', timeZone: 'UTC' }, now)).toBe(true);
-    expect(isUsageWindowRetained({ sinceDay: '2026-07-01', untilDay: '2026-07-20', timeZone: 'UTC' }, now)).toBe(false);
+    expect(isUsageWindowInRange({ sinceDay: '2026-07-30', untilDay: '2026-10-27', timeZone: 'UTC' }, now)).toBe(true);
+    // The first hours of an earlier day in UTC+14 would fall outside the 92 retained days.
+    expect(isUsageWindowInRange({ sinceDay: '2026-07-28', untilDay: '2026-10-25', timeZone: 'Pacific/Kiritimati' }, now)).toBe(false);
+    expect(isUsageWindowInRange({ sinceDay: '2026-07-01', untilDay: '2026-07-20', timeZone: 'UTC' }, now)).toBe(false);
+    expect(isUsageWindowInRange({ sinceDay: '2026-10-22', untilDay: '2026-10-28', timeZone: 'Pacific/Kiritimati' }, now)).toBe(true);
+    expect(isUsageWindowInRange({ sinceDay: '2026-10-25', untilDay: '2026-10-29', timeZone: 'UTC' }, now)).toBe(false);
   });
 
   it('accepts windows of one to ninety days in a known zone', () => {

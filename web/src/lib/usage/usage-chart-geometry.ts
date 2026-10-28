@@ -13,6 +13,12 @@ export interface UsageChartSeries {
 	readonly unknown?: readonly boolean[];
 }
 
+export interface UsageChartAxis {
+	readonly format: (value: number) => string;
+	// The finest tick step worth labeling, such as one cent or one token.
+	readonly minStep: number;
+}
+
 export interface ChartScale {
 	readonly max: number;
 	readonly ticks: readonly number[];
@@ -23,10 +29,10 @@ interface Point {
 	readonly y: number;
 }
 
-/** Rounds the peak up to a 1-2-5 step so axis labels stay readable. */
-export function niceScale(peak: number, tickCount = 4): ChartScale {
+/** Rounds the peak up to a 1-2-5 step, no finer than `minStep`, so axis labels stay readable and distinct. */
+export function niceScale(peak: number, minStep = 0, tickCount = 4): ChartScale {
 	if (!(peak > 0)) return { max: 0, ticks: [0] };
-	const rawStep = peak / tickCount;
+	const rawStep = Math.max(peak / tickCount, minStep);
 	const magnitude = 10 ** Math.floor(Math.log10(rawStep));
 	const normalized = rawStep / magnitude;
 	const step = (normalized > 5 ? 10 : normalized > 2 ? 5 : normalized > 1 ? 2 : 1) * magnitude;

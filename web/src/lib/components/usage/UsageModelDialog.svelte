@@ -6,10 +6,17 @@
 		cacheHitRate,
 		costPerMillionTokens,
 		isCostUnknown,
+		metricValue,
 		type UsageMetric,
 		type UsageModelTotals,
 	} from '$lib/usage/usage-report';
-	import { formatPercent, formatTokens, formatUsd, formatUsdAxis } from '$lib/usage/usage-format';
+	import {
+		formatPercent,
+		formatTokens,
+		formatUsd,
+		TOKEN_AXIS,
+		USD_AXIS,
+	} from '$lib/usage/usage-format';
 	import {
 		costTypeSegments,
 		tokenTypeSegments,
@@ -51,9 +58,7 @@
 			id: model.key,
 			label: model.model,
 			color: usageAgentColor(model.agentId),
-			values: model.daily.map((point) =>
-				chartMetric === 'cost' ? point.costUsd : point.totalTokens,
-			),
+			values: model.daily.map((point) => metricValue(point, chartMetric)),
 			unknown: model.daily.map((point) => chartMetric === 'cost' && isCostUnknown(point)),
 		},
 	]);
@@ -100,7 +105,7 @@
 				{days}
 				{series}
 				format={chartMetric === 'cost' ? formatUsd : formatTokens}
-				formatAxis={chartMetric === 'cost' ? formatUsdAxis : formatTokens}
+				axis={chartMetric === 'cost' ? USD_AXIS : TOKEN_AXIS}
 				ariaLabel={chartMetric === 'cost' ? m.usage_daily_cost() : m.usage_daily_tokens()}
 			/>
 

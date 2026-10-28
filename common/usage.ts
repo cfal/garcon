@@ -149,12 +149,16 @@ export function usageDayFormatter(timeZone: string): (time: number | Date) => st
 }
 
 /**
- * Whether a window starts recently enough for executors to still hold its usage.
- * Compares UTC days with a day of slack, so every zone's "today" window passes.
+ * Whether a window starts recently enough for executors to still hold its usage and
+ * ends no later than today. Compares UTC days with a day of slack at each end, so
+ * every zone's "today" window passes.
  */
-export function isUsageWindowRetained(request: UsageReadRequest, nowMs: number): boolean {
-  const oldest = new Date(nowMs - (USAGE_RETENTION_DAYS - 1) * DAY_MS).toISOString().slice(0, 10);
-  return request.sinceDay >= oldest;
+export function isUsageWindowInRange(request: UsageReadRequest, nowMs: number): boolean {
+  // A day starts up to 14 hours before its UTC date (UTC+14), so its first hours stay retained.
+  const oldest = new Date(nowMs - (USAGE_RETENTION_DAYS - 2) * DAY_MS).toISOString().slice(0, 10);
+  // Today in the earliest time zone (UTC+14) is at most tomorrow in UTC.
+  const latest = new Date(nowMs + DAY_MS).toISOString().slice(0, 10);
+  return request.sinceDay >= oldest && request.untilDay <= latest;
 }
 
 /** Number of calendar days in an inclusive window. */

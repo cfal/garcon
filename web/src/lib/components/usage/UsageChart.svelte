@@ -8,6 +8,7 @@
 		niceScale,
 		seriesPaths,
 		valueToY,
+		type UsageChartAxis,
 		type UsageChartSeries,
 	} from '$lib/usage/usage-chart-geometry';
 	import { formatDayLong, formatDayShort } from '$lib/usage/usage-format';
@@ -16,7 +17,7 @@
 		days: readonly string[];
 		series: readonly UsageChartSeries[];
 		format: (value: number) => string;
-		formatAxis: (value: number) => string;
+		axis: UsageChartAxis;
 		ariaLabel: string;
 		// Shown in place of a value the series marks unknown.
 		unknownLabel?: string;
@@ -27,7 +28,7 @@
 		days,
 		series,
 		format,
-		formatAxis,
+		axis,
 		ariaLabel,
 		unknownLabel = '–',
 		dimmed = false,
@@ -35,7 +36,11 @@
 
 	const TOOLTIP_GAP_PX = 12;
 
-	let hoverIndex = $state<number | null>(null);
+	let pointerIndex = $state<number | null>(null);
+	// A hover from a longer window must not outlive the days it pointed at.
+	const hoverIndex = $derived(
+		pointerIndex !== null && pointerIndex < days.length ? pointerIndex : null,
+	);
 	let pointer = $state({ x: 0, y: 0 });
 	let plotWidth = $state(0);
 	let plotHeight = $state(0);
@@ -45,7 +50,10 @@
 
 	// Series overlap rather than stack, so the scale fits the tallest single value.
 	const scale = $derived(
-		niceScale(series.reduce((peak, entry) => Math.max(peak, ...entry.values), 0)),
+		niceScale(
+			series.reduce((peak, entry) => Math.max(peak, ...entry.values), 0),
+			axis.minStep,
+		),
 	);
 	// The largest series draws first so smaller ones stay visible on top.
 	const paths = $derived(
@@ -95,7 +103,7 @@
 		const x = Math.min(bounds.width, Math.max(0, event.clientX - bounds.left));
 		const y = Math.min(bounds.height, Math.max(0, event.clientY - bounds.top));
 		pointer = { x, y };
-		hoverIndex = indexAtFraction(x / bounds.width, days.length);
+		pointerIndex = indexAtFraction(x / bounds.width, days.length);
 	}
 </script>
 
@@ -108,7 +116,7 @@
 						class="absolute right-0 -translate-y-1/2 text-[10px] text-muted-foreground tabular-nums"
 						style:top={`${(valueToY(tick, scale.max) / CHART_VIEW_HEIGHT) * 100}%`}
 					>
-						{tick === 0 ? '0' : formatAxis(tick)}
+						{tick === 0 ? '0' : axis.format(tick)}
 					</span>
 				{/each}
 			{/if}
@@ -121,7 +129,7 @@
 			class:opacity-40={dimmed}
 			role="presentation"
 			onpointermove={handlePointerMove}
-			onpointerleave={() => (hoverIndex = null)}
+			onpointerleave={() => (pointerIndex = null)}
 		>
 			<svg
 				class="h-full w-full overflow-visible"
@@ -166,7 +174,7 @@
 					/>
 				{/if}
 			</svg>
-			{#if hoverIndex !== null && days[hoverIndex]}
+			{#if hoverIndex !== null}
 				<div
 					bind:offsetWidth={tooltipWidth}
 					bind:offsetHeight={tooltipHeight}

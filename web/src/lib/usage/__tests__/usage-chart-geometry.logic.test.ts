@@ -22,6 +22,10 @@ describe('usage chart geometry', () => {
 		expect(niceScale(27.4)).toEqual({ max: 30, ticks: [0, 10, 20, 30] });
 		expect(niceScale(0.42).ticks.at(-1)).toBeCloseTo(0.6, 10);
 		expect(niceScale(0.42).ticks).toHaveLength(4);
+		// A floor on the step keeps tiny peaks from producing repeated labels.
+		expect(niceScale(0.0004, 0.01)).toEqual({ max: 0.01, ticks: [0, 0.01] });
+		expect(niceScale(0.007, 0.01).ticks).toEqual([0, 0.01]);
+		expect(niceScale(3, 1)).toEqual({ max: 3, ticks: [0, 1, 2, 3] });
 	});
 
 	it('maps values and indexes into the view box', () => {

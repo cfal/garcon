@@ -23,7 +23,7 @@ describe('UsageChart', () => {
 				{ id: 'b', label: 'Codex', color: 'blue', values: [3, 0, 0], unknown: unknownOther },
 			],
 			format,
-			formatAxis: format,
+			axis: { format, minStep: 0.01 },
 			ariaLabel: 'Daily cost',
 			unknownLabel: 'Unpriced',
 		});

@@ -96,8 +96,6 @@ test('rejects invalid windows', async () => {
     { ...window, sinceDay: '2026-01-01' },
     { ...window, timeZone: 'Not/AZone' },
     { ...window, sinceDay: '2026-02-30' },
-    // Older than the usage executors retain.
-    { sinceDay: '2026-07-01', untilDay: '2026-07-20', timeZone: 'UTC' },
   ]) {
     await expect(history.read(invalid)).rejects.toBeInstanceOf(AgentIntegrationError);
   }

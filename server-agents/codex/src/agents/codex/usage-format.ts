@@ -129,8 +129,8 @@ function codexSpeed(serviceTier: unknown): UsageSpeed {
 }
 
 // Forks copy and restamp parent history in a burst right after their session_meta;
-// those copies were billed in the parent.
-function inForkCopyBurst(state: CodexUsageState, timestampMs: number): boolean {
+// those copies were billed in the parent. Advances the burst, or ends it at the first gap.
+function consumeForkCopyBurst(state: CodexUsageState, timestampMs: number): boolean {
   if (!state.suppressingForkCopies) return false;
   if (timestampMs - state.forkCopyAnchorMs < FORK_COPY_MAX_GAP_MS) {
     state.forkCopyAnchorMs = timestampMs;
@@ -163,7 +163,7 @@ function usageRecord(state: CodexUsageState, timestampMs: number, usage: CodexTo
 // Bills one response. Its id identifies the request across verbatim and restamped fork copies.
 function parseUsageRecord(entry: Record<string, unknown>, payload: Record<string, unknown>, state: CodexUsageState): UsageRecord | MalformedUsage | null {
   const timestampMs = parseTimestampMs(entry.timestamp);
-  if (timestampMs !== null && inForkCopyBurst(state, timestampMs)) return null;
+  if (timestampMs !== null && consumeForkCopyBurst(state, timestampMs)) return null;
   state.sawUsageRecord = true;
   const usage = readTokenUsage(payload.usage);
   const responseId = payload.response_id;
@@ -218,7 +218,7 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
   const hasCumulative = rawCumulative !== undefined && rawCumulative !== null;
   const cumulative = hasCumulative ? readTokenUsage(rawCumulative) : null;
 
-  if (inForkCopyBurst(state, timestampMs)) {
+  if (consumeForkCopyBurst(state, timestampMs)) {
     // Copied history is billed in the parent but sets the child's baseline.
     const signature = last === null ? null : JSON.stringify(last);
     if (cumulative !== null) state.lastCumulativeUsage = cumulative;

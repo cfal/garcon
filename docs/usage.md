@@ -2,7 +2,8 @@
 
 The Usage surface reports token usage and estimated API cost per executor, for
 7, 30, or 90 calendar days in the viewer's time zone. Executors keep 92 days of
-usage, so windows that start earlier are rejected. It reads the native
+usage, so windows that start earlier are rejected, as are windows that end
+after today. The controller checks the window by its own clock. It reads the native
 Claude and Codex transcripts on that executor, so it includes sessions Garcon
 did not start. Open it from the sidebar menu, a window's add menu, or the
 command palette.
@@ -21,8 +22,9 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
   subagent transcripts. Codex reads `$CODEX_HOME/sessions` and
   `$CODEX_HOME/archived_sessions` (default `~/.codex`), including rollouts
   Codex compressed to `.jsonl.zst`, which are decompressed as a stream; while both
-  forms of one rollout exist, the plain file is read, and a file moved away
-  mid-scan is read where it now lives. Other integrations report no usage facet.
+  forms of one rollout exist, the plain file is read. A file moved away after
+  the scan listed it makes that read `partial`; the next read finds it where it
+  now lives. Other integrations report no usage facet.
 - Transcripts are parsed on the executor that owns them. A remote executor
   answers over the bulk lane with day-by-model buckets, not raw records; the
   controller validates the report and never reads worker paths itself.
@@ -34,7 +36,8 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
   `EXECUTOR_UNAVAILABLE`; the surface keeps that executor selected, and shown
   in its executor menu even after it is removed, and never falls back to Local.
 - A transcript root that is absent reports `missing`; one that exists but
-  cannot be read, and unreadable transcripts, report `partial`. Malformed usage
+  cannot be read, and unreadable transcripts, report `partial`; a transcript that
+  becomes unreadable keeps contributing its last good parse. Malformed usage
   lines mark a report `partial` only when they fall inside the window, or when
   their time is unknown.
 - Parsed transcripts are cached in memory by size and modification time, and a

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { appendFile, chmod, mkdir, mkdtemp, rm, truncate, utimes, writeFile } from 'node:fs/promises';
+import { renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { EventLoopSteps } from '../../shared/event-loop.js';
@@ -258,6 +259,46 @@ describe('transcript usage scanner', () => {
     expect(warm!.files[0]!.records).toHaveLength(lines + 1);
     // A resume merges into the cached records rather than copying the whole history.
     expect(warm!.files[0]!.records).toBe(cold!.files[0]!.records);
+  });
+
+  test('reports a transcript moved away after listing as unreadable, not as complete', async () => {
+    await writeFile(path.join(root, 'a.jsonl'), line({ model: 'm1' }) + line({ usage: 1 }));
+    const moved = path.join(root, 'b.jsonl');
+    const destination = path.join(root, 'elsewhere.txt');
+    await writeFile(moved, line({ model: 'm2' }) + line({ usage: 2 }));
+    const format = countingFormat(parsed);
+    const moving = new TranscriptUsageScanner({
+      operation: 'usage-test',
+      format: {
+        ...format,
+        // Moves the second transcript once the first is being read, after both were listed.
+        parseLine(text, state) {
+          if (parsed.length === 0) renameSync(moved, destination);
+          return format.parseLine(text, state);
+        },
+      },
+      roots: () => [root],
+      now: () => NOW,
+    });
+    const result = await moving.scan(0, new EventLoopSteps('usage-test'));
+    expect(usage(result)).toEqual(['m1:1']);
+    expect(result.unreadablePaths).toBe(1);
+  });
+
+  test.skipIf(process.getuid?.() === 0)('keeps the last parse of a transcript that can no longer be stat\'ed', async () => {
+    const directory = path.join(root, 'project');
+    await mkdir(directory);
+    await writeFile(path.join(directory, 'a.jsonl'), line({ model: 'm1' }) + line({ usage: 4 }));
+    expect(usage(await scan())).toEqual(['m1:4']);
+    // Listing still works without search permission, but stat fails with EACCES.
+    await chmod(directory, 0o644);
+    try {
+      const result = await scan();
+      expect(usage(result)).toEqual(['m1:4']);
+      expect(result.unreadablePaths).toBe(1);
+    } finally {
+      await chmod(directory, 0o755);
+    }
   });
 
   test('stops at a cancelled scan and still serves the next one', async () => {

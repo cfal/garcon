@@ -1,13 +1,19 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import { agentLabelFor } from '$lib/agents/agent-labels';
-	import { isCostUnknown, type UsageMetric, type UsageReport } from '$lib/usage/usage-report';
+	import {
+		isCostUnknown,
+		metricValue,
+		type UsageMetric,
+		type UsageReport,
+	} from '$lib/usage/usage-report';
 	import {
 		formatCount,
 		formatPercent,
 		formatTokens,
 		formatUsd,
-		formatUsdAxis,
+		TOKEN_AXIS,
+		USD_AXIS,
 	} from '$lib/usage/usage-format';
 	import { usageAgentColor } from '$lib/usage/usage-presentation';
 	import UsageChart from './UsageChart.svelte';
@@ -31,7 +37,7 @@
 				color: usageAgentColor(agent.agentId),
 				values: report.daily.map((day) => {
 					const point = day.byAgent.get(agent.agentId);
-					return metric === 'cost' ? (point?.costUsd ?? 0) : (point?.totalTokens ?? 0);
+					return point ? metricValue(point, metric) : 0;
 				}),
 				unknown: report.daily.map((day) => {
 					const point = day.byAgent.get(agent.agentId);
@@ -132,7 +138,7 @@
 			days={report.days}
 			{series}
 			{format}
-			formatAxis={metric === 'cost' ? formatUsdAxis : formatTokens}
+			axis={metric === 'cost' ? USD_AXIS : TOKEN_AXIS}
 			ariaLabel={metric === 'cost' ? m.usage_daily_cost() : m.usage_daily_tokens()}
 			unknownLabel={m.usage_unpriced()}
 			{dimmed}

@@ -14,60 +14,48 @@ export function usageAgentColor(agentId: string): string {
 	return agentProviderStyle(agentId)?.accentColor ?? 'var(--color-muted-foreground)';
 }
 
+// Cost and tokens share one type breakdown, so both bars use the same order and colors.
+const USAGE_TYPES = [
+	{
+		id: 'input',
+		label: () => m.usage_type_input(),
+		cost: (cost: UsageCategoryCost) => cost.input,
+		tokens: (tokens: UsageTokenTotals) => tokens.uncachedInputTokens,
+	},
+	{
+		id: 'cache-read',
+		label: () => m.usage_type_cache_read(),
+		cost: (cost: UsageCategoryCost) => cost.cacheRead,
+		tokens: (tokens: UsageTokenTotals) => tokens.cachedInputTokens,
+	},
+	{
+		id: 'cache-write',
+		label: () => m.usage_type_cache_write(),
+		cost: (cost: UsageCategoryCost) => cost.cacheWrite,
+		tokens: (tokens: UsageTokenTotals) => tokens.cacheWriteTokens,
+	},
+	{
+		id: 'output',
+		label: () => m.usage_type_output(),
+		cost: (cost: UsageCategoryCost) => cost.output,
+		tokens: (tokens: UsageTokenTotals) => tokens.outputTokens,
+	},
+] as const;
+
 export function costTypeSegments(cost: UsageCategoryCost): readonly ShareSegment[] {
-	return [
-		{
-			id: 'input',
-			label: m.usage_type_input(),
-			value: cost.input,
-			color: 'var(--color-usage-input)',
-		},
-		{
-			id: 'cache-read',
-			label: m.usage_type_cache_read(),
-			value: cost.cacheRead,
-			color: 'var(--color-usage-cache-read)',
-		},
-		{
-			id: 'cache-write',
-			label: m.usage_type_cache_write(),
-			value: cost.cacheWrite,
-			color: 'var(--color-usage-cache-write)',
-		},
-		{
-			id: 'output',
-			label: m.usage_type_output(),
-			value: cost.output,
-			color: 'var(--color-usage-output)',
-		},
-	];
+	return USAGE_TYPES.map((type) => ({
+		id: type.id,
+		label: type.label(),
+		value: type.cost(cost),
+		color: `var(--color-usage-${type.id})`,
+	}));
 }
 
 export function tokenTypeSegments(tokens: UsageTokenTotals): readonly ShareSegment[] {
-	return [
-		{
-			id: 'input',
-			label: m.usage_type_input(),
-			value: tokens.uncachedInputTokens,
-			color: 'var(--color-usage-input)',
-		},
-		{
-			id: 'cache-read',
-			label: m.usage_type_cache_read(),
-			value: tokens.cachedInputTokens,
-			color: 'var(--color-usage-cache-read)',
-		},
-		{
-			id: 'cache-write',
-			label: m.usage_type_cache_write(),
-			value: tokens.cacheWriteTokens,
-			color: 'var(--color-usage-cache-write)',
-		},
-		{
-			id: 'output',
-			label: m.usage_type_output(),
-			value: tokens.outputTokens,
-			color: 'var(--color-usage-output)',
-		},
-	];
+	return USAGE_TYPES.map((type) => ({
+		id: type.id,
+		label: type.label(),
+		value: type.tokens(tokens),
+		color: `var(--color-usage-${type.id})`,
+	}));
 }

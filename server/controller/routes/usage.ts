@@ -1,4 +1,4 @@
-import { isUsageWindowRetained, parseUsageReadRequest } from '../../../common/usage.js';
+import { isUsageWindowInRange, parseUsageReadRequest } from '../../../common/usage.js';
 import { ValidationDomainError } from '../../common/domain-error.js';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
@@ -26,7 +26,7 @@ export function createUsageRoutes(
             throw new ValidationDomainError('Invalid usage window');
           }
           const window = parseUsageReadRequest(Object.fromEntries(WINDOW_PARAMS.map((key) => [key, url.searchParams.get(key)])));
-          if (!window || !isUsageWindowRetained(window, now())) throw new ValidationDomainError('Invalid usage window');
+          if (!window || !isUsageWindowInRange(window, now())) throw new ValidationDomainError('Invalid usage window');
           const summary = await usage.readSummary(executorId, window, { signal: request.signal, timeoutMs: readTimeoutMs });
           return noStore(Response.json(summary));
         } catch (error) {

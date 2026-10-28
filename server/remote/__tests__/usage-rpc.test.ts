@@ -54,6 +54,31 @@ for (const dialer of ['controller', 'worker'] as const) {
     }
   });
 
+  test(`cancelling a usage read cancels it on the worker (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    try {
+      const started = Promise.withResolvers<AbortSignal>();
+      fixture.generations[0]!.hooks.usage = (request) => {
+        started.resolve(request.signal!);
+        // Settles only through cancellation, as a scan stopped mid-file does.
+        return new Promise((_resolve, reject) => {
+          request.signal!.addEventListener('abort', () => reject(request.signal!.reason), { once: true });
+        });
+      };
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const controller = new AbortController();
+      const reading = integration.usageHistory!.read({ ...WINDOW, signal: controller.signal });
+      const workerSignal = await started.promise;
+      controller.abort(new Error('cancelled'));
+      expect(await reading.catch((error: unknown) => error)).toBeInstanceOf(Error);
+      // The cancellation crosses the link asynchronously after the caller's wait ends.
+      if (!workerSignal.aborted) await new Promise((resolve) => workerSignal.addEventListener('abort', resolve, { once: true }));
+      expect(workerSignal.aborted).toBe(true);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
   test(`the controller rejects a malformed usage report (${dialer} dials)`, async () => {
     const fixture = await remoteFixture(dialer);
     try {
