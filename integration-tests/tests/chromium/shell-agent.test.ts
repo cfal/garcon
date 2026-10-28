@@ -182,7 +182,7 @@ test('Shell composer preserves literal commands and stable chat switching on des
       await page.screenshot({ path: join(artifacts, `shell-composer-${width}.png`) });
     }
     phase('cwd settlement failure stays visible once across browser refresh');
-    const cwdNotice = page.locator('[data-chat-message-type="transcript-notice"]').getByText(
+    const cwdNotice = page.locator('[data-chat-scroll-viewport]').getByText(
       'Command completed, but its working directory is unavailable (outside-base).',
       { exact: true },
     );
