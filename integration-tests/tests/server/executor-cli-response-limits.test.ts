@@ -1,3 +1,4 @@
+import { TestWebSocketLink as WebSocketLink, handleTestRpc } from '../../../server/remote/__tests__/test-session-transport.js';
 import { expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -9,7 +10,7 @@ import { startCliGateway } from '../../../server/remote/server/cli-gateway.js';
 import { CLI_REPLY_BYTES } from '../../../server/remote/transport/cli-protocol.js';
 import { ExecutorRpcConnection } from '../../../server/remote/transport/rpc-connection.js';
 import { RpcAdmissionBudgets } from '../../../server/remote/transport/rpc-admission.js';
-import { WebSocketLink } from '../../../server/remote/transport/websocket-link.js';
+
 
 for (const dialer of ['controller', 'worker'] as const) {
   test(`CLI HTTP gateway rejects and cancels oversized replies over Noise (${dialer} dials)`, async () => {
@@ -38,7 +39,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     });
     controller.onSession(session => {
       const connection = new ExecutorRpcConnection(controller, session, { admission: controllerAdmission });
-      connection.onEndpoint(rpc => rpc.handle(async (call, signal, guard) => {
+      connection.onEndpoint(rpc => handleTestRpc(rpc, async (call, signal, guard) => {
         const access = { executorId: CLI_EXECUTOR_ID, rpc, signal, assertCurrent() {}, assertManagement() {} };
         if (call.method === 'controllerCli.describe') return dispatcher.describe(access, guard);
         if (call.method === 'controllerCli.request') return dispatcher.request(call.request, access, guard);

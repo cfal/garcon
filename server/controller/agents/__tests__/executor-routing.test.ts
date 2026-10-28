@@ -17,6 +17,8 @@ import { IntegrationRegistry } from '../../../runtime/agents/integration-registr
 import { AgentEventBus } from '../event-bus.js';
 import { AgentRuntimeRouter } from '../runtime-router.js';
 import { DomainError } from '../../../common/domain-error.js';
+import { RPC_V1, type ExecutorOperation } from '@garcon/common/executor-contracts';
+import { supportsDefinition, type ContractVersions } from '@garcon/common/protocol-contracts';
 
 const FIRST = '22222222-2222-4222-8222-222222222222';
 const SECOND = '33333333-3333-4333-8333-333333333333';
@@ -34,6 +36,10 @@ async function fixture(chatExecutors: readonly string[] = IDS) {
   const providers = IDS.map((id) => integrationFixture(root, id));
   const registries = new Map(providers.map((provider) => [provider.scope.executorId, new IntegrationRegistry({ instances: [provider.integration] })]));
   const ready = new Set(IDS);
+  const contracts = new Map<string, ContractVersions>(IDS.map(id => [id,
+    Object.fromEntries(Object.values(RPC_V1).flatMap(definition => [definition, ...definition.requires])
+      .map(definition => [definition.name, [definition.version]])),
+  ]));
   const executors = {
     isReady: (executorId: string) => ready.has(executorId),
     integrationsFor(executorId: string) {
@@ -45,6 +51,15 @@ async function fixture(chatExecutors: readonly string[] = IDS) {
     captureInventory(executorId: string) {
       const integrations = this.integrationsFor(executorId).list();
       return { instanceId: integrations[0]!.producers.scope.instanceId, integrations, assertCurrent: () => { this.integrationsFor(executorId); } };
+    },
+    supportsOperations(executorId: string, operations: readonly ExecutorOperation[]) {
+      return operations.every(name => supportsDefinition(contracts.get(executorId) ?? {}, RPC_V1[name]));
+    },
+    requireOperations(executorId: string, operations: readonly ExecutorOperation[]) {
+      this.integrationsFor(executorId);
+      if (!this.supportsOperations(executorId, operations)) {
+        throw new DomainError('OPERATION_UNSUPPORTED', 'Executor operation is unsupported', 422);
+      }
     },
   } satisfies ExecutionIntegrationDirectory;
   const directory = new AgentDirectory(registries.get('local')!, executors);
@@ -68,8 +83,24 @@ async function fixture(chatExecutors: readonly string[] = IDS) {
     hasPendingOwnershipTransfer: () => false,
     async resolveFileMentions(prompt, _projectPath, executorId) { mentions.push(effectiveExecutorId(executorId)); return prompt; },
   });
-  return { root, chats, providers, directory, ledger, router, mentions, ready, registries };
+  return { root, chats, providers, directory, ledger, router, mentions, ready, registries, contracts };
 }
+
+test.each(['execution.abort', 'producers.cancelLaunch', 'producer.launch-settled'])('missing %s refuses launch before binding or transcript effects', async missing => {
+  const f = await fixture();
+  const contracts = { ...f.contracts.get(FIRST) };
+  delete contracts[missing];
+  f.contracts.set(FIRST, contracts);
+  const bind = spyOn(f.providers[1]!.integration.producers, 'bind');
+  const before = f.ledger.currentRows(CHAT_IDS[1]!);
+  await expect(f.router.startSession(CHAT_IDS[1]!, 'Synthetic rejected input'))
+    .rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', status: 422 });
+  expect(bind).not.toHaveBeenCalled();
+  expect(f.providers[1]!.calls.start).toBe(0);
+  expect(f.ledger.currentRows(CHAT_IDS[1]!)).toEqual(before);
+  await f.router.startSession(CHAT_IDS[0]!, 'Synthetic independent input');
+  expect(f.providers[0]!.calls.start).toBe(1);
+});
 
 test('same-agent execution, expansion, Stop, and one-shot queries resolve the selected executor', async () => {
   const f = await fixture();

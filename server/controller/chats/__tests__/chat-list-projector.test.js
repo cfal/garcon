@@ -91,9 +91,16 @@ describe('ChatListProjector', () => {
       isActive: true,
       isProcessing: true,
       processingPhase: 'running',
+      hasAgentSession: true,
       canReloadFromNativeHistory: true,
       title: 'First line',
     });
+  });
+
+  it('marks persisted chats without a native session for a fresh start', () => {
+    const { deps, session } = makeDeps();
+    session.agentSessionId = null;
+    expect(new ChatListProjector(deps).buildOne(CHAT_ID).hasAgentSession).toBe(false);
   });
 
   it('projects immutable child parentage without changing the summary', () => {

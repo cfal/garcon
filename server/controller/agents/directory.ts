@@ -2,6 +2,7 @@ import type { AgentIntegration } from '@garcon/server-agent-interface';
 import type { IntegrationRegistry } from '../../runtime/agents/integration-registry.js';
 import { effectiveExecutorId, LOCAL_EXECUTOR_ID, type AgentExecutionTarget } from '../../../common/executors.js';
 import { DomainError } from '../../common/domain-error.js';
+import type { ExecutorOperation } from '@garcon/common/executor-contracts';
 
 export interface ExecutionIntegrationDirectory {
   requireIntegration(target: AgentExecutionTarget): AgentIntegration;
@@ -9,6 +10,8 @@ export interface ExecutionIntegrationDirectory {
   integrationsFor(executorId: string): IntegrationRegistry;
   isReady(executorId: string): boolean;
   captureInventory(executorId: string): AgentInventorySnapshot;
+  requireOperations(executorId: string, operations: readonly ExecutorOperation[]): void;
+  supportsOperations(executorId: string, operations: readonly ExecutorOperation[]): boolean;
 }
 
 export interface AgentInventorySnapshot {
@@ -59,6 +62,16 @@ export class AgentDirectory {
   // not connected since startup, so operations needing the executor check readiness first.
   requireReady(executorId?: string | null): void {
     if (!this.isReady(executorId)) throw executorUnavailable();
+  }
+
+  requireOperations(executorId: string | null | undefined, operations: readonly ExecutorOperation[]): void {
+    if (this.executors) this.executors.requireOperations(effectiveExecutorId(executorId), operations);
+    else this.requireReady(executorId);
+  }
+
+  supportsOperations(executorId: string | null | undefined, operations: readonly ExecutorOperation[]): boolean {
+    return this.executors?.supportsOperations(effectiveExecutorId(executorId), operations)
+      ?? effectiveExecutorId(executorId) === LOCAL_EXECUTOR_ID;
   }
 }
 

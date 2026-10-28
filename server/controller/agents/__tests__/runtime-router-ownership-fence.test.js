@@ -44,6 +44,8 @@ function makeRouter(hasPendingOwnershipTransfer) {
     describePrevious(input) { return this.resolveSelection(input); },
   };
   const directory = {
+    requireOperations: mock(() => undefined),
+    supportsOperations: () => true,
     require: mock(() => integration),
     list: mock(() => [integration]),
     isReady: mock(() => true),

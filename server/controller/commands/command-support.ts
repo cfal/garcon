@@ -51,7 +51,7 @@ import { agentRunCommandPayload } from '../agents/agent-run-command-input.js';
 import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js';
 import type { AgentHandoffService } from '../agents/agent-handoff-service.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
-import type { ForkedChatResult } from '../chats/fork-chat.js';
+import type { ForkedChatResult, PreparedForkSource } from '../chats/fork-chat.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
@@ -98,6 +98,9 @@ export type AgentRegistryDep = Pick<
   | 'hasAgent'
   | 'executionPolicy'
   | 'assertExecutorReady'
+  | 'assertExecutionSupported'
+  | 'assertNativeForkSupported'
+  | 'assertQueuedExecutionSupported'
   | 'assertAgentAvailable'
   | 'supportsImages'
   | 'fileAttachmentAdmission'
@@ -142,6 +145,7 @@ export type CreateForkedChat = (args: {
   signal: AbortSignal;
   upToOrdinal?: number;
   allowHandoffFork?: boolean;
+  preparedSource?: PreparedForkSource;
   registry: IChatRegistry;
   settings: SettingsDep;
   metadata: MetadataDep;
@@ -181,6 +185,7 @@ export interface ChatCommandServiceDeps {
   handoffs: Pick<
     AgentHandoffService,
     | 'resolveTarget'
+    | 'recoverHandoff'
     | 'createPreparation'
     | 'cancelPreparation'
     | 'seedContinuationLedger'

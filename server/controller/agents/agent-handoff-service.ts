@@ -27,6 +27,7 @@ import type { CarryOverOutcome } from '../chats/carryover/outcome.js';
 import type { PreparedCarryover } from '../chats/carryover/prepared-store.js';
 import { OwnershipTransferPendingError } from './ownership-transfer-fence.js';
 import { isThinkingModeSupported, isPermissionModeSupported } from '../../../common/execution-defaults.js';
+import { requireProviderOperations } from './execution-support.js';
 
 const logger = createLogger('agents:handoff');
 const MAX_RECOVERY_RETRY_DELAY_MS = 1_000;
@@ -65,7 +66,7 @@ export class AgentHandoffService {
 
   constructor(private readonly deps: {
     readonly registry: IChatRegistry;
-    readonly integrations: Pick<AgentDirectory, 'list' | 'require'>;
+    readonly integrations: Pick<AgentDirectory, 'list' | 'require' | 'requireOperations' | 'supportsOperations'>;
     readonly inspectProject: ProjectInspector;
     readonly endpointResolver: ApiProviderEndpointResolver;
     readonly catalog: {
@@ -75,8 +76,8 @@ export class AgentHandoffService {
     readonly ledger: TranscriptLedgerService;
     readonly carryover: CarryoverPlanningPort;
     readonly preparedCarryover: PreparedCarryoverPort;
-    readonly reopenProducer: (chatId: string) => void;
-    readonly onCommitted?: (chatId: string) => void | Promise<void>;
+    readonly ensureProducer: (chatId: string) => void;
+    readonly onCommitted?: (chatId: string, clientRequestId: string) => void | Promise<void>;
   }) {}
 
   shutdown(): void {
@@ -91,6 +92,27 @@ export class AgentHandoffService {
 
   cancelPreparation(chatId: string): void {
     this.#carryoverPreparations.get(chatId)?.abort(new Error('Turn interrupted by the user'));
+  }
+
+  async recoverHandoff(chatId: string, clientRequestId: string, handoff: AgentHandoffRequest): Promise<boolean> {
+    const operationId = handoffOperationId(chatId, clientRequestId);
+    const recovery = this.#recoveries.get(operationId);
+    const existing = this.deps.ownership.findHandoff(chatId, clientRequestId) ?? recovery?.intent;
+    if (!existing) return false;
+    assertMatchingHandoff(existing, handoffTargetHash(handoff));
+    if (recovery) {
+      await this.#activeRecoveryAttempts.get(operationId);
+      if (this.#recoveries.get(operationId) === recovery) {
+        const timer = this.#recoveryTimers.get(operationId);
+        if (timer) clearTimeout(timer);
+        this.#recoveryTimers.delete(operationId);
+        await this.#recoverHandoff(recovery, 0);
+      }
+      if (this.#hasPendingHandoff(existing)) throw new OwnershipTransferPendingError();
+      return true;
+    }
+    await this.#rollForwardPersistedHandoff(existing);
+    return true;
   }
 
   async seedContinuationLedger(input: {
@@ -187,6 +209,7 @@ export class AgentHandoffService {
     }
     const endpoint = this.deps.endpointResolver.resolveEndpointReference(selection);
     if (endpoint) {
+      requireProviderOperations(this.deps.integrations, executorId, ['credentials.resolve', 'endpoints.validate']);
       if (!integration.endpoints) {
         throw new DomainError(
           'VALIDATION_FAILED',
@@ -284,7 +307,6 @@ export class AgentHandoffService {
           if (existing) {
             assertMatchingHandoff(existing, submittedTargetHash);
             await this.#rollForwardPersistedHandoff(existing);
-            await this.#notifyCommitted(input.chatId);
             return;
           }
 
@@ -356,7 +378,6 @@ export class AgentHandoffService {
               result: carryoverOutcome,
             });
           }
-          await this.#notifyCommitted(input.chatId);
         } catch (error) {
           if (error instanceof OwnershipTransferPendingError) throw error;
           const retained = this.deps.ownership.findHandoff(
@@ -366,10 +387,9 @@ export class AgentHandoffService {
           if (decisionAttempted && retained) {
             assertMatchingHandoff(retained, submittedTargetHash);
             await this.#rollForwardPersistedHandoff(retained);
-            await this.#notifyCommitted(input.chatId);
             return;
           }
-          if (producerClosed) this.deps.reopenProducer(input.chatId);
+          if (producerClosed) this.deps.ensureProducer(input.chatId);
           throw error;
         }
       },
@@ -403,8 +423,8 @@ export class AgentHandoffService {
 
   async #rollForwardPersistedHandoff(intent: AgentHandoffIntent): Promise<void> {
     this.#disarmHandoffRecovery(intent.operationId);
-    this.deps.ledger.closeProducer(intent.chatId);
     try {
+      this.deps.ledger.closeProducer(intent.chatId);
       await retryHandoffStep(
         'ledger boundary recovery',
         () => this.#applyLedgerBoundary(intent),
@@ -427,14 +447,15 @@ export class AgentHandoffService {
       );
       await retryHandoffStep(
         'producer recovery',
-        () => this.deps.reopenProducer(intent.chatId),
+        () => this.#ensureTargetProducer(intent),
         this.#shutdownController.signal,
         'producer',
       );
     } catch (error) {
-      if (!(error instanceof HandoffStepRetryLimitError)) throw error;
-      const recovery = this.#ensureRecovery(intent, error.step);
-      this.#scheduleHandoffRecovery(recovery, 0);
+      if (error instanceof HandoffStepRetryLimitError) {
+        const recovery = this.#ensureRecovery(intent, error.step);
+        this.#scheduleHandoffRecovery(recovery, 0);
+      }
       throw new OwnershipTransferPendingError(error);
     }
   }
@@ -522,6 +543,7 @@ export class AgentHandoffService {
                 recovery.step = 'fenced';
                 return;
               }
+              await this.#notifyCommitted(intent);
               recovery.step = 'producer';
               break;
             }
@@ -533,11 +555,10 @@ export class AgentHandoffService {
             recovery.step = 'producer';
             break;
           case 'producer':
-            await this.deps.reopenProducer(intent.chatId);
+            await this.#ensureTargetProducer(intent);
             if (this.#recoveries.get(operationId) === recovery) {
               this.#recoveries.delete(operationId);
             }
-            await this.#notifyCommitted(intent.chatId);
             return;
         }
       }
@@ -561,12 +582,19 @@ export class AgentHandoffService {
   }
 
   async #completeHandoffIfPending(intent: AgentHandoffIntent): Promise<void> {
-    if (!this.#hasPendingHandoff(intent)) return;
-    try {
-      await this.deps.ownership.completeHandoff(intent.operationId);
-    } catch (error) {
-      if (!this.#hasPendingHandoff(intent)) return;
-      throw error;
+    if (this.#hasPendingHandoff(intent)) {
+      try {
+        await this.deps.ownership.completeHandoff(intent.operationId);
+      } catch (error) {
+        if (this.#hasPendingHandoff(intent)) throw error;
+      }
+    }
+    await this.#notifyCommitted(intent);
+  }
+
+  #ensureTargetProducer(intent: AgentHandoffIntent): void {
+    if (matchesHandoffTarget(this.deps.registry.getChat(intent.chatId), intent)) {
+      return this.deps.ensureProducer(intent.chatId);
     }
   }
 
@@ -619,12 +647,12 @@ export class AgentHandoffService {
     }
   }
 
-  async #notifyCommitted(chatId: string): Promise<void> {
+  async #notifyCommitted(intent: AgentHandoffIntent): Promise<void> {
     try {
-      await this.deps.onCommitted?.(chatId);
+      await this.deps.onCommitted?.(intent.chatId, intent.clientRequestId);
     } catch (error) {
       logger.warn('Post-handoff invalidation failed', {
-        chatId,
+        chatId: intent.chatId,
         reason: error instanceof Error ? error.message : String(error),
       });
     }

@@ -30,6 +30,8 @@ function makeRouter(transcript = createRuntimeTranscriptFixture({
       getChat: mock(() => ({ agentId: 'test' })),
     },
     directory: {
+      requireOperations: mock(() => undefined),
+      supportsOperations: () => true,
       get: mock((agentId) => agentId === 'test' ? { descriptor: { id: 'test' } } : null),
       require: () => ({ permissions }),
     },

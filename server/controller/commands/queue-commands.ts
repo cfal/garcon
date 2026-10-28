@@ -259,14 +259,18 @@ export class QueueCommands {
         }, deadline);
         return { type: 'queued', chatId, entryId: result.entryId };
       }
-      await this.support.submitHttpRun({
+      const run = {
         chatId,
         transcriptViewId,
         command,
         clientRequestId: input.clientRequestId,
         clientMessageId: input.clientMessageId,
         options: {},
-      }, deadline);
+      };
+      if (!await this.support.replayHttpRun(run, deadline)) {
+        this.deps.agents.assertExecutionSupported(session, [session.agentSessionId ? 'execution.resume' : 'execution.start']);
+        await this.support.submitHttpRun(run, deadline);
+      }
       return { type: 'sent', chatId };
     });
   }
@@ -300,6 +304,7 @@ export class QueueCommands {
       entryId: preparedEntryId,
     };
     const observed = await this.deps.ledger.observe(acceptance);
+    if (!observed) this.deps.agents.assertQueuedExecutionSupported(input.chatId);
     if (!observed || (observed.kind === 'duplicate' && observed.record.status === 'accepted')) {
       this.assertQueueSelection(input);
     }

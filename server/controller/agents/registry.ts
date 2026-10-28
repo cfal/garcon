@@ -1,3 +1,6 @@
+import type { ExecutorOperation } from '@garcon/common/executor-contracts';
+import { executionRequirements, nativeForkRequirements, requireProviderOperations, supportsProviderOperations, type ExecutionSupportTarget } from './execution-support.js';
+import { requireCompaction } from './execution-planning.js';
 import type {
   AgentIntegration,
   AgentNativeSessionRef,
@@ -94,6 +97,9 @@ export interface AgentRegistryServiceContract {
   chatExecutionPolicy(chatId: string): 'conversation' | 'literal';
   hasAgent(agentId: string, executorId?: string | null): boolean;
   assertExecutorReady(executorId?: string | null): void;
+  assertExecutionSupported(target: ExecutionSupportTarget, operations: readonly ExecutorOperation[]): void;
+  assertNativeForkSupported(source: AgentChatEntry): void;
+  assertQueuedExecutionSupported(chatId: string): void;
   assertAgentAvailable(agentId: string, executorId?: string | null): void;
   supportsAuthLogin(agentId: string, executorId?: string | null): boolean;
   supportsAuthLoginCompletion(agentId: string, executorId?: string | null): boolean;
@@ -214,6 +220,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#runtime.reopenProducer(chatId);
   }
 
+  ensureTranscriptProducer(chatId: string): void {
+    this.#runtime.ensureProducer(chatId);
+  }
+
   constructor(args: {
     registry: IChatRegistry;
     integrations: IntegrationRegistry;
@@ -281,6 +291,24 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   hasAgent(agentId: string, executorId?: string | null): boolean { return this.#directory.has(agentId, executorId); }
   assertExecutorReady(executorId?: string | null): void { this.#directory.requireReady(executorId); }
+  assertExecutionSupported(target: ExecutionSupportTarget, operations: readonly ExecutorOperation[]): void {
+    this.assertAgentAvailable(target.agentId, target.executorId);
+    const integration = this.#directory.require(target.agentId, target.executorId);
+    if (operations.includes('compaction.compact')) requireCompaction(integration);
+    this.#directory.requireOperations(target.executorId, executionRequirements(integration, target, operations));
+  }
+  assertNativeForkSupported(source: AgentChatEntry): void {
+    const integration = this.#directory.get(source.agentId, source.executorId);
+    if (!integration) return;
+    const requirements = nativeForkRequirements(integration, source);
+    if (requirements.length) requireProviderOperations(this.#directory, source.executorId, requirements);
+  }
+  assertQueuedExecutionSupported(chatId: string): void {
+    const chat = this.#registry.getChat(chatId);
+    if (chat && this.#directory.isReady(chat.executorId)) {
+      this.assertExecutionSupported(chat, [chat.agentSessionId ? 'execution.resume' : 'execution.start']);
+    }
+  }
   assertAgentAvailable(agentId: string, executorId?: string | null): void {
     if (!this.#directory.list(executorId).some(integration => integration.descriptor.id === agentId)) {
       throw new DomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${agentId}`, 422);
@@ -330,7 +358,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   steeringSupport(agentId: string, executorId?: string | null): SteeringSupport {
     const integration = this.#directory.get(agentId, executorId);
     if (!integration) return 'unknown';
-    return integration.steering ? 'supported' : 'unsupported';
+    return integration.steering && supportsProviderOperations(this.#directory, executorId, ['steering.captureTarget', 'steering.steer'])
+      ? 'supported' : 'unsupported';
   }
   supportsUpdateProjectPath(agentId: string, executorId?: string | null): boolean { return this.#directory.get(agentId, executorId)?.descriptor.supportsProjectPathUpdate ?? false; }
   requiresNativePathForProjectPathUpdate(agentId: string, executorId?: string | null): boolean {

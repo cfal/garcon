@@ -8,6 +8,7 @@ import { LedgerFencedError } from '../../ledger/errors.ts';
 import { ChatExecutionCoordinator } from '../../chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../../chat-execution/chat-execution-control-repository.ts';
 import { assertAgentHandoffIdle } from '../agent-handoff-command.js';
+import { OwnershipTransferPendingError } from '../ownership-transfer-fence.js';
 
 function envelope(ownerId) {
   return { ownerId, schemaVersion: 1, values: {} };
@@ -157,7 +158,7 @@ describe('AgentHandoffService', () => {
         destination.literalExecution = { selectionLabel: 'Runtime', inputFormatByModel: {} };
         return { kind: 'no-history' };
       } },
-      reopenProducer: () => calls.push('reopen'),
+      ensureProducer: () => calls.push('reopen'),
     });
     const resolved = await resolveTarget(service);
     if (when === 'before-preparation') destination.literalExecution = { selectionLabel: 'Runtime', inputFormatByModel: {} };
@@ -188,7 +189,7 @@ describe('AgentHandoffService', () => {
     const snapshot = coordinator.reserveTranscriptSnapshot('chat');
     const service = createService({
       registry: { getChat: () => current }, ownership, ledger: ledgerState(calls),
-      reopenProducer: () => calls.push('reopen'),
+      ensureProducer: () => calls.push('reopen'),
     });
     const preparing = service.createPreparation({
       chatId: 'chat', clientRequestId: 'synthetic-request', source: current,
@@ -264,7 +265,7 @@ describe('AgentHandoffService', () => {
       const withEndpoints = () => captured;
       const service = createService({
         ...deps, inspectProject, catalog: { getAgentCatalogEntry },
-        integrations: { list: () => [captured], require: withEndpoints },
+        integrations: { list: () => [captured], require: withEndpoints, requireOperations() {}, supportsOperations: () => true },
         endpointResolver: {
           ...deps.endpointResolver,
           resolveSelection: ({ model }) => ({ model, apiProviderId: 'provider', endpointId: 'endpoint', protocol: 'openai-chat', isLocal: false }),
@@ -365,7 +366,7 @@ describe('AgentHandoffService', () => {
       registry: { getChat: () => current }, ownership: state.ownership, ledger,
       integrations: { list: () => { throw new Error('offline'); }, require: () => { throw new Error('offline'); } },
       inspectProject: async () => { throw new Error('offline'); },
-      reopenProducer: () => calls.push('reopen'),
+      ensureProducer: () => calls.push('reopen'),
     });
     await service.recoverPendingHandoffs();
     expect(current).toMatchObject({ executorId, projectPath: '/destination', agentSessionId: null, nativeSession: null });
@@ -422,7 +423,7 @@ describe('AgentHandoffService', () => {
       ledger,
       carryover: { planFor },
       preparedCarryover: { deposit, discard: mock(() => {}) },
-      reopenProducer: () => calls.push('reopen'),
+      ensureProducer: () => calls.push('reopen'),
       onCommitted: mock(async () => calls.push('notify')),
     });
     const admission = context();
@@ -448,9 +449,9 @@ describe('AgentHandoffService', () => {
       'boundary',
       'registry',
       'complete',
+      'notify',
       'reopen',
       'deposit',
-      'notify',
     ]);
     expect(admission.assertAdmissionActive).toHaveBeenCalledTimes(2);
     expect(state.decided.watermark).toEqual({ viewId: 'view-1', ordinal: 7 });
@@ -494,7 +495,7 @@ describe('AgentHandoffService', () => {
       registry: { getChat: () => current },
       ownership: state.ownership,
       ledger,
-      reopenProducer: () => calls.push('reopen'),
+      ensureProducer: () => calls.push('reopen'),
     });
 
     await expect(service.createPreparation({
@@ -528,7 +529,7 @@ describe('AgentHandoffService', () => {
         }),
       },
       preparedCarryover: { deposit, discard },
-      reopenProducer: () => calls.push('reopen'),
+      ensureProducer: () => calls.push('reopen'),
     });
     const preparation = service.createPreparation({
       chatId: 'chat',
@@ -616,7 +617,7 @@ describe('AgentHandoffService', () => {
           });
         }),
       },
-      reopenProducer: () => calls.push('reopen'),
+      ensureProducer: () => calls.push('reopen'),
     });
     const preparation = service.createPreparation({
       chatId: 'chat',
@@ -651,7 +652,7 @@ describe('AgentHandoffService', () => {
       ledger,
       carryover: { planFor },
       preparedCarryover: { deposit, discard: mock(() => {}) },
-      reopenProducer: () => calls.push('reopen'),
+      ensureProducer: () => calls.push('reopen'),
     });
 
     await service.createPreparation({
@@ -706,6 +707,43 @@ describe('AgentHandoffService', () => {
     } finally {
       service.shutdown();
       await preparation.catch(() => undefined);
+    }
+  });
+
+  it.each(['new', 'retained', 'existing'])('keeps a %s durable handoff pending when its ledger boundary is corrupt', async (phase) => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    if (phase === 'existing') state.setIntent(persistedIntent());
+    const ledger = ledgerState(calls);
+    ledger.rowsAfter.mockReturnValue([{
+      kind: 'agent-switch', ordinal: 8,
+      detail: { fromAgentId: 'source-agent', toAgentId: 'target-agent', toModel: 'conflicting-model' },
+    }]);
+    const ensureProducer = mock(() => {});
+    const service = createService({
+      registry: { getChat: () => current }, ownership: state.ownership, ledger, ensureProducer,
+    });
+    try {
+      const preparation = service.createPreparation({
+        chatId: 'chat', clientRequestId: 'request-1', handoff: handoff(), source: current,
+        target: await resolveTarget(service), command: null,
+        guardDecision: async (decide) => {
+          const intent = await decide();
+          if (phase === 'retained') throw new Error('Decision acknowledgement lost');
+          return intent;
+        },
+      });
+      const error = await preparation.prepare(context()).catch(error => error);
+      expect(error).toBeInstanceOf(OwnershipTransferPendingError);
+      expect(error.cause).toMatchObject({ name: 'HandoffBoundaryCorruptionError' });
+      expect(state.ownership.findHandoff('chat', 'request-1')).not.toBeNull();
+      expect(state.ownership.applyHandoffDecision).not.toHaveBeenCalled();
+      expect(state.ownership.completeHandoff).not.toHaveBeenCalled();
+      expect(ensureProducer).not.toHaveBeenCalled();
+      expect(current.agentOwnershipEpoch).toBe('source-epoch');
+    } finally {
+      service.shutdown();
     }
   });
 
@@ -812,7 +850,7 @@ describe('AgentHandoffService', () => {
       resolveOrphan = resolve;
     });
     let reopenCalls = 0;
-    const reopenProducer = mock(async () => {
+    const ensureProducer = mock(async () => {
       reopenCalls += 1;
       if (reopenCalls === 1) {
         markOrphanStarted();
@@ -828,7 +866,7 @@ describe('AgentHandoffService', () => {
       registry: { getChat: () => current },
       ownership: state.ownership,
       ledger: ledgerState(calls),
-      reopenProducer,
+      ensureProducer,
     });
     const startupRecovery = service.recoverPendingHandoffs();
     let request;
@@ -891,11 +929,18 @@ describe('AgentHandoffService', () => {
     const recovered = new Promise((resolve) => {
       resolveRecovery = resolve;
     });
+    const onCommitted = mock(async () => {
+      expect(state.ownership.findHandoff('chat', 'request-1')).toBeNull();
+      expect(current.agentOwnershipEpoch).toBe(persistedIntent().target.agentOwnershipEpoch);
+      calls.push('notify');
+    });
     const service = createService({
       registry: { getChat: () => current },
       ownership: state.ownership,
       ledger: ledgerState(calls),
-      reopenProducer: () => {
+      onCommitted,
+      ensureProducer: () => {
+        expect(onCommitted).toHaveBeenCalledTimes(1);
         reopenAttempts += 1;
         if (reopenAttempts <= 3) throw new Error('injected persistent producer failure');
         calls.push('reopen');
@@ -917,13 +962,39 @@ describe('AgentHandoffService', () => {
         retryable: true,
       });
       expect(state.ownership.findHandoff('chat', 'request-1')).toBeNull();
+      expect(onCommitted).toHaveBeenCalledWith('chat', 'request-1');
       await recovered;
       expect(reopenAttempts).toBe(4);
       expect(calls.filter((call) => call === 'complete')).toHaveLength(1);
+      expect(calls.filter((call) => call === 'notify')).toHaveLength(1);
     } finally {
       service.shutdown();
       await preparation.catch(() => undefined);
     }
+  });
+
+  it('does not repair a discharged handoff after ownership has moved again', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    state.setIntent(persistedIntent());
+    const ensureProducer = mock(() => { throw new Error('Synthetic producer unavailable'); });
+    const service = createService({ registry: { getChat: () => current }, ownership: state.ownership,
+      ledger: ledgerState(calls), ensureProducer });
+    const fakeTimers = installFakeTimers();
+    try {
+      await service.recoverPendingHandoffs();
+      expect(state.ownership.findHandoff('chat', 'request-1')).toBeNull();
+      expect(ensureProducer).toHaveBeenCalledTimes(1);
+      current.agentOwnershipEpoch = 'newer-owner';
+      const timer = fakeTimers.timers.find(timer => !timer.cleared && !timer.fired);
+      expect(timer).toBeDefined();
+      timer.fired = true;
+      timer.callback();
+      await service.recoverPendingHandoffs();
+      expect(ensureProducer).toHaveBeenCalledTimes(1);
+      expect(calls.filter(call => call === 'complete')).toHaveLength(1);
+    } finally { service.shutdown(); fakeTimers.restore(); }
   });
 
   it('treats a retry-dispatched journal intent as complete in armed background recovery', async () => {
@@ -946,7 +1017,7 @@ describe('AgentHandoffService', () => {
       registry: { getChat: () => current },
       ownership: state.ownership,
       ledger: ledgerState(calls),
-      reopenProducer: () => {
+      ensureProducer: () => {
         reopenAttempts += 1;
       },
     });
@@ -985,19 +1056,19 @@ describe('AgentHandoffService', () => {
       applyHandoffDecision: mock(async () => {}),
       completeHandoff: mock(async () => {}),
     };
-    const reopenProducer = mock(() => {});
+    const ensureProducer = mock(() => {});
     const service = createService({
       registry: { getChat: () => current },
       ownership,
       ledger: ledgerState([]),
-      reopenProducer,
+      ensureProducer,
     });
 
     await service.recoverPendingHandoffs();
 
     expect(ownership.applyHandoffDecision).not.toHaveBeenCalled();
     expect(ownership.completeHandoff).not.toHaveBeenCalled();
-    expect(reopenProducer).toHaveBeenCalledOnce();
+    expect(ensureProducer).toHaveBeenCalledOnce();
   });
 
   it('stops recovery when the intent disappears without applying target ownership', async () => {
@@ -1008,16 +1079,16 @@ describe('AgentHandoffService', () => {
       applyHandoffDecision: mock(async () => {}),
       completeHandoff: mock(async () => {}),
     };
-    const reopenProducer = mock(() => {});
+    const ensureProducer = mock(() => {});
     const fakeTimers = installFakeTimers();
-    const service = createService({ ownership, ledger: ledgerState([]), reopenProducer });
+    const service = createService({ ownership, ledger: ledgerState([]), ensureProducer });
 
     try {
       await service.recoverPendingHandoffs();
 
       expect(ownership.applyHandoffDecision).not.toHaveBeenCalled();
       expect(ownership.completeHandoff).not.toHaveBeenCalled();
-      expect(reopenProducer).not.toHaveBeenCalled();
+      expect(ensureProducer).not.toHaveBeenCalled();
       expect(fakeTimers.timers).toHaveLength(0);
     } finally {
       service.shutdown();
@@ -1037,7 +1108,7 @@ describe('AgentHandoffService', () => {
       registry: { getChat: () => current },
       ownership: state.ownership,
       ledger: ledgerState(calls),
-      reopenProducer: () => calls.push('reopen'),
+      ensureProducer: () => calls.push('reopen'),
     });
 
     await service.recoverPendingHandoffs();
@@ -1295,6 +1366,10 @@ describe('AgentHandoffService', () => {
       }
       expect(globalThis.clearTimeout).toHaveBeenCalledWith(timer);
       expect(outcome).toBe('rejected');
+      const error = await preparation.catch(error => error);
+      expect(error).toBeInstanceOf(OwnershipTransferPendingError);
+      expect(error.cause).toMatchObject({ message: 'Agent handoff service shut down' });
+      expect(state.ownership.findHandoff('chat', 'request-1')).not.toBeNull();
       fireRetry();
       for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
       expect(registryAttempts).toBe(1);
@@ -1492,10 +1567,12 @@ function createService(overrides = {}) {
     integrations: overrides.integrations ?? {
       list: () => [...integrations.values()],
       require: (agentId) => integrations.get(agentId),
+      requireOperations() {},
+      supportsOperations: () => true,
     },
     endpointResolver: overrides.endpointResolver ?? resolution.endpointResolver,
     catalog: overrides.catalog ?? resolution.catalog,
-    reopenProducer: overrides.reopenProducer ?? (() => {}),
+    ensureProducer: overrides.ensureProducer ?? (() => {}),
     onCommitted: overrides.onCommitted,
   });
 }

@@ -1,5 +1,6 @@
+import { TestWebSocketLink as WebSocketLink } from '../../../server/remote/__tests__/test-session-transport.js';
 import { expect, test } from 'bun:test';
-import { WebSocketLink } from '../../../server/remote/transport/websocket-link.js';
+
 import type { SessionTransport } from '../../../server/remote/transport/session-transport.js';
 
 for (const dialer of ['controller', 'worker'] as const) {

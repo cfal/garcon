@@ -140,6 +140,8 @@ function makeRouter(ledger, view, respond) {
     resolveFileMentions: resolveFileMentionsInCommand,
     registry: { getChat: mock(() => ({ agentId: 'test' })) },
     directory: {
+      requireOperations: mock(() => undefined),
+      supportsOperations: () => true,
       get: mock((agentId) => agentId === 'test' ? { descriptor: { id: 'test' } } : null),
       require: () => ({ permissions: permissionFixture(new Map([[OCCURRENCE_ID, respond]])) }),
     },

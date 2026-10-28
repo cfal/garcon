@@ -159,6 +159,7 @@ export class ChatListProjector {
       parentChat: session.parentChat,
       agentId: chat.agentId,
       agentOwnershipEpoch: session.agentOwnershipEpoch,
+      hasAgentSession: Boolean(session.agentSessionId),
       model: chat.model,
       apiProviderId: chat.apiProviderId,
       modelEndpointId: chat.modelEndpointId,

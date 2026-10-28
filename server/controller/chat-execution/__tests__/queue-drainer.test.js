@@ -439,7 +439,7 @@ describe('QueueDrainer', () => {
       status: 'queued',
       submission: null,
     };
-    const pending = control([entry], [privateControlEntry()]);
+    const pending = control([entry]);
     const dequeueNextTurn = mock(async () => null);
     const pauseForUnavailableProject = mock(async () => ({
       control: { ...pending, pause: { id: 'pause-1' } },
@@ -666,6 +666,8 @@ describe('QueueDrainer queued attachments', () => {
 
   function fixture() {
     const attachmentAdmission = { assertSupported: mock(() => undefined) };
+    const projectAdmission = availableProjectAdmission();
+    const getDrainOptions = mock(() => ({ model: 'test-model' }));
     const controls = new ChatExecutionControlOperations(
       new InMemoryChatExecutionControlRepository('server-1'),
       {
@@ -687,14 +689,68 @@ describe('QueueDrainer queued attachments', () => {
       }),
       controls,
       turnRunner: { isChatRunning: () => false, runAgentTurn },
-      getDrainOptions: () => ({ model: 'test-model' }),
-      projectAdmission: availableProjectAdmission(),
+      getDrainOptions,
+      projectAdmission,
       attachmentAdmission,
       runSelectionAdmissionExclusive: (_chatId, operation) => operation(),
       callbacks,
     });
-    return { attachmentAdmission, controls, callbacks, runAgentTurn, drainer };
+    return { attachmentAdmission, projectAdmission, getDrainOptions, controls, callbacks, runAgentTurn, drainer };
   }
+
+  it('discards stale priority controls before refusing an unsupported user entry', async () => {
+    const f = fixture();
+    const created = await f.controls.create('chat-1', { content: 'retained input', images: [] });
+    const { id: _id, ...input } = privateControlEntry();
+    await f.controls.enqueueControl('chat-1', input);
+    f.callbacks.isControlInputViewCurrent = () => false;
+    f.getDrainOptions.mockImplementation(() => { throw new DomainError('OPERATION_UNSUPPORTED', 'Unsupported workflow', 422); });
+
+    await f.drainer.run('chat-1');
+
+    const final = await f.controls.read('chat-1');
+    expect(final.controlEntries).toEqual([]);
+    expect(final.entries.map(entry => entry.id)).toEqual([created.entryId]);
+    expect(final.pause).toMatchObject({ kind: 'queued-turn-failed', entryId: created.entryId });
+    expect(f.getDrainOptions).toHaveBeenCalledTimes(1);
+    expect(f.callbacks.appendControlReceipt).not.toHaveBeenCalled();
+    expect(f.callbacks.registerQueued).not.toHaveBeenCalled();
+    expect(f.runAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it('does not pause a user entry when project admission races a path edit', async () => {
+    const f = fixture();
+    const created = await f.controls.create('chat-1', { content: 'retained input', images: [] });
+    f.projectAdmission.assertAvailable.mockRejectedValue(new DomainError('PROJECT_PATH_CHANGED', 'Project changed', 409));
+
+    await expect(f.drainer.run('chat-1')).rejects.toMatchObject({ code: 'PROJECT_PATH_CHANGED' });
+
+    const final = await f.controls.read('chat-1');
+    expect(final.entries.map(entry => entry.id)).toEqual([created.entryId]);
+    expect(final.pause).toBeNull();
+    expect(f.callbacks.publishTurnFailed).not.toHaveBeenCalled();
+    expect(f.callbacks.registerQueued).not.toHaveBeenCalled();
+    expect(f.runAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it('retains and pauses current control input when its workflow is unsupported', async () => {
+    const f = fixture();
+    const { id: _id, ...input } = privateControlEntry();
+    await f.controls.enqueueControl('chat-1', input);
+    const pending = await f.controls.read('chat-1');
+    f.getDrainOptions.mockImplementation(() => { throw new DomainError('OPERATION_UNSUPPORTED', 'Unsupported workflow', 422); });
+
+    await f.drainer.run('chat-1');
+
+    const final = await f.controls.read('chat-1');
+    expect(final.controlEntries).toEqual(pending.controlEntries);
+    expect(final.pause).toMatchObject({ kind: 'queued-turn-failed', entryId: pending.controlEntries[0].id });
+    expect(f.callbacks.appendControlReceipt).not.toHaveBeenCalled();
+    expect(f.callbacks.registerQueued).not.toHaveBeenCalled();
+    expect(f.callbacks.publishTurnFailed).toHaveBeenCalledWith('chat-1', 'Unsupported workflow',
+      expect.objectContaining({ commandType: 'agent-run', transcriptViewId: input.transcriptViewId }));
+    expect(f.runAgentTurn).not.toHaveBeenCalled();
+  });
 
   it('admits and dispatches a queued entry with its attachments', async () => {
     const { attachmentAdmission, controls, callbacks, runAgentTurn, drainer } = fixture();

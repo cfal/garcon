@@ -1,9 +1,11 @@
+import { TestWebSocketLink as WebSocketLink, handleTestRpc } from '../../../server/remote/__tests__/test-session-transport.js';
+import { RPC_V1 } from '../../../common/executor-contracts.js';
 import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ExecutorProcess } from '../../support/execution-backend.js';
-import { WebSocketLink } from '../../../server/remote/transport/websocket-link.js';
+
 import { parseConnectionUrl } from '../../../server/remote/transport/connection-url.js';
 import { RemoteExecutorClient } from '../../../server/remote/client/executor-client.js';
 import { connectRemoteExecutor } from '../../../server/remote/__tests__/runtime-adapter.js';
@@ -82,15 +84,15 @@ test('re-adding a running worker under a new executor identity requires restarti
         const rpc = await withTimeout(session.promise, 10_000, () => worker!.logs.join('\n'));
         await rpc.transport.ready;
         const reverseCalls: string[] = [];
-        rpc.handle(async (call) => {
+        handleTestRpc(rpc, async (call) => {
           reverseCalls.push(call.method);
           return { serverInstanceId: 'synthetic-controller', defaultExecutorId: executorId, workspaceName: null };
         });
         expect(await throwingRejectionOf(discoverRuntime({ configDir: directories.config, runtime: 'executor' }))).toThrow('HTTP 503');
         expect(reverseCalls).toEqual([]);
-        const description = await rpc.call('', 'executor.describe', null);
+        const description = await rpc.call('', RPC_V1['executor.describe'], null);
         expect(description.info.executorId).toBe('22222222-2222-4222-8222-222222222222');
-        expect(await rejectionOf(rpc.call('', 'projects.inspect', { projectPath: directories.project }))).toMatchObject({ outcome: 'not-dispatched' });
+        expect(await rejectionOf(rpc.call('', RPC_V1['projects.inspect'], { projectPath: directories.project }))).toMatchObject({ outcome: 'not-dispatched' });
         rpc.retireUnknown();
         unsubscribe();
         const failure = Promise.withResolvers<string>();
