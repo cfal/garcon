@@ -126,10 +126,10 @@ describe('native transcript reload', () => {
       const sharedBeforeReload = await fixture.client.get<GetSharedChatResponse>(
         `/api/v1/shared?token=${encodeURIComponent(share.shareToken)}&limit=100`,
       );
-      expect(sharedBeforeReload.snapshot.origin).toEqual({
-        transcriptViewId: beforeDrift.transcriptViewId,
-        lastOrdinal: beforeDrift.lastOrdinal,
-      });
+      expect(Object.keys(sharedBeforeReload.snapshot).sort()).toEqual(
+        ['agentId', 'messages', 'model', 'shareToken', 'sharedAt', 'title'],
+      );
+      expect(JSON.stringify(sharedBeforeReload.snapshot.messages)).toContain('native-reload-baseline');
 
       const native = await claudeNativeSession(fixture.dirs, chatId);
       const externalContent = 'synthetic-external-native-output';
