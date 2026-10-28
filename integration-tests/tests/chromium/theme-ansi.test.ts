@@ -1,11 +1,107 @@
 import { expect, test } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Locator } from 'playwright';
 import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { AmpOracleToolUseMessage, CompactionMessage } from '../../../common/chat-types.js';
+import type { AddChatRowRequest, ChatRowTargetResponse } from '../../../common/chat-row-contracts.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 
 const ARTIFACT_DIRECTORY = join(import.meta.dirname, '../../artifacts/chromium');
+
+test('Terminal UI Style gives compaction, Oracle and other event cards consistent corners', async () => {
+  await withChromiumFixture('terminal chat row corners', async ({ page, integration, assertNoBrowserErrors }) => {
+    const chatId = integration.newChatId();
+    const started = await integration.client.startChat({
+      ...integration.client.directStartRequest({
+        chatId,
+        content: 'Synthetic review response',
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      }),
+      userMessagePresentation: { origin: 'cli', style: 'info', title: 'Oracle review response' },
+    });
+    await integration.client.waitForTurnTerminal(chatId, started.turnId);
+    await integration.client.waitForProcessing(chatId, false);
+    await integration.restartGarcon({
+      beforeStart: async () => {
+        const ledger = new TranscriptLedgerStore(join(integration.dirs.workspace, 'transcript-ledgers'));
+        try {
+          const view = ledger.currentView(chatId)!;
+          const at = '2026-01-01T00:00:00.000Z';
+          ledger.append(chatId, view.viewId, [
+            new CompactionMessage(at, 'manual', 'Synthetic compaction summary'),
+            new AmpOracleToolUseMessage(at, 'synthetic-oracle', 'Synthetic tool review'),
+          ].map((message) => ({ kind: 'provider-row' as const, at, message, providerMeta: null })));
+        } finally {
+          ledger.close();
+        }
+      },
+    });
+    const target = await integration.client.get<ChatRowTargetResponse>(
+      `/api/v1/chats/rows?chatId=${chatId}`,
+    );
+    await integration.client.post('/api/v1/chats/rows', {
+      clientRequestId: 'synthetic-review-request',
+      clientMessageId: 'synthetic-review-message',
+      chatId,
+      transcriptViewId: target.transcriptViewId,
+      presentation: { style: 'info' },
+      format: 'plain',
+      disclosure: 'collapsed',
+      title: 'Oracle review request',
+      content: 'Synthetic review instructions',
+    } satisfies AddChatRowRequest);
+    await page.addInitScript(seedLocalSettings, { combineToolUseMessages: false });
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+
+    const feed = page.getByRole('region', { name: 'Chat messages', exact: true });
+    const compaction = feed.getByRole('article').filter({ hasText: 'Context compacted' });
+    const request = feed.getByRole('article').filter({ hasText: 'Oracle review request' });
+    const tool = feed.getByRole('article').filter({ hasText: 'Oracle' }).filter({ hasNotText: 'Oracle review request' });
+    const response = feed.locator('.user-message-context-target').filter({ hasText: 'Oracle review response' });
+    const cards: { card: Locator; standardRadius: string }[] = [];
+    for (const card of [compaction, request, tool, response]) {
+      await browserExpect(card).toBeVisible();
+      const standardRadius = await card.evaluate((element) => getComputedStyle(element).borderRadius);
+      expect(parseFloat(standardRadius)).toBeGreaterThan(0);
+      cards.push({ card, standardRadius });
+    }
+
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const appearance of ['standard', 'terminal', 'standard']) {
+        await page.evaluate((terminalAppearance) => {
+          const key = 'pref_local_settings';
+          localStorage.setItem(key, JSON.stringify({
+            ...JSON.parse(localStorage.getItem(key) ?? '{}'),
+            terminalAppearance,
+          }));
+          window.dispatchEvent(new StorageEvent('storage', { key, storageArea: localStorage }));
+        }, appearance === 'terminal');
+        await browserExpect(page.locator('html')).toHaveAttribute('data-theme-appearance', appearance);
+        for (const { card, standardRadius } of cards) {
+          await browserExpect(card).toBeVisible();
+          await browserExpect(card).toHaveCSS(
+            'border-radius',
+            appearance === 'terminal' ? '0px' : standardRadius,
+          );
+        }
+        if (appearance === 'terminal') {
+          await compaction.getByRole('button', { name: 'Show summary' }).click();
+          await browserExpect(compaction.getByText('Synthetic compaction summary')).toBeVisible();
+          await browserExpect(compaction).toHaveCSS('border-radius', '0px');
+          await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
+          await page.screenshot({ path: join(ARTIFACT_DIRECTORY, `terminal-chat-rows-${width}.png`) });
+          await compaction.getByRole('button', { name: 'Hide summary' }).click();
+        }
+      }
+    }
+    assertNoBrowserErrors();
+  });
+}, 60_000);
 
 test.each([1440, 390])(
   'Terminal UI Style opens directly into an interactive workspace at %ipx',
