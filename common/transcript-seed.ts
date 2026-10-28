@@ -712,7 +712,9 @@ function extractToolDetail(message: ToolUseChatMessage): string {
     // Codex expresses shell work as exec rather than bash; without this the
     // busiest tool in a Codex transcript carried only its own name.
     case 'exec-tool-use': return message.code;
-    case 'pi-tool-search-tool-use': return message.query;
+    case 'pi-tool-search-tool-use':
+    case 'claude-tool-search-tool-use': return message.query;
+    case 'claude-monitor-tool-use': return message.description || message.command || message.webSocketUrl || '';
     case 'write-stdin-tool-use': return stringifyToolPayload(message.input);
     case 'read-tool-use':
     case 'write-tool-use': return message.filePath;

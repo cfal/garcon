@@ -74,8 +74,9 @@ import type {
 } from '../../common/prompt-refinement.js';
 import {
   normalizeScheduledPromptsSnapshot,
+  normalizeCreateScheduledPromptResponse,
   type CreateScheduledPromptRequest,
-  type ScheduledPromptsMutationResponse,
+  type CreateScheduledPromptResponse,
   type ScheduledPromptsSnapshot,
 } from '../../common/scheduled-prompts.js';
 import {
@@ -575,17 +576,11 @@ export class GarconTestClient {
 
   async createScheduledPrompt(
     request: CreateScheduledPromptRequest,
-  ): Promise<ScheduledPromptsMutationResponse> {
+  ): Promise<CreateScheduledPromptResponse> {
     const response = await this.post<unknown>('/api/v1/scheduled-prompts', request);
-    if (!response || typeof response !== 'object' || Array.isArray(response)) {
-      throw new Error(`Invalid scheduled prompt mutation response: ${JSON.stringify(response)}`);
-    }
-    const raw = response as Record<string, unknown>;
-    const snapshot = normalizeScheduledPromptsSnapshot(raw.snapshot);
-    if (raw.success !== true || !snapshot) {
-      throw new Error(`Invalid scheduled prompt mutation response: ${JSON.stringify(response)}`);
-    }
-    return { success: true, snapshot };
+    const result = normalizeCreateScheduledPromptResponse(response);
+    if (!result) throw new Error('Invalid scheduled prompt creation response');
+    return result;
   }
 
   updateSettings(patch: UpdateRemoteSettingsInput): Promise<{

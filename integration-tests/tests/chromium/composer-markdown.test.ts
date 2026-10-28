@@ -12,12 +12,12 @@ async function selectMessageFormat(page: Page, mode: 'source' | 'formatted') {
   await browserExpect(page.locator('[data-composer]')).toBeVisible();
   await page.keyboard.press('Control+,');
   const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
-  await dialog.getByRole('tab', { name: 'Interface', exact: true }).click();
+  await dialog.getByRole('tab', { name: 'Behavior', exact: true }).click();
   await dialog.getByRole('combobox', { name: 'Message format', exact: true }).selectOption(mode);
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
 }
 
-test('message format defaults to Formatted and is controlled only by persisted Interface settings', async () => {
+test('message format defaults to Formatted and is controlled only by persisted Behavior settings', async () => {
   await withChromiumFixture('composer-format-setting', async ({ page, context, integration, assertNoBrowserErrors }) => {
     const chatId = integration.newChatId();
     const turn = await integration.client.startDirectChat({
@@ -50,7 +50,7 @@ test('message format defaults to Formatted and is controlled only by persisted I
       await page.screenshot({ path: join(artifacts, `composer-settings-only-${width}.png`) });
       await page.keyboard.press('Control+,');
       const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
-      await dialog.getByRole('tab', { name: 'Interface', exact: true }).click();
+      await dialog.getByRole('tab', { name: 'Behavior', exact: true }).click();
       const format = dialog.getByRole('combobox', { name: 'Message format', exact: true });
       await browserExpect(format).toHaveValue('formatted');
       await format.scrollIntoViewIfNeeded();

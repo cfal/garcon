@@ -104,7 +104,7 @@ function scheduleDurationDomainError(error: ScheduleDurationError): ScheduledPro
   return new ScheduledPromptDomainError(definition.code, definition.message, 400);
 }
 
-export interface ScheduleInResult {
+export interface ScheduledPromptCreationResult {
   scheduledPrompt: ScheduledPrompt;
   snapshot: ScheduledPromptsSnapshot;
 }
@@ -207,19 +207,19 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     });
   }
 
-  async create(request: CreateScheduledPromptRequest): Promise<ScheduledPromptsSnapshot> {
+  async create(request: CreateScheduledPromptRequest): Promise<ScheduledPromptCreationResult> {
     const definition = this.#validateDefinition(request.scheduledPrompt);
     if (definition.target.type === 'new-chat') await this.#validateNewChatTarget(definition.target);
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
       await this.#reconcileMissed(new Date(), false);
       const now = new Date();
       const validated = this.#validateDefinition(definition, now);
-      await this.#createDefinition(validated, now, request.expectedRevision);
-      return this.#snapshot();
+      const scheduledPrompt = await this.#createDefinition(validated, now, request.expectedRevision);
+      return { scheduledPrompt: structuredClone(scheduledPrompt), snapshot: this.#snapshot() };
     });
   }
 
-  async scheduleIn(request: ScheduleInPromptRequest, fixedNow?: Date): Promise<ScheduleInResult> {
+  async scheduleIn(request: ScheduleInPromptRequest, fixedNow?: Date): Promise<ScheduledPromptCreationResult> {
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
       await this.#reconcileMissed(fixedNow ?? new Date(), false);
       const now = fixedNow ?? new Date();
@@ -248,7 +248,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     });
   }
 
-  async scheduleForChat(request: ScheduleForChatRequest, fixedNow?: Date): Promise<ScheduleInResult> {
+  async scheduleForChat(request: ScheduleForChatRequest, fixedNow?: Date): Promise<ScheduledPromptCreationResult> {
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
       const now = fixedNow ?? new Date();
       assertValidScheduleForChatRequest(request);

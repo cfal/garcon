@@ -1,5 +1,11 @@
 import { untrack } from 'svelte';
 import {
+	TYPOGRAPHY_SURFACES,
+	typographyScale,
+	typographyFontOverride,
+	type TypographyPreferences,
+} from './typography.js';
+import {
 	getThemeProfile,
 	resolveThemeId,
 	type ColorScheme,
@@ -15,6 +21,8 @@ const SYSTEM_DARK_MODE_QUERY = '(prefers-color-scheme: dark)';
 
 export interface ThemeControllerDeps {
 	readonly getPreference: () => ThemePreference;
+	readonly getTerminalAppearance: () => boolean;
+	readonly typography: TypographyPreferences;
 	readonly setTerminalPresentation: (
 		presentation: ThemeRendererPresentation & TerminalThemeColors,
 	) => void;
@@ -38,6 +46,32 @@ export class ThemeController {
 	#reportedMissingTerminalThemeIds = new Set<ThemeId>();
 
 	constructor(private readonly deps: ThemeControllerDeps) {
+		for (const { id, fontKey, sizeKey } of TYPOGRAPHY_SURFACES) {
+			$effect(() => {
+				const root = document.documentElement;
+				const attribute = `data-${id}-font`;
+				const font = this.deps.typography[fontKey];
+				if (font === 'default') root.style.removeProperty(`--${id}-font-override`);
+				else root.style.setProperty(`--${id}-font-override`, typographyFontOverride(id, font));
+				if (root.getAttribute(attribute) !== font) root.setAttribute(attribute, font);
+			});
+			$effect(() => {
+				const root = document.documentElement;
+				const size = this.deps.typography[sizeKey];
+				if (size === 'default') root.style.removeProperty(`--${id}-font-size`);
+				else root.style.setProperty(`--${id}-font-size`, `${size}px`);
+				root.style.setProperty(`--${id}-font-scale`, String(typographyScale(id, size)));
+				const attribute = `data-${id}-font-size`;
+				if (root.getAttribute(attribute) !== size) root.setAttribute(attribute, size);
+			});
+		}
+
+		$effect(() => {
+			document.documentElement.dataset.themeAppearance = this.deps.getTerminalAppearance()
+				? 'terminal'
+				: 'standard';
+		});
+
 		$effect(() => {
 			if (this.deps.getPreference().mode !== 'system') return;
 			const media = window.matchMedia(SYSTEM_DARK_MODE_QUERY);

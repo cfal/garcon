@@ -427,7 +427,7 @@
 		text-decoration: underline;
 	}
 	.composer-markdown-editor :global(code) {
-		font-family: monospace;
+		font-family: var(--interface-mono-font-override, monospace);
 		background: hsl(var(--muted));
 		border-radius: 0.25rem;
 		padding: 0.1rem 0.25rem;

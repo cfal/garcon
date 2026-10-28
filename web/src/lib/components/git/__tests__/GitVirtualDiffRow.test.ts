@@ -275,6 +275,37 @@ describe('GitVirtualDiffRow', () => {
 			expect(
 				container.querySelector('[data-git-diff-content-row]')?.classList.contains('flow-root'),
 			).toBe(true);
+			const contentRow = container.querySelector<HTMLElement>('[data-git-diff-content-row]');
+			expect(contentRow?.classList.contains('font-mono')).toBe(true);
+			expect(contentRow?.style.lineHeight).toBe('18px');
+		},
+	);
+
+	it.each(['unified', 'split'] as const)(
+		'keeps explicit %s diff sizes on content while sharing row line-height',
+		(diffMode) => {
+			const rows = buildRows(diffMode);
+			const content = renderRow(
+				rows.find((row) => !row.view.isHunkHeader)!,
+				{ fontSize: 20 },
+			);
+			const header = renderRow(
+				rows.find((row) => row.view.isHunkHeader)!,
+				{ fontSize: 20 },
+			);
+
+			for (const { container } of [content, header]) {
+				const wrapper = container.querySelector<HTMLElement>('[data-git-diff-content-row]');
+				expect(wrapper?.style.lineHeight).toBe('30px');
+				expect(wrapper?.style.fontSize).toBe('');
+				expect(wrapper?.classList.contains('font-mono')).toBe(true);
+			}
+
+			const reviewRow = content.container.querySelector<HTMLElement>('[data-git-diff-review-row]');
+			expect(reviewRow?.style.fontSize).toBe('20px');
+			expect(reviewRow?.classList.contains('typography-code-diff')).toBe(true);
+			const headerText = header.container.querySelector<HTMLElement>('span.typography-code-diff');
+			expect(headerText?.style.fontSize).toBe('16px');
 		},
 	);
 

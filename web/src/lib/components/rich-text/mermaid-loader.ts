@@ -11,7 +11,9 @@ export type MermaidThemeId = RendererThemeId;
 const BASE_MERMAID_CONFIG = {
 	startOnLoad: false,
 	securityLevel: 'strict',
-	fontFamily: 'inherit',
+	// Cached SVG label bounds must survive UI font changes and delayed font loading.
+	fontFamily:
+		'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
 	suppressErrorRendering: true,
 } as const satisfies MermaidConfig;
 

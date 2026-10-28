@@ -2,14 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
-import {
-  createIntegrationFixture,
-  type IntegrationFixture,
-} from '../../support/integration-fixture.js';
+import type { Page } from 'playwright';
+import { expect as browserExpect } from 'playwright/test';
+import { setTypography } from '../../support/typography.js';
 import { withTimeout } from '../../support/deferred.js';
-import { authenticateChromiumContext } from '../../support/chromium-fixture.js';
-import { requireCurrentWebBuild } from '../../support/web-build-gate.js';
+import { withChromiumFixture as withSharedChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
 import {
   clickWorkspaceWindowAddAction,
   collapseCanonicalFilesWindow,
@@ -31,19 +28,7 @@ const DIFF_PANE_SELECTOR = `${DETAILS_SELECTOR} [data-git-history-diff-pane]`;
 const BAND_VIEWPORT = { width: 1_000, height: 900 };
 const WIDE_VIEWPORT = { width: 1_440, height: 900 };
 const GIT_COMMAND_TIMEOUT_MS = 10_000;
-const FIXTURE_SETUP_TIMEOUT_MS = 25_000;
 const SCENARIO_TIMEOUT_MS = 50_000;
-const DIAGNOSTIC_TIMEOUT_MS = 8_000;
-const BROWSER_DISPOSE_TIMEOUT_MS = 10_000;
-const INTEGRATION_DISPOSE_TIMEOUT_MS = 30_000;
-
-interface ChromiumFixture {
-  integration: IntegrationFixture;
-  browser: Browser;
-  context: BrowserContext;
-  page: Page;
-  browserErrors: string[];
-}
 
 type MarkPhase = (phase: string) => void;
 
@@ -87,166 +72,18 @@ async function createHistoryFixture(projectPath: string): Promise<void> {
   await runGit(projectPath, ['commit', '-am', 'second revision']);
 }
 
-async function createChromiumFixture(): Promise<ChromiumFixture> {
-  // Gates on a current web build before any server or browser starts.
-  await requireCurrentWebBuild();
-  const integration = await createIntegrationFixture();
-  let browser: Browser | null = null;
-  let context: BrowserContext | null = null;
-  try {
-    browser = await chromium.launch({ headless: true });
-    context = await browser.newContext({ viewport: WIDE_VIEWPORT });
-    await authenticateChromiumContext(context, integration);
-    await context.addInitScript(() => {
-      const localSettingsKey = 'pref_local_settings';
-      try {
-        const stored = JSON.parse(globalThis.localStorage.getItem(localSettingsKey) ?? '{}');
-        const snapshot =
-          stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
-        globalThis.localStorage.setItem(
-          localSettingsKey,
-          JSON.stringify({ ...snapshot, allowDirectChats: true }),
-        );
-      } catch {
-        globalThis.localStorage.setItem(
-          localSettingsKey,
-          JSON.stringify({ allowDirectChats: true }),
-        );
-      }
-    });
-    const page = await context.newPage();
-    page.setDefaultTimeout(20_000);
-    page.setDefaultNavigationTimeout(20_000);
-    const browserErrors: string[] = [];
-    page.on('pageerror', (error) => browserErrors.push(`pageerror: ${error.message}`));
-    page.on('console', (message) => {
-      if (message.type() === 'error') browserErrors.push(`console.error: ${message.text()}`);
-    });
-    return { integration, browser, context, page, browserErrors };
-  } catch (error) {
-    await context?.close().catch(() => undefined);
-    await browser?.close().catch(() => undefined);
-    await integration.dispose().catch(() => undefined);
-    throw error;
-  }
-}
-
-async function writeDiagnostics(
-  testName: string,
-  fixture: ChromiumFixture,
-  error: unknown,
-): Promise<string> {
-  const safeName = testName
-    .replace(/[^a-z0-9_-]+/gi, '-')
-    .replace(/^-|-$/g, '')
-    .toLowerCase();
-  const prefix = join(ARTIFACT_ROOT, `${safeName || 'chromium'}-${Date.now()}`);
-  await mkdir(join(ARTIFACT_ROOT), { recursive: true });
-  await fixture.page
-    .screenshot({ path: `${prefix}.png`, fullPage: true, timeout: 3_000 })
-    .catch(() => undefined);
-  const html = await withTimeout(
-    fixture.page.content(),
-    3_000,
-    () => 'Timed out capturing Chromium page content.',
-  ).catch(() => '');
-  await writeFile(`${prefix}.html`, html).catch(() => undefined);
-  await writeFile(
-    `${prefix}.json`,
-    JSON.stringify(
-      {
-        testName,
-        error:
-          error instanceof Error
-            ? { name: error.name, message: error.message, stack: error.stack }
-            : String(error),
-        url: fixture.page.url(),
-        browserErrors: fixture.browserErrors,
-        integration: fixture.integration.diagnostics(),
-      },
-      null,
-      2,
-    ),
-  );
-  return `${prefix}.json`;
-}
-
-async function disposeChromiumFixture(fixture: ChromiumFixture): Promise<void> {
-  const results = await Promise.allSettled([
-    (async () => {
-      const errors: unknown[] = [];
-      try {
-        await withTimeout(
-          fixture.context.close(),
-          BROWSER_DISPOSE_TIMEOUT_MS / 2,
-          () => 'Timed out closing the Chromium context.',
-        );
-      } catch (error) {
-        errors.push(error);
-      }
-      try {
-        await withTimeout(
-          fixture.browser.close(),
-          BROWSER_DISPOSE_TIMEOUT_MS / 2,
-          () => 'Timed out closing the Chromium browser.',
-        );
-      } catch (error) {
-        errors.push(error);
-      }
-      if (errors.length > 0) {
-        throw new AggregateError(errors, 'Chromium browser cleanup failed.');
-      }
-    })(),
-    withTimeout(
-      fixture.integration.dispose(),
-      INTEGRATION_DISPOSE_TIMEOUT_MS,
-      () => 'Timed out closing the Garcon integration fixture.',
-    ),
-  ]);
-  const errors = results
-    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-    .map((result) => result.reason);
-  if (errors.length > 0) throw new AggregateError(errors, 'Chromium fixture cleanup failed.');
-}
-
 async function withChromiumFixture<T>(
   testName: string,
   run: (fixture: ChromiumFixture, markPhase: MarkPhase) => Promise<T>,
 ): Promise<T> {
-  const fixture = await withTimeout(
-    createChromiumFixture(),
-    FIXTURE_SETUP_TIMEOUT_MS,
-    () => `Chromium fixture setup timed out for ${testName}.`,
-  );
-  let failure: unknown;
-  let phase = 'starting scenario';
-  try {
-    return await withTimeout(
-      run(fixture, (nextPhase) => {
-        phase = nextPhase;
-      }),
-      SCENARIO_TIMEOUT_MS,
-      () => `Chromium scenario ${testName} timed out while ${phase}.`,
-    );
-  } catch (error) {
-    failure = error;
-    const artifact = await withTimeout(
-      writeDiagnostics(testName, fixture, error),
-      DIAGNOSTIC_TIMEOUT_MS,
-      () => `Chromium diagnostics timed out for ${testName}.`,
-    ).catch(() => null);
-    if (artifact && error instanceof Error) {
-      error.message = `${error.message}\nChromium diagnostics: ${artifact}`;
-    }
-    throw error;
-  } finally {
-    try {
-      await disposeChromiumFixture(fixture);
-    } catch (disposeError) {
-      if (failure === undefined) throw disposeError;
-      console.error(disposeError);
-    }
-  }
+  await mkdir(ARTIFACT_ROOT, { recursive: true });
+  return withSharedChromiumFixture(testName, (fixture, markPhase) => {
+    let phase = 'starting scenario';
+    return withTimeout(run(fixture, nextPhase => {
+      phase = nextPhase;
+      markPhase(nextPhase);
+    }), SCENARIO_TIMEOUT_MS, () => `Chromium scenario ${testName} timed out while ${phase}.`);
+  }, undefined, { composerInputMode: null, serviceWorkers: 'allow' });
 }
 
 async function waitForLayout(page: Page, layout: 'narrow' | 'wide'): Promise<void> {
@@ -456,6 +293,72 @@ describe('Chromium Git responsive presentation', () => {
       markPhase('opening the chat workspace');
       await openChatWorkspace(fixture, project, 'git-responsive-presentation-seed');
       await verifyHistoryBreakpoints(fixture, markPhase);
+
+      markPhase('checking commit diff settings at maximum Interface size');
+      const page = fixture.page;
+      await setTypography(page, {
+        interfaceFont: 'departure-mono',
+        interfaceFontSize: '20',
+      });
+      const settingsButton = page.locator('button[aria-label="Diff settings"]:visible');
+      const popover = page.locator('[data-slot="popover-content"]');
+      const selections = popover.locator('[data-slot="select-trigger"]');
+      await settingsButton.click();
+      await selections.nth(1).click();
+      await page.getByRole('option', { name: 'Unified', exact: true }).click();
+      await selections.nth(2).click();
+      await page.getByRole('option', { name: '20 lines', exact: true }).click();
+      await browserExpect(popover).not.toBeVisible();
+      for (const width of [1440, 320]) {
+        await page.setViewportSize({ width, height: 900 });
+        await settingsButton.click();
+        await browserExpect(selections.nth(1)).toContainText('Unified');
+        await browserExpect(selections.nth(2)).toContainText('20 lines');
+        if (width === 320) {
+          await selections.nth(2).evaluate((element) => {
+            const label = [...element.childNodes].find(
+              (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.includes('20 lines'),
+            );
+            if (!label) throw new Error('Expected context selection text');
+            label.textContent = '20 lines of surrounding context';
+          });
+        }
+        await browserExpect
+          .poll(() =>
+            popover.evaluate((element) => {
+              const bounds = element.getBoundingClientRect();
+              return (
+                bounds.left >= 0 &&
+                bounds.right <= innerWidth &&
+                [
+                  ...element.querySelectorAll<HTMLElement>(
+                    '[data-slot="select-trigger"]',
+                  ),
+                ].every((control) => {
+                  const rect = control.getBoundingClientRect();
+                  const range = document.createRange();
+                  range.selectNodeContents(control);
+                  const content = range.getBoundingClientRect();
+                  return (
+                    control.scrollWidth <= control.clientWidth + 1 &&
+                    rect.left >= bounds.left &&
+                    rect.right <= bounds.right &&
+                    content.top >= rect.top &&
+                    content.bottom <= rect.bottom
+                  );
+                })
+              );
+            }),
+          )
+          .toBe(true);
+        await page.screenshot({ path: join(ARTIFACT_ROOT, `commit-diff-settings-${width}.png`) });
+        await page.keyboard.press('Escape');
+      }
+      await setTypography(page, {
+        interfaceFont: 'default',
+        interfaceFontSize: 'default',
+      });
+      await page.setViewportSize(WIDE_VIEWPORT);
 
       markPhase('creating the Compare working tree change');
       await writeFile(join(project, 'review.txt'), 'working tree revision\n', 'utf8');

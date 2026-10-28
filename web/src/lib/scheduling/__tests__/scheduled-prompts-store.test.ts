@@ -66,7 +66,7 @@ describe('ScheduledPromptsStore', () => {
 
 	it('loads lazily and applies canonical mutation snapshots', async () => {
 		const get = vi.fn().mockResolvedValue(snapshot(0, []));
-		const create = vi.fn().mockResolvedValue({ success: true, snapshot: snapshot(1, ['a']) });
+		const create = vi.fn().mockResolvedValue({ success: true, scheduledPrompt: scheduledPrompt('a'), snapshot: snapshot(1, ['a']) });
 		const store = new ScheduledPromptsStore({ get, create });
 		expect(get).not.toHaveBeenCalled();
 

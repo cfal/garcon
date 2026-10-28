@@ -29,6 +29,8 @@ test('the reverse CLI allowlist accounts for every client HTTP operation and not
     getTurnReceipt: [chatId, 'synthetic'], getTicketBootstrap: [], getTicketProjectDefault: ['/synthetic'],
     listTickets: [{}], readTicket: [{ ticketId: 'synthetic' }], getTicketHistory: [{ ticketId: 'synthetic' }],
     mutateTicket: [{}],
+    getScheduledPrompts: [], createScheduledPrompt: [{}], updateScheduledPrompt: [{}],
+    setScheduledPromptEnabled: [{}], deleteScheduledPrompt: [{}],
     listExecutors: [], createExecutor: [{}], updateExecutor: ['11111111-1111-4111-8111-111111111111', {}],
     deleteExecutor: ['11111111-1111-4111-8111-111111111111'], getExecutorConnection: ['11111111-1111-4111-8111-111111111111'],
     getExecutorProviders: [], assignExecutorProvider: ['local', 'synthetic'], unassignExecutorProvider: ['local', 'synthetic'],

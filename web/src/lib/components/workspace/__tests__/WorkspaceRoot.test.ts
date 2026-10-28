@@ -1044,7 +1044,7 @@ describe('WorkspaceRoot', () => {
 			).toBe(`${height}px`);
 			const tab = container.querySelector<HTMLElement>('[role="tab"]');
 			expect(tab?.style.height).toBe(`${controlSize}px`);
-			expect(tab?.style.fontSize).toBe(`${fontSize}px`);
+			expect(tab?.style.fontSize).toBe(`calc(${fontSize}px * var(--interface-font-scale, 1))`);
 			expect(
 				container.querySelector<HTMLElement>('[data-workspace-window-resize-hit-area]')?.style.top,
 			).toBe(`${height}px`);

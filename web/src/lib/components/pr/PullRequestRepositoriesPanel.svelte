@@ -319,7 +319,7 @@
 			content: attr(data-label);
 			display: block;
 			margin-bottom: 0.25rem;
-			font-size: 0.75rem;
+			font-size: calc(0.75rem * var(--interface-font-scale, 1));
 			color: var(--muted-foreground);
 		}
 		td:first-child,

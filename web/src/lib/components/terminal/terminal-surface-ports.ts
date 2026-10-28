@@ -6,6 +6,7 @@ import type {
 	TerminalClientSession,
 	TerminalRegistry,
 } from '$lib/terminal/sessions/terminal-registry.svelte.js';
+import type { FontPreference } from '$lib/theme/fonts.js';
 import type { WorkspaceLayoutSnapshot } from '$lib/workspace/surface-types.js';
 
 export interface TerminalSurfaceRuntimePort {
@@ -17,6 +18,7 @@ export interface TerminalSurfaceRuntimePort {
 	focus(): void;
 	pasteFromClipboard(): Promise<unknown>;
 	applyFontSize(fontSize: number): void;
+	applyFontPreference(preference: FontPreference): void;
 }
 
 export interface TerminalSurfaceRegistryPort extends Pick<

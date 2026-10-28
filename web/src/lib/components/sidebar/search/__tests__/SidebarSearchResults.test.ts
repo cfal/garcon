@@ -70,6 +70,36 @@ function makeChats(count: number): ChatSessionRecord[] {
 }
 
 describe('SidebarSearchResults', () => {
+	it('retains the visible result when Interface typography grows fixed rows', async () => {
+		const view = render(SidebarSearchResults, {
+			filteredChats: makeChats(200),
+			currentTime,
+			highlightedIndex: 0,
+			onSelectChat: vi.fn(),
+			onHighlightChange: vi.fn(),
+		});
+		try {
+			await tick();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			const viewport = view.container.querySelector<HTMLElement>(
+				'[data-slot="search-dialog-results"]',
+			)!;
+			viewport.scrollTop = 1040;
+			await fireEvent.scroll(viewport);
+			document.documentElement.dataset.interfaceFontSize = '20';
+			await waitFor(() => expect(viewport.scrollTop).toBe(1490));
+			const row = view.container.querySelector<HTMLElement>('[data-search-dialog-virtual-row]')!;
+			expect(row.style.height).toBe('149px');
+			expect(row.querySelector('[data-typography-chat-list]')).toBeNull();
+			viewport.scrollTop = 1490 + 130;
+			await fireEvent.scroll(viewport);
+			document.documentElement.dataset.interfaceFontSize = 'default';
+			await waitFor(() => expect(viewport.scrollTop).toBeCloseTo(1040 + (130 / 149) * 104));
+		} finally {
+			view.unmount();
+			delete document.documentElement.dataset.interfaceFontSize;
+		}
+	});
 	afterEach(() => {
 		cleanup();
 		vi.unstubAllGlobals();

@@ -1,10 +1,11 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatTranscriptCache } from '../chat-transcript-cache.svelte';
 import { LocalChatTranscriptStorage } from '$lib/chat/transcript/chat-transcript-storage.js';
 import { UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { TranscriptMessage, TranscriptPage } from '$shared/chat-view';
 import ChatTranscriptCacheDerivedReaderTestHost from './ChatTranscriptCacheDerivedReaderTestHost.svelte';
+import * as lifetime from '$lib/utils/browser-data-lifetime';
 
 const TS = '2024-01-01T00:00:00.000Z';
 
@@ -278,6 +279,102 @@ describe('ChatTranscriptCache', () => {
 		);
 		await waitFor(() => {
 			expect(screen.getByTestId('cached-last-ordinal').textContent).toBe('2');
+		});
+	});
+
+	describe('paced persistence', () => {
+		beforeEach(() => vi.useFakeTimers());
+		afterEach(() => {
+			vi.useRealTimers();
+			vi.restoreAllMocks();
+		});
+
+		it('yields between chats and persists the latest pending draft only once per cycle', () => {
+			const storage = new LocalChatTranscriptStorage();
+			const persist = vi.spyOn(storage, 'persist');
+			const cache = new ChatTranscriptCache({ limit: 100, storage });
+			cache.replaceFromPage('chat-1', page('generation-1', [entry(1, 'one')]));
+			cache.replaceFromPage('chat-2', page('generation-2', [entry(1, 'two')]));
+			vi.advanceTimersByTime(799);
+			expect(persist).not.toHaveBeenCalled();
+			vi.advanceTimersToNextTimer();
+			expect(persist.mock.calls.map(([id]) => id)).toEqual(['chat-1']);
+
+			cache.replaceFromPage('chat-1', page('generation-1', [entry(1, 'updated one')]));
+			cache.replaceFromPage('chat-2', page('generation-2', [entry(1, 'updated two')]));
+			vi.advanceTimersToNextTimer();
+			expect(persist.mock.calls.map(([id]) => id)).toEqual(['chat-1', 'chat-2']);
+			expect(storage.restore('chat-2')?.entries).toEqual([entry(1, 'updated two')]);
+			vi.advanceTimersByTime(799);
+			expect(persist).toHaveBeenCalledTimes(2);
+			vi.advanceTimersByTime(1);
+			expect(persist.mock.calls.map(([id]) => id)).toEqual(['chat-1', 'chat-2', 'chat-1']);
+			expect(storage.restore('chat-1')?.entries).toEqual([entry(1, 'updated one')]);
+		});
+
+		it.each(['markStale', 'remove'] as const)('allows %s to cancel a draft between timer turns', (method) => {
+			const storage = new LocalChatTranscriptStorage();
+			const persist = vi.spyOn(storage, 'persist');
+			const cache = new ChatTranscriptCache({ limit: 100, storage });
+			cache.replaceFromPage('chat-1', page('generation-1', [entry(1, 'one')]));
+			cache.replaceFromPage('chat-2', page('generation-2', [entry(1, 'two')]));
+			vi.advanceTimersToNextTimer();
+			cache[method]('chat-2');
+			vi.runAllTimers();
+			expect(persist.mock.calls.map(([id]) => id)).toEqual(['chat-1']);
+			expect(storage.restore('chat-2')).toBeNull();
+		});
+
+		it('does not validate an old stored view while its replacement is pending', () => {
+			const storage = new LocalChatTranscriptStorage();
+			storage.persist('chat-1', [entry(1, 'old')], { transcriptViewId: 'old-view', nextBeforeOrdinal: null, lastOrdinal: 1 });
+			const cache = new ChatTranscriptCache({ limit: 100, storage });
+			cache.markStale('chat-1');
+			cache.replaceFromPage('chat-1', page('new-view', [entry(1, 'new')]));
+			cache.markValidated('chat-1');
+			expect(storage.restore('chat-1')).toMatchObject({ transcriptViewId: 'old-view', stale: true });
+			vi.runAllTimers();
+			expect(storage.restore('chat-1')).toMatchObject({ transcriptViewId: 'new-view', stale: false });
+		});
+
+		it('keeps memory and raw cursors intact when disk admission rejects the snapshot', () => {
+			const storage = new LocalChatTranscriptStorage();
+			const cache = new ChatTranscriptCache({ limit: 100, storage });
+			const messages = [entry(250, 'x'.repeat(300_000))];
+			cache.replaceFromPage('chat-1', {
+				...page('generation-1', messages, 300), nextBeforeOrdinal: 201, hasMore: true,
+			});
+			cache.flush();
+			expect(storage.restore('chat-1')).toBeNull();
+			expect(cache.get('chat-1')).toMatchObject({ messages, lastOrdinal: 300, nextBeforeOrdinal: 201, stale: false });
+			expect(cache.listCursors()).toEqual([{ chatId: 'chat-1', transcriptViewId: 'generation-1', lastOrdinal: 300 }]);
+		});
+
+		it('fences a document retired between timer turns', () => {
+			const storage = new LocalChatTranscriptStorage();
+			const cache = new ChatTranscriptCache({ limit: 100, storage });
+			cache.replaceFromPage('chat-1', page('generation-1', [entry(1, 'one')]));
+			cache.replaceFromPage('chat-2', page('generation-2', [entry(1, 'two')]));
+			vi.advanceTimersToNextTimer();
+			const stored = localStorage.getItem('chat_snapshot_chat-1');
+			vi.spyOn(lifetime, 'canPersistBrowserData').mockReturnValue(false);
+			vi.runAllTimers();
+			expect(localStorage.getItem('chat_snapshot_chat-1')).toBe(stored);
+			expect(localStorage.getItem('chat_snapshot_chat-2')).toBeNull();
+		});
+
+		it('synchronously flushes the remainder and cancels the timer continuation', () => {
+			const storage = new LocalChatTranscriptStorage();
+			const persist = vi.spyOn(storage, 'persist');
+			const cache = new ChatTranscriptCache({ limit: 100, storage });
+			cache.replaceFromPage('chat-1', page('generation-1', [entry(1, 'one')]));
+			cache.replaceFromPage('chat-2', page('generation-2', [entry(1, 'two')]));
+			vi.advanceTimersToNextTimer();
+			cache.flush();
+			expect(persist).toHaveBeenCalledTimes(2);
+			expect(vi.getTimerCount()).toBe(0);
+			vi.runAllTimers();
+			expect(persist).toHaveBeenCalledTimes(2);
 		});
 	});
 });

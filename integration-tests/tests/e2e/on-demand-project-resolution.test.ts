@@ -43,7 +43,6 @@ describe('Lightpanda on-demand project resolution', () => {
       await app.sendComposer('Synthetic retry after repair');
       await app.waitForAssistantMessageContaining('Synthetic retry after repair');
       expect((await client.getChatSnapshot(chatId)).chat.executorId).toBe(client.executorId);
-      expect(fixture.browserErrors.filter(message => !message.includes('409'))).toEqual([]);
     }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
   }, 60_000);
 

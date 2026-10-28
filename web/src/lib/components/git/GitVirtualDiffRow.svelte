@@ -160,13 +160,15 @@
 {#if row.kind === 'unified-row'}
 	<div
 		class="flow-root font-mono"
-		style:font-size={`${fontSize}px`}
 		style:line-height={`${rowLineHeight}px`}
 		data-git-diff-content-row
 	>
 		{#if row.view.isHunkHeader}
 			<div class="flex items-center gap-2 px-2 py-1 text-muted-foreground {row.view.bgClass}">
-				<span class="min-w-0 flex-1 truncate" style:font-size={`${headerFontSize}px`}>
+				<span
+					class="typography-code-diff min-w-0 flex-1 truncate"
+					style:font-size={`${headerFontSize}px`}
+				>
 					{row.view.row.beforeText}
 				</span>
 				{#if workbenchControls && row.actionTarget}
@@ -190,7 +192,8 @@
 			{@const defaultTarget = row.view.rowContextTarget}
 			<div
 				data-git-diff-review-row
-				class="group/diff-cell relative grid select-none {workbenchControls
+				style:font-size={`${fontSize}px`}
+				class="typography-code-diff group/diff-cell relative grid select-none {workbenchControls
 					? 'grid-cols-[2rem_3rem_3rem_minmax(0,1fr)]'
 					: 'grid-cols-[3rem_3rem_minmax(0,1fr)]'} {row.view.bgClass}"
 			>
@@ -339,13 +342,15 @@
 {:else}
 	<div
 		class="flow-root font-mono"
-		style:font-size={`${fontSize}px`}
 		style:line-height={`${rowLineHeight}px`}
 		data-git-diff-content-row
 	>
 		{#if row.view.isHunkHeader}
 			<div class="flex items-center gap-2 bg-diff-hunk-header px-2 py-1 text-muted-foreground">
-				<span class="min-w-0 flex-1 truncate" style:font-size={`${headerFontSize}px`}>
+				<span
+					class="typography-code-diff min-w-0 flex-1 truncate"
+					style:font-size={`${headerFontSize}px`}
+				>
 					{row.view.row.headerText}
 				</span>
 				{#if workbenchControls && row.actionTarget}
@@ -366,7 +371,11 @@
 				{/if}
 			</div>
 		{:else}
-			<div data-git-diff-review-row class="grid grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)]">
+			<div
+				data-git-diff-review-row
+				style:font-size={`${fontSize}px`}
+				class="typography-code-diff grid grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)]"
+			>
 				{#each splitCellViews(row.view) as cellView, index (index)}
 					<div
 						class="group/diff-cell grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] {cellView?.bgClass ??

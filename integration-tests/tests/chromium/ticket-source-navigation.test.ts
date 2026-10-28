@@ -88,7 +88,7 @@ test('a reload between lookup and page load opens the chat without reusing the o
     await page.locator('[data-chat-scroll-viewport]').waitFor();
     expect(requests).toBe(1);
     expect(await page.locator(`[data-chat-row-id="${target.transcriptViewId}:${target.ordinal}"]`).count()).toBe(0);
-    expect(browserErrors.filter((error) => !error.includes('409 (Conflict)'))).toEqual([]);
+    expect(browserErrors.splice(0)).toEqual(['console.error: Failed to load resource: the server responded with a status of 409 (Conflict)']);
   }, async ({ page }) => ({
     requests,
     messageUrls,

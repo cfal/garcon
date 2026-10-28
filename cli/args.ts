@@ -13,6 +13,7 @@ import {
 import { parseChatId, type ChatId } from '@garcon/common/chat-id';
 import { isAgentId, type AgentId } from '@garcon/common/agents';
 import { isExecutorId } from '@garcon/common/executors';
+import { SCHEDULED_PROMPT_RUN_LOG_LIMIT } from '@garcon/common/scheduled-prompts';
 import {
   parseChatRowTitle,
 } from '@garcon/common/chat-row-contracts';
@@ -81,6 +82,7 @@ import { CHAT_TITLE_MAX_BYTES, isChatTitleWithinLimit } from '@garcon/common/cha
 import { SHARED_PARSE_OPTIONS } from './shared-options.js';
 import { TICKET_PARSE_OPTIONS, TICKET_STRING_OPTIONS, parseTicketCliCommand, type TicketCliCommand } from './ticket-args.js';
 import { EXECUTOR_PARSE_OPTIONS, EXECUTOR_STRING_OPTIONS, parseExecutorCliCommand, type ExecutorCliCommand } from './executor-args.js';
+import { parseScheduleCliCommand, type ScheduleCliCommand } from './schedule-args.js';
 
 const ADD_ROW_PRESENTATION_REQUIREMENT = [
   ...CLI_PRESET_PRESENTATION_STYLES.map((style) => `--type ${style}`),
@@ -88,6 +90,7 @@ const ADD_ROW_PRESENTATION_REQUIREMENT = [
 ].join(' or ');
 
 export const CLI_HELP = `Usage:
+  garcon-cli [connection options] schedule <list|show|history|create|update|enable|disable|delete> [schedule-id] [options]
   garcon-cli [connection options] executor <list|show|create|update|enable|disable|delete|connection|wait|providers|assign-provider|unassign-provider> [executor-id] [options]
   garcon-cli [connection options] ticket <create|list|read|update|claim|release|close|reopen|comment|comment-edit|comment-delete|link|unlink|history> [ticket-id] [options]
   garcon-cli [options] start [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
@@ -134,6 +137,18 @@ uses notice; a style without a title displays its CLI label. --color selects cus
 --collapsible starts the CLI-authored body collapsed without requiring a style.
 Ordinary restart, replay, shares, and frozen forks preserve it. Native-history
 Reload and provider-native fork segments may drop Garcon-only presentation.
+
+Schedule management:
+  list|show <id> [--json]        Full definitions and collection revision (list takes no ID)
+  history [id] [--limit 1..${SCHEDULED_PROMPT_RUN_LOG_LIMIT}] [--json]  Recent dispatches, not agent completion; cleared on restart
+  create --definition <json|-> [--expected-revision N] [--json]
+  update <id> --definition <json|-> --expected-revision N [--json]
+  enable|disable|delete <id> --expected-revision N [--json]
+  Definitions use minute-aligned UTC timestamps and complete existing-chat or new-chat targets.
+  New-chat targets require explicit executorId and an absolute executor-local projectPath.
+  Use --definition - for bounded UTF-8 stdin. Updates replace one definition and preserve its pause.
+  No automatic mutation retries; inspect schedules after an unknown outcome. Pausing does not stop claimed work.
+  History retains the latest ${SCHEDULED_PROMPT_RUN_LOG_LIMIT} workspace dispatches in memory (default limit 50).
 
 Executor management:
   list|show <id> [--json]        Redacted configuration and readiness (list takes no ID)
@@ -532,10 +547,12 @@ export type ParsedCliCommand =
   | ReadCliCommand
   | TicketCliCommand
   | ExecutorCliCommand
+  | ScheduleCliCommand
   | StartAsyncCliInvocation
   | CliInvocation;
 
 const SINGLE_STRING_OPTIONS = [
+  'definition',
   ...TICKET_STRING_OPTIONS,
   ...EXECUTOR_STRING_OPTIONS,
   'config-dir',
@@ -1522,6 +1539,7 @@ export function parseCliArgs(
         ...SHARED_PARSE_OPTIONS,
         ...TICKET_PARSE_OPTIONS,
         ...EXECUTOR_PARSE_OPTIONS,
+        definition: { type: 'string' },
         'config-dir': { type: 'string' },
         runtime: { type: 'string' },
         server: { type: 'string' },
@@ -1624,6 +1642,7 @@ export function parseCliArgs(
   if (commandName === undefined) throw argumentError('a command is required');
   if (commandName === 'ticket') return parseTicketCliCommand(parsed.positionals, values, connection, currentDirectory);
   if (commandName === 'executor') return parseExecutorCliCommand(parsed.positionals, values, connection, currentDirectory);
+  if (commandName === 'schedule') return parseScheduleCliCommand(parsed.positionals, values, connection);
   if (commandName === 'resume-async') return parseResumeAsync(parsed, values, connection);
   if (commandName === 'fork' || commandName === 'fork-async') {
     return parseFork(commandName, parsed, values, connection);

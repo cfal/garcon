@@ -182,7 +182,9 @@
 								<ComposerModeIcon iconId={option.iconId} class="mt-0.5 size-4" />
 								<div class="min-w-0">
 									<div class="font-medium">{option.label}</div>
-									<div class="text-xs text-muted-foreground">{option.description}</div>
+									<div data-menu-description class="text-xs text-muted-foreground">
+										{option.description}
+									</div>
 								</div>
 							</DropdownMenuItem>
 						{/each}
@@ -225,6 +227,7 @@
 								<div class="min-w-0">
 									<div class="font-medium">{option.label}</div>
 									<div
+										data-menu-description
 										class={option.rainbow ? 'text-xs text-white' : 'text-xs text-muted-foreground'}
 									>
 										{option.description}

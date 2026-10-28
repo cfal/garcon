@@ -1,6 +1,5 @@
 import packageJson from '../package.json' with { type: 'json' };
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import { CLI_HELP, parseCliArgs, type CliConnectionOptions, type ParsedCliCommand } from './args.js';
 import { runCatalogQuery } from './catalog-query.js';
 import { resumeChatAsync, stopChat } from './chat-control.js';
@@ -36,6 +35,7 @@ import {
 } from './automation-output.js';
 import { discoverRuntime } from './discovery.js';
 import { CliError } from './errors.js';
+import { isAbsoluteExecutorPath } from './executor-path.js';
 import { GarconClient } from './garcon-client.js';
 import { createCliOutput, type CliOutput } from './output.js';
 import { applyTicketStdin, runTicketCommand } from './ticket-commands.js';
@@ -43,6 +43,9 @@ import { terminalLine } from './terminal-output.js';
 import { readTicketStdin } from './ticket-stdin.js';
 import { applyExecutorConnectionStdin, readExecutorConnectionStdin } from './executor-args.js';
 import { runExecutorCommand } from './executor-commands.js';
+import { applyScheduleDefinitionStdin } from './schedule-args.js';
+import { readScheduleDefinitionStdin } from './schedule-definition.js';
+import { runScheduleCommand } from './schedule-commands.js';
 import { requireCompletedTurnReceipt, writeTerminalResult } from './terminal-receipt.js';
 
 export interface MainOptions {
@@ -139,8 +142,7 @@ async function canonicalProjectDirectory(cwd: string): Promise<string> {
 }
 
 function remoteProjectDirectory(cwd: string | undefined): string {
-  if (cwd === undefined || cwd.includes('\0') || !(path.posix.isAbsolute(cwd)
-    || /^[a-z]:[\\/]/iu.test(cwd) || /^\\\\[^\\]+\\[^\\]+(?:\\|$)/u.test(cwd))) {
+  if (!isAbsoluteExecutorPath(cwd)) {
     throw new CliError('arguments', 'cross-executor starts require an explicit absolute --cwd on the selected executor', 2);
   }
   return cwd;
@@ -233,6 +235,7 @@ export async function main(
   let command: ParsedCliCommand | undefined;
   let ticketSubmissionStarted = false;
   let executorSubmissionStarted = false;
+  let scheduleSubmissionStarted = false;
   let forkTargetChatId: string | undefined;
   try {
     command = parseCliArgs(argv);
@@ -242,6 +245,17 @@ export async function main(
     }
     if (command.kind === 'version') {
       process.stdout.write(`${packageJson.version}\n`);
+      return 0;
+    }
+    if (command.kind === 'schedule') {
+      let scheduleCommand = command;
+      if (command.readsDefinitionFromStdin) {
+        const definition = await readConfiguredStdin(options,
+          (signal) => readScheduleDefinitionStdin(Bun.stdin.stream(), signal));
+        scheduleCommand = applyScheduleDefinitionStdin(command, definition);
+      }
+      const { client, command: connected } = await connectedClient(scheduleCommand, options);
+      await runScheduleCommand(connected, client, output, options.signal, () => { scheduleSubmissionStarted = true; });
       return 0;
     }
     if (command.kind === 'executor') {
@@ -518,13 +532,27 @@ export async function main(
     return 0;
   } catch (error) {
     if (options.signal?.aborted) {
-      output.diagnostic(command?.kind === 'executor'
-        ? executorSubmissionStarted ? 'terminal interrupted; executor configuration may have committed. Inspect before retrying.' : 'terminal interrupted; no executor mutation was submitted'
-        : command?.kind === 'ticket'
-        ? ticketSubmissionStarted
-          ? 'terminal interrupted; the ticket save is not confirmed. Retry with the printed identity and identical body.'
-          : 'terminal interrupted; no ticket mutation was submitted'
-        : interruptDiagnostic(command, forkTargetChatId));
+      let diagnostic: string;
+      switch (command?.kind) {
+        case 'schedule':
+          diagnostic = scheduleSubmissionStarted
+            ? 'terminal interrupted; schedule mutation may have committed. Inspect schedules before retrying.'
+            : 'terminal interrupted; no schedule mutation was submitted';
+          break;
+        case 'executor':
+          diagnostic = executorSubmissionStarted
+            ? 'terminal interrupted; executor configuration may have committed. Inspect before retrying.'
+            : 'terminal interrupted; no executor mutation was submitted';
+          break;
+        case 'ticket':
+          diagnostic = ticketSubmissionStarted
+            ? 'terminal interrupted; the ticket save is not confirmed. Retry with the printed identity and identical body.'
+            : 'terminal interrupted; no ticket mutation was submitted';
+          break;
+        default:
+          diagnostic = interruptDiagnostic(command, forkTargetChatId);
+      }
+      output.diagnostic(diagnostic);
       return 130;
     }
     const cliError = error instanceof CliError

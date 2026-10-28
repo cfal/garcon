@@ -74,6 +74,61 @@ function dispatcher(routes: RouteMap) {
   return new ControllerCliDispatcher({ routes, serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false });
 }
 
+test('schedule forwarding requires explicit new-chat executors and excludes unrelated browser operations', () => {
+  for (const operation of ['POST /api/v1/scheduled-prompts', 'PUT /api/v1/scheduled-prompts'] as const) {
+    for (const executorId of [undefined, null, '', 'invalid']) {
+      const target = { type: 'new-chat', ...(executorId === undefined ? {} : { executorId }) };
+      expect(() => parseControllerCliRequest(request(operation, { scheduledPrompt: { target } }))).toThrow();
+    }
+    for (const target of [{ type: 'new-chat', executorId: 'local' }, { type: 'new-chat', executorId: CLI_EXECUTOR_ID },
+      { type: 'existing-chat', chatId: '1000000000000001' }]) {
+      const input = request(operation, { scheduledPrompt: { target } });
+      expect(parseControllerCliRequest(input)).toEqual(input);
+    }
+  }
+  for (const [method, pathname] of [['POST', '/api/v1/scheduled-prompts/in'], ['PUT', '/api/v1/scheduled-prompts/reorder'],
+    ['PATCH', '/api/v1/scheduled-prompts'], ['POST', '/api/v1/scheduled-prompts/enabled']]) {
+    expect(() => cliRoute(method!, pathname!)).toThrow();
+  }
+  for (const [operation, policy] of Object.entries(CLI_OPERATIONS).filter(([key]) => key.includes('/scheduled-prompts'))) {
+    expect(policy).toEqual({ lane: 'bulk', pool: 'short', timeoutMs: 30_000, management: false, mutation: !operation.startsWith('GET ') });
+  }
+});
+
+test.each([false, true])('schedule snapshot bounds preserve read/mutation outcomes: mutation=%s', async (mutation) => {
+  let calls = 0;
+  const handler = () => { calls++; return Response.json({ prompts: ['x'.repeat(CLI_REPLY_BYTES)] }); };
+  const pair = cliPair(dispatcher({ '/api/v1/scheduled-prompts': { GET: handler, DELETE: handler } }), undefined, undefined,
+    () => { throw new DomainError('CLI_ACCESS_DENIED', 'Management denied', 403); });
+  try {
+    await expect(pair.worker.call('', 'controllerCli.request', request(mutation ? 'DELETE /api/v1/scheduled-prompts' : 'GET /api/v1/scheduled-prompts',
+      mutation ? { expectedRevision: 0, id: 'synthetic' } : null)))
+      .rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_RESULT_TOO_LARGE' });
+    expect(calls).toBe(1);
+    await expect(pair.primary.worker.call('', 'controllerCli.request', request('GET /api/v1/scheduled-prompts')))
+      .rejects.toThrow('wrong lane');
+  } finally { pair.close(); }
+});
+
+test('schedule reply revocation cannot roll back a committed mutation or authorize its late reply', async () => {
+  const committed = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let revoked = false;
+  let writes = 0;
+  const pair = cliPair(dispatcher({ '/api/v1/scheduled-prompts/enabled': { PUT: async () => {
+    writes++; committed.resolve(); await release.promise;
+    return Response.json({ success: true });
+  } } }), () => { if (revoked) throw new DomainError('CLI_ACCESS_DENIED', 'Revoked', 403); });
+  const pending = pair.worker.call('', 'controllerCli.request', request('PUT /api/v1/scheduled-prompts/enabled', { expectedRevision: 0, id: 'synthetic', enabled: false }));
+  try {
+    await committed.promise;
+    revoked = true;
+    release.resolve();
+    await expect(pending).rejects.toMatchObject({ code: 'CLI_OUTCOME_UNKNOWN' });
+    expect(writes).toBe(1);
+  } finally { release.resolve(); pair.close(); }
+});
+
 test('restricted envelope rejects unknown routes, implicit Local targets, privileged settings and encoded oversize', () => {
   for (const value of [
     { ...request(), principal: { mode: 'local' } },

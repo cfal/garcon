@@ -1,11 +1,10 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { Switch } from '$lib/components/ui/switch/index.js';
 	import { getLocalSettings } from '$lib/context';
 	import {
 		COMPLETION_SOUND_MODE_VALUES,
-		COMPLETION_SOUND_VISIBILITY_VALUES,
 		type CompletionSoundMode,
-		type CompletionSoundVisibility,
 	} from '$lib/stores/local-settings.svelte.js';
 	import {
 		CUSTOM_COMPLETION_SOUND_ACCEPT,
@@ -28,21 +27,12 @@
 		default: m.settings_completion_sound_default,
 		custom: m.settings_completion_sound_custom,
 	};
-	const visibilityLabels: Record<CompletionSoundVisibility, () => string> = {
-		always: m.settings_completion_sound_always,
-		unfocused: m.settings_completion_sound_unfocused,
-	};
 
 	function setMode(value: string): void {
 		if (!COMPLETION_SOUND_MODE_VALUES.includes(value as CompletionSoundMode)) return;
 		const mode = value as CompletionSoundMode;
 		ls.set('completionSoundMode', mode);
 		if (mode !== 'off') void unlockCompletionSound();
-	}
-
-	function setVisibility(value: string): void {
-		if (!COMPLETION_SOUND_VISIBILITY_VALUES.includes(value as CompletionSoundVisibility)) return;
-		ls.set('completionSoundVisibility', value as CompletionSoundVisibility);
 	}
 
 	function validationMessage(code: string): string {
@@ -103,13 +93,13 @@
 	<h3 class="py-2 text-sm font-medium text-foreground">{m.settings_completion_sound_title()}</h3>
 	<p class="pb-2 text-xs text-muted-foreground">{m.settings_completion_sound_description()}</p>
 
-	<div class="flex items-center justify-between gap-4 py-2">
+	<div class="flex flex-wrap items-center justify-between gap-2 py-2">
 		<label class="text-sm font-medium text-foreground" for="completion-sound-mode">
 			{m.settings_completion_sound_label()}
 		</label>
 		<select
 			id="completion-sound-mode"
-			class="select-native w-36 text-base sm:pointer-fine:text-sm"
+			class="select-native w-full min-w-0 text-base sm:pointer-fine:text-sm @xl:w-auto @xl:shrink-0"
 			value={ls.completionSoundMode}
 			onchange={(event) => setMode((event.currentTarget as HTMLSelectElement).value)}
 		>
@@ -173,20 +163,16 @@
 	</div>
 
 	<div class="flex items-center justify-between gap-4 py-2">
-		<label class="text-sm font-medium text-foreground" for="completion-sound-visibility">
-			{m.settings_completion_sound_when()}
+		<label class="min-w-0 text-sm font-medium text-foreground" for="completion-sound-visibility">
+			{m.settings_completion_sound_unfocused()}
 		</label>
-		<select
+		<Switch
 			id="completion-sound-visibility"
-			class="select-native w-48 max-w-[55%] text-base sm:pointer-fine:text-sm"
-			value={ls.completionSoundVisibility}
+			checked={ls.completionSoundVisibility === 'unfocused'}
 			disabled={ls.completionSoundMode === 'off'}
-			onchange={(event) => setVisibility((event.currentTarget as HTMLSelectElement).value)}
-		>
-			{#each COMPLETION_SOUND_VISIBILITY_VALUES as visibility (visibility)}
-				<option value={visibility}>{visibilityLabels[visibility]()}</option>
-			{/each}
-		</select>
+			onCheckedChange={(checked) =>
+				ls.set('completionSoundVisibility', checked ? 'unfocused' : 'always')}
+		/>
 	</div>
 
 	<div class="flex justify-end py-2">

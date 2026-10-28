@@ -16,6 +16,19 @@ const commitFile = { ...baseFile, status: 'modified', rawStatus: 'M' };
 const document = { ...scope, status: 'ready', project: '/repo', documentId: 'document-test', limits, firstBodyCandidates: [] };
 const revision = { kind: 'revision', requestedRevision: 'HEAD', label: 'HEAD', hash: 'a'.repeat(40), shortHash: 'aaaaaaa' };
 
+test('quick summaries require presence flags and distinguish unavailable totals from zero', () => {
+  const ready = { ...scope, status: 'ready', project: '/repo', branch: 'main', hasChanges: true, hasUntracked: true, diffStats: null };
+  for (const diffStats of [null, { additions: 0, deletions: 0 }, { additions: 42, deletions: 7 }]) {
+    expect(() => validateGitResult('getQuickSummary', { ...ready, diffStats }, scope)).not.toThrow();
+  }
+  for (const invalid of [{ hasChanges: 1 }, { hasUntracked: undefined }, { diffStats: undefined }, { diffStats: { additions: 1 } }]) {
+    expect(() => validateGitResult('getQuickSummary', { ...ready, ...invalid }, scope)).toThrow();
+  }
+  for (const status of ['unknown', 'not-git-repository']) {
+    expect(() => validateGitResult('getQuickSummary', { ...scope, project: '/repo', status, message: 'Unavailable' }, scope)).not.toThrow();
+  }
+});
+
 test('comparison failures validate only the fields required by their status', () => {
   for (const result of [
     { status: 'not-found', endpoint: 'from', revision: 'missing', message: 'Not found' },

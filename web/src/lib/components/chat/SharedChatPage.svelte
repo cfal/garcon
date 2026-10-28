@@ -253,7 +253,7 @@
 				</div>
 			</div>
 		{:else}
-			<div class="space-y-1">
+			<div class="space-y-1" data-chat-feed-content>
 				{#if nextBefore !== null || olderPageError}
 					<div class="flex items-center gap-2 py-2 text-xs text-muted-foreground">
 						<div class="h-px flex-1 bg-border/70"></div>
@@ -312,9 +312,12 @@
 											disclosure={userMessageBodyDisclosure(userPresentation)}
 											previewHeight={userPresentation?.style ? 'default' : 'tall'}
 										>
-											<div class={userPresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
+											<div
+												class={['typography-chat-prose text-sm', userPresentation?.style && 'mt-1']}
+											>
 												{#if isPlainTextInput(message)}
-													<pre class="whitespace-pre-wrap break-words font-mono">{message.content}</pre>
+													<pre
+														class="typography-chat-plain whitespace-pre-wrap break-words font-mono">{message.content}</pre>
 												{:else}
 												<Markdown
 													source={message.content}
@@ -392,7 +395,7 @@
 							{:else if message instanceof ErrorMessage}
 								<ChatEventCard variant="error">
 									{#snippet body()}
-										<div class="text-sm whitespace-pre-wrap break-words">
+										<div class="typography-chat-prose text-sm whitespace-pre-wrap break-words">
 											{message.content}
 										</div>
 									{/snippet}

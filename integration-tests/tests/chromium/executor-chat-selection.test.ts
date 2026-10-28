@@ -158,7 +158,7 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
       expect(JSON.parse(failure.body)).toMatchObject({ success: false, errorCode: 'PROJECT_PATH_CHANGED' });
     }
     expect(consoleErrorUrls.sort()).toEqual(failures.map(failure => failure.url).sort());
-    expect(browserErrors).toEqual(failures.map(() =>
+    expect(browserErrors.splice(0)).toEqual(failures.map(() =>
       'console.error: Failed to load resource: the server responded with a status of 409 (Conflict)',
     ));
   }, async () => ({ failedResponses: await Promise.all(failedResponses) }),

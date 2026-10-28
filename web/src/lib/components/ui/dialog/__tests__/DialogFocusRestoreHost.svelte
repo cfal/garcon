@@ -6,7 +6,10 @@
 
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
-	let { claimFocusOnClose = false }: { claimFocusOnClose?: boolean } = $props();
+	let {
+		claimFocusOnClose = false,
+		showCloseButton = false,
+	}: { claimFocusOnClose?: boolean; showCloseButton?: boolean } = $props();
 	let open = $state(false);
 	let outsideFocusTarget: HTMLButtonElement;
 
@@ -20,7 +23,7 @@
 
 <Dialog.Root bind:open>
 	<Dialog.Trigger>Open focus dialog</Dialog.Trigger>
-	<Dialog.Content showCloseButton={false} onCloseAutoFocus={handleCloseAutoFocus}>
+	<Dialog.Content {showCloseButton} onCloseAutoFocus={handleCloseAutoFocus}>
 		<Dialog.Title>Focus restore dialog</Dialog.Title>
 		<button type="button">Dialog action</button>
 	</Dialog.Content>

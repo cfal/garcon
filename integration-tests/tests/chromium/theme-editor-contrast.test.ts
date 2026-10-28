@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { captureBrowserErrors } from '../../support/browser-errors.js';
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "playwright";
@@ -65,6 +66,7 @@ async function readRenderedEditorColors(
   return page.locator("#editor").evaluate(async (root, fixtureTheme) => {
     const documentRoot = document.documentElement;
     documentRoot.dataset.theme = fixtureTheme.profileId;
+    documentRoot.dataset.themeAppearance = 'terminal';
     documentRoot.classList.toggle("dark", fixtureTheme.colorScheme === "dark");
 
     interface MountedEditor {
@@ -234,6 +236,8 @@ describe("CodeMirror theme contrast", () => {
       });
     }
     const page = await context.newPage();
+    const browserErrors: string[] = [];
+    captureBrowserErrors(page.context(), browserErrors);
     await page.route(`${APP_URL}**`, async (route) => {
       const pathname = new URL(route.request().url()).pathname;
       if (pathname === "/editor-fixture.js") {
@@ -347,6 +351,7 @@ describe("CodeMirror theme contrast", () => {
         };
         root.replaceChildren();
         document.documentElement.dataset.theme = "lagoon-dark";
+        document.documentElement.dataset.themeAppearance = "standard";
         const view = scope.mountEditor(root, "semantic-dark");
         view.focus();
         await new Promise(requestAnimationFrame);
@@ -395,6 +400,7 @@ describe("CodeMirror theme contrast", () => {
       )) {
         await page.evaluate(async (profile) => {
           document.documentElement.dataset.theme = profile.id;
+          document.documentElement.dataset.themeAppearance = 'terminal';
           document.documentElement.classList.toggle(
             "dark",
             profile.colorScheme === "dark",
@@ -500,6 +506,7 @@ describe("CodeMirror theme contrast", () => {
           (globalThis as DiffEditorScope).diffEditor.destroy(),
         );
       }
+      expect(browserErrors).toEqual([]);
     } finally {
       await context.close();
       await browser.close();

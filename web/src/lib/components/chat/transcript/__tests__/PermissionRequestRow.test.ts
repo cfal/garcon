@@ -70,7 +70,9 @@ describe('PermissionRequestRow', () => {
 		await fireEvent.click(screen.getByRole('radio', { name: /Careful/ }));
 
 		expect(submit.disabled).toBe(false);
-		expect(screen.getByText('<pre>careful</pre>')).toBeTruthy();
+		expect(screen.getByText('<pre>careful</pre>').classList.contains('typography-chat-code')).toBe(
+			true,
+		);
 
 		await fireEvent.click(submit);
 

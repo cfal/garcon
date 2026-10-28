@@ -284,6 +284,138 @@ directory validation and canonicalization, including when `--executor` is explic
 `resume`, `resume-async`, `fork`, and all other existing-chat commands retain the
 chat's saved executor and reject `--executor`. Target selection does not move chats.
 
+## Scheduled Prompts
+
+`schedule` manages the same controller-owned definitions as **Scheduled prompts**
+in the browser. It works through direct controller HTTP and authorized executor
+gateways, without the executor-management grant.
+
+```sh
+garcon-cli schedule list --json
+garcon-cli schedule show <schedule-id> --json
+garcon-cli schedule history [schedule-id] --limit 50 --json
+garcon-cli schedule create --definition - --json < definition.json
+garcon-cli schedule update <schedule-id> --definition - --expected-revision 7 --json < definition.json
+garcon-cli schedule disable <schedule-id> --expected-revision 8 --json
+garcon-cli schedule enable <schedule-id> --expected-revision 9 --json
+garcon-cli schedule delete <schedule-id> --expected-revision 10 --json
+```
+
+IDs are exact schedule UUIDs, not names or chat IDs. Read the collection revision
+from `list` or `show`; update, enable, disable, and delete require it explicitly.
+Creation accepts an optional `--expected-revision` and otherwise reads one
+baseline before submitting once. Revision zero is valid. Firings, missed-run
+reconciliation, and unrelated edits also advance the collection revision, so a
+conflict requires a fresh read and a deliberate new decision, not automatic
+rebasing. Even a read can reconcile missed occurrences.
+
+`--definition` accepts inline JSON or `-` for stdin on the CLI host. Prefer stdin
+for private prompt text. Both inputs are limited to 256 KiB of valid UTF-8 JSON;
+the encoded mutation request is limited to 512 KiB. Unknown fields are rejected.
+Definition fields are `name` (optional), `schedule`, `target`, and `prompt`.
+Stored-record fields such as `id`, `enabled`, `nextRunAt`, and `createdAt` cannot
+be supplied. Definitions are not snapshots: update replaces one definition,
+preserving its ID, creation time, and paused state, not the whole collection.
+
+An existing-chat definition (replace the sample chat ID):
+
+```json
+{
+  "name": "Daily status",
+  "schedule": {
+    "type": "recurring",
+    "firstRunAtUtc": "2099-01-01T09:00:00.000Z",
+    "intervalMinutes": 1440,
+    "endAtUtc": null
+  },
+  "target": {
+    "type": "existing-chat",
+    "chatId": "1000000000000001",
+    "busyBehavior": "skip"
+  },
+  "prompt": "Report the current status."
+}
+```
+
+An existing-chat target uses that chat's executor and current confirmed cwd,
+never the CLI origin. `busyBehavior` is required: `queue` admits ordinary
+process-local queued input; `skip` drops a busy occurrence. Literal/Shell targets
+capture agent, ownership epoch, and model. Same-chat edits preserve that guard;
+recreate intentionally after a mode change. Literal whitespace and slash-leading
+text are preserved, and scheduled input never invokes composer app commands.
+
+A one-off new Shell Notes chat (replace the project path):
+
+```json
+{
+  "schedule": { "type": "once", "runAtUtc": "2099-01-01T09:00:00.000Z" },
+  "target": {
+    "type": "new-chat",
+    "executorId": "local",
+    "agentId": "shell",
+    "projectPath": "/absolute/project/path",
+    "model": "notes",
+    "apiProviderId": null,
+    "modelEndpointId": null,
+    "modelProtocol": null,
+    "permissionMode": "default",
+    "thinkingMode": "none",
+    "agentSettingsById": {
+      "shell": { "ownerId": "shell", "schemaVersion": 1, "values": {} }
+    },
+    "tags": [],
+    "preambleChoice": { "mode": "defaults" },
+    "chatTitleTemplate": "Scheduled note {{current_date}}"
+  },
+  "prompt": "Synthetic scheduled note"
+}
+```
+
+New-chat targets require an explicit `executorId`, either `local` or an executor
+UUID, even through that executor's own gateway. No execution defaults are
+inferred. Discover exact provider/agent/model/settings values before constructing
+other targets. `projectPath` must be absolute on the target host, including when
+targeting another executor. Paths are sent unchanged: no local `realpath`, `~`
+expansion, or controller-side interpretation of a worker path. The target must
+be ready when creating or updating a new-chat definition so the controller can
+validate execution modes, project existence, and preamble scope. Reads, enable,
+disable, and delete do not need a ready target; a disconnected gateway origin
+still cannot access the controller and never falls back to Local.
+
+Times must be canonical, minute-aligned UTC strings ending in `:00.000Z`, with
+the first run at least the controller's next minute. Recurrence intervals are
+whole minutes from 1 through 5,256,000 (3,650 days); `endAtUtc` is inclusive or
+null. Updates require a complete future schedule, including for overdue paused
+tasks. No relative dates, cron expressions, or timezone rules are accepted.
+New definitions start enabled. Pausing/deleting affects future occurrences, not
+already claimed, running, or queued work. Missed occurrences and failed
+dispatches are not retried. Definitions persist; queued inputs do not.
+
+JSON output is one object on stdout, with diagnostics on stderr. List returns
+`{revision, prompts}`; show/create/update/enable/disable return
+`{revision, scheduledPrompt}`; delete returns `{revision, id, deleted:true}`.
+Human list output is a table; detailed records use JSON even without `--json`.
+Returned new-chat records omit `executorId` for Local; a replacement definition
+must still state `"executorId":"local"` explicitly.
+History returns `{revision, retention:"controller-process", capacity:200, runLog}`,
+newest first. `--limit` defaults to 50 and accepts 1 through 200. The log retains
+only the latest 200 workspace-wide dispatch outcomes, cleared on controller
+restart. It is not agent-completion history. Filtering by a deleted schedule ID
+is valid; one-offs disappear after firing or being missed.
+
+Mutations are submitted once. A lost/malformed/oversized reply or interruption
+after submission can mean the mutation committed. Inspect schedules before
+retrying; a fresh revision is not a deduplication key. Exit codes are 0 for
+confirmed success, 2 for invalid CLI input, 3 for domain/transport/conflict or
+unknown outcome, and 130 for interruption.
+
+The existing API returns a full snapshot even for mutations. Large catalogs can
+exceed the gateway's 8 MiB reply limit: reads fail, and mutation outcomes become
+unknown. Client-side history limits do not reduce the wire payload. No run-now,
+reorder, attachments, snippet expansion, or durable history is provided. In-band
+`<garcon-schedule>` remains a separate current-chat creation interface over the
+same scheduler; CLI management does not add an action wrapper to prompt text.
+
 ## Tickets
 
 Tickets belong to the selected Garcon workspace, independently of chats and Git. All commands use the authenticated server API; the CLI never opens the ticket database or starts an agent.

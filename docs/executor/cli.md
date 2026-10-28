@@ -257,7 +257,7 @@ require explicit contract and authorization tests; a route prefix never grants
 access to all routes beneath it.
 
 Ordinary workspace CLI access covers chat commands, catalogs, search, metadata,
-tickets, and redacted executor listing. Executor administration, connection
+tickets, scheduled prompts, and redacted executor listing. Executor administration, connection
 credential reveal, and provider assignment operations additionally require the
 separate default-off `allowExecutorManagement` grant. Provider credential
 administration, authentication/account routes, and Files/Git/Terminal APIs remain
@@ -272,6 +272,24 @@ exceed reply bounds until renamed. Protocol revision 12 requires matched
 controller and worker builds for these forwarded-contract changes.
 
 Ticket project inference is implemented on the selected executor at current HEAD. Send the context default executor with the CLI directory and reuse that resolver. Do not expand commands merely because their browser APIs exist.
+
+Schedule management forwards exactly `GET`, `POST`, `PUT`, and `DELETE`
+`/api/v1/scheduled-prompts`, plus `PUT /api/v1/scheduled-prompts/enabled`.
+All five use bulk, the short pool, a 30-second deadline, and ordinary workspace
+CLI authority (`management:false`). GET is classified as a read despite its
+idempotent missed-occurrence housekeeping. `/in` and `/reorder` remain excluded.
+POST/PUT new-chat definitions must carry an explicit valid nested
+`scheduledPrompt.target.executorId`, including `local`; neither gateway nor
+dispatcher substitutes a default. Protocol revision 35 requires matching builds.
+POST returns `{success:true, scheduledPrompt, snapshot}` with the created record
+and snapshot captured under the same scheduler lock. Other mutations retain
+`{success:true, snapshot}`. No storage migration is needed.
+
+Schedule mutations use collection-wide revision checks and no automatic retries
+or gateway replay. Full snapshots retain the 8 MiB reply bound; an oversized
+mutation acknowledgement is an unknown outcome, not proof of rejection. History
+is only the latest 200 process-local dispatch outcomes. See
+[Scheduled Prompts](../cli.md#scheduled-prompts) for inputs and recovery rules.
 
 ## Execution Targeting
 
@@ -288,6 +306,9 @@ Origin and target are different identities. Origin is derived from the authentic
 | Read/search/status/wait/stop | Keep the explicit chat identity and existing ownership/control fences; no caller-executor filter or retargeting. |
 | Export/handoff output file | Write where the CLI runs, never on the controller by interpreting the requested output path remotely. |
 | Ticket project inference | Send the context default executor and CLI directory to the existing resolver. |
+| New-chat schedule create/update | Require an explicit executor and absolute target-local project path in the JSON definition. Preserve path bytes; the selected executor validates readiness, modes, and project scope. No origin-derived defaults. |
+| Existing-chat schedules | Use the saved chat's executor and current confirmed cwd; retain literal selection guards on same-chat edits. |
+| Schedule list/show/history/enable/disable/delete | Controller-side operations, available without target readiness. The gateway origin still needs a healthy authorized connection. |
 
 Require explicit executor fields for bridged executor-sensitive requests where omission would otherwise mean Local. Do not repair them by blindly rewriting every executor or path at the gateway. The context default is not an authorization ceiling: an existing chat may legitimately belong to another executor. New cross-executor selection flags are not required to make this bridge useful.
 

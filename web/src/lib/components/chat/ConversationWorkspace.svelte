@@ -641,7 +641,7 @@
 		const executorId = sessions.byId[chatId]?.executorId ?? 'local';
 		if (!executors.gitAvailable(executorId)) return;
 		const projectPath = sessions.byId[chatId]?.projectPath;
-		if (!projectPath || !quickGit.summaryFor({ executorId, projectPath })) return;
+		if (!projectPath) return;
 		const target = { executorId, projectPath };
 		const commit = singletonSurfaces.commit();
 		if (!commit.target.selectProject(target) && !sameGitProject(commit.target.requestTarget, target)) {

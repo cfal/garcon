@@ -19,7 +19,7 @@
 	});
 </script>
 
-<div class="px-4 py-3">
+<div>
 	<fieldset>
 		<legend class="text-sm font-medium text-foreground">{m.settings_theme_title()}</legend>
 		<div class="mt-2 flex flex-wrap gap-x-5 gap-y-2">

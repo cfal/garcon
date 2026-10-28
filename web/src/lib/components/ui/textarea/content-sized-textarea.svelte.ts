@@ -1,4 +1,5 @@
 import { untrack } from 'svelte';
+import { observeFontChanges } from '$lib/theme/fonts.js';
 import type { Attachment } from 'svelte/attachments';
 import type { HTMLTextareaAttributes } from 'svelte/elements';
 
@@ -61,8 +62,15 @@ export function contentSizedTextarea(
 		observer.observe(target);
 		// A breakpoint can change the font size while the field keeps its width.
 		window.addEventListener('resize', scheduleResize);
+		// Switching to an already loaded font need not resize the field's width.
+		const stopObservingFonts = observeFontChanges(target.ownerDocument, scheduleResize, [
+			'data-theme-appearance',
+			'data-interface-font',
+			'data-interface-font-size',
+		]);
 		return () => {
 			observer.disconnect();
+			stopObservingFonts();
 			window.removeEventListener('resize', scheduleResize);
 			if (frame !== null) cancelAnimationFrame(frame);
 			target.style.height = initialHeight;

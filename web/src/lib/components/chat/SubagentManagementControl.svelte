@@ -34,7 +34,9 @@
 
 	const rootEntry = $derived(model.entries.find((entry) => entry.kind === 'root'));
 	const triggerStyle = $derived(
-		sizing ? `height: ${sizing.controlHeightPx}px; font-size: ${sizing.fontSizePx}px;` : undefined,
+		sizing
+			? `height: ${sizing.controlHeightPx}px; font-size: calc(${sizing.fontSizePx}px * var(--interface-font-scale, 1));`
+			: undefined,
 	);
 	const iconStyle = $derived(
 		sizing ? `height: ${sizing.iconSizePx}px; width: ${sizing.iconSizePx}px;` : undefined,
@@ -96,7 +98,9 @@
 						'flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] leading-none',
 						statusTone(summaryStatus),
 					)}
-					style:font-size={sizing ? `${Math.max(9, sizing.fontSizePx - 4)}px` : undefined}
+					style:font-size={sizing
+						? `calc(${Math.max(9, sizing.fontSizePx - 4)}px * var(--interface-font-scale, 1))`
+						: undefined}
 				>
 					<span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
 					<span class="text-muted-foreground">{model.subagents.length}</span>

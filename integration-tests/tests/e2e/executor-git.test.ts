@@ -481,7 +481,7 @@ test('Git views reload and stage on the worker after its process restarts', asyn
     expect((await staged).status()).toBe(200);
     expect(await runFixtureGit(executionDirs.project, 'show', ':example.txt')).toBe('After worker restart\n');
     expect(await fixture.spaWebSocketConnectionCount()).toBe(connections);
-    expect(fixture.browserErrors.filter(message => message.startsWith('pageerror:'))).toEqual([]);
+    fixture.assertNoBrowserErrors();
   }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 90_000);
 

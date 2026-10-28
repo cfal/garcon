@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
@@ -31,6 +32,8 @@
 		onToggleCollapsed,
 	}: PullRequestVirtualDiffSurfaceProps = $props();
 
+	const localSettings = getLocalSettings();
+	const fontSize = $derived(Number(localSettings.gitDiffFontSize) || 12);
 	const readOnlyInteraction = { kind: 'read-only' as const };
 </script>
 
@@ -59,7 +62,7 @@
 			</div>
 		{/if}
 	{:else if row.kind === 'unified-row' || row.kind === 'split-row'}
-		<GitVirtualDiffRow {row} fontSize={12} interaction={readOnlyInteraction} />
+		<GitVirtualDiffRow {row} {fontSize} interaction={readOnlyInteraction} />
 	{/if}
 {/snippet}
 
@@ -68,7 +71,7 @@
 	reviewDocumentId={documentId}
 	{source}
 	pinFileHeaders={false}
-	fontSize={12}
+	{fontSize}
 	scrollToRequest={null}
 	onBodyDemand={() => undefined}
 	rowSnippet={renderRow}

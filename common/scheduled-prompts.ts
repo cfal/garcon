@@ -1,4 +1,5 @@
 import type { ApiProtocol } from './api-providers.js';
+import { stableJsonStringify } from './json.js';
 import { parseExecutorId, LOCAL_EXECUTOR_ID } from './executors.js';
 import {
   isPermissionMode,
@@ -183,6 +184,10 @@ export interface ScheduledPromptsMutationResponse {
   snapshot: ScheduledPromptsSnapshot;
 }
 
+export interface CreateScheduledPromptResponse extends ScheduledPromptsMutationResponse {
+  scheduledPrompt: ScheduledPrompt;
+}
+
 export interface ScheduleInPromptRequest {
   chatId: string;
   duration: string;
@@ -190,11 +195,7 @@ export interface ScheduleInPromptRequest {
   expectedSelection?: ScheduledPromptExecutionSelection;
 }
 
-export interface ScheduleInPromptResponse {
-  success: true;
-  scheduledPrompt: ScheduledPrompt;
-  snapshot: ScheduledPromptsSnapshot;
-}
+export type ScheduleInPromptResponse = CreateScheduledPromptResponse;
 
 export const SCHEDULED_PROMPTS_INVALIDATION_REASONS = [
   'created',
@@ -532,6 +533,17 @@ export function normalizeScheduledPromptsSnapshot(value: unknown): ScheduledProm
 function isRunLogPromptLabel(value: unknown, scheduledPromptId: string | null): value is string | null {
   if (scheduledPromptId === null) return value === null;
   return typeof value === 'string' && value.length <= SCHEDULED_PROMPT_LABEL_MAX_LENGTH;
+}
+
+export function normalizeCreateScheduledPromptResponse(value: unknown): CreateScheduledPromptResponse | null {
+  const raw = asRecord(value);
+  if (raw?.success !== true) return null;
+  const scheduledPrompt = normalizeScheduledPrompt(raw.scheduledPrompt);
+  const snapshot = normalizeScheduledPromptsSnapshot(raw.snapshot);
+  if (!scheduledPrompt || !snapshot) return null;
+  const stored = snapshot.prompts.find((entry) => entry.id === scheduledPrompt.id);
+  if (!stored || stableJsonStringify(stored) !== stableJsonStringify(scheduledPrompt)) return null;
+  return { success: true, scheduledPrompt, snapshot };
 }
 
 function isScheduledPromptRunOutcome(value: unknown): value is ScheduledPromptRunOutcome {

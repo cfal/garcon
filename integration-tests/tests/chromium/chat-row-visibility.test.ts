@@ -355,8 +355,8 @@ async function expectComposerStable(page: Page, value: string): Promise<void> {
   expect(Math.abs(snapshot.distanceFromEnd)).toBeLessThanOrEqual(1);
 }
 
-function assertOnlyExpectedReconnectErrors(errors: readonly string[]): void {
-  expect(errors.filter((error) => (
+function assertOnlyExpectedReconnectErrors(errors: string[]): void {
+  expect(errors.splice(0).filter((error) => (
     !EXPECTED_RECONNECT_BROWSER_ERRORS.some((pattern) => pattern.test(error))
   ))).toEqual([]);
 }

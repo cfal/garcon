@@ -34,6 +34,7 @@ describe('ThemeSettingsCard', () => {
 				'Moss Light',
 				'Paper Light',
 				'Slate Light',
+				'ANSI Light',
 			],
 		);
 		expect([...darkSelect.querySelectorAll('option')].map((option) => option.textContent)).toEqual([
@@ -47,6 +48,7 @@ describe('ThemeSettingsCard', () => {
 			'Moss Dark',
 			'Paper Dark',
 			'Slate Dark',
+			'ANSI Dark',
 		]);
 		localSettings.destroy();
 	});

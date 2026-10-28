@@ -60,7 +60,7 @@ describe('SubagentManagementControl', () => {
 
 		const trigger = screen.getByRole('button', { name: /Agents/ });
 		expect(trigger.style.height).toBe('38px');
-		expect(trigger.style.fontSize).toBe('16px');
+		expect(trigger.style.fontSize).toBe('calc(16px * var(--interface-font-scale, 1))');
 		expect(trigger.querySelector('svg')?.getAttribute('style')).toContain('height: 17px');
 	});
 

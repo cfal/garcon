@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { isRecord } from '../../../common/json.js';
 import {
   assistantContents,
   messagesOfType,
@@ -6,6 +7,7 @@ import {
 } from '../../support/chat-assertions.js';
 import {
   codexAssistantMessage,
+  codexCodeModeCall,
   codexExecCommandCall,
   type CodexScriptedFault,
 } from '../../support/fake-codex-model.js';
@@ -94,6 +96,78 @@ describe('Codex against a scripted model', () => {
       prepareWorkspace: testEnvironment.prepareWorkspace,
     });
   });
+
+  test('executes Terra Code Mode tools using its published Responses Lite metadata', async () => {
+    if (!environment) throw new Error('Scripted Codex environment was not initialized.');
+    const testEnvironment = environment;
+    const marker = 'SCRIPTED_TERRA_COMMAND_OUTPUT';
+    const reply = 'SCRIPTED_TERRA_COMMAND_FINISHED';
+    const requestIndex = testEnvironment.model.requests().length;
+    testEnvironment.model.scriptTurn([codexCodeModeCall(
+      'call_terra_exec',
+      `text((await tools.exec_command({cmd: "printf ${marker}"})).output);`,
+    )]);
+    testEnvironment.model.scriptTurn((request) => {
+      const items = Array.isArray(request.body.input) ? request.body.input : [];
+      const output = items.find((item) => isRecord(item)
+        && item.type === 'custom_tool_call_output' && item.call_id === 'call_terra_exec');
+      if (!isRecord(output)) throw new Error('Terra Code Mode output is missing.');
+      expect(JSON.stringify(output.output)).toContain(marker);
+      return [codexAssistantMessage(reply)];
+    });
+
+    await withIntegrationFixture('codex-scripted-terra-code-mode', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat({
+        ...liveCodexStartRequest({
+          chatId,
+          projectPath: fixture.dirs.project,
+          command: 'Run the scripted Terra command.',
+          permissionMode: 'bypassPermissions',
+        }),
+        model: 'gpt-6.1-terra',
+        thinkingMode: 'none',
+      });
+      await waitForVisibleResponse({
+        fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor,
+      });
+
+      const { messages } = await fixture.client.getMessages(chatId);
+      const commands = messagesOfType(messages, 'bash-tool-use')
+        .filter((message) => message.command.includes(`printf ${marker}`));
+      expect(commands).toHaveLength(1);
+      const results = messagesOfType(messages, 'tool-result')
+        .filter((message) => message.toolId === commands[0]?.toolId);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.isError).toBe(false);
+      expect(JSON.stringify(results[0]?.content)).toContain(marker);
+      expect(assistantContents(messages).filter((content) => content === reply)).toHaveLength(1);
+
+      const requests = testEnvironment.model.requests().slice(requestIndex);
+      expect(requests).toHaveLength(2);
+      for (const request of requests) {
+        expect(request.body).toMatchObject({
+          model: 'gpt-6.1-terra',
+          reasoning: { effort: 'low', context: 'all_turns' },
+          parallel_tool_calls: false,
+        });
+        expect(request.body).not.toHaveProperty('tools');
+        expect(request.body.input).toEqual(expect.arrayContaining([
+          expect.objectContaining({ type: 'additional_tools', role: 'developer' }),
+        ]));
+      }
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: {
+        ...testEnvironment.serverEnvironment,
+        OPENAI_API_KEY: 'garcon-scripted-terra-catalog-key',
+      },
+      prepareWorkspace: (directories) => testEnvironment.prepareWorkspace(directories, {
+        useFixtureModelCatalog: false,
+      }),
+    });
+  }, 120_000);
 
   test('holds a model request while the chat remains processing', async () => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');

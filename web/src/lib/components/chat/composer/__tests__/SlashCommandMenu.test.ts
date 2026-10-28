@@ -29,6 +29,27 @@ function deferred<T>() {
 }
 
 describe('SlashCommandMenu', () => {
+	it('grows described command rows with Interface text', async () => {
+		const view = render(SlashCommandMenuTestHost, {
+			...baseProps,
+			isVisible: true,
+			query: '',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		try {
+			const option = screen.getByText('/compact').closest<HTMLElement>('[role="option"]')!;
+			expect(option.style.height).toBe('48px');
+			document.documentElement.dataset.interfaceFontSize = '20';
+			await waitFor(() => expect(option.style.height).toBe('69px'));
+			expect(view.container.querySelector('ul')?.style.height).toBe(
+				`${Number(option.getAttribute('aria-setsize')) * 69}px`,
+			);
+		} finally {
+			view.unmount();
+			delete document.documentElement.dataset.interfaceFontSize;
+		}
+	});
 	beforeEach(() => {
 		mockedGetSlashCommands.mockReset();
 	});

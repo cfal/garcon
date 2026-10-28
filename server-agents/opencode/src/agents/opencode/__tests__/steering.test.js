@@ -167,27 +167,26 @@ function createRuntime(overrides = {}) {
   const abort = overrides.abort ?? mock(() => Promise.resolve({ data: true }));
   const revert = overrides.revert ?? mock(() => Promise.resolve({ data: {} }));
   const close = mock(() => undefined);
+  const client = {
+    permission: { reply: mock(() => Promise.resolve({})) },
+    global: { event: mock(({ signal }) => Promise.resolve({ stream: eventStream.stream(signal) })) },
+    session: {
+      create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+      prompt,
+      promptAsync: submitAsync,
+      abort,
+      revert,
+    },
+  };
+  const createInstance = mock(() => Promise.resolve({ client, server: { close } }));
   const runtime = new OpenCodeRuntime({
     requestTimeoutMs: overrides.requestTimeoutMs,
     idleRetirementDelayMs: overrides.idleRetirementDelayMs,
     idleRetirementCheckIntervalMs: overrides.idleRetirementCheckIntervalMs,
     now: overrides.now,
-    createInstance: mock(() => Promise.resolve({
-      client: {
-        permission: { reply: mock(() => Promise.resolve({})) },
-        global: { event: mock(({ signal }) => Promise.resolve({ stream: eventStream.stream(signal) })) },
-        session: {
-          create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
-          prompt,
-          promptAsync: submitAsync,
-          abort,
-          revert,
-        },
-      },
-      server: { close },
-    })),
+    createInstance,
   });
-  return { runtime, eventStream, promptAsync, abort, revert, close };
+  return { runtime, eventStream, promptAsync, abort, revert, close, client, createInstance };
 }
 
 async function start(runtime, overrides = {}) {
@@ -635,6 +634,118 @@ describe('OpenCodeRuntime steering', () => {
       fixture.eventStream.close();
       await fixture.runtime.shutdown();
       timers.restore();
+    }
+  });
+
+  it.each([
+    ['resume', 'before'], ['compact', 'before'],
+    ['resume', 'after'], ['compact', 'after'],
+  ])('fences %s cleanup when the replacement starts %s quiescence settles', async (admission, replacementTiming) => {
+    const termination = deferred();
+    const retired = deferred();
+    const abortEntered = deferred();
+    const abortResult = deferred();
+    const promptEntered = deferred();
+    const promptResult = deferred();
+    const fixture = createRuntime({ abort: mock(() => {
+      abortEntered.resolve();
+      return abortResult.promise;
+    }) });
+    fixture.close.mockImplementation(() => retired.resolve());
+    fixture.client.session.summarize = mock(() => Promise.resolve({}));
+    const replacementRevert = mock(() => Promise.resolve({}));
+    const replacementPrompt = mock(() => {
+      promptEntered.resolve();
+      return promptResult.promise;
+    });
+    const replacement = {
+      client: {
+        ...fixture.client,
+        global: { event: mock(() => Promise.resolve({ stream: (async function* () {
+          yield connectedEnvelope();
+          await new Promise(() => {});
+        })() })) },
+        session: { ...fixture.client.session, revert: replacementRevert, prompt: replacementPrompt },
+      },
+      server: { close() {} },
+    };
+    fixture.createInstance
+      .mockImplementationOnce(() => Promise.resolve({
+        client: fixture.client,
+        server: { close: fixture.close, termination: termination.promise },
+      }))
+      .mockImplementation(() => Promise.resolve(replacement));
+    const { runtime, eventStream, promptAsync } = fixture;
+    try {
+      const published = await start(runtime);
+      await bindPrompt(eventStream, promptAsync, 0, 'hello');
+      const target = await waitForTarget(runtime);
+      const steering = runtime.steering.steer(steerRequest(target));
+      await waitFor(() => promptAsync.mock.calls.length === 2);
+      eventStream.push(envelope({
+        id: 'evt_0003', type: 'message.part.updated',
+        properties: { sessionID: 'session-1', part: {
+          id: promptAsync.mock.calls[1][0].parts[0].id,
+          messageID: 'user-steer', type: 'text', text: '/review the current approach',
+        } },
+      }));
+      expect(await steering).toEqual({ kind: 'accepted' });
+      pushAbortedAssistant(eventStream, {
+        messageId: 'assistant-aborted', parentId: 'user-1', eventNumber: 4,
+      });
+      await waitFor(() => terminalEvents(published.events).length === 1);
+      const staleOperation = collectOperation('run-stale');
+      const request = {
+        command: 'recover', agentSessionId: 'session-1', chatId: 'chat-1',
+        projectPath: '/repo', model: 'provider/model', permissionMode: 'default',
+      };
+      const stale = (admission === 'resume'
+        ? runtime.runTurn({ ...request, operation: staleOperation.operation })
+        : runtime.compact({ ...request, operation: staleOperation.operation })
+      ).then(() => null, (error) => error);
+      await abortEntered.promise;
+      termination.resolve({ kind: 'exit', code: null, signal: 'SIGKILL' });
+      await retired.promise;
+      let staleFailure;
+      if (replacementTiming === 'after') {
+        abortResult.resolve({ data: true });
+        staleFailure = await stale;
+        expect(fixture.revert).not.toHaveBeenCalled();
+      }
+      const successorOperation = collectOperation('run-successor');
+      const successor = runtime.runTurn({ ...request, operation: successorOperation.operation });
+      await promptEntered.promise;
+      expect(replacementRevert).toHaveBeenCalledWith(expect.objectContaining({
+        sessionID: 'session-1', messageID: 'user-steer', directory: '/repo',
+      }), expect.any(Object));
+      expect(replacementRevert.mock.invocationCallOrder[0]).toBeLessThan(
+        replacementPrompt.mock.invocationCallOrder[0],
+      );
+      if (replacementTiming === 'before') {
+        abortResult.resolve({ data: true });
+        staleFailure = await stale;
+      }
+      expect(staleFailure).toMatchObject({
+        message: 'OpenCode server process was retired while the request was in flight',
+      });
+      expect(fixture.revert).not.toHaveBeenCalled();
+      expect(fixture.client.session.summarize).not.toHaveBeenCalled();
+      expect(promptAsync).toHaveBeenCalledTimes(2);
+      expect(staleOperation.events).toEqual([]);
+      expect(runtime.isRunning('session-1')).toBe(true);
+      promptResult.resolve({ data: {
+        info: {
+          id: 'assistant-successor', role: 'assistant', parentID: 'user-successor',
+          sessionID: 'session-1', finish: 'stop', time: { completed: Date.now() },
+        }, parts: [],
+      } });
+      await successor;
+      expect(terminalEvents(successorOperation.events)).toEqual([{
+        type: 'run-ended', runId: 'run-successor', outcome: 'finished',
+      }]);
+    } finally {
+      eventStream.close();
+      await runtime.shutdown();
     }
   });
 

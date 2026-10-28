@@ -5,7 +5,3 @@ export type FontSizeOption = (typeof FONT_SIZE_OPTIONS)[number];
 export function isFontSizeOption(value: unknown): value is FontSizeOption {
 	return typeof value === 'string' && FONT_SIZE_OPTIONS.includes(value as FontSizeOption);
 }
-
-export function parseFontSizeOption(value: unknown, fallback: FontSizeOption): FontSizeOption {
-	return isFontSizeOption(value) ? value : fallback;
-}

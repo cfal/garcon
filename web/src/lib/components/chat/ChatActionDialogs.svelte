@@ -250,7 +250,7 @@
 					<ChatDetailsTextField
 						label={m.sidebar_details_first_message()}
 						value={chatDetailsDialog?.firstMessage ?? null}
-						surfaceClass="h-32 max-h-[40vh]"
+						surfaceClass="typography-chat-source [--chat-source-default-size:12px] h-32 max-h-[40vh]"
 					/>
 				</div>
 			</div>

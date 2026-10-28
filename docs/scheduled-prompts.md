@@ -6,7 +6,23 @@ Pausing prevents future dispatches. A run already claimed, started, or queued co
 
 When a recurring prompt resumes, its next run uses the first future slot on its original cadence. Occurrences during the pause are skipped without catch-up dispatches or missed-run log entries. An overdue paused one-off needs a future run time before enabling; an expired recurring prompt needs an updated end date. Editing a paused prompt keeps it paused.
 
-The controller owns enablement in `scheduled-prompts.json`. Records without an `enabled` field load as enabled. `PUT /api/v1/scheduled-prompts/enabled` accepts `{ expectedRevision, id, enabled }` and returns the existing mutation snapshot envelope. Revision conflicts require refresh; the browser retains the saved switch value until persistence succeeds. This route is browser-facing and does not change the CLI forwarding allowlist or executor RPC contract.
+The controller owns enablement in `scheduled-prompts.json`. Records without an `enabled` field load as enabled. `PUT /api/v1/scheduled-prompts/enabled` accepts `{ expectedRevision, id, enabled }` and returns the existing mutation snapshot envelope. Revision conflicts require refresh; the browser retains the saved switch value until persistence succeeds. The same handlers serve browser, direct CLI, and authorized executor-gateway requests.
+
+## CLI Management
+
+`garcon-cli schedule` supports list, show, history, create, update, enable,
+disable, and delete. Creation and single-definition replacement accept JSON;
+edits, toggles, and deletion require an explicit collection revision. See the
+[CLI guide](cli.md#scheduled-prompts) for complete definitions and examples.
+New-chat definitions require an explicit executor and a ready target at save
+time. Reads and enable/disable/delete remain available while a target is offline.
+
+Definitions persist, but run history is only the latest 200 workspace-wide
+dispatch outcomes in the current controller process. Queued inputs are also
+process-local. A saved or queued occurrence is not proof of eventual execution.
+Unknown mutation outcomes must be inspected before retrying; the CLI never
+automatically resubmits. In-band `<garcon-schedule>` remains current-chat creation
+only, while the CLI manages schedules across the workspace.
 
 ## Literal Chat Targets
 
@@ -30,7 +46,8 @@ creating a new schedule does.
 `agentId`, nullable `agentOwnershipEpoch`, and nullable `model`. The composer
 sends its displayed literal selection; a stale selection is rejected before
 saving. Existing-chat schedule targets retain the same optional typed field.
-These browser/controller fields do not change executor RPC or CLI forwarding.
+The CLI forwards these guards through the general creation/update routes;
+the browser-only `/in` convenience route is not forwarded.
 
 `/in` remains a one-off, busy-skip operation, using the current confirmed cwd
 when it fires. A paused queue also skips it. Template substitution still applies,
