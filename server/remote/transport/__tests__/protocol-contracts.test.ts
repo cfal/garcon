@@ -41,6 +41,7 @@ test('registration rejects wrong directions, duplicates and one-sided bidirectio
 
 test('registrations cannot omit prerequisites or a guaranteed creator event', () => {
   expect(() => createRoleContracts('controller', { ...empty, clients: [rpcWireV1('lifecycle.start')] })).toThrow('Incomplete flat requirements');
+  expect(() => createRoleContracts('controller', { ...empty, clients: [rpcWireV1('terminals.create')] })).toThrow('Incomplete flat requirements');
   const binding = rpcWireV1('producers.bind');
   const { rows: _rows, ...codecs } = binding.producer!.codecs;
   expect(() => createRoleContracts('controller', { ...empty, clients: [{ ...binding,
@@ -49,6 +50,41 @@ test('registrations cannot omit prerequisites or a guaranteed creator event', ()
   const { 'terminal-output': _output, ...terminalCodecs } = attachment.terminal!.codecs;
   expect(() => createRoleContracts('controller', { ...empty, clients: [{ ...attachment,
     terminal: { ...attachment.terminal!, codecs: terminalCodecs } }] })).toThrow('Incomplete creator codecs');
+});
+
+test.each(['sender', 'receiver'] as const)('terminal creation requires termination at the %s without blocking lists', async boundary => {
+  const protocol = testSessionProtocol();
+  const { 'terminals.terminate': _unsupported, ...contracts } = protocol.profile.contracts;
+  const profile = { ...protocol.profile, contracts };
+  const left = new TestSessionTransport('synthetic-session', 'synthetic-worker', () => {}, {}, 'local', 'primary', 'synthetic-session',
+    { ...protocol, profile: boundary === 'sender' ? profile : protocol.profile });
+  const right = new WorkerSessionTransport('synthetic-session', 'synthetic-controller', () => {}, {}, 'local', 'primary', 'synthetic-session',
+    { ...testSessionProtocol('local', 'worker'), profile: boundary === 'receiver' ? profile : protocol.profile });
+  const sent: { method?: string; seq?: number }[] = [];
+  const leftSocket = left.attach({ send(payload) {
+    sent.push(JSON.parse(payload));
+    queueMicrotask(() => rightSocket.receive(payload));
+  }, close() {} });
+  const rightSocket = right.attach({ send(payload) { queueMicrotask(() => leftSocket.receive(payload)); }, close() {} });
+  const client = new ExecutorRpc(left);
+  const journal = new RpcReplyJournal();
+  const received = spyOn(journal, 'received');
+  const server = new ExecutorRpc(right, { journal });
+  const invoked: string[] = [];
+  const inventory = { success: true, terminals: [] } as const;
+  handleTestRpc(server, async call => { invoked.push(call.method); return inventory; });
+  const authority = { key: 'synthetic-user', expiresAtMs: null };
+  try {
+    await expect(client.call('', RPC_V1['terminals.create'], { authority, requestId: 'synthetic-create', requestedInitialWorkingDirectory: null }))
+      .rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', outcome: 'not-dispatched' });
+    expect(invoked).toEqual([]);
+    expect(received).not.toHaveBeenCalled();
+    expect(sent).toHaveLength(boundary === 'sender' ? 0 : 1);
+    await expect(client.call('', RPC_V1['terminals.list'], { authority })).resolves.toEqual(inventory);
+    expect(invoked).toEqual(['terminals.list']);
+    expect(sent.at(-1)).toMatchObject({ method: 'terminals.list', seq: boundary === 'sender' ? 1 : 2 });
+    expect(left.connected && right.connected).toBe(true);
+  } finally { left.close(); right.close(); journal.dispose(); received.mockRestore(); }
 });
 
 test('unsupported outgoing methods consume neither admission nor a sequence', async () => {
