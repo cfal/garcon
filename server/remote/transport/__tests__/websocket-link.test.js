@@ -1,12 +1,14 @@
+import { TestWebSocketLink as WebSocketLink } from '../../__tests__/test-session-transport.js';
 import { expect, test } from 'bun:test';
 import { connectNoiseWebSocket } from '@cfal/noise-ws';
-import { WebSocketLink, EXECUTOR_NOISE_CONTEXT, shouldLogLinkFailure } from '../websocket-link.ts';
-import { EXECUTOR_PROTOCOL, selectProtocol } from '../protocol-compatibility.ts';
+import { EXECUTOR_NOISE_CONTEXT, shouldLogLinkFailure } from '../websocket-link.ts';
+import { testRoleContracts } from '../../__tests__/test-session-transport.js';
+const EXECUTOR_PROTOCOL = testRoleContracts('controller').offer;
 import { version as packageVersion } from '../../../../package.json';
 import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.ts';
 import { faultyNoiseListener } from '../../__tests__/noise-socket-faults.ts';
 import { connectWithOwnRole, connectWithWrongKey, openSilentSocket, sendMalformedRecord } from '../../__tests__/failing-peers.ts';
-import { primaryHello, signedProof } from '../../__tests__/link-hello.ts';
+import { primaryHello, selectedDecision, signedProof } from '../../__tests__/link-hello.ts';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
 
@@ -31,26 +33,26 @@ function primaryClosure({ lane, sessionId, primarySessionId, queues, primaryRedi
 
 const incompatiblePeers = [
   ['another release', 'synthetic-incompatible'],
-  ['this release with another core', packageVersion],
+  ['this release with another bootstrap', packageVersion],
 ];
 
 // Initiates authentication with a different build.
 function peerOfBuild(address, role, build) {
-  const hello = { ...primaryHello(role === 'controller' ? 'worker' : 'controller'), build, protocol: { core: 2, contracts: {} } };
+  const hello = { ...primaryHello(role === 'controller' ? 'worker' : 'controller'), build, protocol: { bootstrap: 2, contracts: {} } };
   const encoded = JSON.stringify(hello);
   const socket = connectNoiseWebSocket(address, {
     psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
     onOpen(socket) { socket.send(encoded); },
     onMessage(socket, data) {
       const peer = JSON.parse(data);
-      if (peer.type === 'hello') socket.send(JSON.stringify(signedProof(secret, hello.role, encoded, data, selectProtocol(hello.protocol, peer.protocol))));
+      if (peer.type === 'hello') socket.send(JSON.stringify(signedProof(secret, hello.role, encoded, data, selectedDecision(hello.protocol, peer.protocol))));
     },
   });
   return { socket };
 }
 
 function versionMismatch(peerVersion) {
-  return `Executor protocol mismatch (CORE_MISMATCH): local core 1 build ${packageVersion}, peer core 2 build ${peerVersion}.`;
+  return `Executor protocol mismatch (BOOTSTRAP_MISMATCH): local bootstrap 1 build ${packageVersion}, peer bootstrap 2 build ${peerVersion}.`;
 }
 
 // Initiates authentication with a frame that is not JSON.
@@ -76,7 +78,7 @@ function invalidProof(address, role) {
 
 for (const role of ['controller', 'worker']) {
   for (const [peerBuild, peerVersion] of incompatiblePeers) {
-    test(`reports an authenticated core mismatch with ${peerBuild} (${role})`, async () => {
+    test(`reports an authenticated bootstrap mismatch with ${peerBuild} (${role})`, async () => {
       const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true });
       const failures = [];
       link.onError(failure => failures.push(primaryFailure(failure)));
@@ -539,7 +541,7 @@ for (const dialer of ['controller', 'worker']) {
 
   test(`counts a message over the receiver's size limit as a protocol error (${dialer} dials)`, async () => {
     const common = { executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [60_000] };
-    const controller = new WebSocketLink({ ...common, role: 'controller', noiseLimits: { maxMessageBytes: 1024 } });
+    const controller = new WebSocketLink({ ...common, role: 'controller', noiseLimits: { maxMessageBytes: 16 * 1024 } });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
     const closures = { controller: [], worker: [] };
@@ -548,7 +550,7 @@ for (const dialer of ['controller', 'worker']) {
     try {
       dialing.dial(listening.listen());
       const [session] = await Promise.all([worker.ready, controller.ready]);
-      session.send('x'.repeat(4096));
+      session.send('x'.repeat(32 * 1024));
       await eventually(() => closures.controller.length === 1 && closures.worker.length === 1);
 
       expect(closures.controller).toEqual([
@@ -647,7 +649,7 @@ function workerOutsideSessionLayer(address) {
         controllerHello = data;
       } else if (frame.type === 'proof') {
         socket.send(JSON.stringify(signedProof(secret, 'worker', workerHello, controllerHello,
-          selectProtocol(EXECUTOR_PROTOCOL, JSON.parse(controllerHello).protocol))));
+          selectedDecision(EXECUTOR_PROTOCOL, JSON.parse(controllerHello).protocol))));
       }
     },
   });

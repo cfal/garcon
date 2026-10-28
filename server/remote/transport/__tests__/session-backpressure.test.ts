@@ -1,6 +1,7 @@
+import { TestWebSocketLink as WebSocketLink } from '../../__tests__/test-session-transport.js';
 import { expect, test } from 'bun:test';
 import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.js';
-import { WebSocketLink, type LinkFailure } from '../websocket-link.js';
+import { type LinkFailure } from '../websocket-link.js';
 import { linkOptions } from '../../__tests__/integration-fixture.js';
 
 test('failures after proof verification are not reported as authentication failures', async () => {

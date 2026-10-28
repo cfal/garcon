@@ -1,3 +1,4 @@
+import { TestWebSocketLink as WebSocketLink } from './test-session-transport.js';
 import { expect, test } from 'bun:test';
 import { homedir } from 'node:os';
 import { createNoiseServer, type NoiseSocketData } from '@cfal/noise-ws';
@@ -5,7 +6,7 @@ import type { AgentIntegration } from '@garcon/server-agent-interface';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.js';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { RemoteExecutorClient } from '../client/executor-client.js';
-import { WebSocketLink } from '../transport/websocket-link.js';
+
 import { ProducerRelay } from '../server/producer-relay.js';
 import { RpcReplyJournal } from '../transport/rpc-journal.js';
 import { integrationFixture, linkOptions } from './integration-fixture.js';

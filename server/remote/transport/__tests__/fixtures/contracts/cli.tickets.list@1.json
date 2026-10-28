@@ -1,0 +1,215 @@
+{
+  "definition": {
+    "name": "cli.tickets.list",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "GET /api/v1/tickets",
+  "client": {
+    "parameters": [
+      {
+        "name": "query",
+        "type": {
+          "assignee?": {
+            "union": [
+              "\"unassigned\"",
+              "undefined",
+              {
+                "chatId": "string",
+                "kind": "\"chat\""
+              },
+              {
+                "executorId": "string",
+                "kind": "\"executor\""
+              },
+              {
+                "kind": "\"user\"",
+                "ownerKey": "string"
+              }
+            ]
+          },
+          "beforeNumber?": {
+            "union": [
+              "number",
+              "undefined"
+            ]
+          },
+          "expectedCollectionRevision?": {
+            "union": [
+              "number",
+              "undefined"
+            ]
+          },
+          "includeClosed?": {
+            "union": [
+              "false",
+              "true",
+              "undefined"
+            ]
+          },
+          "label?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "limit?": {
+            "union": [
+              "number",
+              "undefined"
+            ]
+          },
+          "priority?": {
+            "union": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "undefined"
+            ]
+          },
+          "project?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "query?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "ready?": {
+            "union": [
+              "false",
+              "true",
+              "undefined"
+            ]
+          },
+          "status?": {
+            "union": [
+              "\"closed\"",
+              "\"in-progress\"",
+              "\"in-review\"",
+              "\"open\"",
+              "undefined"
+            ]
+          }
+        }
+      }
+    ],
+    "result": {
+      "collectionRevision": "number",
+      "items": {
+        "array": {
+          "assignee": {
+            "union": [
+              "null",
+              {
+                "chatId": "string",
+                "kind": "\"chat\""
+              },
+              {
+                "executorId": "string",
+                "kind": "\"executor\""
+              },
+              {
+                "kind": "\"user\"",
+                "ownerKey": "string"
+              }
+            ]
+          },
+          "blockedByCount": "number",
+          "commentCount": "number",
+          "createdAt": "string",
+          "createdBy": {
+            "union": [
+              {
+                "chatId": "string",
+                "kind": "\"chat\"",
+                "provenance": "\"observed\""
+              },
+              {
+                "declaredChatId": {
+                  "union": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "executorId": "string",
+                "kind": "\"executor\""
+              },
+              {
+                "declaredChatId": {
+                  "union": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "kind": "\"user\"",
+                "principalMode": {
+                  "union": [
+                    "\"authenticated\"",
+                    "\"local\""
+                  ]
+                },
+                "username": "string"
+              }
+            ]
+          },
+          "id": "string",
+          "labels": {
+            "array": "string"
+          },
+          "number": "number",
+          "parentId": {
+            "union": [
+              "null",
+              "string"
+            ]
+          },
+          "priority": {
+            "union": [
+              "0",
+              "1",
+              "2",
+              "3"
+            ]
+          },
+          "project": "string",
+          "resolution": {
+            "union": [
+              "\"canceled\"",
+              "\"done\"",
+              "null"
+            ]
+          },
+          "revision": "number",
+          "status": {
+            "union": [
+              "\"closed\"",
+              "\"in-progress\"",
+              "\"in-review\"",
+              "\"open\""
+            ]
+          },
+          "title": "string",
+          "updatedAt": "string"
+        }
+      },
+      "nextBeforeNumber": {
+        "union": [
+          "null",
+          "number"
+        ]
+      },
+      "storeId": "string"
+    }
+  }
+}

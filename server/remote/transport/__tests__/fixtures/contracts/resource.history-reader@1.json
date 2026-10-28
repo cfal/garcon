@@ -1,0 +1,14 @@
+{
+  "definition": {
+    "name": "resource.history-reader",
+    "version": 1,
+    "requires": []
+  },
+  "reference": {
+    "executorId": "string",
+    "id": "string",
+    "instanceId": "string",
+    "integrationId": "string",
+    "kind": "\"history-reader\""
+  }
+}

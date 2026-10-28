@@ -14,7 +14,9 @@ import { SESSION_MESSAGE_BYTES } from '../transport/session-socket.js';
 import { EXECUTOR_RECONNECT_GRACE_MS } from '../transport/limits.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../common/executor-disconnect.js';
 import { sameContinuity, type SessionProtocol } from '../transport/protocol-compatibility.js';
-import { decodeProducerEvent, UNREADABLE_EVENT_FAILURE } from '../transport/producer-protocol.js';
+import { decodeProducerEvent, UNREADABLE_EVENT_FAILURE, type ProducerCreator } from '../transport/producer-protocol.js';
+import type { ContractRef } from '@garcon/common/protocol-contracts';
+import { supportsDefinition } from '@garcon/common/protocol-contracts';
 import { createLogger } from '../../common/log.js';
 import { failureReason } from '../transport/failure-reason.js';
 
@@ -61,6 +63,7 @@ interface RelayedLaunch {
 }
 
 interface RelayedBinding {
+  readonly creator: ProducerCreator;
   readonly protocol: SessionProtocol;
   readonly integration: AgentIntegration;
   readonly ref: AgentProducerBinding;
@@ -130,9 +133,13 @@ export class ProducerRelay {
     }));
   }
 
-  bind(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding): void {
+  bind(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding, creator: ProducerCreator): void {
+    if (!supportsDefinition(session.protocol.profile.contracts, creator.contract)) {
+      throw new AgentCallError('not-dispatched', 'Producer creator is unsupported', 'OPERATION_UNSUPPORTED');
+    }
+    if (this.#bindings.has(ref.id)) throw new AgentCallError('rejected', 'Producer binding already exists', 'STALE_RESOURCE');
     this.#bindings.set(ref.id, {
-      integration, ref, protocol: session.protocol, seq: 0, retained: [], sent: 0, retainedBytes: 0, session, grace: null, launch: null, received: [],
+      integration, ref, creator, protocol: session.protocol, seq: 0, retained: [], sent: 0, retainedBytes: 0, session, grace: null, launch: null, received: [],
     });
   }
 
@@ -149,9 +156,13 @@ export class ProducerRelay {
     signal: AbortSignal,
     onUndeliveredReply: ObserveUndeliveredReply,
     run: (signal: AbortSignal) => Promise<AgentExecutionHandle>,
+    resource: ContractRef,
   ): Promise<AgentExecutionHandle> {
     const binding = this.#bindings.get(request.producerBinding.id);
-    if (binding?.integration !== integration) return runLaunch(() => run(signal));
+    if (binding?.integration !== integration || binding.creator.resource.name !== resource.name
+      || binding.creator.resource.version !== resource.version) {
+      throw new AgentCallError('not-dispatched', 'Launch requires a compatible producer binding', 'STALE_RESOURCE');
+    }
     if (!sameContinuity(binding.protocol.continuity, session.protocol.continuity) || binding.session !== session) {
       throw new AgentCallError('not-dispatched', 'Producer binding belongs to another continuity', 'STALE_RESOURCE');
     }
@@ -202,6 +213,14 @@ export class ProducerRelay {
     const binding = this.#bindings.get(ref.id);
     if (binding?.integration !== integration || !sameContinuity(binding.protocol.continuity, session.protocol.continuity)) return;
     if (binding.launch?.runId === runId && !binding.launch.handle) binding.launch.cancellation.abort();
+  }
+
+  assertResource(integration: AgentIntegration, ref: AgentProducerBinding, resource: ContractRef): void {
+    const binding = this.#bindings.get(ref.id);
+    if (binding && (binding.integration !== integration || binding.creator.resource.name !== resource.name
+      || binding.creator.resource.version !== resource.version)) {
+      throw new AgentCallError('not-dispatched', 'Operation requires a compatible producer binding', 'STALE_RESOURCE');
+    }
   }
 
   owns(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding): boolean {
@@ -300,7 +319,7 @@ export class ProducerRelay {
     if (binding?.integration !== integration) return;
     let event: AgentProducerNotification['event'];
     try {
-      event = decodeProducerEvent(notification.event, binding.ref, binding.protocol.profile);
+      event = decodeProducerEvent(notification.event, binding.ref, binding.creator);
     } catch (error) {
       log.warn('Provider event could not be encoded', { integrationId: integration.descriptor.id, bindingId: binding.ref.id, reason: failureReason(error) });
       event = notification.event?.type === 'rows'

@@ -1,0 +1,93 @@
+{
+  "definition": {
+    "name": "producers.resume",
+    "version": 1,
+    "requires": [
+      {
+        "name": "resource.producer-binding",
+        "version": 1,
+        "requires": [],
+        "events": [
+          "rows",
+          "session",
+          "permission",
+          "notice",
+          "run-ended",
+          "started",
+          "steerable",
+          "publication-failed",
+          "publication-gap",
+          "launch-settled"
+        ]
+      }
+    ],
+    "lane": "primary",
+    "continuity": "session",
+    "direction": "controller-to-worker",
+    "acceptsResource": {
+      "name": "resource.producer-binding",
+      "version": 1,
+      "requires": [],
+      "events": [
+        "rows",
+        "session",
+        "permission",
+        "notice",
+        "run-ended",
+        "started",
+        "steerable",
+        "publication-failed",
+        "publication-gap",
+        "launch-settled"
+      ]
+    }
+  },
+  "wire": {
+    "request": {
+      "bindings": {
+        "array": {
+          "acknowledgedSeq": "number",
+          "binding": {
+            "executorId": "string",
+            "id": "string",
+            "instanceId": "string",
+            "integrationId": "string",
+            "kind": "\"producer\""
+          }
+        }
+      }
+    },
+    "result": {
+      "resumed": {
+        "array": {
+          "bindingId": "string",
+          "launch": {
+            "union": [
+              "null",
+              {
+                "handle": {
+                  "union": [
+                    "null",
+                    {
+                      "executorId": "string",
+                      "id": "string",
+                      "instanceId": "string",
+                      "integrationId": "string",
+                      "kind": "\"execution\""
+                    }
+                  ]
+                },
+                "runId": "string"
+              }
+            ]
+          },
+          "receivedRunIds": {
+            "array": "string"
+          },
+          "replayThroughSeq": "number"
+        }
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

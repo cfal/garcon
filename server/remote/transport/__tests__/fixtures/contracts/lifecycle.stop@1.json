@@ -1,0 +1,15 @@
+{
+  "definition": {
+    "name": "lifecycle.stop",
+    "version": 1,
+    "requires": [],
+    "lane": "primary",
+    "continuity": "session",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": "null",
+    "result": "void"
+  },
+  "failures": "rpc-errors-v1"
+}

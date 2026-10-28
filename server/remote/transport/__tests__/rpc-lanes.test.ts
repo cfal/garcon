@@ -1,57 +1,67 @@
+import { handleTestRpc } from '../../__tests__/test-session-transport.js';
+import { CLI_OPERATIONS } from '@garcon/common/cli-contracts';
+import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { expect, test } from 'bun:test';
 import { ExecutorRpc } from '../rpc.js';
-import { TestSessionTransport as SessionTransport } from '../../__tests__/test-session-transport.js';
+import { TestSessionTransport, WorkerSessionTransport } from '../../__tests__/test-session-transport.js';
 import type { RpcLane } from '../rpc-lane.js';
 import { PRIMARY_SMALL_RPC_BYTES } from '../limits.js';
 
-function endpoint(lane: RpcLane) {
+function endpoint(lane: RpcLane, role: 'controller' | 'worker' = 'controller') {
   const responses: Record<string, unknown>[] = [];
-  const transport = new SessionTransport(crypto.randomUUID(), 'peer', () => {}, {}, 'synthetic-executor', lane);
-  const channel = transport.attach({ send: (body) => responses.push(JSON.parse(body)), close() {} });
+  const replied = Promise.withResolvers<Record<string, unknown>>();
+  const transport = new (role === 'controller' ? TestSessionTransport : WorkerSessionTransport)(crypto.randomUUID(), 'peer', () => {}, {}, 'synthetic-executor', lane);
+  const channel = transport.attach({ send: (body) => { const frame = JSON.parse(body); responses.push(frame); replied.resolve(frame); }, close() {} });
   const rpc = new ExecutorRpc(transport);
-  return { rpc, transport, responses, receive: (frame: object) => channel.receive(JSON.stringify(frame)) };
+  return { rpc, transport, responses, replied: replied.promise, receive: (frame: object) => channel.receive(JSON.stringify(frame)) };
 }
 
 test('wrong-lane calls reject on sender and receiver without executing a handler', async () => {
   for (const lane of ['primary', 'bulk'] as const) {
-    const peer = endpoint(lane);
+    const caller = endpoint(lane);
+    const peer = endpoint(lane, 'worker');
     let calls = 0;
-    peer.rpc.handle(async () => { calls++; return null; });
+    handleTestRpc(peer.rpc, async () => { calls++; return null; });
     try {
-      if (lane === 'primary') await expect(peer.rpc.call('', 'files.list', { projectPath: '/project' })).rejects.toMatchObject({ outcome: 'not-dispatched' });
-      else await expect(peer.rpc.call('', 'projects.inspect', { projectPath: '/project' })).rejects.toMatchObject({ outcome: 'not-dispatched' });
-      peer.receive({ type: 'request', id: crypto.randomUUID(), seq: 1, integrationId: '',
+      if (lane === 'primary') await expect(caller.rpc.call('', RPC_V1['files.list'], { projectPath: '/project' })).rejects.toMatchObject({ outcome: 'not-dispatched' });
+      else await expect(caller.rpc.call('', RPC_V1['projects.inspect'], { projectPath: '/project' })).rejects.toMatchObject({ outcome: 'not-dispatched' });
+      peer.receive({ version: 1, type: 'request', id: crypto.randomUUID(), seq: 1, integrationId: '',
         method: lane === 'primary' ? 'files.list' : 'projects.inspect', request: { projectPath: '/project' } });
       expect(peer.responses).toHaveLength(1);
       expect(peer.responses[0]).toMatchObject({ type: 'error', error: { outcome: 'not-dispatched' } });
       expect(calls).toBe(0);
       expect(peer.transport.connected).toBe(true);
-    } finally { peer.transport.close(); }
+    } finally { caller.transport.close(); peer.transport.close(); }
   }
 });
 
 test('primary small-call caps preserve Git and CLI mutation error contracts', async () => {
-  const peer = endpoint('primary');
+  const caller = endpoint('primary');
   const large = 'x'.repeat(PRIMARY_SMALL_RPC_BYTES);
-  peer.rpc.handle(async () => ({ large }));
   try {
-    await expect(peer.rpc.call('', 'git.getQuickSummary', { input: { projectPath: large }, budgetMs: 1000 }))
+    const oversized = { input: { projectPath: '/project' }, budgetMs: 1000, padding: large };
+    await expect(caller.rpc.call('', RPC_V1['git.getQuickSummary'], oversized))
       .rejects.toMatchObject({ code: 'GIT_REQUEST_TOO_LARGE' });
-    expect(peer.responses).toHaveLength(0);
+    expect(caller.responses).toHaveLength(0);
     const requests = [
-      { method: 'git.getQuickSummary', request: { input: { projectPath: '/project' }, budgetMs: 1000 }, code: 'GIT_RESULT_TOO_LARGE' },
-      { method: 'controllerCli.request', request: { expectedServerInstanceId: 'synthetic',
-        http: { operation: 'POST /api/v1/chats/stop', query: [], body: {} } }, code: 'CLI_OUTCOME_UNKNOWN' },
-      { method: 'controllerCli.describe', request: null, code: 'CLI_RESULT_TOO_LARGE' },
+      { method: 'git.getQuickSummary', request: { input: { projectPath: '/project' }, budgetMs: 1000 }, code: 'GIT_RESULT_TOO_LARGE',
+        value: { executorId: 'local', instanceId: 'synthetic', project: '/project', status: 'unknown', message: large } },
+      { method: 'controllerCli.request', request: { contract: { name: CLI_OPERATIONS['POST /api/v1/chats/stop'][1].name, version: 1 }, expectedServerInstanceId: 'synthetic',
+        http: { operation: 'POST /api/v1/chats/stop', query: [], body: {} } }, code: 'CLI_OUTCOME_UNKNOWN', value: { status: 200, body: { large } } },
+      { method: 'controllerCli.describe', request: null, code: 'CLI_RESULT_TOO_LARGE',
+        value: { serverInstanceId: 'synthetic', defaultExecutorId: 'local', workspaceName: large } },
     ];
-    for (const [seq, { method, request, code }] of requests.entries()) {
-      const id = crypto.randomUUID();
-      peer.receive({ type: 'request', id, seq: seq + 1, integrationId: '', method, request });
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      expect(peer.responses.find((frame) => frame.id === id)).toMatchObject({ type: 'error', error: { code } });
+    for (const [seq, { method, request, code, value }] of requests.entries()) {
+      const peer = endpoint('primary', method === 'git.getQuickSummary' ? 'worker' : 'controller');
+      handleTestRpc(peer.rpc, async () => value);
+      try {
+        const id = crypto.randomUUID();
+        peer.receive({ type: 'request', version: 1, id, seq: seq + 1, integrationId: '', method, request });
+        expect(await peer.replied).toMatchObject({ type: 'error', error: { code } });
+        expect(peer.transport.connected).toBe(true);
+      } finally { peer.transport.close(); }
     }
-    expect(peer.transport.connected).toBe(true);
-  } finally { peer.transport.close(); }
+  } finally { caller.transport.close(); }
 });
 
 test('primary-only frames retire only the offending bulk endpoint', () => {

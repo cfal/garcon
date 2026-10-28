@@ -1,0 +1,138 @@
+{
+  "definition": {
+    "name": "gh.listPullRequests",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "projectPath": "string",
+        "repository?": {
+          "union": [
+            "undefined",
+            {
+              "host": "string",
+              "nameWithOwner": "string"
+            }
+          ]
+        }
+      }
+    },
+    "result": {
+      "executorId": "string",
+      "instanceId": "string",
+      "pulls": {
+        "array": {
+          "additions": "number",
+          "author": "string",
+          "authorAssociation": {
+            "union": [
+              "\"collaborator\"",
+              "\"contributor\"",
+              "\"first_time_contributor\"",
+              "\"first_timer\"",
+              "\"mannequin\"",
+              "\"member\"",
+              "\"none\"",
+              "\"owner\""
+            ]
+          },
+          "authoredByViewer": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "authorIsBot": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "baseRefName": "string",
+          "changedFiles": "number",
+          "checksState": {
+            "union": [
+              "\"failing\"",
+              "\"none\"",
+              "\"passing\"",
+              "\"pending\""
+            ]
+          },
+          "createdAt": "string",
+          "deletions": "number",
+          "headRefName": "string",
+          "headRefOid": "string",
+          "isCrossRepository": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "isDraft": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "labels": {
+            "array": "string"
+          },
+          "number": "number",
+          "reviewDecision": {
+            "union": [
+              "\"approved\"",
+              "\"changes_requested\"",
+              "\"review_required\"",
+              "null"
+            ]
+          },
+          "reviewRequest": {
+            "union": [
+              "\"me\"",
+              "\"team\"",
+              "null"
+            ]
+          },
+          "state": {
+            "union": [
+              "\"closed\"",
+              "\"merged\"",
+              "\"open\""
+            ]
+          },
+          "title": "string",
+          "updatedAt": "string",
+          "url": "string"
+        }
+      },
+      "repo": {
+        "union": [
+          "null",
+          {
+            "nameWithOwner": "string",
+            "url": "string"
+          }
+        ]
+      },
+      "viewerLogin": {
+        "union": [
+          "null",
+          "string"
+        ]
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

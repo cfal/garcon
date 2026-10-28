@@ -29,6 +29,7 @@ function response() {
       isActive: false,
       isProcessing: false,
       processingPhase: null,
+      hasAgentSession: false,
       canReloadFromNativeHistory: true,
       isUnread: true,
     }],
@@ -38,6 +39,16 @@ function response() {
 }
 
 describe('chat list contract', () => {
+  it('requires the current native-session projection independently of reload support', () => {
+    const value = response();
+    value.sessions[0].hasAgentSession = true;
+    value.sessions[0].canReloadFromNativeHistory = false;
+    expect(parseChatListResponse(value).sessions[0]).toMatchObject({ hasAgentSession: true, canReloadFromNativeHistory: false });
+    for (const invalid of [undefined, null, 'true', 1]) {
+      value.sessions[0].hasAgentSession = invalid;
+      expect(() => parseChatListResponse(value)).toThrow('hasAgentSession');
+    }
+  });
   it('distinguishes literal absence from a saved schema-one envelope', () => {
     const value = response();
     value.sessions[0].agentSettings = null;

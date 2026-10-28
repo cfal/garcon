@@ -1,0 +1,23 @@
+{
+  "definition": {
+    "name": "terminal.replay-batch",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "attachmentId?": {
+      "union": [
+        "string",
+        "undefined"
+      ]
+    },
+    "chunks": {
+      "array": {
+        "dataBase64": "string",
+        "sequence": "number"
+      }
+    },
+    "terminalId": "string",
+    "type": "\"terminal-replay-batch\""
+  }
+}

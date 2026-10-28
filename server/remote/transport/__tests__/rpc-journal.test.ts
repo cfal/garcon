@@ -2,6 +2,13 @@ import { expect, test } from 'bun:test';
 import { RpcReplyJournal, type RpcJournalOwner } from '../rpc-journal.js';
 import type { RpcLane } from '../rpc-lane.js';
 import { testSessionProtocol } from '../../__tests__/test-session-transport.js';
+import { rpcWireV1 } from '../rpc-wire-v1.js';
+
+function begin(journal: RpcReplyJournal, owner: RpcJournalOwner, id: string) {
+  const wire = owner.lane === 'bulk' ? rpcWireV1('files.list') : rpcWireV1('execution.runningSessions');
+  const protocol = { ...testSessionProtocol(owner.continuity.executorId, 'worker'), continuity: owner.continuity };
+  return journal.begin(owner, id, { wire, policy: wire.policy(null, owner.lane, protocol.contracts), protocol });
+}
 
 const UNKNOWN = 'unknown-outcome';
 
@@ -22,7 +29,7 @@ function owner(session: string, accepting = true, lane: RpcLane = 'primary', con
 test('delivers a reply to the owning session and releases it once acknowledged', () => {
   const journal = new RpcReplyJournal();
   const first = owner('session-1');
-  const call = journal.begin(first, 'call-1');
+  const call = begin(journal, first, 'call-1');
   expect(journal.running).toBe(1);
   journal.complete(call, 'reply-1', UNKNOWN);
 
@@ -37,8 +44,8 @@ for (const field of ['executorId', 'controllerRuntimeId', 'workerRuntimeId', 'pr
     const journal = new RpcReplyJournal();
     const first = owner('first');
     journal.received(first, 2);
-    const running = journal.begin(first, 'running');
-    journal.complete(journal.begin(first, 'completed'), 'old-encoded-reply', UNKNOWN);
+    const running = begin(journal, first, 'running');
+    journal.complete(begin(journal, first, 'completed'), 'old-encoded-reply', UNKNOWN);
     journal.ownerLost(first);
     const replacement = owner('replacement', true, 'primary', { ...first.continuity, [field]: 'changed' });
     expect(journal.reconcile(replacement, [
@@ -58,11 +65,11 @@ test('reconciles running, completed, never-received, and forgotten calls of a lo
   const journal = new RpcReplyJournal();
   const first = owner('session-1');
   journal.received(first, 1);
-  const running = journal.begin(first, 'running');
+  const running = begin(journal, first, 'running');
   journal.received(first, 2);
-  const completed = journal.begin(first, 'completed');
+  const completed = begin(journal, first, 'completed');
   journal.received(first, 3);
-  const abandoned = journal.begin(first, 'abandoned');
+  const abandoned = begin(journal, first, 'abandoned');
   journal.complete(completed, 'completed-reply', UNKNOWN);
   journal.ownerLost(first);
   const second = owner('session-2');
@@ -96,7 +103,7 @@ test('reconciles running, completed, never-received, and forgotten calls of a lo
 test('offers a refused reply again and redelivers one sent to a lost session', async () => {
   const journal = new RpcReplyJournal();
   const first = owner('session-1', false);
-  const call = journal.begin(first, 'call-1');
+  const call = begin(journal, first, 'call-1');
   journal.complete(call, 'reply-1', UNKNOWN);
   expect(first.offered).toEqual([]);
   first.state.accepting = true;
@@ -115,12 +122,12 @@ test('drops the oldest delivered replies first under pressure, which then reconc
   const journal = new RpcReplyJournal({ retainedBytes: 20 });
   const first = owner('session-1');
   journal.received(first, 3);
-  const delivered = journal.begin(first, 'delivered');
+  const delivered = begin(journal, first, 'delivered');
   journal.complete(delivered, 'x'.repeat(10), UNKNOWN);
   first.state.accepting = false;
-  const waiting = journal.begin(first, 'waiting');
+  const waiting = begin(journal, first, 'waiting');
   journal.complete(waiting, 'y'.repeat(10), UNKNOWN);
-  const newest = journal.begin(first, 'newest');
+  const newest = begin(journal, first, 'newest');
   journal.complete(newest, 'z'.repeat(10), UNKNOWN);
   journal.ownerLost(first);
 
@@ -135,7 +142,7 @@ test('drops the oldest delivered replies first under pressure, which then reconc
 test('a cancelled call is aborted and its reply dropped', () => {
   const journal = new RpcReplyJournal();
   const first = owner('session-1');
-  const call = journal.begin(first, 'call-1');
+  const call = begin(journal, first, 'call-1');
   journal.cancel(first, 'call-1');
   expect(call.signal.aborted).toBe(true);
   journal.complete(call, 'reply-1', UNKNOWN);
@@ -147,9 +154,9 @@ test('a cancelled call is aborted and its reply dropped', () => {
 test('answers a waiting session with an unknown outcome when pressure drops its undelivered reply', () => {
   const journal = new RpcReplyJournal({ retainedBytes: 25 });
   const first = owner('session-1', false);
-  const waiting = journal.begin(first, 'waiting');
+  const waiting = begin(journal, first, 'waiting');
   journal.complete(waiting, 'y'.repeat(20), UNKNOWN);
-  const newest = journal.begin(first, 'newest');
+  const newest = begin(journal, first, 'newest');
   journal.complete(newest, 'z'.repeat(10), UNKNOWN);
   first.state.accepting = true;
   journal.deliver();
@@ -162,11 +169,11 @@ test('forgets an undelivered reply of a lost session under pressure, which then 
   const journal = new RpcReplyJournal({ retainedBytes: 30 });
   const first = owner('session-1', false);
   journal.received(first, 2);
-  const lost = journal.begin(first, 'lost');
+  const lost = begin(journal, first, 'lost');
   journal.complete(lost, 'y'.repeat(20), UNKNOWN);
   journal.ownerLost(first);
   const second = owner('session-2');
-  const newest = journal.begin(second, 'newest');
+  const newest = begin(journal, second, 'newest');
   journal.complete(newest, 'z'.repeat(20), UNKNOWN);
 
   expect(journal.reconcile(second, [{ id: 'lost', session: 'session-1', seq: 1 }])).toEqual([{ id: 'lost', state: 'unknown' }]);
@@ -180,8 +187,8 @@ test('bulk recovery neither cancels nor claims primary work', () => {
   const bulk = owner('bulk', true, 'bulk');
   journal.received(primary, 1);
   journal.received(bulk, 1);
-  const control = journal.begin(primary, 'control');
-  const transfer = journal.begin(bulk, 'transfer');
+  const control = begin(journal, primary, 'control');
+  const transfer = begin(journal, bulk, 'transfer');
   journal.ownerLost(primary);
   journal.ownerLost(bulk);
   const replacement = owner('new-bulk', true, 'bulk');
@@ -203,10 +210,10 @@ test('blocked bulk delivery and retention cannot consume primary reservations', 
   const journal = new RpcReplyJournal({ retainedBytes: 100, bulkRetainedBytes: 75 });
   const bulk = owner('bulk', false, 'bulk');
   const primary = owner('primary');
-  journal.complete(journal.begin(bulk, 'bulk-1'), 'b'.repeat(70), UNKNOWN);
-  journal.complete(journal.begin(primary, 'primary-1'), 'p'.repeat(25), UNKNOWN);
+  journal.complete(begin(journal, bulk, 'bulk-1'), 'b'.repeat(70), UNKNOWN);
+  journal.complete(begin(journal, primary, 'primary-1'), 'p'.repeat(25), UNKNOWN);
   expect(primary.offered).toEqual(['p'.repeat(25)]);
-  journal.complete(journal.begin(bulk, 'bulk-2'), 'c'.repeat(70), UNKNOWN);
+  journal.complete(begin(journal, bulk, 'bulk-2'), 'c'.repeat(70), UNKNOWN);
   expect(journal.has('primary-1')).toBe(true);
   journal.dispose();
 });

@@ -1,0 +1,11 @@
+{
+  "definition": {
+    "name": "producer.steerable",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "runId": "string",
+    "type": "\"steerable\""
+  }
+}

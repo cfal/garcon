@@ -1,0 +1,27 @@
+{
+  "definition": {
+    "name": "auth.completeLogin",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "code": "string",
+      "sessionId": "string"
+    },
+    "result": {
+      "sessionId": "string",
+      "submitted": "true"
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

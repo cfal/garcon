@@ -1,0 +1,233 @@
+{
+  "definition": {
+    "name": "sessionConfiguration.apply",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "args": {
+        "tuple": [
+          "string",
+          {
+            "endpoint": {
+              "union": [
+                "null",
+                {
+                  "apiProviderId": "string",
+                  "baseUrl": "string",
+                  "capabilities": {
+                    "union": [
+                      "null",
+                      {
+                        "chatCompletions": {
+                          "union": [
+                            "false",
+                            "true"
+                          ]
+                        },
+                        "responses": {
+                          "union": [
+                            "false",
+                            "true"
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "credential": {
+                    "union": [
+                      "null",
+                      {
+                        "apiProviderId": "string",
+                        "endpointId": "string",
+                        "kind": "\"api-provider-endpoint\"",
+                        "revision": "number"
+                      }
+                    ]
+                  },
+                  "endpointId": "string",
+                  "headers": {
+                    "[string]": "string"
+                  },
+                  "isLocal": {
+                    "union": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  "model": "string",
+                  "protocol": {
+                    "union": [
+                      "\"anthropic-messages\"",
+                      "\"openai-compatible\""
+                    ]
+                  },
+                  "providerLabel": "string"
+                }
+              ]
+            },
+            "model": "string",
+            "permissionMode": {
+              "union": [
+                "\"acceptEdits\"",
+                "\"bypassPermissions\"",
+                "\"default\"",
+                "\"manualBypass\"",
+                "\"plan\""
+              ]
+            },
+            "settings": {
+              "ownerId": "string",
+              "schemaVersion": "number",
+              "values": {
+                "[string]": {
+                  "union": [
+                    "false",
+                    "null",
+                    "number",
+                    "string",
+                    "true",
+                    {
+                      "array": {
+                        "recursive": "JsonValue"
+                      }
+                    },
+                    {
+                      "recursive": "JsonObject"
+                    }
+                  ]
+                }
+              }
+            },
+            "thinkingMode": {
+              "union": [
+                "\"high\"",
+                "\"low\"",
+                "\"max\"",
+                "\"medium\"",
+                "\"none\"",
+                "\"ultra\"",
+                "\"xhigh\""
+              ]
+            }
+          },
+          {
+            "endpoint": {
+              "union": [
+                "null",
+                {
+                  "apiProviderId": "string",
+                  "baseUrl": "string",
+                  "capabilities": {
+                    "union": [
+                      "null",
+                      {
+                        "chatCompletions": {
+                          "union": [
+                            "false",
+                            "true"
+                          ]
+                        },
+                        "responses": {
+                          "union": [
+                            "false",
+                            "true"
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "credential": {
+                    "union": [
+                      "null",
+                      {
+                        "apiProviderId": "string",
+                        "endpointId": "string",
+                        "kind": "\"api-provider-endpoint\"",
+                        "revision": "number"
+                      }
+                    ]
+                  },
+                  "endpointId": "string",
+                  "headers": {
+                    "[string]": "string"
+                  },
+                  "isLocal": {
+                    "union": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  "model": "string",
+                  "protocol": {
+                    "union": [
+                      "\"anthropic-messages\"",
+                      "\"openai-compatible\""
+                    ]
+                  },
+                  "providerLabel": "string"
+                }
+              ]
+            },
+            "model": "string",
+            "permissionMode": {
+              "union": [
+                "\"acceptEdits\"",
+                "\"bypassPermissions\"",
+                "\"default\"",
+                "\"manualBypass\"",
+                "\"plan\""
+              ]
+            },
+            "settings": {
+              "ownerId": "string",
+              "schemaVersion": "number",
+              "values": {
+                "[string]": {
+                  "union": [
+                    "false",
+                    "null",
+                    "number",
+                    "string",
+                    "true",
+                    {
+                      "array": {
+                        "recursive": "JsonValue"
+                      }
+                    },
+                    {
+                      "recursive": "JsonObject"
+                    }
+                  ]
+                }
+              }
+            },
+            "thinkingMode": {
+              "union": [
+                "\"high\"",
+                "\"low\"",
+                "\"max\"",
+                "\"medium\"",
+                "\"none\"",
+                "\"ultra\"",
+                "\"xhigh\""
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "result": "void"
+  },
+  "failures": "rpc-errors-v1"
+}

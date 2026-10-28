@@ -1,3 +1,4 @@
+import { CLI_BOOTSTRAP_VERSION, CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 import { afterEach, expect, test } from 'bun:test';
 import crypto from 'node:crypto';
 import { chmod, mkdir, mkdtemp, rm, symlink, utimes, writeFile } from 'node:fs/promises';
@@ -35,7 +36,7 @@ async function fixture() {
     const url = new URL(input instanceof Request ? input.url : input);
     calls.push({ url, authorization: new Headers(init?.headers).get('Authorization') });
     const descriptor = endpoints.get(url.origin)!;
-    if (url.pathname.endsWith('/cli/context')) return Response.json({ serverInstanceId: 'workspaceDir' in descriptor ? descriptor.instanceId : 'controller',
+    if (url.pathname.endsWith('/cli/context')) return Response.json({ protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS }, serverInstanceId: 'workspaceDir' in descriptor ? descriptor.instanceId : 'controller',
       defaultExecutorId: 'workspaceDir' in descriptor ? 'local' : 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', workspaceName: 'work' });
     return Response.json({ schemaVersion: 1, instanceId: descriptor.instanceId, proof: crypto.createHmac('sha256', descriptor.localCapability)
       .update(runtimeProofPayload(descriptor.instanceId, url.searchParams.get('challenge')!)).digest('base64url') });

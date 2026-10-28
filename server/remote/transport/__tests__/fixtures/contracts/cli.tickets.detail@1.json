@@ -1,0 +1,236 @@
+{
+  "definition": {
+    "name": "cli.tickets.detail",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "GET /api/v1/tickets/detail",
+  "client": {
+    "parameters": [
+      {
+        "name": "query",
+        "type": {
+          "beforeCommentSequence?": {
+            "union": [
+              "number",
+              "undefined"
+            ]
+          },
+          "commentLimit?": {
+            "union": [
+              "number",
+              "undefined"
+            ]
+          },
+          "expectedCollectionRevision?": {
+            "union": [
+              "number",
+              "undefined"
+            ]
+          },
+          "includeDescription?": {
+            "union": [
+              "false",
+              "true",
+              "undefined"
+            ]
+          },
+          "ticketId": "string"
+        }
+      }
+    ],
+    "result": {
+      "collectionRevision": "number",
+      "comments": {
+        "collectionRevision": "number",
+        "items": {
+          "array": {
+            "author": {
+              "union": [
+                {
+                  "chatId": "string",
+                  "kind": "\"chat\"",
+                  "provenance": "\"observed\""
+                },
+                {
+                  "declaredChatId": {
+                    "union": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "executorId": "string",
+                  "kind": "\"executor\""
+                },
+                {
+                  "declaredChatId": {
+                    "union": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "kind": "\"user\"",
+                  "principalMode": {
+                    "union": [
+                      "\"authenticated\"",
+                      "\"local\""
+                    ]
+                  },
+                  "username": "string"
+                }
+              ]
+            },
+            "body": {
+              "union": [
+                "null",
+                "string"
+              ]
+            },
+            "canEdit": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "createdAt": "string",
+            "deletedAt": {
+              "union": [
+                "null",
+                "string"
+              ]
+            },
+            "id": "string",
+            "revision": "number",
+            "sequence": "number",
+            "ticketId": "string",
+            "updatedAt": "string"
+          }
+        },
+        "nextBeforeSequence": {
+          "union": [
+            "null",
+            "number"
+          ]
+        },
+        "storeId": "string"
+      },
+      "links": {
+        "array": {
+          "kind": {
+            "union": [
+              "\"blocks\"",
+              "\"related\""
+            ]
+          },
+          "sourceId": "string",
+          "targetId": "string"
+        }
+      },
+      "storeId": "string",
+      "ticket": {
+        "assignee": {
+          "union": [
+            "null",
+            {
+              "chatId": "string",
+              "kind": "\"chat\""
+            },
+            {
+              "executorId": "string",
+              "kind": "\"executor\""
+            },
+            {
+              "kind": "\"user\"",
+              "ownerKey": "string"
+            }
+          ]
+        },
+        "createdAt": "string",
+        "createdBy": {
+          "union": [
+            {
+              "chatId": "string",
+              "kind": "\"chat\"",
+              "provenance": "\"observed\""
+            },
+            {
+              "declaredChatId": {
+                "union": [
+                  "null",
+                  "string"
+                ]
+              },
+              "executorId": "string",
+              "kind": "\"executor\""
+            },
+            {
+              "declaredChatId": {
+                "union": [
+                  "null",
+                  "string"
+                ]
+              },
+              "kind": "\"user\"",
+              "principalMode": {
+                "union": [
+                  "\"authenticated\"",
+                  "\"local\""
+                ]
+              },
+              "username": "string"
+            }
+          ]
+        },
+        "description": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "id": "string",
+        "labels": {
+          "array": "string"
+        },
+        "number": "number",
+        "parentId": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "priority": {
+          "union": [
+            "0",
+            "1",
+            "2",
+            "3"
+          ]
+        },
+        "project": "string",
+        "resolution": {
+          "union": [
+            "\"canceled\"",
+            "\"done\"",
+            "null"
+          ]
+        },
+        "revision": "number",
+        "status": {
+          "union": [
+            "\"closed\"",
+            "\"in-progress\"",
+            "\"in-review\"",
+            "\"open\""
+          ]
+        },
+        "title": "string",
+        "updatedAt": "string"
+      }
+    }
+  }
+}

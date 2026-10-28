@@ -1,9 +1,10 @@
+import { TestWebSocketLink as WebSocketLink } from '../../../remote/__tests__/test-session-transport.js';
 import { expect, test } from 'bun:test';
 import { servePairedRuntime } from '../../../remote/__tests__/runtime-adapter.js';
 import { serveExecutionRuntime } from '../../../remote/server/executor-rpc-server.js';
 import { ProducerRelay } from '../../../remote/server/producer-relay.js';
 import { RemoteExecutorClient } from '../../../remote/client/executor-client.js';
-import { WebSocketLink } from '../../../remote/transport/websocket-link.js';
+
 import { integrationFixture, linkOptions } from '../../../remote/__tests__/integration-fixture.js';
 
 for (const dialer of ['controller', 'worker'] as const) {

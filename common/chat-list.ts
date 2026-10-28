@@ -14,6 +14,7 @@ export interface ChatListEntry {
   parentChat: ParentChatRef | null;
   agentId: string;
   agentOwnershipEpoch: string;
+  hasAgentSession: boolean;
   model: string | null;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
@@ -169,6 +170,7 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
     isProcessing,
     processingPhase,
     canReloadFromNativeHistory,
+    hasAgentSession: requireBoolean(value.hasAgentSession, field('hasAgentSession')),
     isUnread,
   };
 }

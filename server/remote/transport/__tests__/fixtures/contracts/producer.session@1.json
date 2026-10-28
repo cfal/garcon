@@ -1,0 +1,65 @@
+{
+  "definition": {
+    "name": "producer.session",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "session": {
+      "agentSessionId": "string",
+      "nativeSeedReceipt": {
+        "union": [
+          "null",
+          {
+            "agentSessionId": "string",
+            "codeUnitLength": "number",
+            "format": {
+              "union": [
+                "\"legacy-v0\"",
+                "\"v1-marker\"",
+                "\"v2-xml\"",
+                "\"v3-xml\""
+              ]
+            },
+            "placement": {
+              "union": [
+                "\"provider-context\"",
+                "\"user-prefix\""
+              ]
+            },
+            "sha256": "string"
+          }
+        ]
+      },
+      "nativeSession": {
+        "union": [
+          "null",
+          {
+            "ownerId": "string",
+            "schemaVersion": "number",
+            "value": {
+              "[string]": {
+                "union": [
+                  "false",
+                  "null",
+                  "number",
+                  "string",
+                  "true",
+                  {
+                    "array": {
+                      "recursive": "JsonValue"
+                    }
+                  },
+                  {
+                    "recursive": "JsonObject"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "type": "\"session\""
+  }
+}

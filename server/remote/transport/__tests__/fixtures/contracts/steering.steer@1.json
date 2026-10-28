@@ -1,0 +1,96 @@
+{
+  "definition": {
+    "name": "steering.steer",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "agentSessionId": "string",
+      "chatId": "string",
+      "clientMessageId": "string",
+      "input": "string",
+      "nativeSession": {
+        "union": [
+          "null",
+          {
+            "ownerId": "string",
+            "schemaVersion": "number",
+            "value": {
+              "[string]": {
+                "union": [
+                  "false",
+                  "null",
+                  "number",
+                  "string",
+                  "true",
+                  {
+                    "array": {
+                      "recursive": "JsonValue"
+                    }
+                  },
+                  {
+                    "recursive": "JsonObject"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "projectPath": "string",
+      "target": {
+        "union": [
+          "null",
+          {
+            "executorId": "string",
+            "id": "string",
+            "instanceId": "string",
+            "integrationId": "string",
+            "kind": "\"steer-target\""
+          }
+        ]
+      }
+    },
+    "result": {
+      "union": [
+        {
+          "kind": "\"accepted\""
+        },
+        {
+          "kind": "\"failed\"",
+          "message": "string",
+          "outcome": {
+            "union": [
+              "\"not-sent\"",
+              "\"unknown\""
+            ]
+          }
+        },
+        {
+          "kind": "\"rejected\"",
+          "message": "string",
+          "reason": {
+            "union": [
+              "\"invalid-input\"",
+              "\"no-active-turn\"",
+              "\"provider-rejected\"",
+              "\"turn-changed\"",
+              "\"turn-not-steerable\""
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

@@ -1,0 +1,30 @@
+{
+  "definition": {
+    "name": "cli.tickets.projectDefault",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "POST /api/v1/tickets/project-default",
+  "client": {
+    "parameters": [
+      {
+        "name": "directory",
+        "type": "string"
+      }
+    ],
+    "result": {
+      "kind": {
+        "union": [
+          "\"folder\"",
+          "\"repository\""
+        ]
+      },
+      "project": "string"
+    }
+  }
+}

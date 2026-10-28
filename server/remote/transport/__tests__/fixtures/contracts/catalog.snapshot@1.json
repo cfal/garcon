@@ -1,0 +1,90 @@
+{
+  "definition": {
+    "name": "catalog.snapshot",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "strict": {
+        "union": [
+          "false",
+          "true"
+        ]
+      }
+    },
+    "result": {
+      "defaultModel": "string",
+      "generation": {
+        "union": [
+          "null",
+          {
+            "model": "string",
+            "priority": "number"
+          }
+        ]
+      },
+      "models": {
+        "array": {
+          "apiProviderId?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "endpointId?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "isLocal?": {
+            "union": [
+              "false",
+              "true",
+              "undefined"
+            ]
+          },
+          "label": "string",
+          "protocol?": {
+            "union": [
+              "\"anthropic-messages\"",
+              "\"openai-compatible\"",
+              "undefined"
+            ]
+          },
+          "rawModel?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "supportsImages?": {
+            "union": [
+              "false",
+              "true",
+              "undefined"
+            ]
+          },
+          "value": "string"
+        }
+      },
+      "requiresStrictModelDiscovery": {
+        "union": [
+          "false",
+          "true"
+        ]
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

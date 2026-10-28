@@ -1,3 +1,4 @@
+import { TestWebSocketLink as WebSocketLink } from '../../__tests__/test-session-transport.js';
 import { expect, spyOn, test } from 'bun:test';
 import { AssistantMessage } from '@garcon/common/chat-types';
 import { AgentCallError, AgentIntegrationError, type AgentProducerNotification, type ExecutorAvailability } from '@garcon/server-agent-interface';
@@ -9,7 +10,7 @@ import {
 import { connectRemoteExecutor, servePairedRuntime } from '../../__tests__/runtime-adapter.js';
 import { serveExecutionRuntime } from '../../server/executor-rpc-server.js';
 import { ProducerRelay } from '../../server/producer-relay.js';
-import { WebSocketLink } from '../websocket-link.js';
+
 import type { Logger } from '../../../common/log.js';
 import { nextAvailability, replacementFixture } from '../../__tests__/replacement-fixture.js';
 

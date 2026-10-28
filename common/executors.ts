@@ -1,4 +1,6 @@
 import { isRecord } from './json.js';
+import { isContractName } from './protocol-contracts.js';
+import { EXECUTION_WORKFLOW_V1, type ExecutorOperation } from './executor-contracts.js';
 
 export const LOCAL_EXECUTOR_ID = 'local';
 export const LOCAL_EXECUTOR_LABEL = 'Local';
@@ -49,6 +51,7 @@ export interface ExecutorSnapshot {
   readonly availability: ExecutorSnapshotAvailability;
   readonly bulk: ExecutorBulkStatus | null;
   readonly instanceId: string | null;
+  readonly operations: readonly string[];
   readonly projectBasePath: string | null;
   readonly lastError: { readonly code: string; readonly message: string } | null;
   readonly executorServices: {
@@ -150,7 +153,9 @@ export function parseUpdateExecutorRequest(value: unknown): UpdateExecutorReques
 }
 
 export function parseExecutorSnapshot(value: unknown): ExecutorSnapshot | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'label', 'kind', 'enabled', 'direction', 'availability', 'bulk', 'instanceId', 'projectBasePath', 'lastError', 'executorServices', 'allowControllerCli', 'allowExecutorManagement'])
+  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'label', 'kind', 'enabled', 'direction', 'availability', 'bulk', 'instanceId', 'projectBasePath', 'lastError', 'executorServices', 'allowControllerCli', 'allowExecutorManagement', 'operations'])
+    || !Array.isArray(value.operations) || value.operations.length > 512 || !value.operations.every(isContractName)
+    || new Set(value.operations).size !== value.operations.length
     || typeof value.allowExecutorManagement !== 'boolean'
     || typeof value.allowControllerCli !== 'boolean'
     || !isExecutorId(value.id) || !isLabel(value.label) || typeof value.enabled !== 'boolean'
@@ -175,6 +180,15 @@ export function parseExecutorSnapshot(value: unknown): ExecutorSnapshot | null {
       || !isExecutorError(bulk.lastError)) return null;
   }
   return value as unknown as ExecutorSnapshot;
+}
+
+export function executorSupports(snapshot: Pick<ExecutorSnapshot, 'operations'> | null | undefined, ...operations: readonly ExecutorOperation[]): boolean {
+  return snapshot !== undefined && snapshot !== null && operations.every(name => snapshot.operations.includes(name));
+}
+
+export function executorSupportsExecution(snapshot: Pick<ExecutorSnapshot, 'operations'> | null | undefined,
+  operation: 'execution.start' | 'execution.resume' | 'compaction.compact'): boolean {
+  return executorSupports(snapshot, ...EXECUTION_WORKFLOW_V1.map(definition => definition.name), operation);
 }
 
 function isExecutorError(value: unknown): boolean {

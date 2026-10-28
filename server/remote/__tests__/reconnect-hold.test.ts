@@ -29,7 +29,7 @@ function holdNextInstall(worker: ReturnType<typeof integrationFixture>): () => v
 
 // The deadlines the controller sent a method with.
 function sentDeadlines(calls: ReturnType<typeof spyOn<ExecutorRpc, 'call'>>, method: string) {
-  return calls.mock.calls.filter(([, sent]) => sent === method).map(([, , , options]) => options?.timeoutMs);
+  return calls.mock.calls.filter(([, sent]) => sent.name === method).map(([, , , options]) => options?.timeoutMs);
 }
 
 for (const dialer of ['controller', 'worker'] as const) {

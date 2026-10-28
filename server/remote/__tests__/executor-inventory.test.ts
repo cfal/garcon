@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { IntegrationManifest } from '../transport/rpc-protocol.js';
-import { freezeInventory, validateManifest } from '../client/executor-inventory.js';
+import { freezeInventory, validateManifest } from '../transport/executor-inventory.js';
 import { integrationFixture } from './integration-fixture.js';
 
 const native = integrationFixture();

@@ -1,9 +1,10 @@
+import { TestWebSocketLink as WebSocketLink } from './test-session-transport.js';
 import { expect, test } from 'bun:test';
 import { homedir } from 'node:os';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.ts';
 import { TerminalRuntime } from '../../runtime/terminals/runtime.ts';
 import { connectRemoteExecutor, servePairedRuntime } from './runtime-adapter.js';
-import { WebSocketLink } from '../transport/websocket-link.ts';
+
 import { ProducerRelay } from '../server/producer-relay.ts';
 
 const authority = { key: 'synthetic-user', expiresAtMs: null };

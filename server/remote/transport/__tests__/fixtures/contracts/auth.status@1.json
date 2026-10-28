@@ -1,0 +1,51 @@
+{
+  "definition": {
+    "name": "auth.status",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": "null",
+    "result": {
+      "authenticated": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "canReauth": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "detail?": {
+        "union": [
+          "string",
+          "undefined"
+        ]
+      },
+      "label": "string",
+      "source": {
+        "union": [
+          "\"api-key\"",
+          "\"cli\"",
+          "\"environment\"",
+          "\"none\"",
+          "\"oauth\"",
+          "\"unknown\""
+        ]
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

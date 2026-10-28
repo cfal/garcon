@@ -1,0 +1,300 @@
+{
+  "definition": {
+    "name": "compaction.compact",
+    "version": 1,
+    "requires": [
+      {
+        "name": "resource.producer-binding",
+        "version": 1,
+        "requires": [],
+        "events": [
+          "rows",
+          "session",
+          "permission",
+          "notice",
+          "run-ended",
+          "started",
+          "steerable",
+          "publication-failed",
+          "publication-gap",
+          "launch-settled"
+        ]
+      },
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "execution.abort",
+        "version": 1
+      },
+      {
+        "name": "permissions.respond",
+        "version": 1
+      },
+      {
+        "name": "producers.close",
+        "version": 1
+      },
+      {
+        "name": "producers.cancelLaunch",
+        "version": 1
+      }
+    ],
+    "lane": "primary",
+    "continuity": "launch",
+    "direction": "controller-to-worker",
+    "acceptsResource": {
+      "name": "resource.producer-binding",
+      "version": 1,
+      "requires": [],
+      "events": [
+        "rows",
+        "session",
+        "permission",
+        "notice",
+        "run-ended",
+        "started",
+        "steerable",
+        "publication-failed",
+        "publication-gap",
+        "launch-settled"
+      ]
+    }
+  },
+  "wire": {
+    "request": {
+      "agentSessionId": "string",
+      "attachments": {
+        "array": {
+          "data": "string",
+          "kind": "\"image\"",
+          "mimeType": "string",
+          "name": {
+            "union": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "chatId": "string",
+      "endpoint": {
+        "union": [
+          "null",
+          {
+            "apiProviderId": "string",
+            "baseUrl": "string",
+            "capabilities": {
+              "union": [
+                "null",
+                {
+                  "chatCompletions": {
+                    "union": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  "responses": {
+                    "union": [
+                      "false",
+                      "true"
+                    ]
+                  }
+                }
+              ]
+            },
+            "credential": {
+              "union": [
+                "null",
+                {
+                  "apiProviderId": "string",
+                  "endpointId": "string",
+                  "kind": "\"api-provider-endpoint\"",
+                  "revision": "number"
+                }
+              ]
+            },
+            "endpointId": "string",
+            "headers": {
+              "[string]": "string"
+            },
+            "isLocal": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "model": "string",
+            "protocol": {
+              "union": [
+                "\"anthropic-messages\"",
+                "\"openai-compatible\""
+              ]
+            },
+            "providerLabel": "string"
+          }
+        ]
+      },
+      "model": "string",
+      "nativeSession": {
+        "union": [
+          "null",
+          {
+            "ownerId": "string",
+            "schemaVersion": "number",
+            "value": {
+              "[string]": {
+                "union": [
+                  "false",
+                  "null",
+                  "number",
+                  "string",
+                  "true",
+                  {
+                    "array": {
+                      "recursive": "JsonValue"
+                    }
+                  },
+                  {
+                    "recursive": "JsonObject"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "permissionMode": {
+        "union": [
+          "\"acceptEdits\"",
+          "\"bypassPermissions\"",
+          "\"default\"",
+          "\"manualBypass\"",
+          "\"plan\""
+        ]
+      },
+      "producerBinding": {
+        "executorId": "string",
+        "id": "string",
+        "instanceId": "string",
+        "integrationId": "string",
+        "kind": "\"producer\""
+      },
+      "projectPath": "string",
+      "prompt": "string",
+      "runId": "string",
+      "settings": {
+        "ownerId": "string",
+        "schemaVersion": "number",
+        "values": {
+          "[string]": {
+            "union": [
+              "false",
+              "null",
+              "number",
+              "string",
+              "true",
+              {
+                "array": {
+                  "recursive": "JsonValue"
+                }
+              },
+              {
+                "recursive": "JsonObject"
+              }
+            ]
+          }
+        }
+      },
+      "submission?": {
+        "union": [
+          "undefined",
+          {
+            "clientMessageId": {
+              "union": [
+                "null",
+                "string"
+              ]
+            },
+            "presentation?": {
+              "union": [
+                "undefined",
+                {
+                  "customStyle?": "undefined",
+                  "disclosure": "\"collapsed\"",
+                  "origin": "\"cli\"",
+                  "style?": "undefined",
+                  "title?": "undefined"
+                },
+                {
+                  "customStyle": {
+                    "darkAccent": "`#${string}`",
+                    "lightAccent": "`#${string}`"
+                  },
+                  "disclosure?": {
+                    "union": [
+                      "\"collapsed\"",
+                      "undefined"
+                    ]
+                  },
+                  "origin": "\"cli\"",
+                  "style": "\"custom\"",
+                  "title?": {
+                    "union": [
+                      "string",
+                      "undefined"
+                    ]
+                  }
+                },
+                {
+                  "disclosure?": {
+                    "union": [
+                      "\"collapsed\"",
+                      "undefined"
+                    ]
+                  },
+                  "origin": "\"cli\"",
+                  "style": {
+                    "union": [
+                      "\"error\"",
+                      "\"info\"",
+                      "\"notice\""
+                    ]
+                  },
+                  "title?": {
+                    "union": [
+                      "string",
+                      "undefined"
+                    ]
+                  }
+                }
+              ]
+            },
+            "timestamp": "string"
+          }
+        ]
+      },
+      "thinkingMode": {
+        "union": [
+          "\"high\"",
+          "\"low\"",
+          "\"max\"",
+          "\"medium\"",
+          "\"none\"",
+          "\"ultra\"",
+          "\"xhigh\""
+        ]
+      }
+    },
+    "result": {
+      "executorId": "string",
+      "id": "string",
+      "instanceId": "string",
+      "integrationId": "string",
+      "kind": "\"execution\""
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

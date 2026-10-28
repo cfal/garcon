@@ -1,3 +1,5 @@
+import { PRODUCER_BINDING_V1 } from '@garcon/common/executor-contracts';
+import { PRODUCER_BINDING_CODEC_V1 } from '../../transport/producer-protocol.js';
 import { describe, expect, mock, test } from 'bun:test';
 import type { AssistantMessage } from '@garcon/common/chat-types';
 import {
@@ -78,6 +80,35 @@ function rows(text: string): AgentProducerNotification['event'] {
 }
 
 describe('ProducerRelay', () => {
+  test('captures the event codec once and replays retained bytes without decoding again', () => {
+    const relay = new ProducerRelay();
+    const { integration, binding, publish } = integrationDouble();
+    const first = session();
+    const ref = binding();
+    const original = PRODUCER_BINDING_CODEC_V1.codecs.rows!;
+    const decode = mock(original.decode);
+    const creator = { ...PRODUCER_BINDING_CODEC_V1,
+      codecs: { ...PRODUCER_BINDING_CODEC_V1.codecs, rows: { ...original, decode } } };
+    relay.track(integration);
+    try {
+      relay.bind(first, integration, ref, creator);
+      publish({ binding: ref, event: rows('captured') });
+      expect(decode).toHaveBeenCalledTimes(1);
+      relay.suspend(first);
+      const resumed = session();
+      const replacement = { ...creator, codecs: { ...creator.codecs,
+        rows: { ...original, decode: mock(() => { throw new Error('Replacement decoder must not run'); }) } } };
+      expect(() => relay.bind(resumed, integration, ref, replacement)).toThrow('already exists');
+      relay.resume(resumed, integration, [{ binding: ref, acknowledgedSeq: 0 }]);
+      expect(resumed.sent).toEqual(first.sent);
+      expect(decode).toHaveBeenCalledTimes(1);
+      publish({ binding: ref, event: rows('after resume') });
+      expect(decode).toHaveBeenCalledTimes(2);
+      expect(replacement.codecs.rows.decode).not.toHaveBeenCalled();
+      expect(resumed.texts()).toEqual(['captured', 'after resume']);
+    } finally { relay.dispose(); }
+  });
+
   for (const field of ['controllerRuntimeId', 'workerRuntimeId', 'profileId'] as const) {
     test(`retained producer bytes, launch cancellation and cleanup stay with their ${field}`, async () => {
       const relay = new ProducerRelay();
@@ -86,11 +117,11 @@ describe('ProducerRelay', () => {
       const first = session();
       const other = session(Infinity, { ...first.protocol, continuity: { ...first.protocol.continuity, [field]: 'changed' } });
       relay.track(integration);
-      relay.bind(first, integration, ref);
+      relay.bind(first, integration, ref, PRODUCER_BINDING_CODEC_V1);
       publish({ binding: ref, event: rows('retained') });
       const signals: AbortSignal[] = [];
       const launch = relay.launch(first, integration, { producerBinding: ref, runId: 'run' }, new AbortController().signal,
-        undeliveredReplies().observe, pendingAdmission(signals)).catch(() => null);
+        undeliveredReplies().observe, pendingAdmission(signals), PRODUCER_BINDING_V1).catch(() => null);
       relay.suspend(first);
       relay.acknowledge(other, [{ bindingId: ref.id, seq: 1 }]);
       relay.cancelLaunch(other, integration, ref, 'run');
@@ -114,7 +145,7 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const first = session();
     const ref = binding();
-    relay.bind(first, integration, ref);
+    relay.bind(first, integration, ref, PRODUCER_BINDING_CODEC_V1);
 
     for (const text of ['one', 'two', 'three']) publish({ binding: ref, event: rows(text) });
     relay.acknowledge(first, [{ bindingId: ref.id, seq: 2 }]);
@@ -136,7 +167,7 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const first = session();
     const ref = binding();
-    relay.bind(first, integration, ref);
+    relay.bind(first, integration, ref, PRODUCER_BINDING_CODEC_V1);
     relay.suspend(first);
 
     publish({ binding: ref, event: rows('during gap') });
@@ -158,7 +189,7 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const first = session();
     const ref = binding();
-    relay.bind(first, integration, ref);
+    relay.bind(first, integration, ref, PRODUCER_BINDING_CODEC_V1);
     relay.suspend(first);
     for (const text of ['one', 'two', 'three', 'four']) publish({ binding: ref, event: rows(text) });
     const second = session(2);
@@ -181,8 +212,8 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const first = session();
     const [left, right] = [binding(), binding()];
-    relay.bind(first, integration, left);
-    relay.bind(first, integration, right);
+    relay.bind(first, integration, left, PRODUCER_BINDING_CODEC_V1);
+    relay.bind(first, integration, right, PRODUCER_BINDING_CODEC_V1);
     relay.suspend(first);
     publish({ binding: left, event: rows('left one') });
     publish({ binding: right, event: rows('right one') });
@@ -204,7 +235,7 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const live = session(2);
     const ref = binding();
-    relay.bind(live, integration, ref);
+    relay.bind(live, integration, ref, PRODUCER_BINDING_CODEC_V1);
 
     for (const text of ['one', 'two', 'three']) publish({ binding: ref, event: rows(`${text}:${'x'.repeat(600)}`) });
     live.allow(5);
@@ -220,7 +251,7 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const first = session();
     const ref = binding();
-    relay.bind(first, integration, ref);
+    relay.bind(first, integration, ref, PRODUCER_BINDING_CODEC_V1);
     relay.suspend(first);
 
     publish({ binding: ref, event: { type: 'started', runId: 'run-1' } });
@@ -243,8 +274,8 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const first = session();
     const [ref, other] = [binding(), binding()];
-    relay.bind(first, integration, ref);
-    relay.bind(first, integration, other);
+    relay.bind(first, integration, ref, PRODUCER_BINDING_CODEC_V1);
+    relay.bind(first, integration, other, PRODUCER_BINDING_CODEC_V1);
     relay.suspend(first);
 
     publish({ binding: ref, event: { type: 'started', runId: 'run-1' } });
@@ -264,8 +295,8 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const first = session();
     const [ref, other] = [binding(), binding()];
-    relay.bind(first, integration, ref);
-    relay.bind(first, integration, other);
+    relay.bind(first, integration, ref, PRODUCER_BINDING_CODEC_V1);
+    relay.bind(first, integration, other, PRODUCER_BINDING_CODEC_V1);
     relay.suspend(first);
     publish({ binding: ref, event: rows(`old:${'x'.repeat(600)}`) });
     publish({ binding: ref, event: rows(`tail:${'x'.repeat(600)}`) });
@@ -287,7 +318,7 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const first = session();
     const ref = binding();
-    relay.bind(first, integration, ref);
+    relay.bind(first, integration, ref, PRODUCER_BINDING_CODEC_V1);
     relay.suspend(first);
     publish({ binding: ref, event: rows('lost') });
 
@@ -307,8 +338,8 @@ describe('ProducerRelay', () => {
     const first = session();
     const orphan = binding();
     const resumed = binding();
-    relay.bind(first, integration, orphan);
-    relay.bind(first, integration, resumed);
+    relay.bind(first, integration, orphan, PRODUCER_BINDING_CODEC_V1);
+    relay.bind(first, integration, resumed, PRODUCER_BINDING_CODEC_V1);
     relay.suspend(first);
     const second = session();
 
@@ -328,7 +359,7 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const first = session();
     const ref = binding();
-    relay.bind(first, integration, ref);
+    relay.bind(first, integration, ref, PRODUCER_BINDING_CODEC_V1);
     relay.suspend(first);
 
     relay.shortenSuspendedGrace();
@@ -346,7 +377,7 @@ describe('ProducerRelay', () => {
     relay.track(other.integration);
     const first = session();
     const ref = owner.binding();
-    relay.bind(first, owner.integration, ref);
+    relay.bind(first, owner.integration, ref, PRODUCER_BINDING_CODEC_V1);
     relay.suspend(first);
     const second = session();
 
@@ -370,10 +401,10 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const first = session();
     const ref = binding();
-    relay.bind(first, integration, ref);
+    relay.bind(first, integration, ref, PRODUCER_BINDING_CODEC_V1);
     const handle = createAgentResourceRef(SCOPE, 'execution');
     const release = Promise.withResolvers<typeof handle>();
-    const launch = relay.launch(first, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, () => release.promise);
+    const launch = relay.launch(first, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, () => release.promise, PRODUCER_BINDING_V1);
     relay.suspend(first);
     const second = session();
 
@@ -397,14 +428,14 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const first = session();
     const ref = binding();
-    relay.bind(first, integration, ref);
+    relay.bind(first, integration, ref, PRODUCER_BINDING_CODEC_V1);
     const handle = createAgentResourceRef(SCOPE, 'execution');
     for (let run = 1; run <= 10; run += 1) {
-      await relay.launch(first, integration, { producerBinding: ref, runId: `run-${run}` }, new AbortController().signal, undeliveredReplies().observe, async () => handle);
+      await relay.launch(first, integration, { producerBinding: ref, runId: `run-${run}` }, new AbortController().signal, undeliveredReplies().observe, async () => handle, PRODUCER_BINDING_V1);
     }
     await relay.launch(first, integration, { producerBinding: ref, runId: 'run-failed' }, new AbortController().signal, undeliveredReplies().observe, async () => {
       throw new Error('Synthetic launch failure');
-    }).catch(() => null);
+    }, PRODUCER_BINDING_V1).catch(() => null);
     relay.suspend(first);
 
     expect(relay.resume(session(), integration, [{ binding: ref, acknowledgedSeq: 0 }])[0]!.receivedRunIds)
@@ -418,17 +449,17 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const first = session();
     const [started, cancelled, failed] = [binding(), binding(), binding()];
-    for (const ref of [started, cancelled, failed]) relay.bind(first, integration, ref);
+    for (const ref of [started, cancelled, failed]) relay.bind(first, integration, ref, PRODUCER_BINDING_CODEC_V1);
     const handle = createAgentResourceRef(SCOPE, 'execution');
     const success = Promise.withResolvers<typeof handle>();
     const cancellation = Promise.withResolvers<typeof handle>();
     const failure = Promise.withResolvers<typeof handle>();
     const abandoned = new AbortController();
     const launches = [
-      relay.launch(first, integration, { producerBinding: started, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, () => success.promise),
-      relay.launch(first, integration, { producerBinding: cancelled, runId: 'run-2' }, abandoned.signal, undeliveredReplies().observe, () => cancellation.promise)
+      relay.launch(first, integration, { producerBinding: started, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, () => success.promise, PRODUCER_BINDING_V1),
+      relay.launch(first, integration, { producerBinding: cancelled, runId: 'run-2' }, abandoned.signal, undeliveredReplies().observe, () => cancellation.promise, PRODUCER_BINDING_V1)
         .catch(() => null),
-      relay.launch(first, integration, { producerBinding: failed, runId: 'run-3' }, new AbortController().signal, undeliveredReplies().observe, () => failure.promise)
+      relay.launch(first, integration, { producerBinding: failed, runId: 'run-3' }, new AbortController().signal, undeliveredReplies().observe, () => failure.promise, PRODUCER_BINDING_V1)
         .catch(() => null),
     ];
     relay.suspend(first);
@@ -458,11 +489,11 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const first = session();
     const ref = binding();
-    relay.bind(first, integration, ref);
+    relay.bind(first, integration, ref, PRODUCER_BINDING_CODEC_V1);
     const signals: AbortSignal[] = [];
     const launch = relay.launch(
       first, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal,
-      undeliveredReplies().observe, pendingAdmission(signals),
+      undeliveredReplies().observe, pendingAdmission(signals), PRODUCER_BINDING_V1
     ).catch(() => null);
     relay.suspend(first);
     relay.cancelLaunch(first, integration, ref, 'run-1');
@@ -483,9 +514,9 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const live = session();
     const ref = binding();
-    relay.bind(live, integration, ref);
+    relay.bind(live, integration, ref, PRODUCER_BINDING_CODEC_V1);
     const signals: AbortSignal[] = [];
-    const abandoned = relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, pendingAdmission(signals))
+    const abandoned = relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, pendingAdmission(signals), PRODUCER_BINDING_V1)
       .catch((error: unknown) => error);
     relay.cancelLaunch(live, integration, ref, 'run-other');
     expect(signals[0]!.aborted).toBe(false);
@@ -493,10 +524,10 @@ describe('ProducerRelay', () => {
     expect(signals[0]!.aborted).toBe(true);
     expect(await abandoned).toBeInstanceOf(Error);
 
-    const replaced = relay.launch(live, integration, { producerBinding: ref, runId: 'run-2' }, new AbortController().signal, undeliveredReplies().observe, pendingAdmission(signals))
+    const replaced = relay.launch(live, integration, { producerBinding: ref, runId: 'run-2' }, new AbortController().signal, undeliveredReplies().observe, pendingAdmission(signals), PRODUCER_BINDING_V1)
       .catch((error: unknown) => error);
     const handle = createAgentResourceRef(SCOPE, 'execution');
-    const newest = relay.launch(live, integration, { producerBinding: ref, runId: 'run-3' }, new AbortController().signal, undeliveredReplies().observe, async () => handle);
+    const newest = relay.launch(live, integration, { producerBinding: ref, runId: 'run-3' }, new AbortController().signal, undeliveredReplies().observe, async () => handle, PRODUCER_BINDING_V1);
     expect(signals[1]!.aborted).toBe(true);
     expect(await replaced).toBeInstanceOf(Error);
     expect(await newest).toBe(handle);
@@ -511,13 +542,13 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const live = session();
     const ref = binding();
-    relay.bind(live, integration, ref);
+    relay.bind(live, integration, ref, PRODUCER_BINDING_CODEC_V1);
     const handle = createAgentResourceRef(SCOPE, 'execution');
     const release = Promise.withResolvers<void>();
     const launch = relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, async () => {
       await release.promise;
       return handle;
-    });
+    }, PRODUCER_BINDING_V1);
     relay.cancelLaunch(live, integration, ref, 'run-1');
     release.resolve();
 
@@ -532,14 +563,14 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const live = session();
     const ref = binding();
-    relay.bind(live, integration, ref);
+    relay.bind(live, integration, ref, PRODUCER_BINDING_CODEC_V1);
     const handle = createAgentResourceRef(SCOPE, 'execution');
 
-    await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, async () => handle))
+    await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, async () => handle, PRODUCER_BINDING_V1))
       .resolves.toBe(handle);
     await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-2' }, new AbortController().signal, undeliveredReplies().observe, async () => {
       throw new Error('Synthetic rejection');
-    })).rejects.toThrow('Synthetic rejection');
+    }, PRODUCER_BINDING_V1)).rejects.toThrow('Synthetic rejection');
 
     expect(live.sent).toEqual([]);
     relay.dispose();
@@ -551,15 +582,19 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const live = session();
     const ref = binding();
-    relay.bind(live, integration, ref);
+    relay.bind(live, integration, ref, PRODUCER_BINDING_CODEC_V1);
     const nested = new AgentCallError('unknown', 'Synthetic credential read outcome is unknown');
     const untracked = binding();
 
-    for (const producerBinding of [ref, untracked]) {
-      await expect(relay.launch(live, integration, { producerBinding, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, async () => {
-        throw nested;
-      })).rejects.toMatchObject({ outcome: 'rejected', code: nested.code, message: nested.message });
-    }
+    await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, async () => {
+      throw nested;
+    }, PRODUCER_BINDING_V1)).rejects.toMatchObject({ outcome: 'rejected', code: nested.code, message: nested.message });
+    let invoked = false;
+    await expect(relay.launch(live, integration, { producerBinding: untracked, runId: 'run-2' }, new AbortController().signal, undeliveredReplies().observe, async () => {
+      invoked = true;
+      throw nested;
+    }, PRODUCER_BINDING_V1)).rejects.toMatchObject({ outcome: 'not-dispatched', code: 'STALE_RESOURCE' });
+    expect(invoked).toBe(false);
     relay.dispose();
   });
 
@@ -569,16 +604,16 @@ describe('ProducerRelay', () => {
     relay.track(integration);
     const live = session();
     const [started, failed] = [binding(), binding()];
-    relay.bind(live, integration, started);
-    relay.bind(live, integration, failed);
+    relay.bind(live, integration, started, PRODUCER_BINDING_CODEC_V1);
+    relay.bind(live, integration, failed, PRODUCER_BINDING_CODEC_V1);
     const handle = createAgentResourceRef(SCOPE, 'execution');
     const success = undeliveredReplies();
     const failure = undeliveredReplies();
 
-    await relay.launch(live, integration, { producerBinding: started, runId: 'run-1' }, new AbortController().signal, success.observe, async () => handle);
+    await relay.launch(live, integration, { producerBinding: started, runId: 'run-1' }, new AbortController().signal, success.observe, async () => handle, PRODUCER_BINDING_V1);
     await relay.launch(live, integration, { producerBinding: failed, runId: 'run-2' }, new AbortController().signal, failure.observe, async () => {
       throw new AgentIntegrationError('AUTH_REQUIRED', 'Synthetic sign-in required', false);
-    }).catch(() => null);
+    }, PRODUCER_BINDING_V1).catch(() => null);
     expect(live.sent).toEqual([]);
     success.fire();
     failure.fire();

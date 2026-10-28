@@ -1,0 +1,26 @@
+{
+  "definition": {
+    "name": "cli.chats.rows",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "GET /api/v1/chats/rows",
+  "client": {
+    "parameters": [
+      {
+        "name": "chatId",
+        "type": "string"
+      }
+    ],
+    "result": {
+      "chatId": "string",
+      "success": "true",
+      "transcriptViewId": "string"
+    }
+  }
+}

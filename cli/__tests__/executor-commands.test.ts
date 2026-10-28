@@ -1,3 +1,5 @@
+import { LOCAL_EXECUTOR_OPERATIONS } from '@garcon/common/executor-contracts';
+import { CLI_BOOTSTRAP_VERSION, CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 import { expect, mock, spyOn, test } from 'bun:test';
 import fs, { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -16,7 +18,7 @@ const snapshot: ExecutorSnapshot = { id, label: 'Worker', kind: 'remote', enable
   allowControllerCli: true, allowExecutorManagement: false, direction: 'executor-connects', availability: 'ready',
   instanceId: 'synthetic', projectBasePath: '/workspace', lastError: null,
   bulk: { availability: 'ready', lastError: null },
-  executorServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: true } };
+  operations: LOCAL_EXECUTOR_OPERATIONS, executorServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: true } };
 const connection = { connectionUrl: `wss://worker.test/executor#secret=${'A'.repeat(43)}`, noTls: false, allowUnverifiedTls: false };
 const providers = [{ id: 'synthetic-profile', label: 'Profile', executorIds: [id] }];
 
@@ -151,7 +153,7 @@ test.each([
 
 test.each(['{', '{}'])('invalid mutation replies stay unknown without retries: %s', async (body) => {
   const request = mock(async () => new Response(body));
-  const client = new GarconClient({ baseUrl: 'http://127.0.0.1:1', instanceId: 'synthetic', endpointInstanceId: 'synthetic',
+  const client = new GarconClient({ protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS }, baseUrl: 'http://127.0.0.1:1', instanceId: 'synthetic', endpointInstanceId: 'synthetic',
     defaultExecutorId: 'local', localCapability: 'synthetic', workspaceDir: null, workspaceName: null, fetch: request });
   const f = fixture();
   await expect(runExecutorCommand(command(['create', '--label', 'Worker', '--direction', 'controller-connects', '--connection-url', connection.connectionUrl]), client, f.output))
@@ -173,7 +175,7 @@ test('read failures and cancellation before submission do not claim mutation unc
 
 test.each(['list', 'providers'])('malformed %s replies report only a read failure', async (action) => {
   const request = mock(async () => new Response('{}'));
-  const client = new GarconClient({ baseUrl: 'http://127.0.0.1:1', instanceId: 'synthetic', endpointInstanceId: 'synthetic',
+  const client = new GarconClient({ protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS }, baseUrl: 'http://127.0.0.1:1', instanceId: 'synthetic', endpointInstanceId: 'synthetic',
     defaultExecutorId: 'local', localCapability: 'synthetic', workspaceDir: null, workspaceName: null, fetch: request });
   const f = fixture();
   await expect(runExecutorCommand(command([action]), client, f.output)).rejects.toMatchObject({

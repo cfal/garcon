@@ -3,13 +3,16 @@ import { LOCAL_CAPABILITY_PREFIX } from '../../../../common/server-runtime.js';
 import { isNoAuthHandler } from '../../lib/http-route.js';
 import { createServerRuntimeProof } from '../../../common/server-runtime.js';
 import { createRuntimeRoutes } from '../runtime.js';
+import { CLI_BOOTSTRAP_VERSION, CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 
 describe('runtime route', () => {
   it('exposes authenticated CLI context without filesystem metadata', async () => {
     for (const workspaceName of ['review', null]) {
       const handler = createRuntimeRoutes({ identity: { instanceId: 'controller' } }, workspaceName)['/api/v1/cli/context'].GET;
       expect(isNoAuthHandler(handler)).toBe(false);
-      expect(await (await handler()).json()).toEqual({ serverInstanceId: 'controller', defaultExecutorId: 'local', workspaceName });
+      const context = { cliContracts: CLI_CONTRACTS };
+      expect(await (await handler(undefined, undefined, undefined, context)).json()).toEqual({ serverInstanceId: 'controller', defaultExecutorId: 'local', workspaceName,
+        protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS } });
     }
   });
   it('exposes only a fresh instance proof without authentication', async () => {

@@ -10,6 +10,7 @@ import {
   parseServerRuntimeProbe,
   runtimeProofPayload,
   type CliRuntimeDescriptor,
+  type CliContext,
 } from '@garcon/common/server-runtime';
 import { CliError } from './errors.js';
 import { parseBasePath } from '@garcon/common/base-path';
@@ -17,6 +18,7 @@ import { parseBasePath } from '@garcon/common/base-path';
 const RUNTIME_PROBE_TIMEOUT_MS = 5_000;
 
 export interface RuntimeConnection {
+  readonly protocol: CliContext['protocol'];
   baseUrl: string;
   instanceId: string;
   endpointInstanceId: string;
@@ -212,6 +214,7 @@ async function connectRuntime(candidate: RuntimeCandidate, options: RuntimeDisco
     endpointInstanceId: descriptor.instanceId,
     defaultExecutorId: context.defaultExecutorId,
     workspaceName: context.workspaceName,
+    protocol: context.protocol,
     localCapability: descriptor.localCapability,
     workspaceDir: 'workspaceDir' in descriptor ? descriptor.workspaceDir : null,
     selector: { runtime: candidate.runtime },

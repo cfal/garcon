@@ -1,0 +1,72 @@
+{
+  "definition": {
+    "name": "terminals.list",
+    "version": 1,
+    "requires": [],
+    "lane": "primary",
+    "continuity": "session",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "authority": {
+        "expiresAtMs": {
+          "union": [
+            "null",
+            "number"
+          ]
+        },
+        "key": "string"
+      }
+    },
+    "result": {
+      "attachmentEpoch?": {
+        "union": [
+          "string",
+          "undefined"
+        ]
+      },
+      "success": "true",
+      "terminalRuntimeId?": {
+        "union": [
+          "string",
+          "undefined"
+        ]
+      },
+      "terminals": {
+        "array": {
+          "attachmentStatus": {
+            "union": [
+              "\"attached\"",
+              "\"detached\""
+            ]
+          },
+          "createdAt": "string",
+          "displaySequence": "number",
+          "exitCode": {
+            "union": [
+              "null",
+              "number"
+            ]
+          },
+          "initialWorkingDirectory": "string",
+          "latestOutputSequence": "number",
+          "processStatus": {
+            "union": [
+              "\"exited\"",
+              "\"running\""
+            ]
+          },
+          "terminalId": "string",
+          "title": {
+            "union": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

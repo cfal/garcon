@@ -13,7 +13,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       const integration = await f.executor.getAgentIntegration('test');
       for (const timeoutMs of [undefined, 60_000, 25]) {
         await integration.permissions.respond(request, { timeoutMs }).catch(() => {});
-        const sent = calls.mock.calls.filter(([, method]) => method === 'permissions.respond').at(-1)!;
+        const sent = calls.mock.calls.filter(([, contract]) => contract.name === 'permissions.respond').at(-1)!;
         expect(sent[3]?.timeoutMs).toBe(timeoutMs === 25 ? 25 : 20_000);
       }
       const before = calls.mock.calls.length;

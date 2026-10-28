@@ -1,0 +1,64 @@
+{
+  "definition": {
+    "name": "producers.cancelLaunch",
+    "version": 1,
+    "requires": [
+      {
+        "name": "resource.producer-binding",
+        "version": 1,
+        "requires": [],
+        "events": [
+          "rows",
+          "session",
+          "permission",
+          "notice",
+          "run-ended",
+          "started",
+          "steerable",
+          "publication-failed",
+          "publication-gap",
+          "launch-settled"
+        ]
+      },
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker",
+    "acceptsResource": {
+      "name": "resource.producer-binding",
+      "version": 1,
+      "requires": [],
+      "events": [
+        "rows",
+        "session",
+        "permission",
+        "notice",
+        "run-ended",
+        "started",
+        "steerable",
+        "publication-failed",
+        "publication-gap",
+        "launch-settled"
+      ]
+    }
+  },
+  "wire": {
+    "request": {
+      "binding": {
+        "executorId": "string",
+        "id": "string",
+        "instanceId": "string",
+        "integrationId": "string",
+        "kind": "\"producer\""
+      },
+      "runId": "string"
+    },
+    "result": "void"
+  },
+  "failures": "rpc-errors-v1"
+}

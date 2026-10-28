@@ -1,3 +1,5 @@
+import { rpcWireV1 } from '../transport/rpc-wire-v1.js';
+import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { AgentCallError, type ExecutionTerminalService, type TerminalAuthority, type TerminalPeer, type ExecutorCallOptions } from '@garcon/server-agent-interface';
 import { TerminalError } from '../../../common/terminal-error.js';
 import { parseTerminalReference } from '../../../common/terminal-identity.js';
@@ -5,9 +7,11 @@ import { parseTerminalListResponse, parseTerminalCreateResponse, parseTerminalRe
   terminalIdForMessage, type TerminalCreateRequest, type TerminalStreamClientMessage } from '../../../common/terminal.js';
 import type { RemoteSessions } from './executor-client.js';
 import type { ExecutorRpc } from '../transport/rpc.js';
-import type { TerminalNotification } from '../transport/terminal-protocol.js';
+import { parseTerminalNotification, type TerminalCreator, type TerminalNotification } from '../transport/terminal-protocol.js';
+import { resolveRpc } from '../transport/rpc-registrations.js';
 
 interface Attachment {
+  readonly creator: TerminalCreator;
   authority: TerminalAuthority;
   peer: TerminalPeer;
   terminalId: string;
@@ -21,7 +25,7 @@ export class RemoteTerminalService implements ExecutionTerminalService {
 
   async list(authority: TerminalAuthority, options?: ExecutorCallOptions) {
     const { backing, timeoutMs } = await this.sessions.acquire('primary', options);
-    const response = parseTerminalListResponse(await backing.rpc.call('', 'terminals.list', { authority }, { ...options, timeoutMs }));
+    const response = parseTerminalListResponse(await backing.rpc.call('', RPC_V1['terminals.list'], { authority }, { ...options, timeoutMs }));
     if (!response?.terminalRuntimeId || !response.attachmentEpoch || response.terminals.some(terminal => {
       const ref = parseTerminalReference(terminal.terminalId);
       return !ref || ref.executorId !== backing.info.executorId || ref.terminalRuntimeId !== response.terminalRuntimeId;
@@ -30,33 +34,35 @@ export class RemoteTerminalService implements ExecutionTerminalService {
   }
   async create(authority: TerminalAuthority, request: TerminalCreateRequest, options?: ExecutorCallOptions) {
     const { backing, timeoutMs } = await this.sessions.acquire('primary', options);
-    const result = parseTerminalCreateResponse(await backing.rpc.call('', 'terminals.create', { ...request, authority }, { ...options, timeoutMs }));
+    const result = parseTerminalCreateResponse(await backing.rpc.call('', RPC_V1['terminals.create'], { ...request, authority }, { ...options, timeoutMs }));
     const ref = result && parseTerminalReference(result.terminal.terminalId);
     if (!result || !ref || ref.terminalRuntimeId !== request.expectedTerminalRuntimeId || ref.executorId !== backing.info.executorId) throw new TerminalError('terminal-outcome-unknown', 'Invalid terminal create response. Refresh the terminal list.', 502);
     return result;
   }
   async rename(authority: TerminalAuthority, terminalId: string, title: string | null, options?: ExecutorCallOptions) {
-    const result = parseTerminalRenameResponse(await this.sessions.call('', 'terminals.rename', { authority, terminalId, title }, options));
+    const result = parseTerminalRenameResponse(await this.sessions.call('', RPC_V1['terminals.rename'], { authority, terminalId, title }, options));
     if (!result || result.terminalId !== terminalId) throw new TerminalError('terminal-outcome-unknown', 'Invalid terminal rename response.', 502);
     return result;
   }
   async terminate(authority: TerminalAuthority, terminalId: string, requestId: string, options?: ExecutorCallOptions) {
-    const result = parseTerminalTerminateResponse(await this.sessions.call('', 'terminals.terminate', { authority, terminalId, requestId }, options));
+    const result = parseTerminalTerminateResponse(await this.sessions.call('', RPC_V1['terminals.terminate'], { authority, terminalId, requestId }, options));
     if (!result || result.terminalId !== terminalId) throw new TerminalError('terminal-outcome-unknown', 'Invalid terminal terminate response.', 502);
     return result;
   }
   async attach(authority: TerminalAuthority, peer: TerminalPeer, request: Extract<TerminalStreamClientMessage, { type: 'terminal-attach' }>) {
-    this.sessions.latest();
+    const latest = this.sessions.latest();
+    const creator = resolveRpc(latest.rpc.transport.protocol, RPC_V1['terminals.attach'], 'send').terminal;
+    if (!creator) throw new Error('Terminal client codec is not registered');
     if (this.#attachments.size >= 256) throw new TerminalError('terminal-backpressure', 'Terminal attachment budget exhausted.', 429);
     const attachmentId = crypto.randomUUID();
-    const attachment: Attachment = { authority, peer, terminalId: request.terminalId, rpc: null };
+    const attachment: Attachment = { creator, authority, peer, terminalId: request.terminalId, rpc: null };
     // Registered before any wait so that a peer detaching meanwhile is never attached.
     this.#attachments.set(attachmentId, attachment);
     try {
       const { backing, timeoutMs } = await this.sessions.acquire('primary');
       if (this.#attachments.get(attachmentId) !== attachment) return;
       attachment.rpc = backing.rpc;
-      await backing.rpc.call('', 'terminals.attach', { ...request, authority, attachmentId }, { timeoutMs });
+      await backing.rpc.call('', creator.contract, { ...request, authority, attachmentId }, { timeoutMs });
     } catch (error) {
       if (!(error instanceof TerminalError && error.code === 'terminal-takeover-required')) this.#detach(attachmentId);
       throw error;
@@ -64,11 +70,11 @@ export class RemoteTerminalService implements ExecutionTerminalService {
   }
   async input(authority: TerminalAuthority, peer: TerminalPeer, terminalId: string, data: string) {
     const [attachmentId, rpc] = this.#find(authority, peer, terminalId);
-    await rpc.call('', 'terminals.input', { authority, attachmentId, terminalId, type: 'terminal-input', data });
+    await rpc.call('', RPC_V1['terminals.input'], { authority, attachmentId, terminalId, type: 'terminal-input', data });
   }
   async resize(authority: TerminalAuthority, peer: TerminalPeer, terminalId: string, cols: number, rows: number) {
     const [attachmentId, rpc] = this.#find(authority, peer, terminalId);
-    await rpc.call('', 'terminals.resize', { authority, attachmentId, terminalId, type: 'terminal-resize', cols, rows });
+    await rpc.call('', RPC_V1['terminals.resize'], { authority, attachmentId, terminalId, type: 'terminal-resize', cols, rows });
   }
   detachPeer(authority: TerminalAuthority, peer: TerminalPeer): void {
     for (const [id, attachment] of this.#attachments) {
@@ -78,7 +84,7 @@ export class RemoteTerminalService implements ExecutionTerminalService {
   receive(frame: TerminalNotification, rpc: ExecutorRpc): void {
     const attachment = this.#attachments.get(frame.attachmentId);
     if (!attachment || attachment.rpc !== rpc) return;
-    const message = frame.message;
+    const message = parseTerminalNotification(frame, attachment.creator).message;
     const terminalId = terminalIdForMessage(message);
     if (terminalId !== attachment.terminalId) throw new Error('Terminal notification target mismatch');
     if (message.type === 'terminal-attached') attachment.peer.ownedTerminalIds.add(terminalId);
@@ -107,7 +113,18 @@ export class RemoteTerminalService implements ExecutionTerminalService {
     this.#attachments.delete(id);
     attachment.peer.ownedTerminalIds.delete(attachment.terminalId);
     try {
-      attachment.rpc?.detachTerminal({ authority: attachment.authority, terminalId: attachment.terminalId, attachmentId: id, type: 'terminal-detach' });
+      attachment.rpc?.detachTerminal(attachment.creator.detach, { authority: attachment.authority, terminalId: attachment.terminalId, attachmentId: id, type: 'terminal-detach' });
     } catch { /* Transport failure retires all worker attachments. */ }
   }
 }
+
+export const TERMINAL_RPC_CLIENTS = Object.freeze([
+  rpcWireV1('terminals.attach'),
+  rpcWireV1('terminals.create'),
+  rpcWireV1('terminals.detach'),
+  rpcWireV1('terminals.input'),
+  rpcWireV1('terminals.list'),
+  rpcWireV1('terminals.rename'),
+  rpcWireV1('terminals.resize'),
+  rpcWireV1('terminals.terminate'),
+] as const);

@@ -1,0 +1,467 @@
+{
+  "definition": {
+    "name": "cli.models.list",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "GET /api/v1/models",
+  "client": {
+    "parameters": [
+      {
+        "name": "agentId",
+        "type": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        }
+      },
+      {
+        "name": "executorId",
+        "type": "string"
+      }
+    ],
+    "result": {
+      "catalog": {
+        "agents": {
+          "array": {
+            "acceptsApiProviderEndpoints": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "authLoginSupported": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "defaultModel": "string",
+            "defaultSettings": {
+              "ownerId": "string",
+              "schemaVersion": "number",
+              "values": {
+                "[string]": {
+                  "union": [
+                    "false",
+                    "null",
+                    "number",
+                    "string",
+                    "true",
+                    {
+                      "array": {
+                        "recursive": "JsonValue"
+                      }
+                    },
+                    {
+                      "recursive": "JsonObject"
+                    }
+                  ]
+                }
+              }
+            },
+            "description?": {
+              "union": [
+                "string",
+                "undefined"
+              ]
+            },
+            "executionPolicy": {
+              "union": [
+                "\"conversation\"",
+                "\"literal\""
+              ]
+            },
+            "fileAttachmentMimeTypes?": {
+              "union": [
+                "\"any\"",
+                "undefined",
+                {
+                  "array": "string"
+                }
+              ]
+            },
+            "generation": {
+              "union": [
+                "null",
+                {
+                  "model": "string",
+                  "priority": "number"
+                }
+              ]
+            },
+            "id": "string",
+            "inputFormatByModel": {
+              "[string]": {
+                "union": [
+                  "\"markdown\"",
+                  "\"plain\""
+                ]
+              }
+            },
+            "kind": "\"agent\"",
+            "label": "string",
+            "models": {
+              "array": {
+                "apiProviderId?": {
+                  "union": [
+                    "string",
+                    "undefined"
+                  ]
+                },
+                "endpointId?": {
+                  "union": [
+                    "string",
+                    "undefined"
+                  ]
+                },
+                "isLocal?": {
+                  "union": [
+                    "false",
+                    "true",
+                    "undefined"
+                  ]
+                },
+                "label": "string",
+                "protocol?": {
+                  "union": [
+                    "\"anthropic-messages\"",
+                    "\"openai-compatible\"",
+                    "undefined"
+                  ]
+                },
+                "rawModel?": {
+                  "union": [
+                    "string",
+                    "undefined"
+                  ]
+                },
+                "supportsImages?": {
+                  "union": [
+                    "false",
+                    "true",
+                    "undefined"
+                  ]
+                },
+                "value": "string"
+              }
+            },
+            "requiresStrictModelDiscovery": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "selectionLabel": "string",
+            "settings": {
+              "array": {
+                "union": [
+                  {
+                    "credentialKind": "string",
+                    "key": "string",
+                    "label": "string",
+                    "labelKey?": {
+                      "union": [
+                        "\"mode\"",
+                        "\"thinking\"",
+                        "undefined"
+                      ]
+                    },
+                    "type": "\"credential-ref\""
+                  },
+                  {
+                    "key": "string",
+                    "label": "string",
+                    "labelKey?": {
+                      "union": [
+                        "\"mode\"",
+                        "\"thinking\"",
+                        "undefined"
+                      ]
+                    },
+                    "max": "number",
+                    "min": "number",
+                    "step": "number",
+                    "type": "\"number\""
+                  },
+                  {
+                    "key": "string",
+                    "label": "string",
+                    "labelKey?": {
+                      "union": [
+                        "\"mode\"",
+                        "\"thinking\"",
+                        "undefined"
+                      ]
+                    },
+                    "options": {
+                      "array": {
+                        "description?": {
+                          "union": [
+                            "string",
+                            "undefined"
+                          ]
+                        },
+                        "descriptionKey?": {
+                          "union": [
+                            "\"thinkingAutomatic\"",
+                            "\"thinkingDisabled\"",
+                            "\"thinkingEnabled\"",
+                            "undefined"
+                          ]
+                        },
+                        "label": "string",
+                        "labelKey?": {
+                          "union": [
+                            "\"automatic\"",
+                            "\"disabled\"",
+                            "\"enabled\"",
+                            "undefined"
+                          ]
+                        },
+                        "value": "string"
+                      }
+                    },
+                    "type": "\"enum\""
+                  },
+                  {
+                    "key": "string",
+                    "label": "string",
+                    "labelKey?": {
+                      "union": [
+                        "\"mode\"",
+                        "\"thinking\"",
+                        "undefined"
+                      ]
+                    },
+                    "type": "\"boolean\""
+                  },
+                  {
+                    "key": "string",
+                    "label": "string",
+                    "labelKey?": {
+                      "union": [
+                        "\"mode\"",
+                        "\"thinking\"",
+                        "undefined"
+                      ]
+                    },
+                    "type": "\"string\""
+                  }
+                ]
+              }
+            },
+            "supportedPermissionModes": {
+              "array": {
+                "union": [
+                  "\"acceptEdits\"",
+                  "\"bypassPermissions\"",
+                  "\"default\"",
+                  "\"manualBypass\"",
+                  "\"plan\""
+                ]
+              }
+            },
+            "supportedProtocols": {
+              "array": {
+                "union": [
+                  "\"anthropic-messages\"",
+                  "\"openai-compatible\""
+                ]
+              }
+            },
+            "supportedThinkingModes": {
+              "array": {
+                "union": [
+                  "\"high\"",
+                  "\"low\"",
+                  "\"max\"",
+                  "\"medium\"",
+                  "\"none\"",
+                  "\"ultra\"",
+                  "\"xhigh\""
+                ]
+              }
+            },
+            "supportsCompact": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "supportsFork": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "supportsForkAtMessage": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "supportsForkWhileRunning": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "supportsImages": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "supportsSteering": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "supportsUpdateProjectPath": {
+              "union": [
+                "false",
+                "true"
+              ]
+            }
+          }
+        },
+        "apiProviders": {
+          "array": {
+            "createdAt": "string",
+            "endpoints": {
+              "array": {
+                "apiKeyLabel?": {
+                  "union": [
+                    "string",
+                    "undefined"
+                  ]
+                },
+                "baseUrl": "string",
+                "capabilities?": {
+                  "union": [
+                    "undefined",
+                    {
+                      "chatCompletions": {
+                        "union": [
+                          "false",
+                          "true"
+                        ]
+                      },
+                      "responses": {
+                        "union": [
+                          "false",
+                          "true"
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "defaultModel": "string",
+                "hasApiKey": {
+                  "union": [
+                    "false",
+                    "true"
+                  ]
+                },
+                "id": "string",
+                "modelDiscovery?": {
+                  "union": [
+                    "\"anthropic-models\"",
+                    "\"none\"",
+                    "\"ollama-tags\"",
+                    "\"openai-models\"",
+                    "\"openrouter-models\"",
+                    "undefined"
+                  ]
+                },
+                "models": {
+                  "array": {
+                    "apiProviderId?": {
+                      "union": [
+                        "string",
+                        "undefined"
+                      ]
+                    },
+                    "endpointId?": {
+                      "union": [
+                        "string",
+                        "undefined"
+                      ]
+                    },
+                    "isLocal?": {
+                      "union": [
+                        "false",
+                        "true",
+                        "undefined"
+                      ]
+                    },
+                    "label": "string",
+                    "protocol?": {
+                      "union": [
+                        "\"anthropic-messages\"",
+                        "\"openai-compatible\"",
+                        "undefined"
+                      ]
+                    },
+                    "rawModel?": {
+                      "union": [
+                        "string",
+                        "undefined"
+                      ]
+                    },
+                    "supportsImages?": {
+                      "union": [
+                        "false",
+                        "true",
+                        "undefined"
+                      ]
+                    },
+                    "value": "string"
+                  }
+                },
+                "protocol": {
+                  "union": [
+                    "\"anthropic-messages\"",
+                    "\"openai-compatible\""
+                  ]
+                },
+                "supportsImages": {
+                  "union": [
+                    "false",
+                    "true"
+                  ]
+                }
+              }
+            },
+            "id": "string",
+            "label": "string",
+            "revision": "number",
+            "templateId?": {
+              "union": [
+                "\"alibaba-cloud\"",
+                "\"custom\"",
+                "\"fireworks\"",
+                "\"gemini\"",
+                "\"ollama\"",
+                "\"openrouter\"",
+                "\"together\"",
+                "\"zai\"",
+                "undefined"
+              ]
+            },
+            "updatedAt": "string"
+          }
+        }
+      },
+      "executorInstanceId": "string"
+    }
+  }
+}

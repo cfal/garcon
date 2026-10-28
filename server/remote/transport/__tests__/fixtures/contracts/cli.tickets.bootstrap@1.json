@@ -1,0 +1,21 @@
+{
+  "definition": {
+    "name": "cli.tickets.bootstrap",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "GET /api/v1/tickets/bootstrap",
+  "client": {
+    "parameters": [],
+    "result": {
+      "collectionRevision": "number",
+      "storeId": "string",
+      "viewerKey": "string"
+    }
+  }
+}

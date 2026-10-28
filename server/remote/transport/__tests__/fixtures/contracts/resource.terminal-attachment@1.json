@@ -1,0 +1,23 @@
+{
+  "definition": {
+    "name": "resource.terminal-attachment",
+    "version": 1,
+    "requires": [],
+    "events": [
+      "terminal-attached",
+      "terminal-output",
+      "terminal-replay-batch",
+      "terminal-output-fragment",
+      "terminal-status",
+      "terminal-taken-over",
+      "terminal-terminated",
+      "terminal-replay-truncated",
+      "terminal-error"
+    ]
+  },
+  "notification": {
+    "attachmentId": "string",
+    "message": "unknown",
+    "type": "\"terminal\""
+  }
+}

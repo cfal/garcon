@@ -1,0 +1,25 @@
+{
+  "definition": {
+    "name": "cli.providers.assignments",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": true,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "GET /api/v1/api-provider-assignments",
+  "client": {
+    "parameters": [],
+    "result": {
+      "array": {
+        "executorIds": {
+          "array": "string"
+        },
+        "id": "string",
+        "label": "string"
+      }
+    }
+  }
+}

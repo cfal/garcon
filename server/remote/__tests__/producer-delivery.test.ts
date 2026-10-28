@@ -158,7 +158,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(fixture.executor.availability).toBe('ready');
       expect(log.entries).toEqual([1, 2, 3].map(() => ({ level: 'warn', message: 'Executor producer event could not be decoded', detail: {
         integrationId: 'test', bindingId: request.producerBinding.id, seq: expect.any(Number), type: 'rows',
-        reason: 'Unknown or unselected normalized message',
+        reason: 'Unknown v1 normalized message',
       } })));
     } finally { await fixture.dispose(); }
   });

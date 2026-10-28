@@ -1,3 +1,4 @@
+import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { expect, test } from 'bun:test';
 import { ExecutorRpc, ParkedRpcCalls } from '../rpc.js';
 import { TestSessionTransport as SessionTransport, testSessionProtocol } from '../../__tests__/test-session-transport.js';
@@ -26,7 +27,7 @@ function lostCall(dispatchDeadline: number) {
   const parked = new ParkedRpcCalls();
   const lost = session('lost', parked);
   const replacement = session('replacement', parked);
-  const settled = lost.rpc.call('', 'projects.inspect', { projectPath: '/test-project' }, { timeoutMs: 10_000, dispatchDeadline })
+  const settled = lost.rpc.call('', RPC_V1['projects.inspect'], { projectPath: '/test-project' }, { timeoutMs: 10_000, dispatchDeadline })
     .catch((error: unknown) => error);
   const callId = lost.sent[0]!.id;
   lost.transport.close();
@@ -82,7 +83,7 @@ test('a call reconciled as running before its dispatch deadline waits for its re
     call.reconciled('pending');
     await call.reconciling;
     await Bun.sleep(60);
-    const resolution = { kind: 'synthetic-resolution' };
+    const resolution = { kind: 'available', effectiveProjectKey: '/synthetic-project' };
     call.replacement.receive({ type: 'result', id: call.callId, value: { resolution } });
 
     expect(await call.settled).toEqual({ resolution });
@@ -108,7 +109,7 @@ for (const field of ['controllerRuntimeId', 'workerRuntimeId', 'profileId'] as c
     const first = session('first', parked);
     const protocol = first.transport.protocol;
     const next = session('next', parked, { ...protocol, continuity: { ...protocol.continuity, [field]: 'changed' } });
-    const result = first.rpc.call('', 'projects.inspect', { projectPath: '/synthetic' }).catch((error: unknown) => error);
+    const result = first.rpc.call('', RPC_V1['projects.inspect'], { projectPath: '/synthetic' }).catch((error: unknown) => error);
     first.transport.close();
     try {
       const reconciled = next.rpc.reconcileParked();

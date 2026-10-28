@@ -1,0 +1,37 @@
+{
+  "definition": {
+    "name": "execution.runningSessions",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": "null",
+    "result": {
+      "array": {
+        "agentSessionId": "string",
+        "startedAt": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "status": {
+          "union": [
+            "null",
+            "string"
+          ]
+        }
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

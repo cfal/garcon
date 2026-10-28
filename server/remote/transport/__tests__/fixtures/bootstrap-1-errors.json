@@ -1,0 +1,30 @@
+[
+  {
+    "code": "UNAVAILABLE",
+    "message": "Synthetic failure",
+    "retryable": false,
+    "outcome": "not-dispatched"
+  },
+  {
+    "code": "OPERATION_UNSUPPORTED",
+    "message": "Synthetic failure",
+    "retryable": false,
+    "outcome": "not-dispatched"
+  },
+  {
+    "code": "OUTCOME_UNKNOWN",
+    "message": "Synthetic failure",
+    "retryable": false,
+    "outcome": "unknown"
+  },
+  {
+    "code": "PROVIDER_FAILURE",
+    "message": "Synthetic failure",
+    "retryable": false
+  },
+  {
+    "code": "PROVIDER_FAILURE",
+    "message": "Malformed data",
+    "retryable": false
+  }
+]
