@@ -8,6 +8,8 @@ import {
 	workspaceWindowTitlebarMetrics,
 } from '../workspace-window-chrome.js';
 import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
+import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
+import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
 import { portableSingletonDescriptor, TERMINAL_LAUNCHER_ID } from '$lib/workspace/surface-types.js';
@@ -60,6 +62,7 @@ const {
 	copyToClipboard: vi.fn(async () => true),
 	notificationError: vi.fn(),
 	runtime: {
+		transientLayers: null as TransientLayerRegistry | null,
 		fullscreenWindowId: null as WorkspaceWindowId | null,
 		desktopRoot: null as DesktopWorkspaceNode | null,
 		windowCount: 1,
@@ -149,7 +152,7 @@ vi.mock('$lib/context', () => ({
 	}),
 	getWorkspaceContext: () =>
 		({ currentTarget: null }) satisfies Pick<WorkspaceContextStore, 'currentTarget'>,
-	getOptionalTransientLayers: () => null,
+	getOptionalTransientLayers: () => runtime.transientLayers,
 }));
 
 const chatSurface = {
@@ -308,6 +311,7 @@ function measureTabRail(container: HTMLElement, width: number): HTMLElement {
 describe('WorkspaceWindowTitleBar', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		runtime.transientLayers = null;
 		runtime.fullscreenWindowId = null;
 		runtime.desktopRoot = null;
 		runtime.windowCount = 1;
@@ -1088,6 +1092,48 @@ describe('WorkspaceWindowTitleBar', () => {
 				await waitFor(() => expect(document.activeElement).toBe(trigger));
 			} finally {
 				priorFocus.remove();
+			}
+		},
+	);
+
+	it.each(['chat', 'github', 'terminals', 'overflow'] as const)(
+		'returns registry Escape focus to the %s trigger created during resize',
+		async (kind) => {
+			const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+			runtime.transientLayers = layers;
+			runtime.terminalSessions = [
+				{ metadata: { terminalId: 'terminal-seven', displaySequence: 7, title: 'Build logs' } },
+			];
+			const external = document.createElement('button');
+			document.body.append(external);
+			try {
+				external.focus();
+				const executor = workspaceWindow([chatSurface.id]);
+				const props = { windowId: executor.id, tabs: executor.tabs };
+				const narrow = { naturalWidth: 200, viewportWidth: 0 };
+				const wide = { naturalWidth: 100, viewportWidth: 1_000 };
+				const rendered = render(WorkspaceWindowAddMenu, {
+					...props,
+					measure: kind === 'overflow' ? wide : narrow,
+				});
+				await rendered.rerender({ ...props, measure: kind === 'overflow' ? narrow : wide });
+				expect(document.activeElement).toBe(external);
+				const label = {
+					chat: m.workspace_chat_views(),
+					github: m.workspace_github_views(),
+					terminals: m.workspace_terminal_actions(),
+					overflow: m.workspace_add_to_window(),
+				}[kind];
+				const trigger = screen.getByRole('button', { name: label });
+				trigger.focus();
+				await fireEvent.click(trigger);
+				screen.getAllByRole('menuitem')[0].focus();
+				expect(layers.handleEscape(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(true);
+				await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+				await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+				expect(document.activeElement).toBe(trigger);
+			} finally {
+				external.remove();
 			}
 		},
 	);

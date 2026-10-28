@@ -9,6 +9,44 @@ const CHAT_VIEWS = [
 ] as const;
 
 describe('Chromium Chat Views navigation', () => {
+  test('returns Escape focus to add-menu triggers created while the composer has focus', async () => {
+    await withChromiumFixture('workspace-add-menu-escape-focus', async ({ page, integration, assertNoBrowserErrors }) => {
+      const chatId = integration.newChatId();
+      const started = await integration.client.startDirectChat({
+        chatId,
+        content: 'Synthetic add-menu focus',
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(chatId, started.turnId);
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`, { waitUntil: 'domcontentloaded' });
+      await collapseCanonicalFilesWindow(page);
+      const titlebar = page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]');
+      const composer = page.locator('[data-composer] textarea');
+      for (const group of ['Chat Views', 'GitHub Views', 'Add to window']) {
+        const overflow = group === 'Add to window';
+        await titlebar.evaluate((element, narrow) => {
+          (element as HTMLElement).style.width = narrow ? '280px' : '';
+        }, !overflow);
+        await titlebar.getByRole('button', { name: overflow ? 'Chat Views' : 'Add to window', exact: true }).waitFor();
+        await composer.focus();
+        await titlebar.evaluate((element, narrow) => {
+          (element as HTMLElement).style.width = narrow ? '280px' : '';
+        }, overflow);
+        const trigger = titlebar.getByRole('button', { name: group, exact: true });
+        await trigger.waitFor();
+        expect(await composer.evaluate((element) => element === document.activeElement)).toBe(true);
+        await trigger.click();
+        await page.getByRole('menuitem').first().focus();
+        await page.keyboard.press('Escape');
+        await page.getByRole('menu').waitFor({ state: 'detached' });
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+        expect(await trigger.evaluate((element) => element === document.activeElement)).toBe(true);
+      }
+      assertNoBrowserErrors();
+    });
+  });
+
   for (const layout of ['overflow', 'inline'] as const) {
     test(`opens all chat views from the ${layout} group and preserves focus on resize`, async () => {
       await withChromiumFixture(`workspace-chat-views-${layout}`, async (fixture) => {

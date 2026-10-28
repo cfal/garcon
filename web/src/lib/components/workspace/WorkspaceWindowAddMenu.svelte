@@ -264,6 +264,7 @@
 					class="w-64"
 					data-workspace-window-add-menu={windowId}
 					data-workspace-window-group-menu={action.id}
+					getFocusReturnTarget={() => menuState.focusReturnTarget(action.id)}
 					onCloseAutoFocus={(event) => menuState.handleCloseAutoFocus(event)}
 				>
 					{@render viewGroupMenuItems(action)}
@@ -286,6 +287,7 @@
 					class="w-64"
 					data-workspace-window-add-menu={windowId}
 					data-workspace-window-add-terminal-menu={windowId}
+					getFocusReturnTarget={() => menuState.focusReturnTarget(action.id)}
 					onCloseAutoFocus={(event) => menuState.handleCloseAutoFocus(event)}
 				>
 					{@render addActionMenuItem(action)}
@@ -331,6 +333,7 @@
 			</DropdownMenuTrigger>
 			<DropdownMenuContent
 				bind:ref={menuState.overflowMenuContent}
+				getFocusReturnTarget={() => menuState.focusReturnTarget()}
 				align="end"
 				class="w-64"
 				data-workspace-window-add-menu={windowId}
