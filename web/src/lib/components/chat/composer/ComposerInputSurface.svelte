@@ -1,5 +1,6 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
+	import type { ComposerCompletionPopup } from '$lib/chat/composer/completion-popup.js';
 	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import { loadComposerMarkdownEditor } from './composer-markdown-editor-loader.js';
 	import type { ComposerMarkdownDocument } from './composer-markdown-parser.js';
@@ -15,6 +16,7 @@
 		controller,
 		onComposerKeydown,
 		onCompletionKeydown,
+		completionPopup = null,
 		onInput,
 		onRecallReset = () => {},
 		onPaste,
@@ -31,6 +33,7 @@
 		controller: PromptComposerMarkdownController;
 		onComposerKeydown: (event: KeyboardEvent) => void;
 		onCompletionKeydown: (event: KeyboardEvent) => boolean;
+		completionPopup?: ComposerCompletionPopup | null;
 		onInput: (event: Event) => void;
 		onRecallReset?: () => void;
 		onPaste?: (event: ClipboardEvent) => void;
@@ -74,7 +77,14 @@
 		{/await}
 	{/if}
 	<div class="relative z-10" hidden={Boolean(draft)}>
+		<!-- The draft stays a plain multiline textbox; it becomes a combobox only while a
+		     completion listbox is open so the highlighted option is announced. -->
 		<textarea
+			role={completionPopup ? 'combobox' : undefined}
+			aria-expanded={completionPopup ? true : undefined}
+			aria-controls={completionPopup?.listId}
+			aria-autocomplete={completionPopup ? 'list' : undefined}
+			aria-activedescendant={completionPopup?.activeOptionId}
 			{@attach contentSizing}
 			rows="1"
 			bind:this={textarea}

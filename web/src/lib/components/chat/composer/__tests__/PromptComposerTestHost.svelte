@@ -44,6 +44,7 @@
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import type { PreamblesSnapshot } from '$shared/preambles';
+	import type { SnippetsSnapshot } from '$shared/snippets';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { agentLabelFor } from '$lib/agents/agent-labels.js';
 	import {
@@ -95,6 +96,7 @@
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
+		loadSnippets?: () => Promise<SnippetsSnapshot>;
 		preambleSnapshot?: PreamblesSnapshot;
 		quickCommitTrayVisible?: boolean;
 		quickCommitRefreshing?: boolean;
@@ -138,6 +140,7 @@
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',
+		loadSnippets,
 		preambleSnapshot = { revision: 0, preambles: [] },
 		quickCommitTrayVisible = false,
 		quickCommitRefreshing = false,
@@ -457,6 +460,7 @@
 		createSnippetsStore({
 			get: async () => {
 				snippetLoadCount += 1;
+				if (loadSnippets) return loadSnippets();
 				return {
 					revision: 1,
 					snippets: [

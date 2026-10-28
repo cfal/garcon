@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { searchSnippets } from '../search-snippets.js';
+import { searchSnippetNames, searchSnippets } from '../search-snippets.js';
 
 describe('searchSnippets', () => {
 	const snippets = [
@@ -31,5 +31,15 @@ describe('searchSnippets', () => {
 			'review',
 			'review_tests',
 		]);
+	});
+
+	it('matches names only when no text is searched', () => {
+		expect(searchSnippetNames(snippets, 'review').map((item) => item.shortName)).toEqual([
+			'review',
+			'review_api',
+			'review_tests',
+			'pre_review',
+		]);
+		expect(searchSnippetNames(snippets, 'this')).toEqual([]);
 	});
 });

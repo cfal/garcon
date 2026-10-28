@@ -5,6 +5,7 @@
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import SnippetCommandMenu from './SnippetCommandMenu.svelte';
+	import { SnippetCommandMenuState } from './snippet-command-menu-state.svelte.js';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import ComposerAttachmentList from './ComposerAttachmentList.svelte';
 	import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
@@ -201,7 +202,6 @@
 	let destroyed = false;
 	let fileMentionMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
-	let snippetCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let handledAppShellFocusRequestId = 0;
 	let handledDraftAppendRequestId = 0;
 	const focusDelivery = new PromptComposerFocusDelivery();
@@ -238,6 +238,17 @@
 		get active() { return !destroyed && isVisible; },
 		setDraft: updateDraft,
 		returnFocus: returnComposerFocus,
+	});
+	const uid = $props.id();
+	const snippetCommandMenu = new SnippetCommandMenuState(uid, {
+		snippets,
+		preambles,
+		get visible() { return snippetCommandMenuVisible; },
+		get query() { return ui.snippetCommandTrigger?.query ?? ''; },
+		get contextAvailable() { return snippetContextHint === null; },
+		onInsert: (snippet) => void snippetInsertion.insertFromCommandMenu(snippet),
+		onComplete: (snippet) => void snippetInsertion.completeCommandName(snippet),
+		onClose: () => ui.closeSnippetCommandMenu(),
 	});
 	const selectedProjectTarget = $derived(projectState.target);
 	const snippetInteractionKey = $derived(projectState.snippetInteractionKey);
@@ -529,7 +540,7 @@
 	}
 
 	function handleCompletionKeyDown(event: KeyboardEvent): boolean {
-		if (snippetCommandMenuVisible) return snippetCommandMenu?.handleKeyDown(event) ?? false;
+		if (snippetCommandMenuVisible) return snippetCommandMenu.handleKeyDown(event);
 		if (!fileMenuVisible && !slashMenuVisible) return false;
 		const menu = fileMenuVisible ? fileMentionMenu : slashCommandMenu;
 		if (menu?.handleKeyDown(event)) return true;
@@ -797,6 +808,7 @@
 				controller={markdown}
 				onComposerKeydown={handleKeyDown}
 				onCompletionKeydown={handleCompletionKeyDown}
+				completionPopup={snippetCommandMenu.completionPopup}
 				onInput={handleInput}
 				onRecallReset={() => promptRecall.reset()}
 			/>
@@ -888,12 +900,10 @@
 			onClose={() => ui.closeSlashMenu()}
 		/>
 		<SnippetCommandMenu
-			bind:this={snippetCommandMenu}
+			menu={snippetCommandMenu}
 			isVisible={snippetCommandMenuVisible}
 			query={ui.snippetCommandTrigger?.query ?? ''}
 			contextHint={snippetContextHint}
-			onInsert={(snippet) => void snippetInsertion.insertFromCommandMenu(snippet)}
-			onComplete={(snippet) => void snippetInsertion.completeCommandName(snippet)}
 			onClose={() => ui.closeSnippetCommandMenu()}
 			onEditSnippets={() => {
 				ui.closeSnippetCommandMenu();

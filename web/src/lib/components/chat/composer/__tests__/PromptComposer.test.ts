@@ -1865,6 +1865,125 @@ describe('PromptComposer focus', () => {
 		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 	});
 
+	it('exposes the snippet menu highlight to assistive technology from the textarea', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-a11y',
+			selectedStatus: 'running',
+			preambleSnapshot: {
+				revision: 1,
+				preambles: [
+					{
+						id: '00000000-0000-4000-8000-000000000002',
+						enabled: false,
+						title: 'Release',
+						snippetShortName: 'release',
+						content: 'Prepare the release',
+						scope: { type: 'global' },
+						agentIds: [],
+						tagFilter: { mode: 'any', tags: [] },
+						createdAt: '2026-01-01T00:00:00.000Z',
+						updatedAt: '2026-01-01T00:00:00.000Z',
+					},
+				],
+			},
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		expect(textarea.getAttribute('role')).toBeNull();
+		await inputAtCaret(textarea, '/s ', 3);
+		const menu = await screen.findByRole('listbox', { name: 'Snippets' });
+		await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2));
+		const [review, release] = screen.getAllByRole('option');
+
+		expect(textarea.getAttribute('role')).toBe('combobox');
+		expect(textarea.getAttribute('aria-expanded')).toBe('true');
+		expect(textarea.getAttribute('aria-autocomplete')).toBe('list');
+		expect(textarea.getAttribute('aria-controls')).toBe(menu.id);
+		expect(textarea.getAttribute('aria-activedescendant')).toBe(review.id);
+		expect(review.getAttribute('aria-selected')).toBe('true');
+		expect(menu.querySelector('button')).toBeNull();
+
+		await fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+		expect(textarea.getAttribute('aria-activedescendant')).toBe(release.id);
+		expect(release.getAttribute('aria-selected')).toBe('true');
+		expect(review.getAttribute('aria-selected')).toBe('false');
+
+		await fireEvent.keyDown(textarea, { key: 'Escape' });
+		expect(screen.queryByRole('listbox', { name: 'Snippets' })).toBeNull();
+		for (const name of ['role', 'aria-expanded', 'aria-controls', 'aria-autocomplete', 'aria-activedescendant']) {
+			expect(textarea.hasAttribute(name)).toBe(false);
+		}
+	});
+
+	it('matches snippet command names only, so Enter submits a body-only query as typed', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-body-query',
+			selectedStatus: 'running',
+			snippetTemplate: 'Check the deployment',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(textarea, '/s ', 3);
+		await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(1));
+		await inputAtCaret(textarea, '/s deployment', 13);
+
+		await waitFor(() => expect(screen.queryAllByRole('option')).toHaveLength(0));
+		expect(screen.getByText('No snippets match your search.')).toBeTruthy();
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+
+		await waitFor(() =>
+			expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+				expect.objectContaining({ shortName: 'deployment' }),
+				expect.anything(),
+			),
+		);
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(1);
+	});
+
+	it('blocks snippet menu insertion without a project but still completes names on Tab', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-no-project',
+			selectedStatus: 'running',
+			projectPath: '',
+			snippetDefaultArguments: 'the API',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(textarea, '/s re', 5);
+		const option = await screen.findByRole('option', { name: /review/ });
+		expect(option.getAttribute('aria-disabled')).toBe('true');
+		expect(screen.getByText('Set a project path to insert snippets')).toBeTruthy();
+
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		await fireEvent.click(option);
+		expect(textarea.value).toBe('/s re');
+		expect(screen.getByRole('listbox', { name: 'Snippets' })).toBeTruthy();
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+
+		await fireEvent.keyDown(textarea, { key: 'Tab' });
+		await waitFor(() => expect(textarea.value).toBe('/s review the API'));
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		['loading', () => new Promise<never>(() => {}), '/s re', 'Loading snippets...'],
+		['failed', () => Promise.reject(new Error('offline')), '/s re', 'Snippets and preambles could not be loaded.'],
+		['empty', () => Promise.resolve({ revision: 1, snippets: [] }), '/s ', 'No snippets yet'],
+		['no-match', undefined, '/s zzz', 'No snippets match your search.'],
+	] as const)('consumes Tab while the snippet menu is %s', async (_state, loadSnippets, draft, message) => {
+		render(PromptComposerTestHost, {
+			selectedChatId: `chat-snippet-tab-${_state}`,
+			selectedStatus: 'running',
+			loadSnippets,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(textarea, draft, draft.length);
+		await screen.findByText(message);
+
+		const notPrevented = await fireEvent.keyDown(textarea, { key: 'Tab' });
+
+		expect(notPrevented).toBe(false);
+		expect(textarea.value).toBe(draft);
+		expect(screen.getByText(message)).toBeTruthy();
+	});
+
 	it('keeps submission controls gated during expansion and Escape preserves the invocation', async () => {
 		const pending = deferredSnippetExpansion();
 		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
