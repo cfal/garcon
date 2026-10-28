@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
 import { collapseCanonicalFilesWindow } from "../../support/chromium-workspace.js";
+import { initializeFixtureRepository } from "../../support/git-fixture.js";
 
 const CHAT_VIEWS = [
   { label: "Open Chat Map", kind: "chat-map" },
@@ -311,6 +312,9 @@ describe("Chromium view-group navigation", () => {
           `workspace-${id}-${layout}`,
           async (fixture) => {
             const { page, integration } = fixture;
+            if (id === "git-views") {
+              await initializeFixtureRepository(integration.dirs.project);
+            }
             const chatId = integration.newChatId();
             const started = await integration.client.startDirectChat({
               chatId,
