@@ -58,6 +58,9 @@ describe('usage contract', () => {
   it('accepts only windows executors still retain and that end by today', () => {
     const now = Date.parse('2026-10-27T12:00:00Z');
     expect(isUsageWindowInRange({ sinceDay: '2026-07-30', untilDay: '2026-10-27', timeZone: 'UTC' }, now)).toBe(true);
+    // A UTC-12 viewer's 90-day window starts exactly at the oldest accepted day.
+    const westMorning = Date.parse('2026-10-27T11:59:00Z');
+    expect(isUsageWindowInRange({ sinceDay: '2026-07-29', untilDay: '2026-10-26', timeZone: 'Etc/GMT+12' }, westMorning)).toBe(true);
     // The first hours of an earlier day in UTC+14 would fall outside the 92 retained days.
     expect(isUsageWindowInRange({ sinceDay: '2026-07-28', untilDay: '2026-10-25', timeZone: 'Pacific/Kiritimati' }, now)).toBe(false);
     expect(isUsageWindowInRange({ sinceDay: '2026-07-01', untilDay: '2026-07-20', timeZone: 'UTC' }, now)).toBe(false);

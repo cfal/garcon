@@ -109,9 +109,9 @@ export class TranscriptUsageScanner<State> {
     const listing = await listTranscripts(this.#options.roots(), signal);
     const retainedSinceMs = this.#now() - RETENTION_MS;
     const unstatable = new Set(listing.unstatablePaths);
-    for (const filePath of [...this.#cache.keys()]) {
-      if (unstatable.has(filePath)) continue;
-      const mtimeMs = listing.existing.get(filePath);
+    for (const [filePath, cached] of [...this.#cache]) {
+      // A file that exists but cannot be stat'ed ages out by its last known time.
+      const mtimeMs = unstatable.has(filePath) ? cached.mtimeMs : listing.existing.get(filePath);
       if (mtimeMs === undefined || mtimeMs < retainedSinceMs) this.#cache.delete(filePath);
     }
 

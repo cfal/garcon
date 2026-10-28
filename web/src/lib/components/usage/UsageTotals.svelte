@@ -60,25 +60,36 @@
 	</dl>
 </section>
 
+{#snippet costBar()}
+	{#if totals.costUsd > 0}
+		<UsageShareBar
+			label={m.usage_cost_by_type()}
+			segments={costTypeSegments(totals.categoryCostUsd)}
+			format={formatUsd}
+		/>
+	{/if}
+{/snippet}
+
+{#snippet tokenBar()}
+	<UsageShareBar
+		label={m.usage_tokens_by_type()}
+		segments={tokenTypeSegments(totals.tokens)}
+		format={formatTokens}
+	/>
+{/snippet}
+
 {#if totals.totalTokens > 0}
 	<section
 		class="grid gap-x-12 gap-y-8 transition-opacity lg:grid-cols-2"
 		class:opacity-40={dimmed}
 	>
-		<UsageShareBar
-			label={m.usage_tokens_by_type()}
-			segments={tokenTypeSegments(totals.tokens)}
-			format={formatTokens}
-		/>
-		{#if totals.costUsd > 0}
-			<!-- The selected metric's breakdown comes first. -->
-			<div class="min-w-0" class:order-first={metric === 'cost'}>
-				<UsageShareBar
-					label={m.usage_cost_by_type()}
-					segments={costTypeSegments(totals.categoryCostUsd)}
-					format={formatUsd}
-				/>
-			</div>
+		<!-- The selected metric's breakdown comes first, in reading order as well as visually. -->
+		{#if metric === 'cost'}
+			{@render costBar()}
+			{@render tokenBar()}
+		{:else}
+			{@render tokenBar()}
+			{@render costBar()}
 		{/if}
 	</section>
 {/if}

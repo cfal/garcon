@@ -92,6 +92,8 @@ test(`usage reads Claude and Codex transcripts on the selected executor (${backe
 
     expect(await rejectionOf(client.get(`/api/v1/usage?${new URLSearchParams({ executorId, ...window(), sinceDay: day(-120) })}`)))
       .toMatchObject({ status: 400 });
+    expect(await rejectionOf(client.get(`/api/v1/usage?${new URLSearchParams({ executorId, sinceDay: day(1), untilDay: day(3), timeZone: 'UTC' })}`)))
+      .toMatchObject({ status: 400 });
   }, {
     prepareWorkspace: (directories) => seedTranscripts(directories.home, EXECUTOR_USAGE),
     prepareControllerWorkspace: backend === 'in-process'

@@ -35,6 +35,19 @@ describe('UsageChart', () => {
 		expect(tooltip.textContent?.match(/Unpriced/g)).toHaveLength(3);
 	});
 
+	it('drops a hover that pointed past the end of a shorter window', async () => {
+		const { rerender } = renderChart([false, false, false]);
+		await hoverAt(0.99);
+		const hoverLine = () => document.querySelector('[data-usage-chart] line.stroke-muted-foreground');
+		expect(hoverLine()).toBeTruthy();
+		await rerender({
+			days: days.slice(0, 1),
+			series: [{ id: 'a', label: 'Claude', color: 'red', values: [1] }],
+		});
+		expect(hoverLine()).toBeNull();
+		expect(document.querySelector('[data-usage-chart-tooltip]')).toBeNull();
+	});
+
 	it('totals the known points of a day that also has unknown ones', async () => {
 		renderChart([false, false, false]);
 		const tooltip = await hoverAt(0.5);
