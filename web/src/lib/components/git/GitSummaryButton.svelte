@@ -105,6 +105,7 @@
 			</Tooltip.Trigger>
 			<Tooltip.Portal>
 				<Tooltip.Content
+					data-slot="git-summary-tooltip"
 					bind:ref={tooltipContent}
 					role="tooltip"
 					side="top"

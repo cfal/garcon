@@ -43,6 +43,7 @@ describe('GitQuickStatusTray', () => {
 		});
 
 		const tray = screen.getByRole('status', { name: 'Loading...' });
+		expect(tray.getAttribute('data-slot')).toBe('chat-git-status');
 		expect(tray.getAttribute('aria-busy')).toBe('true');
 		expect(tray.className).toContain('min-h-14');
 		const commit = screen.getByRole('button', { name: /^Commit/ });
@@ -63,6 +64,7 @@ describe('GitQuickStatusTray', () => {
 		});
 
 		expect(screen.getByText('main')).toBeTruthy();
+		expect(screen.getByText('main').parentElement?.getAttribute('data-slot')).toBe('chat-git-branch');
 		expect(screen.getByRole('status').getAttribute('aria-busy')).toBe('true');
 		expect(container.querySelector('.animate-spin')).toBeNull();
 		expect(screen.queryByText('Loading...')).toBeNull();

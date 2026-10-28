@@ -30,10 +30,11 @@
 
 {#if isDragActive}
 	<div
+		data-slot="composer-attachment-drop-overlay"
 		data-attachment-drop-overlay
 		class="pointer-events-none absolute inset-0 bg-primary/20 border-2 border-dashed border-primary flex items-center justify-center z-50 rounded-lg"
 	>
-		<div class="bg-card rounded-lg p-4 shadow-md">
+		<div data-slot="composer-attachment-drop-hint" class="bg-card rounded-lg p-4 shadow-md">
 			<ImagePlus class="w-8 h-8 text-primary mx-auto mb-2" />
 			<p class="text-sm font-medium text-foreground">{m.chat_composer_drop_images()}</p>
 		</div>
@@ -41,11 +42,11 @@
 {/if}
 
 {#if files.length > 0}
-	<div class={className}>
+	<div data-slot="composer-attachments" class={className}>
 		<div class="flex flex-wrap gap-2">
 			{#each files as file, idx (file.name + idx)}
 				<div class="relative group">
-					<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
+					<div data-slot="composer-attachment-preview" class="w-16 h-16 rounded-lg overflow-hidden border border-border">
 						{#if isImageAttachment(file)}
 							{@const url = previewUrls.get(file)}
 							{#if url}

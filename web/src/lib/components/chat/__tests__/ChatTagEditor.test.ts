@@ -18,6 +18,7 @@ describe('ChatTagEditor', () => {
 		const input = screen.getByPlaceholderText('Type a tag...') as HTMLInputElement;
 
 		await fireEvent.input(input, { target: { value: 'rev' } });
+		expect(screen.getByRole('button', { name: 'review-needed' }).parentElement?.getAttribute('data-slot')).toBe('chat-tag-suggestions');
 		await fireEvent.click(screen.getByRole('button', { name: 'review-needed' }));
 		expect(onAdd).toHaveBeenCalledWith('review-needed');
 		expect(input.value).toBe('');

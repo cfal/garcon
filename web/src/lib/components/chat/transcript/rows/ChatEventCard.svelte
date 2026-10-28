@@ -34,7 +34,10 @@
 	const paddingClass = $derived(compact ? 'px-3 py-2' : 'px-3.5 py-3');
 </script>
 
-<article class={cn('rounded-xl border shadow-sm', variantClass, paddingClass, className)}>
+<article
+	data-slot="chat-event-card"
+	class={cn('rounded-xl border shadow-sm', variantClass, paddingClass, className)}
+>
 	{#if header}
 		<div class={cn('flex items-start justify-between gap-2', body && 'mb-2')}>
 			{@render header()}

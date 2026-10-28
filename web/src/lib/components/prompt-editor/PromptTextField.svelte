@@ -58,6 +58,7 @@
 </script>
 
 <div
+	data-slot="prompt-text-field"
 	class={cn(
 		'overflow-hidden rounded-md border border-input bg-background has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring',
 		className,

@@ -1,11 +1,229 @@
 import { expect, test } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Locator } from 'playwright';
 import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { setTerminalAppearance } from '../../support/terminal-appearance.js';
+import { initializeFixtureRepository } from '../../support/git-fixture.js';
+import { AmpOracleToolUseMessage, CompactionMessage } from '../../../common/chat-types.js';
+import type { AddChatRowRequest, ChatRowTargetResponse } from '../../../common/chat-row-contracts.js';
+import type { ShareChatResponse } from '../../../common/share-types.js';
+import type { SnippetsSnapshot } from '../../../common/snippets.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 
 const ARTIFACT_DIRECTORY = join(import.meta.dirname, '../../artifacts/chromium');
+
+test('Terminal UI Style squares composer surfaces without changing Standard', async () => {
+  await withChromiumFixture('terminal composer surfaces', async ({ page, integration, assertNoBrowserErrors }) => {
+    await initializeFixtureRepository(integration.dirs.project);
+    const snippets = await integration.client.get<SnippetsSnapshot>('/api/v1/snippets');
+    await integration.client.post('/api/v1/snippets', {
+      expectedRevision: snippets.revision,
+      snippet: { shortName: 'review', template: 'Synthetic snippet text', defaultArguments: '' },
+    });
+    const chatId = integration.newChatId();
+    const started = await integration.client.startDirectChat({
+      chatId, content: 'Synthetic composer appearance seed',
+      projectPath: integration.dirs.project, agent: integration.directAgents.anthropic,
+    });
+    await integration.client.waitForTurnTerminal(chatId, started.turnId);
+    await integration.client.waitForProcessing(chatId, false);
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    const composer = page.locator('[data-composer]:visible');
+    const input = composer.locator('textarea');
+    await input.fill('Synthetic retained draft');
+    await composer.locator('input[type="file"]').setInputFiles({
+      name: 'notes.md', mimeType: 'text/markdown', buffer: Buffer.from('Synthetic attachment'),
+    });
+    const attachments = composer.locator('[data-slot="composer-attachments"]');
+    const preview = attachments.locator('[data-slot="composer-attachment-preview"]');
+    const tray = page.locator('[data-slot="chat-git-status"]:visible');
+    const menu = page.locator('[data-slot="composer-completion-menu"]:visible');
+    await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
+
+    async function checkCorners(surfaces: Locator[], screenshot?: string) {
+      const baselines = [];
+      for (const surface of surfaces) {
+        await browserExpect(surface).toBeVisible();
+        const standardRadius = await surface.evaluate(element => getComputedStyle(element).borderRadius);
+        expect(parseFloat(standardRadius)).toBeGreaterThan(0);
+        baselines.push({ surface, standardRadius });
+      }
+      for (const terminalAppearance of [true, false]) {
+        await setTerminalAppearance(page, terminalAppearance);
+        for (const { surface, standardRadius } of baselines) {
+          await browserExpect(surface).toBeVisible();
+          await browserExpect(surface).toHaveCSS('border-radius', terminalAppearance ? '0px' : standardRadius);
+        }
+        if (terminalAppearance && screenshot) {
+          await page.screenshot({
+            path: join(ARTIFACT_DIRECTORY, screenshot),
+            animations: 'disabled',
+          });
+        }
+      }
+    }
+
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await checkCorners([tray, attachments, preview], `terminal-composer-${width}.png`);
+      await browserExpect(input).toHaveValue('Synthetic retained draft');
+      const commit = tray.getByRole('button', { name: /^Commit/ });
+      await commit.focus();
+      await checkCorners([page.getByRole('tooltip')]);
+      await commit.press('Escape');
+      await browserExpect(page.getByRole('tooltip')).toHaveCount(0);
+      for (const { query, expectedOption, expectedInput } of [
+        { query: '/rename', expectedOption: '/rename', expectedInput: '/rename ' },
+        { query: '@example', expectedOption: 'example.txt', expectedInput: '@example.txt ' },
+      ]) {
+        await input.fill(query);
+        await browserExpect(menu).toContainText(expectedOption);
+        await checkCorners([menu]);
+        await input.press('Enter');
+        await browserExpect(menu).toHaveCount(0);
+        await browserExpect(input).toHaveValue(expectedInput);
+      }
+      await input.fill(';;');
+      const palette = page.getByRole('dialog', { name: 'Insert Snippet' });
+      const option = palette.getByRole('option', { name: /^review\b/ });
+      await browserExpect(option).toHaveAttribute('aria-selected', 'true');
+      await checkCorners([option]);
+      await palette.getByRole('combobox', { name: 'Search snippets' }).press('Enter');
+      await browserExpect(palette).toHaveCount(0);
+      await browserExpect(input).toHaveValue('Synthetic snippet text');
+      await input.fill('Synthetic retained draft');
+    }
+    await composer.getByRole('button', { name: 'Remove attachment notes.md' }).click();
+    await browserExpect(attachments).toHaveCount(0);
+
+    const prompt = 'Synthetic held appearance turn';
+    const held = integration.fakeProviders.anthropic.holdNext({ lastUserText: prompt });
+    try {
+      const accepted = await integration.client.runDirectChat({ chatId, content: prompt, agent: integration.directAgents.anthropic });
+      await held.received;
+      await integration.client.pauseQueue(chatId);
+      await integration.client.enqueueNew(chatId, 'Synthetic queued appearance input');
+      const queue = page.locator('[data-queue-status-summary]');
+      const loading = page.locator('[data-slot="chat-processing-status"]:visible');
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await input.focus();
+        await checkCorners([queue, loading, composer], `terminal-queue-${width}.png`);
+        await browserExpect(input).toHaveValue('Synthetic retained draft');
+        await browserExpect(input).toBeFocused();
+        await queue.getByRole('button', { name: 'Edit queued message', exact: true }).click();
+        const editor = page.getByRole('dialog');
+        await checkCorners([editor.locator('[data-slot="prompt-text-field"]')], `terminal-queue-editor-${width}.png`);
+        await browserExpect(editor.locator('textarea')).toHaveValue('Synthetic queued appearance input');
+        await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await browserExpect(editor).toHaveCount(0);
+      }
+      held.releaseEcho();
+      await integration.client.waitForTurnTerminal(chatId, accepted.turnId!);
+    } finally {
+      held.releaseEcho();
+    }
+    assertNoBrowserErrors();
+  });
+}, 60_000);
+
+test.each(['live', 'shared'] as const)('Terminal UI Style gives %s chat event cards consistent corners', async (view) => {
+  await withChromiumFixture(`terminal ${view} chat row corners`, async ({ page, integration, assertNoBrowserErrors }) => {
+    const chatId = integration.newChatId();
+    const started = await integration.client.startChat({
+      ...integration.client.directStartRequest({
+        chatId,
+        content: 'Synthetic review response',
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      }),
+      userMessagePresentation: { origin: 'cli', style: 'info', title: 'Oracle review response' },
+    });
+    await integration.client.waitForTurnTerminal(chatId, started.turnId);
+    await integration.client.waitForProcessing(chatId, false);
+    await integration.restartGarcon({
+      beforeStart: async () => {
+        const ledger = new TranscriptLedgerStore(join(integration.dirs.workspace, 'transcript-ledgers'));
+        try {
+          const transcriptView = ledger.currentView(chatId)!;
+          const at = '2026-01-01T00:00:00.000Z';
+          ledger.append(chatId, transcriptView.viewId, [
+            new CompactionMessage(at, 'manual', 'Synthetic compaction summary'),
+            new AmpOracleToolUseMessage(at, 'synthetic-oracle', 'Synthetic tool review'),
+          ].map((message) => ({ kind: 'provider-row' as const, at, message, providerMeta: null })));
+        } finally {
+          ledger.close();
+        }
+      },
+    });
+    const target = await integration.client.get<ChatRowTargetResponse>(
+      `/api/v1/chats/rows?chatId=${chatId}`,
+    );
+    await integration.client.post('/api/v1/chats/rows', {
+      clientRequestId: 'synthetic-review-request',
+      clientMessageId: 'synthetic-review-message',
+      chatId,
+      transcriptViewId: target.transcriptViewId,
+      presentation: { style: 'info' },
+      format: 'plain',
+      disclosure: 'collapsed',
+      title: 'Oracle review request',
+      content: 'Synthetic review instructions',
+    } satisfies AddChatRowRequest);
+    await page.addInitScript(seedLocalSettings, { combineToolUseMessages: false });
+    let path = `/chat/${chatId}`;
+    if (view === 'shared') {
+      const share = await integration.client.post<ShareChatResponse>('/api/v1/chats/share', { chatId });
+      path = `/shared/${share.shareToken}`;
+    }
+    await page.goto(`${integration.garcon.baseUrl}${path}`);
+
+    const feed = view === 'shared'
+      ? page.locator('[data-chat-feed-content]')
+      : page.getByRole('region', { name: 'Chat messages', exact: true });
+    const compaction = feed.getByRole('article').filter({ hasText: 'Context compacted' });
+    const request = feed.getByRole('article').filter({ hasText: 'Oracle review request' });
+    const tool = feed.getByRole('article').filter({ hasText: 'Synthetic tool review' });
+    const response = feed.locator(view === 'shared' ? '[data-slot="shared-user-message"]' : '.user-message-context-target')
+      .filter({ hasText: 'Oracle review response' });
+    const cards: { card: Locator; standardRadius: string }[] = [];
+    const visibleCards = view === 'shared' ? [request, tool, response] : [compaction, request, tool, response];
+    for (const card of visibleCards) {
+      await browserExpect(card).toBeVisible();
+      const standardRadius = await card.evaluate((element) => getComputedStyle(element).borderRadius);
+      expect(parseFloat(standardRadius)).toBeGreaterThan(0);
+      cards.push({ card, standardRadius });
+    }
+
+    await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const appearance of ['standard', 'terminal', 'standard']) {
+        await setTerminalAppearance(page, appearance === 'terminal');
+        for (const { card, standardRadius } of cards) {
+          await browserExpect(card).toBeVisible();
+          await browserExpect(card).toHaveCSS(
+            'border-radius',
+            appearance === 'terminal' ? '0px' : standardRadius,
+          );
+        }
+        if (appearance === 'terminal') {
+          if (view === 'live') {
+            await compaction.getByRole('button', { name: 'Show summary' }).click();
+            await browserExpect(compaction.getByText('Synthetic compaction summary')).toBeVisible();
+            await browserExpect(compaction).toHaveCSS('border-radius', '0px');
+          }
+          await page.screenshot({ path: join(ARTIFACT_DIRECTORY, `terminal-${view}-chat-rows-${width}.png`) });
+          if (view === 'live') await compaction.getByRole('button', { name: 'Hide summary' }).click();
+        }
+      }
+    }
+    assertNoBrowserErrors();
+  });
+}, 60_000);
 
 test.each([1440, 390])(
   'Terminal UI Style opens directly into an interactive workspace at %ipx',

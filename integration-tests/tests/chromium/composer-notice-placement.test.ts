@@ -8,6 +8,7 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { withTimeout } from '../../support/deferred.js';
 import { waitForExecutorReconnect } from '../../support/executor-link.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
+import { setTerminalAppearance } from '../../support/terminal-appearance.js';
 
 async function expectNoticeAboveCap(notice: Locator, cap: Locator, composer: Locator): Promise<void> {
   await browserExpect(notice).toBeVisible();
@@ -78,6 +79,19 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         for (const width of [1440, 390]) {
           await page.setViewportSize({ width, height: 900 });
           await expectNoticeAboveCap(notice, cap, composer);
+          const surfaces = [];
+          for (const surface of [notice, cap]) {
+            const standardRadius = await surface.evaluate(element => getComputedStyle(element).borderRadius);
+            expect(parseFloat(standardRadius)).toBeGreaterThan(0);
+            surfaces.push({ surface, standardRadius });
+          }
+          for (const terminalAppearance of [true, false]) {
+            await setTerminalAppearance(page, terminalAppearance);
+            for (const { surface, standardRadius } of surfaces) {
+              await browserExpect(surface).toHaveCSS('border-radius', terminalAppearance ? '0px' : standardRadius);
+            }
+            await expectNoticeAboveCap(notice, cap, composer);
+          }
           await page.screenshot({ path: join(artifacts, `composer-notice-idle-${executionBackend}-${width}.png`) });
         }
 

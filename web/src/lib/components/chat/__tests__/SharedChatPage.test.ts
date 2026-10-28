@@ -465,6 +465,8 @@ describe('SharedChatPage', () => {
 		const bubble = container.querySelector<HTMLElement>(
 			'[data-user-message-presentation="custom"]',
 		);
+		expect(bubble?.getAttribute('data-slot')).toBe('shared-user-message');
+		expect(bubble?.classList.contains('rounded-xl')).toBe(true);
 		expect(bubble?.classList.contains('cli-presentation-custom')).toBe(true);
 		expect(bubble?.classList.contains('selection:bg-user-bubble-foreground')).toBe(false);
 		expect(bubble?.classList.contains('selection:text-user-bubble')).toBe(false);
