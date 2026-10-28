@@ -1,8 +1,9 @@
+import { TestWebSocketLink as WebSocketLink } from './test-session-transport.js';
 import { type ExecutionRuntimeApi, type ExecutorAvailability } from '@garcon/server-agent-interface';
 import { RemoteExecutorClient, type RemoteExecutorClientOptions } from '../client/executor-client.js';
 import { ProducerRelay } from '../server/producer-relay.js';
 import { RpcReplyJournal } from '../transport/rpc-journal.js';
-import { WebSocketLink } from '../transport/websocket-link.js';
+
 import { linkOptions } from './integration-fixture.js';
 import { servePairedRuntime } from './runtime-adapter.js';
 

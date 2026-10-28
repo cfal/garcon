@@ -1,3 +1,4 @@
+import { TestWebSocketLink as WebSocketLink } from './test-session-transport.js';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -5,7 +6,7 @@ import { ExecutionRuntime } from '../../runtime/execution-runtime.js';
 import { connectRemoteExecutor, servePairedRuntime } from './runtime-adapter.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { ProducerRelay } from '../server/producer-relay.js';
-import { WebSocketLink } from '../transport/websocket-link.js';
+
 import { linkOptions } from './integration-fixture.js';
 import { runGit } from '../../runtime/git/run.js';
 

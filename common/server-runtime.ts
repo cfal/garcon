@@ -1,4 +1,6 @@
 import { isExecutorId } from './executors.js';
+import { CLI_BOOTSTRAP_VERSION } from './cli-contracts.js';
+import { isProtocolOffer, intersectContracts, type ProtocolOffer } from './protocol-contracts.js';
 
 export const SERVER_RUNTIME_SCHEMA_VERSION = 1 as const;
 export const SERVER_RUNTIME_FILENAME = 'runtime.json';
@@ -6,13 +8,17 @@ export const LOCAL_CAPABILITY_PREFIX = 'garcon_local_';
 export const SERVER_RUNTIME_PROOF_CONTEXT = 'garcon-runtime-proof-v1';
 export const CLI_SERVER_INSTANCE_HEADER = 'X-Garcon-Server-Instance';
 
-export interface CliContext {
+export interface CliIdentityV1 {
   readonly serverInstanceId: string;
   readonly defaultExecutorId: string;
   readonly workspaceName: string | null;
 }
 
-export function parseCliContext(value: unknown): CliContext {
+export interface CliContext extends CliIdentityV1 {
+  readonly protocol: ProtocolOffer;
+}
+
+export function parseCliIdentity(value: unknown): CliIdentityV1 {
   const raw = runtimeRecord(value);
   if (!isExecutorId(raw.defaultExecutorId)
     || !(raw.workspaceName === null || typeof raw.workspaceName === 'string' && raw.workspaceName.length > 0)) {
@@ -23,6 +29,17 @@ export function parseCliContext(value: unknown): CliContext {
     defaultExecutorId: raw.defaultExecutorId,
     workspaceName: raw.workspaceName,
   };
+}
+
+export function parseCliContext(value: unknown): CliContext {
+  const identity = parseCliIdentity(value);
+  const raw = runtimeRecord(value);
+  if (!isProtocolOffer(raw.protocol) || raw.protocol.bootstrap !== CLI_BOOTSTRAP_VERSION
+    || Object.keys(raw.protocol.contracts).some(name => !name.startsWith('cli.'))) {
+    throw new ServerRuntimeContractError('unsupported CLI bootstrap or invalid contract catalog');
+  }
+  return { ...identity, protocol: Object.freeze({ bootstrap: CLI_BOOTSTRAP_VERSION,
+    contracts: intersectContracts(raw.protocol.contracts, raw.protocol.contracts) }) };
 }
 
 export interface ServerRuntimeProbe {

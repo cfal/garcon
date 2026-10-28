@@ -1,0 +1,11 @@
+{
+  "failures": [
+    {
+      "domain": "executor",
+      "code": "FILE_REVISION_CONFLICT",
+      "message": "Synthetic failure",
+      "retryable": false,
+      "status": 409
+    }
+  ]
+}

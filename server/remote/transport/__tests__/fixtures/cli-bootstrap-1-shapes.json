@@ -1,0 +1,29 @@
+{
+  "context": {
+    "defaultExecutorId": "string",
+    "protocol": {
+      "bootstrap": "number",
+      "contracts": {
+        "[string]": {
+          "array": "number"
+        }
+      }
+    },
+    "serverInstanceId": "string",
+    "workspaceName": {
+      "union": [
+        "null",
+        "string"
+      ]
+    }
+  },
+  "verifyRuntime": {
+    "parameters": [],
+    "result": {
+      "union": [
+        "false",
+        "true"
+      ]
+    }
+  }
+}

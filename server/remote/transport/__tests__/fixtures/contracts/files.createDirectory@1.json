@@ -1,0 +1,28 @@
+{
+  "definition": {
+    "name": "files.createDirectory",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "name": "string",
+      "parentPath": "string"
+    },
+    "result": {
+      "name": "string",
+      "path": "string",
+      "type": "\"directory\""
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

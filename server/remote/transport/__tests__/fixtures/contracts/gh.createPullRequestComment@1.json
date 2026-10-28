@@ -1,0 +1,45 @@
+{
+  "definition": {
+    "name": "gh.createPullRequestComment",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "actor": {
+          "id": "string",
+          "login": "string"
+        },
+        "body": "string",
+        "expected": {
+          "headRefOid": "string",
+          "state": "\"open\""
+        },
+        "number": "number",
+        "projectPath": "string",
+        "repository": {
+          "host": "string",
+          "nameWithOwner": "string"
+        }
+      }
+    },
+    "result": {
+      "executorId": "string",
+      "id": "string",
+      "instanceId": "string",
+      "url": "string"
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

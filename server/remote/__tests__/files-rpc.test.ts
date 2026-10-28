@@ -1,3 +1,4 @@
+import { TestWebSocketLink as WebSocketLink } from './test-session-transport.js';
 import { expect, test, spyOn } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';
@@ -7,12 +8,14 @@ import { descriptorPathsDirectory } from '../../runtime/files/directory-creation
 import { connectRemoteExecutor, servePairedRuntime } from './runtime-adapter.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { ProducerRelay } from '../server/producer-relay.js';
-import { WebSocketLink } from '../transport/websocket-link.js';
-import { linkOptions } from './integration-fixture.js';
+
+import { linkOptions as defaultLinkOptions } from './integration-fixture.js';
 import { decodeFileData, decodeFileText, validateFileRpcRequest } from '../transport/file-protocol.js';
 import { RemoteFilesService } from '../client/remote-files.js';
 import type { RemoteSessions } from '../client/executor-client.js';
 import { MAX_FILE_REVISION_LENGTH, MAX_FILE_VIEW_BYTES } from '../../../common/file-contracts.js';
+
+const linkOptions = { ...defaultLinkOptions, executorId: '33333333-3333-4333-8333-333333333333' };
 
 test('inline file data rejects malformed encoding and oversized payloads', () => {
   for (const data of ['?', 'eA', null]) expect(() => decodeFileData(data)).toThrow(expect.objectContaining({ code: 'FILE_INVALID_DATA' }));

@@ -1,6 +1,7 @@
 import { isSessionId, type RpcLane } from './rpc-lane.js';
 import { isRecord } from '../../../common/json.js';
-import { canonicalProfile, isProtocolDecision, isProtocolOffer, type ProtocolDecision, type ProtocolOffer } from './protocol-compatibility.js';
+import { isProtocolOffer, type ProtocolOffer } from '../../../common/protocol-contracts.js';
+import { isProtocolDecision, type ProtocolDecision } from './protocol-compatibility.js';
 
 export type LinkRole = 'controller' | 'worker';
 
@@ -58,6 +59,6 @@ function isLowerHex64(value: unknown): value is string {
 export function proofPayload(purpose: LinkRole, controllerHelloFrame: string, workerHelloFrame: string, decision: ProtocolDecision): string {
   return JSON.stringify([
     'garcon-executor-handshake-v1', purpose, controllerHelloFrame, workerHelloFrame,
-    decision.ok ? ['accepted', canonicalProfile(decision.profile)] : ['rejected', decision.code],
+    decision.ok ? ['accepted', decision.profileId] : ['rejected', decision.code],
   ]);
 }

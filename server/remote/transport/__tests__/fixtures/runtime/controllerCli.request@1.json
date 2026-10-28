@@ -1,0 +1,90 @@
+{
+  "failures": [
+    {
+      "domain": "executor",
+      "code": "OPERATION_UNSUPPORTED",
+      "message": "Synthetic failure",
+      "retryable": false,
+      "status": 422
+    },
+    {
+      "domain": "executor",
+      "code": "CLI_OUTCOME_UNKNOWN",
+      "message": "Synthetic failure",
+      "retryable": false,
+      "status": 503
+    },
+    {
+      "domain": "executor",
+      "code": "CLI_REQUEST_TOO_LARGE",
+      "message": "Synthetic failure",
+      "retryable": false,
+      "status": 413
+    },
+    {
+      "domain": "executor",
+      "code": "CLI_RESULT_TOO_LARGE",
+      "message": "Synthetic failure",
+      "retryable": false,
+      "status": 413
+    },
+    {
+      "domain": "executor",
+      "code": "CLI_SERVICE_BUSY",
+      "message": "Synthetic failure",
+      "retryable": true,
+      "status": 503
+    },
+    {
+      "domain": "executor",
+      "code": "CLI_CONTROLLER_UNAVAILABLE",
+      "message": "Synthetic failure",
+      "retryable": true,
+      "status": 503
+    },
+    {
+      "domain": "executor",
+      "code": "SERVER_SHUTTING_DOWN",
+      "message": "Synthetic failure",
+      "retryable": true,
+      "status": 503
+    },
+    {
+      "domain": "executor",
+      "code": "CLI_CONTROLLER_CHANGED",
+      "message": "Synthetic failure",
+      "retryable": false,
+      "status": 409
+    }
+  ],
+  "responses": [
+    {
+      "status": 200,
+      "body": {
+        "success": true
+      }
+    },
+    {
+      "status": 422,
+      "body": {
+        "error": "Unsupported operation",
+        "errorCode": "OPERATION_UNSUPPORTED"
+      }
+    },
+    {
+      "status": 503,
+      "body": {
+        "error": "Busy",
+        "errorCode": "CLI_SERVICE_BUSY"
+      },
+      "retryAfter": "1"
+    },
+    {
+      "status": 503,
+      "body": {
+        "error": "Unknown outcome",
+        "errorCode": "CLI_OUTCOME_UNKNOWN"
+      }
+    }
+  ]
+}

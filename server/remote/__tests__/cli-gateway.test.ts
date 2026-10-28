@@ -13,6 +13,7 @@ import { DomainError } from '../../common/domain-error.js';
 import { parseJsonBody } from '../../common/http-body.js';
 import type { RouteMap } from '../../controller/lib/http-route-types.js';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
+import { findCliRoute, CLI_OPERATIONS, CLI_CONTRACT_HEADER } from '@garcon/common/cli-contracts';
 
 const cleanups: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -24,7 +25,11 @@ async function fixture(routes: RouteMap = {}, workspaceName: string | null = 'wo
   let live: ReturnType<typeof cliPair> | null = null;
   const replace = (serverInstanceId: string) => {
     live?.close();
-    live = cliPair(new ControllerCliDispatcher({ routes, serverInstanceId, workspaceName, isShuttingDown: () => false }),
+    live = cliPair(new ControllerCliDispatcher({ routes: {
+      '/api/v1/chats/stop': { POST: () => Response.json({ success: true }) },
+      '/api/v1/chats/turn-receipt': { GET: () => Response.json({ success: true }) },
+      ...routes,
+    }, serverInstanceId, workspaceName, isShuttingDown: () => false }),
       () => { if (!allowed) throw new DomainError('CLI_ACCESS_DENIED', 'Disabled', 403); });
     cleanups.push(() => live?.close());
   };
@@ -33,9 +38,14 @@ async function fixture(routes: RouteMap = {}, workspaceName: string | null = 'wo
   const gateway = await startCliGateway({ dataDir, currentConnection: () => live?.connection ?? null });
   cleanups.push(() => gateway.dispose());
   const discover = () => discoverRuntime({ configDir: root, runtime: 'executor' });
-  const call = (path: string, init: RequestInit = {}) => fetch(`${gateway.descriptor.baseUrl}${path}`, {
-    ...init, headers: { Authorization: `Bearer ${gateway.descriptor.localCapability}`, 'X-Garcon-Server-Instance': 'controller', ...init.headers },
-  });
+  const call = (path: string, init: RequestInit = {}) => {
+    const route = findCliRoute(init.method ?? 'GET', new URL(path, gateway.descriptor.baseUrl).pathname);
+    const contract = route ? `${CLI_OPERATIONS[route.operation][1].name}@1` : null;
+    return fetch(`${gateway.descriptor.baseUrl}${path}`, {
+      ...init, headers: { Authorization: `Bearer ${gateway.descriptor.localCapability}`, 'X-Garcon-Server-Instance': 'controller',
+        ...(contract ? { [CLI_CONTRACT_HEADER]: contract } : {}), ...init.headers },
+    });
+  };
   return { root, dataDir, gateway, discover, call, replace, deny() { allowed = false; }, disconnect() { live?.close(); live = null; } };
 }
 
@@ -224,6 +234,7 @@ test('slow authenticated bulk uploads cannot consume primary HTTP slots', async 
     for (let index = 0; index < 12; index++) {
       const upload = httpRequest(`${f.gateway.descriptor.baseUrl}/api/v1/chats/run`, { method: 'POST', headers: {
         Authorization: `Bearer ${f.gateway.descriptor.localCapability}`, 'X-Garcon-Server-Instance': 'controller',
+        [CLI_CONTRACT_HEADER]: 'cli.chats.run@1',
         'Content-Type': 'application/json', 'Content-Length': '100', Expect: '100-continue',
       } });
       upload.on('error', () => {});

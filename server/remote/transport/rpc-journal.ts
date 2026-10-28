@@ -3,6 +3,7 @@ import type { RpcLane } from './rpc-lane.js';
 import { BULK_JOURNAL_BYTES, RPC_JOURNAL_BYTES } from './limits.js';
 import { RpcAdmission } from './rpc-admission.js';
 import { sameContinuity, type ProtocolContinuity } from './protocol-compatibility.js';
+import type { RpcCallCapture } from './rpc-registrations.js';
 
 // Bounds worker memory for replies awaiting acknowledgement across sessions.
 // Receipt records of recent sessions, so a reconcile interrupted by another
@@ -22,6 +23,7 @@ export interface RpcJournalOwner {
 export interface JournaledCall {
   readonly id: string;
   readonly signal: AbortSignal;
+  readonly capture: RpcCallCapture;
 }
 
 interface JournalEntry extends JournaledCall {
@@ -85,10 +87,10 @@ export class RpcReplyJournal {
     if (sessions.length > RECEIPT_SESSIONS) this.#received.delete(sessions[0]![0]);
   }
 
-  begin(owner: RpcJournalOwner, id: string): JournaledCall {
+  begin(owner: RpcJournalOwner, id: string, capture: RpcCallCapture): JournaledCall {
     const controller = new AbortController();
     const entry: JournalEntry = {
-      id, lane: owner.lane, continuity: owner.continuity, controller, signal: controller.signal, owner,
+      id, capture, lane: owner.lane, continuity: owner.continuity, controller, signal: controller.signal, owner,
       reply: null, undeliverable: null, bytes: 0, delivered: false, cancelled: false,
     };
     this.#entries.set(id, entry);

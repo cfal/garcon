@@ -1,3 +1,5 @@
+import { rpcWireV1 } from '../transport/rpc-wire-v1.js';
+import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 import {
@@ -6,7 +8,7 @@ import {
   type ExecutorAvailability,
 } from '@garcon/server-agent-interface';
 import { DEFAULT_RPC_TIMEOUT_MS, ExecutorRpc, ParkedRpcCalls, type RpcCallOptions } from '../transport/rpc.js';
-import type { ExecutorRpcMethods, IntegrationManifest } from '../transport/rpc-protocol.js';
+import type { RpcContractRef, RpcRequest, RpcResult, IntegrationManifest } from '../transport/rpc-protocol.js';
 import type { SessionTransport } from '../transport/session-transport.js';
 import type { WebSocketLink } from '../transport/websocket-link.js';
 import { failureReason } from '../transport/failure-reason.js';
@@ -21,7 +23,7 @@ import type { ExecutorBulkStatus } from '../../../common/executors.js';
 import { stableJsonStringify } from '../../../common/json.js';
 import { sameContinuity, type ProtocolContinuity } from '../transport/protocol-compatibility.js';
 import { RemoteExecutorGeneration, staleGeneration } from './executor-generation.js';
-import { freezeInventory, validateManifest } from './executor-inventory.js';
+import { freezeInventory, validateManifest } from '../transport/executor-inventory.js';
 
 export interface RemoteSessionBacking {
   readonly rpc: ExecutorRpc;
@@ -62,10 +64,10 @@ export interface RemoteSessions {
   // session retired first, is repeated on the next session of the same worker
   // within the caller's deadline.
   send<T>(lane: RpcLane, options: HeldCallOptions | undefined, send: (session: HeldSession) => Promise<T>): Promise<T>;
-  call<K extends keyof ExecutorRpcMethods>(
-    integrationId: string, method: K, request: ExecutorRpcMethods[K]['request'],
-    options?: RpcCallOptions<ExecutorRpcMethods[K]['result']> & Pick<HeldCallOptions, 'dispatchDeadline' | 'instanceId'>,
-  ): Promise<ExecutorRpcMethods[K]['result']>;
+  call<D extends RpcContractRef>(
+    integrationId: string, contract: D, request: NoInfer<RpcRequest<D>>,
+    options?: RpcCallOptions<NoInfer<RpcResult<D>>> & Pick<HeldCallOptions, 'dispatchDeadline' | 'instanceId'>,
+  ): Promise<RpcResult<D>>;
 }
 
 interface SessionWaiter {
@@ -232,7 +234,7 @@ export class RemoteExecutorClient {
     };
     await transport.ready;
     assertCandidate();
-    const { info, integrations } = await rpc.call('', 'executor.describe', null);
+    const { info, integrations } = await rpc.call('', RPC_V1['executor.describe'], null);
     assertCandidate();
     if (info.executorId !== this.id || transport.executorId !== this.id) throw new ExecutorConfigurationError(`Executor identity mismatch: worker serves ${info.executorId}; restart the worker to serve ${this.id}`);
     if (typeof info.instanceId !== 'string' || !info.instanceId || !Array.isArray(info.integrationIds)
@@ -488,3 +490,7 @@ export class RemoteExecutorClient {
 function heldCallCancelled(): AgentCallError {
   return new AgentCallError('not-dispatched', 'The request was cancelled while the executor reconnected.');
 }
+
+export const EXECUTOR_RPC_CLIENTS = Object.freeze([
+  rpcWireV1('executor.describe'),
+] as const);

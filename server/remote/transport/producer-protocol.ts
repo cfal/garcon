@@ -5,82 +5,87 @@ import { parseNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   isAgentResourceRef,
   type AgentProducerNotification,
+  type AgentEstablishedSession,
+  type AgentNativeSessionRef,
   type AgentResourceScope,
   type AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
-import { CORE_REQUIREMENT, supportsRequirement, type ProtocolProfile, type ProtocolRequirement } from './protocol-compatibility.js';
+import { PRODUCER_CREATOR_V1, type EventCreator } from '@garcon/common/executor-contracts';
+import type { ContractDefinition } from '@garcon/common/protocol-contracts';
 
 type ProducerEvent = AgentProducerNotification['event'];
 
-export const PRODUCER_REQUIREMENTS: Readonly<Record<ProducerEvent['type'], ProtocolRequirement>> = Object.freeze({
-  rows: CORE_REQUIREMENT,
-  session: CORE_REQUIREMENT,
-  permission: CORE_REQUIREMENT,
-  notice: CORE_REQUIREMENT,
-  'run-ended': CORE_REQUIREMENT,
-  started: CORE_REQUIREMENT,
-  steerable: CORE_REQUIREMENT,
-  'publication-failed': CORE_REQUIREMENT,
-  'publication-gap': CORE_REQUIREMENT,
-  'launch-settled': CORE_REQUIREMENT,
+export interface ProducerEventCodec extends ContractDefinition {
+  decode(value: unknown, scope: AgentResourceScope): ProducerEvent;
+}
+
+export interface ProducerCreator extends EventCreator {
+  readonly contract: import('./rpc-protocol.js').RpcContractRef<'producers.bind'>;
+  readonly codecs: Readonly<Record<string, ProducerEventCodec>>;
+}
+
+export const PRODUCER_BINDING_CODEC_V1: ProducerCreator = Object.freeze({ ...PRODUCER_CREATOR_V1,
+  codecs: Object.freeze(Object.fromEntries(Object.entries(PRODUCER_CREATOR_V1.codecs).map(([kind, definition]) => [kind,
+    Object.freeze({ ...definition, decode: decodeProducerEventV1 }),
+  ]))),
 });
 
-export const MESSAGE_REQUIREMENTS: Readonly<Record<ChatMessage['type'], ProtocolRequirement>> = Object.freeze({
-  'user-message': CORE_REQUIREMENT,
-  'assistant-message': CORE_REQUIREMENT,
-  'command-output': CORE_REQUIREMENT,
-  'command-result': CORE_REQUIREMENT,
-  thinking: CORE_REQUIREMENT,
-  'bash-tool-use': CORE_REQUIREMENT,
-  'exec-tool-use': CORE_REQUIREMENT,
-  'wait-tool-use': CORE_REQUIREMENT,
-  'read-tool-use': CORE_REQUIREMENT,
-  'list-tool-use': CORE_REQUIREMENT,
-  'edit-tool-use': CORE_REQUIREMENT,
-  'write-tool-use': CORE_REQUIREMENT,
-  'apply-patch-tool-use': CORE_REQUIREMENT,
-  'grep-tool-use': CORE_REQUIREMENT,
-  'glob-tool-use': CORE_REQUIREMENT,
-  'web-search-tool-use': CORE_REQUIREMENT,
-  'web-fetch-tool-use': CORE_REQUIREMENT,
-  'todo-write-tool-use': CORE_REQUIREMENT,
-  'todo-read-tool-use': CORE_REQUIREMENT,
-  'task-tool-use': CORE_REQUIREMENT,
-  'codex-subagent-tool-use': CORE_REQUIREMENT,
-  'update-plan-tool-use': CORE_REQUIREMENT,
-  'write-stdin-tool-use': CORE_REQUIREMENT,
-  'enter-plan-mode-tool-use': CORE_REQUIREMENT,
-  'exit-plan-mode-tool-use': CORE_REQUIREMENT,
-  'ask-user-question-tool-use': CORE_REQUIREMENT,
-  'cursor-ask-question-tool-use': CORE_REQUIREMENT,
-  'cursor-create-plan-tool-use': CORE_REQUIREMENT,
-  'amp-finder-tool-use': CORE_REQUIREMENT,
-  'amp-oracle-tool-use': CORE_REQUIREMENT,
-  'amp-librarian-tool-use': CORE_REQUIREMENT,
-  'amp-skill-tool-use': CORE_REQUIREMENT,
-  'amp-mermaid-tool-use': CORE_REQUIREMENT,
-  'amp-handoff-tool-use': CORE_REQUIREMENT,
-  'amp-look-at-tool-use': CORE_REQUIREMENT,
-  'amp-find-thread-tool-use': CORE_REQUIREMENT,
-  'amp-read-thread-tool-use': CORE_REQUIREMENT,
-  'amp-task-list-tool-use': CORE_REQUIREMENT,
-  'claude-tool-search-tool-use': CORE_REQUIREMENT,
-  'claude-monitor-tool-use': CORE_REQUIREMENT,
-  'pi-tool-search-tool-use': CORE_REQUIREMENT,
-  'external-tool-use': CORE_REQUIREMENT,
-  'mcp-tool-use': CORE_REQUIREMENT,
-  'request-permissions-tool-use': CORE_REQUIREMENT,
-  'unknown-tool-use': CORE_REQUIREMENT,
-  'tool-result': CORE_REQUIREMENT,
-  error: CORE_REQUIREMENT,
-  'transcript-notice': CORE_REQUIREMENT,
-  'cli-row': CORE_REQUIREMENT,
-  'permission-request': CORE_REQUIREMENT,
-  'permission-resolved': CORE_REQUIREMENT,
-  'permission-cancelled': CORE_REQUIREMENT,
-  'permission-expired': CORE_REQUIREMENT,
-  compaction: CORE_REQUIREMENT,
-  'agent-switch': CORE_REQUIREMENT,
+export const RENDERED_MESSAGES_V1: Readonly<Record<ChatMessage['type'], true>> = Object.freeze({
+  'user-message': true,
+  'assistant-message': true,
+  'command-output': true,
+  'command-result': true,
+  thinking: true,
+  'bash-tool-use': true,
+  'exec-tool-use': true,
+  'wait-tool-use': true,
+  'read-tool-use': true,
+  'list-tool-use': true,
+  'edit-tool-use': true,
+  'write-tool-use': true,
+  'apply-patch-tool-use': true,
+  'grep-tool-use': true,
+  'glob-tool-use': true,
+  'web-search-tool-use': true,
+  'web-fetch-tool-use': true,
+  'todo-write-tool-use': true,
+  'todo-read-tool-use': true,
+  'task-tool-use': true,
+  'codex-subagent-tool-use': true,
+  'update-plan-tool-use': true,
+  'write-stdin-tool-use': true,
+  'enter-plan-mode-tool-use': true,
+  'exit-plan-mode-tool-use': true,
+  'ask-user-question-tool-use': true,
+  'cursor-ask-question-tool-use': true,
+  'cursor-create-plan-tool-use': true,
+  'amp-finder-tool-use': true,
+  'amp-oracle-tool-use': true,
+  'amp-librarian-tool-use': true,
+  'amp-skill-tool-use': true,
+  'amp-mermaid-tool-use': true,
+  'amp-handoff-tool-use': true,
+  'amp-look-at-tool-use': true,
+  'amp-find-thread-tool-use': true,
+  'amp-read-thread-tool-use': true,
+  'amp-task-list-tool-use': true,
+  'claude-tool-search-tool-use': true,
+  'claude-monitor-tool-use': true,
+  'pi-tool-search-tool-use': true,
+  'external-tool-use': true,
+  'mcp-tool-use': true,
+  'request-permissions-tool-use': true,
+  'unknown-tool-use': true,
+  'tool-result': true,
+  error: true,
+  'transcript-notice': true,
+  'cli-row': true,
+  'permission-request': true,
+  'permission-resolved': true,
+  'permission-cancelled': true,
+  'permission-expired': true,
+  compaction: true,
+  'agent-switch': true,
 });
 
 export const UNREADABLE_EVENT_FAILURE = Object.freeze({
@@ -88,19 +93,23 @@ export const UNREADABLE_EVENT_FAILURE = Object.freeze({
   message: 'An event from the executor could not be read, so this turn\'s outcome is unknown. Native history may contain additional output.',
 });
 
-export function decodeProducerMessage(value: unknown, profile: ProtocolProfile): ChatMessage {
+export function decodeRenderedMessageV1(value: unknown): ChatMessage {
   const message = parseChatMessage(value);
-  if (!message || !supportsRequirement(profile, MESSAGE_REQUIREMENTS[message.type])) {
-    throw new Error('Unknown or unselected normalized message');
+  if (!message || !Object.hasOwn(RENDERED_MESSAGES_V1, message.type)) {
+    throw new Error('Unknown v1 normalized message');
   }
   return message;
 }
 
-export function decodeProducerEvent(value: unknown, scope: AgentResourceScope, profile: ProtocolProfile): ProducerEvent {
-  if (!isRecord(value) || typeof value.type !== 'string' || !Object.hasOwn(PRODUCER_REQUIREMENTS, value.type)
-    || !supportsRequirement(profile, PRODUCER_REQUIREMENTS[value.type as ProducerEvent['type']])) {
-    throw new Error('Unknown or unselected producer event');
+export function decodeProducerEvent(value: unknown, scope: AgentResourceScope, creator: ProducerCreator): ProducerEvent {
+  if (!isRecord(value) || typeof value.type !== 'string' || !Object.hasOwn(creator.codecs, value.type)) {
+    throw new Error('Producer event is absent from its creator contract');
   }
+  return creator.codecs[value.type]!.decode(value, scope);
+}
+
+function decodeProducerEventV1(value: unknown, scope: AgentResourceScope): ProducerEvent {
+  if (!isRecord(value)) throw new Error('Invalid producer event');
   switch (value.type) {
     case 'rows':
       if (!Array.isArray(value.rows)) break;
@@ -108,24 +117,11 @@ export function decodeProducerEvent(value: unknown, scope: AgentResourceScope, p
         if (!isRecord(row) || (row.providerMeta !== undefined && !isJsonObject(row.providerMeta))) {
           throw new Error('Invalid producer row');
         }
-        return { message: decodeProducerMessage(row.message, profile), ...(row.providerMeta === undefined ? {} : { providerMeta: row.providerMeta }) };
+        return { message: decodeRenderedMessageV1(row.message), ...(row.providerMeta === undefined ? {} : { providerMeta: row.providerMeta }) };
       }) };
-    case 'session': {
-      const session = value.session;
-      if (!isRecord(session) || !nonempty(session.agentSessionId)) break;
-      const native = session.nativeSession;
-      if (native !== null && (!isRecord(native) || native.ownerId !== scope.integrationId
-        || !Number.isSafeInteger(native.schemaVersion) || Number(native.schemaVersion) < 1 || !isJsonObject(native.value))) break;
-      const receipt = session.nativeSeedReceipt === null ? null : parseNativeSeedReceipt(session.nativeSeedReceipt);
-      if (session.nativeSeedReceipt !== null && (!receipt || receipt.agentSessionId !== session.agentSessionId)) break;
-      return { type: 'session', session: {
-        agentSessionId: session.agentSessionId,
-        nativeSession: native === null ? null : { ownerId: scope.integrationId, schemaVersion: Number(native.schemaVersion), value: native.value as JsonObject },
-        nativeSeedReceipt: receipt,
-      } };
-    }
+    case 'session': return { type: 'session', session: decodeEstablishedSessionV1(value.session, scope) };
     case 'permission':
-      return decodePermission(value, scope, profile);
+      return decodePermission(value, scope);
     case 'notice':
       if (!nonempty(value.runId) || typeof value.content !== 'string' || (value.title !== undefined && typeof value.title !== 'string')) break;
       return { type: 'notice', runId: value.runId, content: value.content, ...(value.title === undefined ? {} : { title: value.title }) };
@@ -166,14 +162,14 @@ export function decodeProducerEvent(value: unknown, scope: AgentResourceScope, p
   throw new Error('Invalid producer event');
 }
 
-function decodePermission(value: Record<string, unknown>, scope: AgentResourceScope, profile: ProtocolProfile): Extract<ProducerEvent, { type: 'permission' }> {
+function decodePermission(value: Record<string, unknown>, scope: AgentResourceScope): Extract<ProducerEvent, { type: 'permission' }> {
   const lifecycle = value.lifecycle;
   if (!nonempty(value.runId) || !isRecord(lifecycle) || !nonempty(lifecycle.permissionOccurrenceId)) throw new Error('Invalid producer permission');
   const base = { type: 'permission', runId: value.runId } as const;
   const permissionOccurrenceId = lifecycle.permissionOccurrenceId;
   switch (lifecycle.kind) {
     case 'requested': {
-      const tool = decodeProducerMessage(lifecycle.requestedTool, profile);
+      const tool = decodeRenderedMessageV1(lifecycle.requestedTool);
       const decision = value.decision;
       if (!isToolUseMessage(tool) || !isRecord(decision) || decision.permissionOccurrenceId !== permissionOccurrenceId
         || !isAgentResourceRef(decision.response, 'permission-response', scope) || !Array.isArray(lifecycle.options)
@@ -210,8 +206,22 @@ function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
-function isJsonObject(value: unknown): value is JsonObject {
+export function isJsonObject(value: unknown): value is JsonObject {
   return isRecord(value) && Object.values(value).every(isJsonValue);
+}
+
+export function isNativeSessionV1(value: unknown): value is AgentNativeSessionRef {
+  return isRecord(value) && nonempty(value.ownerId) && Number.isSafeInteger(value.schemaVersion)
+    && Number(value.schemaVersion) > 0 && isJsonObject(value.value);
+}
+
+export function decodeEstablishedSessionV1(value: unknown, scope?: AgentResourceScope): AgentEstablishedSession {
+  if (!isRecord(value) || !nonempty(value.agentSessionId)
+    || !(value.nativeSession === null || isNativeSessionV1(value.nativeSession)
+      && (!scope || value.nativeSession.ownerId === scope.integrationId))) throw new SyntaxError('Invalid established session');
+  const receipt = value.nativeSeedReceipt === null ? null : parseNativeSeedReceipt(value.nativeSeedReceipt);
+  if (value.nativeSeedReceipt !== null && (!receipt || receipt.agentSessionId !== value.agentSessionId)) throw new SyntaxError('Invalid native seed receipt');
+  return { agentSessionId: value.agentSessionId, nativeSession: value.nativeSession, nativeSeedReceipt: receipt };
 }
 
 function isJsonValue(value: unknown): boolean {

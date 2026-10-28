@@ -1,0 +1,37 @@
+{
+  "definition": {
+    "name": "files.save",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "conflictResolution": {
+        "union": [
+          "\"overwrite\"",
+          "\"reject\""
+        ]
+      },
+      "data": "string",
+      "expectedRevision": "string",
+      "filePath": "string",
+      "projectPath": "string"
+    },
+    "result": {
+      "message": "string",
+      "path": "string",
+      "revision": "string",
+      "success": "true"
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

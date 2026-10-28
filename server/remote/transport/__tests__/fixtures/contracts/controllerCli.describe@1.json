@@ -1,0 +1,24 @@
+{
+  "definition": {
+    "name": "controllerCli.describe",
+    "version": 1,
+    "requires": [],
+    "lane": "primary",
+    "continuity": "session",
+    "direction": "worker-to-controller"
+  },
+  "wire": {
+    "request": "null",
+    "result": {
+      "defaultExecutorId": "string",
+      "serverInstanceId": "string",
+      "workspaceName": {
+        "union": [
+          "null",
+          "string"
+        ]
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

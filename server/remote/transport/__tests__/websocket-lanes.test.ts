@@ -1,6 +1,7 @@
+import { TestWebSocketLink as WebSocketLink } from '../../__tests__/test-session-transport.js';
 import { expect, test } from 'bun:test';
 import { connectNoiseWebSocket } from '@cfal/noise-ws';
-import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../websocket-link.js';
+import { EXECUTOR_NOISE_CONTEXT } from '../websocket-link.js';
 import { ExecutorSocketAdmission } from '../socket-admission.js';
 import { isLinkHello, type LinkHello } from '../link-handshake.js';
 import { primaryHello, signedProof } from '../../__tests__/link-hello.js';
@@ -64,7 +65,7 @@ function rawPeer(address: string, hello: LinkHello) {
       const frame = JSON.parse(data);
       if (isLinkHello(frame)) peer = data;
       else if (frame.type === 'proof') {
-        socket.send(JSON.stringify(signedProof(secret, hello.role, local, peer, { ok: true, profile: { core: 1, contracts: {} } })));
+        socket.send(JSON.stringify(signedProof(secret, hello.role, local, peer, { ok: true, profileId: hello.primaryProfileId! })));
       }
     },
   });
@@ -90,13 +91,16 @@ test('bulk rejects stale grants, different peer runtimes, executor IDs and dupli
       expect(controller.bulk).toBeNull();
       expect(parent.connected).toBe(true);
     }
-    worker.dialBulk(peer, id);
-    await until(() => Boolean(controller.bulk?.connected && worker.bulk?.connected));
+    const accepted = rawPeer(address, valid);
+    await until(() => Boolean(controller.bulk?.connected));
     const bulk = controller.bulk;
+    expect(bulk?.id).toBe(id);
+    expect(bulk?.continuity.profileId).toBe(parent.continuity.profileId);
     await rawPeer(address, valid).closed;
     expect(controller.bulk).toBe(bulk);
     expect(parent.connected && bulk!.connected).toBe(true);
     controller.prepareBulk(parent, crypto.randomUUID());
+    await accepted.closed;
     await rawPeer(address, valid).closed;
     expect(parent.connected).toBe(true);
   } finally { await worker.dispose(); await controller.dispose(); }

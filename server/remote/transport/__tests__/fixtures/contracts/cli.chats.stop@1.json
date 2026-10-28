@@ -1,0 +1,194 @@
+{
+  "definition": {
+    "name": "cli.chats.stop",
+    "version": 1,
+    "requires": [],
+    "mutation": true,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "primary"
+  },
+  "route": "POST /api/v1/chats/stop",
+  "client": {
+    "parameters": [
+      {
+        "name": "request",
+        "type": {
+          "agentId?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "chatId": "string",
+          "clientRequestId": "string"
+        }
+      }
+    ],
+    "result": {
+      "acceptedAt": "string",
+      "chatId?": {
+        "union": [
+          "string",
+          "undefined"
+        ]
+      },
+      "clientRequestId": "string",
+      "commandType": "string",
+      "control": {
+        "queue": {
+          "entries": {
+            "array": {
+              "attachments": {
+                "array": {
+                  "mimeType": "string",
+                  "name": "string"
+                }
+              },
+              "content": "string",
+              "createdAt": "string",
+              "id": "string",
+              "kind": {
+                "union": [
+                  "\"steer\"",
+                  "\"turn\""
+                ]
+              },
+              "revision": "number",
+              "updatedAt": "string"
+            }
+          },
+          "pause": {
+            "union": [
+              "null",
+              {
+                "entryId?": {
+                  "union": [
+                    "string",
+                    "undefined"
+                  ]
+                },
+                "id": "string",
+                "kind": "\"unknown\"",
+                "pausedAt": {
+                  "union": [
+                    "null",
+                    "string"
+                  ]
+                }
+              },
+              {
+                "entryId": "string",
+                "id": "string",
+                "kind": "\"completion-uncertain\"",
+                "pausedAt": "string"
+              },
+              {
+                "entryId": "string",
+                "id": "string",
+                "kind": "\"queued-turn-failed\"",
+                "pausedAt": "string"
+              },
+              {
+                "id": "string",
+                "kind": "\"manual\"",
+                "pausedAt": "string"
+              },
+              {
+                "id": "string",
+                "kind": "\"turn-failed\"",
+                "pausedAt": "string",
+                "turnId": "string"
+              }
+            ]
+          },
+          "recentlyDispatched": {
+            "array": {
+              "dispatchedAt": "string",
+              "entryId": "string",
+              "revision": "number"
+            }
+          },
+          "reorderRevision": "number",
+          "steeringEntryId": {
+            "union": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "serverInstanceId": "string",
+        "updatedAt": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "version": "number"
+      },
+      "outcome": {
+        "union": [
+          "\"already-idle\"",
+          "\"failed\"",
+          "\"interrupt-requested\""
+        ]
+      },
+      "parentChat?": {
+        "union": [
+          "null",
+          "undefined",
+          {
+            "chatId": "string",
+            "ordinal": "number",
+            "relation": {
+              "union": [
+                "\"fork\"",
+                "\"handoff\""
+              ]
+            },
+            "transcriptViewId": "string"
+          },
+          {
+            "chatId": "string",
+            "relation": "\"delegation\""
+          }
+        ]
+      },
+      "status": {
+        "union": [
+          "\"accepted\"",
+          "\"duplicate\""
+        ]
+      },
+      "success": "true",
+      "tagMutation?": {
+        "union": [
+          "undefined",
+          {
+            "addedTags": {
+              "array": "string"
+            },
+            "status": "\"applied\""
+          },
+          {
+            "errorCode": "\"CHAT_TAG_SAVE_FAILED\"",
+            "retryable": "true",
+            "status": "\"not-applied\""
+          },
+          {
+            "errorCode": "\"CHAT_TAG_SAVE_UNKNOWN\"",
+            "recoveryRequired": "true",
+            "status": "\"unknown\""
+          }
+        ]
+      },
+      "turnId?": {
+        "union": [
+          "string",
+          "undefined"
+        ]
+      }
+    }
+  }
+}

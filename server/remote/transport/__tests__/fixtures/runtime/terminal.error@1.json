@@ -1,0 +1,9 @@
+{
+  "messages": [
+    {
+      "type": "terminal-error",
+      "code": "terminal-runtime-changed",
+      "message": "Synthetic failure"
+    }
+  ]
+}

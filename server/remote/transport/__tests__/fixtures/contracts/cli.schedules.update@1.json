@@ -1,0 +1,397 @@
+{
+  "definition": {
+    "name": "cli.schedules.update",
+    "version": 1,
+    "requires": [],
+    "mutation": true,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "PUT /api/v1/scheduled-prompts",
+  "client": {
+    "parameters": [
+      {
+        "name": "request",
+        "type": {
+          "expectedRevision": "number",
+          "id": "string",
+          "scheduledPrompt": {
+            "name?": {
+              "union": [
+                "string",
+                "undefined"
+              ]
+            },
+            "prompt": "string",
+            "schedule": {
+              "union": [
+                {
+                  "endAtUtc": {
+                    "union": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "firstRunAtUtc": "string",
+                  "intervalMinutes": "number",
+                  "type": "\"recurring\""
+                },
+                {
+                  "runAtUtc": "string",
+                  "type": "\"once\""
+                }
+              ]
+            },
+            "target": {
+              "union": [
+                {
+                  "agentId": "string",
+                  "agentSettingsById": {
+                    "[string]": {
+                      "ownerId": "string",
+                      "schemaVersion": "number",
+                      "values": {
+                        "[string]": {
+                          "union": [
+                            "false",
+                            "null",
+                            "number",
+                            "string",
+                            "true",
+                            {
+                              "array": {
+                                "recursive": "JsonValue"
+                              }
+                            },
+                            {
+                              "recursive": "JsonObject"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "apiProviderId": {
+                    "union": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "chatTitleTemplate?": {
+                    "union": [
+                      "string",
+                      "undefined"
+                    ]
+                  },
+                  "executorId?": {
+                    "union": [
+                      "null",
+                      "string",
+                      "undefined"
+                    ]
+                  },
+                  "model": "string",
+                  "modelEndpointId": {
+                    "union": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "modelProtocol": {
+                    "union": [
+                      "\"anthropic-messages\"",
+                      "\"openai-compatible\"",
+                      "null"
+                    ]
+                  },
+                  "permissionMode": {
+                    "union": [
+                      "\"acceptEdits\"",
+                      "\"bypassPermissions\"",
+                      "\"default\"",
+                      "\"manualBypass\"",
+                      "\"plan\""
+                    ]
+                  },
+                  "preambleChoice": {
+                    "union": [
+                      {
+                        "mode": "\"defaults\""
+                      },
+                      {
+                        "mode": "\"explicit\"",
+                        "orderedPreambleIds": {
+                          "array": "string"
+                        }
+                      }
+                    ]
+                  },
+                  "projectPath": "string",
+                  "tags": {
+                    "array": "string"
+                  },
+                  "thinkingMode": {
+                    "union": [
+                      "\"high\"",
+                      "\"low\"",
+                      "\"max\"",
+                      "\"medium\"",
+                      "\"none\"",
+                      "\"ultra\"",
+                      "\"xhigh\""
+                    ]
+                  },
+                  "type": "\"new-chat\""
+                },
+                {
+                  "busyBehavior": {
+                    "union": [
+                      "\"queue\"",
+                      "\"skip\""
+                    ]
+                  },
+                  "chatId": "string",
+                  "expectedSelection?": {
+                    "union": [
+                      "undefined",
+                      {
+                        "agentId": "string",
+                        "agentOwnershipEpoch": {
+                          "union": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "model": {
+                          "union": [
+                            "null",
+                            "string"
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "type": "\"existing-chat\""
+                }
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "result": {
+      "snapshot": {
+        "prompts": {
+          "array": {
+            "createdAt": "string",
+            "enabled": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "id": "string",
+            "name?": {
+              "union": [
+                "string",
+                "undefined"
+              ]
+            },
+            "prompt": "string",
+            "schedule": {
+              "union": [
+                {
+                  "endAt": {
+                    "union": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "intervalMinutes": "number",
+                  "nextRunAt": "string",
+                  "type": "\"recurring\""
+                },
+                {
+                  "nextRunAt": "string",
+                  "type": "\"once\""
+                }
+              ]
+            },
+            "target": {
+              "union": [
+                {
+                  "agentId": "string",
+                  "agentSettingsById": {
+                    "[string]": {
+                      "ownerId": "string",
+                      "schemaVersion": "number",
+                      "values": {
+                        "[string]": {
+                          "union": [
+                            "false",
+                            "null",
+                            "number",
+                            "string",
+                            "true",
+                            {
+                              "array": {
+                                "recursive": "JsonValue"
+                              }
+                            },
+                            {
+                              "recursive": "JsonObject"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "apiProviderId": {
+                    "union": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "chatTitleTemplate?": {
+                    "union": [
+                      "string",
+                      "undefined"
+                    ]
+                  },
+                  "executorId?": {
+                    "union": [
+                      "null",
+                      "string",
+                      "undefined"
+                    ]
+                  },
+                  "model": "string",
+                  "modelEndpointId": {
+                    "union": [
+                      "null",
+                      "string"
+                    ]
+                  },
+                  "modelProtocol": {
+                    "union": [
+                      "\"anthropic-messages\"",
+                      "\"openai-compatible\"",
+                      "null"
+                    ]
+                  },
+                  "permissionMode": {
+                    "union": [
+                      "\"acceptEdits\"",
+                      "\"bypassPermissions\"",
+                      "\"default\"",
+                      "\"manualBypass\"",
+                      "\"plan\""
+                    ]
+                  },
+                  "preambleChoice": {
+                    "union": [
+                      {
+                        "mode": "\"defaults\""
+                      },
+                      {
+                        "mode": "\"explicit\"",
+                        "orderedPreambleIds": {
+                          "array": "string"
+                        }
+                      }
+                    ]
+                  },
+                  "projectPath": "string",
+                  "tags": {
+                    "array": "string"
+                  },
+                  "thinkingMode": {
+                    "union": [
+                      "\"high\"",
+                      "\"low\"",
+                      "\"max\"",
+                      "\"medium\"",
+                      "\"none\"",
+                      "\"ultra\"",
+                      "\"xhigh\""
+                    ]
+                  },
+                  "type": "\"new-chat\""
+                },
+                {
+                  "busyBehavior": {
+                    "union": [
+                      "\"queue\"",
+                      "\"skip\""
+                    ]
+                  },
+                  "chatId": "string",
+                  "expectedSelection?": {
+                    "union": [
+                      "undefined",
+                      {
+                        "agentId": "string",
+                        "agentOwnershipEpoch": {
+                          "union": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "model": {
+                          "union": [
+                            "null",
+                            "string"
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "type": "\"existing-chat\""
+                }
+              ]
+            },
+            "updatedAt": "string"
+          }
+        },
+        "revision": "number",
+        "runLog": {
+          "array": {
+            "at": "string",
+            "chatId": {
+              "union": [
+                "null",
+                "string"
+              ]
+            },
+            "message": "string",
+            "outcome": {
+              "union": [
+                "\"created-chat\"",
+                "\"failed\"",
+                "\"missed\"",
+                "\"queued\"",
+                "\"sent\"",
+                "\"skipped-busy\""
+              ]
+            },
+            "promptLabel": {
+              "union": [
+                "null",
+                "string"
+              ]
+            },
+            "scheduledPromptId": {
+              "union": [
+                "null",
+                "string"
+              ]
+            }
+          }
+        }
+      },
+      "success": "true"
+    }
+  }
+}

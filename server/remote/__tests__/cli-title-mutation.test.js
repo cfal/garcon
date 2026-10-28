@@ -1,3 +1,4 @@
+import { CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 import { expect, spyOn, test } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
@@ -27,7 +28,7 @@ test.each(['direct', 'gateway'])('title byte limits reject new writes before per
         routes: wrapRoutes(routes, { localCapability: 'synthetic-capability', serverInstanceId: 'controller' }),
       });
       cleanups.push(() => server.stop(true));
-      client = new GarconClient({ baseUrl: `http://127.0.0.1:${server.port}`, instanceId: 'controller',
+      client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, baseUrl: `http://127.0.0.1:${server.port}`, instanceId: 'controller',
         endpointInstanceId: 'controller', defaultExecutorId: 'local', workspaceName: null, workspaceDir: null,
         localCapability: 'synthetic-capability' });
     } else {

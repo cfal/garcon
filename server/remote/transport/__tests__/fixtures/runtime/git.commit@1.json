@@ -1,0 +1,11 @@
+{
+  "failures": [
+    {
+      "domain": "git",
+      "code": "GIT_MUTATION_OUTCOME_UNKNOWN",
+      "message": "Synthetic failure",
+      "retryable": false,
+      "status": 503
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { CLI_BOOTSTRAP_VERSION, CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -10,7 +11,7 @@ import { chat, chatList, TS } from './chat-research-fixtures.js';
 const CHAT_ID = '1785337200123456';
 
 // Local discovery stub exercises control-command routing without a workspace descriptor.
-const stubDiscovery = async () => ({
+const stubDiscovery = async () => ({ protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS },
   baseUrl: 'http://127.0.0.1:8080',
   instanceId: 'instance',
   endpointInstanceId: 'instance',

@@ -1,0 +1,84 @@
+{
+  "definition": {
+    "name": "auth.loginStatus",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "expectedSessionId?": {
+        "union": [
+          "string",
+          "undefined"
+        ]
+      }
+    },
+    "result": {
+      "union": [
+        {
+          "completionPending": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "deviceAuth?": {
+            "union": [
+              "undefined",
+              {
+                "code?": {
+                  "union": [
+                    "string",
+                    "undefined"
+                  ]
+                },
+                "needsCode?": {
+                  "union": [
+                    "false",
+                    "true",
+                    "undefined"
+                  ]
+                },
+                "url": "string"
+              }
+            ]
+          },
+          "retryableError?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "running": "true",
+          "sessionId": "string",
+          "state": "\"running\""
+        },
+        {
+          "error": "string",
+          "running": "false",
+          "sessionId": "string",
+          "state": "\"failed\""
+        },
+        {
+          "running": "false",
+          "sessionId": "string",
+          "state": "\"succeeded\""
+        },
+        {
+          "running": "false",
+          "state": "\"idle\""
+        }
+      ]
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

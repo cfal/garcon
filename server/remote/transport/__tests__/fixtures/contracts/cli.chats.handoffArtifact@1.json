@@ -1,0 +1,66 @@
+{
+  "definition": {
+    "name": "cli.chats.handoffArtifact",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": false,
+    "timeoutMs": 120000,
+    "pool": "long",
+    "lane": "bulk"
+  },
+  "route": "GET /api/v1/chats/handoff-artifact",
+  "client": {
+    "parameters": [
+      {
+        "name": "request",
+        "type": {
+          "chatId": "string",
+          "contextWindowTokens": "number"
+        }
+      }
+    ],
+    "result": {
+      "abridgedEntryCount": "number",
+      "budgetOmittedEntryCount": "number",
+      "chatId": "string",
+      "contextWindowTokens": "number",
+      "document": "string",
+      "documentCodeUnits": "number",
+      "eligibleEntryCount": "number",
+      "estimatedTokens": "number",
+      "excludedEntryCounts": {
+        "array": {
+          "category": {
+            "union": [
+              "\"conversation\"",
+              "\"diagnostics\"",
+              "\"handoffs\"",
+              "\"permissions\"",
+              "\"reasoning\"",
+              "\"tool-calls\"",
+              "\"tool-results\""
+            ]
+          },
+          "count": "number"
+        }
+      },
+      "fold": "\"handoff-v1\"",
+      "gapCount": "number",
+      "gapUnit": "\"eligible-entry\"",
+      "generatedAt": "string",
+      "includedEntryCount": "number",
+      "lastOrdinal": "number",
+      "projectionTruncated": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "sourceEntryCount": "number",
+      "success": "true",
+      "transcriptViewId": "string",
+      "usableTokenBudget": "number"
+    }
+  }
+}

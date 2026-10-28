@@ -1,0 +1,10 @@
+{
+  "failures": [
+    {
+      "code": "INVALID_SETTINGS",
+      "message": "Synthetic failure",
+      "retryable": false,
+      "outcome": "rejected"
+    }
+  ]
+}

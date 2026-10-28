@@ -1,18 +1,19 @@
+import { TestWebSocketLink as WebSocketLink } from '../../__tests__/test-session-transport.js';
 import { expect, test } from 'bun:test';
 import { connectNoiseWebSocket, createNoiseServer, type NoiseOptions, type NoiseWebSocket } from '@cfal/noise-ws';
-import { primaryHello, signedProof } from '../../__tests__/link-hello.js';
+import { primaryHello, signedProof, selectedDecision } from '../../__tests__/link-hello.js';
 import { isLinkHello, isLinkProof, type LinkHello, type LinkRole } from '../link-handshake.js';
-import { selectProtocol, type ProtocolDecision } from '../protocol-compatibility.js';
-import { EXECUTOR_NOISE_CONTEXT, WebSocketLink, type LinkFailure } from '../websocket-link.js';
+import { protocolProfileId, type ProtocolDecision } from '../protocol-compatibility.js';
+import { EXECUTOR_NOISE_CONTEXT, type LinkFailure } from '../websocket-link.js';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
 
-async function handshake(role: LinkRole, dialer: 'link' | 'peer', core: number, attack?: 'offer' | 'decision' | 'selection' | 'oversized') {
+async function handshake(role: LinkRole, dialer: 'link' | 'peer', bootstrap: number, attack?: 'offer' | 'decision' | 'selection' | 'oversized') {
   const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [60_000] });
   const failures: LinkFailure[] = [];
   link.onError(failure => failures.push(failure));
   const hello: LinkHello = { ...primaryHello(role === 'controller' ? 'worker' : 'controller'),
-    build: 'independent-build', protocol: { core, contracts: { 'synthetic.unknown': [1, 3] } } };
+    build: 'independent-build', protocol: { bootstrap, contracts: { 'synthetic.unknown': [1, 3] } } };
   // The sender's key order and whitespace are part of the signed transcript.
   const local = JSON.stringify(Object.fromEntries(Object.entries(hello).reverse()), null, 2);
   const received = Promise.withResolvers<ProtocolDecision>();
@@ -24,7 +25,7 @@ async function handshake(role: LinkRole, dialer: 'link' | 'peer', core: number, 
     psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
     onOpen(opened) {
       socket = opened;
-      opened.send(attack === 'oversized' ? local + ' '.repeat(8192) : local);
+      opened.send(attack === 'oversized' ? local + ' '.repeat(60 * 1024) : local);
     },
     onMessage(opened, data) {
       if (typeof data !== 'string') return;
@@ -32,10 +33,10 @@ async function handshake(role: LinkRole, dialer: 'link' | 'peer', core: number, 
       if (isLinkHello(frame)) {
         peerFrame = data;
         const decision = attack === 'selection'
-          ? { ok: true as const, profile: { core: 1, contracts: { 'synthetic.unknown': 3 } } }
-          : selectProtocol(hello.protocol!, frame.protocol!);
+          ? { ok: true as const, profileId: protocolProfileId({ bootstrap: 1, contracts: { 'synthetic.unknown': [3] } }) }
+          : selectedDecision(hello.protocol!, frame.protocol!);
         const proof = signedProof(secret, hello.role, attack === 'offer' ? JSON.stringify(hello) : local, data, decision);
-        opened.send(JSON.stringify(attack === 'decision' ? { ...proof, decision: { ok: false, code: 'CORE_MISMATCH' } } : proof));
+        opened.send(JSON.stringify(attack === 'decision' ? { ...proof, decision: { ok: false, code: 'BOOTSTRAP_MISMATCH' } } : proof));
       } else if (isLinkProof(frame)) {
         expect(frame.signature).toBe(signedProof(secret, role, peerFrame, local, frame.decision).signature);
         received.resolve(frame.decision);
@@ -65,8 +66,8 @@ for (const role of ['controller', 'worker'] as const) for (const dialer of ['lin
     const pair = await handshake(role, dialer, 1);
     try {
       const session = await pair.link.ready;
-      expect(await pair.received).toEqual({ ok: true, profile: { core: 1, contracts: {} } });
-      expect(session.profile).toEqual({ core: 1, contracts: {} });
+      expect(await pair.received).toEqual({ ok: true, profileId: protocolProfileId({ bootstrap: 1, contracts: {} }) });
+      expect(session.profile).toEqual({ bootstrap: 1, contracts: {} });
       expect(Object.isFrozen(session.profile.contracts)).toBe(true);
       expect(session.continuity.executorId).toBe('synthetic-executor');
       expect(pair.failures).toEqual([]);
@@ -76,11 +77,11 @@ for (const role of ['controller', 'worker'] as const) for (const dialer of ['lin
   test(`both peers receive an authenticated refusal before any session exists (${role}, ${dialer} dials)`, async () => {
     const pair = await handshake(role, dialer, 2);
     try {
-      expect(await pair.received).toEqual({ ok: false, code: 'CORE_MISMATCH' });
+      expect(await pair.received).toEqual({ ok: false, code: 'BOOTSTRAP_MISMATCH' });
       await pair.closed();
       expect(pair.accepted()).toBe(0);
-      expect(pair.failures[0]?.message).toContain('CORE_MISMATCH');
-      expect(pair.failures[0]?.message).toContain('peer core 2 build independent-build');
+      expect(pair.failures[0]?.message).toContain('BOOTSTRAP_MISMATCH');
+      expect(pair.failures[0]?.message).toContain('peer bootstrap 2 build independent-build');
     } finally { await pair.dispose(); }
   });
 }

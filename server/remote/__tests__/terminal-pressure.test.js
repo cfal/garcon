@@ -1,3 +1,6 @@
+import { WorkerSessionTransport, handleTestRpc } from './test-session-transport.js';
+import { RPC_V1 } from '@garcon/common/executor-contracts';
+import { rpcWireV1 } from '../transport/rpc-wire-v1.js';
 import { expect, test } from 'bun:test';
 import { homedir } from 'node:os';
 import { ExecutorRpc } from '../transport/rpc.ts';
@@ -30,7 +33,7 @@ test('reliable saturation cannot escape PTY delivery or stop retained output and
     await worker.handle({ method: 'terminals.attach', request: {
       authority, attachmentId: 'attachment', attachmentEpoch: inventory.attachmentEpoch,
       type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'browser', intent: 'restore', afterSequence: 0,
-    } });
+    } }, rpcWireV1('terminals.attach'));
     writable = false;
     while (transport.channel.queuedFrames < 4) transport.send('reliable traffic');
     expect(() => onData('pressure\n')).not.toThrow();
@@ -74,8 +77,8 @@ test('terminal output pressure reserves reliable control capacity for unrelated 
     await worker.handle({ method: 'terminals.attach', request: {
       authority, attachmentId: 'attachment', type: 'terminal-attach', terminalId: 'terminal',
       clientId: 'client', intent: 'restore', afterSequence: 0,
-    } });
-    const unrelated = rpc.call('', 'projects.inspect', { projectPath: homedir() }).catch(error => error);
+    } }, rpcWireV1('terminals.attach'));
+    const unrelated = rpc.call('', RPC_V1['projects.resolveFileMentions'], { projectPath: homedir(), command: 'test' }).catch(error => error);
     writable = false;
     outputPeer.sendTerminalMessage({ type: 'terminal-output', terminalId: 'terminal', sequence: 1, data: 'x' });
     expect(detached).toBe(true);
@@ -96,7 +99,7 @@ for (const closeBeforeReply of [false, true]) test(`attachment cleanup bypasses 
   const inventory = await local.list(authority);
   const { terminal } = await local.create(authority, { expectedTerminalRuntimeId: inventory.terminalRuntimeId, requestId: 'create', requestedInitialWorkingDirectory: null });
   const controller = new SessionTransport('session', 'worker', () => {});
-  const executor = new SessionTransport('session', 'controller', () => {});
+  const executor = new WorkerSessionTransport('session', 'controller', () => {});
   let controllerSocket, executorSocket;
   // Frames toward the controller wait here while set, so an attach reply can arrive after the detach.
   let heldReplies = null;
@@ -108,11 +111,11 @@ for (const closeBeforeReply of [false, true]) test(`attachment cleanup bypasses 
   await Promise.all([controller.ready, executor.ready]);
   const controllerRpc = new ExecutorRpc(controller), workerRpc = new ExecutorRpc(executor);
   const worker = new TerminalRpcServer(local, workerRpc);
-  workerRpc.handle(async call => {
+  handleTestRpc(workerRpc, async (call, _signal, _guard, _undelivered, capture) => {
     await executor.ready;
-    return call.method.startsWith('terminals.') ? worker.handle(call) : new Promise(() => {});
+    return call.method.startsWith('terminals.') ? worker.handle(call, capture.wire) : new Promise(() => {});
   });
-  workerRpc.onTerminalDetach(async request => { await executor.ready; await worker.handle({ method: 'terminals.detach', request }); });
+  workerRpc.onTerminalDetach(async request => { await executor.ready; await worker.detach(request); });
   const backing = { rpc: controllerRpc, info: { executorId: 'local' }, manifests: new Map() };
   const remote = new RemoteTerminalService({
     latest: () => backing,
@@ -130,7 +133,7 @@ for (const closeBeforeReply of [false, true]) test(`attachment cleanup bypasses 
     else {
       for (let i = 0; i < 400 && (await local.list(authority)).terminals[0].attachmentStatus !== 'attached'; i++) await tick();
     }
-    for (let i = 0; i < (closeBeforeReply ? 255 : 256); i++) pending.push(controllerRpc.call('', 'projects.inspect', { projectPath: homedir() }).catch(error => error));
+    for (let i = 0; i < (closeBeforeReply ? 255 : 256); i++) pending.push(controllerRpc.call('', RPC_V1['projects.inspect'], { projectPath: homedir() }).catch(error => error));
     remote.detachPeer(authority, peer);
     for (const data of heldReplies ?? []) controllerSocket.receive(data);
     heldReplies = null;

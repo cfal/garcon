@@ -1,3 +1,4 @@
+import { TestWebSocketLink as WebSocketLink } from './test-session-transport.js';
 import type { ExecutionRuntimeApi } from '@garcon/server-agent-interface';
 import { RemoteExecutorClient, type RemoteExecutorClientOptions } from '../client/executor-client.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
@@ -7,7 +8,7 @@ import { ExecutorRpc } from '../transport/rpc.js';
 import { ExecutorRpcConnection } from '../transport/rpc-connection.js';
 import { RpcAdmissionBudgets } from '../transport/rpc-admission.js';
 import type { SessionTransport } from '../transport/session-transport.js';
-import { WebSocketLink } from '../transport/websocket-link.js';
+
 
 export async function connectRemoteExecutor(
   link: WebSocketLink,

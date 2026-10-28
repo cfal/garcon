@@ -68,7 +68,7 @@ function parseProjectTarget(value: unknown): ProjectTarget | null {
   }
 }
 
-function parseProjectResolution(value: unknown): ProjectResolution | null {
+export function parseProjectResolution(value: unknown): ProjectResolution | null {
   if (!isRecord(value)) return null;
   if (
     value.kind === 'available'

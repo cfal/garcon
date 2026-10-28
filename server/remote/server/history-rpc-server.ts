@@ -4,10 +4,13 @@ import {
 import { AgentResourceTable } from '@garcon/server-agent-common/execution/resource-table';
 import type { ExecutorRpcRequest, HistoryReaderRef } from '../transport/rpc-protocol.js';
 import { historyPages } from '../transport/history-pages.js';
+import type { RpcContractDefinition } from '@garcon/common/executor-contracts';
+import type { ContractRef } from '@garcon/common/protocol-contracts';
 
 type HistoryRequest = Extract<ExecutorRpcRequest, { method: 'history.open' | 'history.next' | 'history.close' }>;
 
 interface HistoryReader {
+  readonly contract: ContractRef;
   readonly closeSource: () => Promise<unknown>;
   readonly iterator: AsyncIterator<readonly AgentImportedTranscriptRow[]>;
   readonly controller: AbortController;
@@ -35,7 +38,7 @@ export class HistoryRpcServer {
     this.#tables.clear();
   }
 
-  async handle(call: HistoryRequest, signal: AbortSignal): Promise<unknown> {
+  async handle(call: HistoryRequest, signal: AbortSignal, definition: RpcContractDefinition): Promise<unknown> {
     this.#assertOpen(signal);
     const integration = this.integrations.get(call.integrationId);
     if (!integration) throw new AgentCallError('rejected', 'Unknown history integration', 'OPERATION_UNSUPPORTED');
@@ -46,6 +49,8 @@ export class HistoryRpcServer {
     }
     switch (call.method) {
       case 'history.open': {
+        const contract = definition.returnsResource;
+        if (!contract) throw new Error('History creator contract is not registered');
         const { source: sourceKind, request } = call.request;
         if (sourceKind !== 'nativeHistoryImport' && sourceKind !== 'legacyHistoryImport') {
           throw new AgentCallError('rejected', 'Unknown history source');
@@ -73,7 +78,7 @@ export class HistoryRpcServer {
           },
           return: closeSource,
         }) });
-        const resource: HistoryReader = { closeSource, iterator, controller, timer: null, requestedPages: 0,
+        const resource: HistoryReader = { contract, closeSource, iterator, controller, timer: null, requestedPages: 0,
           tail: Promise.resolve(), started: false, closing: null };
         let ref: HistoryReaderRef;
         try {
@@ -90,6 +95,7 @@ export class HistoryRpcServer {
       }
       case 'history.next': {
         const resource = table.get(call.request.reader);
+        this.#assertResource(resource, definition);
         this.#assertOpen(signal, resource);
         if (call.request.page !== resource.requestedPages) throw new AgentCallError('rejected', 'History pages must be requested in order');
         resource.requestedPages++;
@@ -107,13 +113,25 @@ export class HistoryRpcServer {
         try { return await page; }
         finally { signal.removeEventListener('abort', abort); }
       }
-      case 'history.close': return this.#close(table.take(call.request));
+      case 'history.close': {
+        const resource = table.get(call.request);
+        this.#assertResource(resource, definition);
+        this.#assertOpen(signal, resource);
+        table.take(call.request);
+        return this.#close(resource);
+      }
     }
   }
 
   #assertOpen(signal: AbortSignal, resource?: HistoryReader): void {
     if (this.#closed || signal.aborted || resource?.controller.signal.aborted) {
       throw new AgentCallError('not-dispatched', 'History reader session retired or request cancelled', 'STALE_RESOURCE');
+    }
+  }
+
+  #assertResource(resource: HistoryReader, definition: RpcContractDefinition): void {
+    if (resource.contract.name !== definition.acceptsResource?.name || resource.contract.version !== definition.acceptsResource.version) {
+      throw new AgentCallError('not-dispatched', 'Incompatible history reader', 'OPERATION_UNSUPPORTED');
     }
   }
 

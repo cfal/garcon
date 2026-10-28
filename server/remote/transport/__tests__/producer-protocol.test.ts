@@ -1,7 +1,6 @@
 import { expect, test } from 'bun:test';
 import { BashToolUseMessage } from '@garcon/common/chat-types';
-import { decodeProducerEvent, PRODUCER_REQUIREMENTS } from '../producer-protocol.js';
-import { EXECUTOR_PROTOCOL } from '../protocol-compatibility.js';
+import { decodeProducerEvent, PRODUCER_BINDING_CODEC_V1 } from '../producer-protocol.js';
 
 const scope = { executorId: 'synthetic-executor', instanceId: 'synthetic-instance', integrationId: 'synthetic-agent' };
 const handle = { ...scope, kind: 'execution', id: 'synthetic-execution' };
@@ -14,7 +13,7 @@ const requested = {
   },
   decision: { permissionOccurrenceId: 'synthetic-permission', response: { ...scope, kind: 'permission-response', id: 'synthetic-response' } },
 };
-const profile = { core: EXECUTOR_PROTOCOL.core, contracts: {} };
+const creator = PRODUCER_BINDING_CODEC_V1;
 const events = [
   { type: 'rows', rows: [{ message: { type: 'assistant-message', timestamp: '2026-01-01T00:00:00Z', content: 'Synthetic output' }, providerMeta: { cursor: 1 } }] },
   { type: 'session', session: { agentSessionId: 'synthetic-session', nativeSession: { ownerId: scope.integrationId, schemaVersion: 1, value: { id: 'synthetic-native' } }, nativeSeedReceipt: null } },
@@ -36,11 +35,11 @@ const events = [
   { type: 'launch-settled', runId: 'synthetic-run', error: { code: 'UNAVAILABLE' } },
 ];
 
-test('every core producer discriminant and outcome survives its wire round trip', () => {
-  expect([...new Set(events.map(event => event.type))].sort()).toEqual(Object.keys(PRODUCER_REQUIREMENTS).sort());
+test('every v1 producer discriminant and outcome survives its wire round trip', () => {
+  expect([...new Set(events.map(event => event.type))].sort()).toEqual(Object.keys(creator.codecs).sort());
   for (const event of events) {
     const wire = JSON.parse(JSON.stringify(event));
-    expect(JSON.parse(JSON.stringify(decodeProducerEvent(wire, scope, profile)))).toEqual(wire);
+    expect(JSON.parse(JSON.stringify(decodeProducerEvent(wire, scope, creator)))).toEqual(wire);
   }
 });
 
@@ -69,5 +68,16 @@ test.each([
   { ...requested, lifecycle: { kind: 'resolved', permissionOccurrenceId: 'synthetic-permission', decision: { kind: 'allow' } } },
   { ...requested, lifecycle: { kind: 'expired', permissionOccurrenceId: 'synthetic-permission' } },
 ].map(event => [event]))('rejects unreadable producer event %j', event => {
-  expect(() => decodeProducerEvent(event, scope, profile)).toThrow();
+  expect(() => decodeProducerEvent(event, scope, creator)).toThrow();
+});
+
+test('decodes from the captured creator, never a newer catalog or a default codec', () => {
+  const notice = { type: 'notice', runId: 'synthetic-run', content: 'original' };
+  const altered = { ...creator, codecs: { ...creator.codecs, notice: {
+    ...creator.codecs.notice!, version: 2,
+    decode: () => ({ type: 'notice' as const, runId: 'synthetic-run', content: 'synthetic-v2' }),
+  } } };
+  expect(decodeProducerEvent(notice, scope, creator)).toEqual(notice);
+  expect(decodeProducerEvent(notice, scope, altered)).toMatchObject({ content: 'synthetic-v2' });
+  expect(() => decodeProducerEvent(notice, scope, { ...creator, codecs: {} })).toThrow('absent');
 });

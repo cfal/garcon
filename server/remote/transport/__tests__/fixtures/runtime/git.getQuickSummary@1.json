@@ -1,0 +1,18 @@
+{
+  "failures": [
+    {
+      "domain": "git",
+      "code": "GIT_REQUEST_TOO_LARGE",
+      "message": "Synthetic failure",
+      "retryable": false,
+      "status": 413
+    },
+    {
+      "domain": "git",
+      "code": "GIT_RESULT_TOO_LARGE",
+      "message": "Synthetic failure",
+      "retryable": false,
+      "status": 413
+    }
+  ]
+}

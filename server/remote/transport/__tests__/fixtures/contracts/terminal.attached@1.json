@@ -1,0 +1,53 @@
+{
+  "definition": {
+    "name": "terminal.attached",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "attachmentId?": {
+      "union": [
+        "string",
+        "undefined"
+      ]
+    },
+    "replay": {
+      "array": {
+        "data": "string",
+        "sequence": "number"
+      }
+    },
+    "terminal": {
+      "attachmentStatus": {
+        "union": [
+          "\"attached\"",
+          "\"detached\""
+        ]
+      },
+      "createdAt": "string",
+      "displaySequence": "number",
+      "exitCode": {
+        "union": [
+          "null",
+          "number"
+        ]
+      },
+      "initialWorkingDirectory": "string",
+      "latestOutputSequence": "number",
+      "processStatus": {
+        "union": [
+          "\"exited\"",
+          "\"running\""
+        ]
+      },
+      "terminalId": "string",
+      "title": {
+        "union": [
+          "null",
+          "string"
+        ]
+      }
+    },
+    "type": "\"terminal-attached\""
+  }
+}

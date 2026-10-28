@@ -1,0 +1,28 @@
+{
+  "definition": {
+    "name": "files.read",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "filePath": "string",
+      "projectPath": "string"
+    },
+    "result": {
+      "data": "string",
+      "path": "string",
+      "revision": "string"
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

@@ -1,8 +1,10 @@
+import { TestWebSocketLink as WebSocketLink, handleTestRpc } from '../../__tests__/test-session-transport.js';
+import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { afterEach, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { WebSocketLink } from '../websocket-link.js';
+
 import { ExecutorRpcConnection } from '../rpc-connection.js';
 import { RpcAdmissionBudgets } from '../rpc-admission.js';
 import { RpcReplyJournal } from '../rpc-journal.js';
@@ -19,7 +21,7 @@ function pairedConnections(link: WebSocketLink): Promise<ExecutorRpcConnection> 
   cleanups.push(() => journal.dispose());
   link.onSession(transport => {
     const connection = new ExecutorRpcConnection(link, transport, { journal, admission });
-    connection.onEndpoint(rpc => rpc.handle(async () => ({ files: [], truncated: false })));
+    connection.onEndpoint(rpc => handleTestRpc(rpc, async () => ({ files: [], truncated: false })));
     void transport.ready.then(() => {
       if (link.role === 'controller') connection.activate();
       ready.resolve(connection);
@@ -72,12 +74,12 @@ for (const role of ['controller', 'worker'] as const) {
     const endpoints = await Promise.all(connections.map(connection => connection.bulk.wait()));
     expect(endpoints[0]!.transport.id).toBe(endpoints[1]!.transport.id);
     const controller = role === 'controller' ? endpoints[0]! : endpoints[1]!;
-    expect(await controller.call('', 'files.list', { projectPath: '/synthetic-project' }))
+    expect(await controller.call('', RPC_V1['files.list'], { projectPath: '/synthetic-project' }))
       .toEqual({ files: [], truncated: false });
     expect(accepted.current?.connected).toBe(true);
     await accepted.dispose();
     const trusted = Bun.spawn([process.execPath, '-e', `
-      import { WebSocketLink } from './server/remote/transport/websocket-link.ts';
+      import { TestWebSocketLink as WebSocketLink } from './server/remote/__tests__/test-session-transport.ts';
       import { ExecutorRpcConnection } from './server/remote/transport/rpc-connection.ts';
       import { RpcAdmissionBudgets } from './server/remote/transport/rpc-admission.ts';
       import { RpcReplyJournal } from './server/remote/transport/rpc-journal.ts';

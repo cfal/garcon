@@ -1,3 +1,5 @@
+import { rpcWireV1 } from '../transport/rpc-wire-v1.js';
+import { RPC_V1, supportedExecutorOperations } from '@garcon/common/executor-contracts';
 import { AgentCallError, type ExecutionRuntimeApi, type ExecutorAvailability, type ExecutorCallOptions } from '@garcon/server-agent-interface';
 import { parseTicketProjectDefault } from '../../../common/ticket-responses.js';
 import { unavailableService } from '../../common/unavailable-service.js';
@@ -25,6 +27,8 @@ export class RemoteExecutorGeneration {
   readonly info;
   readonly manifests;
   readonly continuity;
+  readonly profile;
+  readonly operations;
   readonly integrations: ReadonlyMap<string, RemoteAgentIntegration>;
   readonly terminals: RemoteTerminalService;
   readonly runtime: ExecutionRuntimeApi;
@@ -35,6 +39,8 @@ export class RemoteExecutorGeneration {
     this.info = backing.info;
     this.manifests = backing.manifests;
     this.continuity = backing.continuity;
+    this.profile = backing.rpc.transport.profile;
+    this.operations = supportedExecutorOperations(this.profile.contracts);
     const assertBacking = (session: RemoteSessionBacking) => {
       this.token.assertDispatch();
       if (session.info.instanceId !== this.info.instanceId || !sameContinuity(session.continuity, this.continuity)) throw staleGeneration();
@@ -72,9 +78,9 @@ export class RemoteExecutorGeneration {
     const git = new RemoteGitServices(sessions);
     this.terminals = new RemoteTerminalService(sessions);
     const projects = {
-      ticketProjectDefault: async (request, options) => parseTicketProjectDefault(await sessions.call('', 'projects.ticketProjectDefault', request, options)),
-      inspect: (request, options) => sessions.call('', 'projects.inspect', request, options),
-      resolveFileMentions: (request, options) => sessions.call('', 'projects.resolveFileMentions', request, options),
+      ticketProjectDefault: async (request, options) => parseTicketProjectDefault(await sessions.call('', RPC_V1['projects.ticketProjectDefault'], request, options)),
+      inspect: (request, options) => sessions.call('', RPC_V1['projects.inspect'], request, options),
+      resolveFileMentions: (request, options) => sessions.call('', RPC_V1['projects.resolveFileMentions'], request, options),
     } satisfies Awaited<ReturnType<ExecutionRuntimeApi['getProjectService']>>;
     const assertAvailable = (options?: ExecutorCallOptions) => {
       options?.signal?.throwIfAborted();
@@ -97,7 +103,7 @@ export class RemoteExecutorGeneration {
         if (!integration) throw new AgentCallError('not-dispatched', 'Integration is unavailable on this executor', 'OPERATION_UNSUPPORTED');
         return integration;
       },
-      discoverApiProviderModels: (request, options) => sessions.call('', 'apiProviders.discoverModels', request, {
+      discoverApiProviderModels: (request, options) => sessions.call('', RPC_V1['apiProviders.discoverModels'], request, {
         ...options, timeoutMs: options?.timeoutMs ?? MODEL_DISCOVERY_TIMEOUT_MS + 5_000,
       }),
       getProjectService: async (options) => {
@@ -155,3 +161,10 @@ export class RemoteExecutorGeneration {
 export function staleGeneration(): AgentCallError {
   return new AgentCallError('not-dispatched', 'The executor generation retired before the request was sent.', 'STALE_RESOURCE');
 }
+
+export const PROJECT_RPC_CLIENTS = Object.freeze([
+  rpcWireV1('apiProviders.discoverModels'),
+  rpcWireV1('projects.inspect'),
+  rpcWireV1('projects.resolveFileMentions'),
+  rpcWireV1('projects.ticketProjectDefault'),
+] as const);

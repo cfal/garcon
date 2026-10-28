@@ -1,0 +1,41 @@
+{
+  "definition": {
+    "name": "terminals.rename",
+    "version": 1,
+    "requires": [],
+    "lane": "primary",
+    "continuity": "session",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "authority": {
+        "expiresAtMs": {
+          "union": [
+            "null",
+            "number"
+          ]
+        },
+        "key": "string"
+      },
+      "terminalId": "string",
+      "title": {
+        "union": [
+          "null",
+          "string"
+        ]
+      }
+    },
+    "result": {
+      "success": "true",
+      "terminalId": "string",
+      "title": {
+        "union": [
+          "null",
+          "string"
+        ]
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

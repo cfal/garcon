@@ -9,7 +9,9 @@ const authenticatedPrincipal = {
 const authenticateHttpRequest = mock(() => Promise.resolve({
   errorResponse: null,
   principal: authenticatedPrincipal,
+  localCapability: false,
 }));
+const authenticatedWithLocalCapability = mock(() => false);
 const isAuthDisabled = mock(() => false);
 const isHttpCompressionEnabled = mock(() => true);
 const parseJsonBody = mock(() => Promise.resolve({ ok: true }));
@@ -29,6 +31,7 @@ async function decodeDeflate(bytes) {
 
 mock.module('../http-request.js', () => ({
   authenticateHttpRequest,
+  authenticatedWithLocalCapability,
 }));
 mock.module('../../../common/http-body.js', () => ({
   MalformedJsonError,
@@ -67,7 +70,29 @@ describe('http route wrapping', () => {
       expect(stale.status).toBe(409);
       expect(await stale.json()).toMatchObject({ errorCode: 'CLI_CONTROLLER_CHANGED', retryable: false });
       expect(handler).not.toHaveBeenCalled();
-      expect((await wrapped(new Request('http://localhost/api/private', { headers: { 'X-Garcon-Server-Instance': 'current' } }))).status).toBe(200);
+      expect((await wrapped(new Request('http://localhost/api/private', { headers: { 'X-Garcon-Server-Instance': 'current' } }))).status).toBe(403);
+      expect((await wrapped(new Request('http://localhost/api/private'))).status).toBe(200);
+    });
+  }
+  for (const disabled of [false, true]) {
+    it(`requires exact CLI selectors without changing browser or bootstrap dispatch, auth disabled=${disabled}`, async () => {
+      isAuthDisabled.mockReturnValue(disabled);
+      const handler = mock(() => Response.json({ ok: true }));
+      const wrapped = wrapRoute(handler, '/api/v1/chats', 'GET', { serverInstanceId: 'current' });
+      const send = headers => wrapped(new Request('http://localhost/api/v1/chats', { headers }));
+      expect((await send({})).status).toBe(200);
+      expect((await send({ 'X-Garcon-Server-Instance': 'current' })).status).toBe(422);
+      expect((await send({ 'X-Garcon-Contract': 'cli.chats.list@1' })).status).toBe(200);
+      for (const selector of ['cli.chats.list@01', 'cli.chats.list@1, cli.chats.list@1', 'cli.chats.start@1', 'cli.chats.list@*']) {
+        expect((await send({ 'X-Garcon-Contract': selector })).status).toBe(400);
+      }
+      expect((await send({ 'X-Garcon-Contract': 'cli.chats.list@2' })).status).toBe(422);
+      expect((await send({ 'X-Garcon-Contract': 'cli.chats.list@2', 'X-Garcon-Server-Instance': 'old' })).status).toBe(409);
+      if (disabled) authenticatedWithLocalCapability.mockReturnValueOnce(true);
+      else authenticateHttpRequest.mockResolvedValueOnce({ errorResponse: null, principal: { mode: 'local' }, localCapability: true });
+      expect((await send({ Authorization: 'Bearer local' })).status).toBe(422);
+      const context = wrapRoute(handler, '/api/v1/cli/context', 'GET', { serverInstanceId: 'current' });
+      expect((await context(new Request('http://localhost/api/v1/cli/context', { headers: { 'X-Garcon-Server-Instance': 'current' } }))).status).toBe(200);
     });
   }
   for (const mode of ['authenticated', 'disabled', 'public']) {
@@ -183,7 +208,7 @@ describe('http route wrapping', () => {
       expect.any(Request),
       expect.any(URL),
       server,
-      { principal: authenticatedPrincipal },
+      { principal: authenticatedPrincipal, cliContracts: {} },
     );
   });
 

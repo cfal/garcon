@@ -1,0 +1,32 @@
+{
+  "definition": {
+    "name": "history.close",
+    "version": 1,
+    "requires": [
+      {
+        "name": "resource.history-reader",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "session",
+    "direction": "controller-to-worker",
+    "acceptsResource": {
+      "name": "resource.history-reader",
+      "version": 1,
+      "requires": []
+    }
+  },
+  "wire": {
+    "request": {
+      "executorId": "string",
+      "id": "string",
+      "instanceId": "string",
+      "integrationId": "string",
+      "kind": "\"history-reader\""
+    },
+    "result": "void"
+  },
+  "failures": "rpc-errors-v1"
+}

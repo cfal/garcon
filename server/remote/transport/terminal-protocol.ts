@@ -7,6 +7,9 @@ import {
   type TerminalTerminateResponse, type TerminalStreamClientMessage, type TerminalStreamServerMessage,
 } from '../../../common/terminal.js';
 import { TerminalError } from '../../../common/terminal-error.js';
+import { TERMINAL_CREATOR_V1, type EventCreator } from '@garcon/common/executor-contracts';
+import type { ContractDefinition } from '@garcon/common/protocol-contracts';
+import type { RpcContractRef } from './rpc-protocol.js';
 
 type Call<Q, R> = { readonly request: Q; readonly result: R };
 type Authenticated<T> = T & { readonly authority: TerminalAuthority };
@@ -24,8 +27,24 @@ export interface TerminalRpcMethods {
 }
 
 export type TerminalRpcRequest = { [K in keyof TerminalRpcMethods]: {
-  method: K; request: TerminalRpcMethods[K]['request'];
+  method: K; version: 1; request: TerminalRpcMethods[K]['request'];
 } }[keyof TerminalRpcMethods];
+
+export interface TerminalCreator extends EventCreator {
+  readonly contract: RpcContractRef<'terminals.attach'>;
+  readonly detach: RpcContractRef<'terminals.detach'>;
+  readonly codecs: Readonly<Record<string, ContractDefinition & { decode(value: unknown): TerminalStreamServerMessage }>>;
+}
+
+export const TERMINAL_ATTACHMENT_CODEC_V1: TerminalCreator = Object.freeze({ ...TERMINAL_CREATOR_V1,
+  codecs: Object.freeze(Object.fromEntries(Object.entries(TERMINAL_CREATOR_V1.codecs).map(([kind, definition]) => [kind,
+    Object.freeze({ ...definition, decode(value: unknown) {
+      const message = parseTerminalStreamServerMessage(value);
+      if (!message || message.type !== kind) throw invalidTerminalRequest();
+      return message;
+    } }),
+  ]))),
+});
 
 export interface TerminalNotification {
   readonly type: 'terminal';
@@ -61,9 +80,11 @@ export function validateTerminalRpc(call: TerminalRpcRequest): void {
   }
 }
 
-export function parseTerminalNotification(value: TerminalNotification): TerminalNotification {
-  const message = parseTerminalStreamServerMessage(value.message);
-  if (typeof value.attachmentId !== 'string' || !value.attachmentId || value.attachmentId.length > 256 || !message) throw invalidTerminalRequest();
+export function parseTerminalNotification(value: TerminalNotification, creator: TerminalCreator): TerminalNotification {
+  const kind = value.message?.type;
+  if (!Object.hasOwn(creator.codecs, kind)) throw invalidTerminalRequest();
+  const message = creator.codecs[kind]!.decode(value.message);
+  if (typeof value.attachmentId !== 'string' || !value.attachmentId || value.attachmentId.length > 256) throw invalidTerminalRequest();
   return { type: 'terminal', attachmentId: value.attachmentId, message };
 }
 

@@ -1,0 +1,252 @@
+{
+  "definition": {
+    "name": "cli.chats.fork",
+    "version": 1,
+    "requires": [],
+    "mutation": true,
+    "management": false,
+    "timeoutMs": null,
+    "pool": "long",
+    "lane": "bulk"
+  },
+  "route": "POST /api/v1/chats/fork",
+  "client": {
+    "parameters": [
+      {
+        "name": "request",
+        "type": {
+          "allowHandoffFork?": {
+            "union": [
+              "false",
+              "true",
+              "undefined"
+            ]
+          },
+          "chatId": "string",
+          "clientRequestId?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "sourceChatId": "string",
+          "transcriptViewId?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "upToOrdinal?": {
+            "union": [
+              "number",
+              "undefined"
+            ]
+          }
+        }
+      }
+    ],
+    "result": {
+      "chat": {
+        "activity": {
+          "createdAt": {
+            "union": [
+              "null",
+              "string"
+            ]
+          },
+          "lastActivityAt": {
+            "union": [
+              "null",
+              "string"
+            ]
+          },
+          "lastReadAt": {
+            "union": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "agentId": "string",
+        "agentOwnershipEpoch": "string",
+        "agentSettings": {
+          "union": [
+            "null",
+            {
+              "ownerId": "string",
+              "schemaVersion": "number",
+              "values": {
+                "[string]": {
+                  "union": [
+                    "false",
+                    "null",
+                    "number",
+                    "string",
+                    "true",
+                    {
+                      "array": {
+                        "recursive": "JsonValue"
+                      }
+                    },
+                    {
+                      "recursive": "JsonObject"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "apiProviderId?": {
+          "union": [
+            "null",
+            "string",
+            "undefined"
+          ]
+        },
+        "canReloadFromNativeHistory": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "executorId?": {
+          "union": [
+            "null",
+            "string",
+            "undefined"
+          ]
+        },
+        "hasAgentSession": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "id": "string",
+        "isActive": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "isArchived": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "isPinned": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "isProcessing": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "isUnread": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "model": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "modelEndpointId?": {
+          "union": [
+            "null",
+            "string",
+            "undefined"
+          ]
+        },
+        "modelProtocol?": {
+          "union": [
+            "\"anthropic-messages\"",
+            "\"openai-compatible\"",
+            "null",
+            "undefined"
+          ]
+        },
+        "orderGroup": {
+          "union": [
+            "\"archived\"",
+            "\"normal\"",
+            "\"orphan\"",
+            "\"pinned\""
+          ]
+        },
+        "parentChat": {
+          "union": [
+            "null",
+            {
+              "chatId": "string",
+              "ordinal": "number",
+              "relation": {
+                "union": [
+                  "\"fork\"",
+                  "\"handoff\""
+                ]
+              },
+              "transcriptViewId": "string"
+            },
+            {
+              "chatId": "string",
+              "relation": "\"delegation\""
+            }
+          ]
+        },
+        "permissionMode": {
+          "union": [
+            "\"acceptEdits\"",
+            "\"bypassPermissions\"",
+            "\"default\"",
+            "\"manualBypass\"",
+            "\"plan\""
+          ]
+        },
+        "preview": {
+          "firstMessage?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "lastMessage": "string"
+        },
+        "processingPhase": {
+          "union": [
+            "\"reconnecting\"",
+            "\"running\"",
+            "\"stopping\"",
+            "null"
+          ]
+        },
+        "projectPath": "string",
+        "tags": {
+          "array": "string"
+        },
+        "thinkingMode": {
+          "union": [
+            "\"high\"",
+            "\"low\"",
+            "\"max\"",
+            "\"medium\"",
+            "\"none\"",
+            "\"ultra\"",
+            "\"xhigh\""
+          ]
+        },
+        "title": "string"
+      },
+      "success": "true"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "definition": {
+    "name": "producer.launch-settled",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "union": [
+      {
+        "error?": "undefined",
+        "handle": {
+          "executorId": "string",
+          "id": "string",
+          "instanceId": "string",
+          "integrationId": "string",
+          "kind": "\"execution\""
+        },
+        "runId": "string",
+        "type": "\"launch-settled\""
+      },
+      {
+        "error": {
+          "code": "string",
+          "message?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          }
+        },
+        "handle?": "undefined",
+        "runId": "string",
+        "type": "\"launch-settled\""
+      }
+    ]
+  }
+}

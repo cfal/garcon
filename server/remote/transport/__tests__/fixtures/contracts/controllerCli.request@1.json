@@ -1,0 +1,84 @@
+{
+  "definition": {
+    "name": "controllerCli.request",
+    "version": 1,
+    "requires": [],
+    "lane": "cli",
+    "continuity": "session",
+    "direction": "worker-to-controller"
+  },
+  "wire": {
+    "request": {
+      "contract": {
+        "name": "string",
+        "version": "number"
+      },
+      "expectedServerInstanceId": "string",
+      "http": {
+        "body": {
+          "union": [
+            "false",
+            "null",
+            "number",
+            "string",
+            "true",
+            {
+              "[string]": {
+                "recursive": "JsonValue"
+              }
+            },
+            {
+              "array": {
+                "recursive": "JsonValue"
+              }
+            }
+          ]
+        },
+        "executorId?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "operation": "string",
+        "query": {
+          "array": {
+            "tuple": [
+              "string",
+              "string"
+            ]
+          }
+        }
+      }
+    },
+    "result": {
+      "body": {
+        "union": [
+          "false",
+          "null",
+          "number",
+          "string",
+          "true",
+          {
+            "[string]": {
+              "recursive": "JsonValue"
+            }
+          },
+          {
+            "array": {
+              "recursive": "JsonValue"
+            }
+          }
+        ]
+      },
+      "retryAfter?": {
+        "union": [
+          "string",
+          "undefined"
+        ]
+      },
+      "status": "number"
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

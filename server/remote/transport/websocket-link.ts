@@ -10,13 +10,16 @@ import { SESSION_SOCKET_BUFFER_BYTES, SessionSocketFrames } from './session-sock
 import { SessionTransport } from './session-transport.js';
 import { version as packageVersion } from '../../../package.json';
 import { isLinkHello, isLinkProof, proofPayload, type LinkHello, type LinkDialTarget, type LinkRole } from './link-handshake.js';
-import { canonicalProfile, EXECUTOR_PROTOCOL, protocolProfileId, selectProtocol, type ProtocolDecision, type SessionProtocol } from './protocol-compatibility.js';
+import { selectProtocol, type ProtocolProfile } from '@garcon/common/protocol-contracts';
+import type { RoleContracts } from './rpc-registrations.js';
+import { protocolProfileId, type ProtocolDecision, type SessionProtocol } from './protocol-compatibility.js';
 import { isSessionId, type RpcLane } from './rpc-lane.js';
 import { MessageQueueBudget, type MessageQueueSnapshot } from './message-queue-budget.js';
 import type { ExecutorSocketAdmission, SocketAdmissionLease } from './socket-admission.js';
 
 export interface WebSocketLinkOptions {
   readonly role: LinkRole;
+  readonly contracts: RoleContracts;
   readonly executorId?: string;
   readonly secret: string;
   readonly runtimeId?: string;
@@ -105,6 +108,7 @@ interface Connection {
   peer: LinkHello | null;
   peerFrame: string | null;
   decision: ProtocolDecision | null;
+  profile: ProtocolProfile | null;
   session: SessionTransport | null;
   hooks: ReturnType<SessionTransport['attach']> | null;
   heartbeat: ReturnType<typeof setInterval> | null;
@@ -148,6 +152,7 @@ export class WebSocketLink {
   #redials = 0;
 
   constructor(private readonly options: WebSocketLinkOptions) {
+    if (options.contracts.role !== options.role) throw new Error('Executor contract role mismatch');
     if (!isExecutorSecret(options.secret)) throw new Error('Executor shared secret must be a canonical base64url 32-byte key');
     if (options.role === 'controller' && !options.executorId) throw new Error('Controller executor ID is required');
     if (options.redialDelaysMs && (options.redialDelaysMs.length === 0
@@ -376,7 +381,7 @@ export class WebSocketLink {
   #open(socket: NoiseWebSocket, target?: LinkDialTarget): Connection {
     const hello = target ? this.#hello(target) : null;
     const connection: Connection = {
-      socket, hello, helloFrame: hello ? JSON.stringify(hello) : null, peer: null, peerFrame: null, decision: null,
+      socket, hello, helloFrame: hello ? JSON.stringify(hello) : null, peer: null, peerFrame: null, decision: null, profile: null,
       session: null, hooks: null, heartbeat: null,
       closed: false, authenticated: false, frames: null, lastReceivedAt: Date.now(), closeCause: null, closeReason: null, sessionStartedAt: null,
       timeout: setTimeout(() => {
@@ -394,7 +399,7 @@ export class WebSocketLink {
     let sessionId = target.sessionId;
     if (target.lane === 'primary' && this.options.role === 'controller') sessionId = crypto.randomUUID();
     return {
-      type: 'hello', build: packageVersion, protocol: target.lane === 'primary' ? EXECUTOR_PROTOCOL : null, role: this.options.role,
+      type: 'hello', build: packageVersion, protocol: target.lane === 'primary' ? this.options.contracts.offer : null, role: this.options.role,
       executorId: this.options.executorId ?? this.#current?.executorId ?? peer?.executorId ?? null,
       runtimeId: this.runtimeId, nonce: randomBytes(32).toString('hex'),
       lane: target.lane, sessionId, primarySessionId: target.primarySessionId,
@@ -421,7 +426,7 @@ export class WebSocketLink {
         connection.hooks.receive(encoded);
         return;
       }
-      if (Buffer.byteLength(encoded) > 8192) throw new Error('Handshake exceeds budget');
+      if (Buffer.byteLength(encoded) > 60 * 1024) throw new Error('Handshake exceeds budget');
       const frame = parseHandshakeFrame(encoded);
       if (isLinkHello(frame) && !connection.peer) {
         if (frame.role === this.options.role) {
@@ -452,11 +457,11 @@ export class WebSocketLink {
         else if (!frame.decision.ok) code = frame.decision.code;
         const hello = connection.hello!;
         const peer = connection.peer;
-        this.#reportFailure('protocol-mismatch', `Executor protocol mismatch (${code}): local core ${hello.protocol?.core ?? 'bulk'} build ${hello.build}, peer core ${peer.protocol?.core ?? 'bulk'} build ${peer.build}.`, undefined, hello.lane);
+        this.#reportFailure('protocol-mismatch', `Executor protocol mismatch (${code}): local bootstrap ${hello.protocol?.bootstrap ?? 'bulk'} build ${hello.build}, peer bootstrap ${peer.protocol?.bootstrap ?? 'bulk'} build ${peer.build}.`, undefined, hello.lane);
         this.#close(connection, 'protocol-error');
         return;
       }
-      if (canonicalProfile(decision.profile) !== canonicalProfile(frame.decision.profile)) throw new Error('Executor selected profile mismatch');
+      if (decision.profileId !== frame.decision.profileId) throw new Error('Executor supported profile mismatch');
       this.#accept(connection);
     } catch (error) {
       // Closing the session closes this connection first, so the cause is recorded before.
@@ -481,12 +486,13 @@ export class WebSocketLink {
     const executorId = controller.executorId!;
     const sessionId = controller.sessionId!;
     const decision = connection.decision!;
-    if (!decision.ok) throw new Error('Executor protocol was not selected');
+    if (!decision.ok || !connection.profile) throw new Error('Executor protocol was not accepted');
     const worker = hello.role === 'worker' ? hello : peer;
     const protocol: SessionProtocol = Object.freeze({
-      profile: decision.profile,
+      contracts: this.options.contracts,
+      profile: connection.profile,
       continuity: Object.freeze({ executorId, controllerRuntimeId: controller.runtimeId, workerRuntimeId: worker.runtimeId,
-        profileId: protocolProfileId(decision.profile) }),
+        profileId: decision.profileId }),
     });
     if (lane === 'primary' ? this.#current : this.#bulk) throw new Error('Executor session already attached');
     const lease = this.#socketLeases.get(connection.socket);
@@ -571,14 +577,17 @@ export class WebSocketLink {
     const peer = connection.peer!;
     if (hello.lane === 'bulk') {
       const primary = this.#bulkGrant!.primary;
+      connection.profile = primary.profile;
       return hello.primaryProfileId === primary.continuity.profileId && peer.primaryProfileId === primary.continuity.profileId
-        ? { ok: true, profile: primary.profile } : { ok: false, code: 'BULK_PROFILE_MISMATCH' };
+        ? { ok: true, profileId: primary.continuity.profileId } : { ok: false, code: 'BULK_PROFILE_MISMATCH' };
     }
-    const decision = selectProtocol(EXECUTOR_PROTOCOL, peer.protocol!);
+    const decision = selectProtocol(this.options.contracts.offer, peer.protocol!);
     if (!decision.ok) return decision;
+    connection.profile = decision.profile;
+    const profileId = protocolProfileId(decision.profile);
     const retained = this.#profiles.get(this.#continuityKey(connection));
-    return retained !== undefined && retained !== protocolProfileId(decision.profile)
-      ? { ok: false, code: 'CONTINUITY_MISMATCH' } : decision;
+    return retained !== undefined && retained !== profileId
+      ? { ok: false, code: 'CONTINUITY_MISMATCH' } : { ok: true, profileId };
   }
 
   #signature(connection: Connection, purpose: LinkRole, decision: ProtocolDecision): string {

@@ -104,6 +104,8 @@ import { abortableDelay } from './abortable-delay.js';
 import { CliError, type CliErrorPhase } from './errors.js';
 import { probeRuntime, type RuntimeConnection } from './discovery.js';
 import { CLI_SERVER_INSTANCE_HEADER, parseCliContext } from '@garcon/common/server-runtime';
+import { CLI_BOOTSTRAP_VERSION, CLI_CONTRACTS, CLI_CONTRACT_HEADER, CLI_OPERATIONS, findCliRoute } from '@garcon/common/cli-contracts';
+import { intersectContracts, supportsDefinition, isProtocolOffer, contractKey, type ContractVersions } from '@garcon/common/protocol-contracts';
 import type { HttpTicketMutationRequest } from '@garcon/common/ticket-commands';
 import { ticketSearchParams } from '@garcon/common/ticket-query';
 import { parseTicketWriteResult } from '@garcon/common/ticket-records';
@@ -419,6 +421,7 @@ function isAmbiguousSteerSubmissionError(error: unknown): boolean {
 }
 
 export class GarconClient {
+  readonly #contracts: ContractVersions;
   readonly #baseUrl: string;
   readonly #instanceId: string;
   readonly #endpointInstanceId: string;
@@ -429,6 +432,10 @@ export class GarconClient {
   readonly #submissionDelay: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 
   constructor(options: GarconClientOptions) {
+    if (!isProtocolOffer(options.protocol) || options.protocol.bootstrap !== CLI_BOOTSTRAP_VERSION) {
+      throw new CliError('discovery', 'unsupported CLI bootstrap; update the CLI and start a new invocation', 3);
+    }
+    this.#contracts = intersectContracts(CLI_CONTRACTS, options.protocol.contracts);
     this.#baseUrl = options.baseUrl;
     this.#instanceId = options.instanceId;
     this.#endpointInstanceId = options.endpointInstanceId;
@@ -1312,6 +1319,13 @@ export class GarconClient {
     signal?: AbortSignal,
     timeoutMs: number | null = REQUEST_TIMEOUT_MS,
   ): Promise<unknown> {
+    const pathname = new URL(route, 'http://cli.invalid').pathname;
+    const operation = findCliRoute(method, pathname);
+    const contract = operation ? CLI_OPERATIONS[operation.operation][1] : null;
+    if (!(method === 'GET' && pathname === '/api/v1/cli/context')
+      && (!contract || !supportsDefinition(this.#contracts, contract))) {
+      throw new GarconHttpError(phase, 'The selected endpoint does not support this CLI operation and its requirements', 422, 'OPERATION_UNSUPPORTED', false);
+    }
     // A null deadline is for maintenance calls whose server work is unbounded
     // (a serial per-record drain); the caller's own signal still cancels.
     const timeoutSignal = timeoutMs === null ? null : AbortSignal.timeout(timeoutMs);
@@ -1326,6 +1340,7 @@ export class GarconClient {
           Accept: 'application/json',
           Authorization: `Bearer ${this.#capability}`,
           [CLI_SERVER_INSTANCE_HEADER]: this.#instanceId,
+          ...(contract ? { [CLI_CONTRACT_HEADER]: contractKey(contract) } : {}),
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),

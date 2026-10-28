@@ -1,0 +1,82 @@
+{
+  "definition": {
+    "name": "cli.preambles.list",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "GET /api/v1/preambles",
+  "client": {
+    "parameters": [],
+    "result": {
+      "preambles": {
+        "array": {
+          "agentIds": {
+            "array": "string"
+          },
+          "content": "string",
+          "createdAt": "string",
+          "enabled": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "id": "string",
+          "scope": {
+            "union": [
+              {
+                "rules": {
+                  "array": {
+                    "executorId?": {
+                      "union": [
+                        "null",
+                        "string",
+                        "undefined"
+                      ]
+                    },
+                    "includeNested": {
+                      "union": [
+                        "false",
+                        "true"
+                      ]
+                    },
+                    "projectPath": "string"
+                  }
+                },
+                "type": "\"project-paths\""
+              },
+              {
+                "type": "\"global\""
+              }
+            ]
+          },
+          "snippetShortName?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "tagFilter": {
+            "mode": {
+              "union": [
+                "\"all\"",
+                "\"any\""
+              ]
+            },
+            "tags": {
+              "array": "string"
+            }
+          },
+          "title": "string",
+          "updatedAt": "string"
+        }
+      },
+      "revision": "number"
+    }
+  }
+}

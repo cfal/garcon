@@ -1,3 +1,4 @@
+import { CLI_BOOTSTRAP_VERSION, CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 import { describe, expect, test } from 'bun:test';
 import type { HttpTicketMutationRequest } from '@garcon/common/ticket-commands';
 import type { Ticket, TicketDetail, TicketPage, TicketWriteResult } from '@garcon/common/tickets';
@@ -29,7 +30,7 @@ function harness(handle: (url: URL, body: unknown) => Response | Promise<Respons
   }, { preconnect() {} }) satisfies typeof fetch;
   const run = (args: string[], extra: { readStdin?: () => Promise<string>; signal?: AbortSignal } = {}) => main(['ticket', ...args], {
     fetch: fetcher, output: createCliOutput({ write: (text) => stdout.push(text) }, { write: (text) => stderr.push(text) }),
-    discoverRuntime: async () => ({ baseUrl: 'http://localhost:8080', instanceId: 'synthetic-instance',
+    discoverRuntime: async () => ({ protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS }, baseUrl: 'http://localhost:8080', instanceId: 'synthetic-instance',
       endpointInstanceId: 'synthetic-instance', defaultExecutorId: 'local', workspaceName: 'default',
       localCapability: 'synthetic-capability', workspaceDir: '/workspace', selector: { runtime: 'controller' } }), ...extra,
   });

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { IntegrationManifest } from '../transport/rpc-protocol.js';
-import { freezeInventory, validateManifest } from '../client/executor-inventory.js';
+import { freezeInventory, validateManifest } from '../transport/executor-inventory.js';
 import { integrationFixture } from './integration-fixture.js';
 
 const native = integrationFixture();
@@ -12,7 +12,7 @@ const manifest = {
   capabilities: {
     readiness: false, auth: false, commands: false, compaction: false, forking: false, steering: false,
     endpoints: false, singleQuery: true, legacyHistoryImport: false, nativeHistoryImport: true,
-    nativeActivity: false, nativeSessions: false, configurationValidation: false, sessionConfiguration: false, projectPathUpdates: false,
+    nativeActivity: false, nativeSessions: false, configurationValidation: false, sessionConfiguration: false, projectPathUpdates: false, usageHistory: false,
   },
   authMethods: { launchLogin: false, completeLogin: false, loginStatus: false },
   literalExecution: null,

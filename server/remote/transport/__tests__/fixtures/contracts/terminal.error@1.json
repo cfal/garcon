@@ -1,0 +1,41 @@
+{
+  "definition": {
+    "name": "terminal.error",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "attachmentId?": {
+      "union": [
+        "string",
+        "undefined"
+      ]
+    },
+    "code": {
+      "union": [
+        "\"terminal-auth-expired\"",
+        "\"terminal-backpressure\"",
+        "\"terminal-internal\"",
+        "\"terminal-limit\"",
+        "\"terminal-not-attached\"",
+        "\"terminal-not-found\"",
+        "\"terminal-outcome-unknown\"",
+        "\"terminal-process-exited\"",
+        "\"terminal-replay-sequence\"",
+        "\"terminal-runtime-changed\"",
+        "\"terminal-takeover-required\"",
+        "\"terminal-unavailable\"",
+        "\"terminal-unsupported\"",
+        "\"terminal-validation\""
+      ]
+    },
+    "message": "string",
+    "terminalId?": {
+      "union": [
+        "string",
+        "undefined"
+      ]
+    },
+    "type": "\"terminal-error\""
+  }
+}

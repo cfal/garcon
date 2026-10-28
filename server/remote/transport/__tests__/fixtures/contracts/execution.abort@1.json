@@ -1,0 +1,32 @@
+{
+  "definition": {
+    "name": "execution.abort",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "executorId": "string",
+      "id": "string",
+      "instanceId": "string",
+      "integrationId": "string",
+      "kind": "\"execution\""
+    },
+    "result": {
+      "union": [
+        "false",
+        "true"
+      ]
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

@@ -1,0 +1,106 @@
+{
+  "definition": {
+    "name": "producer.run-ended",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "union": [
+      {
+        "error?": "undefined",
+        "finalResponse?": "undefined",
+        "outcome": "\"interrupted\"",
+        "runId": "string",
+        "type": "\"run-ended\"",
+        "workingDirectory?": {
+          "union": [
+            "undefined",
+            {
+              "kind": "\"reported\"",
+              "path": "string"
+            },
+            {
+              "kind": "\"unavailable\"",
+              "reason": "string"
+            },
+            {
+              "kind": "\"withheld\""
+            }
+          ]
+        }
+      },
+      {
+        "error?": "undefined",
+        "finalResponse?": {
+          "union": [
+            "undefined",
+            {
+              "text": "string",
+              "type": {
+                "union": [
+                  "\"literal-text\"",
+                  "\"text\""
+                ]
+              }
+            }
+          ]
+        },
+        "outcome": "\"finished\"",
+        "runId": "string",
+        "type": "\"run-ended\"",
+        "workingDirectory?": {
+          "union": [
+            "undefined",
+            {
+              "kind": "\"reported\"",
+              "path": "string"
+            },
+            {
+              "kind": "\"unavailable\"",
+              "reason": "string"
+            },
+            {
+              "kind": "\"withheld\""
+            }
+          ]
+        }
+      },
+      {
+        "error?": {
+          "union": [
+            "undefined",
+            {
+              "code": "string",
+              "message?": {
+                "union": [
+                  "string",
+                  "undefined"
+                ]
+              }
+            }
+          ]
+        },
+        "finalResponse?": "undefined",
+        "outcome": "\"failed\"",
+        "runId": "string",
+        "type": "\"run-ended\"",
+        "workingDirectory?": {
+          "union": [
+            "undefined",
+            {
+              "kind": "\"reported\"",
+              "path": "string"
+            },
+            {
+              "kind": "\"unavailable\"",
+              "reason": "string"
+            },
+            {
+              "kind": "\"withheld\""
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

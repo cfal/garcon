@@ -21,7 +21,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       await git.getBranches(input, options);
       await gh.getStatus(options);
       for (const method of ['git.getQuickSummary', 'git.getBranches', 'gh.getStatus']) {
-        const call = calls.mock.calls.find(([, name]) => name === method);
+        const call = calls.mock.calls.find(([, contract]) => contract.name === method);
         expect(call?.[3]?.dispatchDeadline).toBe(options.dispatchDeadline);
         expect(call?.[3]?.timeoutMs).toBeGreaterThan(0);
         expect(call?.[3]?.timeoutMs).toBeLessThanOrEqual(options.timeoutMs);

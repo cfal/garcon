@@ -1,0 +1,84 @@
+{
+  "definition": {
+    "name": "cli.chats.export",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": false,
+    "timeoutMs": 120000,
+    "pool": "long",
+    "lane": "bulk"
+  },
+  "route": "GET /api/v1/chats/export",
+  "client": {
+    "parameters": [
+      {
+        "name": "request",
+        "type": {
+          "chatId": "string",
+          "exclusions": {
+            "array": {
+              "union": [
+                "\"diagnostics\"",
+                "\"handoffs\"",
+                "\"permissions\"",
+                "\"reasoning\"",
+                "\"tool-calls\"",
+                "\"tool-results\""
+              ]
+            }
+          },
+          "format": {
+            "union": [
+              "\"markdown\"",
+              "\"xml\""
+            ]
+          }
+        }
+      }
+    ],
+    "result": {
+      "chatId": "string",
+      "document": "string",
+      "entryCount": "number",
+      "exclusions": {
+        "array": {
+          "union": [
+            "\"diagnostics\"",
+            "\"handoffs\"",
+            "\"permissions\"",
+            "\"reasoning\"",
+            "\"tool-calls\"",
+            "\"tool-results\""
+          ]
+        }
+      },
+      "format": {
+        "union": [
+          "\"markdown\"",
+          "\"xml\""
+        ]
+      },
+      "generatedAt": "string",
+      "lastOrdinal": "number",
+      "omitted": {
+        "array": {
+          "category": {
+            "union": [
+              "\"diagnostics\"",
+              "\"handoffs\"",
+              "\"permissions\"",
+              "\"reasoning\"",
+              "\"tool-calls\"",
+              "\"tool-results\""
+            ]
+          },
+          "count": "number"
+        }
+      },
+      "success": "true",
+      "totalEntryCount": "number",
+      "transcriptViewId": "string"
+    }
+  }
+}

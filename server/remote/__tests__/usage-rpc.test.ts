@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test';
 import { AgentIntegrationError, type AgentUsageReadRequest } from '@garcon/server-agent-interface';
 import type { AgentUsageReport } from '@garcon/common/usage';
-import { rpcContinuity } from '../transport/rpc-protocol.js';
+import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { rpcLane } from '../transport/rpc-routing.js';
+import { rpcWireV1 } from '../transport/rpc-wire-v1.js';
 import { remoteFixture } from './integration-fixture.js';
 
 const WINDOW = { sinceDay: '2026-09-28', untilDay: '2026-10-27', timeZone: 'America/Los_Angeles' };
@@ -29,8 +30,19 @@ const REPORT: AgentUsageReport = {
 };
 
 test('usage reads are journaled and use the bulk lane', () => {
-  expect(rpcContinuity('usageHistory.read')).toBe('journaled');
-  expect(rpcLane('usageHistory.read', WINDOW)).toBe('bulk');
+  expect(RPC_V1['usageHistory.read'].continuity).toBe('journaled');
+  expect(rpcLane(RPC_V1['usageHistory.read'], WINDOW)).toBe('bulk');
+  expect(RPC_V1['usageHistory.read'].requires).toEqual([{ name: 'calls.reconcile', version: 1, requires: [] }]);
+});
+
+test('the usage v1 codec validates requests and projects reports', () => {
+  const wire = rpcWireV1('usageHistory.read');
+  expect(wire.request(WINDOW)).toEqual(WINDOW);
+  expect(wire.result({ ...REPORT, extra: 'not part of the contract' })).toEqual(REPORT);
+  for (const invalid of [null, {}, { ...WINDOW, sinceDay: 'invalid' }, { ...WINDOW, timeZone: 'invalid' },
+    { ...WINDOW, untilDay: '2026-09-01' }]) {
+    expect(() => wire.request(invalid)).toThrow('Invalid RPC v1 data');
+  }
 });
 
 for (const dialer of ['controller', 'worker'] as const) {
@@ -44,11 +56,24 @@ for (const dialer of ['controller', 'worker'] as const) {
       };
       const integration = await fixture.executor.getAgentIntegration('test');
       expect(integration.usageHistory).not.toBeNull();
+      expect(fixture.controller.current?.profile.contracts['usageHistory.read']).toEqual([1]);
       const report = await integration.usageHistory!.read({ ...WINDOW, signal: new AbortController().signal });
       expect(report).toEqual(REPORT);
       expect(received).toHaveLength(1);
       expect(received[0]).toMatchObject(WINDOW);
       expect(received[0]!.signal).toBeInstanceOf(AbortSignal);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test(`invalid usage windows are refused before the provider reads (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      await expect(integration.usageHistory!.read({ ...WINDOW, timeZone: 'invalid' })).rejects.toThrow();
+      expect(fixture.generations[0]!.calls.usage).toBe(0);
+      expect(fixture.client.availability).toBe('ready');
     } finally {
       await fixture.dispose();
     }

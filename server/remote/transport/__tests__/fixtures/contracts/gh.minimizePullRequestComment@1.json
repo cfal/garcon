@@ -1,0 +1,44 @@
+{
+  "definition": {
+    "name": "gh.minimizePullRequestComment",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "actor": {
+          "id": "string",
+          "login": "string"
+        },
+        "commentId": "string",
+        "projectPath": "string",
+        "repository": {
+          "host": "string",
+          "nameWithOwner": "string"
+        }
+      }
+    },
+    "result": {
+      "executorId": "string",
+      "instanceId": "string",
+      "minimized": {
+        "union": [
+          "false",
+          "true"
+        ]
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

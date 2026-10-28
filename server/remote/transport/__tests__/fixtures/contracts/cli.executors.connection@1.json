@@ -1,0 +1,36 @@
+{
+  "definition": {
+    "name": "cli.executors.connection",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": true,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "GET /api/v1/executors/:executorId/connection",
+  "client": {
+    "parameters": [
+      {
+        "name": "id",
+        "type": "string"
+      }
+    ],
+    "result": {
+      "allowUnverifiedTls": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "connectionUrl": "string",
+      "noTls": {
+        "union": [
+          "false",
+          "true"
+        ]
+      }
+    }
+  }
+}

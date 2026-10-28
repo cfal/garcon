@@ -18,7 +18,7 @@ beforeEach(async () => {
   directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-files-service-'));
   await fs.mkdir(path.join(directory, 'project'));
   await fs.writeFile(path.join(directory, 'project/file.txt'), 'initial');
-  runtime = new ExecutionRuntime({ id: 'synthetic-executor', workspaceDir: directory, projectBasePath: directory, integrations: [], resolveCredential: async () => null });
+  runtime = new ExecutionRuntime({ id: '11111111-1111-4111-8111-111111111111', workspaceDir: directory, projectBasePath: directory, integrations: [], resolveCredential: async () => null });
   adapter = await runtimeAdapter(runtime, backend);
   service = await adapter.executor.getFilesService();
 });
@@ -108,7 +108,7 @@ const target = () => ({ projectPath: path.join(directory, 'project'), filePath: 
   });
 
   it('owns canonical identity, listing, browsing and bytes independently of providers', async () => {
-    expect(await service.identity(target())).toEqual({ executorId: 'synthetic-executor', canonicalFileRootPath: target().projectPath, normalizedRelativePath: 'file.txt' });
+    expect(await service.identity(target())).toEqual({ executorId: (await runtime.getInfo()).executorId, canonicalFileRootPath: target().projectPath, normalizedRelativePath: 'file.txt' });
     expect((await service.browse({})).map((item) => item.name)).toEqual(['project']);
     expect((await service.tree({ directoryPath: target().projectPath })).directory.relativePath).toBe('project');
     expect((await service.list({ projectPath: target().projectPath })).files.map((item) => item.relativePath)).toEqual(['file.txt']);
