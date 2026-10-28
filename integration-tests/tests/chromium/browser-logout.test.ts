@@ -50,7 +50,7 @@ async function privateDatabaseRows(page: Page, seed: boolean): Promise<number[]>
 }
 
 test('confirmed logout clears browser data and sibling tabs but not another device', async () => {
-  await withChromiumFixture('browser-logout', async ({ page, context, browser, integration }, phase) => {
+  await withChromiumFixture('browser-logout', async ({ page, context, browser, integration, watchBrowserErrors }, phase) => {
     await context.addInitScript(() => Object.defineProperty(crypto, 'randomUUID', { value: undefined }));
     const base = integration.garcon.baseUrl;
     const bootstrap = await integration.client.get<TicketBootstrap>('/api/v1/tickets/bootstrap');
@@ -73,6 +73,7 @@ test('confirmed logout clears browser data and sibling tabs but not another devi
       return event.defaultPrevented;
     })).toBe(true);
     const otherContext = await browser.newContext({ serviceWorkers: 'block' });
+    watchBrowserErrors(otherContext);
     const other = await otherContext.newPage();
     try {
       await other.goto(`${base}/login`);
@@ -121,9 +122,10 @@ test('confirmed logout clears browser data and sibling tabs but not another devi
 }, 120_000);
 
 test('offline logout still abandons the browser and reports unconfirmed server revocation', async () => {
-  await withChromiumFixture('browser-logout-offline', async ({ page, integration }) => {
+  await withChromiumFixture('browser-logout-offline', async ({ page, integration, consumeExpectedBrowserErrors }) => {
     await page.goto(integration.garcon.baseUrl);
-    await page.route('**/api/v1/auth/logout', route => route.abort('failed'));
+    let aborted = 0;
+    await page.route('**/api/v1/auth/logout', route => { aborted++; return route.abort('failed'); });
     const settings = await authenticationSettings(page);
     await settings.getByRole('button', { name: 'Log out', exact: true }).click();
     await page.getByRole('dialog', { name: 'Log out of this browser?', exact: true })
@@ -132,5 +134,7 @@ test('offline logout still abandons the browser and reports unconfirmed server r
     await browserExpect(page.getByText('Local access was removed, but the server could not confirm logout.', { exact: false })).toBeVisible();
     await page.reload();
     await browserExpect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+    expect(aborted).toBe(1);
+    consumeExpectedBrowserErrors(['console.error: Failed to load resource: net::ERR_FAILED']);
   });
 }, 120_000);

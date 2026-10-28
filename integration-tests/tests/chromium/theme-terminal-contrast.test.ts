@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { captureBrowserErrors } from '../../support/browser-errors.js';
 import { readFile, readdir } from "node:fs/promises";
 import { chromium } from "playwright";
 import { THEME_PROFILES } from "../../../web/src/lib/theme/themes";
@@ -42,6 +43,8 @@ describe("terminal theme contrast", () => {
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
     const page = await context.newPage();
+    const browserErrors: string[] = [];
+    captureBrowserErrors(page.context(), browserErrors);
     await page.route(`${APP_URL}**`, async (route) => {
       if (new URL(route.request().url()).pathname === "/fixture.js") {
         await route.fulfill({
@@ -171,6 +174,7 @@ describe("terminal theme contrast", () => {
           ).toBeGreaterThanOrEqual(4.5);
         }
       }
+      expect(browserErrors).toEqual([]);
     } finally {
       await context.close();
       await browser.close();

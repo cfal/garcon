@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { Deferred, withTimeout } from "../../support/deferred.js";
+import { captureBrowserErrors } from '../../support/browser-errors.js';
 
 test("service worker caches late navigation and isolates cache-write failures", async () => {
   const bundle = await Bun.build({
@@ -59,6 +60,8 @@ test("service worker caches late navigation and isolates cache-write failures", 
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext({ serviceWorkers: "allow" });
+    const browserErrors: string[] = [];
+    captureBrowserErrors(context, browserErrors);
     const page = await context.newPage();
     const origin = `http://127.0.0.1:${server.port}`;
     await page.goto(origin);
@@ -125,6 +128,7 @@ test("service worker caches late navigation and isolates cache-write failures", 
         async () => (await caches.match("/asset-one")) === undefined,
       ),
     ).toBe(true);
+    expect(browserErrors).toEqual([]);
   } finally {
     lateResponse.resolve(new Response("closed"));
     await browser.close();

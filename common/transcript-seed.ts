@@ -567,7 +567,10 @@ function boundedLiteral(content: string): string {
 
 function commandContent(message: Extract<ChatMessage, { type: 'command-output' | 'command-result' }>): string {
   if (message.type === 'command-output') {
-    return `${message.channel}: ${message.content}\nExecutor: ${message.context.executorId}\nStarting directory: ${message.context.projectPath}`;
+    const location = message.context
+      ? `\nExecutor: ${message.context.executorId}\nStarting directory: ${message.context.projectPath}`
+      : '';
+    return `${message.channel}: ${message.content}${location}`;
   }
   const reportedDirectory = message.result.cwd.kind === 'reported' ? `\nWorking directory: ${message.result.cwd.path}` : '';
   return `Command result: ${message.content}${reportedDirectory}`;

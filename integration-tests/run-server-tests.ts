@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { executionBackend } from './support/execution-backend.js';
 import { selectServerSuites } from './support/server-suite-inventory.js';
@@ -11,7 +12,7 @@ if (args.includes('--list')) {
   console.log(selected.join('\n'));
 } else {
   console.log(`Server integration: ${backend}, ${selected.length} suites`);
-  const child = Bun.spawn([process.execPath, 'test', '--max-concurrency=1', '--timeout=30000', ...args, ...selected], {
+  const child = Bun.spawn([process.execPath, 'test', '--max-concurrency=1', '--timeout=30000', ...args, ...selected.map(file => resolve(cwd, file))], {
     cwd, stdin: 'inherit', stdout: 'inherit', stderr: 'inherit',
   });
   process.exit(await child.exited);

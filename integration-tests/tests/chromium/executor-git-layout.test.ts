@@ -22,7 +22,7 @@ test('executor Git labels and GitHub host controls fit desktop and mobile', asyn
     await mkdir(artifacts, { recursive: true });
     await page.goto(`${fixture.integration.garcon.baseUrl}/chat/${chatId}`);
     await collapseCanonicalFilesWindow(page);
-    await clickWorkspaceWindowAddAction(page, 'Open Git Workbench');
+    await clickWorkspaceWindowAddAction(page, 'Open Workbench');
     const panel = page.locator('[data-workspace-surface-id="singleton:git"][aria-hidden="false"]');
     const target = panel.getByRole('button', { name: executionDirs.project, exact: true });
     const executorPicker = panel.getByRole('button', { name: `Executor: ${label}`, exact: true });

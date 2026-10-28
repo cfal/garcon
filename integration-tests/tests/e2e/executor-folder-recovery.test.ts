@@ -51,7 +51,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           if (url.pathname === '/api/v1/projects/resolve') resolutions.push(url);
         });
         if (action === 'retry') {
-          await app.clickWorkspaceWindowAddAction('Open Git Workbench');
+          await app.clickWorkspaceWindowAddAction('Open Workbench');
           await fixture.page.waitForSelector('[data-git-project-content] > div > [role="status"] button');
         }
         await mkdir(chosen);
@@ -83,7 +83,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         expect(resolutions.some(url => url.searchParams.get('projectPath') === chosen && url.searchParams.get('executorId') === client.executorId && !url.searchParams.has('chatId'))).toBe(true);
         expect((await client.listChats()).sessions).toEqual([]);
         expect(fakeProviders.openAi.requests()).toEqual([]);
-        expect(fixture.browserErrors.filter(error => !error.startsWith('console.error: [SessionController] Failed to start chat:'))).toEqual([]);
+        expect(fixture.browserErrors).toEqual([expect.stringContaining('console.error: [SessionController] Failed to start chat:')]);
+        fixture.consumeExpectedBrowserErrors(fixture.browserErrors);
       }, { executionBackend, projectRoots: 'separate' });
     }, 90_000);
   }

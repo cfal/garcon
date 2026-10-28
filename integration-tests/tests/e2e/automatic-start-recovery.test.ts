@@ -88,7 +88,11 @@ for (const failure of ['attachment', 'rejection', 'unknown'] as const) {
       expect(await fixture.page.$eval('[data-composer] textarea', element => (element as HTMLTextAreaElement).value)).toBe(expected);
       expect(await fixture.page.evaluate(() => (globalThis as FailureGateGlobal).__startFailure?.attempts)).toBe(attempts);
       expect((await client.listChats()).sessions.map(chat => chat.id)).toEqual([otherId]);
-      expect(fixture.browserErrors.filter(error => !error.includes('[SessionController] Failed to start chat:') && !error.includes('[SessionController] Failed to prepare attachment payload:'))).toEqual([]);
+      const expectedPrefix = failure === 'attachment'
+        ? 'console.error: [SessionController] Failed to prepare attachment payload:'
+        : 'console.error: [SessionController] Failed to start chat:';
+      expect(fixture.browserErrors).toEqual([expect.stringContaining(expectedPrefix)]);
+      fixture.consumeExpectedBrowserErrors(fixture.browserErrors);
     });
   }, 60_000);
 }

@@ -41,7 +41,7 @@ Reviewed commit: ${HEAD}
 REVIEW
 `;
 
-test('reviews pull requests in chats and shows them in the GitHub Views inbox', async () => {
+test('reviews pull requests in chats and shows them in the Github inbox', async () => {
   await withChromiumFixture('pull-request-reviews', async ({ page, integration, browserErrors }, phase) => {
     const { client, dirs } = integration;
     const project = dirs.project;
@@ -53,7 +53,7 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
       if (screenshots) await page.screenshot({ path: join(screenshots, `${name}.png`) });
     };
 
-    phase('open Pull Requests from GitHub Views before connecting');
+    phase('open Pull Requests from Github before connecting');
     // Wide enough for the inbox list and detail to stay side by side next to the review chat.
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto(integration.garcon.baseUrl);
@@ -363,7 +363,7 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
     expect(abandoned.runs[0].post).toMatchObject({ status: 'abandoned', abandonedAt: expect.any(String) });
     expect(JSON.parse(await readFile(join(project, 'gh-comments.json'), 'utf8')).filter((comment: { number: number }) => comment.number === 141)).toHaveLength(1);
 
-    expect(browserErrors).toEqual([
+    expect(browserErrors.splice(0)).toEqual([
       'console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)',
     ]);
   }, undefined, {

@@ -32,8 +32,8 @@
 		<span class="pointer-events-none absolute end-2 flex size-3.5 items-center justify-center">
 			{#if indeterminate}
 				<MinusIcon class="size-4" />
-			{:else}
-				<CheckIcon class={cn('size-4', !checked && 'text-transparent')} />
+			{:else if checked}
+				<CheckIcon class="size-4" />
 			{/if}
 		</span>
 		{@render childrenProp?.()}

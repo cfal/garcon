@@ -30,6 +30,7 @@ import {
 import {
   assertSensitiveValuesNotPersisted,
   createIntegrationFixture,
+  type IntegrationFixture,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
 import {
@@ -331,21 +332,41 @@ describe('integration support contracts', () => {
     }
   }, 120_000);
 
-  test('runs the post-Garcon cleanup hook before fixture-root removal', async () => {
-    const observations: Array<{ rootExisted: boolean; garconRunning: boolean }> = [];
-    const fixture = await createIntegrationFixture({
+  test.each(['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const)(
+    'runs cleanup after controller and worker termination but before root removal (%s)', async (executionBackend) => {
+    const observations: Array<{ rootExisted: boolean; garconRunning: boolean; runningPids: number[] }> = [];
+    let fixture: IntegrationFixture | undefined;
+    let pids: number[] = [];
+    fixture = await createIntegrationFixture({
+      executionBackend,
       afterGarconStop: async (directories) => {
         observations.push({
           rootExisted: await access(directories.root).then(() => true, () => false),
-          garconRunning: false,
+          garconRunning: fixture?.garcon.isRunning ?? false,
+          runningPids: pids.filter(pid => {
+            try { process.kill(pid, 0); return true; }
+            catch (error) {
+              if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+              throw error;
+            }
+          }),
         });
       },
     });
     const root = fixture.dirs.root;
-    await fixture.dispose();
-    expect(observations).toEqual([{ rootExisted: true, garconRunning: false }]);
+    try {
+      expect(fixture.garcon.pid).not.toBeNull();
+      pids = [...new Set([fixture.garcon.pid!, ...fixture.executionProcessIds])];
+      expect(pids).toHaveLength(executionBackend === 'in-process' ? 1 : 2);
+      for (const pid of pids) expect(() => process.kill(pid, 0)).not.toThrow();
+    } finally {
+      await fixture.dispose();
+    }
+    expect(observations).toEqual([{ rootExisted: true, garconRunning: false, runningPids: [] }]);
     expect(await rejectionOf(access(root))).toMatchObject({ code: 'ENOENT' });
+  }, 120_000);
 
+  test('runs cleanup after a failed fixture creation', async () => {
     const hookCalls: string[] = [];
     let creationError: unknown;
     try {
@@ -365,6 +386,34 @@ describe('integration support contracts', () => {
     expect(hookCalls).toHaveLength(2);
     expect(hookCalls[0].replace('prepare:', '')).toBe(hookCalls[1].replace('cleanup:', ''));
   }, 120_000);
+
+  test.each(['restartGarcon', 'crashAndRestartGarcon'] as const)(
+    '%s cannot hide an unexpected outgoing controller exit', async (restart) => {
+    const fixture = await createIntegrationFixture({ executionBackend: 'in-process' });
+    const outgoing = fixture.garcon;
+    let beforeStartCalled = false;
+    try {
+      expect(outgoing.pid).not.toBeNull();
+      process.kill(outgoing.pid!, 'SIGKILL');
+      const deadline = Date.now() + 5_000;
+      while (outgoing.isRunning && Date.now() < deadline) await Bun.sleep(10);
+      expect(outgoing.isRunning).toBe(false);
+      expect(await throwingRejectionOf(fixture[restart]({
+        beforeStart: async () => { beforeStartCalled = true; },
+      }))).toThrow('Garcon exited unexpectedly');
+      expect(beforeStartCalled).toBe(false);
+      expect(fixture.garcon).toBe(outgoing);
+    } finally {
+      try {
+        const failure = await rejectionOf(fixture.dispose());
+        expect(failure).toBeInstanceOf(AggregateError);
+        expect((failure as AggregateError).errors.some(error =>
+          error instanceof Error && error.message.includes('Garcon exited unexpectedly'))).toBe(true);
+      } finally {
+        await rm(fixture.dirs.root, { recursive: true, force: true });
+      }
+    }
+  }, 60_000);
 
   test('cleans fixture resources when the environment resolver throws', async () => {
     let root = '';
@@ -441,13 +490,33 @@ describe('integration support contracts', () => {
 
   test('escalates a stuck supervised child from SIGTERM to SIGKILL', async () => {
     const child = Bun.spawn(
-      ['sh', '-c', 'trap "" TERM; sleep 30'],
-      { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' },
+      [process.execPath, '-e', 'process.on("SIGTERM", () => {}); console.log("ready"); setInterval(() => {}, 1000);'],
+      { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' },
     );
-    const started = Date.now();
-    const exitCode = await stopChildWithEscalation(child, 50);
-    expect(Date.now() - started).toBeLessThan(5_000);
-    expect(exitCode).not.toBe(0);
+    const reader = child.stdout.getReader();
+    const signals: Array<NodeJS.Signals | undefined> = [];
+    try {
+      let output = '';
+      await withTimeout((async () => {
+        while (!output.includes('ready\n')) {
+          const { value, done } = await reader.read();
+          if (done) throw new Error('Child exited before installing its TERM handler');
+          output += new TextDecoder().decode(value);
+        }
+      })(), 5_000, () => 'Child did not install its TERM handler');
+      const exitCode = await withTimeout(stopChildWithEscalation({
+        exited: child.exited,
+        kill: signal => { signals.push(signal); child.kill(signal); },
+      }, 50), 5_000, () => 'Child did not exit after escalation');
+      expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
+      expect(child.signalCode).toBe('SIGKILL');
+      expect(exitCode).not.toBe(0);
+    } finally {
+      if (child.exitCode === null) child.kill('SIGKILL');
+      await child.exited;
+      await reader.cancel();
+      reader.releaseLock();
+    }
   });
 
   test('reads only complete atomic JSON snapshots', async () => {
