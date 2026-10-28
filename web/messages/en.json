@@ -1162,6 +1162,7 @@
 	"workspace_open_git_history": "Open Git History",
 	"workspace_open_git_compare": "Open Git Compare",
 	"workspace_chat_views": "Chat Views",
+	"workspace_git_views": "Git Views",
 	"workspace_open_chat_map": "Open Chat Map",
 	"workspace_open_chat_canvas": "Open Canvas",
 	"workspace_open_pull_requests": "Open PRs",

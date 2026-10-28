@@ -1,6 +1,7 @@
 <script lang="ts">
 	import MessagesSquare from '@lucide/svelte/icons/messages-square';
 	import GitPullRequestArrow from '@lucide/svelte/icons/git-pull-request-arrow';
+	import GitGraph from '@lucide/svelte/icons/git-graph';
 	import type { Component } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import {
@@ -52,7 +53,7 @@
 		readonly onclick: () => void;
 	}
 	type TerminalAddAction = { readonly id: 'new-terminal'; readonly kind: 'terminal' };
-	type ViewGroupId = 'chat-views' | 'github-views';
+	type ViewGroupId = 'git-views' | 'chat-views' | 'github-views';
 	interface ViewGroup {
 		readonly id: ViewGroupId;
 		readonly kinds: readonly PortableSingletonKind[];
@@ -67,8 +68,15 @@
 		readonly actions: readonly WorkspaceWindowAddCommand[];
 	}
 	type WorkspaceWindowAddAction = WorkspaceWindowAddCommand | TerminalAddAction | ViewGroupAction;
-	// Views of one family share a single titlebar control that opens a menu of them.
-	const VIEW_GROUPS: readonly ViewGroup[] = [
+	const ADD_VIEWS: readonly (PortableSingletonKind | ViewGroup)[] = [
+		{
+			id: 'git-views',
+			kinds: ['git', 'git-history', 'git-compare', 'commit'],
+			label: m.workspace_git_views,
+			icon: GitGraph,
+		},
+		'files',
+		'tickets',
 		{
 			id: 'chat-views',
 			kinds: ['chat-map', 'chat-canvas', 'chat-board'],
@@ -82,7 +90,6 @@
 			icon: GitPullRequestArrow,
 		},
 	];
-	const GROUPED_KINDS = new Set(VIEW_GROUPS.flatMap((group) => group.kinds));
 
 	const ADD_ACTION_CONTROL_CLASS =
 		'flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:pointer-events-none aria-disabled:opacity-50 disabled:pointer-events-none disabled:opacity-50';
@@ -113,22 +120,18 @@
 		'chat-board': m.workspace_surface_chat_board,
 		tickets: m.tickets_title,
 	};
-	const groupActions = $derived(
-		VIEW_GROUPS.map(
-			(group): ViewGroupAction => ({
-				id: group.id,
-				kind: 'view-group',
-				label: group.label(),
-				icon: group.icon,
-				actions: availableSingletonKinds
-					.filter((kind) => group.kinds.includes(kind))
-					.map(singletonAction),
-			}),
-		).filter((group) => group.actions.length > 0),
-	);
 	const eligibleActions = $derived.by((): readonly WorkspaceWindowAddAction[] => [
-		...availableSingletonKinds.filter((kind) => !GROUPED_KINDS.has(kind)).map(singletonAction),
-		...groupActions,
+		...ADD_VIEWS.flatMap((view): WorkspaceWindowAddAction[] => {
+			if (typeof view === 'string') {
+				return availableSingletonKinds.includes(view) ? [singletonAction(view)] : [];
+			}
+			const actions = view.kinds
+				.filter((kind) => availableSingletonKinds.includes(kind))
+				.map(singletonAction);
+			return actions.length > 0
+				? [{ id: view.id, kind: 'view-group', label: view.label(), icon: view.icon, actions }]
+				: [];
+		}),
 		{ id: 'new-terminal', kind: 'terminal' },
 	]);
 	const hasUnplacedTerminalSessions = $derived(unplacedTerminalSessions.length > 0);

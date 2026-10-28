@@ -12,7 +12,11 @@ import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.j
 import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
-import { portableSingletonDescriptor, TERMINAL_LAUNCHER_ID } from '$lib/workspace/surface-types.js';
+import {
+	PORTABLE_SINGLETON_KINDS,
+	portableSingletonDescriptor,
+	TERMINAL_LAUNCHER_ID,
+} from '$lib/workspace/surface-types.js';
 import type {
 	DesktopWorkspaceNode,
 	SurfaceDescriptor,
@@ -198,6 +202,36 @@ const localTabActionOrder = [
 	'move-new-bottom',
 	'close-other-windows',
 	'close-tab',
+] as const;
+
+const viewGroups = [
+	{
+		label: m.workspace_git_views,
+		members: [
+			{
+				kind: 'git',
+				label: () => m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
+			},
+			{ kind: 'git-history', label: m.workspace_open_git_history },
+			{ kind: 'git-compare', label: m.workspace_open_git_compare },
+			{
+				kind: 'commit',
+				label: () => m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
+			},
+		],
+	},
+	{
+		label: m.workspace_chat_views,
+		members: [
+			{ kind: 'chat-map', label: m.workspace_open_chat_map },
+			{ kind: 'chat-canvas', label: m.workspace_open_chat_canvas },
+			{ kind: 'chat-board', label: m.workspace_open_chat_board },
+		],
+	},
+	{
+		label: m.workspace_github_views,
+		members: [{ kind: 'pull-requests', label: () => 'Open Pull Requests' }],
+	},
 ] as const;
 
 function workspaceWindow(
@@ -916,19 +950,24 @@ describe('WorkspaceWindowTitleBar', () => {
 	it('opens plus-menu views as tabs in that window', async () => {
 		renderTitleBar(workspaceWindow([chatSurface.id]));
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_git_views() }));
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_open_git_history() }));
 
 		expect(openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
 	});
 
-	it.each([
-		{ kind: 'chat-map', label: m.workspace_open_chat_map, group: m.workspace_chat_views },
-		{ kind: 'chat-canvas', label: m.workspace_open_chat_canvas, group: m.workspace_chat_views },
-		{ kind: 'chat-board', label: m.workspace_open_chat_board, group: m.workspace_chat_views },
-		{ kind: 'pull-requests', label: () => 'Open Pull Requests', group: m.workspace_github_views },
-	] as const)(
+	it.each(
+		viewGroups.flatMap(({ label: group, members }) =>
+			members.map(({ kind, label }) => ({
+				kind,
+				label,
+				group,
+				expectedLabels: members.map((member) => member.label()),
+			})),
+		),
+	)(
 		'opens $kind through its view group in both titlebar layouts',
-		async ({ kind, label, group }) => {
+		async ({ kind, label, group, expectedLabels }) => {
 			const executor = workspaceWindow([chatSurface.id]);
 			const rendered = render(WorkspaceWindowAddMenu, {
 				windowId: executor.id,
@@ -952,13 +991,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			expect(screen.queryByRole('button', { name: label() })).toBeNull();
 			await fireEvent.click(inlineTrigger);
 			expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual(
-				kind === 'pull-requests'
-					? ['Open Pull Requests']
-					: [
-							m.workspace_open_chat_map(),
-							m.workspace_open_chat_canvas(),
-							m.workspace_open_chat_board(),
-						],
+				expectedLabels,
 			);
 			await fireEvent.click(screen.getByRole('menuitem', { name: label() }));
 			expect(openSingletonAsTab).toHaveBeenCalledTimes(2);
@@ -966,45 +999,91 @@ describe('WorkspaceWindowTitleBar', () => {
 		},
 	);
 
-	it('omits Chat Views already in this window and removes an empty group', async () => {
-		const executor = workspaceWindow([chatSurface.id, 'singleton:chat-map']);
+	it.each(viewGroups)(
+		'omits existing members and removes an empty group: $label',
+		async ({ label, members }) => {
+			const executor = workspaceWindow([chatSurface.id]);
+			const rendered = render(WorkspaceWindowAddMenu, {
+				windowId: executor.id,
+				tabs: executor.tabs,
+				measure: { naturalWidth: 100, viewportWidth: 1_000 },
+			});
+			for (let count = 0; count < members.length; count += 1) {
+				await fireEvent.click(await screen.findByRole('button', { name: label() }));
+				expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual(
+					members.slice(count).map((member) => member.label()),
+				);
+				await fireEvent.keyDown(screen.getAllByRole('menuitem')[0], { key: 'Escape' });
+				const nextWindow = workspaceWindow([
+					chatSurface.id,
+					...members.slice(0, count + 1).map((member) => `singleton:${member.kind}`),
+				]);
+				await rendered.rerender({
+					windowId: executor.id,
+					tabs: nextWindow.tabs,
+					measure: { naturalWidth: 100, viewportWidth: 1_000 },
+				});
+			}
+			expect(screen.queryByRole('button', { name: label() })).toBeNull();
+		},
+	);
+
+	it('offers every portable view exactly once across inline groups and direct controls', async () => {
+		const executor = workspaceWindow([chatSurface.id]);
 		const rendered = render(WorkspaceWindowAddMenu, {
 			windowId: executor.id,
 			tabs: executor.tabs,
 			measure: { naturalWidth: 100, viewportWidth: 1_000 },
 		});
-		await fireEvent.click(await screen.findByRole('button', { name: m.workspace_chat_views() }));
-		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_map() })).toBeNull();
-		expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
-			m.workspace_open_chat_canvas(),
-			m.workspace_open_chat_board(),
-		]);
-		const allViews = workspaceWindow([
-			...executor.tabs.order,
-			'singleton:chat-canvas',
-			'singleton:chat-board',
-		]);
-		await rendered.rerender({
-			windowId: executor.id,
-			tabs: allViews.tabs,
-			measure: { naturalWidth: 100, viewportWidth: 1_000 },
-		});
-		expect(screen.queryByRole('button', { name: m.workspace_chat_views() })).toBeNull();
-		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_canvas() })).toBeNull();
+		const offered = Array.from(
+			rendered.container.querySelectorAll<HTMLElement>(
+				'[data-workspace-window-add-action^="singleton:"]',
+			),
+			(element) => element.dataset.workspaceWindowAddAction,
+		);
+		for (const group of viewGroups) {
+			await fireEvent.click(screen.getByRole('button', { name: group.label() }));
+			const items = screen.getAllByRole('menuitem');
+			offered.push(...items.map((item) => item.dataset.workspaceWindowAddAction));
+			await fireEvent.keyDown(items[0], { key: 'Escape' });
+			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		}
+		expect(offered.sort()).toEqual(
+			PORTABLE_SINGLETON_KINDS.map((kind) => `singleton:${kind}`).sort(),
+		);
 	});
 
 	it.each([
-		{
-			group: m.workspace_chat_views,
-			first: m.workspace_open_chat_canvas,
-			second: m.workspace_open_chat_board,
-		},
-		{
-			group: m.workspace_github_views,
-			first: () => 'Open Pull Requests',
-			second: () => 'Open Pull Requests',
-		},
+		{ group: m.workspace_git_views, item: m.workspace_open_git_history, viewportWidth: 230 },
+		{ group: m.workspace_chat_views, item: m.workspace_open_chat_canvas, viewportWidth: 320 },
 	])(
+		'closes a promoted group while other actions remain in overflow: $group',
+		async ({ group, item, viewportWidth }) => {
+			const executor = workspaceWindow([chatSurface.id]);
+			const props = { windowId: executor.id, tabs: executor.tabs };
+			const rendered = render(WorkspaceWindowAddMenu, {
+				...props,
+				measure: { naturalWidth: 200, viewportWidth: 0 },
+			});
+			await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
+			await fireEvent.click(screen.getByRole('menuitem', { name: group() }));
+			screen.getByRole('menuitem', { name: item() }).focus();
+			await rendered.rerender({ ...props, measure: { naturalWidth: 200, viewportWidth } });
+			await waitFor(() =>
+				expect(document.activeElement).toBe(screen.getByRole('button', { name: group() })),
+			);
+			expect(screen.getByRole('button', { name: m.workspace_add_to_window() })).toBeTruthy();
+			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		},
+	);
+
+	it.each(
+		viewGroups.map(({ label: group, members }) => ({
+			group,
+			first: members[0].label,
+			second: members[members.length - 1].label,
+		})),
+	)(
 		'restores view-group focus when its open submenu moves between layouts',
 		async ({ group, first, second }) => {
 			const executor = workspaceWindow([chatSurface.id]);
@@ -1096,7 +1175,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		},
 	);
 
-	it.each(['chat', 'github', 'terminals', 'overflow'] as const)(
+	it.each(['git', 'chat', 'github', 'terminals', 'overflow'] as const)(
 		'returns registry Escape focus to the %s trigger created during resize',
 		async (kind) => {
 			const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
@@ -1119,6 +1198,7 @@ describe('WorkspaceWindowTitleBar', () => {
 				await rendered.rerender({ ...props, measure: kind === 'overflow' ? narrow : wide });
 				expect(document.activeElement).toBe(external);
 				const label = {
+					git: m.workspace_git_views(),
 					chat: m.workspace_chat_views(),
 					github: m.workspace_github_views(),
 					terminals: m.workspace_terminal_actions(),
@@ -1342,11 +1422,8 @@ describe('WorkspaceWindowTitleBar', () => {
 			measure: { naturalWidth: 200, viewportWidth: 318 },
 		});
 		const expectedLabels = [
-			m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
-			m.workspace_open_git_history(),
-			m.workspace_open_git_compare(),
+			m.workspace_git_views(),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
-			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
 			m.workspace_open_surface({ surface: m.tickets_title() }),
 			m.workspace_chat_views(),
 			m.workspace_github_views(),
@@ -1363,7 +1440,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		);
 
 		await fireEvent.click(screen.getByRole('button', { name: expectedLabels[1] }));
-		expect(openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
+		expect(openSingletonAsTab).toHaveBeenCalledWith('files', 'window-main');
 
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
 		const menu = document.querySelector<HTMLElement>(
@@ -1390,7 +1467,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(
 				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
-			).toHaveLength(9),
+			).toHaveLength(6),
 		);
 		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
 
@@ -1438,9 +1515,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			measure: { naturalWidth: 200, viewportWidth: 0 },
 		});
 		const addLabel = m.workspace_add_to_window();
-		const firstActionLabel = m.workspace_open_surface({
-			surface: m.workspace_surface_git_workbench(),
-		});
+		const firstActionLabel = m.workspace_git_views();
 		const trigger = screen.getByRole('button', { name: addLabel });
 
 		trigger.focus();
@@ -1465,7 +1540,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		);
 
 		await fireEvent.click(screen.getByRole('button', { name: addLabel }));
-		const secondActionLabel = m.workspace_open_git_history();
+		const secondActionLabel = m.workspace_open_surface({ surface: m.workspace_surface_files() });
 		const menuAction = await screen.findByRole('menuitem', { name: secondActionLabel });
 		menuAction.focus();
 		await rendered.rerender({
@@ -1497,7 +1572,8 @@ describe('WorkspaceWindowTitleBar', () => {
 			if (!(owner instanceof WorkspaceWindowAddMenuState)) {
 				throw new Error('Missing mounted add-menu controller.');
 			}
-			const retainedAction = screen.getByRole('menuitem', { name: m.workspace_open_git_history() });
+			const retainedLabel = m.workspace_open_surface({ surface: m.workspace_surface_files() });
+			const retainedAction = screen.getByRole('menuitem', { name: retainedLabel });
 			retainedAction.focus();
 
 			// Bits UI refreshes its focus scope with close/open callbacks while the menu stays open.
@@ -1517,9 +1593,7 @@ describe('WorkspaceWindowTitleBar', () => {
 				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
 			).toHaveLength(1);
 			expect(screen.getByRole('menu')).toBe(menu);
-			expect(screen.getByRole('menuitem', { name: m.workspace_open_git_history() })).toBe(
-				retainedAction,
-			);
+			expect(screen.getByRole('menuitem', { name: retainedLabel })).toBe(retainedAction);
 			expect(document.activeElement).toBe(retainedAction);
 
 			await fireEvent.keyDown(retainedAction, { key: 'Escape' });
@@ -1547,7 +1621,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(
 				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
-			).toHaveLength(8),
+			).toHaveLength(5),
 		);
 		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
 		const trigger = screen.getByRole('button', { name: m.workspace_terminal_actions() });
@@ -1700,11 +1774,8 @@ describe('WorkspaceWindowTitleBar', () => {
 		)!;
 		const items = screen.getAllByRole('menuitem');
 		const viewLabels = [
-			m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
-			m.workspace_open_git_history(),
-			m.workspace_open_git_compare(),
+			m.workspace_git_views(),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
-			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
 			m.workspace_open_surface({ surface: m.tickets_title() }),
 			m.workspace_chat_views(),
 			m.workspace_github_views(),

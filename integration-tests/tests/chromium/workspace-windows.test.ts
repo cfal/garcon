@@ -1014,7 +1014,7 @@ describe('Chromium workspace windows', () => {
 
       markPhase('preserving both menu fallbacks at minimal width');
       await page.locator(`[data-workspace-window-add-trigger="${windowId}"]`).click();
-      await page.getByRole('menuitem', { name: 'Open Git Workbench', exact: true }).waitFor();
+      await page.getByRole('menuitem', { name: 'Git Views', exact: true }).waitFor();
       await page.keyboard.press('Escape');
       await setTabRailWidth(page, windowId, 20);
       await page.waitForFunction(

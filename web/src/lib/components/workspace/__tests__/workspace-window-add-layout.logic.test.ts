@@ -92,4 +92,20 @@ describe('resolveWorkspaceWindowInlineAddActionCount', () => {
 			}),
 		).toBe(3);
 	});
+
+	it('replaces overflow with the final two controls at the six-action boundary', () => {
+		for (const [viewportWidth, expected] of [
+			[349, 4],
+			[350, 6],
+			[351, 6],
+		]) {
+			expect(
+				resolveWorkspaceWindowInlineAddActionCount({
+					measure: { naturalWidth: 200, viewportWidth },
+					eligibleCount: 6,
+					currentInlineCount: 0,
+				}),
+			).toBe(expected);
+		}
+	});
 });
