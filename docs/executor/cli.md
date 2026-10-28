@@ -110,6 +110,7 @@ Both endpoints serve the same application request. For example:
 POST /api/v1/chats/start
 Authorization: Bearer <capability for this local HTTP endpoint>
 X-Garcon-Server-Instance: <captured controller serverInstanceId>
+X-Garcon-Contract: cli.chats.start@1
 Content-Type: application/json
 
 { ...existing start fields, executorId: <selected executor> }
@@ -173,6 +174,10 @@ interface CliContext {
   readonly serverInstanceId: string;
   readonly defaultExecutorId: string;
   readonly workspaceName: string | null;
+  readonly protocol: {
+    readonly bootstrap: number;
+    readonly contracts: Readonly<Record<string, readonly number[]>>;
+  };
 }
 ```
 
@@ -182,7 +187,15 @@ Controllers started with `--workspace-dir` have no workspace name. Report null i
 
 The gateway may prove its own identity while disconnected, but context discovery must return unavailable then. It must not present stale cached controller context as live verification. Reject discovery while the dispatcher is initializing, the executor is not ready, CLI access is disabled, or the controller is quiescing.
 
-After these steps, construct the same `GarconClient` from the HTTP URL, endpoint-local capability, captured controller `serverInstanceId`, default executor, and workspace name. There is no command-level `if (isExecutorGateway)` path.
+CLI bootstrap 1 freezes discovery and exact operation selectors, independently of
+the executor link's bootstrap. A mismatch stops discovery. The direct context
+catalog comes from registered route implementations. The gateway combines the
+captured `controllerCli.describe@1` identity with that profile's `cli.*` subset;
+it exposes no operations without a supported forwarding-envelope implementation.
+The reverse describe result remains only the three identity fields, not a second
+catalog exchange.
+
+After these steps, construct the same `GarconClient` from the HTTP URL, endpoint-local capability, captured controller `serverInstanceId`, default executor, workspace name and contract catalog. There is no command-level `if (isExecutorGateway)` path. Each request sends its implemented exact operation version in `X-Garcon-Contract`; workflow dependencies such as receipt polling are checked before mutation. Recovery retains that version, body and identity, never selecting a different version after possible dispatch.
 
 `verifyRuntime()` must verify the endpoint and compare the live controller context with the invocation's captured instance. A stable gateway HMAC proof alone does not prove that the controller survived. A new invocation can discover a restarted controller; an existing invocation never updates its captured controller identity in place.
 
@@ -215,8 +228,8 @@ Tickets gain explicit UUID-based executor actor and executor owner variants. A c
 User ticket owners use `{kind:'user', ownerKey:string}` and CLI selectors
 `user:<ownerKey>`. This key is immutable, initially the original account username;
 login renames never change it. Historical actor usernames remain attribution,
-not assignment or retry authority. Executor core 1 freezes this DTO in both
-forwarding directions. Account username/password endpoints are controller-browser
+not assignment or retry authority. Each consuming v1 CLI contract freezes this
+DTO in both forwarding directions. Account username/password endpoints are controller-browser
 only and remain excluded from the CLI allowlist.
 
 Changing or revoking CLI access does not replace the connector or terminate PTYs/agents. It invalidates an executor/session authorization lease and cancels bridge waits best effort. Revoke/re-enable cannot authorize late completion under the old lease. Already accepted work is not rolled back. Check current entry configuration, verified readiness, exact RPC backing, and quiescence on each call, not captured connector configuration. Capture these checks with the original lease and cancellation signal in a per-call RPC reply guard, including context discovery. Run that guard synchronously immediately before enqueue; validation at handler completion alone leaves a promise-continuation race.
@@ -230,8 +243,8 @@ Per-chat restrictions would require authenticated run/session context and new de
 Add an explicit typed reverse-service family to the existing protocol:
 
 ```text
-controllerCli.describe() -> live CliContext
-controllerCli.request({ expectedServerInstanceId, http })
+controllerCli.describe@1() -> { serverInstanceId, defaultExecutorId, workspaceName }
+controllerCli.request@1({ expectedServerInstanceId, contract: { name, version }, http })
   -> { status, body, retryAfter? }
 ```
 
@@ -247,12 +260,30 @@ Return finite JSON application responses, including confirmed domain failures. N
 
 Dispatch is concurrent and asynchronous. A start or catalog request can require a controller-to-worker RPC while its worker-to-controller request is pending. Do not hold a connection-wide mutex across either call, block the event loop waiting for a response, or serialize all CLI traffic behind a long-running command.
 
+The outer RPC version and nested HTTP version are independent. Before receipt,
+transport resolves the exact local nested registration for lane, bounds and
+mutation policy. An unknown nested pair receives definite `OPERATION_UNSUPPORTED`
+422 without a receipt. For a known local pair, the controller dispatcher checks
+controller identity before negotiated nested support and HTTP admission.
+
+Direct HTTP and reverse dispatch invoke the same version-specific registered
+route boundary. After authentication, a supplied controller-instance mismatch
+returns `CLI_CONTROLLER_CHANGED` 409. Runtime proof and CLI context are bootstrap
+exceptions and require no selector. On allowlisted routes, a valid local-capability
+bearer or either CLI header selects contract dispatch, including when browser auth
+is disabled. Header-free JWT/auth-disabled browser requests keep paired-browser
+dispatch. Other routes reject CLI headers with `CLI_ACCESS_DENIED` 403; header-free
+requests retain their existing authorization. Selectors grant no authority.
+Missing or unsupported exact selectors return `OPERATION_UNSUPPORTED` 422;
+malformed, duplicate or route-mismatched selectors return `VALIDATION_FAILED` 400.
+No legacy default-to-v1 or current-handler fallback exists.
+
 ## Forwarding Allowlist
 
 `CLI_OPERATIONS` in `server/remote/transport/cli-protocol.ts` is the authoritative
 method/path registry. `server/remote/transport/__tests__/cli-allowlist.test.ts`
 checks it against the HTTP operations emitted by the client. Every entry declares
-its lane, mutation semantics, deadline, and management permission. Additions
+its exact name/version, lane, mutation semantics, deadline, and management permission. Additions
 require explicit contract and authorization tests; a route prefix never grants
 access to all routes beneath it.
 
@@ -268,8 +299,8 @@ CLI tag replacement uses `GET chats/tags` for durability recovery and
 `PUT chats/tags` for an atomic desired-state write. Browser optimistic PATCH is
 not forwarded. Title writes are bounded to 4 KiB UTF-8 at the common parser and
 persistence boundary; legacy oversized values remain readable but can still
-exceed reply bounds until renamed. These forwarded contracts are mandatory in
-executor core 1.
+exceed reply bounds until renamed. Each operation has a separate frozen v1
+contract; absence disables only that operation and its dependent workflows.
 
 Ticket project inference is implemented on the selected executor at current HEAD. Send the context default executor with the CLI directory and reuse that resolver. Do not expand commands merely because their browser APIs exist.
 
@@ -280,7 +311,8 @@ CLI authority (`management:false`). GET is classified as a read despite its
 idempotent missed-occurrence housekeeping. `/in` and `/reorder` remain excluded.
 POST/PUT new-chat definitions must carry an explicit valid nested
 `scheduledPrompt.target.executorId`, including `local`; neither gateway nor
-dispatcher substitutes a default. These routes and target rules are mandatory in executor core 1.
+dispatcher substitutes a default. These target rules belong to the respective
+v1 HTTP operation contracts, not the transport bootstrap.
 POST returns `{success:true, scheduledPrompt, snapshot}` with the created record
 and snapshot captured under the same scheduler lock. Other mutations retain
 `{success:true, snapshot}`. No storage migration is needed.

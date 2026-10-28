@@ -14,7 +14,7 @@ export interface Baseline {
 }
 
 export interface BaselineManifest {
-  readonly core: 1;
+  readonly bootstrap: 1;
   readonly stage: 'bootstrap' | 'cross-build';
   readonly bootstrapPackageVersion?: string;
   readonly baselines: readonly Baseline[];
@@ -25,10 +25,10 @@ export interface CompatibilityArtifact extends SourceArtifact { readonly sourceS
 export function validateManifest(value: unknown, packageVersion: string): BaselineManifest {
   assert(value && typeof value === 'object');
   const manifest = value as BaselineManifest;
-  assert.equal(manifest.core, 1);
+  assert.equal(manifest.bootstrap, 1);
   assert(Array.isArray(manifest.baselines));
   if (manifest.stage === 'bootstrap') {
-    assert.equal(manifest.bootstrapPackageVersion, packageVersion, 'Publish and pin the core-1 baseline before the next release');
+    assert.equal(manifest.bootstrapPackageVersion, packageVersion, 'Publish and pin the contracts-v1 baseline before the next release');
     assert.equal(manifest.baselines.length, 0, 'Bootstrap cannot silently ignore a pinned baseline');
   } else {
     assert.equal(manifest.stage, 'cross-build');
@@ -97,7 +97,8 @@ export async function prepareArtifacts(input?: unknown): Promise<{
       assert.equal(await commandOutput([bunExecutable, '--version']), baseline.runtime.version);
       const metadata = await Bun.file(join(repoRoot, 'compatibility-artifact.json')).json();
       assert.equal(metadata.sourceSha, baseline.sourceSha);
-      assert.equal(metadata.core, 1);
+      assert.equal(metadata.bootstrap, 1);
+      assert.equal(metadata.contractModel, 'method-versions');
       assert.equal(metadata.bunVersion, baseline.runtime.version);
       for (const [file, digest] of Object.entries(baseline.lockfiles)) {
         assert.equal(sha256(await readFile(join(repoRoot, file))), digest, `Baseline ${file} changed`);
@@ -109,7 +110,7 @@ export async function prepareArtifacts(input?: unknown): Promise<{
       baselines.push({ repoRoot, bunExecutable, sourceSha: baseline.sourceSha });
     }
     console.log(JSON.stringify({ stage: manifest.stage, current: current.sourceSha, baselines: baselines.map(item => item.sourceSha),
-      optionalContractEvidence: 'not-applicable: no optional production contracts' }));
+      contractModel: 'method-versions', artifactEvidence: manifest.stage === 'bootstrap' ? 'same-source' : 'mixed-source' }));
     return { current, baselines, stage: manifest.stage, dispose };
   } catch (error) { await dispose(); throw error; }
 }

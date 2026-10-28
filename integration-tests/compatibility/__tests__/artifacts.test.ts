@@ -6,11 +6,11 @@ import { commandOutput, downloadArchive, prepareArtifacts, sha256, validateManif
 import { rejectionOf } from '../../support/promise-assertions.js';
 
 test('bootstrap is explicit and cannot extend into another release', () => {
-  const manifest = { core: 1, stage: 'bootstrap', bootstrapPackageVersion: '0.3.4', baselines: [] } satisfies BaselineManifest;
+  const manifest = { bootstrap: 1, stage: 'bootstrap', bootstrapPackageVersion: '0.3.4', baselines: [] } satisfies BaselineManifest;
   expect(validateManifest(manifest, '0.3.4')).toEqual(manifest);
   expect(() => validateManifest(manifest, '0.3.5')).toThrow('Publish and pin');
   expect(() => validateManifest({ ...manifest, stage: 'cross-build' }, '0.3.5')).toThrow('immutable baseline');
-  expect(() => validateManifest({ core: 1, baselines: [] }, '0.3.4')).toThrow();
+  expect(() => validateManifest({ bootstrap: 1, baselines: [] }, '0.3.4')).toThrow();
 });
 
 test('missing and corrupt immutable archives fail instead of using the current checkout', async () => {
@@ -38,14 +38,14 @@ test('missing and corrupt immutable archives fail instead of using the current c
 
 test('cross-build pins source, runtime and both independent lockfiles', () => {
   const baseline = {
-    sourceSha: 'a'.repeat(40), archiveUrl: 'https://github.com/cfal/garcon/releases/download/executor-core-1-baseline/source.tar.gz',
+    sourceSha: 'a'.repeat(40), archiveUrl: 'https://github.com/cfal/garcon/releases/download/executor-contracts-v1-baseline/source.tar.gz',
     archiveSha256: 'b'.repeat(64), lockfiles: { 'bun.lock': 'c'.repeat(64), 'integration-tests/bun.lock': 'd'.repeat(64) },
     runtime: { version: '1.4.3', archiveUrl: 'https://github.com/oven-sh/bun/releases/download/bun-v1.4.3/bun-linux-x64.zip', archiveSha256: 'e'.repeat(64) },
   };
-  expect(validateManifest({ core: 1, stage: 'cross-build', baselines: [baseline] }, '0.3.5').baselines).toEqual([baseline]);
+  expect(validateManifest({ bootstrap: 1, stage: 'cross-build', baselines: [baseline] }, '0.3.5').baselines).toEqual([baseline]);
   for (const invalid of [{ ...baseline, sourceSha: 'HEAD' }, { ...baseline, archiveSha256: '' },
     { ...baseline, lockfiles: {} }, { ...baseline, runtime: { ...baseline.runtime, archiveUrl: 'file:///synthetic' } }]) {
-    expect(() => validateManifest({ core: 1, stage: 'cross-build', baselines: [invalid] }, '0.3.5')).toThrow();
+    expect(() => validateManifest({ bootstrap: 1, stage: 'cross-build', baselines: [invalid] }, '0.3.5')).toThrow();
   }
 });
 
@@ -60,7 +60,7 @@ test.each(['same revision', 'missing', 'corrupt'])('artifact selection rejects a
   const download = spyOn(globalThis, 'fetch').mockResolvedValue(
     failure === 'missing' ? new Response(null, { status: 404 }) : new Response('Synthetic corrupt archive'));
   try {
-    await expect(prepareArtifacts({ core: 1, stage: 'cross-build', baselines: [baseline] })).rejects.toThrow(
+    await expect(prepareArtifacts({ bootstrap: 1, stage: 'cross-build', baselines: [baseline] })).rejects.toThrow(
       failure === 'same revision' ? 'distinct source revisions'
         : failure === 'missing' ? 'Baseline download failed: 404' : 'Immutable artifact digest mismatch',
     );

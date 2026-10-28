@@ -17,6 +17,7 @@ const lanes = [
   { name: 'web logic', include: ['web/src/**/*.logic.test.ts'] },
   { name: 'web ui', include: ['web/src/**/*.test.ts'], exclude: ['web/src/**/*.logic.test.ts'] },
   { name: 'integration server', include: ['integration-tests/tests/server/*.test.{ts,js}'] },
+  { name: 'executor compatibility', include: ['integration-tests/compatibility/__tests__/*.test.ts', 'integration-tests/tests/server/compatibility/*.test.ts'] },
   ...directoryLanes.map(directory => ({
     name: directory, include: [`integration-tests/tests/${directory}/**/*.{test,spec}.{js,jsx,ts,tsx}`],
   })),
@@ -51,6 +52,7 @@ test('inventory patterns match the executable discovery commands', () => {
     test: 'bun run test:server',
     'test:server': 'bun run test:server:lane && bun run test:sacs',
     'test:server:lane': 'bun run run-server-tests.ts',
+    'test:compatibility': 'bun test --max-concurrency=1 --timeout=30000 compatibility/__tests__ tests/server/compatibility/executor-version.test.ts',
     'test:chromium': `bun ../scripts/run-test-files.js '${integrationPattern('chromium')}' --max-concurrency=1 --timeout=120000`,
     'test:webkit': `bun ../scripts/run-test-files.js '${integrationPattern('webkit')}' --max-concurrency=1 --timeout=120000`,
     'test:search-gate': `bun test --max-concurrency=1 --timeout=900000 ${integrationPattern('search scale')}`,
@@ -101,5 +103,7 @@ test('inventory matching catches unsupported extensions, nesting and overlapping
   }
   expect(owners('web/src/new.logic.test.ts')).toEqual(['web logic']);
   expect(owners('web/src/new.test.ts')).toEqual(['web ui']);
+  expect(owners('integration-tests/tests/server/compatibility/executor-version.test.ts')).toEqual(['executor compatibility']);
+  expect(owners('integration-tests/compatibility/__tests__/artifacts.test.ts')).toEqual(['executor compatibility']);
   expect(owners('common/__tests__/new.test.js', [...lanes, lanes[0]])).toEqual(['common', 'common']);
 });
