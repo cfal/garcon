@@ -13,6 +13,7 @@ import type { ConversationPanelActions } from '../conversation-panel-actions.js'
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 import type { ChatQueueState } from '$lib/types/chat.js';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
+import type { GitRepositoryClassification } from '$lib/git/surface/git-quick-summary.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import { UserMessage } from '$shared/chat-types';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
@@ -31,7 +32,7 @@ const runtime = vi.hoisted(() => ({
 	composerStatusBarProjectPath: true,
 	composerStatusBarGitBranch: true,
 	composerStatusBarCommit: true,
-	classification: 'git' as 'git' | 'non-git' | 'unknown',
+	classification: 'git' as GitRepositoryClassification,
 	pathUpdatesSupported: false,
 	queue: null as ChatQueueState | null,
 	summary: null as GitQuickSummaryReady | null,

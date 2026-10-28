@@ -130,7 +130,6 @@
 	const localSettings = createLocalSettingsStore();
 	localSettings.autoExpandTools = false;
 	localSettings.alwaysExpandCliMessages = initialHost.alwaysExpandCliMessages;
-	localSettings.composerStatusBarGitProjects = true;
 	setLocalSettings(localSettings);
 	onDestroy(() => localSettings.destroy());
 
