@@ -1,6 +1,6 @@
 <script lang="ts">
 	import MessagesSquare from '@lucide/svelte/icons/messages-square';
-	import GitPullRequestArrow from '@lucide/svelte/icons/git-pull-request-arrow';
+	import GitHubIcon from '$lib/components/icons/GitHubIcon.svelte';
 	import GitGraph from '@lucide/svelte/icons/git-graph';
 	import type { Component } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -87,7 +87,7 @@
 			id: 'github-views',
 			kinds: ['pull-requests'],
 			label: m.workspace_github_views,
-			icon: GitPullRequestArrow,
+			icon: GitHubIcon,
 		},
 	];
 

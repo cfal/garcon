@@ -999,6 +999,41 @@ describe('WorkspaceWindowTitleBar', () => {
 		},
 	);
 
+	it.each([0, 1_000])(
+		'uses matching Lucide styling for the GitHub group at width %i',
+		async (width) => {
+			const executor = workspaceWindow([chatSurface.id]);
+			render(WorkspaceWindowAddMenu, {
+				windowId: executor.id,
+				tabs: executor.tabs,
+				measure: { naturalWidth: 100, viewportWidth: width },
+			});
+			if (width === 0) {
+				await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
+			}
+			const role = width === 0 ? 'menuitem' : 'button';
+			const github = (
+				await screen.findByRole(role, { name: m.workspace_github_views() })
+			).querySelector('svg.lucide-github');
+			const git = screen.getByRole(role, { name: m.workspace_git_views() }).querySelector('svg');
+			expect(github).not.toBeNull();
+			for (const attribute of [
+				'viewBox',
+				'width',
+				'height',
+				'fill',
+				'stroke',
+				'stroke-width',
+				'stroke-linecap',
+				'stroke-linejoin',
+				'aria-hidden',
+			]) {
+				expect(github?.getAttribute(attribute)).toBe(git?.getAttribute(attribute));
+			}
+			expect(github?.querySelectorAll('path')).toHaveLength(2);
+		},
+	);
+
 	it.each(viewGroups)(
 		'omits existing members and removes an empty group: $label',
 		async ({ label, members }) => {
