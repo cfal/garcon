@@ -1148,7 +1148,7 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it.each([undefined, null, 1, 'true', {}, []])(
+	it.each([undefined, null, 0, 1, '', 'true', {}, []])(
 		'defaults missing or malformed scrollbar preferences: %j',
 		(value) => {
 			localStorage.setItem(
