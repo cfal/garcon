@@ -363,7 +363,7 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     expect(abandoned.runs[0].post).toMatchObject({ status: 'abandoned', abandonedAt: expect.any(String) });
     expect(JSON.parse(await readFile(join(project, 'gh-comments.json'), 'utf8')).filter((comment: { number: number }) => comment.number === 141)).toHaveLength(1);
 
-    expect(browserErrors).toEqual([
+    expect(browserErrors.splice(0)).toEqual([
       'console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)',
     ]);
   }, undefined, {

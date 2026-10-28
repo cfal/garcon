@@ -6,7 +6,7 @@ import { authenticateChromiumContext, withChromiumFixture } from '../../support/
 import { Deferred, withTimeout } from '../../support/deferred.js';
 
 test('Shell composer preserves literal commands and stable chat switching on desktop and mobile', async () => {
-  await withChromiumFixture('shell-composer', async ({ page, browser, integration, assertNoBrowserErrors }, phase) => {
+  await withChromiumFixture('shell-composer', async ({ page, browser, integration, assertNoBrowserErrors, watchBrowserErrors }, phase) => {
     const { client, executionDirs } = integration;
     const chatIds: string[] = [];
     for (const text of ['**plain output**', 'second chat']) {
@@ -53,6 +53,7 @@ test('Shell composer preserves literal commands and stable chat switching on des
     const touchContext = await browser.newContext({
       viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true, serviceWorkers: 'block',
     });
+    watchBrowserErrors(touchContext);
     try {
       await authenticateChromiumContext(touchContext, integration);
       const touchPage = await touchContext.newPage();

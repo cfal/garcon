@@ -43,9 +43,7 @@ import {
 // multi-directory contracts at Garcon's public server boundary.
 let environment: ScriptedOpenCodeTestEnvironment | undefined;
 
-const describeOnLinux = process.platform === 'linux' ? describe : describe.skip;
-
-describeOnLinux('OpenCode against a scripted model', () => {
+describe.skipIf(process.platform !== 'linux')('OpenCode against a scripted model', () => {
   beforeEach(() => {
     environment = startScriptedOpenCodeTestEnvironment();
   });

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { captureBrowserErrors } from '../../support/browser-errors.js';
 import { chromium } from "playwright";
 import { buildWebBrowserEntry } from "../../support/web-browser-bundle";
 import type {
@@ -23,6 +24,8 @@ test("live editor fonts refresh cached metrics while preserving document, select
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
+    const browserErrors: string[] = [];
+    captureBrowserErrors(page.context(), browserErrors);
     await page.setContent(
       `<style>@font-face { font-family: "Departure Mono"; src: url(data:font/woff2;base64,${font}); }</style><div id="editor"></div>`,
     );
@@ -269,6 +272,7 @@ test("live editor fonts refresh cached metrics while preserving document, select
       expect(transfer.after.cached).toBeCloseTo(transfer.after.actual, 1);
       expect(transfer.retained).toBe(true);
     }
+    expect(browserErrors).toEqual([]);
   } finally {
     await browser.close();
   }

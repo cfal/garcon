@@ -2,9 +2,16 @@ import { afterAll, describe, expect, it, mock } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { UserMessage } from '../../../../common/chat-types.ts';
+import {
+  AssistantMessage,
+  CommandOutputMessage,
+  CommandResultMessage,
+  UserMessage,
+} from '../../../../common/chat-types.ts';
 import createShareRoutes from '../shares.ts';
-import { isNoAuthHandler } from '../../lib/http-route.ts';
+import { isNoAuthHandler, wrapRoutes } from '../../lib/http-route.ts';
+import { ShareStore } from '../../chats/shares/store.ts';
+import { inlineTranscriptRendering } from '../../chats/transcript-rendering/__tests__/inline-transcript-rendering.ts';
 import { DomainError } from '../../../common/domain-error.ts';
 import { renderSharedChatText } from '../../chats/shares/transcript.ts';
 import { decodeStoredLedgerRow } from '../../ledger/codec.ts';
@@ -316,6 +323,111 @@ describe('shared transcript routes', () => {
 
     expect(response.status).toBe(400);
     expect(body.error).toBe('Share token is required');
+  });
+});
+
+describe('public share responses', () => {
+  const PUBLIC_ROUTES = ['/api/v1/shared', '/shared/:token', '/shared/llm/:token'];
+  const publicRequests = [
+    ['/api/v1/shared', 'http://localhost/api/v1/shared?token=share-token', {}],
+    ['/api/v1/shared', 'http://localhost/api/v1/shared?token=missing-token', {}],
+    ['/shared/:token', 'http://localhost/shared/share-token', { Accept: 'text/html' }],
+    ['/shared/:token', 'http://localhost/shared/share-token', {}],
+    ['/shared/:token', 'http://localhost/shared/missing-token', { Accept: 'text/html' }],
+    ['/shared/llm/:token', 'http://localhost/shared/llm/share-token', {}],
+    ['/shared/llm/:token', 'http://localhost/shared/llm/missing-token', {}],
+  ];
+
+  function expectPublicHeaders(response) {
+    expect(response.headers.get('x-robots-tag')).toBe('noindex, nofollow, noarchive');
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+  }
+
+  it.each(publicRequests)('keeps %s (%s) out of search indexes and referrers', async (route, href, headers) => {
+    const served = wrapRoutes(createRoutes().routes);
+    expectPublicHeaders(await served[route].GET(new Request(href, { headers })));
+  });
+
+  it('adds the public headers to unexpected failures and shutdown responses', async () => {
+    let shuttingDown = false;
+    const failure = async () => { throw new Error('synthetic storage failure'); };
+    const { routes } = createRoutes(createSnapshot(), null, {
+      shareStore: { getHeader: failure, getMessages: failure, getTextPath: failure },
+    });
+    const served = wrapRoutes(routes, { isShuttingDown: () => shuttingDown });
+    const request = (route) => served[route].GET(new Request(`http://localhost${route.replace(':token', 'share-token')}?token=share-token`, {
+      headers: { Accept: 'text/html' },
+    }));
+
+    for (const route of PUBLIC_ROUTES) {
+      const failed = await request(route);
+      expect(failed.status).toBe(500);
+      expectPublicHeaders(failed);
+    }
+    shuttingDown = true;
+    for (const route of PUBLIC_ROUTES) {
+      const stopping = await request(route);
+      expect(stopping.status).toBe(503);
+      expectPublicHeaders(stopping);
+    }
+    expect((await served['/api/v1/chats/share/status'].GET(new Request('http://localhost/api/v1/chats/share/status?chatId=123')))
+      .headers.get('x-robots-tag')).toBeNull();
+  });
+
+  it('withholds execution context and the project path from every public representation', async () => {
+    const sentinel = '/private/sentinel-project';
+    const workspace = mkdtempSync(path.join(os.tmpdir(), 'garcon-share-public-'));
+    try {
+      const store = new ShareStore(workspace, { rendering: inlineTranscriptRendering });
+      await store.init();
+      const at = '2025-01-02T03:04:05.000Z';
+      const rows = storedProviderRows([
+        new UserMessage(at, 'Run the build'),
+        new CommandOutputMessage(at, 'command-1', 'stdout', 'plain', 'build passed', {
+          executorId: 'local',
+          projectPath: sentinel,
+        }),
+        new CommandResultMessage(at, 'command-1', {
+          outcome: 'finished', exitCode: 0, signal: null, capture: 'complete',
+          cwd: { kind: 'reported', path: `${sentinel}/packages` },
+        }),
+        new AssistantMessage(at, 'The build passed.'),
+      ]);
+      const routes = createShareRoutes(
+        store,
+        { getChat: mock(() => ({ agentId: 'shell', model: 'sh', projectPath: sentinel })) },
+        { getChatName: mock(() => null), getUiSettings: mock(() => ({})), getRemoteSettingsVersion: mock(() => 0) },
+        { getChatMetadata: mock(() => null) },
+        storedSnapshotReader(async () => ({ rows, transcriptViewId: 'view-1', lastOrdinal: rows.length })),
+      );
+      const created = await (await routes['/api/v1/chats/share'].POST(new Request('http://localhost/api/v1/chats/share', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chatId: '123' }),
+      }), new URL('http://localhost/api/v1/chats/share'))).json();
+      const token = created.shareToken;
+      const read = async (route, href, headers = {}) => (
+        await routes[route].GET(new Request(href, { headers }), new URL(href))
+      ).text();
+
+      const json = await read('/api/v1/shared', `http://localhost/api/v1/shared?token=${token}`);
+      const bodies = [
+        json,
+        await read('/shared/llm/:token', `http://localhost/shared/llm/${token}`),
+        await read('/shared/:token', `http://localhost/shared/${token}`, { Accept: 'text/plain' }),
+        await read('/shared/:token', `http://localhost/shared/${token}`, { Accept: 'text/html' }),
+      ];
+      for (const body of bodies) expect(body).not.toContain(sentinel);
+      const { snapshot } = JSON.parse(json);
+      expect(Object.keys(snapshot).sort()).toEqual(['agentId', 'messages', 'model', 'shareToken', 'sharedAt', 'title']);
+      expect(snapshot.messages.map((message) => message.type)).toEqual(
+        ['user-message', 'command-output', 'command-result', 'assistant-message'],
+      );
+      expect(snapshot.messages[1]).toMatchObject({ content: 'build passed', context: null });
+      expect(snapshot.messages[2].result.cwd).toEqual({ kind: 'withheld' });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 });
 

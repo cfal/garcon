@@ -50,8 +50,12 @@ for (const kind of ['tab', 'window', 'other-windows']) {
           original.call(this, key, value);
         };
       });
+      let rejectedSaves = 0;
       await page.route('**/api/v1/chat-canvases*', async (route) => {
-        if (route.request().method() === 'PUT') await route.fulfill({ status: 500, json: { error: 'Injected save failure' } });
+        if (route.request().method() === 'PUT') {
+          rejectedSaves++;
+          await route.fulfill({ status: 500, json: { error: 'Injected save failure' } });
+        }
         else await route.continue();
       });
       await rename(page, 'Unsaved work');
@@ -73,6 +77,8 @@ for (const kind of ['tab', 'window', 'other-windows']) {
       expect(await page.locator('[data-canvas-panel] select').first().textContent()).toContain('Unsaved work');
       await page.getByRole('button', { name: 'Rename canvas', exact: true }).click();
       expect(await page.getByRole('dialog').getByRole('textbox').inputValue()).toBe('Unsaved work');
+      expect(rejectedSaves).toBe(3);
+      fixture.consumeExpectedBrowserErrors(Array(rejectedSaves).fill('console.error: Failed to load resource: the server responded with a status of 500 (Internal Server Error)'));
     });
   }, 120_000);
 }
@@ -126,6 +132,8 @@ test('preserves a clean remotely deleted board on exit and protects its draft af
     await page.getByRole('dialog').waitFor({ state: 'detached' });
     expect(await page.evaluate((key) => sessionStorage.getItem(key), draftKey)).toBeNull();
     expect(await guardsExit(page)).toBe(false);
+    expect(fixture.failedResponses).toEqual(Array(2).fill(`404 GET ${integration.garcon.baseUrl}${endpoint}?id=diagram`));
+    fixture.consumeExpectedBrowserErrors(Array(2).fill('console.error: Failed to load resource: the server responded with a status of 404 (Not Found)'));
   });
 }, 120_000);
 
@@ -151,6 +159,11 @@ test('completes a confirmed deletion when its successful response was lost', asy
     await dialog.waitFor({ state: 'detached' });
     expect(await page.getByRole('button', { name: 'Create canvas', exact: true }).isVisible()).toBe(true);
     expect(await integration.client.get<CanvasListResponse>(endpoint)).toEqual({ canvases: [], unavailableIds: [] });
+    expect(fixture.failedResponses).toEqual([`404 DELETE ${integration.garcon.baseUrl}${endpoint}`]);
+    fixture.consumeExpectedBrowserErrors([
+      'console.error: Failed to load resource: net::ERR_FAILED',
+      'console.error: Failed to load resource: the server responded with a status of 404 (Not Found)',
+    ]);
   });
 }, 120_000);
 

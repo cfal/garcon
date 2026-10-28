@@ -30,8 +30,8 @@ async function connectReviewRepository(fixture: ChromiumFixture) {
   });
 }
 
-function assertOnlyExpectedHttpErrors(fixture: ChromiumFixture) {
-  expect(fixture.browserErrors.filter(error => error !== 'console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)')).toEqual([]);
+function assertOnlyExpectedHttpErrors(fixture: ChromiumFixture, failures: number) {
+  fixture.consumeExpectedBrowserErrors(Array(failures).fill('console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)'));
 }
 
 test('uncertain push reports its captured executor after disconnection without replay', async () => {
@@ -73,7 +73,7 @@ test('uncertain push reports its captured executor after disconnection without r
       await page.getByText(`Integration worker: ${project}: Push outcome unknown; inspect the remote.`, { exact: true }).waitFor();
       expect(calls).toBe(1);
       expect(await runFixtureGit(remote, 'rev-parse', 'refs/heads/main')).toBe(head);
-      assertOnlyExpectedHttpErrors(fixture);
+      assertOnlyExpectedHttpErrors(fixture, calls);
     } finally { release.resolve(); }
   }, undefined, remoteOptions);
 }, 120_000);
@@ -123,7 +123,7 @@ test('worktree creation blocks Refresh and reports uncertainty after dialog disc
       await page.getByText(`Integration worker: ${project}: Worktree outcome unknown; inspect the repository.`, { exact: true }).waitFor();
       expect(calls).toBe(1);
       expect(await runFixtureGit(project, 'worktree', 'list', '--porcelain')).toContain(`worktree ${join(project, 'feature')}`);
-      assertOnlyExpectedHttpErrors(fixture);
+      assertOnlyExpectedHttpErrors(fixture, calls);
     } finally { release.resolve(); }
   }, undefined, remoteOptions);
 }, 120_000);
@@ -159,7 +159,7 @@ test('failed PR detail refresh waits for an explicit retry', async () => {
     await panel.locator('[data-pr-detail]').getByRole('button', { name: 'Retry', exact: true }).click();
     expect((await retried).status()).toBe(200);
     expect(requests).toBe(3);
-    assertOnlyExpectedHttpErrors(fixture);
+    assertOnlyExpectedHttpErrors(fixture, 1);
   }, undefined, {
     ...remoteOptions,
     resolveServerEnvironment: dirs => ({ PATH: join(dirs.root, 'gh-bin') }),

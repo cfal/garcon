@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
 test('worker base replacement refreshes breadcrumbs while preserving root-qualified dirty documents', async () => {
-  await withChromiumFixture('executor-project-base', async ({ page, integration, browserErrors }, markPhase) => {
+  await withChromiumFixture('executor-project-base', async ({ page, integration, withExpectedConsoleErrors }, markPhase) => {
     const { client, executionDirs, directAgents } = integration;
     const root = executionDirs.project;
     const file = join(root, 'retained.txt');
@@ -41,21 +41,24 @@ test('worker base replacement refreshes breadcrumbs while preserving root-qualif
     await page.locator(`[role="tab"][aria-controls$="-panel-${originalId}"]`).click();
     await browserExpect(original.locator('.cm-content')).toHaveText('Synthetic preserved edit');
 
-    markPhase('narrowing worker base');
-    await integration.crashAndRestartExecutorWorker(narrow);
-    await browserExpect(original.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
-    const denied = page.waitForResponse((response) => response.request().method() === 'PUT' && new URL(response.url()).pathname === '/api/v1/files/text');
-    await original.locator('.cm-content').press('Control+s');
-    expect((await denied).status()).toBe(403);
-    await browserExpect(original.locator('.cm-content')).toHaveText('Synthetic preserved edit');
-    expect(await readFile(file, 'utf8')).toBe('Synthetic original content');
-    await page.getByRole('tab', { name: 'Files', exact: true }).click();
-    await browserExpect(entry).not.toBeVisible();
-    expect((await client.getChatSnapshot(chatId)).chat).toMatchObject({ executorId: client.executorId, projectPath: root });
-    expect(integration.garcon.pid).toBe(pid);
-    await page.locator(`[role="tab"][aria-controls$="-panel-${originalId}"]`).click();
-    await page.setViewportSize({ width: 390, height: 844 });
-    await browserExpect(original.locator('.cm-content')).toHaveText('Synthetic preserved edit');
-    expect(browserErrors.filter((error) => error.startsWith('pageerror:'))).toEqual([]);
+    await withExpectedConsoleErrors([
+      'Failed to load resource: the server responded with a status of 403 (Forbidden)',
+    ], async () => {
+      markPhase('narrowing worker base');
+      await integration.crashAndRestartExecutorWorker(narrow);
+      await browserExpect(original.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
+      const denied = page.waitForResponse((response) => response.request().method() === 'PUT' && new URL(response.url()).pathname === '/api/v1/files/text');
+      await original.locator('.cm-content').press('Control+s');
+      expect((await denied).status()).toBe(403);
+      await browserExpect(original.locator('.cm-content')).toHaveText('Synthetic preserved edit');
+      expect(await readFile(file, 'utf8')).toBe('Synthetic original content');
+      await page.getByRole('tab', { name: 'Files', exact: true }).click();
+      await browserExpect(entry).not.toBeVisible();
+      expect((await client.getChatSnapshot(chatId)).chat).toMatchObject({ executorId: client.executorId, projectPath: root });
+      expect(integration.garcon.pid).toBe(pid);
+      await page.locator(`[role="tab"][aria-controls$="-panel-${originalId}"]`).click();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await browserExpect(original.locator('.cm-content')).toHaveText('Synthetic preserved edit');
+    });
   }, undefined, { executionBackend: 'remote-executor-dials', projectRoots: 'separate' });
 }, 180_000);

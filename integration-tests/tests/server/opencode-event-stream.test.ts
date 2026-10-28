@@ -29,9 +29,7 @@ import {
 // cannot leak under the retired turn, and the replacement global stream recovers.
 let environment: ScriptedOpenCodeTestEnvironment | undefined;
 
-const describeOnLinux = process.platform === 'linux' ? describe : describe.skip;
-
-describeOnLinux('OpenCode global event stream through a real proxy', () => {
+describe.skipIf(process.platform !== 'linux')('OpenCode global event stream through a real proxy', () => {
   beforeEach(() => {
     environment = startScriptedOpenCodeTestEnvironment({ proxy: true });
   });

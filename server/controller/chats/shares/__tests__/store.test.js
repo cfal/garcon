@@ -4,9 +4,15 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 
-import { AssistantMessage, UserMessage } from '../../../../../common/chat-types.ts';
+import {
+  AssistantMessage,
+  CommandOutputMessage,
+  CommandResultMessage,
+  UserMessage,
+} from '../../../../../common/chat-types.ts';
 import { storedProviderRows } from '../../../ledger/__tests__/stored-rows.ts';
 import { ShareStore } from '../store.js';
+import { SHARE_ARTIFACT_REVISION } from '../snapshot-format.ts';
 import { TranscriptRenderingWorker } from '../../transcript-rendering/client.ts';
 import { inlineTranscriptRendering } from '../../transcript-rendering/__tests__/inline-transcript-rendering.ts';
 import { withFailingDirectorySync } from '../../../../common/__tests__/atomic-write-failure.ts';
@@ -56,9 +62,9 @@ function heldRendering() {
         await hold();
         return inlineTranscriptRendering.renderShareSnapshot(input, signal);
       },
-      async convertShareSnapshot(shareToken, json, signal) {
+      async upgradeShareSnapshot(shareToken, format, snapshotPath, signal) {
         await hold();
-        return inlineTranscriptRendering.convertShareSnapshot(shareToken, json, signal);
+        return inlineTranscriptRendering.upgradeShareSnapshot(shareToken, format, snapshotPath, signal);
       },
     },
     holdNext() {
@@ -90,6 +96,27 @@ function legacySnapshot(token, overrides = {}) {
     shareToken: token,
     ...publication(overrides),
     messages: [{ type: 'user-message', timestamp: AT, content: 'hello' }],
+  };
+}
+
+// Upgrading the large older share fixture held the loop for about 80 ms when the controller
+// read and cloned its snapshot, and holds it for a few ms when the Worker reads it.
+const MAX_EVENT_LOOP_GAP_MS = 50;
+
+// Records the longest interval between timer turns until stopped.
+function startEventLoopProbe() {
+  let last = performance.now();
+  let maxGapMs = 0;
+  const timer = setInterval(() => {
+    const now = performance.now();
+    maxGapMs = Math.max(maxGapMs, now - last);
+    last = now;
+  }, 1);
+  return {
+    stop() {
+      clearInterval(timer);
+      return Math.max(maxGapMs, performance.now() - last);
+    },
   };
 }
 
@@ -202,7 +229,10 @@ describe('ShareStore', () => {
 
     const indexRaw = JSON.parse(await fs.readFile(path.join(workspaceDir, 'shared-chats.json'), 'utf8'));
     expect(indexRaw.version).toBe(2);
-    expect(indexRaw.shares[created.shareToken]).toEqual(indexEntry({ ...publication(), shareToken: created.shareToken }));
+    expect(indexRaw.shares[created.shareToken]).toEqual({
+      ...indexEntry({ ...publication(), shareToken: created.shareToken }),
+      artifactRevision: SHARE_ARTIFACT_REVISION,
+    });
     const lines = (await fs.readFile(snapshotPath(created.shareToken), 'utf8')).split('\n');
     expect(JSON.parse(lines[0])).toMatchObject({ chatId: 'chat-1', messageCount: 2, origin: publication().origin });
     expect(lines.slice(1).map((line) => JSON.parse(line).content)).toEqual(['hello', 'answer']);
@@ -466,6 +496,67 @@ describe('ShareStore', () => {
     expect(await fs.readFile(snapshotPath('document-token', 'txt'), 'utf8')).toContain('hello');
     expect((await store.getMessages('document-token')).messages).toHaveLength(1);
   });
+
+  it('renders a share written by an older renderer again before its first read serves it', async () => {
+    const sentinel = '/private/sentinel-project';
+    const token = 'older-token';
+    const messages = [
+      new UserMessage(AT, 'Run the build'),
+      new CommandOutputMessage(AT, 'command-1', 'stdout', 'plain', 'build passed', { executorId: 'local', projectPath: sentinel }),
+      new CommandResultMessage(AT, 'command-1', {
+        outcome: 'finished', exitCode: 0, signal: null, capture: 'complete', cwd: { kind: 'reported', path: sentinel },
+      }),
+    ];
+    const { messages: _messages, ...header } = legacySnapshot(token, { projectPath: sentinel });
+    await fs.mkdir(path.join(workspaceDir, 'shares'));
+    await writeIndex({ [token]: indexEntry({ ...header }) });
+    await fs.writeFile(snapshotPath(token), [
+      JSON.stringify({ ...header, messageCount: messages.length }),
+      ...messages.map((message) => JSON.stringify(message)),
+    ].join('\n'));
+    await fs.writeFile(snapshotPath(token, 'txt'), `Title: Share title\nProject Path: ${sentinel}\n`);
+
+    const store = createStore();
+    await store.init();
+    const textPath = await store.getTextPath(token);
+
+    const servedText = await fs.readFile(textPath, 'utf8');
+    expect(servedText).not.toContain(sentinel);
+    expect(servedText).toContain('build passed');
+    const shared = await store.getMessages(token, () => ({ start: 0, end: messages.length }));
+    expect(shared.messages.join('\n')).not.toContain(sentinel);
+    expect(shared.messages.map((line) => JSON.parse(line).type)).toEqual(['user-message', 'command-output', 'command-result']);
+    const indexRaw = JSON.parse(await fs.readFile(path.join(workspaceDir, 'shared-chats.json'), 'utf8'));
+    expect(indexRaw.shares[token].artifactRevision).toBe(SHARE_ARTIFACT_REVISION);
+  });
+
+  it('upgrades a large older share without holding the event loop', async () => {
+    const token = 'large-older-token';
+    const body = 'Synthetic shared content with generic identifiers. '.repeat(1_200);
+    const messageCount = 1_200;
+    const { messages: _messages, ...header } = legacySnapshot(token);
+    await fs.mkdir(path.join(workspaceDir, 'shares'));
+    await writeIndex({ [token]: indexEntry(header) });
+    await fs.writeFile(snapshotPath(token), [
+      JSON.stringify({ ...header, messageCount }),
+      ...Array.from({ length: messageCount }, (_, index) => JSON.stringify(new AssistantMessage(AT, `${index} ${body}`))),
+    ].join('\n'));
+    const rendering = new TranscriptRenderingWorker();
+    try {
+      const store = createStore(rendering);
+      await store.init();
+
+      const probe = startEventLoopProbe();
+      const textPath = await store.getTextPath(token);
+      const maxGapMs = probe.stop();
+
+      expect(textPath).toBe(snapshotPath(token, 'txt'));
+      expect((await store.getHeader(token)).messageCount).toBe(messageCount);
+      expect(maxGapMs).toBeLessThan(MAX_EVENT_LOOP_GAP_MS);
+    } finally {
+      rendering.close();
+    }
+  }, 30_000);
 
   it('converts a snapshot stored as one document on its first read', async () => {
     const snapshot = await writeDocumentSnapshot('document-token', { title: 'Document title' });

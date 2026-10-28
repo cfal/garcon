@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { captureBrowserErrors } from '../../support/browser-errors.js';
 import { readFile, readdir } from "node:fs/promises";
 import { chromium } from "playwright";
 
@@ -23,6 +24,8 @@ for (const hasTouch of [false, true]) {
         hasTouch,
         viewport: { width: hasTouch ? 390 : 1440, height: 900 },
       });
+      const browserErrors: string[] = [];
+      captureBrowserErrors(page.context(), browserErrors);
       await page.setContent(`<!doctype html><html data-theme="phosphor-light">
         <head><style>${css}</style></head><body>
           <input class="canvas-input" value="Canvas title">
@@ -93,6 +96,7 @@ for (const hasTouch of [false, true]) {
           );
         }
       }
+      expect(browserErrors).toEqual([]);
     } finally {
       await browser.close();
     }
