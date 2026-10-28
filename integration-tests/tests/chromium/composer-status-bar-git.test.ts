@@ -6,15 +6,15 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { Deferred, withTimeout } from '../../support/deferred.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 
-test('Git tray survives slow reads and keeps its shared action aligned across chat states', async () => {
-  await withChromiumFixture('git-summary-tray', async ({ page, integration, assertNoBrowserErrors }, markPhase) => {
+test('Composer status bar waits for repository classification and keeps its Git action aligned', async () => {
+  await withChromiumFixture('composer-status-bar-git', async ({ page, integration, assertNoBrowserErrors }, markPhase) => {
     const project = integration.executionDirs.project;
     await initializeFixtureRepository(project);
     await runFixtureGit(project, 'branch', '-m', 'fix/git-summary-mobile-and-desktop-alignment');
     await mkdir(join(project, 'artifacts/nested'), { recursive: true });
     await writeFile(join(project, 'artifacts/nested/new.txt'), 'new\n');
     const chats: string[] = [];
-    for (const content of ['git-tray-first', 'git-tray-second']) {
+    for (const content of ['composer-status-bar-first', 'composer-status-bar-second']) {
       const chatId = integration.newChatId();
       const started = await integration.client.startDirectChat({
         chatId, content, projectPath: project, agent: integration.directAgents.openAi,
@@ -44,13 +44,14 @@ test('Git tray survives slow reads and keeps its shared action aligned across ch
     await page.goto(`${integration.garcon.baseUrl}/chat/${chats[0]}`);
     const gitButton = page.locator('[data-git-summary-button] button:visible');
     const composer = page.locator('[data-composer]:visible');
-    await gitButton.waitFor();
+    await composer.waitFor();
     try {
       markPhase('holding the initial summary beyond the idle polling interval');
       await withTimeout(received.promise, 10_000, () => 'Summary request not received');
       await page.clock.runFor(16_000);
       expect(requests).toBe(1);
       expect(failedRequests).toEqual([]);
+      await browserExpect(page.locator('[data-composer-status-bar="idle"]')).toHaveCount(0);
     } finally {
       release.resolve();
       await page.clock.resume();
@@ -85,16 +86,16 @@ test('Git tray survives slow reads and keeps its shared action aligned across ch
       expect(inset).toBeGreaterThan(10);
       expect(inset).toBeLessThan(19);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      const idleScreenshot = join(integration.dirs.root, `git-tray-idle-${width}.png`);
+      const idleScreenshot = join(integration.dirs.root, `composer-status-bar-idle-${width}.png`);
       await page.screenshot({ path: idleScreenshot });
-      console.log(`Git tray screenshot: ${idleScreenshot}`);
+      console.log(`composer status bar screenshot: ${idleScreenshot}`);
       const input = composer.locator('textarea');
       await input.fill('Retained draft');
-      const held = integration.fakeProviders.openAi.holdNext({ lastUserText: `git-tray-held-${width}` });
+      const held = integration.fakeProviders.openAi.holdNext({ lastUserText: `composer-status-bar-held-${width}` });
       let turnId: string | null = null;
       try {
         const started = await integration.client.runDirectChat({
-          chatId: chats[0]!, content: `git-tray-held-${width}`, agent: integration.directAgents.openAi,
+          chatId: chats[0]!, content: `composer-status-bar-held-${width}`, agent: integration.directAgents.openAi,
         });
         turnId = started.turnId ?? null;
         await withTimeout(held.received, 10_000, () => 'Held turn not received');
@@ -108,9 +109,9 @@ test('Git tray survives slow reads and keeps its shared action aligned across ch
         expect((await composer.boundingBox())?.y).toBe(idleBox.y);
         await browserExpect(input).toBeFocused();
         await browserExpect(input).toHaveValue('Retained draft');
-        const screenshot = join(integration.dirs.root, `git-tray-${width}.png`);
+        const screenshot = join(integration.dirs.root, `composer-status-bar-${width}.png`);
         await page.screenshot({ path: screenshot });
-        console.log(`Git tray screenshot: ${screenshot}`);
+        console.log(`composer status bar screenshot: ${screenshot}`);
 
         markPhase(`dismissing the tooltip without stopping the running chat at ${width}px`);
         const previousStops = stopRequests;

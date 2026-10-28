@@ -75,7 +75,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
         await mkdir(artifacts, { recursive: true });
 
-        phase('catalog error above the idle Git tray');
+        phase('catalog error above the idle composer status bar');
         for (const width of [1440, 390]) {
           await page.setViewportSize({ width, height: 900 });
           await expectNoticeAboveCap(notice, cap, composer);
@@ -167,10 +167,10 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           held.releaseEcho();
         }
 
-        phase('notice stays close to the composer when the idle tray is disabled');
+        phase('notice stays close to the composer when the idle composer status bar is disabled');
         await page.evaluate(() => {
           const settings = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
-          localStorage.setItem('pref_local_settings', JSON.stringify({ ...settings, showQuickCommitTray: false }));
+          localStorage.setItem('pref_local_settings', JSON.stringify({ ...settings, composerStatusBarGitProjects: false }));
         });
         await page.reload();
         await browserExpect(notice).toBeVisible();

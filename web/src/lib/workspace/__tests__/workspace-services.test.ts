@@ -623,7 +623,7 @@ describe('createWorkspaceServices', () => {
 
 	it('assembles the coordinator and keeps root-owned domain bindings reactive', async () => {
 		rootLocalSettings = createLocalSettingsStore();
-		rootLocalSettings.showQuickCommitTray = false;
+		rootLocalSettings.composerStatusBarGitProjects = false;
 		const assembled = assembleWorkspaceServices(rootLocalSettings);
 		services = assembled.services;
 		const { ghCapability } = assembled;
@@ -646,11 +646,25 @@ describe('createWorkspaceServices', () => {
 		expect(services.commands.knownFileLocations).toEqual([]);
 		expect(services.singletonSurfaces.filesIfPresent()).toBeNull();
 		expect(services.gitQuickSummary.isEnabled).toBe(false);
-		rootLocalSettings.showQuickCommitTray = true;
+		rootLocalSettings.composerStatusBarGitProjects = true;
 		ghCapability.forExecutor('local').available = false;
 		await tick();
 
 		expect(services.gitQuickSummary.isEnabled).toBe(true);
+
+		rootLocalSettings.composerStatusBarNonGitProjects = true;
+		rootLocalSettings.composerStatusBarGitBranch = false;
+		rootLocalSettings.composerStatusBarCommit = false;
+		await tick();
+		expect(services.gitQuickSummary.isEnabled).toBe(false);
+
+		rootLocalSettings.composerStatusBarGitProjects = false;
+		await tick();
+		expect(services.gitQuickSummary.isEnabled).toBe(true);
+
+		rootLocalSettings.composerStatusBarProjectPath = false;
+		await tick();
+		expect(services.gitQuickSummary.isEnabled).toBe(false);
 	});
 
 	it('assembles before terminal identity is ready without secure-context-only randomUUID', () => {
@@ -673,7 +687,7 @@ describe('createWorkspaceServices', () => {
 			resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
 		}));
 		rootLocalSettings = createLocalSettingsStore();
-		rootLocalSettings.showQuickCommitTray = false;
+		rootLocalSettings.composerStatusBarGitProjects = false;
 		const assembled = assembleWorkspaceServices(rootLocalSettings);
 		services = assembled.services;
 		const entry = makeChatEntry();
@@ -729,7 +743,7 @@ describe('createWorkspaceServices', () => {
 			resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
 		}));
 		rootLocalSettings = createLocalSettingsStore();
-		rootLocalSettings.showQuickCommitTray = true;
+		rootLocalSettings.composerStatusBarGitProjects = true;
 		const assembled = assembleWorkspaceServices(rootLocalSettings);
 		services = assembled.services;
 		const entry = makeChatEntry({ projectPath: '/workspace/a' });

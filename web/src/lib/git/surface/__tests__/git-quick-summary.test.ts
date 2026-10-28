@@ -53,13 +53,13 @@ describe('GitQuickSummaryStore', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('shows a quiet pending tray until a ready response arrives for the current project', async () => {
+	it('classifies the project only after a successful response', async () => {
 		const getSummary = vi.fn<GetSummary>().mockResolvedValue(readySummary());
 		const store = new GitQuickSummaryStore({ getSummary });
 
 		showProject(store, '/project');
 
-		expect(store.canShowTray).toBe(true);
+		expect(store.classificationFor(store.project)).toBe('unknown');
 		expect(store.summary).toBeNull();
 		await vi.advanceTimersByTimeAsync(100);
 
@@ -69,11 +69,11 @@ describe('GitQuickSummaryStore', () => {
 				signal: expect.any(AbortSignal),
 			}),
 		);
-		expect(store.canShowTray).toBe(true);
+		expect(store.classificationFor(store.project)).toBe('git');
 		expect(store.summary?.branch).toBe('main');
 	});
 
-	it('keeps non-repositories hidden', async () => {
+	it('classifies non-repositories without deciding presentation', async () => {
 		const getSummary = vi.fn<GetSummary>().mockResolvedValue({
 			status: 'not-git-repository',
 			project: '/project',
@@ -84,7 +84,7 @@ describe('GitQuickSummaryStore', () => {
 		showProject(store, '/project');
 		await vi.advanceTimersByTimeAsync(100);
 
-		expect(store.canShowTray).toBe(false);
+		expect(store.classificationFor(store.project)).toBe('non-git');
 		expect(store.lastNonRepoProject).toBe('/project');
 	});
 
@@ -99,8 +99,41 @@ describe('GitQuickSummaryStore', () => {
 		await vi.advanceTimersByTimeAsync(100);
 
 		expect(getSummary).not.toHaveBeenCalled();
-		expect(store.canShowTray).toBe(true);
+		expect(store.classificationFor(store.project)).toBe('git');
 		expect(store.summary?.project).toBe('/project');
+	});
+
+	it('retains a successful non-Git classification across refresh errors and detects git init later', async () => {
+		const getSummary = vi
+			.fn<GetSummary>()
+			.mockResolvedValueOnce({
+				status: 'not-git-repository',
+				project: '/project',
+				message: 'not git',
+			})
+			.mockRejectedValueOnce(new Error('Executor unavailable'))
+			.mockResolvedValueOnce(readySummary());
+		const store = new GitQuickSummaryStore({ getSummary });
+		showProject(store, '/project');
+		await store.refresh('idle-poll');
+		await store.refresh('idle-poll');
+		expect(store.classificationFor(store.project)).toBe('non-git');
+		expect(store.lastError).toBe('Executor unavailable');
+		await store.refresh('idle-poll');
+		expect(store.classificationFor(store.project)).toBe('git');
+		store.setEnabled(false);
+		expect(store.classificationFor(store.project)).toBe('git');
+		store.destroy();
+	});
+
+	it('does not classify an initial failure as a non-repository', async () => {
+		const store = new GitQuickSummaryStore({
+			getSummary: vi.fn<GetSummary>().mockRejectedValue(new Error('offline')),
+		});
+		showProject(store, '/project');
+		await store.refresh('idle-poll');
+		expect(store.classificationFor(store.project)).toBe('unknown');
+		store.destroy();
 	});
 
 	it('shows cached summary immediately when switching back to a project path', async () => {
@@ -129,19 +162,21 @@ describe('GitQuickSummaryStore', () => {
 
 		showProject(store, '/first');
 		expect(store.summary?.branch).toBe('branch-first');
-		expect(store.canShowTray).toBe(true);
+		expect(store.classificationFor(store.project)).toBe('git');
 
 		await vi.advanceTimersByTimeAsync(100);
 		expect(store.summary?.branch).toBe('branch-first-refresh');
 	});
 
-	it('reports a pending tray for a newly selected project before the effect adopts it', async () => {
+	it('does not reuse another project classification before the effect adopts it', async () => {
 		const getSummary = vi.fn<GetSummary>().mockResolvedValue(readySummary({ project: '/first' }));
 		const store = new GitQuickSummaryStore({ getSummary });
 		showProject(store, '/first');
 		await vi.advanceTimersByTimeAsync(100);
 
-		expect(store.canShowTrayFor({ executorId: 'local', projectPath: '/second' })).toBe(true);
+		expect(store.classificationFor({ executorId: 'local', projectPath: '/second' })).toBe(
+			'unknown',
+		);
 		expect(store.summary?.project).toBe('/first');
 	});
 
@@ -161,7 +196,7 @@ describe('GitQuickSummaryStore', () => {
 		expect(store.summaryFor({ executorId: 'local', projectPath: '/first' })?.branch).toBe(
 			'branch-first',
 		);
-		expect(store.canShowTrayFor({ executorId: 'local', projectPath: '/first' })).toBe(true);
+		expect(store.classificationFor({ executorId: 'local', projectPath: '/first' })).toBe('git');
 	});
 
 	it('deduplicates rendered project leases and refreshes every project once', async () => {
@@ -224,7 +259,7 @@ describe('GitQuickSummaryStore', () => {
 		expect(store.summaryFor({ executorId: 'local', projectPath: '/first' })).toBeNull();
 	});
 
-	it('aborts stale work and keeps the pending tray for the next project path', async () => {
+	it('aborts stale work and leaves the next project unclassified', async () => {
 		const first = deferred<GitQuickSummaryResponse>();
 		const second = deferred<GitQuickSummaryResponse>();
 		const getSummary = vi
@@ -239,7 +274,7 @@ describe('GitQuickSummaryStore', () => {
 
 		showProject(store, '/second');
 		expect(firstSignal?.aborted).toBe(true);
-		expect(store.canShowTray).toBe(true);
+		expect(store.classificationFor(store.project)).toBe('unknown');
 		expect(store.summary).toBeNull();
 
 		first.resolve(readySummary({ project: '/first', branch: 'branch-first' }));
@@ -250,7 +285,7 @@ describe('GitQuickSummaryStore', () => {
 			expect(store.summary?.project).toBe('/second');
 		});
 
-		expect(store.canShowTray).toBe(true);
+		expect(store.classificationFor(store.project)).toBe('git');
 	});
 
 	it('aborts an in-flight summary refresh when destroyed', async () => {
@@ -283,7 +318,7 @@ describe('GitQuickSummaryStore', () => {
 
 		expect(store.summary?.branch).toBe('branch-ready');
 		expect(store.lastError).toBe('quick summary failed');
-		expect(store.canShowTray).toBe(true);
+		expect(store.classificationFor(store.project)).toBe('git');
 		expect(store.isLoading).toBe(false);
 	});
 
@@ -484,7 +519,7 @@ describe('GitQuickSummaryStore', () => {
 		await store.refresh('dialog-open');
 
 		expect(getSummary).toHaveBeenCalledTimes(1);
-		expect(store.canShowTray).toBe(true);
+		expect(store.classificationFor(store.project)).toBe('git');
 	});
 
 	it('lets a slow summary finish across multiple polls and visibility refreshes', async () => {

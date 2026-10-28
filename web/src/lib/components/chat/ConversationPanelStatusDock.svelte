@@ -1,10 +1,11 @@
 <script lang="ts">
 	import LoadingStatus from './LoadingStatus.svelte';
-	import GitQuickStatusTray from './GitQuickStatusTray.svelte';
+	import ComposerStatusBar from './composer/ComposerStatusBar.svelte';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import type { LoadingStatus as ChatLoadingStatus } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
+	import type { ComposerStatusBarBranchControls } from './composer/composer-status-bar-types.js';
 	import type { ChatMaxWidth } from '$lib/stores/local-settings.svelte.js';
+	import type { ComposerStatusBarPresentation } from '$lib/chat/composer/composer-status-bar.js';
 	import {
 		CHAT_DOCK_SHELL_BASE_CLASS,
 		CHAT_MAX_WIDTH_DOCK_SHELL_CLASS,
@@ -18,16 +19,17 @@
 		status: ChatLoadingStatus | null;
 		agentId: string;
 		spinnerSelectionKey: string;
-		quickCommitEnabled: boolean;
-		quickCommitTrayVisible: boolean;
-		quickCommitSummary: GitQuickSummaryReady | null;
-		quickCommitRefreshing: boolean;
-		quickCommitError: string | null;
-		quickCommitBranchSelector: GitQuickBranchSelectorControls | null;
+		statusBar: ComposerStatusBarPresentation;
+		projectPath: string;
+		onProjectPath?: () => void;
+		gitSummary: GitQuickSummaryReady | null;
+		gitRefreshing: boolean;
+		gitError: string | null;
+		branchSelector: ComposerStatusBarBranchControls | null;
 		isMobile: boolean;
 		reduceMotion: boolean;
 		onAbort: () => void;
-		onQuickCommit: () => void;
+		onCommit: () => void;
 		announcementsEnabled?: boolean;
 	}
 
@@ -37,16 +39,17 @@
 		status,
 		agentId,
 		spinnerSelectionKey,
-		quickCommitEnabled,
-		quickCommitTrayVisible,
-		quickCommitSummary,
-		quickCommitRefreshing,
-		quickCommitError,
-		quickCommitBranchSelector,
+		statusBar,
+		projectPath,
+		onProjectPath,
+		gitSummary,
+		gitRefreshing,
+		gitError,
+		branchSelector,
 		isMobile,
 		reduceMotion,
 		onAbort,
-		onQuickCommit,
+		onCommit,
 		announcementsEnabled = true,
 	}: Props = $props();
 
@@ -73,23 +76,25 @@
 					{status}
 					{agentId}
 					{spinnerSelectionKey}
-					quickCommitVisible={quickCommitEnabled}
-					{quickCommitSummary}
-					{quickCommitRefreshing}
-					{quickCommitError}
-					{onQuickCommit}
+					showCommit={statusBar.commit}
+					{gitSummary}
+					{gitRefreshing}
+					{gitError}
+					{onCommit}
 					{onAbort}
 					{announcementsEnabled}
 				/>
 			{:else}
-				<GitQuickStatusTray
-					isVisible={quickCommitTrayVisible}
-					summary={quickCommitSummary}
-					isRefreshing={quickCommitRefreshing}
+				<ComposerStatusBar
+					{projectPath}
+					{onProjectPath}
+					items={statusBar}
+					summary={gitSummary}
+					isRefreshing={gitRefreshing}
 					{isMobile}
-					lastError={quickCommitError}
-					branchSelector={quickCommitBranchSelector}
-					onCommit={onQuickCommit}
+					lastError={gitError}
+					{branchSelector}
+					{onCommit}
 					{announcementsEnabled}
 				/>
 			{/if}

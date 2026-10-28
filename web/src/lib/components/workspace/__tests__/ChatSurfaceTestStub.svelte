@@ -46,6 +46,7 @@
 		deleteQueue: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'delete-queue'),
 		stop: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'stop'),
 		openCommit: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'commit'),
+		chooseProjectFolder: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'project-path'),
 		toggleBranch: async (surfaceId, chatId) =>
 			recordPanelAction(surfaceId, chatId, 'toggle-branch'),
 		closeBranch: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'close-branch'),

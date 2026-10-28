@@ -68,6 +68,7 @@ test('Terminal UI Style squares composer surfaces without changing Standard', as
 
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
+      await browserExpect(page.locator('.mobile-shell')).toHaveCount(width <= 768 ? 1 : 0);
       await checkCorners([tray, attachments, preview], `terminal-composer-${width}.png`);
       await browserExpect(input).toHaveValue('Synthetic retained draft');
       const commit = tray.getByRole('button', { name: /^Commit/ });
@@ -110,6 +111,7 @@ test('Terminal UI Style squares composer surfaces without changing Standard', as
       const loading = page.locator('[data-slot="chat-processing-status"]:visible');
       for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: 900 });
+        await browserExpect(page.locator('.mobile-shell')).toHaveCount(width <= 768 ? 1 : 0);
         await input.focus();
         await checkCorners([queue, loading, composer], `terminal-queue-${width}.png`);
         await browserExpect(input).toHaveValue('Synthetic retained draft');

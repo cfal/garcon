@@ -19,6 +19,18 @@ from a menu item the user already selected.
 Coverage lives in `WorkspaceWindowTitleBar.test.ts` and
 `integration-tests/tests/chromium/file-editor-polish.test.ts`.
 
+## Bits UI scrollbar lifetime
+
+ScrollArea uses the existing plain debounce helper instead of runed's reactive
+debounce for scroll-end callbacks. The reactive accessor can retain detached
+conversation contexts in Chromium, even after its timer finishes. Both scroll
+visibility and thumb tracking keep their 100 ms debounce and explicitly cancel
+pending timers on teardown; thumb tracking also stops its animation-frame loop.
+
+Coverage lives in `scroll-area-lifecycle.test.ts` and
+`integration-tests/tests/chromium/chat-view-lifetime.test.ts`, including short
+feeds and overflowing feeds scrolled before switching chats.
+
 ## Vim shared history
 
 `@replit/codemirror-vim@6.4.0` accepts per-editor `undo`, `redo`, and `save`

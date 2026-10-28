@@ -440,6 +440,10 @@
 			assertRenderedPanel(surfaceId, chatId);
 			openCommitForPanel(surfaceId, chatId);
 		},
+		chooseProjectFolder(surfaceId, chatId) {
+			assertRenderedPanel(surfaceId, chatId);
+			onChooseProjectFolder?.(chatId);
+		},
 		toggleBranch(surfaceId, chatId) {
 			assertRenderedPanel(surfaceId, chatId);
 			return toggleCommitBranchDropdown(surfaceId, chatId);

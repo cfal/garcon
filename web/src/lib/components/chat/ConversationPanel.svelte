@@ -35,7 +35,8 @@
 		composerCapReservation,
 		shouldReserveComposerCapSlot,
 	} from '$lib/chat/composer/composer-cap-layout.js';
-	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
+	import type { ComposerStatusBarBranchControls } from './composer/composer-status-bar-types.js';
+	import { composerStatusBarPresentation } from '$lib/chat/composer/composer-status-bar.js';
 	import { cn } from '$lib/utils/cn';
 
 	interface Props {
@@ -90,9 +91,7 @@
 	);
 	const canSteer = $derived(isProcessing && modelCatalog.supportsSteering(chat.agentId));
 	const executorId = $derived(chat.executorId ?? 'local');
-	const projectPath = $derived(
-		executors.gitAvailable(executorId) ? chat.projectPath || null : null,
-	);
+	const projectPath = $derived(chat.projectPath || null);
 	const gitProject = $derived(projectPath ? { executorId, projectPath } : null);
 	const quickGitSummary = $derived(quickGit.summaryFor(gitProject));
 	const quickGitBranchError = $derived(
@@ -104,11 +103,19 @@
 	);
 	const quickGitError = $derived(quickGit.lastErrorFor(gitProject) ?? quickGitBranchError);
 	const quickGitRefreshing = $derived(quickGit.isRefreshingFor(gitProject));
-	const quickGitEnabled = $derived(
-		localSettings.showQuickCommitTray && quickGit.canShowTrayFor(gitProject),
+	const statusBar = $derived(
+		composerStatusBarPresentation(localSettings, {
+			projectPath,
+			classification: quickGit.classificationFor(gitProject),
+			gitAvailable: executors.gitAvailable(executorId),
+		}),
 	);
-	const quickGitTrayVisible = $derived(!isProcessing && quickGitEnabled);
-	const statusTrayVisible = $derived(isProcessing || quickGitTrayVisible);
+	const canUpdateProjectPath = $derived(
+		!isProcessing &&
+			executors.isReady(executorId) &&
+			(chat.status === 'draft' || modelCatalog.supportsUpdateProjectPath(chat.agentId)),
+	);
+	const statusBarVisible = $derived(isProcessing || statusBar.visible);
 	const reserveStatusCap = $derived(
 		shouldReserveComposerCapSlot({
 			hasProjectPath: Boolean(projectPath),
@@ -136,8 +143,8 @@
 		panel.scroll.isPreparingInitialScroll && localSettings.autoScrollToBottom,
 	);
 	const announcementsEnabled = $derived(ownsComposer && isVisible);
-	const branchSelector = $derived.by<GitQuickBranchSelectorControls | null>(() => {
-		if (!projectPath || !quickGitSummary) return null;
+	const branchSelector = $derived.by<ComposerStatusBarBranchControls | null>(() => {
+		if (!statusBar.gitBranch || !projectPath || !quickGitSummary) return null;
 		const exposesCurrentBranchState =
 			isCommandOwner &&
 			quickGitBranches.executorId === executorId &&
@@ -286,10 +293,12 @@
 				onRetry={() => actions?.reload(surfaceId, chatId)}
 				onForkChat={(ordinal) => actions?.fork(surfaceId, chatId, ordinal)}
 				onClearBefore={(ordinal) => actions?.clearBefore(surfaceId, chatId, ordinal)}
-				onAppendToDraft={conversationActions ? (block) => actions?.appendToDraft(surfaceId, chatId, block) : undefined}
+				onAppendToDraft={conversationActions
+					? (block) => actions?.appendToDraft(surfaceId, chatId, block)
+					: undefined}
 				onGenerateTitleFromMessage={(message, ordinal) =>
 					actions?.generateTitle(surfaceId, chatId, message, ordinal) ?? Promise.resolve()}
-				reserveComposerTraySpace={capSpace.feed}
+				reserveComposerCapSpace={capSpace.feed}
 				{isPreparingInitialScroll}
 				{isVisible}
 				{announcementsEnabled}
@@ -333,9 +342,9 @@
 	</div>
 
 	{#if availabilityNotice}
-		<!-- The notice reserves only the visible tray height: min-h-14 minus translate-y-3. -->
+		<!-- The notice reserves only the visible status bar height: min-h-14 minus translate-y-3. -->
 		<div
-			class={cn(dockShellClass, capSpace.notice && statusTrayVisible && 'pb-11')}
+			class={cn(dockShellClass, capSpace.notice && statusBarVisible && 'pb-11')}
 			data-conversation-panel-notice
 		>
 			<div class={dockFrameClass}>
@@ -350,17 +359,20 @@
 		status={panel.lifecycle.loadingStatus}
 		agentId={chat.agentId}
 		spinnerSelectionKey={`${surfaceId}:${chatId}`}
-		quickCommitEnabled={quickGitEnabled}
-		quickCommitTrayVisible={quickGitTrayVisible}
-		quickCommitSummary={quickGitSummary}
-		quickCommitRefreshing={quickGitRefreshing}
-		quickCommitError={quickGitError}
-		quickCommitBranchSelector={branchSelector}
+		{statusBar}
+		projectPath={chat.projectPath}
+		onProjectPath={canUpdateProjectPath && actions
+			? () => actions?.chooseProjectFolder(surfaceId, chatId)
+			: undefined}
+		gitSummary={quickGitSummary}
+		gitRefreshing={quickGitRefreshing}
+		gitError={quickGitError}
+		{branchSelector}
 		isMobile={appShell.isMobile}
 		reduceMotion={localSettings.reduceMotion}
 		{announcementsEnabled}
 		onAbort={() => void actions?.stop(surfaceId, chatId)}
-		onQuickCommit={() => actions?.openCommit(surfaceId, chatId)}
+		onCommit={() => actions?.openCommit(surfaceId, chatId)}
 	/>
 	<div
 		class="shrink-0"

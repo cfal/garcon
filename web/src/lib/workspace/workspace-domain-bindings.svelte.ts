@@ -1,4 +1,5 @@
 import { untrack } from 'svelte';
+import { composerStatusBarNeedsGit } from '$lib/chat/composer/composer-status-bar.js';
 import { effectiveExecutorId } from '$shared/executors';
 import type { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
@@ -43,7 +44,7 @@ export class WorkspaceDomainBindings {
 			$effect(() => {
 				if (!currentTargetKey) return;
 				const hasDemand =
-					deps.singletons.hasVisibleProjectSurface || deps.localSettings.showQuickCommitTray;
+					deps.singletons.hasVisibleProjectSurface || composerStatusBarNeedsGit(deps.localSettings);
 				if (!hasDemand) return;
 				const target = untrack(() => deps.workspaceContext.currentTarget);
 				if (!target) return;
@@ -63,7 +64,7 @@ export class WorkspaceDomainBindings {
 
 			$effect(() => {
 				const projectState = deps.workspaceContext.projectState;
-				deps.gitQuickSummary.setEnabled(deps.localSettings.showQuickCommitTray);
+				deps.gitQuickSummary.setEnabled(composerStatusBarNeedsGit(deps.localSettings));
 				if (projectState.kind === 'resolving') {
 					untrack(() => deps.gitBranchActions.closeNewBranchDialog());
 					return;

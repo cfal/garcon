@@ -1218,13 +1218,13 @@ describe('PromptComposer focus', () => {
 		expect(document.activeElement).toBe(outsideButton);
 	});
 
-	it('keeps focused input editable while quick commit tray props refresh', async () => {
+	it('keeps focused input editable while composer status bar props refresh', async () => {
 		const { rerender } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',
 			selectedStatus: 'running',
-			quickCommitTrayVisible: true,
-			quickCommitSummary: quickSummary(),
-			quickCommitRefreshing: false,
+			statusBarVisible: true,
+			gitSummary: quickSummary(),
+			gitRefreshing: false,
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 
@@ -1235,9 +1235,9 @@ describe('PromptComposer focus', () => {
 		await rerender({
 			selectedChatId: 'chat-1',
 			selectedStatus: 'running',
-			quickCommitTrayVisible: true,
-			quickCommitSummary: quickSummary({ branch: 'refreshing' }),
-			quickCommitRefreshing: true,
+			statusBarVisible: true,
+			gitSummary: quickSummary({ branch: 'refreshing' }),
+			gitRefreshing: true,
 		});
 		await expectComposerFocus(textarea);
 		await fireEvent.input(textarea, { target: { value: 'first second' } });
@@ -1245,49 +1245,49 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('first second');
 	});
 
-	it('keeps the composer rounded while status trays underlap it', async () => {
+	it('keeps the composer rounded while status bars underlap it', async () => {
 		const { container, rerender } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',
 			selectedStatus: 'running',
 			selectedIsProcessing: true,
-			quickCommitTrayVisible: false,
+			statusBarVisible: false,
 		});
 		const composer = container.querySelector('[data-composer]');
 		const composerShell = container.querySelector('[data-composer-shell]');
 		const statusAnchor = container.querySelector('[data-conversation-panel-status-anchor]');
-		const processingTray = screen.getByRole('status');
+		const processingBar = screen.getByRole('status');
 
 		expect(composer).toBeTruthy();
 		expect(composerShell?.className).not.toMatch(/(^|\s)bg-/);
 		expect(composer?.className).toContain('rounded-2xl');
 		expect(composer?.className).toContain('z-20');
 		expect(composer?.className).not.toContain('rounded-t-none');
-		expect(processingTray.parentElement?.className).toContain('bottom-full');
-		expect(processingTray.parentElement?.className).toContain('translate-y-3');
-		expect(processingTray.parentElement?.className).toContain('z-10');
-		expect(processingTray.className).toContain('min-h-14');
-		expect(processingTray.className).toContain('border-b-0');
-		expect(processingTray.className).toContain('pb-5');
+		expect(processingBar.parentElement?.className).toContain('bottom-full');
+		expect(processingBar.parentElement?.className).toContain('translate-y-3');
+		expect(processingBar.parentElement?.className).toContain('z-10');
+		expect(processingBar.className).toContain('min-h-14');
+		expect(processingBar.className).toContain('border-b-0');
+		expect(processingBar.className).toContain('pb-5');
 		expect(statusAnchor?.className).toContain('composer-thinking-active');
 
 		await rerender({
 			selectedChatId: 'chat-1',
 			selectedStatus: 'running',
 			selectedIsProcessing: false,
-			quickCommitTrayVisible: true,
-			quickCommitSummary: quickSummary(),
+			statusBarVisible: true,
+			gitSummary: quickSummary(),
 		});
-		const gitTray = screen.getByRole('status');
-		expect(gitTray.getAttribute('data-slot')).toBe('chat-git-status');
+		const idleBar = screen.getByRole('status');
+		expect(idleBar.getAttribute('data-slot')).toBe('chat-git-status');
 
 		expect(composer?.className).toContain('rounded-2xl');
 		expect(composer?.className).not.toContain('rounded-t-none');
-		expect(gitTray.parentElement?.className).toContain('bottom-full');
-		expect(gitTray.parentElement?.className).toContain('translate-y-3');
-		expect(gitTray.parentElement?.className).toContain('z-10');
-		expect(gitTray.className).toContain('min-h-14');
-		expect(gitTray.className).toContain('border-b-0');
-		expect(gitTray.className).toContain('pb-5');
+		expect(idleBar.parentElement?.className).toContain('bottom-full');
+		expect(idleBar.parentElement?.className).toContain('translate-y-3');
+		expect(idleBar.parentElement?.className).toContain('z-10');
+		expect(idleBar.className).toContain('min-h-14');
+		expect(idleBar.className).toContain('border-b-0');
+		expect(idleBar.className).toContain('pb-5');
 		expect(statusAnchor?.className).not.toContain('composer-thinking-active');
 	});
 
@@ -1361,15 +1361,15 @@ describe('PromptComposer focus', () => {
 
 	it('shows quick commit before stop while the selected chat is processing', async () => {
 		const onAbort = vi.fn();
-		const onQuickCommit = vi.fn();
+		const onCommit = vi.fn();
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',
 			selectedStatus: 'running',
 			selectedIsProcessing: true,
-			quickCommitTrayVisible: false,
-			quickCommitSummary: quickSummary({ diffStats: { additions: 3, deletions: 1 } }),
+			statusBarVisible: false,
+			gitSummary: quickSummary({ diffStats: { additions: 3, deletions: 1 } }),
 			onAbort,
-			onQuickCommit,
+			onCommit,
 		});
 
 		const commitButton = screen.getByRole('button', { name: /^Commit/ });
@@ -1387,7 +1387,7 @@ describe('PromptComposer focus', () => {
 
 		await fireEvent.click(commitButton);
 
-		expect(onQuickCommit).toHaveBeenCalledOnce();
+		expect(onCommit).toHaveBeenCalledOnce();
 		expect(onAbort).not.toHaveBeenCalled();
 	});
 
@@ -1396,13 +1396,13 @@ describe('PromptComposer focus', () => {
 			selectedChatId: 'chat-1',
 			selectedStatus: 'running',
 			selectedIsProcessing: true,
-			quickCommitTrayVisible: false,
-			quickCommitSummary: quickSummary({
+			statusBarVisible: false,
+			gitSummary: quickSummary({
 				hasChanges: false,
 				hasUntracked: false,
 				diffStats: { additions: 0, deletions: 0 },
 			}),
-			onQuickCommit: vi.fn(),
+			onCommit: vi.fn(),
 		});
 
 		expect(screen.getByRole('button', { name: /^Commit/ }).className).toContain('text-muted-foreground');

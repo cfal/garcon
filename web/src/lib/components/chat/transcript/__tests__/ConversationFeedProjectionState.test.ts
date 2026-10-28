@@ -61,7 +61,7 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
 		showRefreshError: false,
 		earlierBoundary: 'hidden',
 		showLaterBoundary: false,
-		reserveComposerTraySpace: false,
+		reserveComposerCapSpace: false,
 		transcriptViewId: 'generation-1',
 		pendingPermissions: NO_PENDING_PERMISSIONS,
 		...overrides,
@@ -333,10 +333,10 @@ describe('ConversationFeedProjectionState', () => {
 		expect(shrunk.geometry.measurementReset).toBe('none');
 	});
 
-	it('publishes changed end geometry when the composer tray reservation changes', () => {
+	it('publishes changed end geometry when the composer bar reservation changes', () => {
 		const projections = new ConversationFeedProjectionState();
 		const first = projections.reconcile(input());
-		const reserved = projections.reconcile(input({ reserveComposerTraySpace: true }));
+		const reserved = projections.reconcile(input({ reserveComposerCapSpace: true }));
 
 		expect(reserved.geometry.keys).toEqual(first.geometry.keys);
 		expect(reserved.geometry.geometryRevision).toBeGreaterThan(first.geometry.geometryRevision);

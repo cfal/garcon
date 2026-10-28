@@ -1,6 +1,6 @@
 import type { GitRefKind, GitRefOption, GitRefSort, GitRefSortKey } from '$lib/api/git.js';
 
-export interface GitQuickBranchSelectorControls {
+export interface ComposerStatusBarBranchControls {
 	refs: GitRefOption[];
 	sort: GitRefSort;
 	isOpen: boolean;

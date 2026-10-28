@@ -38,7 +38,7 @@ export interface ConversationFeedProjectionInput {
 	showRefreshError: boolean;
 	earlierBoundary: ConversationEarlierBoundaryMode;
 	showLaterBoundary: boolean;
-	reserveComposerTraySpace: boolean;
+	reserveComposerCapSpace: boolean;
 	transcriptViewId: string;
 	pendingPermissions: PendingPermissionRequest[];
 	combineToolUseMessages: boolean;
@@ -126,7 +126,7 @@ function sameInput(
 		left.showRefreshError === right.showRefreshError &&
 		left.earlierBoundary === right.earlierBoundary &&
 		left.showLaterBoundary === right.showLaterBoundary &&
-		left.reserveComposerTraySpace === right.reserveComposerTraySpace &&
+		left.reserveComposerCapSpace === right.reserveComposerCapSpace &&
 		left.pendingPermissions === right.pendingPermissions,
 	);
 }
@@ -149,7 +149,7 @@ function sameProjectionConfiguration(
 		left.showRefreshError === right.showRefreshError &&
 		left.earlierBoundary === right.earlierBoundary &&
 		left.showLaterBoundary === right.showLaterBoundary &&
-		left.reserveComposerTraySpace === right.reserveComposerTraySpace &&
+		left.reserveComposerCapSpace === right.reserveComposerCapSpace &&
 		left.pendingPermissions.length === right.pendingPermissions.length &&
 		left.pendingPermissions.every(
 			(permission, index) => permission === right.pendingPermissions[index],
@@ -181,7 +181,7 @@ export class ConversationFeedProjectionState {
 			showRefreshError: input.showRefreshError,
 			earlierBoundary: input.earlierBoundary,
 			showLaterBoundary: input.showLaterBoundary,
-			reserveComposerTraySpace: input.reserveComposerTraySpace,
+			reserveComposerCapSpace: input.reserveComposerCapSpace,
 			transcriptItems: visibleTranscriptItems,
 			transcriptViewId: input.transcriptViewId,
 			pendingPermissions: input.pendingPermissions,

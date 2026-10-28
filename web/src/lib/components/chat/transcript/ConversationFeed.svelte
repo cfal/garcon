@@ -67,7 +67,7 @@
 		onRetry?: () => void;
 		onLoadEarlier?: () => void;
 		onLoadLater?: () => void;
-		reserveComposerTraySpace?: boolean;
+		reserveComposerCapSpace?: boolean;
 		isPreparingInitialScroll?: boolean;
 		isProcessing?: boolean;
 		onForkChat?: (upToSeq?: number) => void;
@@ -97,7 +97,7 @@
 		onRetry,
 		onLoadEarlier = () => {},
 		onLoadLater = () => {},
-		reserveComposerTraySpace = false,
+		reserveComposerCapSpace = false,
 		isPreparingInitialScroll = false,
 		isProcessing = false,
 		onForkChat,
@@ -186,7 +186,7 @@
 			CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth],
 			chatState.displayMessageCount > 0 && 'min-h-full justify-end',
 			chatState.displayMessageCount === 0 && 'pt-3 sm:pt-4',
-			chatState.displayMessageCount === 0 && (reserveComposerTraySpace ? 'pb-14' : 'pb-3 sm:pb-4'),
+			chatState.displayMessageCount === 0 && (reserveComposerCapSpace ? 'pb-14' : 'pb-3 sm:pb-4'),
 			isPreparingInitialScroll && 'invisible',
 		),
 	);
@@ -282,7 +282,7 @@
 		showRefreshError: chatState.loadStatus === 'error' && chatState.displayMessageCount > 0,
 		earlierBoundary: earlierBoundaryMode(),
 		showLaterBoundary: chatState.hasLaterMessages || chatState.pageStates.later.status !== 'idle',
-		reserveComposerTraySpace,
+		reserveComposerCapSpace,
 		transcriptViewId: chatState.getCursor().transcriptViewId,
 		pendingPermissions:
 			projectedPendingPermissionRequests.length > 0 && onPermissionDecision
@@ -508,7 +508,11 @@
 	{/if}
 {/snippet}
 
-<ScrollAreaPrimitive.Root type="auto" class={feedScrollAreaClass}>
+<ScrollAreaPrimitive.Root
+	type={localSettings.autoHideChatScrollbar ? 'scroll' : 'auto'}
+	class={feedScrollAreaClass}
+	data-chat-scrollbar-auto-hide={localSettings.autoHideChatScrollbar}
+>
 	{#if isPreparingInitialScroll}
 		<div
 			class="pointer-events-none absolute inset-x-0 top-8 z-10 flex items-center justify-center text-muted-foreground"
@@ -553,6 +557,7 @@
 	</ScrollAreaPrimitive.Viewport>
 	<Scrollbar
 		orientation="vertical"
+		forceMount={localSettings.autoHideChatScrollbar}
 		class={cn('w-1.5 pointer-fine:w-3', isPreparingInitialScroll && 'invisible')}
 		data-chat-feed-scrollbar
 		onpointerdowncapture={handleScrollbarPointerDownCapture}
@@ -573,3 +578,34 @@
 		{#key announcement.sequence}<span>{announcement.text}</span>{/key}
 	</div>
 </ScrollAreaPrimitive.Root>
+
+<style>
+	:global([data-chat-scrollbar-auto-hide='true'] [data-chat-feed-scrollbar]) {
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	:global(
+		[data-chat-scrollbar-auto-hide='true']
+			[data-chat-feed-scrollbar]:is([data-state='visible'], :active)
+	),
+	:global([data-chat-scrollbar-auto-hide='true']:has(:focus-visible) [data-chat-feed-scrollbar]) {
+		opacity: 1;
+		pointer-events: auto;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		:global([data-chat-scrollbar-auto-hide='true']:hover [data-chat-feed-scrollbar]) {
+			opacity: 1;
+			pointer-events: auto;
+		}
+	}
+
+	/* Forced mounting keeps drag capture intact, but an empty track must not intercept input. */
+	:global(
+		[data-chat-scrollbar-auto-hide='true']
+			[data-chat-feed-scrollbar]:not(:has([data-scroll-area-thumb]))
+	) {
+		pointer-events: none;
+	}
+</style>
