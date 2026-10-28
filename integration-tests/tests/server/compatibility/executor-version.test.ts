@@ -15,22 +15,24 @@ for (const direction of directions) {
     ...artifacts.baselines.flatMap(baseline => [[baseline, baseline], [artifacts.current, baseline], [baseline, artifacts.current]] as const),
   ];
   for (const [controller, worker] of pairs) {
-    test(`${artifacts.stage}: core workflows and controller restart ${controller.sourceSha.slice(0, 8)}/${worker.sourceSha.slice(0, 8)} (${direction})`, async () => {
+    test(`${artifacts.stage}: contract workflows and controller restart ${controller.sourceSha.slice(0, 8)}/${worker.sourceSha.slice(0, 8)} (${direction})`, async () => {
       let pair: CompatibilityPair | undefined;
       try {
         pair = await CompatibilityPair.start(controller, worker, direction);
         expect(pair.controller.authToken).toBeNull();
         expect(pair.controller.credentials).toBeNull();
-        const result = await coreWorkflow(pair);
+        const result = await contractWorkflows(pair);
+        const terminal = result.retainedTerminal as Record<string, unknown>;
+        expect(terminal).not.toBeNull();
         await cliRestartContexts(pair, 'capture-cli-context');
         await pair.restartController(artifacts.current);
         expect(pair.controller.authToken).toBeNull();
         expect(await pair.driver({ kind: 'terminal-resume', executorId: pair.executorId,
-          terminalId: stringField(result, 'terminalId'), terminalRuntimeId: stringField(result, 'terminalRuntimeId'),
+          terminalId: stringField(terminal, 'terminalId'), terminalRuntimeId: stringField(terminal, 'terminalRuntimeId'),
           previousControllerId: stringField(result, 'controllerId'), workerConfig: pair.workerDirs.config,
         })).toEqual({ retained: true });
         await cliRestartContexts(pair, 'check-cli-restart');
-        await coreWorkflow(pair);
+        await contractWorkflows(pair);
       } catch (error) { await diagnostics(direction, pair, error); throw error; }
       finally { await pair?.dispose(); }
     }, 240_000);
@@ -47,14 +49,14 @@ for (const direction of directions) {
       try {
         pair = await CompatibilityPair.start(controller, initialWorker, direction);
         const controllerPid = pair.controller.pid;
-        await coreWorkflow(pair);
+        await contractWorkflows(pair);
         for (const worker of successors) {
           const ready = await pair.replaceWorker(worker);
           expect(pair.controller.pid).toBe(controllerPid);
           const catalog = await pair.driver({ kind: 'catalog', executorId: pair.executorId });
           expect(catalog.instanceId).toBe(ready.instanceId);
           expect(catalog.agents).toContainEqual(expect.objectContaining({ id: 'shell' }));
-          await coreWorkflow(pair);
+          await contractWorkflows(pair);
         }
       } catch (error) { await diagnostics(direction, pair, error); throw error; }
       finally { await pair?.dispose(); }
@@ -102,12 +104,19 @@ for (const direction of directions) {
   }, 240_000);
 }
 
-async function coreWorkflow(pair: CompatibilityPair): Promise<Record<string, unknown>> {
-  const result = await pair.driver({ kind: 'core-workflow', executorId: pair.executorId, projectPath: pair.workerDirs.project,
+async function contractWorkflows(pair: CompatibilityPair): Promise<Record<string, unknown>> {
+  const result = await pair.driver({ kind: 'contract-workflows', executorId: pair.executorId, projectPath: pair.workerDirs.project,
     controllerConfig: pair.controllerDirs.config, workerConfig: pair.workerDirs.config, home: pair.workerDirs.home,
-    cliArtifacts: [artifacts.current, ...artifacts.baselines],
+    cliArtifacts: [artifacts.current, ...artifacts.baselines], expectedUnsupported: [],
   });
-  expect(result.checked).toEqual(['files', 'mkdir', 'git-primary', 'git-bulk', 'cli-direct', 'cli-gateway', 'execution', 'rendered-rows', 'schedules', 'terminals']);
+  expect(result.checked).toEqual(['files-read', 'files-save', 'files-list', 'mkdir', 'git-primary', 'git-bulk',
+    'cli-direct', 'execution-direct', 'schedules-direct', 'cli-gateway', 'execution-gateway', 'schedules-gateway', 'terminals']);
+  expect(result.unsupported).toEqual([]);
+  expect(result.executorCatalogKind).toBe('usable-operation-projection');
+  expect(result.contracts).toMatchObject({
+    executor: { 'files.read': [1], 'files.list': [1], 'git.getQuickSummary': [1], 'terminals.list': [1] },
+    'direct-cli': { 'cli.chats.start': [1] }, 'gateway-cli': { 'cli.chats.start': [1] },
+  });
   return result;
 }
 

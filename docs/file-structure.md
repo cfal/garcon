@@ -52,6 +52,14 @@ Protocol support,
 provider facets, executor services, settings compatibility and authorization
 remain separate ownership boundaries.
 
+`common/{protocol-contracts,executor-contracts,cli-contracts}.ts` declare exact
+operation/resource/event versions and flat requirements. Executable RPC codecs
+and registration helpers live under `remote/transport/`; their client and handler
+owners export registrations alongside implementations. Role composition lives in
+`controller/executors/controller-contracts.ts` and `remote/server/worker-contracts.ts`.
+Transport receives the immutable offer and knows no controller/runtime classes.
+Direct HTTP and reverse CLI dispatch share the route-backed registered boundary.
+
 Dependency direction:
 
 ```text

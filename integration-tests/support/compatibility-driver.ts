@@ -1,38 +1,22 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseExecutors, type ExecutorConnection } from '../../common/executors.js';
 import type { ModelCatalogResponse } from '../../common/model-catalog.js';
-import type { ReadTextResponse, DirectoryEntry } from '../../common/file-contracts.js';
-import type { ExecutionGitResults } from '../../common/git-execution.js';
-import type { TerminalCreateResponse, TerminalListResponse, TerminalStreamServerMessage } from '../../common/terminal.js';
+import type { TerminalListResponse } from '../../common/terminal.js';
 import { discoverRuntime } from '../../cli/discovery.js';
 import { GarconClient } from '../../cli/garcon-client.js';
 import { GarconTestClient } from './garcon-client.js';
-import { initializeFixtureRepository } from './git-fixture.js';
-import { cliEnvironment } from './cli-environment.js';
+import { contractWorkflows, terminalRoundTrip } from './compatibility-workflows.js';
 import type { CompatibilityCommand, CompatibilityDriverRequest, CompatibilityDriverResult } from './compatibility-contract.js';
-import { withTimeout } from './deferred.js';
 import { rejectionOf } from './promise-assertions.js';
 import { fixtureAuthToken, prepareFixtureAuth } from './fixture-auth.js';
 
 const input: CompatibilityDriverRequest = JSON.parse(await Bun.stdin.text());
 assert.equal(input.version, 1);
 
-async function terminalRoundTrip(client: GarconTestClient, terminalId: string, inventory: TerminalListResponse, data: string, marker: string): Promise<void> {
-  const attachmentId = crypto.randomUUID();
-  client.sendTerminal({ type: 'terminal-attach', terminalId, attachmentId,
-    attachmentEpoch: inventory.attachmentEpoch, clientId: 'compatibility-driver', afterSequence: 0, intent: 'takeover' });
-  await client.waitForEvent((message): message is Extract<TerminalStreamServerMessage, { type: 'terminal-attached' }> =>
-    message.type === 'terminal-attached' && message.attachmentId === attachmentId, 'compatibility terminal attach');
-  const afterIndex = client.eventRecords().length;
-  client.sendTerminal({ type: 'terminal-input', terminalId, attachmentId, data });
-  await client.waitForEvent((message): message is Extract<TerminalStreamServerMessage, { type: 'terminal-output' }> => message.type === 'terminal-output'
-    && message.attachmentId === attachmentId && message.data.includes(marker), 'compatibility terminal output', { afterIndex });
-}
 
 async function execute(client: GarconTestClient, command: CompatibilityCommand): Promise<Record<string, unknown>> {
   switch (command.kind) {
@@ -86,64 +70,7 @@ async function execute(client: GarconTestClient, command: CompatibilityCommand):
       assert(chat, 'Missing saved compatibility chat');
       return { settings: chat.agentSettings };
     }
-    case 'core-workflow': {
-      const { executorId, projectPath } = command;
-      await client.updateSettings({ ui: { chatTitle: { enabled: false } } });
-      if (!existsSync(join(projectPath, '.git'))) await initializeFixtureRepository(projectPath);
-      const path = `compat-${crypto.randomUUID()}.txt`;
-      await writeFile(join(projectPath, path), 'Synthetic original\n');
-      const query = new URLSearchParams({ executorId, projectPath, path });
-      const read = await client.get<ReadTextResponse>(`/api/v1/files/text?${query}`);
-      assert.equal(read.content, 'Synthetic original\n');
-      await client.put(`/api/v1/files/text?${query}`, { content: 'Synthetic replacement\n', expectedRevision: read.revision, conflictResolution: 'reject' });
-      assert.equal(await readFile(join(projectPath, path), 'utf8'), 'Synthetic replacement\n');
-      const name = `compat-dir-${crypto.randomUUID()}`;
-      const directory = await client.post<DirectoryEntry>(`/api/v1/files/directories?${new URLSearchParams({ executorId, path: projectPath })}`, { name });
-      assert.equal(directory.path, join(projectPath, name));
-      const summary = await client.post<ExecutionGitResults['getQuickSummary']>('/api/v1/git/quick-summary', { executorId, project: projectPath });
-      assert.equal(summary.status, 'ready');
-      const workbench = await client.post<ExecutionGitResults['getWorkbenchSnapshot']>('/api/v1/git/workbench/snapshot', { executorId, project: projectPath, mode: 'working', context: 3 });
-      assert.equal(workbench.status, 'ready');
-
-      for (const artifact of command.cliArtifacts) {
-        for (const runtime of ['controller', 'executor'] as const) {
-          const configDir = runtime === 'controller' ? command.controllerConfig : command.workerConfig;
-          const invoke = async <T>(args: readonly string[]): Promise<T> => {
-            const child = Bun.spawn([artifact.bunExecutable, 'cli/main.ts', '--config-dir', configDir, '--runtime', runtime, ...args], {
-              cwd: artifact.repoRoot, env: cliEnvironment({ HOME: command.home }), stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
-            });
-            try {
-              const [exitCode, stdout, stderr] = await withTimeout(Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]),
-                30_000, () => 'Compatibility CLI timed out');
-              assert.equal(exitCode, 0, stderr);
-              return JSON.parse(stdout);
-            } finally { if (child.exitCode === null) { child.kill(); await child.exited; } }
-          };
-          const agents = await invoke<{ agents: { id: string }[] }>(['list', 'agents', '--executor', executorId, '--json']);
-          assert(agents.agents.some((agent: { id: string }) => agent.id === 'shell'));
-          const started = await invoke<{ receipt: { chatId: string } }>(['start', '--agent', 'shell', '--model', 'sh', '--executor', executorId, '--cwd', projectPath, '--json', "printf 'Synthetic compatibility output\\n'"]);
-          const chatId = started.receipt.chatId;
-          assert.equal(typeof chatId, 'string');
-          await client.waitForProcessing(chatId, false);
-          const messages = (await client.getMessages(chatId)).messages.map(row => row.message);
-          assert(messages.some(message => message.type === 'command-output' && message.content === 'Synthetic compatibility output\n'),
-            'Missing rendered row from the execution worker');
-          const definition = { schedule: { type: 'once', runAtUtc: '2099-01-01T09:00:00.000Z' },
-            target: { type: 'existing-chat', chatId, busyBehavior: 'skip' }, prompt: 'Synthetic scheduled note' };
-          const created = await invoke<{ scheduledPrompt: { id: string }; revision: number }>(['schedule', 'create', '--definition', JSON.stringify(definition), '--json']);
-          await invoke(['schedule', 'show', created.scheduledPrompt.id, '--json']);
-          await invoke(['schedule', 'delete', created.scheduledPrompt.id, '--expected-revision', String(created.revision), '--json']);
-        }
-      }
-      const inventory = await client.get<TerminalListResponse>(`/api/v1/terminals?executorId=${executorId}`);
-      const { terminal } = await client.post<TerminalCreateResponse>('/api/v1/terminals', { executorId,
-        expectedTerminalRuntimeId: inventory.terminalRuntimeId, requestId: crypto.randomUUID(), requestedInitialWorkingDirectory: projectPath });
-      await terminalRoundTrip(client, terminal.terminalId, inventory,
-        "stty -echo; export COMPATIBILITY_VALUE=retained; printf 'compat-%s\\n' ready\r", 'compat-ready');
-      const context = await discoverRuntime({ configDir: command.workerConfig, runtime: 'executor' });
-      return { terminalId: terminal.terminalId, terminalRuntimeId: inventory.terminalRuntimeId, controllerId: context.instanceId,
-        checked: ['files', 'mkdir', 'git-primary', 'git-bulk', 'cli-direct', 'cli-gateway', 'execution', 'rendered-rows', 'schedules', 'terminals'] };
-    }
+    case 'contract-workflows': return contractWorkflows(client, command);
     case 'terminal-resume': {
       const inventory = await client.get<TerminalListResponse>(`/api/v1/terminals?executorId=${command.executorId}`);
       assert.equal(inventory.terminalRuntimeId, command.terminalRuntimeId);

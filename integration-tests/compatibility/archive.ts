@@ -7,7 +7,7 @@ import { CURRENT_ARTIFACT } from '../support/source-artifact.js';
 
 const output = process.argv[2];
 assert(output, 'Usage: bun integration-tests/compatibility/archive.ts <source.tar.gz>');
-assert.equal(Bun.version, '1.4.3', 'Archive the core-1 baseline with the CI-pinned Bun 1.4.3');
+assert.equal(Bun.version, '1.4.3', 'Archive the contracts-v1 baseline with the CI-pinned Bun 1.4.3');
 assert.equal(await commandOutput(['git', 'diff', 'HEAD', '--name-only']), '', 'Commit and validate implementation before archiving');
 const sourceSha = await commandOutput(['git', 'rev-parse', 'HEAD']);
 const sourceTime = await commandOutput(['git', 'show', '-s', '--format=%ct', sourceSha]);
@@ -17,7 +17,7 @@ const root = await mkdtemp(join(scratch, 'garcon-baseline-archive-'));
 try {
   const lockfiles = Object.fromEntries(await Promise.all(['bun.lock', 'integration-tests/bun.lock'].map(async file =>
     [file, sha256(await readFile(join(CURRENT_ARTIFACT.repoRoot, file)))])));
-  const metadata = { core: 1, sourceSha, bunVersion: Bun.version, lockfiles };
+  const metadata = { bootstrap: 1, contractModel: 'method-versions', sourceSha, bunVersion: Bun.version, lockfiles };
   await mkdir(join(root, 'garcon'));
   await writeFile(join(root, 'garcon/compatibility-artifact.json'), `${JSON.stringify(metadata, null, 2)}\n`);
   const tar = join(root, 'source.tar');
