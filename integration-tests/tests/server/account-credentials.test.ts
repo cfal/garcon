@@ -7,6 +7,7 @@ import type { TicketBootstrap, TicketDetail, TicketWriteResult } from '../../../
 import { webSocketProtocolsForAuth } from '../../../common/ws-auth.js';
 import { discoverRuntime } from '../../../cli/discovery.js';
 import { CLI_SERVER_INSTANCE_HEADER } from '../../../common/server-runtime.js';
+import { CLI_CONTRACT_HEADER, CLI_OPERATIONS, findCliRoute } from '../../../common/cli-contracts.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { GarconTestClient } from '../../support/garcon-client.js';
 import { GarconProcess } from '../../support/garcon-process.js';
@@ -87,11 +88,15 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
         expect((await request('/api/v1/auth/login', 'POST', { username: 'owner-after', password: 'synthetic-password-after' })).status).toBe(200);
         const connection = await discoverRuntime({ configDir: fixture.executionDirs.config,
           runtime: executorId === 'local' ? 'controller' : 'executor' });
-        const cliFetch = (path: string, method = 'GET', body?: unknown) => fetch(`${connection.baseUrl}${path}`, {
-          method, headers: { Authorization: `Bearer ${connection.localCapability}`, 'Content-Type': 'application/json',
-            [CLI_SERVER_INSTANCE_HEADER]: connection.instanceId },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        });
+        const cliFetch = (path: string, method = 'GET', body?: unknown) => {
+          const route = findCliRoute(method, new URL(path, connection.baseUrl).pathname);
+          return fetch(`${connection.baseUrl}${path}`, {
+            method, headers: { Authorization: `Bearer ${connection.localCapability}`, 'Content-Type': 'application/json',
+              [CLI_SERVER_INSTANCE_HEADER]: connection.instanceId,
+              ...(route ? { [CLI_CONTRACT_HEADER]: `${CLI_OPERATIONS[route.operation][1].name}@1` } : {}) },
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          });
+        };
         const listed = await cliFetch(`/api/v1/tickets?assignee=user:${credentials.username}`);
         const listBody = await listed.json() as { items: unknown[] };
         expect(listed.status, JSON.stringify(listBody)).toBe(200);
