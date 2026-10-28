@@ -2,7 +2,12 @@
   "definition": {
     "name": "terminals.create",
     "version": 1,
-    "requires": [],
+    "requires": [
+      {
+        "name": "terminals.terminate",
+        "version": 1
+      }
+    ],
     "lane": "primary",
     "continuity": "session",
     "direction": "controller-to-worker"

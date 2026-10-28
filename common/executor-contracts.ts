@@ -173,7 +173,7 @@ export const RPC_V1 = Object.freeze({
   'steering.captureTarget': rpc('steering.captureTarget', 'primary', 'journaled', 'controller-to-worker', journal),
   'steering.steer': rpc('steering.steer', 'primary', 'journaled', 'controller-to-worker', journal),
   'terminals.attach': rpc('terminals.attach', 'primary', 'session', 'controller-to-worker', attach, { returnsResource: TERMINAL_ATTACHMENT_V1 }),
-  'terminals.create': rpc('terminals.create', 'primary', 'session', 'controller-to-worker', []),
+  'terminals.create': rpc('terminals.create', 'primary', 'session', 'controller-to-worker', [{ name: 'terminals.terminate', version: 1 }]),
   'terminals.detach': rpc('terminals.detach', 'primary', 'session', 'controller-to-worker', attachment, { acceptsResource: TERMINAL_ATTACHMENT_V1 }),
   'terminals.input': rpc('terminals.input', 'primary', 'session', 'controller-to-worker', attachment, { acceptsResource: TERMINAL_ATTACHMENT_V1 }),
   'terminals.list': rpc('terminals.list', 'primary', 'session', 'controller-to-worker', []),
