@@ -8,6 +8,7 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { withTimeout } from '../../support/deferred.js';
 import { waitForExecutorReconnect } from '../../support/executor-link.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
+import { setTerminalAppearance } from '../../support/terminal-appearance.js';
 
 async function expectNoticeAboveCap(notice: Locator, cap: Locator, composer: Locator): Promise<void> {
   await browserExpect(notice).toBeVisible();
@@ -85,12 +86,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
             surfaces.push({ surface, standardRadius });
           }
           for (const terminalAppearance of [true, false]) {
-            await page.evaluate(terminalAppearance => {
-              const key = 'pref_local_settings';
-              localStorage.setItem(key, JSON.stringify({ ...JSON.parse(localStorage.getItem(key) ?? '{}'), terminalAppearance }));
-              window.dispatchEvent(new StorageEvent('storage', { key, storageArea: localStorage }));
-            }, terminalAppearance);
-            await browserExpect(page.locator('html')).toHaveAttribute('data-theme-appearance', terminalAppearance ? 'terminal' : 'standard');
+            await setTerminalAppearance(page, terminalAppearance);
             for (const { surface, standardRadius } of surfaces) {
               await browserExpect(surface).toHaveCSS('border-radius', terminalAppearance ? '0px' : standardRadius);
             }

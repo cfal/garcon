@@ -1,15 +1,18 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import { CHAT_EVENT_CARD_SURFACE_CLASSES } from '$lib/chat/transcript/chat-event-card-style';
+import {
+	CHAT_EVENT_CARD_SURFACE_CLASSES,
+	type ChatEventCardVariant,
+} from '$lib/chat/transcript/chat-event-card-style';
 import ChatEventCard from '../rows/ChatEventCard.svelte';
 
+const variants = Object.keys(CHAT_EVENT_CARD_SURFACE_CLASSES) as ChatEventCardVariant[];
+
 describe('ChatEventCard', () => {
-	it.each(Object.keys(CHAT_EVENT_CARD_SURFACE_CLASSES))(
+	it.each(variants)(
 		'exposes the appearance slot for the %s surface',
 		(variant) => {
-			render(ChatEventCard, {
-				variant: variant as keyof typeof CHAT_EVENT_CARD_SURFACE_CLASSES,
-			});
+			render(ChatEventCard, { variant });
 
 			const card = screen.getByRole('article');
 			expect(card.getAttribute('data-slot')).toBe('chat-event-card');

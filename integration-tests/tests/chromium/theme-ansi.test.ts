@@ -5,6 +5,7 @@ import type { Locator } from 'playwright';
 import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { setTerminalAppearance } from '../../support/terminal-appearance.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
 import { AmpOracleToolUseMessage, CompactionMessage } from '../../../common/chat-types.js';
 import type { AddChatRowRequest, ChatRowTargetResponse } from '../../../common/chat-row-contracts.js';
@@ -51,12 +52,7 @@ test('Terminal UI Style squares composer surfaces without changing Standard', as
         baselines.push({ surface, standardRadius });
       }
       for (const terminalAppearance of [true, false]) {
-        await page.evaluate(terminalAppearance => {
-          const key = 'pref_local_settings';
-          localStorage.setItem(key, JSON.stringify({ ...JSON.parse(localStorage.getItem(key) ?? '{}'), terminalAppearance }));
-          window.dispatchEvent(new StorageEvent('storage', { key, storageArea: localStorage }));
-        }, terminalAppearance);
-        await browserExpect(page.locator('html')).toHaveAttribute('data-theme-appearance', terminalAppearance ? 'terminal' : 'standard');
+        await setTerminalAppearance(page, terminalAppearance);
         for (const { surface, standardRadius } of baselines) {
           await browserExpect(surface).toBeVisible();
           await browserExpect(surface).toHaveCSS('border-radius', terminalAppearance ? '0px' : standardRadius);
@@ -79,13 +75,16 @@ test('Terminal UI Style squares composer surfaces without changing Standard', as
       await checkCorners([page.getByRole('tooltip')]);
       await commit.press('Escape');
       await browserExpect(page.getByRole('tooltip')).toHaveCount(0);
-      for (const query of ['/rename', '@example']) {
+      for (const { query, expectedOption, expectedInput } of [
+        { query: '/rename', expectedOption: '/rename', expectedInput: '/rename ' },
+        { query: '@example', expectedOption: 'example.txt', expectedInput: '@example.txt ' },
+      ]) {
         await input.fill(query);
-        await browserExpect(menu).toContainText(query === '/rename' ? '/rename' : 'example.txt');
+        await browserExpect(menu).toContainText(expectedOption);
         await checkCorners([menu]);
         await input.press('Enter');
         await browserExpect(menu).toHaveCount(0);
-        await browserExpect(input).toHaveValue(query === '/rename' ? '/rename ' : '@example.txt ');
+        await browserExpect(input).toHaveValue(expectedInput);
       }
       await input.fill(';;');
       const palette = page.getByRole('dialog', { name: 'Insert Snippet' });
@@ -149,9 +148,9 @@ test.each(['live', 'shared'] as const)('Terminal UI Style gives %s chat event ca
       beforeStart: async () => {
         const ledger = new TranscriptLedgerStore(join(integration.dirs.workspace, 'transcript-ledgers'));
         try {
-          const view = ledger.currentView(chatId)!;
+          const transcriptView = ledger.currentView(chatId)!;
           const at = '2026-01-01T00:00:00.000Z';
-          ledger.append(chatId, view.viewId, [
+          ledger.append(chatId, transcriptView.viewId, [
             new CompactionMessage(at, 'manual', 'Synthetic compaction summary'),
             new AmpOracleToolUseMessage(at, 'synthetic-oracle', 'Synthetic tool review'),
           ].map((message) => ({ kind: 'provider-row' as const, at, message, providerMeta: null })));
@@ -187,7 +186,7 @@ test.each(['live', 'shared'] as const)('Terminal UI Style gives %s chat event ca
       : page.getByRole('region', { name: 'Chat messages', exact: true });
     const compaction = feed.getByRole('article').filter({ hasText: 'Context compacted' });
     const request = feed.getByRole('article').filter({ hasText: 'Oracle review request' });
-    const tool = feed.getByRole('article').filter({ hasText: 'Oracle' }).filter({ hasNotText: 'Oracle review request' });
+    const tool = feed.getByRole('article').filter({ hasText: 'Synthetic tool review' });
     const response = feed.locator(view === 'shared' ? '[data-slot="shared-user-message"]' : '.user-message-context-target')
       .filter({ hasText: 'Oracle review response' });
     const cards: { card: Locator; standardRadius: string }[] = [];
@@ -199,18 +198,11 @@ test.each(['live', 'shared'] as const)('Terminal UI Style gives %s chat event ca
       cards.push({ card, standardRadius });
     }
 
+    await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
       for (const appearance of ['standard', 'terminal', 'standard']) {
-        await page.evaluate((terminalAppearance) => {
-          const key = 'pref_local_settings';
-          localStorage.setItem(key, JSON.stringify({
-            ...JSON.parse(localStorage.getItem(key) ?? '{}'),
-            terminalAppearance,
-          }));
-          window.dispatchEvent(new StorageEvent('storage', { key, storageArea: localStorage }));
-        }, appearance === 'terminal');
-        await browserExpect(page.locator('html')).toHaveAttribute('data-theme-appearance', appearance);
+        await setTerminalAppearance(page, appearance === 'terminal');
         for (const { card, standardRadius } of cards) {
           await browserExpect(card).toBeVisible();
           await browserExpect(card).toHaveCSS(
@@ -224,7 +216,6 @@ test.each(['live', 'shared'] as const)('Terminal UI Style gives %s chat event ca
             await browserExpect(compaction.getByText('Synthetic compaction summary')).toBeVisible();
             await browserExpect(compaction).toHaveCSS('border-radius', '0px');
           }
-          await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
           await page.screenshot({ path: join(ARTIFACT_DIRECTORY, `terminal-${view}-chat-rows-${width}.png`) });
           if (view === 'live') await compaction.getByRole('button', { name: 'Hide summary' }).click();
         }
