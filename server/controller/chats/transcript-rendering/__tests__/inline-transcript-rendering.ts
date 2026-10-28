@@ -11,8 +11,8 @@ export const inlineTranscriptRendering = {
     signal?.throwIfAborted();
     return runTranscriptRenderingTask({ kind: 'render-share-snapshot', header }, structuredClone(rows));
   },
-  async upgradeShareSnapshot(shareToken, format, text, signal) {
+  async upgradeShareSnapshot(shareToken, format, snapshotPath, signal) {
     signal?.throwIfAborted();
-    return runTranscriptRenderingTask({ kind: 'upgrade-share-snapshot', shareToken, format }, [text]);
+    return runTranscriptRenderingTask({ kind: 'upgrade-share-snapshot', shareToken, format, snapshotPath }, []);
   },
 } satisfies TranscriptRendering;

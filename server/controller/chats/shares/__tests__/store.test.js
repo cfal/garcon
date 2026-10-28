@@ -62,9 +62,9 @@ function heldRendering() {
         await hold();
         return inlineTranscriptRendering.renderShareSnapshot(input, signal);
       },
-      async upgradeShareSnapshot(shareToken, format, snapshotText, signal) {
+      async upgradeShareSnapshot(shareToken, format, snapshotPath, signal) {
         await hold();
-        return inlineTranscriptRendering.upgradeShareSnapshot(shareToken, format, snapshotText, signal);
+        return inlineTranscriptRendering.upgradeShareSnapshot(shareToken, format, snapshotPath, signal);
       },
     },
     holdNext() {
@@ -96,6 +96,27 @@ function legacySnapshot(token, overrides = {}) {
     shareToken: token,
     ...publication(overrides),
     messages: [{ type: 'user-message', timestamp: AT, content: 'hello' }],
+  };
+}
+
+// Upgrading the large older share fixture held the loop for about 80 ms when the controller
+// read and cloned its snapshot, and holds it for a few ms when the Worker reads it.
+const MAX_EVENT_LOOP_GAP_MS = 50;
+
+// Records the longest interval between timer turns until stopped.
+function startEventLoopProbe() {
+  let last = performance.now();
+  let maxGapMs = 0;
+  const timer = setInterval(() => {
+    const now = performance.now();
+    maxGapMs = Math.max(maxGapMs, now - last);
+    last = now;
+  }, 1);
+  return {
+    stop() {
+      clearInterval(timer);
+      return Math.max(maxGapMs, performance.now() - last);
+    },
   };
 }
 
@@ -508,6 +529,34 @@ describe('ShareStore', () => {
     const indexRaw = JSON.parse(await fs.readFile(path.join(workspaceDir, 'shared-chats.json'), 'utf8'));
     expect(indexRaw.shares[token].artifactRevision).toBe(SHARE_ARTIFACT_REVISION);
   });
+
+  it('upgrades a large older share without holding the event loop', async () => {
+    const token = 'large-older-token';
+    const body = 'Synthetic shared content with generic identifiers. '.repeat(1_200);
+    const messageCount = 1_200;
+    const { messages: _messages, ...header } = legacySnapshot(token);
+    await fs.mkdir(path.join(workspaceDir, 'shares'));
+    await writeIndex({ [token]: indexEntry(header) });
+    await fs.writeFile(snapshotPath(token), [
+      JSON.stringify({ ...header, messageCount }),
+      ...Array.from({ length: messageCount }, (_, index) => JSON.stringify(new AssistantMessage(AT, `${index} ${body}`))),
+    ].join('\n'));
+    const rendering = new TranscriptRenderingWorker();
+    try {
+      const store = createStore(rendering);
+      await store.init();
+
+      const probe = startEventLoopProbe();
+      const textPath = await store.getTextPath(token);
+      const maxGapMs = probe.stop();
+
+      expect(textPath).toBe(snapshotPath(token, 'txt'));
+      expect((await store.getHeader(token)).messageCount).toBe(messageCount);
+      expect(maxGapMs).toBeLessThan(MAX_EVENT_LOOP_GAP_MS);
+    } finally {
+      rendering.close();
+    }
+  }, 30_000);
 
   it('converts a snapshot stored as one document on its first read', async () => {
     const snapshot = await writeDocumentSnapshot('document-token', { title: 'Document title' });

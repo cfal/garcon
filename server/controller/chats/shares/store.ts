@@ -350,13 +350,13 @@ export class ShareStore implements IShareStore {
 
   async #upgradeArtifacts(entry: StoredShareEntry): Promise<StoredShareEntry | null> {
     const token = entry.shareToken;
-    const stored = await this.#readStoredSnapshot(token);
+    const stored = await this.#storedSnapshot(token);
     this.#assertAvailable();
     if (!stored) {
       await this.#commit(shares => { delete shares[token]; });
       return null;
     }
-    const rendered = await this.#rendering.upgradeShareSnapshot(token, stored.format, stored.text);
+    const rendered = await this.#rendering.upgradeShareSnapshot(token, stored.format, stored.path);
     this.#assertAvailable();
     if (!rendered) {
       logger.warn('share-store: a stored share snapshot is unreadable');
@@ -370,14 +370,12 @@ export class ShareStore implements IShareStore {
   }
 
   // Prefers the line-delimited snapshot, which an interrupted upgrade from a document
-  // leaves beside it.
-  async #readStoredSnapshot(token: string): Promise<{ format: ShareSnapshotFormat; text: string } | null> {
+  // leaves beside it. The caller holds the chat lock, which every share write and removal
+  // takes, so the file stays in place while the rendering Worker reads it.
+  async #storedSnapshot(token: string): Promise<{ format: ShareSnapshotFormat; path: string } | null> {
     for (const [format, extension] of [['lines', 'ndjson'], ['document', 'json']] as const) {
-      try {
-        return { format, text: await fs.readFile(this.#shareFilePath(token, extension), 'utf8') };
-      } catch (error) {
-        if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
-      }
+      const snapshotPath = this.#shareFilePath(token, extension);
+      if (await Bun.file(snapshotPath).exists()) return { format, path: snapshotPath };
     }
     return null;
   }

@@ -1,3 +1,4 @@
+import { readFileSync } from 'fs';
 import { parseStoredJson } from '../../../common/stored-json.js';
 import { decodeClonedStoredRows } from '../../ledger/codec.js';
 import { ledgerRowsToMessages } from '../../ledger/presentation.js';
@@ -25,11 +26,17 @@ export interface RenderedShareSnapshot {
 export type ShareSnapshotFormat = 'document' | 'lines';
 
 // Task parameters exclude the transcript items, which cross to the Worker separately in
-// bounded batches: stored ledger rows, or a stored share snapshot's text.
+// bounded batches as stored ledger rows. A share upgrade carries no items: the Worker reads
+// the stored snapshot file itself, so the controller neither decodes nor clones it.
 export type TranscriptRenderingTask =
   | ({ readonly kind: 'render-transcript-export' } & TranscriptExportDocumentRequest)
   | { readonly kind: 'render-share-snapshot'; readonly header: Omit<ShareSnapshotHeader, 'messageCount'> }
-  | { readonly kind: 'upgrade-share-snapshot'; readonly shareToken: string; readonly format: ShareSnapshotFormat };
+  | {
+    readonly kind: 'upgrade-share-snapshot';
+    readonly shareToken: string;
+    readonly format: ShareSnapshotFormat;
+    readonly snapshotPath: string;
+  };
 
 export type TranscriptRenderingTaskKind = TranscriptRenderingTask['kind'];
 
@@ -57,11 +64,9 @@ const TASK_HANDLERS: TaskHandlers = {
     const messages = ledgerRowsToMessages(decodeClonedStoredRows(items));
     return renderShareSnapshot({ ...header, messageCount: messages.length }, messages);
   },
-  'upgrade-share-snapshot': ({ shareToken, format }, items) => {
-    if (items.length !== 1 || typeof items[0] !== 'string') {
-      throw new Error('Transcript rendering received an invalid share snapshot');
-    }
-    const stored = decodeStoredShareSnapshot(shareToken, format, items[0]);
+  'upgrade-share-snapshot': ({ shareToken, format, snapshotPath }, items) => {
+    if (items.length !== 0) throw new Error('Transcript rendering received unexpected share snapshot items');
+    const stored = decodeStoredShareSnapshot(shareToken, format, readFileSync(snapshotPath, 'utf8'));
     if (!stored) return null;
     const { messages, ...header } = stored;
     return renderShareSnapshot({ ...header, messageCount: messages.length }, messages);

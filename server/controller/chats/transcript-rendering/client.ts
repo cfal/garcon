@@ -23,11 +23,12 @@ export interface TranscriptRendering {
     },
     signal?: AbortSignal,
   ): Promise<RenderedShareSnapshot>;
-  // Renders a stored snapshot again with the current renderer; null when it is unreadable.
+  // Renders the snapshot stored at a path again with the current renderer; null when it
+  // is unreadable. The caller keeps the file in place until the rendering settles.
   upgradeShareSnapshot(
     shareToken: string,
     format: ShareSnapshotFormat,
-    text: string,
+    snapshotPath: string,
     signal?: AbortSignal,
   ): Promise<RenderedShareSnapshot | null>;
 }
@@ -61,10 +62,10 @@ export class TranscriptRenderingWorker implements TranscriptRendering {
   upgradeShareSnapshot(
     shareToken: string,
     format: ShareSnapshotFormat,
-    text: string,
+    snapshotPath: string,
     signal?: AbortSignal,
   ): Promise<RenderedShareSnapshot | null> {
-    return this.#worker.run({ kind: 'upgrade-share-snapshot', shareToken, format }, [text], signal);
+    return this.#worker.run({ kind: 'upgrade-share-snapshot', shareToken, format, snapshotPath }, [], signal);
   }
 
   close(): void {
