@@ -51,10 +51,13 @@ for (const dialer of ['controller', 'worker']) test(`terminal RPC preserves proc
     ptys[0].data('hello');
     await until(() => first.messages.some(message => message.type === 'terminal-output'));
     const takeover = peer('takeover');
-    await expect(service.attach(authority, takeover, { type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'second', afterSequence: 0, intent: 'restore', attachmentEpoch: inventory.attachmentEpoch })).rejects.toMatchObject({ code: 'terminal-takeover-required' });
+    // Native awaits avoid Bun's promise matchers reentering buffered WebSocket delivery.
+    const takeoverRefusal = await service.attach(authority, takeover, { type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'second', afterSequence: 0, intent: 'restore', attachmentEpoch: inventory.attachmentEpoch }).catch(error => error);
+    expect(takeoverRefusal).toMatchObject({ code: 'terminal-takeover-required' });
     service.detachPeer(authority, takeover);
     await service.attach(authority, takeover, { type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'second', afterSequence: 0, intent: 'takeover', attachmentEpoch: inventory.attachmentEpoch });
-    await expect(service.input(authority, first, terminal.terminalId, 'stale')).rejects.toMatchObject({ code: 'terminal-not-attached' });
+    const staleInput = await service.input(authority, first, terminal.terminalId, 'stale').catch(error => error);
+    expect(staleInput).toMatchObject({ code: 'terminal-not-attached' });
     const before = await executor.getInfo();
     controller.current.close(new Error('Replace logical session'));
     await until(() => executor.availability === 'ready' && scopes.length === 2);
@@ -66,7 +69,8 @@ for (const dialer of ['controller', 'worker']) test(`terminal RPC preserves proc
     expect(ptys[0].killed).toBe(false);
     expect((await service.create(authority, request)).terminal.terminalId).toBe(terminal.terminalId);
     const restored = peer('restored');
-    await expect(service.attach(authority, restored, { type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'second', afterSequence: 0, intent: 'restore', attachmentEpoch: inventory.attachmentEpoch })).rejects.toMatchObject({ code: 'terminal-not-attached' });
+    const staleAttachment = await service.attach(authority, restored, { type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'second', afterSequence: 0, intent: 'restore', attachmentEpoch: inventory.attachmentEpoch }).catch(error => error);
+    expect(staleAttachment).toMatchObject({ code: 'terminal-not-attached' });
     await service.attach(authority, restored, { type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'second', afterSequence: 0, intent: 'restore', attachmentEpoch: nextInventory.attachmentEpoch });
     expect(restored.messages.find(message => message.type === 'terminal-attached').replay).toEqual([{ sequence: 1, data: 'hello' }]);
     await service.terminate(authority, terminal.terminalId, 'terminate');
