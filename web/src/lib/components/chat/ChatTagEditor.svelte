@@ -88,6 +88,7 @@
 					/>
 					{#if suggestions.length > 0}
 						<div
+							data-slot="chat-tag-suggestions"
 							class="absolute z-10 mt-1 w-full rounded-md border border-border bg-popover shadow-md"
 						>
 							{#each suggestions as suggestion (suggestion)}

@@ -64,6 +64,13 @@ async function openMenu(id: string) {
 }
 
 describe('inline queue', () => {
+	it('exposes the shared appearance hook on the rounded queue panel', () => {
+		const { container } = renderControls();
+		const panel = container.querySelector('[data-queue-status-summary]');
+		expect(panel?.getAttribute('data-slot')).toBe('chat-queue');
+		expect(panel?.classList.contains('rounded-2xl')).toBe(true);
+	});
+
 	it('invalidates cached queue measurements on Interface changes and releases the observer', async () => {
 		const controller = new QueuedInputListController();
 		controller.update('chat-1', makeQueue().entries);

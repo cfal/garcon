@@ -12,7 +12,7 @@ import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.j
 
 const ARTIFACT_DIRECTORY = join(import.meta.dirname, '../../artifacts/chromium');
 
-test('Terminal UI Style squares composer attachments and completion menus without changing Standard', async () => {
+test('Terminal UI Style squares composer surfaces without changing Standard', async () => {
   await withChromiumFixture('terminal composer surfaces', async ({ page, integration, assertNoBrowserErrors }) => {
     await initializeFixtureRepository(integration.dirs.project);
     const chatId = integration.newChatId();
@@ -35,7 +35,7 @@ test('Terminal UI Style squares composer attachments and completion menus withou
     const menu = page.locator('[data-slot="composer-completion-menu"]:visible');
     await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
 
-    async function checkCorners(surfaces: Locator[]) {
+    async function checkCorners(surfaces: Locator[], screenshot?: string) {
       const baselines = [];
       for (const surface of surfaces) {
         await browserExpect(surface).toBeVisible();
@@ -54,9 +54,9 @@ test('Terminal UI Style squares composer attachments and completion menus withou
           await browserExpect(surface).toBeVisible();
           await browserExpect(surface).toHaveCSS('border-radius', terminalAppearance ? '0px' : standardRadius);
         }
-        if (terminalAppearance && surfaces.length > 1) {
+        if (terminalAppearance && screenshot) {
           await page.screenshot({
-            path: join(ARTIFACT_DIRECTORY, `terminal-composer-${page.viewportSize()!.width}.png`),
+            path: join(ARTIFACT_DIRECTORY, screenshot),
             animations: 'disabled',
           });
         }
@@ -65,8 +65,13 @@ test('Terminal UI Style squares composer attachments and completion menus withou
 
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
-      await checkCorners([tray, attachments, preview]);
+      await checkCorners([tray, attachments, preview], `terminal-composer-${width}.png`);
       await browserExpect(input).toHaveValue('Synthetic retained draft');
+      const commit = tray.getByRole('button', { name: /^Commit/ });
+      await commit.focus();
+      await checkCorners([page.getByRole('tooltip')]);
+      await commit.press('Escape');
+      await browserExpect(page.getByRole('tooltip')).toHaveCount(0);
       for (const query of ['/rename', '@example']) {
         await input.fill(query);
         await browserExpect(menu).toContainText(query === '/rename' ? '/rename' : 'example.txt');
@@ -79,6 +84,28 @@ test('Terminal UI Style squares composer attachments and completion menus withou
     }
     await composer.getByRole('button', { name: 'Remove attachment notes.md' }).click();
     await browserExpect(attachments).toHaveCount(0);
+
+    const prompt = 'Synthetic held appearance turn';
+    const held = integration.fakeProviders.anthropic.holdNext({ lastUserText: prompt });
+    try {
+      const accepted = await integration.client.runDirectChat({ chatId, content: prompt, agent: integration.directAgents.anthropic });
+      await held.received;
+      await integration.client.pauseQueue(chatId);
+      await integration.client.enqueueNew(chatId, 'Synthetic queued appearance input');
+      const queue = page.locator('[data-queue-status-summary]');
+      const loading = page.locator('[data-slot="chat-processing-status"]:visible');
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await input.focus();
+        await checkCorners([queue, loading, composer], `terminal-queue-${width}.png`);
+        await browserExpect(input).toHaveValue('Synthetic retained draft');
+        await browserExpect(input).toBeFocused();
+      }
+      held.releaseEcho();
+      await integration.client.waitForTurnTerminal(chatId, accepted.turnId!);
+    } finally {
+      held.releaseEcho();
+    }
     assertNoBrowserErrors();
   });
 }, 60_000);
