@@ -329,8 +329,8 @@ async function createLongDirectTranscript(
   return chatId;
 }
 
-function assertNoUnexpectedReconnectBrowserErrors(errors: readonly string[]): void {
-  expect(errors.filter((error) => (
+function assertNoUnexpectedReconnectBrowserErrors(errors: string[]): void {
+  expect(errors.splice(0).filter((error) => (
     !EXPECTED_RECONNECT_BROWSER_ERRORS.some((pattern) => pattern.test(error))
   ))).toEqual([]);
 }

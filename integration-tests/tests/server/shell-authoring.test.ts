@@ -5,8 +5,9 @@ import { garconCommandResultContent } from '../../../common/garcon-command-resul
 import type { ChatMessagesMessage, ChatTitleUpdatedMessage } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
+import { executionBackend as selectedExecutionBackend } from '../../support/execution-backend.js';
 
-for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
+for (const executionBackend of [selectedExecutionBackend()]) {
   test(`Shell uses configured automatic title generation (${executionBackend})`, async () => {
     await withIntegrationFixture(`shell-title-${executionBackend}`, async fixture => {
       const { client } = fixture;

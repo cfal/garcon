@@ -5,7 +5,7 @@ import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
 test('pauses and resumes saved scheduled prompts with keyboard and touch layouts', async () => {
-  await withChromiumFixture('scheduled-prompt-toggles', async ({ page, integration }, phase) => {
+  await withChromiumFixture('scheduled-prompt-toggles', async ({ page, integration, consumeExpectedBrowserErrors }, phase) => {
     const screenshots = process.env.GARCON_SCREENSHOT_DIR;
     if (screenshots) await mkdir(screenshots, { recursive: true });
     const { client } = integration;
@@ -76,5 +76,6 @@ test('pauses and resumes saved scheduled prompts with keyboard and touch layouts
     await browserExpect(dialog.getByRole('alert')).toContainText('Synthetic save failure');
     await browserExpect(toggle).toBeChecked();
     await browserExpect(toggle).toBeEnabled();
+    consumeExpectedBrowserErrors(['console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)']);
   });
 }, 120_000);

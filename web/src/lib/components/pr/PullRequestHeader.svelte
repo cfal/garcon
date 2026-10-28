@@ -46,16 +46,6 @@
 			>
 				<RefreshCw class="h-3.5 w-3.5" />
 			</button>
-			<a
-				href={pull.url}
-				target="_blank"
-				rel="noreferrer noopener"
-				class="rounded-md p-1 hover:bg-accent hover:text-foreground"
-				aria-label={m.pull_request_open_on_github()}
-				title={m.pull_request_open_on_github()}
-			>
-				<ExternalLink class="h-3.5 w-3.5" />
-			</a>
 			{#if onClose}
 				<button
 					type="button"
@@ -68,7 +58,22 @@
 			{/if}
 		</div>
 	</div>
-	<h2 class="mt-2 text-lg leading-snug font-semibold text-foreground">{pull.title}</h2>
+	<h2 class="mt-2 text-lg leading-snug font-semibold text-foreground">
+		<a
+			href={pull.url}
+			target="_blank"
+			rel="noreferrer noopener"
+			class="group rounded-sm underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+			title={m.pull_request_open_on_github()}
+		>
+			<!-- The word joiner keeps the icon on the line of the title's last word. -->
+			{pull.title}<span aria-hidden="true"
+				>&#8288;<ExternalLink
+					class="ml-1.5 inline-block h-4 w-4 align-[-0.125em] text-muted-foreground group-hover:text-foreground"
+				/></span
+			>
+		</a>
+	</h2>
 	<div class="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
 		<span class="font-medium text-foreground">{pull.author}</span>
 		{#if age}<time datetime={pull.createdAt} title={age.tooltip}>{age.label}</time>{/if}

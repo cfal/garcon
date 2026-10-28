@@ -19,6 +19,78 @@ const TS = '2026-08-12T00:00:00.000Z';
 const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 
 describe('TranscriptLedgerService', () => {
+  it('retires permission controls after their committed request and before an unpersisted failure', async () => {
+    await withService(async ({ ledger, root }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      const delivered = [];
+      ledger.subscribe(event => delivered.push(event.type));
+      ledger.subscribePermissionRetired(control => delivered.push(control));
+      ledger.subscribeRunAbandoned(() => { delivered.push('abandoned'); });
+      lease.sink.publish({
+        type: 'permission', runId: 'run-1',
+        lifecycle: permissionRequest('incarnation-1'), decision: permissionDecision('incarnation-1'),
+      });
+      const db = new Database(path.join(root, 'chat-1', 'ledger.sqlite'));
+      db.exec("CREATE TRIGGER fail_terminal BEFORE INSERT ON transcript_rows BEGIN SELECT RAISE(FAIL, 'synthetic failure'); END");
+      db.close();
+      expect(() => lease.sink.publish({ type: 'run-ended', runId: 'run-1', outcome: 'finished' }))
+        .toThrow(LedgerFencedError);
+      expect(() => ledger.claimPermissionResolution(permissionControl())).toThrow(PermissionNotActionableError);
+      await tick();
+      expect(delivered).toEqual([
+        'permission',
+        { chatId: 'chat-1', viewId: 'view-1', runId: 'run-1', permissionOccurrenceId: 'incarnation-1' },
+        'abandoned',
+      ]);
+      expect(ledger.currentRows('chat-1').map(row => row.kind)).toEqual(['permission-requested']);
+    });
+  });
+
+  it.each(['rows', 'provider-terminal', 'interrupt', 'dispatch-failure'])('abandons only the affected run after a %s write failure', async (operation) => {
+    await withService(async ({ ledger, root }) => {
+      ledger.initializeChat('failed-chat');
+      ledger.initializeChat('healthy-chat');
+      const failed = ledger.openProducer('failed-chat', 'test');
+      const healthy = ledger.openProducer('healthy-chat', 'test');
+      ledger.beginRun('failed-chat', 'failed-run');
+      ledger.beginRun('healthy-chat', 'healthy-run');
+      const abandoned = [];
+      const commits = [];
+      ledger.subscribeRunAbandoned((chatId, runId) => abandoned.push({ chatId, runId }));
+      ledger.subscribe(event => commits.push(event));
+      const db = new Database(path.join(root, 'failed-chat', 'ledger.sqlite'));
+      db.exec("CREATE TRIGGER fail_write BEFORE INSERT ON transcript_rows BEGIN SELECT RAISE(FAIL, 'synthetic write failure'); END");
+      db.close();
+
+      const publish = () => {
+        if (operation === 'interrupt') return ledger.interruptRun('failed-chat');
+        if (operation === 'dispatch-failure') return ledger.failRun('failed-chat', 'failed-run');
+        failed.sink.publish(operation === 'rows'
+          ? { type: 'rows', rows: [{ message: new AssistantMessage(TS, 'Undelivered response') }] }
+          : { type: 'run-ended', runId: 'failed-run', outcome: 'finished' });
+      };
+      expect(publish).toThrow(LedgerFencedError);
+      await tick();
+      expect(abandoned).toEqual([{ chatId: 'failed-chat', runId: 'failed-run' }]);
+      expect(ledger.isRunActive('failed-chat')).toBe(false);
+      expect(failed.closed).toBe(true);
+      expect(ledger.currentRows('failed-chat')).toEqual([]);
+      expect(ledger.failRun('failed-chat', 'failed-run')).toBeNull();
+      expect(() => failed.sink.publish({ type: 'run-ended', runId: 'failed-run', outcome: 'finished' }))
+        .toThrow(TranscriptSinkClosedError);
+      await tick();
+      expect(commits).toEqual([]);
+
+      expect(ledger.isRunActive('healthy-chat', 'healthy-run')).toBe(true);
+      healthy.sink.publish({ type: 'run-ended', runId: 'healthy-run', outcome: 'finished' });
+      await tick();
+      expect(commits).toMatchObject([{ type: 'run-ended', chatId: 'healthy-chat', runId: 'healthy-run' }]);
+      expect(abandoned).toHaveLength(1);
+    });
+  });
+
   it('retains publication gaps only in the carryover fold, even across excluded inputs', async () => {
     await withService(async ({ ledger }) => {
       const view = ledger.initializeChat('chat-1');
@@ -1096,7 +1168,7 @@ async function withService(run, serviceOptions = {}) {
   });
   const ledger = new TranscriptLedgerService(store, { now: () => TS, ...serviceOptions });
   try {
-    await run({ ledger, store });
+    await run({ ledger, store, root });
   } finally {
     ledger.close();
     await rm(root, { recursive: true, force: true });

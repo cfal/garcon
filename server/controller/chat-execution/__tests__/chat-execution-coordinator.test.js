@@ -88,6 +88,7 @@ function createFixture(overrides = {}) {
     {
       projectAdmission,
       attachmentAdmission,
+      canDispatch: overrides.canDispatch,
       executionPolicy: overrides.executionPolicy,
       workingDirectorySettlement: overrides.workingDirectorySettlement,
       unsettledQueueReceiptKeys: () => new Set(),
@@ -255,6 +256,40 @@ describe('ChatExecutionCoordinator', () => {
     await coordinator.onAgentTurnTerminal('chat-1', { turnId: options.turnId });
     run.resolve();
     await release;
+  });
+
+  it('leaves a resumed queue unowned and untouched until its executor is ready', async () => {
+    let ready = true;
+    const canDispatch = mock(() => ready);
+    const fixture = createFixture({ canDispatch });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'queued input');
+    const paused = await coordinator.pauseChatQueue('chat-1');
+    ready = false;
+    const resumed = await coordinator.resumeChatQueue('chat-1', paused.pause.id);
+    fixture.projectAdmission.assertAvailable.mockClear();
+
+    await coordinator.triggerDrain('chat-1');
+    expect(await coordinator.readChatExecutionControl('chat-1')).toEqual(resumed);
+    expect(resumed.pause).toBeNull();
+    expect(resumed.entries).toHaveLength(1);
+    expect(fixture.projectAdmission.assertAvailable).not.toHaveBeenCalled();
+    expect(fixture.projection.admitQueuedInput).not.toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    expect(canDispatch).toHaveBeenCalledWith('chat-1');
+
+    ready = true;
+    await coordinator.triggerDrain('chat-1');
+    expect(fixture.projection.admitQueuedInput).toHaveBeenCalledTimes(1);
+    expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(1);
+    const [chatId, content, options] = fixture.turnRunner.runAgentTurn.mock.calls[0];
+    expect([chatId, content]).toEqual(['chat-1', 'queued input']);
+    const settled = await coordinator.readChatExecutionControl('chat-1');
+    expect(settled.entries).toEqual([]);
+    expect(settled.pause).toBeNull();
+    expect(settled.recentlyDispatched.map(receipt => receipt.entryId)).toEqual([resumed.entries[0].id]);
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: options.turnId });
   });
 
   it('[TLV5-L04.03-CORE-UNIT-01] keeps future-turn inputs out of the transcript until dequeue', async () => {

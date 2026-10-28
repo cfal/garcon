@@ -1208,6 +1208,12 @@ CREATE INDEX transcript_session_rows
 - A commit failure or unknown commit outcome means no broadcast and the
   chat's ledger fences for writes; the producer holds nothing, and
   whatever the fence loses falls under accepted loss 1 (section 16).
+  If a producer publication or terminal write fails during a run, core closes
+  that producer, aborts its execution best-effort, and reports a process-only
+  storage failure through the ordered chat lifecycle path. This releases
+  execution ownership and pending permission controls without claiming a
+  committed terminal row. The write fence remains; neither later input nor
+  queued work may dispatch through it. No terminal row is synthesized on restart.
 - Live backups use SQLite's backup API or `VACUUM INTO`; copying only
   `ledger.sqlite` while the WAL may contain commits is not a valid
   backup.
@@ -1921,7 +1927,11 @@ model context, carryover, or export.
   `server/controller/routes/shares.ts`, `server/controller/chats/share-store.ts`,
   `common/share-types.ts`); the share never reads the ledger again and
   is unaffected by reload or deletion of views. Share revocation policy
-  is unchanged.
+  is unchanged. Share artifacts withhold execution context the share
+  never renders: command output carries a null context and a reported
+  working directory becomes `withheld`. The share index records the
+  renderer revision of each share's artifacts, and a read renders older
+  artifacts again from the stored snapshot before serving them.
 - **Ordinary user export** captures the current view through one pinned
   watermark and folds raw ledger rows into export entries. It includes
   `user-input`, every rendered `provider-row`, every public `notice`,

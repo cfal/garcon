@@ -1,6 +1,10 @@
 import type { SharedChatOrigin, SharedChatSnapshot } from '../../../../common/share-types.ts';
 import { isRecord } from '../../../../common/json.js';
 
+// Revision of the artifacts the share renderer writes. Raising it re-renders each older
+// share on its next read, so a renderer change reaches shares published before it.
+export const SHARE_ARTIFACT_REVISION = 2;
+
 // Everything a share snapshot records except its messages.
 export type ShareIndexEntry = Omit<SharedChatSnapshot, 'messages' | 'origin'>;
 export type ShareSnapshotHeader = Omit<SharedChatSnapshot, 'messages'> & {

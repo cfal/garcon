@@ -119,11 +119,7 @@ export class AgentRuntimeRouter {
       if (this.#producerLeases.get(chatId)?.lease !== lease) return;
       const runId = this.#ledger.activeRunId(chatId);
       if (!runId) return;
-      const active = this.#executionHandles.get(chatId);
-      if (active) this.#aborts.request(chatId, active.integration, active.handle, 'publication failure');
-      else this.#pendingAbortRuns.add(runKey(chatId, runId));
-      this.#executionHandles.delete(chatId);
-      this.#bindings.forgetRun(runId);
+      this.#abortPublication(chatId, runId);
       this.#ledger.failRun(chatId, runId, error);
     },
     (chatId, lease) => {
@@ -163,6 +159,7 @@ export class AgentRuntimeRouter {
         this.#executionHandles.delete(event.chatId);
       }
     });
+    this.#ledger.subscribeRunAbandoned((chatId, runId) => this.#abortPublication(chatId, runId));
   }
   async startSession(chatId: string, prompt: string, opts: StartSessionOptions = {}): Promise<void> {
     let runId: string | null = null;
@@ -897,6 +894,15 @@ export class AgentRuntimeRouter {
     if (this.#ledger.isRunActive(chatId, runId)) {
       this.#executionHandles.set(chatId, { integration, runId, handle });
     }
+  }
+
+  #abortPublication(chatId: string, runId: string): void {
+    const active = this.#executionHandles.get(chatId);
+    if (active?.runId === runId) {
+      this.#executionHandles.delete(chatId);
+      this.#aborts.request(chatId, active.integration, active.handle, 'publication failure');
+    } else this.#pendingAbortRuns.add(runKey(chatId, runId));
+    this.#bindings.forgetRun(runId);
   }
 
   #producer(chatId: string): TranscriptProducerLease {

@@ -17,6 +17,7 @@ import { LightpandaProcess } from './lightpanda-process.js';
 import { installLightpandaWorkspaceGeometry } from './lightpanda-workspace-geometry.js';
 import { withTimeout } from './deferred.js';
 import { requireCurrentWebBuild } from './web-build-gate.js';
+import { consumeExpectedBrowserErrors, withExpectedConsoleErrors } from './browser-errors.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'e2e');
@@ -63,6 +64,7 @@ export class E2eFixture {
       const page = await context.newPage();
       await installLightpandaWorkspaceGeometry(page);
       await page.evaluateOnNewDocument(({ authToken, wsPath }) => {
+        if (location.hostname !== '127.0.0.1') return;
         if (location.hostname === '127.0.0.1' && authToken && !globalThis.localStorage.getItem('bearer-token')
           && !globalThis.localStorage.getItem('garcon.logout-epoch')) {
           globalThis.localStorage.setItem('bearer-token', JSON.stringify({ token: authToken, epoch: null }));
@@ -148,6 +150,14 @@ export class E2eFixture {
     if (this.#browserErrors.length > 0) {
       throw new Error(`Unexpected browser errors:\n${this.#browserErrors.join('\n')}`);
     }
+  }
+
+  consumeExpectedBrowserErrors(expected: readonly string[]): void {
+    consumeExpectedBrowserErrors(this.#browserErrors, expected);
+  }
+
+  withExpectedConsoleErrors<T>(messages: readonly (string | RegExp)[], run: () => Promise<T>): Promise<T> {
+    return withExpectedConsoleErrors(this.#browserErrors, messages, run);
   }
 
   async spaWebSocketConnectionCount(): Promise<number> {
@@ -281,7 +291,9 @@ export async function withE2eFixture<T>(
   const fixture = await E2eFixture.create(options);
   let failure: unknown;
   try {
-    return await run(fixture);
+    const result = await run(fixture);
+    fixture.assertNoBrowserErrors();
+    return result;
   } catch (error) {
     failure = error;
     const artifact = await fixture.writeDiagnostics(testName, error).catch(() => null);

@@ -123,12 +123,13 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(input).toHaveValue(join(root, 'alpha'));
       await browserExpect(control('nested')).toBeVisible();
       await browserExpect(control('touch created')).toBeVisible();
-      await input.fill(join(root, 'alpha', 'desk'));
+      const desktopCreated = join(root, 'alpha', 'desktop created');
+      await input.fill(desktopCreated);
+      await browserExpect(page.getByText('Path does not exist.', { exact: true })).toBeVisible();
       await browserExpect(control('nested')).toHaveCount(0);
-      await control('Create directory "desk"').click();
+      await control('Create directory "desktop created"').click();
       const deskName = browser.getByRole('textbox', { name: 'Directory name' });
-      await browserExpect(deskName).toHaveValue('desk');
-      await deskName.fill('desktop created');
+      await browserExpect(deskName).toHaveValue('desktop created');
       await screenshot('popover-create');
       await page.keyboard.press('Escape');
       await browserExpect(deskName).toHaveCount(0);
@@ -136,11 +137,15 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await control('New directory').click();
       await deskName.fill('desktop created');
       await deskName.press('Enter');
-      const desktopCreated = join(root, 'alpha', 'desktop created');
       await browserExpect(input).toHaveValue(desktopCreated);
       await browserExpect(input).toBeFocused();
       await browserExpect(browser.getByText('No subdirectories')).toBeVisible();
       expect((await stat(desktopCreated)).isDirectory()).toBe(true);
+      await browserExpect(page.getByText('Path does not exist.', { exact: true })).toHaveCount(0);
+      await browserExpect(page.locator('[data-slot="project-path-field"] .text-status-success-foreground')).toBeVisible();
+      await input.press('Enter');
+      await page.getByPlaceholder('How can I help you today?').fill('Synthetic first message');
+      await browserExpect(page.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
 
       const executorId = integration.client.executorId;
       expect(creations).toEqual([
@@ -155,7 +160,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const [status, method, url] = response.split(' ');
         return `${status} ${method} ${new URL(url!).pathname} ${new URL(url!).searchParams.get('path')}`;
       })).toEqual([stalePath, join(root, 'alpha', 'ghost')].map((path) => `404 GET /api/v1/files/browse ${path}`));
-      expect(browserErrors.filter((error) => !error.includes('status of 404'))).toEqual([]);
+      expect(browserErrors.splice(0)).toEqual(Array(2).fill('console.error: Failed to load resource: the server responded with a status of 404 (Not Found)'));
     }, undefined, { executionBackend, projectRoots: 'separate' });
   }, 120_000);
 }

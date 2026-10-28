@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { CommandOutputMessage, CommandResultMessage, TranscriptNoticeMessage, UserMessage, parseChatMessage } from '../chat-types.ts';
 import { extractGarconCommands } from '../garcon-commands.ts';
 import { transcriptEntryCategoryForMessage } from '../transcript-entry-categories.ts';
-import { commandOutcomeText, parseCommandWorkingDirectory } from '../command-output.ts';
+import { commandOutcomeText, isCleanCommandSuccess, parseCommandWorkingDirectory } from '../command-output.ts';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 const context = { executorId: 'local', projectPath: '/workspace/project' };
@@ -20,6 +20,8 @@ describe('retained command content', () => {
     new CommandOutputMessage(timestamp, 'command-1', 'stderr', 'plain', 'failure\n', context),
     new CommandResultMessage(timestamp, 'command-1', result),
     new CommandResultMessage(timestamp, 'command-truncated', { ...result, outcome: 'finished', exitCode: 0, capture: 'truncated' }),
+    new CommandOutputMessage(timestamp, 'command-shared', 'stdout', 'plain', 'shared\n', null),
+    new CommandResultMessage(timestamp, 'command-shared', { ...result, cwd: { kind: 'withheld' } }),
   ]) {
     it(`roundtrips ${message.type} without interpreting content`, () => {
       const parsed = parseChatMessage(JSON.parse(JSON.stringify(message)));
@@ -32,7 +34,8 @@ describe('retained command content', () => {
   it('rejects malformed output instead of degrading to assistant text', () => {
     const output = new CommandOutputMessage(timestamp, 'command-1', 'stderr', 'plain', 'text', context);
     expect(parseChatMessage({ ...output, format: 'markdown' })).toBeNull();
-    expect(parseChatMessage({ ...output, context: null })).toBeNull();
+    expect(parseChatMessage({ ...output, context: undefined })).toBeNull();
+    expect(parseChatMessage({ ...output, context: { executorId: 'local', projectPath: '' } })).toBeNull();
     expect(parseChatMessage({ ...output, commandId: '' })).toBeNull();
     expect(parseChatMessage({ ...output, channel: 'control' })).toBeNull();
     for (const offset of [-1, 0.5, '0', null, undefined]) {
@@ -47,6 +50,13 @@ describe('retained command content', () => {
     expect(parseChatMessage({ ...message, result: { ...result, outcome: ['finished'] } })).toBeNull();
     expect(parseChatMessage({ ...message, result: { ...result, exitCode: -1 } })).toBeNull();
     expect(parseChatMessage({ ...message, result: { ...result, cwd: { kind: 'reported', path: '' } } })).toBeNull();
+  });
+
+  it('treats a withheld working directory as reported without disclosing it', () => {
+    const withheld = { ...result, outcome: 'finished', exitCode: 0, cwd: { kind: 'withheld' } };
+    expect(isCleanCommandSuccess(withheld)).toBe(true);
+    expect(commandOutcomeText(withheld)).toBe('Completed');
+    expect(parseCommandWorkingDirectory({ kind: 'withheld', path: '/workspace' })).toEqual({ kind: 'withheld' });
   });
 
   it('keeps wire paths executor-native rather than enforcing POSIX syntax', () => {

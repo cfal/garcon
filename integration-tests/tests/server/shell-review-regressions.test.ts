@@ -5,8 +5,9 @@ import type { TranscriptExportResponse } from '../../../common/chat-export-contr
 import type { ScheduledPromptsMutationResponse } from '../../../common/scheduled-prompts.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
+import { executionBackend as selectedExecutionBackend } from '../../support/execution-backend.js';
 
-for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
+for (const executionBackend of [selectedExecutionBackend()]) {
   test(`Shell cwd settlement failure remains visible after controller restart (${executionBackend})`, async () => {
     await withIntegrationFixture(`shell-cwd-diagnostic-${executionBackend}`, async fixture => {
       const { client, executionDirs } = fixture;

@@ -1,6 +1,9 @@
+import type { CommandWorkingDirectory } from '../../../common/command-output.js';
 import type { AgentAttachment } from '../../../common/agent-execution.js';
 import type {
   AgentEstablishedSession,
+  AgentFinalResponse,
+  AgentPermissionResponseCapability,
   AgentPermissionLifecycle,
   AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
@@ -355,4 +358,63 @@ export interface TranscriptNativeActivityState {
   readonly viewId: TranscriptViewId;
   readonly session: LedgerSessionRow | null;
   readonly providerWatermark: NativeActivityProviderWatermark | null;
+}
+
+export type TranscriptCommitEvent =
+  | {
+      readonly type: 'rows';
+      readonly chatId: string;
+      readonly viewId: TranscriptViewId;
+      readonly rows: readonly LedgerRow[];
+    }
+  | {
+      readonly type: 'session';
+      readonly chatId: string;
+      readonly viewId: TranscriptViewId;
+      readonly row: LedgerSessionRow;
+    }
+  | {
+      readonly type: 'permission';
+      readonly chatId: string;
+      readonly viewId: TranscriptViewId;
+      readonly runId: string | null;
+      readonly row: LedgerPermissionRow;
+    }
+  | {
+      readonly type: 'run-ended';
+      readonly chatId: string;
+      readonly viewId: TranscriptViewId;
+      readonly runId: string;
+      readonly row: LedgerRunEndedRow;
+      readonly finalResponse: AgentFinalResponse | null;
+      readonly workingDirectory?: CommandWorkingDirectory;
+    }
+  | {
+      readonly type: 'view-replaced';
+      readonly chatId: string;
+      readonly previousViewId: TranscriptViewId;
+      readonly view: TranscriptView;
+    };
+
+export type TranscriptSessionCommitEvent = Extract<TranscriptCommitEvent, { readonly type: 'session' }>;
+
+export interface PermissionResolutionClaim {
+  readonly chatId: string;
+  readonly viewId: TranscriptViewId;
+  readonly runId: string;
+  readonly permissionOccurrenceId: string;
+  readonly claimId: string;
+  readonly decision: AgentPermissionResponseCapability;
+}
+
+export type RetiredPermissionControl = Pick<
+  PermissionResolutionClaim, 'chatId' | 'viewId' | 'runId' | 'permissionOccurrenceId'
+>;
+
+export interface ActivePermission {
+  readonly viewId: TranscriptViewId;
+  readonly runId: string;
+  readonly permissionOccurrenceId: string;
+  readonly decision: AgentPermissionResponseCapability;
+  readonly claimId: string | null;
 }

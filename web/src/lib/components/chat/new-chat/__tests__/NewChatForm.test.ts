@@ -5,6 +5,8 @@ import { loadComposerMarkdownEditor } from '../../composer/composer-markdown-edi
 import NewChatFormTestHost from './NewChatFormTestHost.svelte';
 import * as settingsApi from '$lib/api/settings';
 import * as gitApi from '$lib/api/git';
+import * as filesApi from '$lib/api/files';
+import { ApiError } from '$lib/api/client';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import * as snippetsApi from '$lib/api/snippets';
 import * as clientChatId from '$shared/client-chat-id';
@@ -40,6 +42,11 @@ vi.mock('$lib/api/chat-preambles', () => ({
 
 vi.mock('$lib/api/git', () => ({
 	getGitWorktrees: vi.fn(),
+}));
+
+vi.mock('$lib/api/files', () => ({
+	browseDirectory: vi.fn(async () => []),
+	createDirectory: vi.fn(),
 }));
 
 vi.mock('$lib/api/settings', () => ({
@@ -266,6 +273,8 @@ describe('NewChatForm', () => {
 	afterEach(() => {
 		localStorage.clear();
 		vi.unstubAllGlobals();
+		vi.mocked(filesApi.browseDirectory).mockReset().mockResolvedValue([]);
+		vi.mocked(filesApi.createDirectory).mockReset();
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		vi.mocked(clientChatId.createClientChatId).mockReset();
 		vi.mocked(clientChatId.createClientChatId).mockReturnValue(PROSPECTIVE_CHAT_ID);
@@ -428,6 +437,72 @@ describe('NewChatForm', () => {
 		expect(await screen.findByText('Second')).toBeTruthy();
 		expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledTimes(2);
 		expect(loadPreambles).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		{ isMobile: false, executor: localExecutor },
+		{ isMobile: true, executor: localExecutor },
+		{ isMobile: false, executor: remoteExecutor },
+		{ isMobile: true, executor: remoteExecutor },
+	])('revalidates the same path after creating its directory ($executor.kind, mobile: $isMobile)', async ({ isMobile, executor }) => {
+		stubMatchMedia(isMobile);
+		const projectPath = `${executor.projectBasePath}/fresh`;
+		let created = false;
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockImplementation(async (path) =>
+			path === projectPath && !created
+				? { valid: false, errorCode: 'path_not_found' }
+				: { valid: true, isGitRepo: false },
+		);
+		vi.mocked(filesApi.browseDirectory).mockImplementation(async (path) => {
+			if (path === projectPath && !created) {
+				throw new ApiError(404, 'File or directory not found', 'FILE_NOT_FOUND');
+			}
+			return [];
+		});
+		vi.mocked(filesApi.createDirectory).mockImplementation(async () => {
+			created = true;
+			return { name: 'fresh', path: projectPath, type: 'directory' };
+		});
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			paths: { recentProjectPaths: ['/workspace'], byExecutor: {} },
+			recentAgentSettings: [{
+				agentId: 'claude', model: 'opus', executorId: executor.id,
+				apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+			}],
+		}));
+		const onStartChat = vi.fn();
+		render(NewChatFormTestHost, {
+			onStartChat,
+			executorSnapshots: [localExecutor, {
+				...remoteExecutor, executorServices: localExecutor.executorServices,
+			}],
+		});
+		await waitFor(() => expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull());
+		const pathInput = screen.getByRole<HTMLInputElement>('textbox', { name: 'Project Path' });
+		await fireEvent.input(pathInput, { target: { value: projectPath } });
+		await screen.findByText('Path does not exist.');
+		const messageInput = screen.getByPlaceholderText('How can I help you today?');
+		await fireEvent.input(messageInput, { target: { value: 'Synthetic first message' } });
+		const submit = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
+		expect(submit.disabled).toBe(true);
+		await fireEvent.focus(pathInput);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Create directory "fresh"' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		await waitFor(() => expect(filesApi.createDirectory).toHaveBeenCalledExactlyOnceWith({
+			executorId: executor.id, parentPath: executor.projectBasePath, name: 'fresh',
+		}));
+		await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Directory name' })).toBeNull());
+		if (isMobile) await fireEvent.click(screen.getByRole('button', { name: 'Select this directory' }));
+		expect(pathInput.value).toBe(projectPath);
+		await waitFor(() => expect(submit.disabled).toBe(false));
+		expect(screen.queryByText('Path does not exist.')).toBeNull();
+		expect(chatsApi.validateStart).toHaveBeenLastCalledWith(projectPath, { executorId: executor.id });
+		if (isMobile) await fireEvent.click(submit);
+		else await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		expect(onStartChat).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+			executorId: executor.id, projectPath, firstMessage: 'Synthetic first message',
+		}), PROSPECTIVE_CHAT_ID);
 	});
 
 	it('reveals the form after reseeding while the current path is invalid', async () => {

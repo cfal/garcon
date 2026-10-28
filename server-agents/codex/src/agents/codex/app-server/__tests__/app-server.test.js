@@ -1009,7 +1009,8 @@ describe('Codex app-server request builders', () => {
     expect(mapThinkingModeToCodexEffort('max', 'gpt-5.5')).toBe('xhigh');
     for (const model of [
       'gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
-      'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna',
+      'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna',
+      'acme-openai:gpt-6.1-terra',
     ]) {
       expect(mapThinkingModeToCodexEffort('max', model)).toBe('max');
     }
@@ -1020,7 +1021,8 @@ describe('Codex app-server request builders', () => {
   });
 
   it.each([
-    'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna',
+    'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna',
+    'acme-openai:gpt-6.1-terra',
     'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
     'gpt-5.5', 'gpt-5.4', 'custom-model',
   ])('leaves provider-default effort unset for %s', (model) => {
