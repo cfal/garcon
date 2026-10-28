@@ -7,8 +7,9 @@ import { tcpLinkProxy } from '../../../server/remote/__tests__/tcp-link-proxy.js
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { waitForExecutorReconnect } from '../../support/executor-link.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
+import { executionBackend as selectedExecutionBackend } from '../../support/execution-backend.js';
 
-for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
+for (const executionBackend of [selectedExecutionBackend()].filter(backend => backend !== 'in-process')) {
   test(`Shell output and side effects survive reconnect without replay (${executionBackend})`, async () => {
     let proxy: Awaited<ReturnType<typeof tcpLinkProxy>> | undefined;
     try {
@@ -19,11 +20,12 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
           chatId, agentId: 'shell', model: 'sh', projectPath: executionDirs.project,
           permissionMode: 'default', thinkingMode: 'none', agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} },
           origin: 'interactive', clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
-          command: 'printf once >> executions; printf ready; while [ ! -f release ]; do sleep 0.05; done; printf retained; printf diagnostic >&2',
+          command: 'printf once >> executions; printf ready; touch ready; while [ ! -f release ]; do sleep 0.05; done; printf retained; printf diagnostic >&2',
         });
-        for (let retry = 0; retry < 1000 && !await Bun.file(join(executionDirs.project, 'executions')).exists(); retry++) {
+        for (let retry = 0; retry < 1000 && !await Bun.file(join(executionDirs.project, 'ready')).exists(); retry++) {
           await Bun.sleep(10);
         }
+        expect(await Bun.file(join(executionDirs.project, 'ready')).exists()).toBe(true);
         expect(await readFile(join(executionDirs.project, 'executions'), 'utf8')).toBe('once');
         expect((await client.getMessages(chatId)).messages.some(row => row.message.type === 'command-output')).toBe(false);
         const cursor = client.markEvents();

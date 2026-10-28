@@ -39,6 +39,7 @@ test('a short executor blip keeps the running turn visible as reconnecting and c
         .toEqual(['Synthetic reply after the blip']);
       await waitForBulk(fixture.integration);
       expect(proxy!.connections).toBe(4);
+      fixture.assertNoBrowserErrors();
     }, {
       executionBackend: 'remote-controller-dials',
       interceptExecutorConnection: async url => { proxy = await tcpLinkProxy(url); return proxy.url; },

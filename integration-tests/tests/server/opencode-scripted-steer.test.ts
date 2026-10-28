@@ -31,9 +31,7 @@ import { rejectionOf } from '../../support/promise-assertions.js';
 // future queue. Locked at the public server boundary against the real binary.
 let environment: ScriptedOpenCodeTestEnvironment | undefined;
 
-const describeOnLinux = process.platform === 'linux' ? describe : describe.skip;
-
-describeOnLinux('scripted OpenCode steering', () => {
+describe.skipIf(process.platform !== 'linux')('scripted OpenCode steering', () => {
   beforeEach(() => {
     environment = startScriptedOpenCodeTestEnvironment();
   });
