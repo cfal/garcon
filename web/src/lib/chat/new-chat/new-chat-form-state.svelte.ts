@@ -151,6 +151,9 @@ export class NewChatFormState {
 	get executorReady(): boolean {
 		return this.#options.executors?.isReady(this.executorId) ?? true;
 	}
+	get executionSupported(): boolean {
+		return this.#options.executors?.supportsExecution(this.executorId, 'execution.start') ?? true;
+	}
 	get modelCatalogValidated(): boolean {
 		return this.#modelCatalog.isValidated;
 	}
@@ -205,7 +208,6 @@ export class NewChatFormState {
 	get canSubmit(): boolean {
 		return (
 			this.settingsLoaded &&
-			this.executorReady &&
 			this.modelCatalogValidated &&
 			this.agentSettingsCompatible &&
 			this.#selectableAgentIds.includes(this.agentId) &&
@@ -273,6 +275,7 @@ export class NewChatFormState {
 
 	get modelSelectionError(): string | null {
 		if (!this.executorReady) return 'Executor is unavailable';
+		if (!this.executionSupported) return 'This executor does not support starting chats.';
 		if (this.modelSelectionPending) return null;
 		if (!this.modelCatalogValidated)
 			return this.#modelCatalog.error ?? m.model_selector_unavailable();
@@ -773,8 +776,8 @@ export class NewChatFormState {
 
 	/** Validates and builds the config, returning null if validation fails. */
 	buildConfig(): NewChatConfig | null {
-		if (!this.executorReady) {
-			this.error = 'Executor is unavailable';
+		if (!this.executorReady || !this.executionSupported) {
+			this.error = this.modelSelectionError;
 			return null;
 		}
 		if (!this.settingsLoaded) {

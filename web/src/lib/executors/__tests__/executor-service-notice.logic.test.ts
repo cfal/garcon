@@ -1,3 +1,4 @@
+import { LOCAL_EXECUTOR_OPERATIONS } from '$shared/executor-contracts';
 import { describe, expect, it } from 'vitest';
 import type { ExecutorSnapshot } from '$shared/executors';
 import { resolveExecutorServiceNotice } from '../executor-service-notice.js';
@@ -62,7 +63,7 @@ describe('resolveExecutorServiceNotice', () => {
 			...remoteExecutor,
 			enabled: false,
 			availability: 'reconnecting',
-			executorServices: filesAndGit,
+			operations: LOCAL_EXECUTOR_OPERATIONS, executorServices: filesAndGit,
 		});
 		expect(resolveExecutorServiceNotice(disabled, remoteExecutor.id, 'files')).toMatchObject({
 			kind: 'executor-unavailable',

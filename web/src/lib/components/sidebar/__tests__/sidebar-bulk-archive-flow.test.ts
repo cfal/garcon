@@ -33,6 +33,7 @@ function makeServerChat(
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		hasAgentSession: false,
 		canReloadFromNativeHistory: false,
 		tags: [],
 		parentChat: null,

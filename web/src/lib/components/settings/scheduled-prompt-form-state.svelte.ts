@@ -78,6 +78,8 @@ export class ScheduledPromptFormState {
 	#originalLocalTime: string | null = null;
 	#originalEndAt: string | null = null;
 	#originalEndDate: string | null = null;
+	#savedTarget = $state.raw<Extract<ScheduledPrompt['target'], { type: 'new-chat' }> | null>(null);
+	#savedDraft = '';
 
 	constructor(
 		private readonly modelCatalog: ModelCatalogStore,
@@ -200,6 +202,7 @@ export class ScheduledPromptFormState {
 				!this.sessions.isDraft(this.existingChatId),
 			);
 		}
+		if (this.#preservesSavedTarget) return true;
 		return (
 			this.executionPolicy !== null &&
 			this.startup.settingsLoaded &&
@@ -211,6 +214,19 @@ export class ScheduledPromptFormState {
 		);
 	}
 
+	get #preservesSavedTarget(): boolean {
+		return this.#savedTarget !== null && this.#savedDraft === this.#startupDraft();
+	}
+
+	#startupDraft(): string {
+		return JSON.stringify([
+			this.startup.executorId, this.startup.agentId, this.startup.nonblankPath,
+			this.startup.modelValue, this.startup.modelSelectionTarget, this.startup.permissionMode,
+			this.startup.thinkingMode, this.startup.agentSettingsById, this.startup.chatTags,
+			this.startup.preambles.choiceSnapshot,
+		]);
+	}
+
 	dispose(): void {
 		this.startup.dispose();
 	}
@@ -218,6 +234,7 @@ export class ScheduledPromptFormState {
 	async initialize(scheduledPrompt: ScheduledPrompt | null): Promise<void> {
 		this.error = null;
 		this.saving = false;
+		this.#savedTarget = null;
 		const defaultRunAt = nextLocalTimeUtcIso(this.time);
 		if (defaultRunAt) this.date = localDateValue(new Date(defaultRunAt));
 		if (!scheduledPrompt) {
@@ -271,6 +288,9 @@ export class ScheduledPromptFormState {
 		this.startup.chatTags = [...scheduledPrompt.target.tags];
 		this.startup.showTagInput = false;
 		this.startup.preambles.restoreChoice(scheduledPrompt.target.preambleChoice);
+		// Opaque JSON settings cannot be expanded by Snapshot's recursive type.
+		this.#savedTarget = $state.snapshot<unknown>(scheduledPrompt.target) as typeof scheduledPrompt.target;
+		this.#savedDraft = this.#startupDraft();
 		await this.startup.loadSettingsAndModels();
 		this.startup.validatePath();
 	}
@@ -292,6 +312,12 @@ export class ScheduledPromptFormState {
 				},
 				prompt: this.normalizedPrompt,
 			};
+		}
+		if (this.#preservesSavedTarget) {
+			const target = { ...this.#savedTarget! };
+			delete target.chatTitleTemplate;
+			if (this.customTitleEnabled) target.chatTitleTemplate = this.customTitleTemplate.trim();
+			return { schedule, ...(name ? { name } : {}), target, prompt: this.normalizedPrompt };
 		}
 		const selection = this.startup.resolvedModelSelection;
 		if (!selection) return null;

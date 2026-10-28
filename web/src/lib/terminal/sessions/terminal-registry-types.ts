@@ -71,7 +71,7 @@ export interface PendingTerminalCreate {
 }
 
 export interface TerminalRegistryDeps {
-	executors?: Pick<ExecutorsStore, 'executors' | 'label' | 'onChanged'>;
+	executors?: Pick<ExecutorsStore, 'executors' | 'hasSnapshot' | 'loading' | 'error' | 'label' | 'onChanged'>;
 	connection: PrimaryWsConnectionPort;
 	getClientId(): string;
 	now?: () => number;

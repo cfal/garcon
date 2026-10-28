@@ -5,6 +5,8 @@ import {
 	terminateTerminal,
 } from '$lib/api/terminals.js';
 import { ApiError } from '$lib/api/client.js';
+import { executorSupports } from '$shared/executors';
+import type { ExecutorOperation } from '$shared/executor-contracts';
 import type { TerminalRuntimeOptions } from '$lib/terminal/runtime/terminal-runtime.svelte.js';
 import { TerminalTransport } from '$lib/ws/terminal-transport.svelte.js';
 import type { TerminalMetadata, TerminalStreamServerMessage } from '$shared/terminal';
@@ -15,8 +17,9 @@ import { ModuleImportError } from '$lib/utils/module-import-error.js';
 import * as m from '$lib/paraglide/messages.js';
 import { parseTerminalReference } from '$shared/terminal-identity';
 import { createRandomId } from '$lib/utils/random-id.js';
-import { TERMINAL_SESSION_LIMIT, terminalIdForMessage } from '$shared/terminal';
+import { terminalIdForMessage } from '$shared/terminal';
 import { terminalDisplayName } from './terminal-display-name.js';
+import { projectTerminalHosts } from './terminal-hosts.js';
 import { TerminalOutputFragments, decodeTerminalOutput } from './terminal-output-fragments.js';
 import type {
 	PendingTerminalCreate,
@@ -131,40 +134,21 @@ export class TerminalRegistry {
 		return terminalDisplayName(metadata, this.executorLabel(this.executorIdFor(metadata.terminalId)));
 	}
 	get hosts() {
-		const executors = this.#deps.executors?.executors ?? [
-			{
-				id: 'local',
-				label: 'Local',
-				enabled: true,
-				availability: 'ready',
-				instanceId: null,
-				executorServices: { terminals: true },
-			},
-		];
-		return executors
-			.filter((executor) => executor.id === 'local' || executor.executorServices.terminals)
-			.toSorted((left, right) => {
-				if (left.id === 'local') return -1;
-				if (right.id === 'local') return 1;
-				return 0;
-			})
-			.map((executor) => ({
-				id: executor.id,
-				instanceId: executor.instanceId,
-				label: executor.label,
-				available: executor.enabled && executor.availability === 'ready' && executor.executorServices.terminals,
-				full:
-					this.orderedSessions.filter(
-						(session) => this.executorIdFor(session.metadata.terminalId) === executor.id,
-					).length >= TERMINAL_SESSION_LIMIT,
-			}));
+		return projectTerminalHosts(this.#deps.executors?.executors, this.orderedSessions);
 	}
 	get hasRemoteHosts(): boolean {
 		return this.hosts.some((host) => host.id !== 'local' && host.available);
 	}
 	canCreate(executorId: string): boolean {
+		const executors = this.#deps.executors;
+		if (executors && !executors.hasSnapshot && (executors.loading || executors.error === null)) return false;
 		const host = this.hosts.find((host) => host.id === executorId);
-		return Boolean(host?.available && !host.full);
+		return Boolean(host?.available && !host.full && this.#supports(executorId,
+			'terminals.create', 'terminals.attach', 'terminals.input', 'terminals.resize', 'terminals.terminate'));
+	}
+
+	#supports(executorId: string, ...operations: readonly ExecutorOperation[]): boolean {
+		return this.#deps.executors ? executorSupports(this.#deps.executors.executors.find(executor => executor.id === executorId), ...operations) : executorId === 'local';
 	}
 
 	get orderedSessions(): TerminalClientSession[] {
@@ -842,6 +826,7 @@ export class TerminalRegistry {
 		if (!this.#isCurrentAttachment(terminalId, request)) return false;
 		if (
 			!this.#authSuspended &&
+			this.#supports(this.executorIdFor(terminalId), 'terminals.attach', 'terminals.input', 'terminals.resize') &&
 			this.hosts.some((host) => host.id === this.executorIdFor(terminalId) && host.available) &&
 			this.executorInventories[this.executorIdFor(terminalId)]?.status === 'ready' &&
 			this.#transport.status === 'connected'

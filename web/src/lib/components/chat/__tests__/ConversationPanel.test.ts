@@ -87,6 +87,7 @@ function chat(): ChatSessionRecord {
 		isProcessing: runtime.processing,
 		processingPhase: runtime.processing ? 'running' : null,
 		isUnread: false,
+		hasAgentSession: false,
 		canReloadFromNativeHistory: false,
 		status: runtime.processing ? 'running' : 'draft',
 		agentOwnershipEpoch: null,

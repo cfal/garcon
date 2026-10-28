@@ -1,6 +1,7 @@
 // Owns chat lifecycle and delegates all viewport operations through the dependency interface.
 
 import { getChatSnapshot, handoffChat, interruptAndSendChat, stopChat } from '$lib/api/chats.js';
+import { composerExecutionOperations } from '$lib/chat/composer/execution-operation';
 import { literalInputFormat } from '$shared/input-format';
 import { isStopSatisfied, type ChatImage, type ChatStopOutcome } from '$shared/chat-types';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
@@ -99,7 +100,7 @@ export class ConversationSessionController {
 		this.clearHistory = new ConversationClearController(deps);
 		this.executorHandoff = new ExecutorHandoffProjectState(
 			(executorId, selection) => {
-				if (!deps.canSubmitToExecutor(executorId)) return false;
+				if (!deps.canSubmitToExecutor(executorId, 'execution.start')) return false;
 				const catalog = deps.modelCatalogForExecutor(executorId);
 				const target = this.executorHandoff.target;
 				const isDraft = target !== null && deps.sessions.isDraft(target.chatId);
@@ -588,6 +589,7 @@ export class ConversationSessionController {
 		if (
 			requiresExecutor &&
 			(!deps.canSubmitToExecutor(executorId) ||
+				!composerExecutionOperations(selected, text, { ...agent, supportsFork: catalog.supportsFork(agent.id) }).every(operation => deps.canSubmitToExecutor(executorId, operation)) ||
 				!isCustomProviderSelectionAvailable(catalog, selection))
 		) {
 			return selected.status === 'draft' && source === 'automatic-start'
@@ -752,6 +754,7 @@ export class ConversationSessionController {
 			return this.submitForChat(chatId);
 		if (
 			!deps.canSubmitToExecutor(deps.agentState.executorId) ||
+			!composerExecutionOperations(selected, text, { ...agent, supportsFork: catalog.supportsFork(agent.id) }).every(operation => deps.canSubmitToExecutor(deps.agentState.executorId, operation)) ||
 			!isCustomProviderSelectionAvailable(
 				deps.modelCatalogForExecutor(deps.agentState.executorId),
 				deps.agentState,

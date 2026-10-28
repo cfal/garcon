@@ -33,6 +33,7 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: true,
+		hasAgentSession: false,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
 		lastMessage: 'Latest preview text',

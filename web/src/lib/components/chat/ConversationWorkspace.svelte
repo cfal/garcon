@@ -285,8 +285,9 @@
 			return modelCatalog;
 		},
 		modelCatalogForExecutor: (executorId) => rootModelCatalog.forExecutor(executorId),
-		canSubmitToExecutor: (executorId) =>
-			executors.isReady(executorId) && rootModelCatalog.forExecutor(executorId).isValidated,
+		canSubmitToExecutor: (executorId, operation) =>
+			executors.isReady(executorId) && rootModelCatalog.forExecutor(executorId).isValidated
+			&& (operation === undefined || executors.supportsExecution(executorId, operation)),
 		getExecutionDefaults: (agentId, executorId) => {
 			const modelCatalog = rootModelCatalog.forExecutor(executorId ?? agentState.executorId);
 			const defaults = executionDefaultsForAgent(

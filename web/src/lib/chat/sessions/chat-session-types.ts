@@ -56,6 +56,7 @@ export interface ChatSessionRecord {
 	isUnread: boolean;
 	status: ChatStatus;
 	agentOwnershipEpoch: string | null;
+	hasAgentSession: boolean;
 	lastMessage?: string;
 	tags: string[];
 	firstMessage?: string;

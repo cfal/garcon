@@ -11,6 +11,8 @@ import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import { ModelCatalogStore, type ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import { findModelForSelection } from '../../../../test/model-catalog';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 interface CatalogOverrides {
 	executionPolicy?: 'conversation' | 'literal' | null;
@@ -26,6 +28,7 @@ function createForm(
 	existingIds = new Set(['123']),
 	selectableAgentIds: () => readonly SessionAgentId[] = () => ['claude', 'codex'],
 	catalogOverrides: CatalogOverrides = {},
+	executors?: ExecutorsStore,
 ): ScheduledPromptFormState {
 	const sessions = {
 		get byId() { return Object.fromEntries([...existingIds].map(id => [id, { agentId: 'claude', executorId: 'local' }])); },
@@ -68,6 +71,7 @@ function createForm(
 		getModelForSelection,
 	} satisfies Partial<ModelCatalogStore>);
 	const form = new ScheduledPromptFormState(modelCatalog, new RemoteSettingsStore(), sessions, {
+		executors,
 		get selectableAgentIds() {
 			return selectableAgentIds();
 		},
@@ -143,6 +147,38 @@ function newChatPrompt(
 }
 
 describe('ScheduledPromptFormState', () => {
+	it.each(['offline', 'incompatible'] as const)('saves definition-only edits with unchanged %s settings and selection', async condition => {
+		const executors = new ExecutorsStore();
+		executors.applySnapshot([localExecutor, { ...remoteExecutor,
+			availability: condition === 'offline' ? 'offline' : 'ready', operations: [] }]);
+		const form = createForm(undefined, undefined, {
+			isValidated: condition !== 'offline',
+			executionPolicy: condition === 'offline' ? null : 'conversation',
+		}, executors);
+		form.startup.validatePath = vi.fn();
+		const scheduledPrompt = newChatPrompt({
+			type: 'new-chat', executorId: remoteExecutor.id, agentId: 'codex',
+			projectPath: '/worker/project', model: 'saved-model',
+			apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+			permissionMode: 'acceptEdits', thinkingMode: 'high', tags: ['preserved'],
+			agentSettingsById: { codex: { ownerId: 'codex', schemaVersion: 7, values: { preserved: true } } },
+		});
+		const original = structuredClone(scheduledPrompt.target);
+		await form.initialize(scheduledPrompt);
+		form.prompt = 'Updated scheduled prompt';
+		form.taskName = 'Updated name';
+		form.time = '10:00';
+		expect(form.canSave).toBe(true);
+		expect(form.buildDefinition()).toMatchObject({
+			name: 'Updated name', prompt: 'Updated scheduled prompt', target: original,
+		});
+		expect(scheduledPrompt.target).toEqual(original);
+		form.startup.projectPath = '/worker/changed';
+		expect(form.canSave).toBe(false);
+		expect(form.buildDefinition()).toBeNull();
+		form.dispose();
+	});
+
 	it('restores names and custom titles while omitting disabled or hidden drafts', async () => {
 		const form = createForm();
 		form.startup.validatePath = vi.fn();
@@ -253,7 +289,7 @@ describe('ScheduledPromptFormState', () => {
 		form.startup.validationStatus = 'valid';
 		expect(form.startup.permissionMode).toBe('acceptEdits');
 		expect(form.startup.thinkingMode).toBe('high');
-		expect(form.canSave).toBe(false);
+		expect(form.canSave).toBe(true);
 		loaded = true;
 		discovery.resolve();
 		await discovery.promise;
@@ -641,7 +677,7 @@ describe('ScheduledPromptFormState', () => {
 		form.dispose();
 	});
 
-	it('blocks a stale endpoint target until another model is explicitly selected', async () => {
+	it('preserves a saved stale endpoint until another model is explicitly selected', async () => {
 		const form = createForm(new Set(['123']), () => ['claude', 'codex'], {
 			getModels: () => [
 				{ value: 'native-model', label: 'Native Model' },
@@ -680,8 +716,8 @@ describe('ScheduledPromptFormState', () => {
 			modelEndpointId: 'stale_openai',
 		});
 		expect(form.startup.modelSelectionError).toBe('Model unavailable');
-		expect(form.targetValid).toBe(false);
-		expect(form.buildDefinition(new Date('2029-12-01T00:00:00.000Z'))).toBeNull();
+		expect(form.targetValid).toBe(true);
+		expect(form.buildDefinition(new Date('2029-12-01T00:00:00.000Z'))?.target).toEqual(scheduledPrompt.target);
 
 		form.startup.selectModel('live_openai:shared-model', {
 			model: 'shared-model',
@@ -753,11 +789,11 @@ describe('ScheduledPromptFormState', () => {
 
 		expect(form.startup.modelSelectionTarget?.modelEndpointId).toBe('stale_openai');
 		expect(form.startup.modelSelectionError).toBe('Model unavailable');
-		expect(form.targetValid).toBe(false);
-		expect(form.buildDefinition(new Date('2029-12-01T00:00:00.000Z'))).toBeNull();
+		expect(form.targetValid).toBe(true);
+		expect(form.buildDefinition(new Date('2029-12-01T00:00:00.000Z'))?.target).toEqual(scheduledPrompt.target);
 	});
 
-	it('blocks a stale native target when only an endpoint exposes the same raw model', async () => {
+	it('preserves a saved native target when only an endpoint exposes the same raw model', async () => {
 		const form = createForm(new Set(['123']), () => ['claude', 'codex'], {
 			getModels: () => [
 				{
@@ -791,8 +827,8 @@ describe('ScheduledPromptFormState', () => {
 
 		expect(form.startup.agentId).toBe('codex');
 		expect(form.startup.modelSelectionError).toBe('Model unavailable');
-		expect(form.targetValid).toBe(false);
-		expect(form.buildDefinition(new Date('2029-12-01T00:00:00.000Z'))).toBeNull();
+		expect(form.targetValid).toBe(true);
+		expect(form.buildDefinition(new Date('2029-12-01T00:00:00.000Z'))?.target).toEqual(scheduledPrompt.target);
 	});
 
 	it('preserves an unavailable scheduled agent until explicit reselection', async () => {
@@ -840,8 +876,8 @@ describe('ScheduledPromptFormState', () => {
 			apiProviderId: 'zai',
 			modelEndpointId: 'zai_openai',
 		});
-		expect(form.targetValid).toBe(false);
-		expect(form.buildDefinition(new Date('2029-12-01T00:00:00.000Z'))).toBeNull();
+		expect(form.targetValid).toBe(true);
+		expect(form.buildDefinition(new Date('2029-12-01T00:00:00.000Z'))?.target).toEqual(scheduledPrompt.target);
 
 		form.startup.selectAgent('codex');
 		form.startup.selectModel('gpt-5');
