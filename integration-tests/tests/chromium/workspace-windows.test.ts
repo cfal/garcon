@@ -1241,14 +1241,13 @@ describe('Chromium workspace windows', () => {
         );
       }, windowId);
       await addControls.locator('[data-workspace-window-add-trigger]').click();
-      const retainedMenuAction = menu.getByRole('menuitem').nth(1);
+      const retainedMenuAction = menu.locator('[data-workspace-window-add-action="new-terminal"]');
       const retainedActionId = await retainedMenuAction.getAttribute(
         'data-workspace-window-add-action',
       );
       if (!retainedActionId) throw new Error('Retained overflow action has no stable identity.');
       await retainedMenuAction.hover({ position: { x: 2, y: 10 } });
-      await menu.press('Home');
-      await fixture.page.keyboard.press('ArrowDown');
+      await menu.press('End');
       expect(
         await retainedMenuAction.evaluate((element) => element === document.activeElement),
       ).toBe(true);

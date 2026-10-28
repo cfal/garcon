@@ -259,7 +259,7 @@ describe("Chromium view-group navigation", () => {
         ]) {
           const overflow = group === "Add to window";
           await titlebar.evaluate((element, narrow) => {
-            (element as HTMLElement).style.width = narrow ? "280px" : "";
+            (element as HTMLElement).style.width = narrow ? "220px" : "";
           }, !overflow);
           await titlebar
             .getByRole("button", {
@@ -267,14 +267,15 @@ describe("Chromium view-group navigation", () => {
               exact: true,
             })
             .waitFor();
-          await composer.focus();
-          await titlebar.evaluate((element, narrow) => {
-            (element as HTMLElement).style.width = narrow ? "280px" : "";
-          }, overflow);
           const trigger = titlebar.getByRole("button", {
             name: group,
             exact: true,
           });
+          expect(await trigger.count()).toBe(0);
+          await composer.focus();
+          await titlebar.evaluate((element, narrow) => {
+            (element as HTMLElement).style.width = narrow ? "220px" : "";
+          }, overflow);
           await trigger.waitFor();
           expect(
             await composer.evaluate(
