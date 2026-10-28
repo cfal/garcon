@@ -88,23 +88,29 @@ export class WorkspaceWindowAddMenuState {
 			)
 				return;
 			if (document.activeElement !== document.body && !this.#focusedControl()) return;
-			const trigger = this.controlsElement.querySelector<HTMLButtonElement>(
-				'[data-workspace-window-add-trigger]',
-			);
-			const matchingAction = actionId
-				? this.controlsElement.querySelector<HTMLButtonElement>(
-						`[data-workspace-window-add-action="${CSS.escape(actionId)}"]`,
-					)
-				: null;
-			const fallbackControl = this.controlsElement.querySelector<HTMLButtonElement>(
-				'[data-workspace-window-add-inline]:not(:disabled), [data-workspace-window-add-terminal-trigger]',
-			);
-			(matchingAction ?? trigger ?? fallbackControl)?.focus();
+			this.focusReturnTarget(actionId)?.focus();
 		} finally {
 			if (this.#pendingPromotedAction === previouslyFocused) this.#pendingPromotedAction = null;
 			if (this.#pendingLayoutFocusRestore === previouslyFocused)
 				this.#pendingLayoutFocusRestore = null;
 		}
+	}
+
+	focusReturnTarget(actionId?: string): HTMLElement | null {
+		const controls = this.controlsElement;
+		if (!controls) return null;
+		if (actionId) {
+			const matchingAction = controls.querySelector<HTMLElement>(
+				`[data-workspace-window-add-action="${CSS.escape(actionId)}"]`,
+			);
+			if (matchingAction) return matchingAction;
+		}
+		return (
+			controls.querySelector<HTMLElement>('[data-workspace-window-add-trigger]') ??
+			controls.querySelector<HTMLElement>(
+				'[data-workspace-window-add-inline]:not(:disabled), [data-workspace-window-add-terminal-trigger]',
+			)
+		);
 	}
 
 	handleOpenAutoFocus(event: Event): void {
