@@ -5,7 +5,7 @@ import type {
   ForkRunCommandResponse,
 } from '../../../common/chat-command-contracts.js';
 import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
-import { ForkCreationCleanupError, rollbackForkTarget, type ForkedChatResult } from '../chats/fork-chat.js';
+import { ForkCreationCleanupError, prepareForkSource, rollbackForkTarget, type ForkedChatResult, type PreparedForkSource } from '../chats/fork-chat.js';
 import { commandLedgerKey, PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-ledger.js';
 import {
   CommandSupport,
@@ -24,6 +24,7 @@ interface ForkContext {
   sourceSession: ChatRegistryEntry;
   upToOrdinal?: number;
   allowHandoffFork?: boolean;
+  preparedSource?: PreparedForkSource;
 }
 
 export class ForkCommands {
@@ -63,16 +64,21 @@ export class ForkCommands {
     clientRequestId: string,
     signal: AbortSignal,
   ): Promise<void> {
-    const ledger = await this.deps.ledger.accept({
+    const acceptance = {
       commandType: 'fork',
       chatId: input.chatId,
       clientRequestId: this.support.requireClientRequestId(clientRequestId),
       payload: forkChatPayload(input),
-    });
+    };
+    const observed = await this.deps.ledger.observe(acceptance);
+    if (observed) this.support.throwOnConflict(observed, 'clientRequestId was reused with different payload');
+    if (observed?.record.status === 'finished') return;
+    const context = await this.validateFork(input, { signal });
+    const ledger = await this.deps.ledger.accept(acceptance);
     this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
     if (ledger.kind === 'duplicate' && ledger.record.status === 'finished') return;
     try {
-      await this.createFork(input, signal);
+      await this.forkChatFromContext(context, signal);
     } catch (error) {
       await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
         error: error instanceof Error ? error.message : String(error),
@@ -142,6 +148,7 @@ export class ForkCommands {
     });
     const source = forkContext.sourceSession;
     this.deps.agents.assertAgentAvailable(source.agentId, source.executorId);
+    this.deps.agents.assertExecutionSupported({ ...source, ...input.options }, ['execution.start', 'execution.resume']);
     this.support.assertAttachmentsSupported({
       agentId: source.agentId,
       executorId: source.executorId,
@@ -301,10 +308,14 @@ export class ForkCommands {
         true,
       );
     }
+    const preparedSource = options.allowExistingTarget ? undefined
+      : await prepareForkSource(this.deps.transcripts, sourceChatId, sourceSession, upToOrdinal, options.signal);
+    if (preparedSource?.needsNativeFork) this.deps.agents.assertNativeForkSupported(sourceSession);
 
     return {
       sourceChatId,
       targetChatId,
+      preparedSource,
       sourceSession: {
         ...sourceSession,
         thinkingMode: this.deps.agents.normalizeThinkingModeForAgent(
@@ -354,6 +365,7 @@ export class ForkCommands {
       sourceChatId: context.sourceChatId,
       targetChatId: context.targetChatId,
       signal,
+      preparedSource: context.preparedSource,
       ...(context.upToOrdinal ? { upToOrdinal: context.upToOrdinal } : {}),
       ...(context.allowHandoffFork ? { allowHandoffFork: true } : {}),
       registry: this.deps.chats,

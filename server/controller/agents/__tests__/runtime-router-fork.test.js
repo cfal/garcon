@@ -71,6 +71,8 @@ function makeRouter(fork) {
     resolveFileMentions: resolveFileMentionsInCommand,
     registry,
     directory: {
+      requireOperations: mock(() => undefined),
+      supportsOperations: () => true,
       get: mock(() => integration),
       require: mock(() => integration),
       list: mock(() => [integration]),

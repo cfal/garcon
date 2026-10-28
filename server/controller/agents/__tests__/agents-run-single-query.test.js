@@ -40,6 +40,8 @@ function makeRouter(overrides = {}) {
     resolveFileMentions: resolveFileMentionsInCommand,
     registry: { getChat: mock(() => null) },
     directory: {
+      requireOperations: mock(() => undefined),
+      supportsOperations: () => true,
       require: mock((id) => {
         if (id !== 'test') throw new Error(`Unknown integration: ${id}`);
         return integration;

@@ -1,4 +1,5 @@
 import { effectiveExecutorId, LOCAL_EXECUTOR_ID } from '../../../common/executors.js';
+import { executionRequirements, nativeForkRequirements, requireProviderOperations, type ExecutionSupportTarget } from './execution-support.js';
 import type { CreateCarriedContextInput } from '../chats/carryover/context.js';
 import {
   AgentIntegrationError,
@@ -44,7 +45,7 @@ import type {
   NativeForkCleanup,
 } from './session-types.js';
 import { assertExecutionAdmissionOpen } from './session-types.js';
-import { executionSettings, requireAgentChatEntry, toAgentEndpointSelection } from './execution-planning.js';
+import { executionAttachments, executionSettings, requireAgentChatEntry, requireAgentChatEntryWithModel, requireCompaction, toAgentEndpointSelection } from './execution-planning.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import { resolveCarryOverOutcome, type CarryOverOutcome } from '../chats/carryover/outcome.js';
@@ -176,6 +177,9 @@ export class AgentRuntimeRouter {
       }
       const initial = requireAgentChatEntryWithModel(chatId, this.#registry.getChat(chatId), opts.model);
       const integration = this.#directory.require(initial.agentId, initial.executorId);
+      this.#requireLaunch(integration, 'execution.start', { ...initial,
+        apiProviderId: opts.apiProviderId === undefined ? initial.apiProviderId : opts.apiProviderId,
+        modelEndpointId: opts.modelEndpointId === undefined ? initial.modelEndpointId : opts.modelEndpointId });
       executionSettings(integration, initial, opts.agentSettings);
       await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
       this.#assertCurrent(integration);
@@ -256,6 +260,9 @@ export class AgentRuntimeRouter {
       assertExecutionAdmissionOpen(opts);
       const initial = requireAgentChatEntryWithModel(chatId, this.#registry.getChat(chatId), opts.model);
       const integration = this.#directory.require(initial.agentId, initial.executorId);
+      this.#requireLaunch(integration, initial.agentSessionId ? 'execution.resume' : 'execution.start', { ...initial,
+        apiProviderId: opts.apiProviderId === undefined ? initial.apiProviderId : opts.apiProviderId,
+        modelEndpointId: opts.modelEndpointId === undefined ? initial.modelEndpointId : opts.modelEndpointId });
       executionSettings(integration, initial, opts.agentSettings);
       await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
       this.#assertCurrent(integration);
@@ -370,6 +377,8 @@ export class AgentRuntimeRouter {
       assertExecutionAdmissionOpen(opts);
       const initial = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
       const integration = this.#directory.require(initial.agentId, initial.executorId);
+      const compaction = requireCompaction(integration);
+      this.#requireLaunch(integration, 'compaction.compact', initial);
       executionSettings(integration, initial);
       await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
       this.#assertCurrent(integration);
@@ -385,17 +394,6 @@ export class AgentRuntimeRouter {
         modelEndpointId: entry.modelEndpointId,
       });
       await this.#validateEndpoint(integration, selection, opts.executionAdmission?.signal);
-      // Without the facet there is nothing to call. Sending the literal text
-      // `/compact` as a prompt used to look like success while leaving the context
-      // untouched and a stray message in the transcript.
-      const compaction = integration.compaction;
-      if (!compaction) {
-        throw new DomainError(
-          'VALIDATION_FAILED',
-          `${entry.agentId} does not support native compaction. Use /handoff to continue in a new chat instead.`,
-          400,
-        );
-      }
       const operation = operationIdentity(entry, opts, 'agent-compact');
       const prompt = opts.instructions?.trim() ? `/compact ${opts.instructions.trim()}` : '/compact';
       this.#events.trackTurn(chatId, operationMetadata(operation));
@@ -609,6 +607,7 @@ export class AgentRuntimeRouter {
       if (this.#directory.get(source.agentId, source.executorId)?.forking === null) return null;
       const integration = this.#directory.require(source.agentId, source.executorId);
       if (!integration.forking) return null;
+      requireProviderOperations(this.#directory, source.executorId, nativeForkRequirements(integration, source));
       const settings = executionSettings(integration, source);
       const scope = { ...integration.producers.scope };
       const selection = this.#endpointResolver.resolveSelection({
@@ -711,6 +710,7 @@ export class AgentRuntimeRouter {
     const { agentId } = options;
     const integration = this.#directory.require(agentId, options.executorId);
     if (!integration.singleQuery) throw new Error(`Single query unsupported for agent: ${agentId}`);
+    requireProviderOperations(this.#directory, options.executorId, ['singleQuery.run']);
     const settings = integration.settings.parse(options.agentSettings === undefined
       ? integration.settings.defaults() : options.agentSettings);
     const model = typeof options.model === 'string' ? options.model : '';
@@ -779,6 +779,7 @@ export class AgentRuntimeRouter {
   ): Promise<void> {
     const endpoint = toAgentEndpointSelection(this.#endpointResolver, selection);
     if (!endpoint) return;
+    this.#directory.requireOperations(integration.producers.scope.executorId, ['credentials.resolve', 'endpoints.validate']);
     const endpoints = integration.endpoints;
     if (!endpoints) {
       throw new Error(
@@ -809,7 +810,7 @@ export class AgentRuntimeRouter {
     const excluded = new Set(promptRows.map((row) => row.ordinal));
     const preparedAttachments = promptRows.length > 0
       ? promptRows.flatMap((row) => row.detail.attachments)
-      : attachments(opts.images);
+      : executionAttachments(opts.images);
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     if (integration.literalExecution) {
       const source = composition?.input.detail.message.content ?? fallbackPrompt;
@@ -846,15 +847,17 @@ export class AgentRuntimeRouter {
     };
   }
 
-  // A remote launch whose reply was lost with its executor session leaves its
-  // run active rather than failing the turn; the resumed binding settles it.
+  // The binding settles lost replies, including settlement delivered before
+  // this promise continuation on a healthy session.
   async #launch(chatId: string, runId: string, launch: () => Promise<AgentExecutionHandle>): Promise<AgentExecutionHandle | null> {
     if (this.#settingUp.get(chatId) === runId) this.#settingUp.delete(chatId);
     try {
       return await launch();
     } catch (error) {
-      if (!isLostLaunchReply(error) || !this.#ledger.isRunActive(chatId, runId)) throw error;
-      logger.warn('Execution launch reply was lost; the resumed executor settles it', { chatId, runId, reason: error.message });
+      if (!isLostLaunchReply(error) || this.#pendingAbortRuns.has(runKey(chatId, runId))) throw error;
+      if (this.#ledger.isRunActive(chatId, runId)) {
+        logger.warn('Execution launch reply was lost; the binding settles it', { chatId, runId, reason: error.message });
+      }
       return null;
     }
   }
@@ -921,6 +924,10 @@ export class AgentRuntimeRouter {
     this.#producer(chatId);
   }
 
+  ensureProducer(chatId: string): void {
+    this.#producer(chatId);
+  }
+
   publishSessionFact(chatId: string, session: AgentEstablishedSession): void {
     this.#producer(chatId).sink.publish({ type: 'session', session });
   }
@@ -961,31 +968,15 @@ export class AgentRuntimeRouter {
     };
   }
 
+  #requireLaunch(integration: AgentIntegration, operation: 'execution.start' | 'execution.resume' | 'compaction.compact', target: ExecutionSupportTarget): void {
+    this.#directory.requireOperations(integration.producers.scope.executorId, executionRequirements(integration, target, [operation]));
+  }
+
   #assertCurrent(integration: AgentIntegration): void {
     if (this.#directory.require(integration.descriptor.id, integration.producers.scope.executorId) !== integration) {
       throw new AgentCallError('not-dispatched', 'Executor generation changed during execution preparation', 'STALE_RESOURCE');
     }
   }
-}
-
-function requireAgentChatEntryWithModel(
-  chatId: string,
-  entry: AgentChatEntry | null | undefined,
-  model: string | undefined,
-): ReturnType<typeof requireAgentChatEntry> {
-  return requireAgentChatEntry(
-    chatId,
-    entry && model !== undefined ? { ...entry, model } : entry,
-  );
-}
-
-function attachments(images: RunAgentTurnOptions['images'] = []) {
-  return images.map((image) => ({
-    kind: 'image' as const,
-    data: image.data,
-    name: image.name ?? null,
-    mimeType: image.mimeType ?? 'application/octet-stream',
-  }));
 }
 
 function supportedValue<T extends string>(values: readonly string[], value: T, fallback: T): T {

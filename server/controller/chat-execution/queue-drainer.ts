@@ -108,28 +108,33 @@ export class QueueDrainer {
         pending.entries.some((entry) => entry.status === 'steering')
         || this.#shouldHalt(chatId)
       ) return;
-      if (pending.entries.length > 0) {
-        try {
-          await this.deps.projectAdmission.assertAvailable(chatId, null);
-        } catch (error) {
-          if (!(error instanceof ProjectUnavailableError)) throw error;
-          if (this.#shouldHalt(chatId)) return;
-          const paused = await controls.pauseForUnavailableProject(chatId);
-          if (!paused.changed) continue;
-          callbacks.publishProjectUnavailable(chatId, error);
-          return;
-        }
-      }
-      if (this.#shouldHalt(chatId)) return;
-
       let options: RunAgentTurnOptions | undefined;
       let inputInserted = false;
       const admission = {
         failure: null as DomainError | null,
+        operationEntryId: null as string | null,
         attachmentEntryId: null as string | null,
       };
       let result: Awaited<ReturnType<ChatExecutionControlOperations['dequeueNextTurn']>>;
       try {
+        if (pending.entries.length > 0 && pending.controlEntries.length === 0) {
+          const entry = pending.entries[0]!;
+          options = optionsForTurn({}, { kind: 'user', entry });
+          admission.operationEntryId = entry.id;
+          this.deps.getDrainOptions(chatId);
+          admission.operationEntryId = null;
+          try {
+            await this.deps.projectAdmission.assertAvailable(chatId, null);
+          } catch (error) {
+            if (!(error instanceof ProjectUnavailableError)) throw error;
+            if (this.#shouldHalt(chatId)) return;
+            const paused = await controls.pauseForUnavailableProject(chatId);
+            if (!paused.changed) continue;
+            callbacks.publishProjectUnavailable(chatId, error);
+            return;
+          }
+        }
+        if (this.#shouldHalt(chatId)) return;
         // The dequeue transition and its synchronous registerQueued() callback
         // run inside the selection/admission lock; the callback itself stays
         // synchronous, so it never awaits inside the dequeue.
@@ -137,7 +142,7 @@ export class QueueDrainer {
           chatId,
           () => controls.dequeueNextTurn(chatId, (input) => {
             if (this.#shouldHalt(chatId)) throw halted;
-            options = optionsForTurn(this.deps.getDrainOptions(chatId), input);
+            options = optionsForTurn({}, input);
             if (input.kind === 'control') {
               if (!callbacks.isControlInputViewCurrent(chatId, input.entry.transcriptViewId)) {
                 logger.debug('queue: discarded stale control input', {
@@ -147,6 +152,11 @@ export class QueueDrainer {
                 });
                 return false;
               }
+            }
+            admission.operationEntryId = input.entry.id;
+            options = optionsForTurn(this.deps.getDrainOptions(chatId), input);
+            admission.operationEntryId = null;
+            if (input.kind === 'control') {
               callbacks.appendControlReceipt(chatId, input.entry);
               inputInserted = true;
               return true;
@@ -170,6 +180,12 @@ export class QueueDrainer {
         );
       } catch (error) {
         if (error === halted) return;
+        if (admission.operationEntryId && error instanceof DomainError) {
+          if (error.retryable) return;
+          await controls.pauseAfterFailure(chatId, { kind: 'queued-turn-failed', entryId: admission.operationEntryId });
+          callbacks.publishTurnFailed(chatId, error.message, options!);
+          return;
+        }
         if (admission.attachmentEntryId && options) {
           // Readiness triggers a new drain after a retryable admission failure.
           if (error instanceof DomainError && error.retryable) return;

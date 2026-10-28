@@ -65,6 +65,7 @@ function harness({ source = sourceChat() } = {}) {
       queue: { ownsExecution: mock(() => false) },
       agents: {
         assertAgentAvailable: mock(() => undefined),
+        assertExecutionSupported: mock(() => undefined),
         normalizeThinkingModeForAgent: mock((_agentId, value) => value),
       },
       settings: {

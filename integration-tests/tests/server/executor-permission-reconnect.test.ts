@@ -1,4 +1,6 @@
+import { TestWebSocketLink as WebSocketLink } from '../../../server/remote/__tests__/test-session-transport.js';
 import { expect, test } from 'bun:test';
+import { RPC_V1, supportsWorkflow } from '../../../common/executor-contracts.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,7 +17,7 @@ import { integrationFixture, linkOptions } from '../../../server/remote/__tests_
 import { ProducerRelay, type ProducerRelayOptions } from '../../../server/remote/server/producer-relay.js';
 import type { RemoteExecutorClientOptions } from '../../../server/remote/client/executor-client.js';
 import { connectRemoteExecutor, servePairedRuntime } from '../../../server/remote/__tests__/runtime-adapter.js';
-import { WebSocketLink } from '../../../server/remote/transport/websocket-link.js';
+
 import { TranscriptAdoptionService } from '../../../server/controller/ledger/adoption.js';
 import { TranscriptLedgerService } from '../../../server/controller/ledger/service.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
@@ -79,6 +81,7 @@ async function pendingPermission({ root, chats, ledger, controller, native, remo
   ledger.subscribePermissionRetired(control => { feed.retirePermission(control); });
   const integration = await remote.getAgentIntegration('test');
   const integrations = new IntegrationRegistry({ instances: [integration] });
+  const contracts = controller.current!.profile.contracts;
   const executors = {
     isReady: () => remote.availability === 'ready',
     integrationsFor() { return integrations; },
@@ -86,6 +89,11 @@ async function pendingPermission({ root, chats, ledger, controller, native, remo
       return { instanceId: integration.producers.scope.instanceId, integrations: integrations.list(), assertCurrent: () => { this.requireIntegration({ agentId: 'test', executorId: integration.producers.scope.executorId }); } };
     },
     knownIntegration: ({ agentId }) => integrations.get(agentId),
+    supportsOperations: (_executorId, operations) => supportsWorkflow(contracts, operations.map(operation => RPC_V1[operation])),
+    requireOperations(executorId, operations) {
+      this.requireIntegration({ executorId, agentId: 'test' });
+      if (!this.supportsOperations(executorId, operations)) throw new DomainError('OPERATION_UNSUPPORTED', 'Unsupported test workflow', 422);
+    },
     requireIntegration({ agentId }) {
       if (remote.availability !== 'ready') {
         throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);

@@ -40,6 +40,35 @@ function nativeForkAnchor(
   return null;
 }
 
+export async function prepareForkSource(
+  ledger: Pick<TranscriptLedgerService, 'currentView' | 'highWatermark' | 'rowsThrough'>,
+  sourceChatId: string,
+  sourceSession: ChatRegistryEntry,
+  upToOrdinal?: number,
+  signal?: AbortSignal,
+) {
+  const sourceView = ledger.currentView(sourceChatId);
+  if (!sourceView) throw new DomainError('TRANSCRIPT_UNAVAILABLE', 'Source transcript is unavailable', 422);
+  const sourceWatermark = ledger.highWatermark(sourceChatId);
+  const selectedOrdinal = upToOrdinal ?? sourceWatermark.ordinal;
+  if (!Number.isSafeInteger(selectedOrdinal) || selectedOrdinal < 0 || selectedOrdinal > sourceWatermark.ordinal) {
+    throw new DomainError('TRANSCRIPT_UNAVAILABLE', 'Fork message is outside the source transcript', 422);
+  }
+  const selectedWatermark = { viewId: sourceWatermark.viewId, ordinal: selectedOrdinal };
+  const sourceRows = await ledger.rowsThrough(sourceChatId, selectedWatermark);
+  signal?.throwIfAborted();
+  const selectedRow = sourceRows.at(-1);
+  if (selectedRow?.kind === 'notice' && isPreambleApplicationNoticeDetail(selectedRow.detail)) {
+    throw new DomainError('TRANSCRIPT_UNAVAILABLE', 'Fork message cannot split a preamble application from its user input', 422);
+  }
+  const anchor = nativeForkAnchor(sourceRows, sourceView.contentStartOrdinal);
+  // A whole-chat fork always has a native tip; a point without a current-binding anchor does not.
+  const needsNativeFork = Boolean(sourceSession.agentSessionId) && (upToOrdinal === undefined || anchor !== null);
+  return { sourceView, selectedWatermark, sourceRows, anchor, needsNativeFork };
+}
+
+export type PreparedForkSource = Awaited<ReturnType<typeof prepareForkSource>>;
+
 // The integration refuses a point it cannot fork natively. With consent that refusal means
 // "seed from the frozen conversation instead"; without it, it reaches the caller unchanged.
 function isUnsettledForkPoint(error: unknown): boolean {
@@ -64,6 +93,7 @@ interface ForkChatInput {
   targetChatId: string;
   signal: AbortSignal;
   upToOrdinal?: number;
+  preparedSource?: PreparedForkSource;
   // Consent to a handoff fork when the point cannot be forked natively. Without it the
   // integration's refusal reaches the caller, who asks the user before repeating the request.
   allowHandoffFork?: boolean;
@@ -134,6 +164,7 @@ export async function createForkedChat({
   targetChatId,
   signal,
   upToOrdinal,
+  preparedSource,
   allowHandoffFork = false,
   registry,
   settings,
@@ -146,42 +177,12 @@ export async function createForkedChat({
 }: ForkChatInput): Promise<ForkedChatResult> {
   signal.throwIfAborted();
   const startedAt = Date.now();
-  const sourceAgentSessionId = sourceSession.agentSessionId;
-  const sourceView = ledger.currentView(sourceChatId);
-  if (!sourceView) {
-    throw new DomainError('TRANSCRIPT_UNAVAILABLE', 'Source transcript is unavailable', 422);
+  const { sourceView, selectedWatermark, sourceRows, anchor, needsNativeFork } = preparedSource
+    ?? await prepareForkSource(ledger, sourceChatId, sourceSession, upToOrdinal, signal);
+  const currentView = ledger.currentView(sourceChatId);
+  if (currentView?.viewId !== sourceView.viewId || currentView.contentStartOrdinal !== sourceView.contentStartOrdinal) {
+    throw new DomainError('STALE_TRANSCRIPT_VIEW', 'Source transcript changed during fork preparation', 409, true);
   }
-  const sourceWatermark = ledger.highWatermark(sourceChatId);
-  const selectedOrdinal = upToOrdinal ?? sourceWatermark.ordinal;
-  if (!Number.isSafeInteger(selectedOrdinal)
-      || selectedOrdinal < 0
-      || selectedOrdinal > sourceWatermark.ordinal) {
-    throw new DomainError(
-      'TRANSCRIPT_UNAVAILABLE',
-      'Fork message is outside the source transcript',
-      422,
-    );
-  }
-  const selectedWatermark = { viewId: sourceWatermark.viewId, ordinal: selectedOrdinal };
-  const sourceRows = await ledger.rowsThrough(sourceChatId, selectedWatermark);
-  signal.throwIfAborted();
-  const selectedRow = sourceRows.at(-1);
-  if (selectedRow?.kind === 'notice' && isPreambleApplicationNoticeDetail(selectedRow.detail)) {
-    throw new DomainError(
-      'TRANSCRIPT_UNAVAILABLE',
-      'Fork message cannot split a preamble application from its user input',
-      422,
-    );
-  }
-  const anchor = nativeForkAnchor(sourceRows, sourceView.contentStartOrdinal);
-  // Whether the anchor is forkable is the integration's call, so the request is delegated with
-  // whatever identity that row carries, including none. Only the owning integration knows what
-  // its metadata means and whether the provider has persisted far enough to honour it. Forking
-  // the whole chat continues from the session tip, which is always a native position; forking at
-  // a point needs an anchor, and with none there is nothing native to branch from, so the
-  // handoff fork is taken without asking.
-  const needsNativeFork = Boolean(sourceAgentSessionId)
-    && (upToOrdinal === undefined || anchor !== null);
   let forkOutcome: ForkedAgentSessionOutcome | null = null;
   if (needsNativeFork) {
     try {

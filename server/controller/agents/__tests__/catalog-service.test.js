@@ -71,6 +71,7 @@ describe("AgentCatalogService", () => {
     const service = new AgentCatalogService({
       directory: {
         get: id => current.find(integration => integration.descriptor.id === id),
+        supportsOperations: () => true,
         captureInventory() {
           const integrations = current;
           return {
@@ -122,6 +123,7 @@ describe("AgentCatalogService", () => {
           return integration;
         },
         list: () => [integration],
+        supportsOperations: () => true,
         captureInventory: () => ({ instanceId: 'synthetic-instance', integrations: [integration], assertCurrent() {} }),
       },
       endpointResolver: {

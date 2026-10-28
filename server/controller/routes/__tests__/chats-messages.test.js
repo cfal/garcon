@@ -461,6 +461,8 @@ describe('GET /api/v1/chats/messages', () => {
         updateChat: () => entry,
       },
       integrations: {
+        requireOperations: () => undefined,
+        supportsOperations: () => true,
         require: () => ({
           descriptor: { id: 'test-provider' },
           settings: {

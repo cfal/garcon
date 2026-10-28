@@ -40,7 +40,7 @@ export function createRouteCommandService({
   transientFeeds,
 }) {
   const transcripts = {
-    currentView: () => null,
+    currentView: () => ({ viewId: 'view-1', contentStartOrdinal: 1 }),
     highWatermark: () => ({ viewId: 'view-1', ordinal: 0 }),
     rowsThrough: async () => [],
     seedChat: async () => ({ viewId: 'view-2' }),
@@ -61,6 +61,7 @@ export function createRouteCommandService({
     transientFeeds: transientFeeds ?? { validateAction: () => undefined },
     preambles: { snapshot: () => ({ revision: 0, preambles: [] }) },
 	handoffs: handoffs ?? {
+		recoverHandoff: async () => false,
 		resolveTarget: async ({ handoff }) => ({
 			agentId: handoff.target.agentId,
 			model: handoff.target.model,

@@ -101,6 +101,7 @@ export class SelfHandoffCommands {
     const source = replaying ? null : this.#requireSource(input.sourceChatId);
     if (source) {
       this.deps.agents.assertAgentAvailable(source.agentId, source.executorId);
+      this.deps.agents.assertExecutionSupported(source, ['execution.start']);
       this.support.assertAttachmentsSupported({
         agentId: source.agentId,
         executorId: source.executorId,
