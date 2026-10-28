@@ -909,7 +909,7 @@ describe('Chromium workspace windows', () => {
       if (!windowId) throw new Error('Missing Chat window.');
       const filesWindowId = await canonicalFilesWindowId(page);
       await openWindowTab(page, windowId, 'Open Chat Map');
-      await openWindowTab(page, windowId, 'Open Git Compare');
+      await openWindowTab(page, windowId, 'Open Compare');
       const chatSurfaceId = `chat-view:${windowId}`;
       const chatTab = page.locator(`[id="${windowId}-tab-${chatSurfaceId}"]`);
       const tabRail = page.locator(`[data-workspace-window-tabs="${windowId}"]`);
@@ -1014,7 +1014,7 @@ describe('Chromium workspace windows', () => {
 
       markPhase('preserving both menu fallbacks at minimal width');
       await page.locator(`[data-workspace-window-add-trigger="${windowId}"]`).click();
-      await page.getByRole('menuitem', { name: 'Git Views', exact: true }).waitFor();
+      await page.getByRole('menuitem', { name: 'Git', exact: true }).waitFor();
       await page.keyboard.press('Escape');
       await setTabRailWidth(page, windowId, 20);
       await page.waitForFunction(
@@ -1447,7 +1447,7 @@ describe('Chromium workspace windows', () => {
       expect(await fixture.page.locator('[data-workspace-window-close]').count()).toBe(2);
 
       markPhase('verifying adaptive labels and Chat tab actions');
-      await openWindowTab(fixture.page, chatWindowId, 'Open Git Compare');
+      await openWindowTab(fixture.page, chatWindowId, 'Open Compare');
       await fixture.page.waitForFunction(
         (expectedWindowId) =>
           document
@@ -1669,8 +1669,8 @@ describe('Chromium workspace windows', () => {
       );
 
       markPhase('verifying separator geometry and focused-window treatment');
-      await openWindowTab(fixture.page, filesWindowId, 'Open Git History');
-      await openWindowTab(fixture.page, chatWindowId, 'Open Git Workbench');
+      await openWindowTab(fixture.page, filesWindowId, 'Open History');
+      await openWindowTab(fixture.page, chatWindowId, 'Open Workbench');
       await verifySeparators(fixture.page);
       await verifyFocusedWindow(fixture.page, filesWindowId, chatWindowId);
       await verifyWorkspaceChromeThemes(fixture.page, filesWindowId, chatWindowId);
@@ -1950,7 +1950,7 @@ describe('Chromium workspace windows', () => {
           .locator(`[data-workspace-window-titlebar="${filesWindowId}"]`)
           .click({ position: { x: 3, y: 3 } });
         await waitForCurrentWorkspaceWindow(fixture.page, filesWindowId);
-        await openNewWindow(fixture.page, 'Open Git Workbench');
+        await openNewWindow(fixture.page, 'Open Workbench');
         await fixture.page.waitForFunction(
           () => document.querySelectorAll('[data-workspace-window-id]').length === 3,
         );
@@ -2146,7 +2146,7 @@ describe('Chromium workspace windows', () => {
       await fixture.page.locator(`[id="${windowId}-tab-singleton:files"]`).click();
 
       markPhase('creating a second window while keeping the reopened file inactive');
-      const currentWindowId = await openNewWindow(fixture.page, 'Open Git History');
+      const currentWindowId = await openNewWindow(fixture.page, 'Open History');
       const currentTab = fixture.page.locator(
         `[data-workspace-window-id="${currentWindowId}"] [role="tab"][aria-selected="true"]`,
       );
@@ -2779,7 +2779,7 @@ describe('Chromium workspace windows', () => {
         const chatSurfaceId = `chat-view:${chatWindowId}`;
 
         markPhase('opening an inactive Chat tab');
-        await openWindowTab(fixture.page, chatWindowId, 'Open Git Compare');
+        await openWindowTab(fixture.page, chatWindowId, 'Open Compare');
         await fixture.page.waitForFunction(
           ({ expectedWindowId, expectedSurfaceId }) =>
             document

@@ -299,7 +299,7 @@ async function verifyHistoryBreakpoints(
   markPhase: MarkPhase,
 ): Promise<void> {
   markPhase('opening Git History');
-  await openWorkspaceAddMenuItem(fixture.page, 'Open Git History');
+  await openWorkspaceAddMenuItem(fixture.page, 'Open History');
   await fixture.page.locator(PANEL_SELECTOR).waitFor({ state: 'visible' });
   await fixture.page.waitForFunction(
     (selector) =>
@@ -375,7 +375,7 @@ async function verifyCompareResponsiveActions(
   markPhase: MarkPhase,
 ): Promise<void> {
   markPhase('opening Git Compare');
-  await openWorkspaceAddMenuItem(fixture.page, 'Open Git Compare');
+  await openWorkspaceAddMenuItem(fixture.page, 'Open Compare');
   await fixture.page.locator(COMPARE_PANEL_SELECTOR).waitFor({ state: 'visible' });
   await fixture.page.locator(`${COMPARE_PANEL_SELECTOR} [data-git-diff-document]`).waitFor({
     state: 'visible',

@@ -51,7 +51,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           if (url.pathname === '/api/v1/projects/resolve') resolutions.push(url);
         });
         if (action === 'retry') {
-          await app.clickWorkspaceWindowAddAction('Open Git Workbench');
+          await app.clickWorkspaceWindowAddAction('Open Workbench');
           await fixture.page.waitForSelector('[data-git-project-content] > div > [role="status"] button');
         }
         await mkdir(chosen);

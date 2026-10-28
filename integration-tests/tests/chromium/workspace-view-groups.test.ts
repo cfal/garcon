@@ -9,9 +9,9 @@ const CHAT_VIEWS = [
   { label: "Open Chat Board", kind: "chat-board" },
 ] as const;
 const GIT_VIEWS = [
-  { label: "Open Git Workbench", kind: "git" },
-  { label: "Open Git History", kind: "git-history" },
-  { label: "Open Git Compare", kind: "git-compare" },
+  { label: "Open Workbench", kind: "git" },
+  { label: "Open History", kind: "git-history" },
+  { label: "Open Compare", kind: "git-compare" },
   { label: "Open Commit", kind: "commit" },
 ] as const;
 
@@ -158,7 +158,7 @@ describe("Chromium view-group navigation", () => {
             await setWidth(width);
           }
           for (const group of [
-            { id: "git-views", label: "Git Views", count: 1 },
+            { id: "git-views", label: "Git", count: 1 },
             { id: "chat-views", label: "Chat Views", count: 4 },
           ]) {
             await setWidth(220);
@@ -208,7 +208,7 @@ describe("Chromium view-group navigation", () => {
             .getByRole("button", { name: "Add to window", exact: true })
             .click();
           await page
-            .getByRole("menuitem", { name: "Git Views", exact: true })
+            .getByRole("menuitem", { name: "Git", exact: true })
             .focus();
           await page.keyboard.press("ArrowRight");
           const gitMenu = page.locator(
@@ -252,9 +252,9 @@ describe("Chromium view-group navigation", () => {
         );
         const composer = page.locator("[data-composer] textarea");
         for (const group of [
-          "Git Views",
+          "Git",
           "Chat Views",
-          "GitHub Views",
+          "Github",
           "Add to window",
         ]) {
           const overflow = group === "Add to window";
@@ -305,7 +305,7 @@ describe("Chromium view-group navigation", () => {
 
   for (const { id, label, views } of [
     { id: "chat-views", label: "Chat Views", views: CHAT_VIEWS },
-    { id: "git-views", label: "Git Views", views: GIT_VIEWS },
+    { id: "git-views", label: "Git", views: GIT_VIEWS },
   ]) {
     for (const layout of ["overflow", "inline"] as const) {
       test(`opens all ${label} from the ${layout} group and preserves focus on resize`, async () => {

@@ -35,7 +35,7 @@ test('Local-only Files and Git hide executor selectors and allow Git browsing wi
     await page.locator('[data-file-tree-entry-text]').getByText('example.txt', { exact: true }).waitFor();
     await browserExpect(surface(page, 'files').locator('[data-executor-picker]')).toHaveCount(0);
     await collapseCanonicalFilesWindow(page);
-    for (const [action, kind] of [['Open Git Workbench', 'git'], ['Open Git Compare', 'git-compare']]) {
+    for (const [action, kind] of [['Open Workbench', 'git'], ['Open Compare', 'git-compare']]) {
       await clickWorkspaceWindowAddAction(page, action);
       const panel = surface(page, kind);
       await browserExpect(panel.locator('[data-executor-picker]')).toHaveCount(0);
@@ -66,7 +66,7 @@ test('independent Git folder and executor selection survives chat changes and ow
     }
     await page.goto(`${integration.garcon.baseUrl}/chat/${localChat}`);
     await collapseCanonicalFilesWindow(page);
-    await clickWorkspaceWindowAddAction(page, 'Open Git Workbench');
+    await clickWorkspaceWindowAddAction(page, 'Open Workbench');
     const git = surface(page, 'git');
     await git.getByText('Local project change', { exact: false }).first().waitFor();
     phase('destination-base fallback and independent folder');

@@ -178,8 +178,6 @@
 	}
 
 	function openSingletonLabel(kind: PortableSingletonKind): string {
-		if (kind === 'git-history') return m.workspace_open_git_history();
-		if (kind === 'git-compare') return m.workspace_open_git_compare();
 		if (kind === 'chat-map') return m.workspace_open_chat_map();
 		if (kind === 'chat-canvas') return m.workspace_open_chat_canvas();
 		if (kind === 'chat-board') return m.workspace_open_chat_board();

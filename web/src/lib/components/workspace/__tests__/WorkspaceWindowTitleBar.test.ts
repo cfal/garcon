@@ -212,8 +212,14 @@ const viewGroups = [
 				kind: 'git',
 				label: () => m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
 			},
-			{ kind: 'git-history', label: m.workspace_open_git_history },
-			{ kind: 'git-compare', label: m.workspace_open_git_compare },
+			{
+				kind: 'git-history',
+				label: () => m.workspace_open_surface({ surface: m.workspace_surface_git_history() }),
+			},
+			{
+				kind: 'git-compare',
+				label: () => m.workspace_open_surface({ surface: m.workspace_surface_git_compare() }),
+			},
 			{
 				kind: 'commit',
 				label: () => m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
@@ -951,7 +957,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		renderTitleBar(workspaceWindow([chatSurface.id]));
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_git_views() }));
-		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_open_git_history() }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Open History' }));
 
 		expect(openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
 	});
@@ -1089,7 +1095,7 @@ describe('WorkspaceWindowTitleBar', () => {
 	});
 
 	it.each([
-		{ group: m.workspace_git_views, item: m.workspace_open_git_history, viewportWidth: 230 },
+		{ group: m.workspace_git_views, item: () => 'Open History', viewportWidth: 230 },
 		{ group: m.workspace_chat_views, item: m.workspace_open_chat_canvas, viewportWidth: 320 },
 	])(
 		'closes a promoted group while other actions remain in overflow: $group',
@@ -1846,7 +1852,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
 
 		expect(screen.queryByRole('menuitem', { name: m.workspace_new_terminal() })).toBeNull();
-		expect(screen.queryByRole('menuitem', { name: m.workspace_open_git_history() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: 'Open History' })).toBeNull();
 	});
 
 	it('shows standard copy rows below the active Chat tab actions', async () => {

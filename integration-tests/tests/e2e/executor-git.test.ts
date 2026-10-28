@@ -103,7 +103,7 @@ test('hidden Workbench return reloads retained files after an editor save', asyn
     await app.setViewport(1_600, 900);
     await app.openChat(chats[0]);
     await fixture.waitForSpaWebSocket();
-    await app.clickWorkspaceWindowAddAction('Open Git Workbench');
+    await app.clickWorkspaceWindowAddAction('Open Workbench');
     await fixture.page.waitForSelector(GIT_PANEL);
     await showGitDiff(fixture);
     await waitForDiff(fixture, 'Synthetic retained change');
@@ -202,7 +202,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       expect(await fixture.page.$('[role="dialog"]')).toBeNull();
       expect(await readFile(join(project, 'example.txt'), 'utf8')).toBe('Replacement working content\n');
 
-      const historyWindow = await app.openNewWorkspaceWindow('Open Git History');
+      const historyWindow = await app.openNewWorkspaceWindow('Open History');
       await app.waitForText('Initial synthetic commit');
       await app.clickButton('Initial synthetic commit', { contains: true });
       await app.waitForButton('Revert');
@@ -327,13 +327,13 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       await openGit(fixture);
       await waitForDiff(fixture, 'Worker replacement change');
 
-      await app.openNewWorkspaceWindow('Open Git History');
+      await app.openNewWorkspaceWindow('Open History');
       await app.waitForText('Initial synthetic commit');
       await runFixtureGit(executionDirs.project, 'checkout', '-b', 'external-checkout');
       const historyPanel = '[data-workspace-surface-id="singleton:git-history"][aria-hidden="false"]';
       await app.clickResponsiveAction('Refresh', { within: historyPanel });
       await fixture.page.waitForFunction(selector => document.querySelector(selector)?.textContent?.includes('external-checkout') === true, {}, historyPanel);
-      await app.clickWorkspaceWindowAddAction('Open Git Compare', await app.currentWorkspaceWindowId());
+      await app.clickWorkspaceWindowAddAction('Open Compare', await app.currentWorkspaceWindowId());
       await fixture.page.waitForFunction(() => document.querySelector(
         '[data-workspace-surface-id="singleton:git-compare"] [data-git-virtual-diff-root]',
       )?.textContent?.includes('Worker replacement change') === true, { timeout: 20_000 });

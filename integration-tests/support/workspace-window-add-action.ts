@@ -39,9 +39,9 @@ export function interactWithWorkspaceWindowAddAction({
   const action = inlineAction ?? menuAction;
   // Views that live in a titlebar group menu rather than in the add menu itself.
   const viewGroup = ({
-    'Open Git Workbench': 'git-views',
-    'Open Git History': 'git-views',
-    'Open Git Compare': 'git-views',
+    'Open Workbench': 'git-views',
+    'Open History': 'git-views',
+    'Open Compare': 'git-views',
     'Open Commit': 'git-views',
     'Open Chat Map': 'chat-views',
     'Open Canvas': 'chat-views',
