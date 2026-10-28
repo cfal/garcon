@@ -1018,11 +1018,15 @@ describe('PromptComposer focus', () => {
 		await fireEvent.dragOver(composer, { dataTransfer: transfer });
 		const overlay = screen.getByText('Drop files here').closest('[data-attachment-drop-overlay]');
 		expect(overlay?.classList.contains('pointer-events-none')).toBe(true);
+		expect(overlay?.getAttribute('data-slot')).toBe('composer-attachment-drop-overlay');
+		expect(screen.getByText('Drop files here').parentElement?.getAttribute('data-slot')).toBe('composer-attachment-drop-hint');
 		await fireEvent.drop(screen.getByRole('button', { name: 'Add to prompt' }), {
 			dataTransfer: transfer,
 		});
 		expect(screen.getByTestId('composer-attachment-count').textContent).toBe('2');
 		expect(screen.queryByText('Drop files here')).toBeNull();
+		expect(container.querySelector('[data-slot="composer-attachments"]')?.classList.contains('rounded-lg')).toBe(true);
+		expect(container.querySelectorAll('[data-slot="composer-attachment-preview"]')).toHaveLength(2);
 	});
 
 	it('keeps the drop overlay while moving between composer descendants', async () => {
@@ -1274,6 +1278,7 @@ describe('PromptComposer focus', () => {
 			quickCommitSummary: quickSummary(),
 		});
 		const gitTray = screen.getByRole('status');
+		expect(gitTray.getAttribute('data-slot')).toBe('chat-git-status');
 
 		expect(composer?.className).toContain('rounded-2xl');
 		expect(composer?.className).not.toContain('rounded-t-none');

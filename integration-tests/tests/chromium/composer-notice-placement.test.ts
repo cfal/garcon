@@ -78,6 +78,24 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         for (const width of [1440, 390]) {
           await page.setViewportSize({ width, height: 900 });
           await expectNoticeAboveCap(notice, cap, composer);
+          const surfaces = [];
+          for (const surface of [notice, cap]) {
+            const standardRadius = await surface.evaluate(element => getComputedStyle(element).borderRadius);
+            expect(parseFloat(standardRadius)).toBeGreaterThan(0);
+            surfaces.push({ surface, standardRadius });
+          }
+          for (const terminalAppearance of [true, false]) {
+            await page.evaluate(terminalAppearance => {
+              const key = 'pref_local_settings';
+              localStorage.setItem(key, JSON.stringify({ ...JSON.parse(localStorage.getItem(key) ?? '{}'), terminalAppearance }));
+              window.dispatchEvent(new StorageEvent('storage', { key, storageArea: localStorage }));
+            }, terminalAppearance);
+            await browserExpect(page.locator('html')).toHaveAttribute('data-theme-appearance', terminalAppearance ? 'terminal' : 'standard');
+            for (const { surface, standardRadius } of surfaces) {
+              await browserExpect(surface).toHaveCSS('border-radius', terminalAppearance ? '0px' : standardRadius);
+            }
+            await expectNoticeAboveCap(notice, cap, composer);
+          }
           await page.screenshot({ path: join(artifacts, `composer-notice-idle-${executionBackend}-${width}.png`) });
         }
 

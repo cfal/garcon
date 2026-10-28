@@ -110,6 +110,7 @@
 			/>
 		{:else if otherGroups.length === 0}
 			<p
+				data-slot="new-chat-pinned-paths-hint"
 				class="w-full rounded-md bg-muted/30 px-2.5 py-1 text-center text-xs text-muted-foreground"
 			>
 				{m.chat_new_chat_star_bookmark()}

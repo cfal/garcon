@@ -5,11 +5,83 @@ import type { Locator } from 'playwright';
 import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { initializeFixtureRepository } from '../../support/git-fixture.js';
 import { AmpOracleToolUseMessage, CompactionMessage } from '../../../common/chat-types.js';
 import type { AddChatRowRequest, ChatRowTargetResponse } from '../../../common/chat-row-contracts.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 
 const ARTIFACT_DIRECTORY = join(import.meta.dirname, '../../artifacts/chromium');
+
+test('Terminal UI Style squares composer attachments and completion menus without changing Standard', async () => {
+  await withChromiumFixture('terminal composer surfaces', async ({ page, integration, assertNoBrowserErrors }) => {
+    await initializeFixtureRepository(integration.dirs.project);
+    const chatId = integration.newChatId();
+    const started = await integration.client.startDirectChat({
+      chatId, content: 'Synthetic composer appearance seed',
+      projectPath: integration.dirs.project, agent: integration.directAgents.anthropic,
+    });
+    await integration.client.waitForTurnTerminal(chatId, started.turnId);
+    await integration.client.waitForProcessing(chatId, false);
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    const composer = page.locator('[data-composer]:visible');
+    const input = composer.locator('textarea');
+    await input.fill('Synthetic retained draft');
+    await composer.locator('input[type="file"]').setInputFiles({
+      name: 'notes.md', mimeType: 'text/markdown', buffer: Buffer.from('Synthetic attachment'),
+    });
+    const attachments = composer.locator('[data-slot="composer-attachments"]');
+    const preview = attachments.locator('[data-slot="composer-attachment-preview"]');
+    const tray = page.locator('[data-slot="chat-git-status"]:visible');
+    const menu = page.locator('[data-slot="composer-completion-menu"]:visible');
+    await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
+
+    async function checkCorners(surfaces: Locator[]) {
+      const baselines = [];
+      for (const surface of surfaces) {
+        await browserExpect(surface).toBeVisible();
+        const standardRadius = await surface.evaluate(element => getComputedStyle(element).borderRadius);
+        expect(parseFloat(standardRadius)).toBeGreaterThan(0);
+        baselines.push({ surface, standardRadius });
+      }
+      for (const terminalAppearance of [true, false]) {
+        await page.evaluate(terminalAppearance => {
+          const key = 'pref_local_settings';
+          localStorage.setItem(key, JSON.stringify({ ...JSON.parse(localStorage.getItem(key) ?? '{}'), terminalAppearance }));
+          window.dispatchEvent(new StorageEvent('storage', { key, storageArea: localStorage }));
+        }, terminalAppearance);
+        await browserExpect(page.locator('html')).toHaveAttribute('data-theme-appearance', terminalAppearance ? 'terminal' : 'standard');
+        for (const { surface, standardRadius } of baselines) {
+          await browserExpect(surface).toBeVisible();
+          await browserExpect(surface).toHaveCSS('border-radius', terminalAppearance ? '0px' : standardRadius);
+        }
+        if (terminalAppearance && surfaces.length > 1) {
+          await page.screenshot({
+            path: join(ARTIFACT_DIRECTORY, `terminal-composer-${page.viewportSize()!.width}.png`),
+            animations: 'disabled',
+          });
+        }
+      }
+    }
+
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await checkCorners([tray, attachments, preview]);
+      await browserExpect(input).toHaveValue('Synthetic retained draft');
+      for (const query of ['/rename', '@example']) {
+        await input.fill(query);
+        await browserExpect(menu).toContainText(query === '/rename' ? '/rename' : 'example.txt');
+        await checkCorners([menu]);
+        await input.press('Enter');
+        await browserExpect(menu).toHaveCount(0);
+        await browserExpect(input).toHaveValue(query === '/rename' ? '/rename ' : '@example.txt ');
+      }
+      await input.fill('Synthetic retained draft');
+    }
+    await composer.getByRole('button', { name: 'Remove attachment notes.md' }).click();
+    await browserExpect(attachments).toHaveCount(0);
+    assertNoBrowserErrors();
+  });
+}, 60_000);
 
 test('Terminal UI Style gives compaction, Oracle and other event cards consistent corners', async () => {
   await withChromiumFixture('terminal chat row corners', async ({ page, integration, assertNoBrowserErrors }) => {

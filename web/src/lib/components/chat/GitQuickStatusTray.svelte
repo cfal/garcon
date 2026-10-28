@@ -40,6 +40,7 @@
 {#if isVisible}
 	<div class={trayClass}>
 		<div
+			data-slot="chat-git-status"
 			class={panelClass}
 			role={announcementsEnabled ? 'status' : undefined}
 			aria-live={announcementsEnabled ? 'polite' : 'off'}
@@ -72,6 +73,7 @@
 						/>
 					{:else}
 						<span
+							data-slot="chat-git-branch"
 							class="inline-flex min-w-0 items-center gap-1.5 rounded-md border border-border bg-background/65 px-2 py-1 text-muted-foreground"
 							title={summary.branch}
 						>

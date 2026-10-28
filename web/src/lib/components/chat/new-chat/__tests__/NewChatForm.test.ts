@@ -872,6 +872,7 @@ describe('NewChatForm', () => {
 		});
 
 		const toggleButton = screen.getByRole('button', { name: 'Pin project path' });
+		expect(document.querySelector('[data-slot="new-chat-pinned-paths-hint"]')?.classList.contains('rounded-md')).toBe(true);
 		await fireEvent.click(toggleButton);
 
 		const projectPathInput = screen.getByLabelText('Project Path') as HTMLInputElement;
@@ -1697,6 +1698,7 @@ describe('NewChatForm', () => {
 		});
 
 		expect(screen.getByRole('button', { name: 'Remove attachment pasted.png' })).toBeTruthy();
+		expect(document.querySelector('[data-slot="composer-attachment-preview"]')?.classList.contains('rounded-lg')).toBe(true);
 		const expansionOptions = vi.mocked(snippetsApi.expandSnippet).mock.calls[0]?.[1];
 		expect(expansionOptions?.signal?.aborted).toBe(true);
 		pending.resolve({

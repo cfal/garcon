@@ -75,6 +75,7 @@ describe('QueuedInputEditorDialog', () => {
 		await editMessage();
 		component.setQueue(queue([]));
 		await screen.findByText(m.chat_queue_no_longer_queued());
+		expect(document.getElementById('queued-input-status')?.getAttribute('data-slot')).toBe('queue-status');
 		await fireEvent.click(screen.getByRole('button', { name: m.common_cancel() }));
 		await waitFor(() =>
 			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Composer' })),
@@ -111,6 +112,7 @@ describe('QueuedInputEditorDialog', () => {
 		});
 		component.setQueue(queue([entry(0, 2, 'Remote edit')]));
 		await screen.findByText(m.chat_queue_changed_elsewhere());
+		expect(document.getElementById('queued-input-status')?.getAttribute('data-slot')).toBe('queue-status');
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_replace_latest() }));
 		expect(onReplace).toHaveBeenCalledWith('entry-0', 'Preserved local edit', 2);
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -279,6 +281,10 @@ describe('QueuedInputEditorDialog', () => {
 		});
 		expect(within(list).getByText('screen.png')).toBeTruthy();
 		expect(within(list).getByText('trace.pdf')).toBeTruthy();
+		for (const attachment of within(list).getAllByRole('listitem')) {
+			expect(attachment.getAttribute('data-slot')).toBe('queue-attachment');
+			expect(attachment.classList.contains('rounded-md')).toBe(true);
+		}
 		const textarea = screen.getByRole('textbox', { name: m.chat_queue_edit_message() });
 		const save = screen.getByRole('button', { name: m.chat_queue_save_edit() });
 		expect(
