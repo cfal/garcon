@@ -58,10 +58,19 @@ function makeWorktree(path: string, branch: string, isCurrent = false): GitWorkt
 }
 
 describe('Sidebar dialogs', () => {
-	it.each([false, true])(
-		'restores focus after the path opener disappears only in the originating chat (reused panel: %s)',
-		async (reusedPanel) => {
+	it.each([
+		{ reusedPanel: false, worktreeDetour: false },
+		{ reusedPanel: true, worktreeDetour: false },
+		{ reusedPanel: false, worktreeDetour: true },
+		{ reusedPanel: true, worktreeDetour: true },
+	])(
+		'restores focus only in the originating chat (reused: $reusedPanel, worktree detour: $worktreeDetour)',
+		async ({ reusedPanel, worktreeDetour }) => {
 			vi.useFakeTimers();
+			vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+			vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+				worktrees: [makeWorktree('/workspace/project-feature', 'feature')],
+			});
 			const panel = document.createElement('div');
 			panel.dataset.conversationPanel = 'synthetic-surface';
 			panel.dataset.conversationPanelChatId = 'chat-1';
@@ -87,6 +96,19 @@ describe('Sidebar dialogs', () => {
 			});
 			try {
 				await vi.advanceTimersByTimeAsync(250);
+				if (worktreeDetour) {
+					await fireEvent.click(
+						screen.getByRole('button', { name: 'Select a different worktree' }),
+					);
+					await screen.findByRole('dialog', { name: 'Select worktree' });
+					await vi.advanceTimersByTimeAsync(250);
+					await fireEvent.click(screen.getByRole('option', { name: /feature/ }));
+					await vi.advanceTimersByTimeAsync(250);
+					expect(screen.getByRole('textbox', { name: /new path/i })).toHaveProperty(
+						'value',
+						'/workspace/project-feature',
+					);
+				}
 				trigger.remove();
 				if (reusedPanel) panel.dataset.conversationPanelChatId = 'chat-2';
 				await rendered.rerender({ projectPathDialog: null });

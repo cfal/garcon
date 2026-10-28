@@ -106,13 +106,16 @@ test('Composer status bar categories and included items follow Appearance settin
     const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
     for (const width of [1440, 390, 320]) {
       await page.setViewportSize({ width, height: 900 });
+      await browserExpect(page.locator('.mobile-shell')).toHaveCount(width <= 768 ? 1 : 0);
       await browserExpect(pathButton.locator('[data-composer-project-path-label]')).toBeVisible();
       expect(await bar.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
       await page.screenshot({ path: join(artifacts, `composer-status-bar-path-only-${width}.png`) });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
-    const panel = page.locator('[data-conversation-panel]:visible');
+    await browserExpect(page.locator('.mobile-shell')).toHaveCount(0);
+    const panel = page.locator('[data-workspace-window-id="window-main"] [data-conversation-panel]:visible');
     await panel.evaluate(element => { element.style.width = '170px'; });
+    expect((await panel.boundingBox())!.width).toBe(170);
     await browserExpect(pathButton.locator('[data-composer-project-path-label]')).toBeHidden();
     expect((await pathButton.boundingBox())!.width).toBe(32);
     await panel.evaluate(element => { element.style.removeProperty('width'); });
