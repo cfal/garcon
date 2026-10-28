@@ -1241,11 +1241,10 @@ describe('Chromium workspace windows', () => {
         );
       }, windowId);
       await addControls.locator('[data-workspace-window-add-trigger]').click();
-      const retainedMenuAction = menu.locator('[data-workspace-window-add-action="new-terminal"]');
-      const retainedActionId = await retainedMenuAction.getAttribute(
-        'data-workspace-window-add-action',
+      const retainedActionId = 'new-terminal';
+      const retainedMenuAction = menu.locator(
+        `[data-workspace-window-add-action="${retainedActionId}"]`,
       );
-      if (!retainedActionId) throw new Error('Retained overflow action has no stable identity.');
       await retainedMenuAction.hover({ position: { x: 2, y: 10 } });
       await menu.press('End');
       expect(

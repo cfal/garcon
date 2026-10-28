@@ -962,18 +962,9 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
 	});
 
-	it.each(
-		viewGroups.flatMap(({ label: group, members }) =>
-			members.map(({ kind, label }) => ({
-				kind,
-				label,
-				group,
-				expectedLabels: members.map((member) => member.label()),
-			})),
-		),
-	)(
-		'opens $kind through its view group in both titlebar layouts',
-		async ({ kind, label, group, expectedLabels }) => {
+	it.each(viewGroups.flatMap((group) => group.members.map((member) => ({ group, member }))))(
+		'opens $member.kind through its view group in both titlebar layouts',
+		async ({ group, member }) => {
 			const executor = workspaceWindow([chatSurface.id]);
 			const rendered = render(WorkspaceWindowAddMenu, {
 				windowId: executor.id,
@@ -981,27 +972,27 @@ describe('WorkspaceWindowTitleBar', () => {
 				measure: { naturalWidth: 200, viewportWidth: 0 },
 			});
 			await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
-			expect(screen.queryByRole('menuitem', { name: label() })).toBeNull();
-			const submenuTrigger = screen.getByRole('menuitem', { name: group() });
+			expect(screen.queryByRole('menuitem', { name: member.label() })).toBeNull();
+			const submenuTrigger = screen.getByRole('menuitem', { name: group.label() });
 			submenuTrigger.focus();
 			await fireEvent.keyDown(submenuTrigger, { key: 'ArrowRight' });
-			await fireEvent.click(await screen.findByRole('menuitem', { name: label() }));
-			expect(openSingletonAsTab).toHaveBeenLastCalledWith(kind, 'window-main');
+			await fireEvent.click(await screen.findByRole('menuitem', { name: member.label() }));
+			expect(openSingletonAsTab).toHaveBeenLastCalledWith(member.kind, 'window-main');
 
 			await rendered.rerender({
 				windowId: executor.id,
 				tabs: executor.tabs,
 				measure: { naturalWidth: 100, viewportWidth: 1_000 },
 			});
-			const inlineTrigger = await screen.findByRole('button', { name: group() });
-			expect(screen.queryByRole('button', { name: label() })).toBeNull();
+			const inlineTrigger = await screen.findByRole('button', { name: group.label() });
+			expect(screen.queryByRole('button', { name: member.label() })).toBeNull();
 			await fireEvent.click(inlineTrigger);
 			expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual(
-				expectedLabels,
+				group.members.map((candidate) => candidate.label()),
 			);
-			await fireEvent.click(screen.getByRole('menuitem', { name: label() }));
+			await fireEvent.click(screen.getByRole('menuitem', { name: member.label() }));
 			expect(openSingletonAsTab).toHaveBeenCalledTimes(2);
-			expect(openSingletonAsTab).toHaveBeenLastCalledWith(kind, 'window-main');
+			expect(openSingletonAsTab).toHaveBeenLastCalledWith(member.kind, 'window-main');
 		},
 	);
 
@@ -1118,15 +1109,11 @@ describe('WorkspaceWindowTitleBar', () => {
 		},
 	);
 
-	it.each(
-		viewGroups.map(({ label: group, members }) => ({
-			group,
-			first: members[0].label,
-			second: members[members.length - 1].label,
-		})),
-	)(
+	it.each(viewGroups)(
 		'restores view-group focus when its open submenu moves between layouts',
-		async ({ group, first, second }) => {
+		async ({ label, members }) => {
+			const first = members[0].label();
+			const last = members[members.length - 1].label();
 			const executor = workspaceWindow([chatSurface.id]);
 			const rendered = render(WorkspaceWindowAddMenu, {
 				windowId: executor.id,
@@ -1134,23 +1121,23 @@ describe('WorkspaceWindowTitleBar', () => {
 				measure: { naturalWidth: 200, viewportWidth: 0 },
 			});
 			await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
-			await fireEvent.click(screen.getByRole('menuitem', { name: group() }));
-			const canvasItem = await screen.findByRole('menuitem', {
-				name: first(),
+			await fireEvent.click(screen.getByRole('menuitem', { name: label() }));
+			const firstItem = await screen.findByRole('menuitem', {
+				name: first,
 			});
-			canvasItem.focus();
+			firstItem.focus();
 			await rendered.rerender({
 				windowId: executor.id,
 				tabs: executor.tabs,
 				measure: { naturalWidth: 100, viewportWidth: 1_000 },
 			});
 			await waitFor(() =>
-				expect(document.activeElement).toBe(screen.getByRole('button', { name: group() })),
+				expect(document.activeElement).toBe(screen.getByRole('button', { name: label() })),
 			);
-			expect(screen.queryByRole('menuitem', { name: first() })).toBeNull();
+			expect(screen.queryByRole('menuitem', { name: first })).toBeNull();
 
-			await fireEvent.click(screen.getByRole('button', { name: group() }));
-			screen.getByRole('menuitem', { name: second() }).focus();
+			await fireEvent.click(screen.getByRole('button', { name: label() }));
+			screen.getByRole('menuitem', { name: last }).focus();
 			await rendered.rerender({
 				windowId: executor.id,
 				tabs: executor.tabs,
@@ -1161,7 +1148,7 @@ describe('WorkspaceWindowTitleBar', () => {
 					screen.getByRole('button', { name: m.workspace_add_to_window() }),
 				),
 			);
-			expect(screen.queryByRole('menuitem', { name: second() })).toBeNull();
+			expect(screen.queryByRole('menuitem', { name: last })).toBeNull();
 		},
 	);
 
