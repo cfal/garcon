@@ -1,5 +1,67 @@
+diff --git a/dist/bits/scroll-area/scroll-area.svelte.js b/dist/bits/scroll-area/scroll-area.svelte.js
+index 7fa4f32c422ed548dc31c543522ba2a3d32a31a4..8ff131753350b6e3d3130ce8261947fdf77f8e42 100644
+--- a/dist/bits/scroll-area/scroll-area.svelte.js
++++ b/dist/bits/scroll-area/scroll-area.svelte.js
+@@ -4,11 +4,12 @@
+  * Credit to Jenna Smith (@jjenzz) for the original implementation.
+  * Incredible thought must have went into solving all the intricacies of this component.
+  */
+-import { Context, useDebounce, watch } from "runed";
++import { Context, watch } from "runed";
+ import { untrack } from "svelte";
+ import { simpleBox, executeCallbacks, attachRef, DOMContext, getWindow, } from "svelte-toolbelt";
+ import { mergeProps, useId } from "../../shared/index.js";
+ import { clamp } from "../../internal/clamp.js";
++import { debounce } from "../../internal/debounce.js";
+ import { on } from "svelte/events";
+ import { createBitsAttrs } from "../../internal/attrs.js";
+ import { StateMachine } from "../../internal/state-machine.js";
+@@ -189,7 +190,7 @@ export class ScrollAreaScrollbarScrollState {
+     constructor(scrollbar) {
+         this.scrollbar = scrollbar;
+         this.root = scrollbar.root;
+-        const debounceScrollend = useDebounce(() => this.machine.dispatch("SCROLL_END"), 100);
++        const debounceScrollend = debounce(() => this.machine.dispatch("SCROLL_END"), 100);
+         $effect(() => {
+             const _state = this.machine.state.current;
+             const scrollHideDelay = this.root.opts.scrollHideDelay.current;
+@@ -214,7 +215,10 @@ export class ScrollAreaScrollbarScrollState {
+                 prevScrollPos = scrollPos;
+             };
+             const unsubListener = on(viewportNode, "scroll", handleScroll);
+-            return unsubListener;
++            return () => {
++                unsubListener();
++                debounceScrollend.destroy();
++            };
+         });
+         this.onpointerenter = this.onpointerenter.bind(this);
+         this.onpointerleave = this.onpointerleave.bind(this);
+@@ -637,7 +641,7 @@ export class ScrollAreaThumbImplState {
+     attachment;
+     #root;
+     #removeUnlinkedScrollListener = $state();
+-    #debounceScrollEnd = useDebounce(() => {
++    #debounceScrollEnd = debounce(() => {
+         if (this.#removeUnlinkedScrollListener) {
+             this.#removeUnlinkedScrollListener();
+             this.#removeUnlinkedScrollListener = undefined;
+@@ -662,7 +666,12 @@ export class ScrollAreaThumbImplState {
+             };
+             untrack(() => this.scrollbarState.handleThumbPositionChange());
+             const unsubListener = on(viewportNode, "scroll", handleScroll);
+-            return unsubListener;
++            return () => {
++                unsubListener();
++                this.#debounceScrollEnd.destroy();
++                this.#removeUnlinkedScrollListener?.();
++                this.#removeUnlinkedScrollListener = undefined;
++            };
+         });
+         this.onpointerdowncapture = this.onpointerdowncapture.bind(this);
+         this.onpointerup = this.onpointerup.bind(this);
 diff --git a/dist/bits/utilities/focus-scope/focus-scope.svelte.js b/dist/bits/utilities/focus-scope/focus-scope.svelte.js
-index a3941823aa76e34dabffbb2fa6ce1443787d17a2..3eba84bc84312f8d5ceb5f549b1615c1c642dae9 100644
+index 7a2c1609d5c6d045ba8731d5c3f05eed9eb35e89..a879c79bd69c0742e3ac64617bf477371913783c 100644
 --- a/dist/bits/utilities/focus-scope/focus-scope.svelte.js
 +++ b/dist/bits/utilities/focus-scope/focus-scope.svelte.js
 @@ -28,6 +28,8 @@ export class FocusScope {
