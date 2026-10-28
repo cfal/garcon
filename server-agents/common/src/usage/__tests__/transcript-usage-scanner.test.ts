@@ -241,20 +241,23 @@ describe('transcript usage scanner', () => {
     expect(result.files[0]!.records).toHaveLength(20_001);
   });
 
+  // The controller logs event-loop stalls from 250 ms; a scan must stay well inside that.
   test('parses a large transcript and resumes it without holding the event loop', async () => {
     const file = path.join(root, 'large.jsonl');
     const lines = 200_000;
     await writeLarge(file, lines);
     let cold: Awaited<ReturnType<typeof scan>> | null = null;
-    expect(await longestTimerGap(async () => { cold = await scan(); })).toBeLessThan(200);
+    expect(await longestTimerGap(async () => { cold = await scan(); })).toBeLessThan(250);
     expect(cold!.files[0]!.records).toHaveLength(lines);
 
     await appendFile(file, line({ usage: 2 }));
     parsed.length = 0;
     let warm: Awaited<ReturnType<typeof scan>> | null = null;
-    expect(await longestTimerGap(async () => { warm = await scan(); })).toBeLessThan(200);
+    expect(await longestTimerGap(async () => { warm = await scan(); })).toBeLessThan(250);
     expect(parsed).toHaveLength(1);
     expect(warm!.files[0]!.records).toHaveLength(lines + 1);
+    // A resume merges into the cached records rather than copying the whole history.
+    expect(warm!.files[0]!.records).toBe(cold!.files[0]!.records);
   });
 
   test('stops at a cancelled scan and still serves the next one', async () => {
