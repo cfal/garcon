@@ -169,6 +169,7 @@ export interface LocalSettingsSnapshot extends TypographyPreferences, ComposerSt
 	steerWithCtrlEnter: boolean;
 	snippetTrigger: string;
 	chatMaxWidth: ChatMaxWidth;
+	autoHideChatScrollbar: boolean;
 	inlineImageThumbnailSize: InlineImageThumbnailSize;
 	imageCacheSizeMiB: ImageCacheSizeMiB;
 	inlineMermaidThumbnailSize: InlineMermaidThumbnailSize;
@@ -214,6 +215,7 @@ type BooleanLocalSettingKey =
 	| 'showThinking'
 	| 'allowDirectChats'
 	| 'reduceMotion'
+	| 'autoHideChatScrollbar'
 	| 'composerStatusBarGitProjects'
 	| 'composerStatusBarNonGitProjects'
 	| 'composerStatusBarProjectPath'
@@ -250,6 +252,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	steerWithCtrlEnter: true,
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
+	autoHideChatScrollbar: false,
 	inlineImageThumbnailSize: 'medium',
 	imageCacheSizeMiB: 64,
 	inlineMermaidThumbnailSize: 'medium',
@@ -479,6 +482,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		steerWithCtrlEnter: parseBoolean(parsed.steerWithCtrlEnter, DEFAULTS.steerWithCtrlEnter),
 		snippetTrigger: normalizeSnippetTrigger(parsed.snippetTrigger),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
+		autoHideChatScrollbar: parseBoolean(
+			parsed.autoHideChatScrollbar,
+			DEFAULTS.autoHideChatScrollbar,
+		),
 		inlineImageThumbnailSize: isInlineImageThumbnailSize(parsed.inlineImageThumbnailSize)
 			? parsed.inlineImageThumbnailSize
 			: DEFAULTS.inlineImageThumbnailSize,
@@ -614,6 +621,7 @@ export class LocalSettingsStore {
 	steerWithCtrlEnter = $state(DEFAULTS.steerWithCtrlEnter);
 	snippetTrigger = $state(DEFAULTS.snippetTrigger);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
+	autoHideChatScrollbar = $state(DEFAULTS.autoHideChatScrollbar);
 	inlineImageThumbnailSize = $state<InlineImageThumbnailSize>(DEFAULTS.inlineImageThumbnailSize);
 	imageCacheSizeMiB = $state<ImageCacheSizeMiB>(DEFAULTS.imageCacheSizeMiB);
 	inlineMermaidThumbnailSize = $state<InlineMermaidThumbnailSize>(
@@ -778,6 +786,7 @@ export class LocalSettingsStore {
 			steerWithCtrlEnter: this.steerWithCtrlEnter,
 			snippetTrigger: this.snippetTrigger,
 			chatMaxWidth: this.chatMaxWidth,
+			autoHideChatScrollbar: this.autoHideChatScrollbar,
 			inlineImageThumbnailSize: this.inlineImageThumbnailSize,
 			imageCacheSizeMiB: this.imageCacheSizeMiB,
 			inlineMermaidThumbnailSize: this.inlineMermaidThumbnailSize,
@@ -854,6 +863,7 @@ export class LocalSettingsStore {
 		this.steerWithCtrlEnter = snap.steerWithCtrlEnter;
 		this.snippetTrigger = snap.snippetTrigger;
 		this.chatMaxWidth = snap.chatMaxWidth;
+		this.autoHideChatScrollbar = snap.autoHideChatScrollbar;
 		this.inlineImageThumbnailSize = snap.inlineImageThumbnailSize;
 		this.imageCacheSizeMiB = snap.imageCacheSizeMiB;
 		this.inlineMermaidThumbnailSize = snap.inlineMermaidThumbnailSize;

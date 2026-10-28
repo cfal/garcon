@@ -1755,6 +1755,7 @@
 	"settings_snippet_trigger_error_format": "Use 2-4 characters without spaces, slashes, or at-signs",
 	"settings_snippet_trigger_error_charset": "Include at least one character other than letters, digits, _ or -",
 	"settings_chat_max_width": "Max chat width",
+	"settings_auto_hide_chat_scrollbar": "Auto-hide chat scrollbar",
 	"settings_chat_max_width_none": "None",
 	"settings_chat_max_width_large": "Large",
 	"settings_chat_max_width_medium": "Medium",

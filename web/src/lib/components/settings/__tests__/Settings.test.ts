@@ -51,6 +51,31 @@ const completionSound = await import('$lib/notifications/completion-sound.js');
 const SettingsTestHost = (await import('./SettingsTestHost.svelte')).default;
 
 describe('Settings', () => {
+	it('persists the Appearance scrollbar setting across remounts', async () => {
+		localStorage.clear();
+		const appShell = createAppShellStore();
+		appShell.openSettings('appearance');
+		const props = { appShell, remoteSettings: new RemoteSettingsStore() };
+		let rendered = render(SettingsTestHost, props);
+		try {
+			const control = screen.getByRole('switch', { name: 'Auto-hide chat scrollbar' });
+			expect(control.getAttribute('aria-checked')).toBe('false');
+			await fireEvent.click(control);
+			expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
+				autoHideChatScrollbar: true,
+			});
+			rendered.unmount();
+			rendered = render(SettingsTestHost, props);
+			expect(
+				screen
+					.getByRole('switch', { name: 'Auto-hide chat scrollbar' })
+					.getAttribute('aria-checked'),
+			).toBe('true');
+		} finally {
+			rendered.unmount();
+		}
+	});
+
 	it('configures the composer status bar in Appearance and restores every preference', async () => {
 		localStorage.clear();
 		const appShell = createAppShellStore();

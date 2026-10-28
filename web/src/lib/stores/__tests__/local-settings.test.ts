@@ -1132,6 +1132,56 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
+	it('defaults to a visible chat scrollbar and persists auto-hide', () => {
+		const store = createLocalSettingsStore();
+		expect(store.autoHideChatScrollbar).toBe(false);
+		store.toggle('autoHideChatScrollbar');
+		expect(store.autoHideChatScrollbar).toBe(true);
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({
+			autoHideChatScrollbar: true,
+		});
+		const restored = createLocalSettingsStore();
+		expect(restored.autoHideChatScrollbar).toBe(true);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it.each([null, 1, 'true', {}, []])('ignores malformed scrollbar preferences: %j', (value) => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ autoHideChatScrollbar: value }),
+		);
+		const store = createLocalSettingsStore();
+		expect(store.autoHideChatScrollbar).toBe(false);
+		store.destroy();
+	});
+
+	it('synchronizes scrollbar auto-hide across tabs and restores its default on storage removal', () => {
+		const store = createLocalSettingsStore();
+		const newValue = JSON.stringify({ ...store.snapshot(), autoHideChatScrollbar: true });
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, newValue);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue,
+				storageArea: localStorage,
+			}),
+		);
+		expect(store.autoHideChatScrollbar).toBe(true);
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.localSettings);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: null,
+				storageArea: localStorage,
+			}),
+		);
+		expect(store.autoHideChatScrollbar).toBe(false);
+		store.destroy();
+	});
+
 	it('persists max chat width', () => {
 		const store = createLocalSettingsStore();
 

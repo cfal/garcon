@@ -45,7 +45,10 @@ async function showFeedScrollbar(container: HTMLElement): Promise<{
 		}
 	}
 	await fireEvent.pointerEnter(root);
-	await waitFor(() => expect(container.querySelector('[data-chat-feed-scrollbar]')).not.toBeNull());
+	await waitFor(() => {
+		expect(container.querySelector('[data-chat-feed-scrollbar]')).not.toBeNull();
+		expect(container.querySelector('[data-slot="scroll-area-thumb"]')).not.toBeNull();
+	});
 	const scrollbar = container.querySelector<HTMLElement>('[data-chat-feed-scrollbar]');
 	const thumb = container.querySelector<HTMLElement>('[data-slot="scroll-area-thumb"]');
 	if (!scrollbar || !thumb) throw new Error('Expected the feed scrollbar and thumb');
@@ -327,6 +330,41 @@ describe('ConversationFeed', () => {
 
 		expect(scrollbar.classList.contains('w-1.5')).toBe(true);
 		expect(scrollbar.classList.contains('pointer-fine:w-3')).toBe(true);
+	});
+
+	it('auto-hides after scrolling while retaining the track and viewport', async () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ autoHideChatScrollbar: true }),
+		);
+		const onUserScrollIntent = vi.fn();
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'twenty-thousand',
+			onUserScrollIntent,
+		});
+		const { scrollbar, viewport } = await showFeedScrollbar(container);
+		expect(scrollbar.dataset.state).toBe('hidden');
+		viewport.scrollTop = 100;
+		await fireEvent.scroll(viewport);
+		expect(scrollbar.dataset.state).toBe('visible');
+		await waitFor(() => expect(scrollbar.dataset.state).toBe('hidden'), { timeout: 1_500 });
+		expect(scrollbar.isConnected).toBe(true);
+		expect(onUserScrollIntent).not.toHaveBeenCalled();
+
+		const newValue = JSON.stringify({ autoHideChatScrollbar: false });
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, newValue);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue,
+				storageArea: localStorage,
+			}),
+		);
+		await tick();
+		expect(container.querySelector('[data-chat-scrollbar-auto-hide="false"]')).not.toBeNull();
+		expect(container.querySelector('[data-chat-scroll-viewport]')).toBe(viewport);
+		expect(viewport.scrollTop).toBe(100);
+		expect(onUserScrollIntent).not.toHaveBeenCalled();
 	});
 
 	it('reports an immediate scrollbar track jump from its committed offset', async () => {

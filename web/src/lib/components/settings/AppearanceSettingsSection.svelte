@@ -160,6 +160,9 @@
 				{/each}
 			</select>
 		</div>
+		{@render settingRow(m.settings_auto_hide_chat_scrollbar(), ls.autoHideChatScrollbar, () =>
+			ls.toggle('autoHideChatScrollbar'),
+		)}
 		<div class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
 			<label class="min-w-0 text-sm font-medium text-foreground" for="local-inline-image-size">
 				{m.settings_inline_image_thumbnail_size()}

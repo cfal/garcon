@@ -5,6 +5,7 @@ import { searchSettings, settingsSearchEntries } from '../settings-search';
 
 describe('settings search', () => {
 	it.each([
+		'Auto-hide chat scrollbar',
 		'Composer status bar',
 		'Show for Git projects',
 		'Show for non-Git projects',
