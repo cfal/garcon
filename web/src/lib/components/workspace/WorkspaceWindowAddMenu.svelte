@@ -120,20 +120,28 @@
 		'chat-board': m.workspace_surface_chat_board,
 		tickets: m.tickets_title,
 	};
-	const eligibleActions = $derived.by((): readonly WorkspaceWindowAddAction[] => [
-		...ADD_VIEWS.flatMap((view): WorkspaceWindowAddAction[] => {
+	const eligibleActions = $derived.by((): readonly WorkspaceWindowAddAction[] => {
+		const actions: WorkspaceWindowAddAction[] = [];
+		for (const view of ADD_VIEWS) {
 			if (typeof view === 'string') {
-				return availableSingletonKinds.includes(view) ? [singletonAction(view)] : [];
+				if (availableSingletonKinds.includes(view)) actions.push(singletonAction(view));
+				continue;
 			}
-			const actions = view.kinds
+			const members = view.kinds
 				.filter((kind) => availableSingletonKinds.includes(kind))
 				.map(singletonAction);
-			return actions.length > 0
-				? [{ id: view.id, kind: 'view-group', label: view.label(), icon: view.icon, actions }]
-				: [];
-		}),
-		{ id: 'new-terminal', kind: 'terminal' },
-	]);
+			if (members.length === 0) continue;
+			actions.push({
+				id: view.id,
+				kind: 'view-group',
+				label: view.label(),
+				icon: view.icon,
+				actions: members,
+			});
+		}
+		actions.push({ id: 'new-terminal', kind: 'terminal' });
+		return actions;
+	});
 	const hasUnplacedTerminalSessions = $derived(unplacedTerminalSessions.length > 0);
 	const menuState = new WorkspaceWindowAddMenuState({
 		get windowId() {

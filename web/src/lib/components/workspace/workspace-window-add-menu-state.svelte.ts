@@ -97,18 +97,19 @@ export class WorkspaceWindowAddMenuState {
 	}
 
 	focusReturnTarget(actionId?: string): HTMLElement | null {
-		const matchingAction = actionId
-			? this.controlsElement?.querySelector<HTMLElement>(
-					`[data-workspace-window-add-action="${CSS.escape(actionId)}"]`,
-				)
-			: null;
+		const controls = this.controlsElement;
+		if (!controls) return null;
+		if (actionId) {
+			const matchingAction = controls.querySelector<HTMLElement>(
+				`[data-workspace-window-add-action="${CSS.escape(actionId)}"]`,
+			);
+			if (matchingAction) return matchingAction;
+		}
 		return (
-			matchingAction ??
-			this.controlsElement?.querySelector<HTMLElement>('[data-workspace-window-add-trigger]') ??
-			this.controlsElement?.querySelector<HTMLElement>(
+			controls.querySelector<HTMLElement>('[data-workspace-window-add-trigger]') ??
+			controls.querySelector<HTMLElement>(
 				'[data-workspace-window-add-inline]:not(:disabled), [data-workspace-window-add-terminal-trigger]',
-			) ??
-			null
+			)
 		);
 	}
 
