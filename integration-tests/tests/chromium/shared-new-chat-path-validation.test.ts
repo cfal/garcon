@@ -62,7 +62,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         async function selectedOnce(path: string, select: () => Promise<unknown>): Promise<void> {
           const key = `${client.executorId} ${path}`;
           const previous = validations.filter(value => value === key).length;
-          await page.clock.pauseAt(await page.evaluate(() => Date.now()));
+          await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1_000);
           const requested = page.waitForRequest(request => {
             const url = new URL(request.url());
             return url.pathname === '/api/v1/chats/validate-start'
@@ -103,7 +103,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         phase(`${surface}: preserving typed-path debounce`);
         const typedKey = `${client.executorId} ${root}`;
         const previous = validations.filter(value => value === typedKey).length;
-        await page.clock.pauseAt(await page.evaluate(() => Date.now()));
+        await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1_000);
         await input.fill(root);
         await input.press('Enter');
         await page.clock.runFor(299);
