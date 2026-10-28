@@ -46,6 +46,8 @@ describe('ComposerSnippetPalette', () => {
 		})) as HTMLInputElement;
 		search.focus();
 		const firstOption = screen.getByRole('option', { name: /^item-0\b/ });
+		expect(firstOption.getAttribute('data-slot')).toBe('composer-snippet-option');
+		expect(firstOption.classList.contains('rounded-md')).toBe(true);
 		expect(search.getAttribute('aria-activedescendant')).toBe(firstOption.id);
 
 		await fireEvent.keyDown(search, { key: 'ArrowDown' });

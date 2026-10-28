@@ -85,6 +85,8 @@ describe('QueuedInputEditorDialog', () => {
 		const { component } = renderDialog(queue([entry(0), entry(1)]));
 		await editMessage();
 		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		expect(textarea.parentElement?.getAttribute('data-slot')).toBe('prompt-text-field');
+		expect(textarea.parentElement?.classList.contains('rounded-md')).toBe(true);
 		await fireEvent.input(textarea, { target: { value: 'Keep this selected draft' } });
 		textarea.focus();
 		textarea.setSelectionRange(5, 9, 'backward');

@@ -8,6 +8,8 @@ import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
 import { AmpOracleToolUseMessage, CompactionMessage } from '../../../common/chat-types.js';
 import type { AddChatRowRequest, ChatRowTargetResponse } from '../../../common/chat-row-contracts.js';
+import type { ShareChatResponse } from '../../../common/share-types.js';
+import type { SnippetsSnapshot } from '../../../common/snippets.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 
 const ARTIFACT_DIRECTORY = join(import.meta.dirname, '../../artifacts/chromium');
@@ -15,6 +17,11 @@ const ARTIFACT_DIRECTORY = join(import.meta.dirname, '../../artifacts/chromium')
 test('Terminal UI Style squares composer surfaces without changing Standard', async () => {
   await withChromiumFixture('terminal composer surfaces', async ({ page, integration, assertNoBrowserErrors }) => {
     await initializeFixtureRepository(integration.dirs.project);
+    const snippets = await integration.client.get<SnippetsSnapshot>('/api/v1/snippets');
+    await integration.client.post('/api/v1/snippets', {
+      expectedRevision: snippets.revision,
+      snippet: { shortName: 'review', template: 'Synthetic snippet text', defaultArguments: '' },
+    });
     const chatId = integration.newChatId();
     const started = await integration.client.startDirectChat({
       chatId, content: 'Synthetic composer appearance seed',
@@ -80,6 +87,14 @@ test('Terminal UI Style squares composer surfaces without changing Standard', as
         await browserExpect(menu).toHaveCount(0);
         await browserExpect(input).toHaveValue(query === '/rename' ? '/rename ' : '@example.txt ');
       }
+      await input.fill(';;');
+      const palette = page.getByRole('dialog', { name: 'Insert Snippet' });
+      const option = palette.getByRole('option', { name: /^review\b/ });
+      await browserExpect(option).toHaveAttribute('aria-selected', 'true');
+      await checkCorners([option]);
+      await palette.getByRole('combobox', { name: 'Search snippets' }).press('Enter');
+      await browserExpect(palette).toHaveCount(0);
+      await browserExpect(input).toHaveValue('Synthetic snippet text');
       await input.fill('Synthetic retained draft');
     }
     await composer.getByRole('button', { name: 'Remove attachment notes.md' }).click();
@@ -100,6 +115,12 @@ test('Terminal UI Style squares composer surfaces without changing Standard', as
         await checkCorners([queue, loading, composer], `terminal-queue-${width}.png`);
         await browserExpect(input).toHaveValue('Synthetic retained draft');
         await browserExpect(input).toBeFocused();
+        await queue.getByRole('button', { name: 'Edit queued message', exact: true }).click();
+        const editor = page.getByRole('dialog');
+        await checkCorners([editor.locator('[data-slot="prompt-text-field"]')], `terminal-queue-editor-${width}.png`);
+        await browserExpect(editor.locator('textarea')).toHaveValue('Synthetic queued appearance input');
+        await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await browserExpect(editor).toHaveCount(0);
       }
       held.releaseEcho();
       await integration.client.waitForTurnTerminal(chatId, accepted.turnId!);
@@ -110,8 +131,8 @@ test('Terminal UI Style squares composer surfaces without changing Standard', as
   });
 }, 60_000);
 
-test('Terminal UI Style gives compaction, Oracle and other event cards consistent corners', async () => {
-  await withChromiumFixture('terminal chat row corners', async ({ page, integration, assertNoBrowserErrors }) => {
+test.each(['live', 'shared'] as const)('Terminal UI Style gives %s chat event cards consistent corners', async (view) => {
+  await withChromiumFixture(`terminal ${view} chat row corners`, async ({ page, integration, assertNoBrowserErrors }) => {
     const chatId = integration.newChatId();
     const started = await integration.client.startChat({
       ...integration.client.directStartRequest({
@@ -154,15 +175,24 @@ test('Terminal UI Style gives compaction, Oracle and other event cards consisten
       content: 'Synthetic review instructions',
     } satisfies AddChatRowRequest);
     await page.addInitScript(seedLocalSettings, { combineToolUseMessages: false });
-    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    let path = `/chat/${chatId}`;
+    if (view === 'shared') {
+      const share = await integration.client.post<ShareChatResponse>('/api/v1/chats/share', { chatId });
+      path = `/shared/${share.shareToken}`;
+    }
+    await page.goto(`${integration.garcon.baseUrl}${path}`);
 
-    const feed = page.getByRole('region', { name: 'Chat messages', exact: true });
+    const feed = view === 'shared'
+      ? page.locator('[data-chat-feed-content]')
+      : page.getByRole('region', { name: 'Chat messages', exact: true });
     const compaction = feed.getByRole('article').filter({ hasText: 'Context compacted' });
     const request = feed.getByRole('article').filter({ hasText: 'Oracle review request' });
     const tool = feed.getByRole('article').filter({ hasText: 'Oracle' }).filter({ hasNotText: 'Oracle review request' });
-    const response = feed.locator('.user-message-context-target').filter({ hasText: 'Oracle review response' });
+    const response = feed.locator(view === 'shared' ? '[data-slot="shared-user-message"]' : '.user-message-context-target')
+      .filter({ hasText: 'Oracle review response' });
     const cards: { card: Locator; standardRadius: string }[] = [];
-    for (const card of [compaction, request, tool, response]) {
+    const visibleCards = view === 'shared' ? [request, tool, response] : [compaction, request, tool, response];
+    for (const card of visibleCards) {
       await browserExpect(card).toBeVisible();
       const standardRadius = await card.evaluate((element) => getComputedStyle(element).borderRadius);
       expect(parseFloat(standardRadius)).toBeGreaterThan(0);
@@ -189,12 +219,14 @@ test('Terminal UI Style gives compaction, Oracle and other event cards consisten
           );
         }
         if (appearance === 'terminal') {
-          await compaction.getByRole('button', { name: 'Show summary' }).click();
-          await browserExpect(compaction.getByText('Synthetic compaction summary')).toBeVisible();
-          await browserExpect(compaction).toHaveCSS('border-radius', '0px');
+          if (view === 'live') {
+            await compaction.getByRole('button', { name: 'Show summary' }).click();
+            await browserExpect(compaction.getByText('Synthetic compaction summary')).toBeVisible();
+            await browserExpect(compaction).toHaveCSS('border-radius', '0px');
+          }
           await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
-          await page.screenshot({ path: join(ARTIFACT_DIRECTORY, `terminal-chat-rows-${width}.png`) });
-          await compaction.getByRole('button', { name: 'Hide summary' }).click();
+          await page.screenshot({ path: join(ARTIFACT_DIRECTORY, `terminal-${view}-chat-rows-${width}.png`) });
+          if (view === 'live') await compaction.getByRole('button', { name: 'Hide summary' }).click();
         }
       }
     }
