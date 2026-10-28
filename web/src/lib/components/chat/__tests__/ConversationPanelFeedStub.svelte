@@ -7,7 +7,7 @@
 		chatContext,
 		scrollContainer = $bindable<HTMLDivElement | null>(null),
 		announcementsEnabled = false,
-		reserveComposerTraySpace = false,
+		reserveComposerCapSpace = false,
 		onLoadEarlier,
 		onLoadLater,
 		onForkChat,
@@ -17,7 +17,7 @@
 		chatContext: ConversationMessageChatContext;
 		scrollContainer?: HTMLDivElement | null;
 		announcementsEnabled?: boolean;
-		reserveComposerTraySpace?: boolean;
+		reserveComposerCapSpace?: boolean;
 		onLoadEarlier?: () => void;
 		onLoadLater?: () => void;
 		onForkChat?: (ordinal?: number) => void;
@@ -69,7 +69,7 @@
 	data-conversation-feed-stub
 	data-chat-context={JSON.stringify(chatContext)}
 	data-announcements-enabled={announcementsEnabled}
-	data-reserve-composer-tray-space={reserveComposerTraySpace}
+	data-reserve-composer-cap-space={reserveComposerCapSpace}
 >
 	<button type="button" onclick={onLoadEarlier}>Load earlier</button>
 	<button type="button" onclick={onLoadLater}>Load later</button>

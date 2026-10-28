@@ -1,9 +1,12 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import GitQuickStatusTray from '../GitQuickStatusTray.svelte';
+import type { ComponentProps } from 'svelte';
+import ComposerStatusBar from '../ComposerStatusBar.svelte';
+import type { ComposerStatusBarBranchControls } from '../composer-status-bar-types.js';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 
 const NAME_ASC = { key: 'name', direction: 'asc' } as const;
+const ALL_ITEMS = { projectPath: true, gitBranch: true, commit: true, visible: true };
 
 function refsFromNames(names: string[]) {
 	return names.map((name) => ({
@@ -27,25 +30,135 @@ function summary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSummary
 	};
 }
 
-describe('GitQuickStatusTray', () => {
+function renderBar(overrides: Partial<ComponentProps<typeof ComposerStatusBar>> = {}) {
+	return render(ComposerStatusBar, {
+		items: { ...ALL_ITEMS },
+		projectPath: '/project',
+		summary: summary(),
+		isRefreshing: false,
+		onCommit: vi.fn(),
+		...overrides,
+	});
+}
+
+function branchControls(
+	overrides: Partial<ComposerStatusBarBranchControls> = {},
+): ComposerStatusBarBranchControls {
+	return {
+		refs: refsFromNames(['main', 'feature/bar']),
+		sort: NAME_ASC,
+		isOpen: false,
+		isLoading: false,
+		onToggle: vi.fn(),
+		onClose: vi.fn(),
+		onCreateBranch: vi.fn(),
+		onSwitchBranch: vi.fn(),
+		onSortRefs: vi.fn(),
+		...overrides,
+	};
+}
+
+describe('ComposerStatusBar', () => {
 	afterEach(() => {
 		cleanup();
 	});
 
-	it('keeps Commit available and right-aligned before the first summary', () => {
-		const { container } = render(GitQuickStatusTray, {
-			props: {
-				isVisible: true,
-				summary: null,
-				isRefreshing: true,
-				onCommit: vi.fn(),
-			},
-		});
+	it.each(Array.from({ length: 8 }, (_, mask) => mask))(
+		'renders only included items (%i)',
+		(mask) => {
+			const items = {
+				projectPath: Boolean(mask & 1),
+				gitBranch: Boolean(mask & 2),
+				commit: Boolean(mask & 4),
+				visible: mask !== 0,
+			};
+			renderBar({ items });
+			expect(Boolean(screen.queryByRole('button', { name: 'Change project path: /project' }))).toBe(
+				items.projectPath,
+			);
+			expect(Boolean(screen.queryByText('main'))).toBe(items.gitBranch);
+			expect(Boolean(screen.queryByRole('button', { name: /^Commit/ }))).toBe(items.commit);
+			expect(Boolean(screen.queryByRole('status'))).toBe(items.visible);
+		},
+	);
 
-		const tray = screen.getByRole('status', { name: 'Loading...' });
-		expect(tray.getAttribute('data-slot')).toBe('chat-git-status');
-		expect(tray.getAttribute('aria-busy')).toBe('true');
-		expect(tray.className).toContain('min-h-14');
+	it('does not announce a path-only bar as waiting for Git', () => {
+		renderBar({
+			items: { projectPath: true, gitBranch: false, commit: false, visible: true },
+			projectPath: '/plain-folder',
+			summary: null,
+			isRefreshing: true,
+		});
+		expect(screen.getByRole('status').getAttribute('aria-busy')).toBe('false');
+		expect(screen.queryByRole('button', { name: /^Commit/ })).toBeNull();
+	});
+
+	it.each([null, 'Summary unavailable'])(
+		'keeps the project action available before a summary (%s)',
+		async (lastError) => {
+			const onProjectPath = vi.fn();
+			renderBar({
+				projectPath: '/workspace/clients/project-a',
+				onProjectPath,
+				summary: null,
+				isRefreshing: !lastError,
+				lastError,
+			});
+			const button = screen.getByRole('button', {
+				name: 'Change project path: /workspace/clients/project-a',
+			});
+			expect(button.getAttribute('title')).toBe(button.getAttribute('aria-label'));
+			expect(button.getAttribute('aria-haspopup')).toBe('dialog');
+			await fireEvent.click(button);
+			expect(onProjectPath).toHaveBeenCalledOnce();
+		},
+	);
+
+	it.each([
+		['/workspace/clients/project-a', '/project-a'],
+		['/workspace', 'workspace'],
+		['/', '/'],
+		['C:\\Users\\demo\\project-a', '\\project-a'],
+		['C:\\', 'C:\\'],
+		['project-a', 'project-a'],
+	])('preserves the full path and final directory for %s', (projectPath, basename) => {
+		const { container } = renderBar({ projectPath });
+		const label = container.querySelector('[data-composer-project-path-label]');
+		expect(Array.from(label?.children ?? [], (child) => child.textContent).join('')).toBe(
+			projectPath,
+		);
+		expect(label?.lastElementChild?.textContent).toBe(basename);
+		expect(
+			(
+				screen.getByRole('button', {
+					name: `Change project path: ${projectPath}`,
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(true);
+	});
+
+	it('updates the path and action without remounting the button', async () => {
+		const onProjectPath = vi.fn();
+		const view = renderBar({
+			projectPath: '/project-a',
+			onProjectPath,
+		});
+		const button = screen.getByRole('button', { name: 'Change project path: /project-a' });
+		const nextAction = vi.fn();
+		await view.rerender({ projectPath: '/project-b', onProjectPath: nextAction });
+		expect(screen.getByRole('button', { name: 'Change project path: /project-b' })).toBe(button);
+		await fireEvent.click(button);
+		expect(nextAction).toHaveBeenCalledOnce();
+		expect(onProjectPath).not.toHaveBeenCalled();
+	});
+
+	it('keeps Commit available and right-aligned before the first summary', () => {
+		const { container } = renderBar({ summary: null, isRefreshing: true });
+
+		const bar = screen.getByRole('status');
+		expect(bar.getAttribute('data-slot')).toBe('chat-git-status');
+		expect(bar.getAttribute('aria-busy')).toBe('true');
+		expect(bar.className).toContain('min-h-14');
 		const commit = screen.getByRole('button', { name: /^Commit/ });
 		expect((commit as HTMLButtonElement).disabled).toBe(false);
 		expect(commit.parentElement?.className).toContain('ml-auto');
@@ -54,14 +167,7 @@ describe('GitQuickStatusTray', () => {
 	});
 
 	it('does not render a visible loading indicator while refreshing a ready summary', () => {
-		const { container } = render(GitQuickStatusTray, {
-			props: {
-				isVisible: true,
-				summary: summary(),
-				isRefreshing: true,
-				onCommit: vi.fn(),
-			},
-		});
+		const { container } = renderBar({ isRefreshing: true });
 
 		expect(screen.getByText('main')).toBeTruthy();
 		expect(screen.getByText('main').parentElement?.getAttribute('data-slot')).toBe('chat-git-branch');
@@ -72,18 +178,11 @@ describe('GitQuickStatusTray', () => {
 
 	it('uses the dirty summary as the Commit label without separate counts', async () => {
 		const onCommit = vi.fn();
-		render(GitQuickStatusTray, {
-			props: {
-				isVisible: true,
-				summary: summary(),
-				isRefreshing: false,
-				onCommit,
-			},
-		});
+		renderBar({ onCommit });
 
 		expect(screen.getByText('main')).toBeTruthy();
 		expect(screen.getByText('+3')).toBeTruthy();
-		expect(screen.getByText('/')).toBeTruthy();
+		expect(within(screen.getByRole('button', { name: /^Commit/ })).getByText('/')).toBeTruthy();
 		expect(screen.getByText('-1')).toBeTruthy();
 		expect(screen.queryByTestId('commit-file-summary')).toBeNull();
 		expect(screen.getByRole('button', { name: /^Commit/ }).textContent).toContain('+3');
@@ -93,34 +192,21 @@ describe('GitQuickStatusTray', () => {
 	});
 
 	it('keeps controls visible while disabling non-anchor announcements', () => {
-		const { container } = render(GitQuickStatusTray, {
-			props: {
-				isVisible: true,
-				summary: summary(),
-				isRefreshing: false,
-				onCommit: vi.fn(),
-				announcementsEnabled: false,
-			},
-		});
+		const { container } = renderBar({ announcementsEnabled: false });
 
-		const tray = container.firstElementChild?.firstElementChild;
-		expect(tray?.getAttribute('role')).toBeNull();
-		expect(tray?.getAttribute('aria-live')).toBe('off');
+		const bar = container.firstElementChild?.firstElementChild;
+		expect(bar?.getAttribute('role')).toBeNull();
+		expect(bar?.getAttribute('aria-live')).toBe('off');
 		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
 	});
 
 	it('skips zero-value summary items', () => {
-		render(GitQuickStatusTray, {
-			props: {
-				isVisible: true,
-				summary: summary({
-					hasChanges: true,
-					hasUntracked: true,
-					diffStats: { additions: 0, deletions: 0 },
-				}),
-				isRefreshing: false,
-				onCommit: vi.fn(),
-			},
+		renderBar({
+			summary: summary({
+				hasChanges: true,
+				hasUntracked: true,
+				diffStats: { additions: 0, deletions: 0 },
+			}),
 		});
 
 		expect(screen.getByText('New files')).toBeTruthy();
@@ -131,21 +217,17 @@ describe('GitQuickStatusTray', () => {
 	});
 
 	it('renders a muted clean button that still opens Commit', () => {
-		render(GitQuickStatusTray, {
-			props: {
-				isVisible: true,
-				summary: summary({
-					hasChanges: false,
-					hasUntracked: false,
-					diffStats: { additions: 0, deletions: 0 },
-				}),
-				isRefreshing: false,
-				onCommit: vi.fn(),
-			},
+		renderBar({
+			summary: summary({
+				hasChanges: false,
+				hasUntracked: false,
+				diffStats: { additions: 0, deletions: 0 },
+			}),
 		});
 
-		expect(screen.getByRole('button').className).toContain('text-muted-foreground');
-		expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(false);
+		const commit = screen.getByRole('button', { name: /^Commit/ });
+		expect(commit.className).toContain('text-muted-foreground');
+		expect((commit as HTMLButtonElement).disabled).toBe(false);
 	});
 
 	it('renders the shared branch selector when branch controls are provided', async () => {
@@ -156,25 +238,17 @@ describe('GitQuickStatusTray', () => {
 		const onSearchRefs = vi.fn();
 		const onSortRefs = vi.fn();
 
-		render(GitQuickStatusTray, {
-			props: {
-				isVisible: true,
-				summary: summary(),
-				isRefreshing: false,
-				branchSelector: {
-					refs: refsFromNames(['main', 'feature/tray', 'bugfix/login']),
-					sort: NAME_ASC,
-					isOpen: true,
-					isLoading: false,
-					onToggle,
-					onClose,
-					onCreateBranch,
-					onSwitchBranch,
-					onSearchRefs,
-					onSortRefs,
-				},
-				onCommit: vi.fn(),
-			},
+		renderBar({
+			branchSelector: branchControls({
+				refs: refsFromNames(['main', 'feature/bar', 'bugfix/login']),
+				isOpen: true,
+				onToggle,
+				onClose,
+				onCreateBranch,
+				onSwitchBranch,
+				onSearchRefs,
+				onSortRefs,
+			}),
 		});
 
 		const menuClass = document.querySelector('[data-slot="popover-content"]')?.className ?? '';
@@ -188,13 +262,13 @@ describe('GitQuickStatusTray', () => {
 		await new Promise((resolve) => window.setTimeout(resolve, 180));
 		expect(onSearchRefs).not.toHaveBeenCalled();
 
-		await fireEvent.click(screen.getByRole('option', { name: /feature\/tray/ }));
+		await fireEvent.click(screen.getByRole('option', { name: /feature\/bar/ }));
 		expect(onClose).toHaveBeenCalledOnce();
-		expect(screen.getByRole('heading', { name: 'Switch to branch feature/tray?' })).toBeTruthy();
+		expect(screen.getByRole('heading', { name: 'Switch to branch feature/bar?' })).toBeTruthy();
 		expect(onSwitchBranch).not.toHaveBeenCalled();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
-		expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/tray', 'local-branch');
+		expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/bar', 'local-branch');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Create new branch' }));
 		expect(onCreateBranch).toHaveBeenCalledOnce();
@@ -203,25 +277,7 @@ describe('GitQuickStatusTray', () => {
 
 	it('opens the shared branch selector from the trigger', async () => {
 		const onToggle = vi.fn();
-		render(GitQuickStatusTray, {
-			props: {
-				isVisible: true,
-				summary: summary(),
-				isRefreshing: false,
-				branchSelector: {
-					refs: refsFromNames(['main', 'feature/tray']),
-					sort: NAME_ASC,
-					isOpen: false,
-					isLoading: false,
-					onToggle,
-					onClose: vi.fn(),
-					onCreateBranch: vi.fn(),
-					onSwitchBranch: vi.fn(),
-					onSortRefs: vi.fn(),
-				},
-				onCommit: vi.fn(),
-			},
-		});
+		renderBar({ branchSelector: branchControls({ onToggle }) });
 
 		await fireEvent.click(screen.getByRole('button', { name: /current ref main/i }));
 
@@ -230,24 +286,9 @@ describe('GitQuickStatusTray', () => {
 
 	it('expands the branch control on wide screens without wrapping on narrow screens', () => {
 		const longBranch = 'feature/a-long-current-branch-name';
-		render(GitQuickStatusTray, {
-			props: {
-				isVisible: true,
-				summary: summary({ branch: longBranch }),
-				isRefreshing: false,
-				branchSelector: {
-					refs: refsFromNames([longBranch]),
-					sort: NAME_ASC,
-					isOpen: false,
-					isLoading: false,
-					onToggle: vi.fn(),
-					onClose: vi.fn(),
-					onCreateBranch: vi.fn(),
-					onSwitchBranch: vi.fn(),
-					onSortRefs: vi.fn(),
-				},
-				onCommit: vi.fn(),
-			},
+		renderBar({
+			summary: summary({ branch: longBranch }),
+			branchSelector: branchControls({ refs: refsFromNames([longBranch]) }),
 		});
 
 		const trigger = screen.getByRole('button', {
@@ -264,24 +305,11 @@ describe('GitQuickStatusTray', () => {
 	it('widens the switch confirmation dialog while preserving narrow-screen truncation', async () => {
 		const longBranch =
 			'feature/some-extremely-long-branch-name-that-should-never-wrap-the-confirmation-dialog';
-		render(GitQuickStatusTray, {
-			props: {
-				isVisible: true,
-				summary: summary(),
-				isRefreshing: false,
-				branchSelector: {
-					refs: refsFromNames(['main', longBranch]),
-					sort: NAME_ASC,
-					isOpen: true,
-					isLoading: false,
-					onToggle: vi.fn(),
-					onClose: vi.fn(),
-					onCreateBranch: vi.fn(),
-					onSwitchBranch: vi.fn(),
-					onSortRefs: vi.fn(),
-				},
-				onCommit: vi.fn(),
-			},
+		renderBar({
+			branchSelector: branchControls({
+				refs: refsFromNames(['main', longBranch]),
+				isOpen: true,
+			}),
 		});
 
 		await fireEvent.click(screen.getByRole('option', { name: new RegExp(longBranch) }));
@@ -301,25 +329,9 @@ describe('GitQuickStatusTray', () => {
 	});
 
 	it('does not auto-focus the branch search input on mobile', async () => {
-		render(GitQuickStatusTray, {
-			props: {
-				isVisible: true,
-				summary: summary(),
-				isRefreshing: false,
-				isMobile: true,
-				branchSelector: {
-					refs: refsFromNames(['main', 'feature/tray']),
-					sort: NAME_ASC,
-					isOpen: true,
-					isLoading: false,
-					onToggle: vi.fn(),
-					onClose: vi.fn(),
-					onCreateBranch: vi.fn(),
-					onSwitchBranch: vi.fn(),
-					onSortRefs: vi.fn(),
-				},
-				onCommit: vi.fn(),
-			},
+		renderBar({
+			isMobile: true,
+			branchSelector: branchControls({ isOpen: true }),
 		});
 
 		const search = screen.getByRole('combobox', { name: 'Find a ref' });

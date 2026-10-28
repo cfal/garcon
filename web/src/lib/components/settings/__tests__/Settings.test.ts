@@ -51,6 +51,44 @@ const completionSound = await import('$lib/notifications/completion-sound.js');
 const SettingsTestHost = (await import('./SettingsTestHost.svelte')).default;
 
 describe('Settings', () => {
+	it('configures the composer status bar in Appearance and restores every preference', async () => {
+		localStorage.clear();
+		const appShell = createAppShellStore();
+		appShell.openSettings('appearance');
+		const props = { appShell, remoteSettings: new RemoteSettingsStore() };
+		const controls = [
+			['Show for Git projects', 'composerStatusBarGitProjects', true],
+			['Show for non-Git projects', 'composerStatusBarNonGitProjects', false],
+			['Project path', 'composerStatusBarProjectPath', true],
+			['Git branch', 'composerStatusBarGitBranch', true],
+			['Commit button with diff', 'composerStatusBarCommit', true],
+		] as const;
+		let rendered = render(SettingsTestHost, props);
+		try {
+			const section = within(screen.getByRole('region', { name: 'Composer status bar' }));
+			for (const [name, key, initial] of controls) {
+				const control = section.getByRole('switch', { name });
+				expect(control.getAttribute('aria-checked')).toBe(String(initial));
+				await fireEvent.click(control);
+				expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)[key]).toBe(
+					!initial,
+				);
+			}
+			rendered.unmount();
+			rendered = render(SettingsTestHost, props);
+			for (const [name, , initial] of controls) {
+				expect(screen.getByRole('switch', { name }).getAttribute('aria-checked')).toBe(
+					String(!initial),
+				);
+			}
+			await fireEvent.click(screen.getByRole('tab', { name: 'Behavior' }));
+			expect(screen.queryByRole('switch', { name: 'Show quick commit tray' })).toBeNull();
+			expect(screen.queryByRole('region', { name: 'Composer status bar' })).toBeNull();
+		} finally {
+			rendered.unmount();
+		}
+	});
+
 	it('persists appearance and fonts independently of system and fixed palettes', async () => {
 		localStorage.clear();
 		const appShell = createAppShellStore();

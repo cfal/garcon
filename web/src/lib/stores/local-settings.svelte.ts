@@ -3,6 +3,10 @@
 
 import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
 import {
+	COMPOSER_STATUS_BAR_DEFAULTS,
+	type ComposerStatusBarPreferences,
+} from '$lib/chat/composer/composer-status-bar.js';
+import {
 	parseTypographyPreferences,
 	parseSurfaceFont,
 	parseFontSizePreference,
@@ -148,7 +152,7 @@ export const HIDEABLE_TOOL_GROUPS = [
 ] as const;
 export type HideableToolType = (typeof HIDEABLE_TOOL_GROUPS)[number]['toolTypes'][number];
 
-export interface LocalSettingsSnapshot extends TypographyPreferences {
+export interface LocalSettingsSnapshot extends TypographyPreferences, ComposerStatusBarPreferences {
 	themePreference: ThemePreference;
 	terminalAppearance: boolean;
 	overlayBackdropEffects: boolean;
@@ -159,7 +163,6 @@ export interface LocalSettingsSnapshot extends TypographyPreferences {
 	showThinking: boolean;
 	allowDirectChats: boolean;
 	reduceMotion: boolean;
-	showQuickCommitTray: boolean;
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
 	composerInputMode: ComposerInputMode;
@@ -211,7 +214,11 @@ type BooleanLocalSettingKey =
 	| 'showThinking'
 	| 'allowDirectChats'
 	| 'reduceMotion'
-	| 'showQuickCommitTray'
+	| 'composerStatusBarGitProjects'
+	| 'composerStatusBarNonGitProjects'
+	| 'composerStatusBarProjectPath'
+	| 'composerStatusBarGitBranch'
+	| 'composerStatusBarCommit'
 	| 'autoScrollToBottom'
 	| 'sendByShiftEnter'
 	| 'steerWithCtrlEnter'
@@ -236,7 +243,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	showThinking: true,
 	allowDirectChats: false,
 	reduceMotion: false,
-	showQuickCommitTray: true,
+	...COMPOSER_STATUS_BAR_DEFAULTS,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
 	composerInputMode: 'formatted',
@@ -443,7 +450,26 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
 		allowDirectChats: parseBoolean(parsed.allowDirectChats, DEFAULTS.allowDirectChats),
 		reduceMotion: parseBoolean(parsed.reduceMotion, DEFAULTS.reduceMotion),
-		showQuickCommitTray: parseBoolean(parsed.showQuickCommitTray, DEFAULTS.showQuickCommitTray),
+		composerStatusBarGitProjects: parseBoolean(
+			parsed.composerStatusBarGitProjects,
+			DEFAULTS.composerStatusBarGitProjects,
+		),
+		composerStatusBarNonGitProjects: parseBoolean(
+			parsed.composerStatusBarNonGitProjects,
+			DEFAULTS.composerStatusBarNonGitProjects,
+		),
+		composerStatusBarProjectPath: parseBoolean(
+			parsed.composerStatusBarProjectPath,
+			DEFAULTS.composerStatusBarProjectPath,
+		),
+		composerStatusBarGitBranch: parseBoolean(
+			parsed.composerStatusBarGitBranch,
+			DEFAULTS.composerStatusBarGitBranch,
+		),
+		composerStatusBarCommit: parseBoolean(
+			parsed.composerStatusBarCommit,
+			DEFAULTS.composerStatusBarCommit,
+		),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
 		composerInputMode:
@@ -577,7 +603,11 @@ export class LocalSettingsStore {
 	showThinking = $state(DEFAULTS.showThinking);
 	allowDirectChats = $state(DEFAULTS.allowDirectChats);
 	reduceMotion = $state(DEFAULTS.reduceMotion);
-	showQuickCommitTray = $state(DEFAULTS.showQuickCommitTray);
+	composerStatusBarGitProjects = $state(DEFAULTS.composerStatusBarGitProjects);
+	composerStatusBarNonGitProjects = $state(DEFAULTS.composerStatusBarNonGitProjects);
+	composerStatusBarProjectPath = $state(DEFAULTS.composerStatusBarProjectPath);
+	composerStatusBarGitBranch = $state(DEFAULTS.composerStatusBarGitBranch);
+	composerStatusBarCommit = $state(DEFAULTS.composerStatusBarCommit);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
 	composerInputMode = $state<ComposerInputMode>(DEFAULTS.composerInputMode);
@@ -737,7 +767,11 @@ export class LocalSettingsStore {
 			showThinking: this.showThinking,
 			allowDirectChats: this.allowDirectChats,
 			reduceMotion: this.reduceMotion,
-			showQuickCommitTray: this.showQuickCommitTray,
+			composerStatusBarGitProjects: this.composerStatusBarGitProjects,
+			composerStatusBarNonGitProjects: this.composerStatusBarNonGitProjects,
+			composerStatusBarProjectPath: this.composerStatusBarProjectPath,
+			composerStatusBarGitBranch: this.composerStatusBarGitBranch,
+			composerStatusBarCommit: this.composerStatusBarCommit,
 			autoScrollToBottom: this.autoScrollToBottom,
 			sendByShiftEnter: this.sendByShiftEnter,
 			composerInputMode: this.composerInputMode,
@@ -809,7 +843,11 @@ export class LocalSettingsStore {
 		this.showThinking = snap.showThinking;
 		this.allowDirectChats = snap.allowDirectChats;
 		this.reduceMotion = snap.reduceMotion;
-		this.showQuickCommitTray = snap.showQuickCommitTray;
+		this.composerStatusBarGitProjects = snap.composerStatusBarGitProjects;
+		this.composerStatusBarNonGitProjects = snap.composerStatusBarNonGitProjects;
+		this.composerStatusBarProjectPath = snap.composerStatusBarProjectPath;
+		this.composerStatusBarGitBranch = snap.composerStatusBarGitBranch;
+		this.composerStatusBarCommit = snap.composerStatusBarCommit;
 		this.autoScrollToBottom = snap.autoScrollToBottom;
 		this.sendByShiftEnter = snap.sendByShiftEnter;
 		this.composerInputMode = snap.composerInputMode;

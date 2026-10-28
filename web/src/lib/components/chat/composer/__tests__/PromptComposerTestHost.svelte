@@ -96,16 +96,16 @@
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
 		preambleSnapshot?: PreamblesSnapshot;
-		quickCommitTrayVisible?: boolean;
-		quickCommitRefreshing?: boolean;
-		quickCommitSummary?: GitQuickSummaryReady | null;
+		statusBarVisible?: boolean;
+		gitRefreshing?: boolean;
+		gitSummary?: GitQuickSummaryReady | null;
 		directAdmissionPending?: boolean;
 		requiresQueuedSubmission?: boolean;
 		fetchProjectResolution?: ConstructorParameters<typeof ProjectResolutionStore>[0];
 		onsubmit?: () => void;
 		onSteerPreferredSubmit?: () => void;
 		onAbort?: () => void;
-		onQuickCommit?: () => void;
+		onCommit?: () => void;
 		onChooseProjectFolder?: (chatId: string) => void;
 		onAvailabilityNoticeChange?: (notice: ComposerAvailabilityNoticePresentation | null) => void;
 	}
@@ -139,16 +139,16 @@
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',
 		preambleSnapshot = { revision: 0, preambles: [] },
-		quickCommitTrayVisible = false,
-		quickCommitRefreshing = false,
-		quickCommitSummary = null,
+		statusBarVisible = false,
+		gitRefreshing = false,
+		gitSummary = null,
 		directAdmissionPending = false,
 		requiresQueuedSubmission: requiresQueuedSubmissionOverride,
 		fetchProjectResolution,
 		onsubmit = () => {},
 		onSteerPreferredSubmit = () => {},
 		onAbort = () => {},
-		onQuickCommit = () => {},
+		onCommit = () => {},
 		onChooseProjectFolder,
 		onAvailabilityNoticeChange,
 	}: Props = $props();
@@ -355,9 +355,6 @@
 		get chatMaxWidth() {
 			return chatMaxWidth;
 		},
-		get showQuickCommitTray() {
-			return true;
-		},
 		get allowDirectChats() {
 			return allowDirectChats;
 		},
@@ -537,20 +534,20 @@
 {/if}
 <ConversationPanelStatusDock
 	{chatMaxWidth}
+	{projectPath}
 	isProcessing={selectedIsProcessing}
 	status={lifecycle.loadingStatus}
 	agentId={selectedAgentId}
 	spinnerSelectionKey={selectedChatId}
-	quickCommitEnabled={true}
-	{quickCommitTrayVisible}
-	{quickCommitSummary}
-	{quickCommitRefreshing}
-	quickCommitError={null}
-	quickCommitBranchSelector={null}
+	statusBar={{ projectPath: true, gitBranch: true, commit: true, visible: statusBarVisible }}
+	{gitSummary}
+	{gitRefreshing}
+	gitError={null}
+	branchSelector={null}
 	isMobile={false}
 	{reduceMotion}
 	{onAbort}
-	{onQuickCommit}
+	{onCommit}
 />
 <PromptComposer
 	{recallPrompts}

@@ -4,6 +4,23 @@ import { TYPOGRAPHY_SURFACES, type TypographySurface } from '$lib/theme/typograp
 import { searchSettings, settingsSearchEntries } from '../settings-search';
 
 describe('settings search', () => {
+	it.each([
+		'Composer status bar',
+		'Show for Git projects',
+		'Show for non-Git projects',
+		'Project path',
+		'Git branch',
+		'Commit button with diff',
+	])('finds %s under Appearance', (label) => {
+		expect(searchSettings(settingsSearchEntries(), label)).toContainEqual({
+			tab: 'appearance',
+			label,
+			section: 'Appearance',
+		});
+	});
+	it('omits the retired quick commit tray setting', () => {
+		expect(searchSettings(settingsSearchEntries(), 'quick commit tray')).toEqual([]);
+	});
 	const surfaceLabels: Record<TypographySurface, string> = {
 		interface: 'Interface',
 		'chat-list': 'Chat List',

@@ -16,7 +16,9 @@ import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
 import { UserMessage } from '$shared/chat-types';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
+import { localExecutor } from '$lib/executors/__tests__/fixtures.js';
 import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
+import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
 
 const executors = new ExecutorsStore();
 
@@ -24,7 +26,13 @@ const runtime = vi.hoisted(() => ({
 	autoScrollToBottom: false,
 	processing: true,
 	reduceMotion: false,
-	showQuickCommitTray: true,
+	composerStatusBarGitProjects: true,
+	composerStatusBarNonGitProjects: false,
+	composerStatusBarProjectPath: true,
+	composerStatusBarGitBranch: true,
+	composerStatusBarCommit: true,
+	classification: 'git' as 'git' | 'non-git' | 'unknown',
+	pathUpdatesSupported: false,
 	queue: null as ChatQueueState | null,
 	summary: null as GitQuickSummaryReady | null,
 }));
@@ -49,15 +57,25 @@ vi.mock('$lib/context', () => ({
 		summaryFor: () => runtime.summary,
 		lastErrorFor: () => null,
 		isRefreshingFor: () => false,
-		canShowTrayFor: () => true,
+		classificationFor: () => runtime.classification,
 	}),
 	getLocalSettings: () => ({
 		autoScrollToBottom: runtime.autoScrollToBottom,
 		chatMaxWidth: 'default',
 		reduceMotion: runtime.reduceMotion,
-		showQuickCommitTray: runtime.showQuickCommitTray,
+		composerStatusBarGitProjects: runtime.composerStatusBarGitProjects,
+		composerStatusBarNonGitProjects: runtime.composerStatusBarNonGitProjects,
+		composerStatusBarProjectPath: runtime.composerStatusBarProjectPath,
+		composerStatusBarGitBranch: runtime.composerStatusBarGitBranch,
+		composerStatusBarCommit: runtime.composerStatusBarCommit,
 	}),
-	getModelCatalog: () => ({ forExecutor() { return this; }, supportsSteering: () => true }),
+	getModelCatalog: () => ({
+		forExecutor() {
+			return this;
+		},
+		supportsSteering: () => true,
+		supportsUpdateProjectPath: () => runtime.pathUpdatesSupported,
+	}),
 	getOptionalTransientLayers: () => null,
 }));
 
@@ -191,6 +209,7 @@ function makeActions(): ConversationPanelActions {
 		deleteQueue: vi.fn().mockResolvedValue(undefined),
 		stop: vi.fn().mockResolvedValue(undefined),
 		openCommit: vi.fn(),
+		chooseProjectFolder: vi.fn(),
 		toggleBranch: vi.fn().mockResolvedValue(undefined),
 		closeBranch: vi.fn(),
 		createBranch: vi.fn(),
@@ -207,10 +226,137 @@ describe('ConversationPanel', () => {
 		runtime.autoScrollToBottom = false;
 		runtime.processing = true;
 		runtime.reduceMotion = false;
-		runtime.showQuickCommitTray = true;
+		Object.assign(runtime, COMPOSER_STATUS_BAR_DEFAULTS);
+		runtime.classification = 'git';
+		runtime.pathUpdatesSupported = false;
 		runtime.queue = null;
 		runtime.summary = null;
+		executors.applySnapshot([localExecutor]);
 		vi.clearAllMocks();
+	});
+
+	it('shows only the path for an enabled non-Git project', () => {
+		runtime.processing = false;
+		runtime.classification = 'non-git';
+		runtime.composerStatusBarNonGitProjects = true;
+		const { panel } = makePanel();
+		render(ConversationPanel, {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions: makeActions(),
+		});
+		expect(screen.getByRole('button', { name: 'Change project path: /project' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: /Commit/ })).toBeNull();
+		expect(screen.getByRole('status').getAttribute('aria-busy')).toBe('false');
+	});
+
+	it.each([false, true])(
+		'keeps processing and Stop independent of optional items (Git enabled=%s)',
+		(enabled) => {
+			runtime.composerStatusBarGitProjects = enabled;
+			runtime.composerStatusBarCommit = false;
+			runtime.summary = gitSummary();
+			const { panel } = makePanel();
+			render(ConversationPanel, {
+				surfaceId: panel.surfaceId,
+				chat: chat(),
+				panel,
+				isCommandOwner: true,
+				ownsComposer: true,
+				actions: makeActions(),
+			});
+			expect(screen.getByRole('button', { name: m.chat_loading_stop() })).toBeTruthy();
+			expect(screen.queryByRole('button', { name: /Commit/ })).toBeNull();
+			expect(screen.queryByRole('button', { name: /Change project path/ })).toBeNull();
+		},
+	);
+
+	it('omits an idle bar with no included items', () => {
+		runtime.processing = false;
+		runtime.composerStatusBarProjectPath = false;
+		runtime.composerStatusBarGitBranch = false;
+		runtime.composerStatusBarCommit = false;
+		runtime.summary = gitSummary();
+		const { panel } = makePanel();
+		const { container } = render(ConversationPanel, {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions: makeActions(),
+		});
+		expect(container.querySelector('[data-composer-status-bar]')).toBeNull();
+	});
+
+	it('retains the path during executor reconnects while disabling mutations and Git controls', async () => {
+		runtime.processing = false;
+		runtime.summary = gitSummary();
+		const { panel } = makePanel();
+		render(ConversationPanel, {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions: makeActions(),
+		});
+		const path = screen.getByRole<HTMLButtonElement>('button', {
+			name: 'Change project path: /project',
+		});
+		expect(path.disabled).toBe(false);
+		executors.applySnapshot([{ ...localExecutor, availability: 'offline' }]);
+		await waitFor(() => expect(path.disabled).toBe(true));
+		expect(screen.getByRole('button', { name: 'Change project path: /project' })).toBe(path);
+		expect(screen.queryByRole('button', { name: /Commit/ })).toBeNull();
+		expect(screen.queryByRole('button', { name: /main/ })).toBeNull();
+		executors.applySnapshot([localExecutor]);
+		await waitFor(() => expect(path.disabled).toBe(false));
+		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
+	});
+
+	it.each(['draft', 'running'] as const)(
+		'opens the owning panel project picker for a %s chat',
+		async (status) => {
+			runtime.processing = false;
+			runtime.pathUpdatesSupported = status === 'running';
+			runtime.summary = gitSummary();
+			const actions = makeActions();
+			const { panel } = makePanel();
+			render(ConversationPanel, {
+				surfaceId: panel.surfaceId,
+				chat: { ...chat(), id: 'background-chat', projectPath: '/project/subdirectory', status },
+				panel,
+				isCommandOwner: false,
+				ownsComposer: false,
+				actions,
+			});
+			await fireEvent.click(
+				screen.getByRole('button', { name: 'Change project path: /project/subdirectory' }),
+			);
+			expect(actions.chooseProjectFolder).toHaveBeenCalledWith(panel.surfaceId, 'background-chat');
+		},
+	);
+
+	it('disables the project picker for a persisted chat without provider support', () => {
+		runtime.processing = false;
+		runtime.summary = gitSummary();
+		const { panel } = makePanel();
+		render(ConversationPanel, {
+			surfaceId: panel.surfaceId,
+			chat: { ...chat(), status: 'running' },
+			panel,
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions: makeActions(),
+		});
+		expect(
+			(screen.getByRole('button', { name: 'Change project path: /project' }) as HTMLButtonElement)
+				.disabled,
+		).toBe(true);
 	});
 
 	it('keeps the presentation attached when its viewport becomes available', async () => {
@@ -433,7 +579,7 @@ describe('ConversationPanel', () => {
 		expect(screen.getByRole('button', { name: m.chat_loading_stop() })).toBeTruthy();
 	});
 
-	it('renders the shared Git tray and routes its buttons through surface-qualified actions', async () => {
+	it('renders the shared composer status bar and routes its buttons through surface-qualified actions', async () => {
 		runtime.processing = false;
 		runtime.summary = gitSummary();
 		const { panel } = makePanel();
@@ -453,60 +599,72 @@ describe('ConversationPanel', () => {
 		expect(actions.toggleBranch).toHaveBeenCalledWith(panel.surfaceId, 'chat-1');
 	});
 
-	it.each([false, true])('places the notice above the cap without hiding it (processing=%s)', async (processing) => {
-		runtime.processing = processing;
-		runtime.summary = gitSummary();
-		runtime.queue = queue();
-		const { panel } = makePanel();
-		const composerNotice: ComposerAvailabilityNoticePresentation = {
-			chatId: 'chat-1',
-			notice: { kind: 'catalog-failed', message: 'Catalog unavailable' },
-			onRetryProject: vi.fn(),
-			onRetryCatalog: vi.fn(),
-		};
-		const props = {
-			surfaceId: panel.surfaceId,
-			chat: chat(),
-			panel,
-			isCommandOwner: true,
-			ownsComposer: true,
-			actions: makeActions(),
-			composerNotice,
-			composerInsetPx: 96,
-		};
-		const rendered = render(ConversationPanel, props);
-		const notice = rendered.container.querySelector('[data-conversation-panel-notice]')!;
-		const dock = rendered.container.querySelector('[data-conversation-panel-status-dock]')!;
-		const spacer = rendered.container.querySelector('[data-conversation-panel-composer-spacer]')!;
-		const queued = screen.getByText('Queued input');
-		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
-		expect(notice.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-		expect(queued.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-		expect(notice.classList.contains('pb-11')).toBe(true);
-		expect(queued.closest('.pb-14')).toBeNull();
-		expect(rendered.container.querySelector('[data-reserve-composer-tray-space]')?.getAttribute('data-reserve-composer-tray-space')).toBe('false');
-		expect(dock.nextElementSibling).toBe(spacer);
-		expect(spacer.getAttribute('style')).toContain('height: 96px');
-		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-		expect(composerNotice.onRetryCatalog).toHaveBeenCalledOnce();
+	it.each([false, true])(
+		'places the notice above the cap without hiding it (processing=%s)',
+		async (processing) => {
+			runtime.processing = processing;
+			runtime.summary = gitSummary();
+			runtime.queue = queue();
+			const { panel } = makePanel();
+			const composerNotice: ComposerAvailabilityNoticePresentation = {
+				chatId: 'chat-1',
+				notice: { kind: 'catalog-failed', message: 'Catalog unavailable' },
+				onRetryProject: vi.fn(),
+				onRetryCatalog: vi.fn(),
+			};
+			const props = {
+				surfaceId: panel.surfaceId,
+				chat: chat(),
+				panel,
+				isCommandOwner: true,
+				ownsComposer: true,
+				actions: makeActions(),
+				composerNotice,
+				composerInsetPx: 96,
+			};
+			const rendered = render(ConversationPanel, props);
+			const notice = rendered.container.querySelector('[data-conversation-panel-notice]')!;
+			const dock = rendered.container.querySelector('[data-conversation-panel-status-dock]')!;
+			const spacer = rendered.container.querySelector('[data-conversation-panel-composer-spacer]')!;
+			const queued = screen.getByText('Queued input');
+			expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
+			expect(notice.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+			expect(
+				queued.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
+			).toBeTruthy();
+			expect(notice.classList.contains('pb-11')).toBe(true);
+			expect(queued.closest('.pb-14')).toBeNull();
+			expect(
+				rendered.container
+					.querySelector('[data-reserve-composer-cap-space]')
+					?.getAttribute('data-reserve-composer-cap-space'),
+			).toBe('false');
+			expect(dock.nextElementSibling).toBe(spacer);
+			expect(spacer.getAttribute('style')).toContain('height: 96px');
+			await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+			expect(composerNotice.onRetryCatalog).toHaveBeenCalledOnce();
 
-		await rendered.rerender({ ...props, ownsComposer: false });
-		expect(rendered.container.querySelector('[data-conversation-panel-notice]')).toBeNull();
-		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
+			await rendered.rerender({ ...props, ownsComposer: false });
+			expect(rendered.container.querySelector('[data-conversation-panel-notice]')).toBeNull();
+			expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
 
-		await rendered.rerender({ ...props, composerNotice: { ...composerNotice, chatId: 'previous-chat' } });
-		expect(rendered.container.querySelector('[data-conversation-panel-notice]')).toBeNull();
+			await rendered.rerender({
+				...props,
+				composerNotice: { ...composerNotice, chatId: 'previous-chat' },
+			});
+			expect(rendered.container.querySelector('[data-conversation-panel-notice]')).toBeNull();
 
-		await rendered.rerender({ ...props, composerNotice: null });
-		expect(rendered.container.querySelector('[data-conversation-panel-notice]')).toBeNull();
-		expect(queued.closest('.pb-14')).toBeTruthy();
-		expect(spacer.getAttribute('style')).toContain('height: 96px');
-		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
-	});
+			await rendered.rerender({ ...props, composerNotice: null });
+			expect(rendered.container.querySelector('[data-conversation-panel-notice]')).toBeNull();
+			expect(queued.closest('.pb-14')).toBeTruthy();
+			expect(spacer.getAttribute('style')).toContain('height: 96px');
+			expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
+		},
+	);
 
-	it('omits the notice cap slot when the tray is hidden and restores queue reservation without a notice', async () => {
+	it('omits the notice cap slot when the status bar is hidden and restores queue reservation without a notice', async () => {
 		runtime.processing = false;
-		runtime.showQuickCommitTray = false;
+		runtime.composerStatusBarGitProjects = false;
 		runtime.queue = queue();
 		const { panel } = makePanel();
 		const composerNotice: ComposerAvailabilityNoticePresentation = {

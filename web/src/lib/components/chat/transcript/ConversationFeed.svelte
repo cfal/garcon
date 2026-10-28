@@ -67,7 +67,7 @@
 		onRetry?: () => void;
 		onLoadEarlier?: () => void;
 		onLoadLater?: () => void;
-		reserveComposerTraySpace?: boolean;
+		reserveComposerCapSpace?: boolean;
 		isPreparingInitialScroll?: boolean;
 		isProcessing?: boolean;
 		onForkChat?: (upToSeq?: number) => void;
@@ -97,7 +97,7 @@
 		onRetry,
 		onLoadEarlier = () => {},
 		onLoadLater = () => {},
-		reserveComposerTraySpace = false,
+		reserveComposerCapSpace = false,
 		isPreparingInitialScroll = false,
 		isProcessing = false,
 		onForkChat,
@@ -186,7 +186,7 @@
 			CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth],
 			chatState.displayMessageCount > 0 && 'min-h-full justify-end',
 			chatState.displayMessageCount === 0 && 'pt-3 sm:pt-4',
-			chatState.displayMessageCount === 0 && (reserveComposerTraySpace ? 'pb-14' : 'pb-3 sm:pb-4'),
+			chatState.displayMessageCount === 0 && (reserveComposerCapSpace ? 'pb-14' : 'pb-3 sm:pb-4'),
 			isPreparingInitialScroll && 'invisible',
 		),
 	);
@@ -282,7 +282,7 @@
 		showRefreshError: chatState.loadStatus === 'error' && chatState.displayMessageCount > 0,
 		earlierBoundary: earlierBoundaryMode(),
 		showLaterBoundary: chatState.hasLaterMessages || chatState.pageStates.later.status !== 'idle',
-		reserveComposerTraySpace,
+		reserveComposerCapSpace,
 		transcriptViewId: chatState.getCursor().transcriptViewId,
 		pendingPermissions:
 			projectedPendingPermissionRequests.length > 0 && onPermissionDecision

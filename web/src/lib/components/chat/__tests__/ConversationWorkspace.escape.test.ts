@@ -349,8 +349,9 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			} satisfies GitQuickSummaryReady),
 		});
 		try {
-			render(ConversationWorkspaceEscapeHost, { showQuickCommitTray: true, quickSummary });
-			const button = screen.getByRole('button', { name: /^Commit/ });
+			quickSummary.setVisibleProjects([{ executorId: 'local', projectPath: '/workspace/project', isProcessing: true }]);
+			render(ConversationWorkspaceEscapeHost, { composerStatusBarGitProjects: true, quickSummary });
+			const button = await screen.findByRole('button', { name: /^Commit/ });
 			const focusTarget = interaction === 'keyboard' ? button : screen.getByRole('button', { name: 'Abort' });
 			focusTarget.focus();
 			if (interaction === 'pointer') await fireEvent.pointerEnter(button, { pointerType: 'mouse' });
