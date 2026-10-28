@@ -95,7 +95,7 @@ test('edits remote files and retains offline buffers without touching controller
         expect(url.searchParams.get('executorId')).toBe(client.executorId);
       }
     }
-    expect(browserErrors).toEqual(failedRequests.map(() =>
+    expect(browserErrors.splice(0)).toEqual(failedRequests.map(() =>
       'console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)',
     ));
   }, undefined, { executionBackend: 'remote-executor-dials', projectRoots: 'separate' });
@@ -262,7 +262,7 @@ test('switches file executors from breadcrumbs without changing chat ownership a
       status: 403,
       errorCode: 'outside_project_base',
     })));
-    expect(browserErrors).toEqual(expectedProbes.map(() =>
+    expect(browserErrors.splice(0)).toEqual(expectedProbes.map(() =>
       'console.error: Failed to load resource: the server responded with a status of 403 (Forbidden)',
     ));
   }, undefined, { executionBackend: 'remote-executor-dials', projectRoots: 'separate' });

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { captureBrowserErrors } from '../../support/browser-errors.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,6 +29,8 @@ test.each(['touch', 'mouse'] as const)('reconnects a native %s through the Svelt
     const address = server.httpServer!.address();
     if (!address || typeof address === 'string') throw new Error('Missing provider fixture address');
     const page = await browser.newPage({ viewport: { width: 1100, height: 700 } });
+    const browserErrors: string[] = [];
+    captureBrowserErrors(page.context(), browserErrors);
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${address.port}`);
@@ -62,6 +65,7 @@ test.each(['touch', 'mouse'] as const)('reconnects a native %s through the Svelt
     });
     expect(await page.locator('.svelte-flow__connection').count()).toBe(0);
     expect(errors).toEqual([]);
+    expect(browserErrors).toEqual([]);
   } finally {
     await browser.close();
     await server.close();

@@ -192,11 +192,9 @@ describe("Lightpanda Tickets", () => {
       await app.waitForText(
         "Draft from a previous ticket store. Copy its text before starting a new submission.",
       );
-      expect(
-        fixture.browserErrors.filter(
-          (message) => !message.startsWith("console.error: WebSocket error:"),
-        ),
-      ).toEqual([]);
+      fixture.consumeExpectedBrowserErrors(fixture.browserErrors.filter(
+        message => message.startsWith('console.error: WebSocket error:'),
+      ));
     });
   }, 60_000);
 
@@ -430,6 +428,9 @@ describe("Lightpanda Tickets", () => {
           ),
         ).toEqual([]);
         expect(fixture.browserErrors.slice(errorsAfterReconnect)).toEqual([]);
+        fixture.consumeExpectedBrowserErrors(fixture.browserErrors.slice(0, errorsAfterReconnect).filter(
+          message => message.startsWith('console.error: WebSocket error:'),
+        ));
       });
     }, 60_000);
 });

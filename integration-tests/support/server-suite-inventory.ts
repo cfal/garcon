@@ -2,9 +2,13 @@ import type { ExecutionBackend } from './execution-backend.js';
 
 // New server suites join all three lanes unless an explicit exception is recorded here.
 export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze({
+  'auth-request-bounds': 'Controller HTTP authentication body limits; no executor dispatch.',
   'browser-logout': 'Owns its browser-session and Local/remote execution matrix.',
   'runtime-base-path': 'Owns the root/nested mount and Local/remote transport matrix.',
+  'claude-scripted-steering-protocol': 'Direct pinned CLI protocol; no Garcon executor dispatch.',
   ...Object.fromEntries([
+    'account-credentials', 'garcon-cli-schedules', 'scheduled-prompt-toggles',
+    'shell-agent', 'shell-search',
     'api-provider-assignments', 'cross-executor-handoff', 'execution-worker-process', 'executor-admission', 'executor-app',
     'executor-bulk-isolation', 'executor-bulk-reconnect',
     'executor-cli-response-limits', 'executor-cli', 'executor-cli-management', 'executor-cli-targets', 'executor-config-updates',
@@ -33,6 +37,8 @@ export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze
     'tickets', 'websocket-backpressure', 'websocket-payload-limit', 'websocket-request-validation',
   ].map(name => [name, 'Controller persistence, ordering or browser delivery; no runtime contract under test.'])),
   ...Object.fromEntries([
+    'codex-fixture', 'delegated-start-interleavings', 'fake-claude-model',
+    'opencode-supervisor', 'project-path-publication',
     'execution-backend', 'fake-chat-completions-model', 'fixture-auth', 'git-fixture', 'support-contract',
     'persisted-chat-support', 'reload-helper', 'live-claude-protocol-probe',
     'live-codex-protocol-probe', 'live-codex-credential-proxy',

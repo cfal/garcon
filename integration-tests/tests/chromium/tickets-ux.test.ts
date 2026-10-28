@@ -475,9 +475,7 @@ test("mobile Tickets opens, saves and closes without crypto.randomUUID", async (
       await panel.getByRole("button", { name: "Close Tickets" }).click();
       await panel.waitFor({ state: "hidden" });
       await page.locator("[data-mobile-current-chat-menu]").waitFor();
-      expect(browserErrors.filter((error) => !error.includes("503"))).toEqual(
-        [],
-      );
+      expect(browserErrors.splice(0)).toEqual(['console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)']);
     },
   );
 });
@@ -572,9 +570,7 @@ test("a rejected optimistic move restores the visible mobile lane", async () => 
       expect(
         await page.getByRole("button", { name: "Keep editing" }).count(),
       ).toBe(0);
-      expect(browserErrors.filter((error) => !error.includes("409"))).toEqual(
-        [],
-      );
+      expect(browserErrors.splice(0)).toEqual(['console.error: Failed to load resource: the server responded with a status of 409 (Conflict)']);
     },
   );
 });

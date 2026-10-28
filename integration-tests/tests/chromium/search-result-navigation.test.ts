@@ -162,7 +162,7 @@ for (const phase of ['validation', 'page'] as const) {
             .locator(`[data-chat-row-id="${target.transcriptViewId}:${target.ordinal}"]`)
             .count(),
         ).toBe(0);
-        expect(browserErrors.filter((error) => !error.includes('409 (Conflict)'))).toEqual([]);
+        expect(browserErrors.splice(0)).toEqual(['console.error: Failed to load resource: the server responded with a status of 409 (Conflict)']);
       },
     );
   });

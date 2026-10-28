@@ -17,16 +17,22 @@ test('server lanes share one inventory and new suites default to runtime parity'
   for (const [name, reason] of Object.entries(SINGLE_RUN_SUITES)) {
     expect(names.has(name)).toBe(true);
     expect(reason.length).toBeGreaterThan(20);
+    for (const file of files.filter(file => serverSuiteName(file) === name)) {
+      expect(remote).not.toContain(file);
+    }
   }
-  for (const name of ['chat-lifecycle', 'garcon-cli', 'git-comparison', 'git-refs', 'git-worktrees', 'git-read-deadline']) {
+  expect(remote).toEqual(local.filter(file => !SINGLE_RUN_SUITES[serverSuiteName(file)]));
+  for (const name of ['chat-lifecycle', 'garcon-cli', 'git-comparison', 'git-refs', 'git-worktrees', 'git-read-deadline',
+    'shell-authoring', 'shell-continuity', 'shell-review-regressions']) {
     expect(remote).toContain(`tests/server/${name}.test.ts`);
   }
 });
 
-test('matrix suites cannot silently pin their fixture to Local', async () => {
+test('matrix suites cannot silently pin their fixture or duplicate a backend matrix', async () => {
   for (const file of selectServerSuites(files, 'remote-controller-dials')) {
     const source = await readFile(`${root}/${file}`, 'utf8');
     expect(source, file).not.toMatch(/executionBackend:\s*['"]in-process['"]/);
+    expect(source, file).not.toMatch(/['"]remote-(?:controller|executor)-dials['"]/);
   }
 });
 
@@ -57,7 +63,13 @@ test('live CI lanes use agent-specific secrets and audit all private configurati
     };
     expect(workflow).toMatchObject({ jobs: {
       [`${agent}-live`]: { steps: expect.arrayContaining([
-        expect.objectContaining({ id: agent === 'claude' ? 'claude-config' : 'codex-key', env: environment }),
+        expect.objectContaining({ id: agent === 'claude' ? 'claude-config' : 'codex-key', env: {
+          ...environment,
+          EVENT_NAME: '${{ github.event_name }}',
+          HEAD_REPO: '${{ github.event.pull_request.head.repo.full_name }}',
+          REPO: '${{ github.repository }}',
+          ACTOR: '${{ github.actor }}',
+        } }),
         expect.objectContaining({ run: `bun run test:live:${agent}`, env: environment }),
         expect.objectContaining({
           id: `${agent}-diagnostics-audit`, env: environment,

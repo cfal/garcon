@@ -78,8 +78,6 @@ describe('Lightpanda auth reconnect recovery', () => {
         (globalThis as typeof globalThis & {
           __garconAuthStatusAttempts?: number;
         }).__garconAuthStatusAttempts)).toBe(recoveredAttemptCount);
-      expect(fixture.browserErrors.filter((message) =>
-        !message.includes('[AuthStore] Auth status check failed:'))).toEqual([]);
     });
   });
 });
