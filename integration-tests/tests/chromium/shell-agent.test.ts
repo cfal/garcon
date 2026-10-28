@@ -182,16 +182,18 @@ test('Shell composer preserves literal commands and stable chat switching on des
       await page.screenshot({ path: join(artifacts, `shell-composer-${width}.png`) });
     }
     phase('cwd settlement failure stays visible once across browser refresh');
+    const cwdNotice = page.locator('[data-chat-message-type="transcript-notice"]').getByText(
+      'Command completed, but its working directory is unavailable (outside-base).',
+      { exact: true },
+    );
     await editor.fill('cd "$HOME"');
     await composer.getByRole('button', { name: 'Send message', exact: true }).click();
     await browserExpect(page.getByText('Working directory not saved', { exact: true })).toBeVisible();
     await client.waitForProcessing(chatIds[0]!, false);
-    await browserExpect(page.getByText('Command completed, but its working directory is unavailable (outside-base).', { exact: true }))
-      .toHaveCount(1);
+    await browserExpect(cwdNotice).toHaveCount(1);
     await page.reload();
     await browserExpect(page.getByText('Working directory not saved', { exact: true })).toBeVisible();
-    await browserExpect(page.getByText('Command completed, but its working directory is unavailable (outside-base).', { exact: true }))
-      .toHaveCount(1);
+    await browserExpect(cwdNotice).toHaveCount(1);
     expect(integration.fakeProviders.openAi.requests()).toHaveLength(0);
     expect(integration.fakeProviders.anthropic.requests()).toHaveLength(0);
     assertNoBrowserErrors();
