@@ -45,6 +45,7 @@ test('Composer status bar path responds to its container and opens the owning ch
     for (const width of [1440, 900, 600, 390, 320]) {
       phase(`checking path, branch and Commit geometry at ${width}px`);
       await page.setViewportSize({ width, height: 900 });
+      await browserExpect(page.locator('.mobile-shell')).toHaveCount(width <= 768 ? 1 : 0);
       await browserExpect.poll(async () => {
         const boxes = await Promise.all([pathButton, branch, commit].map(control => control.boundingBox()));
         return boxes.every((box, index) => box && box.width > 0 &&
@@ -74,8 +75,9 @@ test('Composer status bar path responds to its container and opens the owning ch
 
     phase('checking narrow panes on a wide viewport');
     await page.setViewportSize({ width: 1440, height: 900 });
-    const panel = page.locator('[data-conversation-panel]:visible');
+    const panel = page.locator('[data-workspace-window-id="window-main"] [data-conversation-panel]:visible');
     await panel.evaluate(element => { element.style.width = '320px'; });
+    expect((await panel.boundingBox())!.width).toBe(320);
     await browserExpect(pathLabel).toBeHidden();
     const [pathBox, branchBox, commitBox] = await Promise.all(
       [pathButton, branch, commit].map(control => control.boundingBox()),
