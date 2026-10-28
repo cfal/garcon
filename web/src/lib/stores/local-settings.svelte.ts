@@ -252,7 +252,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	steerWithCtrlEnter: true,
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
-	autoHideChatScrollbar: false,
+	autoHideChatScrollbar: true,
 	inlineImageThumbnailSize: 'medium',
 	imageCacheSizeMiB: 64,
 	inlineMermaidThumbnailSize: 'medium',

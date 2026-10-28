@@ -59,10 +59,10 @@ describe('Settings', () => {
 		let rendered = render(SettingsTestHost, props);
 		try {
 			const control = screen.getByRole('switch', { name: 'Auto-hide chat scrollbar' });
-			expect(control.getAttribute('aria-checked')).toBe('false');
+			expect(control.getAttribute('aria-checked')).toBe('true');
 			await fireEvent.click(control);
 			expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
-				autoHideChatScrollbar: true,
+				autoHideChatScrollbar: false,
 			});
 			rendered.unmount();
 			rendered = render(SettingsTestHost, props);
@@ -70,7 +70,7 @@ describe('Settings', () => {
 				screen
 					.getByRole('switch', { name: 'Auto-hide chat scrollbar' })
 					.getAttribute('aria-checked'),
-			).toBe('true');
+			).toBe('false');
 		} finally {
 			rendered.unmount();
 		}

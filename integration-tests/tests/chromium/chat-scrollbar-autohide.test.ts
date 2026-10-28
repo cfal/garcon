@@ -26,9 +26,9 @@ test('chat scrollbar auto-hide preserves scrolling, focus, dragging and viewport
     const scrollbar = root.locator('[data-chat-feed-scrollbar]');
     const composer = page.locator('[data-composer]:visible');
     await browserExpect(scrollbar).toBeVisible();
-    await browserExpect(root).toHaveAttribute('data-chat-scrollbar-auto-hide', 'false');
+    await browserExpect(root).toHaveAttribute('data-chat-scrollbar-auto-hide', 'true');
     await page.mouse.move(1, 1);
-    await browserExpect(scrollbar).toHaveCSS('opacity', '1');
+    await browserExpect(scrollbar).toHaveCSS('opacity', '0');
 
     const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
     async function setAutoHide(checked: boolean) {
@@ -41,6 +41,11 @@ test('chat scrollbar auto-hide preserves scrolling, focus, dragging and viewport
       await settings.getByRole('button', { name: 'Close', exact: true }).click();
       await page.mouse.move(1, 1);
     }
+
+    phase('opting out of the auto-hide default');
+    await setAutoHide(false);
+    await browserExpect(root).toHaveAttribute('data-chat-scrollbar-auto-hide', 'false');
+    await browserExpect(scrollbar).toHaveCSS('opacity', '1');
 
     phase('enabling auto-hide without remounting or shifting the viewport');
     const originalViewport = await viewport.elementHandle();
@@ -105,6 +110,7 @@ test('chat scrollbar auto-hide preserves scrolling, focus, dragging and viewport
     await browserExpect(root).toHaveAttribute('data-chat-scrollbar-auto-hide', 'true');
     await browserExpect(scrollbar).toHaveCSS('opacity', '0');
     await setAutoHide(false);
+    await page.reload();
     await browserExpect(root).toHaveAttribute('data-chat-scrollbar-auto-hide', 'false');
     await browserExpect(scrollbar).toHaveCSS('opacity', '1');
 
@@ -128,11 +134,6 @@ test('chat scrollbar auto-hide preserves scrolling, focus, dragging and viewport
     watchBrowserErrors(touchContext);
     try {
       await authenticateChromiumContext(touchContext, integration);
-      await touchContext.addInitScript(() => {
-        if (location.hostname === '127.0.0.1') {
-          localStorage.setItem('pref_local_settings', JSON.stringify({ autoHideChatScrollbar: true }));
-        }
-      });
       const touchPage = await touchContext.newPage();
       await touchPage.goto(`${integration.garcon.baseUrl}/chat/${chats[0]}`);
       const touchViewport = touchPage.locator('[data-chat-scroll-viewport]:visible');

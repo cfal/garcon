@@ -333,10 +333,6 @@ describe('ConversationFeed', () => {
 	});
 
 	it('auto-hides after scrolling while retaining the track and viewport', async () => {
-		localStorage.setItem(
-			LOCAL_STORAGE_KEYS.localSettings,
-			JSON.stringify({ autoHideChatScrollbar: true }),
-		);
 		const onUserScrollIntent = vi.fn();
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'twenty-thousand',
