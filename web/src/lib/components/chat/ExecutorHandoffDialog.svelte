@@ -82,7 +82,7 @@
 		untrack(() => destination.scheduleValidation(contextKey));
 	});
 	$effect(() => {
-		if (!handoff.target || !executors.isReady(executorId)) return;
+		if (!handoff.target || !executors.isReady(executorId) || !executors.supportsExecution(executorId, 'execution.start')) return;
 		void catalog.version;
 		untrack(() => {
 			void catalog.refreshIfStale();

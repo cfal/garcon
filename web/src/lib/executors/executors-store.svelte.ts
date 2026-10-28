@@ -1,9 +1,12 @@
 import { getExecutors } from '$lib/api/executors.js';
 import {
 	effectiveExecutorId,
+	executorSupports,
+	executorSupportsExecution,
 	parseExecutors,
 	type ExecutorSnapshot,
 } from '$shared/executors';
+import { LOCAL_EXECUTOR_OPERATIONS, type ExecutorOperation } from '$shared/executor-contracts';
 
 const localFallback: readonly ExecutorSnapshot[] = [
 	{
@@ -16,6 +19,7 @@ const localFallback: readonly ExecutorSnapshot[] = [
 		availability: 'ready',
 		bulk: null,
 		instanceId: null,
+		operations: LOCAL_EXECUTOR_OPERATIONS,
 		projectBasePath: null,
 		lastError: null,
 		// Creation stays hidden until the controller reports what Local supports.
@@ -56,13 +60,21 @@ export class ExecutorsStore {
 		return executor?.enabled === true && executor.availability === 'ready';
 	}
 
+	supportsOperations(id: string | null | undefined, ...operations: readonly ExecutorOperation[]): boolean {
+		return executorSupports(this.get(id), ...operations);
+	}
+
+	supportsExecution(id: string | null | undefined, operation: 'execution.start' | 'execution.resume' | 'compaction.compact'): boolean {
+		return executorSupportsExecution(this.get(id), operation);
+	}
+
 	filesAvailable(id?: string | null): boolean {
 		return this.isReady(id) && this.get(id)?.executorServices.files === true;
 	}
 
 	/** A capability of the executor, not its readiness: controls stay in place across a reconnect. */
 	supportsDirectoryCreation(id?: string | null): boolean {
-		return this.get(id)?.executorServices.directoryCreation === true;
+		return this.get(id)?.executorServices.directoryCreation === true && this.supportsOperations(id, 'files.createDirectory');
 	}
 
 	gitAvailable(id?: string | null): boolean {

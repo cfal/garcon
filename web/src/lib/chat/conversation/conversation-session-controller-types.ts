@@ -152,7 +152,7 @@ export interface SessionControllerDeps {
 		executorId?: string,
 	): Pick<ConversationExecutionSelection, 'permissionMode' | 'thinkingMode' | 'agentSettings'>;
 	modelCatalogForExecutor(executorId: string): SessionControllerDeps['modelCatalog'];
-	canSubmitToExecutor(executorId: string): boolean;
+	canSubmitToExecutor(executorId: string, operation?: 'execution.start' | 'execution.resume' | 'compaction.compact'): boolean;
 	appShell: {
 		openNewChatDialog: (opts: { prefill: string }) => void;
 	};

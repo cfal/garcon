@@ -406,6 +406,40 @@ describe('PromptComposer focus', () => {
 		expect(onSteerPreferredSubmit).not.toHaveBeenCalled();
 	});
 
+	it.each((['ready', 'offline'] as const).flatMap(availability => [false, true].map(supportsFork => ({ availability, supportsFork }))))(
+		'gates bare /fork using its effective provider support: $availability, supportsFork=$supportsFork', async ({ availability, supportsFork }) => {
+		const catalog = conversationalCatalog();
+		catalog.forExecutor(remoteExecutor.id).executorInstanceId = remoteExecutor.instanceId;
+		catalog.forExecutor(remoteExecutor.id).lastValidatedAt = Date.now();
+		catalog.forExecutor(remoteExecutor.id).agentMetadata.claude.supportsFork = supportsFork;
+		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
+		vi.spyOn(catalog.forExecutor(remoteExecutor.id), 'refreshIfStale').mockResolvedValue();
+		const onsubmit = vi.fn();
+		const onSteerPreferredSubmit = vi.fn();
+		const commands = vi.spyOn(commandsApi, 'getSlashCommands').mockResolvedValue([]);
+		try {
+			render(PromptComposerTestHost, {
+				selectedExecutorId: remoteExecutor.id,
+				executors: [localExecutor, { ...remoteExecutor, availability,
+					operations: remoteExecutor.operations.filter(name => name !== 'execution.start' && name !== 'execution.resume') }],
+				catalog, onsubmit, onSteerPreferredSubmit,
+			});
+			const textarea = screen.getByRole('textbox');
+			await fireEvent.input(textarea, { target: { value: '/fork' } });
+			await fireEvent.keyDown(textarea, { key: 'Escape' });
+			const send = screen.getByRole<HTMLButtonElement>('button', {
+				name: availability === 'ready' && !supportsFork ? 'This executor does not support this operation.' : 'Send message',
+			});
+			const admitted = availability === 'ready' && supportsFork;
+			expect(send.disabled).toBe(!admitted);
+			await fireEvent.click(send);
+			await fireEvent.keyDown(textarea, { key: 'Enter' });
+			await fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+			expect(onsubmit).toHaveBeenCalledTimes(admitted ? 2 : 0);
+			expect(onSteerPreferredSubmit).toHaveBeenCalledTimes(admitted ? 1 : 0);
+		} finally { commands.mockRestore(); }
+	});
+
 	it('keeps remote submission blocked after catalog failure and offers an explicit retry', async () => {
 		const catalog = conversationalCatalog();
 		const remote = catalog.forExecutor(remoteExecutor.id);

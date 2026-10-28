@@ -55,6 +55,7 @@ export function toRecord(session: ChatListEntry): ChatSessionRecord {
 		isProcessing: session.processingPhase !== null,
 		processingPhase: session.processingPhase,
 		canReloadFromNativeHistory: session.canReloadFromNativeHistory === true,
+		hasAgentSession: session.hasAgentSession,
 		isUnread: session.isUnread ?? false,
 		status: 'running',
 		agentOwnershipEpoch: session.agentOwnershipEpoch,
@@ -91,6 +92,7 @@ export function toDraftRecord(
 		isProcessing: false,
 		processingPhase: null,
 		canReloadFromNativeHistory: false,
+		hasAgentSession: false,
 		isUnread: false,
 		status: 'draft',
 		agentOwnershipEpoch: null,
@@ -147,6 +149,7 @@ export function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean 
 		a.isProcessing === b.isProcessing &&
 		a.processingPhase === b.processingPhase &&
 		a.canReloadFromNativeHistory === b.canReloadFromNativeHistory &&
+		a.hasAgentSession === b.hasAgentSession &&
 		a.isUnread === b.isUnread &&
 		a.status === b.status &&
 		a.agentOwnershipEpoch === b.agentOwnershipEpoch &&
