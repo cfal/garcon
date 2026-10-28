@@ -1839,7 +1839,12 @@ describe('WorkspaceWindowTitleBar', () => {
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
 
 		expect(screen.queryByRole('menuitem', { name: m.workspace_new_terminal() })).toBeNull();
-		expect(screen.queryByRole('menuitem', { name: 'Open History' })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.workspace_git_views() })).toBeNull();
+		expect(
+			screen.queryByRole('menuitem', {
+				name: m.workspace_open_surface({ surface: m.workspace_surface_files() }),
+			}),
+		).toBeNull();
 	});
 
 	it('shows standard copy rows below the active Chat tab actions', async () => {
