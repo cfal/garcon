@@ -70,7 +70,9 @@ async function withReload(run) {
     nativeHistoryImport: { async *load() { yield [{ message: new AssistantMessage(AT, 'Imported reply.') }]; } },
     nativeActivity: { lastActivity: async () => ({ kind: 'ready', value: { lastEntryAt: RESULT_AT } }) },
   };
-  const integrations = { get: () => integration, require: () => integration };
+  /** @satisfies {Pick<import('../../../server/controller/agents/directory.js').AgentDirectory, 'requireOperations' | 'supportsOperations'>} */
+  const operationSupport = { requireOperations: () => {}, supportsOperations: () => true };
+  const integrations = { get: () => integration, require: () => integration, ...operationSupport };
   const adoption = new TranscriptAdoptionService({ ledger, registry, integrations,
     getCarryOverRevision: () => 'synthetic-carry', loadFrozenPrefix: async () => [] });
   const reload = new TranscriptReloadService({ ledger, registry, integrations, adoption, execution,

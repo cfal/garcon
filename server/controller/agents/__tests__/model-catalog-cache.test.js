@@ -1,125 +1,112 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { ModelCatalogResponseCache } from '../model-catalog-cache.js';
 
-function buildModelCatalog({ agentsEntries = [], providers = [] } = {}) {
-  return {
+function fixture(load = mock(async () => [{ id: 'synthetic-agent' }])) {
+  let instanceId = 'instance-a';
+  const catalog = {
     agents: {
-      getAgentCatalogEntries: () => Promise.resolve(agentsEntries),
+      captureCatalog() {
+        const captured = instanceId;
+        return {
+          executorInstanceId: captured,
+          assertCurrent() { if (captured !== instanceId) throw new Error('Generation retired'); },
+          getAgentCatalogEntries: load,
+        };
+      },
     },
-    apiProviders: {
-      getCatalog: () => providers,
-    },
+    apiProviders: { getCatalog: () => [] },
   };
+  return { cache: new ModelCatalogResponseCache(), catalog, load, replace: () => { instanceId = 'instance-b'; } };
 }
 
 describe('ModelCatalogResponseCache', () => {
+  it('caches the snapshot within the TTL', async () => {
+    const { cache, catalog, load } = fixture();
+    const first = await cache.getSnapshot(catalog);
+    expect(await cache.getSnapshot(catalog)).toBe(first);
+    expect(first.body.executorInstanceId).toBe('instance-a');
+    expect(load).toHaveBeenCalledTimes(1);
+  });
 
-  it('does not cache rejected executor lookups or let a stale rejection evict a replacement', async () => {
-    const cache = new ModelCatalogResponseCache();
-    const executorId = '22222222-2222-4222-8222-222222222222';
+  it('does not cache rejected lookups or let a stale rejection evict a replacement', async () => {
     const pending = Promise.withResolvers();
-    const load = mock(async () => { throw new Error('Executor unavailable'); });
-    const catalog = { agents: { getAgentCatalogEntries: load }, apiProviders: { getCatalog: () => [] } };
-    await expect(cache.getSnapshot(catalog, executorId)).rejects.toThrow('Executor unavailable');
+    const { cache, catalog, load } = fixture(mock(async () => { throw new Error('Unavailable'); }));
+    await expect(cache.getSnapshot(catalog)).rejects.toThrow('Unavailable');
     load.mockImplementationOnce(() => pending.promise);
-    const stale = cache.getSnapshot(catalog, executorId);
-    cache.clear(executorId);
+    const stale = cache.getSnapshot(catalog);
+    cache.clear();
     load.mockResolvedValue([{ id: 'test' }]);
-    const replacement = await cache.getSnapshot(catalog, executorId);
+    const replacement = await cache.getSnapshot(catalog);
     pending.reject(new Error('Old executor unavailable'));
     await expect(stale).rejects.toThrow('Old executor unavailable');
-    expect(await cache.getSnapshot(catalog, executorId)).toBe(replacement);
+    expect(await cache.getSnapshot(catalog)).toBe(replacement);
     expect(load).toHaveBeenCalledTimes(3);
   });
-  it('caches the snapshot within the TTL', async () => {
-    const cache = new ModelCatalogResponseCache();
-    const catalog = buildModelCatalog({ agentsEntries: [{ id: 'claude' }] });
 
+  it('returns same-generation results to evicted waiters without replacing the new cache', async () => {
+    const pending = Promise.withResolvers();
+    const { cache, catalog, load } = fixture(mock(() => pending.promise));
+    const first = cache.getSnapshot(catalog);
+    const second = cache.getSnapshot(catalog);
+    cache.clear();
+    load.mockResolvedValue([{ id: 'fresh-agent' }]);
+    const refreshed = await cache.getSnapshot(catalog);
+    pending.resolve([{ id: 'original-agent' }]);
+    const snapshot = await first;
+    expect(await second).toBe(snapshot);
+    expect(snapshot.body.catalog.agents).toEqual([{ id: 'original-agent' }]);
+    expect(() => snapshot.assertCurrent()).not.toThrow();
+    expect(await cache.getSnapshot(catalog)).toBe(refreshed);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects all original waiters after generation replacement and invalidation', async () => {
+    const pending = Promise.withResolvers();
+    const { cache, catalog, load, replace } = fixture(mock(() => pending.promise));
+    const first = cache.getSnapshot(catalog);
+    const second = cache.getSnapshot(catalog);
+    const results = Promise.allSettled([first, second]);
+    replace();
+    cache.clear();
+    pending.resolve([{ id: 'stale-agent' }]);
+    expect(await results).toEqual([
+      { status: 'rejected', reason: expect.objectContaining({ message: 'Generation retired' }) },
+      { status: 'rejected', reason: expect.objectContaining({ message: 'Generation retired' }) },
+    ]);
+    load.mockResolvedValue([{ id: 'new-agent' }]);
+    expect((await cache.getSnapshot(catalog)).body.catalog.agents).toEqual([{ id: 'new-agent' }]);
+  });
+
+  it('rejects stale completion without requiring explicit cache invalidation', async () => {
+    const pending = Promise.withResolvers();
+    const { cache, catalog, replace } = fixture(mock(() => pending.promise));
+    const result = cache.getSnapshot(catalog);
+    replace();
+    pending.resolve([]);
+    await expect(result).rejects.toThrow('Generation retired');
+  });
+
+  it('changes the ETag and response owner on replacement with identical inventory', async () => {
+    const { cache, catalog, replace } = fixture();
     const first = await cache.getSnapshot(catalog);
+    replace();
     const second = await cache.getSnapshot(catalog);
-
-    expect(second).toBe(first);
+    expect(second.body.catalog).toEqual(first.body.catalog);
+    expect(second.body.executorInstanceId).toBe('instance-b');
+    expect(second.etag).not.toBe(first.etag);
   });
 
-  it('rebuilds after clear() is called', async () => {
-    const cache = new ModelCatalogResponseCache();
-    const catalogA = buildModelCatalog({ agentsEntries: [{ id: 'claude' }] });
-    const catalogB = buildModelCatalog({ agentsEntries: [{ id: 'codex' }] });
-
-    const first = await cache.getSnapshot(catalogA);
-    expect(first.body.catalog.agents).toEqual([{ id: 'claude' }]);
-
-    cache.clear();
-
-    const second = await cache.getSnapshot(catalogB);
-    expect(second.body.catalog.agents).toEqual([{ id: 'codex' }]);
+  it('accepts an empty inventory', async () => {
+    const { cache, catalog } = fixture(mock(async () => []));
+    expect((await cache.getSnapshot(catalog)).body.catalog.agents).toEqual([]);
   });
 
-  it('does not commit a stale snapshot when clear() runs during an in-flight fetch', async () => {
-    const cache = new ModelCatalogResponseCache();
-    let resolveFirst;
-    const firstEntries = [{ id: 'claude' }];
-    const secondEntries = [{ id: 'codex' }];
-    const catalog = {
-      agents: {
-        getAgentCatalogEntries: () => new Promise((resolve) => {
-          // First call hangs until resolveFirst is invoked; later calls resolve with fresh data.
-          if (!resolveFirst) {
-            resolveFirst = () => resolve(firstEntries);
-          } else {
-            resolve(secondEntries);
-          }
-        }),
-      },
-      apiProviders: { getCatalog: () => [] },
-    };
-
-    // Start an in-flight fetch. It will hang on the first call.
-    const inflight = cache.getSnapshot(catalog);
-
-    // While it is in flight, clear the cache. This must bump the generation so
-    // the resolving promise cannot commit a stale snapshot.
-    cache.clear();
-
-    // Release the in-flight fetch. Without the generation guard, its .then()
-    // would write the stale snapshot back into #cachedCatalogResponse.
-    resolveFirst();
-    await inflight;
-
-    // The next getSnapshot call must rebuild — the stale snapshot should not have been committed.
+  it('fences an already-completed snapshot at HTTP publication', async () => {
+    const { cache, catalog, replace } = fixture();
     const snapshot = await cache.getSnapshot(catalog);
-    expect(snapshot.body.catalog.agents).toEqual([{ id: 'codex' }]);
-  });
-
-  it('returns the in-flight snapshot to concurrent callers even if clear() runs', async () => {
-    const cache = new ModelCatalogResponseCache();
-    let resolveFirst;
-    const firstEntries = [{ id: 'claude' }];
-    const catalog = {
-      agents: {
-        getAgentCatalogEntries: () => new Promise((resolve) => {
-          if (!resolveFirst) {
-            resolveFirst = () => resolve(firstEntries);
-          } else {
-            resolve([{ id: 'codex' }]);
-          }
-        }),
-      },
-      apiProviders: { getCatalog: () => [] },
-    };
-
-    const firstCall = cache.getSnapshot(catalog);
-    const secondCall = cache.getSnapshot(catalog);
     cache.clear();
-    resolveFirst();
-
-    const [first, second] = await Promise.all([firstCall, secondCall]);
-    // Both concurrent callers receive the in-flight snapshot — they started before clear().
-    expect(first.body.catalog.agents).toEqual([{ id: 'claude' }]);
-    expect(second).toBe(first);
-
-    // A new call after clear() rebuilds fresh.
-    const third = await cache.getSnapshot(catalog);
-    expect(third.body.catalog.agents).toEqual([{ id: 'codex' }]);
+    expect(() => snapshot.assertCurrent()).not.toThrow();
+    replace();
+    expect(() => snapshot.assertCurrent()).toThrow('Generation retired');
   });
 });

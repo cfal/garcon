@@ -1,0 +1,140 @@
+{
+  "definition": {
+    "name": "cli.executors.list",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "GET /api/v1/executors",
+  "client": {
+    "parameters": [],
+    "result": {
+      "array": {
+        "allowControllerCli": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "allowExecutorManagement": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "availability": {
+          "union": [
+            "\"offline\"",
+            "\"ready\"",
+            "\"reconnecting\""
+          ]
+        },
+        "bulk": {
+          "union": [
+            "null",
+            {
+              "availability": {
+                "union": [
+                  "\"connecting\"",
+                  "\"offline\"",
+                  "\"ready\"",
+                  "\"reconnecting\""
+                ]
+              },
+              "lastError": {
+                "union": [
+                  "null",
+                  {
+                    "code": "string",
+                    "message": "string"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "direction": {
+          "union": [
+            "\"controller-connects\"",
+            "\"executor-connects\"",
+            "null"
+          ]
+        },
+        "enabled": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "executorServices": {
+          "directoryCreation": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "files": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "gh": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "git": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "terminals": {
+            "union": [
+              "false",
+              "true"
+            ]
+          }
+        },
+        "id": "string",
+        "instanceId": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "kind": {
+          "union": [
+            "\"local\"",
+            "\"remote\""
+          ]
+        },
+        "label": "string",
+        "lastError": {
+          "union": [
+            "null",
+            {
+              "code": "string",
+              "message": "string"
+            }
+          ]
+        },
+        "operations": {
+          "array": "string"
+        },
+        "projectBasePath": {
+          "union": [
+            "null",
+            "string"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,5 +1,6 @@
+import { WorkerSessionTransport, handleTestRpc } from './test-session-transport.js';
 import { ExecutorRpc } from '../transport/rpc.js';
-import { SessionTransport } from '../transport/session-transport.js';
+import { TestSessionTransport as SessionTransport } from './test-session-transport.js';
 import type { ControllerCliDispatcher } from '../../controller/executors/cli-dispatcher.js';
 import type { ExecutorRpcConnection } from '../transport/rpc-connection.js';
 import { RpcAdmissionBudgets } from '../transport/rpc-admission.js';
@@ -20,13 +21,13 @@ export function cliPair(
   const pair = (lane: RpcLane) => {
     const id = lane === 'primary' ? parent : crypto.randomUUID();
     const left = new SessionTransport(id, 'worker', () => {}, {}, CLI_EXECUTOR_ID, lane, parent);
-    const right = new SessionTransport(id, 'controller', () => {}, {}, CLI_EXECUTOR_ID, lane, parent);
+    const right = new WorkerSessionTransport(id, 'controller', () => {}, {}, CLI_EXECUTOR_ID, lane, parent);
     const receiveLeft = left.attach({ send: (body) => receiveRight.receive(body), close() {}, canSend: () => lane === 'primary' || writable });
     const receiveRight = right.attach({ send: (body) => receiveLeft.receive(body), close() {} });
     const controller = new ExecutorRpc(left, { admission: controllerAdmission });
     const worker = new ExecutorRpc(right, { admission: workerAdmission });
     controller.activate(); worker.activate();
-    controller.handle(async (call, signal, guardReply) => {
+    handleTestRpc(controller, async (call, signal, guardReply) => {
       const access = { executorId: CLI_EXECUTOR_ID, rpc: controller, signal, assertCurrent, assertManagement };
       const observeReply: typeof guardReply = (guard) => guardReply((bytes) => {
         try { guard(bytes); }

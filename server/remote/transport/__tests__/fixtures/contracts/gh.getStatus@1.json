@@ -1,0 +1,62 @@
+{
+  "definition": {
+    "name": "gh.getStatus",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "[string]": "never"
+      }
+    },
+    "result": {
+      "authenticated": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "available": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "executorId": "string",
+      "host?": {
+        "union": [
+          "string",
+          "undefined"
+        ]
+      },
+      "instanceId": "string",
+      "login?": {
+        "union": [
+          "string",
+          "undefined"
+        ]
+      },
+      "reason": {
+        "union": [
+          "\"auth_error\"",
+          "\"authenticated\"",
+          "\"gh_missing\"",
+          "\"unauthenticated\"",
+          "\"unknown\""
+        ]
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

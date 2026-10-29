@@ -1,0 +1,111 @@
+{
+  "definition": {
+    "name": "git.commit",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "files": {
+          "array": "string"
+        },
+        "message": "string",
+        "projectPath": "string"
+      }
+    },
+    "result": {
+      "commitScope": {
+        "union": [
+          "\"selected-files\"",
+          "\"whole-index\""
+        ]
+      },
+      "diagnostics?": {
+        "union": [
+          "undefined",
+          {
+            "batchCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "bisectionCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "cacheHits?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "commands": {
+              "array": {
+                "command": "string",
+                "durationMs": "number",
+                "stderrBytes": "number",
+                "stdoutBytes": "number"
+              }
+            },
+            "fileCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "phases": {
+              "array": {
+                "durationMs": "number",
+                "name": {
+                  "union": [
+                    "\"body-cache\"",
+                    "\"body-git\"",
+                    "\"body-split\"",
+                    "\"document-register\"",
+                    "\"freshness-after\"",
+                    "\"freshness-before\"",
+                    "\"patch-scan\"",
+                    "\"resolve\"",
+                    "\"serialize\"",
+                    "\"summary-git\""
+                  ]
+                }
+              }
+            },
+            "rowCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            }
+          }
+        ]
+      },
+      "executorId": "string",
+      "indexSynchronized": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "instanceId": "string",
+      "output": "string",
+      "success": "true"
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

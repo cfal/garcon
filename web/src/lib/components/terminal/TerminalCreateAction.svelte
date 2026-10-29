@@ -63,13 +63,14 @@
 
 {#snippet hostItems()}
 	{#each terminals.hosts as host (host.id)}
+		{@const canCreate = terminals.canCreate(host.id)}
 		<DropdownMenuItem
-			disabled={busy || !host.available || host.full}
+			disabled={busy || !canCreate}
 			onSelect={() => create(host.id)}
 		>
 			<SquareTerminal class="h-4 w-4" />
 			<span class="min-w-0 flex-1 truncate">{host.label}</span>
-			{#if !host.available || host.full}<span class="text-xs text-muted-foreground"
+			{#if !canCreate}<span class="text-xs text-muted-foreground"
 					>{host.full ? m.terminal_limit_reached() : m.terminal_unavailable()}</span
 				>{/if}
 		</DropdownMenuItem>

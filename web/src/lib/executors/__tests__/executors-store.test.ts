@@ -4,6 +4,23 @@ import { ExecutorsStore, executorStatus } from '../executors-store.svelte.ts';
 import { localExecutor, remoteExecutor } from './fixtures';
 
 describe('ExecutorsStore', () => {
+	it('refreshes operation support on ready-to-ready replacement without disabling host services', () => {
+		const executors = new ExecutorsStore();
+		const remote = { ...remoteExecutor, executorServices: localExecutor.executorServices };
+		executors.applySnapshot([localExecutor, remote]);
+		expect(executors.supportsExecution(remote.id, 'execution.start')).toBe(true);
+		for (const missing of ['execution.start', 'execution.resume', 'compaction.compact', 'producers.bind'] as const) {
+			executors.applySnapshot([localExecutor, { ...remote, instanceId: `without-${missing}`,
+				operations: remote.operations.filter(operation => operation !== missing) }]);
+			expect(executors.isReady(remote.id)).toBe(true);
+			expect(executors.filesAvailable(remote.id)).toBe(true);
+			expect(executors.gitAvailable(remote.id)).toBe(true);
+			for (const operation of ['execution.start', 'execution.resume', 'compaction.compact'] as const) {
+				expect(executors.supportsExecution(remote.id, operation)).toBe(missing !== operation && missing !== 'producers.bind');
+			}
+			expect(executors.supportsExecution('local', 'execution.start')).toBe(true);
+		}
+	});
 	it('keeps primary readiness, capabilities, and context keys stable across bulk-only loss', () => {
 		const executors = new ExecutorsStore();
 		const remote = { ...remoteExecutor, executorServices: localExecutor.executorServices };

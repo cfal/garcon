@@ -76,6 +76,11 @@ export class AgentStartController {
           } else {
             let childChatId: string | undefined;
             try {
+              try { catalog.value.assertCurrent(); }
+              catch (error) {
+                if (discoveryAttempt < MAX_CATALOG_DISCOVERIES) return rediscover;
+                throw error;
+              }
               const selection = this.options.selection.resolve(
                 catalog.value, command, this.options.settings.getExecutionDefaults(), parent,
               );

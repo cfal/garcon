@@ -1,3 +1,4 @@
+import { CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 import { expect, test } from 'bun:test';
 import { GarconClient } from '../../../../cli/garcon-client.js';
 import { CLI_OPERATIONS, cliRoute } from '../cli-protocol.js';
@@ -11,7 +12,7 @@ test('the reverse CLI allowlist accounts for every client HTTP operation and not
     if (path === '/api/v1/chats/tags' && init?.method === 'GET') return Response.json({ success: true, chatId, tags: [] });
     return Response.json({ error: 'Synthetic boundary rejection', errorCode: 'VALIDATION_FAILED', retryable: false }, { status: 400 });
   }, { preconnect() {} }) satisfies typeof fetch;
-  const client = new GarconClient({ baseUrl: 'http://127.0.0.1:1', instanceId: 'controller', endpointInstanceId: 'endpoint',
+  const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, baseUrl: 'http://127.0.0.1:1', instanceId: 'controller', endpointInstanceId: 'endpoint',
     defaultExecutorId: 'local', workspaceName: null, localCapability: 'synthetic', fetch: fetcher });
   type Operation = Exclude<keyof GarconClient, 'defaultExecutorId' | 'workspaceName' | 'serverInstanceId' | 'verifyRuntime'>;
   // Minimal payloads exercise transport paths; the fake endpoint rejects before application DTO parsing.

@@ -1,0 +1,127 @@
+{
+  "definition": {
+    "name": "git.getConflicts",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "projectPath": "string"
+      }
+    },
+    "result": {
+      "conflicts": {
+        "array": {
+          "baseAvailable": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "oursAvailable": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "path": "string",
+          "status": {
+            "union": [
+              "\"AA\"",
+              "\"AU\"",
+              "\"DD\"",
+              "\"DU\"",
+              "\"UA\"",
+              "\"UD\"",
+              "\"UU\""
+            ]
+          },
+          "theirsAvailable": {
+            "union": [
+              "false",
+              "true"
+            ]
+          }
+        }
+      },
+      "diagnostics?": {
+        "union": [
+          "undefined",
+          {
+            "batchCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "bisectionCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "cacheHits?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "commands": {
+              "array": {
+                "command": "string",
+                "durationMs": "number",
+                "stderrBytes": "number",
+                "stdoutBytes": "number"
+              }
+            },
+            "fileCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "phases": {
+              "array": {
+                "durationMs": "number",
+                "name": {
+                  "union": [
+                    "\"body-cache\"",
+                    "\"body-git\"",
+                    "\"body-split\"",
+                    "\"document-register\"",
+                    "\"freshness-after\"",
+                    "\"freshness-before\"",
+                    "\"patch-scan\"",
+                    "\"resolve\"",
+                    "\"serialize\"",
+                    "\"summary-git\""
+                  ]
+                }
+              }
+            },
+            "rowCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            }
+          }
+        ]
+      },
+      "executorId": "string",
+      "instanceId": "string"
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

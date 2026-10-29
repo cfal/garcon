@@ -109,6 +109,7 @@
 		processingPhase: 'running',
 		isUnread: false,
 		canReloadFromNativeHistory: false,
+		hasAgentSession: true,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',
 		tags: [],

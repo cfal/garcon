@@ -1,6 +1,8 @@
+import type { RpcContractDefinition } from '@garcon/common/executor-contracts';
+import type { ContractRef } from '@garcon/common/protocol-contracts';
 import type { AgentDescriptor, AgentSettingDescriptor, AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { FileRpcMethods } from './file-protocol.js';
-import { isGitRpcMethod, type GitRpcMethods } from './git-protocol.js';
+import type { GitRpcMethods } from './git-protocol.js';
 import type { TerminalRpcMethods } from './terminal-protocol.js';
 import type { CliRpcMethods } from './cli-protocol.js';
 import type {
@@ -26,13 +28,6 @@ type Result<F extends keyof AgentIntegration, M extends keyof Facet<F>> =
   Facet<F>[M] extends (...args: never[]) => infer R ? Awaited<R> : never;
 type WithoutSignal<T> = Omit<T, 'signal'>;
 type Call<Q, R> = { readonly request: Q; readonly result: R };
-
-// Revision of what the controller and worker exchange over an executor link:
-// session framing, RPC methods and payloads, and producer, terminal, and CLI
-// frames. Bump it with any change to what either side sends or accepts. Builds
-// of one release share a package version, so without the bump a mismatched
-// pair passes the handshake and fails mid-session instead.
-export const EXECUTOR_PROTOCOL_REVISION = 38;
 
 export const NULLABLE_AGENT_FACETS = [
   'readiness',
@@ -118,15 +113,155 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'calls.reconcile': Call<{ readonly calls: readonly OutstandingCall[] }, { readonly states: readonly OutstandingCallState[] }>;
 }
 
+export interface ExecutorRpcVersions {
+  'apiProviders.discoverModels': { readonly 1: ExecutorRpcMethods['apiProviders.discoverModels'] };
+  'auth.completeLogin': { readonly 1: ExecutorRpcMethods['auth.completeLogin'] };
+  'auth.launchLogin': { readonly 1: ExecutorRpcMethods['auth.launchLogin'] };
+  'auth.loginStatus': { readonly 1: ExecutorRpcMethods['auth.loginStatus'] };
+  'auth.status': { readonly 1: ExecutorRpcMethods['auth.status'] };
+  'calls.reconcile': { readonly 1: ExecutorRpcMethods['calls.reconcile'] };
+  'catalog.snapshot': { readonly 1: ExecutorRpcMethods['catalog.snapshot'] };
+  'commands.discover': { readonly 1: ExecutorRpcMethods['commands.discover'] };
+  'compaction.compact': { readonly 1: ExecutorRpcMethods['compaction.compact'] };
+  'configurationValidation.validate': { readonly 1: ExecutorRpcMethods['configurationValidation.validate'] };
+  'controllerCli.describe': { readonly 1: ExecutorRpcMethods['controllerCli.describe'] };
+  'controllerCli.request': { readonly 1: ExecutorRpcMethods['controllerCli.request'] };
+  'credentials.resolve': { readonly 1: ExecutorRpcMethods['credentials.resolve'] };
+  'endpoints.validate': { readonly 1: ExecutorRpcMethods['endpoints.validate'] };
+  'execution.abort': { readonly 1: ExecutorRpcMethods['execution.abort'] };
+  'execution.resume': { readonly 1: ExecutorRpcMethods['execution.resume'] };
+  'execution.runningSessions': { readonly 1: ExecutorRpcMethods['execution.runningSessions'] };
+  'execution.start': { readonly 1: ExecutorRpcMethods['execution.start'] };
+  'executor.describe': { readonly 1: ExecutorRpcMethods['executor.describe'] };
+  'files.browse': { readonly 1: ExecutorRpcMethods['files.browse'] };
+  'files.createDirectory': { readonly 1: ExecutorRpcMethods['files.createDirectory'] };
+  'files.identity': { readonly 1: ExecutorRpcMethods['files.identity'] };
+  'files.list': { readonly 1: ExecutorRpcMethods['files.list'] };
+  'files.read': { readonly 1: ExecutorRpcMethods['files.read'] };
+  'files.revision': { readonly 1: ExecutorRpcMethods['files.revision'] };
+  'files.save': { readonly 1: ExecutorRpcMethods['files.save'] };
+  'files.tree': { readonly 1: ExecutorRpcMethods['files.tree'] };
+  'forking.discard': { readonly 1: ExecutorRpcMethods['forking.discard'] };
+  'forking.fork': { readonly 1: ExecutorRpcMethods['forking.fork'] };
+  'gh.createPullRequestComment': { readonly 1: ExecutorRpcMethods['gh.createPullRequestComment'] };
+  'gh.getPullRequest': { readonly 1: ExecutorRpcMethods['gh.getPullRequest'] };
+  'gh.getPullRequestReviewTarget': { readonly 1: ExecutorRpcMethods['gh.getPullRequestReviewTarget'] };
+  'gh.getStatus': { readonly 1: ExecutorRpcMethods['gh.getStatus'] };
+  'gh.listPullRequests': { readonly 1: ExecutorRpcMethods['gh.listPullRequests'] };
+  'gh.minimizePullRequestComment': { readonly 1: ExecutorRpcMethods['gh.minimizePullRequestComment'] };
+  'git.acceptConflictSide': { readonly 1: ExecutorRpcMethods['git.acceptConflictSide'] };
+  'git.applyStash': { readonly 1: ExecutorRpcMethods['git.applyStash'] };
+  'git.checkout': { readonly 1: ExecutorRpcMethods['git.checkout'] };
+  'git.collectCommitMessageContext': { readonly 1: ExecutorRpcMethods['git.collectCommitMessageContext'] };
+  'git.commit': { readonly 1: ExecutorRpcMethods['git.commit'] };
+  'git.commitIndex': { readonly 1: ExecutorRpcMethods['git.commitIndex'] };
+  'git.createBranch': { readonly 1: ExecutorRpcMethods['git.createBranch'] };
+  'git.createStash': { readonly 1: ExecutorRpcMethods['git.createStash'] };
+  'git.createWorktree': { readonly 1: ExecutorRpcMethods['git.createWorktree'] };
+  'git.deleteUntracked': { readonly 1: ExecutorRpcMethods['git.deleteUntracked'] };
+  'git.discard': { readonly 1: ExecutorRpcMethods['git.discard'] };
+  'git.dropStash': { readonly 1: ExecutorRpcMethods['git.dropStash'] };
+  'git.fetch': { readonly 1: ExecutorRpcMethods['git.fetch'] };
+  'git.getBlame': { readonly 1: ExecutorRpcMethods['git.getBlame'] };
+  'git.getBranches': { readonly 1: ExecutorRpcMethods['git.getBranches'] };
+  'git.getCommitSnapshot': { readonly 1: ExecutorRpcMethods['git.getCommitSnapshot'] };
+  'git.getComparisonFreshness': { readonly 1: ExecutorRpcMethods['git.getComparisonFreshness'] };
+  'git.getComparisonSnapshot': { readonly 1: ExecutorRpcMethods['git.getComparisonSnapshot'] };
+  'git.getConflictDetails': { readonly 1: ExecutorRpcMethods['git.getConflictDetails'] };
+  'git.getConflicts': { readonly 1: ExecutorRpcMethods['git.getConflicts'] };
+  'git.getFileHistory': { readonly 1: ExecutorRpcMethods['git.getFileHistory'] };
+  'git.getGraph': { readonly 1: ExecutorRpcMethods['git.getGraph'] };
+  'git.getHistoryCommits': { readonly 1: ExecutorRpcMethods['git.getHistoryCommits'] };
+  'git.getQuickSummary': { readonly 1: ExecutorRpcMethods['git.getQuickSummary'] };
+  'git.getRefs': { readonly 1: ExecutorRpcMethods['git.getRefs'] };
+  'git.getRemoteStatus': { readonly 1: ExecutorRpcMethods['git.getRemoteStatus'] };
+  'git.getRemotes': { readonly 1: ExecutorRpcMethods['git.getRemotes'] };
+  'git.getRepoInfo': { readonly 1: ExecutorRpcMethods['git.getRepoInfo'] };
+  'git.getReviewDocumentFileBodies': { readonly 1: ExecutorRpcMethods['git.getReviewDocumentFileBodies'] };
+  'git.getStashes': { readonly 1: ExecutorRpcMethods['git.getStashes'] };
+  'git.getStatus': { readonly 1: ExecutorRpcMethods['git.getStatus'] };
+  'git.getTargetCandidates': { readonly 1: ExecutorRpcMethods['git.getTargetCandidates'] };
+  'git.getWorkbenchSnapshot': { readonly 1: ExecutorRpcMethods['git.getWorkbenchSnapshot'] };
+  'git.getWorkingTreeFingerprint': { readonly 1: ExecutorRpcMethods['git.getWorkingTreeFingerprint'] };
+  'git.getWorktrees': { readonly 1: ExecutorRpcMethods['git.getWorktrees'] };
+  'git.initialCommit': { readonly 1: ExecutorRpcMethods['git.initialCommit'] };
+  'git.markConflictResolved': { readonly 1: ExecutorRpcMethods['git.markConflictResolved'] };
+  'git.popStash': { readonly 1: ExecutorRpcMethods['git.popStash'] };
+  'git.pull': { readonly 1: ExecutorRpcMethods['git.pull'] };
+  'git.push': { readonly 1: ExecutorRpcMethods['git.push'] };
+  'git.removeWorktree': { readonly 1: ExecutorRpcMethods['git.removeWorktree'] };
+  'git.revertCommit': { readonly 1: ExecutorRpcMethods['git.revertCommit'] };
+  'git.stageHunk': { readonly 1: ExecutorRpcMethods['git.stageHunk'] };
+  'git.stagePaths': { readonly 1: ExecutorRpcMethods['git.stagePaths'] };
+  'git.stageSelection': { readonly 1: ExecutorRpcMethods['git.stageSelection'] };
+  'history.close': { readonly 1: ExecutorRpcMethods['history.close'] };
+  'history.next': { readonly 1: ExecutorRpcMethods['history.next'] };
+  'history.open': { readonly 1: ExecutorRpcMethods['history.open'] };
+  'lifecycle.migrateOwnedStorage': { readonly 1: ExecutorRpcMethods['lifecycle.migrateOwnedStorage'] };
+  'lifecycle.start': { readonly 1: ExecutorRpcMethods['lifecycle.start'] };
+  'lifecycle.stop': { readonly 1: ExecutorRpcMethods['lifecycle.stop'] };
+  'migration.translateLegacyModel': { readonly 1: ExecutorRpcMethods['migration.translateLegacyModel'] };
+  'migration.translateLegacyNativeSession': { readonly 1: ExecutorRpcMethods['migration.translateLegacyNativeSession'] };
+  'migration.translateLegacySettings': { readonly 1: ExecutorRpcMethods['migration.translateLegacySettings'] };
+  'nativeActivity.lastActivity': { readonly 1: ExecutorRpcMethods['nativeActivity.lastActivity'] };
+  'nativeSessions.describeSource': { readonly 1: ExecutorRpcMethods['nativeSessions.describeSource'] };
+  'nativeSessions.release': { readonly 1: ExecutorRpcMethods['nativeSessions.release'] };
+  'nativeSessions.resolveNativeSession': { readonly 1: ExecutorRpcMethods['nativeSessions.resolveNativeSession'] };
+  'permissions.respond': { readonly 1: ExecutorRpcMethods['permissions.respond'] };
+  'producers.bind': { readonly 1: ExecutorRpcMethods['producers.bind'] };
+  'producers.cancelLaunch': { readonly 1: ExecutorRpcMethods['producers.cancelLaunch'] };
+  'producers.close': { readonly 1: ExecutorRpcMethods['producers.close'] };
+  'producers.resume': { readonly 1: ExecutorRpcMethods['producers.resume'] };
+  'projectPathUpdates.commit': { readonly 1: ExecutorRpcMethods['projectPathUpdates.commit'] };
+  'projectPathUpdates.prepare': { readonly 1: ExecutorRpcMethods['projectPathUpdates.prepare'] };
+  'projectPathUpdates.rollback': { readonly 1: ExecutorRpcMethods['projectPathUpdates.rollback'] };
+  'projects.inspect': { readonly 1: ExecutorRpcMethods['projects.inspect'] };
+  'projects.resolveFileMentions': { readonly 1: ExecutorRpcMethods['projects.resolveFileMentions'] };
+  'projects.ticketProjectDefault': { readonly 1: ExecutorRpcMethods['projects.ticketProjectDefault'] };
+  'readiness.status': { readonly 1: ExecutorRpcMethods['readiness.status'] };
+  'sessionConfiguration.apply': { readonly 1: ExecutorRpcMethods['sessionConfiguration.apply'] };
+  'settings.migrate': { readonly 1: ExecutorRpcMethods['settings.migrate'] };
+  'singleQuery.run': { readonly 1: ExecutorRpcMethods['singleQuery.run'] };
+  'steering.captureTarget': { readonly 1: ExecutorRpcMethods['steering.captureTarget'] };
+  'steering.steer': { readonly 1: ExecutorRpcMethods['steering.steer'] };
+  'terminals.attach': { readonly 1: ExecutorRpcMethods['terminals.attach'] };
+  'terminals.create': { readonly 1: ExecutorRpcMethods['terminals.create'] };
+  'terminals.detach': { readonly 1: ExecutorRpcMethods['terminals.detach'] };
+  'terminals.input': { readonly 1: ExecutorRpcMethods['terminals.input'] };
+  'terminals.list': { readonly 1: ExecutorRpcMethods['terminals.list'] };
+  'terminals.rename': { readonly 1: ExecutorRpcMethods['terminals.rename'] };
+  'terminals.resize': { readonly 1: ExecutorRpcMethods['terminals.resize'] };
+  'terminals.terminate': { readonly 1: ExecutorRpcMethods['terminals.terminate'] };
+}
+
+export type RpcContractRef<K extends keyof ExecutorRpcVersions = keyof ExecutorRpcVersions> = {
+  [M in K]: {
+    [V in keyof ExecutorRpcVersions[M] & number]: RpcContractDefinition & { readonly name: M; readonly version: V }
+  }[keyof ExecutorRpcVersions[M] & number]
+}[K];
+
+type RpcPayload<D extends ContractRef, Field extends 'request' | 'result'> = D extends ContractRef
+  ? D['name'] extends keyof ExecutorRpcVersions
+    ? D['version'] extends keyof ExecutorRpcVersions[D['name']]
+      ? ExecutorRpcVersions[D['name']][D['version']] extends Record<Field, infer T> ? T : never
+      : never
+    : unknown
+  : never;
+
+export type RpcRequest<D extends ContractRef> = RpcPayload<D, 'request'>;
+export type RpcResult<D extends ContractRef> = RpcPayload<D, 'result'>;
+export type RequestFor<D extends RpcContractDefinition> = Extract<ExecutorRpcRequest,
+  D extends RpcContractDefinition ? { method: D['name']; version: D['version'] } : never>;
+
 export type ExecutorRpcRequest = {
-  [K in keyof ExecutorRpcMethods]: {
-    readonly type: 'request'; readonly id: string; readonly integrationId: string;
-    // Numbers each session's requests from 1, so a worker can tell a request it
-    // never received from one whose reply it no longer holds.
-    readonly seq: number;
-    readonly method: K; readonly request: ExecutorRpcMethods[K]['request'];
-  }
-}[keyof ExecutorRpcMethods];
+  [K in keyof ExecutorRpcVersions]: {
+    [V in keyof ExecutorRpcVersions[K]]: {
+      readonly type: 'request'; readonly id: string; readonly integrationId: string;
+      readonly seq: number; readonly method: K; readonly version: V;
+      readonly request: ExecutorRpcVersions[K][V] extends { readonly request: infer Q } ? Q : never;
+    }
+  }[keyof ExecutorRpcVersions[K]]
+}[keyof ExecutorRpcVersions];
 
 // How a call relates to the session that carries it:
 // - `session`: bound to that session. Losing the session cancels its handler,
@@ -139,85 +274,13 @@ export type ExecutorRpcRequest = {
 //   its caller sees the real outcome.
 export type RpcContinuity = 'session' | 'launch' | 'journaled';
 
-type ClassifiedMethod = Exclude<keyof ExecutorRpcMethods, keyof FileRpcMethods | keyof GitRpcMethods>;
-
-// History readers, terminal attachments, producer bindings, forks, path
-// preparations, and CLI calls belong to one session. Cleanup of a resource that
-// outlives its session is journaled: compensation for a fork or preparation, and
-// closing a producer binding, which a worker keeps suspended for a replacement
-// session of the same instance.
-const CONTINUITY: Readonly<Record<ClassifiedMethod, RpcContinuity>> = {
-  'executor.describe': 'session',
-  'apiProviders.discoverModels': 'journaled',
-  'projects.inspect': 'journaled',
-  'projects.ticketProjectDefault': 'journaled',
-  'projects.resolveFileMentions': 'journaled',
-  'producers.bind': 'session',
-  'producers.close': 'journaled',
-  'producers.cancelLaunch': 'journaled',
-  'producers.resume': 'session',
-  'permissions.respond': 'journaled',
-  'execution.start': 'launch',
-  'execution.resume': 'launch',
-  'execution.abort': 'journaled',
-  'execution.runningSessions': 'journaled',
-  'catalog.snapshot': 'journaled',
-  'settings.migrate': 'journaled',
-  'lifecycle.start': 'session',
-  'lifecycle.stop': 'session',
-  'lifecycle.migrateOwnedStorage': 'session',
-  'migration.translateLegacyModel': 'journaled',
-  'migration.translateLegacyNativeSession': 'journaled',
-  'migration.translateLegacySettings': 'journaled',
-  'auth.status': 'journaled',
-  'readiness.status': 'journaled',
-  'auth.launchLogin': 'journaled',
-  'auth.completeLogin': 'journaled',
-  'auth.loginStatus': 'journaled',
-  'commands.discover': 'journaled',
-  'compaction.compact': 'launch',
-  'forking.fork': 'session',
-  'forking.discard': 'journaled',
-  'steering.captureTarget': 'journaled',
-  'steering.steer': 'journaled',
-  'endpoints.validate': 'journaled',
-  'singleQuery.run': 'journaled',
-  'history.open': 'session',
-  'history.next': 'session',
-  'history.close': 'session',
-  'nativeActivity.lastActivity': 'journaled',
-  'nativeSessions.resolveNativeSession': 'journaled',
-  'nativeSessions.describeSource': 'journaled',
-  'nativeSessions.release': 'journaled',
-  'configurationValidation.validate': 'journaled',
-  'sessionConfiguration.apply': 'journaled',
-  'projectPathUpdates.prepare': 'session',
-  'projectPathUpdates.commit': 'journaled',
-  'projectPathUpdates.rollback': 'journaled',
-  'credentials.resolve': 'session',
-  'calls.reconcile': 'session',
-  'terminals.list': 'session',
-  'terminals.create': 'session',
-  'terminals.rename': 'session',
-  'terminals.terminate': 'session',
-  'terminals.attach': 'session',
-  'terminals.input': 'session',
-  'terminals.resize': 'session',
-  'terminals.detach': 'session',
-  'controllerCli.describe': 'session',
-  'controllerCli.request': 'session',
-};
-
 // Calls that install a replacement session. They bypass the request budgets,
 // so the calls a session recovers cannot keep it from installing.
 export const SESSION_INSTALLATION_METHODS: ReadonlySet<string> = new Set<keyof ExecutorRpcMethods>([
   'executor.describe', 'lifecycle.migrateOwnedStorage', 'lifecycle.start', 'producers.resume', 'calls.reconcile',
 ]);
 
-export function rpcContinuity(method: string): RpcContinuity {
-  if (method.startsWith('files.') || isGitRpcMethod(method)) return 'journaled';
-  return Object.hasOwn(CONTINUITY, method) ? CONTINUITY[method as ClassifiedMethod] : 'session';
-}
+export function rpcContinuity(contract: RpcContractDefinition): RpcContinuity { return contract.continuity; }
 
 // A journaled call a lost session left outstanding, named by where it was last sent.
 export interface OutstandingCall {

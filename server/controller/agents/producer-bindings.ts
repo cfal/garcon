@@ -42,7 +42,7 @@ export class ProducerBindings {
     private readonly onPublicationFailed: (chatId: string, lease: TranscriptProducerLease, error: AgentRunFailureDetail) => void,
     private readonly onPublicationGap: (chatId: string, lease: TranscriptProducerLease) => void,
     private readonly onLaunchSettled: (
-      chatId: string, lease: TranscriptProducerLease, agentId: string, event: LaunchSettledEvent,
+      chatId: string, lease: TranscriptProducerLease, integration: AgentIntegration, event: LaunchSettledEvent,
     ) => void,
     private readonly onSteerable: (chatId: string, lease: TranscriptProducerLease, runId: string) => void,
   ) {}
@@ -119,7 +119,7 @@ export class ProducerBindings {
           return;
         }
         if (event.type === 'launch-settled') {
-          try { this.onLaunchSettled(route.chatId, route.lease, integration.descriptor.id, event); }
+          try { this.onLaunchSettled(route.chatId, route.lease, integration, event); }
           catch (error) { this.onError(error); }
           return;
         }

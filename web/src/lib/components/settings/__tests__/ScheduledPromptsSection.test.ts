@@ -69,6 +69,7 @@ function chat(id: string, executorId: string): ChatListEntry {
 		isActive: false,
 		isProcessing: false,
 		processingPhase: null,
+		hasAgentSession: false,
 		canReloadFromNativeHistory: false,
 		isUnread: false,
 	};

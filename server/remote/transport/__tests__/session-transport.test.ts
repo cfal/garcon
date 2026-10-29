@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { SessionTransport } from '../session-transport.js';
+import { TestSessionTransport as SessionTransport } from '../../__tests__/test-session-transport.js';
 
 test('transport becomes ready when the authenticated socket attaches', async () => {
   const failures: Error[] = [];

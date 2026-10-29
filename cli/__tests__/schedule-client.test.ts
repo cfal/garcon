@@ -1,10 +1,11 @@
+import { CLI_BOOTSTRAP_VERSION, CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 import { expect, mock, test } from 'bun:test';
 import { GarconClient } from '../garcon-client.js';
 import { main } from '../main.js';
 import { CLI_SERVER_INSTANCE_HEADER } from '@garcon/common/server-runtime';
 import { scheduleId, scheduleChatId, scheduleDefinition, newChatDefinition, schedulePrompt, scheduleSnapshot } from './schedule-fixtures.js';
 
-const connection = { baseUrl: 'http://127.0.0.1:1', instanceId: 'synthetic-controller', endpointInstanceId: 'synthetic-endpoint',
+const connection = { protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS }, baseUrl: 'http://127.0.0.1:1', instanceId: 'synthetic-controller', endpointInstanceId: 'synthetic-endpoint',
   defaultExecutorId: 'local', workspaceName: null, localCapability: 'synthetic-capability' };
 
 test('schedule HTTP methods preserve typed bodies, exact paths and controller fencing', async () => {
@@ -17,7 +18,7 @@ test('schedule HTTP methods preserve typed bodies, exact paths and controller fe
       success: true, snapshot: scheduleSnapshot, scheduledPrompt: schedulePrompt,
     });
   }, { preconnect() {} }) satisfies typeof fetch;
-  const client = new GarconClient({ ...connection, fetch: fetcher });
+  const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, ...connection, fetch: fetcher });
   await client.getScheduledPrompts();
   await client.createScheduledPrompt({ expectedRevision: 0, scheduledPrompt: newChatDefinition });
   await client.updateScheduledPrompt({ expectedRevision: 0, id: scheduleId, scheduledPrompt: scheduleDefinition });
@@ -41,7 +42,7 @@ test.each([
 ])('malformed creation replies never become success or automatic retries: %j', async (body) => {
   const request = mock(async () => Response.json(body));
   const fetcher = Object.assign(request, { preconnect() {} }) satisfies typeof fetch;
-  const client = new GarconClient({ ...connection, fetch: fetcher });
+  const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, ...connection, fetch: fetcher });
   await expect(client.createScheduledPrompt({ expectedRevision: 0, scheduledPrompt: scheduleDefinition })).rejects.toThrow('outcome is unknown');
   expect(request).toHaveBeenCalledTimes(1);
 });
@@ -49,7 +50,7 @@ test.each([
 test.each([400, 409, 500, 503])('mutation HTTP %i preserves definite rejection versus uncertainty', async (status) => {
   const request = mock(async () => Response.json({ error: 'Synthetic failure', errorCode: 'SCHEDULED_PROMPT_REVISION_CONFLICT', retryable: true }, { status }));
   const fetcher = Object.assign(request, { preconnect() {} }) satisfies typeof fetch;
-  const client = new GarconClient({ ...connection, fetch: fetcher });
+  const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, ...connection, fetch: fetcher });
   await expect(client.deleteScheduledPrompt({ expectedRevision: 1, id: scheduleId }))
     .rejects.toThrow(status < 500 ? 'Synthetic failure' : 'outcome is unknown');
   expect(request).toHaveBeenCalledTimes(1);
@@ -152,7 +153,7 @@ test('schedule readiness classification does not broaden other mutation rejectio
     error: 'Executor is unavailable', errorCode: 'EXECUTOR_UNAVAILABLE', retryable: true,
   }, { status: 503 }));
   const fetcher = Object.assign(request, { preconnect() {} }) satisfies typeof fetch;
-  const client = new GarconClient({ ...connection, fetch: fetcher });
+  const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, ...connection, fetch: fetcher });
   await expect(client.updateChatTitle({ chatId: scheduleChatId, title: 'Synthetic title' }))
     .rejects.toThrow('outcome is unknown');
   expect(request).toHaveBeenCalledTimes(1);

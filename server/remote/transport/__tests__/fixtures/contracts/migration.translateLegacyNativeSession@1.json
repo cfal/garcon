@@ -1,0 +1,83 @@
+{
+  "definition": {
+    "name": "migration.translateLegacyNativeSession",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "agentSessionId": {
+        "union": [
+          "null",
+          "string"
+        ]
+      },
+      "chatId": "string",
+      "legacyNativePath": {
+        "union": [
+          "null",
+          "string"
+        ]
+      },
+      "legacyValues": {
+        "[string]": {
+          "union": [
+            "false",
+            "null",
+            "number",
+            "string",
+            "true",
+            {
+              "array": {
+                "recursive": "JsonValue"
+              }
+            },
+            {
+              "recursive": "JsonObject"
+            }
+          ]
+        }
+      },
+      "model": "string",
+      "projectPath": "string"
+    },
+    "result": {
+      "union": [
+        "null",
+        {
+          "ownerId": "string",
+          "schemaVersion": "number",
+          "value": {
+            "[string]": {
+              "union": [
+                "false",
+                "null",
+                "number",
+                "string",
+                "true",
+                {
+                  "array": {
+                    "recursive": "JsonValue"
+                  }
+                },
+                {
+                  "recursive": "JsonObject"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

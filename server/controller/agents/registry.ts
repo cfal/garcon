@@ -1,3 +1,6 @@
+import type { ExecutorOperation } from '@garcon/common/executor-contracts';
+import { executionRequirements, nativeForkRequirements, requireProviderOperations, supportsProviderOperations, type ExecutionSupportTarget } from './execution-support.js';
+import { requireCompaction } from './execution-planning.js';
 import type {
   AgentIntegration,
   AgentNativeSessionRef,
@@ -9,6 +12,7 @@ import type {
 } from '@garcon/server-agent-interface';
 import type { AgentAuthStatus } from '../../../common/agent-execution.js';
 import type { PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
+import type { AgentSettingsPatchFence } from '../../../common/agent-settings.js';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { ChatTransientControlAction } from '../../../common/chat-transient-feed.js';
 import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
@@ -43,7 +47,7 @@ import type {
   NativeForkCleanup,
   StartSessionOptions,
 } from './session-types.js';
-import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js';
+import { AgentCatalogService, type AgentModelQuery, type AgentCatalogCapture } from './catalog-service.js';
 import { AgentDirectory, type ExecutionIntegrationDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
 import { AgentRuntimeRouter, type RunSingleQueryOptions } from './runtime-router.js';
@@ -93,6 +97,9 @@ export interface AgentRegistryServiceContract {
   chatExecutionPolicy(chatId: string): 'conversation' | 'literal';
   hasAgent(agentId: string, executorId?: string | null): boolean;
   assertExecutorReady(executorId?: string | null): void;
+  assertExecutionSupported(target: ExecutionSupportTarget, operations: readonly ExecutorOperation[]): void;
+  assertNativeForkSupported(source: AgentChatEntry): void;
+  assertQueuedExecutionSupported(chatId: string): void;
   assertAgentAvailable(agentId: string, executorId?: string | null): void;
   supportsAuthLogin(agentId: string, executorId?: string | null): boolean;
   supportsAuthLoginCompletion(agentId: string, executorId?: string | null): boolean;
@@ -109,7 +116,6 @@ export interface AgentRegistryServiceContract {
     attachment: { readonly mimeType: string; readonly sizeBytes: number },
     executorId?: string | null,
   ): FileAttachmentAdmission;
-  requiresStrictModelDiscovery(agentId: string, executorId?: string | null): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined, executorId?: string | null): boolean;
   currentTranscriptViewId(chatId: string, signal?: AbortSignal): Promise<string>;
   hasMatchingInput(
@@ -144,6 +150,7 @@ export interface AgentRegistryServiceContract {
   getAgentReadinessMap(authByAgent?: Record<string, unknown>, executorId?: string | null): Promise<Record<string, unknown>>;
   getAgentAuthStatus(agentId: string, executorId?: string | null): Promise<unknown | null>;
   getAgentCatalogEntries(executorId?: string | null): Promise<AgentCatalogEntry[]>;
+  captureCatalog(executorId?: string | null): AgentCatalogCapture;
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
   assertExecutionModeSelectionSupported(agentId: string, selection: {
     readonly executorId?: string | null;
@@ -181,7 +188,7 @@ export interface AgentRegistryServiceContract {
   ): Promise<AgentTranscriptSourceLocation | null>;
   validateConfiguration(input: AgentConfigurationInput, options?: ExecutorCallOptions): Promise<void>;
   updateSessionSettings(
-    chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string, signal?: AbortSignal,
+    chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string, signal?: AbortSignal, settingsFence?: AgentSettingsPatchFence,
   ): Promise<AgentChatEntry>;
 }
 
@@ -211,6 +218,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   reopenTranscriptProducer(chatId: string): void {
     this.#runtime.reopenProducer(chatId);
+  }
+
+  ensureTranscriptProducer(chatId: string): void {
+    this.#runtime.ensureProducer(chatId);
   }
 
   constructor(args: {
@@ -280,6 +291,24 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   hasAgent(agentId: string, executorId?: string | null): boolean { return this.#directory.has(agentId, executorId); }
   assertExecutorReady(executorId?: string | null): void { this.#directory.requireReady(executorId); }
+  assertExecutionSupported(target: ExecutionSupportTarget, operations: readonly ExecutorOperation[]): void {
+    this.assertAgentAvailable(target.agentId, target.executorId);
+    const integration = this.#directory.require(target.agentId, target.executorId);
+    if (operations.includes('compaction.compact')) requireCompaction(integration);
+    this.#directory.requireOperations(target.executorId, executionRequirements(integration, target, operations));
+  }
+  assertNativeForkSupported(source: AgentChatEntry): void {
+    const integration = this.#directory.get(source.agentId, source.executorId);
+    if (!integration) return;
+    const requirements = nativeForkRequirements(integration, source);
+    if (requirements.length) requireProviderOperations(this.#directory, source.executorId, requirements);
+  }
+  assertQueuedExecutionSupported(chatId: string): void {
+    const chat = this.#registry.getChat(chatId);
+    if (chat && this.#directory.isReady(chat.executorId)) {
+      this.assertExecutionSupported(chat, [chat.agentSessionId ? 'execution.resume' : 'execution.start']);
+    }
+  }
   assertAgentAvailable(agentId: string, executorId?: string | null): void {
     if (!this.#directory.list(executorId).some(integration => integration.descriptor.id === agentId)) {
       throw new DomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${agentId}`, 422);
@@ -329,7 +358,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   steeringSupport(agentId: string, executorId?: string | null): SteeringSupport {
     const integration = this.#directory.get(agentId, executorId);
     if (!integration) return 'unknown';
-    return integration.steering ? 'supported' : 'unsupported';
+    return integration.steering && supportsProviderOperations(this.#directory, executorId, ['steering.captureTarget', 'steering.steer'])
+      ? 'supported' : 'unsupported';
   }
   supportsUpdateProjectPath(agentId: string, executorId?: string | null): boolean { return this.#directory.get(agentId, executorId)?.descriptor.supportsProjectPathUpdate ?? false; }
   requiresNativePathForProjectPathUpdate(agentId: string, executorId?: string | null): boolean {
@@ -350,10 +380,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       return { kind: 'text-too-large', maxBytes: limit };
     }
     return { kind: 'accepted' };
-  }
-
-  requiresStrictModelDiscovery(agentId: string, executorId?: string | null): boolean {
-    return this.#catalog.requiresStrictModelDiscovery(agentId, executorId);
   }
 
   startSession(chatId: string, command: string, opts: StartSessionOptions = {}): Promise<void> {
@@ -421,8 +447,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   validateConfiguration(input: AgentConfigurationInput, options?: ExecutorCallOptions): Promise<void> {
     return this.#settings.validateConfiguration(input, options);
   }
-  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string, signal?: AbortSignal) {
-    return this.#settings.updateSessionSettings(chatId, patch, expectedAgentOwnershipEpoch, signal);
+  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string, signal?: AbortSignal, settingsFence?: AgentSettingsPatchFence) {
+    return this.#settings.updateSessionSettings(chatId, patch, expectedAgentOwnershipEpoch, signal, settingsFence);
   }
   runSingleQuery(prompt: string, options: RunSingleQueryOptions) {
     return this.#runtime.runSingleQuery(prompt, options);
@@ -807,6 +833,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}) { return this.#catalog.getAgentCatalogEntry(agentId, query); }
   getAgentCatalogEntries(executorId?: string | null) { return this.#catalog.getAgentCatalogEntries(executorId); }
+  captureCatalog(executorId?: string | null) { return this.#catalog.capture(executorId); }
 }
 
 function inputAttachments(options: UserInputAdmissionOptions) {

@@ -1,3 +1,4 @@
+import { LOCAL_EXECUTOR_OPERATIONS } from '@garcon/common/executor-contracts';
 import { expect, test } from 'bun:test';
 import { ExecutorsChangedMessage, parseServerWsMessage } from '../ws-events.ts';
 import {
@@ -75,7 +76,7 @@ test('public snapshots exclude credentials and preserve unavailable remote targe
     id: remoteId, label: 'Worker', enabled: true, kind: 'remote', direction: 'executor-connects',
     availability: 'offline', instanceId: null, projectBasePath: null, lastError: null,
     bulk: { availability: 'offline', lastError: null },
-    executorServices: { files: false, git: false, gh: false, terminals: false, directoryCreation: false },
+    operations: LOCAL_EXECUTOR_OPERATIONS, executorServices: { files: false, git: false, gh: false, terminals: false, directoryCreation: false },
     allowControllerCli: false, allowExecutorManagement: false,
   };
   expect(parseExecutors([remote])).toEqual([remote]);

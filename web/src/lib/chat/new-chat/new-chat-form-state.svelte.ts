@@ -4,7 +4,6 @@
 
 import { ProjectPathCompletionController } from '$lib/project-paths/project-path-completion.js';
 import { effectiveExecutorId } from '$shared/executors';
-import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
 import {
 	ImageAttachmentState,
@@ -26,7 +25,7 @@ import type {
 import { NewChatAgentSettingsState } from './new-chat-agent-settings-state.svelte';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
 import { firstSelectableExecutorRecent, newChatExecutorPreferences } from './new-chat-executor-preferences';
-import type { NewChatPromptDraft } from './new-chat-prompt-draft';
+import type { NewChatFormStateOptions } from './new-chat-form-options';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import {
@@ -44,15 +43,6 @@ import { executorPinnedProjectPaths, savePinnedProjectPathsOptimistically } from
 import { normalizeTagSlug } from '$lib/utils/tags.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
-
-export interface NewChatFormStateOptions {
-	modelCatalog: ModelCatalogStore;
-	executors?: ExecutorsStore;
-	remoteSettings: RemoteSettingsStore;
-	get selectableAgentIds(): readonly SessionAgentId[];
-	/** Retains the unsent prompt across reseeds. Omitted where the prompt is persisted elsewhere. */
-	promptDraft?: NewChatPromptDraft;
-}
 
 export class NewChatFormState {
 	// Agent and model
@@ -161,6 +151,9 @@ export class NewChatFormState {
 	get executorReady(): boolean {
 		return this.#options.executors?.isReady(this.executorId) ?? true;
 	}
+	get executionSupported(): boolean {
+		return this.#options.executors?.supportsExecution(this.executorId, 'execution.start') ?? true;
+	}
 	get modelCatalogValidated(): boolean {
 		return this.#modelCatalog.isValidated;
 	}
@@ -215,8 +208,8 @@ export class NewChatFormState {
 	get canSubmit(): boolean {
 		return (
 			this.settingsLoaded &&
-			this.executorReady &&
 			this.modelCatalogValidated &&
+			this.agentSettingsCompatible &&
 			this.#selectableAgentIds.includes(this.agentId) &&
 			!this.modelSelectionPending &&
 			!this.modelSelectionError &&
@@ -282,6 +275,7 @@ export class NewChatFormState {
 
 	get modelSelectionError(): string | null {
 		if (!this.executorReady) return 'Executor is unavailable';
+		if (!this.executionSupported) return 'This executor does not support starting chats.';
 		if (this.modelSelectionPending) return null;
 		if (!this.modelCatalogValidated)
 			return this.#modelCatalog.error ?? m.model_selector_unavailable();
@@ -302,8 +296,12 @@ export class NewChatFormState {
 			: null;
 	}
 
-	get agentSettings(): AgentSettingsEnvelope {
+	get agentSettings(): AgentSettingsEnvelope | null {
 		return this.#agentSettings.forAgent(this.agentId, this.#modelCatalog);
+	}
+
+	get agentSettingsCompatible(): boolean {
+		return this.#agentSettings.isCompatible(this.agentId, this.#modelCatalog);
 	}
 
 	get agentSettingsById(): Record<string, AgentSettingsEnvelope> {
@@ -778,8 +776,8 @@ export class NewChatFormState {
 
 	/** Validates and builds the config, returning null if validation fails. */
 	buildConfig(): NewChatConfig | null {
-		if (!this.executorReady) {
-			this.error = 'Executor is unavailable';
+		if (!this.executorReady || !this.executionSupported) {
+			this.error = this.modelSelectionError;
 			return null;
 		}
 		if (!this.settingsLoaded) {
@@ -788,6 +786,11 @@ export class NewChatFormState {
 		}
 		if (!this.#selectableAgentIds.includes(this.agentId)) {
 			this.error = m.chat_new_chat_errors_agent_unavailable();
+			return null;
+		}
+		const agentSettings = this.agentSettings;
+		if (!agentSettings || !this.agentSettingsCompatible) {
+			this.error = 'Saved provider settings are unavailable or incompatible with this executor.';
 			return null;
 		}
 		if (!this.modelCatalogValidated || this.modelSelectionPending || this.modelSelectionError || this.attachmentError)
@@ -822,7 +825,7 @@ export class NewChatFormState {
 			modelProtocol: selection.modelProtocol,
 			permissionMode: normalizeSupportedPermissionMode(this.permissionMode, this.permissionModes),
 			thinkingMode: normalizeSupportedThinkingMode(this.thinkingMode, this.thinkingModes),
-			agentSettings: this.agentSettings,
+			agentSettings,
 			firstMessage: this.firstMessage,
 			initialImages: this.attachedImages,
 			tags: this.chatTags.length > 0 ? this.chatTags : undefined,

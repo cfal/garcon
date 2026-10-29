@@ -1,3 +1,4 @@
+import { TestWebSocketLink as WebSocketLink } from './test-session-transport.js';
 import {
   AgentCallError,
   createAgentResourceRef,
@@ -15,7 +16,7 @@ import { createAgentProducerAdapter } from '@garcon/server-agent-common/executio
 import type { AgentRuntimeExecution, AgentRuntimePublisher, AgentRuntimeStartRequest } from '@garcon/server-agent-common/execution/runtime-events';
 import type { SessionSocket } from '../transport/message-session.js';
 import { connectRemoteExecutor, servePairedRuntime } from './runtime-adapter.js';
-import { WebSocketLink } from '../transport/websocket-link.js';
+
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { ProducerRelay, type ProducerRelayOptions } from '../server/producer-relay.js';
 import { RpcReplyJournal } from '../transport/rpc-journal.js';
@@ -69,7 +70,7 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
     },
     nativeHistoryImport: { async *load({ signal }) { calls.import++; yield* hooks.history(signal); } },
     singleQuery: { async run(request: AgentSingleQueryRequest) { calls.query++; return hooks.query(request); } },
-    auth: null, commands: null, compaction: null, forking: null, steering: null, endpoints: null,
+    auth: null, commands: null, compaction: null as AgentIntegration['compaction'], forking: null, steering: null, endpoints: null,
     literalExecution: null, readiness: null,
     legacyHistoryImport: null, nativeActivity: null, nativeSessions: null, configurationValidation: null,
     sessionConfiguration: null, projectPathUpdates: null,
@@ -121,11 +122,12 @@ export async function remoteFixture(
   const connected = connectRemoteExecutor(controller, undefined, resumption.client);
   if (dialer === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
-  const executor = await connected;
+  const client = await connected;
+  const executor = client.runtime;
   return {
-    controller, worker, executor, generations, journal,
+    controller, worker, executor, client, generations, journal,
     async dispose() {
-      await executor.dispose(); await worker.dispose();
+      await client.dispose(); await worker.dispose();
       await Promise.all(scopes.map((scope) => scope.dispose()));
       relay.dispose();
       journal.dispose();

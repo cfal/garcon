@@ -1,0 +1,122 @@
+{
+  "definition": {
+    "name": "producers.bind",
+    "version": 1,
+    "requires": [
+      {
+        "name": "resource.producer-binding",
+        "version": 1,
+        "requires": [],
+        "events": [
+          "rows",
+          "session",
+          "permission",
+          "notice",
+          "run-ended",
+          "started",
+          "steerable",
+          "publication-failed",
+          "publication-gap",
+          "launch-settled"
+        ]
+      },
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "producers.close",
+        "version": 1
+      },
+      {
+        "name": "producers.resume",
+        "version": 1
+      },
+      {
+        "name": "producer.rows",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "producer.session",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "producer.permission",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "producer.notice",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "producer.run-ended",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "producer.started",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "producer.steerable",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "producer.publication-failed",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "producer.publication-gap",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "producer.launch-settled",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "session",
+    "direction": "controller-to-worker",
+    "returnsResource": {
+      "name": "resource.producer-binding",
+      "version": 1,
+      "requires": [],
+      "events": [
+        "rows",
+        "session",
+        "permission",
+        "notice",
+        "run-ended",
+        "started",
+        "steerable",
+        "publication-failed",
+        "publication-gap",
+        "launch-settled"
+      ]
+    }
+  },
+  "wire": {
+    "request": {
+      "binding": {
+        "executorId": "string",
+        "id": "string",
+        "instanceId": "string",
+        "integrationId": "string",
+        "kind": "\"producer\""
+      },
+      "chatId": "string"
+    },
+    "result": "void"
+  },
+  "failures": "rpc-errors-v1"
+}

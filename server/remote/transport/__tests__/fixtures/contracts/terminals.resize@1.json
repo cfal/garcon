@@ -1,0 +1,63 @@
+{
+  "definition": {
+    "name": "terminals.resize",
+    "version": 1,
+    "requires": [
+      {
+        "name": "resource.terminal-attachment",
+        "version": 1,
+        "requires": [],
+        "events": [
+          "terminal-attached",
+          "terminal-output",
+          "terminal-replay-batch",
+          "terminal-output-fragment",
+          "terminal-status",
+          "terminal-taken-over",
+          "terminal-terminated",
+          "terminal-replay-truncated",
+          "terminal-error"
+        ]
+      }
+    ],
+    "lane": "primary",
+    "continuity": "session",
+    "direction": "controller-to-worker",
+    "acceptsResource": {
+      "name": "resource.terminal-attachment",
+      "version": 1,
+      "requires": [],
+      "events": [
+        "terminal-attached",
+        "terminal-output",
+        "terminal-replay-batch",
+        "terminal-output-fragment",
+        "terminal-status",
+        "terminal-taken-over",
+        "terminal-terminated",
+        "terminal-replay-truncated",
+        "terminal-error"
+      ]
+    }
+  },
+  "wire": {
+    "request": {
+      "attachmentId": "string",
+      "authority": {
+        "expiresAtMs": {
+          "union": [
+            "null",
+            "number"
+          ]
+        },
+        "key": "string"
+      },
+      "cols": "number",
+      "rows": "number",
+      "terminalId": "string",
+      "type": "\"terminal-resize\""
+    },
+    "result": "void"
+  },
+  "failures": "rpc-errors-v1"
+}

@@ -1,0 +1,145 @@
+{
+  "definition": {
+    "name": "cli.chats.steer",
+    "version": 1,
+    "requires": [],
+    "mutation": true,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "POST /api/v1/chats/steer",
+  "client": {
+    "parameters": [
+      {
+        "name": "request",
+        "type": {
+          "chatId": "string",
+          "clientMessageId": "string",
+          "clientRequestId": "string",
+          "content": "string",
+          "transcriptViewId": "string",
+          "userMessagePresentation?": {
+            "union": [
+              "undefined",
+              {
+                "customStyle?": "undefined",
+                "disclosure": "\"collapsed\"",
+                "origin": "\"cli\"",
+                "style?": "undefined",
+                "title?": "undefined"
+              },
+              {
+                "customStyle": {
+                  "darkAccent": "`#${string}`",
+                  "lightAccent": "`#${string}`"
+                },
+                "disclosure?": {
+                  "union": [
+                    "\"collapsed\"",
+                    "undefined"
+                  ]
+                },
+                "origin": "\"cli\"",
+                "style": "\"custom\"",
+                "title?": {
+                  "union": [
+                    "string",
+                    "undefined"
+                  ]
+                }
+              },
+              {
+                "disclosure?": {
+                  "union": [
+                    "\"collapsed\"",
+                    "undefined"
+                  ]
+                },
+                "origin": "\"cli\"",
+                "style": {
+                  "union": [
+                    "\"error\"",
+                    "\"info\"",
+                    "\"notice\""
+                  ]
+                },
+                "title?": {
+                  "union": [
+                    "string",
+                    "undefined"
+                  ]
+                }
+              }
+            ]
+          },
+          "whenTurnUnavailable?": {
+            "union": [
+              "\"queue\"",
+              "\"reject\"",
+              "undefined"
+            ]
+          }
+        }
+      }
+    ],
+    "result": {
+      "acceptedAt": "string",
+      "chatId": "string",
+      "clientRequestId": "string",
+      "commandType": "\"steer\"",
+      "delivery?": "undefined",
+      "parentChat?": {
+        "union": [
+          "null",
+          "undefined",
+          {
+            "chatId": "string",
+            "ordinal": "number",
+            "relation": {
+              "union": [
+                "\"fork\"",
+                "\"handoff\""
+              ]
+            },
+            "transcriptViewId": "string"
+          },
+          {
+            "chatId": "string",
+            "relation": "\"delegation\""
+          }
+        ]
+      },
+      "status": {
+        "union": [
+          "\"accepted\"",
+          "\"duplicate\""
+        ]
+      },
+      "success": "true",
+      "tagMutation?": {
+        "union": [
+          "undefined",
+          {
+            "addedTags": {
+              "array": "string"
+            },
+            "status": "\"applied\""
+          },
+          {
+            "errorCode": "\"CHAT_TAG_SAVE_FAILED\"",
+            "retryable": "true",
+            "status": "\"not-applied\""
+          },
+          {
+            "errorCode": "\"CHAT_TAG_SAVE_UNKNOWN\"",
+            "recoveryRequired": "true",
+            "status": "\"unknown\""
+          }
+        ]
+      },
+      "turnId": "string"
+    }
+  }
+}

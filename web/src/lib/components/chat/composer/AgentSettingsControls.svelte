@@ -15,28 +15,30 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import BrainCircuit from '@lucide/svelte/icons/brain-circuit';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import AgentThinkingIcon from './AgentThinkingIcon.svelte';
 
 	interface Props {
 		descriptors: readonly AgentSettingDescriptor[];
-		envelope: AgentSettingsEnvelope;
+		envelope: AgentSettingsEnvelope | null;
+		compatible?: boolean;
 		onChange: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;
 		disabled?: boolean;
 	}
 
-	let { descriptors, envelope, onChange, disabled = false }: Props = $props();
+	let { descriptors, envelope, onChange, disabled = false, compatible = true }: Props = $props();
 
 	function controlId(descriptor: AgentSettingDescriptor): string {
-		return `agent-setting-${envelope.ownerId}-${descriptor.key}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+		return `agent-setting-${envelope?.ownerId ?? ''}-${descriptor.key}`.replace(/[^a-zA-Z0-9_-]/g, '-');
 	}
 
 	function numberValue(descriptor: Extract<AgentSettingDescriptor, { type: 'number' }>): number {
-		const value = settingValue(envelope, descriptor);
+		const value = envelope ? settingValue(envelope, descriptor) : undefined;
 		return typeof value === 'number' ? value : descriptor.min;
 	}
 
 	function stringValue(descriptor: AgentSettingDescriptor): string {
-		const value = settingValue(envelope, descriptor);
+		const value = envelope ? settingValue(envelope, descriptor) : undefined;
 		return typeof value === 'string' ? value : '';
 	}
 
@@ -49,7 +51,16 @@
 	}
 </script>
 
-{#if descriptors.length > 0}
+{#if !compatible || !envelope}
+	<span
+		class="inline-flex size-9 shrink-0 items-center justify-center text-muted-foreground"
+		role="status"
+		title="Provider settings are unavailable or incompatible."
+	>
+		<CircleAlert class="size-4" aria-hidden="true" />
+		<span class="sr-only">Provider settings are unavailable or incompatible.</span>
+	</span>
+{:else if descriptors.length > 0}
 	<div class="flex flex-wrap items-center gap-2" data-slot="agent-settings-controls">
 		{#each descriptors as descriptor (descriptor.key)}
 			<svelte:boundary>

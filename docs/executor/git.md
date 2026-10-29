@@ -157,7 +157,7 @@ gh.createPullRequestComment({ projectPath, repository, actor, number, body, expe
 gh.minimizePullRequestComment({ projectPath, repository, actor, commentId }, callOptions)
 ```
 
-`listPullRequests` reads the viewer's login and paginates open pull requests, labels, and review requests. Each pull request includes its head commit, fork flag, author association, and whether review is requested from the viewer directly or through a team. Incomplete pagination fails the read. Comment bodies, at most GitHub's 65,536 characters, reach `gh` on standard input. The comment writes are GitHub mutations: they take the mutation admission pool, and an interruption or unconfirmed result after dispatch is `GIT_MUTATION_OUTCOME_UNKNOWN`, never a retry. The controller resolves an unknown post by looking for its marker before posting again. Comment creation returns `GH_MUTATION_REJECTED` for proven preflight/non-dispatch failures and explicit HTTP 4xx rejections (excluding request timeout); these cannot have created the attempted comment. HTTP 5xx, timeout, cancellation, transport errors, and unusable successful replies preserve uncertainty. Executor protocol revision 31 carries the new rejection code.
+`listPullRequests` reads the viewer's login and paginates open pull requests, labels, and review requests. Each pull request includes its head commit, fork flag, author association, and whether review is requested from the viewer directly or through a team. Incomplete pagination fails the read. Comment bodies, at most GitHub's 65,536 characters, reach `gh` on standard input. The comment writes are GitHub mutations: they take the mutation admission pool, and an interruption or unconfirmed result after dispatch is `GIT_MUTATION_OUTCOME_UNKNOWN`, never a retry. The controller resolves an unknown post by looking for its marker before posting again. Comment creation returns `GH_MUTATION_REJECTED` for proven preflight/non-dispatch failures and explicit HTTP 4xx rejections (excluding request timeout); these cannot have created the attempted comment. HTTP 5xx, timeout, cancellation, transport errors, and unusable successful replies preserve uncertainty. The `gh.createPullRequestComment@1` contract freezes this rejection code and its outcome semantics.
 
 `repository` binds the GitHub host and owner/name; `actor` carries a stable GitHub user ID and login. Connected reads and mutations address that host/repository explicitly and reject a different live checkout identity. Comment creation rechecks the actor, then reads the PR's open state and head immediately before dispatch. A changed state or head returns `GH_STALE_PULL_REQUEST` without posting. The controller saves the posting actor before dispatch and retains it through reconciliation, so changing the executor's `gh` login cannot duplicate an uncertain post. Browser detail requests carry `repositoryHost` and `repositoryName` alongside the executor, project, and PR number.
 
@@ -209,8 +209,9 @@ Propagate the operation deadline through RPC, subprocesses, and lock waits. Canc
 budget. Pull request lists, details, and review posting targets each share
 60 seconds across all pages; status and GitHub mutations
 receive 30 seconds. Local admission, the remote facade, and worker envelope
-validation use that same policy, and callers may shorten it. Executor protocol
-revision 28 requires both peers to accept the paginated read budgets together.
+validation use that same policy, and callers may shorten it. The
+`gh.listPullRequests@1`, `gh.getPullRequest@1`, and `gh.getPullRequestReviewTarget@1`
+contracts require both peers to accept these paginated read budgets.
 
 Bulk Git traffic cannot occupy primary's socket queue, but host and network resources remain shared. Fixed size/admission bounds are not a traffic scheduler or an end-to-end latency promise. Larger results require a separate product decision.
 
@@ -310,7 +311,7 @@ The changes can be built and reviewed in these bounded slices without inventing 
 4. Route all HTTP entry points and generation by captured targets, then executor-qualify browser APIs, stores, invalidations, gh capability, and worktree workflows. Remove Local-only guards only after both ends enforce the new contract.
 5. Verify real Git repositories through public controller/worker startup in both connection directions, then run browser acceptance. Remove obsolete controller-only service construction and duplicate DTOs in the same slices that replace them.
 
-There is no persisted mutation state, new repository metadata database, or chat-registry migration. Missing executor selection retains the deliberate Local default. Server/client ship together, so do not keep competing legacy and executor-aware protocols. Rollback disables the executor capability and remote UI while preserving repository state and user drafts; it cannot undo completed Git operations.
+There is no persisted mutation state, new repository metadata database, or chat-registry migration. Missing executor selection retains the deliberate Local default. The browser ships with its controller; worker upgrades follow the [executor compatibility and qualification rules](./compatibility.md). Do not keep competing legacy and executor-aware protocols. Rollback disables the executor capability and remote UI while preserving repository state and user drafts; it cannot undo completed Git operations.
 
 ## Verification Criteria
 

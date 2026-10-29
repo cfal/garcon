@@ -35,6 +35,7 @@
 		isProcessing: false,
 		processingPhase: null,
 		canReloadFromNativeHistory: false,
+		hasAgentSession: true,
 		isUnread: false,
 		status: 'running',
 		agentOwnershipEpoch: null,

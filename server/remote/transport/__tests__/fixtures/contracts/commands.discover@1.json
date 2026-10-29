@@ -1,0 +1,39 @@
+{
+  "definition": {
+    "name": "commands.discover",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "projectPath": "string"
+    },
+    "result": {
+      "array": {
+        "description?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "name": "string",
+        "source": {
+          "union": [
+            "\"command\"",
+            "\"skill\""
+          ]
+        }
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

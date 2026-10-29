@@ -21,32 +21,32 @@ for (const dialer of ['controller', 'worker'] as const) {
       link.dialBulk = (...args) => { dialing.resolve(() => dial(...args)); };
     });
     const changes: ExecutorBulkStatus[] = [];
-    f.executor.onBulkChanged(status => changes.push(status));
+    f.client.onBulkChanged(status => changes.push(status));
     try {
       const connect = await dialing.promise;
-      expect(f.executor.bulkStatus).toEqual({ availability: 'connecting', lastError: null });
+      expect(f.client.bulkStatus).toEqual({ availability: 'connecting', lastError: null });
       expect(f.executor.availability).toBe('ready');
       connect();
-      await bulkReady(f.executor);
+      await bulkReady(f.client);
       expect(changes).toEqual([{ availability: 'ready', lastError: null }]);
 
       dialing = Promise.withResolvers<() => void>();
       f.controller.bulk!.close(new Error('Synthetic bulk loss'));
       const reconnect = await dialing.promise;
-      expect(f.executor.bulkStatus).toEqual({ availability: 'reconnecting',
+      expect(f.client.bulkStatus).toEqual({ availability: 'reconnecting',
         lastError: { code: 'EXECUTOR_BULK_UNAVAILABLE', message: 'Synthetic bulk loss' } });
       expect(f.executor.availability).toBe('ready');
       expect(changes).toHaveLength(2);
       reconnect();
-      await bulkReady(f.executor);
-      expect(f.executor.bulkStatus.lastError).toBeNull();
+      await bulkReady(f.client);
+      expect(f.client.bulkStatus.lastError).toBeNull();
       expect(changes).toHaveLength(3);
 
       f.controller.disconnect();
-      expect(f.executor.bulkStatus.availability).toBe('offline');
+      expect(f.client.bulkStatus.availability).toBe('offline');
       expect(f.executor.availability).toBe('reconnecting');
       expect(changes).toHaveLength(4);
     } finally { await f.dispose(); }
-    expect(f.executor.bulkStatus.availability).toBe('offline');
+    expect(f.client.bulkStatus.availability).toBe('offline');
   });
 }

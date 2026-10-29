@@ -6,6 +6,12 @@ import type { ServerPrincipal } from './http-route-types.js';
 
 import { getTokenFromRequest } from '../../common/http-body.js';
 
+export function authenticatedWithLocalCapability(request: Request, capability: string | undefined): boolean {
+  const token = Buffer.from(getTokenFromRequest(request) ?? '');
+  const expected = capability ? Buffer.from(capability) : null;
+  return expected !== null && token.length === expected.length && crypto.timingSafeEqual(token, expected);
+}
+
 // Verifies JWT token presence/validity for protected HTTP routes.
 export async function authenticateHttpRequest(
   request: Request,
@@ -13,18 +19,12 @@ export async function authenticateHttpRequest(
 ): Promise<{
   errorResponse: Response | null;
   principal: ServerPrincipal | null;
+  localCapability: boolean;
 }> {
   const token = getTokenFromRequest(request);
-  const tokenBytes = Buffer.from(token ?? '');
-  const localCapabilityBytes = options.localCapability
-    ? Buffer.from(options.localCapability)
-    : null;
-  if (
-    localCapabilityBytes
-    && tokenBytes.length === localCapabilityBytes.length
-    && crypto.timingSafeEqual(tokenBytes, localCapabilityBytes)
-  ) {
+  if (authenticatedWithLocalCapability(request, options.localCapability)) {
     return {
+      localCapability: true,
       errorResponse: null,
       principal: {
         mode: 'local',
@@ -37,12 +37,13 @@ export async function authenticateHttpRequest(
 
   let claims;
   try { getAuthStore().assertHealthy(); claims = await verifyAuthTokenClaims(token); }
-  catch (error) { return { errorResponse: jsonErrorFromUnknown(error), principal: null }; }
+  catch (error) { return { errorResponse: jsonErrorFromUnknown(error), principal: null, localCapability: false }; }
   if (!claims) {
-    return { errorResponse: jsonError('Invalid token', 401, 'AUTH_SESSION_INVALID'), principal: null };
+    return { errorResponse: jsonError('Invalid token', 401, 'AUTH_SESSION_INVALID'), principal: null, localCapability: false };
   }
 
   return {
+    localCapability: false,
     errorResponse: null,
     principal: {
       mode: 'authenticated',

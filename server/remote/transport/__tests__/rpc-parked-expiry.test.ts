@@ -1,6 +1,7 @@
+import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { expect, test } from 'bun:test';
 import { ExecutorRpc, ParkedRpcCalls } from '../rpc.js';
-import { SessionTransport } from '../session-transport.js';
+import { TestSessionTransport as SessionTransport, testSessionProtocol } from '../../__tests__/test-session-transport.js';
 
 interface SentFrame {
   readonly type: string;
@@ -8,9 +9,9 @@ interface SentFrame {
   readonly method?: string;
 }
 
-function session(id: string, parked: ParkedRpcCalls) {
+function session(id: string, parked: ParkedRpcCalls, protocol = testSessionProtocol()) {
   const sent: SentFrame[] = [];
-  const transport = new SessionTransport(id, 'worker', () => {});
+  const transport = new SessionTransport(id, 'worker', () => {}, {}, 'local', 'primary', id, protocol);
   const connection = transport.attach({ send: (payload) => { sent.push(JSON.parse(payload)); }, close() {} });
   return {
     rpc: new ExecutorRpc(transport, { parked }),
@@ -26,7 +27,7 @@ function lostCall(dispatchDeadline: number) {
   const parked = new ParkedRpcCalls();
   const lost = session('lost', parked);
   const replacement = session('replacement', parked);
-  const settled = lost.rpc.call('', 'projects.inspect', { projectPath: '/test-project' }, { timeoutMs: 10_000, dispatchDeadline })
+  const settled = lost.rpc.call('', RPC_V1['projects.inspect'], { projectPath: '/test-project' }, { timeoutMs: 10_000, dispatchDeadline })
     .catch((error: unknown) => error);
   const callId = lost.sent[0]!.id;
   lost.transport.close();
@@ -82,7 +83,7 @@ test('a call reconciled as running before its dispatch deadline waits for its re
     call.reconciled('pending');
     await call.reconciling;
     await Bun.sleep(60);
-    const resolution = { kind: 'synthetic-resolution' };
+    const resolution = { kind: 'available', effectiveProjectKey: '/synthetic-project' };
     call.replacement.receive({ type: 'result', id: call.callId, value: { resolution } });
 
     expect(await call.settled).toEqual({ resolution });
@@ -101,3 +102,24 @@ test('a call keeps its dispatch deadline when the replacement session is lost wh
     expect(call.parked.size).toBe(0);
   } finally { call.dispose(); }
 });
+
+for (const field of ['controllerRuntimeId', 'workerRuntimeId', 'profileId'] as const) {
+  test(`parked callers cannot adopt or resend across ${field}`, async () => {
+    const parked = new ParkedRpcCalls();
+    const first = session('first', parked);
+    const protocol = first.transport.protocol;
+    const next = session('next', parked, { ...protocol, continuity: { ...protocol.continuity, [field]: 'changed' } });
+    const result = first.rpc.call('', RPC_V1['projects.inspect'], { projectPath: '/synthetic' }).catch((error: unknown) => error);
+    first.transport.close();
+    try {
+      const reconciled = next.rpc.reconcileParked();
+      expect(next.sent).toHaveLength(1);
+      expect(next.sent[0]).toMatchObject({ method: 'calls.reconcile', request: { calls: [] } });
+      next.receive({ type: 'result', id: next.sent[0]!.id, value: { states: [] } });
+      await reconciled;
+      expect(await result).toMatchObject({ outcome: 'unknown' });
+      expect(next.sent.filter(frame => frame.method === 'projects.inspect')).toEqual([]);
+      expect(parked.size).toBe(0);
+    } finally { next.transport.close(); parked.close(); }
+  });
+}

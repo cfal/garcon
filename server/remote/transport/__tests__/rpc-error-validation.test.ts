@@ -1,7 +1,8 @@
+import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { expect, test } from 'bun:test';
 import { AGENT_INTEGRATION_ERROR_CODES, isAgentIntegrationErrorCode } from '@garcon/server-agent-interface';
 import { ExecutorRpc } from '../rpc.js';
-import { SessionTransport } from '../session-transport.js';
+import { TestSessionTransport as SessionTransport } from '../../__tests__/test-session-transport.js';
 
 function fixture() {
   const sent: { id: string }[] = [];
@@ -15,7 +16,7 @@ test.each(AGENT_INTEGRATION_ERROR_CODES)('accepts provider error code %s with an
   try {
     expect(isAgentIntegrationErrorCode(code)).toBe(true);
     for (const outcome of [undefined, 'rejected'] as const) {
-      const pending = f.rpc.call('test', 'execution.runningSessions', null);
+      const pending = f.rpc.call('test', RPC_V1['execution.runningSessions'], null);
       f.connection.receive(JSON.stringify({ type: 'error', id: f.sent.at(-1)!.id,
         error: { code, message: 'Synthetic failure', retryable: false, outcome } }));
       await expect(pending).rejects.toMatchObject({ code, message: 'Synthetic failure' });
@@ -30,10 +31,22 @@ test.each([
 ])('rejects malformed provider error %j and settles the caller', async fields => {
   const f = fixture();
   try {
-    const pending = f.rpc.call('test', 'execution.runningSessions', null);
+    const pending = f.rpc.call('test', RPC_V1['execution.runningSessions'], null);
     f.connection.receive(JSON.stringify({ type: 'error', id: f.sent[0]!.id,
       error: { message: 'Synthetic failure', retryable: false, ...fields } }));
     await expect(pending).rejects.toMatchObject({ outcome: 'unknown' });
+    expect(f.transport.connected).toBe(false);
+  } finally { f.transport.close(); }
+});
+
+test('a malformed error for an already settled call remains a protocol fault', async () => {
+  const f = fixture();
+  try {
+    const pending = f.rpc.call('test', RPC_V1['execution.runningSessions'], null);
+    const id = f.sent[0]!.id;
+    f.connection.receive(JSON.stringify({ type: 'result', id, value: [] }));
+    await expect(pending).resolves.toEqual([]);
+    f.connection.receive(JSON.stringify({ type: 'error', id, error: { code: 'UNKNOWN_ERROR', message: 'Synthetic', retryable: false } }));
     expect(f.transport.connected).toBe(false);
   } finally { f.transport.close(); }
 });

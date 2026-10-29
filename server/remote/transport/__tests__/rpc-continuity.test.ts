@@ -1,20 +1,15 @@
+import { TestWebSocketLink as WebSocketLink } from '../../__tests__/test-session-transport.js';
 import { expect, test } from 'bun:test';
-import type { AgentSingleQueryRequest, ExecutorAvailability } from '@garcon/server-agent-interface';
-import type { RemoteExecutorClient } from '../../client/executor-client.js';
+import type { AgentSingleQueryRequest, ExecutionRuntimeApi } from '@garcon/server-agent-interface';
 import { integrationFixture, linkOptions, outgoingFault, remoteFixture, requestFor } from '../../__tests__/integration-fixture.js';
 import { connectRemoteExecutor, servePairedRuntime } from '../../__tests__/runtime-adapter.js';
 import { serveExecutionRuntime } from '../../server/executor-rpc-server.js';
 import { ProducerRelay } from '../../server/producer-relay.js';
 import { RpcReplyJournal } from '../rpc-journal.js';
-import { WebSocketLink } from '../websocket-link.js';
 
-function nextAvailability(executor: RemoteExecutorClient, value: ExecutorAvailability): Promise<void> {
-  return new Promise((resolve) => {
-    const off = executor.onAvailabilityChanged((next) => { if (next === value) { off(); resolve(); } });
-  });
-}
+import { nextAvailability } from '../../__tests__/replacement-fixture.js';
 
-async function query(executor: RemoteExecutorClient, signal = new AbortController().signal): Promise<string> {
+async function query(executor: ExecutionRuntimeApi, signal = new AbortController().signal): Promise<string> {
   const integration = await executor.getAgentIntegration('test');
   return integration.singleQuery!.run({
     prompt: 'Synthetic query', model: 'test-model', thinkingMode: 'medium',
@@ -244,13 +239,14 @@ for (const dialer of ['controller', 'worker'] as const) {
     const controllerUrl = dialer === 'worker' ? controller.listen() : '';
     if (dialer === 'controller') controller.dial(workerUrl);
     else firstWorker.dial(controllerUrl);
-    const executor = await connected;
+    const client = await connected;
+    const executor = client.runtime;
     try {
       const parked = query(executor).catch((error: unknown) => error);
       await entered.promise;
-      const reconnecting = nextAvailability(executor, 'reconnecting');
-      const offline = nextAvailability(executor, 'offline');
-      const ready = nextAvailability(executor, 'ready');
+      const reconnecting = nextAvailability(client, 'reconnecting');
+      const offline = nextAvailability(client, 'offline');
+      const ready = nextAvailability(client, 'ready');
       await firstWorker.dispose();
       await reconnecting;
       const held = query(executor).catch((error: unknown) => error);
@@ -263,10 +259,10 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(await parked).toMatchObject({ outcome: 'unknown' });
       expect(await held).toMatchObject({ outcome: 'not-dispatched' });
       expect(second.calls.query).toBe(0);
-      expect(await query(executor)).toBe('query result');
+      expect(await query(client.runtime)).toBe('query result');
     } finally {
       release.resolve('');
-      await executor.dispose();
+      await client.dispose();
       for (const worker of workers) {
         await worker.link.dispose();
         worker.relay.dispose();

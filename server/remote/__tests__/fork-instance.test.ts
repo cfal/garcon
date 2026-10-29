@@ -1,10 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { AgentNativeFork, AgentNativeForkRequest } from '@garcon/server-agent-interface';
-import { integrationFixture, linkOptions } from './integration-fixture.js';
-import { connectRemoteExecutor, servePairedRuntime } from './runtime-adapter.js';
-import { ProducerRelay } from '../server/producer-relay.js';
-import { RpcReplyJournal } from '../transport/rpc-journal.js';
-import { WebSocketLink } from '../transport/websocket-link.js';
+import { integrationFixture } from './integration-fixture.js';
+import { nextAvailability, replacementFixture } from './replacement-fixture.js';
 
 function nativeFixture() {
   const native = integrationFixture();
@@ -18,19 +15,14 @@ function nativeFixture() {
 }
 
 async function fixture(dialer: 'controller' | 'worker') {
-  const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
-  const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
+  const f = replacementFixture(dialer);
+  const { controller, client: executor } = f;
   const original = nativeFixture();
   let current = original;
-  const relay = new ProducerRelay();
-  const journal = new RpcReplyJournal();
-  const servings: ReturnType<typeof servePairedRuntime>[] = [];
-  worker.onSession(transport => servings.push(servePairedRuntime(worker, transport, current.executor, relay, journal)));
-  const connected = connectRemoteExecutor(controller);
-  if (dialer === 'controller') controller.dial(worker.listen());
-  else worker.dial(controller.listen());
-  const executor = await connected;
-  const integration = await executor.getAgentIntegration('test');
+  const connected = nextAvailability(executor, 'ready');
+  await f.install(current.executor);
+  await connected;
+  const integration = await executor.runtime.getAgentIntegration('test');
   const source = { chatId: 'source', agentId: 'test', agentSessionId: 'synthetic-source', nativeSession: null,
     nativeSeedReceipt: null, projectPath: '/test-project', model: 'test-model', carryOverRevision: '', settings: integration.settings.defaults() };
   const signal = new AbortController().signal;
@@ -38,21 +30,17 @@ async function fixture(dialer: 'controller' | 'worker') {
     projectPath: source.projectPath, model: source.model, settings: source.settings,
     permissionMode: 'default', thinkingMode: 'medium', endpoint: null };
   return {
-    controller, worker, executor, integration, original, request,
+    controller, executor, integration, original, request,
     historyRequest: { chat: { ...source, chatId: 'fork', agentSessionId: original.session.agentSessionId }, signal },
     async replace(restart: boolean) {
-      if (restart) current = nativeFixture();
-      const ready = Promise.withResolvers<void>();
-      const off = executor.onAvailabilityChanged(value => { if (value === 'ready') ready.resolve(); });
-      controller.disconnect(); worker.disconnect();
-      await ready.promise;
-      off();
+      const ready = nextAvailability(executor, 'ready');
+      controller.disconnect(); f.worker.disconnect();
+      if (restart) { current = nativeFixture(); await f.install(current.executor); }
+      await ready;
       return current;
     },
     async dispose() {
-      await executor.dispose(); await worker.dispose();
-      for (const serving of servings) await serving.dispose();
-      relay.dispose(); journal.dispose();
+      await f.dispose();
     },
   };
 }

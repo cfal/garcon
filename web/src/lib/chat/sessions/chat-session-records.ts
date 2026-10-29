@@ -1,27 +1,32 @@
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
-import { createEmptyAgentSettings, normalizeAgentSettings } from '$shared/agent-settings';
+import { cloneAgentSettings } from '$shared/agent-settings';
 import type { ChatOrderGroup } from '$shared/chat-list';
 import { normalizePermissionMode, normalizeThinkingMode } from '$shared/chat-modes';
 import { stableJsonStringify } from '$shared/json';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
 import type { ChatListEntry } from '$shared/chat-list';
 
-export function normalizeExecutionFields<
-	T extends {
-		agentId: string;
+export function normalizeExecutionFields(
+	value: {
 		permissionMode?: unknown;
 		thinkingMode?: unknown;
-		agentSettings?: AgentSettingsEnvelope;
+		agentSettings: AgentSettingsEnvelope;
 	},
->(value: T): Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'agentSettings'> {
+): Pick<ChatStartupConfig, 'permissionMode' | 'thinkingMode' | 'agentSettings'> {
 	return {
 		permissionMode: normalizePermissionMode(value.permissionMode),
 		thinkingMode: normalizeThinkingMode(value.thinkingMode),
-		agentSettings: normalizeAgentSettings(
-			value.agentId,
-			value.agentSettings,
-			createEmptyAgentSettings(value.agentId),
-		),
+		agentSettings: cloneAgentSettings(value.agentSettings),
+	};
+}
+
+export function normalizeRecordExecutionFields(
+	value: Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'agentSettings'>,
+): Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'agentSettings'> {
+	return {
+		permissionMode: normalizePermissionMode(value.permissionMode),
+		thinkingMode: normalizeThinkingMode(value.thinkingMode),
+		agentSettings: value.agentSettings === null ? null : cloneAgentSettings(value.agentSettings),
 	};
 }
 
@@ -41,7 +46,7 @@ export function toRecord(session: ChatListEntry): ChatSessionRecord {
 		apiProviderId: session.apiProviderId ?? null,
 		modelEndpointId: session.modelEndpointId ?? null,
 		modelProtocol: session.modelProtocol ?? null,
-		...normalizeExecutionFields(session),
+		...normalizeRecordExecutionFields(session),
 		createdAt: session.activity?.createdAt ?? null,
 		lastActivityAt: session.activity?.lastActivityAt ?? null,
 		lastReadAt: session.activity?.lastReadAt ?? null,
@@ -50,6 +55,7 @@ export function toRecord(session: ChatListEntry): ChatSessionRecord {
 		isProcessing: session.processingPhase !== null,
 		processingPhase: session.processingPhase,
 		canReloadFromNativeHistory: session.canReloadFromNativeHistory === true,
+		hasAgentSession: session.hasAgentSession,
 		isUnread: session.isUnread ?? false,
 		status: 'running',
 		agentOwnershipEpoch: session.agentOwnershipEpoch,
@@ -86,6 +92,7 @@ export function toDraftRecord(
 		isProcessing: false,
 		processingPhase: null,
 		canReloadFromNativeHistory: false,
+		hasAgentSession: false,
 		isUnread: false,
 		status: 'draft',
 		agentOwnershipEpoch: null,
@@ -142,6 +149,7 @@ export function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean 
 		a.isProcessing === b.isProcessing &&
 		a.processingPhase === b.processingPhase &&
 		a.canReloadFromNativeHistory === b.canReloadFromNativeHistory &&
+		a.hasAgentSession === b.hasAgentSession &&
 		a.isUnread === b.isUnread &&
 		a.status === b.status &&
 		a.agentOwnershipEpoch === b.agentOwnershipEpoch &&

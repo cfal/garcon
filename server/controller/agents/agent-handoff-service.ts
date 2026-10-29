@@ -27,6 +27,7 @@ import type { CarryOverOutcome } from '../chats/carryover/outcome.js';
 import type { PreparedCarryover } from '../chats/carryover/prepared-store.js';
 import { OwnershipTransferPendingError } from './ownership-transfer-fence.js';
 import { isThinkingModeSupported, isPermissionModeSupported } from '../../../common/execution-defaults.js';
+import { requireProviderOperations } from './execution-support.js';
 
 const logger = createLogger('agents:handoff');
 const MAX_RECOVERY_RETRY_DELAY_MS = 1_000;
@@ -56,6 +57,7 @@ export interface AgentHandoffPreparation {
 }
 
 export class AgentHandoffService {
+  readonly #targetIntegrations = new WeakMap<ResolvedAgentHandoffTarget, AgentIntegration>();
   readonly #recoveries = new Map<string, PendingHandoffRecovery>();
   readonly #activeRecoveryAttempts = new Map<string, Promise<void>>();
   readonly #recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -64,7 +66,7 @@ export class AgentHandoffService {
 
   constructor(private readonly deps: {
     readonly registry: IChatRegistry;
-    readonly integrations: Pick<AgentDirectory, 'get' | 'require'>;
+    readonly integrations: Pick<AgentDirectory, 'list' | 'require' | 'requireOperations' | 'supportsOperations'>;
     readonly inspectProject: ProjectInspector;
     readonly endpointResolver: ApiProviderEndpointResolver;
     readonly catalog: {
@@ -74,8 +76,8 @@ export class AgentHandoffService {
     readonly ledger: TranscriptLedgerService;
     readonly carryover: CarryoverPlanningPort;
     readonly preparedCarryover: PreparedCarryoverPort;
-    readonly reopenProducer: (chatId: string) => void;
-    readonly onCommitted?: (chatId: string) => void | Promise<void>;
+    readonly ensureProducer: (chatId: string) => void;
+    readonly onCommitted?: (chatId: string, clientRequestId: string) => void | Promise<void>;
   }) {}
 
   shutdown(): void {
@@ -90,6 +92,27 @@ export class AgentHandoffService {
 
   cancelPreparation(chatId: string): void {
     this.#carryoverPreparations.get(chatId)?.abort(new Error('Turn interrupted by the user'));
+  }
+
+  async recoverHandoff(chatId: string, clientRequestId: string, handoff: AgentHandoffRequest): Promise<boolean> {
+    const operationId = handoffOperationId(chatId, clientRequestId);
+    const recovery = this.#recoveries.get(operationId);
+    const existing = this.deps.ownership.findHandoff(chatId, clientRequestId) ?? recovery?.intent;
+    if (!existing) return false;
+    assertMatchingHandoff(existing, handoffTargetHash(handoff));
+    if (recovery) {
+      await this.#activeRecoveryAttempts.get(operationId);
+      if (this.#recoveries.get(operationId) === recovery) {
+        const timer = this.#recoveryTimers.get(operationId);
+        if (timer) clearTimeout(timer);
+        this.#recoveryTimers.delete(operationId);
+        await this.#recoverHandoff(recovery, 0);
+      }
+      if (this.#hasPendingHandoff(existing)) throw new OwnershipTransferPendingError();
+      return true;
+    }
+    await this.#rollForwardPersistedHandoff(existing);
+    return true;
   }
 
   async seedContinuationLedger(input: {
@@ -141,21 +164,35 @@ export class AgentHandoffService {
         400,
       );
     }
+    const integration = this.deps.integrations.list(executorId)
+      .find(candidate => candidate.descriptor.id === requested.agentId);
+    if (!integration) {
+      throw new DomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${requested.agentId}`, 422);
+    }
+    assertHandoffDestination(integration);
+    const agentSettings = integration.settings.parse(
+      requested.agentSettings
+        ?? input.chat.agentSettingsById[requested.agentId]
+        ?? integration.settings.defaults(),
+    );
+    if (agentSettings.ownerId !== requested.agentId) {
+      throw new DomainError('INCOMPLETE_EXECUTION_CONFIG', `The chat has no valid settings for agent ${requested.agentId}.`, 422);
+    }
     const projectPath = await resolveStartProjectPath(
       requested.projectPath ?? input.chat.projectPath, this.deps.inspectProject, executorId, readBefore(deadline, input.signal),
     );
-    const integration = this.deps.integrations.get(requested.agentId, executorId);
+    this.#assertIntegrationCurrent(integration, executorId);
     const catalog = await this.deps.catalog.getAgentCatalogEntry(requested.agentId, {
       executorId, ...readBefore(deadline, input.signal),
     });
-    if (!integration || !catalog) {
+    this.#assertIntegrationCurrent(integration, executorId);
+    if (!catalog) {
       throw new DomainError(
         'UNSUPPORTED_AGENT',
         `Unsupported agent: ${requested.agentId}`,
         422,
       );
     }
-    assertHandoffDestination(integration);
     const selection = this.deps.endpointResolver.resolveSelection({
       executorId,
       agentId: requested.agentId,
@@ -172,6 +209,7 @@ export class AgentHandoffService {
     }
     const endpoint = this.deps.endpointResolver.resolveEndpointReference(selection);
     if (endpoint) {
+      requireProviderOperations(this.deps.integrations, executorId, ['credentials.resolve', 'endpoints.validate']);
       if (!integration.endpoints) {
         throw new DomainError(
           'VALIDATION_FAILED',
@@ -196,6 +234,7 @@ export class AgentHandoffService {
           revision: endpoint.apiProvider.revision,
         },
       }, readBefore(deadline, input.signal));
+      this.#assertIntegrationCurrent(integration, executorId);
     }
 
     const permissionMode = requested.permissionMode ?? preferredValue(
@@ -223,19 +262,7 @@ export class AgentHandoffService {
         422,
       );
     }
-    const agentSettings = integration.settings.parse(
-      requested.agentSettings
-        ?? input.chat.agentSettingsById[requested.agentId]
-        ?? integration.settings.defaults(),
-    );
-    if (agentSettings.ownerId !== requested.agentId) {
-      throw new DomainError(
-        'INCOMPLETE_EXECUTION_CONFIG',
-        `The chat has no valid settings for agent ${requested.agentId}.`,
-        422,
-      );
-    }
-    return {
+    const target: ResolvedAgentHandoffTarget = {
       executorId,
       projectPath,
       agentId: requested.agentId,
@@ -247,6 +274,8 @@ export class AgentHandoffService {
       thinkingMode,
       agentSettings,
     };
+    this.#targetIntegrations.set(target, integration);
+    return target;
   }
 
   createPreparation(input: {
@@ -278,12 +307,11 @@ export class AgentHandoffService {
           if (existing) {
             assertMatchingHandoff(existing, submittedTargetHash);
             await this.#rollForwardPersistedHandoff(existing);
-            await this.#notifyCommitted(input.chatId);
             return;
           }
 
           context.assertAdmissionActive();
-          assertHandoffDestination(this.deps.integrations.require(input.target.agentId, input.target.executorId));
+          this.#assertTargetCurrent(input.target);
           this.deps.ledger.closeProducer(input.chatId);
           producerClosed = true;
           const watermark = this.deps.ledger.highWatermark(input.chatId);
@@ -318,7 +346,7 @@ export class AgentHandoffService {
           const decide = () => {
             this.#requireUnchangedSource(input.chatId, sourceFence);
             context.assertAdmissionActive();
-            assertHandoffDestination(this.deps.integrations.require(input.target.agentId, input.target.executorId));
+            this.#assertTargetCurrent(input.target);
             this.deps.endpointResolver.resolveSelection(input.target);
             decisionAttempted = true;
             return this.deps.ownership.decideHandoff({
@@ -330,6 +358,11 @@ export class AgentHandoffService {
               target: input.target,
               targetAgentOwnershipEpoch: crypto.randomUUID(),
               watermark,
+              assertCurrent: () => {
+                this.#requireUnchangedSource(input.chatId, sourceFence);
+                context.assertAdmissionActive();
+                this.#assertTargetCurrent(input.target);
+              },
             });
           };
           const intent = await (input.guardDecision ? input.guardDecision(decide) : decide());
@@ -345,7 +378,6 @@ export class AgentHandoffService {
               result: carryoverOutcome,
             });
           }
-          await this.#notifyCommitted(input.chatId);
         } catch (error) {
           if (error instanceof OwnershipTransferPendingError) throw error;
           const retained = this.deps.ownership.findHandoff(
@@ -355,10 +387,9 @@ export class AgentHandoffService {
           if (decisionAttempted && retained) {
             assertMatchingHandoff(retained, submittedTargetHash);
             await this.#rollForwardPersistedHandoff(retained);
-            await this.#notifyCommitted(input.chatId);
             return;
           }
-          if (producerClosed) this.deps.reopenProducer(input.chatId);
+          if (producerClosed) this.deps.ensureProducer(input.chatId);
           throw error;
         }
       },
@@ -366,6 +397,19 @@ export class AgentHandoffService {
         this.deps.preparedCarryover.discard(input.chatId);
       },
     };
+  }
+
+  #assertTargetCurrent(target: ResolvedAgentHandoffTarget): void {
+    const integration = this.#targetIntegrations.get(target);
+    if (!integration) throw new Error('Handoff target was not resolved by this service');
+    this.#assertIntegrationCurrent(integration, target.executorId);
+    assertHandoffDestination(integration);
+  }
+
+  #assertIntegrationCurrent(integration: AgentIntegration, executorId?: string | null): void {
+    if (this.deps.integrations.require(integration.descriptor.id, executorId) !== integration) {
+      throw new DomainError('VALIDATION_FAILED', 'The handoff destination changed. Refresh its configuration and try again.', 422);
+    }
   }
 
   async recoverPendingHandoffs(): Promise<void> {
@@ -379,8 +423,8 @@ export class AgentHandoffService {
 
   async #rollForwardPersistedHandoff(intent: AgentHandoffIntent): Promise<void> {
     this.#disarmHandoffRecovery(intent.operationId);
-    this.deps.ledger.closeProducer(intent.chatId);
     try {
+      this.deps.ledger.closeProducer(intent.chatId);
       await retryHandoffStep(
         'ledger boundary recovery',
         () => this.#applyLedgerBoundary(intent),
@@ -403,14 +447,15 @@ export class AgentHandoffService {
       );
       await retryHandoffStep(
         'producer recovery',
-        () => this.deps.reopenProducer(intent.chatId),
+        () => this.#ensureTargetProducer(intent),
         this.#shutdownController.signal,
         'producer',
       );
     } catch (error) {
-      if (!(error instanceof HandoffStepRetryLimitError)) throw error;
-      const recovery = this.#ensureRecovery(intent, error.step);
-      this.#scheduleHandoffRecovery(recovery, 0);
+      if (error instanceof HandoffStepRetryLimitError) {
+        const recovery = this.#ensureRecovery(intent, error.step);
+        this.#scheduleHandoffRecovery(recovery, 0);
+      }
       throw new OwnershipTransferPendingError(error);
     }
   }
@@ -498,6 +543,7 @@ export class AgentHandoffService {
                 recovery.step = 'fenced';
                 return;
               }
+              await this.#notifyCommitted(intent);
               recovery.step = 'producer';
               break;
             }
@@ -509,11 +555,10 @@ export class AgentHandoffService {
             recovery.step = 'producer';
             break;
           case 'producer':
-            await this.deps.reopenProducer(intent.chatId);
+            await this.#ensureTargetProducer(intent);
             if (this.#recoveries.get(operationId) === recovery) {
               this.#recoveries.delete(operationId);
             }
-            await this.#notifyCommitted(intent.chatId);
             return;
         }
       }
@@ -537,12 +582,19 @@ export class AgentHandoffService {
   }
 
   async #completeHandoffIfPending(intent: AgentHandoffIntent): Promise<void> {
-    if (!this.#hasPendingHandoff(intent)) return;
-    try {
-      await this.deps.ownership.completeHandoff(intent.operationId);
-    } catch (error) {
-      if (!this.#hasPendingHandoff(intent)) return;
-      throw error;
+    if (this.#hasPendingHandoff(intent)) {
+      try {
+        await this.deps.ownership.completeHandoff(intent.operationId);
+      } catch (error) {
+        if (this.#hasPendingHandoff(intent)) throw error;
+      }
+    }
+    await this.#notifyCommitted(intent);
+  }
+
+  #ensureTargetProducer(intent: AgentHandoffIntent): void {
+    if (matchesHandoffTarget(this.deps.registry.getChat(intent.chatId), intent)) {
+      return this.deps.ensureProducer(intent.chatId);
     }
   }
 
@@ -595,12 +647,12 @@ export class AgentHandoffService {
     }
   }
 
-  async #notifyCommitted(chatId: string): Promise<void> {
+  async #notifyCommitted(intent: AgentHandoffIntent): Promise<void> {
     try {
-      await this.deps.onCommitted?.(chatId);
+      await this.deps.onCommitted?.(intent.chatId, intent.clientRequestId);
     } catch (error) {
       logger.warn('Post-handoff invalidation failed', {
-        chatId,
+        chatId: intent.chatId,
         reason: error instanceof Error ? error.message : String(error),
       });
     }

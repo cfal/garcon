@@ -1,13 +1,13 @@
 import { expect, test } from 'bun:test';
 import { AssistantMessage } from '@garcon/common/chat-types';
-import type { AgentProducerNotification, ExecutorAvailability } from '@garcon/server-agent-interface';
+import type { AgentProducerNotification, ExecutionRuntimeApi } from '@garcon/server-agent-interface';
 import type { AgentRuntimeEvent } from '@garcon/server-agent-common/execution/runtime-events';
-import type { RemoteExecutorClient } from '../client/executor-client.js';
 import type { Logger } from '../../common/log.js';
 import { remoteFixture, requestFor } from './integration-fixture.js';
+import { nextAvailability } from './replacement-fixture.js';
 
 type Fixture = Awaited<ReturnType<typeof remoteFixture>>;
-type Integration = Awaited<ReturnType<RemoteExecutorClient['getAgentIntegration']>>;
+type Integration = Awaited<ReturnType<ExecutionRuntimeApi['getAgentIntegration']>>;
 
 function capturingLogger() {
   const entries: { readonly level: 'warn' | 'error'; readonly message: unknown; readonly detail: unknown }[] = [];
@@ -33,12 +33,6 @@ function workerSessions(fixture: Fixture) {
   const counter = { sessions: 0 };
   fixture.worker.onSession(() => { counter.sessions += 1; });
   return counter;
-}
-
-function nextAvailability(executor: RemoteExecutorClient, value: ExecutorAvailability) {
-  const reached = Promise.withResolvers<void>();
-  const off = executor.onAvailabilityChanged((next) => { if (next === value) { off(); reached.resolve(); } });
-  return reached.promise;
 }
 
 function row(content: string): AgentRuntimeEvent {
@@ -69,12 +63,36 @@ const UNREADABLE_EVENT_FAILURE = {
 
 async function runningTurn(dialer: 'controller' | 'worker') {
   const log = capturingLogger();
-  const fixture = await remoteFixture(dialer, undefined, undefined, undefined, { client: { logger: log.logger } });
+  const wireEvents = new Map<string, unknown>();
+  const fixture = await remoteFixture(dialer, (_controller, worker) => {
+    worker.onSession((session) => {
+      const attach = session.attach.bind(session);
+      session.attach = socket => attach({
+        close: () => socket.close(),
+        canSend: bytes => socket.canSend?.(bytes) !== false,
+        send(encoded) {
+          const frame = JSON.parse(encoded);
+          const marker = frame.type === 'producer' && frame.notification.event.rows?.[0]?.message.content;
+          if (wireEvents.has(marker)) {
+            frame.notification.event = wireEvents.get(marker);
+            wireEvents.delete(marker);
+            socket.send(JSON.stringify(frame));
+          } else socket.send(encoded);
+        },
+      });
+    });
+  }, undefined, undefined, { client: { logger: log.logger } });
   const integration = await fixture.executor.getAgentIntegration('test');
   const request = await requestFor(integration);
   await integration.execution.start(request);
   const publish = fixture.generations[0]!.nativePublishers[0]!;
-  return { fixture, integration, request, publish, log };
+  let wireSequence = 0;
+  const publishWire = (event: unknown) => {
+    const marker = `synthetic-wire-${++wireSequence}`;
+    wireEvents.set(marker, event);
+    publish(row(marker));
+  };
+  return { fixture, integration, request, publish, publishWire, log };
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
@@ -125,14 +143,14 @@ for (const dialer of ['controller', 'worker'] as const) {
   });
 
   test(`row batches the controller cannot decode arrive as one loss per run of them and keep the session (${dialer} dials)`, async () => {
-    const { fixture, integration, request, publish, log } = await runningTurn(dialer);
+    const { fixture, integration, request, publish, publishWire, log } = await runningTurn(dialer);
     try {
       const delivered = deliveries(integration);
       const counter = workerSessions(fixture);
-      publish(UNDECODABLE_ROW);
-      publish(UNDECODABLE_ROW);
+      publishWire(UNDECODABLE_ROW);
+      publishWire(UNDECODABLE_ROW);
       publish(row('after'));
-      publish(UNDECODABLE_ROW);
+      publishWire(UNDECODABLE_ROW);
       await integration.execution.runningSessions();
 
       expect(delivered).toEqual(['publication-gap', 'rows:after', 'publication-gap']);
@@ -140,7 +158,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(fixture.executor.availability).toBe('ready');
       expect(log.entries).toEqual([1, 2, 3].map(() => ({ level: 'warn', message: 'Executor producer event could not be decoded', detail: {
         integrationId: 'test', bindingId: request.producerBinding.id, seq: expect.any(Number), type: 'rows',
-        reason: 'Unknown normalized message',
+        reason: 'Unknown v1 normalized message',
       } })));
     } finally { await fixture.dispose(); }
   });
@@ -164,6 +182,30 @@ for (const dialer of ['controller', 'worker'] as const) {
         expect(failures).toEqual([{ type: 'publication-failed', error: UNREADABLE_EVENT_FAILURE }]);
         expect(delivered).toEqual(['publication-failed']);
         expect(counter.sessions).toBe(1);
+      } finally { await fixture.dispose(); }
+    });
+  }
+
+  for (const event of [
+    { type: 'synthetic-critical', runId: 'synthetic-run' },
+    { type: 'permission', runId: 'synthetic-run', lifecycle: { kind: 'resolved', permissionOccurrenceId: 'synthetic-permission' } },
+    { type: 'run-ended', runId: 'synthetic-run', outcome: 'finished', error: { code: 'PROVIDER_FAILURE' } },
+    { type: 'session', session: { agentSessionId: 'synthetic-session', nativeSession: null } },
+    { type: 'launch-settled', runId: 'synthetic-run', handle: null, error: { code: 'PROVIDER_FAILURE' } },
+  ]) {
+    test(`invalid wire ${event.type} fails only its captured binding (${dialer} dials)`, async () => {
+      const { fixture, integration, request, publishWire, log } = await runningTurn(dialer);
+      try {
+        const notifications: AgentProducerNotification[] = [];
+        integration.producers.subscribe(notification => notifications.push(notification));
+        publishWire(event);
+        publishWire({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+        await integration.execution.runningSessions();
+        expect(notifications).toEqual([{ binding: request.producerBinding, event: { type: 'publication-failed', error: UNREADABLE_EVENT_FAILURE } }]);
+        expect(log.entries).toHaveLength(1);
+        expect(fixture.executor.availability).toBe('ready');
+        await integration.producers.close(request.producerBinding);
+        expect(fixture.generations[0]!.calls.abort).toBe(1);
       } finally { await fixture.dispose(); }
     });
   }

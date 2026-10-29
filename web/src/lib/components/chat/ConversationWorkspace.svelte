@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { areAgentSettingsCompatible } from '$shared/agent-settings';
 	// Owns the singleton conversation runtime, composer, and dialogs while
 	// rendered panels own transcript presentation and scrolling.
 
@@ -284,14 +285,21 @@
 			return modelCatalog;
 		},
 		modelCatalogForExecutor: (executorId) => rootModelCatalog.forExecutor(executorId),
-		canSubmitToExecutor: (executorId) =>
-			executors.isReady(executorId) && rootModelCatalog.forExecutor(executorId).isValidated,
+		canSubmitToExecutor: (executorId, operation) =>
+			executors.isReady(executorId) && rootModelCatalog.forExecutor(executorId).isValidated
+			&& (operation === undefined || executors.supportsExecution(executorId, operation)),
 		getExecutionDefaults: (agentId, executorId) => {
 			const modelCatalog = rootModelCatalog.forExecutor(executorId ?? agentState.executorId);
 			const defaults = executionDefaultsForAgent(
 				remoteSettings.snapshot?.executionDefaults,
 				agentId,
 			);
+			const catalogDefaults = modelCatalog.getDefaultAgentSettings(agentId);
+			const agentSettings = defaults.agentSettingsById[agentId] ?? catalogDefaults;
+			if (!modelCatalog.isValidated || !catalogDefaults || !agentSettings
+				|| !areAgentSettingsCompatible(agentSettings, catalogDefaults, modelCatalog.getAgentSettingsDescriptors(agentId))) {
+				throw new Error('Saved provider settings are unavailable or incompatible with this executor.');
+			}
 			return {
 				permissionMode: normalizeSupportedPermissionMode(
 					defaults.permissionMode,
@@ -301,8 +309,7 @@
 					defaults.thinkingMode,
 					modelCatalog.getThinkingModes(agentId),
 				),
-				agentSettings:
-					defaults.agentSettingsById[agentId] ?? modelCatalog.getDefaultAgentSettings(agentId),
+				agentSettings,
 			};
 		},
 		appShell,

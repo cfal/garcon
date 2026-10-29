@@ -712,7 +712,7 @@ export class ConversationSlashCommandService {
 				command: message.trim(),
 				permissionMode: sourceChat.permissionMode,
 				thinkingMode: sourceChat.thinkingMode,
-				agentSettings: sourceChat.agentSettings,
+				agentSettings: sourceChat.agentSettings ?? undefined,
 				images: imagePayload.length > 0 ? imagePayload : undefined,
 				model: selection.model,
 				apiProviderId: selection.apiProviderId,

@@ -50,7 +50,7 @@ function renderExistingSchedule() {
 		orderGroup: 'normal', tags: [], permissionMode: 'default', thinkingMode: 'none',
 		activity: { createdAt: null, lastActivityAt: null, lastReadAt: null }, preview: { lastMessage: '' },
 		isPinned: false, isArchived: false, isActive: false, isProcessing: false, processingPhase: null,
-		isUnread: false, canReloadFromNativeHistory: false, parentChat: null, agentOwnershipEpoch: 'epoch-1',
+		isUnread: false, hasAgentSession: false, canReloadFromNativeHistory: false, parentChat: null, agentOwnershipEpoch: 'epoch-1',
 	} satisfies ChatListEntry;
 	sessions.upsertFromServer([chat]);
 	const prompt: ScheduledPrompt = {

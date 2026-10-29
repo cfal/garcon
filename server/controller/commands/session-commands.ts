@@ -46,6 +46,7 @@ import { PRE_SCHEDULE_FAILURE_ERROR_CODE, type CommandLedgerRecord } from './com
 import { TransientControlActionError } from '../chats/chat-transient-feed.js';
 import { PermissionNotActionableError } from '../ledger/errors.js';
 import { AgentResumePreparationError } from './agent-resume-preparation-error.js';
+import { OwnershipTransferPendingError } from '../agents/ownership-transfer-fence.js';
 
 const logger = createLogger('commands:session');
 
@@ -65,7 +66,17 @@ export class SessionCommands {
   async submitAgentHandoff(input: AgentHandoffCommandRequest, signal: AbortSignal): Promise<AgentHandoffCommandResponse> {
     this.support.requireClientRequestId(input.clientRequestId);
     return this.support.withChatMutationLock(input.chatId, async (deadline) => {
+      const acceptance = { commandType: 'agent-handoff', chatId: input.chatId,
+        clientRequestId: input.clientRequestId, payload: { handoff: input.handoff } };
+      const observed = await this.deps.ledger.observe(acceptance);
+      if (observed) this.support.throwOnConflict(observed, 'clientRequestId was reused with different payload');
+      if (observed?.record.status === 'finished'
+        || await this.deps.handoffs.recoverHandoff(input.chatId, input.clientRequestId, input.handoff)) {
+        if (observed) await this.deps.ledger.update(observed.record.key, { status: 'finished' });
+        return { success: true, chatId: input.chatId, chat: await this.support.projectCommandChat(input.chatId) };
+      }
       let reservation: TranscriptSnapshotReservation | undefined;
+      let acceptedKey: string | undefined;
       try {
         signal.throwIfAborted();
         const source = this.deps.chats.getChat(input.chatId);
@@ -83,9 +94,18 @@ export class SessionCommands {
             return decide();
           }),
         });
+        const accepted = await this.deps.ledger.accept(acceptance);
+        this.support.throwOnConflict(accepted, 'clientRequestId was reused with different payload');
+        acceptedKey = accepted.record.key;
         await preparation.prepare({ signal, assertAdmissionActive: () => signal.throwIfAborted() });
+        await this.deps.ledger.update(accepted.record.key, { status: 'finished' });
         return { success: true, chatId: input.chatId, chat: await this.support.projectCommandChat(input.chatId) };
       } catch (error) {
+        if (acceptedKey && !(error instanceof OwnershipTransferPendingError)) {
+          await this.deps.ledger.settleTerminal(acceptedKey, 'failed', {
+            error: error instanceof Error ? error.message : String(error), errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+          });
+        }
         throw await withCurrentExecutionControl({ chatId: input.chatId, error, handoff: true,
           readControl: (chatId) => this.deps.queue.readChatExecutionControl(chatId) });
       } finally {
@@ -191,6 +211,7 @@ export class SessionCommands {
         execution: this.deps.queue,
         deadline,
       });
+      this.deps.agents.assertExecutionSupported(handoffCommand.target, ['execution.start']);
       this.support.assertAttachmentsSupported({
         ...handoffCommand.target, attachments: input.images ?? [],
       });
@@ -207,6 +228,7 @@ export class SessionCommands {
       );
       return applyPostAdmissionChatTags(result, input.chatId, input.tagsToAdd, this.deps.chatTags);
     }
+    this.deps.agents.assertExecutionSupported({ ...chat, ...runOptionsForCommand(input) }, [chat.agentSessionId ? 'execution.resume' : 'execution.start']);
     if (!input.model && !chat.model) {
       throw new CommandValidationError(
         'INCOMPLETE_EXECUTION_CONFIG',
@@ -242,7 +264,7 @@ export class SessionCommands {
       );
     }
     const agentSettings = input.agentSettings ?? chat.agentSettingsById[chat.agentId];
-    if (!agentSettings || agentSettings.ownerId !== chat.agentId) {
+    if (agentSettings !== undefined && agentSettings.ownerId !== chat.agentId) {
       throw new CommandValidationError(
         'INCOMPLETE_EXECUTION_CONFIG',
         `The chat has no valid settings for agent ${chat.agentId}`,
@@ -532,14 +554,9 @@ export class SessionCommands {
   }
 
   private async submitCompactLocked(input: CompactInput, deadline: number): Promise<CommandAcceptedResponse> {
-    // Compaction starts its own turn and cannot share its agent session with an active turn.
-    const chat = this.deps.chats.getChat(input.chatId);
-    if (chat?.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId, chat.executorId)) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'Cannot compact while a turn is running', 409);
-    }
     const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
     const turnId = crypto.randomUUID();
-    const ledger = await this.deps.ledger.accept({
+    const acceptance = {
       commandType: 'agent-compact',
       chatId: input.chatId,
       clientRequestId,
@@ -548,7 +565,23 @@ export class SessionCommands {
         instructions: input.instructions ?? null,
       },
       turnId,
-    });
+    } as const;
+    const observed = await this.deps.ledger.observe(acceptance);
+    if (observed) this.support.throwOnConflict(observed, 'clientRequestId was reused with different payload');
+    const retrying = observed?.record.status === 'failed' && observed.record.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE;
+    if (!observed || retrying) {
+      const chat = this.deps.chats.getChat(input.chatId);
+      if (!chat) throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+      if (chat.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId, chat.executorId)) {
+        throw new CommandValidationError('VALIDATION_FAILED', 'Cannot compact while a turn is running', 409);
+      }
+      this.deps.agents.assertExecutionSupported(chat, ['compaction.compact']);
+      await this.deps.agents.currentTranscriptViewId(input.chatId);
+      if (!this.deps.chats.getChat(input.chatId)?.agentSessionId) {
+        throw new CommandValidationError('VALIDATION_FAILED', 'Session missing agent session ID', 400);
+      }
+    }
+    const ledger = observed && !retrying ? observed : await this.deps.ledger.accept(acceptance);
     this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
     if (ledger.kind === 'duplicate') this.support.throwRecordedExecutionFailure(ledger.record);
 

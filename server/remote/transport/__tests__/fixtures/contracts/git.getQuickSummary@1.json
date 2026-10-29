@@ -1,0 +1,263 @@
+{
+  "definition": {
+    "name": "git.getQuickSummary",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "projectPath": "string"
+      }
+    },
+    "result": {
+      "union": [
+        {
+          "branch": "string",
+          "diagnostics?": {
+            "union": [
+              "undefined",
+              {
+                "batchCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "bisectionCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "cacheHits?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "commands": {
+                  "array": {
+                    "command": "string",
+                    "durationMs": "number",
+                    "stderrBytes": "number",
+                    "stdoutBytes": "number"
+                  }
+                },
+                "fileCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "phases": {
+                  "array": {
+                    "durationMs": "number",
+                    "name": {
+                      "union": [
+                        "\"body-cache\"",
+                        "\"body-git\"",
+                        "\"body-split\"",
+                        "\"document-register\"",
+                        "\"freshness-after\"",
+                        "\"freshness-before\"",
+                        "\"patch-scan\"",
+                        "\"resolve\"",
+                        "\"serialize\"",
+                        "\"summary-git\""
+                      ]
+                    }
+                  }
+                },
+                "rowCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                }
+              }
+            ]
+          },
+          "diffStats": {
+            "union": [
+              "null",
+              {
+                "additions": "number",
+                "deletions": "number"
+              }
+            ]
+          },
+          "executorId": "string",
+          "hasChanges": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "hasUntracked": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "instanceId": "string",
+          "project": "string",
+          "status": "\"ready\""
+        },
+        {
+          "diagnostics?": {
+            "union": [
+              "undefined",
+              {
+                "batchCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "bisectionCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "cacheHits?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "commands": {
+                  "array": {
+                    "command": "string",
+                    "durationMs": "number",
+                    "stderrBytes": "number",
+                    "stdoutBytes": "number"
+                  }
+                },
+                "fileCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "phases": {
+                  "array": {
+                    "durationMs": "number",
+                    "name": {
+                      "union": [
+                        "\"body-cache\"",
+                        "\"body-git\"",
+                        "\"body-split\"",
+                        "\"document-register\"",
+                        "\"freshness-after\"",
+                        "\"freshness-before\"",
+                        "\"patch-scan\"",
+                        "\"resolve\"",
+                        "\"serialize\"",
+                        "\"summary-git\""
+                      ]
+                    }
+                  }
+                },
+                "rowCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                }
+              }
+            ]
+          },
+          "executorId": "string",
+          "instanceId": "string",
+          "message": "string",
+          "project": "string",
+          "status": "\"not-git-repository\""
+        },
+        {
+          "diagnostics?": {
+            "union": [
+              "undefined",
+              {
+                "batchCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "bisectionCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "cacheHits?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "commands": {
+                  "array": {
+                    "command": "string",
+                    "durationMs": "number",
+                    "stderrBytes": "number",
+                    "stdoutBytes": "number"
+                  }
+                },
+                "fileCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "phases": {
+                  "array": {
+                    "durationMs": "number",
+                    "name": {
+                      "union": [
+                        "\"body-cache\"",
+                        "\"body-git\"",
+                        "\"body-split\"",
+                        "\"document-register\"",
+                        "\"freshness-after\"",
+                        "\"freshness-before\"",
+                        "\"patch-scan\"",
+                        "\"resolve\"",
+                        "\"serialize\"",
+                        "\"summary-git\""
+                      ]
+                    }
+                  }
+                },
+                "rowCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                }
+              }
+            ]
+          },
+          "executorId": "string",
+          "instanceId": "string",
+          "message": "string",
+          "project": "string",
+          "status": "\"unknown\""
+        }
+      ]
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

@@ -1,0 +1,80 @@
+{
+  "definition": {
+    "name": "cli.chats.rebuildSearch",
+    "version": 1,
+    "requires": [],
+    "mutation": true,
+    "management": false,
+    "timeoutMs": null,
+    "pool": "long",
+    "lane": "bulk"
+  },
+  "route": "POST /api/v1/chats/search/rebuild",
+  "client": {
+    "parameters": [],
+    "result": {
+      "status": {
+        "activeChat": {
+          "union": [
+            "null",
+            {
+              "position": "number",
+              "total": "number"
+            }
+          ]
+        },
+        "backlogRows": "number",
+        "chats": {
+          "failed": "number",
+          "indexed": "number",
+          "pending": "number",
+          "total": "number",
+          "unindexed": "number"
+        },
+        "lastErrorCode": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "phase": {
+          "union": [
+            "\"degraded\"",
+            "\"disabled\"",
+            "\"failed\"",
+            "\"opening\"",
+            "\"ready\"",
+            "\"rebuilding\""
+          ]
+        },
+        "queryStats": {
+          "admissionMaxMs": "number",
+          "admissionP50Ms": "number",
+          "admissionP95Ms": "number",
+          "maxMs": "number",
+          "p50Ms": "number",
+          "p95Ms": "number",
+          "rejectedBusy": "number",
+          "served": "number",
+          "timedOut": "number",
+          "totalMaxMs": "number",
+          "totalP50Ms": "number",
+          "totalP95Ms": "number"
+        },
+        "queuedJobs": "number",
+        "resync": {
+          "union": [
+            "null",
+            {
+              "completedChats": "number",
+              "totalChats": "number"
+            }
+          ]
+        },
+        "updatedAt": "string",
+        "version": "1"
+      },
+      "success": "true"
+    }
+  }
+}

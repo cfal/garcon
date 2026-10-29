@@ -78,6 +78,7 @@ const agents = {
   startSession: mock(() => undefined),
   currentTranscriptViewId: mock(async () => 'view-source'),
   assertExecutionModeSelectionSupported: mock(() => undefined),
+  assertNativeForkSupported: mock(() => undefined),
   normalizeThinkingModeForAgent: mock((_agentId, thinkingMode) => thinkingMode ?? 'none'),
   supportsFork: mock(() => true),
   supportsForkAtMessage: mock(() => true),

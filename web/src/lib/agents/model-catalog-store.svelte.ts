@@ -18,7 +18,6 @@ import {
 	type AgentSettingDescriptor,
 	type AgentSettingsEnvelope,
 } from '$shared/agent-integration';
-import { createEmptyAgentSettings } from '$shared/agent-settings';
 import {
 	ANY_FILE_ATTACHMENT_MIME_TYPE,
 	type FileAttachmentMimeTypes,
@@ -77,6 +76,7 @@ type AgentModels = Record<string, ModelOption[]>;
 type AgentMetadataMap = Record<string, AgentMetadata>;
 
 interface ModelCatalogSnapshot {
+	executorInstanceId: string | null;
 	agentModels: AgentModels;
 	agentMetadata: AgentMetadataMap;
 	apiProviderCatalog: ApiProviderCatalogEntry[];
@@ -186,15 +186,13 @@ function normalizeSettingDescriptors(value: unknown): AgentSettingDescriptor[] {
 	});
 }
 
-function normalizeDefaultSettings(
+function requireDefaultSettings(
 	agentId: string,
 	value: unknown,
-	fallback?: AgentSettingsEnvelope,
 ): AgentSettingsEnvelope {
 	const parsed = parseAgentSettingsEnvelope(value);
 	if (parsed?.ownerId === agentId) return parsed;
-	if (fallback?.ownerId === agentId) return fallback;
-	return createEmptyAgentSettings(agentId);
+	throw new Error('Invalid provider defaults in model catalog');
 }
 
 function normalizeTemplateId(value: unknown): ApiProviderTemplateId | undefined {
@@ -312,7 +310,7 @@ function normalizeAgentMetadataMap(agentMetadata: AgentMetadataMap): AgentMetada
 						supportedPermissionModes: normalizePermissionModes(metadata.supportedPermissionModes),
 						supportedThinkingModes: normalizeThinkingModes(metadata.supportedThinkingModes),
 						settings: normalizeSettingDescriptors(metadata.settings),
-						defaultSettings: normalizeDefaultSettings(id, metadata.defaultSettings),
+						defaultSettings: requireDefaultSettings(id, metadata.defaultSettings),
 						defaultModel: metadata.defaultModel ?? '',
 					},
 				];
@@ -321,12 +319,14 @@ function normalizeAgentMetadataMap(agentMetadata: AgentMetadataMap): AgentMetada
 }
 
 function parseCatalogResponse(data: unknown): {
+	executorInstanceId: string;
 	agentModels: AgentModels;
 	agentMetadata: AgentMetadataMap;
 	apiProviderCatalog: ApiProviderCatalogEntry[];
 } | null {
 	if (!data || typeof data !== 'object') return null;
 	const root = data as Record<string, unknown>;
+	if (typeof root.executorInstanceId !== 'string' || !root.executorInstanceId) return null;
 	const catalog = root.catalog;
 	if (!catalog || typeof catalog !== 'object') return null;
 	const inner = catalog as Record<string, unknown>;
@@ -362,7 +362,7 @@ function parseCatalogResponse(data: unknown): {
 			supportedPermissionModes: normalizePermissionModes(entry.supportedPermissionModes),
 			supportedThinkingModes: normalizeThinkingModes(entry.supportedThinkingModes),
 			settings: normalizeSettingDescriptors(entry.settings),
-			defaultSettings: normalizeDefaultSettings(id, entry.defaultSettings),
+			defaultSettings: requireDefaultSettings(id, entry.defaultSettings),
 			defaultModel: typeof entry.defaultModel === 'string' ? entry.defaultModel : '',
 		};
 
@@ -374,6 +374,7 @@ function parseCatalogResponse(data: unknown): {
 	}
 
 	return {
+		executorInstanceId: root.executorInstanceId,
 		agentModels,
 		agentMetadata,
 		apiProviderCatalog: normalizeApiProviders(inner.apiProviders),
@@ -382,6 +383,7 @@ function parseCatalogResponse(data: unknown): {
 
 function emptySnapshot(): ModelCatalogSnapshot {
 	return {
+		executorInstanceId: null,
 		agentModels: {},
 		agentMetadata: {},
 		apiProviderCatalog: [],
@@ -392,7 +394,7 @@ function emptySnapshot(): ModelCatalogSnapshot {
 }
 
 function normalizeSnapshot(parsed: Record<string, unknown>): ModelCatalogSnapshot {
-	if (parsed.schemaVersion !== 2) return emptySnapshot();
+	if (parsed.schemaVersion !== 3 || typeof parsed.executorInstanceId !== 'string' || !parsed.executorInstanceId) return emptySnapshot();
 	if (!parsed.agentMetadata || typeof parsed.agentMetadata !== 'object'
 		|| Array.isArray(parsed.agentMetadata)
 		|| !Object.values(parsed.agentMetadata).every(hasAgentExecutionMetadata)) return emptySnapshot();
@@ -407,6 +409,7 @@ function normalizeSnapshot(parsed: Record<string, unknown>): ModelCatalogSnapsho
 		typeof parsed.lastValidatedAt === 'number' ? parsed.lastValidatedAt : lastFetchedAt;
 
 	return {
+		executorInstanceId: parsed.executorInstanceId,
 		agentModels,
 		agentMetadata,
 		apiProviderCatalog,
@@ -441,33 +444,16 @@ function readPersisted(executorId: string): ModelCatalogSnapshot {
 }
 
 function persist(executorId: string, snapshot: ModelCatalogSnapshot): void {
-	const persisted = { ...snapshot, schemaVersion: 2 };
+	const persisted = { ...snapshot, schemaVersion: 3 };
 	if (executorId === 'local') setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog, JSON.stringify(persisted));
 	else {
-		const snapshots = Object.fromEntries(Object.entries(readExecutorSnapshots()).map(([id, value]) => [id, { ...value, schemaVersion: 2 }]));
+		const snapshots = Object.fromEntries(Object.entries(readExecutorSnapshots()).map(([id, value]) => [id, { ...value, schemaVersion: 3 }]));
 		setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors, JSON.stringify({ ...snapshots, [executorId]: persisted }));
 	}
 }
 
-interface CatalogApplyResult {
-	agentModels: AgentModels;
-	agentMetadata: AgentMetadataMap;
-	apiProviderCatalog: ApiProviderCatalogEntry[];
-}
-
-function applyCatalogResult(
-	catalogResult: NonNullable<ReturnType<typeof parseCatalogResponse>>,
-): CatalogApplyResult {
-	const agentModels = catalogResult.agentModels;
-	const agentMetadata = normalizeAgentMetadataMap(catalogResult.agentMetadata);
-	return {
-		agentModels,
-		agentMetadata,
-		apiProviderCatalog: catalogResult.apiProviderCatalog,
-	};
-}
-
 export class ModelCatalogStore {
+	executorInstanceId = $state<string | null>(null);
 	agentModels = $state<AgentModels>({});
 	agentMetadata = $state<AgentMetadataMap>({});
 	apiProviderCatalog = $state<ApiProviderCatalogEntry[]>([]);
@@ -480,45 +466,55 @@ export class ModelCatalogStore {
 	#syncPromise: Promise<void> | null = null;
 	#lastSyncAttemptAt = 0;
 	#requestVersion = 0;
-	#executorAvailability = new Map<string, string>();
 
-	constructor(readonly executorId = 'local', private readonly catalogs = new Map<string, ModelCatalogStore>()) {
+	constructor(
+		readonly executorId = 'local',
+		private readonly catalogs = new Map<string, ModelCatalogStore>(),
+		private readonly executors = new Map<string, ExecutorSnapshot>(),
+	) {
 		this.catalogs.set(executorId, this);
 		this.hydrateFromStorage();
 	}
 
 	forExecutor(executorId?: string | null): ModelCatalogStore {
 		const id = effectiveExecutorId(executorId);
-		return this.catalogs.get(id) ?? new ModelCatalogStore(id, this.catalogs);
+		return this.catalogs.get(id) ?? new ModelCatalogStore(id, this.catalogs, this.executors);
 	}
 
 	get isValidated(): boolean {
-		return this.lastValidatedAt !== null && this.error === null;
+		return this.executorInstanceId !== null && this.lastValidatedAt !== null && this.error === null;
 	}
 
 	reconcileExecutors(executors: readonly ExecutorSnapshot[]): void {
 		const ids = new Set(executors.map((executor) => executor.id));
 		const persisted = readExecutorSnapshots();
 		for (const id of Object.keys(persisted)) if (!ids.has(id)) delete persisted[id];
-		for (const id of this.#executorAvailability.keys()) if (!ids.has(id)) this.#executorAvailability.delete(id);
+		for (const id of this.executors.keys()) if (!ids.has(id)) this.executors.delete(id);
 		for (const [id, catalog] of this.catalogs) {
 			if (ids.has(id) || id === 'local') continue;
 			catalog.invalidate();
 			this.catalogs.delete(id);
 		}
 		for (const executor of executors) {
-			const availability = JSON.stringify([executor.enabled, executor.availability, executor.instanceId]);
-			const previous = this.#executorAvailability.get(executor.id);
-			if (previous !== undefined && availability !== previous) {
+			const previous = this.executors.get(executor.id);
+			const cachedInstance = this.catalogs.get(executor.id)?.executorInstanceId ?? persisted[executor.id]?.executorInstanceId;
+			const executorChanged = previous && (
+				executor.enabled !== previous.enabled
+				|| executor.availability !== previous.availability
+				|| executor.instanceId !== previous.instanceId
+			);
+			const cachedInstanceChanged = cachedInstance && cachedInstance !== executor.instanceId;
+			const initiallyUnavailable = !previous && (!executor.enabled || executor.availability !== 'ready');
+			if (executorChanged || cachedInstanceChanged || initiallyUnavailable) {
 				if (executor.id === 'local') {
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog);
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
 				} else delete persisted[executor.id];
 				this.catalogs.get(executor.id)?.invalidate();
 			}
-			this.#executorAvailability.set(executor.id, availability);
+			this.executors.set(executor.id, executor);
 		}
-		const snapshots = Object.fromEntries(Object.entries(persisted).map(([id, value]) => [id, { ...value, schemaVersion: 2 }]));
+		const snapshots = Object.fromEntries(Object.entries(persisted).map(([id, value]) => [id, { ...value, schemaVersion: 3 }]));
 		setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors, JSON.stringify(snapshots));
 	}
 
@@ -530,6 +526,7 @@ export class ModelCatalogStore {
 		this.lastValidatedAt = null;
 		this.lastFetchedAt = null;
 		this.etag = null;
+		this.executorInstanceId = null;
 		this.version += 1;
 	}
 
@@ -570,8 +567,8 @@ export class ModelCatalogStore {
 		return this.agentMetadata[agentId]?.settings ?? [];
 	}
 
-	getDefaultAgentSettings(agentId: SessionAgentId): AgentSettingsEnvelope {
-		return this.agentMetadata[agentId]?.defaultSettings ?? createEmptyAgentSettings(agentId);
+	getDefaultAgentSettings(agentId: SessionAgentId): AgentSettingsEnvelope | null {
+		return this.agentMetadata[agentId]?.defaultSettings ?? null;
 	}
 
 	getPermissionModes(agentId: SessionAgentId): readonly PermissionMode[] {
@@ -718,6 +715,7 @@ export class ModelCatalogStore {
 
 	hydrateFromStorage(): void {
 		const snapshot = readPersisted(this.executorId);
+		this.executorInstanceId = snapshot.executorInstanceId;
 		this.agentModels = snapshot.agentModels;
 		this.agentMetadata = snapshot.agentMetadata;
 		this.apiProviderCatalog = snapshot.apiProviderCatalog;
@@ -756,6 +754,7 @@ export class ModelCatalogStore {
 	}
 
 	async #syncWithServer(options: { force?: boolean }, requestVersion: number): Promise<void> {
+		const expectedInstanceId = this.executors.get(this.executorId)?.instanceId;
 		this.isRefreshing = true;
 
 		try {
@@ -764,6 +763,7 @@ export class ModelCatalogStore {
 			const responseEtag = response.headers?.get?.('etag') ?? null;
 
 			if (response.status === 304) {
+				this.#assertResponseInstance(this.executorInstanceId, expectedInstanceId);
 				this.etag = responseEtag ?? this.etag;
 				this.lastValidatedAt = Date.now();
 				this.error = null;
@@ -778,14 +778,12 @@ export class ModelCatalogStore {
 			if (requestVersion !== this.#requestVersion) return;
 
 			const catalogResult = parseCatalogResponse(data);
-			if (catalogResult && Object.keys(catalogResult.agentMetadata).length > 0) {
-				const applied = applyCatalogResult(catalogResult);
-				this.agentModels = applied.agentModels;
-				this.agentMetadata = applied.agentMetadata;
-				this.apiProviderCatalog = applied.apiProviderCatalog;
-			} else {
-				throw new Error('Model catalog response is invalid');
-			}
+			if (!catalogResult) throw new Error('Model catalog response is invalid');
+			this.#assertResponseInstance(catalogResult.executorInstanceId, expectedInstanceId);
+			this.executorInstanceId = catalogResult.executorInstanceId;
+			this.agentModels = catalogResult.agentModels;
+			this.agentMetadata = catalogResult.agentMetadata;
+			this.apiProviderCatalog = catalogResult.apiProviderCatalog;
 
 			const now = Date.now();
 			this.etag = responseEtag;
@@ -813,8 +811,17 @@ export class ModelCatalogStore {
 		return apiFetch(url);
 	}
 
+	#assertResponseInstance(instanceId: string | null, expected: string | null | undefined): void {
+		const current = this.executors.get(this.executorId);
+		if (!instanceId || (expected && instanceId !== expected)
+			|| (current && (!current.enabled || current.availability !== 'ready' || instanceId !== current.instanceId))) {
+			throw new Error('Executor inventory changed. Refresh and try again.');
+		}
+	}
+
 	#currentSnapshot(): ModelCatalogSnapshot {
 		return {
+			executorInstanceId: this.executorInstanceId,
 			agentModels: this.agentModels,
 			agentMetadata: this.agentMetadata,
 			apiProviderCatalog: this.apiProviderCatalog,

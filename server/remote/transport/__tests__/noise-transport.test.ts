@@ -1,7 +1,8 @@
+import { TestWebSocketLink as WebSocketLink } from '../../__tests__/test-session-transport.js';
 import { afterEach, expect, test } from 'bun:test';
 import { connectNoiseWebSocket, createNoiseServer } from '@cfal/noise-ws';
 import type { ServerWebSocket } from 'bun';
-import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../websocket-link.js';
+import { EXECUTOR_NOISE_CONTEXT } from '../websocket-link.js';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
 const options = { secret, executorId: 'synthetic-executor', noTls: true, redialDelaysMs: [20] };

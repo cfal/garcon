@@ -1,0 +1,57 @@
+{
+  "definition": {
+    "name": "projects.inspect",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "includeGitRepository?": {
+        "union": [
+          "false",
+          "true",
+          "undefined"
+        ]
+      },
+      "projectPath": "string"
+    },
+    "result": {
+      "isGitRepository?": {
+        "union": [
+          "false",
+          "true",
+          "undefined"
+        ]
+      },
+      "resolution": {
+        "union": [
+          {
+            "effectiveProjectKey": "string",
+            "kind": "\"available\""
+          },
+          {
+            "kind": "\"unavailable\"",
+            "reason": {
+              "union": [
+                "\"not-a-directory\"",
+                "\"not-found\"",
+                "\"outside-base\"",
+                "\"permission-denied\""
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

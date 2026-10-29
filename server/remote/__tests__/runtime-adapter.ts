@@ -1,3 +1,4 @@
+import { TestWebSocketLink as WebSocketLink } from './test-session-transport.js';
 import type { ExecutionRuntimeApi } from '@garcon/server-agent-interface';
 import { RemoteExecutorClient, type RemoteExecutorClientOptions } from '../client/executor-client.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
@@ -7,7 +8,7 @@ import { ExecutorRpc } from '../transport/rpc.js';
 import { ExecutorRpcConnection } from '../transport/rpc-connection.js';
 import { RpcAdmissionBudgets } from '../transport/rpc-admission.js';
 import type { SessionTransport } from '../transport/session-transport.js';
-import { WebSocketLink } from '../transport/websocket-link.js';
+
 
 export async function connectRemoteExecutor(
   link: WebSocketLink,
@@ -16,7 +17,7 @@ export async function connectRemoteExecutor(
 ) {
   if (!link.executorId) throw new Error('A controller link is required');
   const ready = Promise.withResolvers<void>();
-  const executor = new RemoteExecutorClient(link.executorId, link, setupRpc, undefined, null, options);
+  const executor = new RemoteExecutorClient(link.executorId, link, setupRpc, undefined, options);
   const unsubscribe = executor.onAvailabilityChanged(value => {
     if (value === 'ready') ready.resolve();
     if (value === 'disposed') ready.reject(new Error('Executor disposed before readiness'));
@@ -69,6 +70,6 @@ export async function runtimeAdapter(runtime: ExecutionRuntimeApi, backend: Runt
     relay.dispose();
     journal.dispose();
   };
-  try { return { executor: await connected, dispose }; }
+  try { return { executor: (await connected).runtime, dispose }; }
   catch (error) { await dispose(); throw error; }
 }

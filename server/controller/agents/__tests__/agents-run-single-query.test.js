@@ -14,6 +14,7 @@ function makeRouter(overrides = {}) {
       id: 'test',
       supportedThinkingModes: overrides.supportedThinkingModes ?? ['none', 'xhigh'],
     },
+    producers: { scope: { executorId: 'local', instanceId: 'synthetic-instance', integrationId: 'test' } },
     settings: {
       defaults: mock(() => envelope('test', { defaulted: true })),
       parse: mock((input) => input),
@@ -39,6 +40,8 @@ function makeRouter(overrides = {}) {
     resolveFileMentions: resolveFileMentionsInCommand,
     registry: { getChat: mock(() => null) },
     directory: {
+      requireOperations: mock(() => undefined),
+      supportsOperations: () => true,
       require: mock((id) => {
         if (id !== 'test') throw new Error(`Unknown integration: ${id}`);
         return integration;
@@ -59,6 +62,17 @@ function makeRouter(overrides = {}) {
 }
 
 describe('AgentRuntimeRouter.runSingleQuery', () => {
+  it.each([null, 'malformed', { ownerId: 'test', schemaVersion: 9, values: {} }])('never substitutes defaults for supplied incompatible settings: %j', async (agentSettings) => {
+    const { router, integration, run } = makeRouter();
+    integration.settings.parse.mockImplementation(() => { throw new Error('Incompatible settings'); });
+    await expect(router.runSingleQuery('prompt', {
+      agentId: 'test', agentSettings, model: 'endpoint:model', apiProviderId: 'provider', modelEndpointId: 'endpoint',
+    })).rejects.toThrow('Incompatible settings');
+    expect(integration.settings.parse).toHaveBeenCalledWith(agentSettings);
+    expect(integration.settings.defaults).not.toHaveBeenCalled();
+    expect(integration.endpoints.validate).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
   it('does not convert an incomplete explicit provider selection into native execution', async () => {
     const { router, endpointResolver, run } = makeRouter();
     endpointResolver.resolveSelection.mockImplementation(() => { throw new Error('Selection incomplete'); });

@@ -1,3 +1,4 @@
+import { CLI_BOOTSTRAP_VERSION, CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 import { expect, spyOn, test } from 'bun:test';
 import { GarconClient, GarconHttpError } from '../garcon-client.js';
 
@@ -13,7 +14,7 @@ const mutations = [
 
 function harness(reply: () => Response | Promise<Response>) {
   let submissions = 0;
-  const client = new GarconClient({
+  const client = new GarconClient({ protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS },
     baseUrl: 'http://localhost:8080', instanceId: 'instance', endpointInstanceId: 'instance',
     defaultExecutorId: 'local', workspaceName: 'default', workspaceDir: '/workspace', localCapability: 'synthetic',
     fetch: Object.assign(async (_url: RequestInfo | URL, init?: RequestInit) => {
@@ -56,7 +57,7 @@ test.each(mutations)('one-shot mutation preserves definitive rejections and pref
 });
 
 test('failed tag recovery is not described as a submitted mutation', async () => {
-  const client = new GarconClient({
+  const client = new GarconClient({ protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS },
     baseUrl: 'http://localhost:8080', instanceId: 'instance', endpointInstanceId: 'instance',
     defaultExecutorId: 'local', workspaceName: 'default', workspaceDir: '/workspace', localCapability: 'synthetic',
     fetch: Object.assign(async () => { throw new Error('Synthetic preflight failure'); }, { preconnect() {} }),

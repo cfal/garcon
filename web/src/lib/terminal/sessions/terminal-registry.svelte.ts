@@ -5,6 +5,8 @@ import {
 	terminateTerminal,
 } from '$lib/api/terminals.js';
 import { ApiError } from '$lib/api/client.js';
+import { executorSupports } from '$shared/executors';
+import type { ExecutorOperation } from '$shared/executor-contracts';
 import type { TerminalRuntimeOptions } from '$lib/terminal/runtime/terminal-runtime.svelte.js';
 import { TerminalTransport } from '$lib/ws/terminal-transport.svelte.js';
 import type { TerminalMetadata, TerminalStreamServerMessage } from '$shared/terminal';
@@ -15,10 +17,12 @@ import { ModuleImportError } from '$lib/utils/module-import-error.js';
 import * as m from '$lib/paraglide/messages.js';
 import { parseTerminalReference } from '$shared/terminal-identity';
 import { createRandomId } from '$lib/utils/random-id.js';
-import { TERMINAL_SESSION_LIMIT, terminalIdForMessage } from '$shared/terminal';
+import { terminalIdForMessage } from '$shared/terminal';
 import { terminalDisplayName } from './terminal-display-name.js';
+import { projectTerminalHosts } from './terminal-hosts.js';
 import { TerminalOutputFragments, decodeTerminalOutput } from './terminal-output-fragments.js';
 import type {
+	PendingTerminalCreate,
 	TerminalAttachmentState,
 	TerminalClientSession,
 	TerminalExecutorInventory,
@@ -37,16 +41,6 @@ export type {
 } from './terminal-registry-types.js';
 
 export const TERMINAL_CREATE_RETRY_WINDOW_MS = 10 * 60 * 1000;
-
-interface PendingTerminalCreate {
-	executorId: string;
-	terminalRuntimeId?: string;
-	requestId: string;
-	requestedInitialWorkingDirectory: string | null;
-	startedAt: number;
-	requiresList: boolean;
-	timer: ReturnType<typeof setTimeout> | null;
-}
 
 async function loadRuntime(): Promise<TerminalRuntimeModule> {
 	try {
@@ -80,6 +74,7 @@ export class TerminalRegistry {
 	readonly #lists = new Map<string, Promise<void>>();
 	readonly #executorVersions = new Map<string, symbol>();
 	readonly #executorAvailability = new Map<string, string>();
+	readonly #executorInstances = new Map<string, string | null>();
 	readonly #attachmentIds = new Map<string, string>();
 	readonly #gapRecovery = new Set<string>();
 	readonly #drainingOutput = new Set<string>();
@@ -139,38 +134,21 @@ export class TerminalRegistry {
 		return terminalDisplayName(metadata, this.executorLabel(this.executorIdFor(metadata.terminalId)));
 	}
 	get hosts() {
-		const executors = this.#deps.executors?.executors ?? [
-			{
-				id: 'local',
-				label: 'Local',
-				enabled: true,
-				availability: 'ready',
-				executorServices: { terminals: true },
-			},
-		];
-		return executors
-			.filter((executor) => executor.id === 'local' || executor.executorServices.terminals)
-			.toSorted((left, right) => {
-				if (left.id === 'local') return -1;
-				if (right.id === 'local') return 1;
-				return 0;
-			})
-			.map((executor) => ({
-				id: executor.id,
-				label: executor.label,
-				available: executor.enabled && executor.availability === 'ready' && executor.executorServices.terminals,
-				full:
-					this.orderedSessions.filter(
-						(session) => this.executorIdFor(session.metadata.terminalId) === executor.id,
-					).length >= TERMINAL_SESSION_LIMIT,
-			}));
+		return projectTerminalHosts(this.#deps.executors?.executors, this.orderedSessions);
 	}
 	get hasRemoteHosts(): boolean {
 		return this.hosts.some((host) => host.id !== 'local' && host.available);
 	}
 	canCreate(executorId: string): boolean {
+		const executors = this.#deps.executors;
+		if (executors && !executors.hasSnapshot && (executors.loading || executors.error === null)) return false;
 		const host = this.hosts.find((host) => host.id === executorId);
-		return Boolean(host?.available && !host.full);
+		return Boolean(host?.available && !host.full && this.#supports(executorId,
+			'terminals.create', 'terminals.attach', 'terminals.input', 'terminals.resize', 'terminals.terminate'));
+	}
+
+	#supports(executorId: string, ...operations: readonly ExecutorOperation[]): boolean {
+		return this.#deps.executors ? executorSupports(this.#deps.executors.executors.find(executor => executor.id === executorId), ...operations) : executorId === 'local';
 	}
 
 	get orderedSessions(): TerminalClientSession[] {
@@ -323,6 +301,7 @@ export class TerminalRegistry {
 		if (!attempt) {
 			const createdAttempt: PendingTerminalCreate = {
 				executorId,
+				executorInstanceId: this.#executorInstances.get(executorId),
 				terminalRuntimeId: this.executorInventories[executorId]?.runtimeId,
 				requestId,
 				requestedInitialWorkingDirectory,
@@ -344,7 +323,8 @@ export class TerminalRegistry {
 			attempt.requestedInitialWorkingDirectory !== requestedInitialWorkingDirectory
 		)
 			throw new Error('Terminal retry cannot change its target');
-		if (attempt.terminalRuntimeId !== this.executorInventories[executorId]?.runtimeId)
+		if (attempt.terminalRuntimeId !== this.executorInventories[executorId]?.runtimeId
+			|| attempt.executorInstanceId !== this.#executorInstances.get(executorId))
 			attempt.requiresList = true;
 		if (attempt.requiresList) {
 			await this.list(executorId);
@@ -360,7 +340,8 @@ export class TerminalRegistry {
 			if (this.#destroyed || !this.#executorVersions.has(executorId))
 				throw new ApiError(503, m.terminal_unavailable(), 'terminal-unavailable');
 			const observedRuntime = this.executorInventories[executorId]?.runtimeId;
-			if (observedRuntime && observedRuntime !== attempt.terminalRuntimeId)
+			if (attempt.executorInstanceId !== this.#executorInstances.get(executorId)
+				|| observedRuntime && observedRuntime !== attempt.terminalRuntimeId)
 				throw new ApiError(409, m.terminal_create_requires_list(), 'terminal-runtime-changed');
 			this.#upsert(result.terminal, 'detached');
 			this.#clearCreateAttempt(requestId);
@@ -845,6 +826,7 @@ export class TerminalRegistry {
 		if (!this.#isCurrentAttachment(terminalId, request)) return false;
 		if (
 			!this.#authSuspended &&
+			this.#supports(this.executorIdFor(terminalId), 'terminals.attach', 'terminals.input', 'terminals.resize') &&
 			this.hosts.some((host) => host.id === this.executorIdFor(terminalId) && host.available) &&
 			this.executorInventories[this.executorIdFor(terminalId)]?.status === 'ready' &&
 			this.#transport.status === 'connected'
@@ -920,6 +902,7 @@ export class TerminalRegistry {
 			if (known.has(executorId)) continue;
 			this.#loseExecutor(executorId);
 			this.#executorAvailability.delete(executorId);
+			this.#executorInstances.delete(executorId);
 			this.#executorVersions.delete(executorId);
 			delete this.executorInventories[executorId];
 			for (const id of Object.keys(this.sessions))
@@ -933,10 +916,13 @@ export class TerminalRegistry {
 		for (const host of hosts) {
 			const availability = host.available ? 'ready' : 'offline';
 			const previous = this.#executorAvailability.get(host.id);
+			const replaced = this.#executorInstances.has(host.id)
+				&& this.#executorInstances.get(host.id) !== host.instanceId;
 			this.#executorAvailability.set(host.id, availability);
-			if (previous === availability) continue;
-			if (!host.available) this.#loseExecutor(host.id);
-			else if (this.#initialized && !this.#authSuspended) {
+			this.#executorInstances.set(host.id, host.instanceId);
+			if (previous === availability && !replaced) continue;
+			if (!host.available || replaced) this.#loseExecutor(host.id);
+			if (host.available && this.#initialized && !this.#authSuspended) {
 				void this.#refreshExecutor(host.id);
 			}
 		}

@@ -68,6 +68,17 @@ also clears browser-local preferences and drafts, but not server-side chats.
 
 ## Executor Connections
 
+Exact method contracts replace package/revision equality. The first deployment is a
+coordinated breaking cutover: drain work and update controller, workers, CLI and
+browser together. There is no legacy handshake or preparatory migration release.
+Every existing RPC and CLI operation starts at v1; bootstrap 1 contains only
+connection mechanics. Later builds retain shared exact operation versions or
+refuse unsupported workflows without disabling unrelated services. The first
+artifact has A/A evidence only; source-distinct successors require the published
+baseline and mixed-artifact CI, including Docker distributions. Package version
+does not establish compatibility. See the
+[compatibility and rollback procedure](./executor/compatibility.md).
+
 Set `--base-path /garcon` with `--public-url https://controller.example.com/garcon/` (or the corresponding environment variables)
 on a proxied controller. The flag wins; the base path is retained when generating
 `wss://controller.example.com/garcon/executor/<id>`. Without configuration, the
@@ -149,7 +160,7 @@ worker cannot be recalled by revoking an assignment.
 
 Worker-launched terminals and provider subprocesses inherit the config root and `GARCON_RUNTIME=executor`. Ordinary shells default to automatic selection, described below. Access grants are workspace-wide, including permission decisions and agent execution on other hosts. Provider sandboxes may independently block loopback HTTP.
 
-Every executor connection requires [Noise NNpsk0 encryption](https://github.com/cfal/noise-ws/tree/6cf4a4b2ab25d300316a21c23cbcef1bb3558556), on both `ws:` and `wss:`. Each physical reconnect negotiates fresh keys before the existing authenticated Garcon session resumes. There is no plaintext fallback. Upgrade the controller and all workers together. The pinned library is new and unaudited; vector, interoperability, and integration tests are not a security audit. Bun 1.4.2 or later is required.
+Every executor connection requires [Noise NNpsk0 encryption](https://github.com/cfal/noise-ws/tree/6cf4a4b2ab25d300316a21c23cbcef1bb3558556), on both `ws:` and `wss:`. Each physical reconnect negotiates fresh keys before the existing authenticated Garcon session resumes. There is no plaintext fallback. Noise and paired lanes are mandatory in executor bootstrap 1. The pinned library is new and unaudited; vector, interoperability, and integration tests are not a security audit. Bun 1.4.2 or later is required.
 
 Remote executors use two sockets to the identical configured URL: primary control
 and subordinate bulk traffic. Proxies must allow both concurrent upgrades. Bulk
@@ -166,8 +177,8 @@ outcome, not permission to retry. See [Executor Transport](./executor/transport.
 
 WSS certificate verification is enabled by default. **Allow unverified TLS certificates** in an outbound executor's editor, or `--allow-unverified-tls` on a dialing worker, explicitly disables only outer certificate verification. Noise still requires the shared secret. Optional certificate pinning is deferred pending [Bun issue 43635](https://github.com/oven-sh/bun/issues/43635). Non-TLS connections require the separate **Allow connection without TLS** checkbox or `--no-tls` flag. HTTP metadata and traffic timing remain visible without outer TLS; Noise protects the execution payload, not the browser UI or other HTTP routes.
 
-Upgrade controller and workers together. Executor configuration and management
-payloads now use `noTls`, replacing `allowInsecureDevelopment`; stored executor
+Executor configuration and management
+payloads use `noTls`, replacing `allowInsecureDevelopment`; stored executor
 entries must use the new field before startup. The old startup flags are rejected,
 not treated as aliases. General controller HTTP TLS configuration is unchanged.
 
@@ -904,8 +915,8 @@ value before retrying; metadata and search-maintenance mutations are not retried
 automatically. Structured validation and pre-dispatch rejections remain definitive.
 The CLI reconciles any earlier uncertain tag save with `GET chats/tags`, then
 uses the atomic desired-set `PUT chats/tags`. Browser `PATCH chats/tags` retains
-its compare-and-set baseline. Upgrade controller and workers together for this
-forwarded API change (executor protocol revision 12).
+its compare-and-set baseline. These behaviors are frozen in the respective
+v1 direct/forwarded HTTP operation contracts.
 
 ## Export
 
@@ -1047,6 +1058,15 @@ These are runtime metadata, not configuration. Named and explicit-directory cont
 `auto` reads only these two locations. With one file, it selects that role. With both, it compares `startedAt` (not filesystem modification time), chooses the newer runtime, and prints a warning on **stderr** naming the selection and how to select a role explicitly. Equal timestamps choose the controller. Malformed or insecure files are errors, not candidates to silently skip. With neither file, the CLI reports that no runtime is available under the selected root. Explicit `controller` or `executor` selection reads only that role's file and does not warn about the other role.
 
 Timestamps express preference, not liveness. After selection, the CLI verifies the endpoint's identity with a capability-free HMAC challenge before sending its bearer token, then fetches authenticated controller context. A stale file, failed verification, denied gateway, or disconnected controller fails the command; it never triggers fallback to the other role or rereads a replacement during discovery. Selection and controller identity remain fixed throughout the invocation, including retries. Starting another role can change the target of a later `auto` invocation. An explicit role prevents switching roles, but still selects whichever process currently holds that role, potentially with a different controller workspace after restart. Warnings never contaminate JSON stdout.
+
+Context includes CLI bootstrap 1 and an exact operation-version catalog. The CLI
+checks its chosen workflow before sending and includes `X-Garcon-Contract`
+(for example `cli.chats.start@1`) beside its captured controller-instance header.
+Direct HTTP and executor gateways use the same selector and application codecs.
+Missing operation support returns definite `OPERATION_UNSUPPORTED` without
+effects; it never authorizes retrying an earlier uncertain mutation at another
+version. Pre-cutover CLIs without selectors are unsupported. Runtime proof and
+context verification remain selector-free bootstrap requests.
 
 Controllers export their resolved `GARCON_CONFIG_DIR` and `GARCON_RUNTIME=controller` to terminals and provider subprocesses. Workers export the same root setting and `GARCON_RUNTIME=executor`. Explicit CLI flags can override either value. Nested controllers and workers install their own role before spawning children. Generated follow-up commands and ticket retry prefixes carry the resolved root and explicit role, preserving their origin across separate invocations.
 

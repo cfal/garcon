@@ -5,6 +5,7 @@ import {
   type ThinkingMode,
 } from './chat-modes.js';
 import type { AgentSettingsEnvelope } from './agent-integration.js';
+import type { AgentSettingsPatchFence } from './agent-settings.js';
 import type { JsonObject } from './json.js';
 import type { AgentCommandImage } from './ws-requests.js';
 import type { ApiProtocol } from './api-providers.js';
@@ -484,20 +485,21 @@ export interface CompactCommandRequest {
   instructions?: string;
 }
 
-export interface ExecutionSettingsPatchRequest {
+export type ExecutionSettingsPatchRequest = {
   chatId: string;
-  expectedAgentOwnershipEpoch?: string;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
-  agentSettingsPatch?: JsonObject;
-}
+} & (
+  | ({ agentSettingsPatch: JsonObject; expectedAgentOwnershipEpoch: string } & AgentSettingsPatchFence)
+  | { agentSettingsPatch?: never; expectedAgentOwnershipEpoch?: string }
+);
 
 export interface ExecutionSettingsPatchResponse {
   success: true;
   chatId: string;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
-  agentSettings: AgentSettingsEnvelope;
+  agentSettings: AgentSettingsEnvelope | null;
 }
 
 export interface ModelPatchRequest {

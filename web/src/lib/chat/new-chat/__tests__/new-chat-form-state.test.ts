@@ -12,6 +12,7 @@ import type { GitWorktreeItem } from '$lib/api/git';
 import type { AgentMetadata, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
+import type { AgentSettingDescriptor } from '$shared/agent-integration';
 import {
 	findModelForSelection,
 	modelValueForSelection,
@@ -214,7 +215,12 @@ const mockModelCatalog = {
 		schemaVersion: 1,
 		values: agentId === 'claude' ? { thinkingMode: 'auto' } : {},
 	})),
-	getAgentSettingsDescriptors: vi.fn(() => []),
+	getAgentSettingsDescriptors: vi.fn((agentId: string): readonly AgentSettingDescriptor[] => [{
+		key: agentId === 'claude' ? 'thinkingMode' : 'effort',
+		label: 'Synthetic setting',
+		type: 'enum',
+		options: ['auto', 'high'].map(value => ({ value, label: value })),
+	}]),
 	getPermissionModes: vi.fn((agentId: string) =>
 		agentId === 'claude'
 			? ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan']
@@ -1130,6 +1136,49 @@ describe('NewChatFormState', () => {
 		},
 	);
 
+	it.each(['execution.start', 'producers.bind', 'lifecycle.start'])(
+		'preserves the draft when a ready replacement lacks %s', async (missing) => {
+			await formState.loadSettingsAndModels();
+			formState.selectExecutor(remoteExecutor.id);
+			formState.projectPath = '/worker/project';
+			formState.validationStatus = 'valid';
+			formState.firstMessage = 'Synthetic retained prompt';
+			const attachment = new File(['synthetic'], 'synthetic.png', { type: 'image/png' });
+			formState.attachedImages = [attachment];
+			const settings = structuredClone(formState.agentSettings);
+			expect(formState.canSubmit).toBe(true);
+
+			executors.applySnapshot([localExecutor, { ...remoteExecutor, instanceId: 'replacement',
+				operations: remoteExecutor.operations.filter(operation => operation !== missing) }]);
+			expect(formState.executorReady).toBe(true);
+			expect(formState.canSubmit).toBe(false);
+			expect(formState.buildConfig()).toBeNull();
+			expect(formState.error).toBe('This executor does not support starting chats.');
+			expect(formState.firstMessage).toBe('Synthetic retained prompt');
+			expect(formState.attachedImages).toEqual([attachment]);
+			expect(formState.agentSettings).toEqual(settings);
+			expect(formState.executorId).toBe(remoteExecutor.id);
+
+			executors.applySnapshot([localExecutor, { ...remoteExecutor, instanceId: 'restored' }]);
+			expect(formState.canSubmit).toBe(true);
+			expect(formState.buildConfig()?.firstMessage).toBe('Synthetic retained prompt');
+		},
+	);
+
+	it('reports an offline executor before missing operation support', async () => {
+		await formState.loadSettingsAndModels();
+		formState.selectExecutor(remoteExecutor.id);
+		formState.projectPath = '/worker/project';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Synthetic offline draft';
+		executors.applySnapshot([localExecutor, { ...remoteExecutor, availability: 'offline', operations: [] }]);
+		expect(formState.canSubmit).toBe(false);
+		expect(formState.modelSelectionError).toBe('Executor is unavailable');
+		expect(formState.buildConfig()).toBeNull();
+		expect(formState.error).toBe('Executor is unavailable');
+		expect(formState.firstMessage).toBe('Synthetic offline draft');
+	});
+
 	it('applies eligible startup recents after background catalog discovery', async () => {
 		const refresh = deferred<void>();
 		selectableAgentIds = [];
@@ -1436,7 +1485,7 @@ describe('NewChatFormState', () => {
 
 		expect(formState.permissionMode).toBe('default');
 		expect(formState.thinkingMode).toBe('none');
-		expect(formState.agentSettings.ownerId).toBe('claude');
+		expect(formState.agentSettings?.ownerId).toBe('claude');
 	});
 
 	it('does not replace manually touched execution modes when changing agent', async () => {

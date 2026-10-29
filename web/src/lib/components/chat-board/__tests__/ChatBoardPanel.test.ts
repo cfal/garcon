@@ -50,6 +50,7 @@ function chat(id = 'chat-1', title = 'Polish onboarding'): ChatSessionRecord {
 		isArchived: false,
 		isProcessing: true,
 		processingPhase: 'running',
+		hasAgentSession: false,
 		canReloadFromNativeHistory: false,
 		isUnread: true,
 		status: 'running',

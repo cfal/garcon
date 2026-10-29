@@ -56,9 +56,10 @@ async function withClear(run, { hasSession = true, frozenRows = 0 } = {}) {
   const clear = new TranscriptClearService(options);
   const request = () => { const head = ledger.highWatermark(chatId); return { chatId, transcriptViewId: head.viewId, lastOrdinal: head.ordinal, target: { kind: 'all' } }; };
   const native = [];
+  const integration = { descriptor: { id: 'test' }, settings: { parse: (value) => value, defaults: () => ({ ownerId: 'test', schemaVersion: 1, values: {} }) },
+    nativeHistoryImport: { async *load() { yield native.map(message => ({ message })); } } };
   const reload = new TranscriptReloadService({ ...options,
-    integrations: { require: () => ({ descriptor: { id: 'test' }, settings: { parse: (value) => value, defaults: () => ({ ownerId: 'test', schemaVersion: 1, values: {} }) },
-      nativeHistoryImport: { async *load() { yield native.map(message => ({ message })); } } }) },
+    integrations: { require: () => integration, requireOperations: () => undefined, supportsOperations: () => true },
     getCarryOverRevision: () => 'carry-v1:0',
   });
   try { await run({ ledger, root, clear, reload, request, registry, entry, execution, native, options, get lease() { return lease; } }); }

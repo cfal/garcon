@@ -120,6 +120,7 @@ function chat(
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		hasAgentSession: false,
 		canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: null,

@@ -1,0 +1,113 @@
+{
+  "definition": {
+    "name": "cli.chats.addRow",
+    "version": 1,
+    "requires": [],
+    "mutation": true,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "POST /api/v1/chats/rows",
+  "client": {
+    "parameters": [
+      {
+        "name": "request",
+        "type": {
+          "chatId": "string",
+          "clientMessageId": "string",
+          "clientRequestId": "string",
+          "content": "string",
+          "disclosure": {
+            "union": [
+              "\"collapsed\"",
+              "\"expanded\""
+            ]
+          },
+          "format": {
+            "union": [
+              "\"markdown\"",
+              "\"plain\""
+            ]
+          },
+          "presentation": {
+            "union": [
+              {
+                "customStyle": {
+                  "darkAccent": "`#${string}`",
+                  "lightAccent": "`#${string}`"
+                },
+                "style": "\"custom\""
+              },
+              {
+                "style": {
+                  "union": [
+                    "\"error\"",
+                    "\"info\"",
+                    "\"notice\""
+                  ]
+                }
+              }
+            ]
+          },
+          "title?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "transcriptViewId": "string"
+        }
+      }
+    ],
+    "result": {
+      "chatId": "string",
+      "clientMessageId": "string",
+      "clientRequestId": "string",
+      "commandType": "\"chat-row-add\"",
+      "disclosure": {
+        "union": [
+          "\"collapsed\"",
+          "\"expanded\""
+        ]
+      },
+      "format": {
+        "union": [
+          "\"markdown\"",
+          "\"plain\""
+        ]
+      },
+      "ordinal": "number",
+      "presentation": {
+        "union": [
+          {
+            "customStyle": {
+              "darkAccent": "`#${string}`",
+              "lightAccent": "`#${string}`"
+            },
+            "style": "\"custom\""
+          },
+          {
+            "style": {
+              "union": [
+                "\"error\"",
+                "\"info\"",
+                "\"notice\""
+              ]
+            }
+          }
+        ]
+      },
+      "status": {
+        "union": [
+          "\"appended\"",
+          "\"duplicate\""
+        ]
+      },
+      "success": "true",
+      "timestamp": "string",
+      "transcriptViewId": "string"
+    }
+  }
+}

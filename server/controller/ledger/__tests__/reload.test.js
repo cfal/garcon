@@ -899,6 +899,8 @@ async function withReload(run, options = {}) {
     flush: async () => options.flushRegistry?.(),
   };
   const integrations = {
+    requireOperations: () => options.requireOperations?.(),
+    supportsOperations: (_executorId, operations) => options.supportsOperations?.(operations) ?? true,
     get: () => integration,
     require: () => integration,
   };

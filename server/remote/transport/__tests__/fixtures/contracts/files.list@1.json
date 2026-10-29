@@ -1,0 +1,48 @@
+{
+  "definition": {
+    "name": "files.list",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "projectPath": "string"
+    },
+    "result": {
+      "files": {
+        "array": {
+          "name": "string",
+          "path": "string",
+          "relativePath?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "type": {
+            "union": [
+              "\"directory\"",
+              "\"file\""
+            ]
+          }
+        }
+      },
+      "truncated": {
+        "union": [
+          "false",
+          "true"
+        ]
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

@@ -1,0 +1,34 @@
+{
+  "definition": {
+    "name": "cli.providers.assign",
+    "version": 1,
+    "requires": [],
+    "mutation": true,
+    "management": true,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "PUT /api/v1/api-provider-assignments",
+  "client": {
+    "parameters": [
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "providerId",
+        "type": "string"
+      }
+    ],
+    "result": {
+      "array": {
+        "executorIds": {
+          "array": "string"
+        },
+        "id": "string",
+        "label": "string"
+      }
+    }
+  }
+}

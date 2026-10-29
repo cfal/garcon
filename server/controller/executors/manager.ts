@@ -1,3 +1,7 @@
+import { controllerContracts } from './controller-contracts.js';
+import { registerRpcHandlers } from '../../remote/transport/rpc-registrations.js';
+import { rpcWireV1 } from '../../remote/transport/rpc-wire-v1.js';
+import type { ExecutorRpc } from '../../remote/transport/rpc.js';
 import {
   AgentCallError, type AgentIntegration, type ExecutionRuntimeApi, type ExecutorInfo,
   type ExecutionProjectService, type ExecutorAvailability, type ExecutorCallOptions,
@@ -11,11 +15,14 @@ import { DomainError } from '../../common/domain-error.js';
 import { createLogger, type Logger } from '../../common/log.js';
 import { ExecutorConfigStore, type RemoteExecutorConfig } from './config-store.js';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.js';
-import { RemoteExecutorClient, type RemoteExecutorInventory } from '../../remote/client/executor-client.js';
+import { RemoteExecutorClient } from '../../remote/client/executor-client.js';
+import type { RemoteExecutorGeneration } from '../../remote/client/executor-generation.js';
 import { shouldLogLinkFailure, WebSocketLink } from '../../remote/transport/websocket-link.js';
 import { ExecutorSocketAdmission } from '../../remote/transport/socket-admission.js';
 import { ExecutorReferenceWrites } from './reference-writes.js';
 import type { ControllerCliDispatcher } from './cli-dispatcher.js';
+import type { AgentInventorySnapshot } from '../agents/directory.js';
+import { LOCAL_EXECUTOR_OPERATIONS, type ExecutorOperation } from '@garcon/common/executor-contracts';
 
 type LocalExecutorOptions = ConstructorParameters<typeof ExecutionRuntime>[0];
 
@@ -27,12 +34,8 @@ interface ManagedRemote {
   config: RemoteExecutorConfig;
   executor: RemoteExecutorClient | null;
   link: WebSocketLink | null;
-  integrations: IntegrationRegistry | null;
-  knownIntegrations: IntegrationRegistry | null;
-  inventory: RemoteExecutorInventory | null;
-  info: ExecutorInfo | null;
+  published: { readonly generation: RemoteExecutorGeneration; readonly integrations: IntegrationRegistry } | null;
   error: ExecutorSnapshot['lastError'];
-  preparation: object | null;
   cliLease: AbortController;
 }
 
@@ -81,13 +84,18 @@ export class ExecutorManager {
     this.#guards = guards;
   }
 
-  setCliDispatcher(dispatcher: ControllerCliDispatcher): void { this.#cliDispatcher = dispatcher; }
+  async setCliDispatcher(dispatcher: ControllerCliDispatcher): Promise<void> {
+    if (this.#cliDispatcher) throw new Error('Controller CLI registrations are already installed');
+    this.#cliDispatcher = dispatcher;
+    await this.#applyConfig();
+  }
 
   isReady(executorId: string): boolean {
     if (this.#disposed || this.#changing.has(executorId)) return false;
     if (executorId === LOCAL_EXECUTOR_ID) return this.local.availability === 'ready';
     const entry = this.#remotes.get(executorId);
-    return Boolean(entry?.config.enabled && !entry.preparation && entry.integrations && entry.executor?.availability === 'ready');
+    return Boolean(entry?.config.enabled && entry.published && !entry.published.generation.token.retired
+      && entry.executor?.generation === entry.published.generation && entry.executor.availability === 'ready');
   }
 
   isReconnecting(executorId: string): boolean {
@@ -101,20 +109,47 @@ export class ExecutorManager {
     if (!this.isReady(executorId) && !this.#holdsCalls(executorId)) {
       throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
     }
-    return executorId === LOCAL_EXECUTOR_ID ? this.local : this.#remotes.get(executorId)!.executor!;
+    return executorId === LOCAL_EXECUTOR_ID ? this.local : this.#remotes.get(executorId)!.published!.generation.runtime;
   }
 
   integrationsFor(executorId: string): IntegrationRegistry {
     this.requireExecutor(executorId);
-    return executorId === LOCAL_EXECUTOR_ID ? this.localIntegrations : this.#remotes.get(executorId)!.integrations!;
+    return executorId === LOCAL_EXECUTOR_ID ? this.localIntegrations : this.#remotes.get(executorId)!.published!.integrations;
+  }
+
+  captureInventory(executorId: string): AgentInventorySnapshot {
+    const runtime = this.requireExecutor(executorId);
+    const registry = this.integrationsFor(executorId);
+    const info = executorId === LOCAL_EXECUTOR_ID ? this.localInfo : this.#remotes.get(executorId)!.published!.generation.info;
+    return {
+      instanceId: info.instanceId,
+      integrations: registry.list(),
+      assertCurrent: () => {
+        if (this.requireExecutor(executorId) !== runtime || this.integrationsFor(executorId) !== registry) {
+          throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor inventory changed. Refresh and try again.', 503, true);
+        }
+      },
+    };
   }
 
   knownIntegration(target: AgentExecutionTarget): AgentIntegration | null {
-    return (target.executorId === LOCAL_EXECUTOR_ID ? this.localIntegrations : this.#remotes.get(target.executorId)?.knownIntegrations)?.get(target.agentId) ?? null;
+    return (target.executorId === LOCAL_EXECUTOR_ID ? this.localIntegrations : this.#remotes.get(target.executorId)?.published?.integrations)?.get(target.agentId) ?? null;
   }
 
   requireIntegration(target: AgentExecutionTarget): AgentIntegration {
     return this.integrationsFor(target.executorId).require(target.agentId);
+  }
+
+  requireOperations(executorId: string, operations: readonly ExecutorOperation[]): void {
+    this.requireExecutor(executorId);
+    if (!this.supportsOperations(executorId, operations)) {
+      throw new DomainError('OPERATION_UNSUPPORTED', 'This executor does not support the required operation contracts', 422);
+    }
+  }
+
+  supportsOperations(executorId: string, operations: readonly ExecutorOperation[]): boolean {
+    const supported = executorId === LOCAL_EXECUTOR_ID ? LOCAL_EXECUTOR_OPERATIONS : this.#remotes.get(executorId)?.published?.generation.operations;
+    return supported !== undefined && operations.every(operation => supported.includes(operation));
   }
 
   async projectService(executorId: string): Promise<ExecutionProjectService> {
@@ -135,20 +170,30 @@ export class ExecutorManager {
       allowControllerCli: true,
       allowExecutorManagement: true,
       availability: this.#disposed ? 'offline' : 'ready', projectBasePath: this.localInfo.projectBasePath,
-      instanceId: this.localInfo.instanceId,
+      instanceId: this.localInfo.instanceId, operations: LOCAL_EXECUTOR_OPERATIONS,
       bulk: null,
       lastError: null, executorServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: this.localInfo.services.directoryCreation },
-    }, ...[...this.#remotes.values()].map((entry): ExecutorSnapshot => ({
-      id: entry.config.id, label: entry.config.label, kind: 'remote', enabled: entry.config.enabled,
-      allowControllerCli: entry.config.allowControllerCli,
-      allowExecutorManagement: entry.config.allowExecutorManagement,
-      direction: entry.config.connection.kind,
-      availability: this.#snapshotAvailability(entry.config.id),
-      projectBasePath: entry.info?.projectBasePath ?? null, lastError: entry.error,
-      instanceId: entry.info?.instanceId ?? null,
-      bulk: entry.executor?.bulkStatus ?? { availability: 'offline', lastError: null },
-      executorServices: { files: entry.info?.services.files === true, git: entry.info?.services.git === true, gh: entry.info?.services.gh === true, terminals: entry.info?.services.terminals === true, directoryCreation: entry.info?.services.directoryCreation === true },
-    }))];
+    }, ...[...this.#remotes.values()].map((entry): ExecutorSnapshot => {
+      const info = entry.published?.generation.info;
+      const services = info?.services;
+      return {
+        id: entry.config.id, label: entry.config.label, kind: 'remote', enabled: entry.config.enabled,
+        allowControllerCli: entry.config.allowControllerCli,
+        allowExecutorManagement: entry.config.allowExecutorManagement,
+        direction: entry.config.connection.kind,
+        availability: this.#snapshotAvailability(entry.config.id),
+        projectBasePath: info?.projectBasePath ?? null, lastError: entry.error,
+        instanceId: info?.instanceId ?? null, operations: entry.published?.generation.operations ?? [],
+        bulk: entry.executor?.bulkStatus ?? { availability: 'offline', lastError: null },
+        executorServices: {
+          files: services?.files === true,
+          git: services?.git === true,
+          gh: services?.gh === true,
+          terminals: services?.terminals === true,
+          directoryCreation: services?.directoryCreation === true,
+        },
+      };
+    })];
   }
 
   inboundLink(executorId: string): WebSocketLink | null {
@@ -237,7 +282,7 @@ export class ExecutorManager {
     const previous = new Map(this.#remotes);
     for (const [id, entry] of this.#remotes) {
       const next = executors.find((executor) => executor.id === id);
-      if (next && sameConnector(entry.config, next)) {
+      if (next && sameConnector(entry.config, next) && (entry.link || !next.enabled || !this.#cliDispatcher)) {
         if (next.allowControllerCli !== entry.config.allowControllerCli
           || next.allowExecutorManagement !== entry.config.allowExecutorManagement) {
           entry.cliLease.abort();
@@ -254,14 +299,14 @@ export class ExecutorManager {
     for (const config of executors) {
       if (this.#remotes.has(config.id)) continue;
       const known = previous.get(config.id);
-      const entry: ManagedRemote = { config, executor: null, link: null, integrations: null,
-        knownIntegrations: known?.knownIntegrations ?? null, inventory: known?.inventory ?? null,
-        info: known?.info ?? null, error: null, preparation: null, cliLease: new AbortController() };
+      const entry: ManagedRemote = { config, executor: null, link: null,
+        published: known?.published ?? null, error: null, cliLease: new AbortController() };
       this.#remotes.set(config.id, entry);
       if (!this.config.isDurable(config.id)) {
         entry.error = { code: 'EXECUTOR_UNAVAILABLE', message: 'Executor configuration durability is unknown. Restart the controller.' };
       }
-      if (!config.enabled) continue;
+      if (!config.enabled || !this.#cliDispatcher) continue;
+      const dispatcher = this.#cliDispatcher;
       // Returns whether the executor's error changed.
       const recordError = (message: string): boolean => {
         if (!this.#current(entry) || entry.error?.message === message) return false;
@@ -273,7 +318,47 @@ export class ExecutorManager {
       const showLinkFailure = (message: string, reason?: string) => {
         if (recordError(reason ? `${message}: ${reason}` : message)) noticeLinkFailure();
       };
-      const link = new WebSocketLink({ role: 'controller', executorId: config.id, secret: config.secret,
+      const reverse = registerRpcHandlers(CONTROLLER_REVERSE_WIRES, async (rpc: ExecutorRpc, call, signal, guardReply, _undelivered, capture) => {
+        if (call.method === 'controllerCli.describe' || call.method === 'controllerCli.request') {
+          const lease = entry.cliLease;
+          const assertCurrent = () => {
+            const currentLane = rpc.transport.lane === 'primary' ? entry.link?.current : entry.link?.bulk;
+            if (!this.#current(entry) || this.#quiescing || currentLane !== rpc.transport
+              || entry.link?.current?.id !== rpc.transport.primarySessionId || !this.isReady(config.id)) {
+              throw new DomainError('CLI_CONTROLLER_UNAVAILABLE', 'Controller CLI connection is unavailable', 503, true);
+            }
+            if (call.integrationId !== '' || !entry.config.allowControllerCli || lease.signal.aborted || entry.cliLease !== lease) {
+              throw new DomainError('CLI_ACCESS_DENIED', 'Workspace CLI access is not enabled for this executor', 403);
+            }
+          };
+          assertCurrent();
+          const assertManagement = () => {
+            assertCurrent();
+            if (!entry.config.allowExecutorManagement) {
+              throw new DomainError('CLI_ACCESS_DENIED', 'Executor management is not enabled for this executor', 403);
+            }
+          };
+          const access = { executorId: config.id, rpc, signal: AbortSignal.any([signal, lease.signal]), assertCurrent, assertManagement };
+          if (call.method === 'controllerCli.describe') {
+            if (call.request !== null) throw new DomainError('VALIDATION_FAILED', 'Invalid CLI context request', 400);
+            return dispatcher.describe(access, guardReply);
+          }
+          return dispatcher.request(call.request, access, guardReply, capture.policy.cli);
+        }
+        if (call.method !== 'credentials.resolve' || !this.#current(entry)) {
+          throw new AgentCallError('rejected', 'Operation is not permitted on the controller');
+        }
+        const assertOrigin = () => {
+          const lane = rpc.transport.lane === 'primary' ? link.current : link.bulk;
+          if (!this.#current(entry) || lane !== rpc.transport) throw new AgentCallError('rejected', 'Executor credential origin expired');
+          entry.executor!.assertIntegrationOrigin(rpc, call.integrationId);
+        };
+        assertOrigin();
+        guardReply(assertOrigin);
+        return this.options.resolveCredential({ executorId: config.id, agentId: call.integrationId, reference: call.request.reference, signal });
+
+      });
+      const link = new WebSocketLink({ role: 'controller', contracts: controllerContracts(reverse, dispatcher.contracts.entries), executorId: config.id, secret: config.secret,
         noTls: config.noTls, allowUnverifiedTls: config.allowUnverifiedTls, socketAdmission: this.#socketAdmission });
       entry.link = link;
       link.onError((failure) => {
@@ -290,82 +375,28 @@ export class ExecutorManager {
         if (closure.lane === 'bulk' || closure.cause === 'local-close' || (closure.cause === 'session-retired' && entry.error !== null)) return;
         showLinkFailure('Executor connection lost', closure.reason);
       });
-      entry.executor = new RemoteExecutorClient(config.id, link, (rpc) => rpc.handle(async (call, signal, guardReply) => {
-        if (call.method === 'controllerCli.describe' || call.method === 'controllerCli.request') {
-          const lease = entry.cliLease;
-          const assertCurrent = () => {
-            const currentLane = rpc.transport.lane === 'primary' ? entry.link?.current : entry.link?.bulk;
-            if (!this.#current(entry) || this.#quiescing || currentLane !== rpc.transport
-              || entry.link?.current?.id !== rpc.transport.primarySessionId || !this.isReady(config.id)) {
-              throw new DomainError('CLI_CONTROLLER_UNAVAILABLE', 'Controller CLI connection is unavailable', 503, true);
-            }
-            if (call.integrationId !== '' || !entry.config.allowControllerCli || lease.signal.aborted || entry.cliLease !== lease) {
-              throw new DomainError('CLI_ACCESS_DENIED', 'Workspace CLI access is not enabled for this executor', 403);
-            }
-          };
-          assertCurrent();
-          if (!this.#cliDispatcher) throw new DomainError('CLI_CONTROLLER_UNAVAILABLE', 'Controller CLI is initializing', 503, true);
-          const assertManagement = () => {
-            assertCurrent();
-            if (!entry.config.allowExecutorManagement) {
-              throw new DomainError('CLI_ACCESS_DENIED', 'Executor management is not enabled for this executor', 403);
-            }
-          };
-          const access = { executorId: config.id, rpc, signal: AbortSignal.any([signal, lease.signal]), assertCurrent, assertManagement };
-          if (call.method === 'controllerCli.describe') {
-            if (call.request !== null) throw new DomainError('VALIDATION_FAILED', 'Invalid CLI context request', 400);
-            return this.#cliDispatcher.describe(access, guardReply);
-          }
-          return this.#cliDispatcher.request(call.request, access, guardReply);
-        }
-        if (call.method !== 'credentials.resolve' || !this.#current(entry)
-          || !this.options.integrations.some((integration) => integration.integrationId === call.integrationId)) {
-          throw new AgentCallError('rejected', 'Operation is not permitted on the controller');
-        }
-        return this.options.resolveCredential({ executorId: config.id, agentId: call.integrationId, reference: call.request.reference, signal });
-      }), reportError, entry.inventory, { logger: this.logger });
+      entry.executor = new RemoteExecutorClient(config.id, link, (rpc) => rpc.handle(reverse.bind(rpc)), reportError, { logger: this.logger, prepareGeneration: (generation) => {
+        const published = entry.published?.generation === generation ? entry.published : {
+          generation, integrations: new IntegrationRegistry({ instances: [...generation.integrations.values()] }),
+        };
+        return () => { entry.published = published; entry.error = null; };
+      } });
       entry.executor.onBulkChanged(() => { if (this.#current(entry)) this.#changed(); });
       entry.executor.onAvailabilityChanged((value) => {
         if (!this.#current(entry)) return;
-        if (value === 'ready') {
-          const preparation = {};
-          entry.preparation = preparation;
-          void this.#prepare(entry, preparation).catch(() => {
-            if (!this.#current(entry) || entry.preparation !== preparation) return;
-            reportError('Executor inventory could not be initialized');
-            link.current?.close(new Error('Executor inventory initialization failed'));
-          });
-        } else {
-          entry.preparation = null;
-          this.#publishAvailability(config.id, value);
-          this.#changed();
-        }
+        this.#publishAvailability(config.id, value);
+        this.#changed();
       });
       if (config.connection.kind === 'controller-connects') link.dial(config.connection.targetUrl);
     }
   }
 
-  async #prepare(entry: ManagedRemote, preparation: object): Promise<void> {
-    const executor = entry.executor!;
-    const info = await executor.getInfo();
-    const integrations = entry.integrations ?? new IntegrationRegistry({ instances: await Promise.all(info.integrationIds.map((id) => executor.getAgentIntegration(id))) });
-    if (!this.#current(entry) || entry.preparation !== preparation || executor.availability !== 'ready') return;
-    entry.info = info;
-    entry.integrations = integrations;
-    entry.knownIntegrations = integrations;
-    entry.inventory = executor.inventory;
-    entry.error = null;
-    entry.preparation = null;
-    this.#publishAvailability(entry.config.id, 'ready');
-    this.#changed();
-  }
-
-  // A reconnected session is being prepared while the client reports ready.
   #holdsCalls(executorId: string): boolean {
     if (this.#disposed || this.#changing.has(executorId)) return false;
     const entry = this.#remotes.get(executorId);
     const availability = entry?.executor?.availability;
-    return Boolean(entry?.config.enabled && entry.integrations && (availability === 'reconnecting' || availability === 'ready'));
+    return Boolean(entry?.config.enabled && entry.published && !entry.published.generation.token.retired
+      && entry.executor?.generation === entry.published.generation && availability === 'reconnecting');
   }
 
   #current(entry: ManagedRemote): boolean { return !this.#disposed && this.#remotes.get(entry.config.id) === entry; }
@@ -407,3 +438,5 @@ function sameConnector(left: RemoteExecutorConfig, right: RemoteExecutorConfig):
   return left.connection.kind !== 'controller-connects' || right.connection.kind !== 'controller-connects'
     || left.connection.targetUrl === right.connection.targetUrl;
 }
+
+export const CONTROLLER_REVERSE_WIRES = Object.freeze([rpcWireV1('credentials.resolve'), rpcWireV1('controllerCli.describe'), rpcWireV1('controllerCli.request')] as const);

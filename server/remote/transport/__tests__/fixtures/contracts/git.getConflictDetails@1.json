@@ -1,0 +1,193 @@
+{
+  "definition": {
+    "name": "git.getConflictDetails",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "file": "string",
+        "projectPath": "string"
+      }
+    },
+    "result": {
+      "base": {
+        "byteLength": "number",
+        "content": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "limitReason?": {
+          "union": [
+            "\"content-too-large\"",
+            "\"too-many-lines\"",
+            "undefined"
+          ]
+        },
+        "lineCount": "number",
+        "truncated": {
+          "union": [
+            "false",
+            "true"
+          ]
+        }
+      },
+      "diagnostics?": {
+        "union": [
+          "undefined",
+          {
+            "batchCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "bisectionCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "cacheHits?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "commands": {
+              "array": {
+                "command": "string",
+                "durationMs": "number",
+                "stderrBytes": "number",
+                "stdoutBytes": "number"
+              }
+            },
+            "fileCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "phases": {
+              "array": {
+                "durationMs": "number",
+                "name": {
+                  "union": [
+                    "\"body-cache\"",
+                    "\"body-git\"",
+                    "\"body-split\"",
+                    "\"document-register\"",
+                    "\"freshness-after\"",
+                    "\"freshness-before\"",
+                    "\"patch-scan\"",
+                    "\"resolve\"",
+                    "\"serialize\"",
+                    "\"summary-git\""
+                  ]
+                }
+              }
+            },
+            "rowCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            }
+          }
+        ]
+      },
+      "executorId": "string",
+      "instanceId": "string",
+      "ours": {
+        "byteLength": "number",
+        "content": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "limitReason?": {
+          "union": [
+            "\"content-too-large\"",
+            "\"too-many-lines\"",
+            "undefined"
+          ]
+        },
+        "lineCount": "number",
+        "truncated": {
+          "union": [
+            "false",
+            "true"
+          ]
+        }
+      },
+      "path": "string",
+      "theirs": {
+        "byteLength": "number",
+        "content": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "limitReason?": {
+          "union": [
+            "\"content-too-large\"",
+            "\"too-many-lines\"",
+            "undefined"
+          ]
+        },
+        "lineCount": "number",
+        "truncated": {
+          "union": [
+            "false",
+            "true"
+          ]
+        }
+      },
+      "truncated": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "working": {
+        "byteLength": "number",
+        "content": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "limitReason?": {
+          "union": [
+            "\"content-too-large\"",
+            "\"too-many-lines\"",
+            "undefined"
+          ]
+        },
+        "lineCount": "number",
+        "truncated": {
+          "union": [
+            "false",
+            "true"
+          ]
+        }
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

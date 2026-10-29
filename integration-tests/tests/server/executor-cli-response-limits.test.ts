@@ -1,7 +1,9 @@
+import { TestWebSocketLink as WebSocketLink, handleTestRpc } from '../../../server/remote/__tests__/test-session-transport.js';
 import { expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { CLI_CONTRACT_HEADER } from '../../../common/cli-contracts.js';
 import { ControllerCliDispatcher } from '../../../server/controller/executors/cli-dispatcher.js';
 import { CLI_EXECUTOR_ID } from '../../../server/remote/__tests__/cli-fixture.js';
 import { linkOptions } from '../../../server/remote/__tests__/integration-fixture.js';
@@ -9,7 +11,7 @@ import { startCliGateway } from '../../../server/remote/server/cli-gateway.js';
 import { CLI_REPLY_BYTES } from '../../../server/remote/transport/cli-protocol.js';
 import { ExecutorRpcConnection } from '../../../server/remote/transport/rpc-connection.js';
 import { RpcAdmissionBudgets } from '../../../server/remote/transport/rpc-admission.js';
-import { WebSocketLink } from '../../../server/remote/transport/websocket-link.js';
+
 
 for (const dialer of ['controller', 'worker'] as const) {
   test(`CLI HTTP gateway rejects and cancels oversized replies over Noise (${dialer} dials)`, async () => {
@@ -34,11 +36,15 @@ for (const dialer of ['controller', 'worker'] as const) {
     }), { headers: { 'Content-Type': 'application/json' } }) : Response.json({ output: 'small' });
     const dispatcher = new ControllerCliDispatcher({
       serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false,
-      routes: { '/api/v1/chats/export': { GET: respond }, '/api/v1/chats/run': { POST: respond } },
+      routes: {
+        '/api/v1/chats/export': { GET: respond }, '/api/v1/chats/run': { POST: respond },
+        '/api/v1/chats/turn-receipt': { GET: () => Response.json({ success: true }) },
+        '/api/v1/chats/stop': { POST: () => Response.json({ success: true }) },
+      },
     });
     controller.onSession(session => {
       const connection = new ExecutorRpcConnection(controller, session, { admission: controllerAdmission });
-      connection.onEndpoint(rpc => rpc.handle(async (call, signal, guard) => {
+      connection.onEndpoint(rpc => handleTestRpc(rpc, async (call, signal, guard) => {
         const access = { executorId: CLI_EXECUTOR_ID, rpc, signal, assertCurrent() {}, assertManagement() {} };
         if (call.method === 'controllerCli.describe') return dispatcher.describe(access, guard);
         if (call.method === 'controllerCli.request') return dispatcher.request(call.request, access, guard);
@@ -54,7 +60,8 @@ for (const dialer of ['controller', 'worker'] as const) {
       gateway = await startCliGateway({ dataDir: join(root, 'executor'), currentConnection: () => workerConnection });
       const call = (mutation: boolean) => fetch(`${gateway!.descriptor.baseUrl}/api/v1/chats/${mutation ? 'run' : 'export'}`, {
         method: mutation ? 'POST' : 'GET', body: mutation ? '{}' : undefined,
-        headers: { Authorization: `Bearer ${gateway!.descriptor.localCapability}`, 'X-Garcon-Server-Instance': 'controller', 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${gateway!.descriptor.localCapability}`, 'X-Garcon-Server-Instance': 'controller',
+          [CLI_CONTRACT_HEADER]: mutation ? 'cli.chats.run@1' : 'cli.chats.export@1', 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(5000),
       });
       for (const mutation of [false, true]) {

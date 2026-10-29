@@ -308,6 +308,7 @@
 		processingPhase: selectedIsProcessing ? 'running' : null,
 		isUnread: false,
 		canReloadFromNativeHistory: false,
+		hasAgentSession: selectedStatus !== 'draft',
 		status: selectedStatus,
 		agentOwnershipEpoch: selectedStatus === 'draft' ? null : 'epoch-1',
 		tags: [],

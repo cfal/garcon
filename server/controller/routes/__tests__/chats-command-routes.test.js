@@ -5,7 +5,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { AgentCallError, AgentIntegrationError } from '@garcon/server-agent-interface';
 
 let testBasePath;
 let workspaceDir;
@@ -417,6 +417,9 @@ function createRouteAgent(sessionOverrides = {}) {
   const agents = {
     hasAgent: mock(() => true),
     assertExecutorReady: mock(() => undefined),
+    assertExecutionSupported: mock(() => undefined),
+    assertNativeForkSupported: mock(() => undefined),
+    assertQueuedExecutionSupported: mock(() => undefined),
     assertAgentAvailable: mock(() => undefined),
     supportsFork: mock(() => true),
     supportsForkAtMessage: mock(() => true),
@@ -1635,6 +1638,8 @@ describe('REST chat command routes', () => {
         thinkingMode: 'ultra',
         agentSettingsPatch: {},
         expectedAgentOwnershipEpoch: 'source-epoch',
+        expectedExecutorInstanceId: 'synthetic-instance',
+        expectedSettingsSchemaVersion: 1,
       },
       'PATCH',
     );
@@ -1656,6 +1661,7 @@ describe('REST chat command routes', () => {
       }),
       'source-epoch',
       expect.any(AbortSignal),
+      { expectedExecutorInstanceId: 'synthetic-instance', expectedSettingsSchemaVersion: 1 },
     );
   });
 
@@ -1675,7 +1681,44 @@ describe('REST chat command routes', () => {
     expect(body.permissionMode).toBe('manualBypass');
     expect(agent.agents.updateSessionSettings).toHaveBeenCalledWith(CHAT_ID, {
       permissionMode: 'manualBypass',
-    }, undefined, expect.any(AbortSignal));
+    }, undefined, expect.any(AbortSignal), undefined);
+  });
+
+  it('PATCH /execution-settings represents absent provider settings as null', async () => {
+    const agent = createRouteAgent();
+    agent.registry.getChat(CHAT_ID).agentSettingsById = {};
+    const { response, body } = await callJson(agent.routes['/api/v1/chats/execution-settings'].PATCH,
+      { chatId: CHAT_ID, permissionMode: 'default' }, 'PATCH');
+    expect(response.status).toBe(200);
+    expect(body.agentSettings).toBeNull();
+    expect(agent.registry.getChat(CHAT_ID).agentSettingsById).toEqual({});
+  });
+
+  it.each(['expectedAgentOwnershipEpoch', 'expectedExecutorInstanceId', 'expectedSettingsSchemaVersion'])(
+    'PATCH /execution-settings requires %s before provider patch admission', async missing => {
+      const agent = createRouteAgent();
+      const request = { chatId: CHAT_ID, agentSettingsPatch: {}, expectedAgentOwnershipEpoch: 'source-epoch',
+        expectedExecutorInstanceId: 'synthetic-instance', expectedSettingsSchemaVersion: 1 };
+      delete request[missing];
+      const { response, body } = await callJson(agent.routes['/api/v1/chats/execution-settings'].PATCH, request, 'PATCH');
+      expect(response.status).toBe(422);
+      expect(body).toMatchObject({ errorCode: 'VALIDATION_FAILED', retryable: false });
+      expect(agent.agents.updateSessionSettings).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['not-dispatched', 'unknown'])('PATCH /execution-settings preserves %s delivery semantics', async outcome => {
+    const agent = createRouteAgent();
+    agent.agents.updateSessionSettings.mockRejectedValueOnce(new AgentCallError(outcome, 'Retired settings operation', 'STALE_RESOURCE'));
+    const { response, body } = await callJson(agent.routes['/api/v1/chats/execution-settings'].PATCH, {
+      chatId: CHAT_ID, permissionMode: 'default',
+    }, 'PATCH');
+    if (outcome === 'not-dispatched') {
+      expect(response.status).toBe(422);
+      expect(body).toMatchObject({ errorCode: 'VALIDATION_FAILED', retryable: false });
+    } else {
+      expect(body.errorCode).not.toBe('VALIDATION_FAILED');
+    }
   });
 
   it('PATCH /execution-settings returns 400 when chatId is missing', async () => {

@@ -1,0 +1,18 @@
+{
+  "definition": {
+    "name": "producer.notice",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "content": "string",
+    "runId": "string",
+    "title?": {
+      "union": [
+        "string",
+        "undefined"
+      ]
+    },
+    "type": "\"notice\""
+  }
+}

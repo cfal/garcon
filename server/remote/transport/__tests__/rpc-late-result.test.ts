@@ -1,6 +1,7 @@
+import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { expect, mock, test } from 'bun:test';
 import { ExecutorRpc } from '../rpc.js';
-import { SessionTransport } from '../session-transport.js';
+import { TestSessionTransport as SessionTransport } from '../../__tests__/test-session-transport.js';
 
 function fixture() {
   const sent: Array<{ type: string; id: string }> = [];
@@ -18,12 +19,12 @@ test('cancelled calls retain bounded cleanup until settlement and release budget
     const cancelled = new AbortController();
     const cleaned = Promise.withResolvers<void>();
     const onLateResult = mock(async () => {
-      const call = rpc.call('test', 'execution.runningSessions', null);
+      const call = rpc.call('test', RPC_V1['execution.runningSessions'], null);
       connection.receive(JSON.stringify({ type: 'result', id: sent.at(-1)!.id, value: [] }));
       await call;
       cleaned.resolve();
     });
-    const calls = Array.from({ length: 256 }, () => rpc.call('test', 'execution.runningSessions', null, {
+    const calls = Array.from({ length: 256 }, () => rpc.call('test', RPC_V1['execution.runningSessions'], null, {
       signal: cancelled.signal, onLateResult,
     }).catch((error: unknown) => error));
     const ids = sent.map(({ id }) => id);
@@ -33,7 +34,7 @@ test('cancelled calls retain bounded cleanup until settlement and release budget
         outcome: 'unknown', message: 'The request was cancelled after it was sent to the executor.',
       });
     }
-    await expect(rpc.call('test', 'execution.runningSessions', null)).rejects.toMatchObject({
+    await expect(rpc.call('test', RPC_V1['execution.runningSessions'], null)).rejects.toMatchObject({
       outcome: 'not-dispatched', message: 'The executor is handling too many requests. Try again shortly.',
     });
     connection.receive(JSON.stringify({ type: 'result', id: ids[0], value: [] }));
@@ -44,7 +45,7 @@ test('cancelled calls retain bounded cleanup until settlement and release budget
     connection.receive(JSON.stringify({ type: 'error', id: ids[1], error: {
       code: 'PROVIDER_FAILURE', message: 'cancelled', retryable: false,
     } }));
-    const admitted = rpc.call('test', 'execution.runningSessions', null);
+    const admitted = rpc.call('test', RPC_V1['execution.runningSessions'], null);
     connection.receive(JSON.stringify({ type: 'result', id: sent.at(-1)!.id, value: [] }));
     await expect(admitted).resolves.toEqual([]);
     expect(onLateResult).toHaveBeenCalledTimes(1);
@@ -55,11 +56,11 @@ test('normal results and cancellation before dispatch never invoke late cleanup'
   const { rpc, connection, sent, transport } = fixture();
   try {
     const onLateResult = mock(() => {});
-    await expect(rpc.call('test', 'execution.runningSessions', null, {
+    await expect(rpc.call('test', RPC_V1['execution.runningSessions'], null, {
       signal: AbortSignal.abort(), onLateResult,
     })).rejects.toMatchObject({ outcome: 'not-dispatched' });
     expect(sent).toHaveLength(0);
-    const call = rpc.call('test', 'execution.runningSessions', null, { onLateResult });
+    const call = rpc.call('test', RPC_V1['execution.runningSessions'], null, { onLateResult });
     connection.receive(JSON.stringify({ type: 'result', id: sent[0]!.id, value: [] }));
     await expect(call).resolves.toEqual([]);
     expect(onLateResult).not.toHaveBeenCalled();
@@ -70,7 +71,7 @@ test('deadline cancellation cleans up a late result', async () => {
   const { rpc, connection, sent, transport } = fixture();
   try {
     const cleaned = Promise.withResolvers<unknown>();
-    await expect(rpc.call('test', 'execution.runningSessions', null, {
+    await expect(rpc.call('test', RPC_V1['execution.runningSessions'], null, {
       timeoutMs: 1, onLateResult: (value) => { cleaned.resolve(value); },
     })).rejects.toMatchObject({ outcome: 'unknown', message: 'The executor did not reply in time.' });
     connection.receive(JSON.stringify({ type: 'result', id: sent[0]!.id, value: [] }));
@@ -83,7 +84,7 @@ test('retirement reports lost cleanup, including a result queued immediately bef
   const onLateResult = mock(() => {});
   const onLateResultLost = mock(() => {});
   const cancelled = new AbortController();
-  const calls = Array.from({ length: 2 }, () => rpc.call('test', 'execution.runningSessions', null, {
+  const calls = Array.from({ length: 2 }, () => rpc.call('test', RPC_V1['execution.runningSessions'], null, {
     signal: cancelled.signal, onLateResult, onLateResultLost,
   }).catch((error: unknown) => error));
   cancelled.abort();
@@ -101,9 +102,10 @@ test.each(['result', 'error'] as const)('a late %s settled before retirement doe
   const { rpc, connection, sent, transport } = fixture();
   const onLateResult = mock(() => {});
   const onLateResultLost = mock(() => {});
+  const onLateError = mock(() => {});
   const cancelled = new AbortController();
-  const call = rpc.call('test', 'execution.runningSessions', null, {
-    signal: cancelled.signal, onLateResult, onLateResultLost,
+  const call = rpc.call('test', RPC_V1['execution.runningSessions'], null, {
+    signal: cancelled.signal, onLateResult, onLateError, onLateResultLost,
   }).catch((error: unknown) => error);
   cancelled.abort();
   await call;
@@ -113,5 +115,7 @@ test.each(['result', 'error'] as const)('a late %s settled before retirement doe
   await Promise.resolve();
   transport.close();
   expect(onLateResult).toHaveBeenCalledTimes(type === 'result' ? 1 : 0);
+  expect(onLateError).toHaveBeenCalledTimes(type === 'error' ? 1 : 0);
+  if (type === 'error') expect(onLateError).toHaveBeenCalledWith(expect.objectContaining({ code: 'PROVIDER_FAILURE' }));
   expect(onLateResultLost).not.toHaveBeenCalled();
 });

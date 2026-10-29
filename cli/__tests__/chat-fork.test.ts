@@ -1,3 +1,4 @@
+import { CLI_BOOTSTRAP_VERSION, CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 import { describe, expect, test } from 'bun:test';
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import type {
@@ -49,6 +50,7 @@ function chat(id = TARGET_CHAT_ID): ChatListEntry {
     isActive: true,
     isProcessing: true,
     processingPhase: 'running',
+    hasAgentSession: false,
     canReloadFromNativeHistory: false,
     isUnread: false,
   };
@@ -91,7 +93,7 @@ function targetExistsResponse(chatId: string): Response {
 }
 
 function clientOptions(fetch: typeof globalThis.fetch) {
-  return {
+  return { protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS },
     baseUrl: 'http://garcon.test',
     instanceId: 'instance-1',
     endpointInstanceId: 'instance-1',

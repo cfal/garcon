@@ -1,0 +1,161 @@
+{
+  "definition": {
+    "name": "projectPathUpdates.prepare",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "projectPathUpdates.commit",
+        "version": 1
+      },
+      {
+        "name": "projectPathUpdates.rollback",
+        "version": 1
+      }
+    ],
+    "lane": "primary",
+    "continuity": "session",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "chat": {
+        "agentId": "string",
+        "agentSessionId": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "carryOverRevision": "string",
+        "chatId": "string",
+        "model": "string",
+        "nativeSeedReceipt": {
+          "union": [
+            "null",
+            {
+              "agentSessionId": "string",
+              "codeUnitLength": "number",
+              "format": {
+                "union": [
+                  "\"legacy-v0\"",
+                  "\"v1-marker\"",
+                  "\"v2-xml\"",
+                  "\"v3-xml\""
+                ]
+              },
+              "placement": {
+                "union": [
+                  "\"provider-context\"",
+                  "\"user-prefix\""
+                ]
+              },
+              "sha256": "string"
+            }
+          ]
+        },
+        "nativeSession": {
+          "union": [
+            "null",
+            {
+              "ownerId": "string",
+              "schemaVersion": "number",
+              "value": {
+                "[string]": {
+                  "union": [
+                    "false",
+                    "null",
+                    "number",
+                    "string",
+                    "true",
+                    {
+                      "array": {
+                        "recursive": "JsonValue"
+                      }
+                    },
+                    {
+                      "recursive": "JsonObject"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "projectPath": "string",
+        "settings": {
+          "ownerId": "string",
+          "schemaVersion": "number",
+          "values": {
+            "[string]": {
+              "union": [
+                "false",
+                "null",
+                "number",
+                "string",
+                "true",
+                {
+                  "array": {
+                    "recursive": "JsonValue"
+                  }
+                },
+                {
+                  "recursive": "JsonObject"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "nextProjectPath": "string"
+    },
+    "result": {
+      "union": [
+        "null",
+        {
+          "nativeSession?": {
+            "union": [
+              "null",
+              "undefined",
+              {
+                "ownerId": "string",
+                "schemaVersion": "number",
+                "value": {
+                  "[string]": {
+                    "union": [
+                      "false",
+                      "null",
+                      "number",
+                      "string",
+                      "true",
+                      {
+                        "array": {
+                          "recursive": "JsonValue"
+                        }
+                      },
+                      {
+                        "recursive": "JsonObject"
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "preparation": {
+            "executorId": "string",
+            "id": "string",
+            "instanceId": "string",
+            "integrationId": "string",
+            "kind": "\"project-path-preparation\""
+          }
+        }
+      ]
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

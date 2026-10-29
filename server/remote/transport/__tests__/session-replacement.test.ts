@@ -1,7 +1,8 @@
+import { TestWebSocketLink as WebSocketLink } from '../../__tests__/test-session-transport.js';
 import { expect, spyOn, test } from 'bun:test';
 import { AssistantMessage } from '@garcon/common/chat-types';
 import { AgentCallError, AgentIntegrationError, type AgentProducerNotification, type ExecutorAvailability } from '@garcon/server-agent-interface';
-import { RemoteExecutorClient } from '../../client/executor-client.js';
+import type { ExecutionRuntimeApi } from '@garcon/server-agent-interface';
 import {
   admissionFault, integrationFixture, isExecutionHandleReply, isProducerResumeReply, linkOptions, outgoingFault, outgoingHold,
   remoteFixture, requestFor,
@@ -9,16 +10,11 @@ import {
 import { connectRemoteExecutor, servePairedRuntime } from '../../__tests__/runtime-adapter.js';
 import { serveExecutionRuntime } from '../../server/executor-rpc-server.js';
 import { ProducerRelay } from '../../server/producer-relay.js';
-import { WebSocketLink } from '../websocket-link.js';
+
 import type { Logger } from '../../../common/log.js';
+import { nextAvailability, replacementFixture } from '../../__tests__/replacement-fixture.js';
 
-function nextAvailability(executor: RemoteExecutorClient, value: ExecutorAvailability) {
-  const reached = Promise.withResolvers<void>();
-  const off = executor.onAvailabilityChanged((next) => { if (next === value) { off(); reached.resolve(); } });
-  return reached.promise;
-}
-
-function record(integration: Awaited<ReturnType<RemoteExecutorClient['getAgentIntegration']>>) {
+function record(integration: Awaited<ReturnType<ExecutionRuntimeApi['getAgentIntegration']>>) {
   const events: string[] = [];
   integration.producers.subscribe(({ event }) => {
     events.push(event.type === 'rows' ? `rows:${(event.rows[0]!.message as AssistantMessage).content}` : event.type);
@@ -26,7 +22,7 @@ function record(integration: Awaited<ReturnType<RemoteExecutorClient['getAgentIn
   return events;
 }
 
-function availabilityLog(executor: RemoteExecutorClient) {
+function availabilityLog(executor: Pick<ExecutionRuntimeApi, 'onAvailabilityChanged'>) {
   const log: ExecutorAvailability[] = [];
   executor.onAvailabilityChanged((value) => log.push(value));
   return log;
@@ -34,7 +30,7 @@ function availabilityLog(executor: RemoteExecutorClient) {
 
 type LaunchOutcome = Extract<AgentProducerNotification['event'], { readonly type: 'launch-settled' }>;
 
-function launchOutcomes(integration: Awaited<ReturnType<RemoteExecutorClient['getAgentIntegration']>>) {
+function launchOutcomes(integration: Awaited<ReturnType<ExecutionRuntimeApi['getAgentIntegration']>>) {
   const outcomes: LaunchOutcome[] = [];
   integration.producers.subscribe(({ event }) => { if (event.type === 'launch-settled') outcomes.push(event); });
   return outcomes;
@@ -575,19 +571,18 @@ for (const dialer of ['controller', 'worker'] as const) {
   ] as const) {
     test(`a replacement session that cannot start its integrations logs the stage and a ${failure}'s reason (${dialer} dials)`, async () => {
       const log = setupFailureLog();
-      const fixture = await remoteFixture(dialer, undefined, undefined, undefined, { client: { logger: log.logger } });
+      const fixture = replacementFixture(dialer, { logger: log.logger });
+      const native = integrationFixture();
+      let failedSessionId = '';
+      native.hooks.initialize = async () => {
+        failedSessionId = fixture.controller.current!.id;
+        native.hooks.initialize = async () => {};
+        throw thrown();
+      };
       try {
-        const worker = fixture.generations[0]!;
-        let failedSessionId = '';
-        worker.hooks.initialize = async () => {
-          failedSessionId = fixture.controller.current!.id;
-          worker.hooks.initialize = async () => {};
-          throw thrown();
-        };
-        const ready = nextAvailability(fixture.executor, 'ready');
-        fixture.controller.disconnect(); fixture.worker.disconnect();
+        const ready = nextAvailability(fixture.client, 'ready');
+        await fixture.install(native.executor);
         await ready;
-
         expect(log.failures).toEqual([
           setupFailureDetails(failedSessionId, 'start-integrations', reason),
         ]);
@@ -737,88 +732,63 @@ for (const dialer of ['controller', 'worker'] as const) {
 }
 
 test('a restarted worker cannot resume bindings, so the controller reports them lost first', async () => {
-  const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
-  const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
-  const generations: ReturnType<typeof integrationFixture>[] = [];
-  const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
-  worker.onSession((transport) => {
-    const fixture = integrationFixture();
-    generations.push(fixture);
-    scopes.push(servePairedRuntime(worker, transport, fixture.executor, new ProducerRelay()));
-  });
-  const connected = connectRemoteExecutor(controller);
-  controller.dial(worker.listen());
-  const executor = await connected;
+  const f = replacementFixture('controller');
+  const original = integrationFixture();
   try {
-    const integration = await executor.getAgentIntegration('test');
-    await integration.execution.start(await requestFor(integration));
-    const availability = availabilityLog(executor);
-    const ready = nextAvailability(executor, 'ready');
-    controller.disconnect(); worker.disconnect();
+    const ready = nextAvailability(f.client, 'ready');
+    await f.install(original.executor);
     await ready;
-
+    const integration = await f.client.runtime.getAgentIntegration('test');
+    await integration.execution.start(await requestFor(integration));
+    const availability = availabilityLog(f.client);
+    const replaced = nextAvailability(f.client, 'ready');
+    const replacement = integrationFixture();
+    await f.install(replacement.executor);
+    await replaced;
     expect(availability).toEqual(['reconnecting', 'offline', 'ready']);
-    expect(generations).toHaveLength(2);
-    expect(integration.producers.scope.instanceId).toBe(generations[1]!.scope.instanceId);
-  } finally {
-    await executor.dispose();
-    await worker.dispose();
-    await Promise.all(scopes.map((scope) => scope.dispose()));
-    for (const generation of generations) await generation.executor.dispose();
-  }
+    expect(integration.producers.scope.instanceId).toBe(original.scope.instanceId);
+    const current = await f.client.runtime.getAgentIntegration('test');
+    expect(current).not.toBe(integration);
+    expect(current.producers.scope.instanceId).toBe(replacement.scope.instanceId);
+    await expect(integration.execution.runningSessions()).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+  } finally { await f.dispose(); }
 });
 
 for (const phase of ['held', 'parked'] as const) {
   test(`a close ${phase} across a worker restart never reaches the restarted worker`, async () => {
-    const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
-    const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
-    const fault = outgoingFault(controller);
-    const generations: ReturnType<typeof integrationFixture>[] = [];
-    const closes: ReturnType<typeof spyOn>[] = [];
-    const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
+    const f = replacementFixture('controller');
+    const fault = outgoingFault(f.controller);
+    const original = integrationFixture();
+    const replacement = integrationFixture();
+    const closes = spyOn(replacement.integration.producers, 'close');
     const install = Promise.withResolvers<void>();
-    // Each session is a new worker instance; the restarted one installs only once the close waits.
-    worker.onSession((transport) => {
-      const fixture = integrationFixture();
-      if (generations.length > 0) {
-        const getInfo = fixture.executor.getInfo;
-        fixture.executor.getInfo = async () => { await install.promise; return getInfo(); };
-      }
-      generations.push(fixture);
-      closes.push(spyOn(fixture.integration.producers, 'close'));
-      scopes.push(servePairedRuntime(worker, transport, fixture.executor, new ProducerRelay()));
-    });
-    const connected = connectRemoteExecutor(controller);
-    controller.dial(worker.listen());
-    const executor = await connected;
+    const getInfo = replacement.executor.getInfo;
+    replacement.executor.getInfo = async () => { await install.promise; return getInfo(); };
     try {
-      const integration = await executor.getAgentIntegration('test');
+      const first = nextAvailability(f.client, 'ready');
+      await f.install(original.executor);
+      await first;
+      const integration = await f.client.runtime.getAgentIntegration('test');
       const request = await requestFor(integration);
       await integration.execution.start(request);
-      const ready = nextAvailability(executor, 'ready');
+      const ready = nextAvailability(f.client, 'ready');
+      const reconnecting = nextAvailability(f.client, 'reconnecting');
       let closing: Promise<unknown>;
       if (phase === 'held') {
-        const reconnecting = nextAvailability(executor, 'reconnecting');
-        controller.disconnect(); worker.disconnect();
+        f.controller.disconnect(); f.worker.disconnect();
         await reconnecting;
         closing = integration.producers.close(request.producerBinding).then(() => null, (error: unknown) => error);
       } else {
-        disconnectOn(fault, (encoded) => encoded.includes('"method":"producers.close"'));
+        disconnectOn(fault, encoded => encoded.includes('"method":"producers.close"'));
         closing = integration.producers.close(request.producerBinding).then(() => null, (error: unknown) => error);
+        await reconnecting;
       }
+      await f.install(replacement.executor);
       install.resolve();
       await ready;
-
       expect(await closing).toMatchObject({ outcome: phase === 'held' ? 'not-dispatched' : 'unknown' });
-      expect(generations).toHaveLength(2);
-      expect(closes[1]).not.toHaveBeenCalled();
-    } finally {
-      install.resolve();
-      await executor.dispose();
-      await worker.dispose();
-      await Promise.all(scopes.map((scope) => scope.dispose()));
-      for (const generation of generations) await generation.executor.dispose();
-    }
+      expect(closes).not.toHaveBeenCalled();
+    } finally { install.resolve(); closes.mockRestore(); await f.dispose(); }
   });
 }
 
@@ -833,12 +803,12 @@ test('bindings a restarted controller cannot resume expire after the short grace
   const url = worker.listen();
   const crashed = new WebSocketLink({ ...linkOptions, role: 'controller' });
   const restarted = new WebSocketLink({ ...linkOptions, role: 'controller' });
-  const executors: RemoteExecutorClient[] = [];
+  const executors: ExecutionRuntimeApi[] = [];
   const detach = spyOn(fixture.integration.producers, 'detach');
   try {
     const first = connectRemoteExecutor(crashed);
     crashed.dial(url);
-    executors.push(await first);
+    executors.push((await first).runtime);
     const integration = await executors[0]!.getAgentIntegration('test');
     const request = await requestFor(integration);
     await integration.execution.start(request);
@@ -846,7 +816,7 @@ test('bindings a restarted controller cannot resume expire after the short grace
 
     const second = connectRemoteExecutor(restarted);
     restarted.dial(url);
-    executors.push(await second);
+    executors.push((await second).runtime);
     await Bun.sleep(50);
 
     expect(detach).toHaveBeenCalledWith(request.producerBinding);

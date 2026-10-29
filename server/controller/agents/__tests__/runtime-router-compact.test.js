@@ -43,6 +43,8 @@ function makeRouter(compaction, options = {}) {
       updateChat: mock(async () => entry),
     },
     directory: {
+      requireOperations: mock(() => undefined),
+      supportsOperations: () => true,
       require: mock(() => integration),
       list: mock(() => [integration]),
     },
@@ -114,7 +116,8 @@ describe('AgentRuntimeRouter compaction', () => {
   });
 
   it('refuses instead of sending a literal /compact prompt without the facet', async () => {
-    const { router, execution } = makeRouter(null);
+    const { router, execution, transcript } = makeRouter(null);
+    transcript.adoption.ensure = mock(async () => { throw new Error('Must not adopt without compaction'); });
 
     await expect(router.compactSession('chat-1')).rejects.toMatchObject({
       code: 'VALIDATION_FAILED',
@@ -122,6 +125,7 @@ describe('AgentRuntimeRouter compaction', () => {
     // Regression: this used to resume the session with the text `/compact`, which
     // left the context untouched and a stray message in the transcript.
     expect(execution.resume).not.toHaveBeenCalled();
+    expect(transcript.adoption.ensure).not.toHaveBeenCalled();
   });
 
   it('points at the provider-agnostic alternative', async () => {

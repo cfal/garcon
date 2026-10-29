@@ -1,16 +1,16 @@
+import { TestWebSocketLink as WebSocketLink } from '../../__tests__/test-session-transport.js';
 import { expect, test } from 'bun:test';
-import { createHmac } from 'node:crypto';
 import { connectNoiseWebSocket } from '@cfal/noise-ws';
-import { WebSocketLink, EXECUTOR_NOISE_CONTEXT, shouldLogLinkFailure } from '../websocket-link.ts';
-import { EXECUTOR_PROTOCOL_REVISION } from '../rpc-protocol.ts';
+import { EXECUTOR_NOISE_CONTEXT, shouldLogLinkFailure } from '../websocket-link.ts';
+import { testRoleContracts } from '../../__tests__/test-session-transport.js';
+const EXECUTOR_PROTOCOL = testRoleContracts('controller').offer;
 import { version as packageVersion } from '../../../../package.json';
 import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.ts';
 import { faultyNoiseListener } from '../../__tests__/noise-socket-faults.ts';
 import { connectWithOwnRole, connectWithWrongKey, openSilentSocket, sendMalformedRecord } from '../../__tests__/failing-peers.ts';
-import { primaryHello } from '../../__tests__/link-hello.ts';
+import { primaryHello, selectedDecision, signedProof } from '../../__tests__/link-hello.ts';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
-const linkVersion = `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION}`;
 
 function primaryFailure({ lane, ...failure }) {
   expect(lane).toBe('primary');
@@ -31,26 +31,28 @@ function primaryClosure({ lane, sessionId, primarySessionId, queues, primaryRedi
   return closure;
 }
 
-// Builds of one release share a package version, so only the protocol revision tells them apart.
 const incompatiblePeers = [
   ['another release', 'synthetic-incompatible'],
-  ['this release without a protocol revision', packageVersion],
-  ['this release at the previous protocol revision', `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION - 1}`],
-  ['this release at another protocol revision', `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION + 1}`],
+  ['this release with another bootstrap', packageVersion],
 ];
 
 // Initiates authentication with a different build.
-function peerOfBuild(address, role, version) {
+function peerOfBuild(address, role, build) {
+  const hello = { ...primaryHello(role === 'controller' ? 'worker' : 'controller'), build, protocol: { bootstrap: 2, contracts: {} } };
+  const encoded = JSON.stringify(hello);
   const socket = connectNoiseWebSocket(address, {
     psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
-    onOpen(socket) { socket.send(JSON.stringify({ ...primaryHello(role === 'controller' ? 'worker' : 'controller'), version })); },
-    onMessage() {},
+    onOpen(socket) { socket.send(encoded); },
+    onMessage(socket, data) {
+      const peer = JSON.parse(data);
+      if (peer.type === 'hello') socket.send(JSON.stringify(signedProof(secret, hello.role, encoded, data, selectedDecision(hello.protocol, peer.protocol))));
+    },
   });
   return { socket };
 }
 
 function versionMismatch(peerVersion) {
-  return `Executor version mismatch: local ${linkVersion}, peer ${JSON.stringify(peerVersion)}. Use matching builds.`;
+  return `Executor protocol mismatch (BOOTSTRAP_MISMATCH): local bootstrap 1 build ${packageVersion}, peer bootstrap 2 build ${peerVersion}.`;
 }
 
 // Initiates authentication with a frame that is not JSON.
@@ -76,7 +78,7 @@ function invalidProof(address, role) {
 
 for (const role of ['controller', 'worker']) {
   for (const [peerBuild, peerVersion] of incompatiblePeers) {
-    test(`reports a version mismatch with ${peerBuild} separately from authentication (${role})`, async () => {
+    test(`reports an authenticated bootstrap mismatch with ${peerBuild} (${role})`, async () => {
       const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true });
       const failures = [];
       link.onError(failure => failures.push(primaryFailure(failure)));
@@ -258,7 +260,7 @@ test('counts each kind of connection failure until a session starts, however fai
   } finally { await worker.dispose(); await controller.dispose(); }
 });
 
-test('counts version mismatches from one again when the peer build changes', async () => {
+test('counts protocol mismatches from one again when the diagnostic build changes', async () => {
   const link = new WebSocketLink({ role: 'controller', executorId: 'synthetic-executor', secret, noTls: true });
   const failures = [];
   link.onError(failure => failures.push(primaryFailure(failure)));
@@ -539,7 +541,7 @@ for (const dialer of ['controller', 'worker']) {
 
   test(`counts a message over the receiver's size limit as a protocol error (${dialer} dials)`, async () => {
     const common = { executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [60_000] };
-    const controller = new WebSocketLink({ ...common, role: 'controller', noiseLimits: { maxMessageBytes: 1024 } });
+    const controller = new WebSocketLink({ ...common, role: 'controller', noiseLimits: { maxMessageBytes: 16 * 1024 } });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
     const closures = { controller: [], worker: [] };
@@ -548,7 +550,7 @@ for (const dialer of ['controller', 'worker']) {
     try {
       dialing.dial(listening.listen());
       const [session] = await Promise.all([worker.ready, controller.ready]);
-      session.send('x'.repeat(4096));
+      session.send('x'.repeat(32 * 1024));
       await eventually(() => closures.controller.length === 1 && closures.worker.length === 1);
 
       expect(closures.controller).toEqual([
@@ -636,18 +638,18 @@ test('counts a frame too short to be an encrypted record as a protocol error', a
 // whose fragments each fit one encrypted record.
 function workerOutsideSessionLayer(address) {
   let controllerHello;
-  const workerHello = primaryHello('worker');
+  const workerHello = JSON.stringify(primaryHello('worker'));
   return connectNoiseWebSocket(address, {
     psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
-    onOpen(socket) { socket.send(JSON.stringify(workerHello)); },
+    onOpen(socket) { socket.send(workerHello); },
     onMessage(socket, data) {
       if (typeof data !== 'string') return;
       const frame = JSON.parse(data);
       if (frame.type === 'hello') {
-        controllerHello = frame;
+        controllerHello = data;
       } else if (frame.type === 'proof') {
-        const transcript = JSON.stringify(['garcon-executor', 'worker', [controllerHello, workerHello]]);
-        socket.send(JSON.stringify({ type: 'proof', signature: createHmac('sha256', secret).update(transcript).digest('hex') }));
+        socket.send(JSON.stringify(signedProof(secret, 'worker', workerHello, controllerHello,
+          selectedDecision(EXECUTOR_PROTOCOL, JSON.parse(controllerHello).protocol))));
       }
     },
   });

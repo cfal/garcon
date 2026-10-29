@@ -1,5 +1,62 @@
 import { describe, expect, it } from 'vitest';
-import { buildThinkingOptions } from '$lib/chat/composer/composer-controls.js';
+import { buildComposerSendPresentation, buildThinkingOptions } from '$lib/chat/composer/composer-controls.js';
+import type { AgentSettingsEnvelope } from '$shared/agent-integration';
+import * as m from '$lib/paraglide/messages.js';
+
+describe('buildComposerSendPresentation', () => {
+	const defaults: AgentSettingsEnvelope = { ownerId: 'test-agent', schemaVersion: 2, values: {} };
+	const catalog = {
+		isValidated: true,
+		error: null,
+		getDefaultAgentSettings: () => defaults,
+		getAgentSettingsDescriptors: () => [],
+	} satisfies Parameters<typeof buildComposerSendPresentation>[0];
+	const selection = { agentId: 'test-agent', agentSettings: null };
+	const availability = { executorReady: true, controllerCommand: false, requiresQueuedSubmission: false };
+
+	it('uses catalog defaults only for absent settings', () => {
+		const presentation = buildComposerSendPresentation(catalog, selection, availability);
+		expect(presentation.settingsEnvelope).toBe(defaults);
+		expect(presentation.settingsCompatible).toBe(true);
+		expect(presentation.sendTitle).toBe(m.chat_composer_send_message());
+		expect(selection.agentSettings).toBeNull();
+	});
+
+	it('preserves incompatible saved settings instead of substituting defaults', () => {
+		const saved = { ...defaults, schemaVersion: 1 };
+		const presentation = buildComposerSendPresentation(catalog, { ...selection, agentSettings: saved }, availability);
+		expect(presentation.settingsEnvelope).toBe(saved);
+		expect(presentation.settingsCompatible).toBe(false);
+		expect(presentation.sendTitle).toBe('Saved provider settings are unavailable or incompatible.');
+	});
+
+	it('does not invent settings while catalog defaults are unavailable', () => {
+		const presentation = buildComposerSendPresentation(
+			{ ...catalog, getDefaultAgentSettings: () => null }, selection, availability,
+		);
+		expect(presentation.settingsEnvelope).toBeNull();
+		expect(presentation.settingsCompatible).toBe(false);
+	});
+
+	it('prioritizes loading over compatibility and queue labels', () => {
+		const presentation = buildComposerSendPresentation(
+			{ ...catalog, isValidated: false }, { ...selection, agentSettings: { ...defaults, schemaVersion: 1 } },
+			{ ...availability, requiresQueuedSubmission: true },
+		);
+		expect(presentation.sendTitle).toBe(m.chat_composer_loading_models());
+	});
+
+	it('labels queued execution without blocking controller-only commands', () => {
+		expect(buildComposerSendPresentation(catalog, selection, { ...availability, requiresQueuedSubmission: true }).sendTitle)
+			.toBe(m.chat_composer_queue_message());
+		const presentation = buildComposerSendPresentation(
+			{ ...catalog, isValidated: false, getDefaultAgentSettings: () => null }, selection,
+			{ ...availability, controllerCommand: true, requiresQueuedSubmission: true },
+		);
+		expect(presentation.settingsCompatible).toBe(false);
+		expect(presentation.sendTitle).toBe(m.chat_composer_send_message());
+	});
+});
 
 describe('buildThinkingOptions', () => {
 	const allModes = ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;

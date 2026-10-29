@@ -1,0 +1,180 @@
+{
+  "definition": {
+    "name": "cli.chats.search",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "POST /api/v1/chats/search",
+  "client": {
+    "parameters": [
+      {
+        "name": "request",
+        "type": {
+          "chatIds?": {
+            "union": [
+              "undefined",
+              {
+                "array": "string"
+              }
+            ]
+          },
+          "limit?": {
+            "union": [
+              "number",
+              "undefined"
+            ]
+          },
+          "mode?": {
+            "union": [
+              "\"page\"",
+              "\"prefix\"",
+              "undefined"
+            ]
+          },
+          "offset?": {
+            "union": [
+              "number",
+              "undefined"
+            ]
+          },
+          "query": "string",
+          "snippetLimit?": {
+            "union": [
+              "number",
+              "undefined"
+            ]
+          },
+          "sort?": {
+            "union": [
+              "\"activity\"",
+              "\"created\"",
+              "\"relevance\"",
+              "undefined"
+            ]
+          },
+          "textTokens?": {
+            "union": [
+              "undefined",
+              {
+                "array": "string"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "result": {
+      "index": {
+        "failedChatCount": "number",
+        "failedChats": {
+          "array": {
+            "chatId": "string",
+            "errorCode": "string",
+            "indexedThroughOrdinal": {
+              "union": [
+                "null",
+                "number"
+              ]
+            },
+            "recovery": {
+              "union": [
+                "\"index-retry\"",
+                "\"source-required\"",
+                "\"unknown\""
+              ]
+            },
+            "stage": {
+              "union": [
+                "\"adoption\"",
+                "\"indexing\"",
+                "\"ledger\""
+              ]
+            },
+            "targetThroughOrdinal": {
+              "union": [
+                "null",
+                "number"
+              ]
+            },
+            "transcriptViewId": {
+              "union": [
+                "null",
+                "string"
+              ]
+            }
+          }
+        },
+        "failedChatsOmittedCount": "number",
+        "indexedChatCount": "number",
+        "pendingChatCount": "number",
+        "resultsTruncated": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "unindexedChatCount": "number",
+        "unsupportedChatCount": "number"
+      },
+      "mode": {
+        "union": [
+          "\"page\"",
+          "\"prefix\""
+        ]
+      },
+      "page": {
+        "hasMore": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "limit": "number",
+        "nextOffset": {
+          "union": [
+            "null",
+            "number"
+          ]
+        },
+        "offset": "number",
+        "total": "number"
+      },
+      "query": "string",
+      "removedStaleResultCount": "number",
+      "results": {
+        "array": {
+          "chatId": "string",
+          "matchedMessageCount": "number",
+          "score": "number",
+          "snippets": {
+            "array": {
+              "ordinal": "number",
+              "role": {
+                "union": [
+                  "\"assistant\"",
+                  "\"system\"",
+                  "\"tool\"",
+                  "\"user\""
+                ]
+              },
+              "text": "string",
+              "timestamp": {
+                "union": [
+                  "null",
+                  "string"
+                ]
+              }
+            }
+          },
+          "transcriptViewId": "string"
+        }
+      },
+      "snippetLimit": "number"
+    }
+  }
+}

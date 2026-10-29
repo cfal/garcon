@@ -1,0 +1,11 @@
+{
+  "definition": {
+    "name": "producer.started",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "runId": "string",
+    "type": "\"started\""
+  }
+}

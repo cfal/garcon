@@ -1,0 +1,81 @@
+{
+  "definition": {
+    "name": "files.tree",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "directoryPath?": {
+        "union": [
+          "string",
+          "undefined"
+        ]
+      }
+    },
+    "result": {
+      "directory": {
+        "breadcrumbs": {
+          "array": {
+            "name": "string",
+            "path": "string"
+          }
+        },
+        "parentPath": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "path": "string",
+        "relativePath": "string"
+      },
+      "entries": {
+        "array": {
+          "modified": {
+            "union": [
+              "null",
+              "string"
+            ]
+          },
+          "name": "string",
+          "path": "string",
+          "permissionsRwx": "string",
+          "relativePath": "string",
+          "size": "number",
+          "type": {
+            "union": [
+              "\"directory\"",
+              "\"file\""
+            ]
+          }
+        }
+      },
+      "fileRootPath": "string",
+      "homeDirectory": {
+        "union": [
+          "null",
+          {
+            "breadcrumbs": {
+              "array": {
+                "name": "string",
+                "path": "string"
+              }
+            },
+            "path": "string"
+          }
+        ]
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

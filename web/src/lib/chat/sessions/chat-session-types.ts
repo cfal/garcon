@@ -44,7 +44,7 @@ export interface ChatSessionRecord {
 	modelProtocol?: ApiProtocol | null;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
-	agentSettings: AgentSettingsEnvelope;
+	agentSettings: AgentSettingsEnvelope | null;
 	createdAt: string | null;
 	lastActivityAt: string | null;
 	lastReadAt: string | null;
@@ -56,6 +56,7 @@ export interface ChatSessionRecord {
 	isUnread: boolean;
 	status: ChatStatus;
 	agentOwnershipEpoch: string | null;
+	hasAgentSession: boolean;
 	lastMessage?: string;
 	tags: string[];
 	firstMessage?: string;

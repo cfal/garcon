@@ -1,0 +1,11 @@
+{
+  "failures": [
+    {
+      "domain": "terminal",
+      "code": "terminal-runtime-changed",
+      "message": "Synthetic failure",
+      "retryable": false,
+      "status": 409
+    }
+  ]
+}

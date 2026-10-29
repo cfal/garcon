@@ -1,0 +1,338 @@
+{
+  "definition": {
+    "name": "git.getReviewDocumentFileBodies",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "document": {
+          "documentId": "string",
+          "executorId": "string",
+          "instanceId": "string"
+        },
+        "files": {
+          "array": "string"
+        },
+        "projectPath": "string",
+        "purpose": {
+          "union": [
+            "\"prefetch\"",
+            "\"visible\""
+          ]
+        }
+      }
+    },
+    "result": {
+      "union": [
+        {
+          "changedPaths": {
+            "array": "string"
+          },
+          "diagnostics?": {
+            "union": [
+              "undefined",
+              {
+                "batchCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "bisectionCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "cacheHits?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "commands": {
+                  "array": {
+                    "command": "string",
+                    "durationMs": "number",
+                    "stderrBytes": "number",
+                    "stdoutBytes": "number"
+                  }
+                },
+                "fileCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "phases": {
+                  "array": {
+                    "durationMs": "number",
+                    "name": {
+                      "union": [
+                        "\"body-cache\"",
+                        "\"body-git\"",
+                        "\"body-split\"",
+                        "\"document-register\"",
+                        "\"freshness-after\"",
+                        "\"freshness-before\"",
+                        "\"patch-scan\"",
+                        "\"resolve\"",
+                        "\"serialize\"",
+                        "\"summary-git\""
+                      ]
+                    }
+                  }
+                },
+                "rowCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                }
+              }
+            ]
+          },
+          "documentId": "string",
+          "executorId": "string",
+          "instanceId": "string",
+          "message": "string",
+          "status": "\"stale\""
+        },
+        {
+          "diagnostics?": {
+            "union": [
+              "undefined",
+              {
+                "batchCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "bisectionCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "cacheHits?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "commands": {
+                  "array": {
+                    "command": "string",
+                    "durationMs": "number",
+                    "stderrBytes": "number",
+                    "stdoutBytes": "number"
+                  }
+                },
+                "fileCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "phases": {
+                  "array": {
+                    "durationMs": "number",
+                    "name": {
+                      "union": [
+                        "\"body-cache\"",
+                        "\"body-git\"",
+                        "\"body-split\"",
+                        "\"document-register\"",
+                        "\"freshness-after\"",
+                        "\"freshness-before\"",
+                        "\"patch-scan\"",
+                        "\"resolve\"",
+                        "\"serialize\"",
+                        "\"summary-git\""
+                      ]
+                    }
+                  }
+                },
+                "rowCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                }
+              }
+            ]
+          },
+          "documentId": "string",
+          "errors": {
+            "[string]": "string"
+          },
+          "executorId": "string",
+          "files": {
+            "[string]": {
+              "bodyFingerprint": "string",
+              "bodyState": {
+                "union": [
+                  "\"binary\"",
+                  "\"error\"",
+                  "\"loaded\"",
+                  "\"loading\"",
+                  "\"too-large\"",
+                  "\"unloaded\""
+                ]
+              },
+              "category": {
+                "union": [
+                  "\"binary\"",
+                  "\"generated\"",
+                  "\"large\"",
+                  "\"lockfile\"",
+                  "\"normal\""
+                ]
+              },
+              "error?": {
+                "union": [
+                  "string",
+                  "undefined"
+                ]
+              },
+              "isBinary": {
+                "union": [
+                  "false",
+                  "true"
+                ]
+              },
+              "isTooLarge": {
+                "union": [
+                  "false",
+                  "true"
+                ]
+              },
+              "limitMessage?": {
+                "union": [
+                  "string",
+                  "undefined"
+                ]
+              },
+              "limitReason?": {
+                "union": [
+                  "\"binary\"",
+                  "\"collection-too-many-bytes\"",
+                  "\"collection-too-many-files\"",
+                  "\"collection-too-many-rows\"",
+                  "\"file-too-many-bytes\"",
+                  "\"file-too-many-rows\"",
+                  "\"git-timeout\"",
+                  "\"line-too-long\"",
+                  "\"unsupported-file-kind\"",
+                  "undefined"
+                ]
+              },
+              "patch": {
+                "union": [
+                  "null",
+                  "string"
+                ]
+              },
+              "patchBytes": "number",
+              "patchDigest?": {
+                "union": [
+                  "string",
+                  "undefined"
+                ]
+              },
+              "path": "string",
+              "renderedRowCount": "number"
+            }
+          },
+          "instanceId": "string",
+          "status": "\"ready\""
+        },
+        {
+          "diagnostics?": {
+            "union": [
+              "undefined",
+              {
+                "batchCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "bisectionCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "cacheHits?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "commands": {
+                  "array": {
+                    "command": "string",
+                    "durationMs": "number",
+                    "stderrBytes": "number",
+                    "stdoutBytes": "number"
+                  }
+                },
+                "fileCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "phases": {
+                  "array": {
+                    "durationMs": "number",
+                    "name": {
+                      "union": [
+                        "\"body-cache\"",
+                        "\"body-git\"",
+                        "\"body-split\"",
+                        "\"document-register\"",
+                        "\"freshness-after\"",
+                        "\"freshness-before\"",
+                        "\"patch-scan\"",
+                        "\"resolve\"",
+                        "\"serialize\"",
+                        "\"summary-git\""
+                      ]
+                    }
+                  }
+                },
+                "rowCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                }
+              }
+            ]
+          },
+          "documentId": "string",
+          "executorId": "string",
+          "instanceId": "string",
+          "message": "string",
+          "status": "\"document-expired\""
+        }
+      ]
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

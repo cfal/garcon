@@ -4,6 +4,7 @@ import {
 	createEmptyAgentSettings,
 	normalizeAgentSettings,
 	withAgentSetting,
+	areAgentSettingsCompatible,
 } from '$shared/agent-settings';
 
 const effort = {
@@ -17,6 +18,16 @@ const effort = {
 } satisfies AgentSettingDescriptor;
 
 describe('agent settings', () => {
+	it('checks the owner, exact schema and every saved value without rewriting settings', () => {
+		const defaults = { ownerId: 'sample', schemaVersion: 2, values: { effort: 'low' } };
+		expect(areAgentSettingsCompatible(defaults, defaults, [effort])).toBe(true);
+		expect(areAgentSettingsCompatible({ ...defaults, values: {} }, defaults, [effort])).toBe(true);
+		for (const envelope of [
+			{ ...defaults, ownerId: 'another' }, { ...defaults, schemaVersion: 1 }, { ...defaults, schemaVersion: 3 },
+			{ ...defaults, values: { effort: 'retired' } }, { ...defaults, values: { removed: true } },
+		]) expect(areAgentSettingsCompatible(envelope, defaults, [effort])).toBe(false);
+		expect(defaults.values).toEqual({ effort: 'low' });
+	});
 	it('updates declared values without changing the envelope identity fields', () => {
 		const initial = { ownerId: 'sample', schemaVersion: 2, values: { effort: 'low' } } as const;
 		expect(withAgentSetting(initial, effort, 'high')).toEqual({

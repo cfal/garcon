@@ -1,3 +1,4 @@
+import { LOCAL_EXECUTOR_OPERATIONS } from '$shared/executor-contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	TerminalRegistry,
@@ -42,7 +43,7 @@ function executor(
 		instanceId: null,
 		projectBasePath: '/project',
 		lastError: null,
-		executorServices: { terminals: true, files: true, git: false, gh: false, directoryCreation: true },
+		operations: LOCAL_EXECUTOR_OPERATIONS, executorServices: { terminals: true, files: true, git: false, gh: false, directoryCreation: true },
 		allowControllerCli: false, allowExecutorManagement: false,
 	};
 }
@@ -66,9 +67,13 @@ const inventory = (terminals: TerminalMetadata[], runtime = runtimeId): Terminal
 	terminals,
 });
 
-function setup(options: { realTransport?: boolean } = {}) {
-	const executors = new ExecutorsStore();
-	executors.applySnapshot([executor('local'), executor(remoteId)]);
+function setup(options: {
+	realTransport?: boolean;
+	awaitingExecutors?: boolean;
+	readExecutors?: ConstructorParameters<typeof ExecutorsStore>[0];
+} = {}) {
+	const executors = new ExecutorsStore(options.readExecutors);
+	if (!options.awaitingExecutors) executors.applySnapshot([executor('local'), executor(remoteId)]);
 	const list = vi.fn(async (executorId = 'local') => inventory([terminal(executorId)]));
 	const create = vi.fn(async () => ({ success: true as const, terminal: terminal(remoteId, 2) }));
 	const write = vi.fn(() => true);
@@ -142,6 +147,95 @@ function setup(options: { realTransport?: boolean } = {}) {
 }
 
 describe('executor-qualified terminal registry', () => {
+	it('allows Local after failed discovery but fences a pending discovery retry', async () => {
+		const initial = Promise.withResolvers<ExecutorSnapshot[]>();
+		const retry = Promise.withResolvers<ExecutorSnapshot[]>();
+		const readExecutors = vi.fn(() => initial.promise).mockImplementationOnce(() => initial.promise)
+			.mockImplementationOnce(() => retry.promise);
+		const { registry, executors, create } = setup({ awaitingExecutors: true, readExecutors });
+		await registry.initialize();
+		const discovering = executors.refresh();
+		expect(registry.canCreate('local')).toBe(false);
+		initial.reject(new Error('Discovery unavailable'));
+		await discovering;
+		expect(executors.hasSnapshot).toBe(false);
+		expect(registry.canCreate('local')).toBe(true);
+		expect(registry.canCreate(remoteId)).toBe(false);
+		create.mockResolvedValueOnce({ success: true, terminal: terminal('local', 2) });
+		await expect(registry.create('/project', 'fallback-create')).resolves.toBe(terminal('local', 2).terminalId);
+		const refreshing = executors.refresh();
+		expect(executors.error).toBe('Discovery unavailable');
+		expect(registry.canCreate('local')).toBe(false);
+		await expect(registry.create('/project', 'retry-pending-create')).rejects.toThrow();
+		expect(create).toHaveBeenCalledOnce();
+		retry.resolve([{ ...executor('local'), instanceId: 'local-instance' }]);
+		await refreshing;
+		expect(executors.hasSnapshot).toBe(true);
+		expect(registry.canCreate('local')).toBe(true);
+	});
+
+	it('waits for the first authoritative host snapshot before allowing terminal creation', async () => {
+		const { registry, executors, list, create } = setup({ awaitingExecutors: true });
+		const initial = Promise.withResolvers<TerminalListResponse>();
+		const current = Promise.withResolvers<TerminalListResponse>();
+		list.mockImplementationOnce(() => initial.promise).mockImplementationOnce(() => current.promise);
+		const initializing = registry.initialize();
+		expect(registry.canCreate('local')).toBe(false);
+		await expect(registry.create('/project', 'early-create')).rejects.toThrow();
+		expect(create).not.toHaveBeenCalled();
+		await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+		executors.applySnapshot([{ ...executor('local'), instanceId: 'local-instance' }]);
+		await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+		initial.resolve(inventory([]));
+		create.mockResolvedValueOnce({ success: true, terminal: terminal('local') });
+		const creating = registry.create('/project', 'current-create');
+		current.resolve(inventory([]));
+		await expect(creating).resolves.toBe(terminal('local').terminalId);
+		await initializing;
+		expect(create).toHaveBeenCalledOnce();
+		expect(create).toHaveBeenCalledWith(expect.objectContaining({ expectedTerminalRuntimeId: runtimeId }));
+	});
+
+	it('rejects a late create across ready-to-ready replacement before its list settles', async () => {
+		const { registry, executors, list, create, sent } = setup();
+		await registry.initialize();
+		const oldCreate = Promise.withResolvers<Awaited<ReturnType<typeof create>>>();
+		const replacementList = Promise.withResolvers<TerminalListResponse>();
+		create.mockImplementationOnce(() => oldCreate.promise);
+		const creating = registry.create('/project', 'old-create', remoteId);
+		list.mockImplementationOnce(() => replacementList.promise);
+		executors.applySnapshot([executor('local'), { ...executor(remoteId), instanceId: 'replacement-instance' }]);
+		const refreshing = registry.list(remoteId);
+		const oldTerminal = terminal(remoteId, 2);
+		oldCreate.resolve({ success: true, terminal: oldTerminal });
+		try {
+			await expect(creating).rejects.toMatchObject({ errorCode: 'terminal-runtime-changed' });
+			expect(registry.sessions[oldTerminal.terminalId]).toBeUndefined();
+			expect(sent.some(message => message.type === 'terminal-attach' && message.terminalId === oldTerminal.terminalId)).toBe(false);
+		} finally {
+			replacementList.resolve(inventory([], replacementRuntimeId));
+			await refreshing;
+		}
+	});
+
+	it('fences late lists and refreshes when a ready host changes instance without an offline snapshot', async () => {
+		const { registry, executors, list } = setup();
+		await registry.initialize();
+		const oldList = Promise.withResolvers<TerminalListResponse>();
+		list.mockImplementationOnce(() => oldList.promise);
+		const stale = registry.list(remoteId);
+		await Promise.resolve();
+		list.mockImplementation(async id => inventory([terminal(id, 1, replacementRuntimeId)], replacementRuntimeId));
+		executors.applySnapshot([executor('local'), { ...executor(remoteId), instanceId: 'replacement-instance' }]);
+		await registry.list(remoteId);
+		expect(registry.executorInventories[remoteId].runtimeId).toBe(replacementRuntimeId);
+		oldList.resolve(inventory([terminal(remoteId)]));
+		await stale;
+		expect(registry.executorInventories[remoteId].runtimeId).toBe(replacementRuntimeId);
+		expect(registry.sessions[terminal(remoteId).terminalId]).toBeUndefined();
+		expect(registry.sessions[terminal(remoteId, 1, replacementRuntimeId).terminalId]).toBeDefined();
+		expect(registry.sessions[terminal('local').terminalId]).toBeDefined();
+	});
 	it('restores terminals without Promise.withResolvers support', async () => {
 		const unsupported = vi.spyOn(Promise, 'withResolvers').mockImplementation(() => {
 			throw new TypeError('Promise.withResolvers is not a function');
@@ -343,6 +437,20 @@ describe('executor-qualified terminal registry', () => {
 		executors.applySnapshot([executor(otherRemoteId), executor('local'), executor(remoteId, 'offline')]);
 		expect(registry.hosts.map((host) => host.id)).toEqual(['local', otherRemoteId, remoteId]);
 		expect(registry.hosts[2].available).toBe(false);
+	});
+
+	it('keeps unsupported list hosts unavailable without blocking other hosts', () => {
+		const { registry, executors } = setup();
+		executors.applySnapshot([executor('local'), {
+			...executor(remoteId),
+			operations: LOCAL_EXECUTOR_OPERATIONS.filter(operation => operation !== 'terminals.list'),
+		}]);
+		expect(registry.hosts).toEqual([
+			expect.objectContaining({ id: 'local', available: true }),
+			expect.objectContaining({ id: remoteId, available: false }),
+		]);
+		expect(registry.canCreate('local')).toBe(true);
+		expect(registry.canCreate(remoteId)).toBe(false);
 	});
 
 	it.each(['before inventory', 'after inventory'])(

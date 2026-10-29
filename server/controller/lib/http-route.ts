@@ -1,4 +1,4 @@
-import { authenticateHttpRequest } from './http-request.js';
+import { authenticateHttpRequest, authenticatedWithLocalCapability } from './http-request.js';
 import { MalformedJsonError } from '../../common/http-body.js';
 import { isAuthDisabled } from '../config.js';
 import { malformedJsonResponse } from './json-route.js';
@@ -14,6 +14,10 @@ import { createLogger } from '../../common/log.js';
 import { trackActivity } from '../../common/event-loop-stalls.js';
 import { CLI_SERVER_INSTANCE_HEADER } from '@garcon/common/server-runtime';
 import { stripBasePath } from '@garcon/common/base-path';
+import { CLI_CONTRACT_HEADER, CLI_OPERATIONS, type CliOperation } from '@garcon/common/cli-contracts';
+import { cliRequestContract } from '../../remote/transport/cli-protocol.js';
+import { DomainError } from '../../common/domain-error.js';
+import { registerCliRoutes, type CliRouteContracts } from './cli-contracts.js';
 
 const logger = createLogger('lib:http-route');
 
@@ -34,6 +38,7 @@ export interface HttpRouteAuthOptions {
   localCapability?: string;
   serverInstanceId?: string;
   isShuttingDown?: () => boolean;
+  cliContracts?: CliRouteContracts;
 }
 
 export function cliInstanceMismatch(request: Request, expected: string | undefined): Response | null {
@@ -41,6 +46,25 @@ export function cliInstanceMismatch(request: Request, expected: string | undefin
   return supplied !== null && supplied !== expected
     ? jsonError('Garcon restarted; start a new CLI invocation', 409, 'CLI_CONTROLLER_CHANGED', false)
     : null;
+}
+
+function cliRouteSelection(request: Request, route: string, method: string, localCapability: boolean,
+  handler: RouteHandler, contracts: CliRouteContracts): Response | RouteHandler {
+  if (method === 'GET' && (route === '/api/v1/runtime' || route === '/api/v1/cli/context')) return handler;
+  const hasHeader = request.headers.has(CLI_CONTRACT_HEADER) || request.headers.has(CLI_SERVER_INSTANCE_HEADER);
+  const operation = `${method} ${route}`;
+  if (!Object.hasOwn(CLI_OPERATIONS, operation)) {
+    return hasHeader ? jsonError('This route is outside the CLI contract', 403, 'CLI_ACCESS_DENIED', false) : handler;
+  }
+  if (!hasHeader && !localCapability) return handler;
+  try {
+    const ref = cliRequestContract(request.headers, operation as CliOperation);
+    return contracts.resolve(operation, ref).dispatch;
+  }
+  catch (error) {
+    if (error instanceof DomainError) return jsonError(error.message, error.status, error.code, error.retryable);
+    throw error;
+  }
 }
 
 export function serverShuttingDownResponse(): Response {
@@ -147,6 +171,7 @@ export function wrapRoute(
   method: string,
   authOptions: HttpRouteAuthOptions = {},
 ): WrappedRouteHandler {
+  authOptions = { ...authOptions, cliContracts: authOptions.cliContracts ?? registerCliRoutes({ [routePath]: { [method]: handler } }) };
   const wrapped = wrapRouteAuth(handler, routePath, method, authOptions);
   const headers = (handler as MarkedRouteHandler)[responseHeadersRouteMarker];
   if (!headers) return wrapped;
@@ -174,7 +199,9 @@ function wrapRouteAuth(
       if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
       const mismatch = cliInstanceMismatch(req, authOptions.serverInstanceId);
       if (mismatch) return mismatch;
-      return invokeRouteHandler(handler, req, server, { principal: LOCAL_SERVER_PRINCIPAL }, activity, authOptions.basePath ?? '');
+      const selected = cliRouteSelection(req, routePath, method, authenticatedWithLocalCapability(req, authOptions.localCapability), handler, authOptions.cliContracts!);
+      if (selected instanceof Response) return selected;
+      return invokeRouteHandler(selected, req, server, { principal: LOCAL_SERVER_PRINCIPAL, cliContracts: authOptions.cliContracts!.catalog }, activity, authOptions.basePath ?? '');
     };
   }
 
@@ -182,13 +209,15 @@ function wrapRouteAuth(
     logger.debug(`Skipping auth wrapping for ${method} ${routePath}`);
     return async (req: Request, server?: unknown): Promise<Response> => {
       if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
-      return invokeRouteHandler(handler, req, server, { principal: null }, activity, authOptions.basePath ?? '');
+      const selected = cliRouteSelection(req, routePath, method, false, handler, authOptions.cliContracts!);
+      if (selected instanceof Response) return selected;
+      return invokeRouteHandler(selected, req, server, { principal: null, cliContracts: authOptions.cliContracts!.catalog }, activity, authOptions.basePath ?? '');
     };
   }
 
   return async (req: Request, server?: unknown): Promise<Response> => {
     if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
-    const { errorResponse, principal } = await authenticateHttpRequest(req, authOptions);
+    const { errorResponse, principal, localCapability } = await authenticateHttpRequest(req, authOptions);
     if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
     if (errorResponse) {
       if ((handler as MarkedRouteHandler)[noStoreRouteMarker]) errorResponse.headers.set('Cache-Control', 'no-store');
@@ -196,7 +225,9 @@ function wrapRouteAuth(
     }
     const mismatch = cliInstanceMismatch(req, authOptions.serverInstanceId);
     if (mismatch) return mismatch;
-    return invokeRouteHandler(handler, req, server, { principal }, activity, authOptions.basePath ?? '');
+    const selected = cliRouteSelection(req, routePath, method, localCapability, handler, authOptions.cliContracts!);
+    if (selected instanceof Response) return selected;
+    return invokeRouteHandler(selected, req, server, { principal, cliContracts: authOptions.cliContracts!.catalog }, activity, authOptions.basePath ?? '');
   };
 }
 
@@ -205,6 +236,7 @@ export function wrapRoutes(
   rawRoutes: RouteMap,
   authOptions: HttpRouteAuthOptions = {},
 ): WrappedRouteMap {
+  authOptions = { ...authOptions, cliContracts: authOptions.cliContracts ?? registerCliRoutes(rawRoutes) };
   const basePath = authOptions.basePath ?? '';
   const mountedRoutes: WrappedRouteMap = Object.fromEntries(
     Object.entries(rawRoutes).map(([routePath, methods]) => {

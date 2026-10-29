@@ -1,10 +1,13 @@
+import { TestWebSocketLink as WebSocketLink } from '../../../remote/__tests__/test-session-transport.js';
+import { RPC_V1 } from '@garcon/common/executor-contracts';
+import { CLI_OPERATIONS } from '@garcon/common/cli-contracts';
 import { afterEach, expect, mock, spyOn, test } from 'bun:test';
 import { connectNoiseWebSocket, createNoiseServer, type NoiseServerOptions } from '@cfal/noise-ws';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ExecutorManager } from '../manager.js';
-import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../../../remote/transport/websocket-link.js';
+import { EXECUTOR_NOISE_CONTEXT } from '../../../remote/transport/websocket-link.js';
 import { ExecutorRpc, type GuardRpcReply } from '../../../remote/transport/rpc.js';
 import type { ExecutorRpcConnection } from '../../../remote/transport/rpc-connection.js';
 import { servePairedRuntime } from '../../../remote/__tests__/runtime-adapter.js';
@@ -25,15 +28,17 @@ import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-async function fixture(logger?: Logger) {
+async function fixture(logger?: Logger, resolveCredential: Parameters<typeof ExecutorManager.create>[0]['resolveCredential'] = async () => null,
+  dispatcher: ControllerCliDispatcher | null = new ControllerCliDispatcher({ serverInstanceId: 'controller', workspaceName: null, routes: {}, isShuttingDown: () => false })) {
   const temporary = join(homedir(), 'tmp');
   await mkdir(temporary, { recursive: true });
   const root = await mkdtemp(join(temporary, 'executor-manager-'));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const manager = await ExecutorManager.create({
-    id: 'local', workspaceDir: root, projectBasePath: root, integrations: [], resolveCredential: async () => null,
+    id: 'local', workspaceDir: root, projectBasePath: root, integrations: [], resolveCredential,
   }, logger);
   cleanups.push(() => manager.dispose());
+  if (dispatcher) await manager.setCliDispatcher(dispatcher);
   return { root, manager };
 }
 
@@ -56,8 +61,7 @@ test.each(['executor-connects', 'controller-connects'] as const)(
     else configured = await manager.create({ direction, label: 'Worker', noTls: true, connectionUrl: executorConnectionUrl(link.listen(), secret) });
     const rpc = await connected.promise;
     await waitReady(manager, configured.id);
-    manager.setCliDispatcher(new ControllerCliDispatcher({ serverInstanceId: 'controller', workspaceName: null, routes: {}, isShuttingDown: () => false }));
-    await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+    await expect(rpc.call('', RPC_V1['controllerCli.describe'], null)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
     const id = configured.id;
     await expect(withFailingDirectorySync(root, () => manager.update(id, { allowControllerCli: true, allowExecutorManagement: true })))
       .rejects.toMatchObject({ renamed: true });
@@ -67,7 +71,7 @@ test.each(['executor-connects', 'controller-connects'] as const)(
     });
     expect(manager.inboundLink(id)).toBeNull();
     expect(() => manager.requireExecutor(id)).toThrow('Executor is unavailable');
-    await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toThrow();
+    await expect(rpc.call('', RPC_V1['controllerCli.describe'], null)).rejects.toThrow();
     expect(manager.isReady('local')).toBe(true);
   },
 );
@@ -128,18 +132,128 @@ function waitBulkReady(manager: ExecutorManager, id: string): Promise<void> {
 function worker(secret: string, projectPath: string, configure: (fixture: ReturnType<typeof integrationFixture>) => void = () => {}) {
   const link = new WebSocketLink({ role: 'worker', secret, noTls: true, redialDelaysMs: [20] });
   cleanups.push(() => link.dispose());
+  let provider: ReturnType<typeof integrationFixture> | null = null;
+  const relay = new ProducerRelay();
+  cleanups.push(async () => relay.dispose());
   link.onSession((transport) => {
-    const provider = integrationFixture(projectPath, transport.executorId);
-    configure(provider);
-    const serving = servePairedRuntime(link, transport, provider.executor, new ProducerRelay());
+    if (!provider) { provider = integrationFixture(projectPath, transport.executorId); configure(provider); }
+    const serving = servePairedRuntime(link, transport, provider.executor, relay);
     cleanups.push(() => serving.dispose());
   });
   return link;
 }
 
+test('candidate credentials use described membership before publication and fence stale replies', async () => {
+  const credential = { kind: 'synthetic', value: 'synthetic-value' };
+  const requested = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let hold = false;
+  const resolved: string[] = [];
+  const { manager, root } = await fixture(undefined, async request => {
+    resolved.push(request.agentId);
+    if (hold) { requested.resolve(); await release.promise; }
+    return credential;
+  });
+  const config = await manager.create({ label: 'Candidate', direction: 'executor-connects' });
+  const link = new WebSocketLink({ role: 'worker', secret: config.secret, noTls: true });
+  cleanups.push(() => link.dispose());
+  const reference = { kind: 'api-provider-endpoint' as const, apiProviderId: 'synthetic', endpointId: 'synthetic', revision: 1 };
+  let endpoint!: ExecutorRpc;
+  link.onSession(transport => {
+    const native = integrationFixture(root, transport.executorId);
+    native.hooks.initialize = async () => {
+      expect(manager.isReady(config.id)).toBe(false);
+      expect(() => manager.requireExecutor(config.id)).toThrow();
+      expect(await endpoint.call('test', RPC_V1['credentials.resolve'], { reference })).toEqual(credential);
+      await expect(endpoint.call('missing', RPC_V1['credentials.resolve'], { reference })).rejects.toThrow();
+    };
+    const relay = new ProducerRelay();
+    const serving = servePairedRuntime(link, transport, native.executor, relay);
+    endpoint = serving.connection.primary;
+    cleanups.push(async () => { await serving.dispose(); relay.dispose(); });
+  });
+  try {
+    link.dial(sharedListener(manager).url(config.id));
+    await waitReady(manager, config.id);
+    expect(resolved).toEqual(['test']);
+    hold = true;
+    const pending = endpoint.call('test', RPC_V1['credentials.resolve'], { reference }).catch((error: unknown) => error);
+    await requested.promise;
+    await manager.update(config.id, { enabled: false });
+    release.resolve();
+    expect(await pending).not.toEqual(credential);
+  } finally { release.resolve(); }
+});
+
+test.each(['executor-connects', 'controller-connects'] as const)(
+  'same-worker credentials remain authorized while reconnect description is pending (%s)', async direction => {
+    const credential = { kind: 'synthetic', value: 'synthetic-value' };
+    const resolve = mock(async () => credential);
+    const { manager, root } = await fixture(undefined, resolve);
+    let config = direction === 'executor-connects'
+      ? await manager.create({ label: 'Reconnect', direction, noTls: true }) : null;
+    const secret = config?.secret ?? Buffer.alloc(32, 7).toString('base64url');
+    const link = new WebSocketLink({ role: 'worker', secret, noTls: true, redialDelaysMs: [20] });
+    cleanups.push(() => link.dispose());
+    const relay = new ProducerRelay();
+    cleanups.push(async () => relay.dispose());
+    let native: ReturnType<typeof integrationFixture> | undefined;
+    let endpoint!: ExecutorRpc;
+    let describing = Promise.withResolvers<void>();
+    let release = Promise.withResolvers<void>();
+    link.onSession(transport => {
+      native ??= integrationFixture(root, transport.executorId);
+      const runtime = native.executor;
+      transport.onMessage(payload => {
+        if (JSON.parse(payload).method === 'executor.describe') describing.resolve();
+      });
+      const serving = servePairedRuntime(link, transport, { ...runtime, getInfo: async () => {
+        await release.promise;
+        return runtime.getInfo();
+      } }, relay);
+      endpoint = serving.connection.primary;
+      cleanups.push(() => serving.dispose());
+    });
+    const reference = { kind: 'api-provider-endpoint' as const, apiProviderId: 'synthetic', endpointId: 'synthetic', revision: 1 };
+    try {
+      if (config) link.dial(sharedListener(manager).url(config.id));
+      else config = await manager.create({ label: 'Reconnect', direction, noTls: true,
+        connectionUrl: executorConnectionUrl(link.listen(), secret) });
+      await describing.promise;
+      await expect(endpoint.call('test', RPC_V1['credentials.resolve'], { reference })).rejects.toMatchObject({ outcome: 'rejected' });
+      release.resolve();
+      await waitReady(manager, config.id);
+      const previous = manager.requireIntegration({ executorId: config.id, agentId: 'test' });
+      describing = Promise.withResolvers<void>();
+      release = Promise.withResolvers<void>();
+      link.disconnect();
+      await describing.promise;
+      expect(manager.isReady(config.id)).toBe(false);
+      expect(await endpoint.call('test', RPC_V1['credentials.resolve'], { reference })).toEqual(credential);
+      await expect(endpoint.call('missing', RPC_V1['credentials.resolve'], { reference })).rejects.toMatchObject({ outcome: 'rejected' });
+      expect(resolve).toHaveBeenCalledTimes(1);
+      release.resolve();
+      await waitReady(manager, config.id);
+      expect(manager.requireIntegration({ executorId: config.id, agentId: 'test' })).toBe(previous);
+    } finally { release.resolve(); }
+  },
+);
+
 test('reverse CLI dispatch checks initialization, executor grant, revocation lease and quiescence on the live link', async () => {
-  const { manager, root } = await fixture();
+  const { manager, root } = await fixture(undefined, undefined, null);
   const config = await manager.create({ label: 'CLI worker', direction: 'executor-connects' });
+  expect(manager.inboundLink(config.id)).toBeNull();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let calls = 0;
+  await manager.setCliDispatcher(new ControllerCliDispatcher({ serverInstanceId: 'controller', workspaceName: 'workspace',
+    isShuttingDown: () => false, routes: {
+      '/api/v1/chats/stop': { POST: () => Response.json({ success: true }) },
+      '/api/v1/chats/turn-receipt': { GET: () => Response.json({ success: true }) },
+      '/api/v1/chats/run': { POST: async () => {
+        calls++; entered.resolve(); await release.promise; return Response.json({ confirmed: true });
+      } },
+    } }));
   const { url } = sharedListener(manager);
   const link = new WebSocketLink({ role: 'worker', secret: config.secret, noTls: true });
   cleanups.push(() => link.dispose());
@@ -153,38 +267,31 @@ test('reverse CLI dispatch checks initialization, executor grant, revocation lea
   const connection = await connected.promise;
   const rpc = connection.primary;
   await waitReady(manager, config.id);
-  await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+  await expect(rpc.call('', RPC_V1['controllerCli.describe'], null)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
   await manager.update(config.id, { allowControllerCli: true });
-  await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_CONTROLLER_UNAVAILABLE' });
-  const entered = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<void>();
-  let calls = 0;
-  manager.setCliDispatcher(new ControllerCliDispatcher({ serverInstanceId: 'controller', workspaceName: 'workspace',
-    isShuttingDown: () => false, routes: { '/api/v1/chats/run': { POST: async () => {
-      calls++; entered.resolve(); await release.promise; return Response.json({ confirmed: true });
-    } } } }));
-  const request = { expectedServerInstanceId: 'controller', http: { operation: 'POST /api/v1/chats/run' as const, query: [], body: {} } };
+  const request = { contract: { name: CLI_OPERATIONS['POST /api/v1/chats/run'][1].name, version: 1 }, expectedServerInstanceId: 'controller',
+    http: { operation: 'POST /api/v1/chats/run' as const, query: [], body: {} } };
   try {
     const bulk = await connection.bulk.wait();
-    expect(await rpc.call('', 'controllerCli.describe', null)).toMatchObject({ defaultExecutorId: config.id });
-    await expect(bulk.call('forged-provider', 'controllerCli.request', request)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
-    const pending = bulk.call('', 'controllerCli.request', request);
+    expect(await rpc.call('', RPC_V1['controllerCli.describe'], null)).toMatchObject({ defaultExecutorId: config.id });
+    await expect(bulk.call('forged-provider', RPC_V1['controllerCli.request'], request)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+    const pending = bulk.call('', RPC_V1['controllerCli.request'], request);
     const result = Promise.allSettled([pending]);
     await entered.promise;
     await manager.update(config.id, { allowControllerCli: false });
     await manager.update(config.id, { allowControllerCli: true });
     release.resolve();
     expect(await result).toMatchObject([{ status: 'rejected', reason: { code: 'CLI_OUTCOME_UNKNOWN' } }]);
-    expect(await rpc.call('', 'controllerCli.describe', null)).toMatchObject({ defaultExecutorId: config.id });
+    expect(await rpc.call('', RPC_V1['controllerCli.describe'], null)).toMatchObject({ defaultExecutorId: config.id });
     expect(calls).toBe(1);
     expect(link.current).toBe(rpc.transport);
     manager.quiesce();
-    await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_CONTROLLER_UNAVAILABLE' });
+    await expect(rpc.call('', RPC_V1['controllerCli.describe'], null)).rejects.toMatchObject({ code: 'CLI_CONTROLLER_UNAVAILABLE' });
   } finally { release.resolve(); }
 });
 
 test.each(['context', 'read', 'mutation'] as const)('quiescence after handler settlement fences Noise RPC publication: %s', async (operation) => {
-  const { manager, root } = await fixture();
+  const { manager, root } = await fixture(undefined, undefined, null);
   const config = await manager.create({ label: 'CLI worker', direction: 'executor-connects', allowControllerCli: true });
   const { url } = sharedListener(manager);
   const link = new WebSocketLink({ role: 'worker', secret: config.secret, noTls: true });
@@ -195,10 +302,6 @@ test.each(['context', 'read', 'mutation'] as const)('quiescence after handler se
     cleanups.push(() => serving.dispose());
     connected.resolve(serving.connection);
   });
-  link.dial(url(config.id));
-  const connection = await connected.promise;
-  const rpc = operation === 'context' ? connection.primary : await connection.bulk.wait();
-  await waitReady(manager, config.id);
   class QuiescingDispatcher extends ControllerCliDispatcher {
     override describe(access: CliDispatchAccess, guardReply: GuardRpcReply) {
       const context = super.describe(access, guardReply);
@@ -211,16 +314,66 @@ test.each(['context', 'read', 'mutation'] as const)('quiescence after handler se
       return reply;
     }
   }
-  manager.setCliDispatcher(new QuiescingDispatcher({ serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false,
-    routes: { '/api/v1/chats': { GET: () => Response.json({ privateData: true }) },
+  await manager.setCliDispatcher(new QuiescingDispatcher({ serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false,
+    routes: { '/api/v1/chats/stop': { POST: () => Response.json({ success: true }) },
+      '/api/v1/chats/turn-receipt': { GET: () => Response.json({ success: true }) },
+      '/api/v1/chats': { GET: () => Response.json({ privateData: true }) },
       '/api/v1/chats/run': { POST: () => Response.json({ committed: true }) } } }));
-  const pending = operation === 'context' ? rpc.call('', 'controllerCli.describe', null)
-    : rpc.call('', 'controllerCli.request', { expectedServerInstanceId: 'controller', http: {
+  link.dial(url(config.id));
+  const connection = await connected.promise;
+  const rpc = operation === 'context' ? connection.primary : await connection.bulk.wait();
+  await waitReady(manager, config.id);
+  const pending = operation === 'context' ? rpc.call('', RPC_V1['controllerCli.describe'], null)
+    : rpc.call('', RPC_V1['controllerCli.request'], { contract: { name: CLI_OPERATIONS[operation === 'mutation' ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats'][1].name, version: 1 }, expectedServerInstanceId: 'controller', http: {
       operation: operation === 'mutation' ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats',
       query: [], body: operation === 'mutation' ? {} : null,
     } });
   await expect(pending).rejects.toMatchObject({ code: operation === 'mutation' ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_CONTROLLER_UNAVAILABLE' });
 });
+
+test.each(['executor-connects', 'controller-connects'] as const)(
+  'persisted connections start only after final CLI registrations are installed (%s)', async direction => {
+    const initial = await fixture(undefined, undefined, null);
+    const secret = Buffer.alloc(32, 7).toString('base64url');
+    const link = new WebSocketLink({ role: 'worker', secret, noTls: true });
+    cleanups.push(() => link.dispose());
+    const configured = await initial.manager.create(direction === 'executor-connects'
+      ? { label: 'Persisted', direction, noTls: true, allowControllerCli: true }
+      : { label: 'Persisted', direction, noTls: true, allowControllerCli: true,
+        connectionUrl: executorConnectionUrl(link.listen(), secret) });
+    await initial.manager.dispose();
+    const manager = await ExecutorManager.create({ id: 'local', workspaceDir: initial.root,
+      projectBasePath: initial.root, integrations: [], resolveCredential: async () => null });
+    cleanups.push(() => manager.dispose());
+    expect(manager.config.require(configured.id)).toEqual(configured);
+    expect(manager.inboundLink(configured.id)).toBeNull();
+    expect(link.current).toBeNull();
+    expect(manager.isReady('local')).toBe(true);
+
+    const remote = direction === 'executor-connects'
+      ? new WebSocketLink({ role: 'worker', secret: configured.secret, noTls: true }) : link;
+    if (remote !== link) cleanups.push(() => remote.dispose());
+    const connected = Promise.withResolvers<ExecutorRpcConnection>();
+    remote.onSession(transport => {
+      const serving = servePairedRuntime(remote, transport, integrationFixture(initial.root, transport.executorId).executor, new ProducerRelay());
+      cleanups.push(() => serving.dispose());
+      connected.resolve(serving.connection);
+    });
+    const dispatcher = new ControllerCliDispatcher({ serverInstanceId: 'controller', workspaceName: null,
+      isShuttingDown: () => false, routes: { '/api/v1/chats': { GET: () => Response.json({ chats: [] }) } } });
+    await manager.setCliDispatcher(dispatcher);
+    if (direction === 'executor-connects') remote.dial(sharedListener(manager).url(configured.id));
+    const connection = await connected.promise;
+    await waitReady(manager, configured.id);
+    const { name, version } = CLI_OPERATIONS['GET /api/v1/chats'][1];
+    expect(connection.primary.transport.protocol.profile.contracts[name]).toEqual([version]);
+    expect(await (await connection.bulk.wait()).call('', RPC_V1['controllerCli.request'], {
+      contract: { name, version }, expectedServerInstanceId: 'controller',
+      http: { operation: 'GET /api/v1/chats', query: [], body: null },
+    })).toEqual({ status: 200, body: { chats: [] } });
+    await expect(manager.setCliDispatcher(dispatcher)).rejects.toThrow('already installed');
+  },
+);
 
 function sharedListener(manager: ExecutorManager, limits?: NoiseServerOptions) {
   const primary = {
@@ -270,7 +423,7 @@ test('offline configuration never blocks Local or fabricates remote inventory', 
   await expect(manager.inspectProject(root, crypto.randomUUID())).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
 });
 
-test('connector replacement retains provider checks but accepts a new project base', async () => {
+test('connector replacement publishes fresh providers and project base', async () => {
   const { manager, root } = await fixture();
   const narrow = join(root, 'narrow');
   await mkdir(narrow);
@@ -292,21 +445,36 @@ test('connector replacement retains provider checks but accepts a new project ba
   await manager.update(config.id, { enabled: false });
   await replacement.dispose();
   await manager.update(config.id, { enabled: true });
-  const rejected = Promise.withResolvers<void>();
-  const off = manager.onChanged(() => {
-    if (manager.list().find((item) => item.id === config.id)?.lastError) rejected.resolve();
-  });
-  const incompatible = worker(config.secret, narrow, (provider) => { provider.integration.descriptor.label = 'Incompatible'; });
-  incompatible.dial(url(config.id));
-  await rejected.promise;
-  off();
-  // Setup closes the session after reporting why, and the closure keeps that report.
-  expect(manager.list().find((item) => item.id === config.id)?.lastError?.message).not.toContain('Executor connection lost');
+  const refreshed = worker(config.secret, narrow, (provider) => { provider.integration.descriptor.label = 'Changed'; });
+  refreshed.dial(url(config.id));
+  await waitReady(manager, config.id);
   expect(manager.list().find((item) => item.id === config.id)).toMatchObject({
-    projectBasePath: root, instanceId: accepted.instanceId, availability: 'offline',
-    lastError: { message: expect.stringContaining('provider inventory changed') },
+    projectBasePath: narrow, availability: 'ready', lastError: null,
   });
+  expect(manager.requireIntegration({ executorId: config.id, agentId: 'test' }).descriptor.label).toBe('Changed');
   expect(manager.isReady('local')).toBe(true);
+});
+
+test('invalid candidate registries never initialize or publish', async () => {
+  const failed = Promise.withResolvers<void>();
+  const { manager, root } = await fixture({ debug() {}, info() {}, error() {}, warn(message) {
+    if (message === 'Executor session setup failed') failed.resolve();
+  } });
+  const config = await manager.create({ label: 'Invalid candidate', direction: 'executor-connects' });
+  let initialized = false;
+  const link = worker(config.secret, root, provider => {
+    Object.assign(provider.integration.descriptor, { configuration: [
+      { key: 'SYNTHETIC', source: 'environment', description: '' },
+      { key: 'SYNTHETIC', source: 'environment', description: '' },
+    ] });
+    provider.hooks.initialize = async () => { initialized = true; };
+  });
+  link.dial(sharedListener(manager).url(config.id));
+  await failed.promise;
+  expect(initialized).toBe(false);
+  expect(manager.isReady(config.id)).toBe(false);
+  expect(manager.knownIntegration({ executorId: config.id, agentId: 'test' })).toBeNull();
+  expect(manager.list().find(entry => entry.id === config.id)?.instanceId).toBeNull();
 });
 
 test('manager readiness waits for replacement metadata publication', async () => {
@@ -317,28 +485,28 @@ test('manager readiness waits for replacement metadata publication', async () =>
   first.dial(url(config.id));
   await waitReady(manager, config.id);
   const executor = manager.requireExecutor(config.id);
-  const original = executor.getInfo.bind(executor);
+  const previousIntegration = manager.requireIntegration({ executorId: config.id, agentId: 'test' });
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
-  const pending = spyOn(executor, 'getInfo').mockImplementation(async () => {
-    const info = await original();
-    entered.resolve();
-    await release.promise;
-    return info;
-  });
   try {
     await first.dispose();
-    const replacement = worker(config.secret, '/');
+    const replacement = worker(config.secret, '/', provider => {
+      provider.hooks.initialize = async () => { entered.resolve(); await release.promise; };
+    });
     replacement.dial(url(config.id));
     await entered.promise;
-    expect(executor.availability).toBe('ready');
+    expect(executor.availability).toBe('disposed');
+    expect(() => manager.requireExecutor(config.id)).toThrow('Executor is unavailable');
+    expect(() => manager.integrationsFor(config.id)).toThrow('Executor is unavailable');
     expect(manager.isReady(config.id)).toBe(false);
     expect(manager.list().find((item) => item.id === config.id)?.projectBasePath).toBe(root);
     const ready = waitReady(manager, config.id);
     release.resolve();
     await ready;
     expect(manager.list().find((item) => item.id === config.id)?.projectBasePath).toBe('/');
-  } finally { release.resolve(); pending.mockRestore(); }
+    expect(manager.requireExecutor(config.id)).not.toBe(executor);
+    expect(manager.requireIntegration({ executorId: config.id, agentId: 'test' })).not.toBe(previousIntegration);
+  } finally { release.resolve(); }
 });
 
 test('a reconnecting executor holds calls instead of reporting itself unavailable', async () => {

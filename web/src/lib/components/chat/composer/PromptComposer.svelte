@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { composerExecutionOperations, isComposerControllerCommand } from '$lib/chat/composer/execution-operation';
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import ComposerInputSurface from './ComposerInputSurface.svelte';
 	import { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
@@ -46,6 +47,7 @@
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import {
+		buildComposerSendPresentation,
 		buildPermissionOptions,
 		buildThinkingOptions,
 	} from '$lib/chat/composer/composer-controls.js';
@@ -60,8 +62,6 @@
 	import {
 		applySlashCommand,
 		findSlashCommandTrigger,
-		isControllerSlashCommand,
-		isClearCommand,
 		parseSnippetCommand,
 		type SnippetCommandParseResult,
 	} from '$lib/chat/composer/slash-commands.js';
@@ -699,20 +699,18 @@
 	const canFormat = $derived(
 		isVisible && isPresented && !isDisabled && !promptTransformPending && !ui.composerEditorOpen,
 	);
-	const controllerCommand = $derived.by(() => {
-		if (sessions.selectedChat?.status !== 'running') return false;
-		if (isClearCommand(composerState.inputText)) return true;
-		return executionAgent !== null && isControllerSlashCommand(composerState.inputText, executionAgent.executionPolicy);
-	});
-	// Loading is explained by the disabled send button so the composer keeps its height.
-	const modelsLoading = $derived(
-		executors.isReady(agentState.executorId) && !modelCatalog.isValidated && !modelCatalog.error,
-	);
-	const sendTitle = $derived.by(() => {
-		if (modelsLoading && !controllerCommand) return m.chat_composer_loading_models();
-		if (requiresQueuedSubmission && !controllerCommand) return m.chat_composer_queue_message();
-		return m.chat_composer_send_message();
-	});
+	const controllerCommand = $derived(isComposerControllerCommand(
+		sessions.selectedChat, composerState.inputText, executionAgent?.executionPolicy ?? null,
+	));
+	const { settingsEnvelope, settingsCompatible, sendTitle } = $derived(buildComposerSendPresentation(
+		modelCatalog, agentState,
+		{ executorReady: executors.isReady(agentState.executorId), controllerCommand, requiresQueuedSubmission },
+	));
+	const executionSupported = $derived(composerExecutionOperations(
+		sessions.selectedChat, composerState.inputText, {
+			executionPolicy: executionAgent?.executionPolicy ?? 'conversation', supportsFork: modelCatalog.supportsFork(capabilityAgentId),
+		},
+	).every(operation => executors.supportsExecution(agentState.executorId, operation)));
 
 	const canSubmit = $derived(
 		canSubmitComposer(
@@ -720,8 +718,9 @@
 				directAdmissionPending ||
 				promptTransformPending ||
 				(!controllerCommand &&
-					(!executors.isReady(agentState.executorId) ||
+					(!executors.isReady(agentState.executorId) || !executionSupported ||
 						!modelCatalog.isValidated ||
+						!settingsCompatible ||
 						!providerAvailable)),
 			composerState.inputText,
 			composerState.images.length,
@@ -915,13 +914,14 @@
 				}}
 				canSend={canSubmit}
 				onSend={() => handleFormSubmit()}
-				{sendTitle}
+				sendTitle={!controllerCommand && executors.isReady(agentState.executorId) && !executionSupported ? 'This executor does not support this operation.' : sendTitle}
 				{sendButtonClass}
 			>
 				{#snippet agentSettings()}
 					<AgentSettingsControls
 						descriptors={modelCatalog.getAgentSettingsDescriptors(agentState.agentId)}
-						envelope={agentState.agentSettings}
+						envelope={settingsEnvelope}
+						compatible={settingsCompatible}
 						onChange={(descriptor, value) => onAgentSettingChange?.(descriptor, value)}
 						disabled={!onAgentSettingChange || directAdmissionPending}
 					/>

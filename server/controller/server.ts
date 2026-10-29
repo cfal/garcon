@@ -68,7 +68,8 @@ import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.j
 import type { ApiProviderAccess } from './api-providers/access.js';
 import { createApiProviderPolicy } from './api-providers/composition.js';
 import { AgentCallError } from '@garcon/server-agent-interface';
-import { CommandLedger } from './commands/command-ledger.js';
+import { CommandLedger, commandLedgerKey } from './commands/command-ledger.js';
+import { supportsProviderOperations } from './agents/execution-support.js';
 import { ChatCommandService } from './commands/chat-command-service.js';
 import { queuedSteerContentResolver } from './commands/steer-file-context.js';
 import { KeyedPromiseLock } from '../common/keyed-lock.js';
@@ -513,6 +514,7 @@ export async function startServer(): Promise<void> {
       transcriptReader,
       nativeTranscriptActivity,
     );
+    const commandLedger = new CommandLedger();
     const handoffs = new AgentHandoffService({
       inspectProject,
       registry: chatRegistry,
@@ -523,8 +525,9 @@ export async function startServer(): Promise<void> {
       ledger: transcriptLedger,
       carryover: carryOverCompaction,
       preparedCarryover,
-      reopenProducer: (chatId) => agentRegistry.reopenTranscriptProducer(chatId),
-      onCommitted(chatId) {
+      ensureProducer: (chatId) => agentRegistry.ensureTranscriptProducer(chatId),
+      async onCommitted(chatId, clientRequestId) {
+        await commandLedger.update(commandLedgerKey('agent-handoff', chatId, clientRequestId), { status: 'finished' });
         eventWiring?.notifyAgentHandoff(chatId);
       },
     });
@@ -535,12 +538,15 @@ export async function startServer(): Promise<void> {
     const shareStore = new ShareStore(workspaceDir, { rendering: transcriptRendering });
     await shareStore.init();
 
-    const commandLedger = new CommandLedger();
     const projectAdmission = new ProjectAdmission(chatRegistry, inspectProject);
     queue = new ChatExecutionCoordinator(
       agentRegistry,
       agentRegistry,
-      (chatId) => queueDrainOptions(chatId, chatRegistry),
+      (chatId) => {
+        const chat = chatRegistry.getChat(chatId);
+        if (chat) agentRegistry.assertExecutionSupported(chat, [chat.agentSessionId ? 'execution.resume' : 'execution.start']);
+        return queueDrainOptions(chatId, chatRegistry);
+      },
       (chatId) => chatRegistry.hasChat(chatId),
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
       {
@@ -606,6 +612,7 @@ export async function startServer(): Promise<void> {
         return Boolean(
           session.agentSessionId
           && session.nativeSession
+          && supportsProviderOperations(directory, session.executorId, ['history.open'])
           && directory.get(session.agentId, session.executorId)?.nativeHistoryImport,
         );
       },
@@ -833,8 +840,9 @@ export async function startServer(): Promise<void> {
     // handshakes on some executors' endpoints turn away every other executor.
     const executionSockets = createNoiseServer({ maxConnections: EXECUTOR_SOCKET_LIMIT, maxPendingHandshakes: EXECUTOR_PENDING_SOCKET_LIMIT });
     let shuttingDown = false;
-    executors.setCliDispatcher(new ControllerCliDispatcher({ routes, serverInstanceId: runtimeState.identity.instanceId,
-      workspaceName: config.workspaceName, isShuttingDown: () => shuttingDown }));
+    const cliDispatcher = new ControllerCliDispatcher({ routes, serverInstanceId: runtimeState.identity.instanceId,
+      workspaceName: config.workspaceName, isShuttingDown: () => shuttingDown });
+    await executors.setCliDispatcher(cliDispatcher);
 
     const serveOptions = {
       port: listenPort,
@@ -842,7 +850,8 @@ export async function startServer(): Promise<void> {
       idleTimeout: config.httpIdleTimeoutSeconds,
       maxConnections: config.maxConnections,
       maxRequestBodySize: config.maxRequestBodySize,
-      routes: wrapRoutes(routes, { basePath: config.basePath, localCapability: runtimeState.localCapability, serverInstanceId: runtimeState.identity.instanceId, isShuttingDown: () => shuttingDown }),
+      routes: wrapRoutes(routes, { basePath: config.basePath, localCapability: runtimeState.localCapability, serverInstanceId: runtimeState.identity.instanceId,
+        cliContracts: cliDispatcher.contracts, isShuttingDown: () => shuttingDown }),
       error: unhandledRouteErrorResponse,
       fetch: createWebSocketUpgradeHandler({ basePath: config.basePath, executors, executionSockets, wsAdmission, authDisabled, isShuttingDown: () => shuttingDown }),
       websocket: createServerSocketHandlers({ primary: primaryWs, admission: wsAdmission, config, logger, execution: executionSockets.websocket, delivery: primaryDelivery }),

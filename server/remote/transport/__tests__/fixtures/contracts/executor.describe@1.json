@@ -1,0 +1,410 @@
+{
+  "definition": {
+    "name": "executor.describe",
+    "version": 1,
+    "requires": [],
+    "lane": "primary",
+    "continuity": "session",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": "null",
+    "result": {
+      "info": {
+        "executorId": "string",
+        "instanceId": "string",
+        "integrationIds": {
+          "array": "string"
+        },
+        "projectBasePath": "string",
+        "services": {
+          "directoryCreation": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "files": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "gh": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "git": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "terminals": {
+            "union": [
+              "false",
+              "true"
+            ]
+          }
+        }
+      },
+      "integrations": {
+        "array": {
+          "attachments": {
+            "union": [
+              "null",
+              {
+                "fileMimeTypes": {
+                  "union": [
+                    "\"any\"",
+                    {
+                      "array": "string"
+                    }
+                  ]
+                },
+                "inlineTextMaxBytes": {
+                  "union": [
+                    "null",
+                    "number"
+                  ]
+                }
+              }
+            ]
+          },
+          "authMethods": {
+            "completeLogin": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "launchLogin": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "loginStatus": {
+              "union": [
+                "false",
+                "true"
+              ]
+            }
+          },
+          "capabilities": {
+            "auth": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "commands": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "compaction": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "configurationValidation": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "endpoints": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "forking": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "legacyHistoryImport": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "nativeActivity": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "nativeHistoryImport": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "nativeSessions": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "projectPathUpdates": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "readiness": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "sessionConfiguration": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "singleQuery": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "steering": {
+              "union": [
+                "false",
+                "true"
+              ]
+            }
+          },
+          "descriptor": {
+            "configuration": {
+              "array": {
+                "description": "string",
+                "key": "string",
+                "source": "\"environment\""
+              }
+            },
+            "icon": {
+              "union": [
+                "null",
+                "string"
+              ]
+            },
+            "id": "string",
+            "label": "string",
+            "requiresNativePathForProjectPathUpdate": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "supportedEndpointProtocols": {
+              "array": {
+                "union": [
+                  "\"anthropic-messages\"",
+                  "\"openai-compatible\""
+                ]
+              }
+            },
+            "supportedPermissionModes": {
+              "array": {
+                "union": [
+                  "\"acceptEdits\"",
+                  "\"bypassPermissions\"",
+                  "\"default\"",
+                  "\"manualBypass\"",
+                  "\"plan\""
+                ]
+              }
+            },
+            "supportedThinkingModes": {
+              "array": {
+                "union": [
+                  "\"high\"",
+                  "\"low\"",
+                  "\"max\"",
+                  "\"medium\"",
+                  "\"none\"",
+                  "\"ultra\"",
+                  "\"xhigh\""
+                ]
+              }
+            },
+            "supportsImages": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "supportsProjectPathUpdate": {
+              "union": [
+                "false",
+                "true"
+              ]
+            }
+          },
+          "literalExecution": {
+            "union": [
+              "null",
+              {
+                "inputFormatByModel": {
+                  "[string]": {
+                    "union": [
+                      "\"markdown\"",
+                      "\"plain\""
+                    ]
+                  }
+                },
+                "selectionLabel": "string"
+              }
+            ]
+          },
+          "scope": {
+            "executorId": "string",
+            "instanceId": "string",
+            "integrationId": "string"
+          },
+          "settings": {
+            "defaults": {
+              "ownerId": "string",
+              "schemaVersion": "number",
+              "values": {
+                "[string]": {
+                  "union": [
+                    "false",
+                    "null",
+                    "number",
+                    "string",
+                    "true",
+                    {
+                      "array": {
+                        "recursive": "JsonValue"
+                      }
+                    },
+                    {
+                      "recursive": "JsonObject"
+                    }
+                  ]
+                }
+              }
+            },
+            "descriptors": {
+              "array": {
+                "union": [
+                  {
+                    "credentialKind": "string",
+                    "key": "string",
+                    "label": "string",
+                    "labelKey?": {
+                      "union": [
+                        "\"mode\"",
+                        "\"thinking\"",
+                        "undefined"
+                      ]
+                    },
+                    "type": "\"credential-ref\""
+                  },
+                  {
+                    "key": "string",
+                    "label": "string",
+                    "labelKey?": {
+                      "union": [
+                        "\"mode\"",
+                        "\"thinking\"",
+                        "undefined"
+                      ]
+                    },
+                    "max": "number",
+                    "min": "number",
+                    "step": "number",
+                    "type": "\"number\""
+                  },
+                  {
+                    "key": "string",
+                    "label": "string",
+                    "labelKey?": {
+                      "union": [
+                        "\"mode\"",
+                        "\"thinking\"",
+                        "undefined"
+                      ]
+                    },
+                    "options": {
+                      "array": {
+                        "description?": {
+                          "union": [
+                            "string",
+                            "undefined"
+                          ]
+                        },
+                        "descriptionKey?": {
+                          "union": [
+                            "\"thinkingAutomatic\"",
+                            "\"thinkingDisabled\"",
+                            "\"thinkingEnabled\"",
+                            "undefined"
+                          ]
+                        },
+                        "label": "string",
+                        "labelKey?": {
+                          "union": [
+                            "\"automatic\"",
+                            "\"disabled\"",
+                            "\"enabled\"",
+                            "undefined"
+                          ]
+                        },
+                        "value": "string"
+                      }
+                    },
+                    "type": "\"enum\""
+                  },
+                  {
+                    "key": "string",
+                    "label": "string",
+                    "labelKey?": {
+                      "union": [
+                        "\"mode\"",
+                        "\"thinking\"",
+                        "undefined"
+                      ]
+                    },
+                    "type": "\"boolean\""
+                  },
+                  {
+                    "key": "string",
+                    "label": "string",
+                    "labelKey?": {
+                      "union": [
+                        "\"mode\"",
+                        "\"thinking\"",
+                        "undefined"
+                      ]
+                    },
+                    "type": "\"string\""
+                  }
+                ]
+              }
+            }
+          },
+          "singleQueryRunsToolsWithoutPermission": {
+            "union": [
+              "false",
+              "true"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

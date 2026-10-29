@@ -839,6 +839,7 @@
 						<AgentSettingsControls
 							descriptors={form.agentSettingDescriptors}
 							envelope={form.agentSettings}
+							compatible={form.agentSettingsCompatible}
 							onChange={(descriptor, value) => form.setAgentSetting(descriptor, value)}
 						/>
 					{/snippet}

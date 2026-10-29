@@ -1,6 +1,8 @@
 import type { ChatReloadProgress } from '../../../common/ws-events.js';
 import type { AgentDirectory } from '../agents/directory.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
+import { toAgentChatReference } from '../agents/integration-chat-reference.js';
+import { requireProviderOperations } from '../agents/execution-support.js';
 import type { IChatRegistry } from '../chats/store.js';
 import {
   hasPendingTurnInput,
@@ -27,7 +29,7 @@ export interface TranscriptReloadServiceOptions {
   readonly ledger: TranscriptLedgerService;
   readonly adoption: TranscriptAdoptionService;
   readonly registry: IChatRegistry;
-  readonly integrations: Pick<AgentDirectory, 'require'>;
+  readonly integrations: Pick<AgentDirectory, 'require' | 'requireOperations' | 'supportsOperations'>;
   readonly execution: ReloadExecutionPort;
   readonly reopenProducer: (chatId: string) => void;
   readonly getCarryOverRevision: (entry: AgentChatEntry) => string;
@@ -106,6 +108,8 @@ export class TranscriptReloadService {
         false,
       );
     }
+    requireProviderOperations(this.options.integrations, entry.executorId, ['history.open']);
+    toAgentChatReference(integration, chatId, entry, this.options.getCarryOverRevision(entry));
 
     const currentRows = await this.options.ledger.rowsThrough(
       chatId,
@@ -120,6 +124,10 @@ export class TranscriptReloadService {
       entry = updated;
     }
     await this.options.registry.flush();
+
+    if (this.options.integrations.require(entry.agentId, entry.executorId) !== integration) {
+      throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor generation changed before history reload', 503, true);
+    }
 
     this.options.ledger.closeProducer(chatId);
     let staging: TranscriptView | null = null;

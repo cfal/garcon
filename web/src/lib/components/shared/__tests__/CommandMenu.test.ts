@@ -63,7 +63,7 @@ const terminals: Pick<
 	get hasRemoteHosts() {
 		return remoteHosts;
 	},
-	hosts: [{ id: 'local', label: 'Local', available: true, full: false }],
+	hosts: [{ id: 'local', instanceId: 'local-instance', label: 'Local', available: true, full: false }],
 	canCreate: (executorId) => executorId === 'local',
 	listStatus: 'ready',
 	orderedSessions: [],
