@@ -115,6 +115,74 @@ Only incompatible connection mechanics require a bootstrap change. No mandatory
 deprecation release or directional revision floor is imposed. A security withdrawal
 is explicit operational policy, not compatibility inferred from version ordering.
 
+### Maintenance Checklist
+
+1. Classify the observable change before editing the contract. Versions cover
+   requests, results, errors, defaults, limits, authorization, lane/continuity,
+   ordering, outcome and retry meanings, and resource cleanup guarantees.
+   Internal refactors may preserve a version; even an added field or union member
+   can break a strict old decoder. Trace shared DTO changes through every consuming
+   contract. Introduce a new version only where the existing promise changes.
+2. Update the complete implemented boundary. Definitions live in
+   `common/{protocol-contracts,executor-contracts,cli-contracts}.ts`; RPC codecs and
+   registration helpers live in `server/remote/transport/`, with implementations
+   under `server/remote/{client,server}/`. Check role composition in
+   `server/controller/executors/controller-contracts.ts` and
+   `server/remote/server/worker-contracts.ts`. For CLI changes, include route-backed
+   registration in `server/controller/lib/cli-contracts.ts`, direct HTTP, client
+   discovery/selection, the gateway, and controller dispatch. A declaration alone
+   must never advertise an implementation. Retain a faithful old implementation
+   while advertising its version; otherwise advertise its absence.
+3. Preserve admission and ownership. Resolve exact-command replay before fresh
+   support checks; a reopened pre-schedule failure is a fresh admission attempt.
+   Include request-dependent endpoint/history requirements before command
+   acceptance, dequeue, or other effects. Creators require their cleanup/control
+   operations, such as terminal create/terminate or history open/next/close.
+   Resource consumers check the captured resource contract, not its creator's
+   method version. Keep late results, events, cleanup, and reconciliation bound
+   to their original codecs and worker generation.
+4. Add evidence without rewriting the old promise. Preserve released fixtures and
+   add fixtures for new versions. Test a reduced registration that refuses the
+   affected operation before dispatch and at the receiver before effects, while
+   an unrelated operation still succeeds. For changed version dispatch or resource
+   semantics, test old/new codecs, retained ownership, and incompatible resources.
+   Run affected direct/forwarded CLI and both-dial-direction workflows. Use the
+   artifact matrix below before claiming cross-release compatibility; synthetic
+   v2 handlers and A/A runs prove different, narrower properties.
+
+### First Multi-Version Operation
+
+Production currently implements v1 only. The exact-version wire dispatcher is
+multi-version capable, but its higher-level operation projections are not a
+complete production multi-version adapter:
+
+- `common/executor-contracts.ts` defines `ExecutorOperation` from `RPC_V1`, derives
+  `supportedExecutorOperations` from that inventory, and declares v1 workflows.
+- `server/controller/executors/manager.ts` checks published operation names;
+  `server/controller/agents/execution-support.ts` builds name-based requirements.
+- `common/executors.ts` projects v1 execution support for the paired browser.
+  CLI route registration and client selection also have explicit v1 owners.
+
+When a real v2 is needed, audit these consumers alongside the new codecs. Choose
+implemented exact contracts inside the owning adapter before effects, then derive
+availability from the workflow that adapter can actually execute. A logical
+operation-name projection may remain name-based; it must not claim support merely
+because some version with that name exists. Do not teach UI components to choose
+wire versions or implement speculative production v2 adapters to prepare for this.
+
+### Complexity Boundaries
+
+Keep unconditional wire prerequisites in contract definitions and conditional
+requirements in the existing workflow owner. Reuse named flat lists where they
+express the same guarantee; do not add a dependency solver or another registration
+framework. Browser checks improve feedback but do not replace server admission or
+receiver enforcement. Avoid reproducing request-specific admission logic in UI.
+
+Best-effort behavior belongs at optional feature boundaries: report unavailability
+and preserve user selections/drafts while unrelated services continue. It must not
+mean empty-success responses, lost critical events, substituted settings, missing
+cleanup, or version fallback after an operation may have executed.
+
 ## Acceptance And Releases
 
 `bun run --cwd integration-tests test:compatibility` runs serial real-process
