@@ -15,13 +15,18 @@ import {
 	type ChatSurfaceTransfer,
 } from './chat-surface-transfer.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
-import type { WorkspaceSplitAdmissionResolver } from './window-geometry-policy.js';
+import type {
+	WorkspaceLayoutFitResolver,
+	WorkspaceSplitAdmissionResolver,
+} from './window-geometry-policy.js';
+import { requireWorkspaceSplitAdmission } from './workspace-split-blocked-error.js';
 import {
-	requireWorkspaceNewWindowEdge,
-	requireWorkspaceSplitAdmission,
-	WorkspaceSplitBlockedError,
-} from './workspace-split-blocked-error.js';
-import { collectWindowNodes, windowNodeById } from './window-tree.js';
+	balanceWindowRow,
+	collectWindowNodes,
+	computeWindowRects,
+	windowNodeById,
+} from './window-tree.js';
+import { reduceWorkspaceLayout } from './workspace-layout.svelte.js';
 
 export interface WorkspaceChatPlacement {
 	surfaceId: ChatViewSurfaceId;
@@ -63,6 +68,7 @@ interface WorkspaceChatPlacementServiceDeps {
 	): Promise<boolean>;
 	prepareChatSurfaceTransfer(transfer: ChatSurfaceTransfer): WorkspacePublication | null;
 	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
+	fitsWorkspaceHost: WorkspaceLayoutFitResolver;
 	present(surfaceId: string): void;
 }
 
@@ -108,7 +114,7 @@ export class WorkspaceChatPlacementService {
 
 	// Anchors on the source chat's window rather than focus, so a fork started from a sidebar
 	// menu or a background window still lands next to the chat it branched from. An unplaced
-	// source anchors on the last focused window. When no split fits, the fork replaces the
+	// source anchors on the last focused window. When no new window fits, the fork replaces the
 	// anchor's chat, as it always does in the single mobile presentation.
 	async openFork(chatId: string, sourceChatId: string): Promise<ChatViewSurfaceId> {
 		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
@@ -121,15 +127,39 @@ export class WorkspaceChatPlacementService {
 				findWorkspaceChatPlacement(latest, sourceChatId)?.windowId ??
 					this.deps.lastFocusedWindowId(),
 			);
-			try {
-				return this.#newWindowPlan(latest, chatId, anchorWindowId, null, newWindowId, partitionId);
-			} catch (error) {
-				if (!(error instanceof WorkspaceSplitBlockedError)) throw error;
-				const plan = this.#setWindowChatPlan(anchorWindowId, chatId);
-				if (!plan.destination) return plan;
-				// Activation leaves another window's fullscreen, which would otherwise hide the fork.
-				return { ...plan, mutations: [...plan.mutations, ...this.#activate(plan.destination)] };
+			if (this.deps.isMobile()) {
+				return this.#newWindowPlan(
+					latest,
+					chatId,
+					anchorWindowId,
+					'right',
+					newWindowId,
+					partitionId,
+				);
 			}
+			if (this.deps.windowReservations.has(anchorWindowId)) {
+				return { destination: null, mutations: [] };
+			}
+			const opening = this.#forkWindowMutations(
+				latest,
+				chatId,
+				anchorWindowId,
+				newWindowId,
+				partitionId,
+			);
+			if (opening) {
+				return {
+					destination: { surfaceId: chatViewSurfaceId(newWindowId), windowId: newWindowId },
+					mutations: opening,
+				};
+			}
+			const replacement = this.#setWindowChatPlan(anchorWindowId, chatId);
+			if (!replacement.destination) return replacement;
+			// Activation leaves another window's fullscreen, which would otherwise hide the fork.
+			return {
+				...replacement,
+				mutations: [...replacement.mutations, ...this.#activate(replacement.destination)],
+			};
 		});
 		return destination.surfaceId;
 	}
@@ -212,8 +242,7 @@ export class WorkspaceChatPlacementService {
 		latest: WorkspaceLayoutSnapshot,
 		chatId: string,
 		targetWindowId: WorkspaceWindowId | undefined,
-		// Null selects the first edge with room for the split.
-		requestedEdge: WorkspaceWindowEdge | null,
+		edge: WorkspaceWindowEdge,
 		newWindowId: WorkspaceWindowId,
 		partitionId: WorkspacePartitionId,
 	): WorkspaceChatPlacementPlan {
@@ -237,8 +266,14 @@ export class WorkspaceChatPlacementService {
 				],
 			};
 		}
-		const edge = this.#admittedEdge(latest, anchorWindowId, requestedEdge);
-		if (!edge) return { destination: null, mutations: [] };
+		if (
+			!requireWorkspaceSplitAdmission(this.deps.resolveSplitAdmission, latest, {
+				targetWindowId: anchorWindowId,
+				edge,
+			})
+		) {
+			return { destination: null, mutations: [] };
+		}
 		const surfaceId = chatViewSurfaceId(newWindowId);
 		return {
 			destination: { surfaceId, windowId: newWindowId },
@@ -255,19 +290,53 @@ export class WorkspaceChatPlacementService {
 		};
 	}
 
-	#admittedEdge(
+	// Prefers halving the source beside it, then adding an equal-width column to the source's row,
+	// so forking one of several columns too narrow to halve still adds a column, then halving it
+	// below.
+	#forkWindowMutations(
 		latest: WorkspaceLayoutSnapshot,
+		chatId: string,
 		anchorWindowId: WorkspaceWindowId,
-		requestedEdge: WorkspaceWindowEdge | null,
-	): WorkspaceWindowEdge | null {
-		if (!requestedEdge) {
-			return requireWorkspaceNewWindowEdge(this.deps.resolveSplitAdmission, latest, anchorWindowId);
-		}
-		const admitted = requireWorkspaceSplitAdmission(this.deps.resolveSplitAdmission, latest, {
+		newWindowId: WorkspaceWindowId,
+		partitionId: WorkspacePartitionId,
+	): WorkspaceLayoutMutation[] | null {
+		const open = (edge: WorkspaceWindowEdge): WorkspaceLayoutMutation => ({
+			type: 'open-chat-in-new-window',
+			chatId,
 			targetWindowId: anchorWindowId,
-			edge: requestedEdge,
+			edge,
+			newWindowId,
+			partitionId,
 		});
-		return admitted ? requestedEdge : null;
+		const admission = (edge: WorkspaceWindowEdge) =>
+			this.deps.resolveSplitAdmission(latest, { targetWindowId: anchorWindowId, edge });
+		const beside = admission('right');
+		if (beside?.allowed) return [open('right')];
+		if (beside?.reason === 'too-small') {
+			const ratios = this.#balancedRowRatios(latest, open('right'), newWindowId);
+			if (ratios) return [open('right'), ...ratios];
+		}
+		return admission('bottom')?.allowed ? [open('bottom')] : null;
+	}
+
+	#balancedRowRatios(
+		latest: WorkspaceLayoutSnapshot,
+		opening: WorkspaceLayoutMutation,
+		newWindowId: WorkspaceWindowId,
+	): WorkspaceLayoutMutation[] | null {
+		const opened = reduceWorkspaceLayout(latest, [opening]).desktopRoot;
+		const balanced = balanceWindowRow(opened, newWindowId);
+		if (!balanced || !this.deps.fitsWorkspaceHost(balanced)) return null;
+		const openedRatios = new Map(
+			computeWindowRects(opened).partitions.map(({ partition }) => [partition.id, partition.ratio]),
+		);
+		return computeWindowRects(balanced)
+			.partitions.filter(({ partition }) => openedRatios.get(partition.id) !== partition.ratio)
+			.map(({ partition }) => ({
+				type: 'set-partition-ratio',
+				partitionId: partition.id,
+				ratio: partition.ratio,
+			}));
 	}
 
 	async clearDeletedChat(chatId: string): Promise<void> {

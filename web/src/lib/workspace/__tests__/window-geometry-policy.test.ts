@@ -14,7 +14,9 @@ import {
 	workspaceWindowsToPrune,
 	resolveWorkspacePartitionRatioBounds,
 	resolveWorkspaceSplitAdmission,
+	workspaceLayoutFitsHost,
 } from '../window-geometry-policy';
+import { balanceWindowRow, computeWindowRects } from '../window-tree';
 
 function workspaceWindow(id: WorkspaceWindowId, surfaceIds: readonly string[] = [`chat:${id}`]) {
 	return {
@@ -380,4 +382,120 @@ it('grows an undersized current window by removing its sibling before an unrelat
 	expect(workspaceWindowsToPrune(root, { width: 1200, height: 800 }, 'window-current')).toEqual([
 		'window-sibling',
 	]);
+});
+
+describe('workspace row balancing', () => {
+	function widths(root: DesktopWorkspaceNode): Record<string, number> {
+		return Object.fromEntries(
+			computeWindowRects(root).windows.map(({ workspaceWindow, rect }) => [
+				workspaceWindow.id,
+				Math.round(rect.width * 1000) / 1000,
+			]),
+		);
+	}
+
+	it('gives each column of the row an equal share and treats a stack as one column', () => {
+		const stack = partition(
+			'stack',
+			'vertical',
+			0.3,
+			workspaceWindow('window-c'),
+			workspaceWindow('window-d'),
+		);
+		const root = partition(
+			'outer',
+			'horizontal',
+			0.7,
+			partition(
+				'inner',
+				'horizontal',
+				0.8,
+				workspaceWindow('window-a'),
+				workspaceWindow('window-b'),
+			),
+			stack,
+		);
+
+		const balanced = balanceWindowRow(root, 'window-b' as WorkspaceWindowId);
+
+		expect(widths(balanced!)).toEqual({
+			'window-a': 0.333,
+			'window-b': 0.333,
+			'window-c': 0.333,
+			'window-d': 0.333,
+		});
+		const balancedStack = computeWindowRects(balanced!).partitions.find(
+			({ partition: node }) => node.id === stack.id,
+		);
+		expect(balancedStack?.partition.ratio).toBe(0.3);
+	});
+
+	it('balances only the row nested inside a stacked column', () => {
+		const root = partition(
+			'outer',
+			'horizontal',
+			0.5,
+			workspaceWindow('window-a'),
+			partition(
+				'stack',
+				'vertical',
+				0.5,
+				partition(
+					'inner',
+					'horizontal',
+					0.8,
+					workspaceWindow('window-b'),
+					workspaceWindow('window-c'),
+				),
+				workspaceWindow('window-d'),
+			),
+		);
+
+		expect(widths(balanceWindowRow(root, 'window-b' as WorkspaceWindowId)!)).toEqual({
+			'window-a': 0.5,
+			'window-b': 0.25,
+			'window-c': 0.25,
+			'window-d': 0.5,
+		});
+	});
+
+	it('declines a window outside any row and a share below the partition bounds', () => {
+		expect(
+			balanceWindowRow(workspaceWindow('window-a'), 'window-a' as WorkspaceWindowId),
+		).toBeNull();
+		let row: DesktopWorkspaceNode = workspaceWindow('window-6');
+		for (let index = 5; index >= 0; index--) {
+			row = partition(
+				`p${index}`,
+				'horizontal',
+				0.5,
+				workspaceWindow(`window-${index}` as WorkspaceWindowId),
+				row,
+			);
+		}
+		expect(balanceWindowRow(row, 'window-0' as WorkspaceWindowId)).toBeNull();
+	});
+
+	it('fits a layout only while every window keeps the minimum window size', () => {
+		const columns = (count: number): DesktopWorkspaceNode => {
+			let row: DesktopWorkspaceNode = workspaceWindow(`window-${count - 1}` as WorkspaceWindowId);
+			for (let index = count - 2; index >= 0; index--) {
+				row = partition(
+					`p${index}`,
+					'horizontal',
+					0.5,
+					workspaceWindow(`window-${index}` as WorkspaceWindowId),
+					row,
+				);
+			}
+			return balanceWindowRow(row, 'window-0' as WorkspaceWindowId)!;
+		};
+		expect(
+			workspaceLayoutFitsHost(columns(4), { width: 4 * MIN_WINDOW_WIDTH_PX, height: 800 }),
+		).toBe(true);
+		expect(
+			workspaceLayoutFitsHost(columns(4), { width: 4 * MIN_WINDOW_WIDTH_PX - 1, height: 800 }),
+		).toBe(false);
+		expect(workspaceLayoutFitsHost(columns(4), null)).toBe(true);
+	});
 });

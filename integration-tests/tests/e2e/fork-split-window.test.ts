@@ -41,6 +41,34 @@ async function waitForForkWindow(
   return fork;
 }
 
+interface WindowBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+// Reads each window's percentage placement, which the workspace renders as inline styles.
+async function windowBoxes(page: Page): Promise<Record<string, WindowBox>> {
+  return page.$$eval('[data-workspace-window-id]', (elements) =>
+    Object.fromEntries(
+      elements.map((element) => {
+        const style = (element as HTMLElement).style;
+        const percent = (value: string) => Math.round(Number.parseFloat(value) * 10) / 10;
+        return [
+          element.getAttribute('data-workspace-window-id'),
+          {
+            left: percent(style.left),
+            top: percent(style.top),
+            width: percent(style.width),
+            height: percent(style.height),
+          },
+        ];
+      }),
+    ),
+  );
+}
+
 describe('Lightpanda fork into a split window', () => {
   test('opens each fork in a new window without replacing any existing chat window', async () => {
     await withE2eFixture('fork-split-window', async (fixture) => {
@@ -83,9 +111,38 @@ describe('Lightpanda fork into a split window', () => {
         [commandFork.windowId]: commandFork.chatId,
       });
 
+      // The halved source is too narrow to halve again, so its next fork becomes another
+      // equal-width column of the same row.
+      const chatsBeforeRowFork = await app.workspaceChatsByWindow();
+      const windowsBeforeRowFork = await app.workspaceWindowIds();
+      await app.openWorkspaceWindowActions(sourceWindowId);
+      await app.waitForMenuItemEnabled('Fork');
+      await app.clickMenuItem('Fork');
+      const rowFork = await waitForForkWindow(fixture.page, app, windowsBeforeRowFork);
+      expect(await app.workspaceChatsByWindow()).toEqual({
+        ...chatsBeforeRowFork,
+        [rowFork.windowId]: rowFork.chatId,
+      });
+      const boxes = await windowBoxes(fixture.page);
+      const source = boxes[sourceWindowId]!;
+      const fork = boxes[rowFork.windowId]!;
+      expect(fork).toEqual({ ...source, left: fork.left });
+      expect(fork.left).toBeCloseTo(source.left + source.width, 0);
+      const rowWidths = Object.values(boxes)
+        .filter((box) => box.top === source.top && box.height === source.height)
+        .map((box) => box.width);
+      expect(rowWidths.length).toBeGreaterThan(3);
+      expect(new Set(rowWidths)).toEqual(new Set([source.width]));
+
       const listed = (await integration.client.listChats()).sessions.map((entry) => entry.id);
       expect(listed).toEqual(
-        expect.arrayContaining([sourceId, neighborId, menuFork.chatId, commandFork.chatId]),
+        expect.arrayContaining([
+          sourceId,
+          neighborId,
+          menuFork.chatId,
+          commandFork.chatId,
+          rowFork.chatId,
+        ]),
       );
       fixture.assertNoBrowserErrors();
     });

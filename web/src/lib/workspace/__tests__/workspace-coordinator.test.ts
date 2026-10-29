@@ -33,9 +33,13 @@ import { SurfaceFrameRegistry } from '../surface-frame-registry';
 import { SurfaceFrameBridge } from '../surface-frame-context';
 import { WorkspaceShortcutDispatcher, type WorkspaceShortcutDeps } from '../workspace-shortcuts';
 import type { WorkspaceLayoutSnapshot } from '../surface-types';
-import type {
-	WorkspacePartitionRatioBoundsResolver,
-	WorkspaceSplitAdmissionResolver,
+import {
+	resolveWorkspaceSplitAdmission,
+	workspaceLayoutFitsHost,
+	type WorkspaceHostSize,
+	type WorkspaceLayoutFitResolver,
+	type WorkspacePartitionRatioBoundsResolver,
+	type WorkspaceSplitAdmissionResolver,
 } from '../window-geometry-policy';
 import { resolveUnmeasuredWorkspaceSplit } from './workspace-geometry-test-fixtures';
 import { WorkspacePresentationController } from '../workspace-presentation-controller.svelte';
@@ -100,6 +104,7 @@ function createHarness(
 		failLayoutPublishAt?: number;
 		includePortableTabs?: boolean;
 		resolveSplitAdmission?: WorkspaceSplitAdmissionResolver;
+		fitsWorkspaceHost?: WorkspaceLayoutFitResolver;
 		resolvePartitionRatioBounds?: WorkspacePartitionRatioBoundsResolver;
 		currentProjectTarget?: ProjectTarget | null;
 		projectResolution?: ProjectResolver;
@@ -254,6 +259,7 @@ function createHarness(
 		},
 		surfaceFrames: options.surfaceFrames,
 		resolveSplitAdmission: options.resolveSplitAdmission ?? resolveUnmeasuredWorkspaceSplit,
+		fitsWorkspaceHost: options.fitsWorkspaceHost ?? (() => true),
 		resolvePartitionRatioBounds: options.resolvePartitionRatioBounds ?? (() => null),
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
@@ -4044,7 +4050,9 @@ describe('forked chat placement', () => {
 		if (!entry) return null;
 		return {
 			direction: entry.partition.direction,
-			windowIds: entry.partition.children.map((child) => (child.type === 'window' ? child.id : null)),
+			windowIds: entry.partition.children.map((child) =>
+				child.type === 'window' ? child.id : null,
+			),
 		};
 	}
 
@@ -4082,10 +4090,11 @@ describe('forked chat placement', () => {
 		expect(layout.surface(chatViewSurfaceId(otherWindowId))).toMatchObject({ chatId: 'chat-b' });
 	});
 
-	it('splits below the source when it is too narrow to split beside', async () => {
+	it('splits below the source when neither a split nor a balanced column fits beside it', async () => {
 		const { coordinator, layout } = createHarness({
 			resolveSplitAdmission: (_snapshot, { edge }) =>
 				edge === 'bottom' ? { allowed: true } : { allowed: false, reason: 'too-small' },
+			fitsWorkspaceHost: () => false,
 		});
 		await coordinator.showChatInCurrentWindow('chat-a');
 
@@ -4099,15 +4108,58 @@ describe('forked chat placement', () => {
 		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
 	});
 
+	describe('in a measured workspace', () => {
+		// Opens three Chat columns in a wide host, then narrows it so that none can be halved.
+		async function threeColumns(width: number) {
+			let hostSize: WorkspaceHostSize = { width: 4000, height: 800 };
+			const harness = createHarness({
+				includePortableTabs: false,
+				resolveSplitAdmission: (snapshot, request) =>
+					resolveWorkspaceSplitAdmission({ snapshot, hostSize, ...request }),
+				fitsWorkspaceHost: (root) => workspaceLayoutFitsHost(root, hostSize),
+			});
+			const { coordinator } = harness;
+			await coordinator.closeWindow('window-files');
+			await coordinator.showChatInCurrentWindow('chat-a');
+			const middle = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+			const last = await coordinator.openChatInNewWindow('chat-c', middle, 'right');
+			hostSize = { width, height: 800 };
+			return { ...harness, middle, last };
+		}
+
+		function columnWidths(snapshot: WorkspaceLayoutSnapshot): Record<string, number> {
+			return Object.fromEntries(
+				computeWindowRects(snapshot.desktopRoot).windows.map(({ workspaceWindow, rect }) => [
+					workspaceWindow.id,
+					Math.round(rect.width * 1000) / 1000,
+				]),
+			);
+		}
+
+		it('adds an equal column beside a source too narrow to halve', async () => {
+			const { coordinator, layout, middle, last } = await threeColumns(1280);
+
+			await coordinator.openForkedChat('fork-b', 'chat-b');
+
+			const destinationWindowId = forkWindowId(layout.snapshot, 'fork-b');
+			const order = computeWindowRects(layout.snapshot.desktopRoot).windows.map(
+				({ workspaceWindow }) => workspaceWindow.id,
+			);
+			expect(order).toEqual(['window-main', middle, destinationWindowId, last]);
+			expect(Object.values(columnWidths(layout.snapshot))).toEqual([0.25, 0.25, 0.25, 0.25]);
+			expect(layout.surface(chatViewSurfaceId(middle))).toMatchObject({ chatId: 'chat-b' });
+			expect(coordinator.focusedChatId).toBe('fork-b');
+		});
+	});
+
 	it.each(['too-small', 'resource-ceiling', 'fullscreen'] as const)(
 		'replaces the source chat when %s blocks every split',
 		async (reason) => {
 			let blocked = false;
 			const { coordinator, layout } = createHarness({
 				resolveSplitAdmission: (snapshot, request) =>
-					blocked
-						? { allowed: false, reason }
-						: resolveUnmeasuredWorkspaceSplit(snapshot, request),
+					blocked ? { allowed: false, reason } : resolveUnmeasuredWorkspaceSplit(snapshot, request),
+				fitsWorkspaceHost: () => !blocked,
 			});
 			await coordinator.showChatInCurrentWindow('chat-a');
 			const otherWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');

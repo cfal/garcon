@@ -77,6 +77,9 @@ export interface ResolvedWorkspacePartitionRatioBounds {
 	readonly bounds: WorkspacePartitionRatioBounds;
 }
 
+// Reports whether a projected desktop layout leaves every window at its minimum size.
+export type WorkspaceLayoutFitResolver = (root: DesktopWorkspaceNode) => boolean;
+
 export type WorkspacePartitionRatioBoundsResolver = (
 	snapshot: WorkspaceLayoutSnapshot,
 	partitionId: WorkspacePartitionId,
@@ -146,6 +149,22 @@ function siblingWindowId(
 	return siblingWindowId(first, windowId) ?? siblingWindowId(second, windowId);
 }
 
+function undersizedWindows(root: DesktopWorkspaceNode, hostSize: WorkspaceHostSize) {
+	return computeWindowRects(root).windows.filter(
+		({ rect }) =>
+			floorWorkspacePixels(rect.width, hostSize.width) < MIN_WINDOW_WIDTH_PX ||
+			floorWorkspacePixels(rect.height, hostSize.height) < MIN_WINDOW_HEIGHT_PX,
+	);
+}
+
+// An unmeasured host admits any layout, as split admission does.
+export function workspaceLayoutFitsHost(
+	root: DesktopWorkspaceNode,
+	hostSize: WorkspaceHostSize | null,
+): boolean {
+	return !hostSize || undersizedWindows(root, hostSize).length === 0;
+}
+
 export function workspaceWindowsToPrune(
 	root: DesktopWorkspaceNode,
 	hostSize: WorkspaceHostSize | null,
@@ -155,13 +174,8 @@ export function workspaceWindowsToPrune(
 	const removed: WorkspaceWindowId[] = [];
 	let remaining = root;
 	while (true) {
-		const windows = computeWindowRects(remaining).windows;
-		if (windows.length < 2) break;
-		const undersized = windows.filter(
-			({ rect }) =>
-				floorWorkspacePixels(rect.width, hostSize.width) < MIN_WINDOW_WIDTH_PX ||
-				floorWorkspacePixels(rect.height, hostSize.height) < MIN_WINDOW_HEIGHT_PX,
-		);
+		if (collectWindowNodes(remaining).length < 2) break;
+		const undersized = undersizedWindows(remaining, hostSize);
 		if (undersized.length === 0) break;
 		const sourceWindowId =
 			undersized.find(({ workspaceWindow }) => workspaceWindow.id !== currentWindowId)

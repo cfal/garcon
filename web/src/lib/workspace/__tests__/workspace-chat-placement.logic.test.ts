@@ -34,6 +34,9 @@ test('reuses a chat in another window while the anchor is reserved', async () =>
 		resolveSplitAdmission: () => {
 			throw new Error('Reuse must not split a window');
 		},
+		fitsWorkspaceHost: () => {
+			throw new Error('Reuse must not measure a layout');
+		},
 		present: () => {},
 	} satisfies ConstructorParameters<typeof WorkspaceChatPlacementService>[0];
 	const service = new WorkspaceChatPlacementService(deps);

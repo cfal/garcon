@@ -48,6 +48,7 @@ import {
 	clampWorkspacePartitionRatio,
 	mapWorkspaceSplitAdmissions,
 	type WorkspaceHostSize,
+	type WorkspaceLayoutFitResolver,
 	type WorkspacePartitionRatioBounds,
 	type WorkspacePartitionRatioBoundsResolver,
 	type WorkspaceSplitAdmission,
@@ -72,6 +73,7 @@ export interface WorkspaceCoordinatorDeps {
 	gitMutations?: Pick<GitMutationCoordinator, 'pendingCount'>;
 	surfaceFrames?: SurfaceFrameRegistry;
 	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
+	fitsWorkspaceHost: WorkspaceLayoutFitResolver;
 	resolvePartitionRatioBounds: WorkspacePartitionRatioBoundsResolver;
 	onLayoutChanged?(snapshot: WorkspaceLayoutSnapshot): void;
 	onTerminalLauncherDismissed?(): void;
@@ -141,6 +143,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			prepareChatSurfaceTransfer: (transfer) =>
 				this.#tabMovement.prepareChatSurfaceTransfer(transfer),
 			resolveSplitAdmission: deps.resolveSplitAdmission,
+			fitsWorkspaceHost: deps.fitsWorkspaceHost,
 			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
 		});
 		this.#fileDialog = new FileDialogCoordinator({
