@@ -31,6 +31,9 @@ describe("Lightpanda Chat Map", () => {
         chatId: source.id,
         relation: "fork",
       });
+      expect(Object.values(await app.workspaceChatsByWindow())).toEqual(
+        expect.arrayContaining([source.id, forkId]),
+      );
 
       await app.selectWorkspaceWindowSurface("Open Chat Map");
       await fixture.page.waitForSelector("[data-chat-map-panel]");
@@ -78,7 +81,8 @@ describe("Lightpanda Chat Map", () => {
       }, source.id);
       await app.waitForSelectedChat(source.id);
 
-      await app.selectWorkspaceWindowSurface("Chat Map");
+      // The fork's window hosts the Chat Map, while the source link focused the source's window.
+      await app.selectWorkspaceWindowSurfaceById("singleton:chat-map");
       await fixture.page.waitForSelector("[data-chat-map-panel]");
       const deleteCursor = fixture.integration.client.markEvents();
       await fixture.integration.client.deleteChat(source.id);

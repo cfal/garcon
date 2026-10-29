@@ -16,7 +16,11 @@ import {
 } from './chat-surface-transfer.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import type { WorkspaceSplitAdmissionResolver } from './window-geometry-policy.js';
-import { requireWorkspaceSplitAdmission } from './workspace-split-blocked-error.js';
+import {
+	requireWorkspaceNewWindowEdge,
+	requireWorkspaceSplitAdmission,
+	WorkspaceSplitBlockedError,
+} from './workspace-split-blocked-error.js';
 import { collectWindowNodes, windowNodeById } from './window-tree.js';
 
 export interface WorkspaceChatPlacement {
@@ -51,6 +55,7 @@ interface WorkspaceChatPlacementServiceDeps {
 		snapshot: WorkspaceLayoutSnapshot,
 		preferredWindowId: WorkspaceWindowId | null | undefined,
 	): WorkspaceWindowId;
+	commit(mutations: WorkspaceMutationPlan): Promise<boolean>;
 	commitWithPresentationTarget(
 		mutations: WorkspaceMutationPlan,
 		resolveTarget: () => string | null,
@@ -99,6 +104,34 @@ export class WorkspaceChatPlacementService {
 			return this.#newWindowPlan(latest, chatId, targetWindowId, edge, newWindowId, partitionId);
 		});
 		return destination.windowId;
+	}
+
+	// Anchors on the source chat's window rather than focus, so a fork started from a sidebar
+	// menu or a background window still lands next to the chat it branched from. An unplaced
+	// source anchors on the last focused window. When no split fits, the fork replaces the
+	// anchor's chat, as it always does in the single mobile presentation.
+	async openFork(chatId: string, sourceChatId: string): Promise<ChatViewSurfaceId> {
+		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
+		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
+		const destination = await this.#commitPlacement((latest) => {
+			const existing = this.#existingPlacementPlan(latest, chatId);
+			if (existing) return existing;
+			const anchorWindowId = this.deps.resolveWindowId(
+				latest,
+				findWorkspaceChatPlacement(latest, sourceChatId)?.windowId ??
+					this.deps.lastFocusedWindowId(),
+			);
+			try {
+				return this.#newWindowPlan(latest, chatId, anchorWindowId, null, newWindowId, partitionId);
+			} catch (error) {
+				if (!(error instanceof WorkspaceSplitBlockedError)) throw error;
+				const plan = this.#setWindowChatPlan(anchorWindowId, chatId);
+				if (!plan.destination) return plan;
+				// Activation leaves another window's fullscreen, which would otherwise hide the fork.
+				return { ...plan, mutations: [...plan.mutations, ...this.#activate(plan.destination)] };
+			}
+		});
+		return destination.surfaceId;
 	}
 
 	async openBeside(
@@ -179,7 +212,8 @@ export class WorkspaceChatPlacementService {
 		latest: WorkspaceLayoutSnapshot,
 		chatId: string,
 		targetWindowId: WorkspaceWindowId | undefined,
-		edge: WorkspaceWindowEdge,
+		// Null selects the first edge with room for the split.
+		requestedEdge: WorkspaceWindowEdge | null,
 		newWindowId: WorkspaceWindowId,
 		partitionId: WorkspacePartitionId,
 	): WorkspaceChatPlacementPlan {
@@ -203,14 +237,8 @@ export class WorkspaceChatPlacementService {
 				],
 			};
 		}
-		if (
-			!requireWorkspaceSplitAdmission(this.deps.resolveSplitAdmission, latest, {
-				targetWindowId: anchorWindowId,
-				edge,
-			})
-		) {
-			return { destination: null, mutations: [] };
-		}
+		const edge = this.#admittedEdge(latest, anchorWindowId, requestedEdge);
+		if (!edge) return { destination: null, mutations: [] };
 		const surfaceId = chatViewSurfaceId(newWindowId);
 		return {
 			destination: { surfaceId, windowId: newWindowId },
@@ -227,6 +255,33 @@ export class WorkspaceChatPlacementService {
 		};
 	}
 
+	#admittedEdge(
+		latest: WorkspaceLayoutSnapshot,
+		anchorWindowId: WorkspaceWindowId,
+		requestedEdge: WorkspaceWindowEdge | null,
+	): WorkspaceWindowEdge | null {
+		if (!requestedEdge) {
+			return requireWorkspaceNewWindowEdge(this.deps.resolveSplitAdmission, latest, anchorWindowId);
+		}
+		const admitted = requireWorkspaceSplitAdmission(this.deps.resolveSplitAdmission, latest, {
+			targetWindowId: anchorWindowId,
+			edge: requestedEdge,
+		});
+		return admitted ? requestedEdge : null;
+	}
+
+	async clearDeletedChat(chatId: string): Promise<void> {
+		await this.deps.commit((latest) =>
+			collectWindowNodes(latest.desktopRoot).flatMap((workspaceWindow) => {
+				const surfaceId = chatViewSurfaceId(workspaceWindow.id);
+				const surface = latest.surfaces[surfaceId];
+				return surface?.type === 'chat' && surface.chatId === chatId
+					? [{ type: 'set-window-chat' as const, windowId: workspaceWindow.id, chatId: null }]
+					: [];
+			}),
+		);
+	}
+
 	async #show(
 		chatId: string,
 		resolveWindow: (snapshot: WorkspaceLayoutSnapshot) => WorkspaceWindowId | null,
@@ -234,26 +289,27 @@ export class WorkspaceChatPlacementService {
 		const destination = await this.#commitPlacement((latest) => {
 			const existing = this.#existingPlacementPlan(latest, chatId);
 			if (existing) return existing;
-
 			const windowId = resolveWindow(latest);
-			if (!windowId || this.deps.windowReservations.has(windowId)) {
-				return { destination: null, mutations: [] };
-			}
-			const surfaceId = chatViewSurfaceId(windowId);
-			if (this.deps.surfaceReservations.has(surfaceId)) {
-				return { destination: null, mutations: [] };
-			}
-			const mutations: WorkspaceLayoutMutation[] = [{ type: 'set-window-chat', windowId, chatId }];
-			if (this.deps.isMobile()) {
-				mutations.push({
-					type: 'set-mobile-presentation',
-					activeId: surfaceId,
-					returnStack: [],
-				});
-			}
-			return { destination: { surfaceId, windowId }, mutations };
+			return windowId
+				? this.#setWindowChatPlan(windowId, chatId)
+				: { destination: null, mutations: [] };
 		});
 		return destination.surfaceId;
+	}
+
+	#setWindowChatPlan(windowId: WorkspaceWindowId, chatId: string): WorkspaceChatPlacementPlan {
+		if (this.deps.windowReservations.has(windowId)) return { destination: null, mutations: [] };
+		const surfaceId = chatViewSurfaceId(windowId);
+		if (this.deps.surfaceReservations.has(surfaceId)) return { destination: null, mutations: [] };
+		const mutations: WorkspaceLayoutMutation[] = [{ type: 'set-window-chat', windowId, chatId }];
+		if (this.deps.isMobile()) {
+			mutations.push({
+				type: 'set-mobile-presentation',
+				activeId: surfaceId,
+				returnStack: [],
+			});
+		}
+		return { destination: { surfaceId, windowId }, mutations };
 	}
 
 	async #commitPlacement(

@@ -312,6 +312,11 @@
 				sessions.setSelectedChatId(chatId);
 				void gotoChat(chatId).finally(() => appShell.requestComposerFocus());
 			},
+			openForkedChat: (chatId, sourceChatId) => {
+				void workspace.openForkedChat(chatId, sourceChatId).catch((error) => {
+					notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+				});
+			},
 		},
 		requestProcessingSnapshot: (source) => ws.requestProcessingSnapshot(source),
 		onProjectUnavailable: async (target) => {

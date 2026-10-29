@@ -17,7 +17,13 @@ import {
 	type WorkspaceWindowId,
 } from '../surface-types';
 import { CANONICAL_CHAT_SURFACE_ID, CANONICAL_FILES_SURFACE_ID } from '../canonical-layout';
-import { windowIdOfSurface, windowNodeById, collectWindowNodes } from '../window-tree';
+import {
+	windowIdOfSurface,
+	windowNodeById,
+	collectWindowNodes,
+	computeWindowRects,
+} from '../window-tree';
+import { findWorkspaceChatPlacement } from '../workspace-chat-placement';
 import type { TerminalMetadata } from '$shared/terminal';
 import type {
 	TerminalAttachmentState,
@@ -4021,5 +4027,167 @@ describe('responsive window merging', () => {
 		await coordinator.fitWindowsToHost(() => ({ width: 300, height: 200 }));
 		expect(windowCountOf(layout.snapshot)).toBe(1);
 		expect(layout.surface(fileSurfaceId('guarded'))).not.toBeNull();
+	});
+});
+
+describe('forked chat placement', () => {
+	function forkWindowId(snapshot: WorkspaceLayoutSnapshot, chatId: string): WorkspaceWindowId {
+		const windowId = findWorkspaceChatPlacement(snapshot, chatId)?.windowId;
+		if (!windowId) throw new Error(`Chat ${chatId} is not placed`);
+		return windowId;
+	}
+
+	function splitOf(snapshot: WorkspaceLayoutSnapshot, windowId: WorkspaceWindowId) {
+		const entry = computeWindowRects(snapshot.desktopRoot).partitions.find(({ partition }) =>
+			partition.children.some((child) => child.type === 'window' && child.id === windowId),
+		);
+		if (!entry) return null;
+		return {
+			direction: entry.partition.direction,
+			windowIds: entry.partition.children.map((child) => (child.type === 'window' ? child.id : null)),
+		};
+	}
+
+	it('splits beside the source window and keeps the source chat in place', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const windowCount = windowCountOf(layout.snapshot);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a');
+
+		const destinationWindowId = forkWindowId(layout.snapshot, 'fork-a');
+		expect(windowCountOf(layout.snapshot)).toBe(windowCount + 1);
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+		expect(splitOf(layout.snapshot, destinationWindowId)).toEqual({
+			direction: 'horizontal',
+			windowIds: ['window-main', destinationWindowId],
+		});
+		expect(coordinator.currentWindowId).toBe(destinationWindowId);
+		expect(coordinator.focusedChatId).toBe('fork-a');
+	});
+
+	it('anchors on the source window rather than the focused window', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const otherWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+		expect(coordinator.currentWindowId).toBe(otherWindowId);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a');
+
+		const destinationWindowId = forkWindowId(layout.snapshot, 'fork-a');
+		expect(splitOf(layout.snapshot, destinationWindowId)?.windowIds).toEqual([
+			'window-main',
+			destinationWindowId,
+		]);
+		expect(layout.surface(chatViewSurfaceId(otherWindowId))).toMatchObject({ chatId: 'chat-b' });
+	});
+
+	it('splits below the source when it is too narrow to split beside', async () => {
+		const { coordinator, layout } = createHarness({
+			resolveSplitAdmission: (_snapshot, { edge }) =>
+				edge === 'bottom' ? { allowed: true } : { allowed: false, reason: 'too-small' },
+		});
+		await coordinator.showChatInCurrentWindow('chat-a');
+
+		await coordinator.openForkedChat('fork-a', 'chat-a');
+
+		const destinationWindowId = forkWindowId(layout.snapshot, 'fork-a');
+		expect(splitOf(layout.snapshot, destinationWindowId)).toEqual({
+			direction: 'vertical',
+			windowIds: ['window-main', destinationWindowId],
+		});
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+	});
+
+	it.each(['too-small', 'resource-ceiling', 'fullscreen'] as const)(
+		'replaces the source chat when %s blocks every split',
+		async (reason) => {
+			let blocked = false;
+			const { coordinator, layout } = createHarness({
+				resolveSplitAdmission: (snapshot, request) =>
+					blocked
+						? { allowed: false, reason }
+						: resolveUnmeasuredWorkspaceSplit(snapshot, request),
+			});
+			await coordinator.showChatInCurrentWindow('chat-a');
+			const otherWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+			const windowCount = windowCountOf(layout.snapshot);
+			blocked = true;
+
+			await coordinator.openForkedChat('fork-a', 'chat-a');
+
+			expect(windowCountOf(layout.snapshot)).toBe(windowCount);
+			expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'fork-a' });
+			expect(layout.surface(chatViewSurfaceId(otherWindowId))).toMatchObject({ chatId: 'chat-b' });
+			expect(coordinator.focusedChatId).toBe('fork-a');
+		},
+	);
+
+	it('leaves another window fullscreen to show the fork in place of its source', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const otherWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+		await coordinator.enterWindowFullscreen(otherWindowId);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a');
+
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'fork-a' });
+		expect(layout.surface(chatViewSurfaceId(otherWindowId))).toMatchObject({ chatId: 'chat-b' });
+		expect(coordinator.focusedChatId).toBe('fork-a');
+	});
+
+	it('keeps a fullscreen source window fullscreen while the fork replaces it', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.enterWindowFullscreen('window-main');
+		const windowCount = windowCountOf(layout.snapshot);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a');
+
+		expect(windowCountOf(layout.snapshot)).toBe(windowCount);
+		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'fork-a' });
+	});
+
+	it('falls back to the focused window when the source chat is not placed', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+
+		await coordinator.openForkedChat('fork-a', 'chat-unplaced');
+
+		const destinationWindowId = forkWindowId(layout.snapshot, 'fork-a');
+		expect(splitOf(layout.snapshot, destinationWindowId)?.windowIds).toEqual([
+			'window-main',
+			destinationWindowId,
+		]);
+	});
+
+	it('replaces the single mobile presentation', async () => {
+		const { coordinator, layout, appShell } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		appShell.isMobile = true;
+		await coordinator.enterMobilePresentation();
+		const windowCount = windowCountOf(layout.snapshot);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a');
+
+		expect(windowCountOf(layout.snapshot)).toBe(windowCount);
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'fork-a' });
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(chatViewSurfaceId('window-main'));
+	});
+
+	it('activates an already placed fork instead of opening another window', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.openForkedChat('fork-a', 'chat-a');
+		const destinationWindowId = forkWindowId(layout.snapshot, 'fork-a');
+		await coordinator.focusSurface(chatViewSurfaceId('window-main'));
+		const windowCount = windowCountOf(layout.snapshot);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a');
+
+		expect(windowCountOf(layout.snapshot)).toBe(windowCount);
+		expect(coordinator.currentWindowId).toBe(destinationWindowId);
 	});
 });

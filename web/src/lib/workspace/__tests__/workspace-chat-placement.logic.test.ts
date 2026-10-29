@@ -21,6 +21,9 @@ test('reuses a chat in another window while the anchor is reserved', async () =>
 		isMobile: () => false,
 		lastFocusedWindowId: () => 'window-files' as const,
 		resolveWindowId: (_snapshot, preferred) => preferred ?? 'window-main',
+		commit: async () => {
+			throw new Error('Reuse must not clear a chat');
+		},
 		commitWithPresentationTarget: async (plan) => {
 			if (typeof plan === 'function') await plan(snapshot);
 			return true;

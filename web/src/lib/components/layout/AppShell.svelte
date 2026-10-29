@@ -148,6 +148,7 @@
 		startArchivingChats: (chatIds) => archiveUndo.startArchivingChats(chatIds),
 		startUnarchivingChats: (chatIds) => archiveUndo.startUnarchivingChats(chatIds),
 		onSelectChat: handleChatSelect,
+		onOpenForkedChat: handleOpenForkedChat,
 		onNewChat: handleNewChat,
 		onDeleteChat: handleChatDelete,
 		onRenameChat: handleChatRenamed,
@@ -438,6 +439,12 @@
 
 	function handleOpenChatInNewWindow(chatId: string, edge?: WorkspaceWindowEdge): void {
 		void workspace.openChatInNewWindow(chatId, undefined, edge).catch((error) => {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		});
+	}
+
+	function handleOpenForkedChat(chatId: string, sourceChatId: string): void {
+		void workspace.openForkedChat(chatId, sourceChatId).catch((error) => {
 			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
 		});
 	}

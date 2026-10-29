@@ -135,6 +135,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			lastFocusedWindowId: () => this.#presentation.lastFocusedWindowId,
 			resolveWindowId: (snapshot, preferredWindowId) =>
 				this.#resolveWindowId(snapshot, preferredWindowId),
+			commit: (mutations) => this.#presentation.commit(mutations),
 			commitWithPresentationTarget: (mutations, resolveTarget, options) =>
 				this.#presentation.commitWithPresentationTarget(mutations, resolveTarget, options),
 			prepareChatSurfaceTransfer: (transfer) =>
@@ -427,6 +428,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#chatPlacement.openInNewWindow(chatId, targetWindowId, edge);
 	}
 
+	openForkedChat(chatId: string, sourceChatId: string): Promise<ChatViewSurfaceId> {
+		return this.#chatPlacement.openFork(chatId, sourceChatId);
+	}
+
 	async openChatBeside(
 		chatId: string,
 		targetWindowId?: WorkspaceWindowId,
@@ -435,16 +440,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#chatPlacement.openBeside(chatId, targetWindowId, edge);
 	}
 
-	async clearDeletedChat(chatId: string): Promise<void> {
-		await this.#presentation.commit((latest) =>
-			collectWindowNodes(latest.desktopRoot).flatMap((workspaceWindow) => {
-				const surfaceId = chatViewSurfaceId(workspaceWindow.id);
-				const surface = latest.surfaces[surfaceId];
-				return surface?.type === 'chat' && surface.chatId === chatId
-					? [{ type: 'set-window-chat' as const, windowId: workspaceWindow.id, chatId: null }]
-					: [];
-			}),
-		);
+	clearDeletedChat(chatId: string): Promise<void> {
+		return this.#chatPlacement.clearDeletedChat(chatId);
 	}
 
 	async openTicket(id: string): Promise<void> {
