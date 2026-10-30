@@ -10,10 +10,8 @@ type PinnedPathForm = Pick<
 	| 'pinnedProjectPaths'
 	| 'isUpdatingPinnedPath'
 	| 'selectExecutor'
-	| 'projectPath'
 	| 'showBrowser'
-	| 'clearError'
-	| 'validatePath'
+	| 'selectProjectPath'
 >;
 
 export class NewChatPinnedPathsController {
@@ -42,10 +40,8 @@ export class NewChatPinnedPathsController {
 				: executorPinnedProjectPaths(this.settings.snapshot, executorId);
 		if (!path.trim() || !paths.includes(path)) return false;
 		form.selectExecutor(executorId);
-		form.projectPath = path;
+		form.selectProjectPath(path);
 		form.showBrowser = false;
-		form.clearError();
-		form.validatePath();
 		return true;
 	}
 }

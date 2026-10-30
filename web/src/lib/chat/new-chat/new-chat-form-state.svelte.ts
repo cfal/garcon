@@ -5,7 +5,7 @@
 import { ProjectPathCompletionController } from '$lib/project-paths/project-path-completion.js';
 import { effectiveExecutorId } from '$shared/executors';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
-import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
+import { NewChatPathValidationController } from './new-chat-path-validation-controller.js';
 import {
 	ImageAttachmentState,
 	isSupportedChatAttachment,
@@ -25,7 +25,10 @@ import type {
 } from '$shared/settings';
 import { NewChatAgentSettingsState } from './new-chat-agent-settings-state.svelte';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
-import { firstSelectableExecutorRecent, newChatExecutorPreferences } from './new-chat-executor-preferences';
+import {
+	firstSelectableExecutorRecent,
+	newChatExecutorPreferences,
+} from './new-chat-executor-preferences';
 import type { NewChatPromptDraft } from './new-chat-prompt-draft';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import type { ResolvedModelSelection } from '$shared/start-selection';
@@ -40,7 +43,10 @@ import {
 	isPinnedProjectPath,
 	nextPinnedProjectPaths,
 } from '$lib/project-paths/project-pinned-paths.js';
-import { executorPinnedProjectPaths, savePinnedProjectPathsOptimistically } from '$lib/project-paths/pinned-project-path-settings.js';
+import {
+	executorPinnedProjectPaths,
+	savePinnedProjectPathsOptimistically,
+} from '$lib/project-paths/pinned-project-path-settings.js';
 import { normalizeTagSlug } from '$lib/utils/tags.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -73,8 +79,7 @@ export class NewChatFormState {
 	// Path validation
 	validationStatus = $state<PathValidationStatus>('idle');
 	validationError = $state<string | null>(null);
-	#validationTimer: ReturnType<typeof setTimeout> | null = null;
-	#validationRequestVersion = 0;
+	readonly #pathValidation = new NewChatPathValidationController(this);
 	#worktreeRequestVersion = 0;
 	#worktreeAbort: AbortController | null = null;
 
@@ -173,7 +178,7 @@ export class NewChatFormState {
 		this.executorId = executorId;
 		this.#catalogRefreshCompleted = false;
 		this.#startupSelectionAutomatic = false;
-		this.#clearValidation();
+		this.#pathValidation.clear();
 		this.#cancelWorktreeLoad();
 		this.worktreeModalOpen = false;
 		this.showBrowser = false;
@@ -294,10 +299,14 @@ export class NewChatFormState {
 		const agent = this.#modelCatalog.getAgent(this.agentId);
 		if (!agent) return null;
 		const support = {
-			allowImages: this.#modelCatalog.supportsImages(this.agentId, this.modelValue, this.modelSelectionTarget?.modelEndpointId),
+			allowImages: this.#modelCatalog.supportsImages(
+				this.agentId,
+				this.modelValue,
+				this.modelSelectionTarget?.modelEndpointId,
+			),
 			fileMimeTypes: this.#modelCatalog.fileAttachmentMimeTypes(this.agentId),
 		};
-		return this.attachedImages.some(file => !isSupportedChatAttachment(file, support))
+		return this.attachedImages.some((file) => !isSupportedChatAttachment(file, support))
 			? m.chat_composer_remove_attachments({ agent: agent.label })
 			: null;
 	}
@@ -411,7 +420,14 @@ export class NewChatFormState {
 		if (this.settingsLoaded && this.#startupSelectionPending) this.#reconcileStartupSelection();
 		const candidate = this.#executorModelCandidate;
 		this.#executorModelCandidate = null;
-		if (candidate && this.#modelCatalog.getModelForSelection(this.agentId, candidate.model, candidate.modelEndpointId)) {
+		if (
+			candidate &&
+			this.#modelCatalog.getModelForSelection(
+				this.agentId,
+				candidate.model,
+				candidate.modelEndpointId,
+			)
+		) {
 			this.restoreSelection(this.agentId, candidate);
 		}
 		for (const agentId of this.#selectableAgentIds) {
@@ -596,9 +612,8 @@ export class NewChatFormState {
 	selectWorktree(worktreePath: string): void {
 		if (!this.gitAvailable) return;
 		this.#cancelWorktreeLoad();
-		this.projectPath = worktreePath;
+		this.selectProjectPath(worktreePath);
 		this.worktreeModalOpen = false;
-		this.clearError();
 	}
 
 	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<boolean> {
@@ -641,71 +656,18 @@ export class NewChatFormState {
 
 	// Path validation
 
-	/** Debounced validation of the project path against the server. */
+	selectProjectPath(path: string): void {
+		this.projectPath = path;
+		this.clearError();
+		this.#pathValidation.validateSelectedPath();
+	}
+
+	validateChangedPath(): void {
+		this.#pathValidation.validateChangedPath();
+	}
+
 	validatePath(): void {
-		const path = this.nonblankPath;
-		const executorId = this.executorId;
-		const contextKey = this.pathContextKey;
-		if (!path) {
-			this.#clearValidation();
-			return;
-		}
-
-		this.preambles.pathValidationStarted();
-
-		this.validationStatus = 'checking';
-		this.validationError = null;
-
-		if (this.#validationTimer) clearTimeout(this.#validationTimer);
-		const requestVersion = ++this.#validationRequestVersion;
-
-		this.#validationTimer = setTimeout(async () => {
-			try {
-				const data = await validateStart(path, { executorId });
-				if (requestVersion !== this.#validationRequestVersion || contextKey !== this.pathContextKey)
-					return;
-				if (data.valid) {
-					this.validationStatus = 'valid';
-					this.validationError = null;
-					this.gitRepoStatus = data.isGitRepo ? 'git' : 'non-git';
-					void this.preambles.refreshPreview();
-				} else {
-					this.validationStatus = 'invalid';
-					this.validationError = this.#validationErrorMessage(data.errorCode);
-					this.gitRepoStatus = 'non-git';
-					this.preambles.invalidatePreview();
-				}
-			} catch (err) {
-				if (requestVersion !== this.#validationRequestVersion || contextKey !== this.pathContextKey)
-					return;
-				this.validationStatus = 'invalid';
-				this.validationError =
-					err instanceof Error ? err.message : m.chat_new_chat_errors_invalid_directory();
-				this.gitRepoStatus = 'non-git';
-				this.preambles.invalidatePreview();
-				console.warn('[NewChatFormState] Path validation request failed', err);
-			}
-		}, 300);
-	}
-
-	#validationErrorMessage(errorCode?: ValidateStartErrorCode): string {
-		if (errorCode === 'outside_base_dir') return m.chat_new_chat_errors_path_outside_base_dir();
-		if (errorCode === 'path_not_found') return m.chat_new_chat_errors_path_not_found();
-		if (errorCode === 'permission_denied') return m.chat_new_chat_errors_path_permission_denied();
-		if (errorCode === 'not_directory') return m.chat_new_chat_errors_path_not_directory();
-		return m.chat_new_chat_errors_invalid_directory();
-	}
-
-	#clearValidation(): void {
-		if (this.#validationTimer) {
-			clearTimeout(this.#validationTimer);
-			this.#validationTimer = null;
-		}
-		this.#validationRequestVersion += 1;
-		this.validationStatus = 'idle';
-		this.validationError = null;
-		this.gitRepoStatus = 'unknown';
-		this.preambles.invalidatePreview();
+		this.#pathValidation.validatePath();
 	}
 
 	// Pinned paths
@@ -762,12 +724,7 @@ export class NewChatFormState {
 
 	dispose(): void {
 		this.#pathCompletion.reset();
-		if (this.#validationTimer) {
-			clearTimeout(this.#validationTimer);
-			this.#validationTimer = null;
-		}
-		this.#validationRequestVersion += 1;
-		this.preambles.invalidatePreview();
+		this.#pathValidation.dispose();
 	}
 
 	// Form submission
@@ -934,7 +891,11 @@ export class NewChatFormState {
 		this.browseStartPath = preferences.browseStartPath;
 		if (!this.projectPath) this.projectPath = preferences.projectPath;
 
-		this.#agentSettings.hydrate(snap.executionDefaults, this.#selectableAgentIds, this.#modelCatalog);
+		this.#agentSettings.hydrate(
+			snap.executionDefaults,
+			this.#selectableAgentIds,
+			this.#modelCatalog,
+		);
 		if (!this.#startupSelectionAutomatic) {
 			this.#applyExecutionDefaultsForAgent(this.agentId);
 			return;
@@ -959,7 +920,12 @@ export class NewChatFormState {
 		recents: RecentAgentSetting[],
 		selectableAgentIds: readonly SessionAgentId[] = this.#selectableAgentIds,
 	): RecentAgentSetting | null {
-		return firstSelectableExecutorRecent(recents, this.executorId, selectableAgentIds, this.#modelCatalog);
+		return firstSelectableExecutorRecent(
+			recents,
+			this.executorId,
+			selectableAgentIds,
+			this.#modelCatalog,
+		);
 	}
 
 	#applyExecutionDefaultsForAgent(agentId: SessionAgentId): void {
