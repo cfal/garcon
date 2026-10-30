@@ -476,6 +476,41 @@ describe('chat WebSocket handler', () => {
     });
   });
 
+  it('forwards an activation purpose with the first replay page it qualifies', async () => {
+    await chatHandler.message(ws, {
+      type: 'chat-subscribe',
+      chatId: '123',
+      clientRequestId: 'req-sub-activation',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 1,
+      purpose: 'activation',
+    });
+
+    expect(mockChatViews.readReplay).toHaveBeenCalledTimes(1);
+    expect(mockChatViews.readReplay).toHaveBeenCalledWith('123', 'view-1', 1, undefined, 'activation');
+    expect(lastSentPayload()).toMatchObject({ type: 'chat-subscribed', clientRequestId: 'req-sub-activation' });
+  });
+
+  it('rejects an activation purpose on a replay continuation', async () => {
+    await chatHandler.message(ws, {
+      type: 'chat-subscribe',
+      chatId: '123',
+      clientRequestId: 'req-sub-activation-continuation',
+      transcriptViewId: 'view-1',
+      afterOrdinal: 200,
+      throughOrdinal: 600,
+      purpose: 'activation',
+    });
+
+    expect(mockChatViews.readReplay).not.toHaveBeenCalled();
+    expect(lastSentPayload()).toMatchObject({
+      type: 'client-request-error',
+      clientRequestId: 'req-sub-activation-continuation',
+      code: 'REQUEST_VALIDATION_FAILED',
+      retryable: false,
+    });
+  });
+
   it('captures a bounded replay watermark and returns its continuation fields', async () => {
     const replayMessage = { ...chatViewMessage, ordinal: 11 };
     mockChatViews.readReplay.mockReturnValueOnce({

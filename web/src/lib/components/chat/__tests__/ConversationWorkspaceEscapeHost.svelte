@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
+	import { currentTranscriptReplayReader } from '../../../../test/transcript-replay.js';
 	import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-singleton-factories';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
@@ -326,6 +327,7 @@
 		overlays: new ConversationTranscriptOverlayStore(),
 		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,
 		getSelectedChatId: () => sessions.selectedChatId,
+		readTranscriptReplayPage: currentTranscriptReplayReader,
 	});
 	conversationPanels.reconcile([
 		{

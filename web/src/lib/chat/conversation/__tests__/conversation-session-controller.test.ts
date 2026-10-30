@@ -51,6 +51,7 @@ import type { ChatSnapshotResponse } from '$shared/chat-snapshot';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
+import type { CachedTranscriptResumeResult } from '$lib/chat/transcript/cached-transcript-resume.js';
 import type {
 	ChatQueueState,
 	PendingPermissionRequest,
@@ -369,6 +370,9 @@ function createDeps(chat = createRunningChat()) {
 			lastOrdinal: chatState.entries.at(-1)?.ordinal ?? 0,
 		})),
 		hasMountedPresentation: vi.fn(() => false),
+		resumeCachedTranscript: vi.fn<SessionControllerDeps['chatState']['resumeCachedTranscript']>(
+			() => null,
+		),
 		recoverViewReplacement: vi.fn(async (_chatId: string, _previousViewId: string) => {}),
 		clearMessages: vi.fn(),
 		resetForNewChat: vi.fn(() => {
@@ -1351,6 +1355,79 @@ describe('ConversationSessionController', () => {
 			minimumLimit: 0,
 			purpose: 'activation',
 		});
+	});
+
+	it('[TLV5-REPLAY.08-WEB-UNIT-03] resumes a cached transcript on activation without loading recent history', async () => {
+		const { deps } = createDeps();
+		const feed = {
+			serverInstanceId: 'server-instance-test',
+			chatId: 'chat-1',
+			transcriptViewId: 'generation-1',
+			transientRevision: 4,
+			rows: [],
+		};
+		deps.chatState.resumeCachedTranscript.mockReturnValue(
+			Promise.resolve({
+				kind: 'resumed',
+				transcriptViewId: 'generation-1',
+				throughOrdinal: 9,
+				deliveredMessages: 2,
+				transientFeed: feed,
+			}),
+		);
+		const controller = new ConversationSessionController(deps);
+
+		controller.handleChatSwitchIfChanged('chat-1');
+		await flushPromises();
+
+		expect(deps.chatState.resumeCachedTranscript).toHaveBeenCalledExactlyOnceWith('chat-1', {
+			purpose: 'activation',
+		});
+		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+		expect(mockGetChatSnapshot).not.toHaveBeenCalled();
+		expect(deps.conversationUi.setTransientFeedFromSnapshot).toHaveBeenCalledExactlyOnceWith(feed);
+		expect(deps.readReceiptOutbox.enqueue).toHaveBeenCalledWith('chat-1', '2026-03-27T08:00:00.000Z');
+	});
+
+	it.each([
+		'view-replaced',
+		'delta-exceeds-page',
+		'apply-failed',
+	] as const)('loads recent history when the cached transcript cannot be resumed (%s)', async (reason) => {
+		const { deps } = createDeps();
+		deps.chatState.resumeCachedTranscript.mockReturnValue(
+			Promise.resolve({ kind: 'snapshot-required', reason }),
+		);
+		const controller = new ConversationSessionController(deps);
+
+		controller.handleChatSwitchIfChanged('chat-1');
+		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+		await flushPromises();
+
+		expect(deps.chatState.loadMessages).toHaveBeenCalledExactlyOnceWith('chat-1', {
+			minimumLimit: 0,
+			purpose: 'activation',
+		});
+	});
+
+	it('leaves superseded or abandoned resumes to the work that replaced them', async () => {
+		const { deps } = createDeps();
+		deps.sessions.byId['chat-2'] = createRunningChat({ id: 'chat-2' });
+		let finishFirst!: (result: CachedTranscriptResumeResult) => void;
+		deps.chatState.resumeCachedTranscript
+			.mockReturnValueOnce(new Promise((resolve) => (finishFirst = resolve)))
+			.mockReturnValueOnce(Promise.resolve({ kind: 'superseded' }));
+		const controller = new ConversationSessionController(deps);
+
+		controller.handleChatSwitchIfChanged('chat-1');
+		deps.sessions.selectedChatId = 'chat-2';
+		controller.handleChatSwitchIfChanged('chat-2');
+		finishFirst({ kind: 'snapshot-required', reason: 'replay-failed' });
+		await flushPromises();
+
+		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+		expect(mockGetChatSnapshot).not.toHaveBeenCalled();
+		expect(deps.conversationUi.setTransientFeedFromSnapshot).not.toHaveBeenCalled();
 	});
 
 	it('persists the latest composer text before restoring the next chat draft', () => {

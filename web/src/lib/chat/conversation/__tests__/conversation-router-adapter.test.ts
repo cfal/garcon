@@ -12,6 +12,7 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 import { UserMessage } from '$shared/chat-types';
 import { ConversationPanelRegistry, type ConversationPanelDescriptor } from '../conversation-panel-registry.svelte.js';
+import { currentTranscriptReplayReader } from '../../../../test/transcript-replay.js';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import { getChatMessages } from '$lib/api/chats.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
@@ -77,6 +78,7 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		},
 		getComposerAnchorSurfaceId: () => null,
 		getSelectedChatId: () => selectedChat?.id ?? null,
+		readTranscriptReplayPage: currentTranscriptReplayReader,
 	});
 	return {
 		sessions: {

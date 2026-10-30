@@ -13,6 +13,17 @@ import {
 } from '../conversation-panel-registry.svelte.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
 import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
+import type {
+	TranscriptReplayPageReader,
+	TranscriptReplayRequest,
+} from '$lib/chat/transcript/cached-transcript-resume.js';
+import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import { WsRequestError } from '$lib/ws/ws-request-error.js';
+import {
+	currentTranscriptReplayReader,
+	settleTranscriptResumes,
+	transcriptReplayPage,
+} from '../../../../test/transcript-replay.js';
 
 function message(ordinal: number): TranscriptMessage {
 	return {
@@ -43,6 +54,7 @@ function fixture(
 		) => Promise<void>;
 			getComposerAnchorSurfaceId?: () => ChatViewSurfaceId | null;
 			getSelectedChatId?: () => string | null;
+			readTranscriptReplayPage?: TranscriptReplayPageReader;
 			retainInactiveWindows?: () => boolean;
 	} = {},
 ) {
@@ -68,6 +80,7 @@ function fixture(
 		lifecycle,
 		getComposerAnchorSurfaceId: options.getComposerAnchorSurfaceId ?? (() => null),
 		getSelectedChatId: options.getSelectedChatId ?? (() => null),
+		readTranscriptReplayPage: options.readTranscriptReplayPage ?? currentTranscriptReplayReader,
 		retainInactiveWindows: options.retainInactiveWindows,
 		loadTranscriptSnapshot: options.loadTranscriptSnapshot,
 	});
@@ -115,11 +128,12 @@ describe('ConversationPanelRegistry', () => {
 		localStorage.clear();
 	});
 
-	it('restores an expanded transcript immediately after rapid chat switches', () => {
+	it('restores an expanded transcript immediately after rapid chat switches', async () => {
 		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
 		seed(cache, 'chat-1');
 		seed(cache, 'chat-2');
 		switchPanel(registry, 'chat-1');
+		await settleTranscriptResumes();
 		const first = registry.panel('chat-view:window-left')?.transcript;
 		if (!first) throw new Error('Expected first transcript');
 		registry.applyCommittedBatch({
@@ -149,13 +163,14 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
-	it('keeps parked windows current through background commits without changing cache fanout', () => {
+	it('keeps parked windows current through background commits without changing cache fanout', async () => {
 		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
 		seed(cache, 'chat-1');
 		seed(cache, 'chat-2');
 		switchPanel(registry, 'chat-1');
 		const first = registry.panel('chat-view:window-left')?.transcript;
 		switchPanel(registry, 'chat-2');
+		await settleTranscriptResumes();
 		const cacheApply = vi.spyOn(cache, 'applyMessages');
 		registry.applyCommittedBatch({
 			chatId: 'chat-1',
@@ -221,13 +236,14 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
-	it('commits one cache batch and fans it out to duplicate-chat surfaces', () => {
+	it('commits one cache batch and fans it out to duplicate-chat surfaces', async () => {
 		const { cache, registry } = fixture();
 		seed(cache);
 		registry.reconcile([
 			presentation('chat-view:window-left', 'chat-1'),
 			presentation('chat-view:window-right', 'chat-1'),
 		]);
+		await settleTranscriptResumes();
 		const applyMessages = vi.spyOn(cache, 'applyMessages');
 
 		const result = registry.applyCommittedBatch({
@@ -248,6 +264,121 @@ describe('ConversationPanelRegistry', () => {
 		expect(
 			registry.panel('chat-view:window-right')?.transcript.entries.map((entry) => entry.ordinal),
 		).toEqual([1, 2]);
+		cache.flush();
+	});
+
+	it('[TLV5-REPLAY.08-WEB-UNIT-02] catches a restored panel up from its cached cursor without recent history', async () => {
+		const readTranscriptReplayPage = vi.fn<TranscriptReplayPageReader>(async (request) =>
+			transcriptReplayPage(request, { messages: [message(2), message(3)], throughOrdinal: 3 }),
+		);
+		const loadTranscriptSnapshot = vi.fn(async () => {});
+		const { cache, registry } = fixture({ readTranscriptReplayPage, loadTranscriptSnapshot });
+		seed(cache);
+
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		await settleTranscriptResumes();
+
+		expect(readTranscriptReplayPage).toHaveBeenCalledExactlyOnceWith({
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
+			afterOrdinal: 1,
+		});
+		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+		expect(
+			registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal),
+		).toEqual([1, 2, 3]);
+		expect(cache.readAppliedCursor('chat-1')).toEqual({
+			transcriptViewId: 'view-1',
+			lastOrdinal: 3,
+			stale: false,
+		});
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('loads a snapshot when the server rejects the cached view', async () => {
+		const readTranscriptReplayPage = vi.fn<TranscriptReplayPageReader>(async () => {
+			throw new WsRequestError('STALE_TRANSCRIPT_VIEW', 'Transcript view changed', false);
+		});
+		const loadTranscriptSnapshot = vi.fn(async (transcript: ActiveTranscriptState, chatId: string) => {
+			transcript.transcriptCache.replace(chatId, 'view-2', [message(1)], 1, null);
+			transcript.installCachedSnapshot(chatId);
+		});
+		const { cache, registry } = fixture({ readTranscriptReplayPage, loadTranscriptSnapshot });
+		seed(cache);
+
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+
+		await vi.waitFor(() => expect(loadTranscriptSnapshot).toHaveBeenCalledOnce());
+		await vi.waitFor(() =>
+			expect(registry.panel('chat-view:window-left')?.transcript.transcriptViewId).toBe('view-2'),
+		);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('catches a returning parked window up with rows it never received live', async () => {
+		let head = 1;
+		const readTranscriptReplayPage = vi.fn<TranscriptReplayPageReader>(async (request) =>
+			transcriptReplayPage(request, {
+				messages: Array.from(
+					{ length: head - request.afterOrdinal },
+					(_, index) => message(request.afterOrdinal + index + 1),
+				),
+				throughOrdinal: head,
+			}),
+		);
+		const { cache, registry } = fixture({
+			readTranscriptReplayPage,
+			retainInactiveWindows: () => true,
+		});
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		switchPanel(registry, 'chat-1');
+		await settleTranscriptResumes();
+		const parked = registry.panel('chat-view:window-left')?.transcript;
+		switchPanel(registry, 'chat-2');
+		await settleTranscriptResumes();
+		head = 4;
+		readTranscriptReplayPage.mockClear();
+
+		switchPanel(registry, 'chat-1');
+		await settleTranscriptResumes();
+
+		expect(registry.panel('chat-view:window-left')?.transcript).toBe(parked);
+		expect(readTranscriptReplayPage).toHaveBeenCalledExactlyOnceWith({
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
+			afterOrdinal: 1,
+		});
+		expect(parked?.entries.map((entry) => entry.ordinal)).toEqual([1, 2, 3, 4]);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('lets an activation replace a pending restore catch-up and shares the activation', async () => {
+		const pages: Array<{ request: TranscriptReplayRequest; respond: () => void }> = [];
+		const readTranscriptReplayPage = vi.fn<TranscriptReplayPageReader>(
+			(request) =>
+				new Promise((resolve) => {
+					pages.push({ request, respond: () => resolve(transcriptReplayPage(request)) });
+				}),
+		);
+		const { cache, registry } = fixture({ readTranscriptReplayPage });
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		const restore = registry.resumeCachedChat('chat-1');
+
+		const activation = registry.resumeCachedChat('chat-1', { purpose: 'activation' });
+
+		expect(registry.resumeCachedChat('chat-1')).toBe(activation);
+		expect(pages.map((page) => page.request.purpose)).toEqual([undefined, 'activation']);
+		for (const page of pages) page.respond();
+		await expect(restore).resolves.toEqual({ kind: 'superseded' });
+		await expect(activation).resolves.toMatchObject({ kind: 'resumed', throughOrdinal: 1 });
+		registry.markChatStale('chat-1');
+		expect(registry.resumeCachedChat('chat-1')).toBeNull();
+		registry.destroy();
 		cache.flush();
 	});
 
@@ -1001,7 +1132,7 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
-	it('reserves a large source window before parking the outgoing destination', () => {
+	it('reserves a large source window before parking the outgoing destination', async () => {
 		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
 		seed(cache, 'chat-1');
 		seed(cache, 'chat-2');
@@ -1009,6 +1140,7 @@ describe('ConversationPanelRegistry', () => {
 			presentation('chat-view:window-left', 'chat-1'),
 			presentation('chat-view:window-right', 'chat-2'),
 		]);
+		await settleTranscriptResumes();
 		const source = registry.panel('chat-view:window-left');
 		if (!source) throw new Error('Expected source panel');
 		registry.applyCommittedBatch({

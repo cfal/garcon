@@ -2,10 +2,10 @@
 
 import { untrack } from 'svelte';
 import {
-	ChatSubscribedMessage,
 	ReconnectStateMessage,
 	WsPongMessage,
 	parseServerWsMessage,
+	type ChatSubscribedMessage,
 } from '$shared/ws-events';
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import type { TranscriptMessage } from '$shared/chat-view';
@@ -17,6 +17,7 @@ import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
 import { getChatExecutionControl } from '$lib/api/chats.js';
 import type { WsMessageConsumer } from './connection.svelte.js';
+import { requestTranscriptReplayPage } from './transcript-replay-request.js';
 import type {
 	CommittedTranscriptBatch,
 	ConversationPanelBatchApplyResult,
@@ -422,54 +423,18 @@ export class ChatReconnectCoordinator {
 		}
 	}
 
-	async #subscribe(
-		chatId: string,
-		transcriptViewId: string,
-		afterOrdinal: number,
-		throughOrdinal?: number,
-	): Promise<ChatSubscribedMessage> {
-		const raw = await this.options.ws.sendRequest({
-			type: 'chat-subscribe',
-			chatId,
-			transcriptViewId,
-			afterOrdinal,
-			...(throughOrdinal === undefined ? {} : { throughOrdinal }),
-		});
-		const message = parseServerWsMessage(raw);
-		if (
-			!(message instanceof ChatSubscribedMessage) ||
-			message.chatId !== chatId ||
-			message.transcriptViewId !== transcriptViewId
-		) {
-			throw new Error('Unexpected chat-subscribe response');
-		}
-		return message;
-	}
-
 	async #replayTranscript(input: TranscriptReplayInput): Promise<ChatSubscribedMessage | null> {
 		let afterOrdinal = input.afterOrdinal;
 		let throughOrdinal: number | undefined;
 		while (input.isCurrent()) {
-			const message = await this.#subscribe(
-				input.chatId,
-				input.transcriptViewId,
+			const message = await requestTranscriptReplayPage(this.options.ws, {
+				chatId: input.chatId,
+				transcriptViewId: input.transcriptViewId,
 				afterOrdinal,
-				throughOrdinal,
-			);
+				...(throughOrdinal === undefined ? {} : { throughOrdinal }),
+			});
 			if (!input.isCurrent()) return null;
-			if (message.firstOrdinal !== afterOrdinal + 1) {
-				throw new Error('Transcript replay page does not continue its requested cursor');
-			}
-			if (throughOrdinal !== undefined && message.throughOrdinal !== throughOrdinal) {
-				throw new Error('Transcript replay watermark changed during continuation');
-			}
 			throughOrdinal ??= message.throughOrdinal;
-			if (
-				message.nextAfterOrdinal < afterOrdinal ||
-				(message.hasMore && message.nextAfterOrdinal === afterOrdinal)
-			) {
-				throw new Error('Transcript replay page did not advance its requested cursor');
-			}
 
 			const applied = await input.apply(message);
 			if (applied === false) throw new Error('Transcript replay page could not be applied');
