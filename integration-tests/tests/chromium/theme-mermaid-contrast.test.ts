@@ -66,7 +66,7 @@ describe("Mermaid theme contrast", () => {
     const browserErrors: string[] = [];
     captureBrowserErrors(page.context(), browserErrors);
     const departureFont = await readFile(fileURLToPath(new URL(
-      '../../../web/src/lib/theme/assets/DepartureMono-1.500.woff2', import.meta.url,
+      '../../../web/src/lib/theme/assets/DepartureMono-1.500-core.woff2', import.meta.url,
     )));
     await page.route(`${APP_URL}**`, async (route) => {
       if (new URL(route.request().url()).pathname.endsWith('.woff2')) {

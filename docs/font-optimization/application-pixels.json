@@ -1,0 +1,1186 @@
+[
+  {
+    "sample": "default-accents-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 27,
+    "boundingBox": [
+      332,
+      897,
+      348,
+      992
+    ],
+    "maxChannelDifference": 1,
+    "originalControl": {
+      "changedPixels": 27,
+      "boundingBox": [
+        332,
+        897,
+        348,
+        992
+      ],
+      "maxChannelDifference": 1
+    },
+    "classification": "Non-text rounded composer-border rasterization: channel deltas 1-2; reproduced in original-font controls."
+  },
+  {
+    "sample": "default-accents-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 104,
+      "boundingBox": [
+        8,
+        832,
+        382,
+        934
+      ],
+      "maxChannelDifference": 5
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "default-ascii-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 27,
+    "boundingBox": [
+      332,
+      897,
+      348,
+      992
+    ],
+    "maxChannelDifference": 1,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Non-text rounded composer-border rasterization: channel deltas 1-2; reproduced in original-font controls."
+  },
+  {
+    "sample": "default-ascii-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "default-cjk-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "default-cjk-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "default-editor-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "default-editor-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "default-extended-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 48,
+    "boundingBox": [
+      332,
+      887,
+      348,
+      992
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 48,
+      "boundingBox": [
+        332,
+        887,
+        348,
+        992
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded composer-border rasterization: channel deltas 1-2; reproduced in original-font controls."
+  },
+  {
+    "sample": "default-extended-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "default-settings-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "default-settings-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "departure-mono-accents-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 48,
+    "boundingBox": [
+      332,
+      887,
+      348,
+      992
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 48,
+      "boundingBox": [
+        332,
+        887,
+        348,
+        992
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded composer-border rasterization: channel deltas 1-2; reproduced in original-font controls."
+  },
+  {
+    "sample": "departure-mono-accents-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "departure-mono-ascii-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "departure-mono-ascii-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "departure-mono-cjk-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 48,
+    "boundingBox": [
+      332,
+      887,
+      348,
+      992
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 48,
+      "boundingBox": [
+        332,
+        887,
+        348,
+        992
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded composer-border rasterization: channel deltas 1-2; reproduced in original-font controls."
+  },
+  {
+    "sample": "departure-mono-cjk-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "departure-mono-editor-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "departure-mono-editor-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 2,
+    "boundingBox": [
+      261,
+      16,
+      262,
+      19
+    ],
+    "maxChannelDifference": 11,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Non-text reload SVG edge rasterization: two pixels, unchanged visible text; max channel delta 11."
+  },
+  {
+    "sample": "departure-mono-extended-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "departure-mono-extended-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "departure-mono-settings-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "departure-mono-settings-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "inter-accents-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 46,
+      "boundingBox": [
+        332,
+        886,
+        348,
+        992
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "inter-accents-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "inter-ascii-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "inter-ascii-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "inter-cjk-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "inter-cjk-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "inter-editor-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "inter-editor-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 2,
+    "boundingBox": [
+      261,
+      16,
+      262,
+      19
+    ],
+    "maxChannelDifference": 11,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Non-text reload SVG edge rasterization: two pixels, unchanged visible text; max channel delta 11."
+  },
+  {
+    "sample": "inter-extended-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "inter-extended-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "inter-settings-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "inter-settings-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "jetbrains-mono-accents-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "jetbrains-mono-accents-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 87,
+      "boundingBox": [
+        8,
+        832,
+        382,
+        934
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "jetbrains-mono-ascii-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "jetbrains-mono-ascii-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "jetbrains-mono-cjk-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "jetbrains-mono-cjk-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "jetbrains-mono-editor-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "jetbrains-mono-editor-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 2,
+    "boundingBox": [
+      261,
+      16,
+      262,
+      19
+    ],
+    "maxChannelDifference": 11,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Non-text reload SVG edge rasterization: two pixels, unchanged visible text; max channel delta 11."
+  },
+  {
+    "sample": "jetbrains-mono-extended-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 27,
+      "boundingBox": [
+        332,
+        897,
+        348,
+        992
+      ],
+      "maxChannelDifference": 1
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "jetbrains-mono-extended-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "jetbrains-mono-settings-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  },
+  {
+    "sample": "jetbrains-mono-settings-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity."
+  }
+]

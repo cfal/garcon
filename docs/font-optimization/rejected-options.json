@@ -1,0 +1,206 @@
+[
+  {
+    "variant": "ascii-core",
+    "bytes": 754108,
+    "coreBytes": 117588,
+    "pixels": [
+      {
+        "sample": "Departure-Mono",
+        "dimensions": {
+          "before": [
+            2447,
+            6192
+          ],
+          "after": [
+            2449,
+            6192
+          ]
+        },
+        "pixels": 15164208,
+        "changedPixels": 703600,
+        "boundingBox": [
+          366,
+          0,
+          2447,
+          6189
+        ],
+        "maxChannelDifference": 255
+      },
+      {
+        "sample": "Inter",
+        "dimensions": {
+          "before": [
+            1992,
+            6192
+          ],
+          "after": [
+            1997,
+            6192
+          ]
+        },
+        "pixels": 12365424,
+        "changedPixels": 1346588,
+        "boundingBox": [
+          147,
+          1,
+          1994,
+          6186
+        ],
+        "maxChannelDifference": 255
+      },
+      {
+        "sample": "JetBrains-Mono",
+        "dimensions": {
+          "before": [
+            2356,
+            6192
+          ],
+          "after": [
+            2358,
+            6192
+          ]
+        },
+        "pixels": 14600736,
+        "changedPixels": 799975,
+        "boundingBox": [
+          305,
+          0,
+          2354,
+          6186
+        ],
+        "maxChannelDifference": 255
+      }
+    ]
+  },
+  {
+    "variant": "no-raster-controls",
+    "bytes": 769068,
+    "coreBytes": 510844,
+    "pixels": [
+      {
+        "sample": "Departure-Mono",
+        "dimensions": {
+          "before": [
+            2447,
+            6192
+          ],
+          "after": [
+            2447,
+            6192
+          ]
+        },
+        "pixels": 15151824,
+        "changedPixels": 0,
+        "boundingBox": null,
+        "maxChannelDifference": 0
+      },
+      {
+        "sample": "Inter",
+        "dimensions": {
+          "before": [
+            1992,
+            6192
+          ],
+          "after": [
+            1992,
+            6192
+          ]
+        },
+        "pixels": 12334464,
+        "changedPixels": 0,
+        "boundingBox": null,
+        "maxChannelDifference": 0
+      },
+      {
+        "sample": "JetBrains-Mono",
+        "dimensions": {
+          "before": [
+            2356,
+            6192
+          ],
+          "after": [
+            2356,
+            6192
+          ]
+        },
+        "pixels": 14588352,
+        "changedPixels": 829842,
+        "boundingBox": [
+          0,
+          0,
+          2352,
+          6185
+        ],
+        "maxChannelDifference": 255
+      }
+    ]
+  },
+  {
+    "variant": "inter-max-800",
+    "bytes": 754604,
+    "coreBytes": 500988,
+    "pixels": [
+      {
+        "sample": "Departure-Mono",
+        "dimensions": {
+          "before": [
+            2447,
+            6192
+          ],
+          "after": [
+            2447,
+            6192
+          ]
+        },
+        "pixels": 15151824,
+        "changedPixels": 0,
+        "boundingBox": null,
+        "maxChannelDifference": 0
+      },
+      {
+        "sample": "Inter",
+        "dimensions": {
+          "before": [
+            1992,
+            6192
+          ],
+          "after": [
+            1939,
+            6192
+          ]
+        },
+        "pixels": 12334464,
+        "changedPixels": 487875,
+        "boundingBox": [
+          0,
+          17,
+          1989,
+          6185
+        ],
+        "maxChannelDifference": 255
+      },
+      {
+        "sample": "JetBrains-Mono",
+        "dimensions": {
+          "before": [
+            2356,
+            6192
+          ],
+          "after": [
+            2356,
+            6192
+          ]
+        },
+        "pixels": 14588352,
+        "changedPixels": 127,
+        "boundingBox": [
+          493,
+          21,
+          2152,
+          3083
+        ],
+        "maxChannelDifference": 9
+      }
+    ]
+  }
+]

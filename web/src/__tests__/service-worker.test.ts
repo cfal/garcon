@@ -54,6 +54,30 @@ describe('service worker helpers', () => {
 		expect(add).toHaveBeenCalledWith('/icon.svg');
 	});
 
+	it('leaves both immutable and static fonts to demand loading under a runtime mount', async () => {
+		const addAll = vi.fn<Cache['addAll']>().mockResolvedValue(undefined);
+		const add = vi.fn<Cache['add']>().mockResolvedValue(undefined);
+		await precacheAppShell(
+			{ addAll, add },
+			{
+				build: [
+					'/mounted/_app/app.js',
+					'/mounted/_app/Inter-core.woff2',
+					'/mounted/_app/Inter-extended.woff2',
+				],
+				files: [
+					'/mounted/font.woff',
+					'/mounted/font.ttf',
+					'/mounted/font.otf',
+					'/mounted/icon.svg',
+				],
+			},
+			'/mounted',
+		);
+		expect(addAll).toHaveBeenCalledExactlyOnceWith(['/mounted/', '/mounted/_app/app.js']);
+		expect(add).toHaveBeenCalledExactlyOnceWith('/mounted/icon.svg');
+	});
+
 	it('recognizes manifest paths for cache bypass', () => {
 		expect(isManifestPath('/site.webmanifest')).toBe(true);
 		expect(isManifestPath('https://garcon.test/site.webmanifest')).toBe(true);

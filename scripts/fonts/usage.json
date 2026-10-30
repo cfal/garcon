@@ -1,0 +1,3152 @@
+{
+  "scope": "Source superset includes inline Svelte directives, component styles, domain/editor/terminal styles and English messages. Runtime chat, files and terminal content are unbounded; all existing font character coverage is preserved.",
+  "sourceCharacters": "U+0009-000A, U+0020-007E, U+00A0, U+00B7, U+2013-2014, U+2019, U+201C-201D, U+2022, U+2026, U+2060, U+2191-2193, U+2212, U+2500, U+2502, U+250C, U+2510, U+2514, U+2518, U+2713",
+  "messageCharacters": "U+000A, U+0020-0023, U+0025-003C, U+003E-003F, U+0041-005B, U+005D, U+005F-007D, U+00B7, U+2013-2014, U+2019, U+201C-201D, U+2022, U+2026, U+2191-2193, U+2318",
+  "requiredCoverage": "Existing cmap union, including Latin-1 and Latin Extended-A wherever the source contains them; no new glyphs or CJK coverage are introduced.",
+  "cssGeneratedCharacters": [
+    "U+2010 (hyphens:auto, reserved even though the current source has no such declaration)",
+    "U+2018-U+2019 and U+201C-U+201D (prose quotation marks)"
+  ],
+  "declarations": [
+    {
+      "file": "web/src/app.css",
+      "line": 661,
+      "text": "font-family: var(--interface-font-override, var(--system-ui-font));"
+    },
+    {
+      "file": "web/src/lib/components/auth/ReauthenticationOverlay.svelte",
+      "line": 28,
+      "text": "<h1 id=\"reauth-title\" class=\"mb-3 text-lg font-semibold\">"
+    },
+    {
+      "file": "web/src/lib/components/auth/SignInForm.svelte",
+      "line": 45,
+      "text": "<label for={`${id}-username`} class=\"text-sm font-medium\">{m.auth_login_username()}</label>"
+    },
+    {
+      "file": "web/src/lib/components/auth/SignInForm.svelte",
+      "line": 58,
+      "text": "<label for={`${id}-password`} class=\"text-sm font-medium\">{m.auth_login_password()}</label>"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatActionDialogs.svelte",
+      "line": 111,
+      "text": "<span class=\"font-medium text-foreground block w-full min-w-0 max-w-full truncate\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatActionDialogs.svelte",
+      "line": 182,
+      "text": "<h3 class=\"text-sm font-medium\">{m.sidebar_details_carryover_history()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatActionDialogs.svelte",
+      "line": 187,
+      "text": "<div class=\"min-w-0 break-words font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatActionDialogs.svelte",
+      "line": 225,
+      "text": "<div class=\"text-sm font-medium\">{m.sidebar_details_created_at()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatActionDialogs.svelte",
+      "line": 240,
+      "text": "<div class=\"text-sm font-medium\">{m.sidebar_details_last_activity()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatDetailsTextField.svelte",
+      "line": 38,
+      "text": "<div class=\"text-sm font-medium\">{label}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatEmptyState.svelte",
+      "line": 35,
+      "text": "<h2 class=\"text-xl font-semibold text-foreground\">{m.chat_empty_no_chat_selected()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatProjectPathDialog.svelte",
+      "line": 205,
+      "text": "<span class=\"text-sm font-medium text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatProjectPathDialog.svelte",
+      "line": 221,
+      "text": "class=\"block text-sm font-medium text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatSummary.svelte",
+      "line": 86,
+      "text": "'text-[13px] italic',"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatSummary.svelte",
+      "line": 88,
+      "text": "isUnread ? 'font-semibold' : 'font-normal',"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatSummary.svelte",
+      "line": 111,
+      "text": "class={cn(titleClass, isUnread ? 'font-bold' : isSidebar ? 'font-normal' : 'font-medium')}"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatSummary.svelte",
+      "line": 142,
+      "text": "'whitespace-nowrap text-[11px] leading-4 tabular-nums',"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatSummary.svelte",
+      "line": 165,
+      "text": "<span class=\"min-w-0 truncate font-semibold\" title={projectPath}>"
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatSummary.svelte",
+      "line": 189,
+      "text": "class=\"inline-flex min-w-0 max-w-[45%] shrink-0 items-center gap-1 rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold leading-none text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat/ChatTagEditor.svelte",
+      "line": 69,
+      "text": "class=\"inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium hover:opacity-80 transition-opacity {getTagColorClasses("
+    },
+    {
+      "file": "web/src/lib/components/chat/LoadingStatus.svelte",
+      "line": 111,
+      "text": "<span class=\"truncate text-sm font-medium text-foreground\">{statusText}...</span>"
+    },
+    {
+      "file": "web/src/lib/components/chat/LoadingStatus.svelte",
+      "line": 130,
+      "text": "class=\"inline-flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md border border-border bg-background/70 px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring\""
+    },
+    {
+      "file": "web/src/lib/components/chat/ReloadChatDialog.svelte",
+      "line": 54,
+      "text": "<p class=\"text-sm font-medium\">{m.sidebar_chats_reload_confirm_resend()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/chat/SharedChatPage.svelte",
+      "line": 199,
+      "text": "<h1 class=\"text-sm font-semibold text-foreground truncate\">{title}</h1>"
+    },
+    {
+      "file": "web/src/lib/components/chat/SharedChatPage.svelte",
+      "line": 201,
+      "text": "<h1 class=\"text-sm font-semibold text-foreground\">{m.shared_view_title()}</h1>"
+    },
+    {
+      "file": "web/src/lib/components/chat/SharedChatPage.svelte",
+      "line": 231,
+      "text": "<h2 class=\"text-lg font-semibold text-foreground mb-1\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/SharedChatPage.svelte",
+      "line": 369,
+      "text": "<span class=\"text-xs font-medium text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat/SubagentManagementControl.svelte",
+      "line": 124,
+      "text": "<div class=\"truncate text-sm font-medium\">{rootEntry.name}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/SubagentManagementControl.svelte",
+      "line": 150,
+      "text": "<div class=\"truncate text-sm font-medium\">{entry.name}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/AgentSettingsControls.svelte",
+      "line": 96,
+      "text": "<div class=\"font-medium\">{agentSettingOptionLabel(option)}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerAddMenu.svelte",
+      "line": 49,
+      "text": "<div class=\"font-medium\">{m.chat_composer_add_image()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerAddMenu.svelte",
+      "line": 59,
+      "text": "<div class=\"font-medium\">{m.snippets_menu_title()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerAttachmentList.svelte",
+      "line": 39,
+      "text": "<p class=\"text-sm font-medium text-foreground\">{m.chat_composer_drop_images()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerBottomBar.svelte",
+      "line": 184,
+      "text": "<div class=\"font-medium\">{option.label}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerBottomBar.svelte",
+      "line": 228,
+      "text": "<div class=\"font-medium\">{option.label}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerMarkdownEditor.svelte",
+      "line": 409,
+      "text": "font-weight: 600;"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerMarkdownEditor.svelte",
+      "line": 430,
+      "text": "font-family: var(--interface-mono-font-override, monospace);"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerMarkdownEditor.svelte",
+      "line": 470,
+      "text": "font-weight: 600;"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerSnippetArgumentsDialog.svelte",
+      "line": 135,
+      "text": "<label for={argumentsId} class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerSnippetPalette.svelte",
+      "line": 192,
+      "text": "<span class=\"truncate text-sm font-medium\">{snippet.shortName}</span>"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerSnippetPalette.svelte",
+      "line": 268,
+      "text": "class=\"flex h-10 w-full items-center justify-center gap-2 rounded-md border border-border bg-background text-sm font-medium hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring\""
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerStatusBar.svelte",
+      "line": 79,
+      "text": "'hidden min-w-0 font-medium text-foreground',"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerStatusBar.svelte",
+      "line": 117,
+      "text": "labelClass=\"max-w-32 text-xs font-medium text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ComposerStatusBar.svelte",
+      "line": 134,
+      "text": "<span class=\"max-w-32 truncate font-medium text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/ResendCandidateChips.svelte",
+      "line": 22,
+      "text": "<p class=\"mb-2 text-xs font-medium text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/composer-markdown-codec-extensions.ts",
+      "line": 28,
+      "text": "} from '@tiptap/extension-italic';"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/composer-markdown-codec-extensions.ts",
+      "line": 112,
+      "text": "...writtenDelimiter('italic', '*', '_'),"
+    },
+    {
+      "file": "web/src/lib/components/chat/composer/composer-markdown.ts",
+      "line": 84,
+      "text": "const DELIMITED_MARKS = ['bold', 'italic', 'strike'];"
+    },
+    {
+      "file": "web/src/lib/components/chat/new-chat/NewChatPinnedPaths.svelte",
+      "line": 69,
+      "text": "<span class=\"min-w-0 break-all font-medium text-foreground\">{label}</span>"
+    },
+    {
+      "file": "web/src/lib/components/chat/new-chat/NewChatPinnedPaths.svelte",
+      "line": 137,
+      "text": "<Dialog.Title class=\"text-sm font-medium\""
+    },
+    {
+      "file": "web/src/lib/components/chat/queue/QueueControls.svelte",
+      "line": 281,
+      "text": "class=\"text-xs font-medium text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat/queue/QueuedInputEditorPanel.svelte",
+      "line": 144,
+      "text": "<p class=\"font-medium\">{m.chat_queue_changed_elsewhere()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/chat/queue/QueuedInputEditorPanel.svelte",
+      "line": 154,
+      "text": "<p class=\"font-medium\">{statusNotice}</p>"
+    },
+    {
+      "file": "web/src/lib/components/chat/queue/QueuedInputEditorPanel.svelte",
+      "line": 199,
+      "text": "class=\"inline-flex min-h-11 items-center rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 sm:pointer-fine:min-h-9\""
+    },
+    {
+      "file": "web/src/lib/components/chat/queue/QueuedInputEditorPanel.svelte",
+      "line": 208,
+      "text": "class=\"inline-flex min-h-11 sm:pointer-fine:min-h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50\""
+    },
+    {
+      "file": "web/src/lib/components/chat/queue/QueuedInputEditorPanel.svelte",
+      "line": 222,
+      "text": "class=\"inline-flex min-h-11 sm:pointer-fine:min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50\""
+    },
+    {
+      "file": "web/src/lib/components/chat/queue/QueuedInputEditorPanel.svelte",
+      "line": 234,
+      "text": "class=\"inline-flex min-h-11 sm:pointer-fine:min-h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50\""
+    },
+    {
+      "file": "web/src/lib/components/chat/queue/QueuedInputEditorPanel.svelte",
+      "line": 244,
+      "text": "class=\"inline-flex min-h-11 sm:pointer-fine:min-h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50\""
+    },
+    {
+      "file": "web/src/lib/components/chat/queue/QueuedInputTrayRow.svelte",
+      "line": 263,
+      "text": "class=\"inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-lg px-0 text-xs font-medium @min-[30rem]/queue-row:px-2 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:pointer-fine:min-h-8 sm:pointer-fine:min-w-8\""
+    },
+    {
+      "file": "web/src/lib/components/chat/tools/ChatToolExpandableEvent.svelte",
+      "line": 74,
+      "text": "<span class=\"pointer-events-none z-10 text-[11px] font-medium text-muted-foreground tracking-wide flex-shrink-0\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/tools/ChatToolExpandableEvent.svelte",
+      "line": 102,
+      "text": "<span class=\"text-[11px] font-medium text-muted-foreground tracking-wide flex-shrink-0\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/tools/ChatToolInlineEvent.svelte",
+      "line": 136,
+      "text": "<span class=\"text-[11px] font-medium text-muted-foreground tracking-wide\""
+    },
+    {
+      "file": "web/src/lib/components/chat/tools/ChatToolInlineEvent.svelte",
+      "line": 152,
+      "text": "<span class=\"text-[11px] text-muted-foreground italic\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/tools/ChatToolInlineEvent.svelte",
+      "line": 187,
+      "text": "<span class=\"text-xs font-medium truncate min-w-0 {colorScheme.primary}\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/tools/ChatToolInlineEvent.svelte",
+      "line": 247,
+      "text": "<span class=\"text-[11px] {colorScheme.secondary} italic flex-shrink-0\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/tools/content/ChatToolDiffView.svelte",
+      "line": 89,
+      "text": "<span class=\"text-[10px] font-medium px-1.5 py-px rounded {badgeClasses} flex-shrink-0 ml-2\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/tools/content/ChatToolTodoListView.svelte",
+      "line": 46,
+      "text": "<span class=\"text-foreground font-medium\">{item.content}</span>"
+    },
+    {
+      "file": "web/src/lib/components/chat/tools/content/ChatToolTodoListView.svelte",
+      "line": 62,
+      "text": "<div class=\"mt-1 text-xs text-muted-foreground italic\">{m.chat_todo_no_items()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/AgentSwitchRow.svelte",
+      "line": 34,
+      "text": "class=\"text-xs font-medium\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/CompactionRow.svelte",
+      "line": 69,
+      "text": "<span class=\"text-xs font-medium\">{m.chat_message_compacted()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/CompactionRow.svelte",
+      "line": 72,
+      "text": "<span class=\"ml-auto text-xs tabular-nums text-muted-foreground\">{tokenLabel}</span>"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/ConversationMessage.svelte",
+      "line": 702,
+      "text": "<div class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/ConversationMessage.svelte",
+      "line": 712,
+      "text": "<span class=\"text-xs font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/ConversationMessage.svelte",
+      "line": 781,
+      "text": "<span class=\"text-xs font-medium text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/ConversationToolGroupRow.svelte",
+      "line": 42,
+      "text": "class=\"typography-chat-prose flex w-full min-w-0 items-center gap-1.5 text-left text-sm italic text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 374,
+      "text": "<span class=\"font-medium\">{m.chat_permission_agent_reason()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 397,
+      "text": "<span class=\"text-sm font-semibold\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 463,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-warning-border bg-status-warning text-status-warning-foreground hover:bg-status-warning/90\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 472,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-warning-border text-status-warning hover:bg-status-warning/15 disabled:opacity-50 disabled:cursor-not-allowed\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 481,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-info-border text-status-info hover:bg-status-info/15 disabled:opacity-50 disabled:cursor-not-allowed\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 494,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-info-border text-status-info hover:bg-status-info/15 disabled:opacity-50 disabled:cursor-not-allowed\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 503,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-neutral-border text-status-neutral-foreground hover:bg-status-neutral/50 disabled:opacity-50 disabled:cursor-not-allowed\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 521,
+      "text": "<span class=\"text-sm font-semibold\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 536,
+      "text": "class=\"text-[10px] font-medium uppercase tracking-wider text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 541,
+      "text": "<div class=\"text-xs font-medium text-foreground\">{question.prompt}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 562,
+      "text": "<span class=\"block font-medium\">{option.label}</span>"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 595,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-warning/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 604,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 border border-status-error-border text-status-error-foreground hover:bg-status-error/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 622,
+      "text": "<span class=\"text-sm font-semibold\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 634,
+      "text": "<div class=\"text-xs font-medium text-foreground\">{question.prompt}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 675,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-warning/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 684,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 border border-status-error-border text-status-error-foreground hover:bg-status-error/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 702,
+      "text": "<span class=\"text-sm font-semibold\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 715,
+      "text": "<div class=\"text-sm font-semibold text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 772,
+      "text": "<div class=\"text-xs font-medium text-foreground\">{phase.name}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 801,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-warning/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 810,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 border border-status-error-border text-status-error-foreground hover:bg-status-error/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 829,
+      "text": "<div class=\"text-sm font-semibold\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 869,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-warning/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/PermissionRequestRow.svelte",
+      "line": 882,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 border border-status-error-border text-status-error-foreground hover:bg-status-error/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/UserMessageNavigatorDialog.svelte",
+      "line": 75,
+      "text": "<Dialog.Title class=\"text-lg font-semibold\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/UserMessageNavigatorDialog.svelte",
+      "line": 112,
+      "text": "class=\"inline-flex min-h-9 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/UserMessageNavigatorDialog.svelte",
+      "line": 181,
+      "text": "class=\"inline-flex min-h-9 shrink-0 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/rows/CliPresentationHeader.svelte",
+      "line": 15,
+      "text": "class=\"min-w-0 flex-1 break-words text-xs font-medium sm:truncate\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/rows/CollapsibleBody.svelte",
+      "line": 101,
+      "text": "class=\"-mx-1 mt-1 inline-flex min-h-6 items-center rounded-sm px-1 text-xs font-medium text-inherit underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/rows/CommandStatusRow.svelte",
+      "line": 15,
+      "text": "<div class=\"text-xs font-medium text-muted-foreground\">stderr</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/rows/CommandStatusRow.svelte",
+      "line": 20,
+      "text": "<div class=\"flex min-w-0 items-center gap-2 text-xs font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/rows/InterAgentMessageRow.svelte",
+      "line": 88,
+      "text": "<span class=\"min-w-0 flex-1 truncate text-xs font-medium\" title={displayTitle}>"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/rows/InterAgentMessageRow.svelte",
+      "line": 95,
+      "text": "<div class=\"text-xs font-medium leading-5 text-muted-foreground\">{participantLabel}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/rows/LocalNoticeRow.svelte",
+      "line": 33,
+      "text": "<div class=\"flex min-w-0 items-center gap-2 text-xs font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/rows/TicketCommandOutcomeRow.svelte",
+      "line": 49,
+      "text": "class=\"text-primary font-medium underline decoration-primary/40 underline-offset-2 hover:decoration-primary focus-visible:outline-2 focus-visible:outline-ring\""
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/rows/TicketCommandOutcomeRow.svelte",
+      "line": 56,
+      "text": "<span class=\"font-medium\">{part.ticketId}</span>"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/rows/TranscriptNoticeRow.svelte",
+      "line": 77,
+      "text": "<span class=\"font-medium\">{m.chat_message_agent_started()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/chat/transcript/rows/TranscriptNoticeRow.svelte",
+      "line": 110,
+      "text": "<div class=\"min-w-0 truncate text-xs font-medium\">{message.title}</div>"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardCard.svelte",
+      "line": 161,
+      "text": "class=\"flex w-full items-center gap-1.5 border-t border-status-warning-border bg-status-warning/10 px-3 py-1 text-left text-[11px] font-medium text-status-warning-muted-foreground outline-none hover:bg-status-warning/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardCard.svelte",
+      "line": 173,
+      "text": "class=\"flex items-center gap-1.5 border-t border-status-info-border bg-status-info px-3 py-1 text-[11px] font-medium text-status-info-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardEmptyState.svelte",
+      "line": 33,
+      "text": "<h2 class=\"mt-4 text-base font-semibold tracking-tight text-foreground\">{title}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardLane.svelte",
+      "line": 109,
+      "text": "class=\"min-w-0 flex-1 truncate text-sm font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-ring\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardLane.svelte",
+      "line": 116,
+      "text": "class=\"rounded-full border border-border/80 bg-background/80 px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardLane.svelte",
+      "line": 122,
+      "text": "class=\"inline-flex items-center gap-1 rounded-full border border-status-processing-border/50 bg-status-processing/10 px-1.5 py-0.5 text-[10px] font-medium text-status-processing-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardLane.svelte",
+      "line": 132,
+      "text": "<p class=\"mt-1 text-[11px] font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardPanel.svelte",
+      "line": 561,
+      "text": "class=\"font-semibold underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardPanel.svelte",
+      "line": 590,
+      "text": "<h2 class=\"mt-3 text-base font-semibold\">{m.chat_board_load_failed()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardPanel.svelte",
+      "line": 633,
+      "text": "<h2 class=\"mt-3 text-base font-semibold\">{m.chat_board_chats_load_failed()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardPanel.svelte",
+      "line": 658,
+      "text": "class=\"inline-flex h-8 items-center gap-2 rounded-md px-2.5 text-xs font-medium text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-selected:bg-foreground aria-selected:text-background\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardPanel.svelte",
+      "line": 663,
+      "text": "<span>{lane.column.name}</span><span class=\"tabular-nums\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardToolbar.svelte",
+      "line": 53,
+      "text": "class=\"mr-auto inline-flex h-8 min-w-36 max-w-64 flex-1 items-center gap-2 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring sm:flex-none\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardToolbar.svelte",
+      "line": 96,
+      "text": "class=\"inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardTransitionDialog.svelte",
+      "line": 282,
+      "text": "<h3 class=\"truncate text-base font-semibold\">“{title}”</h3>"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardTransitionDialog.svelte",
+      "line": 289,
+      "text": "class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-base font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardTransitionDialog.svelte",
+      "line": 323,
+      "text": "<h4 class=\"text-xs font-semibold uppercase tracking-wide text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardTransitionDialog.svelte",
+      "line": 339,
+      "text": "<legend class=\"text-xs font-semibold uppercase tracking-wide text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardTransitionDialog.svelte",
+      "line": 366,
+      "text": "class=\"text-xs font-semibold uppercase tracking-wide text-status-error-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardTransitionDialog.svelte",
+      "line": 376,
+      "text": "class=\"text-xs font-semibold uppercase tracking-wide text-status-success-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardTransitionDialog.svelte",
+      "line": 387,
+      "text": "<h4 class=\"text-xs font-semibold uppercase tracking-wide text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardTransitionDialog.svelte",
+      "line": 403,
+      "text": "<h4 class=\"text-xs font-semibold uppercase tracking-wide text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ChatBoardTransitionDialog.svelte",
+      "line": 406,
+      "text": "<p class=\"mt-1 text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/EditColumnsDialog.svelte",
+      "line": 274,
+      "text": "<label class=\"block text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/EditColumnsDialog.svelte",
+      "line": 318,
+      "text": "<label class=\"text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/EditColumnsDialog.svelte",
+      "line": 330,
+      "text": "<label class=\"text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/EditColumnsDialog.svelte",
+      "line": 375,
+      "text": "<label class=\"mt-3 block text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ManageBoardsDialog.svelte",
+      "line": 222,
+      "text": "<label class=\"min-w-0 flex-1 text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/chat-board/ManageBoardsDialog.svelte",
+      "line": 318,
+      "text": "class=\"min-w-0 flex-1 truncate px-1 text-left text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring\""
+    },
+    {
+      "file": "web/src/lib/components/chat-canvas/CanvasBoxNode.svelte",
+      "line": 23,
+      "text": "<span class=\"truncate text-sm font-semibold\">{box?.type === 'box' ? box.title : ''}</span>"
+    },
+    {
+      "file": "web/src/lib/components/chat-canvas/CanvasChatCard.svelte",
+      "line": 23,
+      "text": "<p class=\"text-sm font-medium\">{m.canvas_unavailable_chat()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/chat-canvas/CanvasChatPicker.svelte",
+      "line": 99,
+      "text": "><span class=\"block truncate text-sm font-medium\""
+    },
+    {
+      "file": "web/src/lib/components/chat-canvas/CanvasInspector.svelte",
+      "line": 36,
+      "text": "<span class=\"min-w-0 truncate text-sm font-medium\">{node.title}</span><button"
+    },
+    {
+      "file": "web/src/lib/components/chat-canvas/CanvasList.svelte",
+      "line": 44,
+      "text": "<h2 class=\"font-semibold\">{group.title}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/chat-canvas/CanvasList.svelte",
+      "line": 76,
+      "text": "<h2 class=\"mb-2 font-semibold\">{m.canvas_connection()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/chat-canvas/CanvasPanel.svelte",
+      "line": 197,
+      "text": "<h1 class=\"text-lg font-semibold\">{m.canvas_empty()}</h1>"
+    },
+    {
+      "file": "web/src/lib/components/chat-map/ChatMapChatCard.svelte",
+      "line": 59,
+      "text": "<span class=\"min-w-0 truncate text-sm font-semibold\">{title}</span>"
+    },
+    {
+      "file": "web/src/lib/components/chat-map/ChatMapChatCard.svelte",
+      "line": 62,
+      "text": "class=\"rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat-map/ChatMapChatCard.svelte",
+      "line": 69,
+      "text": "class=\"rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary\""
+    },
+    {
+      "file": "web/src/lib/components/chat-map/ChatMapChatCard.svelte",
+      "line": 82,
+      "text": "<span class=\"rounded bg-muted px-1.5 py-0.5 font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/chat-map/ChatMapChatCard.svelte",
+      "line": 89,
+      "text": "<span class=\"max-w-64 truncate font-medium\" title={node.chat.projectPath}>"
+    },
+    {
+      "file": "web/src/lib/components/chat-map/ChatMapChatCard.svelte",
+      "line": 95,
+      "text": "class=\"whitespace-nowrap tabular-nums\""
+    },
+    {
+      "file": "web/src/lib/components/chat-map/ChatMapChatCard.svelte",
+      "line": 107,
+      "text": "class=\"mt-1 flex shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/chat-map/ChatMapChatCard.svelte",
+      "line": 116,
+      "text": "<div class=\"mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/chat-map/ChatMapMissingParentCard.svelte",
+      "line": 16,
+      "text": "<p class=\"text-sm font-semibold\">{m.chat_map_missing_parent()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/chat-map/ChatMapPanel.svelte",
+      "line": 56,
+      "text": "<h1 id={titleId} class=\"text-base font-semibold\">"
+    },
+    {
+      "file": "web/src/lib/components/chat-map/ChatMapPanel.svelte",
+      "line": 136,
+      "text": "<h2 class=\"mt-3 text-sm font-semibold\">{m.chat_map_empty_title()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/chat-map/ChatMapPanel.svelte",
+      "line": 144,
+      "text": "<h2 class=\"mt-3 text-sm font-semibold\">{m.chat_map_no_results_title()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/executors/ExecutorsSection.svelte",
+      "line": 88,
+      "text": "<div class=\"break-words text-sm font-medium\">{executor.label}</div>"
+    },
+    {
+      "file": "web/src/lib/components/executors/ExecutorsSection.svelte",
+      "line": 135,
+      "text": "<h3 class=\"text-sm font-medium\">{editor.id ? m.executors_edit() : m.executors_add()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/files/FileTree.svelte",
+      "line": 138,
+      "text": "class=\"truncate text-sm font-medium text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/files/FileTree.svelte",
+      "line": 155,
+      "text": "<h3 class=\"text-sm font-medium text-foreground\">{m.filetree_navigation_failed()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/files/FileTreeBreadcrumbs.svelte",
+      "line": 113,
+      "text": "class=\"min-w-0 flex-1 truncate px-1 font-medium text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/files/FileTreeColumnHeader.svelte",
+      "line": 121,
+      "text": "class=\"sticky top-0 z-20 grid h-8 min-h-8 gap-2 border-b border-border bg-background px-2 text-xs font-medium text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/files/FileTreeVirtualRows.svelte",
+      "line": 180,
+      "text": "<h3 class=\"text-sm font-medium text-foreground\">{m.filetree_no_files_found()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/files/FileTreeVirtualRows.svelte",
+      "line": 184,
+      "text": "<h3 class=\"text-sm font-medium text-foreground\">{m.filetree_no_matching_rows()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/files/FilesPanel.svelte",
+      "line": 140,
+      "text": "<h2 class=\"px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/files/ImageViewer.svelte",
+      "line": 207,
+      "text": "<span class=\"w-12 text-center text-xs tabular-nums text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/files/MarkdownViewer.svelte",
+      "line": 132,
+      "text": "--default-mono-font-family: var(--system-code-font);"
+    },
+    {
+      "file": "web/src/lib/components/files/MarkdownViewer.svelte",
+      "line": 133,
+      "text": "font-family: var(--system-ui-font);"
+    },
+    {
+      "file": "web/src/lib/components/files/MarkdownViewer.svelte",
+      "line": 137,
+      "text": "font-family: var(--interface-font-override, var(--system-ui-font));"
+    },
+    {
+      "file": "web/src/lib/components/files/MarkdownViewerSettingsMenu.svelte",
+      "line": 33,
+      "text": "<div class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/git/CommitFileTree.svelte",
+      "line": 185,
+      "text": "<span class=\"flex shrink-0 gap-1 tabular-nums\">"
+    },
+    {
+      "file": "web/src/lib/components/git/CommitFileTree.svelte",
+      "line": 222,
+      "text": "<span class=\"flex shrink-0 gap-1 tabular-nums\">"
+    },
+    {
+      "file": "web/src/lib/components/git/CommitSurface.svelte",
+      "line": 44,
+      "text": "'inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',"
+    },
+    {
+      "file": "web/src/lib/components/git/CommitSurface.svelte",
+      "line": 153,
+      "text": "<h2 class=\"min-w-0 truncate text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/git/CommitSurface.svelte",
+      "line": 158,
+      "text": "<div class=\"flex shrink-0 gap-1.5 text-xs tabular-nums\">"
+    },
+    {
+      "file": "web/src/lib/components/git/GitBranchRefRow.svelte",
+      "line": 28,
+      "text": "isCurrent ? 'bg-accent/50 font-medium' : 'text-muted-foreground',"
+    },
+    {
+      "file": "web/src/lib/components/git/GitBranchRefRow.svelte",
+      "line": 59,
+      "text": "class=\"truncate text-right text-xs tabular-nums text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitBranchSelector.svelte",
+      "line": 108,
+      "text": "'text-sm font-medium truncate sm:max-w-64',"
+    },
+    {
+      "file": "web/src/lib/components/git/GitBranchSelector.svelte",
+      "line": 320,
+      "text": "<div class=\"{isMobile ? '' : 'mb-2'} text-xs font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/git/GitChangedFileTree.svelte",
+      "line": 408,
+      "text": "class=\"ml-1 mr-1.5 w-3.5 shrink-0 text-center text-[10px] font-bold {statusColor("
+    },
+    {
+      "file": "web/src/lib/components/git/GitCommentAppendError.svelte",
+      "line": 25,
+      "text": "<button type=\"button\" class=\"inline-flex shrink-0 items-center gap-1 rounded border border-border px-2 py-1 font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent\" onclick={copyComment}>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitCommentModal.svelte",
+      "line": 80,
+      "text": "<h2 class=\"text-sm font-medium text-foreground\">{m.git_comment_add_to_chat()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitCommitDetailsHeader.svelte",
+      "line": 92,
+      "text": "<h3 class=\"min-w-0 truncate text-sm font-semibold text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/git/GitCommitDetailsHeader.svelte",
+      "line": 168,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded border border-status-warning-border px-2.5 py-1 text-xs font-medium text-status-warning hover:bg-status-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitCommitListRow.svelte",
+      "line": 108,
+      "text": "<span class=\"min-w-0 truncate text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/git/GitCommitListScreen.svelte",
+      "line": 156,
+      "text": "class=\"rounded border px-2 py-1 font-medium {comparisonSelectionSlot === 'from'"
+    },
+    {
+      "file": "web/src/lib/components/git/GitCommitListScreen.svelte",
+      "line": 169,
+      "text": "class=\"rounded border px-2 py-1 font-medium {comparisonSelectionSlot === 'to'"
+    },
+    {
+      "file": "web/src/lib/components/git/GitCommitListScreen.svelte",
+      "line": 182,
+      "text": "class=\"rounded bg-muted px-2.5 py-1 font-medium text-muted-foreground hover:text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitCommitListScreen.svelte",
+      "line": 187,
+      "text": "class=\"rounded bg-interactive-accent px-2.5 py-1 font-medium text-interactive-accent-foreground disabled:opacity-50\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitCommitListScreen.svelte",
+      "line": 196,
+      "text": "class=\"rounded border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitCommitListScreen.svelte",
+      "line": 294,
+      "text": "class=\"inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded px-2 text-xs font-medium text-status-error-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitComparisonDialog.svelte",
+      "line": 49,
+      "text": "<h2 class=\"flex-1 text-sm font-semibold text-foreground\">{m.git_compare_title()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitComparisonDialog.svelte",
+      "line": 66,
+      "text": "<label for=\"git-comparison-from\" class=\"block text-xs font-medium text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitComparisonDialog.svelte",
+      "line": 91,
+      "text": "<span class=\"text-xs font-medium text-muted-foreground\">{m.git_compare_to()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitComparisonDialog.svelte",
+      "line": 98,
+      "text": "class=\"rounded px-3 py-1.5 text-xs font-medium {comparison.toKind === 'revision'"
+    },
+    {
+      "file": "web/src/lib/components/git/GitComparisonDialog.svelte",
+      "line": 106,
+      "text": "class=\"rounded px-3 py-1.5 text-xs font-medium {comparison.toKind === 'working-tree'"
+    },
+    {
+      "file": "web/src/lib/components/git/GitComparisonDialog.svelte",
+      "line": 156,
+      "text": "<span class=\"text-xs font-medium text-muted-foreground\">{m.git_compare_mode()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitComparisonDialog.svelte",
+      "line": 160,
+      "text": "class=\"rounded px-3 py-1.5 text-xs font-medium {comparison.mode === 'direct'"
+    },
+    {
+      "file": "web/src/lib/components/git/GitComparisonDialog.svelte",
+      "line": 168,
+      "text": "class=\"rounded px-3 py-1.5 text-xs font-medium {comparison.mode === 'merge-base'"
+    },
+    {
+      "file": "web/src/lib/components/git/GitComparisonDialog.svelte",
+      "line": 187,
+      "text": "class=\"shrink-0 rounded border border-status-error-border px-2 py-1 font-medium hover:bg-status-error/10\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitComparisonDialog.svelte",
+      "line": 199,
+      "text": "class=\"rounded bg-muted px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitComparisonDialog.svelte",
+      "line": 205,
+      "text": "class=\"inline-flex min-w-24 items-center justify-center gap-1.5 rounded bg-interactive-accent px-4 py-1.5 text-sm font-medium text-interactive-accent-foreground hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitComparisonScreen.svelte",
+      "line": 64,
+      "text": "class=\"rounded border border-status-warning-border px-2 py-1 font-medium hover:bg-status-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitComparisonScreen.svelte",
+      "line": 96,
+      "text": "<h3 class=\"text-sm font-semibold text-foreground\">{m.git_compare_title()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitDiffDocumentScreen.svelte",
+      "line": 198,
+      "text": "class=\"flex-1 px-3 py-1.5 text-xs font-medium transition-colors {singlePaneClass(pane)}\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitDiffSettingsMenu.svelte",
+      "line": 62,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{m.git_diff_font_size()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitDiffSettingsMenu.svelte",
+      "line": 87,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{m.git_diff_mode()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitDiffSettingsMenu.svelte",
+      "line": 111,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{m.git_diff_context_lines()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitFileTree.svelte",
+      "line": 151,
+      "text": "<span class=\"truncate text-xs font-medium uppercase tracking-wider text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/git/GitFileTreeRow.svelte",
+      "line": 211,
+      "text": "class=\"relative z-10 ml-1.5 shrink-0 text-[10px] font-bold {changeKindColor("
+    },
+    {
+      "file": "web/src/lib/components/git/GitFileTreeRow.svelte",
+      "line": 220,
+      "text": "class=\"relative z-10 ml-1 shrink-0 rounded bg-muted px-1 text-[9px] font-medium text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitPorcelainPanel.svelte",
+      "line": 124,
+      "text": "<span class=\"text-xs font-semibold uppercase tracking-wide text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitPushModal.svelte",
+      "line": 82,
+      "text": "<h2 class=\"text-sm font-medium text-foreground\">{m.git_push_title()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitPushModal.svelte",
+      "line": 94,
+      "text": "<div class=\"text-xs font-medium text-muted-foreground uppercase tracking-wider\">{m.git_push_remote()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitPushModal.svelte",
+      "line": 114,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{remote.name}</div>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitPushModal.svelte",
+      "line": 124,
+      "text": "{m.git_push_progress()} <span class=\"font-medium text-foreground\">{currentBranch}</span>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitPushModal.svelte",
+      "line": 126,
+      "text": "<span class=\"font-medium text-foreground\">{selectedRemote}/{currentBranch}</span>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitPushModal.svelte",
+      "line": 134,
+      "text": "class=\"w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200"
+    },
+    {
+      "file": "web/src/lib/components/git/GitRevertModal.svelte",
+      "line": 26,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{m.git_revert_title()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitSummaryButton.svelte",
+      "line": 67,
+      "text": "class=\"inline-flex h-7 max-w-full items-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-background/70 px-2.5 text-xs font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {summary?.hasChanges"
+    },
+    {
+      "file": "web/src/lib/components/git/GitSummaryButton.svelte",
+      "line": 75,
+      "text": "<span class=\"inline-flex items-center gap-1 tabular-nums\">"
+    },
+    {
+      "file": "web/src/lib/components/git/GitTargetDialog.svelte",
+      "line": 134,
+      "text": "<h2 class=\"flex-1 text-sm font-medium text-foreground\">{m.git_target()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitTargetDialog.svelte",
+      "line": 149,
+      "text": "class=\"block text-sm font-medium text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitTargetDialog.svelte",
+      "line": 229,
+      "text": "class=\"rounded-lg bg-muted px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitTargetDialog.svelte",
+      "line": 237,
+      "text": "class=\"rounded-lg px-4 py-1.5 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50"
+    },
+    {
+      "file": "web/src/lib/components/git/GitVirtualCommentComposer.svelte",
+      "line": 74,
+      "text": "style:font-family=\"var(--interface-font-override, var(--font-mono))\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitVirtualDiffRow.svelte",
+      "line": 337,
+      "text": "class=\"font-medium underline underline-offset-2\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitVirtualDiffRow.svelte",
+      "line": 502,
+      "text": "class=\"font-medium underline underline-offset-2\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitVirtualPlaceholderRow.svelte",
+      "line": 53,
+      "text": "<div class=\"font-medium text-foreground\">{title}</div>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitWorkbench.svelte",
+      "line": 351,
+      "text": "class=\"min-w-0 px-2 py-1.5 text-xs font-medium transition-colors"
+    },
+    {
+      "file": "web/src/lib/components/git/GitWorkbench.svelte",
+      "line": 522,
+      "text": "<h3 class=\"text-xl font-medium mb-3 text-center\">{wb.repositoryError}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitWorkbench.svelte",
+      "line": 564,
+      "text": "class=\"flex-1 px-3 py-1.5 text-xs font-medium transition-colors"
+    },
+    {
+      "file": "web/src/lib/components/git/GitWorktreePickerModal.svelte",
+      "line": 158,
+      "text": "<h2 class=\"min-w-0 flex-1 truncate text-sm font-medium text-foreground\">{m.git_worktree_select()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitWorktreePickerModal.svelte",
+      "line": 191,
+      "text": "class=\"shrink-0 rounded-md bg-muted px-2 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-accent\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitWorktreePickerModal.svelte",
+      "line": 272,
+      "text": "<span class=\"text-xs font-medium text-muted-foreground\">{m.git_worktree_new()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/git/GitWorktreePickerModal.svelte",
+      "line": 296,
+      "text": "class=\"shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitWorktreePickerModal.svelte",
+      "line": 331,
+      "text": "class=\"rounded-md bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitWorktreePickerModal.svelte",
+      "line": 339,
+      "text": "class=\"rounded-md px-4 py-1.5 text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50"
+    },
+    {
+      "file": "web/src/lib/components/git/GitWorktreePickerModal.svelte",
+      "line": 364,
+      "text": "class=\"flex items-center gap-1.5 rounded-md bg-interactive-accent px-3 py-1.5 text-xs font-medium text-interactive-accent-foreground shadow-sm transition-all hover:brightness-110\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitWorktreePickerRow.svelte",
+      "line": 65,
+      "text": "<span class=\"min-w-0 truncate text-sm font-medium\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitWorktreePickerRow.svelte",
+      "line": 70,
+      "text": "class=\"shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/git/GitWorktreePickerRow.svelte",
+      "line": 76,
+      "text": "class=\"shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-destructive\""
+    },
+    {
+      "file": "web/src/lib/components/git/NewBranchModal.svelte",
+      "line": 106,
+      "text": "<label for=\"branch-name\" class=\"block text-sm font-medium mb-2\""
+    },
+    {
+      "file": "web/src/lib/components/git/NewBranchModal.svelte",
+      "line": 120,
+      "text": "<label for=\"branch-base-ref\" class=\"block text-sm font-medium mb-2\">"
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorColumnsLayout.svelte",
+      "line": 69,
+      "text": "<span class=\"min-w-0 flex-1 truncate font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorColumnsLayout.svelte",
+      "line": 78,
+      "text": "class=\"px-2 py-1.5 text-xs font-medium text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorColumnsLayout.svelte",
+      "line": 96,
+      "text": "<span class=\"block truncate font-medium\">{option.label}</span>"
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorColumnsLayout.svelte",
+      "line": 114,
+      "text": "<div class=\"px-2 py-1.5 text-xs font-medium text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorColumnsLayout.svelte",
+      "line": 141,
+      "text": "<div class=\"px-2 py-1.5 text-xs font-medium text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorColumnsLayout.svelte",
+      "line": 157,
+      "text": "<span class=\"block truncate font-medium\">{source.label}</span>"
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorColumnsLayout.svelte",
+      "line": 203,
+      "text": "<div class=\"px-2 py-1.5 text-xs font-medium text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorColumnsLayout.svelte",
+      "line": 218,
+      "text": "<span class=\"block font-medium\">{option.label}</span>"
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorCompactLayout.svelte",
+      "line": 189,
+      "text": "class=\"px-2 py-1.5 text-xs font-medium text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorCompactLayout.svelte",
+      "line": 205,
+      "text": "<span class=\"block truncate font-medium\">{option.label}</span>"
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorCompactLayout.svelte",
+      "line": 221,
+      "text": "class=\"truncate text-sm font-medium text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorCompactLayout.svelte",
+      "line": 249,
+      "text": "<span class=\"min-w-0 flex-1 truncate font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorCompactLayout.svelte",
+      "line": 300,
+      "text": "<span class=\"block truncate font-medium\">{source.label}</span>"
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorCompactLayout.svelte",
+      "line": 321,
+      "text": "<span class=\"block font-medium\">{option.label}</span>"
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorCompactLayout.svelte",
+      "line": 384,
+      "text": "class=\"inline-flex h-8 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring\""
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorExecutorPicker.svelte",
+      "line": 25,
+      "text": "<div class=\"flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/model-selector/ModelSelectorPopover.svelte",
+      "line": 177,
+      "text": "<span class=\"truncate font-medium\""
+    },
+    {
+      "file": "web/src/lib/components/model-selector/VirtualModelList.svelte",
+      "line": 133,
+      "text": "<span class=\"block truncate font-medium leading-none\">{row.label}</span>"
+    },
+    {
+      "file": "web/src/lib/components/onboarding/OnboardingThemePage.svelte",
+      "line": 37,
+      "text": "<span class=\"text-sm font-medium text-foreground\">{m.settings_theme_mode_system()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/onboarding/OnboardingThemePage.svelte",
+      "line": 50,
+      "text": "<span class=\"text-sm font-medium text-foreground\">{m.settings_theme_mode_fixed()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/onboarding/OnboardingWizard.svelte",
+      "line": 102,
+      "text": "<p class=\"text-xs font-medium uppercase tracking-wide text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/onboarding/OnboardingWizard.svelte",
+      "line": 108,
+      "text": "class=\"text-xl font-semibold outline-none\">{pageTitles[wizard.pageId]()}</Dialog.Title"
+    },
+    {
+      "file": "web/src/lib/components/onboarding/OnboardingWizard.svelte",
+      "line": 138,
+      "text": "<span class=\"text-sm font-medium text-foreground\">{option.label()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/onboarding/OnboardingWizard.svelte",
+      "line": 146,
+      "text": "<legend class=\"mb-2 text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/onboarding/OnboardingWizard.svelte",
+      "line": 167,
+      "text": "<span class=\"text-xs font-medium text-foreground\">{option.label()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/onboarding/OnboardingWizard.svelte",
+      "line": 174,
+      "text": "<span class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/onboarding/OnboardingWizard.svelte",
+      "line": 184,
+      "text": "<span class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestChangesTab.svelte",
+      "line": 117,
+      "text": "<span class=\"tabular-nums\""
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestDetailPanel.svelte",
+      "line": 72,
+      "text": "? 'bg-muted font-medium text-foreground'"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestDetailPanel.svelte",
+      "line": 81,
+      "text": "<span class=\"text-xs tabular-nums\">"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestDetailPanel.svelte",
+      "line": 108,
+      "text": "class=\"rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none\""
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestHeader.svelte",
+      "line": 32,
+      "text": "class=\"inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium {stateBadge.class}\""
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestHeader.svelte",
+      "line": 61,
+      "text": "<h2 class=\"mt-2 text-lg leading-snug font-semibold text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestHeader.svelte",
+      "line": 78,
+      "text": "<span class=\"font-medium text-foreground\">{pull.author}</span>"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestInboxRow.svelte",
+      "line": 45,
+      "text": "<span class=\"shrink-0 tabular-nums\">{reference}</span>"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestRepositoriesPanel.svelte",
+      "line": 117,
+      "text": "<th class=\"px-3 py-2 font-medium\">{m.pull_request_repository_column_repository()}</th>"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestRepositoriesPanel.svelte",
+      "line": 118,
+      "text": "<th class=\"px-3 py-2 font-medium\">{m.pull_request_repository_column_executor()}</th>"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestRepositoriesPanel.svelte",
+      "line": 119,
+      "text": "<th class=\"px-3 py-2 font-medium\">{m.pull_request_repository_column_auto_review()}</th>"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestRepositoriesPanel.svelte",
+      "line": 120,
+      "text": "<th class=\"px-3 py-2 font-medium\">{m.pull_request_repository_column_reviewer()}</th>"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestRepositoriesPanel.svelte",
+      "line": 121,
+      "text": "<th class=\"px-3 py-2 font-medium\">{m.pull_request_repository_column_posting()}</th>"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestRepositoriesPanel.svelte",
+      "line": 122,
+      "text": "<th class=\"px-3 py-2 font-medium\">{m.pull_request_repository_column_last_scan()}</th>"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestRepositoriesPanel.svelte",
+      "line": 133,
+      "text": "<p class=\"break-words font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestRepositoriesPanel.svelte",
+      "line": 244,
+      "text": "<h3 class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestRepositoryDialog.svelte",
+      "line": 193,
+      "text": "<p class=\"truncate text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestRepositoryDialog.svelte",
+      "line": 227,
+      "text": "<p class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestRepositoryDialog.svelte",
+      "line": 274,
+      "text": "<summary class=\"cursor-pointer text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestRepositoryDialog.svelte",
+      "line": 318,
+      "text": "<label class=\"flex items-start gap-2 text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestReviewChip.svelte",
+      "line": 10,
+      "text": "'inline-flex shrink-0 items-center rounded-full border px-1.5 py-px text-[11px] leading-4 font-medium',"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestReviewTab.svelte",
+      "line": 95,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none\""
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestReviewTab.svelte",
+      "line": 105,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60\""
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestReviewTab.svelte",
+      "line": 124,
+      "text": "class=\"inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60\""
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestReviewTab.svelte",
+      "line": 135,
+      "text": "'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60',"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestReviewTab.svelte",
+      "line": 220,
+      "text": "<h3 class=\"mb-1 text-xs font-medium text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestThread.svelte",
+      "line": 43,
+      "text": "class=\"inline-flex flex-shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium\""
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestThread.svelte",
+      "line": 60,
+      "text": "<div class=\"mb-0.5 text-xs font-semibold text-foreground\">{comment.author}</div>"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestVirtualDiffSurface.svelte",
+      "line": 57,
+      "text": "<div class=\"px-1 py-1 text-[10px] font-medium uppercase text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestVirtualFileHeader.svelte",
+      "line": 50,
+      "text": "'flex-shrink-0 text-[10px] font-semibold uppercase',"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestVirtualFileHeader.svelte",
+      "line": 58,
+      "text": "<span class=\"text-muted-foreground\">{dirName}</span><span class=\"font-medium text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestVirtualFileHeader.svelte",
+      "line": 64,
+      "text": "class=\"flex flex-shrink-0 items-center gap-0.5 rounded-full bg-accent px-1.5 text-[10px] font-medium text-accent-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestVirtualFileHeader.svelte",
+      "line": 72,
+      "text": "<span class=\"flex-shrink-0 text-[11px] font-medium tabular-nums\">"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestsPanel.svelte",
+      "line": 127,
+      "text": "<h2 class=\"min-w-0 truncate text-base font-semibold text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestsPanel.svelte",
+      "line": 170,
+      "text": "<p class=\"text-sm font-medium text-foreground\">{m.pull_request_inbox_empty_title()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestsPanel.svelte",
+      "line": 174,
+      "text": "class=\"mt-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none\""
+    },
+    {
+      "file": "web/src/lib/components/pr/PullRequestsPanel.svelte",
+      "line": 274,
+      "text": "<span class=\"ml-auto text-xs tabular-nums\">{group.entries.length}</span>"
+    },
+    {
+      "file": "web/src/lib/components/preambles/ChatPreambleSelectionDialog.svelte",
+      "line": 59,
+      "text": "<Dialog.Title class=\"text-lg font-semibold\">"
+    },
+    {
+      "file": "web/src/lib/components/preambles/ChatPreambleSelectionPanel.svelte",
+      "line": 215,
+      "text": "<p class=\"text-xs font-medium text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/preambles/NewChatPreamblePicker.svelte",
+      "line": 258,
+      "text": "<Dialog.Title class=\"text-lg font-semibold\">"
+    },
+    {
+      "file": "web/src/lib/components/preambles/NewChatPreambleSummary.svelte",
+      "line": 85,
+      "text": "class=\"hidden shrink-0 text-xs font-medium text-muted-foreground sm:inline\""
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreambleAutomaticFilters.svelte",
+      "line": 94,
+      "text": "<legend class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreambleAutomaticFilters.svelte",
+      "line": 102,
+      "text": "<p class=\"text-sm font-medium text-foreground\">{m.preambles_agent_filter_label()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreambleAutomaticFilters.svelte",
+      "line": 131,
+      "text": "<p class=\"text-sm font-medium text-foreground\">{m.preambles_tag_filter_label()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreambleAutomaticFilters.svelte",
+      "line": 160,
+      "text": "class=\"inline-flex min-h-9 items-center gap-1 rounded-full border px-3 text-sm font-medium transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 {getTagColorClasses("
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreambleFormDialog.svelte",
+      "line": 160,
+      "text": "<label for=\"preamble-enabled\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreambleFormDialog.svelte",
+      "line": 169,
+      "text": "<label for=\"preamble-title\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreambleFormDialog.svelte",
+      "line": 187,
+      "text": "<label for=\"preamble-snippet-short-name\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreambleFormDialog.svelte",
+      "line": 212,
+      "text": "<legend class=\"text-sm font-medium text-foreground\">{m.preambles_scope_label()}</legend>"
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreambleFormDialog.svelte",
+      "line": 217,
+      "text": "<span class=\"block text-sm font-medium\">{m.preambles_scope_global()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreambleFormDialog.svelte",
+      "line": 231,
+      "text": "<span class=\"block text-sm font-medium\">{m.preambles_scope_projects()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreambleFormDialog.svelte",
+      "line": 329,
+      "text": "<label for=\"preamble-content\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreambleRow.svelte",
+      "line": 61,
+      "text": "class=\"min-w-0 truncate text-sm font-medium text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreamblesDialog.svelte",
+      "line": 20,
+      "text": "<Dialog.Title class=\"text-lg font-semibold\">{m.preambles_title()}</Dialog.Title>"
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreamblesSection.svelte",
+      "line": 242,
+      "text": "<p class=\"text-sm font-medium text-foreground\">{m.preambles_empty()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/preambles/PreamblesSection.svelte",
+      "line": 248,
+      "text": "<p class=\"text-sm font-medium text-foreground\">{m.preambles_no_matches()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/project-paths/DirectoryBrowser.svelte",
+      "line": 207,
+      "text": "class=\"shrink-0 rounded whitespace-nowrap hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none aria-[current=location]:font-medium aria-[current=location]:text-foreground {isMobile"
+    },
+    {
+      "file": "web/src/lib/components/project-paths/DirectoryBrowser.svelte",
+      "line": 352,
+      "text": "<Dialog.Title class=\"min-w-0 truncate text-base font-semibold\">"
+    },
+    {
+      "file": "web/src/lib/components/prompt-editor/PromptEditorDialog.svelte",
+      "line": 71,
+      "text": "<Dialog.Title class=\"min-w-0 flex-1 truncate text-sm font-semibold text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/rich-text/CodeBlock.svelte",
+      "line": 57,
+      "text": "<span class=\"shrink-0 font-medium text-muted-foreground tracking-wide\">{lang}</span>"
+    },
+    {
+      "file": "web/src/lib/components/rich-text/Markdown.svelte",
+      "line": 102,
+      "text": "blockquote: 'my-2 border-l-4 border-border pl-4 italic text-muted-foreground',"
+    },
+    {
+      "file": "web/src/lib/components/rich-text/Markdown.svelte",
+      "line": 110,
+      "text": "blockquote: 'my-2 border-l-4 border-current/40 pl-4 italic text-inherit opacity-90',"
+    },
+    {
+      "file": "web/src/lib/components/rich-text/Markdown.svelte",
+      "line": 118,
+      "text": "blockquote: 'my-2 border-l-4 border-current/40 pl-4 italic text-inherit opacity-90',"
+    },
+    {
+      "file": "web/src/lib/components/rich-text/Markdown.svelte",
+      "line": 126,
+      "text": "blockquote: 'my-2 border-l-4 border-border pl-4 italic text-muted-foreground',"
+    },
+    {
+      "file": "web/src/lib/components/rich-text/MermaidViewerDialog.svelte",
+      "line": 392,
+      "text": "class=\"w-12 text-center text-xs tabular-nums text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/rich-text/mermaid-loader.ts",
+      "line": 15,
+      "text": "fontFamily:"
+    },
+    {
+      "file": "web/src/lib/components/settings/AgentCard.svelte",
+      "line": 122,
+      "text": "<span class=\"break-words font-medium text-foreground\">{agentName}</span>"
+    },
+    {
+      "file": "web/src/lib/components/settings/AgentCard.svelte",
+      "line": 165,
+      "text": "<div class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/AgentCard.svelte",
+      "line": 199,
+      "text": "class=\"rounded bg-muted px-2.5 py-1 font-mono text-base font-semibold text-foreground tracking-wider\""
+    },
+    {
+      "file": "web/src/lib/components/settings/AgentCard.svelte",
+      "line": 265,
+      "text": "<div class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/AgentCard.svelte",
+      "line": 307,
+      "text": "<span class=\"break-words font-medium text-foreground\">{agentName}</span>"
+    },
+    {
+      "file": "web/src/lib/components/settings/AgentCommandsSettingsCard.svelte",
+      "line": 43,
+      "text": "<label for=\"agent-commands-enabled\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiKeyProviderSetup.svelte",
+      "line": 26,
+      "text": "<label for=\"provider-quick-key\" class=\"block text-sm font-medium\""
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProviderEndpointDialog.svelte",
+      "line": 117,
+      "text": "<label class=\"text-sm font-medium\" for=\"api-provider-label\""
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProviderEndpointDialog.svelte",
+      "line": 124,
+      "text": "<label class=\"text-sm font-medium\" for=\"api-provider-base-url\""
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProviderEndpointDialog.svelte",
+      "line": 135,
+      "text": "<label class=\"text-sm font-medium\" for=\"api-provider-api-key\""
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProviderEndpointDialog.svelte",
+      "line": 149,
+      "text": "<legend class=\"mb-2 text-sm font-medium\">{m.settings_provider_available_on()}</legend>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProviderEndpointDialog.svelte",
+      "line": 170,
+      "text": "<label class=\"text-sm font-medium\" for=\"api-provider-executor\""
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProviderEndpointDialog.svelte",
+      "line": 192,
+      "text": "<label class=\"text-sm font-medium\" for=\"api-provider-default-model\""
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProviderEndpointDialog.svelte",
+      "line": 220,
+      "text": "<label class=\"text-sm font-medium\" for=\"api-provider-models\""
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProviderEndpointDialog.svelte",
+      "line": 249,
+      "text": "<div class=\"text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProviderEndpointDialog.svelte",
+      "line": 268,
+      "text": "<div class=\"text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProviderEndpointDialog.svelte",
+      "line": 284,
+      "text": "<div class=\"text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProviderProfileRow.svelte",
+      "line": 39,
+      "text": "<h3 class=\"break-words text-sm font-medium text-foreground\">{profile.label}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProviderProtocolPanel.svelte",
+      "line": 87,
+      "text": "<h3 class=\"text-sm font-semibold text-foreground\">{title}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProvidersSection.svelte",
+      "line": 12,
+      "text": "<h2 class=\"text-base font-semibold\">{m.settings_native_providers()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ApiProvidersSection.svelte",
+      "line": 18,
+      "text": "<h2 class=\"text-base font-semibold\">{m.settings_custom_providers()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/settings/AppTitleSettingsCard.svelte",
+      "line": 89,
+      "text": "<label for=\"custom-app-title\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/AppTitleSettingsCard.svelte",
+      "line": 106,
+      "text": "<div id=\"custom-app-title-value-label\" class=\"text-xs font-medium text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/AppTitleSettingsCard.svelte",
+      "line": 139,
+      "text": "<label for=\"custom-app-title-dialog-value\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/AppearanceSettingsSection.svelte",
+      "line": 66,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{label}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/AppearanceSettingsSection.svelte",
+      "line": 88,
+      "text": "<label class=\"text-sm font-medium\" for=\"local-appearance\">{m.settings_ui_style()}</label>"
+    },
+    {
+      "file": "web/src/lib/components/settings/AppearanceSettingsSection.svelte",
+      "line": 101,
+      "text": "<h3 class=\"pt-4 pb-2 text-sm font-semibold\">{m.settings_layout()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/settings/AppearanceSettingsSection.svelte",
+      "line": 121,
+      "text": "<label class=\"text-sm font-medium text-foreground\" for=\"local-workspace-titlebar-size\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/AppearanceSettingsSection.svelte",
+      "line": 142,
+      "text": "class=\"w-12 text-right text-sm tabular-nums text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/settings/AppearanceSettingsSection.svelte",
+      "line": 151,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{m.settings_chat_max_width()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/AppearanceSettingsSection.svelte",
+      "line": 167,
+      "text": "<label class=\"min-w-0 text-sm font-medium text-foreground\" for=\"local-inline-image-size\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/AppearanceSettingsSection.svelte",
+      "line": 183,
+      "text": "<label class=\"min-w-0 text-sm font-medium text-foreground\" for=\"local-inline-mermaid-size\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/AppearanceSettingsSection.svelte",
+      "line": 209,
+      "text": "<h3 class=\"pb-2 text-sm font-semibold\">{m.settings_composer_status_bar()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/settings/AppearanceSettingsSection.svelte",
+      "line": 220,
+      "text": "<h4 class=\"pt-3 pb-1 text-sm font-medium text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/AuthenticationSection.svelte",
+      "line": 100,
+      "text": "<h2 class=\"text-lg font-semibold\">{m.settings_tab_authentication()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/settings/AuthenticationSection.svelte",
+      "line": 132,
+      "text": "<h3 class=\"font-medium\">{m.auth_login_username()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/settings/AuthenticationSection.svelte",
+      "line": 172,
+      "text": "<h3 class=\"font-medium\">{m.auth_login_password()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/settings/BehaviorSettingsSection.svelte",
+      "line": 125,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{label}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/BehaviorSettingsSection.svelte",
+      "line": 140,
+      "text": "<label class=\"min-w-0 text-sm font-medium text-foreground\" for={`local-${key}`}>"
+    },
+    {
+      "file": "web/src/lib/components/settings/BehaviorSettingsSection.svelte",
+      "line": 161,
+      "text": "<label class=\"min-w-0 text-sm font-medium text-foreground\" for=\"local-image-cache-size\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/BehaviorSettingsSection.svelte",
+      "line": 180,
+      "text": "class=\"text-sm font-medium text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/settings/BehaviorSettingsSection.svelte",
+      "line": 225,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{m.settings_chat_hidden_tools()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/BehaviorSettingsSection.svelte",
+      "line": 240,
+      "text": "<label class=\"min-w-0 text-sm font-medium text-foreground\" for=\"local-composer-input-mode\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/BehaviorSettingsSection.svelte",
+      "line": 260,
+      "text": "<label class=\"text-sm font-medium text-foreground\" for=\"local-snippet-trigger\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/BehaviorSettingsSection.svelte",
+      "line": 294,
+      "text": "<h3 class=\"py-2 text-sm font-medium text-foreground\">{m.settings_file_opening()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/settings/BehaviorSettingsSection.svelte",
+      "line": 313,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{m.settings_file_recovery_title()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/BehaviorSettingsSection.svelte",
+      "line": 334,
+      "text": "<div class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/BrowserNotificationsPanel.svelte",
+      "line": 44,
+      "text": "<h3 class=\"text-sm font-semibold text-foreground\">{m.browser_notifications_title()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/settings/CompletionSoundSettings.svelte",
+      "line": 93,
+      "text": "<h3 class=\"py-2 text-sm font-medium text-foreground\">{m.settings_completion_sound_title()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/settings/CompletionSoundSettings.svelte",
+      "line": 97,
+      "text": "<label class=\"text-sm font-medium text-foreground\" for=\"completion-sound-mode\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/CompletionSoundSettings.svelte",
+      "line": 116,
+      "text": "<div class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/CompletionSoundSettings.svelte",
+      "line": 148,
+      "text": "<label class=\"text-sm font-medium text-foreground\" for=\"completion-sound-volume\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/CompletionSoundSettings.svelte",
+      "line": 166,
+      "text": "<label class=\"min-w-0 text-sm font-medium text-foreground\" for=\"completion-sound-visibility\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/GeneralSettingsSection.svelte",
+      "line": 48,
+      "text": "<label class=\"text-sm font-medium text-foreground\" for=\"remote-pinned-insert-position\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/GenerationPromptDialog.svelte",
+      "line": 133,
+      "text": "<div class=\"text-xs font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/GitHubCliSettingsCard.svelte",
+      "line": 66,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{m.settings_gh_title()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/GitHubRepositoriesSettingsSection.svelte",
+      "line": 29,
+      "text": "<h3 id=\"github-repositories-title\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/HiddenBashCommandsSettingsCard.svelte",
+      "line": 138,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{m.settings_hidden_bash_commands_title()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/KeyboardShortcutsSection.svelte",
+      "line": 130,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{label}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/KeyboardShortcutsSection.svelte",
+      "line": 137,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{label}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/KeyboardShortcutsSection.svelte",
+      "line": 151,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{entry.label()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/KeyboardShortcutsSection.svelte",
+      "line": 210,
+      "text": "<h3 class=\"text-sm font-semibold text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/KeyboardShortcutsSection.svelte",
+      "line": 230,
+      "text": "<h3 class=\"text-sm font-semibold text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/KeyboardShortcutsSection.svelte",
+      "line": 244,
+      "text": "<h3 class=\"text-sm font-semibold text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/RemoteGenerationSettingsCard.svelte",
+      "line": 98,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{enabledLabel}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/RemoteGenerationSettingsCard.svelte",
+      "line": 112,
+      "text": "<label for=\"agent-switch-context-window\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/RemoteGenerationSettingsCard.svelte",
+      "line": 130,
+      "text": "<div class=\"pt-1.5 text-sm font-medium text-foreground\">{modelLabel}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/RemoteGenerationSettingsCard.svelte",
+      "line": 204,
+      "text": "<div class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledChatTitleField.svelte",
+      "line": 14,
+      "text": "<label class=\"flex items-center gap-2 text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledNewChatComposer.svelte",
+      "line": 118,
+      "text": "<label for=\"scheduled-project-path\" class=\"block text-sm font-medium text-muted-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptDialog.svelte",
+      "line": 244,
+      "text": "<label for=\"scheduled-prompt-name\" class=\"text-sm font-medium\">{m.scheduled_prompts_task_name()}</label>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptDialog.svelte",
+      "line": 263,
+      "text": "<h3 id=\"scheduled-prompt-cadence\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptDialog.svelte",
+      "line": 291,
+      "text": "<label for=\"scheduled-prompt-interval\" class=\"block font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptDialog.svelte",
+      "line": 342,
+      "text": "<span class=\"font-medium\">{dateLabel}</span>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptDialog.svelte",
+      "line": 351,
+      "text": "<span class=\"font-medium\">{timeLabel}</span>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptDialog.svelte",
+      "line": 363,
+      "text": "<p class=\"text-sm font-medium\">{m.scheduled_prompts_lifecycle()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptDialog.svelte",
+      "line": 385,
+      "text": "<span class=\"font-medium\">{m.scheduled_prompts_end_date()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptDialog.svelte",
+      "line": 410,
+      "text": "<h3 id=\"scheduled-prompt-target\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptDialog.svelte",
+      "line": 456,
+      "text": "<p class=\"truncate text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptDialog.svelte",
+      "line": 473,
+      "text": "<legend class=\"mb-2 text-sm font-medium\">{m.scheduled_prompts_when_busy()}</legend>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptField.svelte",
+      "line": 112,
+      "text": "<label for={inputId} class=\"text-sm font-medium\">{m.scheduled_prompts_prompt()}</label>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptHeader.svelte",
+      "line": 21,
+      "text": "<Dialog.Title class=\"text-lg font-semibold leading-6\">{title}</Dialog.Title>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptOption.svelte",
+      "line": 29,
+      "text": "<span class=\"block text-sm font-medium text-foreground\">{label}</span>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptRow.svelte",
+      "line": 137,
+      "text": "'inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium',"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptRow.svelte",
+      "line": 149,
+      "text": "<span class=\"font-normal text-muted-foreground\">{endLabel}</span>"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptRow.svelte",
+      "line": 239,
+      "text": "class=\"mt-2 line-clamp-2 break-words text-sm font-medium text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptRow.svelte",
+      "line": 320,
+      "text": "class=\"ml-auto shrink-0 rounded-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring\""
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptRunLogDialog.svelte",
+      "line": 47,
+      "text": "<p class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptSchedulePreview.svelte",
+      "line": 50,
+      "text": "<p class=\"font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptSchedulePreview.svelte",
+      "line": 51,
+      "text": "{cadence}{#if lifecycle}<span class=\"font-normal text-muted-foreground\">, {lifecycle}</span"
+    },
+    {
+      "file": "web/src/lib/components/settings/ScheduledPromptsSection.svelte",
+      "line": 212,
+      "text": "<p class=\"text-sm font-medium text-foreground\">{m.scheduled_prompts_empty()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/settings/Settings.svelte",
+      "line": 112,
+      "text": "<Dialog.Title class=\"text-lg font-semibold\">{m.settings_title()}</Dialog.Title>"
+    },
+    {
+      "file": "web/src/lib/components/settings/Settings.svelte",
+      "line": 140,
+      "text": "class=\"hidden px-2 pb-1 text-xs font-medium text-muted-foreground sm:block {index > 0"
+    },
+    {
+      "file": "web/src/lib/components/settings/SettingsExecutorSections.svelte",
+      "line": 15,
+      "text": "<h3 class=\"break-words text-sm font-semibold text-foreground\">{executor.label}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/settings/TelegramSettingsPanel.svelte",
+      "line": 211,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{m.settings_telegram_notifications()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/TelegramSettingsPanel.svelte",
+      "line": 224,
+      "text": "<label class=\"text-sm font-medium text-foreground\" for=\"telegram-bot-token\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/ThemeSettingsCard.svelte",
+      "line": 24,
+      "text": "<legend class=\"text-sm font-medium text-foreground\">{m.settings_theme_title()}</legend>"
+    },
+    {
+      "file": "web/src/lib/components/settings/TicketChatSettingsCard.svelte",
+      "line": 28,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{m.settings_ticket_chat_prompt()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/settings/TranscriptSearchSettingsCard.svelte",
+      "line": 32,
+      "text": "<label for=\"transcript-search-enabled\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/TypographyDialog.svelte",
+      "line": 51,
+      "text": "<legend class=\"text-sm font-medium\">{m.settings_font()}</legend>"
+    },
+    {
+      "file": "web/src/lib/components/settings/TypographyDialog.svelte",
+      "line": 78,
+      "text": "<label class=\"grid min-w-0 gap-1 text-sm font-medium\">"
+    },
+    {
+      "file": "web/src/lib/components/settings/TypographyDialog.svelte",
+      "line": 99,
+      "text": "<h3 class=\"mb-2 text-sm font-medium\">{m.settings_font_preview()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/settings/TypographyPreview.svelte",
+      "line": 14,
+      "text": "}: { surface: TypographySurface; font: FontPreference; size: FontSizePreference } = $props();"
+    },
+    {
+      "file": "web/src/lib/components/settings/TypographyPreview.svelte",
+      "line": 39,
+      "text": "style:font-family={family}"
+    },
+    {
+      "file": "web/src/lib/components/settings/TypographyPreview.svelte",
+      "line": 68,
+      "text": "<pre style:font-family=\"inherit\" class=\"whitespace-pre-wrap\">  const total = items.length;"
+    },
+    {
+      "file": "web/src/lib/components/settings/TypographyPreview.svelte",
+      "line": 74,
+      "text": "<pre style:font-family=\"inherit\" class=\"whitespace-pre-wrap\">$ git status --short"
+    },
+    {
+      "file": "web/src/lib/components/settings/TypographyPreview.svelte",
+      "line": 81,
+      "text": "<pre style:font-family=\"inherit\" class=\"whitespace-pre-wrap\">{codeSample}</pre>"
+    },
+    {
+      "file": "web/src/lib/components/settings/TypographySettings.svelte",
+      "line": 20,
+      "text": "<h3 id=\"typography-heading\" class=\"mb-2 text-sm font-semibold\">{m.settings_typography()}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/settings/TypographySettings.svelte",
+      "line": 26,
+      "text": "<span class=\"text-sm font-medium\">{TYPOGRAPHY_SURFACE_LABELS[id]()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/shared/AgentPill.svelte",
+      "line": 58,
+      "text": "'inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-none',"
+    },
+    {
+      "file": "web/src/lib/components/shared/ColoredTag.svelte",
+      "line": 28,
+      "text": "'inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-none',"
+    },
+    {
+      "file": "web/src/lib/components/shared/ColoredTag.svelte",
+      "line": 39,
+      "text": "'inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-none',"
+    },
+    {
+      "file": "web/src/lib/components/shared/CommandMenu.svelte",
+      "line": 250,
+      "text": "<div class=\"text-sm font-medium truncate\">{item.label}</div>"
+    },
+    {
+      "file": "web/src/lib/components/shared/ExecutorSelector.svelte",
+      "line": 58,
+      "text": "'inline-flex h-8 min-w-0 max-w-40 items-center gap-1.5 rounded-lg px-2 text-xs font-medium hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50',"
+    },
+    {
+      "file": "web/src/lib/components/shared/NotificationHost.svelte",
+      "line": 74,
+      "text": "class=\"shrink-0 rounded-md border border-current/30 px-2 py-1 text-xs font-medium hover:bg-current/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50\""
+    },
+    {
+      "file": "web/src/lib/components/shared/floating-toolbar-styles.ts",
+      "line": 5,
+      "text": "'relative inline-flex h-8 max-w-40 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:gap-1.5 sm:px-3 sm:text-sm';"
+    },
+    {
+      "file": "web/src/lib/components/shared/typography-labels.ts",
+      "line": 48,
+      "text": "export function fontLabel(surface: TypographySurface, font: FontPreference): string {"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/Sidebar.svelte",
+      "line": 572,
+      "text": "<li class=\"text-muted-foreground italic\">"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarChatItem.svelte",
+      "line": 366,
+      "text": "'w-full h-full justify-start pr-2 font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200',"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarChatList.svelte",
+      "line": 144,
+      "text": "<h3 class=\"mb-2 text-base font-medium text-foreground md:mb-1\">"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarChatList.svelte",
+      "line": 157,
+      "text": "<h3 class=\"mb-2 text-base font-medium text-foreground md:mb-1\">"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarChatList.svelte",
+      "line": 174,
+      "text": "<h3 class=\"mb-2 text-base font-medium text-foreground md:mb-1\">"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarControlsRow.svelte",
+      "line": 134,
+      "text": "class=\"flex h-9 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border border-sidebar-border/70 bg-muted/50 px-3 text-sm font-medium text-foreground transition-colors hover:bg-background\""
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarGroupHeader.svelte",
+      "line": 38,
+      "text": "executor: 'gap-2 text-[13px] font-semibold text-foreground',"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarGroupHeader.svelte",
+      "line": 39,
+      "text": "project: 'gap-1.5 text-xs font-medium text-muted-foreground',"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarGroupHeader.svelte",
+      "line": 41,
+      "text": "'gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground',"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarGroupHeader.svelte",
+      "line": 76,
+      "text": "'ml-auto shrink-0 pl-2 text-[11px] font-normal normal-case tracking-normal tabular-nums text-muted-foreground',"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarProjectHeaderRow.svelte",
+      "line": 60,
+      "text": "class=\"min-w-0 flex-1 basis-0 truncate text-left text-[11px] font-normal text-muted-foreground/80 [direction:rtl]\""
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarSelectionBar.svelte",
+      "line": 61,
+      "text": "<span class=\"text-xs font-medium text-foreground tabular-nums whitespace-nowrap\">"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarSelectionBar.svelte",
+      "line": 66,
+      "text": "class=\"text-xs text-primary hover:text-primary/80 transition-colors font-medium whitespace-nowrap\""
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarSelectionBar.svelte",
+      "line": 76,
+      "text": "class=\"selection-action-button h-7 px-2.5 text-xs font-medium gap-1\""
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarTagDialog.svelte",
+      "line": 215,
+      "text": "class=\"inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium hover:opacity-80 transition-opacity {getTagColorClasses("
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarTagDialog.svelte",
+      "line": 260,
+      "text": "<span class=\"text-xs font-medium text-muted-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/sidebar/SidebarTagDialog.svelte",
+      "line": 277,
+      "text": "<p class=\"text-sm text-muted-foreground italic\">{m.sidebar_tags_no_tags()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/search/SavedSearchEditorDialog.svelte",
+      "line": 110,
+      "text": "<span class=\"text-sm font-medium text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/sidebar/search/SavedSearchEditorDialog.svelte",
+      "line": 124,
+      "text": "<span class=\"text-sm font-medium text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/sidebar/search/SavedSearchEditorDialog.svelte",
+      "line": 137,
+      "text": "<span class=\"text-sm font-medium text-foreground\">{m.sidebar_saved_search_visibility()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/search/SavedSearchManagerDialog.svelte",
+      "line": 131,
+      "text": "<div class=\"text-sm font-medium truncate\">{search.title || search.query}</div>"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/search/SidebarSearchContext.svelte",
+      "line": 72,
+      "text": "<div class=\"truncate text-xs font-medium text-foreground\">{activeQuery}</div>"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/search/SidebarSearchResultRow.svelte",
+      "line": 46,
+      "text": "'h-full min-w-0 w-full bg-transparent px-3 py-1.5 text-left font-normal transition-colors duration-150',"
+    },
+    {
+      "file": "web/src/lib/components/sidebar/search/SidebarSearchResultRow.svelte",
+      "line": 71,
+      "text": "'shrink-0 rounded border px-1 py-0 text-[10px] font-medium uppercase',"
+    },
+    {
+      "file": "web/src/lib/components/snippets/SnippetFormDialog.svelte",
+      "line": 150,
+      "text": "<label for=\"snippet-short-name\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/snippets/SnippetFormDialog.svelte",
+      "line": 174,
+      "text": "<label for=\"snippet-template\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/snippets/SnippetFormDialog.svelte",
+      "line": 215,
+      "text": "<label for=\"snippet-default-arguments\" class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/snippets/SnippetRow.svelte",
+      "line": 22,
+      "text": "<h3 class=\"truncate text-sm font-medium text-foreground\">{snippet.shortName}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/snippets/SnippetRow.svelte",
+      "line": 28,
+      "text": "<span class=\"shrink-0 font-medium\">{m.snippets_default_arguments_summary()}:</span>"
+    },
+    {
+      "file": "web/src/lib/components/snippets/SnippetsDialog.svelte",
+      "line": 20,
+      "text": "<Dialog.Title class=\"text-lg font-semibold\">{m.snippets_title()}</Dialog.Title>"
+    },
+    {
+      "file": "web/src/lib/components/snippets/SnippetsSection.svelte",
+      "line": 133,
+      "text": "<p class=\"text-sm font-medium text-foreground\">{m.snippets_empty()}</p>"
+    },
+    {
+      "file": "web/src/lib/components/terminal/TerminalLauncherSurface.svelte",
+      "line": 31,
+      "text": "<h2 class=\"text-sm font-semibold\">{m.terminal_start()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/terminal/TerminalSettingsMenu.svelte",
+      "line": 30,
+      "text": "<div class=\"text-sm font-medium text-foreground\">{m.terminal_font_size()}</div>"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 51,
+      "text": "font-weight: 550;"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 174,
+      "text": "font-weight: 550;"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 177,
+      "text": "font-weight: 550;"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 192,
+      "text": "font-weight: 400;"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 243,
+      "text": "font-weight: 500;"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 314,
+      "text": "font-weight: 550;"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 317,
+      "text": "font: calc(11px * var(--interface-font-scale, 1)) var(--font-mono, monospace);"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 320,
+      "text": "font-variant-numeric: tabular-nums;"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 445,
+      "text": "font-weight: 600;"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 450,
+      "text": "font-weight: 400;"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 586,
+      "text": "font-weight: 620;"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 674,
+      "text": "font-weight: 550;"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 712,
+      "text": "font-weight: 550;"
+    },
+    {
+      "file": "web/src/lib/components/tickets/tickets.css",
+      "line": 760,
+      "text": "font-weight: 600;"
+    },
+    {
+      "file": "web/src/lib/components/ui/badge/badge.ts",
+      "line": 4,
+      "text": "base: 'focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:ring-[3px] [&>svg]:pointer-events-none [&>svg]:size-3',"
+    },
+    {
+      "file": "web/src/lib/components/ui/button/button.ts",
+      "line": 6,
+      "text": "base: \"focus-visible:border-ring focus-visible:ring-ring aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive inline-flex shrink-0 items-center justify-center gap-2 rounded-(--control-radius) text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4\","
+    },
+    {
+      "file": "web/src/lib/components/ui/context-menu/context-menu-group-heading.svelte",
+      "line": 19,
+      "text": "class={cn('text-foreground px-2 py-1.5 text-sm font-medium data-[inset]:ps-8', className)}"
+    },
+    {
+      "file": "web/src/lib/components/ui/context-menu/context-menu-label.svelte",
+      "line": 20,
+      "text": "class={cn('text-foreground px-2 py-1.5 text-sm font-medium data-[inset]:ps-8', className)}"
+    },
+    {
+      "file": "web/src/lib/components/ui/dialog/dialog-title.svelte",
+      "line": 15,
+      "text": "class={cn('text-lg leading-none font-semibold', className)}"
+    },
+    {
+      "file": "web/src/lib/components/ui/dropdown-menu/dropdown-menu-group-heading.svelte",
+      "line": 20,
+      "text": "class={cn('px-2 py-1.5 text-sm font-semibold data-[inset]:ps-8', className)}"
+    },
+    {
+      "file": "web/src/lib/components/ui/dropdown-menu/dropdown-menu-label.svelte",
+      "line": 20,
+      "text": "class={cn('px-2 py-1.5 text-sm font-semibold data-[inset]:ps-8', className)}"
+    },
+    {
+      "file": "web/src/lib/components/ui/input/input.svelte",
+      "line": 28,
+      "text": "'selection:bg-primary selection:text-primary-foreground border-input ring-offset-background placeholder:text-muted-foreground flex h-9 w-full min-w-0 rounded-(--control-radius) border bg-control-surface px-3 pt-1.5 text-base font-medium shadow-xs transition-[color,box-shadow] outline-none disabled:cursor-not-allowed disabled:opacity-50 md:pointer-fine:text-sm',"
+    },
+    {
+      "file": "web/src/lib/components/ui/tabs/tabs-trigger.svelte",
+      "line": 16,
+      "text": "\"data-[state=active]:bg-control-surface data-[state=active]:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-ring data-[state=active]:border-input text-muted-foreground inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:ring-[3px] focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:shadow-sm [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4\","
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 54,
+      "text": "<h2 class=\"text-sm font-medium text-foreground\">{m.usage_breakdown()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 68,
+      "text": "<th scope=\"col\" class=\"py-2 pr-3 text-left font-normal\">#</th>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 69,
+      "text": "<th scope=\"col\" class=\"w-full py-2 text-left font-normal\">{m.usage_column_model()}</th>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 70,
+      "text": "<th scope=\"col\" class=\"py-2 pl-6 font-normal\">{m.usage_metric_cost()}</th>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 71,
+      "text": "<th scope=\"col\" class=\"hidden py-2 pl-6 font-normal sm:table-cell\""
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 74,
+      "text": "<th scope=\"col\" class=\"py-2 pl-6 font-normal\">{m.usage_metric_tokens()}</th>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 85,
+      "text": "<td class=\"py-2.5 pr-3 text-left text-xs tabular-nums\">{index + 1}</td>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 113,
+      "text": "<td class=\"py-2.5 pl-6 text-foreground tabular-nums\">"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 117,
+      "text": "<td class=\"hidden py-2.5 pl-6 tabular-nums sm:table-cell\">"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 122,
+      "text": "<td class=\"py-2.5 pl-6 tabular-nums\">{formatTokens(model.totalTokens)}</td>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 137,
+      "text": "<th scope=\"col\" class=\"py-2 text-left font-normal\">{m.usage_breakdown_day()}</th>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 139,
+      "text": "<th scope=\"col\" class=\"py-2 pl-4 font-normal\">{agentLabelFor(agent.agentId)}</th>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 141,
+      "text": "<th scope=\"col\" class=\"py-2 pl-4 font-normal\">{m.usage_total()}</th>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 142,
+      "text": "<th scope=\"col\" class=\"py-2 pl-4 font-normal\">"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 151,
+      "text": "class=\"border-b border-border/50 text-right tabular-nums transition-colors hover:bg-muted/50\""
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageBreakdown.svelte",
+      "line": 153,
+      "text": "<th scope=\"row\" class=\"py-2 text-left font-normal text-foreground\""
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageChart.svelte",
+      "line": 116,
+      "text": "class=\"absolute right-0 -translate-y-1/2 text-[10px] text-muted-foreground tabular-nums\""
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageChart.svelte",
+      "line": 195,
+      "text": "<span class=\"text-foreground tabular-nums\""
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageChart.svelte",
+      "line": 205,
+      "text": "<span class=\"text-foreground tabular-nums\""
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageModelDialog.svelte",
+      "line": 97,
+      "text": "<dd class=\"truncate text-2xl font-semibold text-foreground tabular-nums\">"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageOverview.svelte",
+      "line": 54,
+      "text": "<span class=\"text-4xl font-semibold text-foreground tabular-nums\" data-usage-headline>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageOverview.svelte",
+      "line": 90,
+      "text": "class=\"shrink-0 text-[11px] whitespace-nowrap text-muted-foreground tabular-nums\""
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageOverview.svelte",
+      "line": 98,
+      "text": "<span class=\"shrink-0 text-sm font-medium text-foreground tabular-nums\">"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageOverview.svelte",
+      "line": 134,
+      "text": "<h2 class=\"text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsagePanel.svelte",
+      "line": 92,
+      "text": "<h1 id={titleId} class=\"text-base font-semibold\">{m.workspace_surface_usage()}</h1>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsagePanel.svelte",
+      "line": 169,
+      "text": "class=\"shrink-0 rounded px-2 py-0.5 text-xs font-medium hover:bg-destructive/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring\""
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageSegmented.svelte",
+      "line": 33,
+      "text": "'h-6 rounded-[5px] px-2 text-xs font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageShareBar.svelte",
+      "line": 22,
+      "text": "<h3 class=\"text-sm font-medium text-foreground\">{label}</h3>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageShareBar.svelte",
+      "line": 42,
+      "text": "<span class=\"text-foreground tabular-nums\">{format(segment.value)}</span>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageTotals.svelte",
+      "line": 52,
+      "text": "<h2 class=\"text-sm font-medium text-foreground\">{m.usage_totals()}</h2>"
+    },
+    {
+      "file": "web/src/lib/components/usage/UsageTotals.svelte",
+      "line": 57,
+      "text": "<dd class=\"text-base font-medium text-foreground tabular-nums\">{entry.value}</dd>"
+    },
+    {
+      "file": "web/src/lib/components/workspace/AvailabilityNotice.svelte",
+      "line": 20,
+      "text": "<p class=\"font-medium text-foreground\">{title}</p>"
+    },
+    {
+      "file": "web/src/lib/components/workspace/BottomTabBar.svelte",
+      "line": 27,
+      "text": "<span class=\"text-[10px] font-medium\">{m.mobile_menu()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/workspace/BottomTabBar.svelte",
+      "line": 41,
+      "text": "<span class=\"text-[10px] font-medium\">{tab.label()}</span>"
+    },
+    {
+      "file": "web/src/lib/components/workspace/WorkspaceWindow.svelte",
+      "line": 390,
+      "text": "<span class=\"rounded-md bg-background/90 px-2 py-0.5 text-[10px] font-medium shadow-sm\">"
+    },
+    {
+      "file": "web/src/lib/components/workspace/WorkspaceWindowCopyItem.svelte",
+      "line": 28,
+      "text": "<div class=\"font-medium\">{label}</div>"
+    },
+    {
+      "file": "web/src/lib/files/editor/code-editor-controller.svelte.ts",
+      "line": 525,
+      "text": "fontFamily: 'var(--interface-font-override, var(--system-ui-font))',"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 15,
+      "text": "{ tag: tags.heading, textDecoration: 'underline', fontWeight: 'bold' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 16,
+      "text": "{ tag: tags.emphasis, fontStyle: 'italic' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 17,
+      "text": "{ tag: tags.strong, fontWeight: 'bold' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 76,
+      "text": "{ tag: tags.strong, fontWeight: 'bold' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 77,
+      "text": "{ tag: tags.emphasis, fontStyle: 'italic' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 80,
+      "text": "{ tag: tags.heading, fontWeight: 'bold', color: '#e77881' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 153,
+      "text": "{ tag: tags.comment, color: '#5f6b73', fontStyle: 'italic' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 165,
+      "text": "{ tag: tags.strong, fontWeight: 'bold' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 166,
+      "text": "{ tag: tags.emphasis, fontStyle: 'italic' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 188,
+      "text": "{ tag: tags.comment, color: '#90a7b2', fontStyle: 'italic' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 200,
+      "text": "{ tag: tags.strong, fontWeight: 'bold' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 201,
+      "text": "{ tag: tags.emphasis, fontStyle: 'italic' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 223,
+      "text": "{ tag: tags.comment, color: '#5c5f77', fontStyle: 'italic' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 235,
+      "text": "{ tag: tags.strong, fontWeight: 'bold' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 236,
+      "text": "{ tag: tags.emphasis, fontStyle: 'italic' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 258,
+      "text": "{ tag: tags.comment, color: '#a6adc8', fontStyle: 'italic' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 270,
+      "text": "{ tag: tags.strong, fontWeight: 'bold' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 271,
+      "text": "{ tag: tags.emphasis, fontStyle: 'italic' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 304,
+      "text": "{ tag: tags.strong, fontWeight: 'bold' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 305,
+      "text": "{ tag: tags.emphasis, fontStyle: 'italic' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/editor-themes.ts",
+      "line": 308,
+      "text": "{ tag: tags.heading, fontWeight: 'bold' },"
+    },
+    {
+      "file": "web/src/lib/files/editor/file-search-panel.css",
+      "line": 14,
+      "text": "font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);"
+    },
+    {
+      "file": "web/src/lib/files/editor/file-search-panel.css",
+      "line": 47,
+      "text": "font: inherit;"
+    },
+    {
+      "file": "web/src/lib/files/editor/file-search-panel.css",
+      "line": 69,
+      "text": "font-variant-numeric: tabular-nums;"
+    },
+    {
+      "file": "web/src/lib/files/editor/file-vim-mode.css",
+      "line": 7,
+      "text": "font: calc(12px * var(--interface-font-scale, 1)) /"
+    },
+    {
+      "file": "web/src/lib/files/editor/file-vim-mode.css",
+      "line": 27,
+      "text": "font: inherit;"
+    },
+    {
+      "file": "web/src/lib/stores/local-settings.svelte.ts",
+      "line": 709,
+      "text": "setTypography(surface: TypographySurface, font: FontPreference, size: FontSizePreference): void {"
+    },
+    {
+      "file": "web/src/lib/terminal/runtime/terminal-runtime.svelte.ts",
+      "line": 92,
+      "text": "fontFamily: TERMINAL_FALLBACK_FONT_FAMILY,"
+    },
+    {
+      "file": "web/src/lib/terminal/runtime/terminal-runtime.svelte.ts",
+      "line": 93,
+      "text": "fontWeight: 400,"
+    },
+    {
+      "file": "web/src/lib/terminal/runtime/terminal-runtime.svelte.ts",
+      "line": 94,
+      "text": "fontWeightBold: 700,"
+    },
+    {
+      "file": "web/src/lib/terminal/runtime/terminal-runtime.svelte.ts",
+      "line": 125,
+      "text": "let fontFamily: string | null;"
+    },
+    {
+      "file": "web/src/lib/terminal/runtime/terminal-runtime.svelte.ts",
+      "line": 129,
+      "text": "fontFamily = await this.#waitForFont(this.#fontPreference);"
+    },
+    {
+      "file": "web/src/lib/terminal/runtime/terminal-runtime.svelte.ts",
+      "line": 131,
+      "text": "} while (fontFamily === null || fontGeneration !== this.#fontGeneration);"
+    },
+    {
+      "file": "web/src/lib/terminal/runtime/terminal-runtime.svelte.ts",
+      "line": 133,
+      "text": "this.terminal.options.fontFamily = fontFamily;"
+    },
+    {
+      "file": "web/src/lib/terminal/runtime/terminal-runtime.svelte.ts",
+      "line": 138,
+      "text": "this.terminal.options.fontFamily = fontFamily;"
+    },
+    {
+      "file": "web/src/lib/terminal/runtime/terminal-runtime.svelte.ts",
+      "line": 222,
+      "text": "this.terminal.options.fontFamily = family;"
+    },
+    {
+      "file": "web/src/lib/theme/ansi.css",
+      "line": 78,
+      "text": "font: 11px/1 var(--font-mono);"
+    },
+    {
+      "file": "web/src/lib/theme/ansi.css",
+      "line": 135,
+      "text": "font: 11px/1 var(--font-mono);"
+    },
+    {
+      "file": "web/src/lib/theme/editor-font.ts",
+      "line": 19,
+      "text": "fontFamily: `var(--${surface}-font-override, ${defaultFamily})`,"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 17,
+      "text": "--system-ui-font:"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 19,
+      "text": "--system-code-font:"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 29,
+      "text": "--chat-list-font-family: var(--chat-list-font-override, var(--system-ui-font));"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 30,
+      "text": "--chat-feed-font-family: var(--chat-feed-font-override, var(--system-ui-font));"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 31,
+      "text": "--chat-code-font-family: var(--chat-code-font-override, var(--system-code-font));"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 32,
+      "text": "--chat-output-font-family: var(--chat-output-font-override, var(--system-ui-font));"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 33,
+      "text": "--code-diff-font-family: var(--code-diff-font-override, var(--system-code-font));"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 69,
+      "text": "--font-sans: var(--chat-list-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 71,
+      "text": "font-family: var(--chat-list-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 79,
+      "text": "--font-sans: var(--chat-feed-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 80,
+      "text": "--font-mono: var(--chat-code-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 81,
+      "text": "font-family: var(--chat-feed-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 97,
+      "text": "font-family: var(--chat-code-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 101,
+      "text": "font-family: var(--chat-code-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 107,
+      "text": "font-family: var(--chat-code-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 114,
+      "text": "--font-mono: var(--chat-code-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 115,
+      "text": "font-family: var(--chat-code-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 120,
+      "text": "font-family: inherit;"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 125,
+      "text": "font-family: var(--chat-output-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 136,
+      "text": "--font-mono: var(--chat-list-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 141,
+      "text": "--font-mono: var(--code-diff-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 142,
+      "text": "font-family: var(--code-diff-font-family);"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.css",
+      "line": 152,
+      "text": "font-family: var(--interface-font-override, var(--system-ui-font));"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.ts",
+      "line": 20,
+      "text": "font: FontPreference,"
+    },
+    {
+      "file": "web/src/lib/theme/fonts.ts",
+      "line": 52,
+      "text": "export function loadFont(font: FontPreference): Promise<boolean> {"
+    },
+    {
+      "file": "web/src/lib/theme/typography.ts",
+      "line": 63,
+      "text": "export function typographyFontOverride(surface: TypographySurface, font: FontPreference): string {"
+    },
+    {
+      "file": "web/src/routes/+error.svelte",
+      "line": 16,
+      "text": "<p class=\"text-4xl font-bold text-foreground\">{page.status}</p>"
+    },
+    {
+      "file": "web/src/routes/+error.svelte",
+      "line": 17,
+      "text": "<h1 class=\"text-xl font-semibold text-foreground\">"
+    },
+    {
+      "file": "web/src/routes/+layout.svelte",
+      "line": 625,
+      "text": "<h1 class=\"text-2xl font-bold text-foreground mb-2\">{m.sidebar_app_title()}</h1>"
+    },
+    {
+      "file": "web/src/routes/+layout.svelte",
+      "line": 646,
+      "text": "<h1 class=\"text-2xl font-bold text-foreground mb-2\">{m.auth_reconnecting_title()}</h1>"
+    },
+    {
+      "file": "web/src/routes/login/+page.svelte",
+      "line": 12,
+      "text": "<h1 class=\"mb-5 text-center text-xl font-semibold text-foreground\">{m.auth_login_title()}</h1>"
+    },
+    {
+      "file": "web/src/routes/setup/+page.svelte",
+      "line": 75,
+      "text": "class=\"inline-flex items-center gap-2 rounded-md border border-border bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground\""
+    },
+    {
+      "file": "web/src/routes/setup/+page.svelte",
+      "line": 80,
+      "text": "<h1 class=\"mt-3 text-xl font-semibold text-foreground\">"
+    },
+    {
+      "file": "web/src/routes/setup/+page.svelte",
+      "line": 94,
+      "text": "<label for=\"username\" class=\"mb-1 block text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/routes/setup/+page.svelte",
+      "line": 111,
+      "text": "<label for=\"password\" class=\"mb-1 block text-sm font-medium text-foreground\">"
+    },
+    {
+      "file": "web/src/routes/setup/+page.svelte",
+      "line": 143,
+      "text": "<label for=\"confirmPassword\" class=\"mb-1 block text-sm font-medium text-foreground\">"
+    }
+  ]
+}

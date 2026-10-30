@@ -27,9 +27,15 @@ export async function precacheAppShell(
 	basePath = '',
 ): Promise<void> {
 	// Keeps the offline navigation fallback strict while allowing optional static files to drift.
-	await cache.addAll([`${basePath}/`, ...manifest.build]);
+	// Fonts are cached when requested; eager downloads defeat unicode-range and font preferences.
+	await cache.addAll([
+		`${basePath}/`,
+		...manifest.build.filter((url) => !/\.(?:woff2?|ttf|otf)$/.test(url)),
+	]);
 	await Promise.allSettled(
-		manifest.files.filter((url) => !isManifestPath(url, basePath)).map((url) => cache.add(url)),
+		manifest.files
+			.filter((url) => !isManifestPath(url, basePath) && !/\.(?:woff2?|ttf|otf)$/.test(url))
+			.map((url) => cache.add(url)),
 	);
 }
 

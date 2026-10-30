@@ -1,0 +1,3030 @@
+[
+  {
+    "sample": "default-ascii-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "default-ascii-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "default-accents-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "default-accents-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "default-extended-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "default-extended-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "default-cjk-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "default-cjk-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "default-settings-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "default-settings-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "default-editor-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "default-editor-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": []
+    },
+    "after": {
+      "fontBytes": 0,
+      "fonts": {},
+      "preloads": [],
+      "typography": []
+    }
+  },
+  {
+    "sample": "departure-mono-ascii-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 22496,
+      "fonts": {
+        "DepartureMono-1.500.woff2": 22496
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 8336,
+      "fonts": {
+        "DepartureMono-1.500-core.CiQyPRcv.woff2": 8336
+      },
+      "preloads": [
+        "DepartureMono-1.500-core.CiQyPRcv.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "departure-mono-ascii-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 22496,
+      "fonts": {
+        "DepartureMono-1.500.woff2": 22496
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 8336,
+      "fonts": {
+        "DepartureMono-1.500-core.CiQyPRcv.woff2": 8336
+      },
+      "preloads": [
+        "DepartureMono-1.500-core.CiQyPRcv.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "departure-mono-accents-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 22496,
+      "fonts": {
+        "DepartureMono-1.500.woff2": 22496
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 21152,
+      "fonts": {
+        "DepartureMono-1.500-core.CiQyPRcv.woff2": 8336,
+        "DepartureMono-1.500-extended.DjdwswsO.woff2": 12816
+      },
+      "preloads": [
+        "DepartureMono-1.500-core.CiQyPRcv.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "departure-mono-accents-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 22496,
+      "fonts": {
+        "DepartureMono-1.500.woff2": 22496
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 21152,
+      "fonts": {
+        "DepartureMono-1.500-core.CiQyPRcv.woff2": 8336,
+        "DepartureMono-1.500-extended.DjdwswsO.woff2": 12816
+      },
+      "preloads": [
+        "DepartureMono-1.500-core.CiQyPRcv.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "departure-mono-extended-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 22496,
+      "fonts": {
+        "DepartureMono-1.500.woff2": 22496
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 21152,
+      "fonts": {
+        "DepartureMono-1.500-core.CiQyPRcv.woff2": 8336,
+        "DepartureMono-1.500-extended.DjdwswsO.woff2": 12816
+      },
+      "preloads": [
+        "DepartureMono-1.500-core.CiQyPRcv.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "departure-mono-extended-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 22496,
+      "fonts": {
+        "DepartureMono-1.500.woff2": 22496
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 21152,
+      "fonts": {
+        "DepartureMono-1.500-core.CiQyPRcv.woff2": 8336,
+        "DepartureMono-1.500-extended.DjdwswsO.woff2": 12816
+      },
+      "preloads": [
+        "DepartureMono-1.500-core.CiQyPRcv.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "departure-mono-cjk-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 22496,
+      "fonts": {
+        "DepartureMono-1.500.woff2": 22496
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 8336,
+      "fonts": {
+        "DepartureMono-1.500-core.CiQyPRcv.woff2": 8336
+      },
+      "preloads": [
+        "DepartureMono-1.500-core.CiQyPRcv.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "departure-mono-cjk-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 22496,
+      "fonts": {
+        "DepartureMono-1.500.woff2": 22496
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 8336,
+      "fonts": {
+        "DepartureMono-1.500-core.CiQyPRcv.woff2": 8336
+      },
+      "preloads": [
+        "DepartureMono-1.500-core.CiQyPRcv.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "departure-mono-settings-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 22496,
+      "fonts": {
+        "DepartureMono-1.500.woff2": 22496
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 8336,
+      "fonts": {
+        "DepartureMono-1.500-core.CiQyPRcv.woff2": 8336
+      },
+      "preloads": [
+        "DepartureMono-1.500-core.CiQyPRcv.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "departure-mono-settings-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 22496,
+      "fonts": {
+        "DepartureMono-1.500.woff2": 22496
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 8336,
+      "fonts": {
+        "DepartureMono-1.500-core.CiQyPRcv.woff2": 8336
+      },
+      "preloads": [
+        "DepartureMono-1.500-core.CiQyPRcv.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "departure-mono-editor-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 22496,
+      "fonts": {
+        "DepartureMono-1.500.woff2": 22496
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 21152,
+      "fonts": {
+        "DepartureMono-1.500-core.CiQyPRcv.woff2": 8336,
+        "DepartureMono-1.500-extended.DjdwswsO.woff2": 12816
+      },
+      "preloads": [
+        "DepartureMono-1.500-core.CiQyPRcv.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"Departure Mono\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"Departure Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "departure-mono-editor-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 22496,
+      "fonts": {
+        "DepartureMono-1.500.woff2": 22496
+      },
+      "preloads": [],
+      "typography": []
+    },
+    "after": {
+      "fontBytes": 21152,
+      "fonts": {
+        "DepartureMono-1.500-core.CiQyPRcv.woff2": 8336,
+        "DepartureMono-1.500-extended.DjdwswsO.woff2": 12816
+      },
+      "preloads": [
+        "DepartureMono-1.500-core.CiQyPRcv.woff2"
+      ],
+      "typography": []
+    }
+  },
+  {
+    "sample": "jetbrains-mono-ascii-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 236832,
+      "fonts": {
+        "JetBrainsMono.woff2": 113672,
+        "JetBrainsMono-Italic.woff2": 123160
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 86532,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "JetBrainsMono-Italic-core.BxOZc2l_.woff2": 44780
+      },
+      "preloads": [
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "jetbrains-mono-ascii-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 236832,
+      "fonts": {
+        "JetBrainsMono.woff2": 113672,
+        "JetBrainsMono-Italic.woff2": 123160
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 86532,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "JetBrainsMono-Italic-core.BxOZc2l_.woff2": 44780
+      },
+      "preloads": [
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "jetbrains-mono-accents-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 236832,
+      "fonts": {
+        "JetBrainsMono.woff2": 113672,
+        "JetBrainsMono-Italic.woff2": 123160
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 128936,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "JetBrainsMono-Italic-core.BxOZc2l_.woff2": 44780,
+        "JetBrainsMono-extended.DAuyJ8CQ.woff2": 42404
+      },
+      "preloads": [
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "jetbrains-mono-accents-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 236832,
+      "fonts": {
+        "JetBrainsMono.woff2": 113672,
+        "JetBrainsMono-Italic.woff2": 123160
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 128936,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "JetBrainsMono-Italic-core.BxOZc2l_.woff2": 44780,
+        "JetBrainsMono-extended.DAuyJ8CQ.woff2": 42404
+      },
+      "preloads": [
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "jetbrains-mono-extended-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 236832,
+      "fonts": {
+        "JetBrainsMono.woff2": 113672,
+        "JetBrainsMono-Italic.woff2": 123160
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 175332,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "JetBrainsMono-Italic-core.BxOZc2l_.woff2": 44780,
+        "JetBrainsMono-extended.DAuyJ8CQ.woff2": 42404,
+        "JetBrainsMono-Italic-extended.D6GEPfML.woff2": 46396
+      },
+      "preloads": [
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "jetbrains-mono-extended-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 236832,
+      "fonts": {
+        "JetBrainsMono.woff2": 113672,
+        "JetBrainsMono-Italic.woff2": 123160
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 175332,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "JetBrainsMono-Italic-core.BxOZc2l_.woff2": 44780,
+        "JetBrainsMono-Italic-extended.D6GEPfML.woff2": 46396,
+        "JetBrainsMono-extended.DAuyJ8CQ.woff2": 42404
+      },
+      "preloads": [
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "jetbrains-mono-cjk-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 236832,
+      "fonts": {
+        "JetBrainsMono.woff2": 113672,
+        "JetBrainsMono-Italic.woff2": 123160
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 86532,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "JetBrainsMono-Italic-core.BxOZc2l_.woff2": 44780
+      },
+      "preloads": [
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "jetbrains-mono-cjk-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 236832,
+      "fonts": {
+        "JetBrainsMono.woff2": 113672,
+        "JetBrainsMono-Italic.woff2": 123160
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 86532,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "JetBrainsMono-Italic-core.BxOZc2l_.woff2": 44780
+      },
+      "preloads": [
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "jetbrains-mono-settings-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 236832,
+      "fonts": {
+        "JetBrainsMono.woff2": 113672,
+        "JetBrainsMono-Italic.woff2": 123160
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 86532,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "JetBrainsMono-Italic-core.BxOZc2l_.woff2": 44780
+      },
+      "preloads": [
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "jetbrains-mono-settings-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 236832,
+      "fonts": {
+        "JetBrainsMono.woff2": 113672,
+        "JetBrainsMono-Italic.woff2": 123160
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 86532,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "JetBrainsMono-Italic-core.BxOZc2l_.woff2": 44780
+      },
+      "preloads": [
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "jetbrains-mono-editor-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 236832,
+      "fonts": {
+        "JetBrainsMono.woff2": 113672,
+        "JetBrainsMono-Italic.woff2": 123160
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 128936,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "JetBrainsMono-Italic-core.BxOZc2l_.woff2": 44780,
+        "JetBrainsMono-extended.DAuyJ8CQ.woff2": 42404
+      },
+      "preloads": [
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "jetbrains-mono-editor-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 236832,
+      "fonts": {
+        "JetBrainsMono.woff2": 113672,
+        "JetBrainsMono-Italic.woff2": 123160
+      },
+      "preloads": [],
+      "typography": []
+    },
+    "after": {
+      "fontBytes": 128936,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "JetBrainsMono-Italic-core.BxOZc2l_.woff2": 44780,
+        "JetBrainsMono-extended.DAuyJ8CQ.woff2": 42404
+      },
+      "preloads": [
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": []
+    }
+  },
+  {
+    "sample": "inter-ascii-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 853888,
+      "fonts": {
+        "InterVariable.woff2": 352240,
+        "JetBrainsMono.woff2": 113672,
+        "InterVariable-Italic.woff2": 387976
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 463532,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "InterVariable-core.Cf6idQMM.woff2": 202620,
+        "InterVariable-Italic-core.DeoPbu9_.woff2": 219160
+      },
+      "preloads": [
+        "InterVariable-core.Cf6idQMM.woff2",
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "inter-ascii-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 853888,
+      "fonts": {
+        "InterVariable.woff2": 352240,
+        "JetBrainsMono.woff2": 113672,
+        "InterVariable-Italic.woff2": 387976
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 463532,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "InterVariable-core.Cf6idQMM.woff2": 202620,
+        "InterVariable-Italic-core.DeoPbu9_.woff2": 219160
+      },
+      "preloads": [
+        "InterVariable-core.Cf6idQMM.woff2",
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "inter-accents-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 853888,
+      "fonts": {
+        "InterVariable.woff2": 352240,
+        "JetBrainsMono.woff2": 113672,
+        "InterVariable-Italic.woff2": 387976
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 572600,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "InterVariable-core.Cf6idQMM.woff2": 202620,
+        "InterVariable-extended.CkTcgPA5.woff2": 109068,
+        "InterVariable-Italic-core.DeoPbu9_.woff2": 219160
+      },
+      "preloads": [
+        "InterVariable-core.Cf6idQMM.woff2",
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "inter-accents-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 853888,
+      "fonts": {
+        "InterVariable.woff2": 352240,
+        "JetBrainsMono.woff2": 113672,
+        "InterVariable-Italic.woff2": 387976
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 572600,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "InterVariable-core.Cf6idQMM.woff2": 202620,
+        "InterVariable-extended.CkTcgPA5.woff2": 109068,
+        "InterVariable-Italic-core.DeoPbu9_.woff2": 219160
+      },
+      "preloads": [
+        "InterVariable-core.Cf6idQMM.woff2",
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "inter-extended-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 853888,
+      "fonts": {
+        "InterVariable.woff2": 352240,
+        "JetBrainsMono.woff2": 113672,
+        "InterVariable-Italic.woff2": 387976
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 738060,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "InterVariable-core.Cf6idQMM.woff2": 202620,
+        "JetBrainsMono-extended.DAuyJ8CQ.woff2": 42404,
+        "InterVariable-Italic-extended.C1vExgDf.woff2": 123056,
+        "InterVariable-extended.CkTcgPA5.woff2": 109068,
+        "InterVariable-Italic-core.DeoPbu9_.woff2": 219160
+      },
+      "preloads": [
+        "InterVariable-core.Cf6idQMM.woff2",
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "inter-extended-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 853888,
+      "fonts": {
+        "InterVariable.woff2": 352240,
+        "JetBrainsMono.woff2": 113672,
+        "InterVariable-Italic.woff2": 387976
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 738060,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "InterVariable-core.Cf6idQMM.woff2": 202620,
+        "JetBrainsMono-extended.DAuyJ8CQ.woff2": 42404,
+        "InterVariable-Italic-extended.C1vExgDf.woff2": 123056,
+        "InterVariable-extended.CkTcgPA5.woff2": 109068,
+        "InterVariable-Italic-core.DeoPbu9_.woff2": 219160
+      },
+      "preloads": [
+        "InterVariable-core.Cf6idQMM.woff2",
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "inter-cjk-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 853888,
+      "fonts": {
+        "InterVariable.woff2": 352240,
+        "JetBrainsMono.woff2": 113672,
+        "InterVariable-Italic.woff2": 387976
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 463532,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "InterVariable-core.Cf6idQMM.woff2": 202620,
+        "InterVariable-Italic-core.DeoPbu9_.woff2": 219160
+      },
+      "preloads": [
+        "InterVariable-core.Cf6idQMM.woff2",
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "inter-cjk-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 853888,
+      "fonts": {
+        "InterVariable.woff2": 352240,
+        "JetBrainsMono.woff2": 113672,
+        "InterVariable-Italic.woff2": 387976
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 463532,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "InterVariable-core.Cf6idQMM.woff2": 202620,
+        "InterVariable-Italic-core.DeoPbu9_.woff2": 219160
+      },
+      "preloads": [
+        "InterVariable-core.Cf6idQMM.woff2",
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "inter-settings-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 853888,
+      "fonts": {
+        "InterVariable.woff2": 352240,
+        "JetBrainsMono.woff2": 113672,
+        "InterVariable-Italic.woff2": 387976
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 463532,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "InterVariable-core.Cf6idQMM.woff2": 202620,
+        "InterVariable-Italic-core.DeoPbu9_.woff2": 219160
+      },
+      "preloads": [
+        "InterVariable-core.Cf6idQMM.woff2",
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "inter-settings-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 853888,
+      "fonts": {
+        "InterVariable.woff2": 352240,
+        "JetBrainsMono.woff2": 113672,
+        "InterVariable-Italic.woff2": 387976
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 463532,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "InterVariable-core.Cf6idQMM.woff2": 202620,
+        "InterVariable-Italic-core.DeoPbu9_.woff2": 219160
+      },
+      "preloads": [
+        "InterVariable-core.Cf6idQMM.woff2",
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "inter-editor-1440",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 853888,
+      "fonts": {
+        "InterVariable.woff2": 352240,
+        "JetBrainsMono.woff2": 113672,
+        "InterVariable-Italic.woff2": 387976
+      },
+      "preloads": [],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    },
+    "after": {
+      "fontBytes": 505936,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "InterVariable-core.Cf6idQMM.woff2": 202620,
+        "InterVariable-Italic-core.DeoPbu9_.woff2": 219160,
+        "JetBrainsMono-extended.DAuyJ8CQ.woff2": 42404
+      },
+      "preloads": [
+        "InterVariable-core.Cf6idQMM.woff2",
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": [
+        {
+          "tag": "EM",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "400",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "STRONG",
+          "family": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+          "weight": "600",
+          "style": "italic",
+          "features": "normal"
+        },
+        {
+          "tag": "CODE",
+          "family": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+          "weight": "400",
+          "style": "normal",
+          "features": "normal"
+        }
+      ]
+    }
+  },
+  {
+    "sample": "inter-editor-390",
+    "sameVisibleText": true,
+    "before": {
+      "fontBytes": 853888,
+      "fonts": {
+        "InterVariable.woff2": 352240,
+        "JetBrainsMono.woff2": 113672,
+        "InterVariable-Italic.woff2": 387976
+      },
+      "preloads": [],
+      "typography": []
+    },
+    "after": {
+      "fontBytes": 505936,
+      "fonts": {
+        "JetBrainsMono-core.Dq84uVTm.woff2": 41752,
+        "InterVariable-core.Cf6idQMM.woff2": 202620,
+        "InterVariable-Italic-core.DeoPbu9_.woff2": 219160,
+        "JetBrainsMono-extended.DAuyJ8CQ.woff2": 42404
+      },
+      "preloads": [
+        "InterVariable-core.Cf6idQMM.woff2",
+        "JetBrainsMono-core.Dq84uVTm.woff2"
+      ],
+      "typography": []
+    }
+  }
+]

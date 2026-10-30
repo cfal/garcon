@@ -16,7 +16,7 @@ test("live editor fonts refresh cached metrics while preserving document, select
   const font = Buffer.from(
     await Bun.file(
       new URL(
-        "../../../web/src/lib/theme/assets/DepartureMono-1.500.woff2",
+        "../../../web/src/lib/theme/assets/DepartureMono-1.500-core.woff2",
         import.meta.url,
       ),
     ).arrayBuffer(),

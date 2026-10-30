@@ -1,0 +1,600 @@
+[
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_AMS-Regular.woff2",
+    "bytes": 28076,
+    "sha256": "0cdd387c9590a1a9f9794560022dbb59654a7d86f187aa0c81495ad42d3a7308",
+    "glyphs": 260,
+    "characters": 257,
+    "unicodeRange": "U+0020, U+0041-005A, U+006B, U+00A0, U+00A5, U+00AE, U+00F0, U+0127, U+02C6, U+02DC, U+0302-0303, U+03DD, U+03F0, U+2035, U+210F, U+2127, U+2132, U+2136-2138, U+2141, U+2190, U+2192, U+219A-219B, U+219E, U+21A0, U+21A2-21A3, U+21AB-21AE, U+21B0-21B1, U+21B6-21B7, U+21BA-21BB, U+21BE-21BF, U+21C2-21C4, U+21C6-21CF, U+21DA-21DB, U+21DD, U+21E0, U+21E2, U+2201, U+2204-2205, U+220D, U+2212, U+2214, U+2216, U+221D, U+2220-2226, U+2234-2235, U+223C-223D, U+2241-2242, U+2246, U+2248, U+224A, U+224E-224F, U+2251-2253, U+2256-2257, U+225C, U+2266-2269, U+226C, U+226E-2273, U+2276-2277, U+227C-2281, U+2288-228B, U+228F-2290, U+229A-229B, U+229D-22A1, U+22A8-22AA, U+22AC-22AF, U+22B2-22B5, U+22B8, U+22BA-22BC, U+22C5, U+22C7, U+22C9-22D4, U+22D6-22DB, U+22DE-22E1, U+22E6-22ED, U+2322-2323, U+24C8, U+250C, U+2510, U+2514, U+2518, U+2571-2572, U+25A0-25A1, U+25B2-25B3, U+25B6, U+25BC-25BD, U+25C0, U+25CA, U+2605, U+2713, U+2720, U+29EB, U+2A5E, U+2A7D-2A7E, U+2A85-2A8C, U+2A95-2A96, U+2AB5-2ABA, U+2AC5-2AC6, U+2ACB-2ACC, U+E006-E009, U+E00C-E011, U+E016-E01B",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 48,
+      "fpgm": 3596,
+      "prep": 167,
+      "gasp": 8
+    },
+    "hintedGlyphs": 36
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Caligraphic-Bold.woff2",
+    "bytes": 6912,
+    "sha256": "de7701e42cf1f4cf0b766c03fb27977207eee2f4fd5d76fa82188406da43ea4c",
+    "glyphs": 31,
+    "characters": 28,
+    "unicodeRange": "U+0020, U+0041-005A, U+00A0",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 44,
+      "fpgm": 3596,
+      "prep": 167,
+      "gasp": 8
+    },
+    "hintedGlyphs": 26
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Caligraphic-Regular.woff2",
+    "bytes": 6908,
+    "sha256": "5d53e70ad607c2352162dec9e0923fb54ecdafaccbf604cd8dcf7d00facb989b",
+    "glyphs": 31,
+    "characters": 28,
+    "unicodeRange": "U+0020, U+0041-005A, U+00A0",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 44,
+      "fpgm": 3596,
+      "prep": 167,
+      "gasp": 8
+    },
+    "hintedGlyphs": 26
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Fraktur-Bold.woff2",
+    "bytes": 11348,
+    "sha256": "74444efd593c005e3f4573b44524704c0af0a937fe911cca9e94068d0d140d3f",
+    "glyphs": 95,
+    "characters": 92,
+    "unicodeRange": "U+0020-0022, U+0026-003B, U+003D, U+003F, U+0041-005B, U+005D-005E, U+0061-007A, U+00A0, U+2018-2019, U+E301-E305, U+E308-E309",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 60,
+      "fpgm": 3596,
+      "prep": 167,
+      "gasp": 8
+    },
+    "hintedGlyphs": 83
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Fraktur-Regular.woff2",
+    "bytes": 11316,
+    "sha256": "51814d270d06ff0255dba0799994fa4d8c84d11f09951d47595f4abb1f3602dc",
+    "glyphs": 96,
+    "characters": 93,
+    "unicodeRange": "U+0020-0022, U+0026-003B, U+003D, U+003F, U+0041-005B, U+005D-005E, U+0061-007A, U+00A0, U+2018-2019, U+E300-E307",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 60,
+      "fpgm": 3596,
+      "prep": 167,
+      "gasp": 8
+    },
+    "hintedGlyphs": 83
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Main-Bold.woff2",
+    "bytes": 25324,
+    "sha256": "0f60d1b897938ec918c8ce073092411baf9438f6739465693ff18b0f9d20b021",
+    "glyphs": 280,
+    "characters": 277,
+    "unicodeRange": "U+0020-005F, U+0061-007E, U+00A0, U+00A3, U+00A8, U+00AC, U+00B0-00B1, U+00B8, U+00C6, U+00D7-00D8, U+00DF, U+00E6, U+00F7-00F8, U+0131, U+0152-0153, U+0237, U+02C6-02C7, U+02C9-02CB, U+02D8-02DA, U+02DC-02DD, U+0393-0394, U+0398, U+039B, U+039E, U+03A0, U+03A3, U+03A5-03A6, U+03A8-03A9, U+2002-2006, U+2009-200A, U+2013-2014, U+2018-2019, U+201C-201D, U+2020-2021, U+2026, U+2032, U+20D7, U+210F, U+2111, U+2113, U+2118, U+211C, U+2135, U+2190-2199, U+21A6, U+21A9-21AA, U+21BC-21BD, U+21C0-21C1, U+21CC, U+21D0-21D5, U+2200, U+2202-2203, U+2205, U+2207-2208, U+220B, U+2212-2213, U+2215-221A, U+221D-221E, U+2220, U+2223, U+2225, U+2227-222B, U+223C, U+2240, U+2243, U+2245, U+2248, U+224D, U+2250, U+2261, U+2264-2265, U+226A-226B, U+227A-227B, U+2282-2283, U+2286-2287, U+228E, U+2291-2299, U+22A2-22A5, U+22A8, U+22C4-22C6, U+22C8, U+22EE-22EF, U+22F1, U+2308-230B, U+2322-2323, U+25B3, U+25B9, U+25BD, U+25C3, U+25EF, U+2660-2663, U+266D-266F, U+27E8-27E9, U+27F5-27FA, U+27FC, U+2A3F, U+2AAF-2AB0, U+E020",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 90,
+      "fpgm": 3596,
+      "prep": 178,
+      "gasp": 8
+    },
+    "hintedGlyphs": 141
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Main-BoldItalic.woff2",
+    "bytes": 16780,
+    "sha256": "99cd42a3c072d918f2f44984a807cf7aa16e13545fd0875fc07c6c65f99e715b",
+    "glyphs": 130,
+    "characters": 127,
+    "unicodeRange": "U+0020-0023, U+0025-003B, U+003D, U+003F-005B, U+005D-005F, U+0061-007A, U+007E, U+00A0, U+00A8, U+00B0, U+00B8, U+00C6, U+00D8, U+00DF, U+00E6, U+00F8, U+0131, U+0152-0153, U+0237, U+02C6-02C7, U+02C9-02CB, U+02D8-02DA, U+02DC-02DD, U+0393-0394, U+0398, U+039B, U+039E, U+03A0, U+03A3, U+03A5-03A6, U+03A8-03A9, U+2013-2014, U+2018-2019, U+201C-201D",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 90,
+      "fpgm": 3596,
+      "prep": 178,
+      "gasp": 8
+    },
+    "hintedGlyphs": 125
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Main-Italic.woff2",
+    "bytes": 16988,
+    "sha256": "97479ca6cce906abc961ecac96faa5f9ca2e61b8e7670d475826bcdee9a7c267",
+    "glyphs": 131,
+    "characters": 128,
+    "unicodeRange": "U+0020-0023, U+0025-003B, U+003D, U+003F-005B, U+005D-005F, U+0061-007A, U+007E, U+00A0, U+00A8, U+00B0, U+00B8, U+00C6, U+00D8, U+00DF, U+00E6, U+00F8, U+0131, U+0152-0153, U+0237, U+02C6-02C7, U+02C9-02CB, U+02D8-02DA, U+02DC-02DD, U+0393-0394, U+0398, U+039B, U+039E, U+03A0, U+03A3, U+03A5-03A6, U+03A8-03A9, U+2013-2014, U+2018-2019, U+201C-201D, U+210F",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 90,
+      "fpgm": 3596,
+      "prep": 178,
+      "gasp": 8
+    },
+    "hintedGlyphs": 125
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Main-Regular.woff2",
+    "bytes": 26272,
+    "sha256": "c2342cd8b869e01752a9321dc17213fc40d4d04c79688c1d43f2cf316abd7866",
+    "glyphs": 286,
+    "characters": 283,
+    "unicodeRange": "U+0020-005F, U+0061-007E, U+00A0, U+00A3, U+00A7-00A8, U+00AC, U+00B0-00B1, U+00B6, U+00B8, U+00C6, U+00D7-00D8, U+00DF, U+00E6, U+00F7-00F8, U+0131, U+0152-0153, U+0237, U+02C6-02C7, U+02C9-02CB, U+02D8-02DA, U+02DC-02DD, U+0393-0394, U+0398, U+039B, U+039E, U+03A0, U+03A3, U+03A5-03A6, U+03A8-03A9, U+2002-2006, U+2009-200A, U+2013-2014, U+2018-2019, U+201C-201D, U+2020-2021, U+2026, U+2032, U+20D7, U+210F, U+2111, U+2113, U+2118, U+211C, U+2135, U+2190-2199, U+21A6, U+21A9-21AA, U+21BC-21BD, U+21C0-21C1, U+21CC, U+21D0-21D5, U+2200, U+2202-2203, U+2205, U+2207-2208, U+220B, U+2212-2213, U+2215-221A, U+221D-221E, U+2220, U+2223, U+2225, U+2227-222B, U+223C, U+2240, U+2243, U+2245, U+2248, U+224D, U+2250, U+2261, U+2264-2265, U+226A-226B, U+227A-227B, U+2282-2283, U+2286-2287, U+228E, U+2291-2299, U+22A2-22A5, U+22A8, U+22C4-22C6, U+22C8, U+22EE-22EF, U+22F1, U+2308-230B, U+2322-2323, U+23B0-23B1, U+25B3, U+25B9, U+25BD, U+25C3, U+25EF, U+2660-2663, U+266D-266F, U+27E8-27E9, U+27EE-27EF, U+27F5-27FA, U+27FC, U+2A3F, U+2AAF-2AB0, U+E020",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 90,
+      "fpgm": 3596,
+      "prep": 178,
+      "gasp": 8
+    },
+    "hintedGlyphs": 143
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Math-BoldItalic.woff2",
+    "bytes": 16400,
+    "sha256": "dc47344dbb6cb5b655c8460d561f4df5f501b90c804ad3c6cec65fe322351ab1",
+    "glyphs": 110,
+    "characters": 107,
+    "unicodeRange": "U+0020, U+0030-0039, U+0041-005A, U+0061-007A, U+00A0, U+0393-0394, U+0398, U+039B, U+039E, U+03A0, U+03A3, U+03A5-03A6, U+03A8-03A9, U+03B1-03C9, U+03D1, U+03D5-03D6, U+03F1, U+03F5, U+E131, U+E237",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 106,
+      "fpgm": 3596,
+      "prep": 178,
+      "gasp": 8
+    },
+    "hintedGlyphs": 103
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Math-Italic.woff2",
+    "bytes": 16440,
+    "sha256": "7af58c5ec8f132a2ddde9027c6d7814decce4d3b822a11192a42a20e2e973264",
+    "glyphs": 110,
+    "characters": 107,
+    "unicodeRange": "U+0020, U+0030-0039, U+0041-005A, U+0061-007A, U+00A0, U+0393-0394, U+0398, U+039B, U+039E, U+03A0, U+03A3, U+03A5-03A6, U+03A8-03A9, U+03B1-03C9, U+03D1, U+03D5-03D6, U+03F1, U+03F5, U+E131, U+E237",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 106,
+      "fpgm": 3596,
+      "prep": 178,
+      "gasp": 8
+    },
+    "hintedGlyphs": 103
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_SansSerif-Bold.woff2",
+    "bytes": 12216,
+    "sha256": "e99ae51144bf1232efcc1bfe5add36262c6866b0faab24fa75740e1b98577a62",
+    "glyphs": 123,
+    "characters": 120,
+    "unicodeRange": "U+0020-003B, U+003D, U+003F-005B, U+005D-005F, U+0061-007A, U+007E, U+00A0, U+00A8, U+00B0, U+00B4, U+00B8, U+0131, U+0237, U+02C6-02C7, U+02C9, U+02D8-02DA, U+02DC-02DD, U+0393-0394, U+0398, U+039B, U+039E, U+03A0, U+03A3, U+03A5-03A6, U+03A8-03A9, U+2013-2014, U+2018-2019, U+201C-201D",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 90,
+      "fpgm": 3596,
+      "prep": 178,
+      "gasp": 8
+    },
+    "hintedGlyphs": 118
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_SansSerif-Italic.woff2",
+    "bytes": 12028,
+    "sha256": "00b26ac825e2095056396e0553b8ac26d3f8ad158c3826e28b4c45b385c4714a",
+    "glyphs": 124,
+    "characters": 121,
+    "unicodeRange": "U+0020-003B, U+003D, U+003F-005B, U+005D-005F, U+0061-007A, U+007E, U+00A0, U+00A8, U+00B0, U+00B8, U+0131, U+0237, U+02C6-02C7, U+02C9-02CB, U+02D8-02DA, U+02DC-02DD, U+0393-0394, U+0398, U+039B, U+039E, U+03A0, U+03A3, U+03A5-03A6, U+03A8-03A9, U+2013-2014, U+2018-2019, U+201C-201D",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 90,
+      "fpgm": 3596,
+      "prep": 178,
+      "gasp": 8
+    },
+    "hintedGlyphs": 119
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_SansSerif-Regular.woff2",
+    "bytes": 10344,
+    "sha256": "68e8c73ef42afd3ccec58bf0fba302cce448938e7fc020a5e31f8a952eee1342",
+    "glyphs": 124,
+    "characters": 121,
+    "unicodeRange": "U+0020-003B, U+003D, U+003F-005B, U+005D-005F, U+0061-007A, U+007E, U+00A0, U+00A8, U+00B0, U+00B8, U+0131, U+0237, U+02C6-02C7, U+02C9-02CB, U+02D8-02DA, U+02DC-02DD, U+0393-0394, U+0398, U+039B, U+039E, U+03A0, U+03A3, U+03A5-03A6, U+03A8-03A9, U+2013-2014, U+2018-2019, U+201C-201D",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 90,
+      "fpgm": 3596,
+      "prep": 178,
+      "gasp": 8
+    },
+    "hintedGlyphs": 119
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Script-Regular.woff2",
+    "bytes": 9644,
+    "sha256": "036d4e95149b69ff9bcc0cd55771efeb25ffa3947293e69acd78d5ac328c684b",
+    "glyphs": 31,
+    "characters": 28,
+    "unicodeRange": "U+0020, U+0041-005A, U+00A0",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 48,
+      "fpgm": 3596,
+      "prep": 167,
+      "gasp": 8
+    },
+    "hintedGlyphs": 26
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Size1-Regular.woff2",
+    "bytes": 5468,
+    "sha256": "6b47c40166b6dbe21a5dfca7718413f2147fd2399be1ba605d8ad39cedf25dfe",
+    "glyphs": 48,
+    "characters": 45,
+    "unicodeRange": "U+0020, U+0028-0029, U+002F, U+005B-005D, U+007B, U+007D, U+00A0, U+02C6, U+02DC, U+0302-0303, U+2016, U+2191, U+2193, U+21D1, U+21D3, U+220F-2211, U+221A, U+2223, U+2225, U+222B-222E, U+22C0-22C3, U+2308-230B, U+23D0, U+27E8-27E9, U+2A00-2A02, U+2A04, U+2A06",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 14,
+      "fpgm": 3596,
+      "prep": 156,
+      "gasp": 8
+    },
+    "hintedGlyphs": 0
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Size2-Regular.woff2",
+    "bytes": 5208,
+    "sha256": "d04c54219f9eaec6d4d4fd42dfb28785975a4794d6b2fc71e566b9cd6db842dd",
+    "glyphs": 40,
+    "characters": 37,
+    "unicodeRange": "U+0020, U+0028-0029, U+002F, U+005B-005D, U+007B, U+007D, U+00A0, U+02C6, U+02DC, U+0302-0303, U+220F-2211, U+221A, U+222B-222E, U+22C0-22C3, U+2308-230B, U+27E8-27E9, U+2A00-2A02, U+2A04, U+2A06",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 14,
+      "fpgm": 3596,
+      "prep": 156,
+      "gasp": 8
+    },
+    "hintedGlyphs": 0
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Size3-Regular.woff2",
+    "bytes": 3624,
+    "sha256": "73d591271b1604960cb10bb90fee021670af7297017e0e98480b332d11f51995",
+    "glyphs": 24,
+    "characters": 21,
+    "unicodeRange": "U+0020, U+0028-0029, U+002F, U+005B-005D, U+007B, U+007D, U+00A0, U+02C6, U+02DC, U+0302-0303, U+221A, U+2308-230B, U+27E8-27E9",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 14,
+      "fpgm": 3596,
+      "prep": 156,
+      "gasp": 8
+    },
+    "hintedGlyphs": 0
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Size4-Regular.woff2",
+    "bytes": 4928,
+    "sha256": "a4af7d414440a1c1790825cfb700cf9cf43b0f2c4b04f0ebc523011ad9853ec0",
+    "glyphs": 51,
+    "characters": 48,
+    "unicodeRange": "U+0020, U+0028-0029, U+002F, U+005B-005D, U+007B, U+007D, U+00A0, U+02C6, U+02DC, U+0302-0303, U+221A, U+2308-230B, U+239B-23AD, U+23B7, U+27E8-27E9, U+E000-E001, U+E150-E154",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 14,
+      "fpgm": 3596,
+      "prep": 156,
+      "gasp": 8
+    },
+    "hintedGlyphs": 0
+  },
+  {
+    "role": "KaTeX math",
+    "file": "KaTeX_Typewriter-Regular.woff2",
+    "bytes": 13568,
+    "sha256": "71d517d67827787cfabdf186914cc3358eda539e37931941f2b2fd4a21f68c0b",
+    "glyphs": 130,
+    "characters": 127,
+    "unicodeRange": "U+0020-007F, U+00A0, U+00A8, U+00B0, U+00B8, U+0131, U+0237, U+02C6-02C7, U+02C9-02CB, U+02D8-02DA, U+02DC-02DD, U+0393-0394, U+0398, U+039B, U+039E, U+03A0, U+03A3, U+03A5-03A6, U+03A8-03A9, U+2018-2019, U+2032, U+2423",
+    "axes": {},
+    "features": {},
+    "hintTables": [
+      "cvt ",
+      "fpgm",
+      "prep",
+      "gasp"
+    ],
+    "hintTableBytes": {
+      "cvt ": 90,
+      "fpgm": 3596,
+      "prep": 178,
+      "gasp": 8
+    },
+    "hintedGlyphs": 124
+  },
+  {
+    "role": "Default terminal and private-use fallback",
+    "url": "https://cdn.jsdelivr.net/gh/githubnext/monaspace@f31794b6e9e65698a062262e2f826f679dcb7070/fonts/Web%20Fonts/NerdFonts%20Web%20Fonts/Monaspace%20Neon/MonaspaceNeonNF-Regular.woff2",
+    "file": "MonaspaceNeonNF-Regular.woff2",
+    "bytes": 1260028,
+    "sha256": "8063ea45b6997c658035a4d876f996ecfa306c88fd0541d35d533fb1f9400c84",
+    "glyphs": 12752,
+    "characters": 11606,
+    "unicodeRange": "U+0020-007E, U+00A0-0148, U+014A-017E, U+0188, U+018F, U+0192, U+0199, U+019B, U+019D, U+01A0-01A1, U+01A5, U+01AD, U+01AF-01B0, U+01C0-01C3, U+01E6-01E7, U+01EA-01EB, U+01FC-01FF, U+0218-021B, U+0232-0233, U+0237, U+0250-0268, U+026A-0276, U+0278-027B, U+027D-027E, U+0280-0284, U+0288-0292, U+0294-0295, U+0298-0299, U+029B-02AD, U+02B0, U+02B2-02B3, U+02B7-02B8, U+02BC, U+02C6-02C8, U+02CC, U+02D0-02D1, U+02D8-02DD, U+02E1-02E3, U+0300-0304, U+0306-030C, U+030F, U+0312, U+031B-031C, U+0323-0328, U+032C, U+0330, U+0334, U+0339, U+034A-034C, U+0374-0375, U+037E, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03D0, U+03D5, U+03D7, U+03F4-03F5, U+0400-045F, U+0490-0493, U+0496-0497, U+049A-049B, U+04A2-04A3, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04D8-04D9, U+04E2-04E3, U+04E8-04E9, U+04EE-04EF, U+0E3F, U+1D2C, U+1D2E, U+1D30-1D31, U+1D33-1D3A, U+1D3C, U+1D3E-1D43, U+1D47-1D49, U+1D4D, U+1D4F-1D50, U+1D52, U+1D56-1D58, U+1D5B, U+1D62-1D65, U+1D6C-1D76, U+1D9C, U+1DA0, U+1DBB, U+1E20-1E21, U+1E80-1E85, U+1E9E, U+1EA0-1EF9, U+2010, U+2012-2024, U+2026, U+2030, U+2032-2035, U+2039-203A, U+203C-2040, U+2044-204A, U+205F, U+2062-2064, U+2070-2071, U+2074-208E, U+2090-209F, U+20A1, U+20A3-20A4, U+20A6-20A7, U+20A9-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF-20C0, U+2100-2106, U+2109, U+210D, U+2113, U+2115-2117, U+2119-211A, U+211D, U+2120-2122, U+2124, U+2126-2127, U+2129-212A, U+212E, U+2139, U+213B, U+2140-2144, U+214B, U+214D, U+2150-215F, U+2189, U+2190-2199, U+219C-21A7, U+21A9-21AA, U+21B0-21B5, U+21BA-21DB, U+21E6-21E9, U+21F3, U+21F5, U+2200-2214, U+2217-221C, U+221E-2220, U+2223, U+2225, U+2227-222B, U+2234-223D, U+2241-224B, U+2250-2257, U+225F-226C, U+226E-2278, U+227A-227D, U+2280-228B, U+228D-22AF, U+22B2-22B5, U+22B8, U+22BB-22CA, U+22CD-22D4, U+22D6-22E7, U+22EA-22FF, U+2308-230B, U+2310-2313, U+2317, U+2319, U+2322-2323, U+2329-232A, U+2332, U+2336-237A, U+237E, U+2384-2385, U+2389-238A, U+238D-2392, U+2394-2395, U+23BA-23BD, U+23CD, U+23E8-23EF, U+23F4-23FE, U+2407, U+244A, U+2460-247C, U+24EA-24F4, U+24FF-25FF, U+2605-2606, U+2609, U+2610-2612, U+2622, U+262E-2637, U+2639-2647, U+2665, U+2669, U+266D-266F, U+2672, U+267B-267D, U+2680-2691, U+26A0-26A1, U+26AA-26AC, U+26B2-26B5, U+26B7, U+26B9-26BC, U+26CB, U+26D4, U+26DB, U+26DD, U+26E2, U+26E4, U+26E7, U+26EC, U+2713-2718, U+2726-2727, U+2729-273A, U+2742, U+274F-2752, U+2756, U+275B-275E, U+276E-2771, U+2776-277F, U+27A4-27A7, U+27C0-27C4, U+27CE-27D4, U+27D8-27DB, U+27E0-27EB, U+27F2-27F3, U+27F5-27F7, U+290A-290B, U+2934-2939, U+293B, U+293E-2941, U+294A-2951, U+2962-2970, U+2981-2984, U+2987-298A, U+2991-2992, U+2999, U+299C-299D, U+299F, U+29A2-29A5, U+29B0-29CB, U+29CD-29CE, U+29D1-29D7, U+29E0, U+29E2, U+29E6, U+29E8-29F3, U+2A00-2A09, U+2A1D-2A27, U+2A29-2A2E, U+2A30-2A31, U+2A33-2A35, U+2A38, U+2A3A, U+2A3C, U+2A3E-2A40, U+2A4C-2A56, U+2A59-2A67, U+2A6A-2A6C, U+2A6E, U+2A71-2A72, U+2A75-2A84, U+2A87-2A88, U+2A95-2A9E, U+2AA1-2AA3, U+2AAA-2AAD, U+2AAF-2AB0, U+2ABB-2ABE, U+2AC5-2AC6, U+2ACD-2AD6, U+2AD9-2ADB, U+2ADE-2AE0, U+2AE2-2AED, U+2AF6, U+2AF9-2AFA, U+2AFD, U+2AFF-2B2F, U+2B50-2B58, U+2B60-2B65, U+2B82-2B83, U+2B95, U+2B9C-2B9F, U+2BA8-2BAF, U+2BBD-2BC4, U+2BC6, U+2BC8, U+2BCA-2BCF, U+2C7C-2C7D, U+2E18, U+A7F2-A7F4, U+AB53, U+E000-E00A, U+E0A0-E0A3, U+E0B0-E0CA, U+E0CC-E0D2, U+E0D4, U+E123-E129, U+E130-E133, U+E200-E22B, U+E22D-E2A9, U+E300-E3E3, U+E5FA-E6B2, U+E700-E7BC, U+E7C4-E7C5, U+EA60-EA88, U+EA8A-EA8C, U+EA8F-EAC7, U+EAC9, U+EACC-EAFA, U+EAFC-EB04, U+EB06-EB09, U+EB0B-EB4E, U+EB50-EBEB, U+EE00-EE05, U+F000-F00E, U+F010-F01E, U+F021-F03E, U+F040-F04E, U+F050-F05E, U+F060-F06E, U+F070-F07E, U+F080-F08E, U+F090-F09E, U+F0A0-F0AE, U+F0B0-F0B2, U+F0C0-F0CE, U+F0D0-F0DE, U+F0E0-F0EE, U+F0F0-F0FE, U+F100-F10E, U+F110, U+F112-F115, U+F118-F11E, U+F120-F12E, U+F130-F13E, U+F140-F14E, U+F150-F15E, U+F160-F16E, U+F170-F17E, U+F180-F181, U+F184, U+F186-F18E, U+F190-F19E, U+F1A0-F1AE, U+F1B0-F1BE, U+F1C0-F1CE, U+F1D0-F1DE, U+F1E0-F1EE, U+F1F0-F1FE, U+F200-F20E, U+F210-F21E, U+F221-F22D, U+F230-F23E, U+F240-F24E, U+F250-F25E, U+F260-F26E, U+F270-F27E, U+F280-F28E, U+F290-F29E, U+F2A0-F2AE, U+F2B0-F2BE, U+F2C0-F2CE, U+F2D0-F2DE, U+F2E0, U+F300-F372, U+F400-F533, U+FE61-FE62, U+FE64-FE66, U+FF5B, U+FF5D, U+107B2, U+1D538-1D539, U+1D53B-1D53E, U+1D540-1D544, U+1D546, U+1D54A-1D550, U+1D55C, U+1D7D9, U+1F10D, U+1F130-1F149, U+1F170-1F189, U+1F1AD, U+1F315, U+1F323, U+1F41B, U+1F512-1F513, U+1F550-1F567, U+1F610, U+1F676-1F678, U+1F6AD, U+1F6C6-1F6C8, U+1F784-1F787, U+1F789-1F78A, U+1F78C-1F78E, U+1F790-1F791, U+1F793-1F795, U+1F797-1F79B, U+1F79D-1F7A0, U+1F7C0-1F7CF, U+1F7D1-1F7D8, U+1F860-1F86F, U+1FBF0-1FBF9, U+F0001-F0387, U+F0389-F03C8, U+F03CA-F03FE, U+F0400-F043C, U+F043E-F049F, U+F04A1-F0508, U+F050A-F05FB, U+F05FD-F0764, U+F0767-F08CF, U+F08D1-F0B38, U+F0B3A-F0C9D, U+F0CA0-F1087, U+F1089-F108B, U+F108D-F1090, U+F1092-F13A5, U+F13A7-F189F, U+F18A1-F18EF, U+F18F1-F1AF0",
+    "axes": {},
+    "features": {
+      "GSUB": [
+        "aalt",
+        "calt",
+        "case",
+        "ccmp",
+        "cv01",
+        "cv02",
+        "cv10",
+        "cv11",
+        "cv12",
+        "cv13",
+        "cv30",
+        "cv31",
+        "cv32",
+        "cv33",
+        "cv60",
+        "cv61",
+        "cv62",
+        "dnom",
+        "fina",
+        "frac",
+        "fwid",
+        "init",
+        "ital",
+        "liga",
+        "locl",
+        "medi",
+        "numr",
+        "ordn",
+        "sinf",
+        "ss01",
+        "ss02",
+        "ss03",
+        "ss04",
+        "ss05",
+        "ss06",
+        "ss07",
+        "ss08",
+        "ss09",
+        "ss10",
+        "subs",
+        "sups"
+      ]
+    },
+    "hintTables": [],
+    "hintTableBytes": {},
+    "hintedGlyphs": 12745
+  },
+  {
+    "role": "Default terminal and private-use fallback",
+    "url": "https://cdn.jsdelivr.net/gh/githubnext/monaspace@f31794b6e9e65698a062262e2f826f679dcb7070/fonts/Web%20Fonts/NerdFonts%20Web%20Fonts/Monaspace%20Neon/MonaspaceNeonNF-Bold.woff2",
+    "file": "MonaspaceNeonNF-Bold.woff2",
+    "bytes": 1275000,
+    "sha256": "45f56dceff8e569d61b6e3168fe208432e7bf0bc3e56e41b4d754cc575a063bd",
+    "glyphs": 12752,
+    "characters": 11606,
+    "unicodeRange": "U+0020-007E, U+00A0-0148, U+014A-017E, U+0188, U+018F, U+0192, U+0199, U+019B, U+019D, U+01A0-01A1, U+01A5, U+01AD, U+01AF-01B0, U+01C0-01C3, U+01E6-01E7, U+01EA-01EB, U+01FC-01FF, U+0218-021B, U+0232-0233, U+0237, U+0250-0268, U+026A-0276, U+0278-027B, U+027D-027E, U+0280-0284, U+0288-0292, U+0294-0295, U+0298-0299, U+029B-02AD, U+02B0, U+02B2-02B3, U+02B7-02B8, U+02BC, U+02C6-02C8, U+02CC, U+02D0-02D1, U+02D8-02DD, U+02E1-02E3, U+0300-0304, U+0306-030C, U+030F, U+0312, U+031B-031C, U+0323-0328, U+032C, U+0330, U+0334, U+0339, U+034A-034C, U+0374-0375, U+037E, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03D0, U+03D5, U+03D7, U+03F4-03F5, U+0400-045F, U+0490-0493, U+0496-0497, U+049A-049B, U+04A2-04A3, U+04AE-04B3, U+04B6-04B7, U+04BA-04BB, U+04D8-04D9, U+04E2-04E3, U+04E8-04E9, U+04EE-04EF, U+0E3F, U+1D2C, U+1D2E, U+1D30-1D31, U+1D33-1D3A, U+1D3C, U+1D3E-1D43, U+1D47-1D49, U+1D4D, U+1D4F-1D50, U+1D52, U+1D56-1D58, U+1D5B, U+1D62-1D65, U+1D6C-1D76, U+1D9C, U+1DA0, U+1DBB, U+1E20-1E21, U+1E80-1E85, U+1E9E, U+1EA0-1EF9, U+2010, U+2012-2024, U+2026, U+2030, U+2032-2035, U+2039-203A, U+203C-2040, U+2044-204A, U+205F, U+2062-2064, U+2070-2071, U+2074-208E, U+2090-209F, U+20A1, U+20A3-20A4, U+20A6-20A7, U+20A9-20AC, U+20AE, U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF-20C0, U+2100-2106, U+2109, U+210D, U+2113, U+2115-2117, U+2119-211A, U+211D, U+2120-2122, U+2124, U+2126-2127, U+2129-212A, U+212E, U+2139, U+213B, U+2140-2144, U+214B, U+214D, U+2150-215F, U+2189, U+2190-2199, U+219C-21A7, U+21A9-21AA, U+21B0-21B5, U+21BA-21DB, U+21E6-21E9, U+21F3, U+21F5, U+2200-2214, U+2217-221C, U+221E-2220, U+2223, U+2225, U+2227-222B, U+2234-223D, U+2241-224B, U+2250-2257, U+225F-226C, U+226E-2278, U+227A-227D, U+2280-228B, U+228D-22AF, U+22B2-22B5, U+22B8, U+22BB-22CA, U+22CD-22D4, U+22D6-22E7, U+22EA-22FF, U+2308-230B, U+2310-2313, U+2317, U+2319, U+2322-2323, U+2329-232A, U+2332, U+2336-237A, U+237E, U+2384-2385, U+2389-238A, U+238D-2392, U+2394-2395, U+23BA-23BD, U+23CD, U+23E8-23EF, U+23F4-23FE, U+2407, U+244A, U+2460-247C, U+24EA-24F4, U+24FF-25FF, U+2605-2606, U+2609, U+2610-2612, U+2622, U+262E-2637, U+2639-2647, U+2665, U+2669, U+266D-266F, U+2672, U+267B-267D, U+2680-2691, U+26A0-26A1, U+26AA-26AC, U+26B2-26B5, U+26B7, U+26B9-26BC, U+26CB, U+26D4, U+26DB, U+26DD, U+26E2, U+26E4, U+26E7, U+26EC, U+2713-2718, U+2726-2727, U+2729-273A, U+2742, U+274F-2752, U+2756, U+275B-275E, U+276E-2771, U+2776-277F, U+27A4-27A7, U+27C0-27C4, U+27CE-27D4, U+27D8-27DB, U+27E0-27EB, U+27F2-27F3, U+27F5-27F7, U+290A-290B, U+2934-2939, U+293B, U+293E-2941, U+294A-2951, U+2962-2970, U+2981-2984, U+2987-298A, U+2991-2992, U+2999, U+299C-299D, U+299F, U+29A2-29A5, U+29B0-29CB, U+29CD-29CE, U+29D1-29D7, U+29E0, U+29E2, U+29E6, U+29E8-29F3, U+2A00-2A09, U+2A1D-2A27, U+2A29-2A2E, U+2A30-2A31, U+2A33-2A35, U+2A38, U+2A3A, U+2A3C, U+2A3E-2A40, U+2A4C-2A56, U+2A59-2A67, U+2A6A-2A6C, U+2A6E, U+2A71-2A72, U+2A75-2A84, U+2A87-2A88, U+2A95-2A9E, U+2AA1-2AA3, U+2AAA-2AAD, U+2AAF-2AB0, U+2ABB-2ABE, U+2AC5-2AC6, U+2ACD-2AD6, U+2AD9-2ADB, U+2ADE-2AE0, U+2AE2-2AED, U+2AF6, U+2AF9-2AFA, U+2AFD, U+2AFF-2B2F, U+2B50-2B58, U+2B60-2B65, U+2B82-2B83, U+2B95, U+2B9C-2B9F, U+2BA8-2BAF, U+2BBD-2BC4, U+2BC6, U+2BC8, U+2BCA-2BCF, U+2C7C-2C7D, U+2E18, U+A7F2-A7F4, U+AB53, U+E000-E00A, U+E0A0-E0A3, U+E0B0-E0CA, U+E0CC-E0D2, U+E0D4, U+E123-E129, U+E130-E133, U+E200-E22B, U+E22D-E2A9, U+E300-E3E3, U+E5FA-E6B2, U+E700-E7BC, U+E7C4-E7C5, U+EA60-EA88, U+EA8A-EA8C, U+EA8F-EAC7, U+EAC9, U+EACC-EAFA, U+EAFC-EB04, U+EB06-EB09, U+EB0B-EB4E, U+EB50-EBEB, U+EE00-EE05, U+F000-F00E, U+F010-F01E, U+F021-F03E, U+F040-F04E, U+F050-F05E, U+F060-F06E, U+F070-F07E, U+F080-F08E, U+F090-F09E, U+F0A0-F0AE, U+F0B0-F0B2, U+F0C0-F0CE, U+F0D0-F0DE, U+F0E0-F0EE, U+F0F0-F0FE, U+F100-F10E, U+F110, U+F112-F115, U+F118-F11E, U+F120-F12E, U+F130-F13E, U+F140-F14E, U+F150-F15E, U+F160-F16E, U+F170-F17E, U+F180-F181, U+F184, U+F186-F18E, U+F190-F19E, U+F1A0-F1AE, U+F1B0-F1BE, U+F1C0-F1CE, U+F1D0-F1DE, U+F1E0-F1EE, U+F1F0-F1FE, U+F200-F20E, U+F210-F21E, U+F221-F22D, U+F230-F23E, U+F240-F24E, U+F250-F25E, U+F260-F26E, U+F270-F27E, U+F280-F28E, U+F290-F29E, U+F2A0-F2AE, U+F2B0-F2BE, U+F2C0-F2CE, U+F2D0-F2DE, U+F2E0, U+F300-F372, U+F400-F533, U+FE61-FE62, U+FE64-FE66, U+FF5B, U+FF5D, U+107B2, U+1D538-1D539, U+1D53B-1D53E, U+1D540-1D544, U+1D546, U+1D54A-1D550, U+1D55C, U+1D7D9, U+1F10D, U+1F130-1F149, U+1F170-1F189, U+1F1AD, U+1F315, U+1F323, U+1F41B, U+1F512-1F513, U+1F550-1F567, U+1F610, U+1F676-1F678, U+1F6AD, U+1F6C6-1F6C8, U+1F784-1F787, U+1F789-1F78A, U+1F78C-1F78E, U+1F790-1F791, U+1F793-1F795, U+1F797-1F79B, U+1F79D-1F7A0, U+1F7C0-1F7CF, U+1F7D1-1F7D8, U+1F860-1F86F, U+1FBF0-1FBF9, U+F0001-F0387, U+F0389-F03C8, U+F03CA-F03FE, U+F0400-F043C, U+F043E-F049F, U+F04A1-F0508, U+F050A-F05FB, U+F05FD-F0764, U+F0767-F08CF, U+F08D1-F0B38, U+F0B3A-F0C9D, U+F0CA0-F1087, U+F1089-F108B, U+F108D-F1090, U+F1092-F13A5, U+F13A7-F189F, U+F18A1-F18EF, U+F18F1-F1AF0",
+    "axes": {},
+    "features": {
+      "GSUB": [
+        "aalt",
+        "calt",
+        "case",
+        "ccmp",
+        "cv01",
+        "cv02",
+        "cv10",
+        "cv11",
+        "cv12",
+        "cv13",
+        "cv30",
+        "cv31",
+        "cv32",
+        "cv33",
+        "cv60",
+        "cv61",
+        "cv62",
+        "dnom",
+        "fina",
+        "frac",
+        "fwid",
+        "init",
+        "ital",
+        "liga",
+        "locl",
+        "medi",
+        "numr",
+        "ordn",
+        "sinf",
+        "ss01",
+        "ss02",
+        "ss03",
+        "ss04",
+        "ss05",
+        "ss06",
+        "ss07",
+        "ss08",
+        "ss09",
+        "ss10",
+        "subs",
+        "sups"
+      ]
+    },
+    "hintTables": [],
+    "hintTableBytes": {},
+    "hintedGlyphs": 12745
+  }
+]

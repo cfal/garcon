@@ -1,0 +1,53 @@
+[
+  {
+    "sample": "Departure-Mono",
+    "dimensions": {
+      "before": [
+        3126,
+        6192
+      ],
+      "after": [
+        3126,
+        6192
+      ]
+    },
+    "pixels": 19356192,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  },
+  {
+    "sample": "Inter",
+    "dimensions": {
+      "before": [
+        2481,
+        6192
+      ],
+      "after": [
+        2481,
+        6192
+      ]
+    },
+    "pixels": 15362352,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  },
+  {
+    "sample": "JetBrains-Mono",
+    "dimensions": {
+      "before": [
+        3010,
+        6192
+      ],
+      "after": [
+        3010,
+        6192
+      ]
+    },
+    "pixels": 18637920,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  }
+]
