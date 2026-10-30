@@ -13,7 +13,6 @@
 		getSidebarProjectCollapse,
 		getSidebarSearch,
 		getRemoteSettings,
-		getExecutors,
 	} from '$lib/context';
 	import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
@@ -28,10 +27,9 @@
 	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
 	import { addTagToQuery } from '$shared/chat-filter-query';
 	import {
-		buildSidebarDisplayChatIds,
+		type SidebarChatListProjection,
 		buildSidebarExecutorCollapseKeys,
 		buildSidebarProjectKeys,
-		shouldGroupSidebarByExecutor,
 	} from './sidebar-row-model';
 	import {
 		SIDEBAR_SECTION_COLLAPSE_KEYS,
@@ -60,6 +58,7 @@
 
 	interface SidebarProps {
 		chats: ChatSessionRecord[];
+		projection: SidebarChatListProjection;
 		selectedChatId: string | null;
 		isLoading: boolean;
 		isMobile?: boolean;
@@ -75,7 +74,6 @@
 		onTogglePinned: (chatId: string) => Promise<void> | void;
 		onToggleArchive: (chatId: string) => Promise<void> | void;
 		isArchiveMutationPending?: (chatId: string) => boolean;
-		isChatOptimisticallyArchived?: (chatId: string) => boolean;
 		startArchivingChats?: (chatIds: readonly string[]) => ChatArchiveMutation;
 		startUnarchivingChats?: (chatIds: readonly string[]) => ChatArchiveMutation;
 		onShowDetails: (chat: ChatSessionRecord) => void;
@@ -95,6 +93,7 @@
 
 	let {
 		chats,
+		projection,
 		selectedChatId,
 		isLoading,
 		isMobile = false,
@@ -107,7 +106,6 @@
 		onTogglePinned,
 		onToggleArchive,
 		isArchiveMutationPending = () => false,
-		isChatOptimisticallyArchived = () => false,
 		startArchivingChats = () => ({ chatIds: [], completion: Promise.resolve() }),
 		startUnarchivingChats = () => ({ chatIds: [], completion: Promise.resolve() }),
 		onShowDetails,
@@ -131,7 +129,6 @@
 	const projectCollapse = getSidebarProjectCollapse();
 	const sidebarSearch = getSidebarSearch();
 	const remoteSettings = getRemoteSettings();
-	const executors = getExecutors();
 	const controller = new SidebarController({
 		get onQuietRefresh() {
 			return onQuietRefresh;
@@ -165,29 +162,12 @@
 		sortMode: localSettings.sidebarSortMode,
 		pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
 	});
-	let executorOrder = $derived(executors.executors.map((executor) => executor.id));
-	let groupByExecutor = $derived(shouldGroupSidebarByExecutor({ allChats: chats, executorOrder }));
 	let visibleUnreadChatIds = $derived.by(() =>
 		sidebarSearch.filteredChats
 			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
 			.map((chat) => chat.id),
 	);
-	let displayedChatIds = $derived.by(() =>
-		buildSidebarDisplayChatIds({
-			displayedChats: sidebarSearch.filteredChats,
-			grouping: displayOptions.grouping,
-			currentTime,
-			inactivityDuration: displayOptions.inactivityDuration,
-			sortMode: displayOptions.sortMode,
-			pinnedInsertPosition: displayOptions.pinnedInsertPosition,
-			executorOrder,
-			groupByExecutor,
-			isChatOptimisticallyArchived,
-			optimisticArchiveOrder: chats,
-			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
-			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
-		}),
-	);
+	let displayedChatIds = $derived(projection.rowModel.visibleChatIds);
 	let displayedChatIdSet = $derived(new Set(displayedChatIds));
 	let allProjectKeys = $derived.by(() => {
 		const projectKeys = buildSidebarProjectKeys({
@@ -487,8 +467,7 @@
 
 	<div class="order-2 flex min-h-0 flex-1">
 		<SidebarContent
-			{chats}
-			filteredChats={sidebarSearch.filteredChats}
+			{projection}
 			{selectedChatId}
 			{isLoading}
 			{isMobile}
@@ -498,7 +477,6 @@
 			isMultiSelectMode={selection.isActive}
 			isMultiSelected={(id) => selection.isSelected(id)}
 			{displayOptions}
-			collapsedProjectKeys={projectCollapse.collapsedProjectKeys}
 			onToggleProjectCollapsed={(projectKey) => projectCollapse.toggle(projectKey)}
 			onEnterMultiSelect={enterMultiSelect}
 			onMultiSelectToggle={handleMultiSelectToggle}
@@ -512,7 +490,6 @@
 				void onToggleArchive(id);
 			}}
 			{isArchiveMutationPending}
-			{isChatOptimisticallyArchived}
 			{onShowDetails}
 			onForkChat={(id) => {
 				void onForkChat(id);

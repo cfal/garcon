@@ -4,6 +4,7 @@
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import { localExecutor } from '$lib/executors/__tests__/fixtures';
 	import SidebarChatList from '../SidebarChatList.svelte';
+	import { buildSidebarChatListProjection } from '../sidebar-row-model';
 	import { setAppShell, setModelCatalog } from '$lib/context';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 	import {
@@ -53,7 +54,7 @@
 		onQuickMove = () => {},
 		onSortChatOrder = () => {},
 	}: SidebarChatListHostProps = $props();
-	untrack(() => setExecutorsTestContext(executors ?? [localExecutor]));
+	const executorStore = untrack(() => setExecutorsTestContext(executors ?? [localExecutor]));
 
 	let viewportRef = $state<HTMLElement | null>(null);
 	let displayOptions = $derived({
@@ -99,6 +100,20 @@
 	} as never);
 
 	setWorkspaceWindowDndTestContext();
+	const projection = $derived(
+		buildSidebarChatListProjection({
+			displayedChats: searchFilter.trim() ? filteredChats : chats,
+			optimisticArchiveOrder: chats,
+			grouping: displayOptions.grouping,
+			currentTime: new Date('2025-01-01T03:00:00.000Z'),
+			inactivityDuration: displayOptions.inactivityDuration,
+			sortMode: displayOptions.sortMode,
+			pinnedInsertPosition: displayOptions.pinnedInsertPosition,
+			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
+			collapsedProjectKeys: effectiveCollapsedKeys,
+			executorOrder: executorStore.executors.map((executor) => executor.id),
+		}),
+	);
 </script>
 
 <div
@@ -108,8 +123,7 @@
 >
 	<SidebarChatList
 		{viewportRef}
-		{chats}
-		{filteredChats}
+		{projection}
 		{selectedChatId}
 		isLoading={false}
 		{isMobile}
@@ -117,7 +131,6 @@
 		{searchFilter}
 		{onNewChat}
 		{displayOptions}
-		collapsedProjectKeys={effectiveCollapsedKeys}
 		onToggleProjectCollapsed={handleProjectCollapseToggle}
 		onChatSelect={() => {}}
 		onDeleteChat={() => {}}
