@@ -1610,7 +1610,9 @@ displays their chat. The per-socket interest registry,
 `server/controller/ws/chat-transcript-interest.ts`, owns this state:
 
 - **Declaration.** `chat-transcript-interest` carries the socket's complete
-  set of displayed chats, at most 64, and replaces the previous set. A
+  set of displayed chats and replaces the previous set. The raw array contains
+  at most 64 entries, each a canonical 16-digit chat ID; duplicates count
+  toward the limit and collapse only after validation. A
   malformed or oversized declaration is rejected and leaves the previous set
   in force. The handler applies it synchronously on receipt, so every later
   request on the socket and every later publication observe it, and the last

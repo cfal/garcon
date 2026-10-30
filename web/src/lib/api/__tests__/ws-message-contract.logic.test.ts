@@ -910,12 +910,13 @@ describe('parseServerWsMessage', () => {
 });
 describe('parseClientWsMessage', () => {
 	it('round-trips the transcript interest declaration the browser sends', () => {
+		const chatIds = ['1785337200123456', '1785337200123457'];
 		const declared = parseClientWsMessage(
-			JSON.parse(JSON.stringify(new ChatTranscriptInterestRequest(['c-1', 'c-2']))),
+			JSON.parse(JSON.stringify(new ChatTranscriptInterestRequest(chatIds))),
 		);
 
 		expect(declared).toBeInstanceOf(ChatTranscriptInterestRequest);
-		expect((declared as ChatTranscriptInterestRequest).chatIds).toEqual(['c-1', 'c-2']);
+		expect((declared as ChatTranscriptInterestRequest).chatIds).toEqual(chatIds);
 		expect(parseClientWsMessage({ type: 'chat-transcript-interest', chatIds: [1] })).toBeNull();
 	});
 

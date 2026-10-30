@@ -2,6 +2,7 @@
 // Mutating chat commands use the HTTP command ledger; WS is read/resume only.
 
 import type { TranscriptReadPurpose } from './chat-view';
+import { CHAT_ID_LENGTH, parseChatId } from './chat-id';
 
 export interface AgentCommandImage {
   data: string;
@@ -104,13 +105,16 @@ export class ChatTranscriptInterestRequest {
   constructor(public chatIds: string[]) { }
 
   static fromJson(data: Record<string, unknown>): ChatTranscriptInterestRequest | null {
-    if (!Array.isArray(data.chatIds)) return null;
+    if (!Array.isArray(data.chatIds) || data.chatIds.length > MAX_TRANSCRIPT_INTEREST_CHAT_IDS) return null;
     const chatIds = new Set<string>();
     for (const item of data.chatIds) {
-      if (typeof item !== 'string' || item.length === 0) return null;
-      chatIds.add(item);
+      if (typeof item !== 'string' || item.length !== CHAT_ID_LENGTH) return null;
+      try {
+        chatIds.add(parseChatId(item));
+      } catch {
+        return null;
+      }
     }
-    if (chatIds.size > MAX_TRANSCRIPT_INTEREST_CHAT_IDS) return null;
     return new ChatTranscriptInterestRequest([...chatIds]);
   }
 }

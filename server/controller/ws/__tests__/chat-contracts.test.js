@@ -92,6 +92,7 @@ const injectedMocks = [
 ];
 
 const moduleMocks = [sendWebSocketJson];
+const interestChatIds = ['1785337200123456', '1785337200123457', '1785337200123458'];
 
 let transcriptInterest = new ChatTranscriptInterestRegistry();
 
@@ -180,34 +181,39 @@ describe('chat WebSocket handler', () => {
   });
 
   it('replaces the socket transcript interest on each declaration without replying', async () => {
+    const [first, second, third] = interestChatIds;
     const other = createMockWs();
-    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: ['chat-a', 'chat-b'] });
-    await chatHandler.message(other, { type: 'chat-transcript-interest', chatIds: ['chat-b'] });
-    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: ['chat-b', 'chat-c'] });
-    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: ['chat-b', 'chat-c'] });
+    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: [first, second] });
+    await chatHandler.message(other, { type: 'chat-transcript-interest', chatIds: [second] });
+    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: [second, third] });
+    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: [second, third] });
 
-    expect(transcriptInterest.isInterested(ws, 'chat-a')).toBe(false);
-    expect(transcriptInterest.isInterested(ws, 'chat-c')).toBe(true);
-    expect(transcriptInterest.isInterested(other, 'chat-b')).toBe(true);
-    expect(transcriptInterest.isInterested(other, 'chat-c')).toBe(false);
+    expect(transcriptInterest.isInterested(ws, first)).toBe(false);
+    expect(transcriptInterest.isInterested(ws, third)).toBe(true);
+    expect(transcriptInterest.isInterested(other, second)).toBe(true);
+    expect(transcriptInterest.isInterested(other, third)).toBe(false);
     expect(sendWebSocketJson).not.toHaveBeenCalled();
   });
 
   it('keeps the previous interest when a declaration is malformed', async () => {
-    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: ['chat-a'] });
-    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: 'chat-b' });
+    const [first, second] = interestChatIds;
+    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: [first] });
+    for (const chatIds of [second, [second, 'chat-b'], Array(65).fill(second), ['1'.repeat(256 * 1024)]]) {
+      await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds });
 
-    expect(transcriptInterest.isInterested(ws, 'chat-a')).toBe(true);
-    expect(transcriptInterest.isInterested(ws, 'chat-b')).toBe(false);
+      expect(transcriptInterest.isInterested(ws, first)).toBe(true);
+      expect(transcriptInterest.isInterested(ws, second)).toBe(false);
+    }
   });
 
   it('releases transcript interest when its socket closes', async () => {
-    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: ['chat-a'] });
+    const [chatId] = interestChatIds;
+    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: [chatId] });
     chatHandler.close(ws, 1000, 'closed');
     ws.readyState = 3;
-    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: ['chat-a'] });
+    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: [chatId] });
 
-    expect(transcriptInterest.isInterested(ws, 'chat-a')).toBe(false);
+    expect(transcriptInterest.isInterested(ws, chatId)).toBe(false);
     expect(transcriptInterest.socketCount).toBe(0);
   });
 

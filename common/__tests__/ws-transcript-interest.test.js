@@ -45,6 +45,33 @@ describe('chat-transcript-interest request contract', () => {
     );
     expect(parseClientWsMessage({ type: 'chat-transcript-interest', chatIds: oversized })).toBeNull();
   });
+
+  it('accepts the maximum number of canonical chat IDs', () => {
+    const chatIds = Array.from(
+      { length: MAX_TRANSCRIPT_INTEREST_CHAT_IDS },
+      (_, index) => String(1785337200000000 + index),
+    );
+    expect(parseClientWsMessage({ type: 'chat-transcript-interest', chatIds }).chatIds).toEqual(chatIds);
+  });
+
+  it('rejects an oversized raw array even when all IDs are duplicates', () => {
+    const chatIds = Array(MAX_TRANSCRIPT_INTEREST_CHAT_IDS + 1).fill(CHAT_ID);
+    expect(parseClientWsMessage({ type: 'chat-transcript-interest', chatIds })).toBeNull();
+  });
+
+  it('rejects oversized identifiers without retaining them', () => {
+    const parsed = parseClientWsMessage({
+      type: 'chat-transcript-interest',
+      chatIds: ['1'.repeat(256 * 1024)],
+    });
+    expect(parsed === null).toBeTrue();
+  });
+
+  it.each(['chat-a', '1785337200123', '17853372001234567', '0000000000000000', '9999999999999999', ` ${CHAT_ID}`, `${CHAT_ID}\n`])(
+    'rejects the noncanonical chat ID %j', (chatId) => {
+      expect(parseClientWsMessage({ type: 'chat-transcript-interest', chatIds: [chatId] })).toBeNull();
+    },
+  );
 });
 
 describe('transcript delivery event contract', () => {
