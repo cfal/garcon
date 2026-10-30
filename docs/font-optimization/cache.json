@@ -1,10 +1,10 @@
 {
   "installed": [],
   "core": [
-    "/_app/immutable/assets/InterVariable-core.Cf6idQMM.woff2"
+    "/_app/immutable/assets/JetBrainsMono-core.CCwRDKUx.woff2"
   ],
   "extended": [
-    "/_app/immutable/assets/InterVariable-core.Cf6idQMM.woff2",
-    "/_app/immutable/assets/InterVariable-extended.CkTcgPA5.woff2"
+    "/_app/immutable/assets/JetBrainsMono-core.CCwRDKUx.woff2",
+    "/_app/immutable/assets/JetBrainsMono-extended.OBHhWDNr.woff2"
   ]
 }

@@ -8,6 +8,7 @@ import {
 	withNavigationTimeout,
 	isManifestPath,
 	precacheAppShell,
+	preserveCachedFonts,
 	shouldCacheNavigationResponse,
 	type ServiceWorkerPrecacheManifest,
 } from '../service-worker-helpers.js';
@@ -65,16 +66,20 @@ self.addEventListener('activate', (event) => {
 	event.waitUntil(
 		caches
 			.keys()
-			.then((keys) =>
-				Promise.all(
+			.then(async (keys) => {
+				const current = await caches.open(CACHE_NAME);
+				await Promise.all(
 					keys
 						.filter((name) => {
 							const legacyRootCache = base === '' && name.startsWith('garcon-');
 							return legacyRootCache || (name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME);
 						})
-						.map((name) => caches.delete(name)),
-				),
-			)
+						.map(async (name) => {
+							await preserveCachedFonts(current, await caches.open(name), PRECACHE_MANIFEST);
+							await caches.delete(name);
+						}),
+				);
+			})
 			.then(() => self.clients.claim()),
 	);
 });

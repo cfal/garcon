@@ -1,7 +1,7 @@
 <script lang="ts">
 	import departure from '$lib/theme/assets/DepartureMono-1.500-core.woff2?url&no-inline';
 	import jetbrains from '$lib/theme/assets/JetBrainsMono-core.woff2?url&no-inline';
-	import inter from '$lib/theme/assets/InterVariable-core.woff2?url&no-inline';
+	import inter from '$lib/theme/assets/InterVariable.woff2?url&no-inline';
 	import { TYPOGRAPHY_SURFACES, type TypographyPreferences } from '$lib/theme/typography.js';
 
 	let { typography }: { typography: TypographyPreferences } = $props();

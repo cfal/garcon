@@ -15,7 +15,7 @@ const originalFaces = sources.map(({ file }) => {
 const samples = {
   ascii: '# Font proof\n\nAVATAR To office affine -> != ===. “Quoted text”—a dash…\n\n*Italic text with **bold inside italics**.*\n\n```js\nconst result = items.filter(value => value !== null);\n// A code comment\n```',
   accents: '# Font proof\n\nCafé déjà vu. ĀČĎĒĢŁŊŒŘŠŤŪŽ. AV ÁV A\u0301V To Tô. Straße Œuvre. Ĳ\u0301 ĳ\u0301 Ƃ\u0301 Ƅ\u0301 ı\u0301 ø\u0301 ð\u0301 ƂA ƄA.\n\n*Italics with **bold café ĀŽ** inside.*\n\n```js\nconst café = "café"; // ĀŽ\n```',
-  extended: '# Font proof\n\nAn uncommon character: ∑.\n\n*An italic **bold ∑** symbol.*\n\n```text\n∑\n```',
+  extended: '# Font proof\n\nUncommon symbols: ∑ − ≤. Mixed spacing: A   A Ƃ   Ƃ.\n\n*An italic **bold ∑** symbol.*\n\n```text\n∑\n```',
   cjk: '# Font proof\n\n中文 日本語 한국어 with ASCII text.\n\n*Italics and **bold 中文** together.*\n\n```text\n中文 日本語 한국어\n```',
 };
 const fixture = await createChromiumFixture({ chatTitleEnabled: false });
@@ -56,7 +56,7 @@ try {
           });
           if (mode !== 'after') {
             // The original application had no font preloads.
-            await page.route('**/*-core.*.woff2', route => route.abort());
+            await page.route(/\/_app\/immutable\/assets\/(?:InterVariable|JetBrainsMono|DepartureMono)[^/]*\.woff2$/, route => route.abort());
             await page.route('**/*.css', async route => {
               const response = await route.fetch();
               let css = await response.text();

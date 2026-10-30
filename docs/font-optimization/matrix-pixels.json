@@ -3,15 +3,15 @@
     "sample": "Departure-Mono",
     "dimensions": {
       "before": [
-        3126,
+        3551,
         6192
       ],
       "after": [
-        3126,
+        3551,
         6192
       ]
     },
-    "pixels": 19356192,
+    "pixels": 21987792,
     "changedPixels": 0,
     "boundingBox": null,
     "maxChannelDifference": 0
@@ -20,15 +20,15 @@
     "sample": "Inter",
     "dimensions": {
       "before": [
-        2481,
+        2843,
         6192
       ],
       "after": [
-        2481,
+        2843,
         6192
       ]
     },
-    "pixels": 15362352,
+    "pixels": 17603856,
     "changedPixels": 0,
     "boundingBox": null,
     "maxChannelDifference": 0
@@ -37,15 +37,15 @@
     "sample": "JetBrains-Mono",
     "dimensions": {
       "before": [
-        3010,
+        3369,
         6192
       ],
       "after": [
-        3010,
+        3369,
         6192
       ]
     },
-    "pixels": 18637920,
+    "pixels": 20860848,
     "changedPixels": 0,
     "boundingBox": null,
     "maxChannelDifference": 0

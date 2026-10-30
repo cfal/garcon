@@ -3,10 +3,48 @@ import {
 	withNavigationTimeout,
 	isManifestPath,
 	precacheAppShell,
+	preserveCachedFonts,
 	shouldCacheNavigationResponse,
 } from '../service-worker-helpers';
 
 describe('service worker helpers', () => {
+	it('inherits only requested immutable fonts and preserves current responses', async () => {
+		const currentResponse = new Response('current');
+		const inherited = new Response('previous');
+		const current = {
+			match: vi
+				.fn<Cache['match']>()
+				.mockImplementation(async (path) => (path === '/kept.woff2' ? currentResponse : undefined)),
+			put: vi.fn<Cache['put']>().mockResolvedValue(undefined),
+		} satisfies Pick<Cache, 'match' | 'put'>;
+		const previous = {
+			match: vi
+				.fn<Cache['match']>()
+				.mockImplementation(async (path) => (path === '/used.woff2' ? inherited : undefined)),
+		} satisfies Pick<Cache, 'match'>;
+		await preserveCachedFonts(current, previous, {
+			build: ['/kept.woff2', '/used.woff2', '/unused.woff2', '/app.js'],
+			files: ['/unversioned.woff2'],
+		});
+		expect(previous.match.mock.calls.map(([path]) => path)).toEqual([
+			'/used.woff2',
+			'/unused.woff2',
+		]);
+		expect(current.put).toHaveBeenCalledExactlyOnceWith('/used.woff2', inherited);
+	});
+
+	it('propagates migration failure so activation retains the donor cache', async () => {
+		const current = {
+			match: vi.fn<Cache['match']>().mockResolvedValue(undefined),
+			put: vi.fn<Cache['put']>().mockRejectedValue(new Error('quota')),
+		} satisfies Pick<Cache, 'match' | 'put'>;
+		const previous = {
+			match: vi.fn<Cache['match']>().mockResolvedValue(new Response('font')),
+		} satisfies Pick<Cache, 'match'>;
+		await expect(
+			preserveCachedFonts(current, previous, { build: ['/used.woff2'], files: [] }),
+		).rejects.toThrow('quota');
+	});
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});

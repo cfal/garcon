@@ -23,15 +23,15 @@ try {
   await page.evaluate(async () => {
     const sample = document.createElement('div');
     sample.id = 'cache-font-proof';
-    sample.style.fontFamily = 'Inter';
-    sample.textContent = 'ASCII “quotes”—… café';
+    sample.style.fontFamily = 'JetBrains Mono';
+    sample.textContent = 'ASCII “quotes”—…';
     document.body.append(sample);
     sample.getBoundingClientRect();
     await document.fonts.ready;
   });
   await expect.poll(fontCache).toHaveLength(1);
   const core = await fontCache();
-  expect(core[0]).toContain('InterVariable-core.');
+  expect(core[0]).toContain('JetBrainsMono-core.');
   await page.evaluate(async () => {
     document.querySelector('#cache-font-proof')!.textContent += ' ∑';
     document.body.getBoundingClientRect();
@@ -39,7 +39,7 @@ try {
   });
   await expect.poll(fontCache).toHaveLength(2);
   const extended = await fontCache();
-  expect(extended.some(path => path.includes('InterVariable-extended.'))).toBe(true);
+  expect(extended.some(path => path.includes('JetBrainsMono-extended.'))).toBe(true);
   await writeFile(resolve(output, 'cache.json'), JSON.stringify({ installed, core, extended }, null, 2) + '\n');
   console.log({ installed, core, extended });
 } finally {

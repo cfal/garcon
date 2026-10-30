@@ -28,9 +28,15 @@ describe('service worker activation', () => {
 			];
 			const pendingDelete = Promise.withResolvers<boolean>();
 			const storage = {
+				open: vi
+					.fn()
+					.mockResolvedValue({ match: vi.fn().mockResolvedValue(undefined) } satisfies Pick<
+						Cache,
+						'match'
+					>),
 				keys: vi.fn<CacheStorage['keys']>().mockResolvedValue(names),
 				delete: vi.fn<CacheStorage['delete']>().mockReturnValue(pendingDelete.promise),
-			} satisfies Pick<CacheStorage, 'keys' | 'delete'>;
+			} satisfies Pick<CacheStorage, 'keys' | 'delete' | 'open'>;
 			const claim = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			const scope = new EventTarget();
 			vi.stubGlobal('self', {

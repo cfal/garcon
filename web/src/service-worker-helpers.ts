@@ -21,6 +21,23 @@ export function shouldCacheNavigationResponse(response: Response): boolean {
 		.some((directive) => directive.trim().toLowerCase() === 'no-store');
 }
 
+function isFontPath(path: string): boolean {
+	return /\.(?:woff2?|ttf|otf)$/.test(path);
+}
+
+// Only immutable current-build fonts can safely survive a version change.
+export async function preserveCachedFonts(
+	current: Pick<Cache, 'match' | 'put'>,
+	previous: Pick<Cache, 'match'>,
+	manifest: ServiceWorkerPrecacheManifest,
+): Promise<void> {
+	for (const path of manifest.build.filter(isFontPath)) {
+		if (await current.match(path)) continue;
+		const response = await previous.match(path);
+		if (response?.ok) await current.put(path, response);
+	}
+}
+
 export async function precacheAppShell(
 	cache: Pick<Cache, 'addAll' | 'add'>,
 	manifest: ServiceWorkerPrecacheManifest,
@@ -28,13 +45,10 @@ export async function precacheAppShell(
 ): Promise<void> {
 	// Keeps the offline navigation fallback strict while allowing optional static files to drift.
 	// Fonts are cached when requested; eager downloads defeat unicode-range and font preferences.
-	await cache.addAll([
-		`${basePath}/`,
-		...manifest.build.filter((url) => !/\.(?:woff2?|ttf|otf)$/.test(url)),
-	]);
+	await cache.addAll([`${basePath}/`, ...manifest.build.filter((url) => !isFontPath(url))]);
 	await Promise.allSettled(
 		manifest.files
-			.filter((url) => !isManifestPath(url, basePath) && !/\.(?:woff2?|ttf|otf)$/.test(url))
+			.filter((url) => !isManifestPath(url, basePath) && !isFontPath(url))
 			.map((url) => cache.add(url)),
 	);
 }

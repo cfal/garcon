@@ -5,6 +5,7 @@ import hashlib
 from copy import deepcopy
 import io
 import json
+import shutil
 import unicodedata
 import urllib.request
 from pathlib import Path
@@ -107,11 +108,26 @@ def main():
     report = []
     for stem, family, style in FACES:
         source = HERE / "sources" / (stem + ".woff2")
+        if stem.startswith("Inter"):
+            # Subsets alter Chromium metrics for advertised glyphs, even with unchanged outlines.
+            path = ASSETS / source.name
+            shutil.copyfile(source, path)
+            for part in ("core", "extended"):
+                (ASSETS / f"{stem}-{part}.woff2").unlink(missing_ok=True)
+            css.append(f"""@font-face {{
+\tfont-family: '{family}';
+\tsrc: url('./assets/{path.name}?no-inline') format('woff2');
+\tfont-style: {style};
+\tfont-weight: 100 900;
+\tfont-display: swap;
+}}""")
+            report.append({"strategy": "original", "source": inventory(source), "outputs": [inventory(path)]})
+            continue
         font = TTFont(source, recalcTimestamp=False)
         original_points = set(font.getBestCmap())
-        # A cluster must keep every supported combining mark in the same face as its base.
-        marks = {point for point in original_points if unicodedata.category(chr(point)).startswith("M")}
-        core_points = positioning_core(font, CORE | ui_points | marks, FEATURES)
+        # Marks and inherited whitespace must be available in either adjacent shaping face.
+        shared = {point for point in original_points if unicodedata.category(chr(point))[0] in ("M", "Z") or unicodedata.category(chr(point)) == "Cf"}
+        core_points = positioning_core(font, CORE | ui_points | shared, FEATURES)
         # User content is unbounded: preserves existing coverage, including symbols and combining marks.
         if "fvar" in font:
             # The positive weight mapping is unchanged when the minimum becomes the default.
@@ -129,7 +145,7 @@ def main():
         font.flavor = None
         font.save(buffer)
         outputs = []
-        for part, points in (("extended", (original_points - core_points) | marks), ("core", core_points)):
+        for part, points in (("extended", (original_points - core_points) | shared), ("core", core_points)):
             if not points:
                 continue
             result = TTFont(io.BytesIO(buffer.getvalue()), recalcTimestamp=False)
@@ -143,21 +159,17 @@ def main():
             options.name_legacy = True
             options.name_languages = [0x409]
             sub = subset.Subsetter(options=options)
-            # FreeType derives Latin stem widths and blue zones from these reference glyphs.
-            # Hidden cmap support preserves rasterization without advertising ASCII in the extended face.
-            # https://github.com/freetype/freetype/blob/36cd3d56e3bec63f2b5bbfb231ad81def2b26e92/src/autofit/afblue.dat#L347-L358
-            references = set(map(ord, "oO0THEZCQS LUSfijkdbhuvxzescnrpqgy")) if stem.startswith("Inter") and part == "extended" else set()
-            sub.populate(unicodes=points | (references & original_points))
+            sub.populate(unicodes=points)
             sub.subset(result)
             result.flavor = "woff2"
             path = ASSETS / f"{stem}-{part}.woff2"
             result.save(path)
             actual = TTFont(path)
-            assert set(actual.getBestCmap()) == points | (references & original_points), path
+            assert set(actual.getBestCmap()) == points, path
             if not options.hinting:
                 assert not any(t in actual for t in ("cvt ", "fpgm", "prep")), path
-            outputs.append({**inventory(path), "cssUnicodeRange": ranges(points), "supportCharacters": ranges((references & original_points) - points)})
-            weight = ("400 900" if stem.startswith("Inter") else "400 800") if "fvar" in actual else "400"
+            outputs.append({**inventory(path), "cssUnicodeRange": ranges(points)})
+            weight = "400 800" if "fvar" in actual else "400"
             css.append(f"""@font-face {{
 \tfont-family: '{family}';
 \tsrc: url('./assets/{path.name}?no-inline') format('woff2');
@@ -166,7 +178,8 @@ def main():
 \tfont-display: swap;
 \tunicode-range: {ranges(points)};
 }}""")
-        report.append({"source": inventory(source), "outputs": sorted(outputs, key=lambda output: "extended" in output["file"])})
+        (ASSETS / source.name).unlink(missing_ok=True)
+        report.append({"strategy": "split", "source": inventory(source), "outputs": sorted(outputs, key=lambda output: "extended" in output["file"])})
     (ROOT / "web/src/lib/theme/font-faces.css").write_text("\n\n".join(css) + "\n")
     (HERE / "inventory.json").write_text(json.dumps(report, indent=2) + "\n")
     for face in report:
