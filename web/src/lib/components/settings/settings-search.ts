@@ -64,6 +64,7 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			m.settings_text_editor_open_placement(),
 			m.settings_image_viewer_open_placement(),
 			m.settings_markdown_viewer_open_placement(),
+			m.settings_fork_open_placement(),
 			m.settings_file_recovery_title(),
 			m.onboarding_setup_wizard_label(),
 			m.settings_completion_sound_title(),

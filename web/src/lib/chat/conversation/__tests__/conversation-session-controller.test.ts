@@ -748,6 +748,7 @@ function createDeps(chat = createRunningChat()) {
 		},
 		navigation: {
 			navigateToChat: vi.fn(),
+			openForkedChat: vi.fn(),
 		},
 		setIsViewportPinnedToBottom: vi.fn(),
 		setInitialBottomRestorePending: vi.fn(),
@@ -2262,9 +2263,8 @@ describe('ConversationSessionController', () => {
 		expect(deps.chatState.clearLocalNoticesForChat).toHaveBeenCalledWith('123', 1);
 		expect(deps.chatState.localNotices).toEqual([]);
 		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(createServerEntry('456'));
-		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('456');
-		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
-		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('456');
+		expect(deps.navigation.openForkedChat).toHaveBeenCalledWith('456', '123');
+		expect(deps.navigation.navigateToChat).not.toHaveBeenCalled();
 		expect(mockForkRunChat).not.toHaveBeenCalled();
 		expect(mockRunChat).not.toHaveBeenCalled();
 	});
@@ -2371,7 +2371,7 @@ describe('ConversationSessionController', () => {
 			transcriptViewId: 'generation-1',
 			clientRequestId: expect.any(String),
 		});
-		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
+		expect(deps.navigation.openForkedChat).toHaveBeenCalledWith('456', '123');
 	});
 
 	it('submits in-chat fork actions from the clicked panel transcript', async () => {

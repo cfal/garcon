@@ -154,7 +154,10 @@ export interface SessionControllerDeps {
 		openNewChatDialog: (opts: { prefill: string }) => void;
 	};
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
-	navigation: { navigateToChat?: (chatId: string) => void };
+	navigation: {
+		navigateToChat?: (chatId: string) => void;
+		openForkedChat: (chatId: string, sourceChatId: string) => void;
+	};
 	requestProcessingSnapshot: (source: 'admission' | 'stop-probe') => Promise<unknown>;
 	setIsViewportPinnedToBottom: (v: boolean) => void;
 	setInitialBottomRestorePending: (chatId: string | null) => void;

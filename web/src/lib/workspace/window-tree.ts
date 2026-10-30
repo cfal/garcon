@@ -127,6 +127,63 @@ export function insertWindowAtEdge(
 	return replaceWindowNode(root, targetWindowId, partition);
 }
 
+export interface BalancedWindowRow {
+	readonly root: DesktopWorkspaceNode;
+	readonly columnCount: number;
+	readonly windowIds: readonly WorkspaceWindowId[];
+}
+
+/**
+ * Gives every column in a window's row an equal width. The row is the outermost run of
+ * horizontal partitions enclosing the window; the windows and vertical partitions inside it are
+ * its columns. Returns null when the window has no row or an equal share needs a ratio outside
+ * the partition bounds.
+ */
+export function balanceWindowRow(
+	root: DesktopWorkspaceNode,
+	windowId: WorkspaceWindowId,
+): BalancedWindowRow | null {
+	const rowRoot = outermostRowAncestor(root, windowId, null);
+	if (!rowRoot) return null;
+	const balanced = equalizeColumns(rowRoot);
+	if (!balanced) return null;
+	return {
+		root: mapPartitions(root, (partition) =>
+			partition.id === rowRoot.id ? (balanced as WorkspacePartitionNode) : partition,
+		),
+		columnCount: rowColumnCount(rowRoot),
+		windowIds: collectWindowNodes(rowRoot).map((workspaceWindow) => workspaceWindow.id),
+	};
+}
+
+function outermostRowAncestor(
+	node: DesktopWorkspaceNode,
+	windowId: WorkspaceWindowId,
+	enclosingRow: WorkspacePartitionNode | null,
+): WorkspacePartitionNode | null {
+	if (node.type === 'window') return node.id === windowId ? enclosingRow : null;
+	const row = node.direction === 'horizontal' ? (enclosingRow ?? node) : null;
+	return (
+		outermostRowAncestor(node.children[0], windowId, row) ??
+		outermostRowAncestor(node.children[1], windowId, row)
+	);
+}
+
+function rowColumnCount(node: DesktopWorkspaceNode): number {
+	if (node.type === 'window' || node.direction !== 'horizontal') return 1;
+	return rowColumnCount(node.children[0]) + rowColumnCount(node.children[1]);
+}
+
+function equalizeColumns(node: DesktopWorkspaceNode): DesktopWorkspaceNode | null {
+	if (node.type === 'window' || node.direction !== 'horizontal') return node;
+	const ratio = rowColumnCount(node.children[0]) / rowColumnCount(node);
+	if (clampPartitionRatio(ratio) !== ratio) return null;
+	const first = equalizeColumns(node.children[0]);
+	const second = equalizeColumns(node.children[1]);
+	if (!first || !second) return null;
+	return { ...node, ratio, children: [first, second] };
+}
+
 export interface WorkspaceWindowRect {
 	readonly left: number;
 	readonly top: number;
