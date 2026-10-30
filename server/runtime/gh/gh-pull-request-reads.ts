@@ -5,7 +5,7 @@
 
 import type { GhRepositoryIdentity, PullRequestCommits, PullRequestDiff, PullRequestReviewThreads, PullRequestStatus } from '../../../common/gh.js';
 import { GitServiceError } from '../../../common/git-error.js';
-import { buildDiff, buildStatus, buildThreads, type GhRawFile, type GhRawPullRequest, type GhRawReviewComment } from './gh-mappers.js';
+import { buildDiff, buildStatus, buildThreads, type GhRawPullRequest, type GhRawReviewComment } from './gh-mappers.js';
 import { parseMultiFileDiffPatches } from './pull-request-diff.js';
 import type { PullRequestDiffCache } from './pull-request-diff-cache.js';
 import { readConditionalPages } from './gh-conditional-rest.js';
@@ -45,26 +45,20 @@ export async function readPullRequestDiff(
   signal?: AbortSignal,
 ): Promise<PullRequestDiff> {
   const key = { repository, number, commits };
-  const view = (fields: string) => runGhJson<Partial<PullRequestCommits> & { files?: GhRawFile[] }>(
+  const view = () => runGhJson<PullRequestCommits>(
     projectPath,
-    ['pr', 'view', String(number), '--repo', explicitRepository(repository), '--json', fields],
+    ['pr', 'view', String(number), '--repo', explicitRepository(repository), '--json', 'baseRefOid,headRefOid'],
     { signal },
   );
-  const cached = cache.get(key);
-  if (cached) {
-    // The light read proves the executor's current account can still see the pull request.
-    assertCommits(await view('baseRefOid,headRefOid'), commits);
-    return cached;
-  }
-  const diff = await runGh(projectPath, ['pr', 'diff', String(number), '--repo', explicitRepository(repository)], { signal, timeoutMs: DIFF_TIMEOUT_MS });
-  // `gh pr diff` cannot name a commit, so the pair is confirmed after the diff
-  // arrives; a push during the read fails as stale instead of caching the new
-  // diff under the old pair.
-  const current = await view('baseRefOid,headRefOid,files');
-  assertCommits(current, commits);
-  const result = buildDiff(number, commits, parseMultiFileDiffPatches(diff.stdout), current.files);
-  cache.set(key, result);
-  return result;
+  // Every caller proves access before waiting for or reusing another caller's diff.
+  assertCommits(await view(), commits);
+  return cache.load(key, async () => {
+    const comparison = `repos/${repository.nameWithOwner}/compare/${commits.baseRefOid}...${commits.headRefOid}`;
+    const diff = await runGh(projectPath, ['api', '--hostname', repository.host, comparison, '-H', 'Accept: application/vnd.github.diff'], { signal, timeoutMs: DIFF_TIMEOUT_MS });
+    assertCommits(await view(), commits);
+    // Patch headers and counts come from the same immutable comparison as the bodies.
+    return buildDiff(number, commits, parseMultiFileDiffPatches(diff.stdout), undefined);
+  }, signal);
 }
 
 // Review comments are a REST listing, so each unchanged page revalidates as a 304.
@@ -75,6 +69,10 @@ export async function readPullRequestReviewThreads(
   responses: GhResponseCache,
   signal?: AbortSignal,
 ): Promise<PullRequestReviewThreads> {
+  const view = () => runGhJson<PullRequestCommits>(projectPath,
+    ['pr', 'view', String(number), '--repo', explicitRepository(repository), '--json', 'baseRefOid,headRefOid'], { signal });
+  const commits = await view();
   const pages = await readConditionalPages(projectPath, repository, `repos/${repository.nameWithOwner}/pulls/${number}/comments`, responses, signal);
-  return { number, threads: buildThreads(pages.flat() as GhRawReviewComment[]) };
+  assertCommits(await view(), commits);
+  return { number, ...commits, threads: buildThreads(pages.flat() as GhRawReviewComment[]) };
 }

@@ -181,6 +181,15 @@ Each part keeps its last loaded content through a failed refresh and shows the
 failure beside it with Retry; a failed diff or status is not retried until the
 user asks.
 
+Each selection schedules status, diff, and review-thread reads in sequence so
+it occupies at most one query slot during a cold load. Concurrent diff misses
+serialize by repository and commit pair; each caller checks its own access
+before reusing the result. Diff bodies come from GitHub's immutable commit-pair
+comparison, including their file statistics, rather than the mutable PR ref.
+Review-thread snapshots carry the base and head observed before and after
+their read. The Changes tab publishes only matching diff and thread generations
+and retains the previous coherent pair while a replacement loads or fails.
+
 ## Fingerprints
 
 A fingerprint is the part of a pull request summary that decides which reads

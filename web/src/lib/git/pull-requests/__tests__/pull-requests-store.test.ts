@@ -154,6 +154,7 @@ function harness(pulls: PullRequestSummary[] = [summary(7)]) {
 	);
 	const getReviewThreads = vi.fn<typeof getPullRequestReviewThreads>(async (_target, number) => ({
 		number,
+		...remote.get(number)!.commits,
 		threads: [],
 	}));
 	const getRuns = vi.fn<typeof getPullRequestReviewRuns>(async () => ({
@@ -206,6 +207,35 @@ function harness(pulls: PullRequestSummary[] = [summary(7)]) {
 }
 
 describe('PullRequestsStore selective refresh', () => {
+	it('admits one detail read at a time across five concurrent cold selections', async () => {
+		const clients = Array.from({ length: 5 }, () => harness());
+		const held = clients.map(() => Promise.withResolvers<PullRequestDiff>());
+		for (const [index, client] of clients.entries()) {
+			client.getDiff.mockReturnValueOnce(held[index]!.promise);
+			client.select(7);
+		}
+		await vi.waitFor(() => {
+			for (const client of clients) expect(client.getDiff).toHaveBeenCalledOnce();
+		});
+		for (const client of clients) {
+			expect(client.store.status.isLoading).toBe(false);
+			expect(client.getReviewThreads).not.toHaveBeenCalled();
+		}
+		for (const [index, client] of clients.entries()) {
+			held[index]!.resolve({
+				number: 7,
+				baseRefOid: BASE,
+				headRefOid: HEAD,
+				documentId: `client-${index}`,
+				files: [],
+				fileBodies: {},
+			});
+			await client.settled();
+			expect(client.getReviewThreads).toHaveBeenCalledOnce();
+			client.store.dispose();
+		}
+	});
+
 	it('loads status, diff, and review threads once for a new selection', async () => {
 		const { store, select, settled, getStatus, getDiff, getReviewThreads } = harness();
 		select(7);
@@ -323,6 +353,43 @@ describe('PullRequestsStore selective refresh', () => {
 		await settled();
 		expect(getDiff).toHaveBeenCalledTimes(2);
 		expect(store.diff.value?.baseRefOid).toBe(base);
+	});
+
+	it('retains the coherent diff and comments when pushed comments load but the new diff fails', async () => {
+		const { store, select, settled, publish, remote, getDiff, getReviewThreads } = harness();
+		const oldThreads = [
+			{
+				id: 'old',
+				path: 'example.txt',
+				side: 'after' as const,
+				line: 1,
+				diffHunk: '',
+				isOutdated: false,
+				comments: [],
+			},
+		];
+		getReviewThreads.mockResolvedValueOnce({
+			number: 7,
+			baseRefOid: BASE,
+			headRefOid: HEAD,
+			threads: oldThreads,
+		});
+		select(7);
+		await settled();
+		const shown = store.changesView;
+		const pushed = 'b'.repeat(40);
+		remote.get(7)!.commits.headRefOid = pushed;
+		getDiff.mockRejectedValueOnce(new Error('New diff unavailable'));
+		getReviewThreads.mockResolvedValueOnce({
+			number: 7,
+			baseRefOid: BASE,
+			headRefOid: pushed,
+			threads: [{ ...oldThreads[0]!, id: 'new', line: 9 }],
+		});
+		publish([summary(7, { headRefOid: pushed })]);
+		await settled();
+		expect(store.reviewThreads.value?.headRefOid).toBe(pushed);
+		expect(store.changesView).toEqual({ ...shown, refreshError: 'New diff unavailable' });
 	});
 
 	it('keeps shown status beside a failed refresh instead of reporting success', async () => {

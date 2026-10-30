@@ -234,7 +234,7 @@ export interface PullRequestDiff extends PullRequestCommits {
   fileBodies: Record<string, GitReviewFilePatchBody>;
 }
 
-export interface PullRequestReviewThreads {
+export interface PullRequestReviewThreads extends PullRequestCommits {
   number: number;
   threads: PullRequestThread[];
 }

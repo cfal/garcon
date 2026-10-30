@@ -193,6 +193,21 @@ else if (command === 'api' && action === 'graphql') {
   if (config.commentFailureAfterWrite) await fail(config.commentFailureAfterWrite);
   if (config.commentResponse !== undefined) write(config.commentResponse);
   else print({ node_id: id, html_url: url, user: { node_id: commentActor.id, login: commentActor.login } });
+} else if (command === 'api' && args.some(arg => arg.includes('/compare/'))) {
+  const comparison = args.find(arg => arg.includes('/compare/')).split('/compare/')[1];
+  if (config.holdCompare) {
+    const released = Promise.withResolvers();
+    const watcher = watch(cwd, (_event, filename) => { if (filename === 'gh-compare-release') released.resolve(); });
+    try {
+      await Bun.write(`${cwd}/gh-compare-started`, 'ready');
+      if (!await Bun.file(`${cwd}/gh-compare-release`).exists()) await released.promise;
+    } finally { watcher.close(); }
+  }
+  if (config.pushDuringDiff) {
+    const { pushDuringDiff, ...rest } = config;
+    await Bun.write(`${cwd}/gh-fixture.json`, JSON.stringify({ ...rest, pulls: (config.pulls ?? [defaultPull]).map(pull => ({ ...pull, ...pushDuringDiff })) }));
+  }
+  console.log(config.comparisons?.[comparison] ?? config.diff ?? 'diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -1 +1 @@\n-initial\n+changed');
 } else if (command === 'api' && args.includes('--include')) {
   // Pages a REST listing with ETags; a matching If-None-Match is answered 304, and gh exits 1 after printing it.
   requests = 1;
@@ -200,6 +215,10 @@ else if (command === 'api' && action === 'graphql') {
     write(header('403 Forbidden', { 'Content-Type': 'application/json; charset=utf-8' }));
     print({ message: 'forbidden' });
     await fail('gh: forbidden (HTTP 403)');
+  }
+  if (config.pushDuringComments) {
+    const { pushDuringComments, ...rest } = config;
+    await Bun.write(`${cwd}/gh-fixture.json`, JSON.stringify({ ...rest, pulls: (config.pulls ?? [defaultPull]).map(pull => ({ ...pull, ...pushDuringComments })) }));
   }
   const pages = config.commentPages ?? [[{ id: 1, path: 'example.txt', line: 1, side: 'RIGHT', body: 'synthetic comment' }]];
   const path = args[args.length - 1];

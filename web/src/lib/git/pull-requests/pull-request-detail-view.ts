@@ -7,7 +7,7 @@ import type {
 	PullRequestDiff,
 	PullRequestThread,
 } from '$lib/api/pull-requests.js';
-import type { PullRequestStatus } from '$shared/gh';
+import type { PullRequestReviewThreads, PullRequestStatus } from '$shared/gh';
 
 interface ReadView<T> {
 	readonly value: T | null;
@@ -37,12 +37,18 @@ export function pullRequestChecksView(
 export function pullRequestChangesView(
 	status: ReadView<PullRequestStatus>,
 	diff: ReadView<PullRequestDiff>,
-	threads: ReadView<readonly PullRequestThread[]>,
+	threads: ReadView<PullRequestReviewThreads>,
+	coherent: PullRequestChanges | null = null,
 ): PullRequestPartView<PullRequestChanges> {
 	if (diff.value) {
+		const matching =
+			threads.value?.baseRefOid === diff.value.baseRefOid &&
+			threads.value.headRefOid === diff.value.headRefOid;
 		return {
 			kind: 'ready',
-			value: { diff: diff.value, threads: threads.value ?? [] },
+			value: matching
+				? { diff: diff.value, threads: threads.value!.threads }
+				: (coherent ?? { diff: diff.value, threads: [] }),
 			refreshError: diff.error ?? status.error ?? threads.error,
 		};
 	}

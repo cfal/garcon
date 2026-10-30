@@ -82,7 +82,7 @@ test('split pull request results carry only their own part', () => {
   for (const invalid of [{ ...status, baseRefOid: '' }, { ...status, headRefOid: 'main' }, { ...status, checks: undefined }]) {
     expect(() => validateGhResult('getPullRequestStatus', invalid, scope)).toThrow();
   }
-  const threads = { ...scope, number: 7, threads: [{ id: '1', path: 'a.ts', side: 'after', line: 1, diffHunk: '', isOutdated: false, comments: [] }] };
+  const threads = { ...scope, number: 7, baseRefOid: status.baseRefOid, headRefOid: status.headRefOid, threads: [{ id: '1', path: 'a.ts', side: 'after', line: 1, diffHunk: '', isOutdated: false, comments: [] }] };
   expect(() => validateGhResult('getPullRequestReviewThreads', threads, scope)).not.toThrow();
   expect(() => validateGhResult('getPullRequestReviewThreads', { ...threads, threads: undefined }, scope)).toThrow();
   const diff = { ...scope, number: 7, baseRefOid: 'e'.repeat(40), headRefOid: 'a'.repeat(40), files: [], fileBodies: {} };

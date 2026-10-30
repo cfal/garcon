@@ -4,6 +4,7 @@
 // a cached diff is returned, which keeps the active account out of the key.
 
 import { BoundedLruCache } from '../../../common/bounded-lru-cache.js';
+import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import type { GhRepositoryIdentity, PullRequestCommits, PullRequestDiff } from '../../../common/gh.js';
 
 const MAX_ENTRIES = 16;
@@ -28,6 +29,7 @@ export function estimatePullRequestDiffBytes(diff: PullRequestDiff): number {
 }
 
 export class PullRequestDiffCache {
+	readonly #loads = new KeyedPromiseLock();
   readonly #entries = new BoundedLruCache<string, PullRequestDiff>({ maxEntries: MAX_ENTRIES, maxBytes: MAX_BYTES, sizeOf: estimatePullRequestDiffBytes });
 
   get(key: PullRequestDiffKey): PullRequestDiff | undefined {
@@ -36,6 +38,18 @@ export class PullRequestDiffCache {
 
   set(key: PullRequestDiffKey, diff: PullRequestDiff): void {
     this.#entries.set(cacheKey(key), diff);
+  }
+
+  // Serializes misses without sharing a caller's credentials, cancellation, or operation context.
+  load(key: PullRequestDiffKey, read: () => Promise<PullRequestDiff>, signal?: AbortSignal): Promise<PullRequestDiff> {
+    return this.#loads.runExclusive(cacheKey(key), async () => {
+      const cached = this.get(key);
+      if (cached) return cached;
+      const result = await read();
+      signal?.throwIfAborted();
+      this.set(key, result);
+      return result;
+    }, signal);
   }
 
   get size(): number { return this.#entries.size; }

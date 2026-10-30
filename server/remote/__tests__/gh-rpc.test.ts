@@ -47,6 +47,34 @@ test('paginated GitHub policy reads retain their detail budget on Local and remo
 }, 10_000);
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`eight cold detail clients fit the query budget with ${dialer} dialing`, async () => {
+    const fixture = await gitRpcFixture(dialer);
+    const originalPath = process.env.PATH;
+    try {
+      const bin = path.join(fixture.root, 'bin');
+      await fs.mkdir(bin);
+      await fs.copyFile(new URL('./fixtures/fake-gh.js', import.meta.url), path.join(bin, 'gh'));
+      await fs.chmod(path.join(bin, 'gh'), 0o755);
+      process.env.PATH = `${bin}:${originalPath}`;
+      await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic' }));
+      const pull = { projectPath: fixture.projectPath, repository: { host: 'git.example.invalid', nameWithOwner: 'synthetic/repository' }, number: 1 };
+      for (const service of [await fixture.local.getGhService(), await fixture.executor.getGhService()]) {
+        const reads = await Promise.all(Array.from({ length: 8 }, async () => {
+          const status = await service.getPullRequestStatus(pull);
+          const commits = { baseRefOid: status.baseRefOid, headRefOid: status.headRefOid };
+          const diff = await service.getPullRequestDiff({ ...pull, commits });
+          const comments = await service.getPullRequestReviewThreads(pull);
+          return { diff, comments };
+        }));
+        expect(reads).toHaveLength(8);
+        for (const { diff, comments } of reads) {
+          expect(comments.baseRefOid).toBe(diff.baseRefOid);
+          expect(comments.headRefOid).toBe(diff.headRefOid);
+        }
+      }
+    } finally { process.env.PATH = originalPath; await fixture.dispose(); }
+  }, 30_000);
+
   test(`GitHub posting rechecks preflight state and preserves delivered failures with ${dialer} dialing`, async () => {
     const fixture = await gitRpcFixture(dialer);
     const originalPath = process.env.PATH;
