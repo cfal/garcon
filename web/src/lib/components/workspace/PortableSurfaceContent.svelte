@@ -32,6 +32,7 @@
 		() => import('$lib/components/chat-board/ChatBoardPanel.svelte'),
 	);
 	const ticketsRenderer = lazyRenderer(() => import('$lib/components/tickets/TicketsPanel.svelte'));
+	const usageRenderer = lazyRenderer(() => import('$lib/components/usage/UsagePanel.svelte'));
 </script>
 
 <script lang="ts">
@@ -219,6 +220,11 @@
 					else void workspace.showChatInWindow(chatId, presentation);
 				}}
 			/>
+		{/await}
+	{:else if surface.type === 'singleton' && surface.kind === 'usage'}
+		{@const controller = singletonSurfaces.usage()}
+		{#await usageRenderer() then UsagePanel}
+			<UsagePanel {controller} {presentation} />
 		{/await}
 	{:else if surface.type === 'singleton' && surface.kind === 'chat-board'}
 		{@const controller = singletonSurfaces.chatBoard()}

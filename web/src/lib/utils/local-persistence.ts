@@ -25,6 +25,7 @@ export const LOCAL_STORAGE_KEYS = {
 	modelCatalogLegacy: 'pref_model_catalog_v3',
 	modelCatalogExecutors: 'pref_model_catalog_executors_v1',
 	sidebarProjectCollapse: 'pref_sidebar_project_collapse',
+	usagePreferences: 'pref_usage_v1',
 	workspaceLayout: 'workspace_layout_v2',
 } as const;
 

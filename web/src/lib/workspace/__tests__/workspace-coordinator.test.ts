@@ -17,7 +17,13 @@ import {
 	type WorkspaceWindowId,
 } from '../surface-types';
 import { CANONICAL_CHAT_SURFACE_ID, CANONICAL_FILES_SURFACE_ID } from '../canonical-layout';
-import { windowIdOfSurface, windowNodeById, collectWindowNodes } from '../window-tree';
+import {
+	windowIdOfSurface,
+	windowNodeById,
+	collectWindowNodes,
+	computeWindowRects,
+} from '../window-tree';
+import { findWorkspaceChatPlacement } from '../workspace-chat-placement';
 import type { TerminalMetadata } from '$shared/terminal';
 import type {
 	TerminalAttachmentState,
@@ -27,9 +33,13 @@ import { SurfaceFrameRegistry } from '../surface-frame-registry';
 import { SurfaceFrameBridge } from '../surface-frame-context';
 import { WorkspaceShortcutDispatcher, type WorkspaceShortcutDeps } from '../workspace-shortcuts';
 import type { WorkspaceLayoutSnapshot } from '../surface-types';
-import type {
-	WorkspacePartitionRatioBoundsResolver,
-	WorkspaceSplitAdmissionResolver,
+import {
+	resolveWorkspaceSplitAdmission,
+	workspaceWindowsFitHost,
+	type WorkspaceHostSize,
+	type WorkspaceWindowsFitResolver,
+	type WorkspacePartitionRatioBoundsResolver,
+	type WorkspaceSplitAdmissionResolver,
 } from '../window-geometry-policy';
 import { resolveUnmeasuredWorkspaceSplit } from './workspace-geometry-test-fixtures';
 import { WorkspacePresentationController } from '../workspace-presentation-controller.svelte';
@@ -94,6 +104,7 @@ function createHarness(
 		failLayoutPublishAt?: number;
 		includePortableTabs?: boolean;
 		resolveSplitAdmission?: WorkspaceSplitAdmissionResolver;
+		windowsFitHost?: WorkspaceWindowsFitResolver;
 		resolvePartitionRatioBounds?: WorkspacePartitionRatioBoundsResolver;
 		currentProjectTarget?: ProjectTarget | null;
 		projectResolution?: ProjectResolver;
@@ -248,6 +259,7 @@ function createHarness(
 		},
 		surfaceFrames: options.surfaceFrames,
 		resolveSplitAdmission: options.resolveSplitAdmission ?? resolveUnmeasuredWorkspaceSplit,
+		windowsFitHost: options.windowsFitHost ?? (() => true),
 		resolvePartitionRatioBounds: options.resolvePartitionRatioBounds ?? (() => null),
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
@@ -4021,5 +4033,289 @@ describe('responsive window merging', () => {
 		await coordinator.fitWindowsToHost(() => ({ width: 300, height: 200 }));
 		expect(windowCountOf(layout.snapshot)).toBe(1);
 		expect(layout.surface(fileSurfaceId('guarded'))).not.toBeNull();
+	});
+});
+
+describe('forked chat placement', () => {
+	function forkWindowId(snapshot: WorkspaceLayoutSnapshot, chatId: string): WorkspaceWindowId {
+		const windowId = findWorkspaceChatPlacement(snapshot, chatId)?.windowId;
+		if (!windowId) throw new Error(`Chat ${chatId} is not placed`);
+		return windowId;
+	}
+
+	function splitOf(snapshot: WorkspaceLayoutSnapshot, windowId: WorkspaceWindowId) {
+		const entry = computeWindowRects(snapshot.desktopRoot).partitions.find(({ partition }) =>
+			partition.children.some((child) => child.type === 'window' && child.id === windowId),
+		);
+		if (!entry) return null;
+		return {
+			direction: entry.partition.direction,
+			windowIds: entry.partition.children.map((child) =>
+				child.type === 'window' ? child.id : null,
+			),
+		};
+	}
+
+	it('splits beside the source window and keeps the source chat in place', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const windowCount = windowCountOf(layout.snapshot);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a', 'split-auto');
+
+		const destinationWindowId = forkWindowId(layout.snapshot, 'fork-a');
+		expect(windowCountOf(layout.snapshot)).toBe(windowCount + 1);
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+		expect(splitOf(layout.snapshot, destinationWindowId)).toEqual({
+			direction: 'horizontal',
+			windowIds: ['window-main', destinationWindowId],
+		});
+		expect(coordinator.currentWindowId).toBe(destinationWindowId);
+		expect(coordinator.focusedChatId).toBe('fork-a');
+	});
+
+	it('splits only below the source when the preference is below', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+
+		await coordinator.openForkedChat('fork-a', 'chat-a', 'split-below');
+
+		const destinationWindowId = forkWindowId(layout.snapshot, 'fork-a');
+		expect(splitOf(layout.snapshot, destinationWindowId)).toEqual({
+			direction: 'vertical',
+			windowIds: ['window-main', destinationWindowId],
+		});
+	});
+
+	it('replaces the source instead of splitting below when the preference is right', async () => {
+		const { coordinator, layout } = createHarness({
+			resolveSplitAdmission: (_snapshot, { edge }) =>
+				edge === 'bottom' ? { allowed: true } : { allowed: false, reason: 'too-small' },
+			windowsFitHost: () => false,
+		});
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const windowCount = windowCountOf(layout.snapshot);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a', 'split-right');
+
+		expect(windowCountOf(layout.snapshot)).toBe(windowCount);
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'fork-a' });
+	});
+
+	it('replaces the source without splitting when the preference is replace', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const windowCount = windowCountOf(layout.snapshot);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a', 'replace');
+
+		expect(windowCountOf(layout.snapshot)).toBe(windowCount);
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'fork-a' });
+		expect(coordinator.focusedChatId).toBe('fork-a');
+	});
+
+	it('anchors on the source window rather than the focused window', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const otherWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+		expect(coordinator.currentWindowId).toBe(otherWindowId);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a', 'split-auto');
+
+		const destinationWindowId = forkWindowId(layout.snapshot, 'fork-a');
+		expect(splitOf(layout.snapshot, destinationWindowId)?.windowIds).toEqual([
+			'window-main',
+			destinationWindowId,
+		]);
+		expect(layout.surface(chatViewSurfaceId(otherWindowId))).toMatchObject({ chatId: 'chat-b' });
+	});
+
+	it('splits below the source when neither a split nor a balanced column fits beside it', async () => {
+		const { coordinator, layout } = createHarness({
+			resolveSplitAdmission: (_snapshot, { edge }) =>
+				edge === 'bottom' ? { allowed: true } : { allowed: false, reason: 'too-small' },
+			windowsFitHost: () => false,
+		});
+		await coordinator.showChatInCurrentWindow('chat-a');
+
+		await coordinator.openForkedChat('fork-a', 'chat-a', 'split-auto');
+
+		const destinationWindowId = forkWindowId(layout.snapshot, 'fork-a');
+		expect(splitOf(layout.snapshot, destinationWindowId)).toEqual({
+			direction: 'vertical',
+			windowIds: ['window-main', destinationWindowId],
+		});
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+	});
+
+	describe('in a measured workspace', () => {
+		// Opens three Chat columns in a wide host, then narrows it so that none can be halved.
+		async function threeColumns(width: number) {
+			let hostSize: WorkspaceHostSize = { width: 4000, height: 800 };
+			const harness = createHarness({
+				includePortableTabs: false,
+				resolveSplitAdmission: (snapshot, request) =>
+					resolveWorkspaceSplitAdmission({ snapshot, hostSize, ...request }),
+				windowsFitHost: (root, windowIds) => workspaceWindowsFitHost(root, windowIds, hostSize),
+			});
+			const { coordinator } = harness;
+			await coordinator.closeWindow('window-files');
+			await coordinator.showChatInCurrentWindow('chat-a');
+			const middle = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+			const last = await coordinator.openChatInNewWindow('chat-c', middle, 'right');
+			hostSize = { width, height: 800 };
+			return { ...harness, middle, last };
+		}
+
+		function columnWidths(snapshot: WorkspaceLayoutSnapshot): Record<string, number> {
+			return Object.fromEntries(
+				computeWindowRects(snapshot.desktopRoot).windows.map(({ workspaceWindow, rect }) => [
+					workspaceWindow.id,
+					Math.round(rect.width * 1000) / 1000,
+				]),
+			);
+		}
+
+		it('adds an equal column for a right preference but never one for below', async () => {
+			const right = await threeColumns(1280);
+			await right.coordinator.openForkedChat('fork-b', 'chat-b', 'split-right');
+			expect(windowCountOf(right.layout.snapshot)).toBe(4);
+			expect(Object.values(columnWidths(right.layout.snapshot))).toEqual([0.25, 0.25, 0.25, 0.25]);
+
+			// The first column is wide enough to halve downward but not sideways.
+			const below = await threeColumns(1280);
+			await below.coordinator.openForkedChat('fork-a', 'chat-a', 'split-below');
+			const destinationWindowId = forkWindowId(below.layout.snapshot, 'fork-a');
+			expect(splitOf(below.layout.snapshot, destinationWindowId)).toEqual({
+				direction: 'vertical',
+				windowIds: ['window-main', destinationWindowId],
+			});
+		});
+
+		it('splits a lone window too narrow to halve below rather than into narrow columns', async () => {
+			const hostSize: WorkspaceHostSize = { width: 600, height: 1000 };
+			const { coordinator, layout } = createHarness({
+				includePortableTabs: false,
+				resolveSplitAdmission: (snapshot, request) =>
+					resolveWorkspaceSplitAdmission({ snapshot, hostSize, ...request }),
+				windowsFitHost: (root, windowIds) => workspaceWindowsFitHost(root, windowIds, hostSize),
+			});
+			await coordinator.closeWindow('window-files');
+			await coordinator.showChatInCurrentWindow('chat-a');
+
+			await coordinator.openForkedChat('fork-a', 'chat-a', 'split-auto');
+
+			const destinationWindowId = forkWindowId(layout.snapshot, 'fork-a');
+			expect(splitOf(layout.snapshot, destinationWindowId)).toEqual({
+				direction: 'vertical',
+				windowIds: ['window-main', destinationWindowId],
+			});
+		});
+
+		it('adds an equal column beside a source too narrow to halve', async () => {
+			const { coordinator, layout, middle, last } = await threeColumns(1280);
+
+			await coordinator.openForkedChat('fork-b', 'chat-b', 'split-auto');
+
+			const destinationWindowId = forkWindowId(layout.snapshot, 'fork-b');
+			const order = computeWindowRects(layout.snapshot.desktopRoot).windows.map(
+				({ workspaceWindow }) => workspaceWindow.id,
+			);
+			expect(order).toEqual(['window-main', middle, destinationWindowId, last]);
+			expect(Object.values(columnWidths(layout.snapshot))).toEqual([0.25, 0.25, 0.25, 0.25]);
+			expect(layout.surface(chatViewSurfaceId(middle))).toMatchObject({ chatId: 'chat-b' });
+			expect(coordinator.focusedChatId).toBe('fork-b');
+		});
+	});
+
+	it.each(['too-small', 'resource-ceiling', 'fullscreen'] as const)(
+		'replaces the source chat when %s blocks every split',
+		async (reason) => {
+			let blocked = false;
+			const { coordinator, layout } = createHarness({
+				resolveSplitAdmission: (snapshot, request) =>
+					blocked ? { allowed: false, reason } : resolveUnmeasuredWorkspaceSplit(snapshot, request),
+				windowsFitHost: () => !blocked,
+			});
+			await coordinator.showChatInCurrentWindow('chat-a');
+			const otherWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+			const windowCount = windowCountOf(layout.snapshot);
+			blocked = true;
+
+			await coordinator.openForkedChat('fork-a', 'chat-a', 'split-auto');
+
+			expect(windowCountOf(layout.snapshot)).toBe(windowCount);
+			expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'fork-a' });
+			expect(layout.surface(chatViewSurfaceId(otherWindowId))).toMatchObject({ chatId: 'chat-b' });
+			expect(coordinator.focusedChatId).toBe('fork-a');
+		},
+	);
+
+	it('leaves another window fullscreen to show the fork in place of its source', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const otherWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+		await coordinator.enterWindowFullscreen(otherWindowId);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a', 'split-auto');
+
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'fork-a' });
+		expect(layout.surface(chatViewSurfaceId(otherWindowId))).toMatchObject({ chatId: 'chat-b' });
+		expect(coordinator.focusedChatId).toBe('fork-a');
+	});
+
+	it('keeps a fullscreen source window fullscreen while the fork replaces it', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.enterWindowFullscreen('window-main');
+		const windowCount = windowCountOf(layout.snapshot);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a', 'split-auto');
+
+		expect(windowCountOf(layout.snapshot)).toBe(windowCount);
+		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'fork-a' });
+	});
+
+	it('falls back to the focused window when the source chat is not placed', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+
+		await coordinator.openForkedChat('fork-a', 'chat-unplaced', 'split-auto');
+
+		const destinationWindowId = forkWindowId(layout.snapshot, 'fork-a');
+		expect(splitOf(layout.snapshot, destinationWindowId)?.windowIds).toEqual([
+			'window-main',
+			destinationWindowId,
+		]);
+	});
+
+	it('replaces the single mobile presentation', async () => {
+		const { coordinator, layout, appShell } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		appShell.isMobile = true;
+		await coordinator.enterMobilePresentation();
+		const windowCount = windowCountOf(layout.snapshot);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a', 'split-auto');
+
+		expect(windowCountOf(layout.snapshot)).toBe(windowCount);
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'fork-a' });
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(chatViewSurfaceId('window-main'));
+	});
+
+	it('activates an already placed fork instead of opening another window', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.openForkedChat('fork-a', 'chat-a', 'split-auto');
+		const destinationWindowId = forkWindowId(layout.snapshot, 'fork-a');
+		await coordinator.focusSurface(chatViewSurfaceId('window-main'));
+		const windowCount = windowCountOf(layout.snapshot);
+
+		await coordinator.openForkedChat('fork-a', 'chat-a', 'split-auto');
+
+		expect(windowCountOf(layout.snapshot)).toBe(windowCount);
+		expect(coordinator.currentWindowId).toBe(destinationWindowId);
 	});
 });

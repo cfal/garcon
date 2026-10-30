@@ -14,6 +14,7 @@ export const PORTABLE_SINGLETON_KINDS = [
 	'chat-canvas',
 	'chat-board',
 	'tickets',
+	'usage',
 ] as const;
 export const TRANSIENT_MOBILE_SINGLETON_KINDS = ['git-history', 'git-compare'] as const;
 

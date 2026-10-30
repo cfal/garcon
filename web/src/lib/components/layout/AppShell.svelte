@@ -152,6 +152,7 @@
 		startArchivingChats: (chatIds) => archiveUndo.startArchivingChats(chatIds),
 		startUnarchivingChats: (chatIds) => archiveUndo.startUnarchivingChats(chatIds),
 		onSelectChat: handleChatSelect,
+		onOpenForkedChat: handleOpenForkedChat,
 		onNewChat: handleNewChat,
 		onDeleteChat: handleChatDelete,
 		onRenameChat: handleChatRenamed,
@@ -228,6 +229,7 @@
 					mobileActiveDescriptor.kind === 'pull-requests' ||
 					mobileActiveDescriptor.kind === 'chat-board' ||
 					mobileActiveDescriptor.kind === 'tickets' ||
+					mobileActiveDescriptor.kind === 'usage' ||
 					mobileActiveDescriptor.kind === 'git-history' ||
 					mobileActiveDescriptor.kind === 'git-compare')),
 	);
@@ -446,6 +448,14 @@
 		});
 	}
 
+	function handleOpenForkedChat(chatId: string, sourceChatId: string): void {
+		void workspace
+			.openForkedChat(chatId, sourceChatId, localSettings.forkOpenPlacement)
+			.catch((error) => {
+				notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+			});
+	}
+
 	function handleNewChat() {
 		if (isMobile) {
 			appShell.setSidebarOpen(false);
@@ -548,6 +558,17 @@
 	function handleMobileSidebarCloseAutoFocus(event: Event): void {
 		event.preventDefault();
 		restoreMobileSidebarFocus();
+	}
+
+	async function handleShowUsage(): Promise<void> {
+		if (isMobile) closeMobileSidebar();
+		// Completes drawer focus restoration before the surface owns focus.
+		await tick();
+		try {
+			await workspace.openSingleton('usage');
+		} catch (error) {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		}
 	}
 
 	function handleMobileChatSelect(chatId: string): void {
@@ -718,6 +739,7 @@
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
 		onShowPreambles={() => appShell.openPreambles()}
 		onShowSnippets={() => appShell.openSnippets()}
+		onShowUsage={() => void handleShowUsage()}
 		onShowSettings={() => appShell.openSettings()}
 		{newWindowEdges}
 	/>

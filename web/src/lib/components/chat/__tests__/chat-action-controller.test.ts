@@ -127,6 +127,7 @@ function createHarness(
 		projectPathRevision: vi.fn(() => 0),
 		onQuietRefresh: vi.fn(async () => undefined),
 		onSelectChat: vi.fn(),
+		onOpenForkedChat: vi.fn(),
 		onNewChat: vi.fn(),
 		onDeleteChat: vi.fn(async () => undefined),
 		onRenameChat: vi.fn(async () => undefined),
@@ -616,7 +617,7 @@ describe('ChatActionController', () => {
 		},
 	);
 
-	it('upserts and selects a server-confirmed fork', async () => {
+	it('upserts a server-confirmed fork and opens it beside its source', async () => {
 		const fork = makeServerChat();
 		vi.mocked(chatsApi.forkChat).mockResolvedValueOnce({ success: true, chat: fork });
 		const { controller, callbacks } = createHarness();
@@ -629,7 +630,8 @@ describe('ChatActionController', () => {
 			clientRequestId: expect.any(String),
 		});
 		expect(callbacks.onUpsertServerChat).toHaveBeenCalledWith(fork);
-		expect(callbacks.onSelectChat).toHaveBeenCalledWith('fork-chat-id');
+		expect(callbacks.onOpenForkedChat).toHaveBeenCalledWith('fork-chat-id', 'chat-1');
+		expect(callbacks.onSelectChat).not.toHaveBeenCalled();
 	});
 
 	it('shows fork progress until the fork settles and ignores a repeated fork meanwhile', async () => {
@@ -675,7 +677,7 @@ describe('ChatActionController', () => {
 			clientRequestId: expect.any(String),
 		});
 		expect(retry).toEqual(first);
-		expect(callbacks.onSelectChat).toHaveBeenCalledWith('fork-chat-id');
+		expect(callbacks.onOpenForkedChat).toHaveBeenCalledWith('fork-chat-id', 'chat-1');
 		expect(callbacks.notifyError).not.toHaveBeenCalled();
 	});
 
@@ -687,7 +689,7 @@ describe('ChatActionController', () => {
 		await controller.forkChat('chat-1');
 
 		expect(callbacks.notifyError).toHaveBeenCalledWith(m.chat_notice_fork_outcome_unconfirmed());
-		expect(callbacks.onSelectChat).not.toHaveBeenCalled();
+		expect(callbacks.onOpenForkedChat).not.toHaveBeenCalled();
 	});
 
 	it.each([
@@ -713,10 +715,10 @@ describe('ChatActionController', () => {
 				...vi.mocked(chatsApi.forkChat).mock.calls[0]?.[0],
 				allowHandoffFork: true,
 			});
-			expect(callbacks.onSelectChat).toHaveBeenCalledWith('fork-chat-id');
+			expect(callbacks.onOpenForkedChat).toHaveBeenCalledWith('fork-chat-id', 'chat-1');
 		} else {
 			expect(chatsApi.forkChat).toHaveBeenCalledOnce();
-			expect(callbacks.onSelectChat).not.toHaveBeenCalled();
+			expect(callbacks.onOpenForkedChat).not.toHaveBeenCalled();
 		}
 		expect(callbacks.notifyError).not.toHaveBeenCalled();
 		expect(callbacks.dismissProgress).toHaveBeenCalledOnce();

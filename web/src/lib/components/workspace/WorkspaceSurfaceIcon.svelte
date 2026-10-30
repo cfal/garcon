@@ -12,6 +12,7 @@
 	import Waypoints from '@lucide/svelte/icons/waypoints';
 	import Columns3 from '@lucide/svelte/icons/columns-3';
 	import Tickets from '@lucide/svelte/icons/tickets';
+	import ChartSpline from '@lucide/svelte/icons/chart-spline';
 	import type { ActiveSurfaceKind } from '$lib/workspace/surface-types.js';
 
 	let {
@@ -32,6 +33,7 @@
 {:else if kind === 'chat-canvas'}<PanelsTopLeft class={className} {size} />
 {:else if kind === 'chat-board'}<Columns3 class={className} {size} />
 {:else if kind === 'tickets'}<Tickets class={className} {size} />
+{:else if kind === 'usage'}<ChartSpline class={className} {size} />
 {:else if kind === 'terminal' || kind === 'terminal-launcher'}<SquareTerminal
 		class={className}
 		{size}
