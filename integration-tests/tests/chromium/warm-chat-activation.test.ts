@@ -37,6 +37,7 @@ class TranscriptTraffic {
   replayRequests: Record<string, unknown>[] = [];
   replayResponses: ReplayResponse[] = [];
   withheldChatId: string | null = null;
+  transcriptFrames: Array<{chatId: string; type: string; bytes: number}> = [];
   withheldBatches = 0;
   withheldThroughOrdinal = 0;
   droppedOnceChatId: string | null = null;
@@ -45,6 +46,7 @@ class TranscriptTraffic {
 
   reset(): void {
     this.historyReads = [];
+    this.transcriptFrames = [];
     this.replayRequests = [];
     this.replayResponses = [];
   }
@@ -82,13 +84,15 @@ class TranscriptTraffic {
       server.onMessage((message) => {
         const text = typeof message === 'string' ? message : message.toString('utf8');
         const parsed = JSON.parse(text) as Record<string, unknown>;
-        if (parsed.type === 'chat-messages') {
+        if (parsed.type === 'chat-messages' || parsed.type === 'chat-transcript-advanced') {
+          this.transcriptFrames.push({chatId: String(parsed.chatId), type: parsed.type, bytes: Buffer.byteLength(text)});
+          if (parsed.chatId === this.withheldChatId) this.withheldThroughOrdinal = Math.max(this.withheldThroughOrdinal, Number(parsed.lastOrdinal));
           const chatId = String(parsed.chatId);
           this.liveThroughOrdinal.set(
             chatId,
             Math.max(this.liveThroughOrdinal.get(chatId) ?? 0, Number(parsed.lastOrdinal)),
           );
-          if (chatId === this.droppedOnceChatId && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+          if (chatId === this.droppedOnceChatId && (parsed.type === 'chat-transcript-advanced' || Array.isArray(parsed.messages) && parsed.messages.length > 0)) {
             this.droppedOnceChatId = null;
             this.droppedBatch = { firstOrdinal: Number(parsed.firstOrdinal), lastOrdinal: Number(parsed.lastOrdinal) };
             return;
@@ -241,6 +245,7 @@ test('[TLV5-REPLAY.08-CHROMIUM-01] resumes cached chats from their ledger cursor
     phase('advancing A while it is offscreen and its live rows are withheld');
     await selectChat(page, 'warm-beta', beta);
     await settleActivation(page, traffic, beta);
+    traffic.reset();
     traffic.withheldChatId = alpha;
     const missed = await integration.client.runDirectChat({
       chatId: alpha,
@@ -260,6 +265,11 @@ test('[TLV5-REPLAY.08-CHROMIUM-01] resumes cached chats from their ledger cursor
     // A row delivered after withholding ends would arrive with a gap and correctly force a
     // snapshot, so every row through the head must be withheld before A returns.
     await browserExpect.poll(() => traffic.withheldThroughOrdinal).toBe(staleHead);
+
+    const backgroundFrames = traffic.transcriptFrames.filter(frame => frame.chatId === alpha);
+    expect(backgroundFrames.some(frame => frame.type === 'chat-messages')).toBe(false);
+    expect(backgroundFrames.length).toBeGreaterThan(0);
+    console.info('Offscreen transcript delivery', JSON.stringify({frames: backgroundFrames.length, summaryBytes: backgroundFrames.reduce((total, frame) => total + frame.bytes, 0)}));
 
     phase('returning to the stale cached chat');
     traffic.withheldChatId = null;

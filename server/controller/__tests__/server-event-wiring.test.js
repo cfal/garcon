@@ -168,7 +168,9 @@ function createFixture(overrides = {}) {
   const preambles = {};
   const chatBoards = {};
   const telegram = {};
+  // Models one socket that displays every chat and one that displays none.
   const published = [];
+  const backgroundPublished = [];
   let chatPresent = true;
   const noOp = mock(() => undefined);
   const agentRegistry = {
@@ -270,7 +272,14 @@ function createFixture(overrides = {}) {
     executors: executorManager,
     projectBasePath: '/worker/projects',
     server: {
-      publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      publish: mock((_topic, payload) => {
+        published.push(JSON.parse(payload));
+        backgroundPublished.push(JSON.parse(payload));
+      }),
+      publishTranscript: mock((_chatId, payloads) => {
+        published.push(JSON.parse(payloads.body()));
+        backgroundPublished.push(JSON.parse(payloads.summary()));
+      }),
       ...overrides.server,
     },
     agentRegistry,
@@ -319,6 +328,7 @@ function createFixture(overrides = {}) {
     metadata,
     processing,
     published,
+    backgroundPublished,
     queue,
     queueService,
     scheduled,
@@ -1205,6 +1215,25 @@ describe('server event wiring', () => {
       'failed',
       { error: 'provider failed', errorCode: 'CARRYOVER_COMPACTION_FAILED' },
     );
+  });
+
+  it('delivers summaries to undisplaying sockets in the same order as bodies', async () => {
+    const fixture = createFixture();
+
+    fixture.agent.transcript(providerCommit('partial answer'));
+    fixture.agent.transcript(terminalCommit('failed'));
+    fixture.agent.failed('chat-1', 'provider failed', 'CARRYOVER_COMPACTION_FAILED', turn);
+    await fixture.wiring.waitForIdle();
+
+    const displayed = fixture.published.map((message) => message.type);
+    const background = fixture.backgroundPublished.map((message) => message.type);
+    expect(background).toEqual(displayed.map((type) => (
+      type === 'chat-messages' ? 'chat-transcript-advanced' : type
+    )));
+    expect(fixture.backgroundPublished.some((message) => 'messages' in message)).toBe(false);
+    expect(background.lastIndexOf('chat-transcript-advanced'))
+      .toBeLessThan(background.indexOf('chat-processing-updated'));
+    expect(background.indexOf('chat-processing-updated')).toBeLessThan(background.indexOf('agent-run-failed'));
   });
 
   it.each(['agent', 'queue'])('publishes a dispatch failure once when %s reports first', async first => {

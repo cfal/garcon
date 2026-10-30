@@ -55,7 +55,6 @@ describe('LocalChatTranscriptStorage', () => {
 		storage.markStale('fresh-1');
 		storage.markValidated('fresh-2');
 		expect(storage.restore('fresh-3')).toBeNull();
-		expect(storage.listCursors()).toEqual([]);
 		storage.clearAll();
 
 		expect(snapshot()).toEqual(before);
@@ -192,29 +191,7 @@ describe('LocalChatTranscriptStorage', () => {
 		}
 	});
 
-	it('lists cached cursors in most-recently-accessed order', () => {
-		vi.useFakeTimers();
-		const base = new Date('2024-06-01T00:00:00Z').getTime();
-
-		vi.setSystemTime(base);
-		storage.persist('chat-1', [entry(1, 'a')], { transcriptViewId: 'generation-1', nextBeforeOrdinal: null, lastOrdinal: 1 });
-		vi.setSystemTime(base + 1000);
-		storage.persist('chat-2', [entry(1, 'b'), entry(2, 'c')], {
-			transcriptViewId: 'generation-2',
-			nextBeforeOrdinal: null,
-			lastOrdinal: 2,
-		});
-
-		expect(storage.listCursors()).toEqual([
-			{ chatId: 'chat-2', transcriptViewId: 'generation-2', lastOrdinal: 2 },
-			{ chatId: 'chat-1', transcriptViewId: 'generation-1', lastOrdinal: 1 },
-		]);
-		expect(storage.listCursors(1)).toEqual([
-			{ chatId: 'chat-2', transcriptViewId: 'generation-2', lastOrdinal: 2 },
-		]);
-	});
-
-	it('excludes stale transcripts from reconnect cursors', () => {
+	it('marks only the requested transcripts stale', () => {
 		storage.persist('chat-1', [entry(1, 'a')], {
 			transcriptViewId: 'generation-1',
 			nextBeforeOrdinal: null,
@@ -227,9 +204,8 @@ describe('LocalChatTranscriptStorage', () => {
 		});
 		storage.markStale('chat-2');
 
-		expect(storage.listCursors()).toEqual([
-			{ chatId: 'chat-1', transcriptViewId: 'generation-1', lastOrdinal: 1 },
-		]);
+		expect(storage.restore('chat-1')?.stale).toBe(false);
+		expect(storage.restore('chat-2')?.stale).toBe(true);
 	});
 
 	it('remove and clearAll delete snapshots and index state', () => {
@@ -316,16 +292,14 @@ describe('LocalChatTranscriptStorage', () => {
 		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
 		expect(JSON.parse(localStorage.getItem(INDEX_KEY)!).entries).toEqual([]);
 		expect(storage.restore('chat-1')).toBeNull();
-		expect(storage.listCursors()).toEqual([]);
 	});
 
-	it.each(['restore', 'listCursors'] as const)('rejects stored oversized snapshots before parsing in %s', (method) => {
+	it('rejects stored oversized snapshots before parsing them', () => {
 		persist(storage, 'chat-1', [entry(1, 'old')]);
 		const oversized = ' '.repeat(300_000);
 		localStorage.setItem(snapshotKey('chat-1'), oversized);
 		const parse = vi.spyOn(JSON, 'parse');
-		if (method === 'restore') expect(storage.restore('chat-1')).toBeNull();
-		else expect(storage.listCursors()).toEqual([]);
+		expect(storage.restore('chat-1')).toBeNull();
 		expect(parse).not.toHaveBeenCalledWith(oversized);
 		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
 	});

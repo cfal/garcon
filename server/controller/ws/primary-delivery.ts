@@ -97,11 +97,19 @@ export class PrimarySocketDelivery implements WebSocketMessagePublisher {
   }
 
   publish(topic: string, payload: string, compress?: boolean): number {
+    return this.publishSelected(topic, () => payload, compress);
+  }
+
+  publishSelected(
+    topic: string,
+    select: (peer: PrimaryWebSocket) => string,
+    compress?: boolean,
+  ): number {
     let sentBytes = 0;
     let queued = false;
     for (const [socket, peer] of this.#sockets) {
       if (peer.readyState !== 1 || !socket.isSubscribed(topic)) continue;
-      const status = peer.send(payload, compress);
+      const status = peer.send(select(peer), compress);
       if (status > 0) sentBytes += status;
       else if (status === -1) queued = true;
     }

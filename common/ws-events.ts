@@ -53,6 +53,7 @@ import {
   type ProjectUnavailableReason,
 } from './project-resolution';
 import { isRecord } from './json';
+import { ChatTranscriptAdvancedMessage, parseChatTranscriptAdvancedMessage } from './ws-transcript-summary';
 
 export class ChatMessagesMessage {
   readonly type = 'chat-messages' as const;
@@ -454,6 +455,7 @@ export class ClientRequestErrorMessage {
 
 export type ServerWsMessage =
   | ChatMessagesMessage
+  | ChatTranscriptAdvancedMessage
   | ChatSubscribedMessage
   | ChatTranscriptReplacedMessage
   | ChatTransientFeedMutationMessage
@@ -596,6 +598,8 @@ export function parseServerWsMessage(
           : undefined,
       );
     }
+    case 'chat-transcript-advanced':
+      return parseChatTranscriptAdvancedMessage(data);
     case 'chat-subscribed': {
       const clientRequestId = requiredStr(data.clientRequestId);
       const chatId = requiredStr(data.chatId);

@@ -189,6 +189,115 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it('keeps an undisplayed cache as a valid prefix and catches it up when shown', async () => {
+		const loads: string[] = [];
+		const loadTranscriptSnapshot = vi.fn(async (transcript, chatId: string) => {
+			loads.push(chatId);
+			transcript.transcriptCache.replace(chatId, 'view-1', [message(1), message(2)], 2, null);
+			transcript.installCachedSnapshot(chatId);
+		});
+		const readTranscriptReplayPage = vi.fn<TranscriptReplayPageReader>(async (request) =>
+			transcriptReplayPage(request, { messages: [message(2)], throughOrdinal: 2 }),
+		);
+		const { cache, registry } = fixture({
+			retainInactiveWindows: () => true,
+			loadTranscriptSnapshot,
+			readTranscriptReplayPage,
+		});
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		switchPanel(registry, 'chat-1');
+		switchPanel(registry, 'chat-2');
+		expect(loads).toEqual([]);
+		expect(registry.hasInactiveWindow('chat-1')).toBe(true);
+
+		registry.applyTranscriptAdvance('chat-1', 'view-1', 1);
+		expect(registry.hasInactiveWindow('chat-1')).toBe(true);
+
+		registry.applyTranscriptAdvance('chat-1', 'view-1', 2);
+		expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 1, stale: false });
+		expect(registry.hasInactiveWindow('chat-1')).toBe(true);
+		expect(loads).toEqual([]);
+
+		switchPanel(registry, 'chat-1');
+		await vi.waitFor(() =>
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 2, stale: false }),
+		);
+		expect(loads).toEqual([]);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('catches up a displayed chat after a summary that raced its in-flight snapshot load', async () => {
+		const loads: Array<{ through: number; release: () => void }> = [];
+		let serverThrough = 1;
+		const loadTranscriptSnapshot = vi.fn(async (transcript, chatId: string) => {
+			const through = serverThrough;
+			const gate = deferred<void>();
+			loads.push({ through, release: () => gate.resolve() });
+			await gate.promise;
+			const messages = Array.from({ length: through }, (_, index) => message(index + 1));
+			transcript.transcriptCache.replace(chatId, 'view-1', messages, through, null);
+			transcript.installCachedSnapshot(chatId);
+		});
+		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+		switchPanel(registry, 'chat-1');
+		await vi.waitFor(() => expect(loads).toHaveLength(1));
+
+		serverThrough = 3;
+		registry.applyTranscriptAdvance('chat-1', 'view-1', 3);
+		registry.applyTranscriptAdvance('chat-1', 'view-1', 2);
+		loads[0].release();
+
+		await vi.waitFor(() => expect(loads).toHaveLength(2));
+		expect(loads[1].through).toBe(3);
+		loads[1].release();
+		await vi.waitFor(() =>
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 3, stale: false }),
+		);
+		expect(
+			registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal),
+		).toEqual([1, 2, 3]);
+		await Promise.resolve();
+		expect(loads).toHaveLength(2);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('makes undisplayed chats catch up when shown after a disconnect', async () => {
+		const loads: string[] = [];
+		const loadTranscriptSnapshot = vi.fn(async (transcript, chatId: string) => {
+			loads.push(chatId);
+			transcript.transcriptCache.replace(chatId, 'view-1', [message(1)], 1, null);
+			transcript.installCachedSnapshot(chatId);
+		});
+		const { cache, registry } = fixture({
+			retainInactiveWindows: () => true,
+			loadTranscriptSnapshot,
+		});
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		seed(cache, 'chat-3');
+		switchPanel(registry, 'chat-1');
+		switchPanel(registry, 'chat-2');
+		expect(loads).toEqual([]);
+
+		registry.markUndisplayedUnverified();
+
+		expect(registry.hasInactiveWindow('chat-1')).toBe(false);
+		expect(cache.readAppliedCursor('chat-3')?.stale).toBe(false);
+		switchPanel(registry, 'chat-3');
+		await vi.waitFor(() => expect(cache.readAppliedCursor('chat-3')?.stale).toBe(false));
+		switchPanel(registry, 'chat-1');
+		await vi.waitFor(() => expect(cache.readAppliedCursor('chat-1')?.stale).toBe(false));
+		switchPanel(registry, 'chat-2');
+		switchPanel(registry, 'chat-3');
+		await Promise.resolve();
+		expect(loads).toEqual([]);
+		registry.destroy();
+		cache.flush();
+	});
+
 	it('keeps an expanded parked window visible through standalone overlay changes', () => {
 		const { cache, registry } = fixture({ retainInactiveWindows: () => true });
 		seed(cache, 'chat-1');

@@ -44,12 +44,6 @@ export interface RestoredChatTranscript {
 	stale: boolean;
 }
 
-export interface CachedChatCursor {
-	chatId: string;
-	transcriptViewId: string;
-	lastOrdinal: number;
-}
-
 export interface ChatTranscriptWindowOptions {
 	limit?: number;
 }
@@ -334,47 +328,6 @@ export class LocalChatTranscriptStorage {
 			);
 		} catch {
 			// Leaves validation best-effort.
-		}
-	}
-
-	listCursors(limit = 20): CachedChatCursor[] {
-		if (!canPersistBrowserData()) return [];
-		const boundedLimit = Math.max(0, Math.floor(limit));
-		if (boundedLimit === 0) return [];
-		try {
-			const sorted = readIndex()
-				.entries.filter((entry) => !entry.stale)
-				.sort(
-					(a, b) => new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime(),
-				);
-			const cursors: CachedChatCursor[] = [];
-			for (const entry of sorted) {
-				if (cursors.length >= boundedLimit) break;
-				const raw = localStorage.getItem(snapshotKey(entry.chatId));
-				if (!raw || raw.length > MAX_SNAPSHOT_CHARACTERS) {
-					this.remove(entry.chatId);
-					continue;
-				}
-				const parsed = JSON.parse(raw) as Partial<ChatSnapshotEnvelope>;
-				if (
-					parsed.version !== SCHEMA_VERSION ||
-					parsed.chatId !== entry.chatId ||
-					typeof parsed.transcriptViewId !== 'string' ||
-					!parsed.transcriptViewId ||
-					!(Number(parsed.lastOrdinal) > 0)
-				) {
-					this.remove(entry.chatId);
-					continue;
-				}
-				cursors.push({
-					chatId: entry.chatId,
-					transcriptViewId: parsed.transcriptViewId,
-					lastOrdinal: Number(parsed.lastOrdinal),
-				});
-			}
-			return cursors;
-		} catch {
-			return [];
 		}
 	}
 

@@ -1,12 +1,17 @@
-import {
+import { PanelRegistration } from './conversation-panel-registration.svelte.js';
+import type {
 	ActiveTranscriptState,
-	type ChatLoadMessagesOptions,
-	type SharedTranscriptCommit,
+	ChatLoadMessagesOptions,
+	SharedTranscriptCommit,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
 import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
-import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
+import type { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
+import {
+	MissedTranscriptCatchUp,
+	type TranscriptAdvance,
+} from '$lib/chat/transcript/missed-transcript-catch-up.js';
 import {
 	InactiveTranscriptWindowStore,
 	type InactiveTranscriptWindow,
@@ -46,7 +51,6 @@ import type {
 	TranscriptRowNavigationResult,
 	TranscriptRowTarget,
 } from '$lib/chat/transcript/transcript-row-navigation.js';
-import type { UserMessageNavigatorSelectionResult } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 
 export type ConversationPanelSnapshotAdmission = 'deferred' | 'admitted';
 
@@ -105,302 +109,6 @@ interface ActivePanelReconnectReplay {
 	readonly replay: TranscriptReconnectReplayState;
 }
 
-class PanelRegistration implements ConversationPanelRegistration {
-	#presentation: ConversationPanelPresentationPort | null = null;
-	#lastTarget: ConversationPanelRestoreTarget = { kind: 'end' };
-	#restoreEpoch = 0;
-	#readyRestoreEpoch: number | null = null;
-	#applyingRestoreEpoch: number | null = null;
-	#restoreResumeRequested = false;
-	#destroyed = false;
-	#snapshotAdmission: ConversationPanelSnapshotAdmission;
-	#rowNavigation: AbortController | null = null;
-	#lifetime = new AbortController();
-	#presentationReady: (() => void) | null = null;
-
-	readonly transcript: ActiveTranscriptState;
-	readonly lifecycle: ConversationLifecycleState;
-	readonly scroll: ConversationScrollController;
-
-	constructor(
-		readonly surfaceId: ChatViewSurfaceId,
-		readonly chatId: string,
-		snapshotAdmission: ConversationPanelSnapshotAdmission,
-		cache: ChatTranscriptCache,
-		lifecycle: Pick<ConversationLifecycleRegistry, 'forChat'>,
-		overlays: ConversationTranscriptOverlayStore,
-		onSnapshotResendCandidates: (chatId: string, candidates: readonly ResendCandidate[]) => void,
-		private readonly snapshots: {
-			load(options: ChatLoadMessagesOptions): Promise<boolean>;
-			restorePurpose(): TranscriptReadPurpose | undefined;
-			resume(purpose: TranscriptReadPurpose | undefined): Promise<CachedTranscriptResumeResult> | null;
-			wait(signal: AbortSignal): Promise<void>;
-		},
-		retainedTranscript?: ActiveTranscriptState,
-	) {
-		this.#snapshotAdmission = snapshotAdmission;
-		this.transcript = retainedTranscript ?? new ActiveTranscriptState(cache, overlays.forChat(chatId), {
-			onSnapshotResendCandidates,
-		});
-		if (!retainedTranscript) this.transcript.activateChat(chatId);
-		this.lifecycle = lifecycle.forChat(chatId);
-		this.scroll = new ConversationScrollController({
-			getScrollContainer: () => this.#presentation?.getScrollContainer() ?? null,
-			getViewport: () => this.#presentation?.getViewport() ?? null,
-			getQueueContainer: () => this.#presentation?.getQueueContainer(),
-			chatState: this.transcript,
-			getChatId: () => (this.#destroyed ? null : this.chatId),
-		});
-	}
-
-	get snapshotAdmission(): ConversationPanelSnapshotAdmission {
-		return this.#snapshotAdmission;
-	}
-
-	updateSnapshotAdmission(snapshotAdmission: ConversationPanelSnapshotAdmission): boolean {
-		const becameAdmitted =
-			this.#snapshotAdmission === 'deferred' && snapshotAdmission === 'admitted';
-		this.#snapshotAdmission = snapshotAdmission;
-		return becameAdmitted;
-	}
-
-	attachPresentation(port: ConversationPanelPresentationPort): () => void {
-		if (this.#destroyed) return () => {};
-		this.#presentation = port;
-		this.scroll.setViewportVisible(true);
-		if (port.getViewport()) this.#presentationReady?.();
-		this.resumePendingRestore();
-		return () => {
-			if (this.#presentation !== port) return;
-			this.#rowNavigation?.abort();
-			this.#lastTarget = port.captureRestoreTarget() ?? this.#lastTarget;
-			port.closeTransients();
-			this.#presentation = null;
-		};
-	}
-
-	resumePendingRestore(): void {
-		if (this.#presentation?.getViewport()) this.#presentationReady?.();
-		if (this.#applyingRestoreEpoch !== null) {
-			this.#restoreResumeRequested = true;
-			return;
-		}
-		void this.#applyPendingRestore();
-	}
-
-	prepareForInteractionLoss(): void {
-		this.#rowNavigation?.abort();
-		this.#presentation?.closeTransients();
-	}
-
-	captureRestoreTarget(): ConversationPanelRestoreTarget {
-		if (this.#presentation) {
-			this.#lastTarget = this.#presentation.captureRestoreTarget() ?? this.#lastTarget;
-		}
-		return this.#lastTarget;
-	}
-
-	completeInitialBottomRestore(): void {
-		this.scroll.completeInitialBottomRestore(() => this.snapshots.wait(this.#lifetime.signal));
-	}
-
-	prepareForHide(): ConversationPanelRestoreTarget {
-		this.#rowNavigation?.abort();
-		const target = this.captureRestoreTarget();
-		this.#presentation?.closeTransients();
-		this.scroll.setViewportVisible(false);
-		this.scroll.cancelNativeScroll();
-		this.transcript.invalidatePendingHistoryLoad();
-		this.transcript.invalidatePendingWindowNavigation();
-		return target;
-	}
-
-	async restore(target: ConversationPanelRestoreTarget | null): Promise<void> {
-		if (this.#destroyed) return;
-		const restoreEpoch = this.#beginRestore(target);
-		const restored = this.transcript.activateChat(this.chatId);
-		const minimumLimit = restored?.count ?? 0;
-		if (!restored || restored.stale || !this.#resumeCachedWindow(minimumLimit)) {
-			await this.snapshots.load({ minimumLimit });
-		}
-		await this.#finishRestore(restoreEpoch);
-	}
-
-	async restoreRetained(target: ConversationPanelRestoreTarget): Promise<void> {
-		if (this.#destroyed) return;
-		const restoreEpoch = this.#beginRestore(target);
-		if (!this.#resumeCachedWindow(0)) await this.snapshots.load({});
-		await this.#finishRestore(restoreEpoch);
-	}
-
-	// Presents the cached window at once and catches it up without holding the restore
-	// target on the network. A catch-up the server cannot prove contiguous loads a snapshot
-	// with the same purpose, so it coalesces with the activation's own fallback.
-	#resumeCachedWindow(minimumLimit: number): boolean {
-		const purpose = this.snapshots.restorePurpose();
-		const resume = this.snapshots.resume(purpose);
-		if (!resume) return false;
-		void resume
-			.then((result) => {
-				if (result.kind !== 'snapshot-required' || this.#destroyed) return;
-				return this.snapshots.load({ minimumLimit, ...(purpose ? { purpose } : {}) });
-			})
-			// The catch-up already marked the cache stale, so a later activation retries.
-			.catch(() => {});
-		return true;
-	}
-
-	#beginRestore(target: ConversationPanelRestoreTarget | null): number {
-		this.#rowNavigation?.abort();
-		const restoreEpoch = ++this.#restoreEpoch;
-		this.#readyRestoreEpoch = null;
-		this.#lastTarget = target ?? { kind: 'end' };
-		return restoreEpoch;
-	}
-
-	async #finishRestore(restoreEpoch: number): Promise<void> {
-		if (this.#destroyed || restoreEpoch !== this.#restoreEpoch) return;
-		this.#readyRestoreEpoch = restoreEpoch;
-		await this.#applyPendingRestore();
-	}
-
-	async navigateToTranscriptRow(
-		target: TranscriptRowTarget,
-		signal: AbortSignal,
-		ownsNavigation: () => boolean,
-	): Promise<TranscriptRowNavigationResult> {
-		this.#rowNavigation?.abort();
-		const operation = new AbortController();
-		this.#rowNavigation = operation;
-		const combined = AbortSignal.any([signal, operation.signal]);
-		const current = () => !this.#destroyed && this.#rowNavigation === operation && ownsNavigation();
-		++this.#restoreEpoch;
-		this.#readyRestoreEpoch = null;
-		try {
-			const result = await this.scroll.navigateToTranscriptRow(
-				target,
-				combined,
-				async (isCurrent) => {
-					await this.#waitForPresentation(combined);
-					if (!isCurrent()) return 'cancelled';
-					await this.snapshots.wait(combined);
-					if (!isCurrent()) return 'cancelled';
-					return this.transcript.navigateToRow(target, combined, isCurrent);
-				},
-				current,
-			);
-			if (combined.aborted || !current()) return 'cancelled';
-			await this.snapshots.wait(combined);
-			if (combined.aborted || !current()) return 'cancelled';
-			if (
-				this.transcript.transcriptViewId &&
-				this.transcript.transcriptViewId !== target.transcriptViewId
-			)
-				return 'view-changed';
-			return result;
-		} catch (error) {
-			if (combined.aborted || !current()) return 'cancelled';
-			throw error;
-		} finally {
-			if (this.#rowNavigation === operation) this.#rowNavigation = null;
-		}
-	}
-
-	#waitForPresentation(signal: AbortSignal): Promise<void> {
-		signal.throwIfAborted();
-		if (this.#presentation?.getViewport()) return Promise.resolve();
-		return new Promise((resolve, reject) => {
-			const finish = () => {
-				if (this.#presentationReady === finish) this.#presentationReady = null;
-				signal.removeEventListener('abort', finish);
-				if (signal.aborted) reject(signal.reason);
-				else resolve();
-			};
-			this.#presentationReady = finish;
-			signal.addEventListener('abort', finish, { once: true });
-		});
-	}
-
-	async #applyPendingRestore(): Promise<void> {
-		const restoreEpoch = this.#readyRestoreEpoch;
-		if (
-			this.#destroyed ||
-			restoreEpoch === null ||
-			restoreEpoch !== this.#restoreEpoch ||
-			this.#applyingRestoreEpoch !== null
-		)
-			return;
-		if (this.#lastTarget.kind === 'end') {
-			this.#prepareInitialBottomRestore();
-			return;
-		}
-		if (this.#lastTarget.transcriptViewId !== this.transcript.transcriptViewId) {
-			this.#lastTarget = { kind: 'end' };
-			this.#prepareInitialBottomRestore();
-			return;
-		}
-		if (!this.#presentation) return;
-		this.#applyingRestoreEpoch = restoreEpoch;
-		this.scroll.setPinnedToBottom(false);
-		try {
-			const target = this.#lastTarget;
-			const row = {
-				chatId: this.chatId,
-				transcriptViewId: target.transcriptViewId,
-				rowId: `${target.transcriptViewId}:${target.ordinal}`,
-			};
-			let result: UserMessageNavigatorSelectionResult;
-			if (target.kind === 'group-summary') {
-				result = await this.scroll.jumpToMessageRow(row, {
-					viewportOffset: target.viewportOffset,
-					presentation: 'group-summary',
-				});
-			} else {
-				result = await this.scroll.jumpToMessageRow(row, {
-					viewportOffset: target.viewportOffset,
-				});
-			}
-			if (
-				result === 'completed' &&
-				restoreEpoch === this.#restoreEpoch &&
-				restoreEpoch === this.#readyRestoreEpoch
-			)
-				this.#readyRestoreEpoch = null;
-		} finally {
-			if (this.#applyingRestoreEpoch === restoreEpoch) this.#applyingRestoreEpoch = null;
-			if (this.#restoreResumeRequested) {
-				this.#restoreResumeRequested = false;
-				void this.#applyPendingRestore();
-			}
-		}
-	}
-
-	#prepareInitialBottomRestore(): void {
-		this.#readyRestoreEpoch = null;
-		this.scroll.setPinnedToBottom(true);
-		this.scroll.prepareInitialBottomRestore(this.chatId);
-	}
-
-	destroy(): void {
-		if (this.#destroyed) return;
-		this.prepareForHide();
-		this.#destroyed = true;
-		this.#lifetime.abort();
-		this.#presentation = null;
-		this.transcript.clearMessages();
-	}
-
-	detachTranscript(): ActiveTranscriptState | null {
-		if (this.#destroyed) return null;
-		this.prepareForHide();
-		if (!this.transcript.suspendForParking()) return null;
-		this.#destroyed = true;
-		this.#lifetime.abort();
-		this.#presentation = null;
-		return this.transcript;
-	}
-}
-
 function waitForSnapshot(snapshot: Promise<unknown>, signal: AbortSignal): Promise<void> {
 	if (signal.aborted) return Promise.reject(signal.reason);
 	return new Promise((resolve, reject) => {
@@ -429,9 +137,18 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	#pendingSurfaceTransfers = new Map<ChatViewSurfaceId, PendingSurfaceTransfer>();
 	#surfaceTransferToken = 0;
 	#snapshotLoads = new Map<string, SnapshotLoad>();
-	#cachedResumes = new CachedTranscriptResumes(this, (request) => this.options.readTranscriptReplayPage(request));
+	#cachedResumes = new CachedTranscriptResumes(this, (request) =>
+		this.options.readTranscriptReplayPage(request),
+	);
 	#reconnectReplayEpoch = 0;
 	#reconnectReplays = new Map<string, ActivePanelReconnectReplay>();
+	#missedTranscripts = new MissedTranscriptCatchUp({
+		covers: (chatId, advance) => this.#cacheCovers(chatId, advance),
+		isDisplayed: (chatId) => this.#hasAdmittedPanel(chatId),
+		settleLoads: (chatId) => this.#settleSnapshotLoads(chatId),
+		load: (chatId) => this.loadChatSnapshot(chatId),
+		markLoadFailed: (chatId) => this.markChatStale(chatId),
+	});
 	// Reconciliation updates this reactive revision after mutating the plain panel map.
 	#visible = $state.raw<readonly ConversationPanelDescriptor[]>([]);
 	// Parked transcripts must not retain the reconciliation scope and its retired panels.
@@ -583,7 +300,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			}
 			this.#pendingSurfaceTransfers.delete(item.surfaceId);
 			this.#restoreTargets.delete(item.surfaceId);
-			void (retained ? panel.restoreRetained(target ?? retained.target) : panel.restore(target)).catch(() => {
+			void (
+				retained ? panel.restoreRetained(target ?? retained.target) : panel.restore(target)
+			).catch(() => {
 				if (this.#panels.get(item.surfaceId) === panel) this.markChatStale(item.chatId);
 			});
 		}
@@ -642,7 +361,11 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		const operation: SnapshotLoad = {
 			minimumLimit,
 			purpose: options.purpose,
-			promise: this.#performChatSnapshotLoad(chatId, options, () => this.#snapshotLoads.get(chatId) === operation).finally(() => {
+			promise: this.#performChatSnapshotLoad(
+				chatId,
+				options,
+				() => this.#snapshotLoads.get(chatId) === operation,
+			).finally(() => {
 				if (this.#snapshotLoads.get(chatId) === operation) this.#snapshotLoads.delete(chatId);
 			}),
 		};
@@ -793,6 +516,36 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		return { kind: 'applied', localRecoverySurfaceIds };
 	}
 
+	// Reconciles committed rows this socket received only as a summary.
+	applyTranscriptAdvance(chatId: string, transcriptViewId: string, lastOrdinal: number): void {
+		this.#missedTranscripts.apply(chatId, { transcriptViewId, lastOrdinal });
+	}
+
+	// Undisplayed chats lose every summary across a disconnect, so their parked
+	// windows are dropped and their caches catch up from their cursors when shown.
+	markUndisplayedUnverified(): void {
+		const displayed = new Set([...this.#panels.values()].map((panel) => panel.chatId));
+		this.#inactiveWindows.retainChats(displayed);
+	}
+
+	#cacheCovers(chatId: string, advance: TranscriptAdvance): boolean {
+		const cursor = this.options.cache.readAppliedCursor(chatId);
+		return Boolean(
+			cursor &&
+			!cursor.stale &&
+			cursor.transcriptViewId === advance.transcriptViewId &&
+			cursor.lastOrdinal >= advance.lastOrdinal,
+		);
+	}
+
+	async #settleSnapshotLoads(chatId: string): Promise<void> {
+		let pending = this.#snapshotLoads.get(chatId);
+		while (pending) {
+			await pending.promise.catch(() => false);
+			pending = this.#snapshotLoads.get(chatId);
+		}
+	}
+
 	hasInactiveWindow(chatId: string): boolean {
 		return this.#inactiveWindows.hasChat(chatId);
 	}
@@ -857,6 +610,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	handleViewReplacement(chatId: string): void {
+		this.#missedTranscripts.forget(chatId);
 		this.#snapshotLoads.delete(chatId);
 		this.#cachedResumes.forget(chatId);
 		for (const panel of this.panelsForChat(chatId)) panel.transcript.invalidatePendingLoads();
@@ -867,6 +621,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	removeChat(chatId: string): void {
+		this.#missedTranscripts.forget(chatId);
 		this.#cachedResumes.forget(chatId);
 		this.#inactiveWindows.removeChat(chatId);
 		for (const [surfaceId, panel] of this.#panels) {
@@ -886,6 +641,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	destroy(): void {
+		this.#missedTranscripts.clear();
 		this.#inactiveWindows.clear();
 		this.abortReconnectReplays();
 		for (const panel of this.#panels.values()) panel.destroy();
@@ -970,7 +726,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		if (!this.#hasAdmittedPanel(chatId)) return;
 		void this.#cachedResumes
 			.resumeAfterGap(chatId)
-			.then((result) => (result.kind === 'snapshot-required' ? this.loadChatSnapshot(chatId) : undefined))
+			.then((result) =>
+				result.kind === 'snapshot-required' ? this.loadChatSnapshot(chatId) : undefined,
+			)
 			// A failed snapshot leaves the cache stale, so the next activation reloads it.
 			.catch(() => {});
 	}

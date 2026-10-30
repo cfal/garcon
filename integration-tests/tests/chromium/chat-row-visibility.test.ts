@@ -261,12 +261,23 @@ async function cardColors(
   });
 }
 
-async function waitForTrackedContent(page: Page, content: string): Promise<void> {
+async function waitForRowSummary(
+  page: Page,
+  row: Pick<AddChatRowResponse, 'chatId' | 'transcriptViewId' | 'ordinal'>,
+): Promise<void> {
   await page.waitForFunction(
-    (expected) => JSON.stringify(
-      (globalThis as BrowserScope).__chatRowSocketTracker?.frames ?? [],
-    ).includes(expected),
-    content,
+    ({ chatId, transcriptViewId, ordinal }) => (
+      (globalThis as BrowserScope).__chatRowSocketTracker?.frames ?? []
+    ).some((frame) => {
+      if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return false;
+      const record = frame as Record<string, unknown>;
+      return record.type === 'chat-transcript-advanced'
+        && record.chatId === chatId
+        && record.transcriptViewId === transcriptViewId
+        && typeof record.firstOrdinal === 'number' && record.firstOrdinal <= ordinal
+        && typeof record.lastOrdinal === 'number' && record.lastOrdinal >= ordinal;
+    }),
+    { chatId: row.chatId, transcriptViewId: row.transcriptViewId, ordinal: row.ordinal },
   );
 }
 
@@ -565,6 +576,7 @@ describe('Chromium transcript chat rows', () => {
         const noticeTitle = 'Browser deployment';
         const errorTitle = 'Browser release validation';
         const customTitle = 'Browser custom deployment';
+        const hiddenFrameStart = (await trackerSnapshot(observerPage)).frameCount;
         markPhase('publishing live preset and custom chat rows');
         const info = await addRow({
           fixture,
@@ -690,14 +702,18 @@ describe('Chromium transcript chat rows', () => {
         expect(await cardColors(fixture.page, custom)).not.toEqual(
           await cardColors(fixture.page, info),
         );
-        await waitForTrackedContent(observerPage, infoContent);
-        await waitForTrackedContent(observerPage, noticeContent);
-        await waitForTrackedContent(observerPage, errorContent);
-        await waitForTrackedContent(observerPage, customRenderedContent);
-        await waitForTrackedContent(observerPage, infoTitle);
-        await waitForTrackedContent(observerPage, noticeTitle);
-        await waitForTrackedContent(observerPage, errorTitle);
-        await waitForTrackedContent(observerPage, customTitle);
+        for (const row of [info, notice, error, custom]) {
+          await waitForRowSummary(observerPage, row);
+        }
+        const hiddenFrames = await observerPage.evaluate((afterFrame) => (
+          (globalThis as BrowserScope).__chatRowSocketTracker?.frames ?? []
+        ).slice(afterFrame), hiddenFrameStart);
+        for (const content of [
+          infoContent, noticeContent, errorContent, customRenderedContent,
+          infoTitle, noticeTitle, errorTitle, customTitle,
+        ]) {
+          expect(JSON.stringify(hiddenFrames)).not.toContain(content);
+        }
         await expectComposerStable(fixture.page, 'chat row draft remains stable');
 
         markPhase('restoring the warmed background transcript');

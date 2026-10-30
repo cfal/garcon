@@ -337,6 +337,20 @@ describe('WsConnection', () => {
 		expect(transitions).toEqual([true, false, true, false]);
 	});
 
+	it('lets a connection listener send first on the newly opened socket', () => {
+		const connection = new WsConnection();
+		connection.onConnectionChange((connected) => {
+			if (connected) connection.sendMessage({ type: 'chat-transcript-interest', chatIds: ['chat-a'] });
+		});
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		expect(socket.send).toHaveBeenCalledOnce();
+		expect(lastSentPayload(socket)).toEqual({ type: 'chat-transcript-interest', chatIds: ['chat-a'] });
+		connection.disconnect();
+	});
+
 	it('publishes connection status transitions', () => {
 		vi.setSystemTime(1_000);
 		const connection = new WsConnection();

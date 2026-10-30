@@ -54,6 +54,7 @@ import { createNoiseServer } from '@cfal/noise-ws';
 import { EXECUTOR_PENDING_SOCKET_LIMIT, EXECUTOR_SOCKET_LIMIT } from '../remote/transport/socket-admission.js';
 import { createServerSocketHandlers, type WsConnectionData } from './ws/server-sockets.js';
 import { PrimarySocketDelivery } from './ws/primary-delivery.js';
+import { ChatTranscriptInterestRegistry } from './ws/chat-transcript-interest.js';
 import { AgentDirectory } from './agents/directory.js';
 import { executorConfigGuards } from './executors/config-guards.js';
 import { effectiveExecutorId } from '../../common/executors.js';
@@ -715,6 +716,7 @@ export async function startServer(): Promise<void> {
     );
 
     const primaryDelivery = new PrimarySocketDelivery(config.wsBackpressureLimit);
+    const transcriptInterest = new ChatTranscriptInterestRegistry();
     eventWiring = await startExecutionControlPlane({
       wireEvents: () => wireServerEvents({
         executors,
@@ -724,6 +726,7 @@ export async function startServer(): Promise<void> {
           publish(topic, payload) {
             return publishWebSocketPayload(primaryDelivery, topic, payload);
           },
+          publishTranscript: transcriptInterest.createPublisher(primaryDelivery),
         },
         agentRegistry,
         chatRegistry,
@@ -827,6 +830,7 @@ export async function startServer(): Promise<void> {
       queue,
       transientFeeds,
       registry: chatRegistry,
+      transcriptInterest,
     });
     const primaryWs = new PrimaryWsHandler(chatHandler, terminalStream);
 

@@ -5,6 +5,11 @@
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { ServerWsMessage, EventKey } from '$shared/ws-events';
+import { ChatTranscriptAdvancedMessage } from '$shared/ws-transcript-summary';
+import {
+	summarizeTranscriptActivity,
+	type ChatTranscriptActivity,
+} from '$shared/chat-transcript-activity';
 import {
 	ChatMessagesMessage,
 	ChatTranscriptReplacedMessage,
@@ -23,7 +28,8 @@ import {
 	ChatListRefreshRequestedMessage,
 } from '$shared/ws-events';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
-import type { ChatMessage, PermissionMode } from '$lib/types/chat';
+import type { TransientFeedApplyResult } from '$lib/chat/transcript/transient-feed-state.js';
+import type { PermissionMode } from '$lib/types/chat';
 import type { ActiveTranscriptPort } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import {
@@ -33,7 +39,7 @@ import {
 } from '$lib/chat/conversation/pending-chat-handoff.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
-import { applyChatMessageBatchActivity } from '$lib/chat/sessions/chat-message-batch-activity.js';
+import { applyChatTranscriptActivity } from '$lib/chat/sessions/chat-transcript-activity.js';
 import { getChatSnapshot } from '$lib/api/chats.js';
 
 import { untrack } from 'svelte';
@@ -41,9 +47,10 @@ import { normalizeEvent } from '$lib/ws/normalize';
 import { filterByChat } from './chat-filter';
 
 import { handleAgentComplete, handleAgentError, type LifecycleContext } from './handlers/lifecycle';
-import { handlePlanModeMessages, type PlanModeContext } from './handlers/plan-mode';
+import { handlePlanModeActivity, type PlanModeContext } from './handlers/plan-mode';
 import {
-	handlePermissionLifecycleFromBatch,
+	handlePermissionFeedTransition,
+	transientPermissionOccurrences,
 	type PermissionLifecycleContext,
 } from './handlers/permissions';
 import { handleExecutionControlUpdated, type QueueContext } from './handlers/queue';
@@ -102,6 +109,8 @@ export type EventRouterChatStateStore = Pick<
 		lastOrdinal: number,
 		resendCandidates: ResendCandidate[],
 	) => 'applied' | 'view-changed' | 'gap-detected';
+	// Reconciles a span this socket received only as a summary.
+	applyTranscriptAdvance: (chatId: string, transcriptViewId: string, lastOrdinal: number) => void;
 	reloadChatTranscript: (chatId: string) => void;
 	isRenderedChat: (chatId: string) => boolean;
 	loadRenderedChat: (chatId: string) => Promise<void> | void;
@@ -264,7 +273,6 @@ function buildDispatch(
 	};
 
 	const permLifecycleCtx: PermissionLifecycleContext = {
-		conversationUi: stores.conversationUi,
 		markTurnRunning,
 		pushLoadingStatus: stores.lifecycle.pushLoadingStatus,
 		popLoadingStatus: stores.lifecycle.popLoadingStatus,
@@ -294,6 +302,35 @@ function buildDispatch(
 	};
 	const transientTranscriptViews = new Map<string, string>();
 
+	// Bodies and summaries feed the sidebar, read state, and plan mode through
+	// the same activity, so displayed and undisplayed chats stay consistent.
+	const applyTranscriptActivity = (chatId: string, activity: ChatTranscriptActivity) => {
+		const activityTimestamp = applyChatTranscriptActivity(stores.sessions, chatId, activity);
+		const isActiveChat = chatId === (stores.sessions.selectedChat?.id || null);
+		if (isActiveChat && activityTimestamp && document.visibilityState === 'visible') {
+			stores.readState.enqueueReadReceipt(chatId, activityTimestamp);
+		}
+		handlePlanModeActivity(chatId, activity, planModeCtx);
+	};
+
+	// Applies a transient-feed change and derives the permission status from it.
+	const changeTransientFeed = (
+		chatId: string,
+		apply: () => TransientFeedApplyResult,
+	): TransientFeedApplyResult => {
+		const previous = transientPermissionOccurrences(stores.conversationUi.getTransientFeed(chatId));
+		const result = apply();
+		if (result.kind === 'applied') {
+			handlePermissionFeedTransition(
+				chatId,
+				previous,
+				transientPermissionOccurrences(result.snapshot),
+				permLifecycleCtx,
+			);
+		}
+		return result;
+	};
+
 	const refreshTransientFeed = (chatId: string, requestedTranscriptViewId: string) => {
 		const knownTranscriptViewId = transientTranscriptViews.get(chatId);
 		if (knownTranscriptViewId && knownTranscriptViewId !== requestedTranscriptViewId) return;
@@ -303,7 +340,9 @@ function buildDispatch(
 		void getChatSnapshot(chatId, 1)
 			.then((snapshot) => {
 				if (transientTranscriptViews.get(chatId) !== requestedTranscriptViewId) return;
-				const result = stores.conversationUi.setTransientFeedFromSnapshot(snapshot.transientFeed);
+				const result = changeTransientFeed(chatId, () =>
+					stores.conversationUi.setTransientFeedFromSnapshot(snapshot.transientFeed),
+				);
 				if (result.kind !== 'applied') return;
 				const snapshotTranscriptViewId = snapshot.transientFeed.transcriptViewId;
 				transientTranscriptViews.set(chatId, snapshotTranscriptViewId);
@@ -336,10 +375,18 @@ function buildDispatch(
 	return {
 		'chat-messages': (msg) => {
 			if (!(msg instanceof ChatMessagesMessage)) return;
+			applyTranscriptActivity(
+				msg.chatId,
+				summarizeTranscriptActivity(msg.messages.map((entry) => entry.message)),
+			);
 			messagesAccumulator.enqueue(msg);
-			const batch = messagesOf(msg);
-			handlePlanModeMessages(batch, planModeCtx);
-			handlePermissionLifecycleFromBatch(batch, permLifecycleCtx);
+		},
+		'chat-transcript-advanced': (msg) => {
+			if (!(msg instanceof ChatTranscriptAdvancedMessage)) return;
+			// Applies bodies received earlier in this drain before comparing cursors.
+			messagesAccumulator.flush();
+			applyTranscriptActivity(msg.chatId, msg.activity);
+			stores.chatState.applyTranscriptAdvance(msg.chatId, msg.transcriptViewId, msg.lastOrdinal);
 		},
 		'chat-transcript-replaced': (msg) => {
 			if (!(msg instanceof ChatTranscriptReplacedMessage)) return;
@@ -350,7 +397,9 @@ function buildDispatch(
 		},
 		'chat-transient-feed-mutation': (msg) => {
 			if (!(msg instanceof ChatTransientFeedMutationMessage)) return;
-			const result = stores.conversationUi.applyTransientFeedMutation(msg);
+			const result = changeTransientFeed(msg.chatId, () =>
+				stores.conversationUi.applyTransientFeedMutation(msg),
+			);
 			if (result.kind === 'snapshot-required' || result.kind === 'corrupt') {
 				refreshTransientFeed(msg.chatId, msg.transcriptViewId);
 			}
@@ -451,25 +500,6 @@ export function createEventRouter(
 				const selectedChat = stores.sessions.selectedChat;
 				const currentChatId = stores.lifecycle.currentChatId();
 				const pendingViewChatId = stores.conversationUi.pendingViewChat?.chatId || null;
-				// Patch the sidebar and selected-chat read state before keyed reducers run.
-				if (event.message instanceof ChatMessagesMessage) {
-					const agentMsg = event.message;
-					if (agentMsg.chatId) {
-						const messages = agentMsg.messages.map((entry) => entry.message);
-						const activityTimestamp = applyChatMessageBatchActivity(
-							stores.sessions,
-							agentMsg.chatId,
-							messages,
-						);
-
-						// Enqueue read receipts for all active-chat transcript activity when visible.
-						const isActiveChat = agentMsg.chatId === (selectedChat?.id || null);
-						if (isActiveChat && activityTimestamp && document.visibilityState === 'visible') {
-							stores.readState.enqueueReadReceipt(agentMsg.chatId, activityTimestamp);
-						}
-					}
-				}
-
 				const filterResult = filterByChat(event.key, event.message, {
 					selectedChatId: selectedChat?.id || null,
 					currentChatId,
@@ -485,11 +515,4 @@ export function createEventRouter(
 			messagesAccumulator.flush();
 		});
 	});
-}
-
-function messagesOf(msg: ChatMessagesMessage): { chatId: string; messages: ChatMessage[] } {
-	return {
-		chatId: msg.chatId,
-		messages: msg.messages.map((entry) => entry.message),
-	};
 }

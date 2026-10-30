@@ -8,20 +8,12 @@ import {
 	type ChatSubscribedMessage,
 } from '$shared/ws-events';
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
-import type { TranscriptMessage } from '$shared/chat-view';
-import type {
-	ChatTranscriptCache,
-	ChatTranscriptCursor,
-} from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import type { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
 import { getChatExecutionControl } from '$lib/api/chats.js';
 import type { WsMessageConsumer } from './connection.svelte.js';
 import { requestTranscriptReplayPage } from './transcript-replay-request.js';
-import type {
-	CommittedTranscriptBatch,
-	ConversationPanelBatchApplyResult,
-} from '$lib/chat/conversation/committed-transcript-batch.js';
 import type {
 	TranscriptBufferedBatch,
 	TranscriptReplayApplyResult,
@@ -37,8 +29,8 @@ export interface ReconnectPanelRegistryPort {
 	readonly transcriptCache: Pick<ChatTranscriptCache, 'readAppliedCursor' | 'markValidated'>;
 	visibleChatIds(): readonly string[];
 	panelsForChat(chatId: string): readonly unknown[];
-	hasInactiveWindow(chatId: string): boolean;
 	markChatStale(chatId: string): void;
+	markUndisplayedUnverified(): void;
 	loadChatSnapshot(chatId: string): Promise<boolean>;
 	beginReconnectReplay(chatId: string, transcriptViewId: string): number;
 	applyReconnectReplayPage(
@@ -50,7 +42,6 @@ export interface ReconnectPanelRegistryPort {
 	abortReconnectReplay(token: number, chatId: string): void;
 	abortReconnectReplays(): void;
 	noticeRevisionFor(chatId: string): number;
-	applyCommittedBatch(batch: CommittedTranscriptBatch): ConversationPanelBatchApplyResult;
 }
 
 export type ReconnectConversationUiState = Pick<
@@ -69,18 +60,8 @@ export interface ChatReconnectCoordinatorOptions {
 	conversationUi: ReconnectConversationUiState;
 	sessions: Pick<ChatSessionsPort, 'selectedChatId' | 'quietRefreshChats'>;
 	getExecutionControl?: (chatId: string) => Promise<{ control: ChatExecutionControlState }>;
-	getBackgroundCursors: () => ChatTranscriptCursor[];
-	markBackgroundStale: (chatId: string) => void;
-	onBackgroundMessages?: (
-		chatId: string,
-		transcriptViewId: string,
-		messages: TranscriptMessage[],
-		firstOrdinal: number,
-		lastOrdinal: number,
-	) => Promise<boolean | void> | boolean | void;
 }
 
-const BACKGROUND_RESUME_LIMIT = 20;
 const CONTROL_REFRESH_CONCURRENCY = 4;
 
 interface TranscriptReplayInput {
@@ -144,16 +125,15 @@ export class ChatReconnectCoordinator {
 		await this.#reconcileAfterReconnect(chatId, epoch);
 	}
 
+	// Only displayed chats replay transcript bodies. Undisplayed caches received
+	// no bodies and lost their summaries while disconnected, so they catch up
+	// from their cursors when shown.
 	async #reconcileAfterReconnect(selectedChatId: string | null, epoch: number): Promise<void> {
 		const visibleChatIds = [...this.options.panels.visibleChatIds()];
-		const excludedBackgroundChatIds = new Set(visibleChatIds);
+		this.options.panels.markUndisplayedUnverified();
 		const globalReconciliation = this.#reconcileGlobalState(selectedChatId, epoch);
 		const visibleResume = this.#resumeRenderedChats(visibleChatIds, epoch);
-		const backgroundResume = this.#resumeBackgroundChats(excludedBackgroundChatIds, epoch);
-		const [, globalState] = await Promise.all([
-			Promise.all([visibleResume, backgroundResume]),
-			globalReconciliation,
-		]);
+		const [, globalState] = await Promise.all([visibleResume, globalReconciliation]);
 		if (epoch === this.#reconnectEpoch) await globalState.controlRefresh;
 	}
 
@@ -315,104 +295,6 @@ export class ChatReconnectCoordinator {
 					.map((chatId) => this.#refreshControl(chatId, epoch)),
 			);
 		}
-	}
-
-	async #resumeBackgroundChats(excludedChatIds: Set<string>, epoch: number): Promise<void> {
-		const cursors = this.options
-			.getBackgroundCursors()
-			.filter((cursor) => !excludedChatIds.has(cursor.chatId))
-			.filter((cursor) => cursor.transcriptViewId && cursor.lastOrdinal > 0)
-			.slice(0, BACKGROUND_RESUME_LIMIT);
-		const replayTokens = this.#beginParkedBackgroundReplays(cursors);
-
-		let shouldRefresh = false;
-		try {
-			for (const cursor of cursors) {
-				if (epoch !== this.#reconnectEpoch) return;
-				const replayToken = replayTokens.get(cursor.chatId) ?? null;
-				try {
-					const message = await this.#replayTranscript({
-						chatId: cursor.chatId,
-						transcriptViewId: cursor.transcriptViewId,
-						afterOrdinal: cursor.lastOrdinal,
-						isCurrent: () => epoch === this.#reconnectEpoch,
-						apply: (page) => this.#applyBackgroundReplayPage(cursor.chatId, page, replayToken),
-					});
-					if (!message) return;
-					if (replayToken !== null) {
-						const result = this.options.panels.finishReconnectReplay(replayToken, cursor.chatId);
-						replayTokens.delete(cursor.chatId);
-						if (result !== 'applied') {
-							throw new Error('Retained transcript replay could not finish');
-						}
-						this.options.panels.transcriptCache.markValidated(cursor.chatId);
-					}
-					shouldRefresh = message.throughOrdinal > cursor.lastOrdinal || shouldRefresh;
-				} catch {
-					if (replayToken !== null) {
-						this.options.panels.abortReconnectReplay(replayToken, cursor.chatId);
-						replayTokens.delete(cursor.chatId);
-					}
-					if (epoch !== this.#reconnectEpoch) return;
-					this.options.markBackgroundStale(cursor.chatId);
-					shouldRefresh = true;
-				}
-			}
-		} finally {
-			for (const [chatId, replayToken] of replayTokens) {
-				this.options.panels.abortReconnectReplay(replayToken, chatId);
-			}
-		}
-
-		if (epoch === this.#reconnectEpoch && shouldRefresh) {
-			await this.#refreshChatsQuietly();
-		}
-	}
-
-	#beginParkedBackgroundReplays(cursors: readonly ChatTranscriptCursor[]): Map<string, number> {
-		const replayTokens = new Map<string, number>();
-		for (const cursor of cursors) {
-			if (!this.options.panels.hasInactiveWindow(cursor.chatId)) continue;
-			replayTokens.set(
-				cursor.chatId,
-				this.options.panels.beginReconnectReplay(cursor.chatId, cursor.transcriptViewId),
-			);
-		}
-		return replayTokens;
-	}
-
-	#applyBackgroundReplayPage(
-		chatId: string,
-		page: ChatSubscribedMessage,
-		replayToken: number | null = null,
-	): Promise<boolean | void> | boolean | void {
-		const panels = this.options.panels;
-		if (replayToken === null) {
-			const hasWindow = panels.panelsForChat(chatId).length > 0 || panels.hasInactiveWindow(chatId);
-			if (!hasWindow) {
-				return this.options.onBackgroundMessages?.(
-					chatId,
-					page.transcriptViewId,
-					page.messages,
-					page.firstOrdinal,
-					page.lastOrdinal,
-				);
-			}
-		}
-
-		const batch = {
-			transcriptViewId: page.transcriptViewId,
-			messages: page.messages,
-			firstOrdinal: page.firstOrdinal,
-			lastOrdinal: page.lastOrdinal,
-			resendCandidates: page.resendCandidates,
-			noticeRevision: panels.noticeRevisionFor(chatId),
-		};
-		if (replayToken !== null) {
-			return panels.applyReconnectReplayPage(replayToken, chatId, batch) === 'applied';
-		}
-		const result = panels.applyCommittedBatch({ chatId, ...batch });
-		return result.kind === 'applied' && result.localRecoverySurfaceIds.length === 0;
 	}
 
 	async #refreshChatsQuietly(): Promise<void> {

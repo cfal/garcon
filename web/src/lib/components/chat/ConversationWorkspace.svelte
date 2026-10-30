@@ -35,7 +35,6 @@
 	import { createDrainCursor } from '$lib/ws/drain';
 	import { ChatReconnectCoordinator } from '$lib/ws/reconnect-coordinator.svelte';
 	import { mountConversationRouter } from '$lib/chat/conversation/conversation-router-adapter.svelte.js';
-	import { applyChatMessageBatchActivity } from '$lib/chat/sessions/chat-message-batch-activity.js';
 	import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
 	import type { ConversationPanelRegistration } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import { requiresQueuedSubmission } from '$lib/chat/conversation/submission-classifier.js';
@@ -185,22 +184,6 @@
 		panels: conversationPanels,
 		conversationUi,
 		sessions,
-		getBackgroundCursors: () => transcriptCache.listCursors(20),
-		markBackgroundStale: (chatId) => conversationPanels.markChatStale(chatId),
-		onBackgroundMessages: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) => {
-			const applied = transcriptCache.applyMessages(chatId, transcriptViewId, {
-				messages,
-				firstOrdinal,
-				lastOrdinal,
-			});
-			if (applied.status !== 'applied') return false;
-			applyChatMessageBatchActivity(
-				sessions,
-				chatId,
-				messages.map((entry) => entry.message),
-			);
-			return true;
-		},
 	});
 
 	setComposerState(composerState);

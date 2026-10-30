@@ -4,8 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ConversationWorkspaceEscapeHost from './ConversationWorkspaceEscapeHost.svelte';
 import { getChatExecutionControl, getChatMessages, stopChat } from '$lib/api/chats.js';
 import { getGitRefs, type GitQuickSummaryReady } from '$lib/api/git.js';
-import { ToolResultMessage } from '$shared/chat-types';
-import type { TranscriptMessage } from '$shared/chat-view';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
@@ -17,18 +15,6 @@ import { playCompletionSound } from '$lib/notifications/completion-sound.js';
 import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 
 vi.mock('$lib/notifications/completion-sound.js', () => ({ playCompletionSound: vi.fn() }));
-
-type BackgroundMessagesHandler = (
-	chatId: string,
-	transcriptViewId: string,
-	messages: TranscriptMessage[],
-	firstOrdinal: number,
-	lastOrdinal: number,
-) => boolean;
-
-const reconnectHarness = vi.hoisted(() => ({
-	onBackgroundMessages: null as BackgroundMessagesHandler | null,
-}));
 
 vi.mock('$lib/api/chats.js', () => ({
 	compactChat: vi.fn(),
@@ -64,10 +50,6 @@ vi.mock('$lib/chat/conversation/conversation-router-adapter.svelte.js', () => ({
 
 vi.mock('$lib/ws/reconnect-coordinator.svelte', () => ({
 	ChatReconnectCoordinator: class {
-		constructor(options: { onBackgroundMessages: BackgroundMessagesHandler }) {
-			reconnectHarness.onBackgroundMessages = options.onBackgroundMessages;
-		}
-
 		mount(): void {}
 	},
 }));
@@ -123,7 +105,6 @@ describe('ConversationWorkspace Escape abort handling', () => {
 		}
 	});
 	beforeEach(() => {
-		reconnectHarness.onBackgroundMessages = null;
 		mockGetChatMessages.mockResolvedValue({
 			historyState: { kind: 'complete' },
 			chatId: 'chat-1',
@@ -175,30 +156,6 @@ describe('ConversationWorkspace Escape abort handling', () => {
 		});
 		mockGetGitRefs.mockReset();
 		mockGetGitRefs.mockResolvedValue({ refs: [] });
-	});
-
-	it('patches activity for a tool-only background reconnect batch', () => {
-		const patchActivity = vi.fn();
-		render(ConversationWorkspaceEscapeHost, { onPatchActivity: patchActivity });
-		const onBackgroundMessages = reconnectHarness.onBackgroundMessages;
-		if (!onBackgroundMessages) throw new Error('Expected reconnect background message handler');
-		const timestamp = '2026-01-01T00:00:01.000Z';
-
-		expect(
-			onBackgroundMessages(
-				'chat-background',
-				'view-background',
-				[
-					{
-						ordinal: 1,
-						message: new ToolResultMessage(timestamp, 'tool-1', { content: 'result' }, false),
-					},
-				],
-				1,
-				1,
-			),
-		).toBe(true);
-		expect(patchActivity).toHaveBeenCalledWith('chat-background', timestamp);
 	});
 
 	it.each(['/other', '/workspace/project'])('opens busy quick Commit without a summary, notifying only for a different target (%s)', async (projectPath) => {

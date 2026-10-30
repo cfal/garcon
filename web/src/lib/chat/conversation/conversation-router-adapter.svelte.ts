@@ -104,6 +104,8 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 					noticeRevision: deps.panels.noticeRevisionFor(chatId),
 				}));
 			},
+			applyTranscriptAdvance: (chatId, transcriptViewId, lastOrdinal) =>
+				deps.panels.applyTranscriptAdvance(chatId, transcriptViewId, lastOrdinal),
 			reloadChatTranscript: (chatId) => {
 				void deps.panels.loadChatSnapshot(chatId).catch(() => {});
 			},

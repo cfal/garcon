@@ -5,10 +5,7 @@ import {
 	type TranscriptMessage,
 	type TranscriptPage,
 } from '$shared/chat-view';
-import {
-	LocalChatTranscriptStorage,
-	type CachedChatCursor,
-} from '$lib/chat/transcript/chat-transcript-storage.js';
+import { LocalChatTranscriptStorage } from '$lib/chat/transcript/chat-transcript-storage.js';
 import {
 	mergeTranscriptEntriesByOrdinal,
 	retainedEarlierPageCursor,
@@ -21,12 +18,6 @@ export type ChatTranscriptApplyResult =
 	| { status: 'missing-base' }
 	| { status: 'view-changed' }
 	| { status: 'gap-detected'; expectedOrdinal: number; receivedOrdinal: number };
-
-export interface ChatTranscriptCursor {
-	chatId: string;
-	transcriptViewId: string;
-	lastOrdinal: number;
-}
 
 export interface ChatTranscriptAppliedCursor {
 	transcriptViewId: string;
@@ -368,33 +359,6 @@ export class ChatTranscriptCache {
 		if (current) this.#entries.set(chatId, { ...current, stale: false });
 		// A pending replacement validates on write; the stored snapshot may still belong to an older view.
 		if (!this.#persistence.hasPending(chatId)) this.#storage.markValidated(chatId);
-	}
-
-	listCursors(limit = 20): ChatTranscriptCursor[] {
-		const boundedLimit = Math.max(0, Math.floor(limit));
-		if (boundedLimit === 0) return [];
-
-		const memory = [...this.#entries.values()]
-			.filter((entry) => entry.transcriptViewId && entry.lastOrdinal > 0 && !entry.stale)
-			.sort((left, right) =>
-				(this.#lastAccessedAt.get(right.chatId) ?? '').localeCompare(
-					this.#lastAccessedAt.get(left.chatId) ?? '',
-				),
-			)
-			.map(
-				(entry): ChatTranscriptCursor => ({
-					chatId: entry.chatId,
-					transcriptViewId: entry.transcriptViewId,
-					lastOrdinal: entry.lastOrdinal,
-				}),
-			);
-		if (memory.length >= boundedLimit) return memory.slice(0, boundedLimit);
-
-		const seen = new Set(this.#entries.keys());
-		const persisted = this.#storage
-			.listCursors(boundedLimit)
-			.filter((cursor: CachedChatCursor) => !seen.has(cursor.chatId));
-		return [...memory, ...persisted].slice(0, boundedLimit);
 	}
 
 	remove(chatId: string): void {

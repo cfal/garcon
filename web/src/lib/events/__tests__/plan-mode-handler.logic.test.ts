@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { handlePlanModeMessages, type PlanModeContext } from '../handlers/plan-mode';
+import { handlePlanModeActivity, type PlanModeContext } from '../handlers/plan-mode';
 import {
 	BashToolUseMessage,
 	EnterPlanModeToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	type ChatMessage,
 } from '$shared/chat-types';
+import { summarizeTranscriptActivity } from '$shared/chat-transcript-activity';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 
 function makeContext(mode = 'plan'): {
@@ -26,95 +27,56 @@ function makeContext(mode = 'plan'): {
 	return { ctx, read: () => pending };
 }
 
-function batch(messages: ChatMessage[], chatId = 'chat-1') {
-	return { chatId, messages };
+function apply(messages: ChatMessage[], ctx: PlanModeContext, chatId = 'chat-1') {
+	handlePlanModeActivity(chatId, summarizeTranscriptActivity(messages), ctx);
 }
 
 describe('plan mode handler', () => {
-	it('maps ExitPlanMode tool-use into pending permission request', () => {
+	it('maps an ExitPlanMode request into a pending plan approval', () => {
 		const { ctx, read } = makeContext();
-		const message = batch([
-			new ExitPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-123', 'Do X', []),
-		]);
 
-		handlePlanModeMessages(message, ctx);
+		apply([new ExitPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-123', 'Do X', [])], ctx);
+
 		const pending = read();
 		expect(pending).toHaveLength(1);
+		expect(pending[0].permissionOccurrenceId).toBe('plan-exit-tool-123');
 		expect(pending[0].requestedTool).toBeInstanceOf(ExitPlanModeToolUseMessage);
 		expect((pending[0].requestedTool as ExitPlanModeToolUseMessage).plan).toBe('Do X');
 	});
 
-	it('sets plan permission mode on EnterPlanMode tool-use', () => {
+	it('sets plan permission mode on plan-mode entry', () => {
 		const { ctx } = makeContext('default');
-		const message = batch([
-			new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-456'),
-		]);
 
-		handlePlanModeMessages(message, ctx);
+		apply([new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-456')], ctx);
+
 		expect(ctx.conversationUi.beginPlanModeForChat).toHaveBeenCalledWith('chat-1', 'default');
 		expect(ctx.setPermissionMode).toHaveBeenCalledWith('chat-1', 'plan');
 	});
 
-	it('handles enter_plan_mode (snake_case variant)', () => {
-		const { ctx } = makeContext('default');
-		const message = batch([new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-sc')]);
-
-		handlePlanModeMessages(message, ctx);
-		expect(ctx.conversationUi.beginPlanModeForChat).toHaveBeenCalledWith('chat-1', 'default');
-		expect(ctx.setPermissionMode).toHaveBeenCalledWith('chat-1', 'plan');
-	});
-
-	it('handles exit_plan_mode (snake_case variant)', () => {
-		const { ctx, read } = makeContext();
-		const message = batch([
-			new ExitPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-sc-exit', 'Do Y'),
-		]);
-
-		handlePlanModeMessages(message, ctx);
-		const pending = read();
-		expect(pending).toHaveLength(1);
-		expect(pending[0].permissionOccurrenceId).toBe('plan-exit-tool-sc-exit');
-		expect(pending[0].requestedTool.type).toBe('exit-plan-mode-tool-use');
-	});
-
-	it('does not call setPreviousPermissionMode when already in plan mode', () => {
+	it('does not remember a previous mode when already in plan mode', () => {
 		const { ctx } = makeContext('plan');
-		const message = batch([
-			new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-dup'),
-		]);
 
-		handlePlanModeMessages(message, ctx);
+		apply([new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-dup')], ctx);
+
 		expect(ctx.conversationUi.beginPlanModeForChat).not.toHaveBeenCalled();
 		expect(ctx.setPermissionMode).toHaveBeenCalledWith('chat-1', 'plan');
 	});
 
-	it('deduplicates ExitPlanMode with the same toolId', () => {
+	it('deduplicates a plan approval delivered twice', () => {
 		const { ctx, read } = makeContext();
-		const message = batch([
-			new ExitPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-dedup', 'Do Z'),
-		]);
+		const exit = new ExitPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-dedup', 'Do Z');
 
-		handlePlanModeMessages(message, ctx);
-		handlePlanModeMessages(message, ctx);
+		apply([exit], ctx);
+		apply([exit], ctx);
+
 		expect(read()).toHaveLength(1);
 	});
 
-	it('is a no-op when messages array is missing', () => {
+	it('ignores activity without plan-mode facts', () => {
 		const { ctx, read } = makeContext();
-		const message = {
-			chatId: 'chat-1',
-		} as { chatId: string; messages: ChatMessage[] };
 
-		handlePlanModeMessages(message, ctx);
-		expect(ctx.setPermissionMode).not.toHaveBeenCalled();
-		expect(read()).toHaveLength(0);
-	});
+		apply([new BashToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-789', 'ls')], ctx);
 
-	it('ignores non-plan-mode tool-use messages', () => {
-		const { ctx, read } = makeContext();
-		const message = batch([new BashToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-789', 'ls')]);
-
-		handlePlanModeMessages(message, ctx);
 		expect(ctx.setPermissionMode).not.toHaveBeenCalled();
 		expect(read()).toHaveLength(0);
 	});

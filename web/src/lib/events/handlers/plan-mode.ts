@@ -1,8 +1,8 @@
-// Handles plan mode transitions from tool-use messages with
-// EnterPlanMode / ExitPlanMode tool types.
+// Applies plan-mode transitions reported by a committed span's activity. The
+// activity reaches every socket, so an undisplayed chat still enters plan mode
+// and keeps its plan approval actionable for when it is displayed again.
 
-import { isToolUseMessage } from '$shared/chat-types';
-import type { ChatMessage } from '$shared/chat-types';
+import type { ChatTranscriptActivity } from '$shared/chat-transcript-activity';
 import type { PermissionMode } from '$lib/types/chat';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 
@@ -15,39 +15,35 @@ export interface PlanModeContext {
 	>;
 }
 
-export function handlePlanModeMessages(
-	msg: { chatId?: string | null; messages: ChatMessage[] },
+export function handlePlanModeActivity(
+	chatId: string,
+	activity: Pick<ChatTranscriptActivity, 'planModeEntered' | 'planExitRequests'>,
 	ctx: PlanModeContext,
 ) {
-	const chatId = msg.chatId ?? null;
-	if (!chatId || !msg.messages) return;
+	if (!chatId) return;
 
-	for (const chatMsg of msg.messages) {
-		if (!isToolUseMessage(chatMsg)) continue;
-
-		if (chatMsg.type === 'enter-plan-mode-tool-use') {
-			const permissionMode = ctx.getPermissionMode(chatId);
-			if (permissionMode && permissionMode !== 'plan') {
-				ctx.conversationUi.beginPlanModeForChat(chatId, permissionMode);
-			}
-			ctx.setPermissionMode(chatId, 'plan');
+	if (activity.planModeEntered) {
+		const permissionMode = ctx.getPermissionMode(chatId);
+		if (permissionMode && permissionMode !== 'plan') {
+			ctx.conversationUi.beginPlanModeForChat(chatId, permissionMode);
 		}
+		ctx.setPermissionMode(chatId, 'plan');
+	}
 
-		if (chatMsg.type === 'exit-plan-mode-tool-use') {
-			const permissionOccurrenceId = `plan-exit-${chatMsg.toolId}`;
-			ctx.conversationUi.updatePendingPermissionsForChat(chatId, (prev) => {
-				if (prev.some((request) => request.permissionOccurrenceId === permissionOccurrenceId))
-					return prev;
-				return [
-					...prev,
-					{
-						permissionOccurrenceId,
-						requestedTool: chatMsg,
-						chatId,
-						receivedAt: new Date(),
-					},
-				];
-			});
-		}
+	for (const request of activity.planExitRequests) {
+		const permissionOccurrenceId = `plan-exit-${request.toolId}`;
+		ctx.conversationUi.updatePendingPermissionsForChat(chatId, (prev) => {
+			if (prev.some((pending) => pending.permissionOccurrenceId === permissionOccurrenceId))
+				return prev;
+			return [
+				...prev,
+				{
+					permissionOccurrenceId,
+					requestedTool: request,
+					chatId,
+					receivedAt: new Date(),
+				},
+			];
+		});
 	}
 }

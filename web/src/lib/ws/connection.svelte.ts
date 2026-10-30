@@ -250,9 +250,11 @@ export class WsConnection {
 				const now = Date.now();
 				this.#lastInboundAt = now;
 				this.#connectStartedAt = null;
+				// Connection listeners may send first on the new socket, before any
+				// reactive consumer observes the transition.
+				this.#ws = websocket;
 				this.#setConnected(true);
 				this.#hasEverConnected = true;
-				this.#ws = websocket;
 				this.#setConnectionStatus({
 					phase: 'connected',
 					reason: null,

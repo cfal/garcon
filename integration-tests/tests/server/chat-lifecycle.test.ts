@@ -82,6 +82,8 @@ describe('chat lifecycle', () => {
       const clientMessageId = crypto.randomUUID();
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'hello-integration' });
       const observer = await fixture.connectObserver('turn-observer');
+      // A second tab displaying the same chat receives the same transcript bodies.
+      await observer.watchTranscripts(chatId);
       const eventCursor = fixture.client.markEvents();
       const observerCursor = observer.markEvents();
 

@@ -3,7 +3,6 @@ import { Buffer } from 'node:buffer';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CDPSession, Locator, Page } from 'playwright';
-import type { CompleteChatHistoryResponse } from '../../../common/chat-view.js';
 import type {
   PreambleDefinitionInput,
   PreamblesMutationResponse,
@@ -605,24 +604,6 @@ describe('Chromium preambles', () => {
         ).toBeTrue();
 
         markPhase('opening and measuring the applied target');
-        const targetPage = await fixture.integration.client.get<CompleteChatHistoryResponse>(
-          `/api/v1/chats/messages?chatId=${encodeURIComponent(targetChatId)}&limit=50`,
-        );
-        await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
-          const url = new URL(route.request().url());
-          if (url.searchParams.get('chatId') === targetChatId) {
-            await route.fulfill({
-              json: {
-                ...targetPage,
-                messages: [],
-                pageOldestOrdinal: 0,
-                resendCandidates: [],
-              },
-            });
-            return;
-          }
-          await route.continue();
-        });
         await targetRow.locator('button').first().click();
         await fixture.page.waitForURL(new RegExp(`/chat/${targetChatId}$`));
         const notice = fixture.page

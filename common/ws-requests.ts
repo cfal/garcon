@@ -2,6 +2,7 @@
 // Mutating chat commands use the HTTP command ledger; WS is read/resume only.
 
 import type { TranscriptReadPurpose } from './chat-view';
+import { CHAT_ID_LENGTH, parseChatId } from './chat-id';
 
 export interface AgentCommandImage {
   data: string;
@@ -94,6 +95,30 @@ export class ChatSubscribeRequest {
   }
 }
 
+export const MAX_TRANSCRIPT_INTEREST_CHAT_IDS = 64;
+
+// Replaces the complete set of chats whose transcript bodies this socket
+// displays. Each declaration supersedes the previous one on the same socket, so
+// repeating a declaration is a no-op and only the latest one matters.
+export class ChatTranscriptInterestRequest {
+  readonly type = 'chat-transcript-interest' as const;
+  constructor(public chatIds: string[]) { }
+
+  static fromJson(data: Record<string, unknown>): ChatTranscriptInterestRequest | null {
+    if (!Array.isArray(data.chatIds) || data.chatIds.length > MAX_TRANSCRIPT_INTEREST_CHAT_IDS) return null;
+    const chatIds = new Set<string>();
+    for (const item of data.chatIds) {
+      if (typeof item !== 'string' || item.length !== CHAT_ID_LENGTH) return null;
+      try {
+        chatIds.add(parseChatId(item));
+      } catch {
+        return null;
+      }
+    }
+    return new ChatTranscriptInterestRequest([...chatIds]);
+  }
+}
+
 export class ChatReloadRequest {
   readonly type = 'chat-reload' as const;
   constructor(
@@ -138,6 +163,7 @@ export class WsPingRequest {
 export type ClientWsMessage =
   | ReconnectStateQueryRequest
   | ChatSubscribeRequest
+  | ChatTranscriptInterestRequest
   | ChatReloadRequest
   | ChatReloadCancelRequest
   | WsPingRequest;
@@ -148,6 +174,8 @@ export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMes
       return ReconnectStateQueryRequest.fromJson(data);
     case 'chat-subscribe':
       return ChatSubscribeRequest.fromJson(data);
+    case 'chat-transcript-interest':
+      return ChatTranscriptInterestRequest.fromJson(data);
     case 'chat-reload':
       return ChatReloadRequest.fromJson(data);
     case 'chat-reload-cancel':
