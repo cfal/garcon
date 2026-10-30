@@ -633,6 +633,52 @@ describe('fingerprint sweeps', () => {
     expect(listed).toEqual([]);
   });
 
+  test('sustained rate limiting stays batched beyond the full-read interval and recovers once', async () => {
+    let limited = true;
+    const { listed, batches, clock, scanning, repositories } = await sweep({
+      current: () => [pull()],
+      batch: async (request) => {
+        if (limited) throw new GitServiceError('GH_RATE_LIMITED', 'GitHub API rate limit exceeded.');
+        return { executorId: 'local', instanceId: 'instance', viewerLogin: 'viewer', repositories: request.repositories.map((identity) => ({
+          kind: 'read' as const, repo: { nameWithOwner: identity.nameWithOwner, url: 'https://github.com/' + identity.nameWithOwner }, pulls: [fingerprint(pull())] })) };
+      },
+    });
+    for (let interval = 0; interval < 3; interval++) {
+      const previous = batches.length;
+      clock.now += 30 * 60_000;
+      await scanning.scanDue();
+      await until(() => batches.length > previous || listed.length > 0);
+      expect(listed).toEqual([]);
+    }
+    limited = false;
+    clock.now += SCAN_INTERVAL_MS;
+    await scanning.scanDue();
+    await until(() => listed.length === repositories.length);
+    expect(listed.sort()).toEqual(repositories.map((entry) => entry.id).sort());
+  });
+
+  test('a forced non-rate-limit failure clears the previous backoff marker', async () => {
+    let failFullRead = false;
+    const { store, repository, listed, batches, clock, scanning } = await sweep({
+      repositories: 1,
+      current: () => {
+        if (failFullRead) throw new Error('Temporary checkout failure');
+        return [pull()];
+      },
+      batch: async () => { throw new GitServiceError('GH_RATE_LIMITED', 'GitHub API rate limit exceeded.'); },
+    });
+    failFullRead = true;
+    scanning.requestScan(repository.id);
+    await until(() => store.getRepository(repository.id)?.scan.message === 'Temporary checkout failure');
+    expect(listed).toEqual([repository.id]);
+    failFullRead = false;
+    clock.now += SCAN_INTERVAL_MS;
+    await scanning.scanDue();
+    await until(() => store.getRepository(repository.id)?.scan.status === 'ok');
+    expect(listed).toEqual([repository.id, repository.id]);
+    expect(batches).toHaveLength(1);
+  });
+
   test('batches at most 25 repositories per query', async () => {
     const { batches } = await sweep({ repositories: 30, current: () => [pull()] });
     await until(() => batches.length === 2);

@@ -143,7 +143,8 @@ export class PullRequestReviewScanner {
   // full. A rate-limited check stays a fingerprint check, so backing off never
   // turns into more reads.
   #needsFullRead(repository: PullRequestReviewRepository, now: number): boolean {
-    if (repository.scan.status !== 'ok' && !this.#rateLimited.has(repository.id)) return true;
+    if (this.#rateLimited.has(repository.id)) return false;
+    if (repository.scan.status !== 'ok') return true;
     return now - (this.#fullReadAt.get(repository.id) ?? -Infinity) >= FULL_READ_INTERVAL_MS;
   }
 
@@ -185,6 +186,8 @@ export class PullRequestReviewScanner {
     } catch (error) {
       if (!this.#timer || !this.deps.store.available
         || this.deps.store.getRepository(repository.id)?.updatedAt !== repository.updatedAt) return;
+      if (error instanceof GitServiceError && error.code === 'GH_RATE_LIMITED') this.#rateLimited.add(repository.id);
+      else this.#rateLimited.delete(repository.id);
       const unavailable = isDomainError(error) && error.code === 'EXECUTOR_UNAVAILABLE' || error instanceof AgentCallError;
       // An unreachable executor keeps the last list rather than reporting no pull requests.
       scan = {
@@ -264,7 +267,9 @@ export class PullRequestReviewScanner {
     }
     const scan: PullRequestReviewScan = { status: 'ok', scannedAt: new Date(this.deps.now()).toISOString(), message: null };
     if (!store.recordScan(repository.id, scan, plan.kind === 'apply' ? plan.pulls : undefined)) return;
-    this.#rateLimited.delete(repository.id);
+    const recovered = this.#rateLimited.delete(repository.id);
+    if (recovered && this.deps.now() - (this.#fullReadAt.get(repository.id) ?? -Infinity) >= FULL_READ_INTERVAL_MS)
+      this.#repeat(repository.id);
     // Debounce and daily limits move with time, so selection runs even when nothing changed.
     await this.#evaluate(store.getRepository(repository.id) ?? current);
     this.deps.changed();

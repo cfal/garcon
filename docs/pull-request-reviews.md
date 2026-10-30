@@ -169,14 +169,13 @@ loads and shows history or body read failures with Retry. Review and Post remain
 disabled until the required reads succeed. Changes to that pull request refresh
 its history, including an older selected run after a posting result changes.
 
-The Changes and Checks tabs read status, diff, and review threads separately,
-so a scan that reports only new checks, check counts, mergeability, or a new
-review decision rereads status alone. New reviews or review threads reread
-review threads alone. Activity that moves `updatedAt` rereads both; the
-executor revalidates an unchanged thread listing with a conditional request, so
-that costs a 304 rather than a transfer. The diff is read again only when the
-status reports a different base or head commit. Unchanged fingerprints reread
-nothing.
+The Changes and Checks tabs read status, diff, and review threads separately.
+Every successful repository scan refreshes status for the selected visible PR,
+including when aggregate check counts are unchanged: names, URLs, and individual
+check outcomes can change without affecting those counts. This costs one light
+status read for that selection per scan. Review activity invalidates threads;
+unchanged thread pages revalidate with conditional requests. The diff is read
+again only when status reports a different base or head commit.
 Each part keeps its last loaded content through a failed refresh and shows the
 failure beside it with Retry; a failed diff or status is not retried until the
 user asks.
@@ -199,7 +198,8 @@ review-thread counts. A fingerprint batch costs one `gh` call for up to 25
 repositories; a full read costs at least three per repository (`gh repo view`,
 the list query, and the team review-request search).
 
-- Unchanged fingerprints keep the saved list and read nothing more.
+- Unchanged fingerprints keep the saved repository list without a full list read.
+  The selected visible PR still refreshes its check details.
 - Checks, check counts, mergeability, and the review decision change without
   moving `updatedAt`; their new values are applied to the saved list.
 - Any other change (a pull request opened, closed, or reopened, a push, a new
@@ -210,7 +210,9 @@ the list query, and the team review-request search).
 - A batch that fails as a whole lists each repository in full, except when
   GitHub reports a rate limit: then each repository records the failure, keeps
   its list, and is checked by fingerprint again at the next interval rather
-  than listed in full.
+  than listed in full, even past the 30-minute full-read interval. Once a
+  fingerprint succeeds, one overdue full read is scheduled. A forced full read
+  that fails for another reason clears the previous rate-limit marker.
 
 Automatic review selection runs after every successful check, because the
 debounce period and daily limit move with time. Labels and team review

@@ -78,10 +78,10 @@ const fingerprintPull = ({ number, updatedAt, isDraft, headRefOid, baseRefOid, m
   commits: { nodes: [{ commit: { statusCheckRollup: checks ? { state: checks, contexts: { checkRunCountsByState: checkRunCounts, statusContextCountsByState: [] } } : null } }] },
 });
 // A list query that selects no fingerprint fields gets none, so payload sizes follow the query.
-const listPull = (selectsFingerprint) => ({ files, body, labels, reviewRequests, checks, checkRunCounts, teamReviewRequested, reviewCount, reviewThreadCount, mergeable, ...pull }) => ({
+const listPull = (selectsFingerprint, selectsCheckCounts) => ({ files, body, labels, reviewRequests, checks, checkRunCounts, teamReviewRequested, reviewCount, reviewThreadCount, mergeable, ...pull }) => ({
   ...pull,
   ...(selectsFingerprint
-    ? fingerprintPull({ ...pull, mergeable, checks, checkRunCounts, reviewCount, reviewThreadCount })
+    ? fingerprintPull({ ...pull, mergeable, checks, checkRunCounts: selectsCheckCounts ? checkRunCounts : [], reviewCount, reviewThreadCount })
     : { commits: { nodes: [{ commit: { statusCheckRollup: checks ? { state: checks } : null } }] } }),
   labels: page(labels.map(name => ({ name })), 0),
   reviewRequests: page(reviewRequests.map(reviewer => ({ requestedReviewer: { __typename: 'User', login: reviewer } })), 0),
@@ -107,6 +107,9 @@ const requestHeader = (name) => {
 
 // Only a fingerprint batch, which names its repositories, runs without a fixture here.
 const fingerprintBatch = command === 'api' && action === 'graphql' && (field('query') ?? '').includes('r0:repository(');
+if (config.unsupportedCheckCounts && (field('query') ?? '').includes('checkRunCountsByState')) {
+  await fail("GraphQL: Field 'checkRunCountsByState' doesn't exist on type 'StatusCheckRollupContextConnection'");
+}
 if (!config.label && !fingerprintBatch) await fail('gh: no synthetic fixture in this directory');
 if (config.fail?.[`${command} ${action}`] || config.fail?.[command]) await fail(config.fail[`${command} ${action}`] ?? config.fail[command]);
 if (command === 'auth' && action === 'token') {
@@ -176,7 +179,7 @@ else if (command === 'api' && action === 'graphql') {
     print({ data: {
       viewer: actor,
       repository: { ...repo,
-        pullRequests: page(pulls.filter(pull => pull.state === 'OPEN').map(listPull(query.includes('reviewThreads')))) },
+        pullRequests: page(pulls.filter(pull => pull.state === 'OPEN').map(listPull(query.includes('reviewThreads'), query.includes('checkRunCountsByState')))) },
     } });
   }
 } else if (command === 'api' && args.includes('POST')) {
@@ -211,6 +214,8 @@ else if (command === 'api' && action === 'graphql') {
 } else if (command === 'api' && args.includes('--include')) {
   // Pages a REST listing with ETags; a matching If-None-Match is answered 304, and gh exits 1 after printing it.
   requests = 1;
+  if (config.expectedRestToken && (process.env.GH_TOKEN !== config.expectedRestToken || process.env.GH_ENTERPRISE_TOKEN !== config.expectedRestToken))
+    await fail('Conditional request did not use its captured credential.');
   if (config.commentsFail) {
     write(header('403 Forbidden', { 'Content-Type': 'application/json; charset=utf-8' }));
     print({ message: 'forbidden' });
@@ -239,6 +244,14 @@ else if (command === 'api' && action === 'graphql') {
   if (args.includes('--slurp')) print(pages);
   else for (const page of pages) print(page);
 } else if (action === 'view') {
+  if (config.holdStatus) {
+    const released = Promise.withResolvers();
+    const watcher = watch(cwd, (_event, filename) => { if (filename === 'gh-status-release') released.resolve(); });
+    try {
+      await Bun.write(`${cwd}/gh-status-started`, 'ready');
+      if (!await Bun.file(`${cwd}/gh-status-release`).exists()) await released.promise;
+    } finally { watcher.close(); }
+  }
   requests = 1;
   const { checks, checkRunCounts, labels, reviewRequests, teamReviewRequested, reviewCount, reviewThreadCount, ...pull } = await findPull(args[2]);
   print({ ...pull, statusCheckRollup: config.statusChecks ?? [] });

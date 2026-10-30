@@ -384,6 +384,13 @@ describe('conditional review thread reads', () => {
     expect(revalidated.every(entry => !(entry.stdoutBytes > 200))).toBe(true);
   });
 
+  it('binds conditional page reads to the credential used for their cache key', async () => {
+    await fixture({ token: 'synthetic-captured-token', expectedRestToken: 'synthetic-captured-token', commentPages: [[first]] });
+    const gh = createGhOperations(root);
+    expect(bodies(await read(gh))).toEqual(['first page']);
+    expect(bodies(await read(gh))).toEqual(['first page']);
+  });
+
   it('rereads a page whose body changed', async () => {
     await fixture({ commentPages: [[first]] });
     const gh = createGhOperations(root);
@@ -442,7 +449,31 @@ describe('conditional review thread reads', () => {
   });
 });
 
-describe('shared in-flight reads', () => {
+describe('caller-owned reads', () => {
+  it('does not disclose an account A read to an unauthorized account B caller', async () => {
+    await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic', login: 'account-a', holdStatus: true }));
+    const gh = createGhOperations(root);
+    const started = Promise.withResolvers();
+    const watcher = watch(root, (_event, file) => { if (file === 'gh-status-started') started.resolve(); });
+    const a = gh.getPullRequestStatus({ projectPath: root, repository, number: 1 });
+    let b;
+    try {
+      await started.promise;
+      await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic', login: 'account-b', fail: { 'pr view': 'HTTP 404: Not Found' } }));
+      b = gh.getPullRequestStatus({ projectPath: root, repository, number: 1 });
+      const outcomes = Promise.allSettled([a, b]);
+      await fs.writeFile(path.join(root, 'gh-status-release'), 'released');
+      const [first, second] = await outcomes;
+      expect(first.status).toBe('fulfilled');
+      expect(second.status).toBe('rejected');
+      expect(second.reason.message).toContain('Not Found');
+    } finally {
+      watcher.close();
+      await fs.writeFile(path.join(root, 'gh-status-release'), 'released');
+      await Promise.allSettled([a, ...(b ? [b] : [])]);
+    }
+  });
+
   const readCalls = async () => {
     const file = path.join(root, 'gh-calls.jsonl');
     const lines = (await Bun.file(file).exists()) ? (await fs.readFile(file, 'utf8')).trim().split('\n').filter(Boolean) : [];
@@ -450,31 +481,26 @@ describe('shared in-flight reads', () => {
     return lines.map(line => JSON.parse(line).slice(0, 2).join(' '));
   };
 
-  it('runs one gh call for concurrent reads of the same pull request', async () => {
+  it('executes each caller under its current authorization', async () => {
     await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic' }));
     const gh = createGhOperations(root);
     const reads = await Promise.all([1, 2, 3].map(() => gh.getPullRequestStatus({ projectPath: root, repository, number: 1 })));
-    expect(reads[1]).toBe(reads[0]);
-    expect(reads[2]).toBe(reads[0]);
-    expect(await readCalls()).toEqual(['repo view', 'pr view']);
-    await Promise.all([gh.getPullRequestStatus({ projectPath: root, repository, number: 1 }), gh.getPullRequestReviewThreads({ projectPath: root, repository, number: 1 })]);
-    expect((await readCalls()).sort()).toEqual(['api --hostname', 'auth token', 'pr view', 'repo view', 'repo view']);
+    expect(reads.map(read => read.number)).toEqual([1, 1, 1]);
+    const calls = await readCalls();
+    expect(calls.filter(call => call === 'repo view')).toHaveLength(3);
+    expect(calls.filter(call => call === 'pr view')).toHaveLength(3);
   });
 
-  it('keeps a shared read for the callers that did not abort', async () => {
-    await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic' }));
-    const gh = createGhOperations(root);
-    const abandoned = new AbortController();
-    const left = gh.getPullRequestStatus({ projectPath: root, repository, number: 1, signal: abandoned.signal });
-    const kept = gh.getPullRequestStatus({ projectPath: root, repository, number: 1 });
-    abandoned.abort(new Error('Left'));
-    await expect(left).rejects.toThrow('Left');
-    expect((await kept).number).toBe(1);
-    expect(await readCalls()).toEqual(['repo view', 'pr view']);
-  });
 });
 
 describe('pull request fingerprints', () => {
+  it('falls back to a list query when the server does not support aggregate check counts', async () => {
+    await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic', unsupportedCheckCounts: true }));
+    const gh = createGhOperations(root);
+    await expect(gh.getPullRequestFingerprints({ repositories: [repository] })).rejects.toThrow('checkRunCountsByState');
+    expect((await gh.listPullRequests({ projectPath: root, repository })).pulls).toHaveLength(1);
+  });
+
   const second = { host: 'git.example.invalid', nameWithOwner: 'second/repository' };
   const missing = { host: 'git.example.invalid', nameWithOwner: 'missing/repository' };
   const writeFixtures = async (primary = {}, other = {}) => {

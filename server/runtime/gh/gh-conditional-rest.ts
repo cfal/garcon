@@ -53,11 +53,11 @@ export function parseIncludedResponse(stdout: string): IncludedResponse | null {
 
 // Digest of the token `gh` would send to `host`; reading it makes no request.
 // Without one the read is unconditional and nothing is cached.
-async function credentialScope(cwd: string, host: string, signal?: AbortSignal): Promise<string | null> {
+async function credentialScope(cwd: string, host: string, signal?: AbortSignal): Promise<{ account: string; token: string } | null> {
   try {
     const { stdout } = await runGh(cwd, ['auth', 'token', '--hostname', host], { signal, maxStdoutBytes: 64 * 1024 });
     const token = stdout.trim();
-    return token ? createHash('sha256').update(`${host.toLowerCase()}\0${token}`).digest('hex') : null;
+    return token ? { account: createHash('sha256').update(`${host.toLowerCase()}\0${token}`).digest('hex'), token } : null;
   } catch {
     signal?.throwIfAborted();
     return null;
@@ -69,11 +69,11 @@ type PageOutcome =
   // GitHub refused the account; `error` keeps gh's message for classification.
   | { kind: 'refused'; error: unknown };
 
-async function requestPage(cwd: string, host: string, path: string, etag: string | undefined, signal?: AbortSignal): Promise<PageOutcome> {
+async function requestPage(cwd: string, host: string, path: string, etag: string | undefined, token: string | undefined, signal?: AbortSignal): Promise<PageOutcome> {
   const args = ['api', '--hostname', host, '--include', ...(etag ? ['-H', `If-None-Match: ${etag}`] : []), path];
   let stdout: string;
   try {
-    stdout = (await runGh(cwd, args, { signal })).stdout;
+    stdout = (await runGh(cwd, args, { signal, ...(token ? { env: { GH_TOKEN: token, GH_ENTERPRISE_TOKEN: token } } : {}) })).stdout;
   } catch (error) {
     const processError = error as GhProcessError;
     if (processError.timedOut || processError.aborted || typeof processError.stdout !== 'string') throw error;
@@ -95,14 +95,14 @@ export async function readConditionalPages(
   cache: GhResponseCache,
   signal?: AbortSignal,
 ): Promise<unknown[][]> {
-  const account = await credentialScope(cwd, repository.host, signal);
+  const credential = await credentialScope(cwd, repository.host, signal);
   const pages: unknown[][] = [];
   for (let page = 1; ; page++) {
     if (page > MAX_PAGES) throw new GitServiceError('GIT_RESULT_TOO_LARGE', `GitHub listing exceeds ${MAX_PAGES} pages.`);
     const pagePath = `${path}?per_page=${PER_PAGE}&page=${page}`;
-    const key: GhResponseKey | null = account ? { account, repository, path: pagePath } : null;
+    const key: GhResponseKey | null = credential ? { account: credential.account, repository, path: pagePath } : null;
     const cached = key ? cache.get(key) : undefined;
-    const outcome = await requestPage(cwd, repository.host, pagePath, cached?.etag, signal);
+    const outcome = await requestPage(cwd, repository.host, pagePath, cached?.etag, credential?.token, signal);
     if (outcome.kind === 'refused') {
       cache.forgetRepository(repository);
       throw outcome.error;

@@ -1,7 +1,6 @@
-// The pull request fields a fingerprint compares. The list selects the same
-// fields, so a fingerprint read and a list read describe a pull request alike.
-const FINGERPRINT_SELECTION = `number updatedAt isDraft headRefOid baseRefOid mergeable reviewDecision
-        reviews{totalCount} reviewThreads{totalCount}
+const PULL_IDENTITY_SELECTION = `number updatedAt isDraft headRefOid baseRefOid mergeable reviewDecision
+        reviews{totalCount} reviewThreads{totalCount}`;
+const FINGERPRINT_SELECTION = `${PULL_IDENTITY_SELECTION}
         commits(last:1){nodes{commit{statusCheckRollup{state contexts{
           checkRunCountsByState{state count} statusContextCountsByState{state count}
         }}}}}`;
@@ -14,7 +13,8 @@ export const LIST_QUERY = `query($owner:String!,$name:String!,$endCursor:String)
     pullRequests(states:OPEN,first:100,after:$endCursor,orderBy:{field:CREATED_AT,direction:ASC}){
       pageInfo{hasNextPage endCursor}
       nodes{
-        ${FINGERPRINT_SELECTION}
+        ${PULL_IDENTITY_SELECTION}
+        commits(last:1){nodes{commit{statusCheckRollup{state}}}}
         title url state createdAt
         author{login __typename}
         authorAssociation headRefName baseRefName isCrossRepository

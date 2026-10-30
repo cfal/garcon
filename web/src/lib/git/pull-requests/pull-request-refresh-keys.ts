@@ -2,7 +2,7 @@
 // inputs are the fingerprint fields of the inbox summary, which the scanner
 // refreshes from batched GitHub fingerprint reads. Each read reloads only when
 // its key changes:
-// - status follows the commit pair, checks, the review decision, mergeability,
+// - status follows every successful scan as well as the commit pair, checks, the review decision, mergeability,
 //   and `updatedAt`, which moves with title, description, and label edits;
 // - review threads follow review activity: the head (which outdates threads),
 //   the review and thread counts, and `updatedAt`, because an edited review
@@ -27,8 +27,9 @@ type RefreshSignal = Pick<
 	| 'reviewThreadCount'
 >;
 
-export function pullRequestStatusKey(pull: RefreshSignal): string {
+export function pullRequestStatusKey(pull: RefreshSignal, scannedAt: string | null = null): string {
 	return JSON.stringify([
+		scannedAt,
 		pull.headRefOid,
 		pull.baseRefOid,
 		pull.updatedAt,

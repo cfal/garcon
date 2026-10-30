@@ -236,6 +236,29 @@ describe('PullRequestsStore selective refresh', () => {
 		}
 	});
 
+	it('refreshes rendered check details after a successful scan with identical aggregate counts', async () => {
+		const { store, reviews, select, settled, remote, getStatus, getDiff, getReviewThreads } =
+			harness();
+		select(7);
+		await settled();
+		remote.get(7)!.checks = [
+			{ name: 'renamed check', state: 'success', url: 'https://example.invalid/new-check' },
+		];
+		const scanned = snapshot(2, [summary(7)]);
+		scanned.repositories[0]!.scan = {
+			status: 'ok',
+			scannedAt: '2026-01-02T00:00:00Z',
+			message: null,
+		};
+		reviews.apply(scanned);
+		store.syncSelection();
+		await settled();
+		expect(store.checksView).toMatchObject({ kind: 'ready', value: remote.get(7)!.checks });
+		expect(getStatus).toHaveBeenCalledTimes(2);
+		expect(getDiff).toHaveBeenCalledTimes(1);
+		expect(getReviewThreads).toHaveBeenCalledTimes(1);
+	});
+
 	it('loads status, diff, and review threads once for a new selection', async () => {
 		const { store, select, settled, getStatus, getDiff, getReviewThreads } = harness();
 		select(7);
@@ -283,7 +306,9 @@ describe('PullRequestsStore selective refresh', () => {
 		await settled();
 		publish([summary(7, { checkCounts: 'check:IN_PROGRESS=1,check:SUCCESS=1' })]);
 		await settled();
-		publish([summary(7, { checkCounts: 'check:IN_PROGRESS=1,check:SUCCESS=1', mergeable: 'conflicting' })]);
+		publish([
+			summary(7, { checkCounts: 'check:IN_PROGRESS=1,check:SUCCESS=1', mergeable: 'conflicting' }),
+		]);
 		await settled();
 		expect(getStatus).toHaveBeenCalledTimes(3);
 		expect(getReviewThreads).toHaveBeenCalledTimes(1);

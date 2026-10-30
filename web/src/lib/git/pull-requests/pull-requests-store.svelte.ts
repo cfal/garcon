@@ -220,7 +220,12 @@ export class PullRequestsStore implements PortableSingletonController {
 			this.#resetPullRequest();
 			this.#selectionScope = scope;
 		}
-		this.#followStatus(this.status.ensure(pullRequestStatusKey(entry.pull), this.#readStatus()));
+		this.#followStatus(
+			this.status.ensure(
+				pullRequestStatusKey(entry.pull, this.selectedRepository?.scan.scannedAt),
+				this.#readStatus(),
+			),
+		);
 		if (!this.status.isLoading && !this.diff.isLoading) this.#ensureThreads();
 		if (entry.historyRevision !== this.#runsVersion) void this.loadRuns();
 	}
@@ -232,7 +237,10 @@ export class PullRequestsStore implements PortableSingletonController {
 		if (!this.#visible || !entry || this.#selectionScope !== this.#selectedScope()) return;
 		this.diff.forgetFailure();
 		this.#followStatus(
-			this.status.load(pullRequestStatusKey(entry.pull), this.#readStatus()),
+			this.status.load(
+				pullRequestStatusKey(entry.pull, this.selectedRepository?.scan.scannedAt),
+				this.#readStatus(),
+			),
 			() => {
 				const current = this.selectedEntry;
 				if (current)
@@ -382,7 +390,12 @@ export class PullRequestsStore implements PortableSingletonController {
 		// The pull request moved after its status was read; the next status names its new commits.
 		const entry = this.selectedEntry;
 		if (entry && this.diff.key === key && !this.status.isLoading)
-			this.#followStatus(this.status.load(pullRequestStatusKey(entry.pull), this.#readStatus()));
+			this.#followStatus(
+				this.status.load(
+					pullRequestStatusKey(entry.pull, this.selectedRepository?.scan.scannedAt),
+					this.#readStatus(),
+				),
+			);
 	}
 
 	#ensureThreads(): void {
