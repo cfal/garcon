@@ -1,9 +1,7 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import { cn } from '$lib/utils/cn';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
-	import { attachProcessingPulse } from '$lib/chat/sessions/processing-pulse.js';
+	import ComposerStatusBarFrame from './composer/ComposerStatusBarFrame.svelte';
 	import type { LoadingStatus as ChatLoadingStatus } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import GitSummaryButton from '$lib/components/git/GitSummaryButton.svelte';
 	import Square from '@lucide/svelte/icons/square';
@@ -14,11 +12,11 @@
 		agentId: string;
 		onAbort: (() => void) | null;
 		spinnerSelectionKey?: string | null;
-		quickCommitVisible?: boolean;
-		quickCommitSummary?: GitQuickSummaryReady | null;
-		quickCommitRefreshing?: boolean;
-		quickCommitError?: string | null;
-		onQuickCommit?: (() => void) | null;
+		showCommit?: boolean;
+		gitSummary?: GitQuickSummaryReady | null;
+		gitRefreshing?: boolean;
+		gitError?: string | null;
+		onCommit?: (() => void) | null;
 		announcementsEnabled?: boolean;
 	}
 
@@ -28,11 +26,11 @@
 		agentId,
 		onAbort,
 		spinnerSelectionKey = null,
-		quickCommitVisible = false,
-		quickCommitSummary = null,
-		quickCommitRefreshing = false,
-		quickCommitError = null,
-		onQuickCommit = null,
+		showCommit = false,
+		gitSummary = null,
+		gitRefreshing = false,
+		gitError = null,
+		onCommit = null,
 		announcementsEnabled = true,
 	}: Props = $props();
 
@@ -60,7 +58,6 @@
 	let animationPhase = $state(0);
 	let activeSpinners = $state<string[]>([...SPINNER_SETS[0]]);
 
-	let animTimer: ReturnType<typeof setInterval> | null = null;
 	let hasSpinnerSelection = false;
 	let lastSpinnerSelectionKey: string | null = null;
 
@@ -68,19 +65,12 @@
 		return [...SPINNER_SETS[Math.floor(Math.random() * SPINNER_SETS.length)]];
 	}
 
-	// Animates the spinner while the tray is visible.
 	$effect(() => {
-		if (animTimer) {
-			clearInterval(animTimer);
-			animTimer = null;
-		}
 		if (!isVisible) return;
-		animTimer = setInterval(() => {
+		const timer = setInterval(() => {
 			animationPhase = (animationPhase + 1) % activeSpinners.length;
 		}, FRAME_INTERVAL_MS);
-		return () => {
-			if (animTimer) clearInterval(animTimer);
-		};
+		return () => clearInterval(timer);
 	});
 
 	// Spinner set selection is randomized once per load and reset whenever
@@ -101,70 +91,49 @@
 		}
 	});
 
-	onDestroy(() => {
-		if (animTimer) clearInterval(animTimer);
-	});
-
 	const statusText = $derived(
 		agentId === 'codex' ? m.chat_loading_thinking() : status?.text || m.chat_loading_thinking(),
 	);
 	const canInterrupt = $derived(status?.can_interrupt !== false);
-	// The cap stays out of flow while sliding underneath the rounded composer
-	// edge; feed/queue reservation still owns the vertical space above.
-	const statusTrayClass = cn('absolute bottom-full left-0 right-0 z-10 translate-y-3');
-	// Extra bottom padding gives the composer something solid to overlap, hiding
-	// the tray's lower edge behind the composer's stable rounded corners.
-	const statusPanelClass = cn(
-		'pointer-events-auto flex min-h-14 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-chat-thinking px-3 pb-5 pt-2 sm:px-4',
-	);
 </script>
 
 {#if isVisible}
-	<div class={statusTrayClass}>
-		<div
-			class={statusPanelClass}
-			role={announcementsEnabled ? 'status' : undefined}
-			aria-live={announcementsEnabled ? 'polite' : 'off'}
-			data-slot="chat-processing-status"
-			{@attach attachProcessingPulse}
-		>
-			<div class="flex min-w-0 items-center gap-1.5">
-				<span
-					class="flex-shrink-0 text-sm text-status-processing transition-all {animationPhase % 2 ===
-					0
-						? 'scale-110'
-						: ''}"
-					style="transition-duration: {FRAME_INTERVAL_MS}ms"
-				>
-					{activeSpinners[animationPhase]}
-				</span>
-				<span class="truncate text-sm font-medium text-foreground">{statusText}...</span>
-			</div>
-
-			{#if quickCommitVisible || (canInterrupt && onAbort)}
-				<div class="flex shrink-0 items-center gap-2">
-					{#if quickCommitVisible && onQuickCommit}
-						<GitSummaryButton
-							summary={quickCommitSummary}
-							isRefreshing={quickCommitRefreshing}
-							lastError={quickCommitError}
-							onCommit={onQuickCommit}
-						/>
-					{/if}
-					{#if canInterrupt && onAbort}
-						<button
-							type="button"
-							onclick={onAbort}
-							aria-label={m.chat_loading_stop()}
-							title={m.chat_loading_stop()}
-							class="inline-flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md border border-border bg-background/70 px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-						>
-							<Square class="size-3" aria-hidden="true" />
-							<span class="hidden sm:inline">{m.chat_loading_stop()}</span>
-						</button>
-					{/if}
-				</div>
-			{/if}
+	<ComposerStatusBarFrame tone="processing" {announcementsEnabled}>
+		<div class="flex min-w-0 items-center gap-1.5">
+			<span
+				class="flex-shrink-0 text-sm text-status-processing transition-all {animationPhase % 2 === 0
+					? 'scale-110'
+					: ''}"
+				style="transition-duration: {FRAME_INTERVAL_MS}ms"
+			>
+				{activeSpinners[animationPhase]}
+			</span>
+			<span class="truncate text-sm font-medium text-foreground">{statusText}...</span>
 		</div>
-	</div>
+
+		{#if showCommit || (canInterrupt && onAbort)}
+			<div class="flex shrink-0 items-center gap-2">
+				{#if showCommit && onCommit}
+					<GitSummaryButton
+						summary={gitSummary}
+						isRefreshing={gitRefreshing}
+						lastError={gitError}
+						{onCommit}
+					/>
+				{/if}
+				{#if canInterrupt && onAbort}
+					<button
+						type="button"
+						onclick={onAbort}
+						aria-label={m.chat_loading_stop()}
+						title={m.chat_loading_stop()}
+						class="inline-flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md border border-border bg-background/70 px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					>
+						<Square class="size-3" aria-hidden="true" />
+						<span class="hidden sm:inline">{m.chat_loading_stop()}</span>
+					</button>
+				{/if}
+			</div>
+		{/if}
+	</ComposerStatusBarFrame>
 {/if}

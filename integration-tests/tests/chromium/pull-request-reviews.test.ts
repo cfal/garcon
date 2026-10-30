@@ -41,7 +41,7 @@ Reviewed commit: ${HEAD}
 REVIEW
 `;
 
-test('reviews pull requests in chats and shows them in the GitHub Views inbox', async () => {
+test('reviews pull requests in chats and shows them in the Github inbox', async () => {
   await withChromiumFixture('pull-request-reviews', async ({ page, integration, browserErrors }, phase) => {
     const { client, dirs } = integration;
     const project = dirs.project;
@@ -53,7 +53,7 @@ test('reviews pull requests in chats and shows them in the GitHub Views inbox', 
       if (screenshots) await page.screenshot({ path: join(screenshots, `${name}.png`) });
     };
 
-    phase('open Pull Requests from GitHub Views before connecting');
+    phase('open Pull Requests from Github before connecting');
     // Wide enough for the inbox list and detail to stay side by side next to the review chat.
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto(integration.garcon.baseUrl);

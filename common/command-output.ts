@@ -16,8 +16,10 @@ export function isCommandOutputData(value: unknown): value is Record<string, unk
     && (value.channel !== 'stderr' || value.format === 'plain');
 }
 
+// `withheld` is a reported directory that a public share snapshot does not disclose.
 export type CommandWorkingDirectory =
   | { readonly kind: 'reported'; readonly path: string }
+  | { readonly kind: 'withheld' }
   | { readonly kind: 'unavailable'; readonly reason: string };
 
 export interface CommandOutcome {
@@ -30,7 +32,7 @@ export interface CommandOutcome {
 
 export function isCleanCommandSuccess(result: CommandOutcome): boolean {
   return result.outcome === 'finished' && result.exitCode === 0 && result.signal === null
-    && result.capture === 'complete' && result.cwd.kind === 'reported';
+    && result.capture === 'complete' && result.cwd.kind !== 'unavailable';
 }
 
 export function parseCommandOutputContext(value: unknown): CommandOutputContext | null {
@@ -46,6 +48,7 @@ export function parseCommandWorkingDirectory(value: unknown): CommandWorkingDire
     && !value.path.includes('\0')) {
     return { kind: 'reported', path: value.path };
   }
+  if (value.kind === 'withheld') return { kind: 'withheld' };
   if (value.kind === 'unavailable' && typeof value.reason === 'string' && value.reason.length <= 4096) {
     return { kind: 'unavailable', reason: value.reason };
   }

@@ -16,8 +16,8 @@ export interface ComposerCapSlotState {
 	isProcessing: boolean;
 }
 
-// Keeps the out-of-flow cap slot stable for project chats even when no tray is
-// visible. This prevents the feed from shifting when the processing tray exits.
+// Keeps the out-of-flow cap slot stable for project chats even when no status bar is
+// visible. This prevents the feed from shifting when the processing bar exits.
 export function shouldReserveComposerCapSlot({
 	hasProjectPath,
 	isProcessing,

@@ -258,7 +258,7 @@ test("chat list, prose, inline code, blocks and Git diffs have independent typog
       );
       await browserExpect(title).toHaveCSS("font-size", "20px");
       await collapseCanonicalFilesWindow(page);
-      await clickWorkspaceWindowAddAction(page, "Open Git Workbench");
+      await clickWorkspaceWindowAddAction(page, "Open Workbench");
       const diff = page
         .locator(
           '[data-workspace-surface-id="singleton:git"] [data-git-diff-review-row]',

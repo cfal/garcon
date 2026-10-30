@@ -31,8 +31,15 @@ export interface ShareStatusResponse {
   sharedAt?: string;
 }
 
+// Fields public share readers receive. The owning chat, its project path, and its
+// transcript origin stay on the controller.
+export type PublicSharedChatSnapshot = Pick<
+  SharedChatSnapshot,
+  'shareToken' | 'title' | 'agentId' | 'model' | 'sharedAt' | 'messages'
+>;
+
 export interface GetSharedChatResponse {
-  snapshot: SharedChatSnapshot;
+  snapshot: PublicSharedChatSnapshot;
   page: SharedChatMessagePage;
 }
 

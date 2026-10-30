@@ -279,7 +279,7 @@ describe('Lightpanda standalone Git views', () => {
       await waitForPinnedPath(fixture.page, workbenchPanel, 'alpha.ts');
       const retainedWorkbench = await pinnedHeaderSnapshot(fixture.page, workbenchPanel);
 
-      await app.selectWorkspaceWindowSurface('Open Git Compare', gitWindowId);
+      await app.selectWorkspaceWindowSurface('Open Compare', gitWindowId);
       await fixture.page.waitForSelector(`${comparePanel} [data-git-file-header]`);
       await scrollDiffTo(fixture.page, comparePanel, 60);
       await waitForPinnedPath(fixture.page, comparePanel, 'alpha.ts');
@@ -295,7 +295,7 @@ describe('Lightpanda standalone Git views', () => {
       expect(restoredWorkbench.scrollHeight).toBe(retainedWorkbench.scrollHeight);
       expect(restoredWorkbench.spacerHeight).toBe(retainedWorkbench.spacerHeight);
 
-      await app.selectWorkspaceWindowSurface('Open Git History', gitWindowId);
+      await app.selectWorkspaceWindowSurface('Open History', gitWindowId);
       await fixture.page.waitForSelector(historyPanel);
       await fixture.page.waitForSelector(
         `${historyPanel} button[data-git-history-commit-row][aria-label*="large revision"]`,
@@ -375,14 +375,14 @@ describe('Lightpanda standalone Git views', () => {
       await app.startOpenAiDirectChat('git-view-desktop-seed');
       await app.waitForText('echo:git-view-desktop-seed');
 
-      await app.openNewWorkspaceWindow('Open Git History');
+      await app.openNewWorkspaceWindow('Open History');
       const historyWindowId = await app.workspaceWindowIdForSurface('singleton:git-history');
       await fixture.page.waitForSelector(
         `[data-workspace-window-id="${historyWindowId}"] [data-workspace-surface-id="singleton:git-history"][aria-hidden="false"]`,
       );
       await app.waitForText('second revision');
 
-      await app.openNewWorkspaceWindow('Open Git Compare');
+      await app.openNewWorkspaceWindow('Open Compare');
       const compareWindowId = await app.workspaceWindowIdForSurface('singleton:git-compare');
       await fixture.page.waitForSelector(
         `[data-workspace-window-id="${compareWindowId}"] [data-workspace-surface-id="singleton:git-compare"][aria-hidden="false"]`,
@@ -482,7 +482,7 @@ describe('Lightpanda standalone Git views', () => {
         () => !document.querySelector('[data-workspace-surface-id="singleton:git-compare"]'),
         { timeout: 20_000 },
       );
-      await app.openNewWorkspaceWindow('Open Git Compare');
+      await app.openNewWorkspaceWindow('Open Compare');
       expect(await app.workspaceWindowIdForSurface('singleton:git-compare')).not.toBe(
         compareWindowId,
       );
@@ -502,7 +502,7 @@ describe('Lightpanda standalone Git views', () => {
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-view-virtual-history-seed');
       await app.waitForText('echo:git-view-virtual-history-seed');
-      await app.openNewWorkspaceWindow('Open Git History');
+      await app.openNewWorkspaceWindow('Open History');
       const historyWindowId = await app.workspaceWindowIdForSurface('singleton:git-history');
 
       await fixture.page.waitForSelector(
@@ -631,7 +631,7 @@ describe('Lightpanda standalone Git views', () => {
       await app.startOpenAiDirectChat('git-view-compare-target-seed');
       await app.waitForText('echo:git-view-compare-target-seed');
 
-      await app.openNewWorkspaceWindow('Open Git Compare');
+      await app.openNewWorkspaceWindow('Open Compare');
       await fixture.page.waitForSelector(
         '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
           '[aria-hidden="false"]',
@@ -828,7 +828,7 @@ describe('Lightpanda standalone Git views', () => {
         () => !document.querySelector('[data-workspace-surface-id="singleton:git-compare"]'),
         { timeout: 20_000 },
       );
-      await app.waitForWorkspaceWindowAddActionEnabled('Open Git Compare', chatWindowId);
+      await app.waitForWorkspaceWindowAddActionEnabled('Open Compare', chatWindowId);
       fixture.assertNoBrowserErrors();
     });
   });

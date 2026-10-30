@@ -33,6 +33,7 @@ describe('GitSummaryButton', () => {
 			expect(button.contains(marker)).toBe(true);
 			button.focus();
 			const tooltip = await screen.findByRole('tooltip');
+			expect(tooltip.getAttribute('data-slot')).toBe('git-summary-tooltip');
 			expect(tooltip.textContent).toContain('New files');
 		},
 	);

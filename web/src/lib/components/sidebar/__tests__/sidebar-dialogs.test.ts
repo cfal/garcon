@@ -58,6 +58,71 @@ function makeWorktree(path: string, branch: string, isCurrent = false): GitWorkt
 }
 
 describe('Sidebar dialogs', () => {
+	it.each([
+		{ reusedPanel: false, worktreeDetour: false },
+		{ reusedPanel: true, worktreeDetour: false },
+		{ reusedPanel: false, worktreeDetour: true },
+		{ reusedPanel: true, worktreeDetour: true },
+	])(
+		'restores focus only in the originating chat (reused: $reusedPanel, worktree detour: $worktreeDetour)',
+		async ({ reusedPanel, worktreeDetour }) => {
+			vi.useFakeTimers();
+			vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+			vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+				worktrees: [makeWorktree('/workspace/project-feature', 'feature')],
+			});
+			const panel = document.createElement('div');
+			panel.dataset.conversationPanel = 'synthetic-surface';
+			panel.dataset.conversationPanelChatId = 'chat-1';
+			const viewport = document.createElement('div');
+			viewport.dataset.chatScrollViewport = 'true';
+			viewport.tabIndex = -1;
+			const trigger = document.createElement('button');
+			panel.append(viewport, trigger);
+			document.body.append(panel);
+			trigger.focus();
+			const rendered = render(ChatProjectPathDialog, {
+				projectPathDialog: {
+					chatId: 'chat-1',
+					chatTitle: 'Synthetic project',
+					status: 'running',
+					agentOwnershipEpoch: 'epoch-1',
+					currentProjectPath: '/workspace/project',
+				},
+				projectBasePath: '/workspace',
+				isMobile: false,
+				onClose: vi.fn(),
+				onConfirm: vi.fn(),
+			});
+			try {
+				await vi.advanceTimersByTimeAsync(250);
+				if (worktreeDetour) {
+					await fireEvent.click(
+						screen.getByRole('button', { name: 'Select a different worktree' }),
+					);
+					await screen.findByRole('dialog', { name: 'Select worktree' });
+					await vi.advanceTimersByTimeAsync(250);
+					await fireEvent.click(screen.getByRole('option', { name: /feature/ }));
+					await vi.advanceTimersByTimeAsync(250);
+					expect(screen.getByRole('textbox', { name: /new path/i })).toHaveProperty(
+						'value',
+						'/workspace/project-feature',
+					);
+				}
+				trigger.remove();
+				if (reusedPanel) panel.dataset.conversationPanelChatId = 'chat-2';
+				await rendered.rerender({ projectPathDialog: null });
+				await vi.advanceTimersByTimeAsync(250);
+				expect(document.activeElement === viewport).toBe(!reusedPanel);
+			} finally {
+				rendered.unmount();
+				panel.remove();
+				await vi.runAllTimersAsync();
+				vi.useRealTimers();
+			}
+		},
+	);
+
 	it('revalidates the unchanged chat path after replacement and dialog reopening', async () => {
 		vi.useFakeTimers();
 		vi.mocked(chatsApi.validateStart)

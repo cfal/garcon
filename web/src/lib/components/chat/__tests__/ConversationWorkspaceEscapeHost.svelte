@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
 	import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-singleton-factories';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
@@ -63,7 +64,7 @@
 	import { sameFocusOwner } from '$lib/workspace/workspace-presentation-controller.svelte.js';
 
 	interface ConversationWorkspaceEscapeHostProps {
-		showQuickCommitTray?: boolean;
+		composerStatusBarGitProjects?: boolean;
 		executionPolicy?: 'conversation' | 'literal' | null;
 		onRegisterSubmit?: (submit: (message: string) => Promise<boolean>) => void;
 		onRegisterAppendToDraft?: (append: ChatDraftAppend) => void;
@@ -76,7 +77,7 @@
 	}
 
 	let {
-		showQuickCommitTray = false,
+		composerStatusBarGitProjects = false,
 		executionPolicy = 'conversation',
 		onRegisterSubmit,
 		onRegisterAppendToDraft,
@@ -174,9 +175,10 @@
 
 	setChatSessions(sessions as never);
 	setLocalSettings({
+		...COMPOSER_STATUS_BAR_DEFAULTS,
 		autoScrollToBottom: true,
-		get showQuickCommitTray() {
-			return showQuickCommitTray;
+		get composerStatusBarGitProjects() {
+			return composerStatusBarGitProjects;
 		},
 		chatMaxWidth: 'default',
 	} as never);

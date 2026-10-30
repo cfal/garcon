@@ -19,8 +19,13 @@ const logger = createLogger('lib:http-route');
 
 const noAuthRouteMarker: unique symbol = Symbol('no-auth-route');
 const noStoreRouteMarker: unique symbol = Symbol('no-store-route');
+const responseHeadersRouteMarker: unique symbol = Symbol('response-headers-route');
 
-type MarkedRouteHandler = RouteHandler & { [noAuthRouteMarker]?: true; [noStoreRouteMarker]?: true };
+type MarkedRouteHandler = RouteHandler & {
+  [noAuthRouteMarker]?: true;
+  [noStoreRouteMarker]?: true;
+  [responseHeadersRouteMarker]?: Readonly<Record<string, string>>;
+};
 type WrappedRouteHandler = (request: Request, server?: unknown) => Promise<Response>;
 type WrappedRouteMap = Record<string, Record<string, WrappedRouteHandler>>;
 
@@ -80,6 +85,16 @@ export function markRouteNoStore<T extends RouteHandler>(handler: T): T {
   return handler;
 }
 
+// Marks a route whose every response carries these headers, including shutdown and
+// unhandled-error responses produced outside the handler.
+export function markRouteResponseHeaders<T extends RouteHandler>(
+  handler: T,
+  headers: Readonly<Record<string, string>>,
+): T {
+  Object.defineProperty(handler, responseHeadersRouteMarker, { value: headers });
+  return handler;
+}
+
 export async function invokeRawRouteHandler(
   handler: RouteHandler,
   req: Request,
@@ -131,6 +146,27 @@ export function wrapRoute(
   routePath: string,
   method: string,
   authOptions: HttpRouteAuthOptions = {},
+): WrappedRouteHandler {
+  const wrapped = wrapRouteAuth(handler, routePath, method, authOptions);
+  const headers = (handler as MarkedRouteHandler)[responseHeadersRouteMarker];
+  if (!headers) return wrapped;
+  return async (req: Request, server?: unknown): Promise<Response> => {
+    let response: Response;
+    try {
+      response = await wrapped(req, server);
+    } catch (error) {
+      response = unhandledRouteErrorResponse(error);
+    }
+    for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
+    return response;
+  };
+}
+
+function wrapRouteAuth(
+  handler: RouteHandler,
+  routePath: string,
+  method: string,
+  authOptions: HttpRouteAuthOptions,
 ): WrappedRouteHandler {
   const activity = `${method} ${routePath}`;
   if (isAuthDisabled()) {

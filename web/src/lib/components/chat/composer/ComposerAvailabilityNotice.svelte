@@ -18,6 +18,7 @@
 </script>
 
 <div
+	data-slot="composer-availability-notice"
 	class="mb-2 rounded-lg border border-border bg-card px-4 py-3"
 	data-composer-availability-notice={notice.kind}
 	data-project-availability-notice={notice.kind === 'project-unavailable' ? '' : undefined}

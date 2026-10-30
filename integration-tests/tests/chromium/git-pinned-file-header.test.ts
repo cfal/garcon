@@ -79,7 +79,7 @@ async function openChatWorkspace(fixture: ChromiumFixture, projectPath: string):
 }
 
 async function switchToGitWorkbench(page: Page): Promise<void> {
-  await openWorkspaceAddMenuItem(page, 'Open Git Workbench');
+  await openWorkspaceAddMenuItem(page, 'Open Workbench');
   await page.locator(WORKBENCH_PANEL).waitFor({ state: 'visible' });
 }
 
@@ -328,7 +328,7 @@ describe('Chromium pinned Git file headers', () => {
       await fixture.page
         .locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]')
         .waitFor({ state: 'visible' });
-      await openWorkspaceAddMenuItem(fixture.page, 'Open Git Compare');
+      await openWorkspaceAddMenuItem(fixture.page, 'Open Compare');
       await fixture.page.locator(COMPARE_PANEL).waitFor();
       await waitForDiff(fixture.page, COMPARE_PANEL);
       await scrollDiffTo(fixture.page, COMPARE_PANEL, 60);
@@ -344,7 +344,7 @@ describe('Chromium pinned Git file headers', () => {
       ).toBe(1);
 
       markPhase('checking the History header variant');
-      await openWorkspaceAddMenuItem(fixture.page, 'Open Git History');
+      await openWorkspaceAddMenuItem(fixture.page, 'Open History');
       await fixture.page.locator(HISTORY_PANEL).waitFor();
       await fixture.page
         .locator(

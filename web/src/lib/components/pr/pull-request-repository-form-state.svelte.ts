@@ -186,7 +186,7 @@ export class PullRequestRepositoryFormState {
 		this.#startupLoad ??= this.startup
 			.loadSettingsAndModels()
 			.then(() => {
-				if (!this.#disposed) this.startup.validatePath();
+				if (!this.#disposed) this.startup.validateChangedPath();
 			})
 			.finally(() => {
 				this.#startupLoad = null;

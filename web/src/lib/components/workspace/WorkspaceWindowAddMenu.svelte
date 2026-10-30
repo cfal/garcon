@@ -1,6 +1,7 @@
 <script lang="ts">
 	import MessagesSquare from '@lucide/svelte/icons/messages-square';
-	import GitPullRequestArrow from '@lucide/svelte/icons/git-pull-request-arrow';
+	import GitHubIcon from '$lib/components/icons/GitHubIcon.svelte';
+	import GitGraph from '@lucide/svelte/icons/git-graph';
 	import type { Component } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import {
@@ -52,7 +53,7 @@
 		readonly onclick: () => void;
 	}
 	type TerminalAddAction = { readonly id: 'new-terminal'; readonly kind: 'terminal' };
-	type ViewGroupId = 'chat-views' | 'github-views';
+	type ViewGroupId = 'git-views' | 'chat-views' | 'github-views';
 	interface ViewGroup {
 		readonly id: ViewGroupId;
 		readonly kinds: readonly PortableSingletonKind[];
@@ -67,8 +68,16 @@
 		readonly actions: readonly WorkspaceWindowAddCommand[];
 	}
 	type WorkspaceWindowAddAction = WorkspaceWindowAddCommand | TerminalAddAction | ViewGroupAction;
-	// Views of one family share a single titlebar control that opens a menu of them.
-	const VIEW_GROUPS: readonly ViewGroup[] = [
+	const ADD_VIEWS: readonly (PortableSingletonKind | ViewGroup)[] = [
+		{
+			id: 'git-views',
+			kinds: ['git', 'git-history', 'git-compare', 'commit'],
+			label: m.workspace_git_views,
+			icon: GitGraph,
+		},
+		'files',
+		'tickets',
+		'usage',
 		{
 			id: 'chat-views',
 			kinds: ['chat-map', 'chat-canvas', 'chat-board'],
@@ -79,10 +88,9 @@
 			id: 'github-views',
 			kinds: ['pull-requests'],
 			label: m.workspace_github_views,
-			icon: GitPullRequestArrow,
+			icon: GitHubIcon,
 		},
 	];
-	const GROUPED_KINDS = new Set(VIEW_GROUPS.flatMap((group) => group.kinds));
 
 	const ADD_ACTION_CONTROL_CLASS =
 		'flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:pointer-events-none aria-disabled:opacity-50 disabled:pointer-events-none disabled:opacity-50';
@@ -114,24 +122,28 @@
 		tickets: m.tickets_title,
 		usage: m.workspace_surface_usage,
 	};
-	const groupActions = $derived(
-		VIEW_GROUPS.map(
-			(group): ViewGroupAction => ({
-				id: group.id,
+	const eligibleActions = $derived.by((): readonly WorkspaceWindowAddAction[] => {
+		const actions: WorkspaceWindowAddAction[] = [];
+		for (const view of ADD_VIEWS) {
+			if (typeof view === 'string') {
+				if (availableSingletonKinds.includes(view)) actions.push(singletonAction(view));
+				continue;
+			}
+			const members = view.kinds
+				.filter((kind) => availableSingletonKinds.includes(kind))
+				.map(singletonAction);
+			if (members.length === 0) continue;
+			actions.push({
+				id: view.id,
 				kind: 'view-group',
-				label: group.label(),
-				icon: group.icon,
-				actions: availableSingletonKinds
-					.filter((kind) => group.kinds.includes(kind))
-					.map(singletonAction),
-			}),
-		).filter((group) => group.actions.length > 0),
-	);
-	const eligibleActions = $derived.by((): readonly WorkspaceWindowAddAction[] => [
-		...availableSingletonKinds.filter((kind) => !GROUPED_KINDS.has(kind)).map(singletonAction),
-		...groupActions,
-		{ id: 'new-terminal', kind: 'terminal' },
-	]);
+				label: view.label(),
+				icon: view.icon,
+				actions: members,
+			});
+		}
+		actions.push({ id: 'new-terminal', kind: 'terminal' });
+		return actions;
+	});
 	const hasUnplacedTerminalSessions = $derived(unplacedTerminalSessions.length > 0);
 	const menuState = new WorkspaceWindowAddMenuState({
 		get windowId() {
@@ -176,8 +188,6 @@
 	}
 
 	function openSingletonLabel(kind: PortableSingletonKind): string {
-		if (kind === 'git-history') return m.workspace_open_git_history();
-		if (kind === 'git-compare') return m.workspace_open_git_compare();
 		if (kind === 'chat-map') return m.workspace_open_chat_map();
 		if (kind === 'chat-canvas') return m.workspace_open_chat_canvas();
 		if (kind === 'chat-board') return m.workspace_open_chat_board();
@@ -265,6 +275,7 @@
 					class="w-64"
 					data-workspace-window-add-menu={windowId}
 					data-workspace-window-group-menu={action.id}
+					getFocusReturnTarget={() => menuState.focusReturnTarget(action.id)}
 					onCloseAutoFocus={(event) => menuState.handleCloseAutoFocus(event)}
 				>
 					{@render viewGroupMenuItems(action)}
@@ -287,6 +298,7 @@
 					class="w-64"
 					data-workspace-window-add-menu={windowId}
 					data-workspace-window-add-terminal-menu={windowId}
+					getFocusReturnTarget={() => menuState.focusReturnTarget(action.id)}
 					onCloseAutoFocus={(event) => menuState.handleCloseAutoFocus(event)}
 				>
 					{@render addActionMenuItem(action)}
@@ -332,6 +344,7 @@
 			</DropdownMenuTrigger>
 			<DropdownMenuContent
 				bind:ref={menuState.overflowMenuContent}
+				getFocusReturnTarget={() => menuState.focusReturnTarget()}
 				align="end"
 				class="w-64"
 				data-workspace-window-add-menu={windowId}

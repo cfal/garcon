@@ -96,6 +96,7 @@ describe('SlashCommandMenu', () => {
 		});
 
 		expect(screen.getByText('/compact')).toBeTruthy();
+		expect(screen.getByText('/compact').closest('[data-slot="composer-completion-menu"]')?.classList.contains('rounded-md')).toBe(true);
 		expect(screen.getByText('Summarize the conversation to free up context')).toBeTruthy();
 	});
 

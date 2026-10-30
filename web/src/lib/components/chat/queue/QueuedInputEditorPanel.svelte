@@ -137,6 +137,7 @@
 	{#if editor.phase === 'conflict'}
 		<div
 			id="queued-input-status"
+			data-slot="queue-status"
 			class="rounded-lg border border-status-warning-border bg-status-warning/10 px-3 py-2 text-sm text-status-warning-muted-foreground"
 			role="status"
 		>
@@ -146,6 +147,7 @@
 	{:else if statusNotice}
 		<div
 			id="queued-input-status"
+			data-slot="queue-status"
 			class="rounded-lg border border-border bg-card px-3 py-2 text-sm"
 			role="status"
 		>

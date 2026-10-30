@@ -144,7 +144,7 @@ function emptyChatHistory(request: ChatMessagesRequest) {
 	};
 }
 
-function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?: boolean } = {}) {
+function installContext({ composerStatusBarGitProjects = false }: { composerStatusBarGitProjects?: boolean } = {}) {
 	const initial = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 		{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-a' },
 	]);
@@ -420,7 +420,7 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 		rename: vi.fn(async (_terminalId: string, _title: string | null) => undefined),
 	};
 	const localSettings = new LocalSettingsStore();
-	localSettings.showQuickCommitTray = showQuickCommitTray;
+	localSettings.composerStatusBarGitProjects = composerStatusBarGitProjects;
 	const fetchProjectResolution = vi.fn(async (target: ProjectTarget) => ({
 		target,
 		resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
@@ -675,7 +675,7 @@ describe('WorkspaceRoot', () => {
 	});
 
 	it('keeps visible project resolution stable across chat record updates', async () => {
-		const { layout, fetchProjectResolution } = installContext({ showQuickCommitTray: true });
+		const { layout, fetchProjectResolution } = installContext({ composerStatusBarGitProjects: true });
 		renderRoot();
 		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledOnce());
 		const sessions = testContext.current?.sessions as {

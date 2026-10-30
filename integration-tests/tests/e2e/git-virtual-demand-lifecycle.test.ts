@@ -243,7 +243,7 @@ describe('Lightpanda Git virtual demand lifecycle', () => {
       expect(retainedBefore.scrollTop).toBeGreaterThan(0);
       expect(retainedBefore.firstIndex).toBeGreaterThan(0);
 
-      await app.selectWorkspaceWindowSurface('Open Git Compare', gitWindowId);
+      await app.selectWorkspaceWindowSurface('Open Compare', gitWindowId);
       await fixture.page.waitForFunction(
         () =>
           document

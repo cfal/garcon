@@ -25,7 +25,7 @@
 		<div class="flex flex-wrap gap-1.5">
 			{#each candidates as candidate (candidate.ordinal)}
 				{@const content = label(candidate)}
-				<div class="flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 py-1 pl-2.5 pr-1 text-xs text-foreground">
+				<div data-slot="composer-resend-candidate" class="flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 py-1 pl-2.5 pr-1 text-xs text-foreground">
 					<span class="max-w-64 truncate">{content}</span>
 					<button
 						type="button"

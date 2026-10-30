@@ -48,7 +48,7 @@ test('uncertain push reports its captured executor after disconnection without r
     await runFixtureGit(project, 'commit', '-am', 'Pending push');
     const head = await runFixtureGit(project, 'rev-parse', 'HEAD');
     await openChat(fixture);
-    await clickWorkspaceWindowAddAction(page, 'Open Git Workbench');
+    await clickWorkspaceWindowAddAction(page, 'Open Workbench');
     const panel = page.locator('[data-workspace-surface-id="singleton:git"][aria-hidden="false"]');
     const dispatched = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -85,7 +85,7 @@ test('worktree creation blocks Refresh and reports uncertainty after dialog disc
     const project = executionDirs.project;
     await initializeFixtureRepository(project);
     await openChat(fixture);
-    await clickWorkspaceWindowAddAction(page, 'Open Git Workbench');
+    await clickWorkspaceWindowAddAction(page, 'Open Workbench');
     const panel = page.locator('[data-workspace-surface-id="singleton:git"][aria-hidden="false"]');
     await panel.getByRole('button', { name: project, exact: true }).click();
     const release = Promise.withResolvers<void>();

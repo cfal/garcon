@@ -20,11 +20,9 @@ function response(
 	return {
 		snapshot: {
 			shareToken: 'share-token',
-			chatId: 'chat-1',
 			title: 'Large shared chat',
 			agentId: 'codex',
 			model: 'gpt-5',
-			projectPath: '/workspace/garcon',
 			sharedAt: pageOverrides.snapshotVersion ?? '2025-01-02T03:04:05.000Z',
 			messages: contents.map((content, index) => ({
 				type: 'assistant-message',
@@ -69,13 +67,12 @@ describe('SharedChatPage', () => {
 	it('retains literal source, Markdown stdout, fenced stderr and command outcomes', async () => {
 		const snapshot = response([], 0, 4);
 		const at = '2026-01-01T00:00:00.000Z';
-		const context = { executorId: 'local', projectPath: '/workspace/original' };
 		snapshot.snapshot.messages = [
 			new UserMessage(at, '  **source**\n ', undefined, { contentMode: 'literal' }),
-			new CommandOutputMessage(at, 'command-1', 'stdout', 'markdown', '**stdout**', context),
-			new CommandOutputMessage(at, 'command-1', 'stderr', 'plain', '**stderr**', context),
+			new CommandOutputMessage(at, 'command-1', 'stdout', 'markdown', '**stdout**', null),
+			new CommandOutputMessage(at, 'command-1', 'stderr', 'plain', '**stderr**', null),
 			new CommandResultMessage(at, 'command-1', { outcome: 'finished', exitCode: 0, signal: null,
-				capture: 'complete', cwd: { kind: 'reported', path: '/workspace/original' } }),
+				capture: 'complete', cwd: { kind: 'withheld' } }),
 		];
 		snapshot.page.end = 4;
 		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(snapshot);
@@ -468,6 +465,8 @@ describe('SharedChatPage', () => {
 		const bubble = container.querySelector<HTMLElement>(
 			'[data-user-message-presentation="custom"]',
 		);
+		expect(bubble?.getAttribute('data-slot')).toBe('shared-user-message');
+		expect(bubble?.classList.contains('rounded-xl')).toBe(true);
 		expect(bubble?.classList.contains('cli-presentation-custom')).toBe(true);
 		expect(bubble?.classList.contains('selection:bg-user-bubble-foreground')).toBe(false);
 		expect(bubble?.classList.contains('selection:text-user-bubble')).toBe(false);

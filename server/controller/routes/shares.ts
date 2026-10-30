@@ -1,11 +1,12 @@
 // Share routes. Provides endpoints to create, query, revoke, and
 // publicly access shared chat snapshots.
 
-import { markRouteNoAuth } from '../lib/http-route.js';
+import { markRouteNoAuth, markRouteResponseHeaders } from '../lib/http-route.js';
 import { withJsonBody } from '../lib/json-route.js';
 import type { IShareStore } from '../chats/shares/store.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type {
+  PublicSharedChatSnapshot,
   RevokeShareResponse,
   ShareChatResponse,
   SharedChatMessagePage,
@@ -66,6 +67,12 @@ function extractShareTokenFromPath(pathname: string): string | null {
 
 const MAX_SHARED_CHAT_PAGE_SIZE = 200;
 const NO_STORE = 'no-cache, no-store, must-revalidate';
+// Keeps share links out of search indexes and archives once posted somewhere public,
+// and keeps the token out of the Referer sent to sites a shared transcript links to.
+const PUBLIC_SHARE_HEADERS: Readonly<Record<string, string>> = {
+  'X-Robots-Tag': 'noindex, nofollow, noarchive',
+  'Referrer-Policy': 'no-referrer',
+};
 
 function htmlResponse(html: string, llmPath?: string): Response {
   const headers: Record<string, string> = {
@@ -202,13 +209,20 @@ function withShareStorageErrors(handler: RouteHandler): RouteHandler {
   };
 }
 
+// Serves a share route without authentication. The HTTP wrapper adds the public share
+// headers to every response, including shutdown and unhandled-error responses.
+function publicShareRoute(handler: RouteHandler): RouteHandler {
+  return markRouteNoAuth(markRouteResponseHeaders(withShareStorageErrors(handler), PUBLIC_SHARE_HEADERS));
+}
+
 // Builds a GetSharedChatResponse around the page's messages as stored, so serving a page
 // never parses or re-encodes them.
 function sharedChatPageResponse(
   shared: SharedChatMessages,
   page: SharedChatMessagePage,
 ): Response {
-  const { messageCount: _messageCount, ...snapshot } = shared.header;
+  const { shareToken, title, agentId, model, sharedAt } = shared.header;
+  const snapshot: Omit<PublicSharedChatSnapshot, 'messages'> = { shareToken, title, agentId, model, sharedAt };
   const snapshotFields = JSON.stringify(snapshot).slice(0, -1);
   const messages = shared.messages.join(',');
   return new Response(
@@ -420,8 +434,8 @@ export default function createShareRoutes(
       DELETE: deleteShareChat,
     },
     '/api/v1/chats/share/status': { GET: withShareStorageErrors(getShareStatus) },
-    '/api/v1/shared': { GET: markRouteNoAuth(withShareStorageErrors(getSharedChat)) },
-    '/shared/:token': { GET: markRouteNoAuth(withShareStorageErrors(getSharedChatPage)) },
-    '/shared/llm/:token': { GET: markRouteNoAuth(withShareStorageErrors(getLlmTranscript)) },
+    '/api/v1/shared': { GET: publicShareRoute(getSharedChat) },
+    '/shared/:token': { GET: publicShareRoute(getSharedChatPage) },
+    '/shared/llm/:token': { GET: publicShareRoute(getLlmTranscript) },
   };
 }

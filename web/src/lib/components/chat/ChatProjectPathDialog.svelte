@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import { getExecutors } from '$lib/context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -38,6 +38,7 @@
 	let activeDialogKey = $state('');
 	let pathInputRef = $state<HTMLInputElement | null>(null);
 	let isUpdatingPinnedProjectPath = $state(false);
+	let focusOrigin: { trigger: HTMLElement; panel: HTMLElement; chatId: string } | null = null;
 
 	let isOpen = $derived(projectPathDialog !== null);
 	const pathContextKey = $derived(executors.pathContextKey(projectPathDialogState.executorId));
@@ -85,6 +86,12 @@
 		if (activeDialogKey === nextDialogKey) return;
 
 		activeDialogKey = nextDialogKey;
+		const trigger = document.activeElement;
+		const panel = trigger?.closest<HTMLElement>('[data-conversation-panel]');
+		focusOrigin =
+			trigger instanceof HTMLElement && panel
+				? { trigger, panel, chatId: projectPathDialog.chatId }
+				: null;
 		projectPathDialogState.open(projectPathDialog.currentProjectPath, projectPathDialog.executorId);
 	});
 
@@ -106,6 +113,21 @@
 	function handleOpenAutoFocus(event: Event): void {
 		event.preventDefault();
 		queueMicrotask(() => pathInputRef?.focus());
+	}
+
+	function handleCloseAutoFocus(event: Event): void {
+		if (isOpen) return;
+		const origin = focusOrigin;
+		focusOrigin = null;
+		if (!origin || origin.trigger.isConnected) return;
+		event.preventDefault();
+		// Changing paths can remove the opener; the originating chat remains focusable.
+		void tick().then(() => {
+			if (origin.panel.dataset.conversationPanelChatId !== origin.chatId) return;
+			origin.panel
+				.querySelector<HTMLElement>('[data-chat-scroll-viewport]')
+				?.focus({ preventScroll: true });
+		});
 	}
 
 	function handlePathKeydown(event: KeyboardEvent): void {
@@ -168,6 +190,7 @@
 		<Dialog.Content
 			class="h-dvh w-full max-w-full overflow-hidden rounded-none border-0 p-0 sm:h-auto sm:max-w-lg sm:rounded-lg sm:border"
 			onOpenAutoFocus={handleOpenAutoFocus}
+			onCloseAutoFocus={handleCloseAutoFocus}
 		>
 			<div class="flex h-full min-w-0 max-w-full flex-col sm:h-auto">
 				<Dialog.Header class="min-w-0 max-w-full overflow-hidden border-b border-border px-5 py-4">

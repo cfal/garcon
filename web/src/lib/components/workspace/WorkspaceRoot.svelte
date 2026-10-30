@@ -62,6 +62,7 @@
 	} from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 	import type { GitQuickProjectLease } from '$lib/git/surface/git-quick-summary.svelte.js';
+	import { composerStatusBarNeedsGit } from '$lib/chat/composer/composer-status-bar.js';
 	import {
 		chatViewSurfaceId,
 		type ChatViewSurfaceId,
@@ -208,7 +209,7 @@
 			),
 	);
 	const visibleGitProjects = $derived.by<GitQuickProjectLease[]>(() => {
-		if (!localSettings.showQuickCommitTray) return [];
+		if (!composerStatusBarNeedsGit(localSettings)) return [];
 		return chatPresentations.flatMap(({ chatId }) => {
 			const chat = sessions.byId[chatId];
 			if (!chat?.projectPath || !executors.gitAvailable(chat.executorId)) return [];
@@ -243,8 +244,7 @@
 	});
 
 	$effect(() => {
-		const quickCommitVisible = localSettings.showQuickCommitTray;
-		if (!quickCommitVisible || !visibleProjectTargetsKey) return;
+		if (!composerStatusBarNeedsGit(localSettings) || !visibleProjectTargetsKey) return;
 		const targets = untrack(visibleProjectTargets);
 		const leases = untrack(() =>
 			targets.map((target) => {
