@@ -3,6 +3,7 @@
 	setExecutorsTestContext();
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
+	import { buildSidebarChatListProjection } from '../sidebar-row-model';
 	import { TYPOGRAPHY_DEFAULTS } from '$lib/theme/typography.js';
 	import SidebarSearchDialogs from '../search/SidebarSearchDialogs.svelte';
 	import {
@@ -210,6 +211,19 @@
 			void sidebarSearchContext.loadSavedSearches();
 		});
 	});
+	const projection = $derived(
+		buildSidebarChatListProjection({
+			displayedChats: sidebarSearchContext.filteredChats,
+			optimisticArchiveOrder: chats,
+			grouping: sidebarGrouping,
+			currentTime: new Date('2025-01-02T00:00:00.000Z'),
+			inactivityDuration: sidebarInactivityDuration,
+			sortMode: 'manual',
+			pinnedInsertPosition: 'top',
+			groupNestedProjectPaths: sidebarGroupNestedProjectPaths,
+			collapsedProjectKeys,
+		}),
+	);
 </script>
 
 <button type="button" onclick={() => (sidebarOpen = true)}>Open sidebar</button>
@@ -219,6 +233,7 @@
 
 {#if sidebarOpen}
 	<Sidebar
+		{projection}
 		{chats}
 		{selectedChatId}
 		isLoading={false}
@@ -237,6 +252,7 @@
 		onShowScheduledPrompts={() => {}}
 		onShowPreambles={() => {}}
 		onShowSnippets={() => {}}
+		onShowUsage={() => {}}
 		onShowSettings={() => {}}
 		newWindowEdges={workspaceSplitAdmissions()}
 	/>

@@ -3,6 +3,7 @@
 	setExecutorsTestContext();
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
+	import { buildSidebarChatListProjection } from '../sidebar-row-model';
 	import { TYPOGRAPHY_DEFAULTS } from '$lib/theme/typography.js';
 	import SidebarSearchDialogs from '../search/SidebarSearchDialogs.svelte';
 	import {
@@ -265,9 +266,25 @@
 		if (!autoLoadSavedSearches) return;
 		void sidebarSearchContext.loadSavedSearches();
 	});
+	const projection = $derived(
+		buildSidebarChatListProjection({
+			displayedChats: sidebarSearchContext.filteredChats,
+			optimisticArchiveOrder: displayedChats,
+			grouping: sidebarGrouping,
+			currentTime: new Date('2025-01-02T00:00:00.000Z'),
+			inactivityDuration: sidebarInactivityDuration,
+			sortMode: sidebarSortMode,
+			pinnedInsertPosition: 'top',
+			groupNestedProjectPaths: sidebarGroupNestedProjectPaths,
+			collapsedProjectKeys,
+			isChatOptimisticallyArchived: (chatId) =>
+				chatSessions?.isChatOptimisticallyArchived(chatId) ?? false,
+		}),
+	);
 </script>
 
 <Sidebar
+	{projection}
 	chats={displayedChats}
 	{selectedChatId}
 	isLoading={false}
@@ -280,8 +297,6 @@
 	onTogglePinned={() => {}}
 	onToggleArchive={() => {}}
 	isArchiveMutationPending={(chatId) => chatSessions?.isArchiveMutationPending(chatId) ?? false}
-	isChatOptimisticallyArchived={(chatId) =>
-		chatSessions?.isChatOptimisticallyArchived(chatId) ?? false}
 	startArchivingChats={(chatIds) =>
 		chatSessions?.startArchivingChats(chatIds) ?? {
 			chatIds: [],
@@ -300,6 +315,7 @@
 	onShowScheduledPrompts={() => {}}
 	onShowPreambles={() => {}}
 	onShowSnippets={() => {}}
+	onShowUsage={() => {}}
 	onShowSettings={() => {}}
 	newWindowEdges={workspaceSplitAdmissions()}
 />

@@ -19,6 +19,7 @@ import { hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+import { createTranscriptUsageHistory } from '@garcon/server-agent-common/usage/transcript-usage-history';
 import { singleQueryRuntimeOptions, withSingleQueryDirectory } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createAgentProjectPathUpdates } from '@garcon/server-agent-common/execution/project-path-adapter';
@@ -45,7 +46,8 @@ import {
   transformClaudeForkTranscript,
 } from './agents/claude/fork-transcript.js';
 import { loadClaudeChatMessages } from './agents/claude/history-loader.js';
-import { resolveClaudeNativePath } from './agents/claude/native-path.js';
+import { claudeProjectsDir, resolveClaudeNativePath } from './agents/claude/native-path.js';
+import { claudeUsageFormat } from './agents/claude/usage-format.js';
 import { ClaudeSlashCommandDiscovery } from './agents/claude/slash-command-discovery.js';
 import { createClaudeNativeActivityProbe } from './agents/claude/native-activity.js';
 import { resolveClaudeModel } from './agents/claude/model-context.js';
@@ -92,6 +94,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   };
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
   readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
+  readonly usageHistory: NonNullable<AgentIntegration['usageHistory']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -190,6 +193,11 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createClaudeNativeActivityProbe(nativeSessions);
+    this.usageHistory = createTranscriptUsageHistory({
+      operation: 'claude-usage-history',
+      format: claudeUsageFormat,
+      roots: () => [claudeProjectsDir({ configHomeDir: config.configHomeDir() ?? undefined })],
+    });
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: CLAUDE_MODELS.DEFAULT,

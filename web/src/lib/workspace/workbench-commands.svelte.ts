@@ -424,6 +424,7 @@ export class WorkbenchCommandRegistry {
 			open('workspace-chat-map', m.workspace_open_chat_map(), 'chat-map'),
 			open('workspace-chat-canvas', m.workspace_open_chat_canvas(), 'chat-canvas'),
 			open('workspace-chat-board', m.workspace_open_chat_board(), 'chat-board'),
+			open('workspace-usage', m.workspace_open_usage(), 'usage'),
 			{
 				id: 'workspace-terminal',
 				label: m.command_switch_to_terminal(),

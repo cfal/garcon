@@ -16,6 +16,7 @@ import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.
 import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
 import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { WorkbenchCommandRegistry } from '$lib/workspace/workbench-commands.svelte.js';
+import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { searchNavigationPort } from './app-shell-search-navigation-test-port.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
@@ -31,6 +32,7 @@ vi.mock('$lib/chat/actions/chat-navigation.js', () => ({
 }));
 
 vi.mock('$lib/context', () => ({
+	getExecutors: () => ({ executors: [] } satisfies Pick<ExecutorsStore, 'executors'>),
 	getAppShell: () => testContext.current?.appShell,
 	getChatSessions: () => testContext.current?.sessions,
 	getGhCapability: () => testContext.current?.ghCapability,

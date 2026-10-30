@@ -5,6 +5,7 @@
 	import SidebarBackToTop from './SidebarBackToTop.svelte';
 	import { shouldShowSidebarBackToTop } from './sidebar-back-to-top';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { SidebarChatListProjection } from './sidebar-row-model';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type {
 		PersistedChatOrderGroup,
@@ -20,8 +21,7 @@
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarContentProps {
-		chats: ChatSessionRecord[];
-		filteredChats: ChatSessionRecord[];
+		projection: SidebarChatListProjection;
 		selectedChatId: string | null;
 		isLoading: boolean;
 		isMobile?: boolean;
@@ -31,7 +31,6 @@
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: (chatId: string) => boolean;
 		displayOptions?: SidebarDisplayOptions;
-		collapsedProjectKeys?: ReadonlySet<string>;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
@@ -48,7 +47,6 @@
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		isArchiveMutationPending?: (chatId: string) => boolean;
-		isChatOptimisticallyArchived?: (chatId: string) => boolean;
 		onQuickMove: (
 			list: PersistedChatOrderGroup,
 			chatId: string,
@@ -60,8 +58,7 @@
 	}
 
 	let {
-		chats,
-		filteredChats,
+		projection,
 		selectedChatId,
 		isLoading,
 		isMobile = false,
@@ -71,7 +68,6 @@
 		isMultiSelectMode,
 		isMultiSelected,
 		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
-		collapsedProjectKeys = new Set<string>(),
 		onToggleProjectCollapsed,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
@@ -88,7 +84,6 @@
 		onTogglePinned,
 		onToggleArchive,
 		isArchiveMutationPending = () => false,
-		isChatOptimisticallyArchived = () => false,
 		onQuickMove,
 		onSortChatOrder,
 	}: SidebarContentProps = $props();
@@ -165,8 +160,7 @@
 >
 	<SidebarChatList
 		{viewportRef}
-		{chats}
-		{filteredChats}
+		{projection}
 		{selectedChatId}
 		{isLoading}
 		{isMobile}
@@ -176,7 +170,6 @@
 		{isMultiSelectMode}
 		{isMultiSelected}
 		{displayOptions}
-		{collapsedProjectKeys}
 		{onToggleProjectCollapsed}
 		{onEnterMultiSelect}
 		{onMultiSelectToggle}
@@ -193,7 +186,6 @@
 		{onTogglePinned}
 		{onToggleArchive}
 		{isArchiveMutationPending}
-		{isChatOptimisticallyArchived}
 		{onQuickMove}
 		{onSortChatOrder}
 	/>

@@ -38,6 +38,7 @@
 		onShowScheduledPrompts: () => void;
 		onShowPreambles: () => void;
 		onShowSnippets: () => void;
+		onShowUsage: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -71,6 +72,7 @@
 		onShowScheduledPrompts,
 		onShowPreambles,
 		onShowSnippets,
+		onShowUsage,
 		onShowSettings,
 	}: SidebarSearchDockProps = $props();
 
@@ -108,6 +110,7 @@
 		{onShowScheduledPrompts}
 		{onShowPreambles}
 		{onShowSnippets}
+		{onShowUsage}
 		{onShowSettings}
 	/>
 	<SidebarSearchContext
