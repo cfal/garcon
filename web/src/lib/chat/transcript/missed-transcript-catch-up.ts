@@ -15,25 +15,18 @@ export interface MissedTranscriptCatchUpPort {
 	isDisplayed(chatId: string): boolean;
 	settleLoads(chatId: string): Promise<void>;
 	load(chatId: string): Promise<boolean>;
-	dropParkedWindows(chatId: string): void;
 	markLoadFailed(chatId: string): void;
 }
 
 export class MissedTranscriptCatchUp {
 	#pending = new Map<string, TranscriptAdvance>();
 	#running = new Map<string, Promise<void>>();
-	#behindWhileHidden = new Set<string>();
-	// Chats shown since the last reconnect; every other cache missed summaries.
-	#shownSinceReconnect: Set<string> | null = null;
 
 	constructor(private readonly port: MissedTranscriptCatchUpPort) {}
 
 	apply(chatId: string, advance: TranscriptAdvance): void {
 		if (this.port.covers(chatId, advance)) return;
-		if (!this.port.isDisplayed(chatId)) {
-			this.#markHiddenBehind(chatId);
-			return;
-		}
+		if (!this.port.isDisplayed(chatId)) return;
 		const recorded = this.#pending.get(chatId);
 		if (
 			!recorded ||
@@ -43,56 +36,37 @@ export class MissedTranscriptCatchUp {
 			this.#pending.set(chatId, advance);
 		}
 		if (this.#running.has(chatId)) return;
-		const run = this.#run(chatId).finally(() => {
+		const run: Promise<void> = this.#run(chatId, () => this.#running.get(chatId) === run).finally(() => {
 			if (this.#running.get(chatId) === run) this.#running.delete(chatId);
 		});
 		this.#running.set(chatId, run);
 	}
 
-	// A disconnect loses summaries, so no hidden cache is known to be current.
-	markHiddenUnverified(displayedChatIds: ReadonlySet<string>): void {
-		this.#shownSinceReconnect = new Set(displayedChatIds);
-	}
-
-	// Reports whether a chat being shown must catch up before trusting its cache.
-	takeCatchUpOnShow(chatId: string): boolean {
-		const unverified = this.#shownSinceReconnect !== null && !this.#shownSinceReconnect.has(chatId);
-		this.#shownSinceReconnect?.add(chatId);
-		return this.#behindWhileHidden.delete(chatId) || unverified;
-	}
-
 	forget(chatId: string): void {
 		this.#pending.delete(chatId);
-		this.#behindWhileHidden.delete(chatId);
+		this.#running.delete(chatId);
 	}
 
 	clear(): void {
 		this.#pending.clear();
-		this.#behindWhileHidden.clear();
-		this.#shownSinceReconnect = null;
-	}
-
-	#markHiddenBehind(chatId: string): void {
-		this.#behindWhileHidden.add(chatId);
-		this.port.dropParkedWindows(chatId);
+		this.#running.clear();
 	}
 
 	// A load that began before the summarized rows committed cannot contain
 	// them, so each pass first lets in-flight loads settle. A load that starts
 	// afterwards covers every advance recorded so far; a pass repeats only for
 	// an advance that arrives while it loads.
-	async #run(chatId: string): Promise<void> {
+	async #run(chatId: string, isCurrent: () => boolean): Promise<void> {
 		for (;;) {
 			await this.port.settleLoads(chatId);
+			if (!isCurrent()) return;
 			const advance = this.#pending.get(chatId);
 			if (!advance) return;
 			this.#pending.delete(chatId);
 			if (this.port.covers(chatId, advance)) continue;
-			if (!this.port.isDisplayed(chatId)) {
-				this.#markHiddenBehind(chatId);
-				continue;
-			}
+			if (!this.port.isDisplayed(chatId)) continue;
 			const loaded = await this.port.load(chatId).catch(() => false);
+			if (!isCurrent()) return;
 			if (!loaded) {
 				// Leaves the chat stale so its next activation retries.
 				this.#pending.delete(chatId);

@@ -155,9 +155,6 @@ describe('ChatTranscriptCache', () => {
 			lastOrdinal: 1,
 			stale: false,
 		});
-		expect(cache.listCursors()).toEqual([
-			{ chatId: 'chat-1', transcriptViewId: 'generation-1', lastOrdinal: 1 },
-		]);
 	});
 
 	it('advances the cursor across hidden ledger rows', () => {

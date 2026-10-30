@@ -196,7 +196,14 @@ describe('ConversationPanelRegistry', () => {
 			transcript.transcriptCache.replace(chatId, 'view-1', [message(1), message(2)], 2, null);
 			transcript.installCachedSnapshot(chatId);
 		});
-		const { cache, registry } = fixture({ retainInactiveWindows: () => true, loadTranscriptSnapshot });
+		const readTranscriptReplayPage = vi.fn<TranscriptReplayPageReader>(async (request) =>
+			transcriptReplayPage(request, { messages: [message(2)], throughOrdinal: 2 }),
+		);
+		const { cache, registry } = fixture({
+			retainInactiveWindows: () => true,
+			loadTranscriptSnapshot,
+			readTranscriptReplayPage,
+		});
 		seed(cache, 'chat-1');
 		seed(cache, 'chat-2');
 		switchPanel(registry, 'chat-1');
@@ -209,12 +216,14 @@ describe('ConversationPanelRegistry', () => {
 
 		registry.applyTranscriptAdvance('chat-1', 'view-1', 2);
 		expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 1, stale: false });
-		expect(registry.hasInactiveWindow('chat-1')).toBe(false);
+		expect(registry.hasInactiveWindow('chat-1')).toBe(true);
 		expect(loads).toEqual([]);
 
 		switchPanel(registry, 'chat-1');
-		await vi.waitFor(() => expect(loads).toEqual(['chat-1']));
-		expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 2, stale: false });
+		await vi.waitFor(() =>
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 2, stale: false }),
+		);
+		expect(loads).toEqual([]);
 		registry.destroy();
 		cache.flush();
 	});
@@ -262,7 +271,10 @@ describe('ConversationPanelRegistry', () => {
 			transcript.transcriptCache.replace(chatId, 'view-1', [message(1)], 1, null);
 			transcript.installCachedSnapshot(chatId);
 		});
-		const { cache, registry } = fixture({ retainInactiveWindows: () => true, loadTranscriptSnapshot });
+		const { cache, registry } = fixture({
+			retainInactiveWindows: () => true,
+			loadTranscriptSnapshot,
+		});
 		seed(cache, 'chat-1');
 		seed(cache, 'chat-2');
 		seed(cache, 'chat-3');
@@ -275,13 +287,13 @@ describe('ConversationPanelRegistry', () => {
 		expect(registry.hasInactiveWindow('chat-1')).toBe(false);
 		expect(cache.readAppliedCursor('chat-3')?.stale).toBe(false);
 		switchPanel(registry, 'chat-3');
-		await vi.waitFor(() => expect(loads).toEqual(['chat-3']));
+		await vi.waitFor(() => expect(cache.readAppliedCursor('chat-3')?.stale).toBe(false));
 		switchPanel(registry, 'chat-1');
-		await vi.waitFor(() => expect(loads).toEqual(['chat-3', 'chat-1']));
+		await vi.waitFor(() => expect(cache.readAppliedCursor('chat-1')?.stale).toBe(false));
 		switchPanel(registry, 'chat-2');
 		switchPanel(registry, 'chat-3');
 		await Promise.resolve();
-		expect(loads).toEqual(['chat-3', 'chat-1']);
+		expect(loads).toEqual([]);
 		registry.destroy();
 		cache.flush();
 	});

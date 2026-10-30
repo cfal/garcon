@@ -37,7 +37,6 @@ function harness(options: { displayed?: boolean } = {}) {
 			inFlight = tracked;
 			return load;
 		}),
-		dropParkedWindows: vi.fn(),
 		markLoadFailed: vi.fn(),
 	} satisfies MissedTranscriptCatchUpPort;
 	return {
@@ -60,7 +59,6 @@ describe('MissedTranscriptCatchUp', () => {
 		catchUp.apply('chat-1', { transcriptViewId: view, lastOrdinal: 1 });
 
 		expect(port.load).not.toHaveBeenCalled();
-		expect(port.dropParkedWindows).not.toHaveBeenCalled();
 	});
 
 	it('defers an undisplayed chat to its next showing without loading it', () => {
@@ -68,21 +66,7 @@ describe('MissedTranscriptCatchUp', () => {
 
 		catchUp.apply('chat-1', { transcriptViewId: view, lastOrdinal: 4 });
 
-		expect(port.dropParkedWindows).toHaveBeenCalledWith('chat-1');
 		expect(port.load).not.toHaveBeenCalled();
-		expect(catchUp.takeCatchUpOnShow('chat-1')).toBe(true);
-		expect(catchUp.takeCatchUpOnShow('chat-1')).toBe(false);
-		expect(catchUp.takeCatchUpOnShow('chat-2')).toBe(false);
-	});
-
-	it('requires each hidden chat to catch up once after a disconnect', () => {
-		const { catchUp } = harness({ displayed: false });
-
-		catchUp.markHiddenUnverified(new Set(['chat-shown']));
-
-		expect(catchUp.takeCatchUpOnShow('chat-shown')).toBe(false);
-		expect(catchUp.takeCatchUpOnShow('chat-hidden')).toBe(true);
-		expect(catchUp.takeCatchUpOnShow('chat-hidden')).toBe(false);
 	});
 
 	it('loads again after a load that started before the summarized rows', async () => {
@@ -117,6 +101,18 @@ describe('MissedTranscriptCatchUp', () => {
 		state.loads[1].finish(true);
 
 		await vi.waitFor(() => expect(state.cursor()).toBe(4));
+	});
+
+	it('ignores a retired catch-up failure after view replacement', async () => {
+		const target = harness();
+		target.commit(2);
+		target.catchUp.apply('chat-1', { transcriptViewId: view, lastOrdinal: 2 });
+		await vi.waitFor(() => expect(target.loads).toHaveLength(1));
+		target.catchUp.forget('chat-1');
+		target.loads[0].finish(false);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(target.port.markLoadFailed).not.toHaveBeenCalled();
 	});
 
 	it('leaves a chat stale when its catch-up load fails', async () => {

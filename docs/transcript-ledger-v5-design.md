@@ -1639,12 +1639,11 @@ displays their chat. The per-socket interest registry,
   HTTP and WebSocket requests travel on separate connections. The browser then
   lets in-flight snapshot loads settle and loads again unless its cursor
   already covers the span; a load that starts after the summary arrived
-  necessarily contains those rows. When the chat is not displayed, its parked
-  windows are dropped and the chat is recorded as behind. Its cache is not
-  marked stale: it remains a valid prefix of the view, and a summary never
-  advances its cursor or enters the row-apply path. The next time the chat is
-  shown, its panel catches up from the ledger even though the cache is
-  current. Bodies that overlap a catch-up are deduplicated by ordinal, and a
+  necessarily contains those rows. When the chat is not displayed, its cache and parked windows remain
+  valid prefixes of the view. A summary never advances their cursors or enters
+  the row-apply path. Every activation validates its saved cursor through the
+  bounded replay introduced in revision 42, so hidden chats fetch only missing
+  rows when shown. Bodies that overlap a catch-up are deduplicated by ordinal, and a
   body that skips an ordinal takes the existing gap recovery. How much a load
   fetches is the load path's decision, so a delta read after the cached
   ordinal composes with this contract unchanged.

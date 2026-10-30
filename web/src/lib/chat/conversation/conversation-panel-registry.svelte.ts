@@ -137,15 +137,19 @@ class PanelRegistration implements ConversationPanelRegistration {
 		private readonly snapshots: {
 			load(options: ChatLoadMessagesOptions): Promise<boolean>;
 			restorePurpose(): TranscriptReadPurpose | undefined;
-			resume(purpose: TranscriptReadPurpose | undefined): Promise<CachedTranscriptResumeResult> | null;
+			resume(
+				purpose: TranscriptReadPurpose | undefined,
+			): Promise<CachedTranscriptResumeResult> | null;
 			wait(signal: AbortSignal): Promise<void>;
 		},
 		retainedTranscript?: ActiveTranscriptState,
 	) {
 		this.#snapshotAdmission = snapshotAdmission;
-		this.transcript = retainedTranscript ?? new ActiveTranscriptState(cache, overlays.forChat(chatId), {
-			onSnapshotResendCandidates,
-		});
+		this.transcript =
+			retainedTranscript ??
+			new ActiveTranscriptState(cache, overlays.forChat(chatId), {
+				onSnapshotResendCandidates,
+			});
 		if (!retainedTranscript) this.transcript.activateChat(chatId);
 		this.lifecycle = lifecycle.forChat(chatId);
 		this.scroll = new ConversationScrollController({
@@ -433,7 +437,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	#pendingSurfaceTransfers = new Map<ChatViewSurfaceId, PendingSurfaceTransfer>();
 	#surfaceTransferToken = 0;
 	#snapshotLoads = new Map<string, SnapshotLoad>();
-	#cachedResumes = new CachedTranscriptResumes(this, (request) => this.options.readTranscriptReplayPage(request));
+	#cachedResumes = new CachedTranscriptResumes(this, (request) =>
+		this.options.readTranscriptReplayPage(request),
+	);
 	#reconnectReplayEpoch = 0;
 	#reconnectReplays = new Map<string, ActivePanelReconnectReplay>();
 	#missedTranscripts = new MissedTranscriptCatchUp({
@@ -441,7 +447,6 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		isDisplayed: (chatId) => this.#hasAdmittedPanel(chatId),
 		settleLoads: (chatId) => this.#settleSnapshotLoads(chatId),
 		load: (chatId) => this.loadChatSnapshot(chatId),
-		dropParkedWindows: (chatId) => this.#inactiveWindows.removeChat(chatId),
 		markLoadFailed: (chatId) => this.markChatStale(chatId),
 	});
 	// Reconciliation updates this reactive revision after mutating the plain panel map.
@@ -595,9 +600,8 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			}
 			this.#pendingSurfaceTransfers.delete(item.surfaceId);
 			this.#restoreTargets.delete(item.surfaceId);
-			void (retained
-				? panel.restoreRetained(target ?? retained.target)
-				: panel.restore(target)
+			void (
+				retained ? panel.restoreRetained(target ?? retained.target) : panel.restore(target)
 			).catch(() => {
 				if (this.#panels.get(item.surfaceId) === panel) this.markChatStale(item.chatId);
 			});
@@ -657,7 +661,11 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		const operation: SnapshotLoad = {
 			minimumLimit,
 			purpose: options.purpose,
-			promise: this.#performChatSnapshotLoad(chatId, options, () => this.#snapshotLoads.get(chatId) === operation).finally(() => {
+			promise: this.#performChatSnapshotLoad(
+				chatId,
+				options,
+				() => this.#snapshotLoads.get(chatId) === operation,
+			).finally(() => {
 				if (this.#snapshotLoads.get(chatId) === operation) this.#snapshotLoads.delete(chatId);
 			}),
 		};
@@ -818,16 +826,15 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	markUndisplayedUnverified(): void {
 		const displayed = new Set([...this.#panels.values()].map((panel) => panel.chatId));
 		this.#inactiveWindows.retainChats(displayed);
-		this.#missedTranscripts.markHiddenUnverified(displayed);
 	}
 
 	#cacheCovers(chatId: string, advance: TranscriptAdvance): boolean {
 		const cursor = this.options.cache.readAppliedCursor(chatId);
 		return Boolean(
 			cursor &&
-				!cursor.stale &&
-				cursor.transcriptViewId === advance.transcriptViewId &&
-				cursor.lastOrdinal >= advance.lastOrdinal,
+			!cursor.stale &&
+			cursor.transcriptViewId === advance.transcriptViewId &&
+			cursor.lastOrdinal >= advance.lastOrdinal,
 		);
 	}
 
@@ -903,6 +910,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	handleViewReplacement(chatId: string): void {
+		this.#missedTranscripts.forget(chatId);
 		this.#snapshotLoads.delete(chatId);
 		this.#cachedResumes.forget(chatId);
 		for (const panel of this.panelsForChat(chatId)) panel.transcript.invalidatePendingLoads();
@@ -1018,7 +1026,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		if (!this.#hasAdmittedPanel(chatId)) return;
 		void this.#cachedResumes
 			.resumeAfterGap(chatId)
-			.then((result) => (result.kind === 'snapshot-required' ? this.loadChatSnapshot(chatId) : undefined))
+			.then((result) =>
+				result.kind === 'snapshot-required' ? this.loadChatSnapshot(chatId) : undefined,
+			)
 			// A failed snapshot leaves the cache stale, so the next activation reloads it.
 			.catch(() => {});
 	}

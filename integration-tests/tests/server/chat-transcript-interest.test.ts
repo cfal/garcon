@@ -83,7 +83,8 @@ describe('chat transcript interest delivery', () => {
       const displayingCursor = displaying.markEvents();
       const backgroundCursor = background.markEvents();
 
-      const { held, turnId } = await startHeldTurn(fixture, chatId, 'interest-delivery');
+      const content = `interest-delivery ${'deterministic synthetic padding '.repeat(2_000)}`;
+      const { held, turnId } = await startHeldTurn(fixture, chatId, content);
       held.releaseEcho();
       await Promise.all([
         displaying.waitForTurnTerminal(chatId, turnId, { afterIndex: displayingCursor }),
@@ -103,8 +104,12 @@ describe('chat transcript interest delivery', () => {
           ({ firstOrdinal, lastOrdinal, transcriptViewId })));
       expect(summaries.map((summary) => summary.activity)).toEqual(bodies.map((body) =>
         summarizeTranscriptActivity(body.messages.map((entry) => entry.message))));
-      expect(summaries.some((summary) => summary.activity.preview?.content === 'echo:interest-delivery'))
+      expect(summaries.some((summary) => summary.activity.preview?.content.startsWith('echo:interest-delivery')))
         .toBe(true);
+      const bodyBytes = bodies.reduce((total, body) => total + Buffer.byteLength(JSON.stringify(body)), 0);
+      const summaryBytes = summaries.reduce((total, summary) => total + Buffer.byteLength(JSON.stringify(summary)), 0);
+      expect(summaryBytes).toBeLessThan(bodyBytes / 10);
+      console.info('Transcript delivery decoded bytes', JSON.stringify({ bodyBytes, summaryBytes }));
       expect(background.rawEvents().some((raw) => JSON.stringify(raw).includes('echo:interest-delivery')
         && (raw as { type?: string }).type !== 'chat-transcript-advanced'
         && (raw as { type?: string }).type !== 'chat-list-refresh-requested'
