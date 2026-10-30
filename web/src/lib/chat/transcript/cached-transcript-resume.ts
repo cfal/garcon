@@ -56,7 +56,10 @@ export type CachedTranscriptSnapshotReason =
 
 export type CachedTranscriptResumePlan =
 	| { readonly kind: 'resume'; readonly transcriptViewId: string; readonly afterOrdinal: number }
-	| { readonly kind: 'snapshot'; readonly reason: Extract<CachedTranscriptSnapshotReason, 'no-cache' | 'stale-cache'> };
+	| {
+			readonly kind: 'snapshot';
+			readonly reason: Extract<CachedTranscriptSnapshotReason, 'no-cache' | 'stale-cache'>;
+	  };
 
 export type CachedTranscriptResumeResult =
 	| {
@@ -105,19 +108,32 @@ export async function resumeCachedTranscript(input: {
 	readonly purpose?: TranscriptReadPurpose;
 	readonly target: CachedTranscriptResumeTarget;
 	readonly readPage: TranscriptReplayPageReader;
+	readonly signal?: AbortSignal;
 }): Promise<CachedTranscriptResumeResult> {
 	const { chatId, plan, target } = input;
+	if (input.signal?.aborted) return { kind: 'superseded' };
 	// Buffers live rows committed while the page is in flight and applies them after it.
 	const token = target.beginReconnectReplay(chatId, plan.transcriptViewId);
-	const snapshotRequired = (reason: CachedTranscriptSnapshotReason): CachedTranscriptResumeResult => {
+	const abort = () => target.abortReconnectReplay(token, chatId);
+	input.signal?.addEventListener('abort', abort, { once: true });
+	const snapshotRequired = (
+		reason: CachedTranscriptSnapshotReason,
+	): CachedTranscriptResumeResult => {
 		target.abortReconnectReplay(token, chatId);
 		target.markChatStale(chatId);
 		return { kind: 'snapshot-required', reason };
 	};
 	// A snapshot, replacement, or removal that changed the cache's view while the page was in
 	// flight owns the window; applying or failing the older view would only mark it stale.
-	const ownsCachedView = () =>
-		target.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId === plan.transcriptViewId;
+	const ownsCachedView = () => {
+		const cursor = target.transcriptCache.readAppliedCursor(chatId);
+		return (
+			!input.signal?.aborted &&
+			cursor?.stale === false &&
+			cursor.transcriptViewId === plan.transcriptViewId &&
+			cursor.lastOrdinal === plan.afterOrdinal
+		);
+	};
 	try {
 		let page: TranscriptReplayPage;
 		try {
@@ -172,6 +188,7 @@ export async function resumeCachedTranscript(input: {
 			transientFeed: page.transientFeed,
 		};
 	} finally {
+		input.signal?.removeEventListener('abort', abort);
 		target.abortReconnectReplay(token, chatId);
 	}
 }
@@ -182,7 +199,11 @@ export async function resumeCachedTranscript(input: {
 export class CachedTranscriptResumes {
 	readonly #pending = new Map<
 		string,
-		{ readonly purpose: TranscriptReadPurpose | undefined; readonly promise: Promise<CachedTranscriptResumeResult> }
+		{
+			readonly purpose: TranscriptReadPurpose | undefined;
+			readonly cancellation: AbortController;
+			readonly promise: Promise<CachedTranscriptResumeResult>;
+		}
 	>();
 	readonly #followUps = new Map<string, Promise<CachedTranscriptResumeResult>>();
 
@@ -202,14 +223,18 @@ export class CachedTranscriptResumes {
 		}
 		const plan = planCachedTranscriptResume(this.target.transcriptCache.readAppliedCursor(chatId));
 		if (plan.kind === 'snapshot') return null;
+		pending?.cancellation.abort();
+		const cancellation = new AbortController();
 		const operation = {
 			purpose: options.purpose,
+			cancellation,
 			promise: resumeCachedTranscript({
 				chatId,
 				plan,
 				purpose: options.purpose,
 				target: this.target,
 				readPage: this.readPage,
+				signal: cancellation.signal,
 			}).finally(() => {
 				if (this.#pending.get(chatId) === operation) this.#pending.delete(chatId);
 			}),
@@ -225,8 +250,11 @@ export class CachedTranscriptResumes {
 		const queued = this.#followUps.get(chatId);
 		if (queued) return queued;
 		const start = (): Promise<CachedTranscriptResumeResult> | CachedTranscriptResumeResult => {
-			if (this.#followUps.get(chatId) === followUp) this.#followUps.delete(chatId);
-			const plan = planCachedTranscriptResume(this.target.transcriptCache.readAppliedCursor(chatId));
+			if (this.#followUps.get(chatId) !== followUp) return { kind: 'superseded' };
+			this.#followUps.delete(chatId);
+			const plan = planCachedTranscriptResume(
+				this.target.transcriptCache.readAppliedCursor(chatId),
+			);
 			return plan.kind === 'snapshot'
 				? { kind: 'snapshot-required', reason: plan.reason }
 				: (this.resume(chatId) ?? { kind: 'snapshot-required', reason: 'stale-cache' });
@@ -237,11 +265,13 @@ export class CachedTranscriptResumes {
 	}
 
 	forget(chatId: string): void {
+		this.#pending.get(chatId)?.cancellation.abort();
 		this.#pending.delete(chatId);
 		this.#followUps.delete(chatId);
 	}
 
 	clear(): void {
+		for (const operation of this.#pending.values()) operation.cancellation.abort();
 		this.#pending.clear();
 		this.#followUps.clear();
 	}

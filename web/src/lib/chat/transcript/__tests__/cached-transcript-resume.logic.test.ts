@@ -32,7 +32,11 @@ function rows(first: number, last: number): TranscriptMessage[] {
 	}));
 }
 
-function liveBatch(first: number, last: number, transcriptViewId = 'view-1'): TranscriptBufferedBatch {
+function liveBatch(
+	first: number,
+	last: number,
+	transcriptViewId = 'view-1',
+): TranscriptBufferedBatch {
 	return {
 		transcriptViewId,
 		firstOrdinal: first,
@@ -199,7 +203,9 @@ describe('cached transcript resume', () => {
 			{ chatId: CHAT_ID, transcriptViewId: 'view-1', afterOrdinal: 5, purpose: 'activation' },
 		]);
 
-		server.respond(transcriptReplayPage(server.requests[0]!, { messages: rows(6, 8), throughOrdinal: 8 }));
+		server.respond(
+			transcriptReplayPage(server.requests[0]!, { messages: rows(6, 8), throughOrdinal: 8 }),
+		);
 		const result = await resume;
 
 		expect(result).toMatchObject({
@@ -223,7 +229,11 @@ describe('cached transcript resume', () => {
 			transcriptReplayPage(server.requests[0]!, { messages: rows(4, 180), throughOrdinal: 180 }),
 		);
 
-		expect(await resume).toMatchObject({ kind: 'resumed', throughOrdinal: 180, deliveredMessages: 177 });
+		expect(await resume).toMatchObject({
+			kind: 'resumed',
+			throughOrdinal: 180,
+			deliveredMessages: 177,
+		});
 		expect(ordinals(target)).toEqual(Array.from({ length: 180 }, (_, index) => index + 1));
 	});
 
@@ -234,7 +244,9 @@ describe('cached transcript resume', () => {
 
 		expect(target.live(liveBatch(7, 9))).toBe('applied');
 		expect(ordinals(target)).toEqual([1, 2, 3, 4, 5]);
-		server.respond(transcriptReplayPage(server.requests[0]!, { messages: rows(6, 8), throughOrdinal: 8 }));
+		server.respond(
+			transcriptReplayPage(server.requests[0]!, { messages: rows(6, 8), throughOrdinal: 8 }),
+		);
 
 		expect(await resume).toMatchObject({ kind: 'resumed', throughOrdinal: 8 });
 		expect(ordinals(target)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
@@ -248,7 +260,9 @@ describe('cached transcript resume', () => {
 		const resume = startResume(target, server.reader);
 
 		target.live(liveBatch(11, 11));
-		server.respond(transcriptReplayPage(server.requests[0]!, { messages: rows(6, 8), throughOrdinal: 8 }));
+		server.respond(
+			transcriptReplayPage(server.requests[0]!, { messages: rows(6, 8), throughOrdinal: 8 }),
+		);
 
 		expect(await resume).toEqual({ kind: 'snapshot-required', reason: 'apply-failed' });
 		expect(target.markChatStale).toHaveBeenCalledOnce();
@@ -277,8 +291,14 @@ describe('cached transcript resume', () => {
 	});
 
 	it.each([
-		[new WsRequestError('STALE_TRANSCRIPT_VIEW', 'Transcript view changed', false), 'view-replaced'],
-		[new WsRequestError('REQUEST_VALIDATION_FAILED', 'Cursor ahead of view', false), 'cursor-rejected'],
+		[
+			new WsRequestError('STALE_TRANSCRIPT_VIEW', 'Transcript view changed', false),
+			'view-replaced',
+		],
+		[
+			new WsRequestError('REQUEST_VALIDATION_FAILED', 'Cursor ahead of view', false),
+			'cursor-rejected',
+		],
 		[new WsRequestError('HISTORY_LOAD_FAILED', 'Ledger unavailable', true), 'replay-failed'],
 		[new Error('WebSocket not connected'), 'replay-failed'],
 	])('requires a snapshot when the server cannot prove the cursor (%s)', async (error, reason) => {
@@ -301,7 +321,11 @@ describe('cached transcript resume', () => {
 
 		server.respond({ ...transcriptReplayPage(server.requests[0]!), resendCandidates: candidates });
 
-		expect(await resume).toMatchObject({ kind: 'resumed', throughOrdinal: 5, deliveredMessages: 0 });
+		expect(await resume).toMatchObject({
+			kind: 'resumed',
+			throughOrdinal: 5,
+			deliveredMessages: 0,
+		});
 		expect(target.commits).toEqual([]);
 		expect(target.resendReplacements).toEqual([candidates]);
 		expect(target.markValidated).toHaveBeenCalledOnce();
@@ -313,7 +337,9 @@ describe('cached transcript resume', () => {
 		const resume = startResume(target, server.reader);
 		target.beginReconnectReplay(CHAT_ID, 'view-1');
 
-		server.respond(transcriptReplayPage(server.requests[0]!, { messages: rows(6, 6), throughOrdinal: 6 }));
+		server.respond(
+			transcriptReplayPage(server.requests[0]!, { messages: rows(6, 6), throughOrdinal: 6 }),
+		);
 
 		expect(await resume).toEqual({ kind: 'superseded' });
 		expect(ordinals(target)).toEqual([1, 2, 3, 4, 5]);
@@ -330,7 +356,9 @@ describe('cached transcript resume', () => {
 			target.lastOrdinal = 1;
 
 			if (outcome === 'respond') {
-				server.respond(transcriptReplayPage(server.requests[0]!, { messages: rows(6, 6), throughOrdinal: 6 }));
+				server.respond(
+					transcriptReplayPage(server.requests[0]!, { messages: rows(6, 6), throughOrdinal: 6 }),
+				);
 			} else {
 				server.fail(new WsRequestError('STALE_TRANSCRIPT_VIEW', 'Transcript view changed', false));
 			}
@@ -344,7 +372,10 @@ describe('cached transcript resume', () => {
 });
 
 function queuedReader() {
-	const pending: Array<{ request: TranscriptReplayRequest; respond: (page: TranscriptReplayPage) => void }> = [];
+	const pending: Array<{
+		request: TranscriptReplayRequest;
+		respond: (page: TranscriptReplayPage) => void;
+	}> = [];
 	const reader: TranscriptReplayPageReader = (request) =>
 		new Promise((resolve) => pending.push({ request, respond: resolve }));
 	return { reader, pending };
@@ -377,11 +408,31 @@ describe('cached transcript gap follow-up', () => {
 		]);
 
 		server.pending[1]!.respond(
-			transcriptReplayPage(server.pending[1]!.request, { messages: rows(9, 11), throughOrdinal: 11 }),
+			transcriptReplayPage(server.pending[1]!.request, {
+				messages: rows(9, 11),
+				throughOrdinal: 11,
+			}),
 		);
 		await expect(followUp).resolves.toMatchObject({ kind: 'resumed', throughOrdinal: 11 });
 		expect(ordinals(target)).toEqual(Array.from({ length: 11 }, (_, index) => index + 1));
 		expect(target.markChatStale).not.toHaveBeenCalled();
+	});
+
+	it('cancels a forgotten replay and its queued follow-up even if the same view is reseeded', async () => {
+		const target = new ResumeTarget(5);
+		const server = queuedReader();
+		const resumes = new CachedTranscriptResumes(target, server.reader);
+		const pending = resumes.resume(CHAT_ID);
+		const followUp = resumes.resumeAfterGap(CHAT_ID);
+		resumes.forget(CHAT_ID);
+		server.pending[0]!.respond(
+			transcriptReplayPage(server.pending[0]!.request, { messages: rows(6, 8), throughOrdinal: 8 }),
+		);
+		await expect(pending).resolves.toEqual({ kind: 'superseded' });
+		await expect(followUp).resolves.toEqual({ kind: 'superseded' });
+		expect(server.pending).toHaveLength(1);
+		expect(target.commits).toEqual([]);
+		expect(target.markValidated).not.toHaveBeenCalled();
 	});
 
 	it('starts a follow-up from the retained prefix when nothing is pending', async () => {

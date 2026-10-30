@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
 import type { Page } from 'playwright';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   type ChromiumFixture,
   withChromiumFixture,
@@ -302,6 +304,13 @@ test('[TLV5-REPLAY.08-CHROMIUM-01] resumes cached chats from their ledger cursor
     );
     expect(traffic.historyReads).toEqual([]);
     expect(traffic.replayRequests).toEqual([]);
+    const screenshots = process.env.GARCON_SCREENSHOT_DIR;
+    if (screenshots) {
+      await mkdir(screenshots, { recursive: true });
+      await page.screenshot({ path: join(screenshots, 'warm-chat-desktop.png') });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.screenshot({ path: join(screenshots, 'warm-chat-mobile.png') });
+    }
     fixture.assertNoBrowserErrors();
   });
 }, 240_000);

@@ -59,7 +59,11 @@ which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
 
 Revision 42 resumes cached transcript windows on activation instead of
-refetching recent history. When the shared bounded cache holds an unmarked
+refetching recent history. Replacement, removal, disconnect, and a newer
+resume cancel the superseded replay and its queued follow-up. A reply applies
+only while its cache remains non-stale at the originally planned view and
+ordinal; a delayed old-view reply cannot validate an invalidated cache.
+When the shared bounded cache holds an unmarked
 window for the chat, the selected chat's activation and every panel restore,
 parked or not, send one `chat-subscribe` request for rows after the cache's
 applied ordinal: the fixed-watermark replay that reconnect already uses. The

@@ -52,10 +52,10 @@ function fixture(
 			chatId: string,
 			options: ChatLoadMessagesOptions,
 		) => Promise<void>;
-			getComposerAnchorSurfaceId?: () => ChatViewSurfaceId | null;
-			getSelectedChatId?: () => string | null;
-			readTranscriptReplayPage?: TranscriptReplayPageReader;
-			retainInactiveWindows?: () => boolean;
+		getComposerAnchorSurfaceId?: () => ChatViewSurfaceId | null;
+		getSelectedChatId?: () => string | null;
+		readTranscriptReplayPage?: TranscriptReplayPageReader;
+		retainInactiveWindows?: () => boolean;
 	} = {},
 ) {
 	const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
@@ -197,9 +197,13 @@ describe('ConversationPanelRegistry', () => {
 		const first = registry.panel('chat-view:window-left')?.transcript;
 		if (!first) throw new Error('Expected first transcript');
 		registry.applyCommittedBatch({
-			chatId: 'chat-1', transcriptViewId: 'view-1',
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
 			messages: Array.from({ length: 249 }, (_, index) => message(index + 2)),
-			firstOrdinal: 2, lastOrdinal: 250, resendCandidates: [], noticeRevision: 0,
+			firstOrdinal: 2,
+			lastOrdinal: 250,
+			resendCandidates: [],
+			noticeRevision: 0,
 		});
 		first.revealAllLoadedMessages();
 		switchPanel(registry, 'chat-2');
@@ -300,10 +304,12 @@ describe('ConversationPanelRegistry', () => {
 		const readTranscriptReplayPage = vi.fn<TranscriptReplayPageReader>(async () => {
 			throw new WsRequestError('STALE_TRANSCRIPT_VIEW', 'Transcript view changed', false);
 		});
-		const loadTranscriptSnapshot = vi.fn(async (transcript: ActiveTranscriptState, chatId: string) => {
-			transcript.transcriptCache.replace(chatId, 'view-2', [message(1)], 1, null);
-			transcript.installCachedSnapshot(chatId);
-		});
+		const loadTranscriptSnapshot = vi.fn(
+			async (transcript: ActiveTranscriptState, chatId: string) => {
+				transcript.transcriptCache.replace(chatId, 'view-2', [message(1)], 1, null);
+				transcript.installCachedSnapshot(chatId);
+			},
+		);
 		const { cache, registry } = fixture({ readTranscriptReplayPage, loadTranscriptSnapshot });
 		seed(cache);
 
@@ -321,9 +327,8 @@ describe('ConversationPanelRegistry', () => {
 		let head = 1;
 		const readTranscriptReplayPage = vi.fn<TranscriptReplayPageReader>(async (request) =>
 			transcriptReplayPage(request, {
-				messages: Array.from(
-					{ length: head - request.afterOrdinal },
-					(_, index) => message(request.afterOrdinal + index + 1),
+				messages: Array.from({ length: head - request.afterOrdinal }, (_, index) =>
+					message(request.afterOrdinal + index + 1),
 				),
 				throughOrdinal: head,
 			}),
@@ -382,13 +387,40 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it('supersedes a delayed replay when its view is replaced before the snapshot arrives', async () => {
+		const page = deferred<ReturnType<typeof transcriptReplayPage>>();
+		let request: TranscriptReplayRequest | undefined;
+		const { cache, registry } = fixture({
+			readTranscriptReplayPage: (input) => {
+				request = input;
+				return page.promise;
+			},
+		});
+		seed(cache);
+		const validated = vi.spyOn(cache, 'markValidated');
+		const resume = registry.resumeCachedChat('chat-1', { purpose: 'activation' });
+		registry.handleViewReplacement('chat-1');
+		if (!request) throw new Error('Expected replay request');
+		page.resolve(transcriptReplayPage(request, { messages: [message(2)], throughOrdinal: 2 }));
+
+		await expect(resume).resolves.toEqual({ kind: 'superseded' });
+		expect(cache.readAppliedCursor('chat-1')).toEqual({
+			transcriptViewId: 'view-1',
+			lastOrdinal: 1,
+			stale: true,
+		});
+		expect(cache.get('chat-1')?.messages.map((entry) => entry.ordinal)).toEqual([1]);
+		expect(validated).not.toHaveBeenCalled();
+		registry.destroy();
+		cache.flush();
+	});
+
 	it('[TLV5-REPLAY.09-WEB-UNIT-03] keeps an offscreen prefix through a gapped live row and fetches only the delta on return', async () => {
 		let head = 1;
 		const readTranscriptReplayPage = vi.fn<TranscriptReplayPageReader>(async (request) =>
 			transcriptReplayPage(request, {
-				messages: Array.from(
-					{ length: head - request.afterOrdinal },
-					(_, index) => message(request.afterOrdinal + index + 1),
+				messages: Array.from({ length: head - request.afterOrdinal }, (_, index) =>
+					message(request.afterOrdinal + index + 1),
 				),
 				throughOrdinal: head,
 			}),
@@ -409,14 +441,25 @@ describe('ConversationPanelRegistry', () => {
 		readTranscriptReplayPage.mockClear();
 
 		head = 4;
-		expect(registry.applyCommittedBatch({
-			chatId: 'chat-1', transcriptViewId: 'view-1', messages: [message(3), message(4)],
-			firstOrdinal: 3, lastOrdinal: 4, resendCandidates: [], noticeRevision: 0,
-		})).toEqual({ kind: 'prefix-retained' });
+		expect(
+			registry.applyCommittedBatch({
+				chatId: 'chat-1',
+				transcriptViewId: 'view-1',
+				messages: [message(3), message(4)],
+				firstOrdinal: 3,
+				lastOrdinal: 4,
+				resendCandidates: [],
+				noticeRevision: 0,
+			}),
+		).toEqual({ kind: 'prefix-retained' });
 		await settleTranscriptResumes();
 
 		expect(readTranscriptReplayPage).not.toHaveBeenCalled();
-		expect(cache.readAppliedCursor('chat-1')).toEqual({ transcriptViewId: 'view-1', lastOrdinal: 1, stale: false });
+		expect(cache.readAppliedCursor('chat-1')).toEqual({
+			transcriptViewId: 'view-1',
+			lastOrdinal: 1,
+			stale: false,
+		});
 		expect(registry.hasInactiveWindow('chat-1')).toBe(true);
 
 		switchPanel(registry, 'chat-1');
@@ -438,9 +481,8 @@ describe('ConversationPanelRegistry', () => {
 		let head = 1;
 		const readTranscriptReplayPage = vi.fn<TranscriptReplayPageReader>(async (request) =>
 			transcriptReplayPage(request, {
-				messages: Array.from(
-					{ length: head - request.afterOrdinal },
-					(_, index) => message(request.afterOrdinal + index + 1),
+				messages: Array.from({ length: head - request.afterOrdinal }, (_, index) =>
+					message(request.afterOrdinal + index + 1),
 				),
 				throughOrdinal: head,
 			}),
@@ -453,10 +495,17 @@ describe('ConversationPanelRegistry', () => {
 		readTranscriptReplayPage.mockClear();
 
 		head = 3;
-		expect(registry.applyCommittedBatch({
-			chatId: 'chat-1', transcriptViewId: 'view-1', messages: [message(3)],
-			firstOrdinal: 3, lastOrdinal: 3, resendCandidates: [], noticeRevision: 0,
-		})).toEqual({ kind: 'prefix-retained' });
+		expect(
+			registry.applyCommittedBatch({
+				chatId: 'chat-1',
+				transcriptViewId: 'view-1',
+				messages: [message(3)],
+				firstOrdinal: 3,
+				lastOrdinal: 3,
+				resendCandidates: [],
+				noticeRevision: 0,
+			}),
+		).toEqual({ kind: 'prefix-retained' });
 		await settleTranscriptResumes();
 
 		expect(readTranscriptReplayPage).toHaveBeenCalledExactlyOnceWith({
@@ -464,14 +513,23 @@ describe('ConversationPanelRegistry', () => {
 			transcriptViewId: 'view-1',
 			afterOrdinal: 1,
 		});
-		expect(registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal))
-			.toEqual([1, 2, 3]);
-		expect(registry.applyCommittedBatch({
-			chatId: 'chat-1', transcriptViewId: 'view-1', messages: [message(4)],
-			firstOrdinal: 4, lastOrdinal: 4, resendCandidates: [], noticeRevision: 0,
-		})).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
-		expect(registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal))
-			.toEqual([1, 2, 3, 4]);
+		expect(
+			registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal),
+		).toEqual([1, 2, 3]);
+		expect(
+			registry.applyCommittedBatch({
+				chatId: 'chat-1',
+				transcriptViewId: 'view-1',
+				messages: [message(4)],
+				firstOrdinal: 4,
+				lastOrdinal: 4,
+				resendCandidates: [],
+				noticeRevision: 0,
+			}),
+		).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+		expect(
+			registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal),
+		).toEqual([1, 2, 3, 4]);
 		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
 		registry.destroy();
 		cache.flush();
@@ -484,13 +542,15 @@ describe('ConversationPanelRegistry', () => {
 				new Promise((resolve) => {
 					pages.push({
 						request,
-						respond: (head) => resolve(transcriptReplayPage(request, {
-							messages: Array.from(
-								{ length: head - request.afterOrdinal },
-								(_, index) => message(request.afterOrdinal + index + 1),
+						respond: (head) =>
+							resolve(
+								transcriptReplayPage(request, {
+									messages: Array.from({ length: head - request.afterOrdinal }, (_, index) =>
+										message(request.afterOrdinal + index + 1),
+									),
+									throughOrdinal: head,
+								}),
 							),
-							throughOrdinal: head,
-						})),
 					});
 				}),
 		);
@@ -501,8 +561,13 @@ describe('ConversationPanelRegistry', () => {
 		expect(pages).toHaveLength(1);
 
 		registry.applyCommittedBatch({
-			chatId: 'chat-1', transcriptViewId: 'view-1', messages: [message(5)],
-			firstOrdinal: 5, lastOrdinal: 5, resendCandidates: [], noticeRevision: 0,
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
+			messages: [message(5)],
+			firstOrdinal: 5,
+			lastOrdinal: 5,
+			resendCandidates: [],
+			noticeRevision: 0,
 		});
 		pages[0]!.respond(2);
 		await settleTranscriptResumes();
@@ -510,9 +575,14 @@ describe('ConversationPanelRegistry', () => {
 		pages[1]!.respond(5);
 		await settleTranscriptResumes();
 
-		expect(registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal))
-			.toEqual([1, 2, 3, 4, 5]);
-		expect(cache.readAppliedCursor('chat-1')).toEqual({ transcriptViewId: 'view-1', lastOrdinal: 5, stale: false });
+		expect(
+			registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal),
+		).toEqual([1, 2, 3, 4, 5]);
+		expect(cache.readAppliedCursor('chat-1')).toEqual({
+			transcriptViewId: 'view-1',
+			lastOrdinal: 5,
+			stale: false,
+		});
 		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
 		registry.destroy();
 		cache.flush();
@@ -1190,9 +1260,13 @@ describe('ConversationPanelRegistry', () => {
 		const source = registry.panel('chat-view:window-left');
 		if (!source) throw new Error('Expected source panel');
 		registry.applyCommittedBatch({
-			chatId: 'chat-1', transcriptViewId: 'view-1',
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
 			messages: Array.from({ length: 149 }, (_, index) => message(index + 2)),
-			firstOrdinal: 2, lastOrdinal: 150, resendCandidates: [], noticeRevision: 0,
+			firstOrdinal: 2,
+			lastOrdinal: 150,
+			resendCandidates: [],
+			noticeRevision: 0,
 		});
 		source.transcript.revealAllLoadedMessages();
 		const target = {
@@ -1202,11 +1276,13 @@ describe('ConversationPanelRegistry', () => {
 			viewportOffset: -17,
 		};
 		source.attachPresentation(port(target));
-		registry.prepareChatSurfaceTransfer({
-			sourceSurfaceId: 'chat-view:window-left',
-			destinationSurfaceId: 'chat-view:window-right',
-			chatId: 'chat-1',
-		}).publish();
+		registry
+			.prepareChatSurfaceTransfer({
+				sourceSurfaceId: 'chat-view:window-left',
+				destinationSurfaceId: 'chat-view:window-right',
+				chatId: 'chat-1',
+			})
+			.publish();
 		const visible = [presentation('chat-view:window-right', 'chat-1')];
 		registry.prepareForReconcile(visible);
 		registry.reconcile(visible);
@@ -1239,20 +1315,29 @@ describe('ConversationPanelRegistry', () => {
 		const source = registry.panel('chat-view:window-left');
 		if (!source) throw new Error('Expected source panel');
 		registry.applyCommittedBatch({
-			chatId: 'chat-1', transcriptViewId: 'view-1',
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
 			messages: Array.from({ length: 149 }, (_, index) => message(index + 2)),
-			firstOrdinal: 2, lastOrdinal: 150, resendCandidates: [], noticeRevision: 0,
+			firstOrdinal: 2,
+			lastOrdinal: 150,
+			resendCandidates: [],
+			noticeRevision: 0,
 		});
 		source.transcript.revealAllLoadedMessages();
 		const target = {
-			kind: 'row' as const, transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -17,
+			kind: 'row' as const,
+			transcriptViewId: 'view-1',
+			ordinal: 1,
+			viewportOffset: -17,
 		};
 		source.attachPresentation(port(target));
-		registry.prepareChatSurfaceTransfer({
-			sourceSurfaceId: 'chat-view:window-left',
-			destinationSurfaceId: 'chat-view:window-right',
-			chatId: 'chat-1',
-		}).publish();
+		registry
+			.prepareChatSurfaceTransfer({
+				sourceSurfaceId: 'chat-view:window-left',
+				destinationSurfaceId: 'chat-view:window-right',
+				chatId: 'chat-1',
+			})
+			.publish();
 		const visible = [presentation('chat-view:window-right', 'chat-1')];
 		registry.prepareForReconcile(visible);
 		registry.reconcile(visible);
@@ -1280,21 +1365,31 @@ describe('ConversationPanelRegistry', () => {
 		const source = registry.panel('chat-view:window-left');
 		if (!source) throw new Error('Expected source panel');
 		registry.applyCommittedBatch({
-			chatId: 'chat-1', transcriptViewId: 'view-1',
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
 			messages: Array.from({ length: 7_899 }, (_, index) => message(index + 2)),
-			firstOrdinal: 2, lastOrdinal: 7_900, resendCandidates: [], noticeRevision: 0,
+			firstOrdinal: 2,
+			lastOrdinal: 7_900,
+			resendCandidates: [],
+			noticeRevision: 0,
 		});
 		registry.applyCommittedBatch({
-			chatId: 'chat-2', transcriptViewId: 'view-1',
+			chatId: 'chat-2',
+			transcriptViewId: 'view-1',
 			messages: Array.from({ length: 199 }, (_, index) => message(index + 2)),
-			firstOrdinal: 2, lastOrdinal: 200, resendCandidates: [], noticeRevision: 0,
+			firstOrdinal: 2,
+			lastOrdinal: 200,
+			resendCandidates: [],
+			noticeRevision: 0,
 		});
 		source.transcript.revealAllLoadedMessages();
-		registry.prepareChatSurfaceTransfer({
-			sourceSurfaceId: 'chat-view:window-left',
-			destinationSurfaceId: 'chat-view:window-right',
-			chatId: 'chat-1',
-		}).publish();
+		registry
+			.prepareChatSurfaceTransfer({
+				sourceSurfaceId: 'chat-view:window-left',
+				destinationSurfaceId: 'chat-view:window-right',
+				chatId: 'chat-1',
+			})
+			.publish();
 		const visible = [presentation('chat-view:window-right', 'chat-1')];
 		registry.prepareForReconcile(visible);
 		registry.reconcile(visible);
@@ -1422,11 +1517,19 @@ describe('ConversationPanelRegistry', () => {
 		const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
 		panel.attachPresentation(port({ kind: 'end' }));
 		await panel.restore({
-			kind: 'group-summary', transcriptViewId: 'view-1', ordinal: 1, viewportOffset: 9,
+			kind: 'group-summary',
+			transcriptViewId: 'view-1',
+			ordinal: 1,
+			viewportOffset: 9,
 		});
-		expect(jump).toHaveBeenCalledWith({
-			chatId: 'chat-1', transcriptViewId: 'view-1', rowId: 'view-1:1',
-		}, { viewportOffset: 9, presentation: 'group-summary' });
+		expect(jump).toHaveBeenCalledWith(
+			{
+				chatId: 'chat-1',
+				transcriptViewId: 'view-1',
+				rowId: 'view-1:1',
+			},
+			{ viewportOffset: 9, presentation: 'group-summary' },
+		);
 		registry.destroy();
 		cache.flush();
 	});
