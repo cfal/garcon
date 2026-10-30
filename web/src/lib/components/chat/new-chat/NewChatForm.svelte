@@ -75,7 +75,10 @@
 		parseSnippetCommand,
 		type SnippetCommandParseResult,
 	} from '$lib/chat/composer/slash-commands.js';
-	import { SnippetExpansionController, snippetErrorDetail } from '$lib/snippets/snippet-expansion-controller.svelte.js';
+	import {
+		SnippetExpansionController,
+		snippetErrorDetail,
+	} from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { snippetTemplateUsesArguments } from '$shared/snippets';
 	import {
@@ -123,8 +126,12 @@
 	});
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(form.executorId));
 	const executionAgent = $derived(modelCatalog.getAgent(form.agentId));
-	const conversationInput = $derived(Boolean(executionAgent && executionAgent.executionPolicy !== 'literal'));
-	const executionKey = $derived(JSON.stringify([form.executorId, form.agentId, executionAgent?.executionPolicy]));
+	const conversationInput = $derived(
+		Boolean(executionAgent && executionAgent.executionPolicy !== 'literal'),
+	);
+	const executionKey = $derived(
+		JSON.stringify([form.executorId, form.agentId, executionAgent?.executionPolicy]),
+	);
 	function selectableAgentsForExecutor(executorId: string) {
 		const allAgentIds = rootModelCatalog.forExecutor(executorId).getSelectableAgents();
 		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
@@ -334,7 +341,7 @@
 			expansionProjectPath = projectPath;
 			snippetExpansion.cancel();
 		}
-		untrack(() => form.validatePath());
+		untrack(() => form.validateChangedPath());
 	});
 
 	onDestroy(() => {
@@ -627,7 +634,9 @@
 			remoteSettings.snapshot?.recentAgentSettings ?? [],
 		);
 	}
-	const displayedFormError = $derived(form.modelSelectionError ?? form.attachmentError ?? form.error);
+	const displayedFormError = $derived(
+		form.modelSelectionError ?? form.attachmentError ?? form.error,
+	);
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 
@@ -699,10 +708,8 @@
 						isMobile,
 						onSelect: (path) => {
 							if (form.isUpdatingPinnedPath) return;
-							form.projectPath = path;
-							form.clearError();
 							// Rechecks a newly created directory even when the field's path is unchanged.
-							form.validatePath();
+							form.selectProjectPath(path);
 						},
 						onClose: () => (form.showBrowser = false),
 					}}

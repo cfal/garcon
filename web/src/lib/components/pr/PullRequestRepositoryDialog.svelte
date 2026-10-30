@@ -69,7 +69,7 @@
 	$effect(() => {
 		void form.startup.nonblankPath;
 		void form.startup.pathContextKey;
-		untrack(() => form.startup.validatePath());
+		untrack(() => form.startup.validateChangedPath());
 	});
 
 	$effect(() => {

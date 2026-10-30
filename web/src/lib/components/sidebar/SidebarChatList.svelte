@@ -8,17 +8,12 @@
 		SidebarChatReorderState,
 		type SidebarChatReorderRequest,
 	} from './sidebar-chat-reorder-state.svelte.ts';
-	import {
-		buildSidebarChatOrderMap,
-		buildSidebarRowModel,
-		partitionSidebarChats,
-		shouldGroupSidebarByExecutor,
-	} from './sidebar-row-model';
+	import { buildSidebarRowModel } from './sidebar-row-model';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
-	import { prioritizeOptimisticArchives, sortSidebarChatsByRecency } from './chat-recency-sort';
+	import type { SidebarChatListProjection } from './sidebar-row-model';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
@@ -27,12 +22,10 @@
 		RelativeChatOrderPlacement,
 	} from '$shared/chat-order-contracts';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
-	import { getExecutors } from '$lib/context';
 
 	interface SidebarChatListProps {
 		viewportRef?: HTMLElement | null;
-		chats: ChatSessionRecord[];
-		filteredChats: ChatSessionRecord[];
+		projection: SidebarChatListProjection;
 		selectedChatId: string | null;
 		isLoading: boolean;
 		isMobile?: boolean;
@@ -42,7 +35,6 @@
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: (chatId: string) => boolean;
 		displayOptions?: SidebarDisplayOptions;
-		collapsedProjectKeys?: ReadonlySet<string>;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
@@ -52,7 +44,6 @@
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		isArchiveMutationPending?: (chatId: string) => boolean;
-		isChatOptimisticallyArchived?: (chatId: string) => boolean;
 		onShowDetails: (chat: ChatSessionRecord) => void;
 		onForkChat: (sourceChatId: string) => void;
 		onShareChat: (chat: ChatSessionRecord) => void;
@@ -72,8 +63,7 @@
 
 	let {
 		viewportRef = null,
-		chats,
-		filteredChats,
+		projection,
 		selectedChatId,
 		isLoading,
 		isMobile = false,
@@ -83,7 +73,6 @@
 		isMultiSelectMode = false,
 		isMultiSelected,
 		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
-		collapsedProjectKeys = new Set<string>(),
 		onToggleProjectCollapsed,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
@@ -93,7 +82,6 @@
 		onTogglePinned,
 		onToggleArchive,
 		isArchiveMutationPending = () => false,
-		isChatOptimisticallyArchived = () => false,
 		onShowDetails,
 		onForkChat,
 		onShareChat,
@@ -104,39 +92,11 @@
 		onQuickMove,
 		onSortChatOrder,
 	}: SidebarChatListProps = $props();
-	const executors = getExecutors();
-	const executorOrder = $derived(executors.executors.map((executor) => executor.id));
-	const groupByExecutor = $derived(
-		shouldGroupSidebarByExecutor({ allChats: chats, executorOrder }),
-	);
-
 	let isFiltered = $derived(searchFilter.trim().length > 0);
-	let sortByRecent = $derived(displayOptions.sortMode === 'recent');
-	// Filtered results arrive recency-ordered upstream; re-sorting only applies
-	// the pinned placement policy.
-	let displayedChats = $derived.by(() => {
-		const source = isFiltered ? filteredChats : chats;
-		const sorted = sortByRecent
-			? sortSidebarChatsByRecency(source, displayOptions.pinnedInsertPosition)
-			: source;
-		return prioritizeOptimisticArchives(sorted, chats, isChatOptimisticallyArchived);
-	});
-	let showChats = $derived(!isLoading && chats.length > 0 && displayedChats.length > 0);
-	let hasPinnedChats = $derived(partitionSidebarChats(chats).hasPinned);
-	let baseOrders = $derived.by(() => buildSidebarChatOrderMap(displayedChats));
-	let baseRowModel = $derived.by(() =>
-		buildSidebarRowModel({
-			displayedChats,
-			orders: baseOrders,
-			grouping: displayOptions.grouping,
-			currentTime,
-			inactivityDuration: displayOptions.inactivityDuration,
-			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
-			collapsedProjectKeys,
-			executorOrder,
-			groupByExecutor,
-		}),
-	);
+	let displayedChats = $derived(projection.rowModelInput.displayedChats);
+	let showChats = $derived(!isLoading && displayedChats.length > 0);
+	let hasPinnedChats = $derived(projection.hasPinnedChats);
+	let baseRowModel = $derived(projection.rowModel);
 
 	const reorder = new SidebarChatReorderState({
 		get visibleOrders() {
@@ -147,19 +107,12 @@
 	let virtualRowModel = $derived.by(() => {
 		if (!reorder.hasOverrides) return baseRowModel;
 		return buildSidebarRowModel({
-			displayedChats,
+			...projection.rowModelInput,
 			orders: {
 				pinned: reorder.orderFor('pinned'),
 				normal: reorder.orderFor('normal'),
 				archived: reorder.orderFor('archived'),
 			},
-			grouping: displayOptions.grouping,
-			currentTime,
-			inactivityDuration: displayOptions.inactivityDuration,
-			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
-			collapsedProjectKeys,
-			executorOrder,
-			groupByExecutor,
 		});
 	});
 

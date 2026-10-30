@@ -11,6 +11,7 @@ import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import { ModelCatalogStore, type ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import { findModelForSelection } from '../../../../test/model-catalog';
+import * as chatsApi from '$lib/api/chats';
 
 interface CatalogOverrides {
 	executionPolicy?: 'conversation' | 'literal' | null;
@@ -143,9 +144,42 @@ function newChatPrompt(
 }
 
 describe('ScheduledPromptFormState', () => {
+	it.each(['checking', 'valid'] as const)('preserves %s path validation when saved startup settings finish loading', async (status) => {
+		vi.useFakeTimers();
+		const form = createForm();
+		const loading = Promise.withResolvers<void>();
+		vi.mocked(form.startup.loadSettingsAndModels).mockReturnValue(loading.promise);
+		vi.spyOn(form.startup.preambles, 'refreshPreview').mockResolvedValue();
+		const validation = Promise.withResolvers<chatsApi.ValidateStartResponse>();
+		const validate = vi.spyOn(chatsApi, 'validateStart').mockReturnValue(validation.promise);
+		try {
+			const initializing = form.initialize(newChatPrompt({
+				type: 'new-chat', agentId: 'codex', projectPath: '/local/saved', model: 'gpt-5',
+				apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+				permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {}, tags: [],
+			}));
+			form.startup.selectProjectPath('/local/selected');
+			if (status === 'valid') validation.resolve({ valid: true });
+			await vi.advanceTimersByTimeAsync(0);
+			expect(form.startup.validationStatus).toBe(status);
+			loading.resolve();
+			await initializing;
+			expect(form.startup.validationStatus).toBe(status);
+			await vi.advanceTimersByTimeAsync(300);
+			expect(validate).toHaveBeenCalledExactlyOnceWith('/local/selected', { executorId: 'local' });
+			validation.resolve({ valid: true });
+			await vi.advanceTimersByTimeAsync(0);
+			expect(form.startup.validationStatus).toBe('valid');
+		} finally {
+			form.dispose();
+			vi.restoreAllMocks();
+			vi.useRealTimers();
+		}
+	});
+
 	it('restores names and custom titles while omitting disabled or hidden drafts', async () => {
 		const form = createForm();
-		form.startup.validatePath = vi.fn();
+		form.startup.validateChangedPath = vi.fn();
 		const prompt = newChatPrompt({
 			type: 'new-chat', agentId: 'codex', projectPath: '/workspace/project', model: 'gpt-5',
 			apiProviderId: null, modelEndpointId: null, modelProtocol: null,
@@ -206,7 +240,7 @@ describe('ScheduledPromptFormState', () => {
 				{ value: 'local-model', label: 'Local model' },
 			],
 		});
-		form.startup.validatePath = vi.fn();
+		form.startup.validateChangedPath = vi.fn();
 		const initializing = form.initialize(newChatPrompt({
 			type: 'new-chat', executorId: '22222222-2222-4222-8222-222222222222',
 			agentId: 'codex', projectPath: '/remote/project', model: 'gpt-5',
@@ -242,7 +276,7 @@ describe('ScheduledPromptFormState', () => {
 			getPermissionModes: () => loaded ? ['default', 'acceptEdits'] : [],
 			getThinkingModes: () => loaded ? ['none', 'high'] : [],
 		});
-		form.startup.validatePath = vi.fn();
+		form.startup.validateChangedPath = vi.fn();
 		await form.initialize(newChatPrompt({
 			type: 'new-chat', executorId: '22222222-2222-4222-8222-222222222222',
 			agentId: 'codex', projectPath: '/remote/project', model: 'gpt-5',
@@ -623,7 +657,7 @@ describe('ScheduledPromptFormState', () => {
 			],
 		};
 		const form = createForm(new Set(), () => ['claude'], catalog);
-		form.startup.validatePath = vi.fn();
+		form.startup.validateChangedPath = vi.fn();
 		const target = {
 			type: 'new-chat' as const, executorId: '22222222-2222-4222-8222-222222222222',
 			agentId: 'claude', projectPath: '/worker', model: 'saved',
@@ -655,7 +689,7 @@ describe('ScheduledPromptFormState', () => {
 				},
 			],
 		});
-		form.startup.validatePath = vi.fn();
+		form.startup.validateChangedPath = vi.fn();
 		const scheduledPrompt = newChatPrompt({
 			type: 'new-chat',
 			agentId: 'codex',
@@ -728,7 +762,7 @@ describe('ScheduledPromptFormState', () => {
 				form.startup.validateAllModelsAgainstLive();
 			});
 		});
-		form.startup.validatePath = vi.fn();
+		form.startup.validateChangedPath = vi.fn();
 		const scheduledPrompt = newChatPrompt({
 			type: 'new-chat',
 			agentId: 'codex',
@@ -770,7 +804,7 @@ describe('ScheduledPromptFormState', () => {
 				},
 			],
 		});
-		form.startup.validatePath = vi.fn();
+		form.startup.validateChangedPath = vi.fn();
 		const scheduledPrompt = newChatPrompt({
 			type: 'new-chat',
 			agentId: 'codex',
@@ -814,7 +848,7 @@ describe('ScheduledPromptFormState', () => {
 				return [{ value: 'gpt-5', label: 'GPT-5' }];
 			},
 		});
-		form.startup.validatePath = vi.fn();
+		form.startup.validateChangedPath = vi.fn();
 		const scheduledPrompt = newChatPrompt({
 			type: 'new-chat',
 			agentId: 'direct-openai-compatible',
@@ -866,7 +900,7 @@ describe('ScheduledPromptFormState', () => {
 		form.startup.setPermissionMode = vi.fn();
 		form.startup.setThinkingMode = vi.fn();
 		form.startup.replaceAgentSettingsById = vi.fn();
-		form.startup.validatePath = vi.fn();
+		form.startup.validateChangedPath = vi.fn();
 		const scheduledPrompt: ScheduledPrompt = {
 			id: 'tagged-prompt', enabled: true,
 			schedule: { type: 'once', nextRunAt: '2030-01-02T09:00:00.000Z' },

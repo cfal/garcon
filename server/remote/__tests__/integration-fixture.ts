@@ -8,7 +8,9 @@ import {
   type AgentStartRequestV5,
   type AgentImportedTranscriptRow,
   type AgentSingleQueryRequest,
+  type AgentUsageReadRequest,
 } from '@garcon/server-agent-interface';
+import type { AgentUsageReport } from '@garcon/common/usage';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
@@ -29,13 +31,17 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
   const scope: AgentResourceScope = { executorId, instanceId: crypto.randomUUID(), integrationId: 'test' };
   const published: AgentProducerNotification[] = [];
   const nativePublishers: AgentRuntimePublisher[] = [];
-  const calls = { start: 0, resume: 0, abort: 0, migrate: 0, initialize: 0, stop: 0, import: 0, query: 0 };
+  const calls = { start: 0, resume: 0, abort: 0, migrate: 0, initialize: 0, stop: 0, import: 0, query: 0, usage: 0 };
   const hooks = {
     start: async (_request: AgentRuntimeStartRequest) => {},
     initialize: async () => {},
     stop: async () => {},
     query: async (_request: AgentSingleQueryRequest) => 'query result',
     history: async function* (_signal: AbortSignal): AsyncGenerator<readonly AgentImportedTranscriptRow[]> { yield []; },
+    usage: async (_request: AgentUsageReadRequest): Promise<AgentUsageReport> => ({
+      status: 'missing', buckets: [], scannedFiles: 0, unreadableFiles: 0, malformedRecords: 0, distinctSessions: 0,
+      pricingAsOf: '2026-10-27',
+    }),
   };
   const runtime: AgentRuntimeExecution = {
     async start(request, publish) {
@@ -73,6 +79,7 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
     literalExecution: null, readiness: null,
     legacyHistoryImport: null, nativeActivity: null, nativeSessions: null, configurationValidation: null,
     sessionConfiguration: null, projectPathUpdates: null,
+    usageHistory: { async read(request: AgentUsageReadRequest) { calls.usage++; return hooks.usage(request); } },
   } satisfies AgentIntegration;
   let disposed = false;
   const projects = new ProjectService(projectBasePath, (options) => {

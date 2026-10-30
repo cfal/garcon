@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildSidebarChatOrderMap,
-	buildSidebarDisplayChatIds as buildSidebarDisplayChatIdsBase,
+	buildSidebarChatListProjection,
 	buildSidebarExecutorCollapseKeys,
 	buildSidebarProjectKeys,
 	buildSidebarRowModel as buildSidebarRowModelBase,
@@ -35,7 +35,7 @@ function buildSidebarRowModel(
 
 function buildSidebarDisplayChatIds(
 	input: Omit<
-		Parameters<typeof buildSidebarDisplayChatIdsBase>[0],
+		Parameters<typeof buildSidebarChatListProjection>[0],
 		'inactivityDuration' | 'sortMode' | 'pinnedInsertPosition'
 	> & {
 		inactivityDuration?: SidebarInactivityDuration;
@@ -43,12 +43,12 @@ function buildSidebarDisplayChatIds(
 		pinnedInsertPosition?: 'top' | 'bottom';
 	},
 ) {
-	return buildSidebarDisplayChatIdsBase({
+	return buildSidebarChatListProjection({
 		inactivityDuration: TEST_INACTIVITY_DURATION,
 		sortMode: 'manual',
 		pinnedInsertPosition: 'top',
 		...input,
-	});
+	}).rowModel.visibleChatIds;
 }
 
 function chat(

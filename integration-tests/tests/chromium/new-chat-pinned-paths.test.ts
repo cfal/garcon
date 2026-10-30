@@ -40,6 +40,18 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
       await mkdir(artifacts, { recursive: true });
       await dialog.screenshot({ path: join(artifacts, `executor-pins-${executionBackend}-desktop-default.png`) });
+      phase('validating a selected pin without advancing the debounce clock');
+      await page.clock.install();
+      await page.clock.pauseAt(new Date());
+      const selectedPinValidation = page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.pathname === '/api/v1/chats/validate-start'
+          && url.searchParams.get('executorId') === 'local' && response.ok();
+      });
+      await pins.getByRole('button', { name: sharedPath, exact: true }).dispatchEvent('click');
+      await selectedPinValidation;
+      await page.clock.resume();
+      await browserExpect(prompt).toHaveValue('Synthetic retained draft');
       await trigger.focus();
       await page.keyboard.press('Space');
       await browserExpect(picker).toBeVisible();
@@ -71,8 +83,10 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           return url.pathname === '/api/v1/chats/validate-start'
             && url.searchParams.get('executorId') === client.executorId && response.ok();
         });
+        await page.clock.pauseAt(new Date());
         await page.keyboard.press('Enter');
         await validated;
+        await page.clock.resume();
         await browserExpect(page.getByText('Loading models...', { exact: true })).toHaveCount(0, { timeout: 20_000 });
         await browserExpect(picker).toHaveCount(0);
         await browserExpect(pins.getByRole('button', { name: sharedPath, exact: true })).toHaveAttribute('aria-pressed', 'true');

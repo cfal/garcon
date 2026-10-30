@@ -28,6 +28,7 @@
 	const lazySnippets = () => import('../snippets/SnippetsDialog.svelte');
 	const lazyOnboardingWizard = () => import('../onboarding/OnboardingWizard.svelte');
 	import {
+		getExecutors,
 		getWorkbenchCommands,
 		getNavigation,
 		getChatSessions,
@@ -70,7 +71,7 @@
 		SearchResultNavigationPort,
 		SearchResultSelection,
 	} from '$lib/sidebar/search/search-result-navigation-controller.js';
-	import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model';
+	import { buildSidebarChatListProjection } from '$lib/components/sidebar/sidebar-row-model';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
@@ -80,6 +81,7 @@
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 
+	const executors = getExecutors();
 	const commandRegistry = getWorkbenchCommands();
 	const navigation = getNavigation();
 	const sessions = getChatSessions();
@@ -104,9 +106,10 @@
 		notifications,
 	});
 	const chatActionDialogs = new ChatActionDialogsState();
-	const displayedSidebarChatIds = $derived.by(() =>
-		buildSidebarDisplayChatIds({
+	const sidebarProjection = $derived.by(() =>
+		buildSidebarChatListProjection({
 			displayedChats: sidebarSearch.filteredChats,
+			executorOrder: executors.executors.map((executor) => executor.id),
 			grouping: localSettings.sidebarGrouping,
 			currentTime: minuteClock.currentTime,
 			inactivityDuration: localSettings.sidebarInactivityDuration,
@@ -118,6 +121,7 @@
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 		}),
 	);
+	const displayedSidebarChatIds = $derived(sidebarProjection.rowModel.visibleChatIds);
 	let mobileSidebarFocusReturnTarget: HTMLElement | null = null;
 	const mobileSidebarLayer = transientLayerAttachment({
 		registry: transientLayers,
@@ -224,6 +228,7 @@
 					mobileActiveDescriptor.kind === 'pull-requests' ||
 					mobileActiveDescriptor.kind === 'chat-board' ||
 					mobileActiveDescriptor.kind === 'tickets' ||
+					mobileActiveDescriptor.kind === 'usage' ||
 					mobileActiveDescriptor.kind === 'git-history' ||
 					mobileActiveDescriptor.kind === 'git-compare')),
 	);
@@ -546,6 +551,17 @@
 		restoreMobileSidebarFocus();
 	}
 
+	async function handleShowUsage(): Promise<void> {
+		if (isMobile) closeMobileSidebar();
+		// Completes drawer focus restoration before the surface owns focus.
+		await tick();
+		try {
+			await workspace.openSingleton('usage');
+		} catch (error) {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		}
+	}
+
 	function handleMobileChatSelect(chatId: string): void {
 		handleChatSelect(chatId);
 		closeMobileSidebar();
@@ -688,6 +704,7 @@
 
 {#snippet sidebarContent(isMobile: boolean, onChatSelect: (chatId: string) => void)}
 	<Sidebar
+		projection={sidebarProjection}
 		chats={sessions.orderedChats}
 		selectedChatId={sessions.selectedChatId}
 		isLoading={sessions.isLoadingChats}
@@ -701,7 +718,6 @@
 		onTogglePinned={(id) => chatActionController.togglePinned(id)}
 		onToggleArchive={(id) => chatActionController.toggleArchive(id)}
 		isArchiveMutationPending={(id) => sessions.isArchiveMutationPending(id)}
-		isChatOptimisticallyArchived={(id) => sessions.isChatOptimisticallyArchived(id)}
 		startArchivingChats={(chatIds) => archiveUndo.startArchivingChats(chatIds)}
 		startUnarchivingChats={(chatIds) => archiveUndo.startUnarchivingChats(chatIds)}
 		onShowDetails={requestDetailsChat}
@@ -714,6 +730,7 @@
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
 		onShowPreambles={() => appShell.openPreambles()}
 		onShowSnippets={() => appShell.openSnippets()}
+		onShowUsage={() => void handleShowUsage()}
 		onShowSettings={() => appShell.openSettings()}
 		{newWindowEdges}
 	/>

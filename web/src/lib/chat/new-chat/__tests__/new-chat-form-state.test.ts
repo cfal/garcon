@@ -189,8 +189,9 @@ const mockModelCatalog = {
 		'direct-openai-compatible': { label: 'Direct (Chat Completions)' },
 	},
 	getAgent: vi.fn((agentId: string): Pick<AgentMetadata, 'label' | 'executionPolicy'> | null => {
-		const metadata = Object.entries(mockModelCatalog.agentMetadata)
-			.find(([id]) => id === agentId)?.[1];
+		const metadata = Object.entries(mockModelCatalog.agentMetadata).find(
+			([id]) => id === agentId,
+		)?.[1];
 		return metadata ? { ...metadata, executionPolicy: 'conversation' } : null;
 	}),
 	getAgents: vi.fn(() => ['claude', 'codex', 'direct-openai-compatible']),
@@ -309,9 +310,14 @@ describe('NewChatFormState', () => {
 
 
 	it('selects the saved pin with its owner while preserving prompt and attachments', () => {
-		mockRemoteSettings.snapshot = makeSnapshot({ paths: { pinnedProjectPaths: ['/same'], byExecutor: {
-			[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/same', '/exact '] },
-		} } });
+		mockRemoteSettings.snapshot = makeSnapshot({
+			paths: {
+				pinnedProjectPaths: ['/same'],
+				byExecutor: {
+					[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/same', '/exact '] },
+				},
+			},
+		});
 		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
 		formState.projectPath = '/same';
 		formState.firstMessage = 'Synthetic retained prompt';
@@ -328,9 +334,13 @@ describe('NewChatFormState', () => {
 	});
 
 	it('rejects stale pin selection after removal, disconnection or a pending pin write', () => {
-		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byExecutor: {
-			[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/pin'] },
-		} } });
+		mockRemoteSettings.snapshot = makeSnapshot({
+			paths: {
+				byExecutor: {
+					[remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/pin'] },
+				},
+			},
+		});
 		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
 		formState.projectPath = '/local';
 		pins.select(remoteExecutor.id, '/removed-pin');
@@ -348,11 +358,25 @@ describe('NewChatFormState', () => {
 		expect(formState.projectPath).toBe('/local');
 	});
 	it('preserves compatible models, prompt and attachments while adopting destination path preferences', async () => {
-		mockRemoteSettings.snapshot = makeSnapshot({ paths: { byExecutor: {
-			[remoteExecutor.id]: { defaultPath: '/worker/default', recentPaths: ['/worker/recent'], pinnedPaths: ['/worker/pin'] },
-		} } });
-		mockModelCatalog.getModels.mockImplementation((agentId) => agentId === 'claude'
-			? [{ value: 'default', label: 'Default' }, { value: 'kept', label: 'Kept' }] : modelsForAgent(agentId));
+		mockRemoteSettings.snapshot = makeSnapshot({
+			paths: {
+				byExecutor: {
+					[remoteExecutor.id]: {
+						defaultPath: '/worker/default',
+						recentPaths: ['/worker/recent'],
+						pinnedPaths: ['/worker/pin'],
+					},
+				},
+			},
+		});
+		mockModelCatalog.getModels.mockImplementation((agentId) =>
+			agentId === 'claude'
+				? [
+						{ value: 'default', label: 'Default' },
+						{ value: 'kept', label: 'Kept' },
+					]
+				: modelsForAgent(agentId),
+		);
 		formState.selectModel('kept');
 		formState.firstMessage = 'Synthetic preserved prompt';
 		const image = new File(['synthetic'], 'synthetic.png', { type: 'image/png' });
@@ -369,8 +393,14 @@ describe('NewChatFormState', () => {
 	});
 
 	it('retains the compatible model through an intermediate uncached host', async () => {
-		mockModelCatalog.getModels.mockImplementation(() => formState.executorId === 'local'
-			? [{ value: 'opus', label: 'Default' }, { value: 'kept', label: 'Kept' }] : []);
+		mockModelCatalog.getModels.mockImplementation(() =>
+			formState.executorId === 'local'
+				? [
+						{ value: 'opus', label: 'Default' },
+						{ value: 'kept', label: 'Kept' },
+					]
+				: [],
+		);
 		formState.selectModel('kept');
 		mockModelCatalog.isValidated = false;
 		const remoteRefresh = deferred<void>();
@@ -389,12 +419,24 @@ describe('NewChatFormState', () => {
 	it('explicit restoration supersedes a pending executor-change model after failed discovery', async () => {
 		mockModelCatalog.getModels.mockReturnValue([
 			{ value: 'opus', label: 'Default' },
-			{ value: 'endpoint:saved', rawModel: 'saved', label: 'Saved', endpointId: 'endpoint', apiProviderId: 'provider', protocol: 'anthropic-messages' },
+			{
+				value: 'endpoint:saved',
+				rawModel: 'saved',
+				label: 'Saved',
+				endpointId: 'endpoint',
+				apiProviderId: 'provider',
+				protocol: 'anthropic-messages',
+			},
 		]);
 		mockModelCatalog.isValidated = false;
 		mockModelCatalog.error = 'Discovery failed';
 		formState.selectExecutor(remoteExecutor.id);
-		const saved = { model: 'saved', modelEndpointId: 'endpoint', apiProviderId: 'provider', modelProtocol: 'anthropic-messages' as const };
+		const saved = {
+			model: 'saved',
+			modelEndpointId: 'endpoint',
+			apiProviderId: 'provider',
+			modelProtocol: 'anthropic-messages' as const,
+		};
 		formState.restoreSelection('claude', saved);
 		await Promise.resolve();
 		expect(formState.modelSelectionTarget).toEqual(saved);
@@ -404,6 +446,55 @@ describe('NewChatFormState', () => {
 		expect(formState.modelSelectionTarget).toEqual(saved);
 		expect(formState.modelValue).toBe('endpoint:saved');
 		formState.dispose();
+	});
+
+	it('validates a pinned path immediately without repeating it in the path effect', async () => {
+		const pending = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
+		vi.mocked(chatsApi.validateStart).mockReturnValueOnce(pending.promise);
+		formState.pinnedProjectPaths = ['/workspace/pinned'];
+		const pins = new NewChatPinnedPathsController(() => formState, executors, mockRemoteSettings);
+		expect(pins.select('local', '/workspace/pinned')).toBe(true);
+		expect(chatsApi.validateStart).toHaveBeenCalledExactlyOnceWith('/workspace/pinned', {
+			executorId: 'local',
+		});
+		formState.validateChangedPath();
+		await vi.advanceTimersByTimeAsync(300);
+		expect(chatsApi.validateStart).toHaveBeenCalledTimes(1);
+		pending.resolve({ valid: true });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(formState.validationStatus).toBe('valid');
+	});
+
+	it('cancels typed-path debounce when a directory is explicitly selected and rechecks the same directory', async () => {
+		formState.projectPath = '/workspace/typed';
+		formState.validateChangedPath();
+		expect(chatsApi.validateStart).not.toHaveBeenCalled();
+		formState.selectProjectPath('/workspace/selected');
+		expect(chatsApi.validateStart).toHaveBeenCalledExactlyOnceWith('/workspace/selected', {
+			executorId: 'local',
+		});
+		formState.validateChangedPath();
+		await vi.advanceTimersByTimeAsync(300);
+		expect(chatsApi.validateStart).toHaveBeenCalledTimes(1);
+		formState.selectProjectPath('/workspace/selected');
+		expect(chatsApi.validateStart).toHaveBeenCalledTimes(2);
+	});
+
+	it('does not apply a selected-path response after typing another path before the effect runs', async () => {
+		const pending = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
+		vi.mocked(chatsApi.validateStart).mockReturnValueOnce(pending.promise);
+		formState.selectProjectPath('/workspace/selected');
+		formState.projectPath = '/workspace/typed';
+		pending.resolve({ valid: true });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(formState.validationStatus).toBe('checking');
+		formState.validateChangedPath();
+		await vi.advanceTimersByTimeAsync(299);
+		expect(chatsApi.validateStart).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/workspace/typed', {
+			executorId: 'local',
+		});
 	});
 
 	it('updates a selected remote base without resetting the draft and ignores old validation', async () => {
@@ -496,7 +587,13 @@ describe('NewChatFormState', () => {
 			{
 				...remoteExecutor,
 				projectBasePath: '/same',
-				executorServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
+				executorServices: {
+					files: true,
+					git: false,
+					gh: false,
+					terminals: false,
+					directoryCreation: true,
+				},
 			},
 		]);
 		const local = deferred<Awaited<ReturnType<typeof browseDirectory>>>();
@@ -1564,7 +1661,9 @@ describe('NewChatFormState', () => {
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		formState.validatePath();
 		await vi.advanceTimersByTimeAsync(300);
-		expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/workspace/project ', { executorId: 'local' });
+		expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/workspace/project ', {
+			executorId: 'local',
+		});
 		expect(formState.buildConfig()?.projectPath).toBe('/workspace/project ');
 		formState.projectPath = '   ';
 		expect(formState.nonblankPath).toBe('');
