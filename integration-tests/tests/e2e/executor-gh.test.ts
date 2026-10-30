@@ -34,6 +34,7 @@ test('a connected remote repository lists its pull requests and loads a diff fro
     await fixture.page.$eval('[data-pr-inbox-row]', element => (element as HTMLButtonElement).click());
     await fixture.page.$eval('[data-pr-tab="changes"]', element => (element as HTMLButtonElement).click());
     await fixture.page.waitForFunction(() => document.querySelector('[data-pr-detail]')?.textContent?.includes('changed'));
+    await fixture.page.waitForFunction(() => document.querySelector('[data-pr-panel]')?.textContent?.includes('synthetic comment'));
     const panel = await fixture.page.$eval('[data-pr-panel]', element => element.textContent);
     expect(panel).toContain('example.txt');
     expect(panel).toContain('synthetic comment');
