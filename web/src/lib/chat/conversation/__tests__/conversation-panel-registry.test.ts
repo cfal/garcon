@@ -382,6 +382,142 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it('[TLV5-REPLAY.09-WEB-UNIT-03] keeps an offscreen prefix through a gapped live row and fetches only the delta on return', async () => {
+		let head = 1;
+		const readTranscriptReplayPage = vi.fn<TranscriptReplayPageReader>(async (request) =>
+			transcriptReplayPage(request, {
+				messages: Array.from(
+					{ length: head - request.afterOrdinal },
+					(_, index) => message(request.afterOrdinal + index + 1),
+				),
+				throughOrdinal: head,
+			}),
+		);
+		const loadTranscriptSnapshot = vi.fn(async () => {});
+		const { cache, registry } = fixture({
+			readTranscriptReplayPage,
+			loadTranscriptSnapshot,
+			retainInactiveWindows: () => true,
+		});
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		switchPanel(registry, 'chat-1');
+		await settleTranscriptResumes();
+		const parked = registry.panel('chat-view:window-left')?.transcript;
+		switchPanel(registry, 'chat-2');
+		await settleTranscriptResumes();
+		readTranscriptReplayPage.mockClear();
+
+		head = 4;
+		expect(registry.applyCommittedBatch({
+			chatId: 'chat-1', transcriptViewId: 'view-1', messages: [message(3), message(4)],
+			firstOrdinal: 3, lastOrdinal: 4, resendCandidates: [], noticeRevision: 0,
+		})).toEqual({ kind: 'prefix-retained' });
+		await settleTranscriptResumes();
+
+		expect(readTranscriptReplayPage).not.toHaveBeenCalled();
+		expect(cache.readAppliedCursor('chat-1')).toEqual({ transcriptViewId: 'view-1', lastOrdinal: 1, stale: false });
+		expect(registry.hasInactiveWindow('chat-1')).toBe(true);
+
+		switchPanel(registry, 'chat-1');
+		await settleTranscriptResumes();
+
+		expect(registry.panel('chat-view:window-left')?.transcript).toBe(parked);
+		expect(readTranscriptReplayPage).toHaveBeenCalledExactlyOnceWith({
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
+			afterOrdinal: 1,
+		});
+		expect(parked?.entries.map((entry) => entry.ordinal)).toEqual([1, 2, 3, 4]);
+		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('catches a rendered chat up from its prefix after a gapped live row without a snapshot', async () => {
+		let head = 1;
+		const readTranscriptReplayPage = vi.fn<TranscriptReplayPageReader>(async (request) =>
+			transcriptReplayPage(request, {
+				messages: Array.from(
+					{ length: head - request.afterOrdinal },
+					(_, index) => message(request.afterOrdinal + index + 1),
+				),
+				throughOrdinal: head,
+			}),
+		);
+		const loadTranscriptSnapshot = vi.fn(async () => {});
+		const { cache, registry } = fixture({ readTranscriptReplayPage, loadTranscriptSnapshot });
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		await settleTranscriptResumes();
+		readTranscriptReplayPage.mockClear();
+
+		head = 3;
+		expect(registry.applyCommittedBatch({
+			chatId: 'chat-1', transcriptViewId: 'view-1', messages: [message(3)],
+			firstOrdinal: 3, lastOrdinal: 3, resendCandidates: [], noticeRevision: 0,
+		})).toEqual({ kind: 'prefix-retained' });
+		await settleTranscriptResumes();
+
+		expect(readTranscriptReplayPage).toHaveBeenCalledExactlyOnceWith({
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
+			afterOrdinal: 1,
+		});
+		expect(registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal))
+			.toEqual([1, 2, 3]);
+		expect(registry.applyCommittedBatch({
+			chatId: 'chat-1', transcriptViewId: 'view-1', messages: [message(4)],
+			firstOrdinal: 4, lastOrdinal: 4, resendCandidates: [], noticeRevision: 0,
+		})).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+		expect(registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal))
+			.toEqual([1, 2, 3, 4]);
+		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('follows a catch-up whose held live row left a gap with one more catch-up', async () => {
+		const pages: Array<{ request: TranscriptReplayRequest; respond: (head: number) => void }> = [];
+		const readTranscriptReplayPage = vi.fn<TranscriptReplayPageReader>(
+			(request) =>
+				new Promise((resolve) => {
+					pages.push({
+						request,
+						respond: (head) => resolve(transcriptReplayPage(request, {
+							messages: Array.from(
+								{ length: head - request.afterOrdinal },
+								(_, index) => message(request.afterOrdinal + index + 1),
+							),
+							throughOrdinal: head,
+						})),
+					});
+				}),
+		);
+		const loadTranscriptSnapshot = vi.fn(async () => {});
+		const { cache, registry } = fixture({ readTranscriptReplayPage, loadTranscriptSnapshot });
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		expect(pages).toHaveLength(1);
+
+		registry.applyCommittedBatch({
+			chatId: 'chat-1', transcriptViewId: 'view-1', messages: [message(5)],
+			firstOrdinal: 5, lastOrdinal: 5, resendCandidates: [], noticeRevision: 0,
+		});
+		pages[0]!.respond(2);
+		await settleTranscriptResumes();
+		expect(pages.map((page) => page.request.afterOrdinal)).toEqual([1, 2]);
+		pages[1]!.respond(5);
+		await settleTranscriptResumes();
+
+		expect(registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal))
+			.toEqual([1, 2, 3, 4, 5]);
+		expect(cache.readAppliedCursor('chat-1')).toEqual({ transcriptViewId: 'view-1', lastOrdinal: 5, stale: false });
+		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+		registry.destroy();
+		cache.flush();
+	});
+
 	it('holds live shared commits behind a fixed reconnect replay watermark', () => {
 		const { cache, registry } = fixture();
 		seed(cache);

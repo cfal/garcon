@@ -27,8 +27,9 @@ interface ReplayResponse {
   readonly throughOrdinal: number;
 }
 
-// Observes transcript traffic in both directions and can withhold live transcript bodies for
-// one chat, the way a server that only delivers on-screen chats would.
+// Observes transcript traffic in both directions. It can withhold live transcript bodies for
+// one chat, the way a server that only delivers on-screen chats would, or drop exactly one
+// live batch so the next one arrives with a gap.
 class TranscriptTraffic {
   historyReads: HistoryRead[] = [];
   replayRequests: Record<string, unknown>[] = [];
@@ -36,6 +37,9 @@ class TranscriptTraffic {
   withheldChatId: string | null = null;
   withheldBatches = 0;
   withheldThroughOrdinal = 0;
+  droppedOnceChatId: string | null = null;
+  droppedBatch: { firstOrdinal: number; lastOrdinal: number } | null = null;
+  liveThroughOrdinal = new Map<string, number>();
 
   reset(): void {
     this.historyReads = [];
@@ -76,6 +80,18 @@ class TranscriptTraffic {
       server.onMessage((message) => {
         const text = typeof message === 'string' ? message : message.toString('utf8');
         const parsed = JSON.parse(text) as Record<string, unknown>;
+        if (parsed.type === 'chat-messages') {
+          const chatId = String(parsed.chatId);
+          this.liveThroughOrdinal.set(
+            chatId,
+            Math.max(this.liveThroughOrdinal.get(chatId) ?? 0, Number(parsed.lastOrdinal)),
+          );
+          if (chatId === this.droppedOnceChatId && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+            this.droppedOnceChatId = null;
+            this.droppedBatch = { firstOrdinal: Number(parsed.firstOrdinal), lastOrdinal: Number(parsed.lastOrdinal) };
+            return;
+          }
+        }
         if (parsed.type === 'chat-messages' && parsed.chatId === this.withheldChatId) {
           this.withheldBatches += 1;
           this.withheldThroughOrdinal = Math.max(this.withheldThroughOrdinal, Number(parsed.lastOrdinal));
@@ -286,6 +302,82 @@ test('[TLV5-REPLAY.08-CHROMIUM-01] resumes cached chats from their ledger cursor
     );
     expect(traffic.historyReads).toEqual([]);
     expect(traffic.replayRequests).toEqual([]);
+    fixture.assertNoBrowserErrors();
+  });
+}, 240_000);
+
+test('[TLV5-REPLAY.09-CHROMIUM-01] resumes from the contiguous prefix after a gapped live row', async () => {
+  await withChromiumFixture('warm-chat-activation-gap', async (fixture, phase) => {
+    const { page, integration } = fixture;
+    const traffic = new TranscriptTraffic();
+    await traffic.install(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const head = async (chatId: string) => (await integration.client.getMessages(chatId, { limit: 1 })).lastOrdinal;
+    const runTurn = async (chatId: string, content: string) => {
+      const turn = await integration.client.runDirectChat({ chatId, content, agent: integration.directAgents.openAi });
+      await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+      await integration.client.waitForProcessing(chatId, false);
+    };
+
+    phase('creating and opening two synthetic transcripts');
+    const alpha = await createChat(fixture, 'warm-alpha');
+    const beta = await createChat(fixture, 'warm-beta');
+    await page.goto(`${integration.garcon.baseUrl}/chat/${alpha}`);
+    await browserExpect(page.locator(FEED_SELECTOR)).toContainText(`echo:warm-alpha-${TURNS_PER_CHAT - 1}`);
+    await selectChat(page, 'warm-beta', beta);
+    await settleActivation(page, traffic, beta);
+
+    phase('dropping one live batch while A is offscreen');
+    const offscreenPrefix = await head(alpha);
+    traffic.droppedOnceChatId = alpha;
+    await runTurn(alpha, 'warm-alpha-gapped');
+    const offscreenHead = await head(alpha);
+    await browserExpect.poll(() => traffic.liveThroughOrdinal.get(alpha)).toBe(offscreenHead);
+    expect(traffic.droppedBatch?.lastOrdinal).toBeLessThan(offscreenHead);
+
+    phase('returning to A after the gap');
+    traffic.reset();
+    await selectChat(page, 'warm-alpha', alpha);
+    await browserExpect(page.locator(FEED_SELECTOR)).toContainText('echo:warm-alpha-gapped');
+    await settleActivation(page, traffic, alpha);
+    const offscreenReturn = traffic.forChat(alpha);
+    console.info(
+      'Gapped offscreen chat return traffic',
+      JSON.stringify({ ...summarize(offscreenReturn), offscreenPrefix, offscreenHead }),
+    );
+    expect(offscreenReturn.historyReads).toEqual([]);
+    expect(offscreenReturn.replayRequests).toEqual([
+      expect.objectContaining({ afterOrdinal: offscreenPrefix, purpose: 'activation' }),
+    ]);
+    expect(offscreenReturn.replayResponses).toEqual([
+      expect.objectContaining({ firstOrdinal: offscreenPrefix + 1, throughOrdinal: offscreenHead }),
+    ]);
+    const gappedTail = [row('warm-alpha-gapped'), row('echo:warm-alpha-gapped')];
+    expectContiguousTail(await messageTexts(page), gappedTail);
+    expect(await isPinnedToBottom(page)).toBe(true);
+
+    phase('dropping one live batch while A is on screen');
+    traffic.reset();
+    const visiblePrefix = offscreenHead;
+    traffic.droppedOnceChatId = alpha;
+    await runTurn(alpha, 'warm-alpha-visible-gap');
+    const visibleHead = await head(alpha);
+    await browserExpect(page.locator(FEED_SELECTOR)).toContainText('echo:warm-alpha-visible-gap');
+    await page.waitForTimeout(750);
+    console.info(
+      'Gapped rendered chat traffic',
+      JSON.stringify({ ...summarize(traffic.forChat(alpha)), visiblePrefix, visibleHead }),
+    );
+    expect(traffic.droppedBatch?.lastOrdinal).toBeLessThan(visibleHead);
+    expect(traffic.historyReads).toEqual([]);
+    expect(traffic.replayRequests.length).toBeGreaterThan(0);
+    expect(traffic.replayRequests[0]).toMatchObject({ chatId: alpha, afterOrdinal: visiblePrefix });
+    expect(traffic.replayRequests.every((request) => request.purpose === undefined)).toBe(true);
+    expectContiguousTail(
+      await messageTexts(page),
+      [...gappedTail, row('warm-alpha-visible-gap'), row('echo:warm-alpha-visible-gap')],
+    );
+    expect(await isPinnedToBottom(page)).toBe(true);
     fixture.assertNoBrowserErrors();
   });
 }, 240_000);

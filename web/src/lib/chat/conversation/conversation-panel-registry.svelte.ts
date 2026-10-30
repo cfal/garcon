@@ -3,10 +3,7 @@ import {
 	type ChatLoadMessagesOptions,
 	type SharedTranscriptCommit,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import type {
-	ChatTranscriptApplyResult,
-	ChatTranscriptCache,
-} from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import type { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
 import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
@@ -30,9 +27,14 @@ import {
 	type CachedTranscriptResumeResult,
 	type TranscriptReplayPageReader,
 } from '$lib/chat/transcript/cached-transcript-resume.js';
+import {
+	committedBatchApplyStatus,
+	type CommittedTranscriptBatch,
+	type ConversationPanelBatchApplyResult,
+} from './committed-transcript-batch.js';
 import type { ConversationLifecycleRegistry } from './conversation-lifecycle-registry.svelte.js';
 import type { ConversationLifecycleState } from './conversation-lifecycle-state.svelte.js';
-import type { ResendCandidate, TranscriptMessage, TranscriptReadPurpose } from '$shared/chat-view';
+import type { ResendCandidate, TranscriptReadPurpose } from '$shared/chat-view';
 import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
 import type { VisibleChatPresentation } from '$lib/workspace/visible-presentations.js';
 import type {
@@ -50,16 +52,6 @@ export type ConversationPanelSnapshotAdmission = 'deferred' | 'admitted';
 
 export interface ConversationPanelDescriptor extends VisibleChatPresentation {
 	readonly snapshotAdmission: ConversationPanelSnapshotAdmission;
-}
-
-export interface CommittedTranscriptBatch {
-	readonly chatId: string;
-	readonly transcriptViewId: string;
-	readonly messages: TranscriptMessage[];
-	readonly firstOrdinal: number;
-	readonly lastOrdinal: number;
-	readonly resendCandidates: ResendCandidate[];
-	readonly noticeRevision: number;
 }
 
 export interface ConversationPanelPresentationPort {
@@ -90,16 +82,6 @@ export interface ConversationPanelRegistration {
 	restore(target: ConversationPanelRestoreTarget | null): Promise<void>;
 	destroy(): void;
 }
-
-export type ConversationPanelBatchApplyResult =
-	| {
-			readonly kind: 'applied';
-			readonly localRecoverySurfaceIds: readonly ChatViewSurfaceId[];
-	  }
-	| {
-			readonly kind: 'chat-recovery-required';
-			readonly outcome: Exclude<ChatTranscriptApplyResult, { status: 'applied' }>;
-	  };
 
 interface StoredRestoreTarget {
 	readonly chatId: string;
@@ -788,6 +770,10 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			lastOrdinal: batch.lastOrdinal,
 			messages: batch.messages,
 		});
+		if (outcome.status === 'gap-detected') {
+			this.#catchUpAfterGap(batch.chatId);
+			return { kind: 'prefix-retained' };
+		}
 		if (outcome.status !== 'applied') {
 			this.#inactiveWindows.removeChat(batch.chatId);
 			return { kind: 'chat-recovery-required', outcome };
@@ -974,10 +960,18 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		chatId: string,
 		batch: TranscriptBufferedBatch,
 	): TranscriptReplayApplyResult {
-		const result = this.applyCommittedBatch({ chatId, ...batch });
-		if (result.kind === 'applied') {
-			return result.localRecoverySurfaceIds.length === 0 ? 'applied' : 'gap-detected';
-		}
-		return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
+		return committedBatchApplyStatus(this.applyCommittedBatch({ chatId, ...batch }));
+	}
+
+	// The gapped batch and later rows are discarded while the cache, panels, and parked windows
+	// keep their contiguous prefix. A rendered chat catches up from it now; any other chat
+	// does so at its next activation.
+	#catchUpAfterGap(chatId: string): void {
+		if (!this.#hasAdmittedPanel(chatId)) return;
+		void this.#cachedResumes
+			.resumeAfterGap(chatId)
+			.then((result) => (result.kind === 'snapshot-required' ? this.loadChatSnapshot(chatId) : undefined))
+			// A failed snapshot leaves the cache stale, so the next activation reloads it.
+			.catch(() => {});
 	}
 }

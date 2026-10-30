@@ -192,6 +192,31 @@ describe('buildRouterStores', () => {
 		deps.chatState.transcriptCache.flush();
 	});
 
+	it('leaves a gapped background batch to the retained cache prefix without a reload', () => {
+		const deps = depsFor(chatRecord());
+		deps.chatState.transcriptCache.replace('chat-2', 'generation-2', [entry(1, 'one')], 1, null);
+		const stores = buildRouterStores(deps);
+
+		const applied = stores.chatState.applyChatMessages(
+			'chat-2',
+			'generation-2',
+			[entry(3, 'three')],
+			3,
+			3,
+			[],
+		);
+
+		expect(applied).toBe('applied');
+		expect(deps.chatState.transcriptCache.readAppliedCursor('chat-2')).toEqual({
+			transcriptViewId: 'generation-2',
+			lastOrdinal: 1,
+			stale: false,
+		});
+		expect(getChatMessages).not.toHaveBeenCalled();
+		deps.panels.destroy();
+		deps.chatState.transcriptCache.flush();
+	});
+
 	it('reads a selected but unrendered chat cursor from the shared panel cache', () => {
 		const deps = depsFor(chatRecord());
 		deps.chatState.transcriptCache.replace(

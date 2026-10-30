@@ -21,7 +21,7 @@ import { requestTranscriptReplayPage } from './transcript-replay-request.js';
 import type {
 	CommittedTranscriptBatch,
 	ConversationPanelBatchApplyResult,
-} from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+} from '$lib/chat/conversation/committed-transcript-batch.js';
 import type {
 	TranscriptBufferedBatch,
 	TranscriptReplayApplyResult,

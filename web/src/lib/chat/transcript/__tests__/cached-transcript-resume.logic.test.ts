@@ -7,6 +7,7 @@ import {
 } from '$shared/chat-view';
 import { WsRequestError } from '$lib/ws/ws-request-error.js';
 import {
+	CachedTranscriptResumes,
 	planCachedTranscriptResume,
 	resumeCachedTranscript,
 	type CachedTranscriptResumeTarget,
@@ -340,4 +341,76 @@ describe('cached transcript resume', () => {
 			expect(target.markValidated).not.toHaveBeenCalled();
 		},
 	);
+});
+
+function queuedReader() {
+	const pending: Array<{ request: TranscriptReplayRequest; respond: (page: TranscriptReplayPage) => void }> = [];
+	const reader: TranscriptReplayPageReader = (request) =>
+		new Promise((resolve) => pending.push({ request, respond: resolve }));
+	return { reader, pending };
+}
+
+async function settle(): Promise<void> {
+	for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+}
+
+describe('cached transcript gap follow-up', () => {
+	it('[TLV5-REPLAY.09-WEB-UNIT-02] queues one follow-up from the advanced cursor after a pending catch-up', async () => {
+		const target = new ResumeTarget(5);
+		const server = queuedReader();
+		const resumes = new CachedTranscriptResumes(target, server.reader);
+		const pending = resumes.resume(CHAT_ID, { purpose: 'activation' });
+
+		const followUp = resumes.resumeAfterGap(CHAT_ID);
+		expect(resumes.resumeAfterGap(CHAT_ID)).toBe(followUp);
+		await settle();
+		expect(server.pending.map((entry) => entry.request.afterOrdinal)).toEqual([5]);
+
+		server.pending[0]!.respond(
+			transcriptReplayPage(server.pending[0]!.request, { messages: rows(6, 8), throughOrdinal: 8 }),
+		);
+		await expect(pending).resolves.toMatchObject({ kind: 'resumed', throughOrdinal: 8 });
+		await settle();
+		expect(server.pending.map((entry) => entry.request)).toEqual([
+			{ chatId: CHAT_ID, transcriptViewId: 'view-1', afterOrdinal: 5, purpose: 'activation' },
+			{ chatId: CHAT_ID, transcriptViewId: 'view-1', afterOrdinal: 8 },
+		]);
+
+		server.pending[1]!.respond(
+			transcriptReplayPage(server.pending[1]!.request, { messages: rows(9, 11), throughOrdinal: 11 }),
+		);
+		await expect(followUp).resolves.toMatchObject({ kind: 'resumed', throughOrdinal: 11 });
+		expect(ordinals(target)).toEqual(Array.from({ length: 11 }, (_, index) => index + 1));
+		expect(target.markChatStale).not.toHaveBeenCalled();
+	});
+
+	it('starts a follow-up from the retained prefix when nothing is pending', async () => {
+		const target = new ResumeTarget(5);
+		const server = queuedReader();
+		const resumes = new CachedTranscriptResumes(target, server.reader);
+
+		const followUp = resumes.resumeAfterGap(CHAT_ID);
+		await settle();
+
+		expect(server.pending.map((entry) => entry.request)).toEqual([
+			{ chatId: CHAT_ID, transcriptViewId: 'view-1', afterOrdinal: 5 },
+		]);
+		server.pending[0]!.respond(
+			transcriptReplayPage(server.pending[0]!.request, { messages: rows(6, 7), throughOrdinal: 7 }),
+		);
+		await expect(followUp).resolves.toMatchObject({ kind: 'resumed', throughOrdinal: 7 });
+	});
+
+	it('requires a snapshot when the cache was invalidated before the follow-up starts', async () => {
+		const target = new ResumeTarget(5);
+		const server = queuedReader();
+		const resumes = new CachedTranscriptResumes(target, server.reader);
+		target.stale = true;
+
+		await expect(resumes.resumeAfterGap(CHAT_ID)).resolves.toEqual({
+			kind: 'snapshot-required',
+			reason: 'stale-cache',
+		});
+		expect(server.pending).toEqual([]);
+	});
 });

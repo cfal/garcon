@@ -318,12 +318,10 @@ function createReconnectDeps(
 				if (result === 'applied') {
 					return { kind: 'applied' as const, localRecoverySurfaceIds: [] };
 				}
+				if (result === 'gap-detected') return { kind: 'prefix-retained' as const };
 				return {
 					kind: 'chat-recovery-required' as const,
-					outcome:
-						result === 'view-changed'
-							? { status: 'view-changed' as const }
-							: { status: 'gap-detected' as const, expectedOrdinal: 0, receivedOrdinal: 0 },
+					outcome: { status: 'view-changed' as const },
 				};
 			},
 		),

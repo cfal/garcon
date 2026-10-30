@@ -12,6 +12,7 @@ import {
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
 import { echoedClientMessageIds } from '$lib/chat/transcript/transcript-row-projection.js';
+import { committedBatchApplyStatus } from './committed-transcript-batch.js';
 import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
 
 export class CurrentConversationPanelTranscript implements ActiveTranscriptPort {
@@ -144,9 +145,8 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 					this.#optimisticChatIds.delete(clientMessageId);
 				}
 			}
-			return result.localRecoverySurfaceIds.length === 0 ? 'applied' : 'gap-detected';
 		}
-		return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
+		return committedBatchApplyStatus(result);
 	}
 
 	setResendCandidates(candidates: readonly ResendCandidate[]): void {

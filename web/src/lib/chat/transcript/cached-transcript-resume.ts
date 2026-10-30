@@ -184,6 +184,7 @@ export class CachedTranscriptResumes {
 		string,
 		{ readonly purpose: TranscriptReadPurpose | undefined; readonly promise: Promise<CachedTranscriptResumeResult> }
 	>();
+	readonly #followUps = new Map<string, Promise<CachedTranscriptResumeResult>>();
 
 	constructor(
 		private readonly target: CachedTranscriptResumeTarget,
@@ -217,12 +218,32 @@ export class CachedTranscriptResumes {
 		return operation.promise;
 	}
 
+	// A gap means the server holds rows after the cache's prefix that no pending catch-up
+	// requested, so the follow-up starts only once the pending one settles. Gaps observed
+	// before it starts share it; later ones are held by its replay buffer or queue another.
+	resumeAfterGap(chatId: string): Promise<CachedTranscriptResumeResult> {
+		const queued = this.#followUps.get(chatId);
+		if (queued) return queued;
+		const start = (): Promise<CachedTranscriptResumeResult> | CachedTranscriptResumeResult => {
+			if (this.#followUps.get(chatId) === followUp) this.#followUps.delete(chatId);
+			const plan = planCachedTranscriptResume(this.target.transcriptCache.readAppliedCursor(chatId));
+			return plan.kind === 'snapshot'
+				? { kind: 'snapshot-required', reason: plan.reason }
+				: (this.resume(chatId) ?? { kind: 'snapshot-required', reason: 'stale-cache' });
+		};
+		const followUp = (this.#pending.get(chatId)?.promise ?? Promise.resolve()).then(start, start);
+		this.#followUps.set(chatId, followUp);
+		return followUp;
+	}
+
 	forget(chatId: string): void {
 		this.#pending.delete(chatId);
+		this.#followUps.delete(chatId);
 	}
 
 	clear(): void {
 		this.#pending.clear();
+		this.#followUps.clear();
 	}
 }
 
