@@ -152,6 +152,8 @@ export class WsConnection {
 	#reconnectAttempts = 0;
 	#destroyed = false;
 	#authPaused = false;
+	#pendingResumeReason: 'visibility-visible' | 'browser-online' | null = null;
+	#resumeRecovery = false;
 	onAuthFailure: ((token: string | null, code: number) => void) | null = null;
 	#pendingRequests = new Map<string, PendingRequest>();
 	#connectionWaiters = new Set<{
@@ -227,10 +229,16 @@ export class WsConnection {
 			return;
 		}
 
+		if (this.#pendingResumeReason && document.visibilityState === 'hidden') {
+			this.#scheduleReconnect(this.#pendingResumeReason, this.#beginOutage());
+			return;
+		}
+
 		// Closes any existing socket before opening a new one.
 		this.#closeExisting({ rejectPending: true });
 
-		const reason = this.#nextConnectReason;
+		const reason = this.#pendingResumeReason ?? this.#nextConnectReason;
+		this.#pendingResumeReason = null;
 		this.#setConnectionStatus({
 			phase: this.#hasEverConnected ? 'reconnecting' : 'connecting',
 			reason,
@@ -354,11 +362,7 @@ export class WsConnection {
 
 			this.#scheduleConnectTimeout(
 				websocket,
-				reason === 'visibility-visible' ||
-					reason === 'browser-online' ||
-					reason === 'heartbeat-timeout'
-					? RESUME_CONNECT_TIMEOUT_MS
-					: CONNECT_ATTEMPT_TIMEOUT_MS,
+				this.#resumeRecovery ? RESUME_CONNECT_TIMEOUT_MS : CONNECT_ATTEMPT_TIMEOUT_MS,
 			);
 		} catch (error) {
 			console.error('Error creating WebSocket connection:', error);
@@ -388,11 +392,17 @@ export class WsConnection {
 	retryAfterAuthProbe(): void {
 		if (!this.#authPaused || this.#destroyed) return;
 		this.#authPaused = false;
+		if (this.#pendingResumeReason && document.visibilityState !== 'hidden') {
+			this.#connectNow(this.#pendingResumeReason);
+			return;
+		}
 		this.#scheduleReconnect('socket-close', this.#beginOutage());
 	}
 
 	disconnect(): void {
 		this.#destroyed = true;
+		this.#pendingResumeReason = null;
+		this.#resumeRecovery = false;
 		this.#setConnectionStatus({
 			phase: 'destroyed',
 			reason: 'manual-disconnect',
@@ -744,20 +754,27 @@ export class WsConnection {
 		}
 	}
 
-	#resumeConnection(reason: WsConnectionIssue): void {
-		if (this.#destroyed || this.#authPaused || document.visibilityState === 'hidden') return;
+	#resumeConnection(reason: 'visibility-visible' | 'browser-online'): void {
+		if (this.#destroyed || document.visibilityState === 'hidden') return;
 		// A foreground or network restoration starts a fresh retry budget.
 		this.#reconnectAttempts = 0;
 		this.#setConnectionStatus({ reconnectAttempt: 0 });
+		if (this.#authPaused) {
+			this.#resumeRecovery = true;
+			this.#pendingResumeReason = reason;
+			return;
+		}
 		if (this.isConnected && this.#activeSocket?.readyState === WebSocket.OPEN) {
 			this.#clearHeartbeatTimer();
 			void this.#sendVisibilityProbe();
 		} else {
+			this.#resumeRecovery = true;
 			this.#connectNow(reason);
 		}
 	}
 
 	#forceReconnect(reason: WsConnectionIssue, options: { reconnectNow: boolean }): void {
+		if (reason === 'heartbeat-timeout') this.#resumeRecovery = true;
 		console.warn(`WebSocket reconnecting: ${reason}`);
 		const episodeId = this.#beginOutage();
 		this.#rejectAllPending();
@@ -878,6 +895,7 @@ export class WsConnection {
 			this.#stabilityTimeout = null;
 			if (!this.#isCurrentSocket(socket) || socket.readyState !== WebSocket.OPEN) return;
 			this.#reconnectAttempts = 0;
+			this.#resumeRecovery = false;
 			this.#setConnectionStatus({ reconnectAttempt: 0 });
 		}, CONNECTION_STABILITY_MS);
 	}

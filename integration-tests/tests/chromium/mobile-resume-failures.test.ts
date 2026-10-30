@@ -9,7 +9,7 @@ interface ResumeFaults {
   opens: number[];
   clientCloses: number;
   failUpgrade: boolean;
-  stallUpgrade: boolean;
+  stalledUpgrades: number;
   authFault: 'fail' | 'stall' | null;
   authFailures: number;
   authTimeouts: number;
@@ -28,7 +28,7 @@ async function installFaults(page: Page, port: number): Promise<void> {
   await page.addInitScript((port) => {
     const faults: ResumeFaults = window.resumeFaults = {
       sockets: [], opens: [], clientCloses: 0,
-      failUpgrade: false, stallUpgrade: false, authFault: null,
+      failUpgrade: false, stalledUpgrades: 0, authFault: null,
       authFailures: 0, authTimeouts: 0, authSuccesses: 0,
       resumedAt: 0, onlineAt: 0,
     };
@@ -36,10 +36,10 @@ async function installFaults(page: Page, port: number): Promise<void> {
     window.WebSocket = class extends NativeWebSocket {
       constructor(url: string | URL, protocols?: string | string[]) {
         let target = url;
-        if (faults.failUpgrade || faults.stallUpgrade) {
+        if (faults.failUpgrade || faults.stalledUpgrades > 0) {
           target = `ws://127.0.0.1:${port}/${faults.failUpgrade ? 'fail' : 'stall'}`;
           faults.failUpgrade = false;
-          faults.stallUpgrade = false;
+          faults.stalledUpgrades = Math.max(0, faults.stalledUpgrades - 1);
         }
         super(target, protocols);
         faults.sockets.push(this);
@@ -169,7 +169,7 @@ test('recovers through auth faults, stalled upgrades and repeated quick app swit
 
       phase('online replaces an upgrade stalled before the network returned');
       await background(page);
-      await page.evaluate(() => { window.resumeFaults.stallUpgrade = true; });
+      await page.evaluate(() => { window.resumeFaults.stalledUpgrades = 1; });
       await foreground(page);
       await page.evaluate(() => {
         setTimeout(() => {
@@ -198,6 +198,15 @@ test('recovers through auth faults, stalled upgrades and repeated quick app swit
         expect(await composer.boundingBox()).toEqual(box);
         expect(await composer.evaluate((element) => element === document.activeElement)).toBe(true);
       }
+
+      phase("consecutive blackholed upgrades retain the short resume watchdog");
+      await background(page);
+      const attempts = await page.evaluate(() => window.resumeFaults.sockets.length);
+      await page.evaluate(() => { window.resumeFaults.stalledUpgrades = 2; });
+      await foreground(page);
+      await expectRecovery(page, 8, 8_500);
+      expect(await page.evaluate(() => window.resumeFaults.sockets.length)).toBe(attempts + 3);
+      await browserExpect(composer).toHaveValue("Synthetic retained draft");
     });
   } finally {
     for (const socket of sockets) socket.destroy();

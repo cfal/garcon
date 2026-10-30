@@ -388,8 +388,37 @@ describe('initial authority', () => {
 
 describe('accepted-session revalidation', () => {
 	it.each([
+		{ user: { id: user.id } },
+		{ user: { id: 'different-owner', username: 'different-owner' } },
+	])('suspends authority for an invalid successful auth response: %s', async (response) => {
+		const auth = await signedIn();
+		const actualApi = await vi.importActual<typeof api>('$lib/api/auth.js');
+		vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json(response));
+		vi.mocked(api.getUser).mockImplementationOnce(actualApi.getUser);
+		await auth.reconcile();
+		expect(auth.availability).toBe('repairing');
+		expect(auth.isAuthenticated).toBe(false);
+		expect(canDispatchAuthenticated()).toBe(false);
+		expect(auth.user).toEqual(user);
+	});
+
+	it.each([
+		new Error('Unexpected identity failure'),
+		new SyntaxError('Invalid JSON'),
+		new DOMException('Invalid operation', 'InvalidStateError'),
+	])('suspends authority for a non-transport exception: %s', async (failure) => {
+		const auth = await signedIn();
+		vi.mocked(api.getUser).mockRejectedValueOnce(failure);
+		await auth.reconcile();
+		expect(auth.isAuthenticated).toBe(false);
+		expect(canDispatchAuthenticated()).toBe(false);
+	});
+
+	it.each([
 		new TypeError('offline'),
 		new DOMException('Timed out', 'TimeoutError'),
+		new DOMException('Network unavailable', 'NetworkError'),
+		new DOMException('Request aborted', 'AbortError'),
 		new ApiError(502, 'Gateway unavailable'),
 	])('keeps accepted authority through a transient failure: %s', async (failure) => {
 		const auth = await signedIn();

@@ -1274,6 +1274,103 @@ describe('WsConnection', () => {
 		}
 	});
 
+	it.each(['online', 'visibilitychange'])(
+		'remembers %s during auth repair without bypassing the auth gate',
+		async (signal) => {
+			const connection = new WsConnection();
+			connection.onAuthFailure = vi.fn();
+			connection.connect('token');
+			try {
+				for (let attempt = 0; attempt < 3; attempt++) {
+					mockSockets.at(-1)!.onclose?.(new CloseEvent('close', { code: 1006 }));
+					connection.retryAfterAuthProbe();
+					await vi.advanceTimersByTimeAsync(connection.connectionStatus.nextRetryAt! - Date.now());
+				}
+				mockSockets.at(-1)!.onclose?.(new CloseEvent('close', { code: 1006 }));
+				const count = mockSockets.length;
+				if (signal === 'online') window.dispatchEvent(new Event('online'));
+				else document.dispatchEvent(new Event('visibilitychange'));
+				await vi.advanceTimersByTimeAsync(500);
+				expect(mockSockets).toHaveLength(count);
+				connection.retryAfterAuthProbe();
+				expect(mockSockets).toHaveLength(count + 1);
+				expect(connection.connectionStatus).toMatchObject({
+					reason: signal === 'online' ? 'browser-online' : 'visibility-visible',
+					reconnectAttempt: 0,
+				});
+				const resumed = mockSockets.at(-1)!;
+				await vi.advanceTimersByTimeAsync(3_000);
+				expect(resumed.close).toHaveBeenCalledOnce();
+			} finally {
+				connection.disconnect();
+			}
+		},
+	);
+
+	it('preserves a pending resume through accepted credential replacement', async () => {
+		const connection = new WsConnection();
+		connection.connect('old-token');
+		try {
+			connection.pauseForAuth();
+			window.dispatchEvent(new Event('online'));
+			connection.resumeForAuth('new-token');
+			expect(connection.connectionStatus.reason).toBe('browser-online');
+			const resumed = mockSockets.at(-1)!;
+			await vi.advanceTimersByTimeAsync(3_000);
+			expect(resumed.close).toHaveBeenCalledOnce();
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it.each(['retryAfterAuthProbe', 'resumeForAuth', 'connect'] as const)('defers pending resume work while hidden through %s', (method) => {
+		let visibilityState: DocumentVisibilityState = 'visible';
+		vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+		const connection = new WsConnection();
+		connection.connect('token');
+		try {
+			connection.pauseForAuth();
+			window.dispatchEvent(new Event('online'));
+			visibilityState = 'hidden';
+			document.dispatchEvent(new Event('visibilitychange'));
+			if (method === 'retryAfterAuthProbe') connection.retryAfterAuthProbe();
+			else connection[method]('new-token');
+			expect(mockSockets).toHaveLength(1);
+			visibilityState = 'visible';
+			document.dispatchEvent(new Event('visibilitychange'));
+			expect(mockSockets).toHaveLength(2);
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it('keeps the short watchdog across stalled retries until the connection stabilizes', async () => {
+		const connection = new WsConnection();
+		try {
+			document.dispatchEvent(new Event('visibilitychange'));
+			await vi.advanceTimersByTimeAsync(3_000);
+			expect(mockSockets[0].close).toHaveBeenCalledOnce();
+			await vi.advanceTimersByTimeAsync(250);
+			const retry = mockSockets[1];
+			await vi.advanceTimersByTimeAsync(2_999);
+			expect(retry.close).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(retry.close).toHaveBeenCalledOnce();
+			await vi.advanceTimersByTimeAsync(800);
+			mockSockets[2].open();
+			await vi.advanceTimersByTimeAsync(10_000);
+			mockSockets[2].closeFromServer();
+			await vi.advanceTimersByTimeAsync(250);
+			const ordinaryRetry = mockSockets[3];
+			await vi.advanceTimersByTimeAsync(9_999);
+			expect(ordinaryRetry.close).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(ordinaryRetry.close).toHaveBeenCalledOnce();
+		} finally {
+			connection.disconnect();
+		}
+	});
+
 	it.each(['visibilitychange', 'pageshow'])(
 		'restarts backoff on %s while retaining exponential retries within that foreground',
 		async (signal) => {
