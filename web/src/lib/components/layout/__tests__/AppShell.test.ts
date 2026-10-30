@@ -683,6 +683,7 @@ describe('AppShell responsive workspace binding', () => {
 		{ label: 'Chat', method: 'focusChat' },
 		{ label: 'Files', method: 'focusMobileSingleton' },
 		{ label: 'Git', method: 'focusMobileSingleton' },
+		{ label: 'PRs', method: 'focusMobileSingleton' },
 		{ label: 'Terminal', method: 'focusMostRecentTerminalOrCreate' },
 	] as const)('reports failed mobile $label navigation', async ({ label, method }) => {
 		const workspace = installContext();
@@ -809,7 +810,9 @@ describe('AppShell responsive workspace binding', () => {
 			expect(chatList?.style.width).toBe('320px');
 			expect(chatList?.inert).toBe(false);
 			expect(panel?.inert).toBe(false);
-			expect(chatList?.classList.contains(dock === 'left' ? 'order-first' : 'order-last')).toBe(true);
+			expect(chatList?.classList.contains(dock === 'left' ? 'order-first' : 'order-last')).toBe(
+				true,
+			);
 			selectChat.focus();
 			expect(document.activeElement).toBe(selectChat);
 			await fireEvent.click(selectChat);
@@ -874,7 +877,7 @@ describe('AppShell responsive workspace binding', () => {
 		},
 	);
 
-	it.each(['git-history', 'git-compare', 'chat-map', 'chat-canvas', 'pull-requests'] as const)(
+	it.each(['git-history', 'git-compare', 'chat-map', 'chat-canvas'] as const)(
 		'hides the mobile bottom bar for transient %s',
 		async (kind) => {
 			const workspace = installContext();
@@ -902,6 +905,7 @@ describe('AppShell responsive workspace binding', () => {
 	it.each([
 		{ kind: 'git', label: 'Git' },
 		{ kind: 'files', label: 'Files' },
+		{ kind: 'pull-requests', label: 'PRs' },
 	] as const)(
 		'keeps $label in the persistent mobile navigation and marks it active',
 		async ({ kind, label }) => {

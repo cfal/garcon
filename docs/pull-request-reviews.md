@@ -5,9 +5,19 @@ chats and keeps each review's final response. Design discussion:
 [cfal/garcon#897](https://github.com/cfal/garcon/issues/897). This page
 describes what milestones 1 and 2 of that issue implement.
 
-The global inbox stays accessible from the Github group on desktop and Open PRs
-in the mobile chat menu, regardless of the current chat's executor or GitHub
-login. Repository connection and scan errors appear inside the inbox.
+The global inbox stays accessible from the Github group on desktop and the PRs
+tab of the mobile bottom navigation, regardless of the current chat's executor
+or GitHub login. Repository connection and scan errors appear inside the inbox.
+
+On a phone, or any pane too narrow for the list and detail side by side,
+selecting a pull request replaces the inbox with its detail, and focus returns
+to the row the user left on the way back. A compact bar names the pull request
+and holds Open on GitHub, Copy link, Copy branch name, and Refresh; the title,
+meta, and a clipped description scroll away under it while the tabs stay
+pinned. Changes gives the diff the full height below the tabs, pins the current
+file's header, and offers a changed-files menu that jumps to any file. Inbox
+rows lead with the pull request's state and show its checks beside the review
+state.
 
 Connected repositories are also available directly in **Settings → GitHub**,
 below the executor's GitHub CLI status. Settings and the inbox's Repositories

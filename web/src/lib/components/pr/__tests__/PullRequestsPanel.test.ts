@@ -123,6 +123,7 @@ function setup(
 		getPage?: typeof getPullRequestReviewRuns;
 		getRun?: typeof getPullRequestReviewRun;
 		snapshot?: PullRequestReviewsSnapshot;
+		isMobile?: boolean;
 	} = {},
 ) {
 	const api = {
@@ -158,11 +159,12 @@ function setup(
 	});
 	controller.setPresentationVisible(true);
 	const onOpenChat = vi.fn();
-	render(PullRequestsPanel, {
+	const rendered = render(PullRequestsPanel, {
 		controller,
+		isMobile: options.isMobile,
 		onOpenChat,
 	});
-	return { api, onOpenChat, controller, getDetail, getRuns, getRun };
+	return { api, onOpenChat, controller, getDetail, getRuns, getRun, rendered };
 }
 
 describe('PullRequestsPanel', () => {
@@ -195,6 +197,77 @@ describe('PullRequestsPanel', () => {
 		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
 		await screen.findByText('Post recovery was abandoned.');
 		expect(screen.queryByRole('button', { name: 'Post to GitHub' })).toBeNull();
+	});
+	it('drills into a pull request on mobile behind one header and returns to its row', async () => {
+		const { rendered, onOpenChat } = setup({ isMobile: true });
+		const header = rendered.container.querySelector('[data-pr-inbox-header]')!;
+		const row = await waitFor(() => {
+			const element = rendered.container.querySelector<HTMLElement>('[data-pr-inbox-row="repo#7"]');
+			expect(element).toBeTruthy();
+			return element!;
+		});
+		await fireEvent.click(row);
+
+		const back = await screen.findByRole('button', { name: 'All pull requests' });
+		await waitFor(() => expect(document.activeElement).toBe(back));
+		expect(header.classList.contains('hidden')).toBe(true);
+		expect(screen.queryByRole('button', { name: 'Close pull request' })).toBeNull();
+		// Mobile keeps the user on the pull request instead of opening its review chat.
+		expect(onOpenChat).not.toHaveBeenCalled();
+		const changes = screen.getByRole('tab', { name: 'Changes' });
+		expect(changes.textContent?.trim()).toBe('Changes');
+
+		await fireEvent.click(back);
+		expect(header.classList.contains('hidden')).toBe(false);
+		await waitFor(() => expect(document.activeElement).toBe(row));
+	});
+	it('names a narrow detail in a compact bar and scrolls its identity away except on Changes', async () => {
+		const { rendered } = setup({ isMobile: true });
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+
+		const bar = rendered.container.querySelector<HTMLElement>('[data-pr-nav-bar]')!;
+		expect(bar.textContent).toContain('#7');
+		expect(bar.textContent).toContain('acme/app');
+		const scroll = rendered.container.querySelector('[data-pr-detail-scroll]')!;
+		expect(scroll.querySelector('[data-pr-identity]')).toBeTruthy();
+		expect(scroll.querySelector('[role="tablist"]')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('tab', { name: 'Changes' }));
+		expect(rendered.container.querySelector('[data-pr-identity]')).toBeNull();
+		expect(rendered.container.querySelector('[data-pr-nav-bar]')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('tab', { name: 'Review' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Checks passing' }));
+		expect(screen.getByRole('tab', { name: 'Checks' }).getAttribute('aria-selected')).toBe('true');
+	});
+	it('copies the pull request link from the narrow actions menu', async () => {
+		const writeText = vi.fn(async () => undefined);
+		vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+		try {
+			const { rendered } = setup({ isMobile: true });
+			await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+			const bar = rendered.container.querySelector<HTMLElement>('[data-pr-nav-bar]')!;
+			const trigger = screen.getByRole('button', { name: 'Pull request actions' });
+			await fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
+			await fireEvent.click(trigger);
+			await fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy link' }));
+			await waitFor(() =>
+				expect(writeText).toHaveBeenCalledWith('https://github.com/acme/app/pull/7'),
+			);
+			await waitFor(() =>
+				expect(bar.querySelector('[role="status"]')?.textContent).toBe('Link copied'),
+			);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+	it('marks inbox rows with their checks state', async () => {
+		const { rendered } = setup();
+		await screen.findAllByText('Change 7');
+		const row = rendered.container.querySelector('[data-pr-inbox-row="repo#7"]')!;
+		expect(row.querySelector('[data-pr-checks-state="passing"]')?.getAttribute('aria-label')).toBe(
+			'Checks passing',
+		);
 	});
 	it('links the selected pull request title to GitHub', async () => {
 		setup();

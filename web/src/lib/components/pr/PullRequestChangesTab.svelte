@@ -1,21 +1,36 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
+	import Check from '@lucide/svelte/icons/check';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
 	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
 	import { DEFAULT_GIT_REVIEW_DOCUMENT_LIMITS } from '$lib/api/git.js';
 	import type { PullRequestDetail } from '$lib/api/pull-requests';
 	import { buildGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 	import { buildPullRequestVirtualRowSource } from '$lib/git/pull-requests/pull-request-virtual-row-source.js';
+	import {
+		DropdownMenu,
+		DropdownMenuContent,
+		DropdownMenuItem,
+		DropdownMenuTrigger,
+	} from '$lib/components/ui/dropdown-menu';
+	import { cn } from '$lib/utils/cn.js';
+	import type { ContainerPresentation } from '$lib/components/shared/container-presentation.js';
+	import { fileStatusClass, fileStatusLabel, splitFilePath } from './pr-display.js';
 	import PullRequestVirtualDiffSurface from './PullRequestVirtualDiffSurface.svelte';
 
 	interface Props {
 		detail: PullRequestDetail;
+		// Narrow tabs drop their line totals, so the toolbar shows them instead.
+		presentation: ContainerPresentation;
 	}
 
-	let { detail }: Props = $props();
+	let { detail, presentation }: Props = $props();
 
 	let viewedFiles = $state<Set<string>>(new Set());
 	let collapsedFiles = $state<Set<string>>(new Set());
+	let scrollRequest = $state<{ filePath: string; token: number } | null>(null);
+	let scrollToken = 0;
 
 	// Resets per-PR view state whenever the shown pull request changes.
 	let trackedNumber = $state<number | null>(null);
@@ -25,6 +40,7 @@
 			trackedNumber = current;
 			viewedFiles = new Set();
 			collapsedFiles = new Set();
+			scrollRequest = null;
 		}
 	});
 
@@ -93,24 +109,87 @@
 	function toggleCollapseAll(): void {
 		collapsedFiles = allCollapsed ? new Set() : new Set(filePaths);
 	}
+
+	function jumpToFile(filePath: string): void {
+		scrollToken += 1;
+		scrollRequest = { filePath, token: scrollToken };
+	}
+
+	const toolbarButtonClass =
+		'inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none pointer-coarse:px-1.5 pointer-coarse:py-1.5';
 </script>
 
-<div class="border-b border-border">
-	<div class="flex items-center justify-between px-3 py-1.5 text-xs text-muted-foreground">
-		<span>{m.pull_request_changed_files({ count: detail.files.length })}</span>
-		<div class="flex items-center gap-3">
+<div class="@container border-b border-border">
+	<div class="flex items-center justify-between gap-2 px-3 py-1.5 text-xs text-muted-foreground">
+		<div class="flex min-w-0 items-center gap-2">
 			{#if detail.files.length > 0}
-				<button
-					type="button"
-					class="inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-					onclick={toggleCollapseAll}
-				>
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						class={toolbarButtonClass}
+						aria-label={`${m.pull_request_jump_to_file()}, ${m.pull_request_changed_files({ count: detail.files.length })}`}
+						data-pr-file-jump
+					>
+						<span class="truncate"
+							>{m.pull_request_changed_files({ count: detail.files.length })}</span
+						>
+						<ChevronDown class="h-3.5 w-3.5 shrink-0" />
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="start" class="w-[min(24rem,calc(100vw-1.5rem))]">
+						{#each detail.files as file (file.path)}
+							{@const parts = splitFilePath(file.path)}
+							<DropdownMenuItem
+								onSelect={() => jumpToFile(file.path)}
+								data-pr-file-jump-item={file.path}
+							>
+								<Check
+									class={cn(
+										'shrink-0',
+										viewedFiles.has(file.path) ? 'text-git-added' : 'invisible',
+									)}
+								/>
+								{#if viewedFiles.has(file.path)}<span class="sr-only"
+										>{m.pull_request_viewed()}</span
+									>{/if}
+								<span
+									class={cn(
+										'shrink-0 text-[10px] font-semibold',
+										fileStatusClass(file.workTreeStatus),
+									)}
+									title={fileStatusLabel(file.workTreeStatus)}>{file.workTreeStatus}</span
+								>
+								<span class="flex min-w-0 flex-1 font-mono text-xs" title={file.path}>
+									<span class="min-w-0 truncate text-muted-foreground">{parts.directory}</span><span
+										class="max-w-full shrink-0 truncate">{parts.baseName}</span
+									>
+								</span>
+								<span class="shrink-0 text-[11px] tabular-nums">
+									<span class="text-git-added">+{file.additions}</span>
+									<span class="text-git-deleted">-{file.deletions}</span>
+								</span>
+							</DropdownMenuItem>
+						{/each}
+					</DropdownMenuContent>
+				</DropdownMenu>
+			{:else}
+				<span>{m.pull_request_changed_files({ count: 0 })}</span>
+			{/if}
+			{#if presentation === 'narrow'}
+				<span class="shrink-0 tabular-nums" data-pr-line-totals>
+					<span class="text-git-added">+{detail.additions.toLocaleString()}</span>
+					<span class="text-git-deleted">−{detail.deletions.toLocaleString()}</span>
+				</span>
+			{/if}
+		</div>
+		<div class="flex shrink-0 items-center gap-2">
+			{#if detail.files.length > 0}
+				<!-- Narrow toolbars keep the icon and move the label to assistive text. -->
+				<button type="button" class={toolbarButtonClass} onclick={toggleCollapseAll}>
 					{#if allCollapsed}
-						<ChevronsUpDown class="h-3.5 w-3.5" />
-						{m.common_expand_all()}
+						<ChevronsUpDown class="h-3.5 w-3.5 shrink-0" />
+						<span class="@max-md:sr-only">{m.common_expand_all()}</span>
 					{:else}
-						<ChevronsDownUp class="h-3.5 w-3.5" />
-						{m.common_collapse_all()}
+						<ChevronsDownUp class="h-3.5 w-3.5 shrink-0" />
+						<span class="@max-md:sr-only">{m.common_collapse_all()}</span>
 					{/if}
 				</button>
 			{/if}
@@ -138,6 +217,7 @@
 		{collapsedFiles}
 		{threadsById}
 		{threadCountByFile}
+		scrollToRequest={scrollRequest}
 		onToggleViewed={toggleViewed}
 		onToggleCollapsed={toggleCollapsed}
 	/>

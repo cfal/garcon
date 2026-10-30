@@ -51,8 +51,7 @@
 			(surface.kind === 'commit' ||
 				surface.kind === 'chat-board' ||
 				surface.kind === 'chat-map' ||
-				surface.kind === 'chat-canvas' ||
-				surface.kind === 'pull-requests'),
+				surface.kind === 'chat-canvas'),
 	);
 </script>
 

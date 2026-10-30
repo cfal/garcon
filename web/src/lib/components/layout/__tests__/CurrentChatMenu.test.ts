@@ -103,7 +103,6 @@ describe('CurrentChatMenu', () => {
 		const openTickets = vi.fn();
 		const openChatMap = vi.fn();
 		const openCanvas = vi.fn();
-		const openPullRequests = vi.fn();
 		render(CurrentChatMenu, {
 			...props(),
 			onOpenGitHistory: openHistory,
@@ -111,7 +110,6 @@ describe('CurrentChatMenu', () => {
 			onOpenTickets: openTickets,
 			onOpenChatMap: openChatMap,
 			onOpenCanvas: openCanvas,
-			onOpenPullRequests: openPullRequests,
 		});
 		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
 		const history = screen.getByRole('menuitem', {
@@ -127,11 +125,7 @@ describe('CurrentChatMenu', () => {
 		expect(items.indexOf(compare)).toBeLessThan(items.indexOf(share));
 		const tickets = screen.getByRole('menuitem', { name: m.workspace_open_tickets() });
 		expect(items.indexOf(tickets)).toBe(items.indexOf(compare) + 1);
-		for (const label of [
-			m.workspace_open_chat_map(),
-			m.workspace_open_chat_canvas(),
-			m.workspace_open_pull_requests(),
-		]) {
+		for (const label of [m.workspace_open_chat_map(), m.workspace_open_chat_canvas()]) {
 			expect(items.indexOf(screen.getByRole('menuitem', { name: label }))).toBeLessThan(
 				items.indexOf(share),
 			);
@@ -149,7 +143,6 @@ describe('CurrentChatMenu', () => {
 		for (const [label, callback] of [
 			[m.workspace_open_chat_map(), openChatMap],
 			[m.workspace_open_chat_canvas(), openCanvas],
-			[m.workspace_open_pull_requests(), openPullRequests],
 		] as const) {
 			await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
 			await fireEvent.click(screen.getByRole('menuitem', { name: label }));
@@ -166,7 +159,6 @@ describe('CurrentChatMenu', () => {
 		expect(screen.queryByRole('menuitem', { name: m.workspace_open_tickets() })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_map() })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_canvas() })).toBeNull();
-		expect(screen.queryByRole('menuitem', { name: m.workspace_open_pull_requests() })).toBeNull();
 	});
 
 	it.each([

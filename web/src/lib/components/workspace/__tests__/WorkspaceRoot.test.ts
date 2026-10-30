@@ -439,9 +439,15 @@ function installContext({ composerStatusBarGitProjects = false }: { composerStat
 		surfaceFrames: new SurfaceFrameRegistry(),
 		fileSessions: {
 			get: () => null,
-			get guardRequest() { return null; },
-			get overwriteRequest() { return null; },
-			get thresholdRequest() { return null; },
+			get guardRequest() {
+				return null;
+			},
+			get overwriteRequest() {
+				return null;
+			},
+			get thresholdRequest() {
+				return null;
+			},
 		},
 		terminals,
 		localSettings,
@@ -455,7 +461,9 @@ function installContext({ composerStatusBarGitProjects = false }: { composerStat
 		},
 		processingReconciler: { addPresentation: () => () => {} },
 		modelCatalog: {
-			forExecutor() { return this; },
+			forExecutor() {
+				return this;
+			},
 			supportsFork: () => false,
 			supportsForkWhileRunning: () => false,
 			supportsUpdateProjectPath: () => false,
@@ -1338,7 +1346,26 @@ describe('WorkspaceRoot', () => {
 		).not.toBeNull();
 	});
 
-	it.each(['chat-board', 'chat-map', 'chat-canvas', 'pull-requests'] as const)(
+	it('hosts mobile pull requests as a tab without transient Back and Close controls', async () => {
+		const { layout } = installContext();
+		const surface = portableSingletonDescriptor('pull-requests');
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{ type: 'register-surface', surface },
+				{ type: 'set-mobile-presentation', activeId: surface.id, returnStack: [] },
+			]),
+		);
+		const { container } = renderRoot(true);
+
+		expect(
+			container.querySelector(`[role="tabpanel"][data-workspace-surface-id="${surface.id}"]`),
+		).not.toBeNull();
+		expect(screen.queryByRole('button', { name: m.workspace_back() })).toBeNull();
+		expect(screen.queryByRole('button', { name: m.workspace_close_view() })).toBeNull();
+	});
+
+	it.each(['chat-board', 'chat-map', 'chat-canvas'] as const)(
 		'gives mobile %s explicit Back and Close controls',
 		async (kind) => {
 			const { layout, workspace } = installContext();
@@ -1360,7 +1387,7 @@ describe('WorkspaceRoot', () => {
 		},
 	);
 
-	it.each(['chat-map', 'chat-canvas', 'pull-requests'] as const)(
+	it.each(['chat-map', 'chat-canvas'] as const)(
 		'disables mobile %s Close while destruction is blocked',
 		async (kind) => {
 			const { layout, workspace } = installContext();

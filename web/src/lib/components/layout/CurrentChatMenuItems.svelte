@@ -7,7 +7,6 @@
 	import Tickets from '@lucide/svelte/icons/tickets';
 	import Waypoints from '@lucide/svelte/icons/waypoints';
 	import PanelsTopLeft from '@lucide/svelte/icons/panels-top-left';
-	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
 	import Info from '@lucide/svelte/icons/info';
 	import ListIcon from '@lucide/svelte/icons/list';
 	import ListPlus from '@lucide/svelte/icons/list-plus';
@@ -34,7 +33,6 @@
 		onOpenTickets,
 		onOpenChatMap,
 		onOpenCanvas,
-		onOpenPullRequests,
 		onConfigurePreambles,
 		onRename,
 		onDetails,
@@ -56,7 +54,6 @@
 		onOpenTickets?: () => void;
 		onOpenChatMap?: () => void;
 		onOpenCanvas?: () => void;
-		onOpenPullRequests?: () => void;
 		onConfigurePreambles?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
@@ -68,14 +65,7 @@
 	} = $props();
 
 	const hasWorkspaceCommands = $derived(
-		Boolean(
-			onOpenGitHistory ||
-			onOpenGitCompare ||
-			onOpenTickets ||
-			onOpenChatMap ||
-			onOpenCanvas ||
-			onOpenPullRequests,
-		),
+		Boolean(onOpenGitHistory || onOpenGitCompare || onOpenTickets || onOpenChatMap || onOpenCanvas),
 	);
 </script>
 
@@ -107,12 +97,6 @@
 	<menu.Item onSelect={onOpenCanvas}>
 		<PanelsTopLeft />
 		{m.workspace_open_chat_canvas()}
-	</menu.Item>
-{/if}
-{#if onOpenPullRequests}
-	<menu.Item onSelect={onOpenPullRequests}>
-		<GitPullRequest />
-		{m.workspace_open_pull_requests()}
 	</menu.Item>
 {/if}
 

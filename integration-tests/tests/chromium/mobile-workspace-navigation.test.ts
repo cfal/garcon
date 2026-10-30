@@ -65,7 +65,7 @@ test('keeps the mobile shell full height across non-keyboard viewport discrepanc
   });
 }, 120_000);
 
-test('keeps primary mobile tabs compact and opens secondary views from the chat menu', async () => {
+test('keeps primary mobile tabs compact, hosts PRs as a tab, and opens secondary views from the chat menu', async () => {
   await withChromiumFixture('mobile-workspace-navigation', async (fixture, markPhase) => {
     const { page, integration } = fixture;
     const chatId = integration.newChatId();
@@ -96,7 +96,7 @@ test('keeps primary mobile tabs compact and opens secondary views from the chat 
     const navigation = page.getByRole('navigation', { name: 'Workspace navigation' });
     await navigation.getByRole('button', { name: 'Chat', exact: true }).waitFor();
     expect((await navigation.getByRole('button').allTextContents()).map((label) => label.trim())).toEqual([
-      'Menu', 'Chat', 'Git', 'Files', 'Terminal',
+      'Menu', 'Chat', 'Git', 'PRs', 'Files', 'Terminal',
     ]);
 
     for (const width of [320, 390]) {
@@ -120,11 +120,27 @@ test('keeps primary mobile tabs compact and opens secondary views from the chat 
     }
 
     for (const width of [320, 390]) {
+      markPhase(`switching to the PRs tab and back at ${width}px`);
+      await page.setViewportSize({ width, height: 844 });
+      const prsTab = navigation.getByRole('button', { name: 'PRs', exact: true });
+      await prsTab.click();
+      const pullRequests = page.locator('[data-workspace-surface-id="singleton:pull-requests"]');
+      await pullRequests.locator('[data-pr-panel]').waitFor({ state: 'visible' });
+      expect(await prsTab.getAttribute('aria-current')).toBe('page');
+      expect(await pullRequests.getByRole('button', { name: 'Close view', exact: true }).count()).toBe(0);
+      await navigation.getByRole('button', { name: 'Chat', exact: true }).click();
+      await page.locator('[data-mobile-current-chat-menu]').waitFor({ state: 'visible' });
+      expect(await prsTab.getAttribute('aria-current')).toBeNull();
+      await page.locator('[data-mobile-current-chat-menu]').getByRole('button').click();
+      expect(await page.getByRole('menuitem', { name: 'Open PRs', exact: true }).count()).toBe(0);
+      await page.keyboard.press('Escape');
+    }
+
+    for (const width of [320, 390]) {
       await page.setViewportSize({ width, height: 844 });
       for (const [label, kind, selector] of [
         ['Open Chat Map', 'chat-map', '[data-chat-map-panel]'],
         ['Open Canvas', 'chat-canvas', '[data-canvas-panel]'],
-        ['Open PRs', 'pull-requests', '[data-pr-panel]'],
       ]) {
         markPhase(`opening and closing ${kind} at ${width}px`);
         for (const exit of ['Back', 'Close view']) {
@@ -139,7 +155,7 @@ test('keeps primary mobile tabs compact and opens secondary views from the chat 
           expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
           await panel.getByRole('button', { name: exit, exact: true }).click();
           await navigation.waitFor({ state: 'visible' });
-          expect(await navigation.getByRole('button').count()).toBe(5);
+          expect(await navigation.getByRole('button').count()).toBe(6);
           if (exit === 'Close view') expect(await panel.count()).toBe(0);
         }
       }

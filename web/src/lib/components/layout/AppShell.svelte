@@ -209,7 +209,7 @@
 		if (surface?.type === 'terminal' || surface?.type === 'terminal-launcher') return 'terminal';
 		if (surface?.type === 'chat') return 'chat';
 		if (surface?.type === 'singleton') {
-			if (surface.kind === 'git' || surface.kind === 'files') {
+			if (surface.kind === 'git' || surface.kind === 'files' || surface.kind === 'pull-requests') {
 				return surface.kind;
 			}
 		}
@@ -221,7 +221,6 @@
 				(mobileActiveDescriptor.kind === 'commit' ||
 					mobileActiveDescriptor.kind === 'chat-map' ||
 					mobileActiveDescriptor.kind === 'chat-canvas' ||
-					mobileActiveDescriptor.kind === 'pull-requests' ||
 					mobileActiveDescriptor.kind === 'chat-board' ||
 					mobileActiveDescriptor.kind === 'tickets' ||
 					mobileActiveDescriptor.kind === 'git-history' ||

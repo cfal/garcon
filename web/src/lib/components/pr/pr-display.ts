@@ -41,6 +41,13 @@ export function prStateDotClass(state: PullRequestState, isDraft: boolean): stri
 	return 'bg-git-added';
 }
 
+export function prStateIconClass(state: PullRequestState, isDraft: boolean): string {
+	if (isDraft) return 'text-muted-foreground';
+	if (state === 'merged') return 'text-pr-merged';
+	if (state === 'closed') return 'text-git-deleted';
+	return 'text-git-added';
+}
+
 export function reviewDecisionBadge(decision: PullRequestReviewDecision): PrBadge | null {
 	switch (decision) {
 		case 'approved':
@@ -104,6 +111,14 @@ export function fileStatusClass(status: string): string {
 		default:
 			return 'text-git-modified';
 	}
+}
+
+// Separates the directory, kept with its trailing slash, so narrow layouts can truncate it before the base name.
+export function splitFilePath(path: string): { directory: string; baseName: string } {
+	const lastSlash = path.lastIndexOf('/');
+	return lastSlash >= 0
+		? { directory: path.slice(0, lastSlash + 1), baseName: path.slice(lastSlash + 1) }
+		: { directory: '', baseName: path };
 }
 
 export type ReviewChipTone = 'success' | 'warning' | 'error' | 'info' | 'neutral' | 'processing';

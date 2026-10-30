@@ -137,7 +137,14 @@ describe("Lightpanda Chat Map", () => {
         'nav[aria-label="Workspace navigation"] button',
         (buttons) => buttons.map((button) => button.textContent?.trim()),
       );
-      expect(mobileTabs).toEqual(["Menu", "Chat", "Git", "Files", "Terminal"]);
+      expect(mobileTabs).toEqual([
+        "Menu",
+        "Chat",
+        "Git",
+        "PRs",
+        "Files",
+        "Terminal",
+      ]);
 
       await app.waitForButton("Settings");
       await app.clickButton("Settings");

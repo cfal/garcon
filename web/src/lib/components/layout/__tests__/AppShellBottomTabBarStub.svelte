@@ -18,4 +18,5 @@
 	<button type="button" onclick={() => onTabChange('terminal')}>Select Terminal tab</button>
 	<button type="button" onclick={() => onTabChange('git')}>Select Git tab</button>
 	<button type="button" onclick={() => onTabChange('files')}>Select Files tab</button>
+	<button type="button" onclick={() => onTabChange('pull-requests')}>Select PRs tab</button>
 </div>

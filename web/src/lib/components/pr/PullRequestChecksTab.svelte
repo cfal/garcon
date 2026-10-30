@@ -28,7 +28,7 @@
 		</p>
 		<ul class="divide-y divide-border" data-pr-checks>
 			{#each ordered as check, index (`${index}:${check.name}`)}
-				<li class="flex items-center gap-2 px-4 py-2 text-sm">
+				<li class="flex items-center gap-2 px-4 py-2 text-sm pointer-coarse:py-1">
 					<span class={checkStateClass(check.state)}>
 						{#if check.state === 'success'}
 							<CircleCheck class="h-4 w-4" />
@@ -46,7 +46,7 @@
 							href={check.url}
 							target="_blank"
 							rel="noreferrer noopener"
-							class="text-muted-foreground hover:text-foreground"
+							class="rounded-md text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none pointer-coarse:p-2.5"
 							aria-label={m.pull_request_check_details({ name: check.name })}
 						>
 							<ExternalLink class="h-3.5 w-3.5" />
