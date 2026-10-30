@@ -14,7 +14,7 @@ import {
 	type PullRequestDiff,
 	type PullRequestStatus,
 	type PullRequestTarget,
-	type PullRequestThread,
+	type PullRequestReviewThreads,
 } from '$lib/api/pull-requests.js';
 import {
 	getPullRequestReviewRun,
@@ -65,7 +65,7 @@ export class PullRequestsStore implements PortableSingletonController {
 	readonly diff = new PullRequestReadState<PullRequestDiff>(() =>
 		m.pull_request_changes_load_failed(),
 	);
-	readonly reviewThreads = new PullRequestReadState<readonly PullRequestThread[]>(() =>
+	readonly reviewThreads = new PullRequestReadState<PullRequestReviewThreads>(() =>
 		m.pull_request_review_threads_load_failed(),
 	);
 	readonly #deps: PullRequestsStoreDeps;
@@ -77,6 +77,7 @@ export class PullRequestsStore implements PortableSingletonController {
 	#runsController: AbortController | null = null;
 	#runController: AbortController | null = null;
 	#runsVersion: number | null = null;
+	#coherentChanges = $state.raw<PullRequestChanges | null>(null);
 
 	query = $state('');
 	repositoryFilter = $state<string | null>(null);
@@ -127,7 +128,12 @@ export class PullRequestsStore implements PortableSingletonController {
 	}
 
 	get changesView(): PullRequestPartView<PullRequestChanges> {
-		return pullRequestChangesView(this.status, this.diff, this.reviewThreads);
+		return pullRequestChangesView(
+			this.status,
+			this.diff,
+			this.reviewThreads,
+			this.#coherentChanges,
+		);
 	}
 
 	get shownRun(): PullRequestReviewRunDetail | null {
@@ -215,11 +221,7 @@ export class PullRequestsStore implements PortableSingletonController {
 			this.#selectionScope = scope;
 		}
 		this.#followStatus(this.status.ensure(pullRequestStatusKey(entry.pull), this.#readStatus()));
-		// Thread failures stay inline beside the diff they annotate rather than notifying.
-		void this.reviewThreads.ensure(
-			pullRequestReviewThreadsKey(entry.pull),
-			this.#readReviewThreads(),
-		);
+		if (!this.status.isLoading && !this.diff.isLoading) this.#ensureThreads();
 		if (entry.historyRevision !== this.#runsVersion) void this.loadRuns();
 	}
 
@@ -229,10 +231,18 @@ export class PullRequestsStore implements PortableSingletonController {
 		const entry = this.selectedEntry;
 		if (!this.#visible || !entry || this.#selectionScope !== this.#selectedScope()) return;
 		this.diff.forgetFailure();
-		this.#followStatus(this.status.load(pullRequestStatusKey(entry.pull), this.#readStatus()));
-		void this.reviewThreads.load(
-			pullRequestReviewThreadsKey(entry.pull),
-			this.#readReviewThreads(),
+		this.#followStatus(
+			this.status.load(pullRequestStatusKey(entry.pull), this.#readStatus()),
+			() => {
+				const current = this.selectedEntry;
+				if (current)
+					this.#followThreads(
+						this.reviewThreads.load(
+							pullRequestReviewThreadsKey(current.pull),
+							this.#readReviewThreads(),
+						),
+					);
+			},
 		);
 	}
 
@@ -297,6 +307,7 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.status.reset();
 		this.diff.reset();
 		this.reviewThreads.reset();
+		this.#coherentChanges = null;
 	}
 
 	#selectedTarget(): { readonly target: PullRequestTarget; readonly number: number } | null {
@@ -323,27 +334,30 @@ export class PullRequestsStore implements PortableSingletonController {
 			selected ? getStatus(selected.target, selected.number, { signal }) : unreadable();
 	}
 
-	#readReviewThreads(): (signal: AbortSignal) => Promise<readonly PullRequestThread[]> {
+	#readReviewThreads(): (signal: AbortSignal) => Promise<PullRequestReviewThreads> {
 		const selected = this.#selectedTarget();
 		const getThreads = this.#deps.getReviewThreads ?? getPullRequestReviewThreads;
 		return async (signal) =>
-			selected
-				? (await getThreads(selected.target, selected.number, { signal })).threads
-				: unreadable();
+			selected ? await getThreads(selected.target, selected.number, { signal }) : unreadable();
 	}
 
-	#followStatus(pending: Promise<PullRequestReadOutcome<PullRequestStatus>> | null): void {
-		void pending?.then((outcome) => {
+	#followStatus(
+		pending: Promise<PullRequestReadOutcome<PullRequestStatus>> | null,
+		readThreads: () => void = () => this.#ensureThreads(),
+	): void {
+		void pending?.then(async (outcome) => {
 			if (outcome.kind === 'failed') this.#notify(this.status.error);
 			// A newer read or another selection may have replaced this status meanwhile.
-			else if (outcome.kind === 'loaded' && this.status.value === outcome.value)
-				this.#ensureDiff(outcome.value);
+			else if (outcome.kind === 'loaded' && this.status.value === outcome.value) {
+				await this.#ensureDiff(outcome.value);
+				if (this.status.value === outcome.value && !this.status.isLoading) readThreads();
+			}
 		});
 	}
 
 	// The diff follows the commit pair of the latest status. A cached diff is
 	// only reused after that status read has confirmed the pair on this executor.
-	#ensureDiff(status: PullRequestStatus): void {
+	async #ensureDiff(status: PullRequestStatus): Promise<void> {
 		const selected = this.#selectedTarget();
 		if (!selected) return;
 		const { target, number } = selected;
@@ -357,17 +371,45 @@ export class PullRequestsStore implements PortableSingletonController {
 			this.#diffCache.set(key, diff);
 			return diff;
 		});
-		void pending?.then((outcome) => {
-			if (outcome.kind !== 'failed') return;
-			if (!isStalePullRequest(outcome.error)) {
-				this.#notify(this.diff.error);
-				return;
-			}
-			// The pull request moved after its status was read; the next status names its new commits.
-			const entry = this.selectedEntry;
-			if (entry && this.diff.key === key && !this.status.isLoading)
-				this.#followStatus(this.status.load(pullRequestStatusKey(entry.pull), this.#readStatus()));
-		});
+		if (!pending) return;
+		const outcome = await pending;
+		this.#captureCoherentChanges();
+		if (outcome.kind !== 'failed') return;
+		if (!isStalePullRequest(outcome.error)) {
+			this.#notify(this.diff.error);
+			return;
+		}
+		// The pull request moved after its status was read; the next status names its new commits.
+		const entry = this.selectedEntry;
+		if (entry && this.diff.key === key && !this.status.isLoading)
+			this.#followStatus(this.status.load(pullRequestStatusKey(entry.pull), this.#readStatus()));
+	}
+
+	#ensureThreads(): void {
+		const entry = this.selectedEntry;
+		if (entry)
+			this.#followThreads(
+				this.reviewThreads.ensure(
+					pullRequestReviewThreadsKey(entry.pull),
+					this.#readReviewThreads(),
+				),
+			);
+	}
+
+	#followThreads(pending: Promise<PullRequestReadOutcome<PullRequestReviewThreads>> | null): void {
+		void pending?.then(() => this.#captureCoherentChanges());
+	}
+
+	#captureCoherentChanges(): void {
+		const diff = this.diff.value;
+		const threads = this.reviewThreads.value;
+		if (
+			diff &&
+			threads &&
+			diff.baseRefOid === threads.baseRefOid &&
+			diff.headRefOid === threads.headRefOid
+		)
+			this.#coherentChanges = { diff, threads: threads.threads };
 	}
 
 	#notify(message: string | null): void {

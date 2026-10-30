@@ -246,7 +246,7 @@ describe('split pull request reads', () => {
   it('reads review threads without the diff or status', async () => {
     await fixture();
     const read = await createGhOperations(root).getPullRequestReviewThreads({ projectPath: root, repository, number: 1 });
-    expect(await readCalls()).toEqual(['repo view', 'api --hostname']);
+    expect(await readCalls()).toEqual(['repo view', 'pr view', 'api --hostname', 'pr view']);
     expect(read.threads).toMatchObject([{ path: 'example.txt', comments: [{ body: 'synthetic comment' }] }]);
   });
 
@@ -255,16 +255,55 @@ describe('split pull request reads', () => {
     await expect(createGhOperations(root).getPullRequestReviewThreads({ projectPath: root, repository, number: 1 })).rejects.toThrow(/forbidden/);
   });
 
+  it('does not version comments with a commit pair that changed during their read', async () => {
+    await fixture({ pushDuringComments: { headRefOid: 'b'.repeat(40) } });
+    await expect(createGhOperations(root).getPullRequestReviewThreads({ projectPath: root, repository, number: 1 }))
+      .rejects.toMatchObject({ code: 'GH_STALE_PULL_REQUEST' });
+  });
+
+  it('serializes concurrent misses while every caller proves access to the PR', async () => {
+    await fixture({ holdCompare: true });
+    const gh = createGhOperations(root);
+    const started = Promise.withResolvers();
+    const watcher = watch(root, (_event, file) => { if (file === 'gh-compare-started') started.resolve(); });
+    const reads = Array.from({ length: 5 }, () => gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits }));
+    const outcome = Promise.all(reads);
+    try {
+      await started.promise;
+      await fs.writeFile(path.join(root, 'gh-compare-release'), 'released');
+      const results = await outcome;
+      expect(results.every(result => result === results[0])).toBe(true);
+      const calls = await readCalls();
+      expect(calls.filter(call => call === 'api --hostname')).toHaveLength(1);
+      expect(calls.filter(call => call === 'repo view')).toHaveLength(5);
+      expect(calls.filter(call => call === 'pr view')).toHaveLength(6);
+    } finally {
+      watcher.close();
+      await fs.writeFile(path.join(root, 'gh-compare-release'), 'released');
+      await Promise.allSettled(reads);
+    }
+  });
+
   it('confirms the commit pair after reading a diff and serves the same pair from cache', async () => {
     await fixture({ files: [{ path: 'example.txt', additions: 7, deletions: 5 }] });
     const gh = createGhOperations(root);
     const diff = await gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits });
-    expect(await readCalls()).toEqual(['repo view', 'pr diff', 'pr view']);
-    expect(diff).toMatchObject({ number: 1, ...commits, files: [{ path: 'example.txt', additions: 7, deletions: 5 }] });
+    expect(await readCalls()).toEqual(['repo view', 'pr view', 'api --hostname', 'pr view']);
+    expect(diff).toMatchObject({ number: 1, ...commits, files: [{ path: 'example.txt', additions: 1, deletions: 1 }] });
     expect(diff.fileBodies['example.txt'].patch).toContain('+changed');
 
     expect(await gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits })).toBe(diff);
     expect(await readCalls()).toEqual(['repo view', 'pr view']);
+  });
+
+  it('reads the immutable comparison even when the mutable PR diff belongs to another head', async () => {
+    const pinned = 'diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -1 +1 @@\n-initial\n+pinned-head-A';
+    await fixture({ diff: pinned.replace('pinned-head-A', 'inconsistent-head-B'), comparisons: { [`${commits.baseRefOid}...${commits.headRefOid}`]: pinned } });
+    const gh = createGhOperations(root);
+    const result = await gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits });
+    expect(result.fileBodies['example.txt'].patch).toContain('+pinned-head-A');
+    expect(result.fileBodies['example.txt'].patch).not.toContain('inconsistent-head-B');
+    expect(await gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits })).toBe(result);
   });
 
   it('keeps cached diffs per repository and commit pair', async () => {
@@ -276,7 +315,7 @@ describe('split pull request reads', () => {
     const moved = { ...commits, baseRefOid: 'f'.repeat(40) };
     await fixture({ pulls: [{ number: 1, baseRefOid: moved.baseRefOid }, { number: 2 }] });
     await gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits: moved });
-    expect(await readCalls()).toEqual(['repo view', 'pr diff', 'pr view']);
+    expect(await readCalls()).toEqual(['repo view', 'pr view', 'api --hostname', 'pr view']);
     await gh.getPullRequestDiff({ projectPath: root, repository, number: 2, commits });
     expect(await readCalls()).toEqual(['repo view', 'pr view']);
   });
@@ -288,7 +327,7 @@ describe('split pull request reads', () => {
     await expect(gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits })).rejects.toMatchObject({ code: 'GH_STALE_PULL_REQUEST' });
     await readCalls();
     await expect(gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits })).rejects.toMatchObject({ code: 'GH_STALE_PULL_REQUEST' });
-    expect(await readCalls()).toEqual(['repo view', 'pr diff', 'pr view']);
+    expect(await readCalls()).toEqual(['repo view', 'pr view']);
     const current = await gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits: { ...commits, ...pushed } });
     expect(current.headRefOid).toBe(pushed.headRefOid);
   });

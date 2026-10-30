@@ -48,7 +48,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const diff = await fixture.client.get<ExecutionGhResults['getPullRequestDiff']>(diffQuery(commits));
       expect(diff).toMatchObject({ ...scope, ...commits });
       expect(diff.fileBodies['example.txt'].patch).toContain('+changed');
-      expect(await takeCalls()).toEqual(['repo view', 'pr diff', 'pr view']);
+      expect(await takeCalls()).toEqual(['repo view', 'pr view', 'api --hostname', 'pr view']);
       expect(await rejectionOf(fixture.client.get(`/api/v1/gh/pull-request/review-threads?${pullQuery}`))).toMatchObject({ status: 403, body: { errorCode: 'GH_FORBIDDEN' } });
       expect(await rejectionOf(fixture.client.get(diffQuery({ ...commits, headRefOid: 'b'.repeat(40) })))).toMatchObject({ status: 409, body: { errorCode: 'GH_STALE_PULL_REQUEST' } });
 

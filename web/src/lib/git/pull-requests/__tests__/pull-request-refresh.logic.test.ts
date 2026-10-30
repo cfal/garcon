@@ -129,6 +129,32 @@ const read = <T>(value: T | null, error: string | null = null, isLoading = false
 });
 
 describe('pull request detail views', () => {
+	it('keeps the previous coherent pair when new-head comments arrive before a failed diff', () => {
+		const shown = { diff: diff(), threads: [] };
+		const snapshot = {
+			number: 7,
+			...commits,
+			headRefOid: 'b'.repeat(40),
+			threads: [
+				{
+					id: 'new',
+					path: 'a.ts',
+					side: 'after' as const,
+					line: 99,
+					diffHunk: '',
+					isOutdated: false,
+					comments: [],
+				},
+			],
+		};
+		expect(
+			pullRequestChangesView(read(status), read(shown.diff, 'diff failed'), read(snapshot), shown),
+		).toEqual({
+			kind: 'ready',
+			value: shown,
+			refreshError: 'diff failed',
+		});
+	});
 	it('keeps loaded checks beside a failed refresh', () => {
 		expect(pullRequestChecksView(read(status, 'offline'))).toEqual({
 			kind: 'ready',
@@ -152,28 +178,52 @@ describe('pull request detail views', () => {
 			value: { diff: shown, threads: [] },
 			refreshError: 'no comments',
 		});
-		expect(pullRequestChangesView(ok, read(shown, 'too large'), read([]))).toMatchObject({
+		expect(
+			pullRequestChangesView(
+				ok,
+				read(shown, 'too large'),
+				read({ number: 7, ...commits, threads: [] }),
+			),
+		).toMatchObject({
 			refreshError: 'too large',
 		});
-		expect(pullRequestChangesView(read(status, 'offline'), read(shown), read([]))).toMatchObject({
+		expect(
+			pullRequestChangesView(
+				read(status, 'offline'),
+				read(shown),
+				read({ number: 7, ...commits, threads: [] }),
+			),
+		).toMatchObject({
 			refreshError: 'offline',
 		});
 	});
 
 	it('never shows changes before a diff loads', () => {
 		expect(
-			pullRequestChangesView(read<PullRequestStatus>(null, null, true), read(null), read([])),
+			pullRequestChangesView(
+				read<PullRequestStatus>(null, null, true),
+				read(null),
+				read({ number: 7, ...commits, threads: [] }),
+			),
 		).toEqual({
 			kind: 'loading',
 		});
 		expect(
-			pullRequestChangesView(read<PullRequestStatus>(null, 'offline'), read(null), read([])),
+			pullRequestChangesView(
+				read<PullRequestStatus>(null, 'offline'),
+				read(null),
+				read({ number: 7, ...commits, threads: [] }),
+			),
 		).toEqual({
 			kind: 'failed',
 			error: 'offline',
 		});
 		expect(
-			pullRequestChangesView(read(status), read<PullRequestDiff>(null, 'too large'), read([])),
+			pullRequestChangesView(
+				read(status),
+				read<PullRequestDiff>(null, 'too large'),
+				read({ number: 7, ...commits, threads: [] }),
+			),
 		).toEqual({ kind: 'failed', error: 'too large' });
 	});
 });

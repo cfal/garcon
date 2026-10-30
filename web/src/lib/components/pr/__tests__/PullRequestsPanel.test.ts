@@ -165,6 +165,8 @@ function setup(
 	}));
 	const getReviewThreads = vi.fn<typeof getPullRequestReviewThreads>(async (_target, number) => ({
 		number,
+		baseRefOid: BASE,
+		headRefOid: HEAD,
 		threads: [],
 	}));
 	const getRuns = vi.fn(options.getRuns ?? (async () => [run]));

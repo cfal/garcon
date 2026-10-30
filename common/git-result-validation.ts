@@ -173,7 +173,7 @@ export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, 
   } else if (method === 'getPullRequestDiff') {
     valid = shape(value, { number: num, ...commits, files: array(reviewFile, 10_000), fileBodies: map(isGitPatchBody) });
   } else if (method === 'getPullRequestReviewThreads') {
-    valid = shape(value, { number: num, threads: array(x => shape(x, { id: str, path: str, side: oneOf('before', 'after'), line: num, diffHunk: str, isOutdated: bool,
+    valid = shape(value, { number: num, ...commits, threads: array(x => shape(x, { id: str, path: str, side: oneOf('before', 'after'), line: num, diffHunk: str, isOutdated: bool,
       comments: array(c => shape(c, { id: num, author: str, body: str, createdAt: str })) })) });
   } else {
     valid = false;
