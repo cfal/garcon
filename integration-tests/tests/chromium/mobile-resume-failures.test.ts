@@ -1,4 +1,4 @@
-import { createServer, type Socket } from 'node:net';
+import { createConnection, createServer, type Socket } from 'node:net';
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
 import type { Page } from 'playwright';
@@ -10,6 +10,7 @@ interface ResumeFaults {
   clientCloses: number;
   failUpgrade: boolean;
   stalledUpgrades: number;
+  slowUpgrades: boolean;
   authFault: 'fail' | 'stall' | null;
   authFailures: number;
   authTimeouts: number;
@@ -28,7 +29,7 @@ async function installFaults(page: Page, port: number): Promise<void> {
   await page.addInitScript((port) => {
     const faults: ResumeFaults = window.resumeFaults = {
       sockets: [], opens: [], clientCloses: 0,
-      failUpgrade: false, stalledUpgrades: 0, authFault: null,
+      failUpgrade: false, stalledUpgrades: 0, slowUpgrades: false, authFault: null,
       authFailures: 0, authTimeouts: 0, authSuccesses: 0,
       resumedAt: 0, onlineAt: 0,
     };
@@ -40,6 +41,9 @@ async function installFaults(page: Page, port: number): Promise<void> {
           target = `ws://127.0.0.1:${port}/${faults.failUpgrade ? 'fail' : 'stall'}`;
           faults.failUpgrade = false;
           faults.stalledUpgrades = Math.max(0, faults.stalledUpgrades - 1);
+        } else if (faults.slowUpgrades) {
+          const original = new URL(url);
+          target = `ws://127.0.0.1:${port}/slow${original.pathname}${original.search}`;
         }
         super(target, protocols);
         faults.sockets.push(this);
@@ -115,19 +119,41 @@ async function expectRecovery(page: Page, previousOpens: number, budgetMs: numbe
 
 test('recovers through auth faults, stalled upgrades and repeated quick app switches', async () => {
   const sockets = new Set<Socket>();
+  let upstreamUrl: URL;
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
-    socket.once('data', (data) => {
-      if (data.toString().startsWith('GET /fail '))
+    socket.on('error', () => socket.destroy());
+    let request = '';
+    const receive = (data: Buffer) => {
+      request += data.toString();
+      if (!request.includes('\r\n\r\n')) return;
+      socket.off('data', receive);
+      if (request.startsWith('GET /fail '))
         socket.end('HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
-    });
+      else if (request.startsWith('GET /slow/')) {
+        const timer = setTimeout(() => {
+          if (socket.destroyed) return;
+          const upstream = createConnection({ host: upstreamUrl.hostname, port: Number(upstreamUrl.port) }, () => {
+            upstream.write(request.replace('GET /slow/', 'GET /').replace(/^Host: .*$/mi, `Host: ${upstreamUrl.host}`));
+            socket.pipe(upstream).pipe(socket);
+          });
+          sockets.add(upstream);
+          upstream.on('close', () => { sockets.delete(upstream); socket.destroy(); });
+          upstream.on('error', () => socket.destroy());
+          socket.once('close', () => upstream.destroy());
+        }, 4_000);
+        socket.once('close', () => clearTimeout(timer));
+      }
+    };
+    socket.on('data', receive);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Missing fault-server port');
   try {
     await withChromiumFixture('mobile-resume-failures', async ({ page, integration, withExpectedConsoleErrors }, phase) => {
+      upstreamUrl = new URL(integration.garcon.baseUrl);
       await installFaults(page, address.port);
       const chatId = integration.newChatId();
       const turn = await integration.client.startDirectChat({
@@ -199,14 +225,24 @@ test('recovers through auth faults, stalled upgrades and repeated quick app swit
         expect(await composer.evaluate((element) => element === document.activeElement)).toBe(true);
       }
 
-      phase("consecutive blackholed upgrades retain the short resume watchdog");
+      phase('consecutive blackholed upgrades retain the short resume watchdog');
       await background(page);
       const attempts = await page.evaluate(() => window.resumeFaults.sockets.length);
       await page.evaluate(() => { window.resumeFaults.stalledUpgrades = 2; });
       await foreground(page);
       await expectRecovery(page, 8, 8_500);
       expect(await page.evaluate(() => window.resumeFaults.sockets.length)).toBe(attempts + 3);
-      await browserExpect(composer).toHaveValue("Synthetic retained draft");
+      await browserExpect(composer).toHaveValue('Synthetic retained draft');
+
+      phase('a slow successful upgrade completes after the fast recovery budget');
+      await page.waitForTimeout(10_000);
+      await background(page);
+      const slowAttempts = await page.evaluate(() => window.resumeFaults.sockets.length);
+      await page.evaluate(() => { window.resumeFaults.slowUpgrades = true; });
+      await foreground(page);
+      await expectRecovery(page, 9, 13_000);
+      expect(await page.evaluate(() => window.resumeFaults.sockets.length)).toBe(slowAttempts + 3);
+      await browserExpect(composer).toHaveValue('Synthetic retained draft');
     });
   } finally {
     for (const socket of sockets) socket.destroy();

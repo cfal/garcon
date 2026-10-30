@@ -33,6 +33,7 @@ const CONNECTION_STABILITY_MS = 10_000;
 const CONNECT_ATTEMPT_DEDUPE_MS = 2_000;
 const CONNECT_ATTEMPT_TIMEOUT_MS = 10_000;
 const RESUME_CONNECT_TIMEOUT_MS = 3_000;
+const FAST_RECOVERY_TIMEOUTS = 2;
 
 export interface WsMessage {
 	data: Record<string, unknown>;
@@ -153,7 +154,7 @@ export class WsConnection {
 	#destroyed = false;
 	#authPaused = false;
 	#pendingResumeReason: 'visibility-visible' | 'browser-online' | null = null;
-	#resumeRecovery = false;
+	#recoveryTimeouts: number | null = null;
 	onAuthFailure: ((token: string | null, code: number) => void) | null = null;
 	#pendingRequests = new Map<string, PendingRequest>();
 	#connectionWaiters = new Set<{
@@ -360,10 +361,7 @@ export class WsConnection {
 				this.#setConnectionStatus({ reason: 'socket-error' });
 			};
 
-			this.#scheduleConnectTimeout(
-				websocket,
-				this.#resumeRecovery ? RESUME_CONNECT_TIMEOUT_MS : CONNECT_ATTEMPT_TIMEOUT_MS,
-			);
+			this.#scheduleConnectTimeout(websocket);
 		} catch (error) {
 			console.error('Error creating WebSocket connection:', error);
 			const episodeId = this.#beginOutage();
@@ -402,7 +400,7 @@ export class WsConnection {
 	disconnect(): void {
 		this.#destroyed = true;
 		this.#pendingResumeReason = null;
-		this.#resumeRecovery = false;
+		this.#recoveryTimeouts = null;
 		this.#setConnectionStatus({
 			phase: 'destroyed',
 			reason: 'manual-disconnect',
@@ -760,7 +758,7 @@ export class WsConnection {
 		this.#reconnectAttempts = 0;
 		this.#setConnectionStatus({ reconnectAttempt: 0 });
 		if (this.#authPaused) {
-			this.#resumeRecovery = true;
+			this.#recoveryTimeouts ??= 0;
 			this.#pendingResumeReason = reason;
 			return;
 		}
@@ -768,13 +766,13 @@ export class WsConnection {
 			this.#clearHeartbeatTimer();
 			void this.#sendVisibilityProbe();
 		} else {
-			this.#resumeRecovery = true;
+			this.#recoveryTimeouts ??= 0;
 			this.#connectNow(reason);
 		}
 	}
 
 	#forceReconnect(reason: WsConnectionIssue, options: { reconnectNow: boolean }): void {
-		if (reason === 'heartbeat-timeout') this.#resumeRecovery = true;
+		if (reason === 'heartbeat-timeout') this.#recoveryTimeouts ??= 0;
 		console.warn(`WebSocket reconnecting: ${reason}`);
 		const episodeId = this.#beginOutage();
 		this.#rejectAllPending();
@@ -797,7 +795,7 @@ export class WsConnection {
 			Date.now() - this.#connectStartedAt < CONNECT_ATTEMPT_DEDUPE_MS &&
 			(reason !== 'browser-online' || this.connectionStatus.reason === 'browser-online')
 		) {
-			this.#scheduleConnectTimeout(this.#activeSocket, RESUME_CONNECT_TIMEOUT_MS);
+			this.#scheduleConnectTimeout(this.#activeSocket);
 			return;
 		}
 		this.#clearReconnectTimeout();
@@ -861,8 +859,13 @@ export class WsConnection {
 		}
 	}
 
-	#scheduleConnectTimeout(socket: WebSocket, timeoutMs: number): void {
+	#scheduleConnectTimeout(socket: WebSocket): void {
 		this.#clearConnectTimeout();
+		// Fast recovery has a bounded budget so a slow but working handshake can finish.
+		const timeoutMs =
+			this.#recoveryTimeouts !== null && this.#recoveryTimeouts < FAST_RECOVERY_TIMEOUTS
+				? RESUME_CONNECT_TIMEOUT_MS
+				: CONNECT_ATTEMPT_TIMEOUT_MS;
 		// Overlapping resume signals shorten the deadline without extending the attempt.
 		const remainingMs = Math.max(0, timeoutMs - (Date.now() - this.#connectStartedAt!));
 		this.#connectTimeout = setTimeout(() => {
@@ -875,6 +878,9 @@ export class WsConnection {
 				return;
 
 			console.warn('WebSocket connection attempt timed out');
+			if (this.#recoveryTimeouts !== null) {
+				this.#recoveryTimeouts = Math.min(this.#recoveryTimeouts + 1, FAST_RECOVERY_TIMEOUTS);
+			}
 			const episodeId = this.#beginOutage();
 			this.#rejectAllPending();
 			this.#closeExisting({ rejectPending: false });
@@ -895,7 +901,7 @@ export class WsConnection {
 			this.#stabilityTimeout = null;
 			if (!this.#isCurrentSocket(socket) || socket.readyState !== WebSocket.OPEN) return;
 			this.#reconnectAttempts = 0;
-			this.#resumeRecovery = false;
+			this.#recoveryTimeouts = null;
 			this.#setConnectionStatus({ reconnectAttempt: 0 });
 		}, CONNECTION_STABILITY_MS);
 	}

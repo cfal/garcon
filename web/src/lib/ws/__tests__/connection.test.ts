@@ -1323,28 +1323,72 @@ describe('WsConnection', () => {
 		}
 	});
 
-	it.each(['retryAfterAuthProbe', 'resumeForAuth', 'connect'] as const)('defers pending resume work while hidden through %s', (method) => {
-		let visibilityState: DocumentVisibilityState = 'visible';
-		vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
-		const connection = new WsConnection();
-		connection.connect('token');
-		try {
-			connection.pauseForAuth();
-			window.dispatchEvent(new Event('online'));
-			visibilityState = 'hidden';
-			document.dispatchEvent(new Event('visibilitychange'));
-			if (method === 'retryAfterAuthProbe') connection.retryAfterAuthProbe();
-			else connection[method]('new-token');
-			expect(mockSockets).toHaveLength(1);
-			visibilityState = 'visible';
-			document.dispatchEvent(new Event('visibilitychange'));
-			expect(mockSockets).toHaveLength(2);
-		} finally {
-			connection.disconnect();
-		}
-	});
+	it.each(['retryAfterAuthProbe', 'resumeForAuth', 'connect'] as const)(
+		'defers pending resume work while hidden through %s',
+		(method) => {
+			let visibilityState: DocumentVisibilityState = 'visible';
+			vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+			const connection = new WsConnection();
+			connection.connect('token');
+			try {
+				connection.pauseForAuth();
+				window.dispatchEvent(new Event('online'));
+				visibilityState = 'hidden';
+				document.dispatchEvent(new Event('visibilitychange'));
+				if (method === 'retryAfterAuthProbe') connection.retryAfterAuthProbe();
+				else connection[method]('new-token');
+				expect(mockSockets).toHaveLength(1);
+				visibilityState = 'visible';
+				document.dispatchEvent(new Event('visibilitychange'));
+				expect(mockSockets).toHaveLength(2);
+			} finally {
+				connection.disconnect();
+			}
+		},
+	);
 
-	it('keeps the short watchdog across stalled retries until the connection stabilizes', async () => {
+	it.each([4_000, 9_000])(
+		'allows a %s ms handshake after two fast recovery attempts',
+		async (handshakeMs) => {
+			let visibilityState: DocumentVisibilityState = 'visible';
+			vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+			const connection = new WsConnection();
+			connection.connect('token');
+			mockSockets[0].open();
+			vi.stubGlobal(
+				'WebSocket',
+				class extends MockWebSocket {
+					constructor(url: string, protocols?: string | string[]) {
+						super(url, protocols);
+						setTimeout(() => {
+							if (this.readyState === MockWebSocket.CONNECTING) this.open();
+						}, handshakeMs);
+					}
+				},
+			);
+			try {
+				visibilityState = 'hidden';
+				document.dispatchEvent(new Event('visibilitychange'));
+				mockSockets[0].closeFromServer();
+				visibilityState = 'visible';
+				document.dispatchEvent(new Event('visibilitychange'));
+				await vi.advanceTimersByTimeAsync(3_000 + 250 + 3_000 + 800);
+				expect(mockSockets).toHaveLength(4);
+				expect(mockSockets[1].close).toHaveBeenCalledOnce();
+				expect(mockSockets[2].close).toHaveBeenCalledOnce();
+				await vi.advanceTimersByTimeAsync(500);
+				document.dispatchEvent(new Event('visibilitychange'));
+				window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+				await vi.advanceTimersByTimeAsync(handshakeMs - 500);
+				expect(connection.isConnected).toBe(true);
+				expect(mockSockets).toHaveLength(4);
+			} finally {
+				connection.disconnect();
+			}
+		},
+	);
+
+	it('keeps two fast watchdogs across stalled retries and restores ordinary retries after stability', async () => {
 		const connection = new WsConnection();
 		try {
 			document.dispatchEvent(new Event('visibilitychange'));
