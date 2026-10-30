@@ -33,6 +33,13 @@ test('paginated GitHub policy reads retain their detail budget on Local and remo
       expectDetailBudget();
       expect((await service.getPullRequestReviewTarget({ projectPath: fixture.projectPath, repository, number: 1, marker: 'garcon-review synthetic/repository#1 ' })).state).toBe('open');
       expectDetailBudget();
+      const pull = { projectPath: fixture.projectPath, repository, number: 1 };
+      const status = await service.getPullRequestStatus(pull);
+      expectDetailBudget();
+      await service.getPullRequestDiff({ ...pull, commits: { baseRefOid: status.baseRefOid, headRefOid: status.headRefOid } });
+      expectDetailBudget();
+      await service.getPullRequestReviewThreads(pull);
+      expectDetailBudget();
     }
   } finally { operation.mockRestore(); process.env.PATH = originalPath; await fixture.dispose(); }
 }, 10_000);
@@ -125,30 +132,41 @@ for (const dialer of ['controller', 'worker'] as const) {
         .rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
       await expect(gh.createPullRequestComment({ projectPath: fixture.projectPath, repository, actor, expected, number: 9, body: 'Synthetic review' }))
         .rejects.toMatchObject({ code: 'GH_MUTATION_REJECTED' });
-      const detail = await gh.getPullRequest({ projectPath: fixture.projectPath, repository, number: 1 });
-      expect(detail).toMatchObject({ executorId, instanceId });
-      expect(detail.body.length).toBe(config.bodyBytes);
-      expect(detail.fileBodies['example.txt'].patch).toContain('+changed');
-      expect(detail.threads).toEqual([]);
+      const pull = { projectPath: fixture.projectPath, repository, number: 1 };
+      const status = await gh.getPullRequestStatus(pull);
+      expect(status).toMatchObject({ executorId, instanceId, baseRefOid: 'e'.repeat(40), headRefOid: 'a'.repeat(40) });
+      expect(status.body.length).toBe(config.bodyBytes);
+      const commits = { baseRefOid: status.baseRefOid, headRefOid: status.headRefOid };
+      const first = await gh.getPullRequestDiff({ ...pull, commits });
+      expect(first).toMatchObject({ executorId, instanceId, ...commits });
+      expect(first.fileBodies['example.txt'].patch).toContain('+changed');
+      // A failed review-comment read is an error, never an empty thread list.
+      await expect(gh.getPullRequestReviewThreads(pull)).rejects.toMatchObject({ code: 'GH_FORBIDDEN' });
       const specialPath = 'a\tb.txt';
       const diff = 'diff --git "a/a\\tb.txt" "b/a\\tb.txt"\n--- "a/a\\tb.txt"\n+++ "b/a\\tb.txt"\n@@ -1 +1 @@\n--- i;\n+++ i;\n';
       await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({
         ...config, diff, files: [{ path: specialPath, additions: 1, deletions: 1 }],
       }));
-      const named = await gh.getPullRequest({ projectPath: fixture.projectPath, repository, number: 1 });
-      expect(named.files).toMatchObject([{ path: specialPath }]);
-      expect(Object.keys(named.fileBodies)).toEqual([specialPath]);
-      expect(named.fileBodies[specialPath].patch).toContain('+++ i;');
+      // A different diff under the same commit pair proves the worker served its cache.
+      expect(Object.keys((await gh.getPullRequestDiff({ ...pull, commits })).fileBodies)).toEqual(['example.txt']);
+      await expect(gh.getPullRequestDiff({ ...pull, commits: { ...commits, baseRefOid: 'f'.repeat(40) } })).rejects.toMatchObject({ code: 'GH_STALE_PULL_REQUEST' });
+      await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({
+        ...config, diff, files: [{ path: specialPath, additions: 1, deletions: 1 }], pulls: [{ number: 1, baseRefOid: 'f'.repeat(40) }],
+      }));
+      const renamed = await gh.getPullRequestDiff({ ...pull, commits: { ...commits, baseRefOid: 'f'.repeat(40) } });
+      expect(renamed.files).toMatchObject([{ path: specialPath }]);
+      expect(Object.keys(renamed.fileBodies)).toEqual([specialPath]);
+      expect(renamed.fileBodies[specialPath].patch).toContain('+++ i;');
       await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({
         ...config, commentsFail: false, commentPages: [
           [{ id: 1, path: 'example.txt', line: 1, side: 'RIGHT', body: 'first page' }],
           [{ id: 2, path: 'example.txt', line: 2, side: 'RIGHT', body: 'second page' }],
         ],
       }));
-      const paginated = await gh.getPullRequest({ projectPath: fixture.projectPath, repository, number: 1 });
+      const paginated = await gh.getPullRequestReviewThreads(pull);
       expect(paginated.threads.flatMap(thread => thread.comments.map(comment => comment.body))).toEqual(['first page', 'second page']);
       await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({ ...config, bodyBytes: 4 * 1024 * 1024 }));
-      await expect(gh.getPullRequest({ projectPath: fixture.projectPath, repository, number: 1 })).rejects.toMatchObject({ code: 'GIT_RESULT_TOO_LARGE' });
+      await expect(gh.getPullRequestStatus(pull)).rejects.toMatchObject({ code: 'GIT_RESULT_TOO_LARGE' });
       expect(fixture.executor.availability).toBe('ready');
       const labels = Array.from({ length: 101 }, (_, index) => `label-${index}`);
       await fs.rm(path.join(fixture.projectPath, 'gh-comments.json'));

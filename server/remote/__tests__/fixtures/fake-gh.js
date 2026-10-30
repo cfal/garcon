@@ -21,7 +21,7 @@ const defaultPull = { number: 1, title: config.label, author: { login: config.la
 const pulls = (config.pulls ?? [defaultPull]).map(pull => ({
   title: `Pull request ${pull.number}`, body: 'x'.repeat(config.bodyBytes ?? 0), state: 'OPEN', isDraft: false,
   author: { login, __typename: 'User' }, authorAssociation: 'MEMBER', headRefName: 'feature', baseRefName: 'main',
-  headRefOid: 'a'.repeat(40), isCrossRepository: false, additions: 1, deletions: 1, changedFiles: 1, reviewDecision: null,
+  headRefOid: 'a'.repeat(40), baseRefOid: 'e'.repeat(40), isCrossRepository: false, additions: 1, deletions: 1, changedFiles: 1, reviewDecision: null,
   createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
   url: `https://git.example.invalid/${owner}/${repository}/pull/${pull.number}`,
   files: config.files ?? [{ path: 'example.txt', additions: 1, deletions: 1 }],
@@ -116,5 +116,12 @@ else if (command === 'api' && action === 'graphql') {
 } else if (action === 'view') {
   const { checks, labels, reviewRequests, teamReviewRequested, ...pull } = findPull(args[2]);
   print({ ...pull, statusCheckRollup: config.statusChecks ?? [] });
-} else if (action === 'diff') console.log(config.diff ?? 'diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -1 +1 @@\n-initial\n+changed');
+} else if (action === 'diff') {
+  // Simulates a push that lands while the diff is being read.
+  if (config.pushDuringDiff) {
+    const { pushDuringDiff, ...rest } = config;
+    await Bun.write(`${cwd}/gh-fixture.json`, JSON.stringify({ ...rest, pulls: (config.pulls ?? [defaultPull]).map(pull => ({ ...pull, ...pushDuringDiff })) }));
+  }
+  console.log(config.diff ?? 'diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -1 +1 @@\n-initial\n+changed');
+}
 else process.exit(1);

@@ -41,7 +41,9 @@ function harness(directory = mkdtempSync(join(tmpdir(), 'garcon-reviews-')), now
   const scope = { executorId: 'local', instanceId: 'instance' };
   const gh = {
     async getStatus() { throw new Error('Unused status read'); },
-    async getPullRequest() { throw new Error('Unused detail read'); },
+    async getPullRequestStatus() { throw new Error('Unused status read'); },
+    async getPullRequestDiff() { throw new Error('Unused diff read'); },
+    async getPullRequestReviewThreads() { throw new Error('Unused review thread read'); },
     async listPullRequests() {
       return { ...scope, pulls: github.pulls, repo: { nameWithOwner: 'acme/app', url: 'https://github.com/acme/app' }, viewerLogin: 'viewer' };
     },

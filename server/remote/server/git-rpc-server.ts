@@ -37,7 +37,9 @@ export class GitRpcServer {
     switch (method) {
       case 'getStatus': validateGhRequest(method, input); return gh.getStatus(options);
       case 'listPullRequests': validateGhRequest(method, input); return gh.listPullRequests(input, options);
-      case 'getPullRequest': validateGhRequest(method, input); return gh.getPullRequest(input, options);
+      case 'getPullRequestStatus': validateGhRequest(method, input); return gh.getPullRequestStatus(input, options);
+      case 'getPullRequestDiff': validateGhRequest(method, input); return gh.getPullRequestDiff(input, options);
+      case 'getPullRequestReviewThreads': validateGhRequest(method, input); return gh.getPullRequestReviewThreads(input, options);
       case 'getPullRequestReviewTarget': validateGhRequest(method, input); return gh.getPullRequestReviewTarget(input, options);
       case 'createPullRequestComment': validateGhRequest(method, input); return gh.createPullRequestComment(input, options);
       case 'minimizePullRequestComment': validateGhRequest(method, input); return gh.minimizePullRequestComment(input, options);

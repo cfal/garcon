@@ -67,7 +67,8 @@ function harness() {
   const gh = {
     async listPullRequests() { github.reads++; return { executorId: 'local', instanceId: 'instance', pulls: store.pulls(repository.id),
       repo: { nameWithOwner: repository.nameWithOwner, url: repository.url }, viewerLogin: 'viewer' }; },
-    async getStatus() { throw new Error('Unused'); }, async getPullRequest() { throw new Error('Unused'); },
+    async getStatus() { throw new Error('Unused'); }, async getPullRequestStatus() { throw new Error('Unused'); },
+    async getPullRequestDiff() { throw new Error('Unused'); }, async getPullRequestReviewThreads() { throw new Error('Unused'); },
     async getPullRequestReviewTarget() { throw new Error('Unused'); }, async createPullRequestComment() { throw new Error('Unused'); },
     async minimizePullRequestComment() { throw new Error('Unused'); },
   } satisfies ExecutionGhService;

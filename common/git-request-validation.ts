@@ -1,5 +1,5 @@
 import { isRecord } from './json.js';
-import { isGhActorIdentity, isGhRepositoryIdentity } from './gh-identity.js';
+import { isGhActorIdentity, isGhCommitOid, isGhRepositoryIdentity } from './gh-identity.js';
 import type { GitMethod } from './git.js';
 import type { ExecutionGitRequests, GitReviewDocumentRef } from './git-execution.js';
 import { GIT_MAX_REQUEST_BYTES, GIT_MAX_REQUEST_PATHS } from './git-execution.js';
@@ -60,7 +60,9 @@ export function isGitMethod(value: unknown): value is GitMethod {
 export const GH_REQUEST_FIELDS = {
   getStatus: [],
   listPullRequests: ['projectPath', 'repository'],
-  getPullRequest: ['projectPath', 'repository', 'number'],
+  getPullRequestStatus: ['projectPath', 'repository', 'number'],
+  getPullRequestDiff: ['projectPath', 'repository', 'number', 'commits'],
+  getPullRequestReviewThreads: ['projectPath', 'repository', 'number'],
   getPullRequestReviewTarget: ['projectPath', 'repository', 'number', 'marker'],
   createPullRequestComment: ['projectPath', 'repository', 'actor', 'number', 'body', 'expected'],
   minimizePullRequestComment: ['projectPath', 'repository', 'actor', 'commentId'],
@@ -82,8 +84,9 @@ export function validateGhRequest<K extends keyof GhRequests>(method: K, request
     && (!keys.includes('marker') || bounded(request.marker, GH_COMMENT_MARKER_MAX_LENGTH))
     && (!keys.includes('body') || bounded(request.body, GH_COMMENT_BODY_MAX_LENGTH))
     && (!keys.includes('expected') || isRecord(request.expected) && request.expected.state === 'open'
-      && typeof request.expected.headRefOid === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(request.expected.headRefOid)
-      && fields(request.expected, ['state', 'headRefOid']))
+      && isGhCommitOid(request.expected.headRefOid) && fields(request.expected, ['state', 'headRefOid']))
+    && (!keys.includes('commits') || isRecord(request.commits) && isGhCommitOid(request.commits.baseRefOid)
+      && isGhCommitOid(request.commits.headRefOid) && fields(request.commits, ['baseRefOid', 'headRefOid']))
     && (!keys.includes('commentId') || bounded(request.commentId, GH_COMMENT_ID_MAX_LENGTH));
   if (!valid) throw new GitServiceError('GIT_INVALID_INPUT', `Invalid GitHub ${method} request`);
 }

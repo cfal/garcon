@@ -10,7 +10,7 @@ Make the existing Git and read-only pull-request experience work on the reposito
 
 - Status, workbench, staged/unstaged review, partial staging, commit, branch/ref selection, history, comparisons, blame, graph, conflict resolution, stashes, remotes, fetch/pull/push, and worktrees.
 - Remote worktree selection/creation from New Chat and the sidebar project-path dialog.
-- GitHub CLI availability/auth status and existing pull-request list/detail views, including diffs and best-effort review threads.
+- GitHub CLI availability/auth status and existing pull-request list/detail views, including diffs and review threads.
 - The review-target read and two comment writes that [automatic pull request review](../pull-request-reviews.md) needs: find marked comments, create a pull request comment, and minimize one.
 - Commit-message generation that reads the correct executor's repository while retaining independently selected one-shot generation settings.
 - Local uses the same service implementation and behavioral contract as remote executors.
@@ -126,7 +126,7 @@ Keep domain operations rather than exposing `git(args)` or serializing arbitrary
 | Remotes | `getRemotes`, `getRemoteStatus`, `fetch`, `pull`, `push` |
 | Worktrees | `getWorktrees`, `getTargetCandidates`, `createWorktree`, `removeWorktree` |
 | Generation input | `collectCommitMessageContext` (extracted filesystem-only work, not model invocation) |
-| GitHub CLI | `getStatus`, `listPullRequests`, `getPullRequest`, `getPullRequestReviewTarget`, `createPullRequestComment`, `minimizePullRequestComment` on `ExecutionGhService` |
+| GitHub CLI | `getStatus`, `listPullRequests`, `getPullRequestStatus`, `getPullRequestDiff`, `getPullRequestReviewThreads`, `getPullRequestReviewTarget`, `createPullRequestComment`, `minimizePullRequestComment` on `ExecutionGhService` |
 
 `initialCommit` preserves today's operation on an already initialized repository; this is not a new `git init` or clone workflow. `push` preserves its current remote/branch restrictions and does not acquire force-push or upstream-setting behavior. PR operations are read-only except the two comment writes, which the controller alone calls when it posts a review; the browser has no route to them.
 
@@ -150,7 +150,12 @@ git.collectCommitMessageContext({ projectPath, files }, callOptions)
 
 gh.getStatus(callOptions)
 gh.listPullRequests({ projectPath, repository? }, callOptions)
-gh.getPullRequest({ projectPath, repository, number }, callOptions)
+gh.getPullRequestStatus({ projectPath, repository, number }, callOptions)
+  -> metadata, checks, review decision, mergeability, and { baseRefOid, headRefOid }
+gh.getPullRequestDiff({ projectPath, repository, number, commits: { baseRefOid, headRefOid } }, callOptions)
+  -> files and patch bodies of exactly that commit pair | GH_STALE_PULL_REQUEST
+gh.getPullRequestReviewThreads({ projectPath, repository, number }, callOptions)
+  -> review comments grouped into threads
 gh.getPullRequestReviewTarget({ projectPath, repository, number, marker }, callOptions)
   -> repository identity, viewer identity, head commit, state, and marked comments with their authors
 gh.createPullRequestComment({ projectPath, repository, actor, number, body, expected: { state: 'open', headRefOid } }, callOptions)
@@ -160,6 +165,14 @@ gh.minimizePullRequestComment({ projectPath, repository, actor, commentId }, cal
 `listPullRequests` reads the viewer's login and paginates open pull requests, labels, and review requests. Each pull request includes its head commit, fork flag, author association, and whether review is requested from the viewer directly or through a team. Incomplete pagination fails the read. Comment bodies, at most GitHub's 65,536 characters, reach `gh` on standard input. The comment writes are GitHub mutations: they take the mutation admission pool, and an interruption or unconfirmed result after dispatch is `GIT_MUTATION_OUTCOME_UNKNOWN`, never a retry. The controller resolves an unknown post by looking for its marker before posting again. Comment creation returns `GH_MUTATION_REJECTED` for proven preflight/non-dispatch failures and explicit HTTP 4xx rejections (excluding request timeout); these cannot have created the attempted comment. HTTP 5xx, timeout, cancellation, transport errors, and unusable successful replies preserve uncertainty. Executor protocol revision 31 carries the new rejection code.
 
 `repository` binds the GitHub host and owner/name; `actor` carries a stable GitHub user ID and login. Connected reads and mutations address that host/repository explicitly and reject a different live checkout identity. Comment creation rechecks the actor, then reads the PR's open state and head immediately before dispatch. A changed state or head returns `GH_STALE_PULL_REQUEST` without posting. The controller saves the posting actor before dispatch and retains it through reconciliation, so changing the executor's `gh` login cannot duplicate an uncertain post. Browser detail requests carry `repositoryHost` and `repositoryName` alongside the executor, project, and PR number.
+
+Pull request detail is three independent reads, so a check-run update does not re-run `gh pr diff` or resend the diff. Browser routes are `GET /api/v1/gh/pull-request/status`, `/diff` (which also takes `baseRefOid` and `headRefOid`), and `/review-threads`; executor protocol revision 39 replaced the combined `getPullRequest` with them. All three are bulk-lane, journaled reads like other GitHub calls, and each first rebinds the live checkout to the saved repository:
+
+- Status is one `gh pr view` without files. It returns the base and head commits that name the current diff.
+- The diff request names the commit pair it expects. `gh pr diff` cannot be pinned to a commit, so the executor confirms the pair with a light `gh pr view` after reading the diff and returns `GH_STALE_PULL_REQUEST` (409) rather than labelling a newer diff with the older pair. A push that lands and is reverted within that window is not detected.
+- Review threads fail as an error instead of the former best-effort empty list.
+
+Each `GitRuntime` keeps the diffs it read in a [`PullRequestDiffCache`](../../server/runtime/gh/pull-request-diff-cache.ts) keyed by repository, number, and commit pair, bounded to 16 entries and 32 MiB of estimated patch memory and cleared when the serving instance is disposed. Because a diff is a pure function of its commit pair, entries never expire; they are only evicted. A cached diff is returned only after the light `gh pr view` confirms the pair, which also proves that the executor's current `gh` account can still read the pull request, so the account is not part of the key. The browser [Pull Requests store](../../web/src/lib/git/pull-requests/pull-requests-store.svelte.ts) separately keeps up to eight shown diffs keyed additionally by executor, so reselecting a pull request at unchanged commits neither transfers nor re-indexes the diff; it consults that cache only after a fresh status read from the same executor confirms the pair. [`pull-request-refresh-keys.ts`](../../web/src/lib/git/pull-requests/pull-request-refresh-keys.ts) decides which read an inbox change invalidates.
 
 The service is already acquired from a selected executor. Validate returned executor identity against that selection rather than letting a response retarget a call. `ExecutorCallOptions` carries local abort/deadline plumbing; do not serialize `AbortSignal`, callbacks, `Response`, mutable trace arrays, Maps, or filesystem handles. Return serializable optional diagnostics if needed, and keep HTTP serialization metrics at the controller.
 
@@ -206,9 +219,9 @@ Mutation replies are also inline. A result that exceeds the size limit after a m
 Propagate the operation deadline through RPC, subprocesses, and lock waits. Cancellation stops undispatched work and requests interruption of dispatched subprocesses; it is not rollback. Temporary-index cleanup and repository locks remain executor-owned until native operations settle. Connection loss alone never permits mutation replay.
 
 `ghOperationTimeoutMs` in `common/git-execution.ts` owns the per-method GitHub
-budget. Pull request lists, details, and review posting targets each share
-60 seconds across all pages; status and GitHub mutations
-receive 30 seconds. Local admission, the remote facade, and worker envelope
+budget. Pull request lists, pull request status, diff, and review-thread reads,
+and review posting targets each share 60 seconds across all pages; `gh` auth
+status and GitHub mutations receive 30 seconds. Local admission, the remote facade, and worker envelope
 validation use that same policy, and callers may shorten it. Executor protocol
 revision 28 requires both peers to accept the paginated read budgets together.
 
@@ -258,7 +271,7 @@ Split the current `generateCommitMessageForFiles` orchestration in [status.ts](.
 
 The `gh` service runs on the repository executor even though GitHub is network-accessible from the controller. That preserves the executor's remotes, enterprise-host selection, environment, login, and network reachability. No controller proxying with controller `gh` credentials, SSH forwarding, or new login UI is introduced.
 
-`gh.getStatus()` is executor-level status, not a guarantee of authorization for every repository or GitHub host. PR calls still validate their own repository context and return typed auth/network/not-found failures. Keep optional review-comment fetches best effort, as today; transport interruption is not an authoritative empty PR list or an unauthenticated status.
+`gh.getStatus()` is executor-level status, not a guarantee of authorization for every repository or GitHub host. PR calls still validate their own repository context and return typed auth/network/not-found failures. A failed review-comment read is an error the browser shows beside the diff, not an empty thread list; transport interruption is not an authoritative empty PR list or an unauthenticated status.
 
 Replace the single browser [GhCapabilityStore](../../web/src/lib/git/pull-requests/gh-capability.svelte.ts) with executor-scoped status and bounded lifecycle. Query the selected executor on demand, fence stale responses, refresh on executor/session changes, and prune removed executors. Do not probe every configured offline executor at app startup.
 

@@ -15,10 +15,12 @@ import type {
   PullRequestCheck,
   PullRequestCheckState,
   PullRequestChecksState,
-  PullRequestDetail,
+  PullRequestCommits,
+  PullRequestDiff,
   PullRequestMergeable,
   PullRequestReviewDecision,
   PullRequestState,
+  PullRequestStatus,
   PullRequestSummary,
   PullRequestThread,
 } from './gh-types.js';
@@ -60,6 +62,7 @@ export interface GhRawPullRequest {
   createdAt?: string;
   updatedAt?: string;
   url?: string;
+  baseRefOid?: string;
   headRefOid?: string;
   mergeable?: string;
   reviewDecision?: string;
@@ -356,12 +359,7 @@ export function buildPatchFileSet(
   return { files, fileBodies };
 }
 
-export function buildDetail(
-  raw: GhRawPullRequest,
-  patches: GitDiffPatchFile[],
-  threads: PullRequestThread[],
-): PullRequestDetail {
-  const { files, fileBodies } = buildPatchFileSet(patches, raw.files);
+export function buildStatus(raw: GhRawPullRequest): PullRequestStatus {
   return {
     number: raw.number,
     title: raw.title ?? '',
@@ -373,16 +371,23 @@ export function buildDetail(
     baseRefName: raw.baseRefName ?? '',
     additions: raw.additions ?? 0,
     deletions: raw.deletions ?? 0,
-    changedFiles: raw.changedFiles ?? files.length,
+    changedFiles: raw.changedFiles ?? 0,
     createdAt: raw.createdAt ?? '',
     updatedAt: raw.updatedAt ?? '',
     url: raw.url ?? '',
+    baseRefOid: raw.baseRefOid ?? '',
     headRefOid: raw.headRefOid ?? '',
     mergeable: mapMergeable(raw.mergeable),
     reviewDecision: mapReviewDecision(raw.reviewDecision),
     checks: mapChecks(raw.statusCheckRollup),
-    files,
-    fileBodies,
-    threads,
   };
+}
+
+export function buildDiff(
+  number: number,
+  commits: PullRequestCommits,
+  patches: GitDiffPatchFile[],
+  ghFiles: GhRawFile[] | undefined,
+): PullRequestDiff {
+  return { number, baseRefOid: commits.baseRefOid, headRefOid: commits.headRefOid, ...buildPatchFileSet(patches, ghFiles) };
 }

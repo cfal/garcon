@@ -8,18 +8,28 @@
 	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp';
 	import { checksStateClass, checksStateLabel, prStateBadge } from './pr-display';
 	import Markdown from '$lib/components/rich-text/Markdown.svelte';
+	import { cn } from '$lib/utils/cn';
 
 	interface PullRequestHeaderProps {
 		pull: PullRequestSummary;
 		repositoryName: string;
 		body: string;
 		currentTime: Date;
+		// True while any part of the shown pull request is being reread.
+		refreshing: boolean;
 		onRefresh: () => void;
 		onClose?: () => void;
 	}
 
-	let { pull, repositoryName, body, currentTime, onRefresh, onClose }: PullRequestHeaderProps =
-		$props();
+	let {
+		pull,
+		repositoryName,
+		body,
+		currentTime,
+		refreshing,
+		onRefresh,
+		onClose,
+	}: PullRequestHeaderProps = $props();
 
 	const stateBadge = $derived(prStateBadge(pull.state, pull.isDraft));
 	const checksLabel = $derived(checksStateLabel(pull.checksState));
@@ -42,9 +52,10 @@
 				class="rounded-md p-1 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 				onclick={onRefresh}
 				aria-label={m.common_refresh()}
+				aria-busy={refreshing}
 				title={m.common_refresh()}
 			>
-				<RefreshCw class="h-3.5 w-3.5" />
+				<RefreshCw class={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
 			</button>
 			{#if onClose}
 				<button

@@ -37,7 +37,9 @@ test('a connected remote repository lists its pull requests and loads a diff fro
     const panel = await fixture.page.$eval('[data-pr-panel]', element => element.textContent);
     expect(panel).toContain('example.txt');
     expect(panel).toContain('synthetic comment');
-    expect(requests.some(url => url.pathname === '/api/v1/gh/pull-request' && url.searchParams.get('executorId') === client.executorId)).toBe(true);
+    for (const read of ['status', 'diff', 'review-threads']) {
+      expect(requests.filter(url => url.pathname === `/api/v1/gh/pull-request/${read}`)).toHaveLength(1);
+    }
     expect(requests.every(url => url.searchParams.get('executorId') === client.executorId)).toBe(true);
     fixture.assertNoBrowserErrors();
   }, {

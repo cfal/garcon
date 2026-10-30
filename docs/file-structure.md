@@ -75,7 +75,10 @@ The controller owns chats, ledgers, queues, schedules, provider configuration/cr
   SQLite store, the scanner, the runner that starts and settles review chats,
   and the poster. See [Pull request reviews](./pull-request-reviews.md).
 - `runtime/git/review-patch.ts` constructs compact patch bodies;
-  `runtime/gh/pull-request-diff.ts` projects GitHub pull-request diffs.
+  `runtime/gh/pull-request-diff.ts` projects GitHub pull-request diffs;
+  `runtime/gh/gh-pull-request-reads.ts` owns the separate status, diff, and
+  review-thread reads, and `runtime/gh/pull-request-diff-cache.ts` bounds the
+  executor's diffs by commit pair.
 - Git operation tests live in named suites under `runtime/git/__tests__/`;
   `git-service.test.js` checks service assembly. Controller Git generation and
   HTTP error tests live in `controller/git/__tests__/`.

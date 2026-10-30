@@ -18,7 +18,9 @@ export interface GhStatusResponse {
 export interface GhResults {
   getStatus: GhStatusResponse;
   listPullRequests: PullRequestListResult;
-  getPullRequest: PullRequestDetail;
+  getPullRequestStatus: PullRequestStatus;
+  getPullRequestDiff: PullRequestDiff;
+  getPullRequestReviewThreads: PullRequestReviewThreads;
   getPullRequestReviewTarget: PullRequestReviewTarget;
   createPullRequestComment: PullRequestCommentRef;
   minimizePullRequestComment: PullRequestCommentMinimized;
@@ -27,7 +29,10 @@ export interface GhResults {
 export interface GhRequests {
   getStatus: Record<string, never>;
   listPullRequests: { projectPath: string; repository?: GhRepositoryIdentity };
-  getPullRequest: { projectPath: string; repository: GhRepositoryIdentity; number: number };
+  getPullRequestStatus: { projectPath: string; repository: GhRepositoryIdentity; number: number };
+  // The diff is read only while the pull request is still at `commits`.
+  getPullRequestDiff: { projectPath: string; repository: GhRepositoryIdentity; number: number; commits: PullRequestCommits };
+  getPullRequestReviewThreads: { projectPath: string; repository: GhRepositoryIdentity; number: number };
   getPullRequestReviewTarget: { projectPath: string; repository: GhRepositoryIdentity; number: number; marker: string };
   createPullRequestComment: { projectPath: string; repository: GhRepositoryIdentity; actor: GhActorIdentity; number: number; body: string; expected: { state: 'open'; headRefOid: string } };
   minimizePullRequestComment: { projectPath: string; repository: GhRepositoryIdentity; actor: GhActorIdentity; commentId: string };
@@ -159,7 +164,16 @@ export interface PullRequestCheck {
   url?: string;
 }
 
-export interface PullRequestDetail {
+// The commit pair a pull request diff is computed from. GitHub diffs the head
+// against its merge base with the base, so the pair identifies the diff exactly.
+export interface PullRequestCommits {
+  baseRefOid: string;
+  headRefOid: string;
+}
+
+// Metadata that changes without a push: checks, review decision, mergeability,
+// and the commit pair that tells a reader whether its diff is still current.
+export interface PullRequestStatus extends PullRequestCommits {
   number: number;
   title: string;
   body: string;
@@ -174,11 +188,18 @@ export interface PullRequestDetail {
   createdAt: string;
   updatedAt: string;
   url: string;
-  headRefOid: string;
   mergeable: PullRequestMergeable;
   reviewDecision: PullRequestReviewDecision;
   checks: PullRequestCheck[];
+}
+
+export interface PullRequestDiff extends PullRequestCommits {
+  number: number;
   files: GitReviewFileSummary[];
   fileBodies: Record<string, GitReviewFilePatchBody>;
+}
+
+export interface PullRequestReviewThreads {
+  number: number;
   threads: PullRequestThread[];
 }

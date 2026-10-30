@@ -87,12 +87,9 @@ const cases = [
     }, scope),
   },
   {
-    method: 'getPullRequest', file: reviewFile, statusFields: ['indexStatus', 'workTreeStatus'],
-    validate: file => validateGhResult('getPullRequest', {
-      ...scope, number: 1, title: 'Synthetic change', state: 'open', isDraft: false, author: 'test',
-      headRefName: 'feature', baseRefName: 'main', additions: 1, deletions: 0, changedFiles: 1,
-      updatedAt: '2026-01-01', createdAt: '2026-01-01', url: 'https://git.example.invalid/pull/1', headRefOid: 'a'.repeat(40),
-      reviewDecision: null, body: '', mergeable: 'mergeable', files: [file], fileBodies: {}, checks: [], threads: [],
+    method: 'getPullRequestDiff', file: reviewFile, statusFields: ['indexStatus', 'workTreeStatus'],
+    validate: file => validateGhResult('getPullRequestDiff', {
+      ...scope, number: 1, baseRefOid: 'e'.repeat(40), headRefOid: 'a'.repeat(40), files: [file], fileBodies: {},
     }, scope),
   },
 ];

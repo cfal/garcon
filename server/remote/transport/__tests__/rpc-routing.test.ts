@@ -1,19 +1,27 @@
 import { expect, test } from 'bun:test';
 import { CLI_OPERATIONS, cliPolicy, type CliOperation } from '../cli-protocol.js';
 import { rpcLane } from '../rpc-routing.js';
+import { rpcContinuity } from '../rpc-protocol.js';
 import { parseBulkControl } from '../rpc-lane.js';
 
 test('bulk routing preserves quick summaries and primary lifecycle', () => {
   for (const method of ['git.getQuickSummary', 'files.identity', 'files.revision', 'execution.abort', 'permissions.respond', 'credentials.resolve', 'forking.fork']) {
     expect(rpcLane(method, null)).toBe('primary');
   }
-  for (const method of ['git.getStatus', 'gh.getStatus', 'gh.getPullRequestReviewTarget', 'gh.createPullRequestComment', 'gh.minimizePullRequestComment', 'files.read', 'files.save', 'files.tree', 'files.browse', 'files.list', 'files.createDirectory', 'history.open', 'history.next', 'history.close']) {
+  for (const method of ['git.getStatus', 'gh.getStatus', 'gh.getPullRequestStatus', 'gh.getPullRequestDiff', 'gh.getPullRequestReviewThreads', 'gh.getPullRequestReviewTarget', 'gh.createPullRequestComment', 'gh.minimizePullRequestComment', 'files.read', 'files.save', 'files.tree', 'files.browse', 'files.list', 'files.createDirectory', 'history.open', 'history.next', 'history.close']) {
     expect(rpcLane(method, null)).toBe('bulk');
   }
   expect(rpcLane('calls.reconcile', null, 'bulk')).toBe('bulk');
   expect(() => rpcLane('git.unknown', null)).toThrow('Unknown executor RPC method');
   expect(() => rpcLane('gh.unknown', null)).toThrow('Unknown executor RPC method');
+  expect(() => rpcLane('gh.getPullRequest', null)).toThrow('Unknown executor RPC method');
   expect(() => rpcLane('files.unknown', null)).toThrow('Unknown executor RPC method');
+});
+
+test('split pull request reads keep their replies across a lost session', () => {
+  for (const method of ['gh.getPullRequestStatus', 'gh.getPullRequestDiff', 'gh.getPullRequestReviewThreads']) {
+    expect(rpcContinuity(method)).toBe('journaled');
+  }
 });
 
 test('only explicit small CLI controls use primary', () => {

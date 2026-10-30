@@ -165,6 +165,14 @@ loads and shows history or body read failures with Retry. Review and Post remain
 disabled until the required reads succeed. Changes to that pull request refresh
 its history, including an older selected run after a posting result changes.
 
+The Changes and Checks tabs read status, diff, and review threads separately,
+so a scan that reports only new checks or a new review decision rereads status
+alone. Activity that moves `updatedAt` also rereads review threads, and the diff
+is read again only when the status reports a different base or head commit.
+Each part keeps its last loaded content through a failed refresh and shows the
+failure beside it with Retry; a failed diff or status is not retried until the
+user asks.
+
 ## Safety
 
 A pull request is untrusted input to an agent Garcon does not sandbox. By

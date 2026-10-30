@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +7,7 @@ import { createGhOperations } from '../gh-service.js';
 
 const repository = {host: "git.example.invalid", nameWithOwner: "synthetic/repository"};
 const expectedPull = { state: "open", headRefOid: "a".repeat(40) };
+const commits = { baseRefOid: 'e'.repeat(40), headRefOid: 'a'.repeat(40) };
 const actor = {id: "actor:synthetic", login: "synthetic"};
 let root;
 let originalPath;
@@ -93,7 +94,9 @@ it('posts a comment, finds it by marker, and minimizes it', async () => {
 
   expect(await gh.minimizePullRequestComment({ projectPath: root, repository, actor, commentId: created.id })).toEqual({ minimized: true });
   await gh.listPullRequests({ projectPath: root, repository });
-  await gh.getPullRequest({ projectPath: root, repository, number: 3 });
+  const status = await gh.getPullRequestStatus({ projectPath: root, repository, number: 3 });
+  await gh.getPullRequestDiff({ projectPath: root, repository, number: 3, commits: { baseRefOid: status.baseRefOid, headRefOid: status.headRefOid } });
+  await gh.getPullRequestReviewThreads({ projectPath: root, repository, number: 3 });
   const after = await gh.getPullRequestReviewTarget({ projectPath: root, repository, actor, number: 3, marker: 'garcon-review ' });
   expect(after.markedComments.map((comment) => comment.isMinimized)).toEqual([true]);
   const calls = (await fs.readFile(path.join(root, 'gh-calls.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
@@ -174,8 +177,8 @@ for (const [label, commentPages, bodies] of [
 ]) {
   it(`retains review comments with ${label}`, async () => {
     await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic', commentPages }));
-    const detail = await createGhOperations(root).getPullRequest({ projectPath: root, repository, actor, number: 1 });
-    expect(detail.threads.flatMap(thread => thread.comments.map(comment => comment.body))).toEqual(bodies);
+    const read = await createGhOperations(root).getPullRequestReviewThreads({ projectPath: root, repository, number: 1 });
+    expect(read.threads.flatMap(thread => thread.comments.map(comment => comment.body))).toEqual(bodies);
   });
 }
 
@@ -184,7 +187,9 @@ for (const expected of [{ host: "another.example.invalid", nameWithOwner: "synth
     await Bun.write(`${root}/gh-fixture.json`, JSON.stringify({ label: "synthetic" }));
     const gh = createGhOperations(root);
     await expect(gh.getPullRequestReviewTarget({ projectPath: root, repository: expected, number: 1, marker: "garcon-review " })).rejects.toThrow(/repository.*changed/i);
-    await expect(gh.getPullRequest({ projectPath: root, repository: expected, number: 1 })).rejects.toThrow(/repository.*changed/i);
+    await expect(gh.getPullRequestStatus({ projectPath: root, repository: expected, number: 1 })).rejects.toThrow(/repository.*changed/i);
+    await expect(gh.getPullRequestDiff({ projectPath: root, repository: expected, number: 1, commits })).rejects.toThrow(/repository.*changed/i);
+    await expect(gh.getPullRequestReviewThreads({ projectPath: root, repository: expected, number: 1 })).rejects.toThrow(/repository.*changed/i);
     await expect(gh.createPullRequestComment({ projectPath: root, repository: expected, actor, expected: expectedPull, number: 1, body: "Review" })).rejects.toThrow(/repository.*changed/i);
     expect(await Bun.file(`${root}/gh-comments.json`).exists()).toBe(false);
   });
@@ -215,4 +220,86 @@ it("leaves the outcome unknown if auth changes after the actor preflight", async
   await expect(gh.createPullRequestComment({ projectPath: root, repository, actor, expected: expectedPull, number: 1, body: `Review\n<!-- garcon-review synthetic/repository#1 ${"a".repeat(40)} -->` })).rejects.toMatchObject({ code: "GIT_MUTATION_OUTCOME_UNKNOWN" });
   const target = await gh.getPullRequestReviewTarget({ projectPath: root, repository, number: 1, marker: "garcon-review " });
   expect(target).toMatchObject({ viewer: actor, markedComments: [{ author: other }] });
+});
+
+describe('split pull request reads', () => {
+  const readCalls = async () => {
+    const file = path.join(root, 'gh-calls.jsonl');
+    const lines = (await Bun.file(file).exists()) ? (await fs.readFile(file, 'utf8')).trim().split('\n').filter(Boolean) : [];
+    await fs.rm(file, { force: true });
+    return lines.map(line => JSON.parse(line).slice(0, 2).join(' '));
+  };
+  const fixture = (config = {}) => fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({
+    label: 'synthetic', statusChecks: [{ name: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' }], ...config,
+  }));
+
+  it('reads status without the diff or review comments', async () => {
+    await fixture();
+    const status = await createGhOperations(root).getPullRequestStatus({ projectPath: root, repository, number: 1 });
+    expect(await readCalls()).toEqual(['repo view', 'pr view']);
+    expect(status).toMatchObject({ number: 1, ...commits, checks: [{ name: 'ci', state: 'success' }] });
+    expect(status).not.toHaveProperty('files');
+    expect(status).not.toHaveProperty('fileBodies');
+    expect(status).not.toHaveProperty('threads');
+  });
+
+  it('reads review threads without the diff or status', async () => {
+    await fixture();
+    const read = await createGhOperations(root).getPullRequestReviewThreads({ projectPath: root, repository, number: 1 });
+    expect(await readCalls()).toEqual(['repo view', 'api --hostname']);
+    expect(read.threads).toMatchObject([{ path: 'example.txt', comments: [{ body: 'synthetic comment' }] }]);
+  });
+
+  it('fails a review thread read instead of reporting no comments', async () => {
+    await fixture({ commentsFail: true });
+    await expect(createGhOperations(root).getPullRequestReviewThreads({ projectPath: root, repository, number: 1 })).rejects.toThrow(/forbidden/);
+  });
+
+  it('confirms the commit pair after reading a diff and serves the same pair from cache', async () => {
+    await fixture({ files: [{ path: 'example.txt', additions: 7, deletions: 5 }] });
+    const gh = createGhOperations(root);
+    const diff = await gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits });
+    expect(await readCalls()).toEqual(['repo view', 'pr diff', 'pr view']);
+    expect(diff).toMatchObject({ number: 1, ...commits, files: [{ path: 'example.txt', additions: 7, deletions: 5 }] });
+    expect(diff.fileBodies['example.txt'].patch).toContain('+changed');
+
+    expect(await gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits })).toBe(diff);
+    expect(await readCalls()).toEqual(['repo view', 'pr view']);
+  });
+
+  it('keeps cached diffs per repository and commit pair', async () => {
+    await fixture({ pulls: [{ number: 1 }, { number: 2 }] });
+    const gh = createGhOperations(root);
+    await gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits });
+    await gh.getPullRequestDiff({ projectPath: root, repository, number: 2, commits });
+    await readCalls();
+    const moved = { ...commits, baseRefOid: 'f'.repeat(40) };
+    await fixture({ pulls: [{ number: 1, baseRefOid: moved.baseRefOid }, { number: 2 }] });
+    await gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits: moved });
+    expect(await readCalls()).toEqual(['repo view', 'pr diff', 'pr view']);
+    await gh.getPullRequestDiff({ projectPath: root, repository, number: 2, commits });
+    expect(await readCalls()).toEqual(['repo view', 'pr view']);
+  });
+
+  it('rejects a diff whose pull request moved during the read and does not cache it', async () => {
+    const pushed = { headRefOid: 'b'.repeat(40) };
+    await fixture({ pushDuringDiff: pushed });
+    const gh = createGhOperations(root);
+    await expect(gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits })).rejects.toMatchObject({ code: 'GH_STALE_PULL_REQUEST' });
+    await readCalls();
+    await expect(gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits })).rejects.toMatchObject({ code: 'GH_STALE_PULL_REQUEST' });
+    expect(await readCalls()).toEqual(['repo view', 'pr diff', 'pr view']);
+    const current = await gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits: { ...commits, ...pushed } });
+    expect(current.headRefOid).toBe(pushed.headRefOid);
+  });
+
+  it('proves access and the commit pair before serving a cached diff', async () => {
+    await fixture();
+    const gh = createGhOperations(root);
+    await gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits });
+    await fixture({ pulls: [{ number: 1, headRefOid: 'b'.repeat(40) }] });
+    await expect(gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits })).rejects.toMatchObject({ code: 'GH_STALE_PULL_REQUEST' });
+    await fixture({ fail: { 'pr view': 'HTTP 404: Not Found' } });
+    await expect(gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits })).rejects.toThrow(/Not Found/);
+  });
 });

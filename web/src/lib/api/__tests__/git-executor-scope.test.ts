@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getGitStatus, gitCommitIndex, gitStageHunk } from '../git.js';
 import { getGitReviewDocumentFileBodies } from '../git-review-documents.js';
-import { getPullRequest } from '../pull-requests.js';
+import { getPullRequestDiff } from '../pull-requests.js';
 
 const target = { executorId: 'remote-executor', projectPath: '/project' };
 const scope = { executorId: target.executorId, instanceId: 'instance-a' };
@@ -88,18 +88,35 @@ describe('Git executor response boundaries', () => {
 		).rejects.toMatchObject({ errorCode: 'GIT_STALE_DOCUMENT' });
 	});
 
-	it('qualifies PR rendering identities by executor, instance, project, and GitHub repository', async () => {
-		const payload = { ...scope, number: 1, updatedAt: '2026-01-01', fileBodies: {} };
-		fetchMock.mockImplementation(async () => response(payload));
+	it('qualifies PR rendering identities by executor, instance, project, GitHub repository, and commits', async () => {
+		const commits = { baseRefOid: 'e'.repeat(40), headRefOid: 'a'.repeat(40) };
+		fetchMock.mockImplementation(async (url: string | URL | Request) => {
+			const query = new URL(String(url), 'http://localhost').searchParams;
+			return response({
+				...scope,
+				number: 1,
+				baseRefOid: query.get('baseRefOid'),
+				headRefOid: query.get('headRefOid'),
+				files: [],
+				fileBodies: {},
+			});
+		});
 		const prTarget = { ...target, repository: { host: 'github.com', nameWithOwner: 'acme/app' } };
-		const first = await getPullRequest(prTarget, 1);
-		const second = await getPullRequest({ ...prTarget, projectPath: '/other' }, 1);
-		const otherHost = await getPullRequest(
+		const first = await getPullRequestDiff(prTarget, 1, commits);
+		const second = await getPullRequestDiff({ ...prTarget, projectPath: '/other' }, 1, commits);
+		const otherHost = await getPullRequestDiff(
 			{ ...prTarget, repository: { ...prTarget.repository, host: 'github.example.com' } },
 			1,
+			commits,
 		);
+		const pushed = await getPullRequestDiff(prTarget, 1, {
+			...commits,
+			headRefOid: 'b'.repeat(40),
+		});
 		expect(first.documentId).not.toBe(second.documentId);
 		expect(first.documentId).not.toBe(otherHost.documentId);
+		expect(first.documentId).not.toBe(pushed.documentId);
+		expect(first.documentId).toBe((await getPullRequestDiff(prTarget, 1, commits)).documentId);
 		expect(first.documentId).toContain('remote-executor');
 	});
 });
