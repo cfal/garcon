@@ -759,7 +759,13 @@ export function buildSidebarProjectKeys(input: {
 	return projectOrderFromDisplayedChats(input.displayedChats, grouping);
 }
 
-export function buildSidebarDisplayChatIds(input: {
+export interface SidebarChatListProjection {
+	rowModelInput: SidebarRowModelInput;
+	rowModel: SidebarRowModel;
+	hasPinnedChats: boolean;
+}
+
+export function buildSidebarChatListProjection(input: {
 	displayedChats: ChatSessionRecord[];
 	grouping: SidebarChatGrouping;
 	currentTime: Date;
@@ -772,7 +778,7 @@ export function buildSidebarDisplayChatIds(input: {
 	collapsedProjectKeys?: ReadonlySet<string>;
 	executorOrder?: readonly string[];
 	groupByExecutor?: boolean;
-}): string[] {
+}): SidebarChatListProjection {
 	const sortedChats =
 		input.sortMode === 'recent'
 			? sortSidebarChatsByRecency(input.displayedChats, input.pinnedInsertPosition)
@@ -785,7 +791,7 @@ export function buildSidebarDisplayChatIds(input: {
 			)
 		: sortedChats;
 	const orders = buildSidebarChatOrderMap(displayedChats);
-	return buildSidebarRowModel({
+	const rowModelInput: SidebarRowModelInput = {
 		displayedChats,
 		orders,
 		grouping: input.grouping,
@@ -794,6 +800,18 @@ export function buildSidebarDisplayChatIds(input: {
 		groupNestedProjectPaths: input.groupNestedProjectPaths,
 		collapsedProjectKeys: input.collapsedProjectKeys,
 		executorOrder: input.executorOrder,
-		groupByExecutor: input.groupByExecutor,
-	}).visibleChatIds;
+		groupByExecutor:
+			input.groupByExecutor ??
+			shouldGroupSidebarByExecutor({
+				allChats: input.optimisticArchiveOrder ?? input.displayedChats,
+				executorOrder: input.executorOrder,
+			}),
+	};
+	return {
+		rowModelInput,
+		rowModel: buildSidebarRowModel(rowModelInput),
+		hasPinnedChats: (input.optimisticArchiveOrder ?? input.displayedChats).some(
+			(chat) => chatOrderGroupFor(chat) === 'pinned',
+		),
+	};
 }

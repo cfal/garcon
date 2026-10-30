@@ -18,7 +18,8 @@ export type PersistedWorkspaceSurfaceRef =
         | "chat-map"
         | "chat-canvas"
         | "chat-board"
-        | "tickets";
+        | "tickets"
+        | "usage";
     }
   | { type: "terminal"; terminalId: string };
 

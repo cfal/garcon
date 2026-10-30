@@ -11,6 +11,40 @@ import type { ExecutorSnapshot } from '$shared/executors';
 import { PullRequestRepositoryFormState } from '../pull-request-repository-form-state.svelte';
 import { createExecutorStartupFixture } from '$lib/chat/new-chat/__tests__/executor-startup-fixture';
 import { remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import * as chatsApi from '$lib/api/chats';
+
+it.each(['checking', 'valid'] as const)('preserves %s path validation when startup settings finish loading', async (status) => {
+	vi.useFakeTimers();
+	const fixture = createExecutorStartupFixture();
+	const form = new PullRequestRepositoryFormState({
+		...fixture,
+		selectableAgentIds: ['claude', 'codex'],
+	});
+	const loading = Promise.withResolvers<void>();
+	vi.spyOn(form.startup, 'loadSettingsAndModels').mockReturnValue(loading.promise);
+	vi.spyOn(form.startup.preambles, 'refreshPreview').mockResolvedValue();
+	const validation = Promise.withResolvers<chatsApi.ValidateStartResponse>();
+	const validate = vi.spyOn(chatsApi, 'validateStart').mockReturnValue(validation.promise);
+	try {
+		const initializing = form.initialize(null);
+		form.startup.selectProjectPath('/local/selected');
+		if (status === 'valid') validation.resolve({ valid: true });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(form.startup.validationStatus).toBe(status);
+		loading.resolve();
+		await initializing;
+		expect(form.startup.validationStatus).toBe(status);
+		await vi.advanceTimersByTimeAsync(300);
+		expect(validate).toHaveBeenCalledExactlyOnceWith('/local/selected', { executorId: 'local' });
+		validation.resolve({ valid: true });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(form.startup.validationStatus).toBe('valid');
+	} finally {
+		form.dispose();
+		vi.restoreAllMocks();
+		vi.useRealTimers();
+	}
+});
 
 async function offlineForm(settings: PullRequestReviewSettings) {
 	const fixture = createExecutorStartupFixture();
@@ -236,7 +270,7 @@ it('loads startup settings after reconnection without losing the saved target or
 	} satisfies PullRequestReviewRepository;
 	const load = vi.spyOn(form.startup, 'loadSettingsAndModels');
 	// Path validity is supplied by the executor's validation port in this recovery check.
-	vi.spyOn(form.startup, 'validatePath').mockImplementation(() => {
+	vi.spyOn(form.startup, 'validateChangedPath').mockImplementation(() => {
 		form.startup.validationStatus = 'valid';
 	});
 	try {

@@ -28,6 +28,7 @@ import type {
   AgentNativeActivityProbe,
   AgentNativeSessionAccess,
 } from './native-history.js';
+import type { AgentUsageHistory } from './usage-history.js';
 
 export interface AgentIntegration {
   readonly descriptor: AgentDescriptor;
@@ -57,6 +58,7 @@ export interface AgentIntegration {
   readonly configurationValidation: AgentConfigurationValidation | null;
   readonly sessionConfiguration: AgentSessionConfigurationUpdates | null;
   readonly projectPathUpdates: AgentProjectPathUpdates | null;
+  readonly usageHistory: AgentUsageHistory | null;
 }
 
 export interface AgentIntegrationClass {

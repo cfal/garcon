@@ -19,6 +19,7 @@ describe('sidebar mark all as read menu', () => {
 			onShowScheduledPrompts: vi.fn(),
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
+			onShowUsage: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 

@@ -12,5 +12,6 @@ export * from './contracts/producer.js';
 export * from './contracts/resources.js';
 export * from './contracts/services.js';
 export * from './contracts/transcript.js';
+export * from './contracts/usage-history.js';
 export * from './errors.js';
 export * from './native-message-source.js';

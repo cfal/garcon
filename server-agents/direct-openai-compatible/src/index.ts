@@ -62,6 +62,7 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
   readonly nativeSessions;
   readonly sessionConfiguration = null;
   readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
+  readonly usageHistory = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;

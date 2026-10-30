@@ -76,6 +76,7 @@ describe('Chromium view-group navigation', () => {
           'git-views',
           'singleton:files',
           'singleton:tickets',
+          'singleton:usage',
           'chat-views',
           'github-views',
           'new-terminal',
@@ -152,7 +153,7 @@ describe('Chromium view-group navigation', () => {
         }
         for (const group of [
           { id: 'git-views', label: 'Git', inlineCount: 1 },
-          { id: 'chat-views', label: 'Chat Views', inlineCount: 4 },
+          { id: 'chat-views', label: 'Chat Views', inlineCount: 5 },
         ]) {
           await setTitlebarWidth(220);
           await controls.getByRole('button', { name: 'Add to window', exact: true }).click();

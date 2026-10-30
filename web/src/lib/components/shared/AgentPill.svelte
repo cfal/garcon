@@ -4,22 +4,15 @@
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
 	} from '$shared/agents';
+	import { agentProviderStyle } from '$lib/agents/agent-provider-style';
 
 	const DEFAULT_VARIANT = 'border-border bg-muted text-foreground';
-	const VARIANTS: Readonly<Record<string, string>> = {
-		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
-		codex: 'border-provider-codex-border bg-provider-codex-bg text-provider-codex-foreground',
-		cursor: 'border-provider-cursor-border bg-provider-cursor-bg text-provider-cursor-foreground',
-		opencode:
-			'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
-		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
-		factory:
-			'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
-		pi: 'border-provider-pi-border bg-provider-pi-bg text-provider-pi-foreground',
-		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: DEFAULT_VARIANT,
-		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: DEFAULT_VARIANT,
-		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: DEFAULT_VARIANT,
-	};
+	// Direct agents are styled neutrally and never borrow their fallback agent's provider style.
+	const NEUTRAL_AGENT_IDS: ReadonlySet<string> = new Set([
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+	]);
 </script>
 
 <script lang="ts">
@@ -53,8 +46,12 @@
 
 	const resolvedLabel = $derived(agentLabelFor(agentId, label ?? agentId));
 	const variant = $derived.by(() => {
-		if (appearance === 'neutral') return DEFAULT_VARIANT;
-		return VARIANTS[agentId] ?? VARIANTS[fallbackAgentId ?? ''] ?? DEFAULT_VARIANT;
+		if (appearance === 'neutral' || NEUTRAL_AGENT_IDS.has(agentId)) return DEFAULT_VARIANT;
+		return (
+			agentProviderStyle(agentId)?.pillClass ??
+			agentProviderStyle(fallbackAgentId ?? '')?.pillClass ??
+			DEFAULT_VARIANT
+		);
 	});
 	const classes = $derived(
 		cn(

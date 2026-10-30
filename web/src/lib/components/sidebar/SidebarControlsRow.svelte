@@ -18,6 +18,7 @@
 	import Settings from '@lucide/svelte/icons/settings';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import Braces from '@lucide/svelte/icons/braces';
+	import ChartSpline from '@lucide/svelte/icons/chart-spline';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import FolderTree from '@lucide/svelte/icons/folder-tree';
@@ -60,6 +61,7 @@
 		onShowScheduledPrompts: () => void;
 		onShowPreambles: () => void;
 		onShowSnippets: () => void;
+		onShowUsage: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -90,6 +92,7 @@
 		onShowScheduledPrompts,
 		onShowPreambles,
 		onShowSnippets,
+		onShowUsage,
 		onShowSettings,
 	}: SidebarControlsRowProps = $props();
 
@@ -282,6 +285,10 @@
 				<DropdownMenuItem onclick={onShowSnippets}>
 					<Braces class="h-3.5 w-3.5" />
 					{m.snippets_title()}
+				</DropdownMenuItem>
+				<DropdownMenuItem onclick={onShowUsage}>
+					<ChartSpline class="h-3.5 w-3.5" />
+					{m.workspace_surface_usage()}
 				</DropdownMenuItem>
 				<DropdownMenuItem onclick={onShowSettings}>
 					<Settings class="h-3.5 w-3.5" />

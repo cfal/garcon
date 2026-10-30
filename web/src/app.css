@@ -89,6 +89,10 @@
 	--color-chat-board-card-hover: color-mix(in oklab, hsl(var(--card)) 94%, hsl(var(--accent)));
 	--color-chat-board-card-border: hsl(var(--border));
 	--color-chat-board-drop: color-mix(in oklab, hsl(var(--accent)) 14%, hsl(var(--muted)));
+	--color-usage-input: color-mix(in oklab, hsl(var(--foreground)) 58%, hsl(var(--background)));
+	--color-usage-cache-read: color-mix(in oklab, hsl(var(--foreground)) 26%, hsl(var(--background)));
+	--color-usage-cache-write: color-mix(in oklab, hsl(var(--foreground)) 74%, hsl(var(--background)));
+	--color-usage-output: hsl(var(--foreground));
 
 	--color-sidebar: hsl(var(--sidebar-background));
 	--color-sidebar-foreground: hsl(var(--sidebar-foreground));

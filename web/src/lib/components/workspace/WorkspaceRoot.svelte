@@ -492,6 +492,7 @@
 			'chat-canvas': m.workspace_surface_chat_canvas(),
 			'chat-board': m.workspace_surface_chat_board(),
 			tickets: m.tickets_title(),
+			usage: m.workspace_surface_usage(),
 		};
 		return labels[surface.kind];
 	}
