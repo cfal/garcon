@@ -176,6 +176,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.textEditorOpenPlacement).toBe('same-window');
 		expect(store.imageViewerOpenPlacement).toBe('same-window');
 		expect(store.markdownViewerOpenPlacement).toBe('same-window');
+		expect(store.forkOpenPlacement).toBe('split-auto');
 		expect(store.terminalFontSize).toBe('default');
 		expect(store.hiddenToolTypes).toEqual([]);
 		expect(store.steerWithCtrlEnter).toBe(true);
@@ -880,6 +881,26 @@ describe('LocalSettingsStore', () => {
 
 		store.destroy();
 		restored.destroy();
+	});
+
+	it('persists the fork opening preference and rejects unknown values', () => {
+		const store = createLocalSettingsStore();
+		store.set('forkOpenPlacement', 'split-below');
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ forkOpenPlacement: 'split-below' });
+		const restored = createLocalSettingsStore();
+		expect(restored.forkOpenPlacement).toBe('split-below');
+		store.destroy();
+		restored.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ forkOpenPlacement: 'sideways' }),
+		);
+		const invalid = createLocalSettingsStore();
+		expect(invalid.forkOpenPlacement).toBe('split-auto');
+		invalid.destroy();
 	});
 
 	it('defaults missing file opening preferences to the same window', () => {

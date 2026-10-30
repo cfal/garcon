@@ -1,5 +1,6 @@
 import * as m from '$lib/paraglide/messages.js';
 import { createRandomId } from '$lib/utils/random-id.js';
+import type { ForkOpenPlacementPreference } from '$lib/stores/local-settings.svelte.js';
 import {
 	chatViewSurfaceId,
 	type ChatViewSurfaceId,
@@ -72,6 +73,11 @@ interface WorkspaceChatPlacementServiceDeps {
 	present(surfaceId: string): void;
 }
 
+type OpenChatInNewWindowMutation = Extract<
+	WorkspaceLayoutMutation,
+	{ type: 'open-chat-in-new-window' }
+>;
+
 interface WorkspaceChatPlacementPlan {
 	destination: WorkspaceChatPlacement | null;
 	mutations: readonly WorkspaceLayoutMutation[];
@@ -114,9 +120,13 @@ export class WorkspaceChatPlacementService {
 
 	// Anchors on the source chat's window rather than focus, so a fork started from a sidebar
 	// menu or a background window still lands next to the chat it branched from. An unplaced
-	// source anchors on the last focused window. When no new window fits, the fork replaces the
-	// anchor's chat, as it always does in the single mobile presentation.
-	async openFork(chatId: string, sourceChatId: string): Promise<ChatViewSurfaceId> {
+	// source anchors on the last focused window. When the preferred split does not fit, the fork
+	// replaces the anchor's chat, as it always does in the single mobile presentation.
+	async openFork(
+		chatId: string,
+		sourceChatId: string,
+		placement: ForkOpenPlacementPreference,
+	): Promise<ChatViewSurfaceId> {
 		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
 		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
 		const destination = await this.#commitPlacement((latest) => {
@@ -140,13 +150,14 @@ export class WorkspaceChatPlacementService {
 			if (this.deps.windowReservations.has(anchorWindowId)) {
 				return { destination: null, mutations: [] };
 			}
-			const opening = this.#forkWindowMutations(
-				latest,
+			const opening = this.#forkWindowMutations(latest, placement, {
+				type: 'open-chat-in-new-window',
 				chatId,
-				anchorWindowId,
+				targetWindowId: anchorWindowId,
+				edge: 'right',
 				newWindowId,
 				partitionId,
-			);
+			});
 			if (opening) {
 				return {
 					destination: { surfaceId: chatViewSurfaceId(newWindowId), windowId: newWindowId },
@@ -290,42 +301,35 @@ export class WorkspaceChatPlacementService {
 		};
 	}
 
-	// Prefers halving the source beside it, then adding an equal-width column to the source's row,
-	// so forking one of several columns too narrow to halve still adds a column, then halving it
-	// below.
+	// Splitting right halves the source beside it, or adds an equal-width column to its row when
+	// the source is too narrow to halve; splitting below halves it downward. Auto tries both in
+	// that order. Null means the fork replaces the source.
 	#forkWindowMutations(
 		latest: WorkspaceLayoutSnapshot,
-		chatId: string,
-		anchorWindowId: WorkspaceWindowId,
-		newWindowId: WorkspaceWindowId,
-		partitionId: WorkspacePartitionId,
+		placement: ForkOpenPlacementPreference,
+		beside: OpenChatInNewWindowMutation,
 	): WorkspaceLayoutMutation[] | null {
-		const open = (edge: WorkspaceWindowEdge): WorkspaceLayoutMutation => ({
-			type: 'open-chat-in-new-window',
-			chatId,
-			targetWindowId: anchorWindowId,
-			edge,
-			newWindowId,
-			partitionId,
-		});
+		if (placement === 'replace') return null;
 		const admission = (edge: WorkspaceWindowEdge) =>
-			this.deps.resolveSplitAdmission(latest, { targetWindowId: anchorWindowId, edge });
-		const beside = admission('right');
-		if (beside?.allowed) return [open('right')];
-		if (beside?.reason === 'too-small') {
-			const ratios = this.#balancedRowRatios(latest, open('right'), newWindowId);
-			if (ratios) return [open('right'), ...ratios];
+			this.deps.resolveSplitAdmission(latest, { targetWindowId: beside.targetWindowId, edge });
+		if (placement !== 'split-below') {
+			const besideAdmission = admission('right');
+			if (besideAdmission?.allowed) return [beside];
+			if (besideAdmission?.reason === 'too-small') {
+				const ratios = this.#balancedRowRatios(latest, beside);
+				if (ratios) return [beside, ...ratios];
+			}
+			if (placement === 'split-right') return null;
 		}
-		return admission('bottom')?.allowed ? [open('bottom')] : null;
+		return admission('bottom')?.allowed ? [{ ...beside, edge: 'bottom' }] : null;
 	}
 
 	#balancedRowRatios(
 		latest: WorkspaceLayoutSnapshot,
-		opening: WorkspaceLayoutMutation,
-		newWindowId: WorkspaceWindowId,
+		opening: OpenChatInNewWindowMutation,
 	): WorkspaceLayoutMutation[] | null {
 		const opened = reduceWorkspaceLayout(latest, [opening]).desktopRoot;
-		const balanced = balanceWindowRow(opened, newWindowId);
+		const balanced = balanceWindowRow(opened, opening.newWindowId);
 		if (!balanced || !this.deps.fitsWorkspaceHost(balanced)) return null;
 		const openedRatios = new Map(
 			computeWindowRects(opened).partitions.map(({ partition }) => [partition.id, partition.ratio]),

@@ -653,6 +653,13 @@ describe('Settings', () => {
 			expect(onLocalSet).toHaveBeenCalledWith('textEditorOpenPlacement', 'same-window');
 			expect(onLocalSet).toHaveBeenCalledWith('imageViewerOpenPlacement', 'same-window');
 			expect(onLocalSet).toHaveBeenCalledWith('markdownViewerOpenPlacement', 'same-window');
+			const forkPlacement = screen.getByRole('combobox', { name: 'Forked chats' });
+			expect((forkPlacement as HTMLSelectElement).value).toBe('split-auto');
+			expect(
+				[...(forkPlacement as HTMLSelectElement).options].map((option) => option.text),
+			).toEqual(['Split (auto)', 'Split right', 'Split below', 'Replace source chat']);
+			await fireEvent.change(forkPlacement, { target: { value: 'replace' } });
+			expect(onLocalSet).toHaveBeenCalledWith('forkOpenPlacement', 'replace');
 			expect(screen.queryByText('Chat grouping')).toBeNull();
 			expect(screen.queryByText('Combine nested paths')).toBeNull();
 			expect(

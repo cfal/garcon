@@ -1,4 +1,5 @@
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
+import type { ForkOpenPlacementPreference } from '$lib/stores/local-settings.svelte.js';
 import { SvelteSet } from 'svelte/reactivity';
 import type { WorkspaceFiles, WorkspaceSingletons, WorkspaceTerminals } from './workspace-resource-ports.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
@@ -431,8 +432,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#chatPlacement.openInNewWindow(chatId, targetWindowId, edge);
 	}
 
-	openForkedChat(chatId: string, sourceChatId: string): Promise<ChatViewSurfaceId> {
-		return this.#chatPlacement.openFork(chatId, sourceChatId);
+	openForkedChat(chatId: string, sourceChatId: string, placement: ForkOpenPlacementPreference) {
+		return this.#chatPlacement.openFork(chatId, sourceChatId, placement);
 	}
 
 	async openChatBeside(

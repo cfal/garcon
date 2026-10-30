@@ -444,9 +444,11 @@
 	}
 
 	function handleOpenForkedChat(chatId: string, sourceChatId: string): void {
-		void workspace.openForkedChat(chatId, sourceChatId).catch((error) => {
-			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-		});
+		void workspace
+			.openForkedChat(chatId, sourceChatId, localSettings.forkOpenPlacement)
+			.catch((error) => {
+				notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+			});
 	}
 
 	function handleNewChat() {
