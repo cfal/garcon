@@ -16,12 +16,50 @@ const HEAD = '3f9c2ab41d6e0c7b8a5f2e1d9c4b3a2f1e0d9c8b';
 
 // Synthetic pull requests covering each inbox group and review state.
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+// Long enough that a phone clips it behind Show more.
+const DESCRIPTION = [
+  '## Summary',
+  'Carries the paused flag through queue restoration so a reconnect never resumes a paused queue.',
+  '## Changes',
+  ...Array.from({ length: 8 }, (_, index) => `- Synthetic change ${index + 1} keeps queue state consistent.`),
+  '## Testing',
+  'Adds reconnect and replacement-session cases to the synthetic queue suite.',
+].join('\n\n');
+
 const PULLS = [
-  { number: 128, title: 'Keep queue controls stable during reconnect', author: { login: 'author-one', __typename: 'User' }, reviewRequests: ['synthetic-viewer'], checks: 'SUCCESS', additions: 1465, deletions: 599, headRefOid: HEAD, headRefName: 'fix/queue', createdAt: minutesAgo(26), updatedAt: minutesAgo(20) },
+  { number: 128, title: 'Keep queue controls stable during reconnect', body: DESCRIPTION, author: { login: 'author-one', __typename: 'User' }, reviewRequests: ['synthetic-viewer'], checks: 'SUCCESS', additions: 1465, deletions: 599, headRefOid: HEAD, headRefName: 'fix/queue', createdAt: minutesAgo(26), updatedAt: minutesAgo(20) },
   { number: 131, title: 'Add search to the project picker', author: { login: 'author-two', __typename: 'User' }, reviewRequests: ['synthetic-viewer'], checks: 'PENDING', headRefName: 'feat/picker-search', createdAt: minutesAgo(130), updatedAt: minutesAgo(90) },
   { number: 133, title: 'Document executor reconnect limits', author: { login: 'synthetic-viewer', __typename: 'User' }, checks: 'SUCCESS', headRefOid: HEAD, headRefName: 'docs/reconnect', createdAt: minutesAgo(300), updatedAt: minutesAgo(240) },
   { number: 135, title: 'Speed up transcript paging', author: { login: 'author-three', __typename: 'User' }, teamReviewRequested: true, checks: 'FAILURE', headRefName: 'perf/paging', createdAt: minutesAgo(1500), updatedAt: minutesAgo(600) },
   { number: 136, title: 'Bump synthetic dependencies', author: { login: 'synthetic-bot', __typename: 'Bot' }, headRefName: 'deps/bump', createdAt: minutesAgo(2900), updatedAt: minutesAgo(2800) },
+];
+
+// Nested paths longer than a phone header exercise base-name truncation; the long middle file
+// pushes the last file below the fold so the file jump menu has to scroll to it.
+const RESTORE_LINES = Array.from({ length: 60 }, (_, index) => `+  const entry${index} = snapshot.entries[${index}];`);
+const PULL_FILES = [
+  {
+    path: 'example.txt', additions: 1, deletions: 1,
+    patch: 'diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -1 +1 @@\n-initial\n+changed',
+  },
+  {
+    path: 'web/src/lib/synthetic/queue/reconnect-controls.svelte.ts', additions: RESTORE_LINES.length + 1, deletions: 1,
+    patch: [
+      'diff --git a/web/src/lib/synthetic/queue/reconnect-controls.svelte.ts b/web/src/lib/synthetic/queue/reconnect-controls.svelte.ts',
+      '--- a/web/src/lib/synthetic/queue/reconnect-controls.svelte.ts',
+      '+++ b/web/src/lib/synthetic/queue/reconnect-controls.svelte.ts',
+      `@@ -1,2 +1,${RESTORE_LINES.length + 2} @@`,
+      ' export function restoreQueue(snapshot) {',
+      '-  return snapshot.entries;',
+      ...RESTORE_LINES,
+      '+  return { paused: snapshot.paused ?? false };',
+      ' }',
+    ].join('\n'),
+  },
+  {
+    path: 'test/synthetic/session-replacement.test.ts', additions: 2, deletions: 0,
+    patch: 'diff --git a/test/synthetic/session-replacement.test.ts b/test/synthetic/session-replacement.test.ts\n--- a/test/synthetic/session-replacement.test.ts\n+++ b/test/synthetic/session-replacement.test.ts\n@@ -1 +1,3 @@\n describe(\'session\', () => {});\n+describe(\'replacement session\', () => {});\n+describe(\'paused queue\', () => {});',
+  },
 ];
 
 // The shell agent prints this as its final response; #131 keeps reviewing.
@@ -54,8 +92,10 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     };
 
     phase('open Pull Requests from Github before connecting');
-    // Wide enough for the inbox list and detail to stay side by side next to the review chat.
-    await page.setViewportSize({ width: 1920, height: 1080 });
+    // Wide enough for the inbox list and detail to stay side by side next to the review chat. Desktop
+    // heights stay within the soft-keyboard threshold of the phone height, so switching to the phone
+    // layout reads as a width change and keeps the bottom navigation.
+    await page.setViewportSize({ width: 1920, height: 900 });
     await page.goto(integration.garcon.baseUrl);
     await page.locator('[data-workspace-window-add-group-trigger="github-views"]').first().waitFor({ timeout: 30_000 });
     await collapseCanonicalFilesWindow(page);
@@ -65,6 +105,7 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     await page.keyboard.press('Escape');
     await clickWorkspaceWindowAddAction(page, 'Open Pull Requests');
     const panel = page.locator('[data-workspace-surface-id="singleton:pull-requests"][aria-hidden="false"]');
+    const mobileNavigation = page.getByRole('navigation', { name: 'Workspace navigation' });
     await panel.locator('[data-pr-inbox-empty]').waitFor();
     await capture('inbox-empty-desktop');
     await panel.locator('[data-pr-inbox-connect]').click();
@@ -133,11 +174,10 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     await browserExpect(panel.getByRole('button', { name: 'Re-run', exact: true })).toBeDisabled();
     await capture('review-history-error-desktop');
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.locator('[data-mobile-current-chat-menu]').getByRole('button').click();
-    await page.getByRole('menuitem', { name: 'Open PRs', exact: true }).click();
+    await mobileNavigation.getByRole('button', { name: 'PRs', exact: true }).click();
     await browserExpect(panel.locator('[data-pr-review-history-error]')).toBeVisible();
     await capture('review-history-error-mobile');
-    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.setViewportSize({ width: 1920, height: 900 });
     rejectHistory = false;
     await panel.locator('[data-pr-review-history-error]').getByRole('button', { name: 'Retry' }).click();
     await panel.locator('[data-pr-review-tab]').getByText('Queue pause is lost on reconnect.').waitFor();
@@ -164,20 +204,70 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     await capture('repositories-desktop');
     await page.keyboard.press('Escape');
 
-    phase('mobile inbox');
+    phase('mobile review from the PRs tab');
     await page.setViewportSize({ width: 390, height: 844 });
-    await browserExpect(panel.locator('[data-pr-repositories-button]')).toBeVisible();
+    const prsTab = mobileNavigation.getByRole('button', { name: 'PRs', exact: true });
+    await prsTab.click();
+    await browserExpect(prsTab).toHaveAttribute('aria-current', 'page');
+    // The detail is a drill-down: one header with a way back, and no transient Back/Close bar or inbox chrome.
+    const back = panel.getByRole('button', { name: 'All pull requests' });
+    await browserExpect(back).toBeVisible();
+    await browserExpect(panel.locator('[data-pr-inbox-header]')).toBeHidden();
+    await browserExpect(panel.getByRole('button', { name: 'Close view', exact: true })).toHaveCount(0);
+    expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await panel.locator('[data-pr-tab="review"]').click();
+    await panel.locator('[data-pr-review-tab]').getByText('Queue pause is lost on reconnect.').waitFor();
+    // Secondary actions live behind the compact bar's menu.
+    await panel.getByRole('button', { name: 'Pull request actions' }).click();
+    await browserExpect(page.getByRole('menuitem', { name: 'Copy link' })).toBeVisible();
+    await capture('inbox-actions-menu-mobile');
+    await page.keyboard.press('Escape');
+    const description = panel.locator('[data-pr-description]');
+    await browserExpect(description.locator('[data-pr-description-clipped="true"]')).toHaveCount(1);
     await capture('inbox-detail-mobile');
+    await description.getByRole('button', { name: 'Show more' }).click();
+    await browserExpect(description.getByText('Adds reconnect and replacement-session cases')).toBeInViewport();
+    await capture('inbox-description-expanded-mobile');
+    await description.getByRole('button', { name: 'Show less' }).click();
+    // The identity scrolls away under the compact bar while the tabs stay pinned beneath it.
+    await panel.locator('[data-pr-detail-scroll]').evaluate(element => element.scrollTo(0, element.scrollHeight));
+    const navBounds = (await panel.locator('[data-pr-nav-bar]').boundingBox())!;
+    const tabBounds = (await panel.getByRole('tablist').boundingBox())!;
+    expect(Math.abs(tabBounds.y - (navBounds.y + navBounds.height))).toBeLessThanOrEqual(1);
+    await capture('inbox-detail-scrolled-mobile');
+    await panel.locator('[data-pr-tab="changes"]').click();
+    const longFile = 'web/src/lib/synthetic/queue/reconnect-controls.svelte.ts';
+    await panel.locator('[data-pr-detail]').getByText('reconnect-controls.svelte.ts').first().waitFor();
+    await capture('inbox-changes-mobile');
+    await panel.locator('[data-pr-file-jump]').click();
+    const jumpTarget = page.locator(`[data-pr-file-jump-item="test/synthetic/session-replacement.test.ts"]`);
+    await browserExpect(jumpTarget).toBeVisible();
+    await browserExpect(page.locator(`[data-pr-file-jump-item="${longFile}"]`)).toContainText('reconnect-controls.svelte.ts');
+    await capture('inbox-file-jump-mobile');
+    const lastFileHeader = panel.locator('[data-git-virtual-row-window]').getByText('session-replacement.test.ts', { exact: true });
+    expect(await lastFileHeader.count()).toBe(0);
+    await jumpTarget.click();
+    await browserExpect(lastFileHeader).toBeInViewport();
+    await capture('inbox-file-jumped-mobile');
+    // Scrolling back into the long file keeps its header pinned above its rows.
+    await panel.locator('[data-git-virtual-diff-root]').evaluate(element => element.scrollBy(0, -400));
+    await browserExpect(panel.locator(`[data-git-pinned-file-header][data-file-path="${longFile}"]`)).toBeVisible();
+    await capture('inbox-pinned-file-header-mobile');
+    await panel.locator('[data-pr-tab="checks"]').click();
+    await panel.getByText('Unit tests', { exact: true }).waitFor();
+    await capture('inbox-checks-mobile');
+    await back.click();
+    await browserExpect(needsReview).toBeVisible();
+    // Returning lands on the row the user left.
+    await browserExpect(needsReview.locator('[data-pr-inbox-row$="#128"]')).toBeFocused();
+    await capture('inbox-mobile');
     await panel.locator('[data-pr-repositories-button]').click();
     await page.locator('[data-pr-repositories-dialog]').waitFor();
     await capture('repositories-mobile');
     await page.keyboard.press('Escape');
-    await panel.getByRole('button', { name: 'All pull requests' }).click();
-    await browserExpect(needsReview).toBeVisible();
-    await capture('inbox-mobile');
 
     phase('manage the connected repository directly in GitHub settings');
-    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
@@ -192,7 +282,7 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     await browserExpect(settingsRepositories.getByRole('switch', { name: 'Review acme/app automatically' })).toBeVisible();
     expect(await settings.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     await capture('github-repositories-settings-mobile');
-    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.setViewportSize({ width: 1440, height: 900 });
     phase('opt into automatic posting from Settings');
     await settingsRepositories.locator('[data-pr-repository="acme/app"]').getByRole('button', { name: 'Edit acme/app' }).click();
     const autoPost = connectForm.getByRole('checkbox', { name: 'Post reviews to GitHub automatically' });
@@ -223,8 +313,7 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     await browserExpect(settings).toHaveCount(0);
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.locator('[data-mobile-current-chat-menu]').getByRole('button').click();
-    await page.getByRole('menuitem', { name: 'Open PRs', exact: true }).click();
+    await mobileNavigation.getByRole('button', { name: 'PRs', exact: true }).click();
     await panel.locator('[data-pr-repositories-button]').click();
     await repositories.locator('[data-pr-repository="acme/app"]').getByRole('button', { name: 'Edit acme/app' }).click();
     await browserExpect(autoPost).toBeChecked();
@@ -294,7 +383,7 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     await client.post('/api/v1/pull-request-reviews/scan', { repositoryId });
     await browserExpect.poll(async () => (await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews'))
       .inbox.some(entry => entry.pull.number === 140)).toBe(false);
-    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.setViewportSize({ width: 1920, height: 900 });
     await panel.locator('[data-pr-repositories-button]').click();
     await repositories.getByRole('button', { name: 'Show all unresolved posts' }).click();
     const reconcile = repositories.locator(`[data-pr-reconcile-run="${recovery.run.id}"]`);
@@ -303,6 +392,7 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     await capture('closed-review-recovery-desktop');
     await page.keyboard.press('Escape');
     await page.setViewportSize({ width: 390, height: 844 });
+    await panel.getByRole('button', { name: 'All pull requests' }).click();
     await panel.locator('[data-pr-repositories-button]').click();
     await repositories.getByRole('button', { name: 'Show all unresolved posts' }).click();
     await reconcile.scrollIntoViewIfNeeded();
@@ -316,7 +406,7 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
 
     phase('distinguish same-name connections and abandon an unreconcilable post');
     await page.keyboard.press('Escape');
-    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.setViewportSize({ width: 1920, height: 900 });
     const enterpriseProject = join(project, 'other-host');
     await mkdir(enterpriseProject);
     await initializeFixtureRepository(enterpriseProject);
@@ -336,7 +426,7 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     await writeFile(githubFixturePath, JSON.stringify({ ...githubFixture, pulls: PULLS }));
     await client.post('/api/v1/pull-request-reviews/scan', { repositoryId });
     await browserExpect.poll(async () => (await client.get<PullRequestReviewsSnapshot>('/api/v1/pull-request-reviews')).inbox.some(entry => entry.pull.number === 141)).toBe(false);
-    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.setViewportSize({ width: 1920, height: 900 });
     await panel.locator('[data-pr-repositories-button]').click();
     await browserExpect(repositories.getByRole('button', { name: 'Edit acme/app (github.com)' })).toBeVisible();
     await browserExpect(repositories.getByRole('button', { name: 'Edit acme/app (git.example.invalid)' })).toBeVisible();
@@ -377,6 +467,8 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
       await symlink(process.execPath, join(bin, 'bun'));
       await writeFile(join(dirs.project, 'gh-fixture.json'), JSON.stringify({
         label: 'synthetic-viewer', owner: 'acme', repository: 'app', pulls: PULLS,
+        files: PULL_FILES.map(({ path, additions, deletions }) => ({ path, additions, deletions })),
+        diff: PULL_FILES.map(file => file.patch).join('\n'),
         statusChecks: [
           { __typename: 'CheckRun', name: 'Unit tests', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://git.example.invalid/acme/app/actions/unit-tests' },
           { __typename: 'CheckRun', name: 'Type check', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://git.example.invalid/acme/app/actions/type-check' },

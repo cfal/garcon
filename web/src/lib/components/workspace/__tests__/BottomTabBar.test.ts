@@ -19,6 +19,7 @@ describe('BottomTabBar', () => {
 			m.mobile_menu(),
 			m.sidebar_navigation_chat(),
 			m.sidebar_navigation_git(),
+			m.workspace_surface_pull_requests_short(),
 			m.sidebar_navigation_files(),
 			m.sidebar_navigation_terminal(),
 		]);
@@ -31,6 +32,7 @@ describe('BottomTabBar', () => {
 		for (const [id, label] of [
 			['chat', m.sidebar_navigation_chat()],
 			['git', m.sidebar_navigation_git()],
+			['pull-requests', m.workspace_surface_pull_requests_short()],
 			['files', m.sidebar_navigation_files()],
 			['terminal', m.sidebar_navigation_terminal()],
 		]) {

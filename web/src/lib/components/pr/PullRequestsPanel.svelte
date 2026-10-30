@@ -1,8 +1,7 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Search from '@lucide/svelte/icons/search';
 	import Settings2 from '@lucide/svelte/icons/settings-2';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
@@ -67,8 +66,12 @@
 		isMobile ? 'narrow' : containerPresentationForWidth(containerWidth, containerBreakpoints),
 	);
 	let listViewportRef = $state<HTMLElement | null>(null);
+	let listElement = $state<HTMLElement | null>(null);
+	let detailElement = $state<HTMLElement | null>(null);
 	const listHidden = $derived(containerPresentation === 'narrow' && hasSelection);
 	const detailHidden = $derived(containerPresentation === 'narrow' && !hasSelection);
+	const iconButtonClass =
+		'rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-50 pointer-coarse:p-2.5';
 
 	$effect(() => {
 		const region = listViewportRef;
@@ -114,6 +117,25 @@
 		pullRequests.select(entry);
 		const chatId = entry.latestRun?.chatAvailable ? entry.latestRun.chatId : null;
 		if (chatId && !isMobile) onOpenChat(chatId);
+		// The selected row becomes inert in a narrow drill-down, so focus follows into the detail.
+		if (containerPresentation === 'narrow') {
+			void tick().then(() =>
+				detailElement?.querySelector<HTMLElement>('[data-pr-back]')?.focus({ preventScroll: true }),
+			);
+		}
+	}
+
+	// Dismissing removes the focused control, so focus returns to the row the user left; in a
+	// narrow drill-down this also scrolls that row back into view after the list was hidden.
+	function returnToInbox(): void {
+		const key = pullRequests.selectedKey;
+		pullRequests.clearSelection();
+		if (!key) return;
+		void tick().then(() =>
+			listElement
+				?.querySelector<HTMLElement>(`[data-pr-inbox-row="${CSS.escape(key)}"]`)
+				?.focus({ preventScroll: false }),
+		);
 	}
 </script>
 
@@ -123,7 +145,14 @@
 	data-pr-layout={containerPresentation}
 	{@attach observePanelWidth}
 >
-	<div class="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
+	<!-- A narrow detail is a drill-down whose own header carries the way back, so inbox chrome steps aside. -->
+	<div
+		class={cn(
+			'flex shrink-0 items-center gap-1 border-b border-border px-3 py-2',
+			listHidden && 'hidden',
+		)}
+		data-pr-inbox-header
+	>
 		<h2 class="min-w-0 truncate text-base font-semibold text-foreground">
 			{m.pull_requests_title()}
 		</h2>
@@ -142,7 +171,7 @@
 		</p>
 		<button
 			type="button"
-			class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-50"
+			class={iconButtonClass}
 			aria-label={m.pull_requests_refresh()}
 			title={m.pull_requests_refresh()}
 			disabled={reviews.repositories.length === 0 || reviews.isScanning}
@@ -154,7 +183,7 @@
 		</button>
 		<button
 			type="button"
-			class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+			class={iconButtonClass}
 			aria-label={m.pull_request_repositories()}
 			title={m.pull_request_repositories()}
 			onclick={() => (repositoriesOpen = true)}
@@ -189,6 +218,7 @@
 				)}
 				aria-hidden={listHidden}
 				inert={listHidden}
+				bind:this={listElement}
 				data-pr-list
 			>
 				<label
@@ -304,27 +334,17 @@
 				class={cn('flex h-full min-h-0 min-w-0 flex-1 flex-col', detailHidden && 'hidden')}
 				aria-hidden={detailHidden}
 				inert={detailHidden}
+				bind:this={detailElement}
 				data-pr-detail
 			>
 				{#if hasSelection}
-					{#if containerPresentation === 'narrow'}
-						<button
-							type="button"
-							class="flex flex-shrink-0 items-center gap-1 border-b border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none"
-							onclick={() => pullRequests.clearSelection()}
-						>
-							<ArrowLeft class="h-3.5 w-3.5" />
-							{m.pull_requests_all()}
-						</button>
-					{/if}
 					<div class="min-h-0 flex-1">
 						<PullRequestDetailPanel
 							controller={pullRequests}
+							presentation={containerPresentation}
 							{currentTime}
 							{onOpenChat}
-							onClose={containerPresentation === 'narrow'
-								? undefined
-								: () => pullRequests.clearSelection()}
+							onDismiss={returnToInbox}
 						/>
 					</div>
 				{:else}

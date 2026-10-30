@@ -68,6 +68,7 @@ describe('PullRequestVirtualDiffSurface', () => {
 			collapsedFiles: new Set<string>(),
 			threadsById: new Map(),
 			threadCountByFile: new Map(),
+			scrollToRequest: null,
 			onToggleViewed: vi.fn(),
 			onToggleCollapsed: vi.fn(),
 		});

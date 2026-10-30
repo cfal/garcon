@@ -2,86 +2,66 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import X from '@lucide/svelte/icons/x';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import ExternalLink from '@lucide/svelte/icons/external-link';
-	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
-	import type { PullRequestSummary } from '$lib/api/pull-requests';
-	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp';
-	import { checksStateClass, checksStateLabel, prStateBadge } from './pr-display';
+	import type { PullRequestSummary as PullRequestSummaryData } from '$lib/api/pull-requests';
 	import Markdown from '$lib/components/rich-text/Markdown.svelte';
+	import PullRequestStateBadge from './PullRequestStateBadge.svelte';
+	import PullRequestSummary from './PullRequestSummary.svelte';
 
+	// The header of a detail shown beside the inbox; narrow layouts use the nav bar instead.
 	interface PullRequestHeaderProps {
-		pull: PullRequestSummary;
+		pull: PullRequestSummaryData;
 		repositoryName: string;
 		body: string;
 		currentTime: Date;
 		onRefresh: () => void;
-		onClose?: () => void;
+		onShowChecks: () => void;
+		onClose: () => void;
 	}
 
-	let { pull, repositoryName, body, currentTime, onRefresh, onClose }: PullRequestHeaderProps =
-		$props();
+	let {
+		pull,
+		repositoryName,
+		body,
+		currentTime,
+		onRefresh,
+		onShowChecks,
+		onClose,
+	}: PullRequestHeaderProps = $props();
 
-	const stateBadge = $derived(prStateBadge(pull.state, pull.isDraft));
-	const checksLabel = $derived(checksStateLabel(pull.checksState));
-	const age = $derived(formatRelativeTimestamp(pull.createdAt || pull.updatedAt, currentTime));
+	const iconButtonClass =
+		'rounded-md p-1 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none pointer-coarse:p-2';
 </script>
 
 <div class="border-b border-border px-4 pt-3 pb-3">
-	<div class="flex items-center gap-2 text-xs text-muted-foreground">
-		<span
-			class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium {stateBadge.class}"
-		>
-			<GitPullRequest class="h-3.5 w-3.5" />
-			{stateBadge.label}
-		</span>
+	<div class="mb-2 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+		<PullRequestStateBadge {pull} />
 		<span class="min-w-0 truncate">{repositoryName} #{pull.number}</span>
-		<span class="min-w-0 truncate font-mono">{pull.headRefName} → {pull.baseRefName}</span>
 		<div class="ml-auto flex shrink-0 items-center gap-0.5">
 			<button
 				type="button"
-				class="rounded-md p-1 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+				class={iconButtonClass}
 				onclick={onRefresh}
 				aria-label={m.common_refresh()}
 				title={m.common_refresh()}
 			>
-				<RefreshCw class="h-3.5 w-3.5" />
+				<RefreshCw class="h-3.5 w-3.5 pointer-coarse:h-4 pointer-coarse:w-4" />
 			</button>
-			{#if onClose}
-				<button
-					type="button"
-					class="rounded-md p-1 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-					onclick={onClose}
-					aria-label={m.pull_request_close()}
-				>
-					<X class="h-4 w-4" />
-				</button>
-			{/if}
+			<button
+				type="button"
+				class={iconButtonClass}
+				onclick={onClose}
+				aria-label={m.pull_request_close()}
+			>
+				<X class="h-4 w-4" />
+			</button>
 		</div>
 	</div>
-	<h2 class="mt-2 text-lg leading-snug font-semibold text-foreground">
-		<a
-			href={pull.url}
-			target="_blank"
-			rel="noreferrer noopener"
-			class="group rounded-sm underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-			title={m.pull_request_open_on_github()}
-		>
-			<!-- The word joiner keeps the icon on the line of the title's last word. -->
-			{pull.title}<span aria-hidden="true"
-				>&#8288;<ExternalLink
-					class="ml-1.5 inline-block h-4 w-4 align-[-0.125em] text-muted-foreground group-hover:text-foreground"
-				/></span
-			>
-		</a>
-	</h2>
-	<div class="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-		<span class="font-medium text-foreground">{pull.author}</span>
-		{#if age}<time datetime={pull.createdAt} title={age.tooltip}>{age.label}</time>{/if}
-		{#if checksLabel}<span class={checksStateClass(pull.checksState)}>{checksLabel}</span>{/if}
-	</div>
+	<PullRequestSummary {pull} {currentTime} {onShowChecks} />
 	{#if body.trim()}
 		<details class="mt-2 text-xs">
-			<summary class="cursor-pointer text-muted-foreground hover:text-foreground">
+			<summary
+				class="cursor-pointer text-muted-foreground hover:text-foreground pointer-coarse:py-1"
+			>
 				{m.pull_request_description()}
 			</summary>
 			<div class="mt-1 max-h-64 overflow-y-auto">

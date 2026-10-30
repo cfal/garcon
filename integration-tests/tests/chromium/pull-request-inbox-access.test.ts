@@ -33,10 +33,10 @@ test('mobile opens the global PR inbox despite a cached failed GitHub check', as
     await browserExpect(settings).toBeHidden();
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.locator('[data-mobile-current-chat-menu]').getByRole('button').click();
-    await browserExpect(page.getByRole('menuitem', { name: 'Open PRs', exact: true })).toBeVisible();
-    await capture('inbox-access-menu-mobile');
-    await page.getByRole('menuitem', { name: 'Open PRs', exact: true }).click();
+    const prsTab = page.getByRole('navigation', { name: 'Workspace navigation' }).getByRole('button', { name: 'PRs', exact: true });
+    await browserExpect(prsTab).toBeVisible();
+    await capture('inbox-access-tab-mobile');
+    await prsTab.click();
     const inbox = page.locator('[data-workspace-surface-id="singleton:pull-requests"][aria-hidden="false"]');
     await browserExpect(inbox.locator('[data-pr-inbox-connect]')).toBeVisible();
     expect(statusChecks).toBe(1);

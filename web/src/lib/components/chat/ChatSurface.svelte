@@ -160,7 +160,6 @@
 					onOpenTickets={() => void workspace.focusMobileSingleton('tickets')}
 					onOpenChatMap={() => void workspace.focusMobileSingleton('chat-map')}
 					onOpenCanvas={() => void workspace.focusMobileSingleton('chat-canvas')}
-					onOpenPullRequests={() => void workspace.focusMobileSingleton('pull-requests')}
 					onRename={() => selectedChat && chatActions.requestRename(selectedChat)}
 					onDetails={() => selectedChat && chatActions.requestDetails(selectedChat)}
 					onReload={() => selectedChat && chatActions.reload(selectedChat)}

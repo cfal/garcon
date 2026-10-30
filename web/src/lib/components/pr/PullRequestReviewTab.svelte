@@ -42,6 +42,16 @@
 					run.post.status !== 'too-long')),
 	);
 	const historyUnavailable = $derived(controller.isRunsLoading || controller.runsError !== null);
+	const actionClass =
+		'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60 pointer-coarse:px-3 pointer-coarse:py-2 pointer-coarse:text-sm';
+	const secondaryActionClass = cn(
+		actionClass,
+		'border border-border text-foreground hover:bg-accent',
+	);
+	const primaryActionClass = cn(
+		actionClass,
+		'bg-primary text-primary-foreground hover:bg-primary/90',
+	);
 	let pending = $state<'review' | 'stop' | 'post' | null>(null);
 	let actionError = $state<string | null>(null);
 
@@ -92,7 +102,7 @@
 				{#if run?.chatId && run.chatAvailable}
 					<button
 						type="button"
-						class="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+						class={secondaryActionClass}
 						onclick={() => onOpenChat(run.chatId!)}
 					>
 						<MessageSquare class="h-3.5 w-3.5" />
@@ -102,7 +112,7 @@
 				{#if canPost && run}
 					<button
 						type="button"
-						class="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
+						class={primaryActionClass}
 						disabled={pending !== null ||
 							historyUnavailable ||
 							controller.isRunLoading ||
@@ -121,7 +131,7 @@
 					{@const latest = entry.latestRun}
 					<button
 						type="button"
-						class="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
+						class={secondaryActionClass}
 						disabled={pending !== null}
 						onclick={() => act('stop', () => controller.reviews.stop(latest.id))}
 					>
@@ -131,12 +141,7 @@
 				{:else}
 					<button
 						type="button"
-						class={cn(
-							'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60',
-							run
-								? 'border border-border text-foreground hover:bg-accent'
-								: 'bg-primary text-primary-foreground hover:bg-primary/90',
-						)}
+						class={run ? secondaryActionClass : primaryActionClass}
 						disabled={pending !== null || historyUnavailable}
 						onclick={() =>
 							act('review', () => controller.reviews.review(entry.repositoryId, entry.pull.number))}
@@ -227,7 +232,7 @@
 								<button
 									type="button"
 									class={cn(
-										'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+										'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none pointer-coarse:py-2',
 										candidate.id === run?.id && 'bg-accent',
 									)}
 									aria-current={candidate.id === run?.id}

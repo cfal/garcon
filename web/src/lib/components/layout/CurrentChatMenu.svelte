@@ -28,7 +28,6 @@
 		onOpenTickets?: () => void;
 		onOpenChatMap?: () => void;
 		onOpenCanvas?: () => void;
-		onOpenPullRequests?: () => void;
 		onConfigurePreambles?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
@@ -53,7 +52,6 @@
 		onOpenTickets,
 		onOpenChatMap,
 		onOpenCanvas,
-		onOpenPullRequests,
 		onConfigurePreambles,
 		onRename,
 		onDetails,
@@ -89,7 +87,6 @@
 			{onOpenTickets}
 			{onOpenChatMap}
 			{onOpenCanvas}
-			{onOpenPullRequests}
 			{onConfigurePreambles}
 			{onRename}
 			{onDetails}

@@ -140,7 +140,6 @@ describe('ChatSurface mobile toolbar', () => {
 		expect(screen.queryByRole('menuitem', { name: m.share_button() })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: m.sidebar_chats_details() })).toBeNull();
 		expect(screen.getByRole('menuitem', { name: m.workspace_open_chat_map() })).toBeTruthy();
-		expect(screen.getByRole('menuitem', { name: m.workspace_open_pull_requests() })).toBeTruthy();
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_open_chat_canvas() }));
 		expect(workspace.focusMobileSingleton).toHaveBeenCalledWith('chat-canvas');
 	});
@@ -182,7 +181,6 @@ describe('ChatSurface mobile toolbar', () => {
 			for (const [kind, label] of [
 				['chat-map', m.workspace_open_chat_map()],
 				['chat-canvas', m.workspace_open_chat_canvas()],
-				['pull-requests', m.workspace_open_pull_requests()],
 			] as const) {
 				await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
 				await fireEvent.click(screen.getByRole('menuitem', { name: label }));

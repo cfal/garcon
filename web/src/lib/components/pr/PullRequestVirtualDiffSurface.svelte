@@ -17,6 +17,7 @@
 		collapsedFiles: ReadonlySet<string>;
 		threadsById: ReadonlyMap<string, PullRequestThreadData>;
 		threadCountByFile: ReadonlyMap<string, number>;
+		scrollToRequest: { filePath: string; token: number } | null;
 		onToggleViewed: (filePath: string) => void;
 		onToggleCollapsed: (filePath: string) => void;
 	}
@@ -28,6 +29,7 @@
 		collapsedFiles,
 		threadsById,
 		threadCountByFile,
+		scrollToRequest,
 		onToggleViewed,
 		onToggleCollapsed,
 	}: PullRequestVirtualDiffSurfaceProps = $props();
@@ -70,9 +72,9 @@
 	layoutIdentity={documentId}
 	reviewDocumentId={documentId}
 	{source}
-	pinFileHeaders={false}
+	pinFileHeaders={true}
 	{fontSize}
-	scrollToRequest={null}
+	{scrollToRequest}
 	onBodyDemand={() => undefined}
 	rowSnippet={renderRow}
 />
