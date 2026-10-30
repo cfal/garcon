@@ -98,7 +98,6 @@
 	setLocalSettings({
 		sendByShiftEnter: false,
 		get composerInputMode() { return composerInputMode; },
-		showQuickCommitTray: true,
 		get snippetTrigger() {
 			return snippetTrigger;
 		},

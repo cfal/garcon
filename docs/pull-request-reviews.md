@@ -5,7 +5,7 @@ chats and keeps each review's final response. Design discussion:
 [cfal/garcon#897](https://github.com/cfal/garcon/issues/897). This page
 describes what milestones 1 and 2 of that issue implement.
 
-The global inbox stays accessible from GitHub Views on desktop and Open PRs
+The global inbox stays accessible from the Github group on desktop and Open PRs
 in the mobile chat menu, regardless of the current chat's executor or GitHub
 login. Repository connection and scan errors appear inside the inbox.
 

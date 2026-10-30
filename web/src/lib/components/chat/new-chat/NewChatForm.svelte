@@ -904,7 +904,7 @@
 					<div class="flex flex-wrap gap-2">
 						{#each form.attachedImages as file, idx (file.name + idx)}
 							<div class="relative group">
-								<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
+								<div data-slot="composer-attachment-preview" class="w-16 h-16 rounded-lg overflow-hidden border border-border">
 									{#if isImageAttachment(file) && form.imageUrlFor(file, idx)}
 										<img
 											src={form.imageUrlFor(file, idx)}

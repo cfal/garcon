@@ -622,6 +622,7 @@ export class IntegrationFixture {
   }
 
   #archiveCurrentRun(): void {
+    this.garcon.assertNoUnexpectedExit();
     this.#completedRuns.push(this.#currentRunDiagnostics());
   }
 

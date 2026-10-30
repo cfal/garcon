@@ -1,9 +1,12 @@
+import { readFileSync } from 'fs';
 import { parseStoredJson } from '../../../common/stored-json.js';
 import { decodeClonedStoredRows } from '../../ledger/codec.js';
 import { ledgerRowsToMessages } from '../../ledger/presentation.js';
 import { renderSharedChatText } from '../shares/transcript.ts';
+import { withholdExecutionContext } from '../shares/public-messages.ts';
 import {
   decodeLegacyShareSnapshot,
+  decodeShareSnapshot,
   encodeShareSnapshot,
   type ShareSnapshotHeader,
 } from '../shares/snapshot-format.js';
@@ -18,12 +21,22 @@ export interface RenderedShareSnapshot {
   readonly text: Uint8Array;
 }
 
+// A share's stored snapshot: one JSON document from before messages moved one per line,
+// or the line-delimited form.
+export type ShareSnapshotFormat = 'document' | 'lines';
+
 // Task parameters exclude the transcript items, which cross to the Worker separately in
-// bounded batches: stored ledger rows, or a legacy snapshot's JSON text.
+// bounded batches as stored ledger rows. A share upgrade carries no items: the Worker reads
+// the stored snapshot file itself, so the controller neither decodes nor clones it.
 export type TranscriptRenderingTask =
   | ({ readonly kind: 'render-transcript-export' } & TranscriptExportDocumentRequest)
   | { readonly kind: 'render-share-snapshot'; readonly header: Omit<ShareSnapshotHeader, 'messageCount'> }
-  | { readonly kind: 'convert-share-snapshot'; readonly shareToken: string };
+  | {
+    readonly kind: 'upgrade-share-snapshot';
+    readonly shareToken: string;
+    readonly format: ShareSnapshotFormat;
+    readonly snapshotPath: string;
+  };
 
 export type TranscriptRenderingTaskKind = TranscriptRenderingTask['kind'];
 
@@ -31,7 +44,7 @@ export interface TranscriptRenderingResults {
   // The complete JSON response body.
   readonly 'render-transcript-export': Uint8Array<ArrayBuffer>;
   readonly 'render-share-snapshot': RenderedShareSnapshot;
-  readonly 'convert-share-snapshot': RenderedShareSnapshot | null;
+  readonly 'upgrade-share-snapshot': RenderedShareSnapshot | null;
 }
 
 type TaskHandlers = {
@@ -51,13 +64,11 @@ const TASK_HANDLERS: TaskHandlers = {
     const messages = ledgerRowsToMessages(decodeClonedStoredRows(items));
     return renderShareSnapshot({ ...header, messageCount: messages.length }, messages);
   },
-  'convert-share-snapshot': ({ shareToken }, items) => {
-    if (items.length !== 1 || typeof items[0] !== 'string') {
-      throw new Error('Transcript rendering received an invalid share snapshot');
-    }
-    const legacy = decodeLegacyShareSnapshot(shareToken, parseStoredJson(items[0], 'Share snapshot'));
-    if (!legacy) return null;
-    const { messages, ...header } = legacy;
+  'upgrade-share-snapshot': ({ shareToken, format, snapshotPath }, items) => {
+    if (items.length !== 0) throw new Error('Transcript rendering received unexpected share snapshot items');
+    const stored = decodeStoredShareSnapshot(shareToken, format, readFileSync(snapshotPath, 'utf8'));
+    if (!stored) return null;
+    const { messages, ...header } = stored;
     return renderShareSnapshot({ ...header, messageCount: messages.length }, messages);
   },
 };
@@ -72,7 +83,24 @@ export function runTranscriptRenderingTask<K extends TranscriptRenderingTaskKind
   return handler(task, items);
 }
 
-function renderShareSnapshot(header: ShareSnapshotHeader, messages: readonly unknown[]): RenderedShareSnapshot {
+function decodeStoredShareSnapshot(
+  shareToken: string,
+  format: ShareSnapshotFormat,
+  text: string,
+): (Omit<ShareSnapshotHeader, 'messageCount'> & { readonly messages: readonly unknown[] }) | null {
+  if (format === 'document') {
+    return decodeLegacyShareSnapshot(shareToken, parseStoredJson(text, 'Share snapshot'));
+  }
+  const stored = decodeShareSnapshot(shareToken, text);
+  if (!stored) return null;
+  const { messageCount: _messageCount, ...header } = stored.header;
+  return { ...header, messages: stored.messages.map(line => parseStoredJson(line, 'Share message')) };
+}
+
+// Every artifact a share writes, the public snapshot and its plain text, holds the
+// projected messages.
+function renderShareSnapshot(header: ShareSnapshotHeader, storedMessages: readonly unknown[]): RenderedShareSnapshot {
+  const messages = storedMessages.map(withholdExecutionContext);
   return {
     header,
     snapshot: encoder.encode(encodeShareSnapshot(header, messages)),

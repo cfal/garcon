@@ -50,7 +50,7 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
   try {
     await withChromiumFixture(
       "inline-queue",
-      async ({ page, browser, integration, assertNoBrowserErrors }, phase) => {
+      async ({ page, browser, integration, assertNoBrowserErrors, watchBrowserErrors }, phase) => {
         const chatId = integration.newChatId();
         const active = await integration.client.startChat(
           liveCodexStartRequest({
@@ -280,6 +280,7 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
 
         phase("checking the grip on a wide coarse-pointer screen");
         const touchContext = await browser.newContext({ viewport: { width: 900, height: 700 }, hasTouch: true, serviceWorkers: "block" });
+        watchBrowserErrors(touchContext);
         try {
           await authenticateChromiumContext(touchContext, integration);
           const touchPage = await touchContext.newPage();

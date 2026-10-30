@@ -19,6 +19,7 @@ describe('ComposerAvailabilityNotice', () => {
 		});
 		const card = container.querySelector('[data-composer-availability-notice="catalog-failed"]');
 		expect(card?.className).toContain('rounded-lg');
+		expect(card?.getAttribute('data-slot')).toBe('composer-availability-notice');
 		expect(card?.hasAttribute('data-project-availability-notice')).toBe(false);
 		expect(screen.getByText('Failed to load model catalog')).toBeTruthy();
 		expect(screen.getByRole('status').textContent).toContain('Failed to fetch model catalog: 502');

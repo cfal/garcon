@@ -10,10 +10,60 @@ import {
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import { DEFAULT_THEME_PREFERENCE } from '$lib/theme/themes.js';
 import { CHAT_BOARD_MAX_COUNT, type ChatBoard } from '$shared/chat-boards';
+import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
 
 describe('LocalSettingsStore', () => {
 	beforeEach(() => {
 		localStorage.clear();
+	});
+
+	it('defaults the new category preferences independently of obsolete settings', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ showQuickCommitTray: false }),
+		);
+		const store = createLocalSettingsStore();
+		expect(store.composerStatusBarGitProjects).toBe(true);
+		expect(store.composerStatusBarNonGitProjects).toBe(false);
+		store.set('composerStatusBarGitProjects', true);
+		const saved = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!);
+		expect(saved.showQuickCommitTray).toBeUndefined();
+		store.destroy();
+		const restored = createLocalSettingsStore();
+		expect(restored.composerStatusBarGitProjects).toBe(true);
+		restored.destroy();
+	});
+
+	it.each(
+		Object.keys(COMPOSER_STATUS_BAR_DEFAULTS) as (keyof typeof COMPOSER_STATUS_BAR_DEFAULTS)[],
+	)('persists, synchronizes, validates and resets %s independently', (key) => {
+		const store = createLocalSettingsStore();
+		const initial = COMPOSER_STATUS_BAR_DEFAULTS[key];
+		expect(store[key]).toBe(initial);
+		store.toggle(key);
+		const restored = createLocalSettingsStore();
+		expect(restored[key]).toBe(!initial);
+		const changed = JSON.stringify({ ...store.snapshot(), [key]: initial });
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, changed);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: changed,
+				storageArea: localStorage,
+			}),
+		);
+		expect(restored[key]).toBe(initial);
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ [key]: 'invalid' }));
+		const invalid = createLocalSettingsStore();
+		expect(invalid[key]).toBe(initial);
+		localStorage.clear();
+		window.dispatchEvent(
+			new StorageEvent('storage', { key: null, newValue: null, storageArea: localStorage }),
+		);
+		expect(restored.snapshot()).toMatchObject(COMPOSER_STATUS_BAR_DEFAULTS);
+		store.destroy();
+		restored.destroy();
+		invalid.destroy();
 	});
 
 	it.each([true, false, 'true', 1, null, [], {}])(
@@ -122,7 +172,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarSortMode).toBe('manual');
 		expect(store.sidebarSearchResultSort).toBe('relevance');
 		expect(store.reduceMotion).toBe(false);
-		expect(store.showQuickCommitTray).toBe(true);
+		expect(store.composerStatusBarGitProjects).toBe(true);
 		expect(store.textEditorOpenPlacement).toBe('same-window');
 		expect(store.imageViewerOpenPlacement).toBe('same-window');
 		expect(store.markdownViewerOpenPlacement).toBe('same-window');
@@ -1082,6 +1132,59 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
+	it('defaults to auto-hiding the chat scrollbar and persists an explicit opt-out', () => {
+		const store = createLocalSettingsStore();
+		expect(store.autoHideChatScrollbar).toBe(true);
+		store.toggle('autoHideChatScrollbar');
+		expect(store.autoHideChatScrollbar).toBe(false);
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({
+			autoHideChatScrollbar: false,
+		});
+		const restored = createLocalSettingsStore();
+		expect(restored.autoHideChatScrollbar).toBe(false);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it.each([undefined, null, 0, 1, '', 'true', {}, []])(
+		'defaults missing or malformed scrollbar preferences: %j',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ autoHideChatScrollbar: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.autoHideChatScrollbar).toBe(true);
+			store.destroy();
+		},
+	);
+
+	it('synchronizes scrollbar auto-hide across tabs and restores its default on storage removal', () => {
+		const store = createLocalSettingsStore();
+		const newValue = JSON.stringify({ ...store.snapshot(), autoHideChatScrollbar: false });
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, newValue);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue,
+				storageArea: localStorage,
+			}),
+		);
+		expect(store.autoHideChatScrollbar).toBe(false);
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.localSettings);
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: null,
+				storageArea: localStorage,
+			}),
+		);
+		expect(store.autoHideChatScrollbar).toBe(true);
+		store.destroy();
+	});
+
 	it('persists max chat width', () => {
 		const store = createLocalSettingsStore();
 
@@ -1090,7 +1193,7 @@ describe('LocalSettingsStore', () => {
 		store.set('sidebarInactivityDuration', '2-weeks');
 		store.set('sidebarGroupNestedProjectPaths', true);
 		store.set('sidebarChatItemLayout', 'compact');
-		store.set('showQuickCommitTray', false);
+		store.set('composerStatusBarGitProjects', false);
 		store.toggle('reduceMotion');
 
 		expect(
@@ -1101,7 +1204,7 @@ describe('LocalSettingsStore', () => {
 			sidebarInactivityDuration: '2-weeks',
 			sidebarGroupNestedProjectPaths: true,
 			sidebarChatItemLayout: 'compact',
-			showQuickCommitTray: false,
+			composerStatusBarGitProjects: false,
 			reduceMotion: true,
 		});
 
@@ -1131,7 +1234,7 @@ describe('LocalSettingsStore', () => {
 				sidebarGroupNestedProjectPaths: true,
 				sidebarChatItemLayout: 'compact',
 				sidebarShowProjectPath: true,
-				showQuickCommitTray: false,
+				composerStatusBarGitProjects: false,
 				allowDirectChats: true,
 				steerWithCtrlEnter: false,
 				chatListAutohide: true,
@@ -1161,7 +1264,7 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
 		expect(secondStore.sidebarChatItemLayout).toBe('compact');
 		expect(secondStore.sidebarShowProjectPath).toBe(true);
-		expect(secondStore.showQuickCommitTray).toBe(false);
+		expect(secondStore.composerStatusBarGitProjects).toBe(false);
 		expect(secondStore.allowDirectChats).toBe(true);
 		expect(secondStore.steerWithCtrlEnter).toBe(false);
 		expect(secondStore.chatListAutohide).toBe(true);

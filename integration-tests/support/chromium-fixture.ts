@@ -8,7 +8,9 @@ import {
   type IntegrationFixtureOptions,
 } from './integration-fixture.js';
 import { withTimeout } from './deferred.js';
+import { awaitFixtureSetup } from './fixture-setup.js';
 import { requireCurrentWebBuild } from './web-build-gate.js';
+import { captureBrowserErrors, consumeExpectedBrowserErrors, withExpectedConsoleErrors } from './browser-errors.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'chromium');
@@ -29,6 +31,9 @@ export interface ChromiumFixture {
   // Chromium reports a failed resource load without its URL, so failures are listed with it.
   readonly failedResponses: readonly string[];
   assertNoBrowserErrors(): void;
+  watchBrowserErrors(context: BrowserContext): void;
+  consumeExpectedBrowserErrors(expected: readonly string[]): void;
+  withExpectedConsoleErrors<T>(messages: readonly (string | RegExp)[], run: () => Promise<T>): Promise<T>;
 }
 
 export interface ChromiumFixtureOptions extends IntegrationFixtureOptions {
@@ -86,6 +91,7 @@ export async function createChromiumFixture(
     });
     await authenticateChromiumContext(context, integration);
     await context.addInitScript((composerInputMode) => {
+      if (location.hostname !== '127.0.0.1') return;
       const key = 'pref_local_settings';
       const defaults = {
         allowDirectChats: true,
@@ -104,14 +110,17 @@ export async function createChromiumFixture(
       }
     }, composerInputMode);
 
+    const browserErrors: string[] = [];
+    const watchedContexts = new WeakSet<BrowserContext>();
+    const watchBrowserErrors = (context: BrowserContext) => {
+      if (watchedContexts.has(context)) return;
+      watchedContexts.add(context);
+      captureBrowserErrors(context, browserErrors);
+    };
+    watchBrowserErrors(context);
     const page = await context.newPage();
     page.setDefaultTimeout(20_000);
     page.setDefaultNavigationTimeout(20_000);
-    const browserErrors: string[] = [];
-    page.on('pageerror', (error) => browserErrors.push(`pageerror: ${error.message}`));
-    page.on('console', (message) => {
-      if (message.type() === 'error') browserErrors.push(`console.error: ${message.text()}`);
-    });
     const failedResponses: string[] = [];
     page.on('response', (response) => {
       if (response.status() < 400) return;
@@ -124,6 +133,9 @@ export async function createChromiumFixture(
       page,
       browserErrors,
       failedResponses,
+      watchBrowserErrors,
+      consumeExpectedBrowserErrors: expected => consumeExpectedBrowserErrors(browserErrors, expected),
+      withExpectedConsoleErrors: (messages, run) => withExpectedConsoleErrors(browserErrors, messages, run),
       assertNoBrowserErrors() {
         if (browserErrors.length > 0) {
           const responses = failedResponses.length > 0
@@ -233,21 +245,24 @@ export async function withChromiumFixture<T>(
   options: ChromiumFixtureOptions = {},
   sharedBrowser?: Browser,
 ): Promise<T> {
-  const fixture = await withTimeout(
+  const fixture = await awaitFixtureSetup(
     createChromiumFixture(options, sharedBrowser),
+    disposeChromiumFixture,
     FIXTURE_SETUP_TIMEOUT_MS,
     () => `Chromium fixture setup timed out for ${testName}.`,
   );
   let failure: unknown;
   let phase = 'starting scenario';
   try {
-    return await withTimeout(
+    const result = await withTimeout(
       run(fixture, (nextPhase) => {
         phase = nextPhase;
       }),
       SCENARIO_TIMEOUT_MS,
       () => `Chromium scenario ${testName} timed out while ${phase}.`,
     );
+    fixture.assertNoBrowserErrors();
+    return result;
   } catch (error) {
     failure = error;
     const artifact = await withTimeout(

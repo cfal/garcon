@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { captureBrowserErrors } from '../../support/browser-errors.js';
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium, type Locator, type Page } from "playwright";
@@ -230,6 +231,8 @@ describe("compiled theme CSS", () => {
       reducedMotion: "reduce",
     });
     const page = await context.newPage();
+    const browserErrors: string[] = [];
+    captureBrowserErrors(page.context(), browserErrors);
     await page.route(`${APP_URL}**`, async (route) => {
       const pathname = new URL(route.request().url()).pathname;
       if (pathname === "/theme.css") {
@@ -1026,6 +1029,7 @@ describe("compiled theme CSS", () => {
           ).toBe(16);
         }
       }
+      expect(browserErrors).toEqual([]);
     } finally {
       await context.close();
       await browser.close();

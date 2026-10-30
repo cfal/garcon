@@ -209,7 +209,7 @@ for (const executionBackend of ['in-process', 'remote-executor-dials', 'remote-c
             );
           }),
         ).toBe(true);
-        expect(browserErrors.filter((error) => error !== EXPECTED_NOT_FOUND)).toEqual([]);
+        expect(browserErrors.splice(0)).toEqual(Array(failedResponses.length).fill(EXPECTED_NOT_FOUND));
       },
       undefined,
       { executionBackend, projectRoots: 'separate' },
@@ -232,11 +232,13 @@ for (const linked of [false, true]) {
       });
       await client.waitForTurnTerminal(chatId, started.turnId);
       let ready = false;
+      let failedImages = 0;
       const releaseRetry = new Deferred<void>();
       await page.route(EXTERNAL_IMAGE_URL, async (route) => {
         expect(route.request().headers().authorization).toBeUndefined();
         expect(route.request().headers().referer).toBeUndefined();
         if (ready) await releaseRetry.promise;
+        if (!ready) failedImages++;
         await route.fulfill({
           status: ready ? 200 : 404,
           contentType: 'image/png',
@@ -276,7 +278,8 @@ for (const linked of [false, true]) {
       await browserExpect(assistant.getByRole('status')).toHaveCount(0);
       await page.locator('[data-conversation-composer-host] textarea[placeholder="Reply..."]').focus();
       await browserExpect(assistant.locator('.markdown-image[tabindex], a[tabindex]')).toHaveCount(0);
-      expect(browserErrors.filter((error) => error !== EXPECTED_NOT_FOUND)).toEqual([]);
+      expect(failedImages).toBeGreaterThan(0);
+      expect(browserErrors.splice(0)).toEqual(Array(failedImages).fill(EXPECTED_NOT_FOUND));
     });
   }, 180_000);
 }
@@ -291,11 +294,13 @@ test('keeps shared-link retry focus and button order tied to the active image', 
     const secondRelease = new Deferred<void>();
     let holdRetries = false;
     let ready = false;
+    let failedImages = 0;
     await page.route('https://images.example.test/*.png', async (route) => {
       if (holdRetries) {
         const release = route.request().url() === firstUrl ? firstRelease : secondRelease;
         await release.promise;
       }
+      if (!ready) failedImages++;
       await route.fulfill({
         status: ready ? 200 : 404,
         contentType: 'image/png',
@@ -345,6 +350,7 @@ test('keeps shared-link retry focus and button order tied to the active image', 
       firstRelease.resolve();
       secondRelease.resolve();
     }
-    expect(browserErrors.filter((error) => error !== EXPECTED_NOT_FOUND)).toEqual([]);
+    expect(failedImages).toBeGreaterThan(0);
+    expect(browserErrors.splice(0)).toEqual(Array(failedImages).fill(EXPECTED_NOT_FOUND));
   });
 }, 180_000);

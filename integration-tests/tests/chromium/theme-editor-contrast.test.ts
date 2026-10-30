@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { captureBrowserErrors } from '../../support/browser-errors.js';
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "playwright";
@@ -235,6 +236,8 @@ describe("CodeMirror theme contrast", () => {
       });
     }
     const page = await context.newPage();
+    const browserErrors: string[] = [];
+    captureBrowserErrors(page.context(), browserErrors);
     await page.route(`${APP_URL}**`, async (route) => {
       const pathname = new URL(route.request().url()).pathname;
       if (pathname === "/editor-fixture.js") {
@@ -503,6 +506,7 @@ describe("CodeMirror theme contrast", () => {
           (globalThis as DiffEditorScope).diffEditor.destroy(),
         );
       }
+      expect(browserErrors).toEqual([]);
     } finally {
       await context.close();
       await browser.close();

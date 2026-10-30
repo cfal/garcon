@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { chromium } from "playwright";
+import { captureBrowserErrors } from '../../support/browser-errors.js';
 import { FONT_OPTIONS } from "../../../web/src/lib/theme/fonts";
 import {
   TYPOGRAPHY_SURFACES,
@@ -291,6 +292,8 @@ describe("theme bootstrap", () => {
     const browser = await chromium.launch({ headless: true });
     try {
       const context = await browser.newContext({ javaScriptEnabled: false });
+      const browserErrors: string[] = [];
+      captureBrowserErrors(context, browserErrors);
       const page = await context.newPage();
       await page.setContent(appTemplate);
       expect(
@@ -301,6 +304,7 @@ describe("theme bootstrap", () => {
           .locator('meta[name="apple-mobile-web-app-status-bar-style"]')
           .getAttribute("content"),
       ).toBe("default");
+      expect(browserErrors).toEqual([]);
     } finally {
       await browser.close();
     }
@@ -348,6 +352,8 @@ describe("theme bootstrap", () => {
           },
         );
         const page = await context.newPage();
+        const browserErrors: string[] = [];
+        captureBrowserErrors(context, browserErrors);
         await page.route(`${APP_URL}**`, async (route) => {
           if (new URL(route.request().url()).pathname === "/") {
             await route.fulfill({
@@ -425,6 +431,7 @@ describe("theme bootstrap", () => {
           appleStatusBarStyle: "default",
         });
 
+        expect(browserErrors).toEqual([]);
         await context.close();
       }
     } finally {

@@ -159,7 +159,7 @@
 		};
 	});
 	const executorId = $derived(
-		(message.type === 'command-output' ? message.context.executorId : activeChatContext?.executorId) ??
+		(message.type === 'command-output' ? message.context?.executorId : activeChatContext?.executorId) ??
 			(activeChatContext ? sessions.byId[activeChatContext.chatId]?.executorId : null) ??
 			'local',
 	);
@@ -169,7 +169,7 @@
 	const imageFileRootPath = $derived(executors.get(executorId)?.projectBasePath);
 	const chatProjectPath = $derived.by(() => {
 		if (!filesAvailable) return null;
-		if (message.type === 'command-output') return message.context.projectPath;
+		if (message.type === 'command-output') return message.context?.projectPath ?? null;
 		return activeChatContext?.projectPath ?? null;
 	});
 	const resolveChatReference: ResolveChatReference = (chatId) =>

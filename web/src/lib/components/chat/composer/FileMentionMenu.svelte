@@ -186,6 +186,7 @@
 
 {#if isVisible}
 	<div
+		data-slot="composer-completion-menu"
 		class="absolute z-50 w-80 rounded-md border border-border bg-popover shadow-md"
 		use:transientLayer={{
 			registry: transientLayers,

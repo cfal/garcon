@@ -225,7 +225,7 @@ test("one-pixel active borders cover shared separators across themes, nested spl
 
       await page.evaluate(() => { document.documentElement.dataset.themeAppearance = 'standard'; });
 
-      await clickWorkspaceWindowAddAction(page, "Open Git History", "window-files");
+      await clickWorkspaceWindowAddAction(page, "Open History", "window-files");
       await page
         .locator('[data-workspace-window-menu-trigger="window-files"]')
         .click();

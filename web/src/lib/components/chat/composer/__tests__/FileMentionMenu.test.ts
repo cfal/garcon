@@ -55,6 +55,7 @@ describe('FileMentionMenu', () => {
 		});
 
 		const item = await screen.findByRole('button', { name: /src\/main\.ts/ });
+		expect(item.closest('[data-slot="composer-completion-menu"]')?.classList.contains('rounded-md')).toBe(true);
 		expect(screen.queryByText('/repo/src')).toBeNull();
 
 		await fireEvent.click(item);

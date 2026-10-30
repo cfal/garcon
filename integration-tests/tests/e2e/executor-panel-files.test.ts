@@ -110,7 +110,7 @@ test('saving from the Files root refreshes Git on the same host even outside the
     await app.setViewport(1_600, 900);
     await app.openChat(chatId);
     await fixture.waitForSpaWebSocket();
-    await app.selectWorkspaceWindowSurface('Open Git Workbench');
+    await app.selectWorkspaceWindowSurface('Open Workbench');
     const gitPanel = '[data-workspace-surface-id="singleton:git"][aria-hidden="false"]';
     await fixture.page.waitForFunction(selector => document.querySelector(selector)?.textContent?.includes('No changed files'), {}, gitPanel);
     const filesWindow = await app.workspaceWindowIdForSurface('singleton:files');
@@ -179,7 +179,7 @@ test('discarding a Git change refreshes the open file on the same host without w
     await app.setViewport(1_600, 900);
     await app.openChat(chatId);
     await fixture.waitForSpaWebSocket();
-    await app.selectWorkspaceWindowSurface('Open Git Workbench');
+    await app.selectWorkspaceWindowSurface('Open Workbench');
     const gitPanel = '[data-workspace-surface-id="singleton:git"][aria-hidden="false"]';
     await fixture.page.waitForSelector(`${gitPanel} [data-git-file-header]`);
     await fixture.page.waitForSelector(`[data-file-tree-row] [title="${examplePath}"]`);
