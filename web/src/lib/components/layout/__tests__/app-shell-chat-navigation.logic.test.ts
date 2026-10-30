@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
-import { buildSidebarChatListProjection } from '$lib/components/sidebar/sidebar-row-model';
+import {
+	buildSidebarChatListProjection,
+	sidebarExecutorKey,
+} from '$lib/components/sidebar/sidebar-row-model';
 import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from '../app-shell-chat-navigation';
 
 function chat(
@@ -34,6 +37,38 @@ function chat(
 }
 
 describe('resolveAdjacentChatId', () => {
+	it.each([false, true])(
+		'follows configured executor order with a collapsed executor=%s',
+		(collapsed) => {
+			const chats = [
+				{ ...chat('remote-a'), executorId: 'worker-a' },
+				chat('local'),
+				{ ...chat('remote-b'), executorId: 'worker-b' },
+			];
+			const { rowModel } = buildSidebarChatListProjection({
+				displayedChats: chats,
+				executorOrder: ['local', 'worker-b', 'worker-a'],
+				collapsedProjectKeys: new Set(collapsed ? [sidebarExecutorKey('worker-b')] : []),
+				grouping: 'project',
+				currentTime: new Date('2025-06-01T12:00:00.000Z'),
+				inactivityDuration: '3-days',
+				sortMode: 'manual',
+				pinnedInsertPosition: 'top',
+			});
+			expect(rowModel.visibleChatIds).toEqual(
+				collapsed ? ['local', 'remote-a'] : ['local', 'remote-b', 'remote-a'],
+			);
+			expect(
+				resolveAdjacentChatId({
+					selectedChatId: 'local',
+					displayedChatIds: rowModel.visibleChatIds,
+					fallbackOrder: chats.map((entry) => entry.id),
+					offset: 1,
+				}),
+			).toBe(collapsed ? 'remote-a' : 'remote-b');
+		},
+	);
+
 	it('follows displayed sidebar order when pinned chats are hoisted', () => {
 		const chats = [chat('normal-a'), chat('normal-b'), chat('pinned-c', { isPinned: true })];
 		const displayedChatIds = buildSidebarChatListProjection({

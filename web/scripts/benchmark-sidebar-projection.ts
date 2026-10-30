@@ -146,7 +146,7 @@ function scenario(size: number, nestedProjects: boolean, activeSearch: boolean) 
 		pinnedInsertPosition: 'top' as const,
 		groupNestedProjectPaths: nestedProjects,
 	};
-	// Reproduces the former shell, sidebar, and list calculations on the same fixture.
+	// Navigation and selection are lazy consumers; rendering alone builds one model.
 	const legacyRowModel = () => {
 		const sorted = sortSidebarChatsByRecency(displayedChats, 'top');
 		return buildSidebarRowModel({
@@ -171,10 +171,8 @@ function scenario(size: number, nestedProjects: boolean, activeSearch: boolean) 
 		iterations,
 		filter: profile(
 			() =>
-				(activeSearch
-					? chats.filter((chat) => matchesChatFilter(chat, ACTIVE_SEARCH))
-					: chats
-				).length,
+				(activeSearch ? chats.filter((chat) => matchesChatFilter(chat, ACTIVE_SEARCH)) : chats)
+					.length,
 			iterations,
 		),
 		sort: profile(() => sortChatsByRecencyDesc(displayedChats).length, iterations),
@@ -191,7 +189,11 @@ function scenario(size: number, nestedProjects: boolean, activeSearch: boolean) 
 			() => buildSidebarChatListProjection(projectionInput).rowModel.rows.length,
 			iterations,
 		),
-		repeatedProjections: profile(() => {
+		renderOnlyProjection: profile(
+			() => legacyRowModel().rows.length + Number(partitionSidebarChats(chats).hasPinned),
+			iterations,
+		),
+		allConsumerProjections: profile(() => {
 			const navigationIds = legacyRowModel().visibleChatIds;
 			const selectionIds = legacyRowModel().visibleChatIds;
 			const rows = legacyRowModel().rows;
