@@ -1,4 +1,5 @@
 import type { PrimaryWebSocket } from './primary-delivery.js';
+import { publishSelectedWebSocketPayload, type SelectiveWebSocketMessagePublisher } from './transport.js';
 
 type InterestedSocket = Pick<PrimaryWebSocket, 'readyState'>;
 
@@ -32,6 +33,11 @@ export class ChatTranscriptInterestRegistry {
 
   get socketCount(): number {
     return this.#chatsBySocket.size;
+  }
+
+  createPublisher(delivery: SelectiveWebSocketMessagePublisher<InterestedSocket>) {
+    return (chatId: string, payloads: ChatTranscriptPayloads): number =>
+      publishSelectedWebSocketPayload(delivery, 'chat', this.payloadSelector(chatId, payloads));
   }
 
   // Chooses each socket's payload for one committed span and serializes each

@@ -29,7 +29,7 @@ import { queueDrainOptions, queuedAttachmentAdmission } from './chats/chat-execu
 import { TerminalController } from './terminals/controller.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { PrimaryWsHandler } from './ws/primary.js';
-import { publishSelectedWebSocketPayload, publishWebSocketPayload } from './ws/transport.js';
+import { publishWebSocketPayload } from './ws/transport.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import { ChatProcessingActivity } from './chats/chat-processing-activity.js';
@@ -726,8 +726,7 @@ export async function startServer(): Promise<void> {
           publish(topic, payload) {
             return publishWebSocketPayload(primaryDelivery, topic, payload);
           },
-          publishTranscript: (chatId, payloads) => publishSelectedWebSocketPayload(
-            primaryDelivery, 'chat', transcriptInterest.payloadSelector(chatId, payloads)),
+          publishTranscript: transcriptInterest.createPublisher(primaryDelivery),
         },
         agentRegistry,
         chatRegistry,

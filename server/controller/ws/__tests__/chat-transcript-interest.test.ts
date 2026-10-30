@@ -1,7 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { ChatTranscriptInterestRegistry } from '../chat-transcript-interest.js';
 import { PrimarySocketDelivery } from '../primary-delivery.js';
-import { publishSelectedWebSocketPayload } from '../transport.js';
 import { LOCAL_SERVER_PRINCIPAL } from '../../lib/http-route-types.js';
 
 function socketFixture() {
@@ -77,14 +76,15 @@ describe('selective transcript delivery', () => {
     displayingPeer.subscribe('chat');
     registry.declare(displayingPeer, ['chat-a']);
 
-    publishSelectedWebSocketPayload(delivery, 'chat', registry.payloadSelector('chat-a', {
+    const publish = registry.createPublisher(delivery);
+    publish('chat-a', {
       body: () => 'body-a',
       summary: () => 'summary-a',
-    }));
-    publishSelectedWebSocketPayload(delivery, 'chat', registry.payloadSelector('chat-b', {
+    });
+    publish('chat-b', {
       body: () => 'body-b',
       summary: () => 'summary-b',
-    }));
+    });
 
     expect(displaying.send.mock.calls).toEqual([['body-a', true], ['summary-b', true]]);
     expect(background.send.mock.calls).toEqual([['summary-a', true], ['summary-b', true]]);
