@@ -127,6 +127,12 @@ export function insertWindowAtEdge(
 	return replaceWindowNode(root, targetWindowId, partition);
 }
 
+export interface BalancedWindowRow {
+	readonly root: DesktopWorkspaceNode;
+	readonly columnCount: number;
+	readonly windowIds: readonly WorkspaceWindowId[];
+}
+
 /**
  * Gives every column in a window's row an equal width. The row is the outermost run of
  * horizontal partitions enclosing the window; the windows and vertical partitions inside it are
@@ -136,14 +142,18 @@ export function insertWindowAtEdge(
 export function balanceWindowRow(
 	root: DesktopWorkspaceNode,
 	windowId: WorkspaceWindowId,
-): DesktopWorkspaceNode | null {
+): BalancedWindowRow | null {
 	const rowRoot = outermostRowAncestor(root, windowId, null);
 	if (!rowRoot) return null;
 	const balanced = equalizeColumns(rowRoot);
 	if (!balanced) return null;
-	return mapPartitions(root, (partition) =>
-		partition.id === rowRoot.id ? (balanced as WorkspacePartitionNode) : partition,
-	);
+	return {
+		root: mapPartitions(root, (partition) =>
+			partition.id === rowRoot.id ? (balanced as WorkspacePartitionNode) : partition,
+		),
+		columnCount: rowColumnCount(rowRoot),
+		windowIds: collectWindowNodes(rowRoot).map((workspaceWindow) => workspaceWindow.id),
+	};
 }
 
 function outermostRowAncestor(

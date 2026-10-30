@@ -17,7 +17,7 @@ import {
 } from './chat-surface-transfer.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import type {
-	WorkspaceLayoutFitResolver,
+	WorkspaceWindowsFitResolver,
 	WorkspaceSplitAdmissionResolver,
 } from './window-geometry-policy.js';
 import { requireWorkspaceSplitAdmission } from './workspace-split-blocked-error.js';
@@ -69,7 +69,7 @@ interface WorkspaceChatPlacementServiceDeps {
 	): Promise<boolean>;
 	prepareChatSurfaceTransfer(transfer: ChatSurfaceTransfer): WorkspacePublication | null;
 	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
-	fitsWorkspaceHost: WorkspaceLayoutFitResolver;
+	windowsFitHost: WorkspaceWindowsFitResolver;
 	present(surfaceId: string): void;
 }
 
@@ -137,16 +137,7 @@ export class WorkspaceChatPlacementService {
 				findWorkspaceChatPlacement(latest, sourceChatId)?.windowId ??
 					this.deps.lastFocusedWindowId(),
 			);
-			if (this.deps.isMobile()) {
-				return this.#newWindowPlan(
-					latest,
-					chatId,
-					anchorWindowId,
-					'right',
-					newWindowId,
-					partitionId,
-				);
-			}
+			if (this.deps.isMobile()) return this.#setWindowChatPlan(anchorWindowId, chatId);
 			if (this.deps.windowReservations.has(anchorWindowId)) {
 				return { destination: null, mutations: [] };
 			}
@@ -330,11 +321,13 @@ export class WorkspaceChatPlacementService {
 	): WorkspaceLayoutMutation[] | null {
 		const opened = reduceWorkspaceLayout(latest, [opening]).desktopRoot;
 		const balanced = balanceWindowRow(opened, opening.newWindowId);
-		if (!balanced || !this.deps.fitsWorkspaceHost(balanced)) return null;
+		// With only the source and its fork, the row is the halving that admission just refused.
+		if (!balanced || balanced.columnCount < 3) return null;
+		if (!this.deps.windowsFitHost(balanced.root, balanced.windowIds)) return null;
 		const openedRatios = new Map(
 			computeWindowRects(opened).partitions.map(({ partition }) => [partition.id, partition.ratio]),
 		);
-		return computeWindowRects(balanced)
+		return computeWindowRects(balanced.root)
 			.partitions.filter(({ partition }) => openedRatios.get(partition.id) !== partition.ratio)
 			.map(({ partition }) => ({
 				type: 'set-partition-ratio',

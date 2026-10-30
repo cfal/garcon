@@ -34,7 +34,7 @@ test('reuses a chat in another window while the anchor is reserved', async () =>
 		resolveSplitAdmission: () => {
 			throw new Error('Reuse must not split a window');
 		},
-		fitsWorkspaceHost: () => {
+		windowsFitHost: () => {
 			throw new Error('Reuse must not measure a layout');
 		},
 		present: () => {},

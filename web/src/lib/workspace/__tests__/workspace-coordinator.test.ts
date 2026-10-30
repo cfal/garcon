@@ -35,9 +35,9 @@ import { WorkspaceShortcutDispatcher, type WorkspaceShortcutDeps } from '../work
 import type { WorkspaceLayoutSnapshot } from '../surface-types';
 import {
 	resolveWorkspaceSplitAdmission,
-	workspaceLayoutFitsHost,
+	workspaceWindowsFitHost,
 	type WorkspaceHostSize,
-	type WorkspaceLayoutFitResolver,
+	type WorkspaceWindowsFitResolver,
 	type WorkspacePartitionRatioBoundsResolver,
 	type WorkspaceSplitAdmissionResolver,
 } from '../window-geometry-policy';
@@ -104,7 +104,7 @@ function createHarness(
 		failLayoutPublishAt?: number;
 		includePortableTabs?: boolean;
 		resolveSplitAdmission?: WorkspaceSplitAdmissionResolver;
-		fitsWorkspaceHost?: WorkspaceLayoutFitResolver;
+		windowsFitHost?: WorkspaceWindowsFitResolver;
 		resolvePartitionRatioBounds?: WorkspacePartitionRatioBoundsResolver;
 		currentProjectTarget?: ProjectTarget | null;
 		projectResolution?: ProjectResolver;
@@ -259,7 +259,7 @@ function createHarness(
 		},
 		surfaceFrames: options.surfaceFrames,
 		resolveSplitAdmission: options.resolveSplitAdmission ?? resolveUnmeasuredWorkspaceSplit,
-		fitsWorkspaceHost: options.fitsWorkspaceHost ?? (() => true),
+		windowsFitHost: options.windowsFitHost ?? (() => true),
 		resolvePartitionRatioBounds: options.resolvePartitionRatioBounds ?? (() => null),
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
@@ -4091,7 +4091,7 @@ describe('forked chat placement', () => {
 		const { coordinator, layout } = createHarness({
 			resolveSplitAdmission: (_snapshot, { edge }) =>
 				edge === 'bottom' ? { allowed: true } : { allowed: false, reason: 'too-small' },
-			fitsWorkspaceHost: () => false,
+			windowsFitHost: () => false,
 		});
 		await coordinator.showChatInCurrentWindow('chat-a');
 		const windowCount = windowCountOf(layout.snapshot);
@@ -4134,7 +4134,7 @@ describe('forked chat placement', () => {
 		const { coordinator, layout } = createHarness({
 			resolveSplitAdmission: (_snapshot, { edge }) =>
 				edge === 'bottom' ? { allowed: true } : { allowed: false, reason: 'too-small' },
-			fitsWorkspaceHost: () => false,
+			windowsFitHost: () => false,
 		});
 		await coordinator.showChatInCurrentWindow('chat-a');
 
@@ -4156,7 +4156,7 @@ describe('forked chat placement', () => {
 				includePortableTabs: false,
 				resolveSplitAdmission: (snapshot, request) =>
 					resolveWorkspaceSplitAdmission({ snapshot, hostSize, ...request }),
-				fitsWorkspaceHost: (root) => workspaceLayoutFitsHost(root, hostSize),
+				windowsFitHost: (root, windowIds) => workspaceWindowsFitHost(root, windowIds, hostSize),
 			});
 			const { coordinator } = harness;
 			await coordinator.closeWindow('window-files');
@@ -4192,6 +4192,26 @@ describe('forked chat placement', () => {
 			});
 		});
 
+		it('splits a lone window too narrow to halve below rather than into narrow columns', async () => {
+			const hostSize: WorkspaceHostSize = { width: 600, height: 1000 };
+			const { coordinator, layout } = createHarness({
+				includePortableTabs: false,
+				resolveSplitAdmission: (snapshot, request) =>
+					resolveWorkspaceSplitAdmission({ snapshot, hostSize, ...request }),
+				windowsFitHost: (root, windowIds) => workspaceWindowsFitHost(root, windowIds, hostSize),
+			});
+			await coordinator.closeWindow('window-files');
+			await coordinator.showChatInCurrentWindow('chat-a');
+
+			await coordinator.openForkedChat('fork-a', 'chat-a', 'split-auto');
+
+			const destinationWindowId = forkWindowId(layout.snapshot, 'fork-a');
+			expect(splitOf(layout.snapshot, destinationWindowId)).toEqual({
+				direction: 'vertical',
+				windowIds: ['window-main', destinationWindowId],
+			});
+		});
+
 		it('adds an equal column beside a source too narrow to halve', async () => {
 			const { coordinator, layout, middle, last } = await threeColumns(1280);
 
@@ -4215,7 +4235,7 @@ describe('forked chat placement', () => {
 			const { coordinator, layout } = createHarness({
 				resolveSplitAdmission: (snapshot, request) =>
 					blocked ? { allowed: false, reason } : resolveUnmeasuredWorkspaceSplit(snapshot, request),
-				fitsWorkspaceHost: () => !blocked,
+				windowsFitHost: () => !blocked,
 			});
 			await coordinator.showChatInCurrentWindow('chat-a');
 			const otherWindowId = await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');

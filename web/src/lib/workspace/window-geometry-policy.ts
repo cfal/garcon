@@ -77,8 +77,11 @@ export interface ResolvedWorkspacePartitionRatioBounds {
 	readonly bounds: WorkspacePartitionRatioBounds;
 }
 
-// Reports whether a projected desktop layout leaves every window at its minimum size.
-export type WorkspaceLayoutFitResolver = (root: DesktopWorkspaceNode) => boolean;
+// Reports whether the given windows of a projected desktop layout keep a resizable size.
+export type WorkspaceWindowsFitResolver = (
+	root: DesktopWorkspaceNode,
+	windowIds: readonly WorkspaceWindowId[],
+) => boolean;
 
 export type WorkspacePartitionRatioBoundsResolver = (
 	snapshot: WorkspaceLayoutSnapshot,
@@ -149,20 +152,26 @@ function siblingWindowId(
 	return siblingWindowId(first, windowId) ?? siblingWindowId(second, windowId);
 }
 
-function undersizedWindows(root: DesktopWorkspaceNode, hostSize: WorkspaceHostSize) {
-	return computeWindowRects(root).windows.filter(
-		({ rect }) =>
-			floorWorkspacePixels(rect.width, hostSize.width) < MIN_WINDOW_WIDTH_PX ||
-			floorWorkspacePixels(rect.height, hostSize.height) < MIN_WINDOW_HEIGHT_PX,
-	);
-}
-
-// An unmeasured host admits any layout, as split admission does.
-export function workspaceLayoutFitsHost(
+/**
+ * Requires the resize bound's safety pixel beyond the minimum window size, so the partitions
+ * between the windows stay adjustable and a one-pixel host shrink prunes none of them. An
+ * unmeasured host admits any layout, as split admission does.
+ */
+export function workspaceWindowsFitHost(
 	root: DesktopWorkspaceNode,
+	windowIds: readonly WorkspaceWindowId[],
 	hostSize: WorkspaceHostSize | null,
 ): boolean {
-	return !hostSize || undersizedWindows(root, hostSize).length === 0;
+	if (!hostSize) return true;
+	const checked = new Set(windowIds);
+	return computeWindowRects(root).windows.every(
+		({ workspaceWindow, rect }) =>
+			!checked.has(workspaceWindow.id) ||
+			(floorWorkspacePixels(rect.width, hostSize.width) >=
+				MIN_WINDOW_WIDTH_PX + WORKSPACE_RESIZE_BOUND_SAFETY_PX &&
+				floorWorkspacePixels(rect.height, hostSize.height) >=
+					MIN_WINDOW_HEIGHT_PX + WORKSPACE_RESIZE_BOUND_SAFETY_PX),
+	);
 }
 
 export function workspaceWindowsToPrune(
@@ -174,8 +183,13 @@ export function workspaceWindowsToPrune(
 	const removed: WorkspaceWindowId[] = [];
 	let remaining = root;
 	while (true) {
-		if (collectWindowNodes(remaining).length < 2) break;
-		const undersized = undersizedWindows(remaining, hostSize);
+		const windows = computeWindowRects(remaining).windows;
+		if (windows.length < 2) break;
+		const undersized = windows.filter(
+			({ rect }) =>
+				floorWorkspacePixels(rect.width, hostSize.width) < MIN_WINDOW_WIDTH_PX ||
+				floorWorkspacePixels(rect.height, hostSize.height) < MIN_WINDOW_HEIGHT_PX,
+		);
 		if (undersized.length === 0) break;
 		const sourceWindowId =
 			undersized.find(({ workspaceWindow }) => workspaceWindow.id !== currentWindowId)

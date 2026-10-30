@@ -10,11 +10,12 @@ import type {
 import { WORKSPACE_WINDOW_RESOURCE_CEILING } from '../surface-types';
 import {
 	MIN_WINDOW_WIDTH_PX,
+	WORKSPACE_RESIZE_BOUND_SAFETY_PX,
 	clampWorkspacePartitionRatio,
 	workspaceWindowsToPrune,
 	resolveWorkspacePartitionRatioBounds,
 	resolveWorkspaceSplitAdmission,
-	workspaceLayoutFitsHost,
+	workspaceWindowsFitHost,
 } from '../window-geometry-policy';
 import { balanceWindowRow, computeWindowRects } from '../window-tree';
 
@@ -418,13 +419,15 @@ describe('workspace row balancing', () => {
 
 		const balanced = balanceWindowRow(root, 'window-b' as WorkspaceWindowId);
 
-		expect(widths(balanced!)).toEqual({
+		expect(balanced?.columnCount).toBe(3);
+		expect(balanced?.windowIds).toEqual(['window-a', 'window-b', 'window-c', 'window-d']);
+		expect(widths(balanced!.root)).toEqual({
 			'window-a': 0.333,
 			'window-b': 0.333,
 			'window-c': 0.333,
 			'window-d': 0.333,
 		});
-		const balancedStack = computeWindowRects(balanced!).partitions.find(
+		const balancedStack = computeWindowRects(balanced!.root).partitions.find(
 			({ partition: node }) => node.id === stack.id,
 		);
 		expect(balancedStack?.partition.ratio).toBe(0.3);
@@ -451,7 +454,9 @@ describe('workspace row balancing', () => {
 			),
 		);
 
-		expect(widths(balanceWindowRow(root, 'window-b' as WorkspaceWindowId)!)).toEqual({
+		const balanced = balanceWindowRow(root, 'window-b' as WorkspaceWindowId)!;
+		expect(balanced.windowIds).toEqual(['window-b', 'window-c']);
+		expect(widths(balanced.root)).toEqual({
 			'window-a': 0.5,
 			'window-b': 0.25,
 			'window-c': 0.25,
@@ -476,8 +481,8 @@ describe('workspace row balancing', () => {
 		expect(balanceWindowRow(row, 'window-0' as WorkspaceWindowId)).toBeNull();
 	});
 
-	it('fits a layout only while every window keeps the minimum window size', () => {
-		const columns = (count: number): DesktopWorkspaceNode => {
+	it('fits the given windows only while they stay resizable above the minimum size', () => {
+		const columns = (count: number) => {
 			let row: DesktopWorkspaceNode = workspaceWindow(`window-${count - 1}` as WorkspaceWindowId);
 			for (let index = count - 2; index >= 0; index--) {
 				row = partition(
@@ -490,12 +495,14 @@ describe('workspace row balancing', () => {
 			}
 			return balanceWindowRow(row, 'window-0' as WorkspaceWindowId)!;
 		};
-		expect(
-			workspaceLayoutFitsHost(columns(4), { width: 4 * MIN_WINDOW_WIDTH_PX, height: 800 }),
-		).toBe(true);
-		expect(
-			workspaceLayoutFitsHost(columns(4), { width: 4 * MIN_WINDOW_WIDTH_PX - 1, height: 800 }),
-		).toBe(false);
-		expect(workspaceLayoutFitsHost(columns(4), null)).toBe(true);
+		const row = columns(4);
+		const resizable = MIN_WINDOW_WIDTH_PX + WORKSPACE_RESIZE_BOUND_SAFETY_PX;
+		const fits = (width: number, windowIds = row.windowIds) =>
+			workspaceWindowsFitHost(row.root, windowIds, { width, height: 800 });
+		expect(fits(4 * resizable)).toBe(true);
+		expect(fits(4 * resizable - 1)).toBe(false);
+		// Windows outside the checked set do not block the fit.
+		expect(fits(4 * resizable - 1, [])).toBe(true);
+		expect(workspaceWindowsFitHost(row.root, row.windowIds, null)).toBe(true);
 	});
 });

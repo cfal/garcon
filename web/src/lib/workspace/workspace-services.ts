@@ -53,8 +53,8 @@ import {
 	floorWorkspacePixels,
 	resolveWorkspacePartitionRatioBounds,
 	resolveWorkspaceSplitAdmission,
-	workspaceLayoutFitsHost,
-	type WorkspaceLayoutFitResolver,
+	workspaceWindowsFitHost,
+	type WorkspaceWindowsFitResolver,
 	type WorkspacePartitionRatioBoundsResolver,
 	type WorkspaceSplitAdmissionResolver,
 } from './window-geometry-policy.js';
@@ -240,8 +240,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			hostSize: hostGeometry.size,
 			...request,
 		});
-	const fitsWorkspaceHost: WorkspaceLayoutFitResolver = (root) =>
-		workspaceLayoutFitsHost(root, hostGeometry.size);
+	const windowsFitHost: WorkspaceWindowsFitResolver = (root, windowIds) =>
+		workspaceWindowsFitHost(root, windowIds, hostGeometry.size);
 	const resolvePartitionRatioBounds: WorkspacePartitionRatioBoundsResolver = (
 		snapshot,
 		partitionId,
@@ -469,7 +469,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		gitMutations,
 		surfaceFrames,
 		resolveSplitAdmission,
-		fitsWorkspaceHost,
+		windowsFitHost,
 		resolvePartitionRatioBounds,
 		onLayoutChanged: (snapshot) => {
 			hostGeometry.layoutPublished();
