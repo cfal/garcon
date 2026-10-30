@@ -93,7 +93,8 @@ export class CommandOutputMessage {
     public channel: 'stdout' | 'stderr',
     public format: 'plain' | 'markdown',
     public content: string,
-    public context: CommandOutputContext,
+    // Null in public share snapshots, which do not disclose where the command ran.
+    public context: CommandOutputContext | null,
     public offset = 0,
   ) {}
 }
@@ -1213,8 +1214,8 @@ export function parseChatMessage(data: unknown): ChatMessage | null {
     case 'assistant-message':
       return new AssistantMessage(str(data.timestamp), str(data.content));
     case 'command-output': {
-      const context = parseCommandOutputContext(data.context);
-      if (!context || !isCommandOutputData(data)) return null;
+      const context = data.context === null ? null : parseCommandOutputContext(data.context);
+      if ((data.context !== null && !context) || !isCommandOutputData(data)) return null;
       return new CommandOutputMessage(str(data.timestamp), data.commandId, data.channel,
         data.format, data.content, context, data.offset);
     }

@@ -16,7 +16,7 @@ export const QUICK_GIT_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 
 export type GitQuickRefreshReason =
 	| 'project-change'
-	| 'tray-visible'
+	| 'demand-enabled'
 	| 'agent-stopped'
 	| 'agent-processing-poll'
 	| 'idle-poll'
@@ -44,13 +44,13 @@ type QuickSummaryClearInterval = (handle: QuickSummaryIntervalHandle) => void;
 type QuickSummaryNow = () => number;
 
 type GitQuickCachedStatus = 'unknown' | 'ready' | 'not-git-repository' | 'error';
+export type GitRepositoryClassification = 'unknown' | 'git' | 'non-git';
 
 interface GitQuickSummaryCacheEntry {
 	project: GitProjectTarget;
 	status: GitQuickCachedStatus;
 	summary: GitQuickSummaryReady | null;
 	lastError: string | null;
-	hasResponse: boolean;
 	isRefreshing: boolean;
 	lastAccessedAt: number;
 	lastUpdatedAt: number;
@@ -160,18 +160,10 @@ export class GitQuickSummaryStore {
 		return this.activeEntry?.status === 'ready';
 	}
 
-	get canShowTray(): boolean {
-		return this.canShowTrayFor(this.project);
-	}
-
-	canShowTrayFor(project: GitProjectTarget | null): boolean {
-		if (!this.isEnabled || !project) return false;
+	classificationFor(project: GitProjectTarget | null): GitRepositoryClassification {
 		const entry = this.entryFor(project);
-		if (!entry) return true;
-		if (entry.status === 'not-git-repository') return false;
-		if (entry.summary) return true;
-		if (entry.status === 'error') return Boolean(entry.lastError);
-		return !entry.hasResponse;
+		if (entry?.status === 'not-git-repository') return 'non-git';
+		return entry?.summary ? 'git' : 'unknown';
 	}
 
 	summaryFor(project: GitProjectTarget | null): GitQuickSummaryReady | null {
@@ -263,7 +255,7 @@ export class GitQuickSummaryStore {
 		}
 		for (const project of this.visibleProjects) {
 			this.touchProject(project);
-			this.scheduleRefreshFor(project, 'tray-visible', QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS);
+			this.scheduleRefreshFor(project, 'demand-enabled', QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS);
 		}
 		this.pruneCache();
 	}
@@ -419,25 +411,11 @@ export class GitQuickSummaryStore {
 
 	private applyResponse(project: GitProjectTarget, result: GitQuickSummaryResponse): void {
 		const now = this.now();
-		if (result.status === 'ready') {
+		if (result.status === 'ready' || result.status === 'not-git-repository') {
 			this.updateEntry(project, {
-				status: 'ready',
-				summary: result,
+				status: result.status,
+				summary: result.status === 'ready' ? result : null,
 				lastError: null,
-				hasResponse: true,
-				isRefreshing: false,
-				lastAccessedAt: now,
-				lastUpdatedAt: now,
-			});
-			return;
-		}
-
-		if (result.status === 'not-git-repository') {
-			this.updateEntry(project, {
-				status: 'not-git-repository',
-				summary: null,
-				lastError: null,
-				hasResponse: true,
 				isRefreshing: false,
 				lastAccessedAt: now,
 				lastUpdatedAt: now,
@@ -463,10 +441,15 @@ export class GitQuickSummaryStore {
 
 	private applySummaryError(project: GitProjectTarget, message: string, now: number): void {
 		const existing = this.entryFor(project);
+		let status: GitQuickCachedStatus = 'error';
+		if (existing?.summary) {
+			status = 'ready';
+		} else if (existing?.status === 'not-git-repository') {
+			status = 'not-git-repository';
+		}
 		this.updateEntry(project, {
-			status: existing?.summary ? 'ready' : 'error',
+			status,
 			lastError: message,
-			hasResponse: true,
 			isRefreshing: false,
 			lastAccessedAt: now,
 			lastUpdatedAt: now,
@@ -501,7 +484,6 @@ export class GitQuickSummaryStore {
 			status: 'unknown',
 			summary: null,
 			lastError: null,
-			hasResponse: false,
 			isRefreshing: false,
 			lastAccessedAt: now,
 			lastUpdatedAt: 0,

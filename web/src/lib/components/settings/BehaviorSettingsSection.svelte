@@ -233,9 +233,6 @@
 					{/each}
 				</div>
 			</div>
-			{@render settingRow(m.settings_chat_show_quick_commit_tray(), ls.showQuickCommitTray, () =>
-				ls.toggle('showQuickCommitTray'),
-			)}
 			{@render settingRow(m.settings_chat_auto_scroll_to_bottom(), ls.autoScrollToBottom, () =>
 				ls.toggle('autoScrollToBottom'),
 			)}

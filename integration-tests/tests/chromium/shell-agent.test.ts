@@ -6,7 +6,7 @@ import { authenticateChromiumContext, withChromiumFixture } from '../../support/
 import { Deferred, withTimeout } from '../../support/deferred.js';
 
 test('Shell composer preserves literal commands and stable chat switching on desktop and mobile', async () => {
-  await withChromiumFixture('shell-composer', async ({ page, browser, integration, assertNoBrowserErrors }, phase) => {
+  await withChromiumFixture('shell-composer', async ({ page, browser, integration, assertNoBrowserErrors, watchBrowserErrors }, phase) => {
     const { client, executionDirs } = integration;
     const chatIds: string[] = [];
     for (const text of ['**plain output**', 'second chat']) {
@@ -53,6 +53,7 @@ test('Shell composer preserves literal commands and stable chat switching on des
     const touchContext = await browser.newContext({
       viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true, serviceWorkers: 'block',
     });
+    watchBrowserErrors(touchContext);
     try {
       await authenticateChromiumContext(touchContext, integration);
       const touchPage = await touchContext.newPage();
@@ -181,16 +182,18 @@ test('Shell composer preserves literal commands and stable chat switching on des
       await page.screenshot({ path: join(artifacts, `shell-composer-${width}.png`) });
     }
     phase('cwd settlement failure stays visible once across browser refresh');
+    const cwdNotice = page.locator('[data-chat-scroll-viewport]').getByText(
+      'Command completed, but its working directory is unavailable (outside-base).',
+      { exact: true },
+    );
     await editor.fill('cd "$HOME"');
     await composer.getByRole('button', { name: 'Send message', exact: true }).click();
     await browserExpect(page.getByText('Working directory not saved', { exact: true })).toBeVisible();
     await client.waitForProcessing(chatIds[0]!, false);
-    await browserExpect(page.getByText('Command completed, but its working directory is unavailable (outside-base).', { exact: true }))
-      .toHaveCount(1);
+    await browserExpect(cwdNotice).toHaveCount(1);
     await page.reload();
     await browserExpect(page.getByText('Working directory not saved', { exact: true })).toBeVisible();
-    await browserExpect(page.getByText('Command completed, but its working directory is unavailable (outside-base).', { exact: true }))
-      .toHaveCount(1);
+    await browserExpect(cwdNotice).toHaveCount(1);
     expect(integration.fakeProviders.openAi.requests()).toHaveLength(0);
     expect(integration.fakeProviders.anthropic.requests()).toHaveLength(0);
     assertNoBrowserErrors();

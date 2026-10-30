@@ -38,13 +38,13 @@ describe('Lightpanda workspace windows', () => {
       const chatWindowId = await app.currentWorkspaceWindowId();
       await app.fill('textarea[placeholder="Reply..."]', 'Draft survives window destruction');
 
-      await app.openNewWorkspaceWindow('Open Git Workbench');
+      await app.openNewWorkspaceWindow('Open Workbench');
       await app.waitForWorkspaceWindowCount(3);
       const gitWindowId = await app.workspaceWindowIdForSurface('singleton:git');
       expect(gitWindowId).not.toBe(chatWindowId);
-      await app.selectWorkspaceWindowSurface('Open Git Compare', gitWindowId);
+      await app.selectWorkspaceWindowSurface('Open Compare', gitWindowId);
       await waitForWindowActiveSurface(fixture.page, gitWindowId, 'singleton:git-compare');
-      await app.selectWorkspaceWindowSurface('Open Git History', gitWindowId);
+      await app.selectWorkspaceWindowSurface('Open History', gitWindowId);
       await waitForWindowActiveSurface(fixture.page, gitWindowId, 'singleton:git-history');
       await app.selectWorkspaceWindowSurface('Open Files', gitWindowId);
       await waitForWindowActiveSurface(fixture.page, gitWindowId, 'singleton:files');
@@ -92,10 +92,10 @@ describe('Lightpanda workspace windows', () => {
       const chat = (await fixture.integration.client.listChats()).sessions[0];
       if (!chat) throw new Error('Missing persisted Chat fixture.');
 
-      await app.openNewWorkspaceWindow('Open Git Workbench');
+      await app.openNewWorkspaceWindow('Open Workbench');
       await app.waitForWorkspaceWindowCount(3);
       const gitWindowId = await app.workspaceWindowIdForSurface('singleton:git');
-      await app.selectWorkspaceWindowSurface('Open Git Compare', gitWindowId);
+      await app.selectWorkspaceWindowSurface('Open Compare', gitWindowId);
       await waitForWindowActiveSurface(fixture.page, gitWindowId, 'singleton:git-compare');
       await waitForPersistedWindowState(fixture.page, {
         windowCount: 3,

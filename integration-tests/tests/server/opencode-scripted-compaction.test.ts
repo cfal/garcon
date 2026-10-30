@@ -43,9 +43,7 @@ const HIGH_USAGE = {
 
 let environment: ScriptedOpenCodeTestEnvironment | undefined;
 
-const describeOnLinux = process.platform === 'linux' ? describe : describe.skip;
-
-describeOnLinux('OpenCode V1 automatic compaction against a scripted model', () => {
+describe.skipIf(process.platform !== 'linux')('OpenCode V1 automatic compaction against a scripted model', () => {
   beforeEach(() => {
     environment = startScriptedOpenCodeTestEnvironment({ autoCompact: true });
   });

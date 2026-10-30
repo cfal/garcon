@@ -147,7 +147,7 @@
 		if (!open || activeForm.targetType !== 'new-chat') return;
 		void activeForm.startup.nonblankPath;
 		void pathContextKey;
-		untrack(() => activeForm.startup.validatePath());
+		untrack(() => activeForm.startup.validateChangedPath());
 	});
 
 	$effect(() => {

@@ -34,9 +34,7 @@ import {
 // and agent-run-failed, never a false success.
 let environment: ScriptedOpenCodeTestEnvironment | undefined;
 
-const describeOnLinux = process.platform === 'linux' ? describe : describe.skip;
-
-describeOnLinux('scripted OpenCode provider failures', () => {
+describe.skipIf(process.platform !== 'linux')('scripted OpenCode provider failures', () => {
   beforeEach(() => {
     environment = startScriptedOpenCodeTestEnvironment();
   });

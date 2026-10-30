@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { captureBrowserErrors } from '../../support/browser-errors.js';
 import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
@@ -12,6 +13,8 @@ test('the patched graph UMD runs in a browser without a process shim', async () 
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
+    const browserErrors: string[] = [];
+    captureBrowserErrors(page.context(), browserErrors);
     const script = await readFile(new URL('../../../node_modules/@xyflow/system/dist/umd/index.js', import.meta.url), 'utf8');
     await page.addScriptTag({ content: script });
     const result = await page.evaluate(() => {
@@ -24,6 +27,7 @@ test('the patched graph UMD runs in a browser without a process shim', async () 
       };
     });
     expect(result).toEqual({ hasProcess: false, bounds: { x: 10, y: 20, width: 100, height: 50 } });
+    expect(browserErrors).toEqual([]);
   } finally {
     await browser.close();
   }

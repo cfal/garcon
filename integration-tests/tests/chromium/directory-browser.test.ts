@@ -160,7 +160,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const [status, method, url] = response.split(' ');
         return `${status} ${method} ${new URL(url!).pathname} ${new URL(url!).searchParams.get('path')}`;
       })).toEqual([stalePath, join(root, 'alpha', 'ghost')].map((path) => `404 GET /api/v1/files/browse ${path}`));
-      expect(browserErrors.filter((error) => !error.includes('status of 404'))).toEqual([]);
+      expect(browserErrors.splice(0)).toEqual(Array(2).fill('console.error: Failed to load resource: the server responded with a status of 404 (Not Found)'));
     }, undefined, { executionBackend, projectRoots: 'separate' });
   }, 120_000);
 }

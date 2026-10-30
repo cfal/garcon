@@ -87,7 +87,7 @@
 {:else if item.kind === 'viewport-end-spacer'}
 	<div
 		aria-hidden="true"
-		class={item.reserveComposerTraySpace ? 'h-14' : 'h-3 sm:h-4'}
+		class={item.reserveComposerCapSpace ? 'h-14' : 'h-3 sm:h-4'}
 		data-chat-feed-viewport-end-spacer
 	></div>
 {:else if item.kind === 'refresh-error'}

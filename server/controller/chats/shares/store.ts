@@ -1,6 +1,8 @@
 // Persistent store for shared chat snapshots. Keeps a small share index in
 // shared-chats.json and, per token, a snapshot with one message per line and its
-// plain-text transcript, both rendered on the transcript rendering Worker.
+// plain-text transcript, both rendered on the transcript rendering Worker. The index
+// records the renderer revision of each share's artifacts; a read renders older
+// artifacts again before serving them.
 
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -19,10 +21,11 @@ import {
   decodeShareSnapshotHeader,
   isValidShareToken,
   normalizeShareIndexEntry,
+  SHARE_ARTIFACT_REVISION,
   type ShareIndexEntry,
   type ShareSnapshotHeader,
 } from './snapshot-format.js';
-import type { RenderedShareSnapshot } from '../transcript-rendering/tasks.js';
+import type { RenderedShareSnapshot, ShareSnapshotFormat } from '../transcript-rendering/tasks.js';
 import type { TranscriptRendering } from '../transcript-rendering/client.js';
 import { readShareSnapshotRange, type SelectShareMessageRange } from './snapshot-reader.js';
 
@@ -46,13 +49,17 @@ async function repairSharePermissions(
   });
 }
 
+interface StoredShareEntry extends ShareIndexEntry {
+  readonly artifactRevision: number;
+}
+
 interface ShareStoreIndex {
   version: 2;
-  shares: Record<string, ShareIndexEntry>;
+  shares: Record<string, StoredShareEntry>;
 }
 
 interface ShareStoreOptions {
-  readonly rendering: Pick<TranscriptRendering, 'renderShareSnapshot' | 'convertShareSnapshot'>;
+  readonly rendering: Pick<TranscriptRendering, 'renderShareSnapshot' | 'upgradeShareSnapshot'>;
   readonly now?: () => number;
   readonly cacheLimit?: number;
   readonly cacheBytes?: number;
@@ -93,7 +100,7 @@ function createEmptyIndex(): ShareStoreIndex {
   return { version: SHARE_INDEX_VERSION, shares: {} };
 }
 
-function indexEntryFromHeader(header: ShareSnapshotHeader): ShareIndexEntry {
+function indexEntryFromHeader(header: ShareSnapshotHeader, artifactRevision: number): StoredShareEntry {
   return {
     shareToken: header.shareToken,
     chatId: header.chatId,
@@ -102,7 +109,14 @@ function indexEntryFromHeader(header: ShareSnapshotHeader): ShareIndexEntry {
     model: header.model,
     projectPath: header.projectPath,
     sharedAt: header.sharedAt,
+    artifactRevision,
   };
+}
+
+// Shares indexed before artifacts carried a revision hold the first one.
+function storedArtifactRevision(value: unknown): number {
+  const revision = isRecord(value) ? value.artifactRevision : undefined;
+  return typeof revision === 'number' && Number.isSafeInteger(revision) && revision > 0 ? revision : 1;
 }
 
 export class ShareStore implements IShareStore {
@@ -176,7 +190,7 @@ export class ShareStore implements IShareStore {
     const index = createEmptyIndex();
     for (const [token, rawEntry] of Object.entries(shares)) {
       const entry = normalizeShareIndexEntry(token, rawEntry);
-      if (entry) index.shares[entry.shareToken] = entry;
+      if (entry) index.shares[entry.shareToken] = { ...entry, artifactRevision: storedArtifactRevision(rawEntry) };
     }
     return index;
   }
@@ -188,7 +202,7 @@ export class ShareStore implements IShareStore {
     for (const [token, rawSnapshot] of Object.entries(shares)) {
       const snapshot = decodeLegacyShareSnapshot(token, rawSnapshot);
       if (!snapshot) continue;
-      index.shares[snapshot.shareToken] = indexEntryFromHeader({ ...snapshot, messageCount: snapshot.messages.length });
+      index.shares[snapshot.shareToken] = indexEntryFromHeader({ ...snapshot, messageCount: snapshot.messages.length }, 1);
       await writeJsonFileAtomic(this.#shareFilePath(snapshot.shareToken, 'json'), snapshot, { mode: 0o600 });
     }
     await writeJsonFileAtomic(this.#filePath(), index, { mode: 0o600 });
@@ -251,7 +265,7 @@ export class ShareStore implements IShareStore {
       );
       this.#assertAvailable();
       await this.#writeRendered(token, rendered);
-      const entry = indexEntryFromHeader(rendered.header);
+      const entry = indexEntryFromHeader(rendered.header, SHARE_ARTIFACT_REVISION);
       this.#snapshotCache.delete(token);
       await this.#commit(shares => { shares[token] = entry; });
       return entry;
@@ -266,7 +280,7 @@ export class ShareStore implements IShareStore {
 
   // Reads only the snapshot's first line when its messages are not cached.
   async getHeader(token: string): Promise<ShareSnapshotHeader | null> {
-    if (!this.#hasShare(token)) return null;
+    if (!(await this.#currentShare(token))) return null;
     const cached = this.#cachedMessages(token);
     if (cached) return cached.header;
     const header = await this.#readHeader(token);
@@ -275,7 +289,7 @@ export class ShareStore implements IShareStore {
   }
 
   async getMessages(token: string, select?: SelectShareMessageRange): Promise<SharedChatMessages | null> {
-    const entry = this.#shareEntry(token);
+    const entry = await this.#currentShare(token);
     if (!entry) return null;
     const cached = this.#cachedMessages(token);
     if (cached) return selectMessages(cached, select);
@@ -291,9 +305,7 @@ export class ShareStore implements IShareStore {
           return page;
         } catch (error) {
           if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
-          const converted = await this.#convertLegacySnapshot(token);
-          this.#assertAvailable();
-          return converted ? selectMessages(converted, select) : null;
+          return null;
         }
       }
       const loaded = await this.#loadSnapshot(token);
@@ -302,11 +314,8 @@ export class ShareStore implements IShareStore {
   }
 
   async getTextPath(token: string): Promise<string | null> {
-    if (!this.#hasShare(token)) return null;
+    if (!(await this.#currentShare(token))) return null;
     const textPath = this.#shareFilePath(token, 'txt');
-    if (await Bun.file(textPath).exists()) return textPath;
-    // Reading a share converts an older snapshot, which writes its plain text.
-    if (!(await this.getMessages(token))) return null;
     return await Bun.file(textPath).exists() ? textPath : null;
   }
 
@@ -327,18 +336,59 @@ export class ShareStore implements IShareStore {
     });
   }
 
-  #hasShare(token: string): boolean {
-    return this.#shareEntry(token) !== null;
+  // Returns the share once the current renderer wrote its artifacts, rendering older
+  // artifacts again first so no read serves what an earlier renderer disclosed.
+  async #currentShare(token: string): Promise<StoredShareEntry | null> {
+    const entry = this.#shareEntry(token);
+    if (!entry || entry.artifactRevision === SHARE_ARTIFACT_REVISION) return entry;
+    return this.#chatLocks.runExclusive(entry.chatId, async () => {
+      const current = this.#shareEntry(token);
+      if (current?.chatId !== entry.chatId) return null;
+      return current.artifactRevision === SHARE_ARTIFACT_REVISION ? current : this.#upgradeArtifacts(current);
+    });
   }
 
-  #shareEntry(token: string): ShareIndexEntry | null {
+  async #upgradeArtifacts(entry: StoredShareEntry): Promise<StoredShareEntry | null> {
+    const token = entry.shareToken;
+    const stored = await this.#storedSnapshot(token);
+    this.#assertAvailable();
+    if (!stored) {
+      await this.#commit(shares => { delete shares[token]; });
+      return null;
+    }
+    const rendered = await this.#rendering.upgradeShareSnapshot(token, stored.format, stored.path);
+    this.#assertAvailable();
+    if (!rendered) {
+      logger.warn('share-store: a stored share snapshot is unreadable');
+      return null;
+    }
+    await this.#writeRendered(token, rendered);
+    this.#snapshotCache.delete(token);
+    const upgraded = indexEntryFromHeader(rendered.header, SHARE_ARTIFACT_REVISION);
+    await this.#commit(shares => { shares[token] = upgraded; });
+    return upgraded;
+  }
+
+  // Prefers the line-delimited snapshot, which an interrupted upgrade from a document
+  // leaves beside it. The caller holds the chat lock, which every share write and removal
+  // takes, so the file stays in place while the rendering Worker reads it.
+  async #storedSnapshot(token: string): Promise<{ format: ShareSnapshotFormat; path: string } | null> {
+    for (const [format, extension] of [['lines', 'ndjson'], ['document', 'json']] as const) {
+      const snapshotPath = this.#shareFilePath(token, extension);
+      if (await Bun.file(snapshotPath).exists()) return { format, path: snapshotPath };
+    }
+    return null;
+  }
+
+  #shareEntry(token: string): StoredShareEntry | null {
     this.#assertAvailable();
     if (!this.#index || !isValidShareToken(token) || !Object.hasOwn(this.#index.shares, token)) return null;
     return this.#index.shares[token] ?? null;
   }
 
-  // The snapshot goes last: its presence means the share needs no conversion, so it must
-  // imply the plain text was written.
+  // A document snapshot is removed only once its line-delimited replacement exists, and the
+  // index records the new revision after every write, so an interrupted write is rendered
+  // again on the next read.
   async #writeRendered(token: string, rendered: RenderedShareSnapshot): Promise<void> {
     await writeFileAtomic(this.#shareFilePath(token, 'txt'), rendered.text, { mode: 0o600 });
     await writeFileAtomic(this.#shareFilePath(token, 'ndjson'), rendered.snapshot, { mode: 0o600 });
@@ -363,29 +413,13 @@ export class ShareStore implements IShareStore {
     try {
       text = await fs.readFile(snapshotPath, 'utf8');
     } catch (error: unknown) {
-      if (hasNodeErrorCode(error, 'ENOENT')) return this.#convertLegacySnapshot(token);
+      if (hasNodeErrorCode(error, 'ENOENT')) return null;
       throw error;
     }
     await repairSharePermissions(snapshotPath, 0o600, 'share snapshot');
     const shared = decodeShareSnapshot(token, text);
     if (!shared) logger.warn('share-store: share snapshot is unreadable:', token);
     return shared;
-  }
-
-  // Converts a snapshot stored as one document on the rendering Worker, once.
-  async #convertLegacySnapshot(token: string): Promise<SharedChatMessages | null> {
-    let json: string;
-    try {
-      json = await fs.readFile(this.#shareFilePath(token, 'json'), 'utf8');
-    } catch (error: unknown) {
-      if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
-      await this.#commit(shares => { delete shares[token]; });
-      return null;
-    }
-    const rendered = await this.#rendering.convertShareSnapshot(token, json);
-    if (!rendered) return null;
-    await this.#writeRendered(token, rendered);
-    return decodeShareSnapshot(token, new TextDecoder().decode(rendered.snapshot));
   }
 
   async #removeFile(filePath: string): Promise<void> {

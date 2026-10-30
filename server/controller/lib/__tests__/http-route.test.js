@@ -39,7 +39,14 @@ mock.module('../../config.js', () => ({
   isHttpCompressionEnabled,
 }));
 
-import { markRouteNoAuth, markRouteNoStore, isNoAuthHandler, wrapRoute, wrapRoutes } from '../http-route.js';
+import {
+  markRouteNoAuth,
+  markRouteNoStore,
+  markRouteResponseHeaders,
+  isNoAuthHandler,
+  wrapRoute,
+  wrapRoutes,
+} from '../http-route.js';
 import { withJsonBody } from '../json-route.js';
 import { monitorEventLoopStalls } from '../../../common/event-loop-stalls.js';
 
@@ -100,6 +107,29 @@ describe('http route wrapping', () => {
     }
     expect(handler).not.toHaveBeenCalled();
   });
+  for (const mode of ['authenticated', 'disabled', 'public']) {
+    it(`adds marked response headers to ${mode} success, unhandled-error, and shutdown responses`, async () => {
+      if (mode === 'disabled') isAuthDisabled.mockReturnValue(true);
+      let shuttingDown = false;
+      let failing = false;
+      const handler = markRouteResponseHeaders(mock(() => {
+        if (failing) throw new Error('synthetic route failure');
+        return Response.json({ ok: true });
+      }), { 'X-Robots-Tag': 'noindex' });
+      if (mode === 'public') markRouteNoAuth(handler);
+      const wrapped = wrapRoute(handler, '/shared/:token', 'GET', { isShuttingDown: () => shuttingDown });
+      const request = () => wrapped(new Request('http://localhost/shared/token'));
+
+      const responses = [await request()];
+      failing = true;
+      responses.push(await request());
+      shuttingDown = true;
+      responses.push(await request());
+
+      expect(responses.map((response) => response.status)).toEqual([200, 500, 503]);
+      for (const response of responses) expect(response.headers.get('X-Robots-Tag')).toBe('noindex');
+    });
+  }
   beforeEach(() => {
     authenticateHttpRequest.mockClear();
     parseJsonBody.mockClear();

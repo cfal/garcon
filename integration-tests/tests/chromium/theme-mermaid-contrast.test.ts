@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { captureBrowserErrors } from '../../support/browser-errors.js';
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -62,6 +63,8 @@ describe("Mermaid theme contrast", () => {
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
     const page = await context.newPage();
+    const browserErrors: string[] = [];
+    captureBrowserErrors(page.context(), browserErrors);
     const departureFont = await readFile(fileURLToPath(new URL(
       '../../../web/src/lib/theme/assets/DepartureMono-1.500.woff2', import.meta.url,
     )));
@@ -254,6 +257,7 @@ describe("Mermaid theme contrast", () => {
       expect(geometry.toggled).toEqual(geometry.standard);
       expect(geometry.cached).toEqual(geometry.standard);
       expect(geometry.fresh).toEqual(geometry.standard);
+      expect(browserErrors).toEqual([]);
     } finally {
       await context.close();
       await browser.close();

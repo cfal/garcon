@@ -160,6 +160,9 @@
 				{/each}
 			</select>
 		</div>
+		{@render settingRow(m.settings_auto_hide_chat_scrollbar(), ls.autoHideChatScrollbar, () =>
+			ls.toggle('autoHideChatScrollbar'),
+		)}
 		<div class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
 			<label class="min-w-0 text-sm font-medium text-foreground" for="local-inline-image-size">
 				{m.settings_inline_image_thumbnail_size()}
@@ -202,5 +205,34 @@
 		{@render settingRow(m.settings_chat_reduce_motion(), ls.reduceMotion, () =>
 			ls.toggle('reduceMotion'),
 		)}
+		<section class="mt-4 border-t border-border pt-3" aria-label={m.settings_composer_status_bar()}>
+			<h3 class="pb-2 text-sm font-semibold">{m.settings_composer_status_bar()}</h3>
+			{@render settingRow(
+				m.settings_composer_status_bar_git_projects(),
+				ls.composerStatusBarGitProjects,
+				() => ls.toggle('composerStatusBarGitProjects'),
+			)}
+			{@render settingRow(
+				m.settings_composer_status_bar_non_git_projects(),
+				ls.composerStatusBarNonGitProjects,
+				() => ls.toggle('composerStatusBarNonGitProjects'),
+			)}
+			<h4 class="pt-3 pb-1 text-sm font-medium text-muted-foreground">
+				{m.settings_composer_status_bar_items()}
+			</h4>
+			{@render settingRow(
+				m.settings_composer_status_bar_project_path(),
+				ls.composerStatusBarProjectPath,
+				() => ls.toggle('composerStatusBarProjectPath'),
+			)}
+			{@render settingRow(
+				m.settings_composer_status_bar_git_branch(),
+				ls.composerStatusBarGitBranch,
+				() => ls.toggle('composerStatusBarGitBranch'),
+			)}
+			{@render settingRow(m.settings_composer_status_bar_commit(), ls.composerStatusBarCommit, () =>
+				ls.toggle('composerStatusBarCommit'),
+			)}
+		</section>
 	</div>
 </div>

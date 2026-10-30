@@ -50,6 +50,7 @@ test('browser notifications enable explicitly and route a background completion 
 test('two Garcon pages suppress notifications while either is focused and deliver once when both are unfocused', async () => {
   await withChromiumFixture('browser-notifications-two-pages', async ({ page, context, integration, assertNoBrowserErrors }) => {
     await context.addInitScript(() => {
+      if (location.hostname !== '127.0.0.1') return;
       const capture = window as typeof window & { notificationTitles: string[]; notificationFocused: boolean; finishedTurns: string[] };
       capture.notificationTitles = []; capture.notificationFocused = false; capture.finishedTurns = [];
       const settings = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');

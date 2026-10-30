@@ -22,6 +22,7 @@
 	>
 		{#each attachments as attachment, index (index)}
 			<li
+				data-slot="queue-attachment"
 				class="flex min-w-0 max-w-48 items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
 				title={attachment.name}
 			>

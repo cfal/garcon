@@ -212,6 +212,7 @@
 
 {#if queue && chatId && entries.length > 0}
 	<section
+		data-slot="chat-queue"
 		class={`${CHAT_DOCK_SURFACE_CLASS} flex min-h-0 flex-col`}
 		aria-label={m.chat_queue_dialog_title()}
 		data-queue-status-summary

@@ -8,7 +8,7 @@ import { SpaDriver } from '../../support/spa-driver.js';
 describe('Lightpanda on-demand project resolution', () => {
   test('a rejected remote send refreshes the composer project on its own executor', async () => {
     await withE2eFixture('remote-unavailable-project-submit', async fixture => {
-      await fixture.page.evaluateOnNewDocument(seedLocalSettings, { showQuickCommitTray: false });
+      await fixture.page.evaluateOnNewDocument(seedLocalSettings, { composerStatusBarGitProjects: false });
       const { client, directAgents, executionDirs } = fixture.integration;
       const projectPath = join(executionDirs.project, 'removed-after-open');
       await mkdir(projectPath);
@@ -43,13 +43,12 @@ describe('Lightpanda on-demand project resolution', () => {
       await app.sendComposer('Synthetic retry after repair');
       await app.waitForAssistantMessageContaining('Synthetic retry after repair');
       expect((await client.getChatSnapshot(chatId)).chat.executorId).toBe(client.executorId);
-      expect(fixture.browserErrors.filter(message => !message.includes('409'))).toEqual([]);
     }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
   }, 60_000);
 
   test('keeps chat history and drafts quiet until a project surface is presented', async () => {
     await withE2eFixture('on-demand-project-resolution', async (fixture) => {
-      await fixture.page.evaluateOnNewDocument(seedLocalSettings, { showQuickCommitTray: false });
+      await fixture.page.evaluateOnNewDocument(seedLocalSettings, { composerStatusBarGitProjects: false });
       const projectPath = join(fixture.integration.dirs.project, 'missing-project');
       await mkdir(projectPath);
       const chatId = fixture.integration.newChatId();

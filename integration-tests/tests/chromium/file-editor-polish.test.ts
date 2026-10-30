@@ -1,9 +1,67 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 describe('File editor controls', () => {
+  test.each([false, true])('keeps checkbox indicators tied to selection with Terminal UI Style %s', async (terminalAppearance) => {
+    await withChromiumFixture(`file-editor-checkbox-hover-${terminalAppearance}`, async ({ page, integration }) => {
+      await page.addInitScript(seedLocalSettings, {
+        terminalAppearance,
+        codeEditorWordWrap: false,
+        codeEditorLineNumbers: true,
+      });
+      const filename = 'checkbox-hover.txt';
+      await writeFile(join(integration.dirs.project, filename), 'Synthetic editor content\n', 'utf8');
+      const chatId = integration.newChatId();
+      const started = await integration.client.startDirectChat({
+        chatId,
+        content: 'Editor checkbox fixture',
+        projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(chatId, started.turnId);
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      await browserExpect(page.locator('html')).toHaveAttribute(
+        'data-theme-appearance', terminalAppearance ? 'terminal' : 'standard',
+      );
+      await page.locator('[data-file-tree-entry-text]').filter({ hasText: filename }).click();
+      await page.getByRole('button', { name: 'Editor settings' }).click();
+      const wordWrap = page.getByRole('menuitemcheckbox', { name: 'Word wrap', exact: true });
+      const lineNumbers = page.getByRole('menuitemcheckbox', { name: 'Line numbers', exact: true });
+      await wordWrap.hover();
+      await browserExpect(wordWrap).toHaveAttribute('data-highlighted', '');
+      await browserExpect(wordWrap).toHaveAttribute('aria-checked', 'false');
+      await browserExpect(wordWrap.locator('svg')).toHaveCount(0);
+      const bounds = await wordWrap.boundingBox();
+
+      await wordWrap.click();
+      await browserExpect(wordWrap).toHaveAttribute('aria-checked', 'true');
+      await browserExpect(wordWrap.locator('svg')).toBeVisible();
+      await browserExpect(wordWrap.locator('svg')).toHaveCSS(
+        'color', await wordWrap.evaluate((element) => getComputedStyle(element).color),
+      );
+      expect(await wordWrap.boundingBox()).toEqual(bounds);
+      await wordWrap.click();
+      await browserExpect(wordWrap).toHaveAttribute('aria-checked', 'false');
+      await browserExpect(wordWrap.locator('svg')).toHaveCount(0);
+
+      await lineNumbers.hover();
+      await browserExpect(lineNumbers).toHaveAttribute('aria-checked', 'true');
+      await browserExpect(lineNumbers.locator('svg')).toBeVisible();
+      await lineNumbers.press('ArrowUp');
+      await browserExpect(wordWrap).toBeFocused();
+      await browserExpect(wordWrap).toHaveAttribute('data-highlighted', '');
+      await browserExpect(wordWrap.locator('svg')).toHaveCount(0);
+      expect(await wordWrap.boundingBox()).toEqual(bounds);
+      await page.screenshot({
+        path: join(import.meta.dirname, `../../artifacts/chromium/editor-checkbox-${terminalAppearance}.png`),
+      });
+    });
+  }, 60_000);
+
   test('refreshes Markdown preview without mounting a source editor', async () => {
     await withChromiumFixture('markdown-preview-disk-refresh', async (fixture) => {
       const { page, integration } = fixture;

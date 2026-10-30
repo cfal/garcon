@@ -134,7 +134,6 @@ test.each([
           await page.screenshot({
             path: join(integration.dirs.root, 'missing-draft-mobile.png'),
           });
-          expect(browserErrors.filter((error) => !error.includes('404 (Not Found)'))).toEqual([]);
           return;
         }
 
@@ -220,7 +219,7 @@ test.each([
         expect(result.request().postDataJSON().conflictResolution).toBe('reject');
         expect(await readFile(path, 'utf8')).toBe('selected edit');
         await browserExpect.poll(() => storedDraftContents(page)).toEqual([]);
-        expect(browserErrors).toEqual([
+        expect(browserErrors.splice(0)).toEqual([
           ...(choice === 'Resume draft'
             ? [
                 'console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)',

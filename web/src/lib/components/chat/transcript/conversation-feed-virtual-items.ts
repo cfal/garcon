@@ -47,7 +47,7 @@ export type ConversationVirtualFeedItem =
 	| {
 			kind: 'viewport-end-spacer';
 			key: string;
-			reserveComposerTraySpace: boolean;
+			reserveComposerCapSpace: boolean;
 			spacingAfter: 'none';
 	  };
 
@@ -72,7 +72,7 @@ export interface ConversationVirtualFeedInput {
 	showRefreshError: boolean;
 	earlierBoundary: ConversationEarlierBoundaryMode;
 	showLaterBoundary: boolean;
-	reserveComposerTraySpace: boolean;
+	reserveComposerCapSpace: boolean;
 	surfaceIdentity: string;
 	transcriptItems: ConversationFeedRenderItem[];
 	transcriptViewId: string;
@@ -258,7 +258,7 @@ export function buildConversationVirtualFeedModel(
 	items.push({
 		kind: 'viewport-end-spacer',
 		key: key('suffix:viewport-end-spacer'),
-		reserveComposerTraySpace: input.reserveComposerTraySpace,
+		reserveComposerCapSpace: input.reserveComposerCapSpace,
 		spacingAfter: 'none',
 	});
 
@@ -379,7 +379,7 @@ export function estimateConversationFeedItemSize(
 ): number {
 	if (!item) return 120;
 	if (item.kind === 'viewport-start-spacer') return 16;
-	if (item.kind === 'viewport-end-spacer') return item.reserveComposerTraySpace ? 56 : 16;
+	if (item.kind === 'viewport-end-spacer') return item.reserveComposerCapSpace ? 56 : 16;
 	if (
 		item.kind === 'refresh-error' ||
 		item.kind === 'earlier-boundary' ||

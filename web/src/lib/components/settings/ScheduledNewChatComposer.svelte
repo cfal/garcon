@@ -146,8 +146,7 @@
 				basePath: startup.projectBasePath,
 				isMobile,
 				onSelect: (path) => {
-					startup.projectPath = path;
-					startup.clearError();
+					startup.selectProjectPath(path);
 				},
 				onClose: () => (startup.showBrowser = false),
 			}}
@@ -182,8 +181,7 @@
 			emptyLabel={m.chat_new_chat_star_bookmark()}
 			disabled={startup.isUpdatingPinnedPath}
 			onSelect={(path) => {
-				startup.projectPath = path;
-				startup.clearError();
+				startup.selectProjectPath(path);
 			}}
 		/>
 

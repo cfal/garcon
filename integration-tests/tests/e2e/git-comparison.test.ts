@@ -80,7 +80,7 @@ describe('Lightpanda Git comparison', () => {
 
       await app.clickSidebarChatContaining('git-comparison-chat-a');
       await app.waitForSelectedChat(chatA.id);
-      await app.openNewWorkspaceWindow('Open Git Compare');
+      await app.openNewWorkspaceWindow('Open Compare');
       await fixture.page.waitForSelector(COMPARE_PANEL);
       const compareWindowId = await app.workspaceWindowIdForSurface('singleton:git-compare');
       await waitForComparisonMarkers(
@@ -235,7 +235,7 @@ describe('Lightpanda Git comparison', () => {
       });
       await app.waitForText('echo:git-comparison-root-default');
       const compareWindowId = await app.currentWorkspaceWindowId();
-      await app.selectWorkspaceWindowSurface('Open Git Compare', compareWindowId);
+      await app.selectWorkspaceWindowSurface('Open Compare', compareWindowId);
       await fixture.page.waitForSelector(COMPARE_PANEL);
       await waitForComparisonMarkers(
         fixture.page,
@@ -349,7 +349,7 @@ describe('Lightpanda Git comparison', () => {
       await app.waitForText('echo:git-comparison-seed');
       const chatWindowId = await app.currentWorkspaceWindowId();
 
-      await app.openNewWorkspaceWindow('Open Git Compare');
+      await app.openNewWorkspaceWindow('Open Compare');
       await fixture.page.waitForSelector(
         '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
           '[aria-hidden="false"]',
@@ -532,7 +532,7 @@ describe('Lightpanda Git comparison', () => {
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-revision-freshness-seed');
       await app.waitForText('echo:git-revision-freshness-seed');
-      await app.openNewWorkspaceWindow('Open Git Compare');
+      await app.openNewWorkspaceWindow('Open Compare');
       await fixture.page.waitForSelector(
         '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
           '[aria-hidden="false"]',

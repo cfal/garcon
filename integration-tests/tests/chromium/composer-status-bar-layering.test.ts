@@ -17,7 +17,7 @@ async function openSettledChat(fixture: ChromiumFixture): Promise<string> {
   const chatId = fixture.integration.newChatId();
   const started = await fixture.integration.client.startDirectChat({
     chatId,
-    content: "composer-status-tray-prime",
+    content: "composer-status-bar-prime",
     projectPath: fixture.integration.dirs.project,
     agent: fixture.integration.directAgents.openAi,
   });
@@ -35,7 +35,7 @@ async function openSettledChat(fixture: ChromiumFixture): Promise<string> {
 
 async function bounds(locator: Locator) {
   const box = await locator.boundingBox();
-  if (!box) throw new Error("Missing composer status tray geometry.");
+  if (!box) throw new Error("Missing composer status bar geometry.");
   return box;
 }
 
@@ -86,14 +86,14 @@ function maximumChannelDifference(left: Rgba, right: Rgba): number {
   );
 }
 
-describe("Chromium composer status tray layering", () => {
+describe("Chromium composer status bar layering", () => {
   test("keeps the processing cap visible underneath the rounded composer corners", async () => {
     await withChromiumFixture(
-      "composer-status-tray-layering",
+      "composer-status-bar-layering",
       async (fixture, markPhase) => {
         markPhase("opening a settled chat");
         const chatId = await openSettledChat(fixture);
-        const prompt = "composer-status-tray-held";
+        const prompt = "composer-status-bar-held";
         const held = fixture.integration.fakeProviders.openAi.holdNext({
           lastUserText: prompt,
         });

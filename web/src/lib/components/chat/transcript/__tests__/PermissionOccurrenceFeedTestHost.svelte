@@ -35,7 +35,7 @@
 		showRefreshError: false,
 		earlierBoundary: 'hidden',
 		showLaterBoundary: false,
-		reserveComposerTraySpace: false,
+		reserveComposerCapSpace: false,
 		transcriptViewId: 'view-1',
 		surfaceIdentity: 'chat-1:view-1',
 		transcriptItems: [],

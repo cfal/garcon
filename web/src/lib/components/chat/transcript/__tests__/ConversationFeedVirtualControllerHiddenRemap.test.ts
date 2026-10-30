@@ -113,7 +113,7 @@ function fallbackProjection(
 		showRefreshError: false,
 		earlierBoundary: 'hidden',
 		showLaterBoundary: false,
-		reserveComposerTraySpace: false,
+		reserveComposerCapSpace: false,
 		pendingPermissions: [],
 		combineToolUseMessages,
 		expandedToolMemberIds: new Set(),

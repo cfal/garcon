@@ -272,7 +272,7 @@ export class ScheduledPromptFormState {
 		this.startup.showTagInput = false;
 		this.startup.preambles.restoreChoice(scheduledPrompt.target.preambleChoice);
 		await this.startup.loadSettingsAndModels();
-		this.startup.validatePath();
+		this.startup.validateChangedPath();
 	}
 
 	buildDefinition(now = new Date()): ScheduledPromptDefinitionInput | null {
