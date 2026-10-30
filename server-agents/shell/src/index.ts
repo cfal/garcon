@@ -45,6 +45,7 @@ export default class ShellIntegration implements AgentIntegration {
   readonly producers;
   readonly permissions;
   readonly projectPathUpdates;
+  readonly usageHistory = null;
   readonly configurationValidation: NonNullable<AgentIntegration['configurationValidation']>;
   readonly nativeHistoryImport: NonNullable<AgentIntegration['nativeHistoryImport']>;
   readonly nativeSessions: NonNullable<AgentIntegration['nativeSessions']>;

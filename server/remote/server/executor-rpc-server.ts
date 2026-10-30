@@ -199,6 +199,7 @@ export function serveExecutionRuntime(
       case 'projectPathUpdates.prepare': return required(integration.projectPathUpdates).prepare(call.request);
       case 'projectPathUpdates.commit': return required(integration.projectPathUpdates).commit(call.request, options);
       case 'projectPathUpdates.rollback': return required(integration.projectPathUpdates).rollback(call.request, options);
+      case 'usageHistory.read': return required(integration.usageHistory).read({ ...call.request, signal });
       case 'credentials.resolve': throw new AgentCallError('rejected', 'Credential resolution is controller-owned');
       case 'calls.reconcile': throw new AgentCallError('rejected', 'Call reconciliation belongs to the RPC layer');
       default: return unknownMethod(call);

@@ -47,7 +47,7 @@ function claudeConfigHomeDir(options: ClaudeNativePathOptions): string {
   ).normalize('NFC');
 }
 
-function claudeProjectsDir(options: ClaudeNativePathOptions): string {
+export function claudeProjectsDir(options: ClaudeNativePathOptions): string {
   return path.join(claudeConfigHomeDir(options), 'projects');
 }
 

@@ -1,4 +1,5 @@
 import os from 'node:os';
+import path from 'node:path';
 import { stat } from 'node:fs/promises';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
@@ -19,6 +20,7 @@ import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/sco
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+import { createTranscriptUsageHistory } from '@garcon/server-agent-common/usage/transcript-usage-history';
 import {
   singleQueryRuntimeOptions,
   withSingleQueryControl,
@@ -54,6 +56,7 @@ import { CodexAppServerRuntime } from './agents/codex/app-server/runtime.js';
 import { runSingleQuery } from './agents/codex/app-server/run-single-query.js';
 import { CodexSkillDiscovery } from './agents/codex/slash-command-discovery.js';
 import { createCodexNativeActivityProbe } from './agents/codex/native-activity.js';
+import { codexUsageFormat } from './agents/codex/usage-format.js';
 
 const CODEX_DESCRIPTOR = {
   id: 'codex',
@@ -94,6 +97,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
   readonly nativeSessions;
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
   readonly projectPathUpdates = null;
+  readonly usageHistory: NonNullable<AgentIntegration['usageHistory']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -163,6 +167,12 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createCodexNativeActivityProbe(nativeSessions);
+    // Archived threads move their rollouts out of sessions/ but still carry usage.
+    this.usageHistory = createTranscriptUsageHistory({
+      operation: 'codex-usage-history',
+      format: codexUsageFormat,
+      roots: () => [path.join(config.home(), 'sessions'), path.join(config.home(), 'archived_sessions')],
+    });
     // Codex compacts natively through its app-server; the execution object owns
     // the call, the facet advertises that it exists.
     this.compaction = {

@@ -88,6 +88,7 @@
     "./transcript-entry-categories": "./transcript-entry-categories.ts",
     "./transcript-projection": "./transcript-projection.ts",
     "./transcript-seed": "./transcript-seed.ts",
+    "./usage": "./usage.ts",
     "./workspace-layout": "./workspace-layout.ts",
     "./ws-auth": "./ws-auth.ts",
     "./ws-events": "./ws-events.ts",

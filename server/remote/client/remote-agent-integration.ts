@@ -1,8 +1,10 @@
 import { parseChatMessage, isToolUseMessage } from '@garcon/common/chat-types';
 import { isInputFormatByModel } from '@garcon/common/input-format';
 import { parseCommandWorkingDirectory } from '@garcon/common/command-output';
+import { parseAgentUsageReport } from '@garcon/common/usage';
 import {
   AgentCallError,
+  AgentIntegrationError,
   assertAgentResourceScope,
   isAgentResourceRef,
   type AgentHistoryImport,
@@ -88,6 +90,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
   readonly configurationValidation: AgentIntegration['configurationValidation'];
   readonly sessionConfiguration: AgentIntegration['sessionConfiguration'];
   readonly projectPathUpdates: AgentIntegration['projectPathUpdates'];
+  readonly usageHistory: AgentIntegration['usageHistory'];
   readonly #listeners = new Set<(event: AgentProducerNotification) => void>();
   readonly #log: Logger;
   readonly #bindings = new Map<string, RemoteProducerBinding>();
@@ -331,6 +334,13 @@ export class RemoteAgentIntegration implements AgentIntegration {
       },
       commit: (ref, options) => call('projectPathUpdates.commit', ref, options),
       rollback: (ref, options) => call('projectPathUpdates.rollback', ref, options),
+    } : null;
+    this.usageHistory = cap.usageHistory ? {
+      read: async ({ signal, ...request }) => {
+        const report = parseAgentUsageReport(await call('usageHistory.read', request, { signal }));
+        if (!report) throw new AgentIntegrationError('PROVIDER_FAILURE', 'Executor returned an invalid usage report', false);
+        return report;
+      },
     } : null;
   }
 

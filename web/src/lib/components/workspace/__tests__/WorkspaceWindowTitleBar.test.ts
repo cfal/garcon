@@ -1087,7 +1087,7 @@ describe('WorkspaceWindowTitleBar', () => {
 
 	it.each([
 		{ group: m.workspace_git_views, item: () => 'Open History', viewportWidth: 230 },
-		{ group: m.workspace_chat_views, item: m.workspace_open_chat_canvas, viewportWidth: 320 },
+		{ group: m.workspace_chat_views, item: m.workspace_open_chat_canvas, viewportWidth: 350 },
 	])(
 		'closes a promoted group while other actions remain in overflow: $group',
 		async ({ group, item, viewportWidth }) => {
@@ -1453,6 +1453,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_git_views(),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.tickets_title() }),
+			m.workspace_open_surface({ surface: m.workspace_surface_usage() }),
 			m.workspace_chat_views(),
 			m.workspace_github_views(),
 			m.workspace_new_terminal(),
@@ -1495,7 +1496,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(
 				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
-			).toHaveLength(6),
+			).toHaveLength(7),
 		);
 		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
 
@@ -1649,7 +1650,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(
 				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
-			).toHaveLength(5),
+			).toHaveLength(6),
 		);
 		expect(screen.queryByRole('button', { name: m.workspace_add_to_window() })).toBeNull();
 		const trigger = screen.getByRole('button', { name: m.workspace_terminal_actions() });
@@ -1720,6 +1721,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			'chat-map',
 			'chat-canvas',
 			'chat-board',
+			'usage',
 		] as const;
 		const singletonSurfaces = kinds.map((kind) => portableSingletonDescriptor(kind));
 		runtime.surfaces = Object.fromEntries(
@@ -1805,6 +1807,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_git_views(),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.tickets_title() }),
+			m.workspace_open_surface({ surface: m.workspace_surface_usage() }),
 			m.workspace_chat_views(),
 			m.workspace_github_views(),
 		];

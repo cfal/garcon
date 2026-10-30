@@ -63,6 +63,7 @@ Garcon keeps that development loop coherent:
 - **Track durable work.** Create workspace tickets in a list or status board, assign and claim work, discuss progress, and retain attributed change history across chat deletion and server restarts.
 - **Review the real change.** Browse and edit files, run terminals, inspect reasoning and tool calls, review diffs, then stage individual lines, hunks, files, or folders before committing and pushing.
 - **Find and reuse context.** Search chat metadata and indexed transcripts, save filters, tag, pin, archive, export Markdown or XML, build bounded handoffs, share snapshots, and [schedule prompts](docs/scheduled-prompts.md) with per-prompt pause and resume.
+- **Know what agents cost.** See [token usage and estimated API cost](docs/usage.md) per day, agent, and model from the Claude and Codex transcripts on each executor, with cache hit rates and cost by token type.
 - **Work from any screen.** Use the responsive workspace on desktop or phone and choose Classic, Phosphor, or colorblind-aware themes in light or dark mode.
 
 ## See It In Action
