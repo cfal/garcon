@@ -1222,6 +1222,104 @@ describe('WsConnection', () => {
 		connection.disconnect();
 	});
 
+	it('replaces a pre-online attempt immediately and fences its late callbacks', async () => {
+		const connection = new WsConnection();
+		try {
+			document.dispatchEvent(new Event('visibilitychange'));
+			const stalled = mockSockets[0];
+			const lateOpen = stalled.onopen;
+			const lateClose = stalled.onclose;
+			await vi.advanceTimersByTimeAsync(500);
+			window.dispatchEvent(new Event('online'));
+			expect(stalled.close).toHaveBeenCalledOnce();
+			expect(mockSockets).toHaveLength(2);
+			mockSockets[1].open();
+			lateOpen?.(new Event('open'));
+			lateClose?.(new CloseEvent('close'));
+			expect(connection.isConnected).toBe(true);
+			expect(connection.connectionStatus.phase).toBe('connected');
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it('coalesces overlapping signals after starting an online replacement', () => {
+		const connection = new WsConnection();
+		try {
+			connection.connect('token');
+			window.dispatchEvent(new Event('online'));
+			const count = mockSockets.length;
+			document.dispatchEvent(new Event('visibilitychange'));
+			window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+			window.dispatchEvent(new Event('online'));
+			expect(mockSockets).toHaveLength(count);
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it('bounds a stalled foreground attempt to three seconds without an online event', async () => {
+		const connection = new WsConnection();
+		try {
+			document.dispatchEvent(new Event('visibilitychange'));
+			const stalled = mockSockets[0];
+			await vi.advanceTimersByTimeAsync(2_999);
+			expect(stalled.close).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(stalled.close).toHaveBeenCalledOnce();
+			await vi.advanceTimersByTimeAsync(250);
+			expect(mockSockets).toHaveLength(2);
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it.each(['visibilitychange', 'pageshow'])(
+		'restarts backoff on %s while retaining exponential retries within that foreground',
+		async (signal) => {
+			let visibilityState: DocumentVisibilityState = 'visible';
+			vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+			const connection = new WsConnection();
+			connection.onAuthFailure = () => connection.retryAfterAuthProbe();
+			connection.connect('token');
+			try {
+				for (let cycle = 0; cycle < 4; cycle++) {
+					visibilityState = 'hidden';
+					document.dispatchEvent(new Event('visibilitychange'));
+					mockSockets.at(-1)!.closeFromServer();
+					visibilityState = 'visible';
+					if (signal === 'pageshow')
+						window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+					else document.dispatchEvent(new Event('visibilitychange'));
+					mockSockets.at(-1)!.onclose?.(new CloseEvent('close', { code: 1006 }));
+					expect(connection.connectionStatus.nextRetryAt! - Date.now()).toBe(250);
+					await vi.advanceTimersByTimeAsync(250);
+					mockSockets.at(-1)!.open();
+				}
+				mockSockets.at(-1)!.closeFromServer();
+				expect(connection.connectionStatus.nextRetryAt! - Date.now()).toBe(800);
+			} finally {
+				connection.disconnect();
+			}
+		},
+	);
+
+	it('shortens an existing attempt on resume without extending it on overlapping signals', async () => {
+		const connection = new WsConnection();
+		try {
+			connection.connect('token');
+			const stalled = mockSockets[0];
+			await vi.advanceTimersByTimeAsync(500);
+			document.dispatchEvent(new Event('visibilitychange'));
+			await vi.advanceTimersByTimeAsync(500);
+			window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+			await vi.advanceTimersByTimeAsync(2_000);
+			expect(stalled.close).toHaveBeenCalledOnce();
+		} finally {
+			connection.disconnect();
+		}
+	});
+
 	it('retries when a connection attempt never settles', async () => {
 		vi.setSystemTime(0);
 		const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

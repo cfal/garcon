@@ -489,6 +489,15 @@ export class AuthStore {
 			}
 			return;
 		}
+		// A failed transport probe cannot revoke an independently accepted session.
+		if (
+			this.availability === 'active' &&
+			!this.#uncertainToken &&
+			(!(error instanceof ApiError) || isIntermediaryResponse(error))
+		) {
+			this.#scheduleRepair(2_000);
+			return;
+		}
 		this.error = describeAuthError(error);
 		this.#setAvailability(this.#uncertainToken ? 'reauth-required' : 'repairing');
 		this.#scheduleRepair(2_000);

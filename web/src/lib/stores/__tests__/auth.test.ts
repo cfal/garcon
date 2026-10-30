@@ -386,6 +386,63 @@ describe('initial authority', () => {
 	});
 });
 
+describe('accepted-session revalidation', () => {
+	it.each([
+		new TypeError('offline'),
+		new DOMException('Timed out', 'TimeoutError'),
+		new ApiError(502, 'Gateway unavailable'),
+	])('keeps accepted authority through a transient failure: %s', async (failure) => {
+		const auth = await signedIn();
+		vi.mocked(api.getUser).mockRejectedValueOnce(failure);
+		await auth.reconcile();
+		expect(auth.availability).toBe('active');
+		expect(auth.isAuthenticated).toBe(true);
+		expect(canDispatchAuthenticated()).toBe(true);
+		expect(auth.error).toBeNull();
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(api.getUser).toHaveBeenCalledTimes(3);
+		expect(auth.isAuthenticated).toBe(true);
+	});
+
+	it('does not grant cold credentials authority after a transport failure', async () => {
+		setAuthToken(session().token);
+		vi.mocked(api.getUser).mockRejectedValueOnce(new TypeError('offline'));
+		const auth = store();
+		await auth.checkAuthStatus();
+		expect(auth.isAuthenticated).toBe(false);
+		expect(canDispatchAuthenticated()).toBe(false);
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(auth.isAuthenticated).toBe(true);
+	});
+
+	it('keeps a rejected session paused when its pending probe later times out', async () => {
+		const auth = await signedIn();
+		const pending = Promise.withResolvers<{ user: typeof user }>();
+		vi.mocked(api.getUser)
+			.mockReturnValueOnce(pending.promise)
+			.mockRejectedValue(new TypeError('offline'));
+		const probe = auth.reconcile();
+		auth.sessionRejected(auth.token, 'AUTH_SESSION_INVALID');
+		pending.reject(new DOMException('Timed out', 'TimeoutError'));
+		await probe;
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(auth.isAuthenticated).toBe(false);
+		expect(canDispatchAuthenticated()).toBe(false);
+	});
+
+	it('honors revocation found by a background retry', async () => {
+		const auth = await signedIn();
+		vi.mocked(api.getUser)
+			.mockRejectedValueOnce(new TypeError('offline'))
+			.mockRejectedValue(invalid());
+		await auth.reconcile();
+		expect(auth.isAuthenticated).toBe(true);
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(auth.availability).toBe('reauth-required');
+		expect(canDispatchAuthenticated()).toBe(false);
+	});
+});
+
 describe('session ordering and credential operations', () => {
 	it.each([false, true])(
 		'revalidates a login response overtaken by revocation, current=%s',

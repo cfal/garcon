@@ -32,6 +32,7 @@ const HEARTBEAT_JITTER_MS = 1_500;
 const CONNECTION_STABILITY_MS = 10_000;
 const CONNECT_ATTEMPT_DEDUPE_MS = 2_000;
 const CONNECT_ATTEMPT_TIMEOUT_MS = 10_000;
+const RESUME_CONNECT_TIMEOUT_MS = 3_000;
 
 export interface WsMessage {
 	data: Record<string, unknown>;
@@ -351,7 +352,14 @@ export class WsConnection {
 				this.#setConnectionStatus({ reason: 'socket-error' });
 			};
 
-			this.#scheduleConnectTimeout(websocket);
+			this.#scheduleConnectTimeout(
+				websocket,
+				reason === 'visibility-visible' ||
+					reason === 'browser-online' ||
+					reason === 'heartbeat-timeout'
+					? RESUME_CONNECT_TIMEOUT_MS
+					: CONNECT_ATTEMPT_TIMEOUT_MS,
+			);
 		} catch (error) {
 			console.error('Error creating WebSocket connection:', error);
 			const episodeId = this.#beginOutage();
@@ -738,6 +746,9 @@ export class WsConnection {
 
 	#resumeConnection(reason: WsConnectionIssue): void {
 		if (this.#destroyed || this.#authPaused || document.visibilityState === 'hidden') return;
+		// A foreground or network restoration starts a fresh retry budget.
+		this.#reconnectAttempts = 0;
+		this.#setConnectionStatus({ reconnectAttempt: 0 });
 		if (this.isConnected && this.#activeSocket?.readyState === WebSocket.OPEN) {
 			this.#clearHeartbeatTimer();
 			void this.#sendVisibilityProbe();
@@ -766,9 +777,12 @@ export class WsConnection {
 		if (
 			this.#activeSocket?.readyState === WebSocket.CONNECTING &&
 			this.#connectStartedAt !== null &&
-			Date.now() - this.#connectStartedAt < CONNECT_ATTEMPT_DEDUPE_MS
-		)
+			Date.now() - this.#connectStartedAt < CONNECT_ATTEMPT_DEDUPE_MS &&
+			(reason !== 'browser-online' || this.connectionStatus.reason === 'browser-online')
+		) {
+			this.#scheduleConnectTimeout(this.#activeSocket, RESUME_CONNECT_TIMEOUT_MS);
 			return;
+		}
 		this.#clearReconnectTimeout();
 		this.#nextConnectReason = reason;
 		this.connect(getAuthToken(), this.#authDisabled);
@@ -830,8 +844,10 @@ export class WsConnection {
 		}
 	}
 
-	#scheduleConnectTimeout(socket: WebSocket): void {
+	#scheduleConnectTimeout(socket: WebSocket, timeoutMs: number): void {
 		this.#clearConnectTimeout();
+		// Overlapping resume signals shorten the deadline without extending the attempt.
+		const remainingMs = Math.max(0, timeoutMs - (Date.now() - this.#connectStartedAt!));
 		this.#connectTimeout = setTimeout(() => {
 			this.#connectTimeout = null;
 			if (
@@ -846,7 +862,7 @@ export class WsConnection {
 			this.#rejectAllPending();
 			this.#closeExisting({ rejectPending: false });
 			this.#scheduleReconnect('connect-timeout', episodeId);
-		}, CONNECT_ATTEMPT_TIMEOUT_MS);
+		}, remainingMs);
 	}
 
 	#clearConnectTimeout(): void {
