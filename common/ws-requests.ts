@@ -1,6 +1,8 @@
 // Discriminated union of WebSocket request messages the client can emit.
 // Mutating chat commands use the HTTP command ledger; WS is read/resume only.
 
+import type { TranscriptReadPurpose } from './chat-view';
+
 export interface AgentCommandImage {
   data: string;
   name?: string;
@@ -44,6 +46,9 @@ export class ReconnectStateQueryRequest {
   }
 }
 
+// An activation purpose marks the first page of a cached-window catch-up for the
+// selected chat. Like an activation newest-history read, it schedules the advisory
+// native drift probe; continuations carry a watermark and never schedule it.
 export class ChatSubscribeRequest {
   readonly type = 'chat-subscribe' as const;
   constructor(
@@ -52,9 +57,14 @@ export class ChatSubscribeRequest {
     public transcriptViewId: string,
     public afterOrdinal: number,
     public throughOrdinal?: number,
+    public purpose?: TranscriptReadPurpose,
   ) { }
 
   static fromJson(data: Record<string, unknown>): ChatSubscribeRequest | null {
+    const purpose: TranscriptReadPurpose | undefined = data.purpose === 'activation' ? 'activation' : undefined;
+    if (data.purpose !== undefined && (purpose === undefined || data.throughOrdinal !== undefined)) {
+      return null;
+    }
     if (
       typeof data.afterOrdinal !== 'number'
       || !Number.isSafeInteger(data.afterOrdinal)
@@ -79,6 +89,7 @@ export class ChatSubscribeRequest {
       data.transcriptViewId,
       data.afterOrdinal,
       throughOrdinal,
+      purpose,
     );
   }
 }

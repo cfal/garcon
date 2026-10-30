@@ -16,6 +16,10 @@ import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+import {
+	currentTranscriptReplayReader,
+	settleTranscriptResumes,
+} from '../../../test/transcript-replay.js';
 
 const TS = '2024-01-01T00:00:00.000Z';
 
@@ -387,6 +391,7 @@ describe('ChatReconnectCoordinator', () => {
 			},
 			getComposerAnchorSurfaceId: () => null,
 			getSelectedChatId: () => null,
+			readTranscriptReplayPage: currentTranscriptReplayReader,
 		});
 		panels.reconcile([
 			{
@@ -443,6 +448,7 @@ describe('ChatReconnectCoordinator', () => {
 			},
 			getComposerAnchorSurfaceId: () => null,
 			getSelectedChatId: () => null,
+			readTranscriptReplayPage: currentTranscriptReplayReader,
 		});
 		panels.reconcile([
 			{
@@ -564,6 +570,7 @@ describe('ChatReconnectCoordinator', () => {
 			},
 			getComposerAnchorSurfaceId: () => null,
 			getSelectedChatId: () => null,
+			readTranscriptReplayPage: currentTranscriptReplayReader,
 		});
 		panels.reconcile([
 			{
@@ -1319,6 +1326,7 @@ describe('ChatReconnectCoordinator', () => {
 			},
 			getComposerAnchorSurfaceId: () => null,
 			getSelectedChatId: () => null,
+			readTranscriptReplayPage: currentTranscriptReplayReader,
 		});
 		panels.reconcile([
 			{
@@ -1329,6 +1337,7 @@ describe('ChatReconnectCoordinator', () => {
 				windowId: 'window-left',
 			},
 		]);
+		await settleTranscriptResumes();
 		const activeTranscript = panels.panel('chat-view:window-left')?.transcript;
 		if (!activeTranscript) throw new Error('Expected a rendered conversation panel.');
 		const heldContinuation = deferred<Record<string, unknown>>();

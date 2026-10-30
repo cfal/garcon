@@ -10,6 +10,11 @@ import {
 	type ConversationPanelDescriptor,
 } from '../conversation-panel-registry.svelte.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
+import type { TranscriptReplayPageReader } from '$lib/chat/transcript/cached-transcript-resume.js';
+import {
+	currentTranscriptReplayReader,
+	transcriptReplayPage,
+} from '../../../../test/transcript-replay.js';
 import { ConversationClearController } from '../conversation-clear-controller.svelte.js';
 import { clearChat } from '$lib/api/chat-clear.js';
 
@@ -72,7 +77,7 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 		for (const cleanup of cleanups.splice(0)) cleanup();
 	});
 
-	function fixture() {
+	function fixture(readTranscriptReplayPage: TranscriptReplayPageReader = currentTranscriptReplayReader) {
 		const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
 		cache.replace('chat-1', 'view-1', [entry(1)], 1, null);
 		cache.replace('chat-2', 'view-other', [entry(10)], 10, null);
@@ -97,6 +102,7 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 			},
 			getComposerAnchorSurfaceId: () => 'chat-view:window-left',
 			getSelectedChatId: () => selectedChatId,
+			readTranscriptReplayPage,
 		});
 		const selected = new CurrentConversationPanelTranscript({
 			panels: registry,
@@ -377,6 +383,22 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 		expect(await loading).toEqual([entry(3).message]);
 		expect(selected.transcriptViewId).toBe('view-2');
 		expect(selected.entries).toEqual(cache.get('chat-1')?.messages);
+	});
+
+	it('republishes a caught-up cache to the unrendered fallback', async () => {
+		const { selected } = fixture(async (request) =>
+			transcriptReplayPage(request, { messages: [entry(2), entry(3)], throughOrdinal: 3 }),
+		);
+
+		const result = await selected.resumeCachedTranscript('chat-1', { purpose: 'activation' });
+
+		expect(result).toMatchObject({ kind: 'resumed', throughOrdinal: 3 });
+		expect(selected.entries.map((item) => item.ordinal)).toEqual([1, 2, 3]);
+		expect(selected.transcriptCache.readAppliedCursor('chat-1')).toEqual({
+			transcriptViewId: 'view-1',
+			lastOrdinal: 3,
+			stale: false,
+		});
 	});
 
 	it('returns fallback messages when no panel has mounted', async () => {

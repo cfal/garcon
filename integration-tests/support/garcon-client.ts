@@ -1018,6 +1018,7 @@ export class GarconTestClient {
     transcriptViewId: string,
     afterOrdinal: number,
     throughOrdinal?: number,
+    purpose?: TranscriptReadPurpose,
   ): Promise<ChatSubscribedMessage> {
     await this.watchTranscripts(chatId);
     const clientRequestId = crypto.randomUUID();
@@ -1028,6 +1029,7 @@ export class GarconTestClient {
       transcriptViewId,
       afterOrdinal,
       throughOrdinal,
+      purpose,
     );
     this.sendWs(request);
     const outcome = await this.waitForEvent(

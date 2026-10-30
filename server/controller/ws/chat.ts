@@ -33,6 +33,7 @@ import { isDomainError } from '../../common/domain-error.js';
 import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
 import type {
   ResendCandidate,
+  TranscriptReadPurpose,
   TranscriptReplayResult,
 } from '../../../common/chat-view.js';
 import type { ChatTransientFeedSnapshot } from '../../../common/chat-transient-feed.js';
@@ -60,6 +61,7 @@ type ChatViewsDep = {
     viewId: TranscriptViewId,
     afterOrdinal: number,
     throughOrdinal?: number,
+    purpose?: TranscriptReadPurpose,
   ): Promise<TranscriptReplayResult>;
   resendCandidates(chatId: string): readonly import('../../../common/chat-view.js').ResendCandidate[];
 };
@@ -395,14 +397,17 @@ export class ChatHandler {
         return;
       }
       const viewId = transcriptViewId(data.transcriptViewId);
-      const replay = data.throughOrdinal === undefined
-        ? await this.#chatViews.readReplay(chatId, viewId, data.afterOrdinal)
-        : await this.#chatViews.readReplay(
-            chatId,
-            viewId,
-            data.afterOrdinal,
-            data.throughOrdinal,
-          );
+      // Request validation admits a purpose only on a first page, which has no watermark.
+      const replay = data.purpose !== undefined
+        ? await this.#chatViews.readReplay(chatId, viewId, data.afterOrdinal, undefined, data.purpose)
+        : data.throughOrdinal === undefined
+          ? await this.#chatViews.readReplay(chatId, viewId, data.afterOrdinal)
+          : await this.#chatViews.readReplay(
+              chatId,
+              viewId,
+              data.afterOrdinal,
+              data.throughOrdinal,
+            );
       const response = fitChatSubscribedPage({
         clientRequestId,
         chatId,

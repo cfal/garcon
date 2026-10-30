@@ -3,10 +3,7 @@ import {
 	type ChatLoadMessagesOptions,
 	type SharedTranscriptCommit,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import type {
-	ChatTranscriptApplyResult,
-	ChatTranscriptCache,
-} from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import type { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
 import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
@@ -29,9 +26,19 @@ import {
 	ConversationTranscriptOverlayStore,
 	type ConversationTranscriptOverlayMutation,
 } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
+import {
+	CachedTranscriptResumes,
+	type CachedTranscriptResumeResult,
+	type TranscriptReplayPageReader,
+} from '$lib/chat/transcript/cached-transcript-resume.js';
+import {
+	committedBatchApplyStatus,
+	type CommittedTranscriptBatch,
+	type ConversationPanelBatchApplyResult,
+} from './committed-transcript-batch.js';
 import type { ConversationLifecycleRegistry } from './conversation-lifecycle-registry.svelte.js';
 import type { ConversationLifecycleState } from './conversation-lifecycle-state.svelte.js';
-import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import type { ResendCandidate, TranscriptReadPurpose } from '$shared/chat-view';
 import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
 import type { VisibleChatPresentation } from '$lib/workspace/visible-presentations.js';
 import type {
@@ -49,16 +56,6 @@ export type ConversationPanelSnapshotAdmission = 'deferred' | 'admitted';
 
 export interface ConversationPanelDescriptor extends VisibleChatPresentation {
 	readonly snapshotAdmission: ConversationPanelSnapshotAdmission;
-}
-
-export interface CommittedTranscriptBatch {
-	readonly chatId: string;
-	readonly transcriptViewId: string;
-	readonly messages: TranscriptMessage[];
-	readonly firstOrdinal: number;
-	readonly lastOrdinal: number;
-	readonly resendCandidates: ResendCandidate[];
-	readonly noticeRevision: number;
 }
 
 export interface ConversationPanelPresentationPort {
@@ -89,16 +86,6 @@ export interface ConversationPanelRegistration {
 	restore(target: ConversationPanelRestoreTarget | null): Promise<void>;
 	destroy(): void;
 }
-
-export type ConversationPanelBatchApplyResult =
-	| {
-			readonly kind: 'applied';
-			readonly localRecoverySurfaceIds: readonly ChatViewSurfaceId[];
-	  }
-	| {
-			readonly kind: 'chat-recovery-required';
-			readonly outcome: Exclude<ChatTranscriptApplyResult, { status: 'applied' }>;
-	  };
 
 interface StoredRestoreTarget {
 	readonly chatId: string;
@@ -149,6 +136,8 @@ class PanelRegistration implements ConversationPanelRegistration {
 		onSnapshotResendCandidates: (chatId: string, candidates: readonly ResendCandidate[]) => void,
 		private readonly snapshots: {
 			load(options: ChatLoadMessagesOptions): Promise<boolean>;
+			restorePurpose(): TranscriptReadPurpose | undefined;
+			resume(purpose: TranscriptReadPurpose | undefined): Promise<CachedTranscriptResumeResult> | null;
 			wait(signal: AbortSignal): Promise<void>;
 		},
 		retainedTranscript?: ActiveTranscriptState,
@@ -230,13 +219,13 @@ class PanelRegistration implements ConversationPanelRegistration {
 		return target;
 	}
 
-	async restore(target: ConversationPanelRestoreTarget | null, catchUp = false): Promise<void> {
+	async restore(target: ConversationPanelRestoreTarget | null): Promise<void> {
 		if (this.#destroyed) return;
 		const restoreEpoch = this.#beginRestore(target);
 		const restored = this.transcript.activateChat(this.chatId);
-		if (!restored || restored.stale || catchUp) {
-			const loadOptions = { minimumLimit: restored?.count ?? 0 };
-			await this.snapshots.load(loadOptions);
+		const minimumLimit = restored?.count ?? 0;
+		if (!restored || restored.stale || !this.#resumeCachedWindow(minimumLimit)) {
+			await this.snapshots.load({ minimumLimit });
 		}
 		await this.#finishRestore(restoreEpoch);
 	}
@@ -244,7 +233,25 @@ class PanelRegistration implements ConversationPanelRegistration {
 	async restoreRetained(target: ConversationPanelRestoreTarget): Promise<void> {
 		if (this.#destroyed) return;
 		const restoreEpoch = this.#beginRestore(target);
+		if (!this.#resumeCachedWindow(0)) await this.snapshots.load({});
 		await this.#finishRestore(restoreEpoch);
+	}
+
+	// Presents the cached window at once and catches it up without holding the restore
+	// target on the network. A catch-up the server cannot prove contiguous loads a snapshot
+	// with the same purpose, so it coalesces with the activation's own fallback.
+	#resumeCachedWindow(minimumLimit: number): boolean {
+		const purpose = this.snapshots.restorePurpose();
+		const resume = this.snapshots.resume(purpose);
+		if (!resume) return false;
+		void resume
+			.then((result) => {
+				if (result.kind !== 'snapshot-required' || this.#destroyed) return;
+				return this.snapshots.load({ minimumLimit, ...(purpose ? { purpose } : {}) });
+			})
+			// The catch-up already marked the cache stale, so a later activation retries.
+			.catch(() => {});
+		return true;
 	}
 
 	#beginRestore(target: ConversationPanelRestoreTarget | null): number {
@@ -426,6 +433,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	#pendingSurfaceTransfers = new Map<ChatViewSurfaceId, PendingSurfaceTransfer>();
 	#surfaceTransferToken = 0;
 	#snapshotLoads = new Map<string, SnapshotLoad>();
+	#cachedResumes = new CachedTranscriptResumes(this, (request) => this.options.readTranscriptReplayPage(request));
 	#reconnectReplayEpoch = 0;
 	#reconnectReplays = new Map<string, ActivePanelReconnectReplay>();
 	#missedTranscripts = new MissedTranscriptCatchUp({
@@ -450,6 +458,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			overlays: ConversationTranscriptOverlayStore;
 			getComposerAnchorSurfaceId(): ChatViewSurfaceId | null;
 			getSelectedChatId(): string | null;
+			readTranscriptReplayPage: TranscriptReplayPageReader;
 			retainInactiveWindows?: () => boolean;
 			loadTranscriptSnapshot?: (
 				transcript: ActiveTranscriptState,
@@ -565,6 +574,11 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				this.#onSnapshotResendCandidates,
 				{
 					load: (options) => this.loadChatSnapshot(item.chatId, options),
+					// The composer surface presents the chat being selected, whose catch-up is the
+					// activation; selection itself can settle after the layout reconciles.
+					restorePurpose: () =>
+						this.options.getComposerAnchorSurfaceId() === item.surfaceId ? 'activation' : undefined,
+					resume: (purpose) => this.resumeCachedChat(item.chatId, purpose ? { purpose } : {}),
 					wait: (signal) => this.#waitForChatSnapshot(item.chatId, signal),
 				},
 				retained?.transcript,
@@ -581,10 +595,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			}
 			this.#pendingSurfaceTransfers.delete(item.surfaceId);
 			this.#restoreTargets.delete(item.surfaceId);
-			const catchUp = this.#missedTranscripts.takeCatchUpOnShow(item.chatId);
 			void (retained
 				? panel.restoreRetained(target ?? retained.target)
-				: panel.restore(target, catchUp)
+				: panel.restore(target)
 			).catch(() => {
 				if (this.#panels.get(item.surfaceId) === panel) this.markChatStale(item.chatId);
 			});
@@ -650,6 +663,15 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		};
 		this.#snapshotLoads.set(chatId, operation);
 		return operation.promise;
+	}
+
+	// Catches the shared cache, rendered panels, and parked windows up from the cache's
+	// applied cursor; null means only a snapshot can restore the chat.
+	resumeCachedChat(
+		chatId: string,
+		options: { purpose?: TranscriptReadPurpose } = {},
+	): Promise<CachedTranscriptResumeResult> | null {
+		return this.#cachedResumes.resume(chatId, options);
 	}
 
 	async #waitForChatSnapshot(chatId: string, signal: AbortSignal): Promise<void> {
@@ -763,6 +785,10 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			lastOrdinal: batch.lastOrdinal,
 			messages: batch.messages,
 		});
+		if (outcome.status === 'gap-detected') {
+			this.#catchUpAfterGap(batch.chatId);
+			return { kind: 'prefix-retained' };
+		}
 		if (outcome.status !== 'applied') {
 			this.#inactiveWindows.removeChat(batch.chatId);
 			return { kind: 'chat-recovery-required', outcome };
@@ -878,6 +904,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 
 	handleViewReplacement(chatId: string): void {
 		this.#snapshotLoads.delete(chatId);
+		this.#cachedResumes.forget(chatId);
 		for (const panel of this.panelsForChat(chatId)) panel.transcript.invalidatePendingLoads();
 		this.#inactiveWindows.removeChat(chatId);
 		this.options.cache.markStale(chatId);
@@ -887,6 +914,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 
 	removeChat(chatId: string): void {
 		this.#missedTranscripts.forget(chatId);
+		this.#cachedResumes.forget(chatId);
 		this.#inactiveWindows.removeChat(chatId);
 		for (const [surfaceId, panel] of this.#panels) {
 			if (panel.chatId !== chatId) continue;
@@ -913,6 +941,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		this.#restoreTargets.clear();
 		this.#pendingSurfaceTransfers.clear();
 		this.#snapshotLoads.clear();
+		this.#cachedResumes.clear();
 		this.#visible = [];
 	}
 
@@ -979,10 +1008,18 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		chatId: string,
 		batch: TranscriptBufferedBatch,
 	): TranscriptReplayApplyResult {
-		const result = this.applyCommittedBatch({ chatId, ...batch });
-		if (result.kind === 'applied') {
-			return result.localRecoverySurfaceIds.length === 0 ? 'applied' : 'gap-detected';
-		}
-		return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
+		return committedBatchApplyStatus(this.applyCommittedBatch({ chatId, ...batch }));
+	}
+
+	// The gapped batch and later rows are discarded while the cache, panels, and parked windows
+	// keep their contiguous prefix. A rendered chat catches up from it now; any other chat
+	// does so at its next activation.
+	#catchUpAfterGap(chatId: string): void {
+		if (!this.#hasAdmittedPanel(chatId)) return;
+		void this.#cachedResumes
+			.resumeAfterGap(chatId)
+			.then((result) => (result.kind === 'snapshot-required' ? this.loadChatSnapshot(chatId) : undefined))
+			// A failed snapshot leaves the cache stale, so the next activation reloads it.
+			.catch(() => {});
 	}
 }

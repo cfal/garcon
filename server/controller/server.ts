@@ -117,6 +117,7 @@ import {
   TranscriptAdoptionService,
   TranscriptLedgerService,
   NativeActivityPageReader,
+  NativeActivityReplayReader,
   NativeTranscriptActivityService,
   TranscriptLedgerStore,
   TranscriptReloadService,
@@ -514,6 +515,10 @@ export async function startServer(): Promise<void> {
       transcriptReader,
       nativeTranscriptActivity,
     );
+    const chatViewReplays = new NativeActivityReplayReader(
+      transcriptReader,
+      nativeTranscriptActivity,
+    );
     const handoffs = new AgentHandoffService({
       inspectProject,
       registry: chatRegistry,
@@ -815,8 +820,8 @@ export async function startServer(): Promise<void> {
       processing: chatProcessingActivity,
       chatViews: {
         ...chatViewPages,
-        readReplay: (chatId, viewId, afterOrdinal, throughOrdinal) =>
-          transcriptReader.replay(chatId, viewId, afterOrdinal, throughOrdinal),
+        readReplay: (chatId, viewId, afterOrdinal, throughOrdinal, purpose) =>
+          chatViewReplays.replay(chatId, viewId, afterOrdinal, throughOrdinal, purpose),
         resendCandidates: (chatId) => agentRegistry.resendCandidates(chatId),
       },
       transcriptReload: async (chatId, options) => {

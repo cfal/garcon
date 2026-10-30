@@ -63,6 +63,7 @@
 		type ConversationPanelDescriptor,
 	} from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
+	import { requestTranscriptReplayPage } from '$lib/ws/transcript-replay-request.js';
 	import type { GitQuickProjectLease } from '$lib/git/surface/git-quick-summary.svelte.js';
 	import { composerStatusBarNeedsGit } from '$lib/chat/composer/composer-status-bar.js';
 	import {
@@ -129,12 +130,14 @@
 	});
 	setConversationLifecycles(conversationLifecycles);
 	const conversationTranscriptOverlays = new ConversationTranscriptOverlayStore();
+	const ws = getWs();
 	const conversationPanels = new ConversationPanelRegistry({
 		cache: chatTranscriptCache,
 		lifecycle: conversationLifecycles,
 		overlays: conversationTranscriptOverlays,
 		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,
 		getSelectedChatId: () => sessions.selectedChatId,
+		readTranscriptReplayPage: (request) => requestTranscriptReplayPage(ws, request),
 		retainInactiveWindows: () => localSettings.combineToolUseMessages,
 	});
 	setConversationPanels(conversationPanels);

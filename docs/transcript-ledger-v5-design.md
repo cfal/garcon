@@ -52,13 +52,13 @@ the retained session row remains in the binding until replacement. Repeated Clea
 consolidates evidence once; native Reload reconstructs ordinary pairs and drops
 the retained field, preventing double-counting.
 
-Status: revision 42 integrated design. Supersedes
+Status: revision 43 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
 
-Revision 42 scopes transcript bodies to the browser sockets that display
+Revision 43 scopes transcript bodies to the browser sockets that display
 them. Each browser socket declares, with `chat-transcript-interest`, the
 complete set of chats its visible panels show, split panes included. The
 controller sends a committed span's `chat-messages` body only to sockets
@@ -74,6 +74,33 @@ revision 39's statement that parked windows receive committed background and
 replay updates. Delivery is controller-to-browser only; the ledger, the
 executor link, and the CLI contracts are unchanged. Section 6.3 states the
 contract.
+
+Revision 42 resumes cached transcript windows on activation instead of
+refetching recent history. Replacement, removal, disconnect, and a newer
+resume cancel the superseded replay and its queued follow-up. A reply applies
+only while its cache remains non-stale at the originally planned view and
+ordinal; a delayed old-view reply cannot validate an invalidated cache.
+When the shared bounded cache holds an unmarked
+window for the chat, the selected chat's activation and every panel restore,
+parked or not, send one `chat-subscribe` request for rows after the cache's
+applied ordinal: the fixed-watermark replay that reconnect already uses. The
+page is applied through the existing replay buffer, so live rows committed
+while it is in flight follow it exactly once. Live broadcasts are not assumed
+to keep background caches current; the server's view check and watermark
+prove the delta, so a cache that missed any number of rows catches up as long
+as the delta fits in one bounded replay page. A live batch that does not
+continue the cache is discarded with everything after it, and the cache, its
+panels, and parked windows keep their contiguous prefix unmarked: a rendered
+chat catches up from that prefix at once, and any other chat at its next
+activation. A missing or stale-marked cache, a rejected view or cursor, a delta
+beyond one page, or a transport failure marks the cache stale and falls back to
+the newest-history snapshot. Agent and executor rebinding keep the view and its
+cursors (section 12.1), so they need no fallback. The composer surface's
+catch-up carries `purpose: 'activation'` on its first page, which schedules
+the same advisory native probe as an activation newest-history read;
+continuations never carry it. The cached window is presented at once and the
+delta appends to it like a live commit, so neither the reading target nor the
+bottom pin waits on the network. No HTTP or executor-link payload changes.
 
 Revision 41 lets remote producer bindings survive an executor disconnect
 and bounds whole-history work. The worker's process-level producer relay
@@ -739,16 +766,19 @@ The decisions:
   flight. With combined tool use enabled, a bounded inactive window may keep
   the loaded interval and reading target across chat switches. A browser
   reload, an evicted window, or a non-combined switch uses the bounded recent
-  cache instead; a replaced transcript view requires its new snapshot.
-  Section 4.4 defines that lifecycle. No live-edge timer participates in
+  cache instead; a replaced transcript view requires its new snapshot. Either
+  restoration catches up from its applied ordinal through one bounded replay
+  page and requests that snapshot only when the server cannot prove the delta
+  contiguous. Section 4.4 defines that lifecycle. No live-edge timer participates in
   correctness, and memory eviction never truncates the ledger.
 - **L8 View stability.** `transcriptViewId` changes only through manual
   full reload. Every page, event, search result, and cursor is qualified
   by it; requests qualified by a replaced view receive a typed
   stale-view error whether or not its rows still exist. There are no
   exceptions: shares are snapshot artifacts, not ledger readers.
-- **L9 Advisory drift detection.** A successful active newest-history load
-  returns before scheduling one point-in-time bounded tail read of the chat's
+- **L9 Advisory drift detection.** A successful active newest-history load, or
+  the first page of an activation catch-up replay, returns before scheduling
+  one point-in-time bounded tail read of the chat's
   current binding. Older pages, replay continuations, background reads,
   provider dispatch, timers, and startup never schedule it. The probe
   obligation: the reported relevant-entry timestamp must be no later than
@@ -1254,6 +1284,34 @@ CREATE INDEX transcript_session_rows
   That cache persists the raw earlier-page continuation independently of its
   oldest visible ordinal, so an all-hidden page remains resumable. Evicting
   memory never truncates the ledger: older rows remain pageable.
+- Restoring a parked window or the bounded cache does not refetch recent
+  history. The restored window is presented at once, and one `chat-subscribe`
+  request asks for rows after the cache's applied ordinal in its view. Parked
+  windows and the bounded cache advance together, so that cursor is the
+  frontier of both. The page goes through the per-chat replay buffer: live
+  commits arriving while it is in flight are held, then applied after it, and
+  overlapping ordinals collapse exactly as in reconnect replay. Concurrent
+  restores of one chat share one catch-up; the composer surface's carries
+  `purpose: 'activation'` and replaces a pending catch-up without it, so the
+  selected chat sends one request and keeps its native probe (L9). Delivery of
+  live rows to a cached chat is not assumed: a cache that received none since
+  it was last applied is caught up from the server's watermark. A gap is not an
+  invalidation: a live batch, or a held one, that does not continue the cache is
+  discarded with every later row, and the cache stays unmarked at its
+  contiguous prefix, with its panels and parked windows. A rendered chat queues
+  one follow-up catch-up from that prefix, started after any catch-up already
+  in flight, since that one requested rows before the gap appeared; an
+  unrendered chat waits for its next activation, so a background gap costs no
+  request. The router does not reload a snapshot for such a gap. The catch-up
+  falls back to the newest-history snapshot, after marking the cache stale,
+  when the cache is missing or already stale, the server rejects the view or
+  cursor, the delta exceeds one bounded replay page, a panel cannot apply a
+  page the cache accepted, or the request fails. View replacement, Reload,
+  Clear, and fork still invalidate the cache through their own replacement
+  paths. A catch-up whose cache adopted another view while
+  it was in flight, or whose replay buffer a newer catch-up, reconnect, or
+  disconnect took over, yields without changing the cache. A page that
+  advances no raw row refreshes resend candidates and commits nothing.
 - An initially underfilled feed with collapsed tool groups starts measured
   refill after its activation snapshot settles. Each compressed logical page
   demands at most 200 presented messages, with at most ten automatic demands
@@ -3245,7 +3303,22 @@ The catalog cites this revision, but its inventory is not repeated here.
   fake-time case retains a bottom-pinned expanded transcript beyond the old
   180-second interval, and a static assertion proves the timer,
   `history-pruned`, and immediate-compaction machinery are absent. Compact and
-  wide Chromium coverage locks final-row visibility and position.
+  wide Chromium coverage locks final-row visibility and position. Warm
+  activation unit cases cover the resume plan, a delta far behind the cache,
+  held live rows that overlap or leave a gap, a delta beyond one page, view and
+  cursor rejection, transport failure, an unchanged head, and supersession. A
+  Chromium case proves a warm A to B to A switch reads no history over HTTP and
+  sends one activation replay per switch, and that a chat whose live rows were
+  withheld while offscreen, including an agent switch, receives exactly the
+  missed rows in order once it returns, then applies the next live rows. Gap
+  cases prove a gapped live batch leaves the cache, its cursor listing, and a
+  parked window unmarked at their prefix, that an offscreen chat makes no
+  request until it returns, that a rendered chat and a gap held behind an
+  in-flight catch-up each recover through one follow-up from the prefix, and
+  that the router reloads no snapshot. A second Chromium case drops one live
+  batch for an offscreen chat and then for the rendered chat, and proves each
+  recovers through one replay from the prefix with no HTTP history read and
+  every row once in order.
 - **OpenCode V1 compaction**: the owned process does not force autocompaction
   off and preserves operator overrides; the session-latest continuation map
   and plugin remain absent. Scripted fixtures prove threshold and first-turn
@@ -3609,8 +3682,12 @@ Direct plan without requiring another implementation or migration.
     inactive transcript windows and their reading targets for warm chat
     returns. Browser reload, an ineligible or invalidated window, and
     non-combined mode restore the bounded recent cache, including its raw
-    earlier-page continuation, and page older rows from the ledger. The
-    three-minute live-edge prune timer and its state machine are deleted.
+    earlier-page continuation, and page older rows from the ledger. Both
+    restorations catch up from the cache's applied ordinal through one bounded
+    replay page and fall back to the newest snapshot only when the server
+    cannot prove that delta contiguous. A gapped live row is discarded rather
+    than invalidating the cache, whose contiguous prefix that catch-up resumes.
+    The three-minute live-edge prune timer and its state machine are deleted.
 24. Pinned OpenCode V1 automatic compaction is marker-routed: OpenCode marks
     its compaction control and continuation parts, the runtime adopts them
     into the owning turn's route, and a successful summary publishes one

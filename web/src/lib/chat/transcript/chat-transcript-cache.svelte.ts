@@ -317,8 +317,9 @@ export class ChatTranscriptCache {
 		}
 
 		const applied = applyTranscriptAppend(entry.messages, append, entry.lastOrdinal);
+		// A gap discards the batch but leaves the contiguous prefix valid: a replay from its
+		// applied ordinal recovers the missing rows, so only a view change invalidates it.
 		if (applied.status === 'gap-detected') {
-			this.markStale(chatId);
 			return {
 				status: 'gap-detected',
 				expectedOrdinal: applied.expectedOrdinal ?? entry.lastOrdinal + 1,
