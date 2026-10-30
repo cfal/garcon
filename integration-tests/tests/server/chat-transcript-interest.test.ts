@@ -83,7 +83,7 @@ describe('chat transcript interest delivery', () => {
       const displayingCursor = displaying.markEvents();
       const backgroundCursor = background.markEvents();
 
-      const content = `interest-delivery ${'deterministic synthetic padding '.repeat(2_000)}`;
+      const content = `interest-delivery ${'deterministic synthetic padding '.repeat(2_000)}`.trimEnd();
       const { held, turnId } = await startHeldTurn(fixture, chatId, content);
       held.releaseEcho();
       await Promise.all([
