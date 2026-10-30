@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { ChatTranscriptInterestRegistry } from '../chat-transcript-interest.ts';
 import { ChatHandler } from '../chat.ts';
 import { PrimaryWsHandler } from '../primary.ts';
 import { TerminalStreamHandler } from '../terminal-stream.ts';
@@ -73,6 +74,7 @@ function chatHandlerDeps() {
       }),
     },
     registry: { getChat: () => null },
+    transcriptInterest: new ChatTranscriptInterestRegistry(),
   };
 }
 

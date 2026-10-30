@@ -14,6 +14,7 @@ export type ChatFilterResult = { action: 'process' } | { action: 'skip' };
 
 const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
 	'chat-messages',
+	'chat-transcript-advanced',
 	'chat-session-created',
 	'chat-session-deleted',
 	'chat-processing-updated',

@@ -107,6 +107,8 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				}
 				return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
 			},
+			applyTranscriptAdvance: (chatId, transcriptViewId, lastOrdinal) =>
+				deps.panels.applyTranscriptAdvance(chatId, transcriptViewId, lastOrdinal),
 			reloadChatTranscript: (chatId) => {
 				void deps.panels.loadChatSnapshot(chatId).catch(() => {});
 			},

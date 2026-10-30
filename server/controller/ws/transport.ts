@@ -6,6 +6,10 @@ export interface WebSocketMessagePublisher {
   publish(topic: string, payload: string, compress?: boolean): number;
 }
 
+export interface SelectiveWebSocketMessagePublisher<Peer> {
+  publishSelected(topic: string, select: (peer: Peer) => string, compress?: boolean): number;
+}
+
 export const PRIMARY_WEBSOCKET_TRANSPORT_OPTIONS = {
   perMessageDeflate: true,
 } as const;
@@ -26,4 +30,12 @@ export function publishWebSocketPayload(
   payload: string,
 ): number {
   return publisher.publish(topic, payload, COMPRESS_OUTBOUND_MESSAGES);
+}
+
+export function publishSelectedWebSocketPayload<Peer>(
+  publisher: SelectiveWebSocketMessagePublisher<Peer>,
+  topic: string,
+  select: (peer: Peer) => string,
+): number {
+  return publisher.publishSelected(topic, select, COMPRESS_OUTBOUND_MESSAGES);
 }

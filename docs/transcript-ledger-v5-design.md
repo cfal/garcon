@@ -52,11 +52,28 @@ the retained session row remains in the binding until replacement. Repeated Clea
 consolidates evidence once; native Reload reconstructs ordinary pairs and drops
 the retained field, preventing double-counting.
 
-Status: revision 41 integrated design. Supersedes
+Status: revision 42 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 42 scopes transcript bodies to the browser sockets that display
+them. Each browser socket declares, with `chat-transcript-interest`, the
+complete set of chats its visible panels show, split panes included. The
+controller sends a committed span's `chat-messages` body only to sockets
+whose declared set contains the chat and sends every other socket a body-free
+`chat-transcript-advanced` summary of the same span: the chat, view, ordinal
+span, and the activity the sidebar, unread state, and plan-mode controls need.
+Both payloads leave from the same per-chat server-event task, so the
+messages-before-terminal-state order holds for either. Hidden views, parked
+inactive windows included, receive no live bodies: a summary records that
+their cache is behind without invalidating it, and they catch up from the
+ledger when shown. This supersedes
+revision 39's statement that parked windows receive committed background and
+replay updates. Delivery is controller-to-browser only; the ledger, the
+executor link, and the CLI contracts are unchanged. Section 6.3 states the
+contract.
 
 Revision 41 lets remote producer bindings survive an executor disconnect
 and bounds whole-history work. The worker's process-level producer relay
@@ -1528,6 +1545,58 @@ for agreement; the V4 session-metadata registry write from `RuntimeRouter`'s
 start return path (`server/controller/agents/runtime-router.ts`) is removed. Startup fences
 orphan provider processes (unchanged policy).
 
+### 6.3 Browser transcript delivery
+
+Committed rows reach a browser socket as bodies only while the socket
+displays their chat. The per-socket interest registry,
+`server/controller/ws/chat-transcript-interest.ts`, owns this state:
+
+- **Declaration.** `chat-transcript-interest` carries the socket's complete
+  set of displayed chats, at most 64, and replaces the previous set. A
+  malformed or oversized declaration is rejected and leaves the previous set
+  in force. The handler applies it synchronously on receipt, so every later
+  request on the socket and every later publication observe it, and the last
+  frame of a rapid switch wins without acknowledgement. A new socket starts
+  with no interest and closing a socket releases its set; nothing persists or
+  carries across sockets, tabs, or devices. Interest is a delivery preference,
+  not an authorization: pages and replay remain readable for any chat.
+- **Selection.** The transcript fanout task builds one `chat-messages` body
+  and one `chat-transcript-advanced` summary per committed span and hands both
+  to delivery, which picks one per open chat socket at publication time and
+  serializes each at most once. Everything else on the chat topic, including
+  view replacement, processing, execution control, transient-feed permission
+  mutations, titles, read state, and deletion, still reaches every socket.
+- **Activity.** `summarizeTranscriptActivity` in
+  `common/chat-transcript-activity.ts` is the single rule for what a span
+  contributes to chat-level state: the first line of the latest user,
+  assistant, or command-output message as preview, the latest timestamp as
+  activity, plan-mode entry, and plan-approval requests. The server applies it
+  to build summaries and displaying browsers apply it to bodies, so both paths
+  update the sidebar, unread state, and plan mode identically. The
+  waiting-for-permission status derives from the transient feed, which every
+  socket receives, rather than from permission rows.
+- **Catch-up.** Ordinals stay authoritative. A summary names exactly the rows
+  its socket did not receive. When the chat is displayed, the declaration was
+  still in flight, because the browser declares before activation loads but
+  HTTP and WebSocket requests travel on separate connections. The browser then
+  lets in-flight snapshot loads settle and loads again unless its cursor
+  already covers the span; a load that starts after the summary arrived
+  necessarily contains those rows. When the chat is not displayed, its parked
+  windows are dropped and the chat is recorded as behind. Its cache is not
+  marked stale: it remains a valid prefix of the view, and a summary never
+  advances its cursor or enters the row-apply path. The next time the chat is
+  shown, its panel catches up from the ledger even though the cache is
+  current. Bodies that overlap a catch-up are deduplicated by ordinal, and a
+  body that skips an ordinal takes the existing gap recovery. How much a load
+  fetches is the load path's decision, so a delta read after the cached
+  ordinal composes with this contract unchanged.
+- **Reconnect.** The browser re-declares from the new socket's open listener,
+  before the reconnect coordinator sends any replay request on that socket, so
+  displayed chats replay from their cursors and continue live without a gap.
+  Undisplayed chats lost their summaries with the old socket: their parked
+  windows are dropped and each catches up from its cursor the next time it is
+  shown, rather than replaying bodies now.
+
 ## 7. Inputs and Resend
 
 ### 7.1 The queue/transcript boundary
@@ -2962,10 +3031,19 @@ The catalog cites this revision, but its inventory is not repeated here.
   against the single active sink; publish commits inline and no ledger
   transaction spans an `await` (asserted via an instrumented ledger
   port); broadcast ordering through the per-chat server-event queue
-  preserves the chat-messages-before-terminal-derived contract;
+  preserves the chat-messages-before-terminal-derived contract for bodies
+  and body-free summaries alike;
   publish-versus-close is decided by synchronous execution order;
   staging failure issues a fresh current-view sink; the per-flow
   teardown preconditions.
+- **Browser transcript delivery**: interest declarations replace,
+  deduplicate, reject oversized sets, and end with their socket; only
+  interested sockets receive bodies and every other socket receives the
+  summary of the same span; a chat shown or hidden mid-turn catches up from
+  its cursor with no gap or duplicate; split panels each receive bodies; a
+  reconnected socket starts without interest until it declares again and then
+  replays from its cursor; summaries and bodies both precede terminal
+  lifecycle broadcasts (`integration-tests/tests/server/chat-transcript-interest.test.ts`).
 - **Run lifecycle and event rules**: interrupt marks the run stopped and
   appends `run-ended: interrupted` immediately; a duplicate or stale
   `run-ended` is ignored and never stored; a delayed old-run end signal

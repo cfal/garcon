@@ -94,6 +94,15 @@ describe('filterByChat', () => {
 		expect(result).toEqual({ action: 'process' });
 	});
 
+	it('processes transcript summaries globally so undisplayed chats update the sidebar', () => {
+		const result = filterByChat(
+			'chat-transcript-advanced',
+			{ type: 'chat-transcript-advanced', chatId: 'chat-b' } as never,
+			ctx,
+		);
+		expect(result).toEqual({ action: 'process' });
+	});
+
 	it('skips scoped events for non-matching chats', () => {
 		const result = filterByChat(
 			'agent-run-finished',

@@ -10,6 +10,8 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import { getChatSnapshot } from '$lib/api/chats.js';
 import type { ChatSnapshotResponse } from '$shared/chat-snapshot';
+import type { ChatMessage } from '$shared/chat-types';
+import { summarizeTranscriptActivity } from '$shared/chat-transcript-activity';
 
 vi.mock('$lib/api/chats.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api/chats.js')>()),
@@ -131,6 +133,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 				lastOrdinal: 1,
 			})),
 			applyChatMessages: vi.fn((): 'applied' => 'applied'),
+			applyTranscriptAdvance: vi.fn(),
 			reloadChatTranscript: vi.fn(),
 			isRenderedChat: vi.fn(() => false),
 			loadRenderedChat: vi.fn(),
@@ -426,43 +429,59 @@ describe('event router integration', () => {
 		expect(stores.readState.enqueueReadReceipt).toHaveBeenCalledWith('chat-a', newestTimestamp);
 	});
 
-	it('keeps background plan and permission batches isolated from selected-chat ports', () => {
+	it('derives background plan and permission state from summaries and the transient feed', () => {
 		const stores = createStores();
+		const permission = {
+			type: 'permission-request',
+			timestamp: TS,
+			permissionOccurrenceId: 'permission-background',
+			requestedTool: {
+				type: 'bash-tool-use',
+				timestamp: TS,
+				toolId: 'tool-background',
+				command: 'true',
+			},
+		};
+		stores.conversationUi.setTransientFeedFromSnapshot({
+			...transientFeed('generation-b'),
+			chatId: 'chat-b',
+		});
 
 		renderRouterWithRawMessages(
 			[
 				{
-					type: 'chat-messages',
+					type: 'chat-transcript-advanced',
 					chatId: 'chat-b',
 					transcriptViewId: 'generation-b',
 					firstOrdinal: 1,
 					lastOrdinal: 2,
-					resendCandidates: [],
-					clientRequestId: 'req-background',
-					upstreamRequestId: 'cursor-background',
-					messages: [
-						rawMessage(1, {
-							type: 'enter-plan-mode-tool-use',
-							timestamp: TS,
-							toolId: 'plan-background',
-						}),
-						rawMessage(2, {
-							type: 'permission-request',
-							timestamp: TS,
+					activity: summarizeTranscriptActivity([
+						{ type: 'enter-plan-mode-tool-use', timestamp: TS, toolId: 'plan-background' },
+						permission,
+					] as unknown as ChatMessage[]),
+				},
+				{
+					type: 'chat-transient-feed-mutation',
+					...transientFeed('generation-b', 1),
+					chatId: 'chat-b',
+					mutation: {
+						kind: 'upsert',
+						row: {
 							permissionOccurrenceId: 'permission-background',
-							requestedTool: {
-								type: 'bash-tool-use',
-								timestamp: TS,
-								toolId: 'tool-background',
-								command: 'true',
-							},
-						}),
-					],
+							runId: 'run-background',
+							transcript: { transcriptViewId: 'generation-b', afterOrdinal: 1 },
+							displayOrder: 0,
+							message: permission,
+						},
+					},
 				},
 			],
 			stores,
 		);
 
+		expect(stores.chatState.applyTranscriptAdvance).toHaveBeenCalledWith('chat-b', 'generation-b', 2);
+		expect(stores.chatState.applyChatMessages).not.toHaveBeenCalled();
+		expect(stores.sessions.patchActivity).toHaveBeenCalledWith('chat-b', TS);
 		expect(stores.agentSettings.permissionMode).toHaveBeenCalledWith('chat-b');
 		expect(stores.agentSettings.setPermissionMode).toHaveBeenCalledWith('chat-b', 'plan');
 		expect(stores.lifecycle.markTurnRunning).toHaveBeenCalledWith('chat-b');
@@ -474,6 +493,43 @@ describe('event router integration', () => {
 		expect(stores.conversationUi.pendingPermissionsFor('chat-a')).toHaveLength(0);
 		expect(stores.conversationUi.previousPermissionModeFor('chat-b')).toBe('default');
 		expect(stores.conversationUi.previousPermissionModeFor('chat-a')).toBeNull();
+	});
+
+	it('applies bodies received earlier in a drain before reconciling a summary', () => {
+		const stores = createStores();
+		const order: string[] = [];
+		vi.mocked(stores.chatState.applyChatMessages).mockImplementation(() => {
+			order.push('body');
+			return 'applied';
+		});
+		vi.mocked(stores.chatState.applyTranscriptAdvance).mockImplementation(() => {
+			order.push('summary');
+		});
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'chat-messages',
+					chatId: 'chat-a',
+					transcriptViewId: 'generation-current',
+					firstOrdinal: 2,
+					lastOrdinal: 2,
+					resendCandidates: [],
+					messages: [rawMessage(2, { type: 'assistant-message', timestamp: TS, content: 'body' })],
+				},
+				{
+					type: 'chat-transcript-advanced',
+					chatId: 'chat-a',
+					transcriptViewId: 'generation-current',
+					firstOrdinal: 3,
+					lastOrdinal: 3,
+					activity: summarizeTranscriptActivity([]),
+				},
+			],
+			stores,
+		);
+
+		expect(order).toEqual(['body', 'summary']);
 	});
 
 	it('leaves processing events to the synchronous WebSocket reconciler', () => {

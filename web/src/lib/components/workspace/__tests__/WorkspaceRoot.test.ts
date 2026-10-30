@@ -37,6 +37,8 @@ import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte.js';
 import { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+import type { PrimaryWsClientMessage } from '$shared/ws-protocol';
+import type { TranscriptInterestConnectionPort } from '$lib/ws/chat-transcript-interest.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
@@ -65,6 +67,7 @@ vi.mock('$lib/context', () => ({
 	getWorkspaceCoordinator: () => testContext.current?.workspace,
 	getWorkspaceHostGeometry: () => testContext.current?.hostGeometry,
 	getWorkspaceWindowDnd: () => testContext.current?.windowDnd,
+	getWs: () => testContext.current?.ws,
 	getOptionalTransientLayers: () => null,
 	setConversationUi: (value: unknown) => {
 		if (testContext.current) testContext.current.conversationUi = value;
@@ -431,7 +434,17 @@ function installContext({ composerStatusBarGitProjects = false }: { composerStat
 		attach: () => undefined,
 	};
 	const windowDnd = new WorkspaceWindowDndController(layout, resolveUnmeasuredWorkspaceSplit);
+	const transcriptInterests: string[][] = [];
+	const ws = {
+		isConnected: true,
+		sendMessage: vi.fn((message: PrimaryWsClientMessage) => {
+			if (message.type === 'chat-transcript-interest') transcriptInterests.push(message.chatIds);
+			return true;
+		}),
+		onConnectionChange: () => () => {},
+	} satisfies TranscriptInterestConnectionPort;
 	testContext.current = {
+		ws,
 		hostGeometry,
 		appShell: { isMobile: false, openNewChatDialog: vi.fn() },
 		workspace,
@@ -487,6 +500,7 @@ function installContext({ composerStatusBarGitProjects = false }: { composerStat
 		hostGeometry,
 		projectResolution,
 		fetchProjectResolution,
+		transcriptInterests,
 	};
 }
 
@@ -967,6 +981,32 @@ describe('WorkspaceRoot', () => {
 		expect(liveChat.getAttribute('data-visible')).toBe('true');
 		expect(composerLayer.getAttribute('aria-hidden')).toBe('false');
 		expect(composerLayer.hasAttribute('inert')).toBe(false);
+	});
+
+	it('declares every visible conversation panel as transcript interest', async () => {
+		const { layout, transcriptInterests } = installContext();
+		renderRoot();
+		await tick();
+		expect(transcriptInterests.at(-1)).toEqual(['chat-a']);
+
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'open-chat-in-new-window',
+					chatId: 'chat-b',
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
+				},
+			]),
+		);
+		await tick();
+
+		expect(transcriptInterests.at(-1)).toEqual(['chat-a', 'chat-b']);
+		cleanup();
+		expect(transcriptInterests.at(-1)).toEqual([]);
 	});
 
 	it('keeps one runtime while both windows render conversation panels', async () => {

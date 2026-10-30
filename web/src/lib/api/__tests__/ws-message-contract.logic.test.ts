@@ -25,10 +25,12 @@ import {
 	WsPongMessage,
 	parseServerWsMessage,
 } from '$shared/ws-events';
+import { ChatTranscriptAdvancedMessage } from '$shared/ws-transcript-summary';
 import {
 	ChatReloadCancelRequest,
 	ChatReloadRequest,
 	ChatSubscribeRequest,
+	ChatTranscriptInterestRequest,
 	ReconnectStateQueryRequest,
 	WsPingRequest,
 	parseClientWsMessage,
@@ -147,6 +149,35 @@ describe('parseServerWsMessage', () => {
 		expect((msg as ChatMessagesMessage).turnId).toBe('turn-1');
 		expect((msg as ChatMessagesMessage).clientRequestId).toBe('req-1');
 		expect((msg as ChatMessagesMessage).upstreamRequestId).toBe('cursor-req-1');
+	});
+
+	it('parses a body-free transcript summary with its activity', () => {
+		const activity = {
+			preview: { content: 'Synthetic answer', timestamp: '2025-01-01T00:00:00Z' },
+			lastActivityAt: '2025-01-01T00:00:00Z',
+			planModeEntered: false,
+			planExitRequests: [],
+		};
+		const msg = parseServerWsMessage({
+			type: 'chat-transcript-advanced',
+			chatId: 'c-1',
+			transcriptViewId: 'generation-1',
+			firstOrdinal: 4,
+			lastOrdinal: 6,
+			activity,
+		});
+
+		expect(msg).toBeInstanceOf(ChatTranscriptAdvancedMessage);
+		expect(msg).toMatchObject({ chatId: 'c-1', firstOrdinal: 4, lastOrdinal: 6, activity });
+		expect(
+			parseServerWsMessage({
+				type: 'chat-transcript-advanced',
+				chatId: 'c-1',
+				transcriptViewId: 'generation-1',
+				firstOrdinal: 4,
+				lastOrdinal: 6,
+			}),
+		).toBeNull();
 	});
 
 	it('rejects a chat message batch when any envelope is malformed', () => {
@@ -878,6 +909,16 @@ describe('parseServerWsMessage', () => {
 	});
 });
 describe('parseClientWsMessage', () => {
+	it('round-trips the transcript interest declaration the browser sends', () => {
+		const declared = parseClientWsMessage(
+			JSON.parse(JSON.stringify(new ChatTranscriptInterestRequest(['c-1', 'c-2']))),
+		);
+
+		expect(declared).toBeInstanceOf(ChatTranscriptInterestRequest);
+		expect((declared as ChatTranscriptInterestRequest).chatIds).toEqual(['c-1', 'c-2']);
+		expect(parseClientWsMessage({ type: 'chat-transcript-interest', chatIds: [1] })).toBeNull();
+	});
+
 	it('parses read/resume request messages', () => {
 		const reconnect = parseClientWsMessage({
 			type: 'reconnect-state-query',

@@ -35,6 +35,7 @@
 		getTerminalRegistry,
 		getWorkspaceCoordinator,
 		getWorkspaceHostGeometry,
+		getWs,
 		setConversationUi,
 		setConversationLifecycles,
 		setConversationPanels,
@@ -53,6 +54,7 @@
 	} from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 	import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+	import { ChatTranscriptInterestController } from '$lib/ws/chat-transcript-interest.svelte.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 	import { ConversationLifecycleRegistry } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
@@ -200,6 +202,9 @@
 			];
 		}),
 	);
+	// Every visible panel displays live bodies; hidden and parked views catch up when shown.
+	const transcriptInterest = new ChatTranscriptInterestController(getWs());
+	transcriptInterest.mount(() => chatPresentations.map((presentation) => presentation.chatId));
 	const existingChatSurfaceIds = $derived.by(
 		() =>
 			new Set<ChatViewSurfaceId>(

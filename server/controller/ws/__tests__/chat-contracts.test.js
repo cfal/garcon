@@ -5,6 +5,7 @@ mock.module('../utils.js', () => ({
 }));
 
 import { ChatHandler } from '../chat.js';
+import { ChatTranscriptInterestRegistry } from '../chat-transcript-interest.ts';
 import { sendWebSocketJson } from '../utils.js';
 import { TranscriptHistoryUnavailableError } from '../../chats/errors.js';
 import { DomainError } from '../../../common/domain-error.js';
@@ -92,7 +93,10 @@ const injectedMocks = [
 
 const moduleMocks = [sendWebSocketJson];
 
+let transcriptInterest = new ChatTranscriptInterestRegistry();
+
 function createHandler() {
+  transcriptInterest = new ChatTranscriptInterestRegistry();
   const instance = new ChatHandler({
     serverInstanceId: 'server-instance-test',
     processing: mockProcessing,
@@ -101,12 +105,14 @@ function createHandler() {
     queue: mockQueue,
     transientFeeds: mockTransientFeeds,
     registry: mockRegistry,
+    transcriptInterest,
   });
   return instance.createHandler();
 }
 
 function createMockWs() {
   return {
+    readyState: 1,
     subscribe: mock(() => undefined),
     publish: mock(() => undefined),
   };
@@ -171,6 +177,38 @@ describe('chat WebSocket handler', () => {
   it('subscribes the socket to the chat topic on open', () => {
     chatHandler.open(ws);
     expect(ws.subscribe).toHaveBeenCalledWith('chat');
+  });
+
+  it('replaces the socket transcript interest on each declaration without replying', async () => {
+    const other = createMockWs();
+    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: ['chat-a', 'chat-b'] });
+    await chatHandler.message(other, { type: 'chat-transcript-interest', chatIds: ['chat-b'] });
+    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: ['chat-b', 'chat-c'] });
+    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: ['chat-b', 'chat-c'] });
+
+    expect(transcriptInterest.isInterested(ws, 'chat-a')).toBe(false);
+    expect(transcriptInterest.isInterested(ws, 'chat-c')).toBe(true);
+    expect(transcriptInterest.isInterested(other, 'chat-b')).toBe(true);
+    expect(transcriptInterest.isInterested(other, 'chat-c')).toBe(false);
+    expect(sendWebSocketJson).not.toHaveBeenCalled();
+  });
+
+  it('keeps the previous interest when a declaration is malformed', async () => {
+    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: ['chat-a'] });
+    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: 'chat-b' });
+
+    expect(transcriptInterest.isInterested(ws, 'chat-a')).toBe(true);
+    expect(transcriptInterest.isInterested(ws, 'chat-b')).toBe(false);
+  });
+
+  it('releases transcript interest when its socket closes', async () => {
+    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: ['chat-a'] });
+    chatHandler.close(ws, 1000, 'closed');
+    ws.readyState = 3;
+    await chatHandler.message(ws, { type: 'chat-transcript-interest', chatIds: ['chat-a'] });
+
+    expect(transcriptInterest.isInterested(ws, 'chat-a')).toBe(false);
+    expect(transcriptInterest.socketCount).toBe(0);
   });
 
   it('responds with a processing snapshot and per-chat queue outcomes for reconnect', async () => {

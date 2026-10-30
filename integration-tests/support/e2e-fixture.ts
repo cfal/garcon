@@ -199,6 +199,22 @@ export class E2eFixture {
     });
   }
 
+  // Lists the type and chat of each server event the SPA socket received.
+  async spaWebSocketEventKinds(afterIndex = 0): Promise<Array<{ type: string; chatId: string | null }>> {
+    return await this.page.evaluate((from) => {
+      const scope = globalThis as typeof globalThis & {
+        __garconSpaWsEvents?: unknown[];
+      };
+      return (scope.__garconSpaWsEvents ?? []).slice(from).map((event) => {
+        const record = event && typeof event === 'object' ? event as Record<string, unknown> : {};
+        return {
+          type: String(record.type),
+          chatId: typeof record.chatId === 'string' ? record.chatId : null,
+        };
+      });
+    }, afterIndex);
+  }
+
   async waitForSpaWebSocketEvent(input: {
     afterIndex: number;
     type: ServerWsMessage['type'];

@@ -29,7 +29,7 @@ import { queueDrainOptions, queuedAttachmentAdmission } from './chats/chat-execu
 import { TerminalController } from './terminals/controller.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { PrimaryWsHandler } from './ws/primary.js';
-import { publishWebSocketPayload } from './ws/transport.js';
+import { publishSelectedWebSocketPayload, publishWebSocketPayload } from './ws/transport.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import { ChatProcessingActivity } from './chats/chat-processing-activity.js';
@@ -54,6 +54,7 @@ import { createNoiseServer } from '@cfal/noise-ws';
 import { EXECUTOR_PENDING_SOCKET_LIMIT, EXECUTOR_SOCKET_LIMIT } from '../remote/transport/socket-admission.js';
 import { createServerSocketHandlers, type WsConnectionData } from './ws/server-sockets.js';
 import { PrimarySocketDelivery } from './ws/primary-delivery.js';
+import { ChatTranscriptInterestRegistry } from './ws/chat-transcript-interest.js';
 import { AgentDirectory } from './agents/directory.js';
 import { executorConfigGuards } from './executors/config-guards.js';
 import { effectiveExecutorId } from '../../common/executors.js';
@@ -710,6 +711,7 @@ export async function startServer(): Promise<void> {
     );
 
     const primaryDelivery = new PrimarySocketDelivery(config.wsBackpressureLimit);
+    const transcriptInterest = new ChatTranscriptInterestRegistry();
     eventWiring = await startExecutionControlPlane({
       wireEvents: () => wireServerEvents({
         executors,
@@ -719,6 +721,8 @@ export async function startServer(): Promise<void> {
           publish(topic, payload) {
             return publishWebSocketPayload(primaryDelivery, topic, payload);
           },
+          publishTranscript: (chatId, payloads) => publishSelectedWebSocketPayload(
+            primaryDelivery, 'chat', transcriptInterest.payloadSelector(chatId, payloads)),
         },
         agentRegistry,
         chatRegistry,
@@ -822,6 +826,7 @@ export async function startServer(): Promise<void> {
       queue,
       transientFeeds,
       registry: chatRegistry,
+      transcriptInterest,
     });
     const primaryWs = new PrimaryWsHandler(chatHandler, terminalStream);
 

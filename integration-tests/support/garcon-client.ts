@@ -109,6 +109,7 @@ import {
 import {
   ChatReloadRequest,
   ChatSubscribeRequest,
+  ChatTranscriptInterestRequest,
   ReconnectStateQueryRequest,
   WsPingRequest,
   type ClientWsMessage,
@@ -335,6 +336,8 @@ export class GarconTestClient {
   readonly #eventRecords: EventRecord[] = [];
   readonly #waiters = new Set<EventWaiter>();
   readonly #receiveTasks = new Set<Promise<void>>();
+  // Chats whose transcript bodies this client displays, as a browser panel would.
+  readonly #transcriptInterest = new Set<string>();
   #socket: GarconWebSocket | null = null;
   #protocolError: Error | null = null;
 
@@ -415,6 +418,41 @@ export class GarconTestClient {
       this.#scheduleReceive((event as MessageEvent).data);
     });
     await withTimeout(opened.promise, 10_000, () => `Timed out connecting WebSocket: ${wsUrl}`);
+    if (this.#transcriptInterest.size > 0) await this.#declareTranscriptInterest();
+  }
+
+  get transcriptInterest(): readonly string[] {
+    return [...this.#transcriptInterest];
+  }
+
+  // Adds chats to this client's displayed set. Chat commands sent through this
+  // client add their chats automatically; other chats arrive only as summaries.
+  async watchTranscripts(...chatIds: string[]): Promise<void> {
+    const size = this.#transcriptInterest.size;
+    for (const chatId of chatIds) this.#transcriptInterest.add(chatId);
+    if (this.#transcriptInterest.size !== size) await this.#declareTranscriptInterest();
+  }
+
+  async setTranscriptInterest(chatIds: readonly string[]): Promise<void> {
+    this.#transcriptInterest.clear();
+    for (const chatId of chatIds) this.#transcriptInterest.add(chatId);
+    await this.#declareTranscriptInterest();
+  }
+
+  // The server applies a declaration synchronously, so the pong orders it ahead
+  // of every later request from this client.
+  async #declareTranscriptInterest(): Promise<void> {
+    if (!this.#socket || this.#socket.readyState !== WEB_SOCKET_OPEN) return;
+    this.sendWs(new ChatTranscriptInterestRequest([...this.#transcriptInterest]));
+    await this.ping();
+  }
+
+  async #watchCommandChats(path: string, body: unknown): Promise<void> {
+    if (!path.startsWith('/api/v1/chats') || !isRecord(body)) return;
+    const chatIds = [body.chatId, body.sourceChatId].filter(
+      (chatId): chatId is string => typeof chatId === 'string' && chatId.length > 0,
+    );
+    if (chatIds.length > 0) await this.watchTranscripts(...chatIds);
   }
 
   async disconnect(): Promise<void> {
@@ -981,6 +1019,7 @@ export class GarconTestClient {
     afterOrdinal: number,
     throughOrdinal?: number,
   ): Promise<ChatSubscribedMessage> {
+    await this.watchTranscripts(chatId);
     const clientRequestId = crypto.randomUUID();
     const afterIndex = this.markEvents();
     const request = new ChatSubscribeRequest(
@@ -1208,6 +1247,7 @@ export class GarconTestClient {
     path: string,
     body?: unknown,
   ): Promise<{ response: Response; parsed: unknown }> {
+    await this.#watchCommandChats(path, body);
     const response = await this.fetch(path, {
       method,
       headers: body === undefined ? undefined : { 'content-type': 'application/json' },

@@ -68,7 +68,6 @@
 		executionPolicy?: 'conversation' | 'literal' | null;
 		onRegisterSubmit?: (submit: (message: string) => Promise<boolean>) => void;
 		onRegisterAppendToDraft?: (append: ChatDraftAppend) => void;
-		onPatchActivity?: (chatId: string, timestamp: string) => void;
 		fetchProjectResolution?: ConstructorParameters<typeof ProjectResolutionStore>[0];
 		commit?: CommitController;
 		quickSummary?: GitQuickSummaryStore;
@@ -81,7 +80,6 @@
 		executionPolicy = 'conversation',
 		onRegisterSubmit,
 		onRegisterAppendToDraft,
-		onPatchActivity,
 		fetchProjectResolution,
 		commit,
 		quickSummary,
@@ -161,7 +159,7 @@
 		processingPhase: () => selectedChat.processingPhase,
 		patchDraftStartup: () => {},
 		patchPreview: () => {},
-		patchActivity: (chatId: string, timestamp: string) => onPatchActivity?.(chatId, timestamp),
+		patchActivity: () => {},
 		patchChat: () => {},
 		patchLastReadAt: () => {},
 		applyStartEntry: () => {},

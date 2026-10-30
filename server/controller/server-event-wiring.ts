@@ -8,6 +8,7 @@ import { isErrorCode } from '../../common/error-codes.ts';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import { wireExecutorAvailability } from './executors/availability-wiring.js';
 import { createTranscriptEventFanout } from './ledger/event-fanout.js';
+import type { ChatTranscriptPayloads } from './ws/chat-transcript-interest.js';
 import { isLedgerPreambleSelectionChangedNoticeDetail } from './ledger/contracts.js';
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
@@ -61,6 +62,7 @@ const logger = createLogger('server-events');
 
 interface WebSocketPublisher {
   publish(topic: string, payload: string): unknown;
+  publishTranscript(chatId: string, payloads: ChatTranscriptPayloads): unknown;
 }
 
 interface ChatSearchEventIndex {
@@ -387,6 +389,12 @@ export function wireServerEvents({
       void scheduleChatTask(chatId, 'transcript commit fanout', task);
     },
     broadcast,
+    publishTranscript: (body, summary) => {
+      server.publishTranscript(body.chatId, {
+        body: () => JSON.stringify(body),
+        summary: () => JSON.stringify(summary),
+      });
+    },
     updateMetadata: (chatId, viewId, messages) => {
       metadata.updateFromAppendedMessages(chatId, viewId, [...messages]);
     },

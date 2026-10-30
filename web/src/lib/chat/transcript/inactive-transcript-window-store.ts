@@ -134,6 +134,12 @@ export class InactiveTranscriptWindowStore {
 		}
 	}
 
+	retainChats(chatIds: ReadonlySet<string>): void {
+		for (const [key, window] of this.#windows) {
+			if (!chatIds.has(window.chatId)) this.#windows.delete(key);
+		}
+	}
+
 	pruneSurfaces(existingSurfaceIds: ReadonlySet<string>): void {
 		for (const [key, window] of this.#windows) {
 			if (!existingSurfaceIds.has(window.surfaceId)) this.#windows.delete(key);

@@ -40,11 +40,17 @@ describe('Lightpanda multi-chat isolation', () => {
       first.releaseEcho();
       await app.waitForText('echo:ui-multi-a');
 
+      // The hidden chat reaches the sidebar through summaries, never bodies.
+      const hiddenCursor = await fixture.spaWebSocketEventCount();
       second.releaseEcho();
       await app.waitForSidebarPreview('ui-multi-b', 'echo:ui-multi-b');
       await app.waitForSidebarUnread('ui-multi-b', true);
       await app.waitForSidebarUnread('ui-multi-a', false);
       expect(await app.exactTextCount('echo:ui-multi-b')).toBe(0);
+      const hiddenEvents = (await fixture.spaWebSocketEventKinds(hiddenCursor))
+        .filter((event) => event.chatId === chatB.id);
+      expect(hiddenEvents.some((event) => event.type === 'chat-transcript-advanced')).toBe(true);
+      expect(hiddenEvents.some((event) => event.type === 'chat-messages')).toBe(false);
 
       const readCursor = fixture.integration.client.markEvents();
       await app.clickSidebarChatContaining('ui-multi-b');

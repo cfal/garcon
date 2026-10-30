@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { StartChatCommandRequest } from '../../../common/chat-command-contracts.js';
 import type { AgentStartOutcomeNoticeDetail } from '../../../common/garcon-agent-result.js';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
+import type { ChatTranscriptAdvancedMessage } from '../../../common/ws-transcript-summary.js';
 import { escapeGarconXmlText } from '../../../common/garcon-command-envelope.js';
 import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
 import { parseGarconCommandRejection, type GarconCommandRejection } from '../../../common/garcon-command-rejection.js';
@@ -316,9 +317,10 @@ describe('scripted provider agent commands', () => {
               'private action result acknowledged', { afterIndex: cursor, timeoutMs: 90_000 },
             );
             if (createsChild) {
+              // No socket displays the child, so its completion arrives as a summary.
               await fixture.client.waitForEvent(
-                (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId !== source
-                  && event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Synthetic child complete.'),
+                (event): event is ChatTranscriptAdvancedMessage => event.type === 'chat-transcript-advanced'
+                  && event.chatId !== source && event.activity.preview?.content === 'Synthetic child complete.',
                 'independent child completed', { afterIndex: cursor, timeoutMs: 90_000 },
               );
             }

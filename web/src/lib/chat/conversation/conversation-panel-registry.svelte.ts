@@ -11,6 +11,10 @@ import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conver
 import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
 import {
+	MissedTranscriptCatchUp,
+	type TranscriptAdvance,
+} from '$lib/chat/transcript/missed-transcript-catch-up.js';
+import {
 	InactiveTranscriptWindowStore,
 	type InactiveTranscriptWindow,
 } from '$lib/chat/transcript/inactive-transcript-window-store.js';
@@ -226,11 +230,11 @@ class PanelRegistration implements ConversationPanelRegistration {
 		return target;
 	}
 
-	async restore(target: ConversationPanelRestoreTarget | null): Promise<void> {
+	async restore(target: ConversationPanelRestoreTarget | null, catchUp = false): Promise<void> {
 		if (this.#destroyed) return;
 		const restoreEpoch = this.#beginRestore(target);
 		const restored = this.transcript.activateChat(this.chatId);
-		if (!restored || restored.stale) {
+		if (!restored || restored.stale || catchUp) {
 			const loadOptions = { minimumLimit: restored?.count ?? 0 };
 			await this.snapshots.load(loadOptions);
 		}
@@ -424,6 +428,14 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	#snapshotLoads = new Map<string, SnapshotLoad>();
 	#reconnectReplayEpoch = 0;
 	#reconnectReplays = new Map<string, ActivePanelReconnectReplay>();
+	#missedTranscripts = new MissedTranscriptCatchUp({
+		covers: (chatId, advance) => this.#cacheCovers(chatId, advance),
+		isDisplayed: (chatId) => this.#hasAdmittedPanel(chatId),
+		settleLoads: (chatId) => this.#settleSnapshotLoads(chatId),
+		load: (chatId) => this.loadChatSnapshot(chatId),
+		dropParkedWindows: (chatId) => this.#inactiveWindows.removeChat(chatId),
+		markLoadFailed: (chatId) => this.markChatStale(chatId),
+	});
 	// Reconciliation updates this reactive revision after mutating the plain panel map.
 	#visible = $state.raw<readonly ConversationPanelDescriptor[]>([]);
 	// Parked transcripts must not retain the reconciliation scope and its retired panels.
@@ -569,7 +581,11 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			}
 			this.#pendingSurfaceTransfers.delete(item.surfaceId);
 			this.#restoreTargets.delete(item.surfaceId);
-			void (retained ? panel.restoreRetained(target ?? retained.target) : panel.restore(target)).catch(() => {
+			const catchUp = this.#missedTranscripts.takeCatchUpOnShow(item.chatId);
+			void (retained
+				? panel.restoreRetained(target ?? retained.target)
+				: panel.restore(target, catchUp)
+			).catch(() => {
 				if (this.#panels.get(item.surfaceId) === panel) this.markChatStale(item.chatId);
 			});
 		}
@@ -766,6 +782,37 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		return { kind: 'applied', localRecoverySurfaceIds };
 	}
 
+	// Reconciles committed rows this socket received only as a summary.
+	applyTranscriptAdvance(chatId: string, transcriptViewId: string, lastOrdinal: number): void {
+		this.#missedTranscripts.apply(chatId, { transcriptViewId, lastOrdinal });
+	}
+
+	// Undisplayed chats lose every summary across a disconnect, so their parked
+	// windows are dropped and their caches catch up from their cursors when shown.
+	markUndisplayedUnverified(): void {
+		const displayed = new Set([...this.#panels.values()].map((panel) => panel.chatId));
+		this.#inactiveWindows.retainChats(displayed);
+		this.#missedTranscripts.markHiddenUnverified(displayed);
+	}
+
+	#cacheCovers(chatId: string, advance: TranscriptAdvance): boolean {
+		const cursor = this.options.cache.readAppliedCursor(chatId);
+		return Boolean(
+			cursor &&
+				!cursor.stale &&
+				cursor.transcriptViewId === advance.transcriptViewId &&
+				cursor.lastOrdinal >= advance.lastOrdinal,
+		);
+	}
+
+	async #settleSnapshotLoads(chatId: string): Promise<void> {
+		let pending = this.#snapshotLoads.get(chatId);
+		while (pending) {
+			await pending.promise.catch(() => false);
+			pending = this.#snapshotLoads.get(chatId);
+		}
+	}
+
 	hasInactiveWindow(chatId: string): boolean {
 		return this.#inactiveWindows.hasChat(chatId);
 	}
@@ -839,6 +886,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	removeChat(chatId: string): void {
+		this.#missedTranscripts.forget(chatId);
 		this.#inactiveWindows.removeChat(chatId);
 		for (const [surfaceId, panel] of this.#panels) {
 			if (panel.chatId !== chatId) continue;
@@ -857,6 +905,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	destroy(): void {
+		this.#missedTranscripts.clear();
 		this.#inactiveWindows.clear();
 		this.abortReconnectReplays();
 		for (const panel of this.#panels.values()) panel.destroy();

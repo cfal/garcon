@@ -21,6 +21,7 @@ import type {
 import {
   parseClientWsMessage,
   ChatSubscribeRequest,
+  ChatTranscriptInterestRequest,
   ChatReloadRequest,
   ChatReloadCancelRequest,
   ReconnectStateQueryRequest,
@@ -40,6 +41,7 @@ import type { ChatExecutionQueries } from '../chat-execution/chat-execution-coor
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.js';
 import { mapWithConcurrencyResult } from '../../common/concurrency.js';
+import type { ChatTranscriptInterestRegistry } from './chat-transcript-interest.js';
 import {
   StaleTranscriptViewError,
   InvalidTranscriptReplayRequestError,
@@ -82,6 +84,7 @@ interface ChatHandlerDeps {
   queue: QueueDep;
   transientFeeds: Pick<ChatTransientFeedStore, 'snapshot'>;
   registry: IChatRegistry;
+  transcriptInterest: Pick<ChatTranscriptInterestRegistry, 'declare' | 'release'>;
 }
 
 const RECONNECT_CONTROL_READ_CONCURRENCY = 8;
@@ -253,6 +256,7 @@ export class ChatHandler {
   #queue: QueueDep;
   #transientFeeds: Pick<ChatTransientFeedStore, 'snapshot'>;
   #registry: IChatRegistry;
+  #transcriptInterest: Pick<ChatTranscriptInterestRegistry, 'declare' | 'release'>;
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
   // Only the requesting socket may cancel a reload. A closed socket does not
   // cancel it: the replacement reaches every client as a view replacement.
@@ -266,6 +270,7 @@ export class ChatHandler {
     queue,
     transientFeeds,
     registry,
+    transcriptInterest,
   }: ChatHandlerDeps) {
     this.#serverInstanceId = serverInstanceId;
     this.#processing = processing;
@@ -274,6 +279,7 @@ export class ChatHandler {
     this.#queue = queue;
     this.#transientFeeds = transientFeeds;
     this.#registry = registry;
+    this.#transcriptInterest = transcriptInterest;
     this.#requestHandlers = this.#createRequestHandlers();
   }
 
@@ -520,6 +526,11 @@ export class ChatHandler {
       'chat-reload-cancel': (data, writer, ws) => this.#withChatId(data as ChatReloadCancelRequest, writer, (chatId) => {
         this.#handleChatReloadCancel(data as ChatReloadCancelRequest, chatId, ws);
       }),
+      // Applies synchronously, so later requests on this socket and every later
+      // transcript publication observe the new set.
+      'chat-transcript-interest': (data, _writer, ws) => {
+        this.#transcriptInterest.declare(ws, (data as ChatTranscriptInterestRequest).chatIds);
+      },
       'reconnect-state-query': (data, writer) => this.#handleReconnectState(data as ReconnectStateQueryRequest, writer),
       'ws-ping': (data, writer) => this.#handleWsPing(data as WsPingRequest, writer),
     };
@@ -602,7 +613,8 @@ export class ChatHandler {
     writer.send(new WsFaultMessage(message));
   }
 
-  #handleClose(_ws: WS, code?: number, reason?: string): void {
+  #handleClose(ws: WS, code?: number, reason?: string): void {
+    this.#transcriptInterest.release(ws);
     logger.info('ws: chat client disconnected', code ?? '', reason ? `(${reason})` : '');
   }
 }

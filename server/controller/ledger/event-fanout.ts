@@ -2,8 +2,10 @@ import {
   ChatMessagesMessage,
   ChatTranscriptReplacedMessage,
 } from '../../../common/ws-events.js';
+import { ChatTranscriptAdvancedMessage } from '../../../common/ws-transcript-summary.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { ResendCandidate } from '../../../common/chat-view.js';
+import { summarizeTranscriptActivity } from '../../../common/chat-transcript-activity.js';
 import type { TranscriptCommitEvent } from './service.js';
 import { isConversationalLedgerRow } from './contracts.js';
 import {
@@ -15,6 +17,8 @@ export interface TranscriptEventFanoutDeps {
   chatExists(chatId: string): boolean;
   schedule(chatId: string, task: () => Promise<void> | void): void;
   broadcast(payload: unknown): void;
+  // Delivers the body to sockets displaying the chat and the summary to all others.
+  publishTranscript(body: ChatMessagesMessage, summary: ChatTranscriptAdvancedMessage): void;
   updateMetadata(chatId: string, transcriptViewId: string, messages: readonly ChatMessage[]): void;
   replaceMetadata(chatId: string, transcriptViewId: string): Promise<void>;
   resendCandidates(chatId: string): readonly ResendCandidate[];
@@ -52,13 +56,25 @@ async function applyTranscriptEvent(
   if (conversationalMessages.length > 0) {
     deps.updateMetadata(event.chatId, event.viewId, conversationalMessages);
   }
-  deps.broadcast(new ChatMessagesMessage(
-    event.chatId,
-    event.viewId,
-    messages,
-    rows[0]!.ordinal,
-    rows.at(-1)!.ordinal,
-    [...deps.resendCandidates(event.chatId)],
-    event.type === 'run-ended' ? event.runId : undefined,
-  ));
+  const firstOrdinal = rows[0]!.ordinal;
+  const lastOrdinal = rows.at(-1)!.ordinal;
+  deps.publishTranscript(
+    new ChatMessagesMessage(
+      event.chatId,
+      event.viewId,
+      messages,
+      firstOrdinal,
+      lastOrdinal,
+      [...deps.resendCandidates(event.chatId)],
+      event.type === 'run-ended' ? event.runId : undefined,
+    ),
+    // Displaying sockets derive the same activity from the body.
+    new ChatTranscriptAdvancedMessage(
+      event.chatId,
+      event.viewId,
+      firstOrdinal,
+      lastOrdinal,
+      summarizeTranscriptActivity(messages.map((entry) => entry.message)),
+    ),
+  );
 }
