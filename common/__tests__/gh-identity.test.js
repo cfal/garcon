@@ -89,3 +89,37 @@ test('split pull request results carry only their own part', () => {
   expect(() => validateGhResult('getPullRequestDiff', diff, scope)).not.toThrow();
   expect(() => validateGhResult('getPullRequestDiff', { ...diff, headRefOid: undefined }, scope)).toThrow();
 });
+
+test('fingerprint batches name distinct repositories on one host, within the batch size', () => {
+  const at = (index, host = repository.host) => ({ host, nameWithOwner: `acme/app-${index}` });
+  expect(() => validateGhRequest('getPullRequestFingerprints', { repositories: [repository] })).not.toThrow();
+  expect(() => validateGhRequest('getPullRequestFingerprints', { repositories: Array.from({ length: 25 }, (_, index) => at(index)) })).not.toThrow();
+  for (const repositories of [
+    undefined, [], Array.from({ length: 26 }, (_, index) => at(index)),
+    [at(1), at(2, 'other.example.invalid')], [at(1), { ...at(1), nameWithOwner: 'ACME/app-1' }], [{ host: '--invalid', nameWithOwner: 'acme/app' }],
+  ]) {
+    expect(() => validateGhRequest('getPullRequestFingerprints', { repositories })).toThrow();
+  }
+  expect(() => validateGhRequest('getPullRequestFingerprints', { repositories: [repository], projectPath: '/work/app' })).toThrow();
+});
+
+test('fingerprint results keep each repository outcome explicit', () => {
+  const scope = { executorId: 'local', instanceId: 'instance' };
+  const fingerprint = {
+    number: 7, updatedAt: '', isDraft: false, headRefOid: 'a'.repeat(40), baseRefOid: 'e'.repeat(40), checksState: 'pending',
+    checkCounts: 'check:IN_PROGRESS=1', reviewDecision: null, mergeable: 'unknown', reviewCount: 0, reviewThreadCount: 0,
+  };
+  const batch = { ...scope, viewerLogin: 'viewer', repositories: [
+    { kind: 'read', repo: { nameWithOwner: 'acme/app', url: 'https://github.example.invalid/acme/app' }, pulls: [fingerprint] },
+    { kind: 'incomplete' },
+    { kind: 'failed', reason: 'not-found', message: 'Not found' },
+  ] };
+  expect(() => validateGhResult('getPullRequestFingerprints', batch, scope)).not.toThrow();
+  for (const repositories of [
+    [{ kind: 'unchanged' }],
+    [{ kind: 'failed', reason: 'rate-limited', message: '' }],
+    [{ ...batch.repositories[0], pulls: [{ ...fingerprint, reviewCount: undefined }] }],
+    [{ ...batch.repositories[0], pulls: undefined }],
+  ]) expect(() => validateGhResult('getPullRequestFingerprints', { ...batch, repositories }, scope)).toThrow();
+  expect(() => validateGhResult('getPullRequestFingerprints', { ...batch, viewerLogin: undefined }, scope)).toThrow();
+});

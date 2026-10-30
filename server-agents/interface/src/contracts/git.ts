@@ -10,6 +10,7 @@ export type ExecutionGitService = {
 export interface ExecutionGhService {
   getStatus(options?: ExecutorCallOptions): Promise<ExecutionGhResults['getStatus']>;
   listPullRequests(request: GhRequests['listPullRequests'], options?: ExecutorCallOptions): Promise<ExecutionGhResults['listPullRequests']>;
+  getPullRequestFingerprints(request: GhRequests['getPullRequestFingerprints'], options?: ExecutorCallOptions): Promise<ExecutionGhResults['getPullRequestFingerprints']>;
   getPullRequestStatus(request: GhRequests['getPullRequestStatus'], options?: ExecutorCallOptions): Promise<ExecutionGhResults['getPullRequestStatus']>;
   getPullRequestDiff(request: GhRequests['getPullRequestDiff'], options?: ExecutorCallOptions): Promise<ExecutionGhResults['getPullRequestDiff']>;
   getPullRequestReviewThreads(request: GhRequests['getPullRequestReviewThreads'], options?: ExecutorCallOptions): Promise<ExecutionGhResults['getPullRequestReviewThreads']>;

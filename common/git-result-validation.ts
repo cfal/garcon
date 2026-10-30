@@ -2,7 +2,7 @@ import { isRecord } from './json.js';
 import { GitServiceError } from './git-error.js';
 import { GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitResults, type ExecutionGhResults, type GitExecutorScope } from './git-execution.js';
 import type { GitMethod } from './git.js';
-import { PULL_REQUEST_AUTHOR_ASSOCIATIONS } from './gh.js';
+import { GH_FINGERPRINT_BATCH_SIZE, PULL_REQUEST_AUTHOR_ASSOCIATIONS } from './gh.js';
 import { isGhActorIdentity, isGhCommitOid, isGhRepositoryIdentity } from './gh-identity.js';
 
 type Check = (value: unknown) => boolean;
@@ -152,14 +152,23 @@ export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, 
     reviewDecision: oneOf('approved', 'changes_requested', 'review_required', null) };
   const state = oneOf('open', 'closed', 'merged');
   const commits = { baseRefOid: isGhCommitOid, headRefOid: isGhCommitOid };
+  const mergeable = oneOf('mergeable', 'conflicting', 'unknown');
+  const fingerprint = { number: num, updatedAt: str, isDraft: bool, headRefOid: str, baseRefOid: str,
+    checksState: oneOf('passing', 'failing', 'pending', 'none'), checkCounts: str, reviewDecision: identity.reviewDecision,
+    mergeable, reviewCount: num, reviewThreadCount: num };
   let valid: boolean;
   if (method === 'getStatus') {
     valid = shape(value, { available: bool, authenticated: bool, reason: oneOf('authenticated', 'unauthenticated', 'gh_missing', 'auth_error', 'unknown'), login: optional(str), host: optional(str) });
   } else if (method === 'listPullRequests') {
-    valid = shape(value, { pulls: array(x => shape(x, { ...identity, checksState: oneOf('passing', 'failing', 'pending', 'none'),
+    valid = shape(value, { pulls: array(x => shape(x, { ...identity, ...fingerprint,
       isCrossRepository: bool, authorAssociation: oneOf(...PULL_REQUEST_AUTHOR_ASSOCIATIONS), authorIsBot: bool, authoredByViewer: bool,
       labels: array(str), reviewRequest: oneOf('me', 'team', null) })),
       repo: nullable(x => shape(x, { nameWithOwner: str, url: str })), viewerLogin: nullable(str) });
+  } else if (method === 'getPullRequestFingerprints') {
+    valid = shape(value, { viewerLogin: str, repositories: array(x => shape(x, { kind: oneOf('incomplete') })
+      || shape(x, { kind: oneOf('failed'), reason: oneOf('not-found', 'forbidden', 'error'), message: str })
+      || shape(x, { kind: oneOf('read'), repo: v => shape(v, { nameWithOwner: str, url: str }), pulls: array(p => shape(p, fingerprint), 100) }),
+    GH_FINGERPRINT_BATCH_SIZE) });
   } else if (method === 'getPullRequestReviewTarget') {
     valid = shape(value, { repository: isGhRepositoryIdentity, viewer: isGhActorIdentity, number: num, state, headRefOid: str,
       markedComments: array(x => shape(x, { id: str, url: str, marker: str, isMinimized: bool, author: nullable(isGhActorIdentity) })) });

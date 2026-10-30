@@ -1,26 +1,52 @@
-// Decides which part of the selected pull request a change invalidates. Each
-// read reloads only when its key changes:
-// - status follows anything the inbox scan reports changing, including checks
-//   and the review decision, because one status read is cheap;
-// - review threads follow activity, which GitHub reflects in `updatedAt` for
-//   comments, reviews, and pushes, but not for check runs;
+// Decides which part of the selected pull request a change invalidates. The
+// inputs are the fingerprint fields of the inbox summary, which the scanner
+// refreshes from batched GitHub fingerprint reads. Each read reloads only when
+// its key changes:
+// - status follows the commit pair, checks, the review decision, mergeability,
+//   and `updatedAt`, which moves with title, description, and label edits;
+// - review threads follow review activity: the head (which outdates threads),
+//   the review and thread counts, and `updatedAt`, because an edited review
+//   comment changes no count. The executor revalidates an unchanged thread
+//   listing with a conditional request, so an `updatedAt` move without review
+//   activity costs a 304 instead of a transfer;
 // - the diff follows only the commit pair the latest status reports.
-// The inbox summary is the only change signal today; a batched GitHub
-// fingerprint lookup can replace these inputs without changing the reads.
 
 import type { PullRequestCommits, PullRequestStatus, PullRequestSummary } from '$shared/gh';
 
 type RefreshSignal = Pick<
 	PullRequestSummary,
-	'headRefOid' | 'updatedAt' | 'checksState' | 'reviewDecision'
+	| 'headRefOid'
+	| 'baseRefOid'
+	| 'updatedAt'
+	| 'isDraft'
+	| 'checksState'
+	| 'checkCounts'
+	| 'reviewDecision'
+	| 'mergeable'
+	| 'reviewCount'
+	| 'reviewThreadCount'
 >;
 
 export function pullRequestStatusKey(pull: RefreshSignal): string {
-	return JSON.stringify([pull.headRefOid, pull.updatedAt, pull.checksState, pull.reviewDecision]);
+	return JSON.stringify([
+		pull.headRefOid,
+		pull.baseRefOid,
+		pull.updatedAt,
+		pull.isDraft,
+		pull.checksState,
+		pull.checkCounts,
+		pull.reviewDecision,
+		pull.mergeable,
+	]);
 }
 
 export function pullRequestReviewThreadsKey(pull: RefreshSignal): string {
-	return JSON.stringify([pull.headRefOid, pull.updatedAt]);
+	return JSON.stringify([
+		pull.headRefOid,
+		pull.updatedAt,
+		pull.reviewCount,
+		pull.reviewThreadCount,
+	]);
 }
 
 export function pullRequestDiffCommits(status: PullRequestStatus): PullRequestCommits {

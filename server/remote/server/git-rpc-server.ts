@@ -37,6 +37,7 @@ export class GitRpcServer {
     switch (method) {
       case 'getStatus': validateGhRequest(method, input); return gh.getStatus(options);
       case 'listPullRequests': validateGhRequest(method, input); return gh.listPullRequests(input, options);
+      case 'getPullRequestFingerprints': validateGhRequest(method, input); return gh.getPullRequestFingerprints(input, options);
       case 'getPullRequestStatus': validateGhRequest(method, input); return gh.getPullRequestStatus(input, options);
       case 'getPullRequestDiff': validateGhRequest(method, input); return gh.getPullRequestDiff(input, options);
       case 'getPullRequestReviewThreads': validateGhRequest(method, input); return gh.getPullRequestReviewThreads(input, options);

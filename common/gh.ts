@@ -18,6 +18,7 @@ export interface GhStatusResponse {
 export interface GhResults {
   getStatus: GhStatusResponse;
   listPullRequests: PullRequestListResult;
+  getPullRequestFingerprints: PullRequestFingerprintBatch;
   getPullRequestStatus: PullRequestStatus;
   getPullRequestDiff: PullRequestDiff;
   getPullRequestReviewThreads: PullRequestReviewThreads;
@@ -29,6 +30,8 @@ export interface GhResults {
 export interface GhRequests {
   getStatus: Record<string, never>;
   listPullRequests: { projectPath: string; repository?: GhRepositoryIdentity };
+  // Distinct repositories on one GitHub host, at most `GH_FINGERPRINT_BATCH_SIZE`.
+  getPullRequestFingerprints: { repositories: GhRepositoryIdentity[] };
   getPullRequestStatus: { projectPath: string; repository: GhRepositoryIdentity; number: number };
   // The diff is read only while the pull request is still at `commits`.
   getPullRequestDiff: { projectPath: string; repository: GhRepositoryIdentity; number: number; commits: PullRequestCommits };
@@ -83,6 +86,9 @@ export type PullRequestCheckState =
   | 'neutral'
   | 'skipped';
 
+// Each GraphQL fingerprint query aliases at most this many repositories.
+export const GH_FINGERPRINT_BATCH_SIZE = 25;
+
 export interface PullRequestSummary {
   number: number;
   title: string;
@@ -99,7 +105,14 @@ export interface PullRequestSummary {
   url: string;
   reviewDecision: PullRequestReviewDecision;
   checksState: PullRequestChecksState;
+  // Canonical per-state counts of check runs and status contexts. They move
+  // while the rollup state holds, for example as pending checks finish.
+  checkCounts: string;
+  mergeable: PullRequestMergeable;
   headRefOid: string;
+  baseRefOid: string;
+  reviewCount: number;
+  reviewThreadCount: number;
   // True when the head branch lives in another repository, such as a fork.
   isCrossRepository: boolean;
   authorAssociation: PullRequestAuthorAssociation;
@@ -107,6 +120,28 @@ export interface PullRequestSummary {
   authoredByViewer: boolean;
   labels: string[];
   reviewRequest: PullRequestReviewRequest;
+}
+
+// The summary fields that decide which reads of a pull request are stale.
+export const PULL_REQUEST_FINGERPRINT_FIELDS = [
+  'number', 'updatedAt', 'isDraft', 'headRefOid', 'baseRefOid', 'checksState', 'checkCounts',
+  'reviewDecision', 'mergeable', 'reviewCount', 'reviewThreadCount',
+] as const satisfies readonly (keyof PullRequestSummary)[];
+
+export type PullRequestFingerprint = Pick<PullRequestSummary, typeof PULL_REQUEST_FINGERPRINT_FIELDS[number]>;
+
+// One repository of a fingerprint batch. A repository GitHub would not read, or
+// one with more open pull requests than a single page, carries no fingerprints,
+// so a caller cannot mistake it for an unchanged one.
+export type RepositoryPullRequestFingerprints =
+  | { kind: 'read'; repo: { nameWithOwner: string; url: string }; pulls: PullRequestFingerprint[] }
+  | { kind: 'incomplete' }
+  | { kind: 'failed'; reason: 'not-found' | 'forbidden' | 'error'; message: string };
+
+export interface PullRequestFingerprintBatch {
+  viewerLogin: string;
+  // In request order.
+  repositories: RepositoryPullRequestFingerprints[];
 }
 
 export interface PullRequestListResult {

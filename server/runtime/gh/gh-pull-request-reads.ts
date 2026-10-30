@@ -8,6 +8,8 @@ import { GitServiceError } from '../../../common/git-error.js';
 import { buildDiff, buildStatus, buildThreads, type GhRawFile, type GhRawPullRequest, type GhRawReviewComment } from './gh-mappers.js';
 import { parseMultiFileDiffPatches } from './pull-request-diff.js';
 import type { PullRequestDiffCache } from './pull-request-diff-cache.js';
+import { readConditionalPages } from './gh-conditional-rest.js';
+import type { GhResponseCache } from './gh-response-cache.js';
 import { runGh, runGhJson } from './run.js';
 
 const STATUS_FIELDS =
@@ -65,12 +67,14 @@ export async function readPullRequestDiff(
   return result;
 }
 
-export async function readPullRequestReviewThreads(projectPath: string, repository: GhRepositoryIdentity, number: number, signal?: AbortSignal): Promise<PullRequestReviewThreads> {
-  const pages = await runGhJson<GhRawReviewComment[][]>(
-    projectPath,
-    ['api', '--hostname', repository.host, '--paginate', '--slurp', `repos/${repository.nameWithOwner}/pulls/${number}/comments`],
-    { signal },
-  );
-  if (!Array.isArray(pages) || !pages.every(Array.isArray)) throw new GitServiceError('GIT_INVALID_RESULT', 'GitHub returned unreadable review comments.');
-  return { number, threads: buildThreads(pages.flat()) };
+// Review comments are a REST listing, so each unchanged page revalidates as a 304.
+export async function readPullRequestReviewThreads(
+  projectPath: string,
+  repository: GhRepositoryIdentity,
+  number: number,
+  responses: GhResponseCache,
+  signal?: AbortSignal,
+): Promise<PullRequestReviewThreads> {
+  const pages = await readConditionalPages(projectPath, repository, `repos/${repository.nameWithOwner}/pulls/${number}/comments`, responses, signal);
+  return { number, threads: buildThreads(pages.flat() as GhRawReviewComment[]) };
 }

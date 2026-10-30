@@ -1,10 +1,11 @@
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ExecutionGhService } from '@garcon/server-agent-interface';
-import type { PullRequestSummary } from '../../../../common/gh.js';
+import { PULL_REQUEST_FINGERPRINT_FIELDS, type PullRequestFingerprint, type PullRequestSummary } from '../../../../common/gh.js';
+import { GitServiceError } from '../../../../common/git-error.js';
 import { DEFAULT_PULL_REQUEST_REVIEW_SETTINGS } from '../../../../common/pull-request-reviews.js';
 import { PullRequestReviewScanner } from '../scanner.js';
 import { PullRequestReviewStore, REVIEW_HISTORY_BATCH_SIZE, type StoredRepository, type StoredRun } from '../store.js';
@@ -20,9 +21,14 @@ function pull(head = HEAD): PullRequestSummary {
   return {
     number: 7, title: 'Synthetic change', state: 'open', isDraft: false, author: 'author', headRefName: 'feature',
     baseRefName: 'main', additions: 10, deletions: 2, changedFiles: 1, createdAt: '', updatedAt: '', url: '', reviewDecision: null,
-    checksState: 'passing', headRefOid: head, isCrossRepository: false, authorAssociation: 'member', authorIsBot: false,
+    checksState: 'passing', checkCounts: 'check:SUCCESS=1', mergeable: 'mergeable', headRefOid: head, baseRefOid: 'e'.repeat(40),
+    reviewCount: 0, reviewThreadCount: 0, isCrossRepository: false, authorAssociation: 'member', authorIsBot: false,
     authoredByViewer: false, labels: [], reviewRequest: 'me',
   };
+}
+
+function fingerprint(summary: PullRequestSummary): PullRequestFingerprint {
+  return Object.fromEntries(PULL_REQUEST_FINGERPRINT_FIELDS.map((field) => [field, summary[field]])) as PullRequestFingerprint;
 }
 
 function harness() {
@@ -47,9 +53,14 @@ function harness() {
   };
   store.insertRun(run);
   const queued: string[] = [];
-  const scanner = (listPullRequests: ExecutionGhService['listPullRequests'], archiveChat: (id: string) => Promise<void> = async () => {}) => {
+  const scanner = (
+    listPullRequests: ExecutionGhService['listPullRequests'],
+    archiveChat: (id: string) => Promise<void> = async () => {},
+    getPullRequestFingerprints: ExecutionGhService['getPullRequestFingerprints'] = async () => { throw new Error('Unused'); },
+  ) => {
     const gh = {
       listPullRequests,
+      getPullRequestFingerprints,
       async getStatus() { throw new Error('Unused'); },
       async getPullRequestStatus() { throw new Error('Unused'); },
       async getPullRequestDiff() { throw new Error('Unused'); },
@@ -494,3 +505,146 @@ test('large closed-history maintenance yields during archival and deletion in bo
     deletion.mockRestore();
   }
 }, 30_000);
+
+describe('fingerprint sweeps', () => {
+  const SCAN_INTERVAL_MS = 5 * 60_000;
+  const other = (repository: StoredRepository, index: number): StoredRepository => ({
+    ...repository, id: `repository-${index}`, nameWithOwner: `acme/app-${index}`, url: `https://github.com/acme/app-${index}`,
+    target: { ...repository.target, projectPath: `/work/app-${index}` }, settings: { ...repository.settings, autoReview: false },
+  });
+  const read = (repository: StoredRepository, pulls: PullRequestSummary[]) => ({
+    kind: 'read' as const, repo: { nameWithOwner: repository.nameWithOwner, url: repository.url }, pulls: pulls.map(fingerprint),
+  });
+
+  // Runs the startup full reads, then one interval later the fingerprint sweep.
+  async function sweep(options: {
+    repositories?: number;
+    current: (repository: StoredRepository) => PullRequestSummary[];
+    batch?: ExecutionGhService['getPullRequestFingerprints'];
+  }) {
+    const context = harness();
+    const { store, scanner, repository, list, clock } = context;
+    const repositories = [repository];
+    for (let index = 1; index < (options.repositories ?? 2); index++) {
+      const next = other(repository, index);
+      store.insertRepository(next, { status: 'pending', scannedAt: null, message: null }, []);
+      repositories.push(next);
+    }
+    const listed: string[] = [];
+    const startupReads = new Set<string>();
+    const batches: string[][] = [];
+    const scanning = scanner(async ({ projectPath }) => {
+      const target = repositories.find((entry) => entry.target.projectPath === projectPath)!;
+      listed.push(target.id);
+      const startup = !startupReads.has(target.id);
+      startupReads.add(target.id);
+      return { ...list(startup ? [pull()] : options.current(target)),
+        repo: { nameWithOwner: target.nameWithOwner, url: target.url } };
+    }, undefined, async (request, callOptions) => {
+      batches.push(request.repositories.map((identity) => identity.nameWithOwner));
+      if (options.batch) return options.batch(request, callOptions);
+      return {
+        executorId: 'local', instanceId: 'instance', viewerLogin: 'viewer',
+        repositories: request.repositories.map((identity) => {
+          const target = repositories.find((entry) => entry.nameWithOwner === identity.nameWithOwner)!;
+          return read(target, options.current(target));
+        }),
+      };
+    });
+    scanning.start();
+    await until(() => listed.length === repositories.length
+      && repositories.every((entry) => store.getRepository(entry.id)?.scan.scannedAt));
+    listed.length = 0;
+    const scannedAt = store.getRepository(repository.id)?.scan.scannedAt;
+    clock.now += SCAN_INTERVAL_MS;
+    await scanning.scanDue();
+    await until(() => batches.length > 0 && store.getRepository(repository.id)?.scan.scannedAt !== scannedAt
+      || store.getRepository(repository.id)?.scan.status === 'failed');
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+    return { ...context, repositories, listed, batches, scanning };
+  }
+
+  test('unchanged fingerprints keep every list without a full read', async () => {
+    const { store, repositories, listed, batches } = await sweep({ current: () => [pull()] });
+    expect(batches).toEqual([repositories.map((entry) => entry.nameWithOwner)]);
+    expect(listed).toEqual([]);
+    for (const entry of repositories) expect(store.getRepository(entry.id)?.scan.status).toBe('ok');
+  });
+
+  test('a checks change is applied from the fingerprint without a full read', async () => {
+    const { store, repository, listed } = await sweep({
+      current: (target) => [target.id === 'repository' ? { ...pull(), checksState: 'failing', checkCounts: 'check:FAILURE=1' } : pull()],
+    });
+    expect(listed).toEqual([]);
+    expect(store.pulls(repository.id)[0]).toMatchObject({ checksState: 'failing', checkCounts: 'check:FAILURE=1', title: 'Synthetic change' });
+  });
+
+  test('activity a fingerprint cannot apply rereads only that repository', async () => {
+    const { store, repository, listed } = await sweep({
+      current: (target) => [target.id === 'repository' ? { ...pull(NEXT_HEAD), updatedAt: '2026-03-01T00:01:00Z' } : pull()],
+    });
+    await until(() => listed.length === 1);
+    expect(listed).toEqual([repository.id]);
+    await until(() => store.pulls(repository.id)[0]?.headRefOid === NEXT_HEAD);
+  });
+
+  test('a repository the batch could not read is read in full and keeps its own outcome', async () => {
+    const { repository, listed } = await sweep({
+      current: () => [pull()],
+      batch: async (request) => ({
+        executorId: 'local', instanceId: 'instance', viewerLogin: 'viewer',
+        repositories: request.repositories.map((identity, index) => index === 0
+          ? { kind: 'failed' as const, reason: 'not-found' as const, message: 'Could not resolve to a Repository.' }
+          : { kind: 'read' as const, repo: { nameWithOwner: identity.nameWithOwner, url: `https://github.com/${identity.nameWithOwner}` }, pulls: [fingerprint(pull())] }),
+      }),
+    });
+    await until(() => listed.length === 1);
+    expect(listed).toEqual([repository.id]);
+  });
+
+  test('a failed batch never reads as unchanged: every repository is read in full', async () => {
+    const { repositories, listed } = await sweep({ current: () => [pull()], batch: async () => { throw new Error('Temporary failure'); } });
+    await until(() => listed.length === repositories.length);
+    expect(listed.sort()).toEqual(repositories.map((entry) => entry.id).sort());
+  });
+
+  test('a rate-limited batch records the limit and waits instead of reading more', async () => {
+    let limited = true;
+    const { store, repositories, listed, batches, clock, scanning } = await sweep({
+      current: () => [pull()],
+      batch: async (request) => {
+        if (limited) throw new GitServiceError('GH_RATE_LIMITED', 'GitHub API rate limit exceeded.');
+        return { executorId: 'local', instanceId: 'instance', viewerLogin: 'viewer', repositories: request.repositories.map((identity) => ({
+          kind: 'read' as const, repo: { nameWithOwner: identity.nameWithOwner, url: `https://github.com/${identity.nameWithOwner}` }, pulls: [fingerprint(pull())] })) };
+      },
+    });
+    expect(listed).toEqual([]);
+    for (const entry of repositories) {
+      expect(store.getRepository(entry.id)?.scan).toMatchObject({ status: 'failed', message: 'GitHub API rate limit exceeded.' });
+      expect(store.pulls(entry.id)).toHaveLength(1);
+    }
+    // The next interval checks fingerprints again rather than reading every repository in full.
+    limited = false;
+    batches.length = 0;
+    clock.now += SCAN_INTERVAL_MS;
+    await scanning.scanDue();
+    await until(() => repositories.every((entry) => store.getRepository(entry.id)?.scan.status === 'ok'));
+    expect(batches).toHaveLength(1);
+    expect(listed).toEqual([]);
+  });
+
+  test('batches at most 25 repositories per query', async () => {
+    const { batches } = await sweep({ repositories: 30, current: () => [pull()] });
+    await until(() => batches.length === 2);
+    expect(batches.map((batch) => batch.length).sort((a, b) => a - b)).toEqual([5, 25]);
+  });
+
+  test('reads in full again once the full-read interval passes', async () => {
+    const { listed, batches, clock, scanning, repositories } = await sweep({ current: () => [pull()] });
+    batches.length = 0;
+    clock.now += 30 * 60_000;
+    await scanning.scanDue();
+    await until(() => listed.length === repositories.length);
+    expect(batches).toEqual([]);
+  });
+});

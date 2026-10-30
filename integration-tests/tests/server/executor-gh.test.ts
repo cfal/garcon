@@ -79,6 +79,12 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const threads = await fixture.client.get<ExecutionGhResults['getPullRequestReviewThreads']>(`/api/v1/gh/pull-request/review-threads?${pullQuery}`);
       expect(threads).toMatchObject(scope);
       expect(threads.threads.flatMap(thread => thread.comments.map(comment => comment.body))).toEqual(['first page', 'second page']);
+      // The executor revalidates an unchanged listing page by page and reuses its cached bodies.
+      await rm(callsPath, { force: true });
+      const revalidated = await fixture.client.get<ExecutionGhResults['getPullRequestReviewThreads']>(`/api/v1/gh/pull-request/review-threads?${pullQuery}`);
+      expect(revalidated.threads).toEqual(threads.threads);
+      const apiCalls = (await Bun.file(callsPath).text()).trim().split('\n').map(line => JSON.parse(line) as string[]).filter(args => args[0] === 'api');
+      expect(apiCalls.map(args => args.some(arg => arg.startsWith('If-None-Match: W/')))).toEqual([true, true]);
       await writeFile(configPath, JSON.stringify({ label: 'synthetic-worker', bodyBytes: 4 * 1024 * 1024 }));
       expect(await rejectionOf(fixture.client.get(`/api/v1/gh/pull-request/status?${pullQuery}`))).toMatchObject({ status: 413, body: { errorCode: 'GIT_RESULT_TOO_LARGE' } });
       const limitedBase = 'd'.repeat(40);

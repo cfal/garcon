@@ -49,6 +49,14 @@ export class BoundedLruCache<K, V> {
     this.#bytes -= entry.bytes;
   }
 
+  deleteWhere(matches: (key: K, value: V) => boolean): void {
+    for (const [key, entry] of this.#entries) {
+      if (!matches(key, entry.value)) continue;
+      this.#entries.delete(key);
+      this.#bytes -= entry.bytes;
+    }
+  }
+
   clear(): void {
     this.#entries.clear();
     this.#bytes = 0;

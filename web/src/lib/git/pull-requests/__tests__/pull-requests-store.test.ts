@@ -49,7 +49,12 @@ function summary(number: number, overrides: Partial<PullRequestSummary> = {}): P
 		url: `https://github.com/acme/app/pull/${number}`,
 		reviewDecision: null,
 		checksState: 'pending',
+		checkCounts: 'check:IN_PROGRESS=1',
+		mergeable: 'unknown',
 		headRefOid: HEAD,
+		baseRefOid: BASE,
+		reviewCount: 0,
+		reviewThreadCount: 0,
 		isCrossRepository: false,
 		authorAssociation: 'member',
 		authorIsBot: false,
@@ -229,6 +234,41 @@ describe('PullRequestsStore selective refresh', () => {
 			kind: 'ready',
 			value: [{ name: 'ci', state: 'failure' }],
 		});
+	});
+
+	it('reads nothing when a scan republishes unchanged fingerprints', async () => {
+		const { select, settled, publish, getStatus, getDiff, getReviewThreads } = harness();
+		select(7);
+		await settled();
+		publish([summary(7)]);
+		await settled();
+		expect(getStatus).toHaveBeenCalledTimes(1);
+		expect(getReviewThreads).toHaveBeenCalledTimes(1);
+		expect(getDiff).toHaveBeenCalledTimes(1);
+	});
+
+	it('rereads only status when check counts or mergeability change', async () => {
+		const { select, settled, publish, getStatus, getDiff, getReviewThreads } = harness();
+		select(7);
+		await settled();
+		publish([summary(7, { checkCounts: 'check:IN_PROGRESS=1,check:SUCCESS=1' })]);
+		await settled();
+		publish([summary(7, { checkCounts: 'check:IN_PROGRESS=1,check:SUCCESS=1', mergeable: 'conflicting' })]);
+		await settled();
+		expect(getStatus).toHaveBeenCalledTimes(3);
+		expect(getReviewThreads).toHaveBeenCalledTimes(1);
+		expect(getDiff).toHaveBeenCalledTimes(1);
+	});
+
+	it('rereads only review threads when review counts change', async () => {
+		const { select, settled, publish, getStatus, getDiff, getReviewThreads } = harness();
+		select(7);
+		await settled();
+		publish([summary(7, { reviewCount: 1, reviewThreadCount: 1 })]);
+		await settled();
+		expect(getStatus).toHaveBeenCalledTimes(1);
+		expect(getReviewThreads).toHaveBeenCalledTimes(2);
+		expect(getDiff).toHaveBeenCalledTimes(1);
 	});
 
 	it('rereads only status when the review decision changes', async () => {
