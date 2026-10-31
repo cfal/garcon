@@ -1,0 +1,1394 @@
+[
+  {
+    "sample": "default-accents-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 46,
+    "boundingBox": [
+      332,
+      886,
+      348,
+      992
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 46,
+      "boundingBox": [
+        332,
+        886,
+        348,
+        992
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "default-accents-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 93,
+    "boundingBox": [
+      8,
+      758,
+      382,
+      934
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 93,
+      "boundingBox": [
+        8,
+        758,
+        382,
+        934
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "default-ascii-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 46,
+    "boundingBox": [
+      332,
+      886,
+      348,
+      992
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 12,
+      "boundingBox": [
+        342,
+        886,
+        348,
+        889
+      ],
+      "maxChannelDifference": 1
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": false
+  },
+  {
+    "sample": "default-ascii-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 100,
+    "boundingBox": [
+      8,
+      758,
+      382,
+      934
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 100,
+      "boundingBox": [
+        8,
+        758,
+        382,
+        934
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "default-cjk-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 48,
+    "boundingBox": [
+      332,
+      887,
+      348,
+      992
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 48,
+      "boundingBox": [
+        332,
+        887,
+        348,
+        992
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "default-cjk-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 87,
+    "boundingBox": [
+      8,
+      832,
+      382,
+      934
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 87,
+      "boundingBox": [
+        8,
+        832,
+        382,
+        934
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "default-editor-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 22,
+    "boundingBox": [
+      1287,
+      53,
+      1352,
+      72
+    ],
+    "maxChannelDifference": 24,
+    "originalControl": {
+      "changedPixels": 22,
+      "boundingBox": [
+        1287,
+        53,
+        1352,
+        72
+      ],
+      "maxChannelDifference": 24
+    },
+    "classification": "Non-text Save-button rounded edge; identical pixel differences in original-font control, maximum channel delta 24.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "default-editor-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "default-extended-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "default-extended-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "default-settings-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "default-settings-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "departure-mono-accents-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 46,
+    "boundingBox": [
+      332,
+      886,
+      348,
+      992
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 46,
+      "boundingBox": [
+        332,
+        886,
+        348,
+        992
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "departure-mono-accents-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 93,
+    "boundingBox": [
+      8,
+      758,
+      382,
+      934
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 93,
+      "boundingBox": [
+        8,
+        758,
+        382,
+        934
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "departure-mono-ascii-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "departure-mono-ascii-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 13,
+    "boundingBox": [
+      23,
+      758,
+      335,
+      760
+    ],
+    "maxChannelDifference": 1,
+    "originalControl": {
+      "changedPixels": 13,
+      "boundingBox": [
+        23,
+        758,
+        335,
+        760
+      ],
+      "maxChannelDifference": 1
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "departure-mono-cjk-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 27,
+    "boundingBox": [
+      332,
+      897,
+      348,
+      992
+    ],
+    "maxChannelDifference": 1,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": false
+  },
+  {
+    "sample": "departure-mono-cjk-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 68,
+    "boundingBox": [
+      9,
+      832,
+      382,
+      934
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 68,
+      "boundingBox": [
+        9,
+        832,
+        382,
+        934
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "departure-mono-editor-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "departure-mono-editor-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 2,
+    "boundingBox": [
+      261,
+      16,
+      262,
+      19
+    ],
+    "maxChannelDifference": 11,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Non-text reload SVG edge rasterization; two pixels, maximum channel delta 11.",
+    "sameDifferenceAsOriginalControl": false
+  },
+  {
+    "sample": "departure-mono-extended-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "departure-mono-extended-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 96,
+      "boundingBox": [
+        8,
+        832,
+        382,
+        934
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": false
+  },
+  {
+    "sample": "departure-mono-settings-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "departure-mono-settings-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "inter-accents-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "inter-accents-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 87,
+    "boundingBox": [
+      8,
+      832,
+      382,
+      934
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 87,
+      "boundingBox": [
+        8,
+        832,
+        382,
+        934
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "inter-ascii-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "inter-ascii-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "inter-cjk-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "inter-cjk-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 41,
+      "boundingBox": [
+        366,
+        832,
+        382,
+        934
+      ],
+      "maxChannelDifference": 1
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": false
+  },
+  {
+    "sample": "inter-editor-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "inter-editor-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 2,
+    "boundingBox": [
+      261,
+      16,
+      262,
+      19
+    ],
+    "maxChannelDifference": 11,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Non-text reload SVG edge rasterization; two pixels, maximum channel delta 11.",
+    "sameDifferenceAsOriginalControl": false
+  },
+  {
+    "sample": "inter-extended-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "inter-extended-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 87,
+    "boundingBox": [
+      8,
+      832,
+      382,
+      934
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 87,
+      "boundingBox": [
+        8,
+        832,
+        382,
+        934
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "inter-settings-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "inter-settings-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "jetbrains-mono-accents-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 21,
+    "boundingBox": [
+      333,
+      887,
+      348,
+      897
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 48,
+      "boundingBox": [
+        332,
+        887,
+        348,
+        992
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": false
+  },
+  {
+    "sample": "jetbrains-mono-accents-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 93,
+    "boundingBox": [
+      8,
+      758,
+      382,
+      934
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 93,
+      "boundingBox": [
+        8,
+        758,
+        382,
+        934
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "jetbrains-mono-ascii-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 48,
+    "boundingBox": [
+      332,
+      887,
+      348,
+      992
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 48,
+      "boundingBox": [
+        332,
+        887,
+        348,
+        992
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "jetbrains-mono-ascii-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 100,
+    "boundingBox": [
+      8,
+      758,
+      382,
+      934
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 100,
+      "boundingBox": [
+        8,
+        758,
+        382,
+        934
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "jetbrains-mono-cjk-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 48,
+    "boundingBox": [
+      332,
+      887,
+      348,
+      992
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 48,
+      "boundingBox": [
+        332,
+        887,
+        348,
+        992
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "jetbrains-mono-cjk-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 45,
+    "boundingBox": [
+      25,
+      833,
+      381,
+      927
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 87,
+      "boundingBox": [
+        8,
+        832,
+        382,
+        934
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": false
+  },
+  {
+    "sample": "jetbrains-mono-editor-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "jetbrains-mono-editor-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 2,
+    "boundingBox": [
+      261,
+      16,
+      262,
+      19
+    ],
+    "maxChannelDifference": 11,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Non-text reload SVG edge rasterization; two pixels, maximum channel delta 11.",
+    "sameDifferenceAsOriginalControl": false
+  },
+  {
+    "sample": "jetbrains-mono-extended-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 21,
+    "boundingBox": [
+      333,
+      887,
+      348,
+      897
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 48,
+      "boundingBox": [
+        332,
+        887,
+        348,
+        992
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": false
+  },
+  {
+    "sample": "jetbrains-mono-extended-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 87,
+    "boundingBox": [
+      8,
+      832,
+      382,
+      934
+    ],
+    "maxChannelDifference": 2,
+    "originalControl": {
+      "changedPixels": 87,
+      "boundingBox": [
+        8,
+        832,
+        382,
+        934
+      ],
+      "maxChannelDifference": 2
+    },
+    "classification": "Non-text rounded code/composer border rasterization; channel deltas 1-2, also present in original-font controls and System scenes.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "jetbrains-mono-settings-1440",
+    "dimensions": {
+      "before": [
+        1440,
+        1000
+      ],
+      "after": [
+        1440,
+        1000
+      ]
+    },
+    "pixels": 1440000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  },
+  {
+    "sample": "jetbrains-mono-settings-390",
+    "dimensions": {
+      "before": [
+        390,
+        1000
+      ],
+      "after": [
+        390,
+        1000
+      ]
+    },
+    "pixels": 390000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0,
+    "originalControl": {
+      "changedPixels": 0,
+      "boundingBox": null,
+      "maxChannelDifference": 0
+    },
+    "classification": "Exact RGB identity.",
+    "sameDifferenceAsOriginalControl": true
+  }
+]

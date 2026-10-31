@@ -10,6 +10,7 @@
 	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import GarconMark from '$lib/components/shared/GarconMark.svelte';
+	import FontPreloads from '$lib/components/layout/FontPreloads.svelte';
 
 	import { createAuthStore } from '$lib/stores/auth.svelte.js';
 	import ReauthenticationOverlay from '$lib/components/auth/ReauthenticationOverlay.svelte';
@@ -608,6 +609,8 @@
 		}
 	});
 </script>
+
+<FontPreloads typography={localSettings} />
 
 {#if auth.logoutPending}
 	<div class="min-h-dvh bg-background flex items-center justify-center p-4">

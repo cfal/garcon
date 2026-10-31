@@ -1,0 +1,206 @@
+[
+  {
+    "sample": "Departure-Mono-italic-normal",
+    "dimensions": {
+      "before": [
+        1280,
+        900
+      ],
+      "after": [
+        1280,
+        900
+      ]
+    },
+    "pixels": 1152000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  },
+  {
+    "sample": "Departure-Mono-italic-tnum",
+    "dimensions": {
+      "before": [
+        1280,
+        900
+      ],
+      "after": [
+        1280,
+        900
+      ]
+    },
+    "pixels": 1152000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  },
+  {
+    "sample": "Departure-Mono-normal-normal",
+    "dimensions": {
+      "before": [
+        1280,
+        900
+      ],
+      "after": [
+        1280,
+        900
+      ]
+    },
+    "pixels": 1152000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  },
+  {
+    "sample": "Departure-Mono-normal-tnum",
+    "dimensions": {
+      "before": [
+        1280,
+        900
+      ],
+      "after": [
+        1280,
+        900
+      ]
+    },
+    "pixels": 1152000,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  },
+  {
+    "sample": "Inter-italic-normal",
+    "dimensions": {
+      "before": [
+        1280,
+        2160
+      ],
+      "after": [
+        1280,
+        2160
+      ]
+    },
+    "pixels": 2764800,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  },
+  {
+    "sample": "Inter-italic-tnum",
+    "dimensions": {
+      "before": [
+        1280,
+        2160
+      ],
+      "after": [
+        1280,
+        2160
+      ]
+    },
+    "pixels": 2764800,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  },
+  {
+    "sample": "Inter-normal-normal",
+    "dimensions": {
+      "before": [
+        1280,
+        2160
+      ],
+      "after": [
+        1280,
+        2160
+      ]
+    },
+    "pixels": 2764800,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  },
+  {
+    "sample": "Inter-normal-tnum",
+    "dimensions": {
+      "before": [
+        1280,
+        2160
+      ],
+      "after": [
+        1280,
+        2160
+      ]
+    },
+    "pixels": 2764800,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  },
+  {
+    "sample": "JetBrains-Mono-italic-normal",
+    "dimensions": {
+      "before": [
+        1280,
+        1032
+      ],
+      "after": [
+        1280,
+        1032
+      ]
+    },
+    "pixels": 1320960,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  },
+  {
+    "sample": "JetBrains-Mono-italic-tnum",
+    "dimensions": {
+      "before": [
+        1280,
+        1032
+      ],
+      "after": [
+        1280,
+        1032
+      ]
+    },
+    "pixels": 1320960,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  },
+  {
+    "sample": "JetBrains-Mono-normal-normal",
+    "dimensions": {
+      "before": [
+        1280,
+        1032
+      ],
+      "after": [
+        1280,
+        1032
+      ]
+    },
+    "pixels": 1320960,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  },
+  {
+    "sample": "JetBrains-Mono-normal-tnum",
+    "dimensions": {
+      "before": [
+        1280,
+        1032
+      ],
+      "after": [
+        1280,
+        1032
+      ]
+    },
+    "pixels": 1320960,
+    "changedPixels": 0,
+    "boundingBox": null,
+    "maxChannelDifference": 0
+  }
+]

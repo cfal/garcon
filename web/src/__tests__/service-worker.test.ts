@@ -3,10 +3,48 @@ import {
 	withNavigationTimeout,
 	isManifestPath,
 	precacheAppShell,
+	preserveCachedFonts,
 	shouldCacheNavigationResponse,
 } from '../service-worker-helpers';
 
 describe('service worker helpers', () => {
+	it('inherits only requested immutable fonts and preserves current responses', async () => {
+		const currentResponse = new Response('current');
+		const inherited = new Response('previous');
+		const current = {
+			match: vi
+				.fn<Cache['match']>()
+				.mockImplementation(async (path) => (path === '/kept.woff2' ? currentResponse : undefined)),
+			put: vi.fn<Cache['put']>().mockResolvedValue(undefined),
+		} satisfies Pick<Cache, 'match' | 'put'>;
+		const previous = {
+			match: vi
+				.fn<Cache['match']>()
+				.mockImplementation(async (path) => (path === '/used.woff2' ? inherited : undefined)),
+		} satisfies Pick<Cache, 'match'>;
+		await preserveCachedFonts(current, previous, {
+			build: ['/kept.woff2', '/used.woff2', '/unused.woff2', '/app.js'],
+			files: ['/unversioned.woff2'],
+		});
+		expect(previous.match.mock.calls.map(([path]) => path)).toEqual([
+			'/used.woff2',
+			'/unused.woff2',
+		]);
+		expect(current.put).toHaveBeenCalledExactlyOnceWith('/used.woff2', inherited);
+	});
+
+	it('propagates migration failure so activation retains the donor cache', async () => {
+		const current = {
+			match: vi.fn<Cache['match']>().mockResolvedValue(undefined),
+			put: vi.fn<Cache['put']>().mockRejectedValue(new Error('quota')),
+		} satisfies Pick<Cache, 'match' | 'put'>;
+		const previous = {
+			match: vi.fn<Cache['match']>().mockResolvedValue(new Response('font')),
+		} satisfies Pick<Cache, 'match'>;
+		await expect(
+			preserveCachedFonts(current, previous, { build: ['/used.woff2'], files: [] }),
+		).rejects.toThrow('quota');
+	});
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});
@@ -52,6 +90,30 @@ describe('service worker helpers', () => {
 		expect(addAll).toHaveBeenCalledWith(['/', '/build/app.js']);
 		expect(add).not.toHaveBeenCalledWith('/site.webmanifest');
 		expect(add).toHaveBeenCalledWith('/icon.svg');
+	});
+
+	it('leaves both immutable and static fonts to demand loading under a runtime mount', async () => {
+		const addAll = vi.fn<Cache['addAll']>().mockResolvedValue(undefined);
+		const add = vi.fn<Cache['add']>().mockResolvedValue(undefined);
+		await precacheAppShell(
+			{ addAll, add },
+			{
+				build: [
+					'/mounted/_app/app.js',
+					'/mounted/_app/Inter-core.woff2',
+					'/mounted/_app/Inter-extended.woff2',
+				],
+				files: [
+					'/mounted/font.woff',
+					'/mounted/font.ttf',
+					'/mounted/font.otf',
+					'/mounted/icon.svg',
+				],
+			},
+			'/mounted',
+		);
+		expect(addAll).toHaveBeenCalledExactlyOnceWith(['/mounted/', '/mounted/_app/app.js']);
+		expect(add).toHaveBeenCalledExactlyOnceWith('/mounted/icon.svg');
 	});
 
 	it('recognizes manifest paths for cache bypass', () => {

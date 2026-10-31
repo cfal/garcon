@@ -1,0 +1,134 @@
+[
+  {
+    "family": "Departure Mono",
+    "characters": 1079,
+    "sizes": [
+      9,
+      10,
+      10.5,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17.5,
+      18,
+      20,
+      24,
+      32,
+      36
+    ],
+    "weights": [
+      400,
+      500,
+      550,
+      600,
+      620,
+      700,
+      800,
+      900
+    ],
+    "styles": [
+      "normal",
+      "italic"
+    ],
+    "features": [
+      "normal",
+      "tnum"
+    ],
+    "comparisons": 517920,
+    "changed": 0,
+    "failures": [],
+    "mixedComparisons": 4320,
+    "mixed": []
+  },
+  {
+    "family": "JetBrains Mono",
+    "characters": 1372,
+    "sizes": [
+      9,
+      10,
+      10.5,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17.5,
+      18,
+      20,
+      24,
+      32,
+      36
+    ],
+    "weights": [
+      400,
+      500,
+      550,
+      600,
+      620,
+      700,
+      800,
+      900
+    ],
+    "styles": [
+      "normal",
+      "italic"
+    ],
+    "features": [
+      "normal",
+      "tnum"
+    ],
+    "comparisons": 658560,
+    "changed": 0,
+    "failures": [],
+    "mixedComparisons": 7200,
+    "mixed": []
+  },
+  {
+    "family": "Inter",
+    "characters": 2853,
+    "sizes": [
+      9,
+      10,
+      10.5,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17.5,
+      18,
+      20,
+      24,
+      32,
+      36
+    ],
+    "weights": [
+      400,
+      500,
+      550,
+      600,
+      620,
+      700,
+      800,
+      900
+    ],
+    "styles": [
+      "normal",
+      "italic"
+    ],
+    "features": [
+      "normal",
+      "tnum"
+    ],
+    "comparisons": 1369440,
+    "changed": 0,
+    "failures": [],
+    "mixedComparisons": 24480,
+    "mixed": []
+  }
+]
