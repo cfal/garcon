@@ -188,6 +188,31 @@ describe('native transcript reload', () => {
         'repeated native drift notice publication',
         { afterIndex: repeatedDriftCursor },
       );
+
+      // A warm activation catches up through replay instead of newest history and keeps the probe.
+      const catchUpDriftCursor = fixture.client.markEvents();
+      const caughtUp = await fixture.client.subscribe(
+        chatId,
+        beforeDrift.transcriptViewId,
+        beforeDrift.lastOrdinal,
+        undefined,
+        'activation',
+      );
+      expect(caughtUp).toMatchObject({
+        firstOrdinal: beforeDrift.lastOrdinal + 1,
+        messages: [],
+        throughOrdinal: beforeDrift.lastOrdinal,
+        hasMore: false,
+      });
+      await fixture.client.waitForEvent(
+        (event): event is ChatOperationalNoticeMessage =>
+          event.type === 'chat-operational-notice'
+          && event.chatId === chatId
+          && event.noticeType === 'warning'
+          && event.content === NATIVE_TRANSCRIPT_DRIFT_NOTICE,
+        'activation catch-up native drift notice publication',
+        { afterIndex: catchUpDriftCursor },
+      );
       expect(await fixture.client.getMessages(chatId)).toMatchObject({
         transcriptViewId: beforeDrift.transcriptViewId,
         lastOrdinal: beforeDrift.lastOrdinal,
@@ -263,18 +288,22 @@ describe('native transcript reload', () => {
       expect(sharedAfterReload).toEqual(sharedBeforeReload);
       expect(JSON.stringify(sharedAfterReload.snapshot.messages)).not.toContain(externalContent);
       for (const replaced of [beforeDrift, reloaded]) {
-        expect(await rejectionOf(fixture.client.subscribe(
-          chatId,
-          replaced.transcriptViewId,
-          replaced.lastOrdinal,
-        ))).toMatchObject({
-          response: {
-            requestType: 'chat-subscribe',
-            code: 'STALE_TRANSCRIPT_VIEW',
-            retryable: false,
+        for (const purpose of [undefined, 'activation'] as const) {
+          expect(await rejectionOf(fixture.client.subscribe(
             chatId,
-          },
-        });
+            replaced.transcriptViewId,
+            replaced.lastOrdinal,
+            undefined,
+            purpose,
+          ))).toMatchObject({
+            response: {
+              requestType: 'chat-subscribe',
+              code: 'STALE_TRANSCRIPT_VIEW',
+              retryable: false,
+              chatId,
+            },
+          });
+        }
       }
 
       let staleSubmission: unknown;
