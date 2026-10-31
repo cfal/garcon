@@ -5,13 +5,16 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import {
 		FILE_OPEN_PLACEMENT_VALUES,
+		FORK_OPEN_PLACEMENT_VALUES,
 		HIDEABLE_TOOL_GROUPS,
 		IMAGE_CACHE_SIZE_MIB_VALUES,
 		SIDEBAR_INACTIVITY_DURATION_VALUES,
 		isFileOpenPlacement,
+		isForkOpenPlacement,
 		isImageCacheSizeMiB,
 		isSidebarInactivityDuration,
 		type FileOpenPlacementPreference,
+		type ForkOpenPlacementPreference,
 		type SidebarInactivityDuration,
 	} from '$lib/stores/local-settings.svelte.js';
 	import {
@@ -43,6 +46,12 @@
 		'new-window': m.settings_file_open_placement_new_window,
 		dialog: m.settings_file_open_placement_dialog,
 	};
+	const forkOpenPlacementLabels: Record<ForkOpenPlacementPreference, () => string> = {
+		'split-auto': m.settings_fork_open_placement_split_auto,
+		'split-right': m.settings_fork_open_placement_split_right,
+		'split-below': m.settings_fork_open_placement_split_below,
+		replace: m.settings_fork_open_placement_replace,
+	};
 	const sidebarInactivityDurationLabels: Record<SidebarInactivityDuration, () => string> = {
 		'2-days': m.settings_sidebar_inactivity_duration_2_days,
 		'3-days': m.settings_sidebar_inactivity_duration_3_days,
@@ -57,6 +66,10 @@
 
 	function setFileOpenPlacement(key: FilePlacementSettingKey, value: string): void {
 		if (isFileOpenPlacement(value)) ls.set(key, value);
+	}
+
+	function setForkOpenPlacement(value: string): void {
+		if (isForkOpenPlacement(value)) ls.set('forkOpenPlacement', value);
 	}
 
 	function setImageCacheSize(value: string): void {
@@ -307,6 +320,27 @@
 					'markdownViewerOpenPlacement',
 					ls.markdownViewerOpenPlacement,
 				)}
+			</div>
+			<div class="flex flex-wrap items-center justify-between gap-2 border-t border-border py-2">
+				<div class="min-w-0">
+					<label class="text-sm font-medium text-foreground" for="local-forkOpenPlacement">
+						{m.settings_fork_open_placement()}
+					</label>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{m.settings_fork_open_placement_description()}
+					</p>
+				</div>
+				<select
+					id="local-forkOpenPlacement"
+					class="select-native w-full min-w-0 @xl:w-auto @xl:shrink-0"
+					value={ls.forkOpenPlacement}
+					onchange={(event) =>
+						setForkOpenPlacement((event.currentTarget as HTMLSelectElement).value)}
+				>
+					{#each FORK_OPEN_PLACEMENT_VALUES as placement (placement)}
+						<option value={placement}>{forkOpenPlacementLabels[placement]()}</option>
+					{/each}
+				</select>
 			</div>
 			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
 				<div class="min-w-0">

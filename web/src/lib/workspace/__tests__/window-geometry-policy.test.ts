@@ -10,11 +10,14 @@ import type {
 import { WORKSPACE_WINDOW_RESOURCE_CEILING } from '../surface-types';
 import {
 	MIN_WINDOW_WIDTH_PX,
+	WORKSPACE_RESIZE_BOUND_SAFETY_PX,
 	clampWorkspacePartitionRatio,
 	workspaceWindowsToPrune,
 	resolveWorkspacePartitionRatioBounds,
 	resolveWorkspaceSplitAdmission,
+	workspaceWindowsFitHost,
 } from '../window-geometry-policy';
+import { balanceWindowRow, computeWindowRects } from '../window-tree';
 
 function workspaceWindow(id: WorkspaceWindowId, surfaceIds: readonly string[] = [`chat:${id}`]) {
 	return {
@@ -380,4 +383,126 @@ it('grows an undersized current window by removing its sibling before an unrelat
 	expect(workspaceWindowsToPrune(root, { width: 1200, height: 800 }, 'window-current')).toEqual([
 		'window-sibling',
 	]);
+});
+
+describe('workspace row balancing', () => {
+	function widths(root: DesktopWorkspaceNode): Record<string, number> {
+		return Object.fromEntries(
+			computeWindowRects(root).windows.map(({ workspaceWindow, rect }) => [
+				workspaceWindow.id,
+				Math.round(rect.width * 1000) / 1000,
+			]),
+		);
+	}
+
+	it('gives each column of the row an equal share and treats a stack as one column', () => {
+		const stack = partition(
+			'stack',
+			'vertical',
+			0.3,
+			workspaceWindow('window-c'),
+			workspaceWindow('window-d'),
+		);
+		const root = partition(
+			'outer',
+			'horizontal',
+			0.7,
+			partition(
+				'inner',
+				'horizontal',
+				0.8,
+				workspaceWindow('window-a'),
+				workspaceWindow('window-b'),
+			),
+			stack,
+		);
+
+		const balanced = balanceWindowRow(root, 'window-b' as WorkspaceWindowId);
+
+		expect(balanced?.columnCount).toBe(3);
+		expect(balanced?.windowIds).toEqual(['window-a', 'window-b', 'window-c', 'window-d']);
+		expect(widths(balanced!.root)).toEqual({
+			'window-a': 0.333,
+			'window-b': 0.333,
+			'window-c': 0.333,
+			'window-d': 0.333,
+		});
+		const balancedStack = computeWindowRects(balanced!.root).partitions.find(
+			({ partition: node }) => node.id === stack.id,
+		);
+		expect(balancedStack?.partition.ratio).toBe(0.3);
+	});
+
+	it('balances only the row nested inside a stacked column', () => {
+		const root = partition(
+			'outer',
+			'horizontal',
+			0.5,
+			workspaceWindow('window-a'),
+			partition(
+				'stack',
+				'vertical',
+				0.5,
+				partition(
+					'inner',
+					'horizontal',
+					0.8,
+					workspaceWindow('window-b'),
+					workspaceWindow('window-c'),
+				),
+				workspaceWindow('window-d'),
+			),
+		);
+
+		const balanced = balanceWindowRow(root, 'window-b' as WorkspaceWindowId)!;
+		expect(balanced.windowIds).toEqual(['window-b', 'window-c']);
+		expect(widths(balanced.root)).toEqual({
+			'window-a': 0.5,
+			'window-b': 0.25,
+			'window-c': 0.25,
+			'window-d': 0.5,
+		});
+	});
+
+	it('declines a window outside any row and a share below the partition bounds', () => {
+		expect(
+			balanceWindowRow(workspaceWindow('window-a'), 'window-a' as WorkspaceWindowId),
+		).toBeNull();
+		let row: DesktopWorkspaceNode = workspaceWindow('window-6');
+		for (let index = 5; index >= 0; index--) {
+			row = partition(
+				`p${index}`,
+				'horizontal',
+				0.5,
+				workspaceWindow(`window-${index}` as WorkspaceWindowId),
+				row,
+			);
+		}
+		expect(balanceWindowRow(row, 'window-0' as WorkspaceWindowId)).toBeNull();
+	});
+
+	it('fits the given windows only while they stay resizable above the minimum size', () => {
+		const columns = (count: number) => {
+			let row: DesktopWorkspaceNode = workspaceWindow(`window-${count - 1}` as WorkspaceWindowId);
+			for (let index = count - 2; index >= 0; index--) {
+				row = partition(
+					`p${index}`,
+					'horizontal',
+					0.5,
+					workspaceWindow(`window-${index}` as WorkspaceWindowId),
+					row,
+				);
+			}
+			return balanceWindowRow(row, 'window-0' as WorkspaceWindowId)!;
+		};
+		const row = columns(4);
+		const resizable = MIN_WINDOW_WIDTH_PX + WORKSPACE_RESIZE_BOUND_SAFETY_PX;
+		const fits = (width: number, windowIds = row.windowIds) =>
+			workspaceWindowsFitHost(row.root, windowIds, { width, height: 800 });
+		expect(fits(4 * resizable)).toBe(true);
+		expect(fits(4 * resizable - 1)).toBe(false);
+		// Windows outside the checked set do not block the fit.
+		expect(fits(4 * resizable - 1, [])).toBe(true);
+		expect(workspaceWindowsFitHost(row.root, row.windowIds, null)).toBe(true);
+	});
 });

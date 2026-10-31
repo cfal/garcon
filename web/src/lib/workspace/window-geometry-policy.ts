@@ -77,6 +77,12 @@ export interface ResolvedWorkspacePartitionRatioBounds {
 	readonly bounds: WorkspacePartitionRatioBounds;
 }
 
+// Reports whether the given windows of a projected desktop layout keep a resizable size.
+export type WorkspaceWindowsFitResolver = (
+	root: DesktopWorkspaceNode,
+	windowIds: readonly WorkspaceWindowId[],
+) => boolean;
+
 export type WorkspacePartitionRatioBoundsResolver = (
 	snapshot: WorkspaceLayoutSnapshot,
 	partitionId: WorkspacePartitionId,
@@ -144,6 +150,28 @@ function siblingWindowId(
 	if (first.type === 'window' && first.id === windowId) return collectWindowNodes(second)[0].id;
 	if (second.type === 'window' && second.id === windowId) return collectWindowNodes(first)[0].id;
 	return siblingWindowId(first, windowId) ?? siblingWindowId(second, windowId);
+}
+
+/**
+ * Requires the resize bound's safety pixel beyond the minimum window size, so the partitions
+ * between the windows stay adjustable and a one-pixel host shrink prunes none of them. An
+ * unmeasured host admits any layout, as split admission does.
+ */
+export function workspaceWindowsFitHost(
+	root: DesktopWorkspaceNode,
+	windowIds: readonly WorkspaceWindowId[],
+	hostSize: WorkspaceHostSize | null,
+): boolean {
+	if (!hostSize) return true;
+	const checked = new Set(windowIds);
+	return computeWindowRects(root).windows.every(
+		({ workspaceWindow, rect }) =>
+			!checked.has(workspaceWindow.id) ||
+			(floorWorkspacePixels(rect.width, hostSize.width) >=
+				MIN_WINDOW_WIDTH_PX + WORKSPACE_RESIZE_BOUND_SAFETY_PX &&
+				floorWorkspacePixels(rect.height, hostSize.height) >=
+					MIN_WINDOW_HEIGHT_PX + WORKSPACE_RESIZE_BOUND_SAFETY_PX),
+	);
 }
 
 export function workspaceWindowsToPrune(

@@ -503,6 +503,20 @@ export class SpaDriver {
     );
   }
 
+  async workspaceChatsByWindow(): Promise<Record<string, string>> {
+    return this.#page.$$eval('[data-workspace-window-id]', (elements) =>
+      Object.fromEntries(
+        elements.flatMap((element) => {
+          const windowId = element.getAttribute('data-workspace-window-id');
+          const chatId = element
+            .querySelector(`[data-conversation-panel="chat-view:${windowId}"]`)
+            ?.getAttribute('data-conversation-panel-chat-id');
+          return windowId && chatId ? [[windowId, chatId]] : [];
+        }),
+      ),
+    );
+  }
+
   async waitForWorkspaceWindowCount(expected: number): Promise<void> {
     await this.#page.waitForFunction(
       (count) => document.querySelectorAll('[data-workspace-window-id]').length === count,

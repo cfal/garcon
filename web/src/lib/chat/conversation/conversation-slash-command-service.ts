@@ -112,7 +112,6 @@ interface SlashCommandAgentState {
 
 interface SlashCommandLifecycle {
 	beginTurn(chatId: string): void;
-	setCurrentChatId(chatId: string | null): void;
 }
 
 interface SlashCommandModelCatalog {
@@ -138,7 +137,11 @@ export interface ConversationSlashCommandDeps {
 	agentState: SlashCommandAgentState;
 	lifecycle: SlashCommandLifecycle;
 	modelCatalogForExecutor(executorId: string): SlashCommandModelCatalog;
-	navigation: { navigateToChat?(chatId: string): void };
+	navigation: {
+		navigateToChat?(chatId: string): void;
+		// Presents a fork without replacing its source chat's view.
+		openForkedChat(chatId: string, sourceChatId: string): void;
+	};
 	refetchTranscript?: (chatId: string) => Promise<void>;
 	// Asks the user whether to continue when the provider cannot materialize a native fork.
 	// Without it the refusal reads as a plain failure.
@@ -726,8 +729,7 @@ export class ConversationSlashCommandService {
 					return 'rejected';
 				}
 				deps.sessions.upsertServerChat(response.chat);
-				deps.sessions.setSelectedChatId(response.chat.id);
-				deps.navigation.navigateToChat?.(response.chat.id);
+				deps.navigation.openForkedChat(response.chat.id, sourceChatId);
 				if (response.status === 'accepted') {
 					deps.lifecycle.beginTurn(response.chat.id);
 				}
@@ -830,9 +832,7 @@ export class ConversationSlashCommandService {
 		}
 		if (!result) return null;
 		this.deps.sessions.upsertServerChat(result.chat);
-		this.deps.lifecycle.setCurrentChatId(result.chat.id);
-		this.deps.sessions.setSelectedChatId(result.chat.id);
-		this.deps.navigation.navigateToChat?.(result.chat.id);
+		this.deps.navigation.openForkedChat(result.chat.id, sourceChatId);
 		return result.chat;
 	}
 

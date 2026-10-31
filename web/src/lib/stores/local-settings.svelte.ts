@@ -97,6 +97,14 @@ export const FILE_OPEN_PLACEMENT_VALUES = [
 	'new-window',
 	'dialog',
 ] as const satisfies readonly FileOpenPlacementPreference[];
+// Auto keeps the source visible in whatever split fits; mobile always replaces the source.
+export const FORK_OPEN_PLACEMENT_VALUES = [
+	'split-auto',
+	'split-right',
+	'split-below',
+	'replace',
+] as const;
+export type ForkOpenPlacementPreference = (typeof FORK_OPEN_PLACEMENT_VALUES)[number];
 export const HIDEABLE_TOOL_GROUPS = [
 	{
 		id: 'bash',
@@ -196,6 +204,7 @@ export interface LocalSettingsSnapshot extends TypographyPreferences, ComposerSt
 	textEditorOpenPlacement: FileOpenPlacementPreference;
 	imageViewerOpenPlacement: FileOpenPlacementPreference;
 	markdownViewerOpenPlacement: FileOpenPlacementPreference;
+	forkOpenPlacement: ForkOpenPlacementPreference;
 	hiddenToolTypes: HideableToolType[];
 	globalShortcuts: GlobalShortcutOverrides;
 	browserNotifications: boolean;
@@ -279,6 +288,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	textEditorOpenPlacement: 'same-window',
 	imageViewerOpenPlacement: 'same-window',
 	markdownViewerOpenPlacement: 'same-window',
+	forkOpenPlacement: 'split-auto',
 	hiddenToolTypes: [],
 	globalShortcuts: {},
 	browserNotifications: false,
@@ -420,6 +430,13 @@ function parseFileOpenPlacement(
 	return fallback;
 }
 
+export function isForkOpenPlacement(value: unknown): value is ForkOpenPlacementPreference {
+	return (
+		typeof value === 'string' &&
+		FORK_OPEN_PLACEMENT_VALUES.includes(value as ForkOpenPlacementPreference)
+	);
+}
+
 function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
 	if (!Array.isArray(value)) return DEFAULTS.hiddenToolTypes;
 	const selected = new Set(value.filter((entry): entry is string => typeof entry === 'string'));
@@ -551,6 +568,9 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.markdownViewerOpenPlacement,
 			DEFAULTS.markdownViewerOpenPlacement,
 		),
+		forkOpenPlacement: isForkOpenPlacement(parsed.forkOpenPlacement)
+			? parsed.forkOpenPlacement
+			: DEFAULTS.forkOpenPlacement,
 		hiddenToolTypes: normalizeHiddenToolTypes(parsed.hiddenToolTypes),
 		globalShortcuts: sanitizeGlobalShortcutOverrides(parsed.globalShortcuts),
 		browserNotifications: parseBoolean(parsed.browserNotifications, DEFAULTS.browserNotifications),
@@ -655,6 +675,7 @@ export class LocalSettingsStore {
 	markdownViewerOpenPlacement = $state<FileOpenPlacementPreference>(
 		DEFAULTS.markdownViewerOpenPlacement,
 	);
+	forkOpenPlacement = $state<ForkOpenPlacementPreference>(DEFAULTS.forkOpenPlacement);
 	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
 	globalShortcuts = $state<GlobalShortcutOverrides>(DEFAULTS.globalShortcuts);
 	browserNotifications = $state(DEFAULTS.browserNotifications);
@@ -816,6 +837,7 @@ export class LocalSettingsStore {
 			textEditorOpenPlacement: this.textEditorOpenPlacement,
 			imageViewerOpenPlacement: this.imageViewerOpenPlacement,
 			markdownViewerOpenPlacement: this.markdownViewerOpenPlacement,
+			forkOpenPlacement: this.forkOpenPlacement,
 			hiddenToolTypes: this.hiddenToolTypes,
 			globalShortcuts: { ...this.globalShortcuts },
 			browserNotifications: this.browserNotifications,
@@ -893,6 +915,7 @@ export class LocalSettingsStore {
 		this.textEditorOpenPlacement = snap.textEditorOpenPlacement;
 		this.imageViewerOpenPlacement = snap.imageViewerOpenPlacement;
 		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;
+		this.forkOpenPlacement = snap.forkOpenPlacement;
 		this.hiddenToolTypes = snap.hiddenToolTypes;
 		this.globalShortcuts = { ...snap.globalShortcuts };
 		this.browserNotifications = snap.browserNotifications;

@@ -68,6 +68,15 @@ function describeAuthError(error: unknown): string {
 	return error.message;
 }
 
+function isTransientProbeFailure(error: unknown): boolean {
+	if (error instanceof ApiError) return isIntermediaryResponse(error);
+	if (error instanceof TypeError) return true;
+	return (
+		error instanceof DOMException &&
+		(error.name === 'NetworkError' || error.name === 'TimeoutError' || error.name === 'AbortError')
+	);
+}
+
 export class AuthStore {
 	#version = 0;
 	#rejectionVersion = 0;
@@ -487,6 +496,15 @@ export class AuthStore {
 					}
 				}
 			}
+			return;
+		}
+		// A failed transport probe cannot revoke an independently accepted session.
+		if (
+			this.availability === 'active' &&
+			!this.#uncertainToken &&
+			isTransientProbeFailure(error)
+		) {
+			this.#scheduleRepair(2_000);
 			return;
 		}
 		this.error = describeAuthError(error);

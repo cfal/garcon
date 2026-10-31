@@ -229,10 +229,9 @@ function createDeps(chat = createChat()) {
 		agentState: { model: 'sonnet' },
 		lifecycle: {
 			beginTurn: vi.fn(),
-			setCurrentChatId: vi.fn(),
 		},
 		modelCatalogForExecutor: vi.fn((_executorId: string) => modelCatalog),
-		navigation: { navigateToChat: vi.fn() },
+		navigation: { navigateToChat: vi.fn(), openForkedChat: vi.fn() },
 		refetchTranscript: vi.fn().mockResolvedValue(undefined),
 		confirmHandoffFork: vi.fn().mockResolvedValue(true),
 		scrollToBottom: vi.fn(),
@@ -1044,7 +1043,7 @@ describe('ConversationSlashCommandService', () => {
 		);
 	});
 
-	it('forks and runs while selecting the projected server chat before beginning the turn', async () => {
+	it('forks and runs in a view beside the source chat without replacing it', async () => {
 		const { deps } = createDeps();
 		const forked = createServerEntry('chat-2');
 		mockForkRunChat.mockResolvedValueOnce({
@@ -1070,8 +1069,9 @@ describe('ConversationSlashCommandService', () => {
 			expect.objectContaining({ sourceChatId: 'chat-1', command: 'continue here' }),
 		);
 		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(forked);
-		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
-		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('chat-2');
+		expect(deps.navigation.openForkedChat).toHaveBeenCalledWith('chat-2', 'chat-1');
+		expect(deps.navigation.navigateToChat).not.toHaveBeenCalled();
+		expect(deps.sessions.setSelectedChatId).not.toHaveBeenCalled();
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-2');
 	});
 
@@ -1205,7 +1205,7 @@ describe('ConversationSlashCommandService', () => {
 			clientMessageId: first.clientMessageId,
 			chatId: first.chatId,
 		});
-		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+		expect(deps.navigation.openForkedChat).toHaveBeenCalledWith('chat-2', 'chat-1');
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-2');
 	});
 
@@ -1235,7 +1235,7 @@ describe('ConversationSlashCommandService', () => {
 
 		expect(mockForkRunChat).toHaveBeenCalledTimes(2);
 		expect(mockForkRunChat.mock.calls[1][0]).toEqual(mockForkRunChat.mock.calls[0][0]);
-		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+		expect(deps.navigation.openForkedChat).toHaveBeenCalledWith('chat-2', 'chat-1');
 	});
 
 	it('does not restore a fork prompt after two ambiguous outcomes', async () => {
@@ -1442,8 +1442,9 @@ describe('ConversationSlashCommandService', () => {
 			clientRequestId: expect.any(String),
 		});
 		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(forked);
-		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('chat-2');
-		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+		expect(deps.navigation.openForkedChat).toHaveBeenCalledWith('chat-2', 'chat-1');
+		expect(deps.navigation.navigateToChat).not.toHaveBeenCalled();
+		expect(deps.sessions.setSelectedChatId).not.toHaveBeenCalled();
 	});
 
 	it('shows fork progress on the source chat until the fork settles', async () => {
@@ -1535,7 +1536,7 @@ describe('ConversationSlashCommandService', () => {
 		);
 		expect(deps.refetchTranscript).toHaveBeenCalledWith('chat-1');
 		expect(appendLocalNotice).toHaveBeenCalledExactlyOnceWith('progress', 'Forking chat...');
-		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+		expect(deps.navigation.openForkedChat).toHaveBeenCalledWith('chat-2', 'chat-1');
 	});
 
 	it('does not retry a stale selection against a shifted duplicate window', async () => {
@@ -1604,7 +1605,7 @@ describe('ConversationSlashCommandService', () => {
 			allowHandoffFork: true,
 		});
 		expect(appendLocalNotice).toHaveBeenCalledExactlyOnceWith('progress', 'Forking chat...');
-		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+		expect(deps.navigation.openForkedChat).toHaveBeenCalledWith('chat-2', 'chat-1');
 	});
 
 	it('leaves the chat untouched when the handoff fork is declined', async () => {

@@ -1,4 +1,5 @@
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
+import type { ForkOpenPlacementPreference } from '$lib/stores/local-settings.svelte.js';
 import { SvelteSet } from 'svelte/reactivity';
 import type { WorkspaceFiles, WorkspaceSingletons, WorkspaceTerminals } from './workspace-resource-ports.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
@@ -48,6 +49,7 @@ import {
 	clampWorkspacePartitionRatio,
 	mapWorkspaceSplitAdmissions,
 	type WorkspaceHostSize,
+	type WorkspaceWindowsFitResolver,
 	type WorkspacePartitionRatioBounds,
 	type WorkspacePartitionRatioBoundsResolver,
 	type WorkspaceSplitAdmission,
@@ -72,6 +74,7 @@ export interface WorkspaceCoordinatorDeps {
 	gitMutations?: Pick<GitMutationCoordinator, 'pendingCount'>;
 	surfaceFrames?: SurfaceFrameRegistry;
 	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
+	windowsFitHost: WorkspaceWindowsFitResolver;
 	resolvePartitionRatioBounds: WorkspacePartitionRatioBoundsResolver;
 	onLayoutChanged?(snapshot: WorkspaceLayoutSnapshot): void;
 	onTerminalLauncherDismissed?(): void;
@@ -135,11 +138,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			lastFocusedWindowId: () => this.#presentation.lastFocusedWindowId,
 			resolveWindowId: (snapshot, preferredWindowId) =>
 				this.#resolveWindowId(snapshot, preferredWindowId),
+			commit: (mutations) => this.#presentation.commit(mutations),
 			commitWithPresentationTarget: (mutations, resolveTarget, options) =>
 				this.#presentation.commitWithPresentationTarget(mutations, resolveTarget, options),
 			prepareChatSurfaceTransfer: (transfer) =>
 				this.#tabMovement.prepareChatSurfaceTransfer(transfer),
 			resolveSplitAdmission: deps.resolveSplitAdmission,
+			windowsFitHost: deps.windowsFitHost,
 			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
 		});
 		this.#fileDialog = new FileDialogCoordinator({
@@ -427,6 +432,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#chatPlacement.openInNewWindow(chatId, targetWindowId, edge);
 	}
 
+	openForkedChat(chatId: string, sourceChatId: string, placement: ForkOpenPlacementPreference) {
+		return this.#chatPlacement.openFork(chatId, sourceChatId, placement);
+	}
+
 	async openChatBeside(
 		chatId: string,
 		targetWindowId?: WorkspaceWindowId,
@@ -435,16 +444,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#chatPlacement.openBeside(chatId, targetWindowId, edge);
 	}
 
-	async clearDeletedChat(chatId: string): Promise<void> {
-		await this.#presentation.commit((latest) =>
-			collectWindowNodes(latest.desktopRoot).flatMap((workspaceWindow) => {
-				const surfaceId = chatViewSurfaceId(workspaceWindow.id);
-				const surface = latest.surfaces[surfaceId];
-				return surface?.type === 'chat' && surface.chatId === chatId
-					? [{ type: 'set-window-chat' as const, windowId: workspaceWindow.id, chatId: null }]
-					: [];
-			}),
-		);
+	clearDeletedChat(chatId: string): Promise<void> {
+		return this.#chatPlacement.clearDeletedChat(chatId);
 	}
 
 	async openTicket(id: string): Promise<void> {

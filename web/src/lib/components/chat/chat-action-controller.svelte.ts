@@ -26,6 +26,7 @@ export interface ChatActionControllerDeps {
 	startArchivingChats: (chatIds: readonly string[]) => ChatArchiveMutation;
 	startUnarchivingChats: (chatIds: readonly string[]) => ChatArchiveMutation;
 	onSelectChat: (chatId: string) => void;
+	onOpenForkedChat: (chatId: string, sourceChatId: string) => void;
 	onNewChat: () => void;
 	onDeleteChat: (chatId: string) => Promise<void> | void;
 	onRenameChat: (chatId: string, newTitle: string) => Promise<void> | void;
@@ -206,7 +207,7 @@ export class ChatActionController {
 			);
 			if (!result) return;
 			this.deps.onUpsertServerChat(result.chat);
-			this.deps.onSelectChat(result.chat.id);
+			this.deps.onOpenForkedChat(result.chat.id, sourceChatId);
 		} catch (error) {
 			console.error('Failed to fork chat:', error);
 			this.deps.notifyError(forkFailureNotice(error));

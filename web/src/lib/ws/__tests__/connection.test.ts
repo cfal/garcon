@@ -1222,6 +1222,245 @@ describe('WsConnection', () => {
 		connection.disconnect();
 	});
 
+	it('replaces a pre-online attempt immediately and fences its late callbacks', async () => {
+		const connection = new WsConnection();
+		try {
+			document.dispatchEvent(new Event('visibilitychange'));
+			const stalled = mockSockets[0];
+			const lateOpen = stalled.onopen;
+			const lateClose = stalled.onclose;
+			await vi.advanceTimersByTimeAsync(500);
+			window.dispatchEvent(new Event('online'));
+			expect(stalled.close).toHaveBeenCalledOnce();
+			expect(mockSockets).toHaveLength(2);
+			mockSockets[1].open();
+			lateOpen?.(new Event('open'));
+			lateClose?.(new CloseEvent('close'));
+			expect(connection.isConnected).toBe(true);
+			expect(connection.connectionStatus.phase).toBe('connected');
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it('coalesces overlapping signals after starting an online replacement', () => {
+		const connection = new WsConnection();
+		try {
+			connection.connect('token');
+			window.dispatchEvent(new Event('online'));
+			const count = mockSockets.length;
+			document.dispatchEvent(new Event('visibilitychange'));
+			window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+			window.dispatchEvent(new Event('online'));
+			expect(mockSockets).toHaveLength(count);
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it('bounds a stalled foreground attempt to three seconds without an online event', async () => {
+		const connection = new WsConnection();
+		try {
+			document.dispatchEvent(new Event('visibilitychange'));
+			const stalled = mockSockets[0];
+			await vi.advanceTimersByTimeAsync(2_999);
+			expect(stalled.close).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(stalled.close).toHaveBeenCalledOnce();
+			await vi.advanceTimersByTimeAsync(250);
+			expect(mockSockets).toHaveLength(2);
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it.each(['online', 'visibilitychange'])(
+		'remembers %s during auth repair without bypassing the auth gate',
+		async (signal) => {
+			const connection = new WsConnection();
+			connection.onAuthFailure = vi.fn();
+			connection.connect('token');
+			try {
+				for (let attempt = 0; attempt < 3; attempt++) {
+					mockSockets.at(-1)!.onclose?.(new CloseEvent('close', { code: 1006 }));
+					connection.retryAfterAuthProbe();
+					await vi.advanceTimersByTimeAsync(connection.connectionStatus.nextRetryAt! - Date.now());
+				}
+				mockSockets.at(-1)!.onclose?.(new CloseEvent('close', { code: 1006 }));
+				const count = mockSockets.length;
+				if (signal === 'online') window.dispatchEvent(new Event('online'));
+				else document.dispatchEvent(new Event('visibilitychange'));
+				await vi.advanceTimersByTimeAsync(500);
+				expect(mockSockets).toHaveLength(count);
+				connection.retryAfterAuthProbe();
+				expect(mockSockets).toHaveLength(count + 1);
+				expect(connection.connectionStatus).toMatchObject({
+					reason: signal === 'online' ? 'browser-online' : 'visibility-visible',
+					reconnectAttempt: 0,
+				});
+				const resumed = mockSockets.at(-1)!;
+				await vi.advanceTimersByTimeAsync(3_000);
+				expect(resumed.close).toHaveBeenCalledOnce();
+			} finally {
+				connection.disconnect();
+			}
+		},
+	);
+
+	it('preserves a pending resume through accepted credential replacement', async () => {
+		const connection = new WsConnection();
+		connection.connect('old-token');
+		try {
+			connection.pauseForAuth();
+			window.dispatchEvent(new Event('online'));
+			connection.resumeForAuth('new-token');
+			expect(connection.connectionStatus.reason).toBe('browser-online');
+			const resumed = mockSockets.at(-1)!;
+			await vi.advanceTimersByTimeAsync(3_000);
+			expect(resumed.close).toHaveBeenCalledOnce();
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it.each(['retryAfterAuthProbe', 'resumeForAuth', 'connect'] as const)(
+		'defers pending resume work while hidden through %s',
+		(method) => {
+			let visibilityState: DocumentVisibilityState = 'visible';
+			vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+			const connection = new WsConnection();
+			connection.connect('token');
+			try {
+				connection.pauseForAuth();
+				window.dispatchEvent(new Event('online'));
+				visibilityState = 'hidden';
+				document.dispatchEvent(new Event('visibilitychange'));
+				if (method === 'retryAfterAuthProbe') connection.retryAfterAuthProbe();
+				else connection[method]('new-token');
+				expect(mockSockets).toHaveLength(1);
+				visibilityState = 'visible';
+				document.dispatchEvent(new Event('visibilitychange'));
+				expect(mockSockets).toHaveLength(2);
+			} finally {
+				connection.disconnect();
+			}
+		},
+	);
+
+	it.each([4_000, 9_000])(
+		'allows a %s ms handshake after two fast recovery attempts',
+		async (handshakeMs) => {
+			let visibilityState: DocumentVisibilityState = 'visible';
+			vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+			const connection = new WsConnection();
+			connection.connect('token');
+			mockSockets[0].open();
+			vi.stubGlobal(
+				'WebSocket',
+				class extends MockWebSocket {
+					constructor(url: string, protocols?: string | string[]) {
+						super(url, protocols);
+						setTimeout(() => {
+							if (this.readyState === MockWebSocket.CONNECTING) this.open();
+						}, handshakeMs);
+					}
+				},
+			);
+			try {
+				visibilityState = 'hidden';
+				document.dispatchEvent(new Event('visibilitychange'));
+				mockSockets[0].closeFromServer();
+				visibilityState = 'visible';
+				document.dispatchEvent(new Event('visibilitychange'));
+				await vi.advanceTimersByTimeAsync(3_000 + 250 + 3_000 + 800);
+				expect(mockSockets).toHaveLength(4);
+				expect(mockSockets[1].close).toHaveBeenCalledOnce();
+				expect(mockSockets[2].close).toHaveBeenCalledOnce();
+				await vi.advanceTimersByTimeAsync(500);
+				document.dispatchEvent(new Event('visibilitychange'));
+				window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+				await vi.advanceTimersByTimeAsync(handshakeMs - 500);
+				expect(connection.isConnected).toBe(true);
+				expect(mockSockets).toHaveLength(4);
+			} finally {
+				connection.disconnect();
+			}
+		},
+	);
+
+	it('keeps two fast watchdogs across stalled retries and restores ordinary retries after stability', async () => {
+		const connection = new WsConnection();
+		try {
+			document.dispatchEvent(new Event('visibilitychange'));
+			await vi.advanceTimersByTimeAsync(3_000);
+			expect(mockSockets[0].close).toHaveBeenCalledOnce();
+			await vi.advanceTimersByTimeAsync(250);
+			const retry = mockSockets[1];
+			await vi.advanceTimersByTimeAsync(2_999);
+			expect(retry.close).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(retry.close).toHaveBeenCalledOnce();
+			await vi.advanceTimersByTimeAsync(800);
+			mockSockets[2].open();
+			await vi.advanceTimersByTimeAsync(10_000);
+			mockSockets[2].closeFromServer();
+			await vi.advanceTimersByTimeAsync(250);
+			const ordinaryRetry = mockSockets[3];
+			await vi.advanceTimersByTimeAsync(9_999);
+			expect(ordinaryRetry.close).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(ordinaryRetry.close).toHaveBeenCalledOnce();
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it.each(['visibilitychange', 'pageshow'])(
+		'restarts backoff on %s while retaining exponential retries within that foreground',
+		async (signal) => {
+			let visibilityState: DocumentVisibilityState = 'visible';
+			vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+			const connection = new WsConnection();
+			connection.onAuthFailure = () => connection.retryAfterAuthProbe();
+			connection.connect('token');
+			try {
+				for (let cycle = 0; cycle < 4; cycle++) {
+					visibilityState = 'hidden';
+					document.dispatchEvent(new Event('visibilitychange'));
+					mockSockets.at(-1)!.closeFromServer();
+					visibilityState = 'visible';
+					if (signal === 'pageshow')
+						window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+					else document.dispatchEvent(new Event('visibilitychange'));
+					mockSockets.at(-1)!.onclose?.(new CloseEvent('close', { code: 1006 }));
+					expect(connection.connectionStatus.nextRetryAt! - Date.now()).toBe(250);
+					await vi.advanceTimersByTimeAsync(250);
+					mockSockets.at(-1)!.open();
+				}
+				mockSockets.at(-1)!.closeFromServer();
+				expect(connection.connectionStatus.nextRetryAt! - Date.now()).toBe(800);
+			} finally {
+				connection.disconnect();
+			}
+		},
+	);
+
+	it('shortens an existing attempt on resume without extending it on overlapping signals', async () => {
+		const connection = new WsConnection();
+		try {
+			connection.connect('token');
+			const stalled = mockSockets[0];
+			await vi.advanceTimersByTimeAsync(500);
+			document.dispatchEvent(new Event('visibilitychange'));
+			await vi.advanceTimersByTimeAsync(500);
+			window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+			await vi.advanceTimersByTimeAsync(2_000);
+			expect(stalled.close).toHaveBeenCalledOnce();
+		} finally {
+			connection.disconnect();
+		}
+	});
+
 	it('retries when a connection attempt never settles', async () => {
 		vi.setSystemTime(0);
 		const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
