@@ -250,7 +250,8 @@ describe("Mermaid theme contrast", () => {
         root.innerHTML = await scope.renderMermaid(source, 'standard-light');
         const cached = read();
         root.innerHTML = await scope.renderMermaid(source + '\n', 'standard-light');
-        return { standard, toggled, cached, fresh: read(), fontLoaded: document.fonts.check('11px "Departure Mono"') };
+        // Checks core text because a space also matches the unused extended face.
+        return { standard, toggled, cached, fresh: read(), fontLoaded: document.fonts.check('11px "Departure Mono"', 'ABC') };
       });
       expect(geometry.fontLoaded).toBe(true);
       expect(geometry.standard).toHaveLength(2);
