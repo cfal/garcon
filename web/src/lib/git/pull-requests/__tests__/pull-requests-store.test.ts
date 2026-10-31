@@ -49,7 +49,6 @@ function summary(number: number, overrides: Partial<PullRequestSummary> = {}): P
 		url: `https://github.com/acme/app/pull/${number}`,
 		reviewDecision: null,
 		checksState: 'pending',
-		checkCounts: 'check:IN_PROGRESS=1',
 		mergeable: 'unknown',
 		headRefOid: HEAD,
 		baseRefOid: BASE,
@@ -300,15 +299,13 @@ describe('PullRequestsStore selective refresh', () => {
 		expect(getDiff).toHaveBeenCalledTimes(1);
 	});
 
-	it('rereads only status when check counts or mergeability change', async () => {
+	it('rereads only status when the check rollup or mergeability changes', async () => {
 		const { select, settled, publish, getStatus, getDiff, getReviewThreads } = harness();
 		select(7);
 		await settled();
-		publish([summary(7, { checkCounts: 'check:IN_PROGRESS=1,check:SUCCESS=1' })]);
+		publish([summary(7, { checksState: 'passing' })]);
 		await settled();
-		publish([
-			summary(7, { checkCounts: 'check:IN_PROGRESS=1,check:SUCCESS=1', mergeable: 'conflicting' }),
-		]);
+		publish([summary(7, { checksState: 'passing', mergeable: 'conflicting' })]);
 		await settled();
 		expect(getStatus).toHaveBeenCalledTimes(3);
 		expect(getReviewThreads).toHaveBeenCalledTimes(1);
@@ -433,6 +430,34 @@ describe('PullRequestsStore selective refresh', () => {
 			refreshError: 'Synthetic GitHub outage',
 		});
 		expect(notifyError).toHaveBeenCalledWith('Synthetic GitHub outage');
+	});
+
+	it('leaves a failed status for Retry when later scans report nothing new', async () => {
+		const { store, reviews, select, settled, publish, getStatus, notifyError } = harness();
+		select(7);
+		await settled();
+		getStatus.mockRejectedValueOnce(new ApiError(502, 'Synthetic GitHub outage', 'GH_NETWORK'));
+		publish([summary(7, { checksState: 'failing' })]);
+		await settled();
+		expect(getStatus).toHaveBeenCalledTimes(2);
+		const scanned = snapshot(3, [summary(7, { checksState: 'failing' })]);
+		scanned.repositories[0]!.scan = {
+			status: 'ok',
+			scannedAt: '2026-01-02T00:00:00Z',
+			message: null,
+		};
+		reviews.apply(scanned);
+		store.syncSelection();
+		await settled();
+		expect(getStatus).toHaveBeenCalledTimes(2);
+		expect(notifyError).toHaveBeenCalledTimes(1);
+		store.refresh();
+		await settled();
+		expect(getStatus).toHaveBeenCalledTimes(3);
+		expect(store.status.error).toBeNull();
+		store.syncSelection();
+		await settled();
+		expect(getStatus).toHaveBeenCalledTimes(3);
 	});
 
 	it('keeps a failed review thread read inline beside the diff', async () => {

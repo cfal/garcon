@@ -21,7 +21,7 @@ function pull(head = HEAD): PullRequestSummary {
   return {
     number: 7, title: 'Synthetic change', state: 'open', isDraft: false, author: 'author', headRefName: 'feature',
     baseRefName: 'main', additions: 10, deletions: 2, changedFiles: 1, createdAt: '', updatedAt: '', url: '', reviewDecision: null,
-    checksState: 'passing', checkCounts: 'check:SUCCESS=1', mergeable: 'mergeable', headRefOid: head, baseRefOid: 'e'.repeat(40),
+    checksState: 'passing', mergeable: 'mergeable', headRefOid: head, baseRefOid: 'e'.repeat(40),
     reviewCount: 0, reviewThreadCount: 0, isCrossRepository: false, authorAssociation: 'member', authorIsBot: false,
     authoredByViewer: false, labels: [], reviewRequest: 'me',
   };
@@ -573,10 +573,10 @@ describe('fingerprint sweeps', () => {
 
   test('a checks change is applied from the fingerprint without a full read', async () => {
     const { store, repository, listed } = await sweep({
-      current: (target) => [target.id === 'repository' ? { ...pull(), checksState: 'failing', checkCounts: 'check:FAILURE=1' } : pull()],
+      current: (target) => [target.id === 'repository' ? { ...pull(), checksState: 'failing' } : pull()],
     });
     expect(listed).toEqual([]);
-    expect(store.pulls(repository.id)[0]).toMatchObject({ checksState: 'failing', checkCounts: 'check:FAILURE=1', title: 'Synthetic change' });
+    expect(store.pulls(repository.id)[0]).toMatchObject({ checksState: 'failing', title: 'Synthetic change' });
   });
 
   test('activity a fingerprint cannot apply rereads only that repository', async () => {

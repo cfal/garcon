@@ -171,14 +171,14 @@ its history, including an older selected run after a posting result changes.
 
 The Changes and Checks tabs read status, diff, and review threads separately.
 Every successful repository scan refreshes status for the selected visible PR,
-including when aggregate check counts are unchanged: names, URLs, and individual
-check outcomes can change without affecting those counts. This costs one light
-status read for that selection per scan. Review activity invalidates threads;
+including when the check rollup is unchanged: names, URLs, and individual check
+outcomes can change without affecting it. This costs one light status read for
+that selection per scan. Review activity invalidates threads;
 unchanged thread pages revalidate with conditional requests. The diff is read
 again only when status reports a different base or head commit.
 Each part keeps its last loaded content through a failed refresh and shows the
 failure beside it with Retry; a failed diff or status is not retried until the
-user asks.
+user asks or a scan reports a change to that pull request.
 
 Each selection schedules status, diff, and review-thread reads in sequence so
 it occupies at most one query slot during a cold load. Concurrent diff misses
@@ -193,14 +193,13 @@ and retains the previous coherent pair while a replacement loads or fails.
 
 A fingerprint is the part of a pull request summary that decides which reads
 are stale: `updatedAt`, draft state, head and base commits, the check rollup
-state and per-state check counts, review decision, mergeability, and review and
-review-thread counts. A fingerprint batch costs one `gh` call for up to 25
+state, review decision, mergeability, and review and review-thread counts. A fingerprint batch costs one `gh` call for up to 25
 repositories; a full read costs at least three per repository (`gh repo view`,
 the list query, and the team review-request search).
 
 - Unchanged fingerprints keep the saved repository list without a full list read.
   The selected visible PR still refreshes its check details.
-- Checks, check counts, mergeability, and the review decision change without
+- The check rollup, mergeability, and the review decision change without
   moving `updatedAt`; their new values are applied to the saved list.
 - Any other change (a pull request opened, closed, or reopened, a push, a new
   base, new reviews, an edit that moves `updatedAt`, another `gh` account, or a

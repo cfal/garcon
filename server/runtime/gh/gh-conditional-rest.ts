@@ -12,6 +12,7 @@
 import { createHash } from 'node:crypto';
 import type { GhRepositoryIdentity } from '../../../common/gh.js';
 import { GitServiceError } from '../../../common/git-error.js';
+import { classifyGhError } from './gh-error-classifier.js';
 import type { GhResponseCache, GhResponseKey } from './gh-response-cache.js';
 import type { GhProcessError } from './gh-types.js';
 import { runGh } from './run.js';
@@ -79,7 +80,8 @@ async function requestPage(cwd: string, host: string, path: string, etag: string
     if (processError.timedOut || processError.aborted || typeof processError.stdout !== 'string') throw error;
     const response = parseIncludedResponse(processError.stdout);
     if (response?.status === 304) return { kind: 'response', response };
-    if (response && REFUSED.has(response.status)) return { kind: 'refused', error };
+    // A rate limit is also a 403, but it says nothing about access and validators are what save quota.
+    if (response && REFUSED.has(response.status) && classifyGhError(error).code !== 'RATE_LIMITED') return { kind: 'refused', error };
     throw error;
   }
   const response = parseIncludedResponse(stdout);

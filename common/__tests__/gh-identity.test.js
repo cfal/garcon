@@ -107,7 +107,7 @@ test('fingerprint results keep each repository outcome explicit', () => {
   const scope = { executorId: 'local', instanceId: 'instance' };
   const fingerprint = {
     number: 7, updatedAt: '', isDraft: false, headRefOid: 'a'.repeat(40), baseRefOid: 'e'.repeat(40), checksState: 'pending',
-    checkCounts: 'check:IN_PROGRESS=1', reviewDecision: null, mergeable: 'unknown', reviewCount: 0, reviewThreadCount: 0,
+    reviewDecision: null, mergeable: 'unknown', reviewCount: 0, reviewThreadCount: 0,
   };
   const batch = { ...scope, viewerLogin: 'viewer', repositories: [
     { kind: 'read', repo: { nameWithOwner: 'acme/app', url: 'https://github.example.invalid/acme/app' }, pulls: [fingerprint] },

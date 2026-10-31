@@ -29,7 +29,6 @@ function entry(
 			url: `https://github.com/acme/app/pull/${number}`,
 			reviewDecision: null,
 			checksState: 'none',
-			checkCounts: '',
 			mergeable: 'unknown',
 			headRefOid: 'a'.repeat(40),
 			baseRefOid: 'e'.repeat(40),

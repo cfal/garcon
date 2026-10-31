@@ -16,7 +16,6 @@ const signal: PullRequestFingerprint = {
 	updatedAt: '2026-01-01T00:00:00Z',
 	isDraft: false,
 	checksState: 'pending',
-	checkCounts: 'check:IN_PROGRESS=1',
 	reviewDecision: null,
 	mergeable: 'unknown',
 	reviewCount: 0,
@@ -27,7 +26,6 @@ describe('pull request refresh keys', () => {
 	it('invalidates status alone for fingerprint changes that leave review activity alone', () => {
 		const changes: Partial<PullRequestFingerprint>[] = [
 			{ checksState: 'failing' },
-			{ checkCounts: 'check:IN_PROGRESS=1,check:SUCCESS=1' },
 			{ reviewDecision: 'approved' },
 			{ mergeable: 'conflicting' },
 			{ baseRefOid: 'f'.repeat(40) },

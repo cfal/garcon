@@ -49,7 +49,7 @@ const describe = (fixture) => {
       createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', mergeable: 'MERGEABLE', reviewCount: 0, reviewThreadCount: 0,
       url: `https://git.example.invalid/${owner}/${repository}/pull/${pull.number}`,
       files: fixture.files ?? [{ path: 'example.txt', additions: 1, deletions: 1 }],
-      labels: [], reviewRequests: [], checks: null, checkRunCounts: [],
+      labels: [], reviewRequests: [], checks: null,
       ...pull,
     })),
   };
@@ -72,17 +72,15 @@ const page = (values, cursor = Number(field('endCursor') ?? 0), limit = config.p
   nodes: values.slice(cursor, cursor + limit),
   pageInfo: config.incompleteConnection ? null : { hasNextPage: cursor + limit < values.length, endCursor: String(cursor + limit) },
 });
-const fingerprintPull = ({ number, updatedAt, isDraft, headRefOid, baseRefOid, mergeable, reviewDecision, reviewCount, reviewThreadCount, checks, checkRunCounts }) => ({
+const rollup = (checks) => ({ nodes: [{ commit: { statusCheckRollup: checks ? { state: checks } : null } }] });
+const fingerprintPull = ({ number, updatedAt, isDraft, headRefOid, baseRefOid, mergeable, reviewDecision, reviewCount, reviewThreadCount, checks }) => ({
   number, updatedAt, isDraft, headRefOid, baseRefOid, mergeable, reviewDecision,
-  reviews: { totalCount: reviewCount }, reviewThreads: { totalCount: reviewThreadCount },
-  commits: { nodes: [{ commit: { statusCheckRollup: checks ? { state: checks, contexts: { checkRunCountsByState: checkRunCounts, statusContextCountsByState: [] } } : null } }] },
+  reviews: { totalCount: reviewCount }, reviewThreads: { totalCount: reviewThreadCount }, commits: rollup(checks),
 });
 // A list query that selects no fingerprint fields gets none, so payload sizes follow the query.
-const listPull = (selectsFingerprint, selectsCheckCounts) => ({ files, body, labels, reviewRequests, checks, checkRunCounts, teamReviewRequested, reviewCount, reviewThreadCount, mergeable, ...pull }) => ({
+const listPull = (selectsFingerprint) => ({ files, body, labels, reviewRequests, checks, teamReviewRequested, reviewCount, reviewThreadCount, mergeable, ...pull }) => ({
   ...pull,
-  ...(selectsFingerprint
-    ? fingerprintPull({ ...pull, mergeable, checks, checkRunCounts: selectsCheckCounts ? checkRunCounts : [], reviewCount, reviewThreadCount })
-    : { commits: { nodes: [{ commit: { statusCheckRollup: checks ? { state: checks } : null } }] } }),
+  ...(selectsFingerprint ? fingerprintPull({ ...pull, mergeable, checks, reviewCount, reviewThreadCount }) : { commits: rollup(checks) }),
   labels: page(labels.map(name => ({ name })), 0),
   reviewRequests: page(reviewRequests.map(reviewer => ({ requestedReviewer: { __typename: 'User', login: reviewer } })), 0),
 });
@@ -107,9 +105,6 @@ const requestHeader = (name) => {
 
 // Only a fingerprint batch, which names its repositories, runs without a fixture here.
 const fingerprintBatch = command === 'api' && action === 'graphql' && (field('query') ?? '').includes('r0:repository(');
-if (config.unsupportedCheckCounts && (field('query') ?? '').includes('checkRunCountsByState')) {
-  await fail("GraphQL: Field 'checkRunCountsByState' doesn't exist on type 'StatusCheckRollupContextConnection'");
-}
 if (!config.label && !fingerprintBatch) await fail('gh: no synthetic fixture in this directory');
 if (config.fail?.[`${command} ${action}`] || config.fail?.[command]) await fail(config.fail[`${command} ${action}`] ?? config.fail[command]);
 if (command === 'auth' && action === 'token') {
@@ -179,7 +174,7 @@ else if (command === 'api' && action === 'graphql') {
     print({ data: {
       viewer: actor,
       repository: { ...repo,
-        pullRequests: page(pulls.filter(pull => pull.state === 'OPEN').map(listPull(query.includes('reviewThreads'), query.includes('checkRunCountsByState')))) },
+        pullRequests: page(pulls.filter(pull => pull.state === 'OPEN').map(listPull(query.includes('reviewThreads')))) },
     } });
   }
 } else if (command === 'api' && args.includes('POST')) {
@@ -218,8 +213,9 @@ else if (command === 'api' && action === 'graphql') {
     await fail('Conditional request did not use its captured credential.');
   if (config.commentsFail) {
     write(header('403 Forbidden', { 'Content-Type': 'application/json; charset=utf-8' }));
-    print({ message: 'forbidden' });
-    await fail('gh: forbidden (HTTP 403)');
+    const message = config.commentsFail === true ? 'forbidden' : config.commentsFail;
+    print({ message });
+    await fail(`gh: ${message} (HTTP 403)`);
   }
   if (config.pushDuringComments) {
     const { pushDuringComments, ...rest } = config;
@@ -253,7 +249,7 @@ else if (command === 'api' && action === 'graphql') {
     } finally { watcher.close(); }
   }
   requests = 1;
-  const { checks, checkRunCounts, labels, reviewRequests, teamReviewRequested, reviewCount, reviewThreadCount, ...pull } = await findPull(args[2]);
+  const { checks, labels, reviewRequests, teamReviewRequested, reviewCount, reviewThreadCount, ...pull } = await findPull(args[2]);
   print({ ...pull, statusCheckRollup: config.statusChecks ?? [] });
 } else if (action === 'diff') {
   requests = 2;

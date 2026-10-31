@@ -5,7 +5,7 @@ import { fingerprintBatches, planFingerprintRefresh } from '../fingerprints.js';
 const summary: PullRequestSummary = {
   number: 7, title: 'Synthetic change', state: 'open', isDraft: false, author: 'author', headRefName: 'feature',
   baseRefName: 'main', additions: 1, deletions: 1, changedFiles: 1, createdAt: '', updatedAt: '2026-03-01T00:00:00Z', url: '',
-  reviewDecision: null, checksState: 'pending', checkCounts: 'check:IN_PROGRESS=1', mergeable: 'unknown',
+  reviewDecision: null, checksState: 'pending', mergeable: 'unknown',
   headRefOid: 'a'.repeat(40), baseRefOid: 'e'.repeat(40), reviewCount: 0, reviewThreadCount: 0, isCrossRepository: false,
   authorAssociation: 'member', authorIsBot: false, authoredByViewer: false, labels: ['bug'], reviewRequest: 'team',
 };
@@ -21,8 +21,7 @@ test('unchanged fingerprints need no read', () => {
 });
 
 for (const change of [
-  { checksState: 'passing', checkCounts: 'check:SUCCESS=1' },
-  { checkCounts: 'check:IN_PROGRESS=1,check:SUCCESS=1' },
+  { checksState: 'passing' },
   { reviewDecision: 'approved' },
   { mergeable: 'conflicting' },
 ] as Partial<PullRequestFingerprint>[]) {
@@ -50,7 +49,7 @@ test('reads in full when the set of open pull requests, the account, or the repo
 });
 
 test('a saved summary without fingerprint fields reads in full', () => {
-  const { checkCounts: _counts, reviewCount: _reviews, ...legacy } = summary;
+  const { reviewCount: _reviews, ...legacy } = summary;
   expect(planFingerprintRefresh({ ...saved, pulls: [legacy as PullRequestSummary] }, 'viewer', { kind: 'read', repo, pulls: [fingerprint()] }))
     .toEqual({ kind: 'full-read' });
 });

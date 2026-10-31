@@ -105,9 +105,6 @@ export interface PullRequestSummary {
   url: string;
   reviewDecision: PullRequestReviewDecision;
   checksState: PullRequestChecksState;
-  // Canonical per-state counts of check runs and status contexts. They move
-  // while the rollup state holds, for example as pending checks finish.
-  checkCounts: string;
   mergeable: PullRequestMergeable;
   headRefOid: string;
   baseRefOid: string;
@@ -124,7 +121,7 @@ export interface PullRequestSummary {
 
 // The summary fields that decide which reads of a pull request are stale.
 export const PULL_REQUEST_FINGERPRINT_FIELDS = [
-  'number', 'updatedAt', 'isDraft', 'headRefOid', 'baseRefOid', 'checksState', 'checkCounts',
+  'number', 'updatedAt', 'isDraft', 'headRefOid', 'baseRefOid', 'checksState',
   'reviewDecision', 'mergeable', 'reviewCount', 'reviewThreadCount',
 ] as const satisfies readonly (keyof PullRequestSummary)[];
 

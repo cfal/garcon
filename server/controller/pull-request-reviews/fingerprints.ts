@@ -27,13 +27,12 @@ import {
   type RepositoryPullRequestFingerprints,
 } from '../../../common/gh.js';
 
-// Fields whose change cannot be applied from the fingerprint alone.
 type FingerprintField = keyof PullRequestFingerprint;
 // What a change to each fingerprint field requires; a new field must choose.
 const FIELD_CHANGES = {
   number: 'key', updatedAt: 'full-read', isDraft: 'full-read', headRefOid: 'full-read', baseRefOid: 'full-read',
   reviewCount: 'full-read', reviewThreadCount: 'full-read',
-  checksState: 'apply', checkCounts: 'apply', reviewDecision: 'apply', mergeable: 'apply',
+  checksState: 'apply', reviewDecision: 'apply', mergeable: 'apply',
 } as const satisfies Record<FingerprintField, 'key' | 'full-read' | 'apply'>;
 const fieldsRequiring = (change: 'full-read' | 'apply') =>
   (Object.keys(FIELD_CHANGES) as FingerprintField[]).filter((field) => FIELD_CHANGES[field] === change);

@@ -447,6 +447,18 @@ describe('conditional review thread reads', () => {
     await read(gh);
     expect(await takeValidators()).toEqual([null]);
   });
+
+  it('keeps cached pages through a rate-limit 403, which says nothing about access', async () => {
+    for (const message of ['API rate limit exceeded for user ID 1.', 'You have exceeded a secondary rate limit.']) {
+      await fixture({ commentPages: [[first]] });
+      const caches = new GhReadCaches();
+      const gh = createGhOperations(root, caches);
+      await read(gh);
+      await fixture({ commentPages: [[first]], commentsFail: message });
+      await expect(read(gh)).rejects.toThrow(/rate limit/);
+      expect(caches.responses.size).toBe(1);
+    }
+  });
 });
 
 describe('caller-owned reads', () => {
@@ -494,13 +506,6 @@ describe('caller-owned reads', () => {
 });
 
 describe('pull request fingerprints', () => {
-  it('falls back to a list query when the server does not support aggregate check counts', async () => {
-    await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic', unsupportedCheckCounts: true }));
-    const gh = createGhOperations(root);
-    await expect(gh.getPullRequestFingerprints({ repositories: [repository] })).rejects.toThrow('checkRunCountsByState');
-    expect((await gh.listPullRequests({ projectPath: root, repository })).pulls).toHaveLength(1);
-  });
-
   const second = { host: 'git.example.invalid', nameWithOwner: 'second/repository' };
   const missing = { host: 'git.example.invalid', nameWithOwner: 'missing/repository' };
   const writeFixtures = async (primary = {}, other = {}) => {
@@ -517,8 +522,7 @@ describe('pull request fingerprints', () => {
 
   it('reads aliased repositories in one query and maps each failure to its repository', async () => {
     await writeFixtures({
-      pulls: [{ number: 3, checks: 'PENDING', checkRunCounts: [{ state: 'SUCCESS', count: 2 }, { state: 'IN_PROGRESS', count: 1 }],
-        reviewDecision: 'APPROVED', mergeable: 'CONFLICTING', reviewCount: 2, reviewThreadCount: 1 }],
+      pulls: [{ number: 3, checks: 'PENDING', reviewDecision: 'APPROVED', mergeable: 'CONFLICTING', reviewCount: 2, reviewThreadCount: 1 }],
     }, { pulls: [{ number: 1 }, { number: 2, state: 'CLOSED' }] });
     const batch = await createGhOperations(root).getPullRequestFingerprints({ repositories: [repository, missing, second] });
     expect(await graphqlCalls()).toHaveLength(1);
@@ -526,12 +530,20 @@ describe('pull request fingerprints', () => {
     expect(batch.repositories).toEqual([
       { kind: 'read', repo: { nameWithOwner: 'synthetic/repository', url: 'https://git.example.invalid/synthetic/repository' }, pulls: [{
         number: 3, updatedAt: '2026-01-01T00:00:00Z', isDraft: false, headRefOid: 'a'.repeat(40), baseRefOid: 'e'.repeat(40),
-        checksState: 'pending', checkCounts: 'check:IN_PROGRESS=1,check:SUCCESS=2', reviewDecision: 'approved', mergeable: 'conflicting',
+        checksState: 'pending', reviewDecision: 'approved', mergeable: 'conflicting',
         reviewCount: 2, reviewThreadCount: 1,
       }] },
       { kind: 'failed', reason: 'not-found', message: "Could not resolve to a Repository with the name 'missing/repository'." },
       { kind: 'read', repo: { nameWithOwner: 'second/repository', url: 'https://git.example.invalid/second/repository' }, pulls: [expect.objectContaining({ number: 1 })] },
     ]);
+  });
+
+  it('reads the same fingerprint as the full list, so a full read is never a false change', async () => {
+    await writeFixtures({ pulls: [{ number: 3, checks: 'PENDING', reviewDecision: 'APPROVED', mergeable: 'CONFLICTING', reviewCount: 2, reviewThreadCount: 1 }] });
+    const gh = createGhOperations(root);
+    const { pulls: [summary] } = await gh.listPullRequests({ projectPath: root, repository });
+    const { repositories: [read] } = await gh.getPullRequestFingerprints({ repositories: [repository] });
+    expect(summary).toMatchObject(read.pulls[0]);
   });
 
   it('marks a repository with more than one page of open pull requests incomplete', async () => {

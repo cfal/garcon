@@ -46,7 +46,6 @@ function pull(number: number, overrides: Partial<PullRequestSummary>): PullReque
 		url: `https://github.com/acme/app/pull/${number}`,
 		reviewDecision: null,
 		checksState: 'passing',
-		checkCounts: 'check:SUCCESS=1',
 		mergeable: 'mergeable',
 		headRefOid: HEAD,
 		baseRefOid: BASE,

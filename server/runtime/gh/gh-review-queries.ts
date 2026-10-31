@@ -1,9 +1,6 @@
-const PULL_IDENTITY_SELECTION = `number updatedAt isDraft headRefOid baseRefOid mergeable reviewDecision
-        reviews{totalCount} reviewThreads{totalCount}`;
-const FINGERPRINT_SELECTION = `${PULL_IDENTITY_SELECTION}
-        commits(last:1){nodes{commit{statusCheckRollup{state contexts{
-          checkRunCountsByState{state count} statusContextCountsByState{state count}
-        }}}}}`;
+const FINGERPRINT_SELECTION = `number updatedAt isDraft headRefOid baseRefOid mergeable reviewDecision
+        reviews{totalCount} reviewThreads{totalCount}
+        commits(last:1){nodes{commit{statusCheckRollup{state}}}}`;
 
 // Policy and idempotency inputs expose every connection's continuation.
 export const LIST_QUERY = `query($owner:String!,$name:String!,$endCursor:String){
@@ -13,8 +10,7 @@ export const LIST_QUERY = `query($owner:String!,$name:String!,$endCursor:String)
     pullRequests(states:OPEN,first:100,after:$endCursor,orderBy:{field:CREATED_AT,direction:ASC}){
       pageInfo{hasNextPage endCursor}
       nodes{
-        ${PULL_IDENTITY_SELECTION}
-        commits(last:1){nodes{commit{statusCheckRollup{state}}}}
+        ${FINGERPRINT_SELECTION}
         title url state createdAt
         author{login __typename}
         authorAssociation headRefName baseRefName isCrossRepository

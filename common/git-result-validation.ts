@@ -154,7 +154,7 @@ export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, 
   const commits = { baseRefOid: isGhCommitOid, headRefOid: isGhCommitOid };
   const mergeable = oneOf('mergeable', 'conflicting', 'unknown');
   const fingerprint = { number: num, updatedAt: str, isDraft: bool, headRefOid: str, baseRefOid: str,
-    checksState: oneOf('passing', 'failing', 'pending', 'none'), checkCounts: str, reviewDecision: identity.reviewDecision,
+    checksState: oneOf('passing', 'failing', 'pending', 'none'), reviewDecision: identity.reviewDecision,
     mergeable, reviewCount: num, reviewThreadCount: num };
   let valid: boolean;
   if (method === 'getStatus') {

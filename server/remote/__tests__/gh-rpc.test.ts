@@ -2,6 +2,7 @@ import { expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import { watch } from 'node:fs';
 import path from 'node:path';
+import { GitServiceError } from '../../../common/git-error.js';
 import { GH_DETAIL_TIMEOUT_MS, GIT_OPERATION_TIMEOUT_MS } from '../../../common/git-execution.js';
 import * as gitOperation from '../../runtime/git/operation-context.js';
 import { gitRpcFixture } from './git-rpc-fixture.js';
@@ -42,6 +43,15 @@ test('paginated GitHub policy reads retain their detail budget on Local and remo
       expectDetailBudget();
       expect((await service.getPullRequestFingerprints({ repositories: [repository] })).repositories[0]).toMatchObject({ kind: 'read' });
       expectDetailBudget();
+    }
+    // The scanner backs off on the typed code, which must survive the executor link.
+    await fs.writeFile(path.join(fixture.root, 'gh-fixture.json'), JSON.stringify({
+      label: 'synthetic', fingerprintFailure: 'gh: API rate limit exceeded for user ID 1.',
+    }));
+    for (const service of [await fixture.local.getGhService(), await fixture.executor.getGhService()]) {
+      const failure = await service.getPullRequestFingerprints({ repositories: [{ host: 'git.example.invalid', nameWithOwner: 'synthetic/repository' }] }).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(GitServiceError);
+      expect(failure).toMatchObject({ code: 'GH_RATE_LIMITED' });
     }
   } finally { operation.mockRestore(); process.env.PATH = originalPath; await fixture.dispose(); }
 }, 10_000);

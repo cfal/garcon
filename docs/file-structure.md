@@ -79,9 +79,8 @@ The controller owns chats, ledgers, queues, schedules, provider configuration/cr
   `runtime/gh/gh-pull-request-reads.ts` owns the separate status, diff, and
   review-thread reads, and `runtime/gh/pull-request-diff-cache.ts` bounds the
   executor's diffs by commit pair. `runtime/gh/gh-fingerprint-reads.ts` owns
-  batched fingerprint reads, `runtime/gh/gh-conditional-rest.ts` and
-  `gh-response-cache.ts` own ETag-conditional REST reads and their cache, and
-  `runtime/gh/gh-shared-reads.ts` shares reads in flight.
+  batched fingerprint reads, and `runtime/gh/gh-conditional-rest.ts` and
+  `gh-response-cache.ts` own ETag-conditional REST reads and their cache.
   `controller/pull-request-reviews/fingerprints.ts` decides what a fingerprint
   change requires.
 - Git operation tests live in named suites under `runtime/git/__tests__/`;

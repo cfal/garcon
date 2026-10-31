@@ -144,16 +144,6 @@ export interface GhRawNodes<T> {
   issueCount?: number;
 }
 
-interface GhRawStateCount {
-  state?: string;
-  count?: number;
-}
-
-interface GhRawStatusCheckRollup {
-  state?: string;
-  contexts?: { checkRunCountsByState?: GhRawStateCount[] | null; statusContextCountsByState?: GhRawStateCount[] | null } | null;
-}
-
 export interface GhRawFingerprintPullRequest {
   number: number;
   updatedAt?: string;
@@ -164,7 +154,7 @@ export interface GhRawFingerprintPullRequest {
   reviewDecision?: string | null;
   reviews?: { totalCount?: number } | null;
   reviewThreads?: { totalCount?: number } | null;
-  commits?: GhRawNodes<{ commit?: { statusCheckRollup?: GhRawStatusCheckRollup | null } | null }> | null;
+  commits?: GhRawNodes<{ commit?: { statusCheckRollup?: { state?: string } | null } | null }> | null;
 }
 
 export interface GhRawListPullRequest extends GhRawFingerprintPullRequest {
@@ -231,25 +221,14 @@ function mapRollupState(raw: string | undefined): PullRequestChecksState {
   return 'none';
 }
 
-// Sorted `kind:STATE=count` pairs, so equal counts compare equal whatever order GitHub lists them in.
-export function mapCheckCounts(rollup: GhRawStatusCheckRollup | null | undefined): string {
-  const pairs = (kind: string, counts: GhRawStateCount[] | null | undefined) => (counts ?? [])
-    .filter((entry) => typeof entry.state === 'string' && typeof entry.count === 'number' && entry.count > 0)
-    .map((entry) => `${kind}:${entry.state!.toUpperCase()}=${entry.count}`);
-  return [...pairs('check', rollup?.contexts?.checkRunCountsByState), ...pairs('status', rollup?.contexts?.statusContextCountsByState)]
-    .sort().join(',');
-}
-
 export function mapFingerprint(raw: GhRawFingerprintPullRequest): PullRequestFingerprint {
-  const rollup = nodes(raw.commits)[0]?.commit?.statusCheckRollup;
   return {
     number: raw.number,
     updatedAt: raw.updatedAt ?? '',
     isDraft: Boolean(raw.isDraft),
     headRefOid: raw.headRefOid ?? '',
     baseRefOid: raw.baseRefOid ?? '',
-    checksState: mapRollupState(rollup?.state),
-    checkCounts: mapCheckCounts(rollup),
+    checksState: mapRollupState(nodes(raw.commits)[0]?.commit?.statusCheckRollup?.state),
     reviewDecision: mapReviewDecision(raw.reviewDecision ?? undefined),
     mergeable: mapMergeable(raw.mergeable),
     reviewCount: raw.reviews?.totalCount ?? 0,
