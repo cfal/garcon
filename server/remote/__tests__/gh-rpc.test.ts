@@ -2,6 +2,7 @@ import { expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import { watch } from 'node:fs';
 import path from 'node:path';
+import { GitServiceError } from '../../../common/git-error.js';
 import { GH_DETAIL_TIMEOUT_MS, GIT_OPERATION_TIMEOUT_MS } from '../../../common/git-execution.js';
 import * as gitOperation from '../../runtime/git/operation-context.js';
 import { gitRpcFixture } from './git-rpc-fixture.js';
@@ -40,6 +41,17 @@ test('paginated GitHub policy reads retain their detail budget on Local and remo
       expectDetailBudget();
       await service.getPullRequestReviewThreads(pull);
       expectDetailBudget();
+      expect((await service.getPullRequestFingerprints({ repositories: [repository] })).repositories[0]).toMatchObject({ kind: 'read' });
+      expectDetailBudget();
+    }
+    // The scanner backs off on the typed code, which must survive the executor link.
+    await fs.writeFile(path.join(fixture.root, 'gh-fixture.json'), JSON.stringify({
+      label: 'synthetic', fingerprintFailure: 'gh: API rate limit exceeded for user ID 1.',
+    }));
+    for (const service of [await fixture.local.getGhService(), await fixture.executor.getGhService()]) {
+      const failure = await service.getPullRequestFingerprints({ repositories: [{ host: 'git.example.invalid', nameWithOwner: 'synthetic/repository' }] }).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(GitServiceError);
+      expect(failure).toMatchObject({ code: 'GH_RATE_LIMITED' });
     }
   } finally { operation.mockRestore(); process.env.PATH = originalPath; await fixture.dispose(); }
 }, 10_000);
@@ -193,6 +205,23 @@ for (const dialer of ['controller', 'worker'] as const) {
       }));
       const paginated = await gh.getPullRequestReviewThreads(pull);
       expect(paginated.threads.flatMap(thread => thread.comments.map(comment => comment.body))).toEqual(['first page', 'second page']);
+      // An unchanged listing revalidates each page and reuses the worker's cached bodies.
+      const callsPath = path.join(fixture.projectPath, 'gh-calls.jsonl');
+      await fs.rm(callsPath, { force: true });
+      expect((await gh.getPullRequestReviewThreads(pull)).threads).toEqual(paginated.threads);
+      const revalidations = (await fs.readFile(callsPath, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as string[])
+        .filter(args => args[0] === 'api').map(args => args.some(arg => arg.startsWith('If-None-Match: W/')));
+      expect(revalidations).toEqual([true, true]);
+      const absent = { host: repository.host, nameWithOwner: 'absent/repository' };
+      expect(await gh.getPullRequestFingerprints({ repositories: [repository, absent] })).toMatchObject({
+        executorId, instanceId, viewerLogin: config.label,
+        repositories: [
+          { kind: 'read', repo: { nameWithOwner: `${config.label}/repository` }, pulls: [{ number: 1, headRefOid: 'a'.repeat(40), baseRefOid: 'e'.repeat(40) }] },
+          { kind: 'failed', reason: 'not-found' },
+        ],
+      });
+      await expect(gh.getPullRequestFingerprints({ repositories: [repository, { ...absent, host: 'other.example.invalid' }] }))
+        .rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
       await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({ ...config, bodyBytes: 4 * 1024 * 1024 }));
       await expect(gh.getPullRequestStatus(pull)).rejects.toMatchObject({ code: 'GIT_RESULT_TOO_LARGE' });
       expect(fixture.executor.availability).toBe('ready');

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PullRequestDiff } from '$lib/api/pull-requests.js';
-import type { PullRequestStatus } from '$shared/gh';
+import type { PullRequestFingerprint, PullRequestStatus } from '$shared/gh';
 import {
 	createPullRequestDiffCache,
 	PULL_REQUEST_DIFF_CACHE_MAX_ENTRIES,
@@ -9,19 +9,40 @@ import {
 import { pullRequestChangesView, pullRequestChecksView } from '../pull-request-detail-view.js';
 import { pullRequestReviewThreadsKey, pullRequestStatusKey } from '../pull-request-refresh-keys.js';
 
-const signal = {
+const signal: PullRequestFingerprint = {
+	number: 7,
 	headRefOid: 'a'.repeat(40),
+	baseRefOid: 'e'.repeat(40),
 	updatedAt: '2026-01-01T00:00:00Z',
+	isDraft: false,
 	checksState: 'pending',
 	reviewDecision: null,
-} as const;
+	mergeable: 'unknown',
+	reviewCount: 0,
+	reviewThreadCount: 0,
+};
 
 describe('pull request refresh keys', () => {
-	it('invalidates status alone for checks and review decisions', () => {
-		for (const change of [{ checksState: 'failing' }, { reviewDecision: 'approved' }] as const) {
+	it('invalidates status alone for fingerprint changes that leave review activity alone', () => {
+		const changes: Partial<PullRequestFingerprint>[] = [
+			{ checksState: 'failing' },
+			{ reviewDecision: 'approved' },
+			{ mergeable: 'conflicting' },
+			{ baseRefOid: 'f'.repeat(40) },
+			{ isDraft: true },
+		];
+		for (const change of changes) {
 			const next = { ...signal, ...change };
 			expect(pullRequestStatusKey(next)).not.toBe(pullRequestStatusKey(signal));
 			expect(pullRequestReviewThreadsKey(next)).toBe(pullRequestReviewThreadsKey(signal));
+		}
+	});
+
+	it('invalidates review threads alone for review activity', () => {
+		for (const change of [{ reviewCount: 1 }, { reviewThreadCount: 1 }]) {
+			const next = { ...signal, ...change };
+			expect(pullRequestStatusKey(next)).toBe(pullRequestStatusKey(signal));
+			expect(pullRequestReviewThreadsKey(next)).not.toBe(pullRequestReviewThreadsKey(signal));
 		}
 	});
 
@@ -31,6 +52,12 @@ describe('pull request refresh keys', () => {
 			expect(pullRequestStatusKey(next)).not.toBe(pullRequestStatusKey(signal));
 			expect(pullRequestReviewThreadsKey(next)).not.toBe(pullRequestReviewThreadsKey(signal));
 		}
+	});
+
+	it('keys nothing on an unchanged fingerprint', () => {
+		const same = { ...signal };
+		expect(pullRequestStatusKey(same)).toBe(pullRequestStatusKey(signal));
+		expect(pullRequestReviewThreadsKey(same)).toBe(pullRequestReviewThreadsKey(signal));
 	});
 });
 

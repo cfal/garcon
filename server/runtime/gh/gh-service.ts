@@ -8,6 +8,7 @@ import { deriveGhStatus, type GhAuthStatusJson } from './gh-status.js';
 import {
   GhDomainError,
   type PullRequestCommentMinimized,
+  type PullRequestFingerprintBatch,
   type PullRequestCommentRef,
   type PullRequestDiff,
   type PullRequestListResult,
@@ -17,6 +18,8 @@ import {
 } from './gh-types.js';
 import { readPullRequestList, readReviewTarget } from './gh-review-reads.js';
 import { readPullRequestDiff, readPullRequestReviewThreads, readPullRequestStatus } from './gh-pull-request-reads.js';
+import { readPullRequestFingerprints } from './gh-fingerprint-reads.js';
+import { GhResponseCache } from './gh-response-cache.js';
 import { PullRequestDiffCache } from './pull-request-diff-cache.js';
 import { assertGhActor, readPostingActor, requireGhActor, resolveCheckoutRepository } from './gh-repository.js';
 
@@ -33,6 +36,7 @@ const STATUS_TIMEOUT_MS = 10_000;
 
 type WithSignal<T> = T & { signal?: AbortSignal };
 export type ListPullRequestsOptions = WithSignal<GhRequests['listPullRequests']>;
+export type GetPullRequestFingerprintsOptions = WithSignal<GhRequests['getPullRequestFingerprints']>;
 export type GetPullRequestStatusOptions = WithSignal<GhRequests['getPullRequestStatus']>;
 export type GetPullRequestDiffOptions = WithSignal<GhRequests['getPullRequestDiff']>;
 export type GetPullRequestReviewThreadsOptions = WithSignal<GhRequests['getPullRequestReviewThreads']>;
@@ -43,6 +47,7 @@ export type MinimizePullRequestCommentOptions = WithSignal<GhRequests['minimizeP
 export interface GhOperations {
   getStatus(signal?: AbortSignal): Promise<GhStatusResponse>;
   listPullRequests(options: ListPullRequestsOptions): Promise<PullRequestListResult>;
+  getPullRequestFingerprints(options: GetPullRequestFingerprintsOptions): Promise<PullRequestFingerprintBatch>;
   getPullRequestStatus(options: GetPullRequestStatusOptions): Promise<PullRequestStatus>;
   getPullRequestDiff(options: GetPullRequestDiffOptions): Promise<PullRequestDiff>;
   getPullRequestReviewThreads(options: GetPullRequestReviewThreadsOptions): Promise<PullRequestReviewThreads>;
@@ -64,8 +69,19 @@ async function assertPullRequestTarget(projectPath: string, repository: GhReposi
   await resolveCheckoutRepository(projectPath, repository, signal);
 }
 
-// The caller owns the diff cache so it lives exactly as long as its serving instance.
-export function createGhOperations(statusDirectory = process.cwd(), diffCache = new PullRequestDiffCache()): GhOperations {
+// Read state an executor's serving instance owns and clears when it is disposed.
+export class GhReadCaches {
+  readonly diffs = new PullRequestDiffCache();
+  readonly responses = new GhResponseCache();
+
+  clear(): void {
+    this.diffs.clear();
+    this.responses.clear();
+  }
+}
+
+// Each caller resolves its own authorization; mutable reads never share credentials or results.
+export function createGhOperations(statusDirectory = process.cwd(), caches = new GhReadCaches()): GhOperations {
   return {
     async getStatus(signal): Promise<GhStatusResponse> {
       try {
@@ -89,6 +105,10 @@ export function createGhOperations(statusDirectory = process.cwd(), diffCache = 
       return readPullRequestList(projectPath, identity, signal);
     },
 
+    async getPullRequestFingerprints({ repositories, signal }): Promise<PullRequestFingerprintBatch> {
+      return readPullRequestFingerprints(statusDirectory, repositories, signal);
+    },
+
     async getPullRequestStatus({ projectPath, repository, number, signal }): Promise<PullRequestStatus> {
       await assertPullRequestTarget(projectPath, repository, number, signal);
       return readPullRequestStatus(projectPath, repository, number, signal);
@@ -96,12 +116,12 @@ export function createGhOperations(statusDirectory = process.cwd(), diffCache = 
 
     async getPullRequestDiff({ projectPath, repository, number, commits, signal }): Promise<PullRequestDiff> {
       await assertPullRequestTarget(projectPath, repository, number, signal);
-      return readPullRequestDiff(projectPath, repository, number, commits, diffCache, signal);
+      return readPullRequestDiff(projectPath, repository, number, commits, caches.diffs, signal);
     },
 
     async getPullRequestReviewThreads({ projectPath, repository, number, signal }): Promise<PullRequestReviewThreads> {
       await assertPullRequestTarget(projectPath, repository, number, signal);
-      return readPullRequestReviewThreads(projectPath, repository, number, signal);
+      return readPullRequestReviewThreads(projectPath, repository, number, caches.responses, signal);
     },
 
     async getPullRequestReviewTarget({ projectPath, repository, number, marker, signal }): Promise<PullRequestReviewTarget> {

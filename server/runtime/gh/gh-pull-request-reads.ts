@@ -8,6 +8,8 @@ import { GitServiceError } from '../../../common/git-error.js';
 import { buildDiff, buildStatus, buildThreads, type GhRawPullRequest, type GhRawReviewComment } from './gh-mappers.js';
 import { parseMultiFileDiffPatches } from './pull-request-diff.js';
 import type { PullRequestDiffCache } from './pull-request-diff-cache.js';
+import { readConditionalPages } from './gh-conditional-rest.js';
+import type { GhResponseCache } from './gh-response-cache.js';
 import { runGh, runGhJson } from './run.js';
 
 const STATUS_FIELDS =
@@ -59,16 +61,18 @@ export async function readPullRequestDiff(
   }, signal);
 }
 
-export async function readPullRequestReviewThreads(projectPath: string, repository: GhRepositoryIdentity, number: number, signal?: AbortSignal): Promise<PullRequestReviewThreads> {
+// Review comments are a REST listing, so each unchanged page revalidates as a 304.
+export async function readPullRequestReviewThreads(
+  projectPath: string,
+  repository: GhRepositoryIdentity,
+  number: number,
+  responses: GhResponseCache,
+  signal?: AbortSignal,
+): Promise<PullRequestReviewThreads> {
   const view = () => runGhJson<PullRequestCommits>(projectPath,
     ['pr', 'view', String(number), '--repo', explicitRepository(repository), '--json', 'baseRefOid,headRefOid'], { signal });
   const commits = await view();
-  const pages = await runGhJson<GhRawReviewComment[][]>(
-    projectPath,
-    ['api', '--hostname', repository.host, '--paginate', '--slurp', `repos/${repository.nameWithOwner}/pulls/${number}/comments`],
-    { signal },
-  );
-  if (!Array.isArray(pages) || !pages.every(Array.isArray)) throw new GitServiceError('GIT_INVALID_RESULT', 'GitHub returned unreadable review comments.');
+  const pages = await readConditionalPages(projectPath, repository, `repos/${repository.nameWithOwner}/pulls/${number}/comments`, responses, signal);
   assertCommits(await view(), commits);
-  return { number, ...commits, threads: buildThreads(pages.flat()) };
+  return { number, ...commits, threads: buildThreads(pages.flat() as GhRawReviewComment[]) };
 }

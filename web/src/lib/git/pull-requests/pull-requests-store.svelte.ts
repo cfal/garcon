@@ -78,6 +78,8 @@ export class PullRequestsStore implements PortableSingletonController {
 	#runController: AbortController | null = null;
 	#runsVersion: number | null = null;
 	#coherentChanges = $state.raw<PullRequestChanges | null>(null);
+	// The scan status follows. A failed read keeps its scan, so later scans wait for Retry.
+	#statusScan: string | null = null;
 
 	query = $state('');
 	repositoryFilter = $state<string | null>(null);
@@ -220,7 +222,8 @@ export class PullRequestsStore implements PortableSingletonController {
 			this.#resetPullRequest();
 			this.#selectionScope = scope;
 		}
-		this.#followStatus(this.status.ensure(pullRequestStatusKey(entry.pull), this.#readStatus()));
+		if (this.status.error === null) this.#followLatestScan();
+		this.#followStatus(this.status.ensure(this.#statusKey(entry), this.#readStatus()));
 		if (!this.status.isLoading && !this.diff.isLoading) this.#ensureThreads();
 		if (entry.historyRevision !== this.#runsVersion) void this.loadRuns();
 	}
@@ -231,8 +234,9 @@ export class PullRequestsStore implements PortableSingletonController {
 		const entry = this.selectedEntry;
 		if (!this.#visible || !entry || this.#selectionScope !== this.#selectedScope()) return;
 		this.diff.forgetFailure();
+		this.#followLatestScan();
 		this.#followStatus(
-			this.status.load(pullRequestStatusKey(entry.pull), this.#readStatus()),
+			this.status.load(this.#statusKey(entry), this.#readStatus()),
 			() => {
 				const current = this.selectedEntry;
 				if (current)
@@ -382,7 +386,15 @@ export class PullRequestsStore implements PortableSingletonController {
 		// The pull request moved after its status was read; the next status names its new commits.
 		const entry = this.selectedEntry;
 		if (entry && this.diff.key === key && !this.status.isLoading)
-			this.#followStatus(this.status.load(pullRequestStatusKey(entry.pull), this.#readStatus()));
+			this.#followStatus(this.status.load(this.#statusKey(entry), this.#readStatus()));
+	}
+
+	#followLatestScan(): void {
+		this.#statusScan = this.selectedRepository?.scan.scannedAt ?? null;
+	}
+
+	#statusKey(entry: PullRequestReviewInboxEntry): string {
+		return pullRequestStatusKey(entry.pull, this.#statusScan);
 	}
 
 	#ensureThreads(): void {

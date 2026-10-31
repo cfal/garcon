@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { watch } from 'node:fs';
-import { createGhOperations } from '../gh-service.js';
+import { createGhOperations, GhReadCaches } from '../gh-service.js';
 
 const repository = {host: "git.example.invalid", nameWithOwner: "synthetic/repository"};
 const expectedPull = { state: "open", headRefOid: "a".repeat(40) };
@@ -246,7 +246,7 @@ describe('split pull request reads', () => {
   it('reads review threads without the diff or status', async () => {
     await fixture();
     const read = await createGhOperations(root).getPullRequestReviewThreads({ projectPath: root, repository, number: 1 });
-    expect(await readCalls()).toEqual(['repo view', 'pr view', 'api --hostname', 'pr view']);
+    expect(await readCalls()).toEqual(['repo view', 'pr view', 'auth token', 'api --hostname', 'pr view']);
     expect(read.threads).toMatchObject([{ path: 'example.txt', comments: [{ body: 'synthetic comment' }] }]);
   });
 
@@ -340,5 +340,226 @@ describe('split pull request reads', () => {
     await expect(gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits })).rejects.toMatchObject({ code: 'GH_STALE_PULL_REQUEST' });
     await fixture({ fail: { 'pr view': 'HTTP 404: Not Found' } });
     await expect(gh.getPullRequestDiff({ projectPath: root, repository, number: 1, commits })).rejects.toThrow(/Not Found/);
+  });
+});
+
+describe('conditional review thread reads', () => {
+  const pull = { projectPath: root, repository, number: 1 };
+  const first = { id: 1, path: 'example.txt', line: 1, side: 'RIGHT', body: 'first page' };
+  const second = { id: 2, path: 'example.txt', line: 2, side: 'RIGHT', body: 'second page' };
+  let metrics;
+  beforeEach(() => {
+    metrics = path.join(root, 'gh-metrics.jsonl');
+    process.env.GH_FAKE_METRICS = metrics;
+  });
+  afterEach(() => { delete process.env.GH_FAKE_METRICS; });
+  const fixture = (config = {}) => fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic', ...config }));
+  const takeMetrics = async () => {
+    const lines = (await Bun.file(metrics).exists()) ? (await fs.readFile(metrics, 'utf8')).trim().split('\n').filter(Boolean) : [];
+    await fs.rm(metrics, { force: true });
+    return lines.map(line => JSON.parse(line)).filter(entry => entry.command.startsWith('api'));
+  };
+  const takeValidators = async () => {
+    const file = path.join(root, 'gh-calls.jsonl');
+    const lines = (await Bun.file(file).exists()) ? (await fs.readFile(file, 'utf8')).trim().split('\n').filter(Boolean) : [];
+    await fs.rm(file, { force: true });
+    return lines.map(line => JSON.parse(line)).filter(args => args[0] === 'api')
+      .map(args => args.find(arg => arg.startsWith('If-None-Match:')) ?? null);
+  };
+  const bodies = (read) => read.threads.flatMap(thread => thread.comments.map(comment => comment.body));
+  const read = (gh) => gh.getPullRequestReviewThreads({ ...pull, projectPath: root });
+
+  it('reuses every unchanged page from a 304', async () => {
+    await fixture({ commentPages: [[first], [second]] });
+    const gh = createGhOperations(root);
+    expect(bodies(await read(gh))).toEqual(['first page', 'second page']);
+    expect(await takeValidators()).toEqual([null, null]);
+    expect((await takeMetrics()).map(entry => entry.code)).toEqual([0, 0]);
+    expect(bodies(await read(gh))).toEqual(['first page', 'second page']);
+    expect((await takeValidators()).every(Boolean)).toBe(true);
+    const revalidated = await takeMetrics();
+    // Each page is still one request, but carries no body.
+    expect(revalidated.map(entry => entry.requests)).toEqual([1, 1]);
+    expect(revalidated.map(entry => entry.code)).toEqual([1, 1]);
+    expect(revalidated.every(entry => !(entry.stdoutBytes > 200))).toBe(true);
+  });
+
+  it('binds conditional page reads to the credential used for their cache key', async () => {
+    await fixture({ token: 'synthetic-captured-token', expectedRestToken: 'synthetic-captured-token', commentPages: [[first]] });
+    const gh = createGhOperations(root);
+    expect(bodies(await read(gh))).toEqual(['first page']);
+    expect(bodies(await read(gh))).toEqual(['first page']);
+  });
+
+  it('rereads a page whose body changed', async () => {
+    await fixture({ commentPages: [[first]] });
+    const gh = createGhOperations(root);
+    await read(gh);
+    await fixture({ commentPages: [[first, second]] });
+    expect(bodies(await read(gh))).toEqual(['first page', 'second page']);
+    expect((await takeMetrics()).at(-1).code).toBe(0);
+  });
+
+  it('probes past an unchanged full last page', async () => {
+    const full = Array.from({ length: 100 }, (_, index) => ({ ...first, id: index + 1, body: `comment ${index + 1}` }));
+    await fixture({ commentPages: [full] });
+    const gh = createGhOperations(root);
+    await read(gh);
+    await takeMetrics();
+    await fixture({ commentPages: [full, [second]] });
+    expect(bodies(await read(gh))).toHaveLength(101);
+    expect((await takeMetrics()).map(entry => entry.code)).toEqual([1, 0]);
+  });
+
+  it('scopes validators to the account gh sends', async () => {
+    await fixture({ commentPages: [[first]], token: 'token-one' });
+    const gh = createGhOperations(root);
+    await read(gh);
+    await takeValidators();
+    await fixture({ commentPages: [[first]], token: 'token-two' });
+    await read(gh);
+    expect(await takeValidators()).toEqual([null]);
+    await read(gh);
+    expect((await takeValidators())[0]).toStartWith('If-None-Match: W/');
+  });
+
+  it('reads unconditionally and caches nothing without a token', async () => {
+    await fixture({ commentPages: [[first]], authTokenFails: true });
+    const caches = new GhReadCaches();
+    const gh = createGhOperations(root, caches);
+    await read(gh);
+    await read(gh);
+    expect(await takeValidators()).toEqual([null, null]);
+    expect(caches.responses.size).toBe(0);
+  });
+
+  it('forgets the repository when access is lost and never serves its cached body', async () => {
+    await fixture({ commentPages: [[first]] });
+    const caches = new GhReadCaches();
+    const gh = createGhOperations(root, caches);
+    await read(gh);
+    expect(caches.responses.size).toBe(1);
+    await fixture({ commentPages: [[first]], commentsFail: true });
+    await expect(read(gh)).rejects.toThrow(/forbidden/);
+    expect(caches.responses.size).toBe(0);
+    await fixture({ commentPages: [[first]] });
+    await takeValidators();
+    await read(gh);
+    expect(await takeValidators()).toEqual([null]);
+  });
+
+  it('keeps cached pages through a rate-limit 403, which says nothing about access', async () => {
+    for (const message of ['API rate limit exceeded for user ID 1.', 'You have exceeded a secondary rate limit.']) {
+      await fixture({ commentPages: [[first]] });
+      const caches = new GhReadCaches();
+      const gh = createGhOperations(root, caches);
+      await read(gh);
+      await fixture({ commentPages: [[first]], commentsFail: message });
+      await expect(read(gh)).rejects.toThrow(/rate limit/);
+      expect(caches.responses.size).toBe(1);
+    }
+  });
+});
+
+describe('caller-owned reads', () => {
+  it('does not disclose an account A read to an unauthorized account B caller', async () => {
+    await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic', login: 'account-a', holdStatus: true }));
+    const gh = createGhOperations(root);
+    const started = Promise.withResolvers();
+    const watcher = watch(root, (_event, file) => { if (file === 'gh-status-started') started.resolve(); });
+    const a = gh.getPullRequestStatus({ projectPath: root, repository, number: 1 });
+    let b;
+    try {
+      await started.promise;
+      await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic', login: 'account-b', fail: { 'pr view': 'HTTP 404: Not Found' } }));
+      b = gh.getPullRequestStatus({ projectPath: root, repository, number: 1 });
+      const outcomes = Promise.allSettled([a, b]);
+      await fs.writeFile(path.join(root, 'gh-status-release'), 'released');
+      const [first, second] = await outcomes;
+      expect(first.status).toBe('fulfilled');
+      expect(second.status).toBe('rejected');
+      expect(second.reason.message).toContain('Not Found');
+    } finally {
+      watcher.close();
+      await fs.writeFile(path.join(root, 'gh-status-release'), 'released');
+      await Promise.allSettled([a, ...(b ? [b] : [])]);
+    }
+  });
+
+  const readCalls = async () => {
+    const file = path.join(root, 'gh-calls.jsonl');
+    const lines = (await Bun.file(file).exists()) ? (await fs.readFile(file, 'utf8')).trim().split('\n').filter(Boolean) : [];
+    await fs.rm(file, { force: true });
+    return lines.map(line => JSON.parse(line).slice(0, 2).join(' '));
+  };
+
+  it('executes each caller under its current authorization', async () => {
+    await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic' }));
+    const gh = createGhOperations(root);
+    const reads = await Promise.all([1, 2, 3].map(() => gh.getPullRequestStatus({ projectPath: root, repository, number: 1 })));
+    expect(reads.map(read => read.number)).toEqual([1, 1, 1]);
+    const calls = await readCalls();
+    expect(calls.filter(call => call === 'repo view')).toHaveLength(3);
+    expect(calls.filter(call => call === 'pr view')).toHaveLength(3);
+  });
+
+});
+
+describe('pull request fingerprints', () => {
+  const second = { host: 'git.example.invalid', nameWithOwner: 'second/repository' };
+  const missing = { host: 'git.example.invalid', nameWithOwner: 'missing/repository' };
+  const writeFixtures = async (primary = {}, other = {}) => {
+    await fs.writeFile(path.join(root, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic', ...primary }));
+    await fs.mkdir(path.join(root, 'second'), { recursive: true });
+    await fs.writeFile(path.join(root, 'second', 'gh-fixture.json'), JSON.stringify({ label: 'second', ...other }));
+  };
+  const graphqlCalls = async () => {
+    const file = path.join(root, 'gh-calls.jsonl');
+    const lines = (await fs.readFile(file, 'utf8')).trim().split('\n').filter(Boolean);
+    await fs.rm(file, { force: true });
+    return lines.map(line => JSON.parse(line)).filter(args => args[0] === 'api');
+  };
+
+  it('reads aliased repositories in one query and maps each failure to its repository', async () => {
+    await writeFixtures({
+      pulls: [{ number: 3, checks: 'PENDING', reviewDecision: 'APPROVED', mergeable: 'CONFLICTING', reviewCount: 2, reviewThreadCount: 1 }],
+    }, { pulls: [{ number: 1 }, { number: 2, state: 'CLOSED' }] });
+    const batch = await createGhOperations(root).getPullRequestFingerprints({ repositories: [repository, missing, second] });
+    expect(await graphqlCalls()).toHaveLength(1);
+    expect(batch.viewerLogin).toBe('synthetic');
+    expect(batch.repositories).toEqual([
+      { kind: 'read', repo: { nameWithOwner: 'synthetic/repository', url: 'https://git.example.invalid/synthetic/repository' }, pulls: [{
+        number: 3, updatedAt: '2026-01-01T00:00:00Z', isDraft: false, headRefOid: 'a'.repeat(40), baseRefOid: 'e'.repeat(40),
+        checksState: 'pending', reviewDecision: 'approved', mergeable: 'conflicting',
+        reviewCount: 2, reviewThreadCount: 1,
+      }] },
+      { kind: 'failed', reason: 'not-found', message: "Could not resolve to a Repository with the name 'missing/repository'." },
+      { kind: 'read', repo: { nameWithOwner: 'second/repository', url: 'https://git.example.invalid/second/repository' }, pulls: [expect.objectContaining({ number: 1 })] },
+    ]);
+  });
+
+  it('reads the same fingerprint as the full list, so a full read is never a false change', async () => {
+    await writeFixtures({ pulls: [{ number: 3, checks: 'PENDING', reviewDecision: 'APPROVED', mergeable: 'CONFLICTING', reviewCount: 2, reviewThreadCount: 1 }] });
+    const gh = createGhOperations(root);
+    const { pulls: [summary] } = await gh.listPullRequests({ projectPath: root, repository });
+    const { repositories: [read] } = await gh.getPullRequestFingerprints({ repositories: [repository] });
+    expect(summary).toMatchObject(read.pulls[0]);
+  });
+
+  it('marks a repository with more than one page of open pull requests incomplete', async () => {
+    await writeFixtures({ pulls: Array.from({ length: 101 }, (_, index) => ({ number: index + 1 })) });
+    const batch = await createGhOperations(root).getPullRequestFingerprints({ repositories: [repository, second] });
+    expect(batch.repositories.map(entry => entry.kind)).toEqual(['incomplete', 'read']);
+  });
+
+  it('maps a refused repository without failing the others', async () => {
+    await writeFixtures({}, { fingerprintError: 'FORBIDDEN' });
+    const batch = await createGhOperations(root).getPullRequestFingerprints({ repositories: [repository, second] });
+    expect(batch.repositories.map(entry => entry.kind === 'failed' ? entry.reason : entry.kind)).toEqual(['read', 'forbidden']);
+  });
+
+  it('fails the whole batch rather than reporting any repository unchanged', async () => {
+    await writeFixtures({ fingerprintFailure: 'gh: API rate limit exceeded for user ID 1.' });
+    await expect(createGhOperations(root).getPullRequestFingerprints({ repositories: [repository, second] })).rejects.toThrow(/rate limit/);
   });
 });

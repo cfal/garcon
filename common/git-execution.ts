@@ -45,7 +45,7 @@ export const GIT_OPERATION_TIMEOUT_MS = 30_000;
 export const GH_DETAIL_TIMEOUT_MS = 60_000;
 
 const GH_DETAIL_READS: ReadonlySet<keyof GhResults> = new Set<keyof GhResults>([
-  'listPullRequests', 'getPullRequestStatus', 'getPullRequestDiff', 'getPullRequestReviewThreads', 'getPullRequestReviewTarget',
+  'listPullRequests', 'getPullRequestFingerprints', 'getPullRequestStatus', 'getPullRequestDiff', 'getPullRequestReviewThreads', 'getPullRequestReviewTarget',
 ]);
 
 export function ghOperationTimeoutMs(method: keyof GhResults): number {

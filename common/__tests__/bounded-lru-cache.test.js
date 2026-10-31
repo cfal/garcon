@@ -39,3 +39,14 @@ test('replacing, deleting, and clearing keep the byte total exact', () => {
   expect(values.size).toBe(0);
   expect(values.bytes).toBe(0);
 });
+
+test('deletes matching entries and releases their bytes', () => {
+  const values = cache(10, 10);
+  values.set('keep', 'xx');
+  values.set('drop-1', 'xxx');
+  values.set('drop-2', 'xxx');
+  values.deleteWhere((key) => key.startsWith('drop'));
+  expect(values.size).toBe(1);
+  expect(values.bytes).toBe(2);
+  expect(values.get('keep')).toBe('xx');
+});

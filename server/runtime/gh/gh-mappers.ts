@@ -17,6 +17,7 @@ import type {
   PullRequestChecksState,
   PullRequestCommits,
   PullRequestDiff,
+  PullRequestFingerprint,
   PullRequestMergeable,
   PullRequestReviewDecision,
   PullRequestState,
@@ -143,27 +144,34 @@ export interface GhRawNodes<T> {
   issueCount?: number;
 }
 
-export interface GhRawListPullRequest {
+export interface GhRawFingerprintPullRequest {
   number: number;
+  updatedAt?: string;
+  isDraft?: boolean;
+  headRefOid?: string;
+  baseRefOid?: string;
+  mergeable?: string;
+  reviewDecision?: string | null;
+  reviews?: { totalCount?: number } | null;
+  reviewThreads?: { totalCount?: number } | null;
+  commits?: GhRawNodes<{ commit?: { statusCheckRollup?: { state?: string } | null } | null }> | null;
+}
+
+export interface GhRawListPullRequest extends GhRawFingerprintPullRequest {
   title?: string;
   url?: string;
   state?: string;
-  isDraft?: boolean;
   createdAt?: string;
-  updatedAt?: string;
   author?: { login?: string; __typename?: string } | null;
   authorAssociation?: string;
   headRefName?: string;
   baseRefName?: string;
-  headRefOid?: string;
   isCrossRepository?: boolean;
   additions?: number;
   deletions?: number;
   changedFiles?: number;
-  reviewDecision?: string | null;
   labels?: GhRawNodes<{ name?: string }> | null;
   reviewRequests?: GhRawNodes<{ requestedReviewer?: { __typename?: string; login?: string } | null }> | null;
-  commits?: GhRawNodes<{ commit?: { statusCheckRollup?: { state?: string } | null } | null }> | null;
 }
 
 export interface GhRawPullRequestList {
@@ -213,6 +221,21 @@ function mapRollupState(raw: string | undefined): PullRequestChecksState {
   return 'none';
 }
 
+export function mapFingerprint(raw: GhRawFingerprintPullRequest): PullRequestFingerprint {
+  return {
+    number: raw.number,
+    updatedAt: raw.updatedAt ?? '',
+    isDraft: Boolean(raw.isDraft),
+    headRefOid: raw.headRefOid ?? '',
+    baseRefOid: raw.baseRefOid ?? '',
+    checksState: mapRollupState(nodes(raw.commits)[0]?.commit?.statusCheckRollup?.state),
+    reviewDecision: mapReviewDecision(raw.reviewDecision ?? undefined),
+    mergeable: mapMergeable(raw.mergeable),
+    reviewCount: raw.reviews?.totalCount ?? 0,
+    reviewThreadCount: raw.reviewThreads?.totalCount ?? 0,
+  };
+}
+
 export function mapSummary(
   raw: GhRawListPullRequest,
   viewerLogin: string | null,
@@ -222,10 +245,9 @@ export function mapSummary(
   const requestedDirectly = viewerLogin !== null && nodes(raw.reviewRequests)
     .some((request) => request.requestedReviewer?.__typename === 'User' && request.requestedReviewer.login === viewerLogin);
   return {
-    number: raw.number,
+    ...mapFingerprint(raw),
     title: raw.title ?? '',
     state: mapPrState(raw.state),
-    isDraft: Boolean(raw.isDraft),
     author,
     headRefName: raw.headRefName ?? '',
     baseRefName: raw.baseRefName ?? '',
@@ -233,11 +255,7 @@ export function mapSummary(
     deletions: raw.deletions ?? 0,
     changedFiles: raw.changedFiles ?? 0,
     createdAt: raw.createdAt ?? '',
-    updatedAt: raw.updatedAt ?? '',
     url: raw.url ?? '',
-    reviewDecision: mapReviewDecision(raw.reviewDecision ?? undefined),
-    checksState: mapRollupState(nodes(raw.commits)[0]?.commit?.statusCheckRollup?.state),
-    headRefOid: raw.headRefOid ?? '',
     isCrossRepository: Boolean(raw.isCrossRepository),
     authorAssociation: mapAuthorAssociation(raw.authorAssociation),
     authorIsBot: raw.author?.__typename === 'Bot',

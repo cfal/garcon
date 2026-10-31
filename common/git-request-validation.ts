@@ -4,7 +4,7 @@ import type { GitMethod } from './git.js';
 import type { ExecutionGitRequests, GitReviewDocumentRef } from './git-execution.js';
 import { GIT_MAX_REQUEST_BYTES, GIT_MAX_REQUEST_PATHS } from './git-execution.js';
 import { GitServiceError } from './git-error.js';
-import { GH_COMMENT_BODY_MAX_LENGTH, GH_COMMENT_ID_MAX_LENGTH, GH_COMMENT_MARKER_MAX_LENGTH, type GhRequests } from './gh.js';
+import { GH_COMMENT_BODY_MAX_LENGTH, GH_COMMENT_ID_MAX_LENGTH, GH_COMMENT_MARKER_MAX_LENGTH, GH_FINGERPRINT_BATCH_SIZE, type GhRequests } from './gh.js';
 
 const path = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 4096 && !v.includes('\0');
 const text = (v: unknown): v is string => typeof v === 'string' && v.length <= 64 * 1024 && !v.includes('\0');
@@ -60,6 +60,7 @@ export function isGitMethod(value: unknown): value is GitMethod {
 export const GH_REQUEST_FIELDS = {
   getStatus: [],
   listPullRequests: ['projectPath', 'repository'],
+  getPullRequestFingerprints: ['repositories'],
   getPullRequestStatus: ['projectPath', 'repository', 'number'],
   getPullRequestDiff: ['projectPath', 'repository', 'number', 'commits'],
   getPullRequestReviewThreads: ['projectPath', 'repository', 'number'],
@@ -74,10 +75,19 @@ export function isGhMethod(value: unknown): value is keyof GhRequests {
 
 const bounded = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max && !v.includes('\0');
 
+// One GraphQL query covers the batch, so it names one host and no repository twice.
+function fingerprintRepositories(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length === 0 || value.length > GH_FINGERPRINT_BATCH_SIZE || !value.every(isGhRepositoryIdentity)) return false;
+  const host = value[0].host.toLowerCase();
+  const names = new Set(value.map(repository => repository.nameWithOwner.toLowerCase()));
+  return names.size === value.length && value.every(repository => repository.host.toLowerCase() === host);
+}
+
 export function validateGhRequest<K extends keyof GhRequests>(method: K, request: unknown): asserts request is GhRequests[K] {
   const keys: readonly string[] = GH_REQUEST_FIELDS[method];
   const valid = isRecord(request) && fields(request, keys)
     && (!keys.includes('projectPath') || path(request.projectPath))
+    && (!keys.includes('repositories') || fingerprintRepositories(request.repositories))
     && (!keys.includes('repository') || method === 'listPullRequests' && request.repository === undefined || isGhRepositoryIdentity(request.repository))
     && (!keys.includes('actor') || isGhActorIdentity(request.actor))
     && (!keys.includes('number') || integer(request.number, Number.MAX_SAFE_INTEGER) && request.number !== 0)
