@@ -18,7 +18,10 @@ export interface GhStatusResponse {
 export interface GhResults {
   getStatus: GhStatusResponse;
   listPullRequests: PullRequestListResult;
-  getPullRequest: PullRequestDetail;
+  getPullRequestFingerprints: PullRequestFingerprintBatch;
+  getPullRequestStatus: PullRequestStatus;
+  getPullRequestDiff: PullRequestDiff;
+  getPullRequestReviewThreads: PullRequestReviewThreads;
   getPullRequestReviewTarget: PullRequestReviewTarget;
   createPullRequestComment: PullRequestCommentRef;
   minimizePullRequestComment: PullRequestCommentMinimized;
@@ -27,7 +30,12 @@ export interface GhResults {
 export interface GhRequests {
   getStatus: Record<string, never>;
   listPullRequests: { projectPath: string; repository?: GhRepositoryIdentity };
-  getPullRequest: { projectPath: string; repository: GhRepositoryIdentity; number: number };
+  // Distinct repositories on one GitHub host, at most `GH_FINGERPRINT_BATCH_SIZE`.
+  getPullRequestFingerprints: { repositories: GhRepositoryIdentity[] };
+  getPullRequestStatus: { projectPath: string; repository: GhRepositoryIdentity; number: number };
+  // The diff is read only while the pull request is still at `commits`.
+  getPullRequestDiff: { projectPath: string; repository: GhRepositoryIdentity; number: number; commits: PullRequestCommits };
+  getPullRequestReviewThreads: { projectPath: string; repository: GhRepositoryIdentity; number: number };
   getPullRequestReviewTarget: { projectPath: string; repository: GhRepositoryIdentity; number: number; marker: string };
   createPullRequestComment: { projectPath: string; repository: GhRepositoryIdentity; actor: GhActorIdentity; number: number; body: string; expected: { state: 'open'; headRefOid: string } };
   minimizePullRequestComment: { projectPath: string; repository: GhRepositoryIdentity; actor: GhActorIdentity; commentId: string };
@@ -78,6 +86,9 @@ export type PullRequestCheckState =
   | 'neutral'
   | 'skipped';
 
+// Each GraphQL fingerprint query aliases at most this many repositories.
+export const GH_FINGERPRINT_BATCH_SIZE = 25;
+
 export interface PullRequestSummary {
   number: number;
   title: string;
@@ -94,7 +105,11 @@ export interface PullRequestSummary {
   url: string;
   reviewDecision: PullRequestReviewDecision;
   checksState: PullRequestChecksState;
+  mergeable: PullRequestMergeable;
   headRefOid: string;
+  baseRefOid: string;
+  reviewCount: number;
+  reviewThreadCount: number;
   // True when the head branch lives in another repository, such as a fork.
   isCrossRepository: boolean;
   authorAssociation: PullRequestAuthorAssociation;
@@ -102,6 +117,28 @@ export interface PullRequestSummary {
   authoredByViewer: boolean;
   labels: string[];
   reviewRequest: PullRequestReviewRequest;
+}
+
+// The summary fields that decide which reads of a pull request are stale.
+export const PULL_REQUEST_FINGERPRINT_FIELDS = [
+  'number', 'updatedAt', 'isDraft', 'headRefOid', 'baseRefOid', 'checksState',
+  'reviewDecision', 'mergeable', 'reviewCount', 'reviewThreadCount',
+] as const satisfies readonly (keyof PullRequestSummary)[];
+
+export type PullRequestFingerprint = Pick<PullRequestSummary, typeof PULL_REQUEST_FINGERPRINT_FIELDS[number]>;
+
+// One repository of a fingerprint batch. A repository GitHub would not read, or
+// one with more open pull requests than a single page, carries no fingerprints,
+// so a caller cannot mistake it for an unchanged one.
+export type RepositoryPullRequestFingerprints =
+  | { kind: 'read'; repo: { nameWithOwner: string; url: string }; pulls: PullRequestFingerprint[] }
+  | { kind: 'incomplete' }
+  | { kind: 'failed'; reason: 'not-found' | 'forbidden' | 'error'; message: string };
+
+export interface PullRequestFingerprintBatch {
+  viewerLogin: string;
+  // In request order.
+  repositories: RepositoryPullRequestFingerprints[];
 }
 
 export interface PullRequestListResult {
@@ -159,7 +196,16 @@ export interface PullRequestCheck {
   url?: string;
 }
 
-export interface PullRequestDetail {
+// The commit pair a pull request diff is computed from. GitHub diffs the head
+// against its merge base with the base, so the pair identifies the diff exactly.
+export interface PullRequestCommits {
+  baseRefOid: string;
+  headRefOid: string;
+}
+
+// Metadata that changes without a push: checks, review decision, mergeability,
+// and the commit pair that tells a reader whether its diff is still current.
+export interface PullRequestStatus extends PullRequestCommits {
   number: number;
   title: string;
   body: string;
@@ -174,11 +220,18 @@ export interface PullRequestDetail {
   createdAt: string;
   updatedAt: string;
   url: string;
-  headRefOid: string;
   mergeable: PullRequestMergeable;
   reviewDecision: PullRequestReviewDecision;
   checks: PullRequestCheck[];
+}
+
+export interface PullRequestDiff extends PullRequestCommits {
+  number: number;
   files: GitReviewFileSummary[];
   fileBodies: Record<string, GitReviewFilePatchBody>;
+}
+
+export interface PullRequestReviewThreads extends PullRequestCommits {
+  number: number;
   threads: PullRequestThread[];
 }

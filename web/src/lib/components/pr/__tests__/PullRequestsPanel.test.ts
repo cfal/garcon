@@ -12,7 +12,13 @@ import {
 	type PullRequestReviewsSnapshot,
 } from '$shared/pull-request-reviews';
 import type { PullRequestSummary } from '$shared/gh';
-import type { PullRequestDetail } from '$lib/api/pull-requests';
+import { ApiError } from '$lib/api/client';
+import type {
+	getPullRequestDiff,
+	getPullRequestReviewThreads,
+	getPullRequestStatus,
+	PullRequestStatus,
+} from '$lib/api/pull-requests';
 import type {
 	getPullRequestReviewRuns,
 	getPullRequestReviewRun,
@@ -21,6 +27,7 @@ import type {
 afterEach(cleanup);
 
 const HEAD = 'a'.repeat(40);
+const BASE = 'e'.repeat(40);
 
 function pull(number: number, overrides: Partial<PullRequestSummary>): PullRequestSummary {
 	return {
@@ -39,7 +46,11 @@ function pull(number: number, overrides: Partial<PullRequestSummary>): PullReque
 		url: `https://github.com/acme/app/pull/${number}`,
 		reviewDecision: null,
 		checksState: 'passing',
+		mergeable: 'mergeable',
 		headRefOid: HEAD,
+		baseRefOid: BASE,
+		reviewCount: 0,
+		reviewThreadCount: 0,
 		isCrossRepository: false,
 		authorAssociation: 'member',
 		authorIsBot: false,
@@ -116,10 +127,20 @@ const snapshot: PullRequestReviewsSnapshot = {
 	recentRuns: [run],
 };
 
+function pullStatus(checks: PullRequestStatus['checks']): PullRequestStatus {
+	return {
+		...snapshot.inbox[0].pull,
+		baseRefOid: BASE,
+		body: '',
+		mergeable: 'mergeable',
+		checks,
+	};
+}
+
 function setup(
 	options: {
 		getRuns?: () => Promise<PullRequestReviewRunDetail[]>;
-		getDetail?: () => Promise<PullRequestDetail>;
+		getStatus?: typeof getPullRequestStatus;
 		getPage?: typeof getPullRequestReviewRuns;
 		getRun?: typeof getPullRequestReviewRun;
 		snapshot?: PullRequestReviewsSnapshot;
@@ -136,13 +157,30 @@ function setup(
 		post: vi.fn(async () => snapshot),
 		abandon: vi.fn(async () => snapshot),
 	} satisfies PullRequestReviewsApi;
-	const getDetail = vi.fn(options.getDetail ?? (() => new Promise<never>(() => {})));
+	const getStatus = vi.fn<typeof getPullRequestStatus>(
+		options.getStatus ?? (() => new Promise<never>(() => {})),
+	);
+	const getDiff = vi.fn<typeof getPullRequestDiff>(async (_target, number, commits) => ({
+		number,
+		...commits,
+		documentId: 'document',
+		files: [],
+		fileBodies: {},
+	}));
+	const getReviewThreads = vi.fn<typeof getPullRequestReviewThreads>(async (_target, number) => ({
+		number,
+		baseRefOid: BASE,
+		headRefOid: HEAD,
+		threads: [],
+	}));
 	const getRuns = vi.fn(options.getRuns ?? (async () => [run]));
 	const details = new Map<string, PullRequestReviewRunDetail>();
 	const getRun = vi.fn(options.getRun ?? (async (id: string) => details.get(id)!));
 	const controller = new PullRequestsStore({
 		reviews: new PullRequestReviewsStore(api),
-		getDetail,
+		getStatus,
+		getDiff,
+		getReviewThreads,
 		getRuns:
 			options.getPage ??
 			(async () => {
@@ -162,7 +200,7 @@ function setup(
 		controller,
 		onOpenChat,
 	});
-	return { api, onOpenChat, controller, getDetail, getRuns, getRun };
+	return { api, onOpenChat, controller, getStatus, getDiff, getReviewThreads, getRuns, getRun };
 }
 
 describe('PullRequestsPanel', () => {
@@ -429,76 +467,39 @@ describe('PullRequestsPanel', () => {
 
 	it('counts neutral and skipped checks separately', async () => {
 		setup({
-			getDetail: async () => ({
-				...snapshot.inbox[0].pull,
-				documentId: 'document',
-				body: '',
-				mergeable: 'mergeable',
-				checks: [
+			getStatus: async () =>
+				pullStatus([
 					{ name: 'Advisory', state: 'neutral' },
 					{ name: 'Optional', state: 'skipped' },
-				],
-				files: [],
-				fileBodies: {},
-				threads: [],
-			}),
+				]),
 		});
 		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
 		await fireEvent.click(screen.getByRole('tab', { name: 'Checks' }));
 		await screen.findByText('1 neutral · 1 skipped');
 	});
 
-	it('aborts stale detail after a push and clears a closed selection', async () => {
-		const reviews = new PullRequestReviewsStore();
-		reviews.apply(snapshot);
-		const first = Promise.withResolvers<PullRequestDetail>();
-		const second = Promise.withResolvers<PullRequestDetail>();
-		const getDetail = vi
-			.fn()
-			.mockReturnValueOnce(first.promise)
-			.mockReturnValueOnce(second.promise);
-		const controller = new PullRequestsStore({
-			reviews,
-			getDetail,
-			getRuns: vi.fn(async () => ({ runs: [run], nextCursor: null, revision: 1 })),
-			getRun: vi.fn(async () => run),
+	it('keeps the last checks beside a failed refresh until an explicit retry succeeds', async () => {
+		const { getStatus, getDiff } = setup({
+			getStatus: async () => pullStatus([{ name: 'Build', state: 'success' }]),
 		});
-		controller.setPresentationVisible(true);
-		controller.select(snapshot.inbox[0]);
-		const oldSignal = getDetail.mock.calls[0][2].signal;
-		const newHead = 'b'.repeat(40);
-		reviews.apply({
-			...snapshot,
-			revision: 2,
-			inbox: [{ ...snapshot.inbox[0], pull: { ...snapshot.inbox[0].pull, headRefOid: newHead } }],
-		});
-		controller.syncSelection();
-		expect(oldSignal.aborted).toBe(true);
-		expect(getDetail).toHaveBeenCalledTimes(2);
-		const detail = {
-			...snapshot.inbox[0].pull,
-			documentId: 'document',
-			body: '',
-			mergeable: 'mergeable',
-			checks: [],
-			files: [],
-			fileBodies: {},
-			threads: [],
-		} satisfies PullRequestDetail;
-		first.resolve(detail);
-		await Promise.resolve();
-		expect(controller.detail).toBeNull();
-		second.resolve({ ...detail, headRefOid: newHead });
-		await waitFor(() => expect(controller.detail?.headRefOid).toBe(newHead));
-		reviews.apply({ ...snapshot, revision: 3, inbox: [] });
-		controller.syncSelection();
-		expect(controller.hasSelection).toBe(false);
-		expect(controller.detail).toBeNull();
-		controller.dispose();
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await fireEvent.click(screen.getByRole('tab', { name: 'Checks' }));
+		await screen.findByText('Build');
+		getStatus.mockRejectedValueOnce(
+			new ApiError(503, 'Synthetic status unavailable', 'GH_OPERATION_FAILED'),
+		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+		await screen.findByText('Synthetic status unavailable');
+		expect(screen.getByText('Build')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		await waitFor(() => expect(screen.queryByText('Synthetic status unavailable')).toBeNull());
+		expect(getStatus).toHaveBeenCalledTimes(3);
+		// Checks alone changed, so the diff was read once.
+		expect(getDiff).toHaveBeenCalledTimes(1);
 	});
 
-	it('reloads selected detail after changing the repository executor and folder', async () => {
-		const { controller, getDetail } = setup();
+	it('reloads selected status after changing the repository executor and folder', async () => {
+		const { controller, getStatus } = setup();
 		await screen.findByText('Needs my review');
 		controller.select(snapshot.inbox[0]);
 		const current = controller.reviews.snapshot!;
@@ -516,8 +517,9 @@ describe('PullRequestsPanel', () => {
 				},
 			],
 		});
-		await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(2));
-		expect(getDetail).toHaveBeenLastCalledWith(
+		await waitFor(() => expect(getStatus).toHaveBeenCalledTimes(2));
+		expect(getStatus.mock.calls[0][2]?.signal?.aborted).toBe(true);
+		expect(getStatus).toHaveBeenLastCalledWith(
 			{
 				executorId: '11111111-1111-4111-8111-111111111111',
 				projectPath: '/remote/app',

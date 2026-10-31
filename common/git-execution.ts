@@ -44,9 +44,12 @@ export function isGitMutation(method: GitMethod): boolean {
 export const GIT_OPERATION_TIMEOUT_MS = 30_000;
 export const GH_DETAIL_TIMEOUT_MS = 60_000;
 
+const GH_DETAIL_READS: ReadonlySet<keyof GhResults> = new Set<keyof GhResults>([
+  'listPullRequests', 'getPullRequestFingerprints', 'getPullRequestStatus', 'getPullRequestDiff', 'getPullRequestReviewThreads', 'getPullRequestReviewTarget',
+]);
+
 export function ghOperationTimeoutMs(method: keyof GhResults): number {
-  return method === 'getPullRequest' || method === 'listPullRequests' || method === 'getPullRequestReviewTarget'
-    ? GH_DETAIL_TIMEOUT_MS : GIT_OPERATION_TIMEOUT_MS;
+  return GH_DETAIL_READS.has(method) ? GH_DETAIL_TIMEOUT_MS : GIT_OPERATION_TIMEOUT_MS;
 }
 export const GIT_MAX_RESULT_BYTES = 4 * 1024 * 1024;
 export const GIT_MAX_CONCURRENT_QUERIES = 8;

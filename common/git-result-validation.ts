@@ -2,8 +2,8 @@ import { isRecord } from './json.js';
 import { GitServiceError } from './git-error.js';
 import { GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitResults, type ExecutionGhResults, type GitExecutorScope } from './git-execution.js';
 import type { GitMethod } from './git.js';
-import { PULL_REQUEST_AUTHOR_ASSOCIATIONS } from './gh.js';
-import { isGhActorIdentity, isGhRepositoryIdentity } from './gh-identity.js';
+import { GH_FINGERPRINT_BATCH_SIZE, PULL_REQUEST_AUTHOR_ASSOCIATIONS } from './gh.js';
+import { isGhActorIdentity, isGhCommitOid, isGhRepositoryIdentity } from './gh-identity.js';
 
 type Check = (value: unknown) => boolean;
 const str: Check = v => typeof v === 'string';
@@ -151,14 +151,24 @@ export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, 
     additions: num, deletions: num, changedFiles: num, createdAt: str, updatedAt: str, url: str, headRefOid: str,
     reviewDecision: oneOf('approved', 'changes_requested', 'review_required', null) };
   const state = oneOf('open', 'closed', 'merged');
+  const commits = { baseRefOid: isGhCommitOid, headRefOid: isGhCommitOid };
+  const mergeable = oneOf('mergeable', 'conflicting', 'unknown');
+  const fingerprint = { number: num, updatedAt: str, isDraft: bool, headRefOid: str, baseRefOid: str,
+    checksState: oneOf('passing', 'failing', 'pending', 'none'), reviewDecision: identity.reviewDecision,
+    mergeable, reviewCount: num, reviewThreadCount: num };
   let valid: boolean;
   if (method === 'getStatus') {
     valid = shape(value, { available: bool, authenticated: bool, reason: oneOf('authenticated', 'unauthenticated', 'gh_missing', 'auth_error', 'unknown'), login: optional(str), host: optional(str) });
   } else if (method === 'listPullRequests') {
-    valid = shape(value, { pulls: array(x => shape(x, { ...identity, checksState: oneOf('passing', 'failing', 'pending', 'none'),
+    valid = shape(value, { pulls: array(x => shape(x, { ...identity, ...fingerprint,
       isCrossRepository: bool, authorAssociation: oneOf(...PULL_REQUEST_AUTHOR_ASSOCIATIONS), authorIsBot: bool, authoredByViewer: bool,
       labels: array(str), reviewRequest: oneOf('me', 'team', null) })),
       repo: nullable(x => shape(x, { nameWithOwner: str, url: str })), viewerLogin: nullable(str) });
+  } else if (method === 'getPullRequestFingerprints') {
+    valid = shape(value, { viewerLogin: str, repositories: array(x => shape(x, { kind: oneOf('incomplete') })
+      || shape(x, { kind: oneOf('failed'), reason: oneOf('not-found', 'forbidden', 'error'), message: str })
+      || shape(x, { kind: oneOf('read'), repo: v => shape(v, { nameWithOwner: str, url: str }), pulls: array(p => shape(p, fingerprint), 100) }),
+    GH_FINGERPRINT_BATCH_SIZE) });
   } else if (method === 'getPullRequestReviewTarget') {
     valid = shape(value, { repository: isGhRepositoryIdentity, viewer: isGhActorIdentity, number: num, state, headRefOid: str,
       markedComments: array(x => shape(x, { id: str, url: str, marker: str, isMinimized: bool, author: nullable(isGhActorIdentity) })) });
@@ -166,11 +176,16 @@ export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, 
     valid = shape(value, { id: str, url: str });
   } else if (method === 'minimizePullRequestComment') {
     valid = shape(value, { minimized: bool });
+  } else if (method === 'getPullRequestStatus') {
+    valid = shape(value, { ...identity, ...commits, body: str, mergeable: oneOf('mergeable', 'conflicting', 'unknown'),
+      checks: array(x => shape(x, { name: str, state: oneOf('success', 'failure', 'pending', 'neutral', 'skipped'), url: optional(str) })) });
+  } else if (method === 'getPullRequestDiff') {
+    valid = shape(value, { number: num, ...commits, files: array(reviewFile, 10_000), fileBodies: map(isGitPatchBody) });
+  } else if (method === 'getPullRequestReviewThreads') {
+    valid = shape(value, { number: num, ...commits, threads: array(x => shape(x, { id: str, path: str, side: oneOf('before', 'after'), line: num, diffHunk: str, isOutdated: bool,
+      comments: array(c => shape(c, { id: num, author: str, body: str, createdAt: str })) })) });
   } else {
-    valid = shape(value, { ...identity, body: str, mergeable: oneOf('mergeable', 'conflicting', 'unknown'), files: array(reviewFile, 10_000), fileBodies: map(isGitPatchBody),
-      checks: array(x => shape(x, { name: str, state: oneOf('success', 'failure', 'pending', 'neutral', 'skipped'), url: optional(str) })),
-      threads: array(x => shape(x, { id: str, path: str, side: oneOf('before', 'after'), line: num, diffHunk: str, isOutdated: bool,
-        comments: array(c => shape(c, { id: num, author: str, body: str, createdAt: str })) })) });
+    valid = false;
   }
   if (!valid) throw new GitServiceError('GIT_INVALID_RESULT', `Invalid GitHub ${method} response`);
 }

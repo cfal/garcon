@@ -10,6 +10,11 @@ export function isGhRepositoryIdentity(value: unknown): value is GhRepositoryIde
     && Object.keys(value).every(key => key === 'host' || key === 'nameWithOwner');
 }
 
+// A full SHA-1 or SHA-256 commit object ID, as GitHub reports it.
+export function isGhCommitOid(value: unknown): value is string {
+  return typeof value === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value);
+}
+
 export function isGhActorIdentity(value: unknown): value is GhActorIdentity {
   return isRecord(value) && typeof value.id === 'string' && value.id.length > 0 && value.id.length <= 256 && !value.id.includes('\0')
     && typeof value.login === 'string' && value.login.length > 0 && value.login.length <= 256 && !value.login.includes('\0')

@@ -16,7 +16,9 @@ function makeService(overrides = {}) {
       }),
     ),
     listPullRequests: mock(() => Promise.resolve({ executorId: 'local', instanceId: 'test-instance', pulls: [], repo: null })),
-    getPullRequest: mock(() => Promise.resolve({ executorId: 'local', instanceId: 'test-instance' })),
+    getPullRequestStatus: mock(() => Promise.resolve({ executorId: 'local', instanceId: 'test-instance' })),
+    getPullRequestDiff: mock(() => Promise.resolve({ executorId: 'local', instanceId: 'test-instance' })),
+    getPullRequestReviewThreads: mock(() => Promise.resolve({ executorId: 'local', instanceId: 'test-instance' })),
     ...overrides,
   };
 }
@@ -70,11 +72,17 @@ describe('GET /api/v1/gh/status', () => {
   });
 });
 
+const pullQuery = 'project=%2Fproject&number=42&repositoryHost=github.example.com&repositoryName=acme%2Fapp';
+const pullInput = { projectPath: '/project', number: 42, repository: { host: 'github.example.com', nameWithOwner: 'acme/app' } };
+const commits = { baseRefOid: 'b'.repeat(40), headRefOid: 'a'.repeat(64) };
+
 describe('GitHub route dispatch', () => {
   const operations = [
     ['status', 'getStatus', '', undefined, GIT_OPERATION_TIMEOUT_MS],
     ['pull-requests', 'listPullRequests', 'project=%2Fproject', { projectPath: '/project' }, GH_DETAIL_TIMEOUT_MS],
-    ['pull-request', 'getPullRequest', 'project=%2Fproject&number=42&repositoryHost=github.example.com&repositoryName=acme%2Fapp', { projectPath: '/project', number: 42, repository: { host: 'github.example.com', nameWithOwner: 'acme/app' } }, GH_DETAIL_TIMEOUT_MS],
+    ['pull-request/status', 'getPullRequestStatus', pullQuery, pullInput, GH_DETAIL_TIMEOUT_MS],
+    ['pull-request/diff', 'getPullRequestDiff', `${pullQuery}&baseRefOid=${commits.baseRefOid}&headRefOid=${commits.headRefOid}`, { ...pullInput, commits }, GH_DETAIL_TIMEOUT_MS],
+    ['pull-request/review-threads', 'getPullRequestReviewThreads', pullQuery, pullInput, GH_DETAIL_TIMEOUT_MS],
   ];
 
   it.each(operations)('dispatches %s with the selected executor, signal, and bounded timeout', async (path, method, query, input, maximum) => {
@@ -110,10 +118,16 @@ describe('GitHub route dispatch', () => {
     ['status', 'executorId=local&executorId=local'],
     ['pull-requests', ''],
     ['pull-requests', 'project=/project&number=42'],
-    ['pull-request', 'project=/project&number=0'],
-    ['pull-request', 'project=/project&number=1&number=2'],
-    ['pull-request', 'project=/project&number=1'],
-    ['pull-request', 'project=/project&number=1&repositoryHost=github.com&repositoryName=acme/app&repositoryHost=other.example'],
+    ['pull-request/status', 'project=/project&number=0'],
+    ['pull-request/status', 'project=/project&number=1&number=2'],
+    ['pull-request/status', 'project=/project&number=1'],
+    ['pull-request/status', 'project=/project&number=1&repositoryHost=github.com&repositoryName=acme/app&repositoryHost=other.example'],
+    ['pull-request/status', `${pullQuery}&headRefOid=${commits.headRefOid}`],
+    ['pull-request/review-threads', `${pullQuery}&baseRefOid=${commits.baseRefOid}`],
+    ['pull-request/diff', pullQuery],
+    ['pull-request/diff', `${pullQuery}&baseRefOid=${commits.baseRefOid}`],
+    ['pull-request/diff', `${pullQuery}&baseRefOid=${commits.baseRefOid}&headRefOid=HEAD`],
+    ['pull-request/diff', `${pullQuery}&baseRefOid=${'B'.repeat(40)}&headRefOid=${commits.headRefOid}`],
   ])('rejects invalid %s fields before resolving an executor', async (path, query) => {
     const resolve = mock(async () => makeService());
     const routes = createGhRoutes(resolve);
