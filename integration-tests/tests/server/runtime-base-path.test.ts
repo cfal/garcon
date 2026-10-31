@@ -5,6 +5,10 @@ import type { ReadTextResponse } from '../../../common/file-contracts.js';
 import type { StartChatCommandResponse } from '../../../common/chat-command-contracts.js';
 import type { ShareChatResponse, ShareStatusResponse } from '../../../common/share-types.js';
 import { discoverRuntime } from '../../../cli/discovery.js';
+import {
+  SHARED_CHAT_RATE_LIMIT_MAX_REQUESTS,
+  SHARED_CHAT_RATE_LIMIT_WINDOW_MS,
+} from '../../../server/controller/routes/shares.js';
 import { withCliFixture, runCli } from '../../support/cli-fixture.js';
 
 for (const basePath of ['', '/garcon', '/tools/garcon']) {
@@ -60,6 +64,18 @@ for (const basePath of ['', '/garcon', '/tools/garcon']) {
         expect(shared.headers.get('link')).toContain(`${basePath}/shared/llm/`);
         expect(await (await request(`/shared/llm/${share.shareToken}`)).text()).toContain('Synthetic mounted turn');
         expect((await request(`/api/v1/shared?token=${share.shareToken}`)).status).toBe(200);
+        const missingShare = await request('/api/v1/shared');
+        const unknownShare = await request('/api/v1/shared?token=synthetic-unknown-token');
+        expect(missingShare.status).toBe(404);
+        expect(unknownShare.status).toBe(404);
+        expect(await missingShare.text()).toBe(await unknownShare.text());
+        // The burst proves the real listener passes its client address to the limiter.
+        let probe = await request('/api/v1/shared?token=synthetic-unknown-token');
+        for (let attempt = 0; attempt < SHARED_CHAT_RATE_LIMIT_MAX_REQUESTS && probe.status === 404; attempt++) {
+          probe = await request('/api/v1/shared?token=synthetic-unknown-token');
+        }
+        expect(probe.status).toBe(429);
+        expect(probe.headers.get('retry-after')).toBe(String(SHARED_CHAT_RATE_LIMIT_WINDOW_MS / 1_000));
 
         const discovery = await discoverRuntime({ configDir: fixture.dirs.config, runtime: 'controller' });
         expect(new URL(discovery.baseUrl).pathname).toBe(basePath || '/');
