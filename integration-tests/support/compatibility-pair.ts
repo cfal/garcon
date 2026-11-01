@@ -45,6 +45,8 @@ export class CompatibilityPair {
     const pair = new CompatibilityPair(root, await directories('controller'), await directories('worker'), controller, worker, direction);
     try {
       pair.#port = await reusableListenPort();
+      const credentials = await pair.#invokeDriver({ version: 1, kind: 'prepare-auth', configDir: pair.controllerDirs.config });
+      pair.#credentials = { username: stringField(credentials, 'username'), password: stringField(credentials, 'password') };
       pair.controller = await pair.#startController();
       const workerOptions = pair.#workerOptions(worker, inventory);
       if (direction === 'remote-controller-dials') {
@@ -84,8 +86,6 @@ export class CompatibilityPair {
   }
 
   async #startController(): Promise<GarconProcess> {
-    const credentials = await this.#invokeDriver({ version: 1, kind: 'prepare-auth', configDir: this.controllerDirs.config });
-    this.#credentials = { username: stringField(credentials, 'username'), password: stringField(credentials, 'password') };
     return GarconProcess.start({ ...this.controllerArtifact, configDir: this.controllerDirs.config,
       workspaceDir: this.controllerDirs.workspace, projectDir: this.controllerDirs.project,
       homeDir: this.controllerDirs.home, environment: { GARCON_TERMINAL_SHELL: '/bin/sh' }, port: this.#port,

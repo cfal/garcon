@@ -38,11 +38,9 @@ export interface CompatibilityDriverResult {
   readonly result: Record<string, unknown>;
 }
 
-export interface ContractProbe {
-  readonly surface: 'executor' | 'direct-cli' | 'gateway-cli';
-  readonly name: string;
-  readonly version: number;
-}
+export type ContractProbe =
+  | { readonly surface: 'executor'; readonly name: string }
+  | { readonly surface: 'direct-cli' | 'gateway-cli'; readonly name: string; readonly version: number };
 
 export interface UnsupportedWorkflow {
   readonly workflow: string;

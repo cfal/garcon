@@ -74,9 +74,10 @@ browser together. There is no legacy handshake or preparatory migration release.
 Every existing RPC and CLI operation starts at v1; bootstrap 1 contains only
 connection mechanics. Later builds retain shared exact operation versions or
 refuse unsupported workflows without disabling unrelated services. The first
-artifact has A/A evidence only; source-distinct successors require the published
-baseline and mixed-artifact CI, including Docker distributions. Package version
-does not establish compatibility. See the
+artifact has A/A evidence only. Independent upgrades require the published
+baseline and green mixed-artifact qualification for the distributed build and
+runtime. Docker `:main` and `sha-*` tags are rolling builds; publication alone
+does not establish that qualification. Package version does not establish compatibility. See the
 [compatibility and rollback procedure](./executor/compatibility.md).
 
 Set `--base-path /garcon` with `--public-url https://controller.example.com/garcon/` (or the corresponding environment variables)

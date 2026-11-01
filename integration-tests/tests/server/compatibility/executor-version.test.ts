@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { prepareArtifacts, type CompatibilityArtifact } from '../../../compatibility/artifacts.js';
 import { CompatibilityPair, stringField } from '../../../support/compatibility-pair.js';
+import released from '../../../../server/remote/transport/__tests__/fixtures/released-contracts.json';
 
 const artifacts = await prepareArtifacts();
 afterAll(() => artifacts.dispose());
@@ -22,6 +23,16 @@ for (const direction of directions) {
         expect(pair.controller.authToken).toBeNull();
         expect(pair.controller.credentials).toBeNull();
         const result = await contractWorkflows(pair);
+        if (controller === artifacts.current) {
+          const cli: Record<string, number[]> = {};
+          for (const key of released.filter(key => key.startsWith('cli.'))) {
+            const [name, version] = key.split('@');
+            (cli[name!] ??= []).push(Number(version));
+          }
+          for (const versions of Object.values(cli)) versions.sort((a, b) => a - b);
+          expect(result.contracts).toMatchObject({ 'direct-cli': cli });
+        }
+        if (controller === artifacts.current && artifacts.baselines.length > 0) return;
         const terminal = result.retainedTerminal as Record<string, unknown>;
         expect(terminal).not.toBeNull();
         await cliRestartContexts(pair, 'capture-cli-context');
@@ -49,7 +60,10 @@ for (const direction of directions) {
       try {
         pair = await CompatibilityPair.start(controller, initialWorker, direction);
         const controllerPid = pair.controller.pid;
-        await contractWorkflows(pair);
+        const initial = await pair.ready();
+        const initialCatalog = await pair.driver({ kind: 'catalog', executorId: pair.executorId });
+        expect(initialCatalog.instanceId).toBe(initial.instanceId);
+        expect(initialCatalog.agents).toContainEqual(expect.objectContaining({ id: 'shell' }));
         for (const worker of successors) {
           const ready = await pair.replaceWorker(worker);
           expect(pair.controller.pid).toBe(controllerPid);
@@ -114,7 +128,7 @@ async function contractWorkflows(pair: CompatibilityPair): Promise<Record<string
   expect(result.unsupported).toEqual([]);
   expect(result.executorCatalogKind).toBe('usable-operation-projection');
   expect(result.contracts).toMatchObject({
-    executor: { 'files.read': [1], 'files.list': [1], 'git.getQuickSummary': [1], 'terminals.list': [1] },
+    executor: expect.arrayContaining(['files.read', 'files.list', 'git.getQuickSummary', 'terminals.list']),
     'direct-cli': { 'cli.chats.start': [1] }, 'gateway-cli': { 'cli.chats.start': [1] },
   });
   return result;

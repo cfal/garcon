@@ -104,7 +104,7 @@ export class TerminalController {
   async #service(executorId: string): Promise<ExecutionTerminalService> {
     try { return await this.executors.requireExecutor(executorId).getTerminalService(); }
     catch (error) {
-      if (error instanceof AgentCallError && error.code === 'OPERATION_UNSUPPORTED') throw new TerminalError('terminal-unsupported', 'This executor does not support terminals.', 501);
+      if (error instanceof AgentCallError) throw terminalOperationError(error);
       throw new TerminalError('terminal-unavailable', 'Terminal executor is unavailable.', 503);
     }
   }
@@ -112,8 +112,10 @@ export class TerminalController {
 
 export function terminalOperationError(error: unknown): TerminalError {
   if (error instanceof TerminalError) return error;
-  if (error instanceof AgentCallError) return error.outcome === 'unknown'
-    ? new TerminalError('terminal-outcome-unknown', 'Terminal operation may have completed. Reconcile the terminal list before retrying.', 503)
-    : new TerminalError('terminal-unavailable', 'Terminal executor is unavailable.', 503);
+  if (error instanceof AgentCallError) {
+    if (error.outcome === 'unknown') return new TerminalError('terminal-outcome-unknown', 'Terminal operation may have completed. Reconcile the terminal list before retrying.', 503);
+    if (error.code === 'OPERATION_UNSUPPORTED') return new TerminalError('terminal-unsupported', 'This executor does not support this terminal operation.', 422);
+    return new TerminalError('terminal-unavailable', 'Terminal executor is unavailable.', 503);
+  }
   return new TerminalError('terminal-internal', 'Terminal operation failed.', 500);
 }

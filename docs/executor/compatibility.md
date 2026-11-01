@@ -71,6 +71,8 @@ remain valid without conversion.
 3. Confirm primary/bulk readiness, credential grants, CLI forwarding and fresh
    execution in the configured dial direction. Inspect bounded last-error/log
    codes for bootstrap, profile, unsupported-operation, stale-generation or settings failures.
+   `INVALID_HELLO` rejects an unrecognized hello, including pre-cutover formats,
+   without a legacy reader; update those peers together rather than rotating secrets.
 4. After baseline publication and mixed-artifact qualification below, later
    controller upgrades may leave compliant workers running. Drain first;
    graceful shutdown still requests native aborts. Queues, command ledgers,
@@ -94,8 +96,9 @@ produce a gap; unknown error domains/codes remain protocol faults.
 
 Frozen bootstrap envelopes and errors live in `fixtures/bootstrap-1-*.json` under
 `server/remote/transport/__tests__/`. `fixtures/contracts/<name>@<version>.json`
-freezes each operation's expanded payloads, requirements and policy; runtime
-fixtures retain behavioral examples. The literal `released-contracts.json` list
+freezes each operation's expanded wire types and definitions; runtime fixtures
+retain accepted payload and failure examples. These examples do not exhaustively
+freeze everything a decoder accepts. The literal `released-contracts.json` list
 is independent of registry enumeration. Shared `common/` and internal aliases
 are safe only while those boundary shapes stay unchanged.
 Fixtures are tripwires, not proof of semantics. Never regenerate released
@@ -114,6 +117,11 @@ Examples:
 Only incompatible connection mechanics require a bootstrap change. No mandatory
 deprecation release or directional revision floor is imposed. A security withdrawal
 is explicit operational policy, not compatibility inferred from version ordering.
+
+Compatibility is not an indefinite support promise. Release qualification covers
+the explicitly pinned artifacts and tested workflows, not every historical build.
+Retain old implementations for deliberately supported use cases; otherwise withdraw
+their advertisements and prove pre-effect refusal without disabling unrelated operations.
 
 ### Maintenance Checklist
 
@@ -192,14 +200,10 @@ by its own artifact's parsers through the frozen test-only JSON protocol in
 passes credentials, not tokens or private auth files. HEAD's browser parsers never
 drive an old controller. The contract also names the frozen process launch and
 readiness signals used by the orchestrator.
-The frozen driver also depends on `cli/main.ts`, `--config-dir`/`--runtime`,
-`list agents --executor --json`, `start --agent shell --model sh --executor --cwd --json`,
-and `schedule create/show/delete` with `--definition`/`--expected-revision`/`--json`.
-Their JSON results retain `agents[].id`, `receipt.chatId`, `scheduledPrompt.id`,
-and `revision`. The production `shell` agent's `sh` model and
-`GARCON_TERMINAL_SHELL` remain available. Restart checks capture CLI context with
-each artifact's own discovery code and read that opaque context with the same
-artifact after restart, for both direct and gateway access.
+`compatibility-contract.ts` is the canonical inventory of frozen process, CLI
+and result surfaces. Restart checks capture CLI context with each artifact's
+own discovery code and read that opaque context with the same artifact after
+restart, for both direct and gateway access.
 Separate installations own dependencies and generated outputs. Synthetic changed-
 inventory workers inject integrations through production worker composition,
 without protocol-offer overrides or a production CLI mode.
@@ -211,8 +215,12 @@ Do not describe bootstrap artifact evidence as mixed-build evidence. Reduced
 registrations and test-only versions establish partial-support behavior separately;
 they are not production offer overrides or speculative production v2 codecs.
 The first release has only A/A artifact evidence. A source-distinct successor B
-must pass mixed-artifact qualification before release, including Docker `:main`
-and `sha-*` distributions. The bootstrap package-version expiry is an additional
+needs a green mixed-artifact run on the same runtime before it is qualified for
+independent upgrades. Docker `:main` and `sha-*` are unqualified rolling builds:
+their publication workflow does not depend on the compatibility job. Promoting
+or downloading either tag is not qualification evidence. The Docker and source
+matrix currently pin Bun 1.4.3; packaging still needs its own smoke checks.
+The bootstrap package-version expiry is an additional
 guard, not qualification of intervening builds or a product compatibility mode.
 
 Immediately after merging the validated cutover, a release maintainer checks out
@@ -232,7 +240,9 @@ Publish and pin A as the immediate follow-up to the cutover merge; do not wait f
 the next package-version bump. Change the manifest to
 `stage: "cross-build"`, remove `bootstrapPackageVersion`, and add A's `sourceSha`,
 `archiveUrl`, `archiveSha256`, both `lockfiles` digests, and `runtime` version/URL/
-digest. The matrix then runs A/A, B/B, A/B and B/A in both directions, both CLI
+digest. Remove the first-release-only `stage: "bootstrap"` manifest branch, its
+package-version guard and same-source-only test branches in that follow-up; the
+wire bootstrap remains unchanged. The matrix then runs A/A, B/B, A/B and B/A in both directions, both CLI
 artifacts directly and through each gateway, rendered output rows, controller-only
 upgrades with retained PTYs, and worker A-to-B-to-A replacement while each A or B
 controller stays running. Catalog instance identity, the production `shell` agent,

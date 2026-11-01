@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CLI_CONTRACT_HEADER, CLI_OPERATIONS, type CliOperation } from '../../common/cli-contracts.js';
-import { EXECUTION_WORKFLOW_V1, RPC_V1, type ExecutorOperation } from '../../common/executor-contracts.js';
+import { EXECUTION_LAUNCH_OPERATIONS_V1, EXECUTION_WORKFLOW_OPERATIONS_V1, type ExecutorOperation } from '../../common/executor-contracts.js';
 import { parseExecutors } from '../../common/executors.js';
 import type { DirectoryEntry, ReadTextResponse } from '../../common/file-contracts.js';
 import type { ExecutionFileEntry } from '../../server-agents/interface/src/index.js';
@@ -23,7 +23,12 @@ import type { SourceArtifact } from './source-artifact.js';
 type WorkflowCommand = Extract<CompatibilityCommand, { kind: 'contract-workflows' }>;
 
 function executorRequirements(...names: readonly ExecutorOperation[]): ContractProbe[] {
-  return [...new Set(names)].map(name => ({ surface: 'executor', name, version: RPC_V1[name].version }));
+  return [...new Set(names)].map(name => ({ surface: 'executor', name }));
+}
+
+export function catalogRequirements(operations: readonly string[]): ContractProbe[] {
+  const launch = EXECUTION_LAUNCH_OPERATIONS_V1.find(name => operations.includes(name));
+  return executorRequirements(...EXECUTION_WORKFLOW_OPERATIONS_V1, ...(launch ? [launch] : EXECUTION_LAUNCH_OPERATIONS_V1));
 }
 
 function cliRequirements(surface: 'direct-cli' | 'gateway-cli', ...operations: readonly CliOperation[]): ContractProbe[] {
@@ -31,15 +36,17 @@ function cliRequirements(surface: 'direct-cli' | 'gateway-cli', ...operations: r
   return [...new Map(refs.map(ref => [`${ref.name}@${ref.version}`, { surface, name: ref.name, version: ref.version }])).values()];
 }
 
-async function refused(action: () => Promise<unknown>): Promise<void> {
+export async function refused(action: () => Promise<unknown>, status: 422 | 501, code = 'OPERATION_UNSUPPORTED'): Promise<void> {
   const error = await rejectionOf(action());
   assert(error instanceof GarconApiError, 'Expected an HTTP refusal');
-  assert.equal((error.body as HttpErrorResponse).errorCode, 'OPERATION_UNSUPPORTED');
+  assert.equal((error.body as HttpErrorResponse).errorCode, code);
+  assert.equal(error.status, status);
   assert.equal((error.body as HttpErrorResponse).retryable, false);
 }
 
-async function refusedCli(connection: RuntimeConnection, missing: readonly ContractProbe[]): Promise<void> {
+export async function refusedCli(connection: RuntimeConnection, missing: readonly ContractProbe[]): Promise<void> {
   for (const ref of missing) {
+    assert(ref.surface !== 'executor');
     const operation = Object.entries(CLI_OPERATIONS).find(([, versions]) => versions[1].name === ref.name)?.[0];
     assert(operation, `No refusal probe for ${ref.name}`);
     const [method, path] = operation.split(' ');
@@ -89,8 +96,7 @@ export async function contractWorkflows(client: GarconTestClient, command: Workf
   const gateway = await discoverRuntime({ configDir: command.workerConfig, runtime: 'executor' });
   assert.equal(direct.instanceId, gateway.instanceId);
   // Snapshots expose usable operations, not the private negotiated profile or resource codecs.
-  const executor = Object.fromEntries(Object.values(RPC_V1).filter(definition => selected.operations.includes(definition.name))
-    .map(definition => [definition.name, [definition.version]]));
+  const executor = selected.operations;
   const evidence = new CompatibilityEvidence({ executor, 'direct-cli': direct.protocol.contracts,
     'gateway-cli': gateway.protocol.contracts }, command.expectedUnsupported);
   await client.updateSettings({ ui: { chatTitle: { enabled: false } } });
@@ -104,41 +110,42 @@ export async function contractWorkflows(client: GarconTestClient, command: Workf
     const result = await read();
     assert.equal(result.content, 'Synthetic original\n');
     expectedRevision = result.revision;
-  }, () => refused(read));
+  }, () => refused(read, 501));
   const save = () => client.put(`/api/v1/files/text?${query}`, {
     content: 'Synthetic replacement\n', expectedRevision, conflictResolution: 'overwrite',
   });
   await evidence.check('files-save', executorRequirements('projects.inspect', 'files.save'), async () => {
     await save();
     assert.equal(await readFile(join(projectPath, path), 'utf8'), 'Synthetic replacement\n');
-  }, async () => { await refused(save); assert.equal(await readFile(join(projectPath, path), 'utf8'), 'Synthetic original\n'); });
+  }, async () => { await refused(save, 501); assert.equal(await readFile(join(projectPath, path), 'utf8'), 'Synthetic original\n'); });
   const list = () => client.get<ExecutionFileEntry[]>(`/api/v1/files/list?${query}`);
   await evidence.check('files-list', executorRequirements('projects.inspect', 'files.list'), async () => {
     assert((await list()).some(entry => entry.relativePath === path));
-  }, () => refused(list));
+  }, () => refused(list, 501));
   const name = `compat-dir-${crypto.randomUUID()}`;
   const mkdir = () => client.post<DirectoryEntry>(`/api/v1/files/directories?${new URLSearchParams({ executorId, path: projectPath })}`, { name });
   await evidence.check('mkdir', executorRequirements('files.createDirectory'), async () => {
     assert.equal((await mkdir()).path, join(projectPath, name));
-  }, async () => { await refused(mkdir); assert(!existsSync(join(projectPath, name))); });
+  }, async () => { await refused(mkdir, 501); assert(!existsSync(join(projectPath, name))); });
   const summary = () => client.post<ExecutionGitResults['getQuickSummary']>('/api/v1/git/quick-summary', { executorId, project: projectPath });
   await evidence.check('git-primary', executorRequirements('git.getQuickSummary'), async () => {
     assert.equal((await summary()).status, 'ready');
-  }, () => refused(summary));
+  }, () => refused(summary, 501));
   const workbench = () => client.post<ExecutionGitResults['getWorkbenchSnapshot']>('/api/v1/git/workbench/snapshot', { executorId, project: projectPath, mode: 'working', context: 3 });
   await evidence.check('git-bulk', executorRequirements('git.getWorkbenchSnapshot'), async () => {
     assert.equal((await workbench()).status, 'ready');
-  }, () => refused(workbench));
+  }, () => refused(workbench, 501));
 
   for (const [runtime, surface, connection] of [['controller', 'direct-cli', direct], ['executor', 'gateway-cli', gateway]] as const) {
+    await refusedCli(connection, [{ surface, name: 'cli.chats.start', version: 2 }]);
     const suffix = runtime === 'controller' ? 'direct' : 'gateway';
     const catalog = () => client.get(`/api/v1/models?executorId=${executorId}`);
     const refusal = async (missing: readonly ContractProbe[]) => {
       const cli = missing.filter(ref => ref.surface === surface);
       if (cli.length) await refusedCli(connection, cli);
-      if (missing.some(ref => ref.surface === 'executor')) await refused(catalog);
+      if (missing.some(ref => ref.surface === 'executor')) await refused(catalog, 501);
     };
-    await evidence.check(`cli-${suffix}`, [...cliRequirements(surface, 'GET /api/v1/models'), ...executorRequirements('catalog.snapshot')], async () => {
+    await evidence.check(`cli-${suffix}`, [...cliRequirements(surface, 'GET /api/v1/models'), ...catalogRequirements(executor)], async () => {
       for (const artifact of command.cliArtifacts) {
         const agents = await invokeCli<{ agents: { id: string }[] }>(artifact, command, runtime, ['list', 'agents', '--executor', executorId, '--json']);
         assert(agents.agents.some(agent => agent.id === 'shell'));
@@ -151,7 +158,7 @@ export async function contractWorkflows(client: GarconTestClient, command: Workf
       agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} }, command: `touch ${join(projectPath, marker)}`,
     });
     await evidence.check(`execution-${suffix}`, [
-      ...executorRequirements(...EXECUTION_WORKFLOW_V1.map(definition => definition.name), 'execution.start'),
+      ...executorRequirements(...EXECUTION_WORKFLOW_OPERATIONS_V1, 'execution.start'),
       ...cliRequirements(surface, 'GET /api/v1/models', 'GET /api/v1/app/settings', 'GET /api/v1/preambles', 'POST /api/v1/chats/start'),
     ], async () => {
       for (const artifact of command.cliArtifacts) {
@@ -167,7 +174,7 @@ export async function contractWorkflows(client: GarconTestClient, command: Workf
     }, async missing => {
       const cli = missing.filter(ref => ref.surface === surface);
       if (cli.length) await refusedCli(connection, cli);
-      if (missing.some(ref => ref.surface === 'executor')) { await refused(start); assert(!existsSync(join(projectPath, marker))); }
+      if (missing.some(ref => ref.surface === 'executor')) { await refused(start, 422); assert(!existsSync(join(projectPath, marker))); }
     });
     await evidence.check(`schedules-${suffix}`, cliRequirements(surface,
       'POST /api/v1/scheduled-prompts', 'GET /api/v1/scheduled-prompts', 'DELETE /api/v1/scheduled-prompts'), async () => {
@@ -186,7 +193,7 @@ export async function contractWorkflows(client: GarconTestClient, command: Workf
   }
 
   let retainedTerminal: { terminalId: string; terminalRuntimeId: string } | null = null;
-  await evidence.check('terminals', executorRequirements('terminals.list', 'terminals.create', 'terminals.attach', 'terminals.input', 'terminals.detach'), async () => {
+  await evidence.check('terminals', executorRequirements('terminals.list', 'terminals.create', 'terminals.terminate', 'terminals.attach', 'terminals.input', 'terminals.detach'), async () => {
     const inventory = await client.get<TerminalListResponse>(`/api/v1/terminals?executorId=${executorId}`);
     assert(inventory.terminalRuntimeId, 'Missing terminal runtime identity');
     const { terminal } = await client.post<TerminalCreateResponse>('/api/v1/terminals', { executorId,
@@ -194,14 +201,37 @@ export async function contractWorkflows(client: GarconTestClient, command: Workf
     await terminalRoundTrip(client, terminal.terminalId, inventory,
       "stty -echo; export COMPATIBILITY_VALUE=retained; printf 'compat-%s\\n' ready\r", 'compat-ready');
     retainedTerminal = { terminalId: terminal.terminalId, terminalRuntimeId: inventory.terminalRuntimeId };
-  }, async missing => {
-    if (missing.some(ref => ref.name === 'terminals.list')) await refused(() => client.get(`/api/v1/terminals?executorId=${executorId}`));
-    else {
-      const inventory = await client.get<TerminalListResponse>(`/api/v1/terminals?executorId=${executorId}`);
-      await refused(() => client.post('/api/v1/terminals', { executorId, expectedTerminalRuntimeId: inventory.terminalRuntimeId,
-        requestId: crypto.randomUUID(), requestedInitialWorkingDirectory: projectPath }));
-      assert.deepEqual((await client.get<TerminalListResponse>(`/api/v1/terminals?executorId=${executorId}`)).terminals, inventory.terminals);
-    }
-  });
+  }, missing => refusedTerminals(client, executorId, projectPath, missing));
   return { retainedTerminal, controllerId: gateway.instanceId, executorCatalogKind: 'usable-operation-projection', ...evidence.report() };
+}
+
+export async function refusedTerminals(client: GarconTestClient, executorId: string, projectPath: string, missing: readonly ContractProbe[]): Promise<void> {
+  if (missing.some(ref => ref.name === 'terminals.list')) {
+    await refused(() => client.get(`/api/v1/terminals?executorId=${executorId}`), 422, 'terminal-unsupported');
+    return;
+  }
+  const inventory = await client.get<TerminalListResponse>(`/api/v1/terminals?executorId=${executorId}`);
+  const create = () => client.post<TerminalCreateResponse>('/api/v1/terminals', { executorId, expectedTerminalRuntimeId: inventory.terminalRuntimeId,
+    requestId: crypto.randomUUID(), requestedInitialWorkingDirectory: projectPath });
+  if (missing.some(ref => ref.name === 'terminals.create' || ref.name === 'terminals.terminate')) {
+    await refused(create, 422, 'terminal-unsupported');
+    assert.deepEqual((await client.get<TerminalListResponse>(`/api/v1/terminals?executorId=${executorId}`)).terminals, inventory.terminals);
+    return;
+  }
+  const { terminal } = await create();
+  const attachmentId = crypto.randomUUID();
+  const afterIndex = client.eventRecords().length;
+  try {
+    client.sendTerminal({ type: 'terminal-attach', terminalId: terminal.terminalId, attachmentId,
+      attachmentEpoch: inventory.attachmentEpoch, clientId: 'compatibility-refusal', afterSequence: 0, intent: 'takeover' });
+    if (!missing.some(ref => ref.name === 'terminals.attach' || ref.name === 'terminals.detach')) {
+      await client.waitForEvent((message): message is Extract<TerminalStreamServerMessage, { type: 'terminal-attached' }> => message.type === 'terminal-attached' && message.attachmentId === attachmentId,
+        'refusal probe attachment', { afterIndex });
+      client.sendTerminal({ type: 'terminal-input', terminalId: terminal.terminalId, attachmentId, data: 'true\r' });
+    }
+    await client.waitForEvent((message): message is Extract<TerminalStreamServerMessage, { type: 'terminal-error' }> => message.type === 'terminal-error' && message.attachmentId === attachmentId
+      && message.code === 'terminal-unsupported', 'definite terminal operation refusal', { afterIndex });
+  } finally {
+    await client.delete('/api/v1/terminals', { terminalId: terminal.terminalId, requestId: crypto.randomUUID() });
+  }
 }

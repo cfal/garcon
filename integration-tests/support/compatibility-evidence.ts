@@ -7,7 +7,7 @@ export class CompatibilityEvidence {
   readonly unsupported: UnsupportedWorkflow[] = [];
   readonly #visited = new Set<string>();
 
-  constructor(readonly contracts: Readonly<Record<ContractProbe['surface'], ContractVersions>>,
+  constructor(readonly contracts: { readonly executor: readonly string[]; readonly 'direct-cli': ContractVersions; readonly 'gateway-cli': ContractVersions },
     private readonly expected: readonly UnsupportedWorkflow[]) {
     assert.equal(new Set(expected.map(item => item.workflow)).size, expected.length, 'Duplicate unsupported workflow');
     assert(expected.every(item => item.missing.length > 0), 'Unsupported workflows must name missing contracts');
@@ -16,9 +16,10 @@ export class CompatibilityEvidence {
   async check(workflow: string, required: readonly ContractProbe[], run: () => Promise<unknown>,
     verifyRefusal: (missing: readonly ContractProbe[]) => Promise<void>): Promise<void> {
     assert(!this.#visited.has(workflow), `Duplicate workflow: ${workflow}`);
-    const missing = required.filter(ref => !supportsContract(this.contracts[ref.surface], ref));
+    const missing = required.filter(ref => ref.surface === 'executor'
+      ? !this.contracts.executor.includes(ref.name) : !supportsContract(this.contracts[ref.surface], ref));
     const expected = this.expected.find(item => item.workflow === workflow)?.missing ?? [];
-    const keys = (refs: readonly ContractProbe[]) => refs.map(ref => `${ref.surface}:${ref.name}@${ref.version}`).sort();
+    const keys = (refs: readonly ContractProbe[]) => refs.map(ref => `${ref.surface}:${ref.name}${ref.surface === 'executor' ? '' : `@${ref.version}`}`).sort();
     assert.deepEqual(keys(missing), keys(expected), `Unexpected contract availability for ${workflow}`);
     if (missing.length) {
       await verifyRefusal(missing);

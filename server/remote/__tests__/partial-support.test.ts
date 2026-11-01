@@ -18,6 +18,8 @@ import { RpcReplyJournal } from '../transport/rpc-journal.js';
 import { TestWebSocketLink } from './test-session-transport.js';
 import { connectRemoteExecutor, servePairedRuntime } from './runtime-adapter.js';
 import { integrationFixture, linkOptions } from './integration-fixture.js';
+import { CompatibilityEvidence } from '../../../integration-tests/support/compatibility-evidence.js';
+import { catalogRequirements } from '../../../integration-tests/support/compatibility-workflows.js';
 
 const executorId = '22222222-2222-4222-8222-222222222222';
 const independentProviderMethods = new Set([
@@ -61,8 +63,18 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(provider.calls.migrate).toBe(0);
       expect(provider.calls.initialize).toBe(0);
       const integration = await client.runtime.getAgentIntegration('test');
-      await expect(integration.catalog.snapshot({ strict: false, signal: new AbortController().signal }))
-        .rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', outcome: 'not-dispatched' });
+      const operations = client.generation!.operations;
+      expect(operations).toContain('catalog.snapshot');
+      const absent = missing === 'lifecycle'
+        ? ['lifecycle.migrateOwnedStorage', 'lifecycle.start', 'lifecycle.stop']
+        : ['producers.bind', 'execution.runningSessions', 'execution.start', 'execution.resume', 'compaction.compact'];
+      const evidence = new CompatibilityEvidence({ executor: operations, 'direct-cli': {}, 'gateway-cli': {} },
+        [{ workflow: 'catalog', missing: absent.map(name => ({ surface: 'executor', name })) }]);
+      await evidence.check('catalog', catalogRequirements(operations), async () => { throw new Error('Unsupported catalog must not run'); }, async () => {
+        await expect(integration.catalog.snapshot({ strict: false, signal: new AbortController().signal }))
+          .rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', outcome: 'not-dispatched' });
+      });
+      expect(evidence.report().unsupported).toHaveLength(1);
       const binding = createAgentResourceRef(integration.producers.scope, 'producer', 'synthetic-binding');
       await expect(integration.producers.bind({ binding, chatId: '1783725900000400' }))
         .rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', outcome: 'not-dispatched' });
