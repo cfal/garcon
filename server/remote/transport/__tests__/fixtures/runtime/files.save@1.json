@@ -1,4 +1,6 @@
 {
+  "request": { "projectPath": "/synthetic", "filePath": "note.txt", "data": "c3ludGhldGljCg==", "expectedRevision": "v1:before", "conflictResolution": "reject" },
+  "result": { "success": true, "path": "/synthetic/note.txt", "message": "Saved", "revision": "v1:after" },
   "failures": [
     {
       "domain": "executor",

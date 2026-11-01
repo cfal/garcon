@@ -10,16 +10,13 @@
     "lane": "bulk"
   },
   "route": "GET /api/v1/chats/handoff-artifact",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "chatId": "string",
-          "contextWindowTokens": "number"
-        }
+  "wire": {
+    "request": {
+      "query": {
+        "chatId": "string",
+        "contextWindowTokens": "string"
       }
-    ],
+    },
     "result": {
       "abridgedEntryCount": "number",
       "budgetOmittedEntryCount": "number",

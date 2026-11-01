@@ -10,25 +10,13 @@
     "lane": "bulk"
   },
   "route": "GET /api/v1/chats/tags",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "chatId": "string",
-          "tags": {
-            "array": "string"
-          }
-        }
+  "wire": {
+    "request": {
+      "query": {
+        "chatId": "string"
       }
-    ],
+    },
     "result": {
-      "changed": {
-        "union": [
-          "false",
-          "true"
-        ]
-      },
       "chatId": "string",
       "success": "true",
       "tags": {

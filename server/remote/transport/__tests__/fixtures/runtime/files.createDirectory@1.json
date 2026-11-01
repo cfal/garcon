@@ -1,0 +1,4 @@
+{
+  "request": { "parentPath": "/synthetic", "name": "child" },
+  "result": { "name": "child", "path": "/synthetic/child", "type": "directory" }
+}

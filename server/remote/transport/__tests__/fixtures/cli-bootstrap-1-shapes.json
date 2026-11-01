@@ -16,14 +16,5 @@
         "string"
       ]
     }
-  },
-  "verifyRuntime": {
-    "parameters": [],
-    "result": {
-      "union": [
-        "false",
-        "true"
-      ]
-    }
   }
 }

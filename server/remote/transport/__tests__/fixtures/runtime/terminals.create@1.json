@@ -1,0 +1,8 @@
+{
+  "request": { "authority": { "key": "synthetic-authority", "expiresAtMs": null }, "requestId": "synthetic-create", "requestedInitialWorkingDirectory": "/synthetic" },
+  "result": { "success": true, "terminal": {
+    "terminalId": "11111111-1111-4111-8111-111111111111", "title": null, "displaySequence": 1,
+    "createdAt": "2026-01-01T00:00:00.000Z", "initialWorkingDirectory": "/synthetic",
+    "attachmentStatus": "detached", "processStatus": "running", "exitCode": null, "latestOutputSequence": 0
+  } }
+}

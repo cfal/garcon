@@ -10,16 +10,13 @@
     "lane": "bulk"
   },
   "route": "DELETE /api/v1/scheduled-prompts",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "expectedRevision": "number",
-          "id": "string"
-        }
+  "wire": {
+    "request": {
+      "body": {
+        "expectedRevision": "number",
+        "id": "string"
       }
-    ],
+    },
     "result": {
       "snapshot": {
         "prompts": {

@@ -10,198 +10,196 @@
     "lane": "bulk"
   },
   "route": "PATCH /api/v1/executors/:executorId",
-  "client": {
-    "parameters": [
-      {
-        "name": "id",
-        "type": "string"
+  "wire": {
+    "request": {
+      "body": {
+        "allowControllerCli?": {
+          "union": [
+            "false",
+            "true",
+            "undefined"
+          ]
+        },
+        "allowExecutorManagement?": {
+          "union": [
+            "false",
+            "true",
+            "undefined"
+          ]
+        },
+        "connection?": {
+          "union": [
+            "undefined",
+            {
+              "allowUnverifiedTls?": {
+                "union": [
+                  "false",
+                  "true",
+                  "undefined"
+                ]
+              },
+              "connectionUrl?": {
+                "union": [
+                  "string",
+                  "undefined"
+                ]
+              },
+              "direction": {
+                "union": [
+                  "\"controller-connects\"",
+                  "\"executor-connects\""
+                ]
+              },
+              "noTls": {
+                "union": [
+                  "false",
+                  "true"
+                ]
+              }
+            }
+          ]
+        },
+        "enabled?": {
+          "union": [
+            "false",
+            "true",
+            "undefined"
+          ]
+        },
+        "label?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        }
       },
-      {
-        "name": "request",
-        "type": {
-          "allowControllerCli?": {
+      "path": {
+        "executorId": "string"
+      }
+    },
+    "result": {
+      "executors": {
+        "array": {
+          "allowControllerCli": {
             "union": [
               "false",
-              "true",
-              "undefined"
+              "true"
             ]
           },
-          "allowExecutorManagement?": {
+          "allowExecutorManagement": {
             "union": [
               "false",
-              "true",
-              "undefined"
+              "true"
             ]
           },
-          "connection?": {
+          "availability": {
             "union": [
-              "undefined",
+              "\"offline\"",
+              "\"ready\"",
+              "\"reconnecting\""
+            ]
+          },
+          "bulk": {
+            "union": [
+              "null",
               {
-                "allowUnverifiedTls?": {
+                "availability": {
                   "union": [
-                    "false",
-                    "true",
-                    "undefined"
+                    "\"connecting\"",
+                    "\"offline\"",
+                    "\"ready\"",
+                    "\"reconnecting\""
                   ]
                 },
-                "connectionUrl?": {
+                "lastError": {
                   "union": [
-                    "string",
-                    "undefined"
-                  ]
-                },
-                "direction": {
-                  "union": [
-                    "\"controller-connects\"",
-                    "\"executor-connects\""
-                  ]
-                },
-                "noTls": {
-                  "union": [
-                    "false",
-                    "true"
+                    "null",
+                    {
+                      "code": "string",
+                      "message": "string"
+                    }
                   ]
                 }
               }
             ]
           },
-          "enabled?": {
+          "direction": {
             "union": [
-              "false",
-              "true",
-              "undefined"
+              "\"controller-connects\"",
+              "\"executor-connects\"",
+              "null"
             ]
           },
-          "label?": {
+          "enabled": {
             "union": [
-              "string",
-              "undefined"
+              "false",
+              "true"
             ]
-          }
-        }
-      }
-    ],
-    "result": {
-      "array": {
-        "allowControllerCli": {
-          "union": [
-            "false",
-            "true"
-          ]
-        },
-        "allowExecutorManagement": {
-          "union": [
-            "false",
-            "true"
-          ]
-        },
-        "availability": {
-          "union": [
-            "\"offline\"",
-            "\"ready\"",
-            "\"reconnecting\""
-          ]
-        },
-        "bulk": {
-          "union": [
-            "null",
-            {
-              "availability": {
-                "union": [
-                  "\"connecting\"",
-                  "\"offline\"",
-                  "\"ready\"",
-                  "\"reconnecting\""
-                ]
-              },
-              "lastError": {
-                "union": [
-                  "null",
-                  {
-                    "code": "string",
-                    "message": "string"
-                  }
-                ]
+          },
+          "executorServices": {
+            "directoryCreation": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "files": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "gh": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "git": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "terminals": {
+              "union": [
+                "false",
+                "true"
+              ]
+            }
+          },
+          "id": "string",
+          "instanceId": {
+            "union": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "union": [
+              "\"local\"",
+              "\"remote\""
+            ]
+          },
+          "label": "string",
+          "lastError": {
+            "union": [
+              "null",
+              {
+                "code": "string",
+                "message": "string"
               }
-            }
-          ]
-        },
-        "direction": {
-          "union": [
-            "\"controller-connects\"",
-            "\"executor-connects\"",
-            "null"
-          ]
-        },
-        "enabled": {
-          "union": [
-            "false",
-            "true"
-          ]
-        },
-        "executorServices": {
-          "directoryCreation": {
-            "union": [
-              "false",
-              "true"
             ]
           },
-          "files": {
-            "union": [
-              "false",
-              "true"
-            ]
+          "operations": {
+            "array": "string"
           },
-          "gh": {
+          "projectBasePath": {
             "union": [
-              "false",
-              "true"
-            ]
-          },
-          "git": {
-            "union": [
-              "false",
-              "true"
-            ]
-          },
-          "terminals": {
-            "union": [
-              "false",
-              "true"
+              "null",
+              "string"
             ]
           }
-        },
-        "id": "string",
-        "instanceId": {
-          "union": [
-            "null",
-            "string"
-          ]
-        },
-        "kind": {
-          "union": [
-            "\"local\"",
-            "\"remote\""
-          ]
-        },
-        "label": "string",
-        "lastError": {
-          "union": [
-            "null",
-            {
-              "code": "string",
-              "message": "string"
-            }
-          ]
-        },
-        "operations": {
-          "array": "string"
-        },
-        "projectBasePath": {
-          "union": [
-            "null",
-            "string"
-          ]
         }
       }
     }

@@ -10,64 +10,61 @@
     "lane": "bulk"
   },
   "route": "POST /api/v1/chats/search",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "chatIds?": {
-            "union": [
-              "undefined",
-              {
-                "array": "string"
-              }
-            ]
-          },
-          "limit?": {
-            "union": [
-              "number",
-              "undefined"
-            ]
-          },
-          "mode?": {
-            "union": [
-              "\"page\"",
-              "\"prefix\"",
-              "undefined"
-            ]
-          },
-          "offset?": {
-            "union": [
-              "number",
-              "undefined"
-            ]
-          },
-          "query": "string",
-          "snippetLimit?": {
-            "union": [
-              "number",
-              "undefined"
-            ]
-          },
-          "sort?": {
-            "union": [
-              "\"activity\"",
-              "\"created\"",
-              "\"relevance\"",
-              "undefined"
-            ]
-          },
-          "textTokens?": {
-            "union": [
-              "undefined",
-              {
-                "array": "string"
-              }
-            ]
-          }
+  "wire": {
+    "request": {
+      "body": {
+        "chatIds?": {
+          "union": [
+            "undefined",
+            {
+              "array": "string"
+            }
+          ]
+        },
+        "limit?": {
+          "union": [
+            "number",
+            "undefined"
+          ]
+        },
+        "mode?": {
+          "union": [
+            "\"page\"",
+            "\"prefix\"",
+            "undefined"
+          ]
+        },
+        "offset?": {
+          "union": [
+            "number",
+            "undefined"
+          ]
+        },
+        "query": "string",
+        "snippetLimit?": {
+          "union": [
+            "number",
+            "undefined"
+          ]
+        },
+        "sort?": {
+          "union": [
+            "\"activity\"",
+            "\"created\"",
+            "\"relevance\"",
+            "undefined"
+          ]
+        },
+        "textTokens?": {
+          "union": [
+            "undefined",
+            {
+              "array": "string"
+            }
+          ]
         }
       }
-    ],
+    },
     "result": {
       "index": {
         "failedChatCount": "number",

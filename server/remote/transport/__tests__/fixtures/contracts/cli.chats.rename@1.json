@@ -10,16 +10,13 @@
     "lane": "bulk"
   },
   "route": "PUT /api/v1/app/session-name",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "chatId": "string",
-          "title": "string"
-        }
+  "wire": {
+    "request": {
+      "body": {
+        "chatId": "string",
+        "title": "string"
       }
-    ],
+    },
     "result": {
       "changed": {
         "union": [

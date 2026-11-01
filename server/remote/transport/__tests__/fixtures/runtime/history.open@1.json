@@ -1,0 +1,11 @@
+{
+  "request": {
+    "source": "nativeHistoryImport",
+    "request": { "chat": {
+      "chatId": "synthetic-chat", "agentId": "synthetic", "projectPath": "/synthetic", "model": "synthetic-model",
+      "carryOverRevision": "", "agentSessionId": "synthetic-native", "nativeSession": null, "nativeSeedReceipt": null,
+      "settings": { "ownerId": "synthetic", "schemaVersion": 1, "values": {} }
+    } }
+  },
+  "result": { "kind": "history-reader", "id": "synthetic-reader", "executorId": "local", "instanceId": "synthetic-worker", "integrationId": "synthetic" }
+}

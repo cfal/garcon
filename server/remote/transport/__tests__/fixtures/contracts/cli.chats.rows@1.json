@@ -10,13 +10,12 @@
     "lane": "bulk"
   },
   "route": "GET /api/v1/chats/rows",
-  "client": {
-    "parameters": [
-      {
-        "name": "chatId",
-        "type": "string"
+  "wire": {
+    "request": {
+      "query": {
+        "chatId": "string"
       }
-    ],
+    },
     "result": {
       "chatId": "string",
       "success": "true",

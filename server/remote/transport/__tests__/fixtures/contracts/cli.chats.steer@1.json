@@ -10,80 +10,77 @@
     "lane": "bulk"
   },
   "route": "POST /api/v1/chats/steer",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "chatId": "string",
-          "clientMessageId": "string",
-          "clientRequestId": "string",
-          "content": "string",
-          "transcriptViewId": "string",
-          "userMessagePresentation?": {
-            "union": [
-              "undefined",
-              {
-                "customStyle?": "undefined",
-                "disclosure": "\"collapsed\"",
-                "origin": "\"cli\"",
-                "style?": "undefined",
-                "title?": "undefined"
+  "wire": {
+    "request": {
+      "body": {
+        "chatId": "string",
+        "clientMessageId": "string",
+        "clientRequestId": "string",
+        "content": "string",
+        "transcriptViewId": "string",
+        "userMessagePresentation?": {
+          "union": [
+            "undefined",
+            {
+              "customStyle?": "undefined",
+              "disclosure": "\"collapsed\"",
+              "origin": "\"cli\"",
+              "style?": "undefined",
+              "title?": "undefined"
+            },
+            {
+              "customStyle": {
+                "darkAccent": "`#${string}`",
+                "lightAccent": "`#${string}`"
               },
-              {
-                "customStyle": {
-                  "darkAccent": "`#${string}`",
-                  "lightAccent": "`#${string}`"
-                },
-                "disclosure?": {
-                  "union": [
-                    "\"collapsed\"",
-                    "undefined"
-                  ]
-                },
-                "origin": "\"cli\"",
-                "style": "\"custom\"",
-                "title?": {
-                  "union": [
-                    "string",
-                    "undefined"
-                  ]
-                }
+              "disclosure?": {
+                "union": [
+                  "\"collapsed\"",
+                  "undefined"
+                ]
               },
-              {
-                "disclosure?": {
-                  "union": [
-                    "\"collapsed\"",
-                    "undefined"
-                  ]
-                },
-                "origin": "\"cli\"",
-                "style": {
-                  "union": [
-                    "\"error\"",
-                    "\"info\"",
-                    "\"notice\""
-                  ]
-                },
-                "title?": {
-                  "union": [
-                    "string",
-                    "undefined"
-                  ]
-                }
+              "origin": "\"cli\"",
+              "style": "\"custom\"",
+              "title?": {
+                "union": [
+                  "string",
+                  "undefined"
+                ]
               }
-            ]
-          },
-          "whenTurnUnavailable?": {
-            "union": [
-              "\"queue\"",
-              "\"reject\"",
-              "undefined"
-            ]
-          }
+            },
+            {
+              "disclosure?": {
+                "union": [
+                  "\"collapsed\"",
+                  "undefined"
+                ]
+              },
+              "origin": "\"cli\"",
+              "style": {
+                "union": [
+                  "\"error\"",
+                  "\"info\"",
+                  "\"notice\""
+                ]
+              },
+              "title?": {
+                "union": [
+                  "string",
+                  "undefined"
+                ]
+              }
+            }
+          ]
+        },
+        "whenTurnUnavailable?": {
+          "union": [
+            "\"queue\"",
+            "\"reject\"",
+            "undefined"
+          ]
         }
       }
-    ],
+    },
     "result": {
       "acceptedAt": "string",
       "chatId": "string",

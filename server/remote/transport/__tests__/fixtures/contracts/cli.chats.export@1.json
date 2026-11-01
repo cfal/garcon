@@ -10,33 +10,35 @@
     "lane": "bulk"
   },
   "route": "GET /api/v1/chats/export",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "chatId": "string",
-          "exclusions": {
-            "array": {
-              "union": [
-                "\"diagnostics\"",
-                "\"handoffs\"",
-                "\"permissions\"",
-                "\"reasoning\"",
-                "\"tool-calls\"",
-                "\"tool-results\""
-              ]
+  "wire": {
+    "request": {
+      "query": {
+        "chatId": "string",
+        "exclude?": {
+          "union": [
+            "undefined",
+            {
+              "array": {
+                "union": [
+                  "\"diagnostics\"",
+                  "\"handoffs\"",
+                  "\"permissions\"",
+                  "\"reasoning\"",
+                  "\"tool-calls\"",
+                  "\"tool-results\""
+                ]
+              }
             }
-          },
-          "format": {
-            "union": [
-              "\"markdown\"",
-              "\"xml\""
-            ]
-          }
+          ]
+        },
+        "format": {
+          "union": [
+            "\"markdown\"",
+            "\"xml\""
+          ]
         }
       }
-    ],
+    },
     "result": {
       "chatId": "string",
       "document": "string",

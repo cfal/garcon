@@ -19,126 +19,123 @@
     "lane": "bulk"
   },
   "route": "POST /api/v1/chats/fork-run",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "agentSettings?": {
-            "union": [
-              "undefined",
-              {
-                "ownerId": "string",
-                "schemaVersion": "number",
-                "values": {
-                  "[string]": {
-                    "union": [
-                      "false",
-                      "null",
-                      "number",
-                      "string",
-                      "true",
-                      {
-                        "array": {
-                          "recursive": "JsonValue"
-                        }
-                      },
-                      {
-                        "recursive": "JsonObject"
+  "wire": {
+    "request": {
+      "body": {
+        "agentSettings?": {
+          "union": [
+            "undefined",
+            {
+              "ownerId": "string",
+              "schemaVersion": "number",
+              "values": {
+                "[string]": {
+                  "union": [
+                    "false",
+                    "null",
+                    "number",
+                    "string",
+                    "true",
+                    {
+                      "array": {
+                        "recursive": "JsonValue"
                       }
-                    ]
-                  }
+                    },
+                    {
+                      "recursive": "JsonObject"
+                    }
+                  ]
                 }
               }
-            ]
-          },
-          "allowHandoffFork?": {
-            "union": [
-              "false",
-              "true",
-              "undefined"
-            ]
-          },
-          "apiProviderId?": {
-            "union": [
-              "null",
-              "string",
-              "undefined"
-            ]
-          },
-          "chatId": "string",
-          "clientMessageId": "string",
-          "clientRequestId": "string",
-          "command": "string",
-          "images?": {
-            "union": [
-              "undefined",
-              {
-                "array": {
-                  "data": "string",
-                  "mimeType?": {
-                    "union": [
-                      "string",
-                      "undefined"
-                    ]
-                  },
-                  "name?": {
-                    "union": [
-                      "string",
-                      "undefined"
-                    ]
-                  }
+            }
+          ]
+        },
+        "allowHandoffFork?": {
+          "union": [
+            "false",
+            "true",
+            "undefined"
+          ]
+        },
+        "apiProviderId?": {
+          "union": [
+            "null",
+            "string",
+            "undefined"
+          ]
+        },
+        "chatId": "string",
+        "clientMessageId": "string",
+        "clientRequestId": "string",
+        "command": "string",
+        "images?": {
+          "union": [
+            "undefined",
+            {
+              "array": {
+                "data": "string",
+                "mimeType?": {
+                  "union": [
+                    "string",
+                    "undefined"
+                  ]
+                },
+                "name?": {
+                  "union": [
+                    "string",
+                    "undefined"
+                  ]
                 }
               }
-            ]
-          },
-          "model?": {
-            "union": [
-              "string",
-              "undefined"
-            ]
-          },
-          "modelEndpointId?": {
-            "union": [
-              "null",
-              "string",
-              "undefined"
-            ]
-          },
-          "modelProtocol?": {
-            "union": [
-              "\"anthropic-messages\"",
-              "\"openai-compatible\"",
-              "null",
-              "undefined"
-            ]
-          },
-          "permissionMode?": {
-            "union": [
-              "\"acceptEdits\"",
-              "\"bypassPermissions\"",
-              "\"default\"",
-              "\"manualBypass\"",
-              "\"plan\"",
-              "undefined"
-            ]
-          },
-          "sourceChatId": "string",
-          "thinkingMode?": {
-            "union": [
-              "\"high\"",
-              "\"low\"",
-              "\"max\"",
-              "\"medium\"",
-              "\"none\"",
-              "\"ultra\"",
-              "\"xhigh\"",
-              "undefined"
-            ]
-          }
+            }
+          ]
+        },
+        "model?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "modelEndpointId?": {
+          "union": [
+            "null",
+            "string",
+            "undefined"
+          ]
+        },
+        "modelProtocol?": {
+          "union": [
+            "\"anthropic-messages\"",
+            "\"openai-compatible\"",
+            "null",
+            "undefined"
+          ]
+        },
+        "permissionMode?": {
+          "union": [
+            "\"acceptEdits\"",
+            "\"bypassPermissions\"",
+            "\"default\"",
+            "\"manualBypass\"",
+            "\"plan\"",
+            "undefined"
+          ]
+        },
+        "sourceChatId": "string",
+        "thinkingMode?": {
+          "union": [
+            "\"high\"",
+            "\"low\"",
+            "\"max\"",
+            "\"medium\"",
+            "\"none\"",
+            "\"ultra\"",
+            "\"xhigh\"",
+            "undefined"
+          ]
         }
       }
-    ],
+    },
     "result": {
       "acceptedAt": "string",
       "chat": {

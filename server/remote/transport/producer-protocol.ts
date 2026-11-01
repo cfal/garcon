@@ -30,7 +30,7 @@ export const PRODUCER_BINDING_CODEC_V1: ProducerCreator = Object.freeze({ ...PRO
   ]))),
 });
 
-export const RENDERED_MESSAGES_V1: Readonly<Record<ChatMessage['type'], true>> = Object.freeze({
+export const RENDERED_MESSAGES_V1: Readonly<Partial<Record<ChatMessage['type'], true>>> = Object.freeze({
   'user-message': true,
   'assistant-message': true,
   'command-output': true,

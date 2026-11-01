@@ -10,17 +10,13 @@
     "lane": "primary"
   },
   "route": "GET /api/v1/chats/turn-receipt",
-  "client": {
-    "parameters": [
-      {
-        "name": "chatId",
-        "type": "string"
-      },
-      {
-        "name": "turnId",
-        "type": "string"
+  "wire": {
+    "request": {
+      "query": {
+        "chatId": "string",
+        "turnId": "string"
       }
-    ],
+    },
     "result": {
       "union": [
         {

@@ -10,22 +10,18 @@
     "lane": "bulk"
   },
   "route": "GET /api/v1/models",
-  "client": {
-    "parameters": [
-      {
-        "name": "agentId",
-        "type": {
+  "wire": {
+    "request": {
+      "query": {
+        "agent?": {
           "union": [
             "string",
             "undefined"
           ]
-        }
-      },
-      {
-        "name": "executorId",
-        "type": "string"
+        },
+        "executorId": "string"
       }
-    ],
+    },
     "result": {
       "catalog": {
         "agents": {

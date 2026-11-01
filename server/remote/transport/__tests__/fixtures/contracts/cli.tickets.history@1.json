@@ -10,27 +10,24 @@
     "lane": "bulk"
   },
   "route": "GET /api/v1/tickets/history",
-  "client": {
-    "parameters": [
-      {
-        "name": "query",
-        "type": {
-          "beforeSequence?": {
-            "union": [
-              "number",
-              "undefined"
-            ]
-          },
-          "limit?": {
-            "union": [
-              "number",
-              "undefined"
-            ]
-          },
-          "ticketId": "string"
-        }
+  "wire": {
+    "request": {
+      "query": {
+        "beforeSequence?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "limit?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "ticketId": "string"
       }
-    ],
+    },
     "result": {
       "collectionRevision": "number",
       "items": {

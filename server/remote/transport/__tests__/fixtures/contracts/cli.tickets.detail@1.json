@@ -10,40 +10,37 @@
     "lane": "bulk"
   },
   "route": "GET /api/v1/tickets/detail",
-  "client": {
-    "parameters": [
-      {
-        "name": "query",
-        "type": {
-          "beforeCommentSequence?": {
-            "union": [
-              "number",
-              "undefined"
-            ]
-          },
-          "commentLimit?": {
-            "union": [
-              "number",
-              "undefined"
-            ]
-          },
-          "expectedCollectionRevision?": {
-            "union": [
-              "number",
-              "undefined"
-            ]
-          },
-          "includeDescription?": {
-            "union": [
-              "false",
-              "true",
-              "undefined"
-            ]
-          },
-          "ticketId": "string"
-        }
+  "wire": {
+    "request": {
+      "query": {
+        "beforeCommentSequence?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "commentLimit?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "expectedCollectionRevision?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "includeDescription?": {
+          "union": [
+            "\"false\"",
+            "\"true\"",
+            "undefined"
+          ]
+        },
+        "ticketId": "string"
       }
-    ],
+    },
     "result": {
       "collectionRevision": "number",
       "comments": {

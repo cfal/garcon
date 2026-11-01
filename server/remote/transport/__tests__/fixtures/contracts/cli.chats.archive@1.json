@@ -10,21 +10,18 @@
     "lane": "bulk"
   },
   "route": "PUT /api/v1/chats/archive",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "chatId": "string",
-          "isArchived": {
-            "union": [
-              "false",
-              "true"
-            ]
-          }
+  "wire": {
+    "request": {
+      "body": {
+        "chatId": "string",
+        "isArchived": {
+          "union": [
+            "false",
+            "true"
+          ]
         }
       }
-    ],
+    },
     "result": {
       "changed": {
         "union": [

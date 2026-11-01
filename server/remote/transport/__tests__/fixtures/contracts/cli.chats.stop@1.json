@@ -10,22 +10,19 @@
     "lane": "primary"
   },
   "route": "POST /api/v1/chats/stop",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "agentId?": {
-            "union": [
-              "string",
-              "undefined"
-            ]
-          },
-          "chatId": "string",
-          "clientRequestId": "string"
-        }
+  "wire": {
+    "request": {
+      "body": {
+        "agentId?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "chatId": "string",
+        "clientRequestId": "string"
       }
-    ],
+    },
     "result": {
       "acceptedAt": "string",
       "chatId?": {

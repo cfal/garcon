@@ -6,56 +6,6 @@ import { RPC_V1, PRODUCER_EVENTS_V1, TERMINAL_EVENTS_V1, PRODUCER_BINDING_V1, TE
 import { contractKey } from '@garcon/common/protocol-contracts';
 import { RENDERED_MESSAGES_V1 } from '../producer-protocol.js';
 
-const CLI_CLIENTS = {
-  'cli.schedules.list': 'getScheduledPrompts',
-  'cli.schedules.create': 'createScheduledPrompt',
-  'cli.schedules.update': 'updateScheduledPrompt',
-  'cli.schedules.delete': 'deleteScheduledPrompt',
-  'cli.schedules.enabled': 'setScheduledPromptEnabled',
-  'cli.executors.list': 'listExecutors',
-  'cli.executors.create': 'createExecutor',
-  'cli.executors.update': 'updateExecutor',
-  'cli.executors.delete': 'deleteExecutor',
-  'cli.executors.connection': 'getExecutorConnection',
-  'cli.providers.assignments': 'getExecutorProviders',
-  'cli.providers.assign': 'assignExecutorProvider',
-  'cli.providers.unassign': 'unassignExecutorProvider',
-  'cli.models.list': 'getModelCatalog',
-  'cli.settings.read': 'getSettings',
-  'cli.preambles.list': 'getPreambles',
-  'cli.chats.list': 'listChats',
-  'cli.chats.messages': 'getChatMessages',
-  'cli.chats.snapshot': 'getChatSnapshot',
-  'cli.chats.turnReceipt': 'getTurnReceipt',
-  'cli.chats.export': 'getTranscriptExport',
-  'cli.chats.handoffArtifact': 'getChatHandoffArtifact',
-  'cli.chats.lookupNativeSession': 'lookupNativeSession',
-  'cli.chats.search': 'searchChats',
-  'cli.chats.searchStatus': 'getTranscriptSearchStatus',
-  'cli.chats.rebuildSearch': 'rebuildTranscriptSearch',
-  'cli.settings.updateSearch': 'setTranscriptSearchEnabled',
-  'cli.chats.start': 'startChat',
-  'cli.chats.run': 'runChat',
-  'cli.chats.fork': 'forkChat',
-  'cli.chats.forkRun': 'forkRun',
-  'cli.chats.steer': 'steerChat',
-  'cli.chats.stop': 'stopChat',
-  'cli.chats.permissionDecision': 'decidePermission',
-  'cli.chats.rows': 'getChatRowTarget',
-  'cli.chats.addRow': 'addChatRow',
-  'cli.chats.rename': 'updateChatTitle',
-  'cli.chats.pin': 'setChatPinned',
-  'cli.chats.archive': 'setChatArchived',
-  'cli.chats.tags': 'setChatTags',
-  'cli.chats.setTags': 'setChatTags',
-  'cli.tickets.bootstrap': 'getTicketBootstrap',
-  'cli.tickets.list': 'listTickets',
-  'cli.tickets.detail': 'readTicket',
-  'cli.tickets.history': 'getTicketHistory',
-  'cli.tickets.projectDefault': 'getTicketProjectDefault',
-  'cli.tickets.mutate': 'mutateTicket',
-} as const;
-
 // Expands aliases so an internal DTO edit cannot silently change a frozen wire shape.
 // This is a test tripwire, not a serializer or evidence of runtime semantics.
 export function contractWireShapes(): {
@@ -66,7 +16,7 @@ export function contractWireShapes(): {
   const root = fileURLToPath(new URL('../../../', import.meta.url)).replace(/\/$/, '');
   const configuration = ts.readConfigFile(`${root}/tsconfig.json`, ts.sys.readFile);
   const parsed = ts.parseJsonConfigFileContent(configuration.config, ts.sys, root);
-  const cli = `${root}/../cli/garcon-client.ts`;
+  const cli = `${root}/remote/transport/__tests__/cli-http-boundaries.ts`;
   const program = ts.createProgram([`${root}/remote/transport/rpc.ts`, `${root}/remote/transport/link-handshake.ts`, cli], parsed.options);
   const checker = program.getTypeChecker();
   const location = program.getSourceFile(`${root}/remote/transport/rpc-protocol.ts`)!;
@@ -114,28 +64,13 @@ export function contractWireShapes(): {
   for (const definition of Object.values(RPC_V1)) contracts[contractKey(definition)] = {
     definition, wire: shape(member(member(rpc, definition.name), String(definition.version))), failures: 'rpc-errors-v1',
   };
-  const client = exported(cli, 'GarconClient');
-  const clientShapes: Record<string, JsonValue> = {};
-  for (const method of client.getProperties().sort((a, b) => a.name.localeCompare(b.name))) {
-    if (!method.valueDeclaration || method.name.includes('#')) continue;
-    const signature = checker.getTypeOfSymbolAtLocation(method, method.valueDeclaration).getCallSignatures()[0];
-    if (!signature) continue;
-    clientShapes[method.name] = {
-      parameters: signature.parameters.filter(parameter => parameter.name !== 'signal').map(parameter => {
-        const declaration = parameter.valueDeclaration!;
-        return { name: parameter.name, type: shape(checker.getTypeOfSymbolAtLocation(parameter, declaration)) };
-      }),
-      result: shape(checker.getAwaitedType(signature.getReturnType())!),
-    };
-  }
-  const usedClients = new Set<string>(['verifyRuntime']);
+  const boundaries = exported(cli, 'CliHttpBoundariesV1');
+  const usedBoundaries = new Set<string>();
   for (const [route, versions] of Object.entries(CLI_OPERATIONS)) for (const definition of Object.values(versions)) {
-    const method = CLI_CLIENTS[definition.name];
-    if (!clientShapes[method]) throw new Error(`Missing CLI client ${method}`);
-    usedClients.add(method);
-    contracts[contractKey(definition)] = { definition, route, client: clientShapes[method]! };
+    usedBoundaries.add(definition.name);
+    contracts[contractKey(definition)] = { definition, route, wire: shape(member(boundaries, definition.name)) };
   }
-  for (const name of Object.keys(clientShapes)) if (!usedClients.has(name)) throw new Error(`Unclassified CLI client ${name}`);
+  for (const boundary of boundaries.getProperties()) if (!usedBoundaries.has(boundary.name)) throw new Error(`Unclassified CLI boundary ${boundary.name}`);
   const variantShape = (union: ts.Type, kind: string): JsonValue => {
     const types = (union.isUnion() ? union.types : [union]).filter(type => {
       const discriminant = member(type, 'type');
@@ -179,6 +114,5 @@ export function contractWireShapes(): {
     failure: shape(exported(`${root}/remote/transport/rpc-failure.ts`, 'Failure'), { code: 'string' }),
   }, cliBootstrap: {
     context: shape(exported(`${root}/../common/server-runtime.ts`, 'CliContext')),
-    verifyRuntime: clientShapes.verifyRuntime!,
   } };
 }

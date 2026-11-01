@@ -1,4 +1,5 @@
 {
+  "request": { "input": { "projectPath": "/synthetic" }, "budgetMs": 30000 },
   "failures": [
     {
       "domain": "git",

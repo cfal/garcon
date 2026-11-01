@@ -10,13 +10,12 @@
     "lane": "bulk"
   },
   "route": "GET /api/v1/executors/:executorId/connection",
-  "client": {
-    "parameters": [
-      {
-        "name": "id",
-        "type": "string"
+  "wire": {
+    "request": {
+      "path": {
+        "executorId": "string"
       }
-    ],
+    },
     "result": {
       "allowUnverifiedTls": {
         "union": [

@@ -10,41 +10,38 @@
     "lane": "bulk"
   },
   "route": "POST /api/v1/chats/fork",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "allowHandoffFork?": {
-            "union": [
-              "false",
-              "true",
-              "undefined"
-            ]
-          },
-          "chatId": "string",
-          "clientRequestId?": {
-            "union": [
-              "string",
-              "undefined"
-            ]
-          },
-          "sourceChatId": "string",
-          "transcriptViewId?": {
-            "union": [
-              "string",
-              "undefined"
-            ]
-          },
-          "upToOrdinal?": {
-            "union": [
-              "number",
-              "undefined"
-            ]
-          }
+  "wire": {
+    "request": {
+      "body": {
+        "allowHandoffFork?": {
+          "union": [
+            "false",
+            "true",
+            "undefined"
+          ]
+        },
+        "chatId": "string",
+        "clientRequestId?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "sourceChatId": "string",
+        "transcriptViewId?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "upToOrdinal?": {
+          "union": [
+            "number",
+            "undefined"
+          ]
         }
       }
-    ],
+    },
     "result": {
       "chat": {
         "activity": {

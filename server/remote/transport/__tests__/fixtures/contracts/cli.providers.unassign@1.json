@@ -10,24 +10,148 @@
     "lane": "bulk"
   },
   "route": "DELETE /api/v1/api-provider-assignments",
-  "client": {
-    "parameters": [
-      {
-        "name": "id",
-        "type": "string"
-      },
-      {
-        "name": "providerId",
-        "type": "string"
+  "wire": {
+    "request": {
+      "query": {
+        "apiProviderId": "string",
+        "executorId": "string"
       }
-    ],
+    },
     "result": {
-      "array": {
-        "executorIds": {
-          "array": "string"
+      "assignments": {
+        "assignments": {
+          "[string]": {
+            "array": "string"
+          }
         },
-        "id": "string",
-        "label": "string"
+        "revision": "number"
+      },
+      "providers": {
+        "array": {
+          "createdAt": "string",
+          "endpoints": {
+            "array": {
+              "apiKeyLabel?": {
+                "union": [
+                  "string",
+                  "undefined"
+                ]
+              },
+              "baseUrl": "string",
+              "capabilities?": {
+                "union": [
+                  "undefined",
+                  {
+                    "chatCompletions": {
+                      "union": [
+                        "false",
+                        "true"
+                      ]
+                    },
+                    "responses": {
+                      "union": [
+                        "false",
+                        "true"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "defaultModel": "string",
+              "hasApiKey": {
+                "union": [
+                  "false",
+                  "true"
+                ]
+              },
+              "id": "string",
+              "modelDiscovery?": {
+                "union": [
+                  "\"anthropic-models\"",
+                  "\"none\"",
+                  "\"ollama-tags\"",
+                  "\"openai-models\"",
+                  "\"openrouter-models\"",
+                  "undefined"
+                ]
+              },
+              "models": {
+                "array": {
+                  "apiProviderId?": {
+                    "union": [
+                      "string",
+                      "undefined"
+                    ]
+                  },
+                  "endpointId?": {
+                    "union": [
+                      "string",
+                      "undefined"
+                    ]
+                  },
+                  "isLocal?": {
+                    "union": [
+                      "false",
+                      "true",
+                      "undefined"
+                    ]
+                  },
+                  "label": "string",
+                  "protocol?": {
+                    "union": [
+                      "\"anthropic-messages\"",
+                      "\"openai-compatible\"",
+                      "undefined"
+                    ]
+                  },
+                  "rawModel?": {
+                    "union": [
+                      "string",
+                      "undefined"
+                    ]
+                  },
+                  "supportsImages?": {
+                    "union": [
+                      "false",
+                      "true",
+                      "undefined"
+                    ]
+                  },
+                  "value": "string"
+                }
+              },
+              "protocol": {
+                "union": [
+                  "\"anthropic-messages\"",
+                  "\"openai-compatible\""
+                ]
+              },
+              "supportsImages": {
+                "union": [
+                  "false",
+                  "true"
+                ]
+              }
+            }
+          },
+          "id": "string",
+          "label": "string",
+          "revision": "number",
+          "templateId?": {
+            "union": [
+              "\"alibaba-cloud\"",
+              "\"custom\"",
+              "\"fireworks\"",
+              "\"gemini\"",
+              "\"ollama\"",
+              "\"openrouter\"",
+              "\"together\"",
+              "\"zai\"",
+              "undefined"
+            ]
+          },
+          "updatedAt": "string"
+        }
       }
     }
   }

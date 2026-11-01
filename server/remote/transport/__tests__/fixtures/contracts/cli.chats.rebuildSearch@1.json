@@ -10,8 +10,8 @@
     "lane": "bulk"
   },
   "route": "POST /api/v1/chats/search/rebuild",
-  "client": {
-    "parameters": [],
+  "wire": {
+    "request": "null",
     "result": {
       "status": {
         "activeChat": {

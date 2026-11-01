@@ -10,50 +10,36 @@
     "lane": "bulk"
   },
   "route": "GET /api/v1/chats/messages",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
+  "wire": {
+    "request": {
+      "query": {
+        "beforeOrdinal?": {
           "union": [
-            {
-              "beforeOrdinal?": "undefined",
-              "chatId": "string",
-              "limit?": {
-                "union": [
-                  "number",
-                  "undefined"
-                ]
-              },
-              "purpose?": {
-                "union": [
-                  "\"activation\"",
-                  "undefined"
-                ]
-              },
-              "transcriptViewId?": {
-                "union": [
-                  "string",
-                  "undefined"
-                ]
-              }
-            },
-            {
-              "beforeOrdinal": "number",
-              "chatId": "string",
-              "limit?": {
-                "union": [
-                  "number",
-                  "undefined"
-                ]
-              },
-              "purpose?": "undefined",
-              "transcriptViewId": "string"
-            }
+            "string",
+            "undefined"
+          ]
+        },
+        "chatId": "string",
+        "limit?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "purpose?": {
+          "union": [
+            "\"activation\"",
+            "undefined"
+          ]
+        },
+        "transcriptViewId?": {
+          "union": [
+            "string",
+            "undefined"
           ]
         }
       }
-    ],
+    },
     "result": {
       "union": [
         {

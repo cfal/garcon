@@ -1,4 +1,6 @@
 {
+  "request": { "input": { "projectPath": "/synthetic", "files": ["note.txt"], "message": "Synthetic commit" }, "budgetMs": 30000 },
+  "result": { "executorId": "local", "instanceId": "synthetic-worker", "success": true, "output": "Synthetic commit", "commitScope": "selected-files", "indexSynchronized": true },
   "failures": [
     {
       "domain": "git",

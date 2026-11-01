@@ -10,13 +10,13 @@
     "lane": "bulk"
   },
   "route": "POST /api/v1/tickets/project-default",
-  "client": {
-    "parameters": [
-      {
-        "name": "directory",
-        "type": "string"
+  "wire": {
+    "request": {
+      "body": {
+        "directory": "string",
+        "executorId": "string"
       }
-    ],
+    },
     "result": {
       "kind": {
         "union": [

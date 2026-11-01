@@ -10,8 +10,8 @@
     "lane": "bulk"
   },
   "route": "GET /api/v1/preambles",
-  "client": {
-    "parameters": [],
+  "wire": {
+    "request": "null",
     "result": {
       "preambles": {
         "array": {

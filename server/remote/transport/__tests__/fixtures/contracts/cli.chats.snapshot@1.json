@@ -10,17 +10,13 @@
     "lane": "bulk"
   },
   "route": "GET /api/v1/chats/snapshot",
-  "client": {
-    "parameters": [
-      {
-        "name": "chatId",
-        "type": "string"
-      },
-      {
-        "name": "messageLimit",
-        "type": "number"
+  "wire": {
+    "request": {
+      "query": {
+        "chatId": "string",
+        "limit": "string"
       }
-    ],
+    },
     "result": {
       "chat": {
         "activity": {

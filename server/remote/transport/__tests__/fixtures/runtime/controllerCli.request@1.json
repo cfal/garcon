@@ -1,4 +1,8 @@
 {
+  "request": {
+    "expectedServerInstanceId": "synthetic-controller", "contract": { "name": "cli.chats.list", "version": 1 },
+    "http": { "operation": "GET /api/v1/chats", "query": [], "body": null }
+  },
   "failures": [
     {
       "domain": "executor",

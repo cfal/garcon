@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "bun main.js",
-    "typecheck": "bunx tsc -p tsconfig.json"
+    "typecheck": "bunx tsc -p tsconfig.json && bunx tsc -p tsconfig.contract-tests.json"
   },
   "dependencies": {
     "@cfal/noise-ws": "github:cfal/noise-ws#6cf4a4b2ab25d300316a21c23cbcef1bb3558556",

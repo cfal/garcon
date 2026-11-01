@@ -10,8 +10,8 @@
     "lane": "bulk"
   },
   "route": "GET /api/v1/app/settings",
-  "client": {
-    "parameters": [],
+  "wire": {
+    "request": "null",
     "result": {
       "executionDefaults": {
         "byAgent": {},

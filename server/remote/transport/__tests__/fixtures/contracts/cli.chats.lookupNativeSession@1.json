@@ -10,27 +10,21 @@
     "lane": "bulk"
   },
   "route": "POST /api/v1/chats/lookup-native-session",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "agent?": {
-            "union": [
-              "string",
-              "undefined"
-            ]
-          },
-          "executorId?": {
-            "union": [
-              "string",
-              "undefined"
-            ]
-          },
-          "nativeSessionId": "string"
-        }
+  "wire": {
+    "request": {
+      "body": {
+        "agent?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "executorId": "string",
+        "nativeSessionId": "string"
       }
-    ],
-    "result": "string"
+    },
+    "result": {
+      "chatId": "string"
+    }
   }
 }

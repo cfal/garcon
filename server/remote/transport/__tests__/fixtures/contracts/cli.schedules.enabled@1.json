@@ -10,22 +10,19 @@
     "lane": "bulk"
   },
   "route": "PUT /api/v1/scheduled-prompts/enabled",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "enabled": {
-            "union": [
-              "false",
-              "true"
-            ]
-          },
-          "expectedRevision": "number",
-          "id": "string"
-        }
+  "wire": {
+    "request": {
+      "body": {
+        "enabled": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "expectedRevision": "number",
+        "id": "string"
       }
-    ],
+    },
     "result": {
       "snapshot": {
         "prompts": {

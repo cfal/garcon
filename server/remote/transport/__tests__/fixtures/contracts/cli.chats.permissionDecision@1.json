@@ -10,43 +10,40 @@
     "lane": "primary"
   },
   "route": "POST /api/v1/chats/permissions/decision",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "allow": {
-            "union": [
-              "false",
-              "true"
-            ]
-          },
-          "alwaysAllow": {
-            "union": [
-              "false",
-              "true"
-            ]
-          },
+  "wire": {
+    "request": {
+      "body": {
+        "allow": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "alwaysAllow": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "chatId": "string",
+        "clientRequestId": "string",
+        "control": {
           "chatId": "string",
-          "clientRequestId": "string",
-          "control": {
-            "chatId": "string",
-            "permissionOccurrenceId": "string",
-            "runId": "string",
-            "serverInstanceId": "string"
-          },
           "permissionOccurrenceId": "string",
-          "response?": {
-            "union": [
-              "undefined",
-              {
-                "[string]": "unknown"
-              }
-            ]
-          }
+          "runId": "string",
+          "serverInstanceId": "string"
+        },
+        "permissionOccurrenceId": "string",
+        "response?": {
+          "union": [
+            "undefined",
+            {
+              "[string]": "unknown"
+            }
+          ]
         }
       }
-    ],
+    },
     "result": {
       "acceptedAt": "string",
       "chatId?": {

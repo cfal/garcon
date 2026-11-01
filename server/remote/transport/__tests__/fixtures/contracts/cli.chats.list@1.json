@@ -10,8 +10,8 @@
     "lane": "bulk"
   },
   "route": "GET /api/v1/chats",
-  "client": {
-    "parameters": [],
+  "wire": {
+    "request": "null",
     "result": {
       "lastSelectedChatId": {
         "union": [

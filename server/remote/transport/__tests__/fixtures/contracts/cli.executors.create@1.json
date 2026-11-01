@@ -10,89 +10,99 @@
     "lane": "bulk"
   },
   "route": "POST /api/v1/executors",
-  "client": {
-    "parameters": [
-      {
-        "name": "request",
-        "type": {
-          "union": [
-            {
-              "advertisedUrl?": {
-                "union": [
-                  "string",
-                  "undefined"
-                ]
-              },
-              "allowControllerCli?": {
-                "union": [
-                  "false",
-                  "true",
-                  "undefined"
-                ]
-              },
-              "allowExecutorManagement?": {
-                "union": [
-                  "false",
-                  "true",
-                  "undefined"
-                ]
-              },
-              "allowUnverifiedTls?": {
-                "union": [
-                  "false",
-                  "true",
-                  "undefined"
-                ]
-              },
-              "direction": "\"executor-connects\"",
-              "label": "string",
-              "noTls?": {
-                "union": [
-                  "false",
-                  "true",
-                  "undefined"
-                ]
-              }
+  "wire": {
+    "request": {
+      "body": {
+        "union": [
+          {
+            "advertisedUrl?": {
+              "union": [
+                "string",
+                "undefined"
+              ]
             },
-            {
-              "allowControllerCli?": {
-                "union": [
-                  "false",
-                  "true",
-                  "undefined"
-                ]
-              },
-              "allowExecutorManagement?": {
-                "union": [
-                  "false",
-                  "true",
-                  "undefined"
-                ]
-              },
-              "allowUnverifiedTls?": {
-                "union": [
-                  "false",
-                  "true",
-                  "undefined"
-                ]
-              },
-              "connectionUrl": "string",
-              "direction": "\"controller-connects\"",
-              "label": "string",
-              "noTls?": {
-                "union": [
-                  "false",
-                  "true",
-                  "undefined"
-                ]
-              }
+            "allowControllerCli?": {
+              "union": [
+                "false",
+                "true",
+                "undefined"
+              ]
+            },
+            "allowExecutorManagement?": {
+              "union": [
+                "false",
+                "true",
+                "undefined"
+              ]
+            },
+            "allowUnverifiedTls?": {
+              "union": [
+                "false",
+                "true",
+                "undefined"
+              ]
+            },
+            "direction": "\"executor-connects\"",
+            "label": "string",
+            "noTls?": {
+              "union": [
+                "false",
+                "true",
+                "undefined"
+              ]
             }
-          ]
-        }
+          },
+          {
+            "allowControllerCli?": {
+              "union": [
+                "false",
+                "true",
+                "undefined"
+              ]
+            },
+            "allowExecutorManagement?": {
+              "union": [
+                "false",
+                "true",
+                "undefined"
+              ]
+            },
+            "allowUnverifiedTls?": {
+              "union": [
+                "false",
+                "true",
+                "undefined"
+              ]
+            },
+            "connectionUrl": "string",
+            "direction": "\"controller-connects\"",
+            "label": "string",
+            "noTls?": {
+              "union": [
+                "false",
+                "true",
+                "undefined"
+              ]
+            }
+          }
+        ]
       }
-    ],
+    },
     "result": {
-      "id": "string"
+      "allowUnverifiedTls": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "connectionUrl": "string",
+      "id": "string",
+      "noTls": {
+        "union": [
+          "false",
+          "true"
+        ]
+      }
     }
   }
 }
