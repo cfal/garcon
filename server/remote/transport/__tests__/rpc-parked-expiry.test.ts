@@ -123,3 +123,18 @@ for (const field of ['controllerRuntimeId', 'workerRuntimeId', 'profileId'] as c
     } finally { next.transport.close(); parked.close(); }
   });
 }
+
+test('missing reconciliation rejects parked outcomes without sending them again', async () => {
+  const parked = new ParkedRpcCalls();
+  const first = session('first', parked);
+  const original = first.transport.protocol;
+  const result = first.rpc.call('', RPC_V1['projects.inspect'], { projectPath: '/synthetic' }).catch(error => error);
+  first.transport.close();
+  const next = session('next', parked, { ...original, profile: { bootstrap: 1, contracts: {} } });
+  try {
+    await next.rpc.reconcileParked();
+    expect(await result).toMatchObject({ outcome: 'unknown' });
+    expect(next.sent).toEqual([]);
+    expect(parked.size).toBe(0);
+  } finally { next.transport.close(); parked.close(); }
+});

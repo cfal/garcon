@@ -282,8 +282,6 @@ export const SESSION_INSTALLATION_METHODS: ReadonlySet<string> = new Set<keyof E
   'executor.describe', 'lifecycle.migrateOwnedStorage', 'lifecycle.start', 'producers.resume', 'calls.reconcile',
 ]);
 
-export function rpcContinuity(contract: RpcContractDefinition): RpcContinuity { return contract.continuity; }
-
 // A journaled call a lost session left outstanding, named by where it was last sent.
 export interface OutstandingCall {
   readonly id: string;

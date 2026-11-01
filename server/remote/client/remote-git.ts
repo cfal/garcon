@@ -9,6 +9,7 @@ import { GitServiceError } from '../../../common/git-error.js';
 import type { RemoteSessions } from './executor-client.js';
 import { rpcLane } from '../transport/rpc-routing.js';
 import { RPC_V1 } from '@garcon/common/executor-contracts';
+import type { GitRpcMethods } from '../transport/git-protocol.js';
 
 export class RemoteGitServices {
   readonly git: ExecutionGitService;
@@ -103,8 +104,10 @@ export class RemoteGitServices {
       return await withDeadline(options, ghOperationTimeoutMs(method), async (callOptions) => {
         const { backing, timeoutMs } = await this.sessions.acquire('bulk', callOptions);
         const budgetMs = timeoutMs ?? callOptions.timeoutMs;
-        const wire = rpcWireV1(`gh.${method}`);
-        const result = await backing.rpc.call('', wire.definition, wire.request({ input: request, budgetMs }), { ...callOptions, timeoutMs: budgetMs })
+        const contract: (typeof RPC_V1)[`gh.${keyof GhRequests}`] = RPC_V1[`gh.${method}`];
+        // The generic method key already pairs this validated input with its wire request.
+        const payload = { input: request, budgetMs } as GitRpcMethods[`gh.${keyof GhRequests}`]['request'];
+        const result = await backing.rpc.call('', contract, payload, { ...callOptions, timeoutMs: budgetMs })
           .catch(error => { throw mutation ? error : readFailure(error, callOptions.signal); });
         validateGhResult(method, result, backing.info);
         return result;

@@ -4,7 +4,6 @@ import {
   AgentCallError, type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import {
-  rpcContinuity,
   SESSION_INSTALLATION_METHODS,
   type ExecutorRpcMethods, type ExecutorRpcRequest, type RpcContractRef, type RpcRequest, type RpcResult, type AgentProducerFrame, type ProducerAckFrame, type ProducerAcknowledgement,
   type OutstandingCall, type OutstandingCallState, type ReplyAckFrame, type RpcContinuity,
@@ -20,7 +19,7 @@ import type { TerminalNotification } from './terminal-protocol.js';
 import { RpcAdmission, type RpcAdmissionBudgets } from './rpc-admission.js';
 import { parseBulkControl, type BulkConnectionControl } from './rpc-lane.js';
 import { BULK_CONTROL_BYTES, RPC_CALL_LIMIT, RPC_INSTALLATION_CALL_LIMIT } from './limits.js';
-import { sameContinuity, type SessionProtocol } from './protocol-compatibility.js';
+import { sameContinuity } from './protocol-compatibility.js';
 import { registerRpcHandlers, resolveRpc, type BoundRpcHandlers, type RpcHandler, type RpcCallCapture, type RpcWire } from './rpc-registrations.js';
 import { rpcWireV1 } from './rpc-wire-v1.js';
 
@@ -49,6 +48,17 @@ interface LateResult {
   readonly lost: (() => void) | undefined;
 }
 
+interface SettledCall {
+  readonly failure: RpcWire['failure'];
+  readonly replySize: RpcCallCapture['policy']['replySize'];
+  readonly journaled: boolean;
+}
+
+function settledCall(capture: RpcCallCapture): SettledCall {
+  return { failure: capture.wire.failure, replySize: capture.policy.replySize,
+    journaled: capture.wire.definition.continuity === 'journaled' };
+}
+
 const log = createLogger('executor-rpc');
 
 export const DEFAULT_RPC_TIMEOUT_MS = 120_000;
@@ -67,7 +77,6 @@ interface OutgoingCall {
   readonly capture: RpcCallCapture;
   readonly encodedRequest: string;
   readonly journaled: boolean;
-  readonly protocol: SessionProtocol;
   // Where the call was last sent, which a reconcile names.
   session: string;
   seq: number;
@@ -93,7 +102,6 @@ function disarmExpiry(call: OutgoingCall): void {
 interface IncomingCall {
   readonly controller: AbortController;
   readonly continuity: RpcContinuity;
-  readonly capture: RpcCallCapture;
 }
 
 // Journaled calls whose session was lost, which a controller keeps until a
@@ -156,7 +164,7 @@ export interface ExecutorRpcContinuity {
 export class ExecutorRpc {
   readonly #pending = new Map<string, OutgoingCall>();
   readonly #lateResults = new Map<string, LateResult>();
-  readonly #settledCalls = new Map<string, RpcCallCapture>();
+  readonly #settledCalls = new Map<string, SettledCall>();
   readonly #incoming = new Map<string, IncomingCall>();
   readonly #parked: ParkedRpcCalls | null;
   readonly #journal: RpcReplyJournal | null;
@@ -186,6 +194,8 @@ export class ExecutorRpc {
   readonly #unsubscribe: () => void;
 
   constructor(readonly transport: SessionTransport, continuity: ExecutorRpcContinuity = {}) {
+    // A complete profile without journaled operations needs no reconciliation exchange.
+    this.#reconciled = !supportsDefinition(transport.profile.contracts, RPC_V1['calls.reconcile']);
     this.#incomingOpen = !continuity.recovering;
     this.#outgoingOpen = !continuity.recovering;
     this.#parked = continuity.parked ?? null;
@@ -258,7 +268,10 @@ export class ExecutorRpc {
   get reconciled(): boolean { return this.#reconciled; }
   get active(): boolean { return !this.#retired && this.#outgoingOpen && this.transport.connected; }
   onBulkControl(handler: (frame: BulkConnectionControl) => void): void { this.#bulkControl = handler; }
-  onReconciled(handler: () => void): void { this.#reconciliationComplete = handler; }
+  onReconciled(handler: () => void): void {
+    this.#reconciliationComplete = handler;
+    if (this.#reconciled) handler();
+  }
   activateIncoming(): void { this.#incomingOpen = true; this.#recoveryResends.clear(); }
   activate(): void { this.activateIncoming(); this.#outgoingOpen = true; this.#installing = false; }
   onProducer(handler: (frame: AgentProducerFrame) => void): void { this.#producer = handler; }
@@ -325,7 +338,6 @@ export class ExecutorRpc {
     const result = Promise.withResolvers<RpcResult<D>>();
     const call: OutgoingCall = {
       id: crypto.randomUUID(), integrationId, capture, encodedRequest,
-      protocol: this.transport.protocol,
       journaled: this.#parked !== null && wire.definition.continuity === 'journaled',
       session: this.transport.id, seq: 0, rpc: this, dispatchDeadline: options?.dispatchDeadline, expiry: null,
       resolve: value => {
@@ -353,7 +365,7 @@ export class ExecutorRpc {
           failed: options?.onLateError,
           lost: options?.onLateResultLost,
         });
-      } else if (holder) holder.#rememberCall(call.id, call.capture);
+      } else if (holder) holder.#rememberCall(call.id, settledCall(call.capture));
       call.cleanup();
       call.reject(new AgentCallError('unknown', message));
       // A parked call's worker learns of it at the next reconcile, which does not name it.
@@ -388,7 +400,7 @@ export class ExecutorRpc {
   async reconcileParked(): Promise<void> {
     const parked = this.#parked;
     const calls = (parked?.take() ?? []).filter(call => {
-      if (sameContinuity(call.protocol.continuity, this.transport.continuity)) return true;
+      if (sameContinuity(call.capture.protocol.continuity, this.transport.continuity)) return true;
       call.cleanup();
       call.reject(new ExecutorSessionLostError('unknown', 'The executor continuity changed before its reply was recovered.'));
       return false;
@@ -449,12 +461,12 @@ export class ExecutorRpc {
   // Sends a call on this session: its first dispatch, or again once the worker
   // reports that a lost session never delivered it.
   #dispatch(call: OutgoingCall): void {
-    if (!sameContinuity(call.protocol.continuity, this.transport.continuity)) {
+    if (!sameContinuity(call.capture.protocol.continuity, this.transport.continuity)) {
       throw new ExecutorSessionLostError('unknown', 'A call cannot be replayed in another executor continuity.');
     }
     this.#assertDispatch?.();
     const { wire, policy } = call.capture;
-    if (!supportsDefinition(call.protocol.profile.contracts, wire.definition)) throw new AgentCallError('not-dispatched', 'Operation unsupported', 'OPERATION_UNSUPPORTED');
+    if (!supportsDefinition(call.capture.protocol.profile.contracts, wire.definition)) throw new AgentCallError('not-dispatched', 'Operation unsupported', 'OPERATION_UNSUPPORTED');
     const seq = this.#sent + 1;
     const envelope = JSON.stringify({ type: 'request', id: call.id, seq, integrationId: call.integrationId,
       method: wire.definition.name, version: wire.definition.version });
@@ -528,43 +540,17 @@ export class ExecutorRpc {
     if (frame.type === 'result' || frame.type === 'error') {
       const call = this.#pending.get(frame.id);
       if (!call) {
-        const late = this.#lateResults.get(frame.id);
-        const capture = late?.capture ?? this.#settledCalls.get(frame.id);
-        let receiveLate: (() => void | Promise<unknown>) | undefined;
-        let lateFailure: Error | undefined;
-        let unreadable = false;
-        if (frame.type === 'error') {
-          if (capture) lateFailure = capture.wire.failure(frame.error);
-          else assertFailureEnvelope(frame.error);
-        }
-        try {
-          if (late && frame.type === 'result') receiveLate = late.prepare(frame.value);
-          capture?.policy.replySize(Buffer.byteLength(payload));
-        } catch { unreadable = true; }
-        this.#lateResults.delete(frame.id);
-        late?.release();
-        if (capture) {
-          this.#rememberCall(frame.id, capture);
-          if (capture.wire.definition.continuity === 'journaled') this.#acknowledgeReply(frame.id);
-        }
-        if (frame.type === 'result' && late) {
-          // The deferred callback owns cleanup after the map releases the budget slot.
-          void Promise.resolve().then(() => {
-            return this.#retired || unreadable ? late.lost?.() : receiveLate?.();
-          }).catch((error) => log.warn('Failed to clean up a cancelled executor call', error));
-        } else if (lateFailure && late?.failed) {
-          try { late.failed(lateFailure); }
-          catch (error) { log.warn('Failed to settle a cancelled executor call', error); }
-        }
+        this.#receiveSettledReply(frame, payload);
         return;
       }
       let failure = frame.type === 'error' ? call.capture.wire.failure(frame.error) : null;
       try { call.capture.policy.replySize(Buffer.byteLength(payload)); }
       catch (error) { failure = error instanceof Error ? error : new Error(String(error)); }
       this.#pending.delete(frame.id); call.cleanup();
-      this.#rememberCall(frame.id, call.capture);
+      const reply = settledCall(call.capture);
+      this.#rememberCall(frame.id, reply);
       // A worker keeps every journaled reply until it is acknowledged.
-      if (call.capture.wire.definition.continuity === 'journaled') this.#acknowledgeReply(frame.id);
+      if (reply.journaled) this.#acknowledgeReply(frame.id);
       if (failure) call.reject(failure);
       else if (frame.type === 'result') call.resolve(frame.value);
       return;
@@ -579,6 +565,37 @@ export class ExecutorRpc {
       throw new Error('Invalid executor RPC request');
     }
     this.#request(frame, payload);
+  }
+
+  #receiveSettledReply(frame: ReplyFrame, payload: string): void {
+    const late = this.#lateResults.get(frame.id);
+    const reply = late ? settledCall(late.capture) : this.#settledCalls.get(frame.id);
+    let receiveLate: (() => void | Promise<unknown>) | undefined;
+    let lateFailure: Error | undefined;
+    let unreadable = false;
+    if (frame.type === 'error') {
+      if (reply) lateFailure = reply.failure(frame.error);
+      else assertFailureEnvelope(frame.error);
+    }
+    try {
+      if (late && frame.type === 'result') receiveLate = late.prepare(frame.value);
+      reply?.replySize(Buffer.byteLength(payload));
+    } catch { unreadable = true; }
+    this.#lateResults.delete(frame.id);
+    late?.release();
+    if (reply) {
+      this.#rememberCall(frame.id, reply);
+      if (reply.journaled) this.#acknowledgeReply(frame.id);
+    }
+    if (frame.type === 'result' && late) {
+      // The deferred callback owns cleanup after the map releases the budget slot.
+      void Promise.resolve().then(() => {
+        return this.#retired || unreadable ? late.lost?.() : receiveLate?.();
+      }).catch((error) => log.warn('Failed to clean up a cancelled executor call', error));
+    } else if (lateFailure && late?.failed) {
+      try { late.failed(lateFailure); }
+      catch (error) { log.warn('Failed to settle a cancelled executor call', error); }
+    }
   }
 
   #request(frame: ExecutorRpcRequest, payload: string): void {
@@ -625,7 +642,7 @@ export class ExecutorRpc {
       return;
     }
     const controller = new AbortController();
-    this.#incoming.set(frame.id, { controller, continuity, capture });
+    this.#incoming.set(frame.id, { controller, continuity });
     const handler = this.#handlers.get(contractKey(capture.wire.definition));
     let replyGuard: RpcReplyGuard | undefined;
     let undelivered: (() => void) | undefined;
@@ -705,9 +722,9 @@ export class ExecutorRpc {
     };
   }
 
-  #rememberCall(id: string, capture: RpcCallCapture): void {
+  #rememberCall(id: string, reply: SettledCall): void {
     this.#settledCalls.delete(id);
-    this.#settledCalls.set(id, capture);
+    this.#settledCalls.set(id, reply);
     if (this.#settledCalls.size > RPC_CALL_LIMIT) this.#settledCalls.delete(this.#settledCalls.keys().next().value!);
   }
 

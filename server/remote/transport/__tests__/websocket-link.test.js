@@ -77,6 +77,49 @@ function invalidProof(address, role) {
 }
 
 for (const role of ['controller', 'worker']) {
+  test(`reports a pre-cutover hello as protocol mismatch without a legacy reader (${role})`, async () => {
+    const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true });
+    const failures = [];
+    link.onError(failure => failures.push(unclassifiedFailure(failure)));
+    const socket = connectNoiseWebSocket(link.listen(), {
+      psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+      onOpen(socket) { socket.send(JSON.stringify({ type: 'hello', version: '0.3.3-37',
+        role: role === 'controller' ? 'worker' : 'controller', executorId: 'synthetic-executor',
+        runtimeId: 'synthetic-pre-cutover', nonce: '1'.repeat(64), lane: 'primary',
+        sessionId: role === 'controller' ? null : '11111111-1111-4111-8111-111111111111', primarySessionId: null,
+      })); },
+      onMessage() {},
+    });
+    try {
+      await socket.closed;
+      expect(link.current).toBeNull();
+      expect(failures).toEqual([{ count: 1,
+        message: 'Executor protocol mismatch (INVALID_HELLO). Pre-cutover peers must be updated together.',
+      }]);
+    } finally { socket.close(); await link.dispose(); }
+  });
+
+  test(`reports a validly signed different profile as a protocol mismatch (${role})`, async () => {
+    const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true });
+    const failures = [];
+    link.onError(failure => failures.push(primaryFailure(failure)));
+    const hello = primaryHello(role === 'controller' ? 'worker' : 'controller');
+    const encoded = JSON.stringify(hello);
+    const socket = connectNoiseWebSocket(link.listen(), {
+      psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+      onOpen(socket) { socket.send(encoded); },
+      onMessage(socket, data) {
+        if (JSON.parse(data).type === 'hello') socket.send(JSON.stringify(signedProof(secret, hello.role,
+          encoded, data, { ok: true, profileId: '0'.repeat(64) })));
+      },
+    });
+    try {
+      await socket.closed;
+      expect(link.current).toBeNull();
+      expect(failures).toEqual([{ count: 1, message: expect.stringContaining('protocol mismatch (PROFILE_MISMATCH)') }]);
+    } finally { socket.close(); await link.dispose(); }
+  });
+
   for (const [peerBuild, peerVersion] of incompatiblePeers) {
     test(`reports an authenticated bootstrap mismatch with ${peerBuild} (${role})`, async () => {
       const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true });

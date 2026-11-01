@@ -17,18 +17,26 @@ export function validateManifest(value: IntegrationManifest): void {
     || !isUniqueList(descriptor.supportedEndpointProtocols, protocol => protocol === 'anthropic-messages' || protocol === 'openai-compatible')
     || !hasBooleanFields(descriptor, ['supportsImages', 'supportsProjectPathUpdate', 'requiresNativePathForProjectPathUpdate'])
     || !Array.isArray(descriptor.configuration) || !descriptor.configuration.every(entry => isRecord(entry)
-      && typeof entry.key === 'string' && entry.key.trim() && entry.source === 'environment' && typeof entry.description === 'string')
-    || !isRecord(value.scope) || value.scope.integrationId !== descriptor.id
+      && typeof entry.key === 'string' && entry.key.trim() && entry.source === 'environment' && typeof entry.description === 'string')) {
+    throw new Error('Executor integration manifest is invalid');
+  }
+  if (!isRecord(value.scope) || value.scope.integrationId !== descriptor.id
     || !defaults || defaults.ownerId !== descriptor.id
     || !Array.isArray(settings.descriptors) || !settings.descriptors.every(isSettingDescriptor)
-    || new Set(settings.descriptors.map(entry => entry.key)).size !== settings.descriptors.length
-    || !hasBooleanFields(value.capabilities, NULLABLE_AGENT_FACETS)
+    || new Set(settings.descriptors.map(entry => entry.key)).size !== settings.descriptors.length) {
+    throw new Error('Executor integration manifest is invalid');
+  }
+  if (!hasBooleanFields(value.capabilities, NULLABLE_AGENT_FACETS)
     || !hasBooleanFields(value.authMethods, ['launchLogin', 'completeLogin', 'loginStatus'])
-    || typeof value.singleQueryRunsToolsWithoutPermission !== 'boolean'
-    || !(value.attachments === null || isRecord(value.attachments)
+    || typeof value.singleQueryRunsToolsWithoutPermission !== 'boolean') {
+    throw new Error('Executor integration manifest is invalid');
+  }
+  if (!(value.attachments === null || isRecord(value.attachments)
       && (value.attachments.fileMimeTypes === ANY_FILE_ATTACHMENT_MIME_TYPE || isUniqueList(value.attachments.fileMimeTypes, item => typeof item === 'string'))
-      && (value.attachments.inlineTextMaxBytes === null || Number.isSafeInteger(value.attachments.inlineTextMaxBytes) && value.attachments.inlineTextMaxBytes >= 0))
-    || !(value.literalExecution === null || isRecord(value.literalExecution)
+      && (value.attachments.inlineTextMaxBytes === null || Number.isSafeInteger(value.attachments.inlineTextMaxBytes) && value.attachments.inlineTextMaxBytes >= 0))) {
+    throw new Error('Executor integration manifest is invalid');
+  }
+  if (!(value.literalExecution === null || isRecord(value.literalExecution)
       && typeof value.literalExecution.selectionLabel === 'string' && value.literalExecution.selectionLabel.length > 0
       && isInputFormatByModel(value.literalExecution.inputFormatByModel)
       && !value.capabilities.singleQuery && !value.capabilities.compaction && !value.capabilities.steering)) {

@@ -5,6 +5,7 @@ import {
 } from '@garcon/common/protocol-contracts';
 import { RPC_V1, PRODUCER_CREATOR_V1, TERMINAL_CREATOR_V1, assertCreator } from '@garcon/common/executor-contracts';
 import { WORKER_CONTRACTS } from '../../server/worker-contracts.js';
+import released from './fixtures/released-contracts.json';
 const EXECUTOR_PROTOCOL = WORKER_CONTRACTS.offer;
 import { protocolProfileId, sameContinuity, isProtocolDecision } from '../protocol-compatibility.js';
 
@@ -12,7 +13,7 @@ test('every application operation starts with an explicit v1 contract, not an ap
   expect(EXECUTOR_PROTOCOL.bootstrap).toBe(1);
   expect(Object.hasOwn(EXECUTOR_PROTOCOL, 'core')).toBe(false);
   expect(EXECUTOR_PROTOCOL.contracts['files.read']).toEqual([1]);
-  expect(Object.keys(EXECUTOR_PROTOCOL.contracts)).toHaveLength(187);
+  expect(Object.keys(EXECUTOR_PROTOCOL.contracts)).toHaveLength(released.length);
   expect(Object.isFrozen(EXECUTOR_PROTOCOL)).toBe(true);
   expect(Object.isFrozen(EXECUTOR_PROTOCOL.contracts)).toBe(true);
   expect(selectProtocol(EXECUTOR_PROTOCOL, { bootstrap: 2, contracts: {} })).toEqual({ ok: false, code: 'BOOTSTRAP_MISMATCH' });

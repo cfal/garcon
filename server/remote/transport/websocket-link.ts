@@ -428,7 +428,12 @@ export class WebSocketLink {
       }
       if (Buffer.byteLength(encoded) > 60 * 1024) throw new Error('Handshake exceeds budget');
       const frame = parseHandshakeFrame(encoded);
-      if (isLinkHello(frame) && !connection.peer) {
+      if (!connection.peer) {
+        if (!isLinkHello(frame)) {
+          this.#reportFailure('protocol-mismatch', 'Executor protocol mismatch (INVALID_HELLO). Pre-cutover peers must be updated together.', undefined, connection.hello?.lane);
+          this.#close(connection, 'protocol-error');
+          return;
+        }
         if (frame.role === this.options.role) {
           throw new Error('Executor handshake mismatch');
         }
@@ -451,8 +456,8 @@ export class WebSocketLink {
       }
       connection.authenticated = true;
       const decision = connection.decision;
-      if (!decision.ok || !frame.decision.ok) {
-        let code = 'CONTINUITY_MISMATCH';
+      if (!decision.ok || !frame.decision.ok || decision.profileId !== frame.decision.profileId) {
+        let code = 'PROFILE_MISMATCH';
         if (!decision.ok) code = decision.code;
         else if (!frame.decision.ok) code = frame.decision.code;
         const hello = connection.hello!;
@@ -461,7 +466,6 @@ export class WebSocketLink {
         this.#close(connection, 'protocol-error');
         return;
       }
-      if (decision.profileId !== frame.decision.profileId) throw new Error('Executor supported profile mismatch');
       this.#accept(connection);
     } catch (error) {
       // Closing the session closes this connection first, so the cause is recorded before.

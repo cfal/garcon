@@ -9,6 +9,9 @@ import { RpcReplyJournal } from '../rpc-journal.js';
 
 import type { SessionTransport } from '../session-transport.js';
 import type { FileRpcMethods } from '../file-protocol.js';
+import { createRoleContracts, registerRpcHandlers } from '../rpc-registrations.js';
+import { rpcWireV1 } from '../rpc-wire-v1.js';
+import { cliWireV1 } from '../cli-protocol.js';
 
 const files = (name: string): FileRpcMethods['files.list']['result'] => ({
   files: [{ name, path: `/project/${name}`, relativePath: name, type: 'file' }], truncated: false,
@@ -89,6 +92,45 @@ async function pair(dialer: 'controller' | 'worker', configure?: (controller: Re
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`bulk activates a complete profile without reconciliation (${dialer} dials)`, async () => {
+    const reverse = registerRpcHandlers([rpcWireV1('controllerCli.describe'), rpcWireV1('controllerCli.request')],
+      async (_context: null, call) => call.method === 'controllerCli.describe'
+        ? { serverInstanceId: 'synthetic-controller', defaultExecutorId: 'local', workspaceName: null }
+        : { status: 200, body: [] });
+    const cli = cliWireV1('GET /api/v1/scheduled-prompts');
+    const controllerContracts = createRoleContracts('controller', { clients: [], handlers: [reverse], resources: [],
+      cli: [{ ...cli, side: 'handler', dispatch: () => {} }] });
+    const workerContracts = createRoleContracts('worker', { clients: reverse.wires, handlers: [], resources: [],
+      cli: [{ ...cli, side: 'forwarder', dispatch: async () => ({ status: 200, body: [] }) }] });
+    const common = { executorId: 'test-executor', secret: Buffer.alloc(32, 42).toString('base64url'), noTls: true };
+    const controller = new WebSocketLink({ ...common, role: 'controller', contracts: controllerContracts });
+    const worker = new WebSocketLink({ ...common, role: 'worker', contracts: workerContracts });
+    let controllerConnection: ExecutorRpcConnection | undefined;
+    let workerConnection: ExecutorRpcConnection | undefined;
+    controller.onSession(transport => {
+      controllerConnection = new ExecutorRpcConnection(controller, transport, { admission: new RpcAdmissionBudgets() });
+      controllerConnection.onEndpoint(rpc => rpc.handle(reverse.bind(null)));
+    });
+    worker.onSession(transport => {
+      workerConnection = new ExecutorRpcConnection(worker, transport, { admission: new RpcAdmissionBudgets() });
+    });
+    try {
+      if (dialer === 'controller') controller.dial(worker.listen());
+      else worker.dial(controller.listen());
+      await Promise.all([controller.ready, worker.ready]);
+      controllerConnection!.activate();
+      await until(() => Boolean(controllerConnection?.bulk.current && workerConnection?.bulk.current));
+      await expect(workerConnection!.primary.call('', RPC_V1['controllerCli.describe'], null))
+        .resolves.toMatchObject({ serverInstanceId: 'synthetic-controller' });
+      await expect(workerConnection!.bulk.current!.call('', RPC_V1['controllerCli.request'], {
+        contract: { name: cli.definition.name, version: cli.definition.version }, expectedServerInstanceId: 'synthetic-controller',
+        http: { operation: cli.operation, query: [], body: null },
+      })).resolves.toEqual({ status: 200, body: [] });
+      expect(controller.current!.connected).toBe(true);
+      expect(controller.current!.profile.contracts['calls.reconcile']).toBeUndefined();
+    } finally { await controller.dispose(); await worker.dispose(); }
+  });
+
   test(`primary works before bulk and bulk flaps never replace it (${dialer} dials)`, async () => {
     const fixture = await pair(dialer);
     try {

@@ -96,8 +96,7 @@ type SessionSetupStage = 'describe' | 'start-integrations' | 'resume-bindings' |
 export class RemoteExecutorClient {
   #generation: RemoteExecutorGeneration | null = null;
   #candidateGeneration: RemoteExecutorGeneration | null = null;
-  #candidateBacking: RemoteSessionBacking | null = null;
-  // Validated identities survive failed candidates and publication of other workers.
+  // Lifetime history prevents A-to-B-to-A identity reuse, including failed candidates.
   readonly #workerInventories = new Map<string, { readonly instanceId: string; readonly fingerprint: string }>();
   readonly #instanceRuntimes = new Map<string, string>();
   readonly #listeners = new Set<(value: ExecutorAvailability) => void>();
@@ -136,7 +135,6 @@ export class RemoteExecutorClient {
     this.#unsubscribe = link.onSession((transport) => {
       if (this.#candidateGeneration !== this.#generation) this.#candidateGeneration?.retire();
       this.#candidateGeneration = null;
-      this.#candidateBacking = null;
       this.#candidate = transport;
       const connection = new ExecutorRpcConnection(link, transport, {
         parked: this.#parked, admission: this.#admission,
@@ -192,13 +190,12 @@ export class RemoteExecutorClient {
   }
 
   assertIntegrationOrigin(rpc: ExecutorRpc, integrationId: string): void {
-    const backing = this.#candidateBacking ?? this.#generation;
+    const generation = this.#candidateGeneration ?? this.#generation;
     const candidate = this.#candidate;
     const transport = rpc.transport;
-    const generation = this.#candidateBacking ? this.#candidateGeneration : this.#generation;
-    if (!backing || !candidate || this.#candidateRetired(candidate) || !transport.connected
-      || transport.primarySessionId !== candidate.id || !sameContinuity(transport.continuity, backing.continuity)
-      || !generation || generation.token.retired || !backing.manifests.has(integrationId)) {
+    if (!generation || !candidate || this.#candidateRetired(candidate) || !transport.connected
+      || transport.primarySessionId !== candidate.id || !sameContinuity(transport.continuity, generation.continuity)
+      || generation.token.retired || !generation.manifests.has(integrationId)) {
       throw new AgentCallError('rejected', 'Operation is not permitted from this executor generation');
     }
   }
@@ -275,7 +272,6 @@ export class RemoteExecutorClient {
     const reconnect = previous && sameInstance && !previous.token.retired;
     const generation = reconnect ? previous : new RemoteExecutorGeneration(backing, this.#sessions, () => this.dispose(), this.#log);
     this.#candidateGeneration = generation;
-    this.#candidateBacking = backing;
     rpc.guardDispatch(() => generation.token.assertDispatch());
     try {
       const publish = this.options.prepareGeneration?.(generation);

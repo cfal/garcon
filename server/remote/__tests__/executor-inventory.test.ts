@@ -29,8 +29,26 @@ test('valid received manifests are frozen without freezing worker-owned metadata
   expect(Object.isFrozen(manifest.descriptor)).toBe(false);
 });
 
+test('accepts null metadata, empty lists and extra fields without projecting them away', () => {
+  const received = {
+    ...manifest,
+    descriptor: { ...manifest.descriptor, icon: null, supportedPermissionModes: [], supportedThinkingModes: [],
+      supportedEndpointProtocols: [], configuration: [] },
+    settings: { ...manifest.settings, descriptors: [] },
+    attachments: null,
+    literalExecution: null,
+    extra: 'synthetic extension',
+  };
+  const original = structuredClone(received);
+  expect(() => validateManifest(received)).not.toThrow();
+  expect(received).toEqual(original);
+});
+
 for (const [name, fields] of Object.entries({
+  descriptor: { descriptor: null },
   scope: { scope: null },
+  settings: { settings: null },
+  settingList: { settings: { ...manifest.settings, descriptors: null } },
   owner: { settings: { ...manifest.settings, defaults: { ...manifest.settings.defaults, ownerId: 'different' } } },
   schema: { settings: { ...manifest.settings, defaults: { ...manifest.settings.defaults, schemaVersion: 0 } } },
   facets: { capabilities: { ...manifest.capabilities, nativeSessions: 'yes' } },
@@ -38,8 +56,17 @@ for (const [name, fields] of Object.entries({
   auth: { authMethods: {} },
   attachment: { attachments: { fileMimeTypes: [], inlineTextMaxBytes: -1 } },
   mode: { descriptor: { ...manifest.descriptor, supportedPermissionModes: ['future-mode'] } },
+  duplicateMode: { descriptor: { ...manifest.descriptor, supportedPermissionModes: ['default', 'default'] } },
+  duplicateThinkingMode: { descriptor: { ...manifest.descriptor, supportedThinkingModes: ['none', 'none'] } },
+  duplicateSetting: { settings: { ...manifest.settings, descriptors: [
+    { key: 'synthetic', label: 'Synthetic', type: 'boolean' },
+    { key: 'synthetic', label: 'Synthetic', type: 'boolean' },
+  ] } },
   setting: { settings: { ...manifest.settings, descriptors: [{ key: 'unknown', label: 'Unknown', type: 'future-setting' }] } },
   literal: { literalExecution: { selectionLabel: 'Literal', inputFormatByModel: {} } },
+  missingCapabilitiesWithLiteral: { capabilities: null, literalExecution: { selectionLabel: 'Literal', inputFormatByModel: {} } },
+  missingAttachments: { attachments: undefined },
+  missingLiteral: { literalExecution: undefined },
 })) {
   test(`invalid ${name} is rejected before constructing a generation`, () => {
     expect(() => validateManifest(JSON.parse(JSON.stringify({ ...manifest, ...fields })))).toThrow('manifest is invalid');
