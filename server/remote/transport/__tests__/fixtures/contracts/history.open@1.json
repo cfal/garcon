@@ -1,0 +1,137 @@
+{
+  "definition": {
+    "name": "history.open",
+    "version": 1,
+    "requires": [
+      {
+        "name": "resource.history-reader",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "history.next",
+        "version": 1
+      },
+      {
+        "name": "history.close",
+        "version": 1
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "session",
+    "direction": "controller-to-worker",
+    "returnsResource": {
+      "name": "resource.history-reader",
+      "version": 1,
+      "requires": []
+    }
+  },
+  "wire": {
+    "request": {
+      "request": {
+        "chat": {
+          "agentId": "string",
+          "agentSessionId": {
+            "union": [
+              "null",
+              "string"
+            ]
+          },
+          "carryOverRevision": "string",
+          "chatId": "string",
+          "model": "string",
+          "nativeSeedReceipt": {
+            "union": [
+              "null",
+              {
+                "agentSessionId": "string",
+                "codeUnitLength": "number",
+                "format": {
+                  "union": [
+                    "\"legacy-v0\"",
+                    "\"v1-marker\"",
+                    "\"v2-xml\"",
+                    "\"v3-xml\""
+                  ]
+                },
+                "placement": {
+                  "union": [
+                    "\"provider-context\"",
+                    "\"user-prefix\""
+                  ]
+                },
+                "sha256": "string"
+              }
+            ]
+          },
+          "nativeSession": {
+            "union": [
+              "null",
+              {
+                "ownerId": "string",
+                "schemaVersion": "number",
+                "value": {
+                  "[string]": {
+                    "union": [
+                      "false",
+                      "null",
+                      "number",
+                      "string",
+                      "true",
+                      {
+                        "array": {
+                          "recursive": "JsonValue"
+                        }
+                      },
+                      {
+                        "recursive": "JsonObject"
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "projectPath": "string",
+          "settings": {
+            "ownerId": "string",
+            "schemaVersion": "number",
+            "values": {
+              "[string]": {
+                "union": [
+                  "false",
+                  "null",
+                  "number",
+                  "string",
+                  "true",
+                  {
+                    "array": {
+                      "recursive": "JsonValue"
+                    }
+                  },
+                  {
+                    "recursive": "JsonObject"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "source": {
+        "union": [
+          "\"legacyHistoryImport\"",
+          "\"nativeHistoryImport\""
+        ]
+      }
+    },
+    "result": {
+      "executorId": "string",
+      "id": "string",
+      "instanceId": "string",
+      "integrationId": "string",
+      "kind": "\"history-reader\""
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

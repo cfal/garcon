@@ -91,7 +91,7 @@ export class ChatCommandSettlement implements CommandSettlementPort {
   }
 
   async settleDuplicateInput(command: AcceptedExecutionCommand): Promise<void> {
-    await this.ledger.settleTerminal(command.key, 'finished');
+    await this.ledger.settleTerminal(command.key, 'finished', { forkPreparation: undefined });
   }
 
 }

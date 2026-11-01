@@ -1,0 +1,36 @@
+{
+  "definition": {
+    "name": "calls.reconcile",
+    "version": 1,
+    "requires": [],
+    "lane": "calling",
+    "continuity": "session",
+    "direction": "both"
+  },
+  "wire": {
+    "request": {
+      "calls": {
+        "array": {
+          "id": "string",
+          "seq": "number",
+          "session": "string"
+        }
+      }
+    },
+    "result": {
+      "states": {
+        "array": {
+          "id": "string",
+          "state": {
+            "union": [
+              "\"not-received\"",
+              "\"pending\"",
+              "\"unknown\""
+            ]
+          }
+        }
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

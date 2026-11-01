@@ -55,6 +55,8 @@ function makeRouter(overrides = {}) {
       getChat: mock(() => entry),
     },
     directory: {
+      requireOperations: mock(() => undefined),
+      supportsOperations: () => true,
       require: mock(() => integration),
     },
     endpointResolver: {},

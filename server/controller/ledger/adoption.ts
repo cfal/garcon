@@ -1,16 +1,19 @@
 import { isDeepStrictEqual } from 'node:util';
 import {
   AgentIntegrationError,
+  AgentCallError,
   type AgentIntegration,
   type AgentLogger,
 } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import { sanitizeRecordedCarriedContext } from '../../../common/transcript-seed.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
+import { requireProviderOperations } from '../agents/execution-support.js';
 import type { AgentDirectory } from '../agents/directory.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import { DomainError } from '../../common/domain-error.js';
 import type { LedgerRowDraft, TranscriptView } from './contracts.js';
 import { frozenDrafts, importedDrafts, type ImportedRow } from './imported-drafts.js';
 import { TranscriptLedgerService } from './service.js';
@@ -18,7 +21,7 @@ import { TranscriptLedgerService } from './service.js';
 export interface TranscriptAdoptionOptions {
   readonly ledger: TranscriptLedgerService;
   readonly registry: IChatRegistry;
-  readonly integrations: Pick<AgentDirectory, 'require'>;
+  readonly integrations: Pick<AgentDirectory, 'require' | 'requireOperations' | 'supportsOperations'>;
   readonly getCarryOverRevision: (entry: AgentChatEntry) => string;
   readonly loadFrozenPrefix: (
     chatId: string,
@@ -137,6 +140,7 @@ export class TranscriptAdoptionService {
     // A chat that records no native session has no legacy history, so a new chat
     // adopts without waiting on its executor under the caller's chat lock.
     if (!integration.legacyHistoryImport || (!entry.agentSessionId && !entry.nativeSession)) return [];
+    requireProviderOperations(this.options.integrations, entry.executorId, ['history.open']);
     try {
       const rows: ImportedRow[] = [];
       const chat = toAgentChatReference(
@@ -166,6 +170,8 @@ export class TranscriptAdoptionService {
   ): never {
     if (signal.aborted) signal.throwIfAborted();
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    if (error instanceof AgentIntegrationError && error.code === 'INVALID_SETTINGS'
+      || (error instanceof AgentCallError || error instanceof DomainError) && error.code === 'OPERATION_UNSUPPORTED') throw error;
     this.options.logger?.warn('Transcript adoption source failed.', {
       chatId,
       provider,

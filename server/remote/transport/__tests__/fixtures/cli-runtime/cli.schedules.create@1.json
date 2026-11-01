@@ -1,0 +1,19 @@
+{
+  "request": { "expectedRevision": 0, "scheduledPrompt": {
+    "schedule": { "type": "once", "runAtUtc": "2099-01-01T00:00:00.000Z" },
+    "target": { "type": "existing-chat", "chatId": "1700000000000001", "busyBehavior": "queue" }, "prompt": "Synthetic note"
+  } },
+  "result": {
+    "success": true,
+    "scheduledPrompt": { "id": "synthetic-schedule", "enabled": true,
+      "schedule": { "type": "once", "nextRunAt": "2099-01-01T00:00:00.000Z" },
+      "target": { "type": "existing-chat", "chatId": "1700000000000001", "busyBehavior": "queue" }, "prompt": "Synthetic note",
+      "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "snapshot": { "revision": 1, "prompts": [{ "id": "synthetic-schedule", "enabled": true,
+      "schedule": { "type": "once", "nextRunAt": "2099-01-01T00:00:00.000Z" },
+      "target": { "type": "existing-chat", "chatId": "1700000000000001", "busyBehavior": "queue" }, "prompt": "Synthetic note",
+      "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-01-01T00:00:00.000Z"
+    }], "runLog": [] }
+  }
+}

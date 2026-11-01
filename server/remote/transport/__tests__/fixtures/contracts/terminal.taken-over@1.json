@@ -1,0 +1,18 @@
+{
+  "definition": {
+    "name": "terminal.taken-over",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "attachmentId?": {
+      "union": [
+        "string",
+        "undefined"
+      ]
+    },
+    "replacementClientId": "string",
+    "terminalId": "string",
+    "type": "\"terminal-taken-over\""
+  }
+}

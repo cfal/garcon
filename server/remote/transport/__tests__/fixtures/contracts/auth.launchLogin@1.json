@@ -1,0 +1,56 @@
+{
+  "definition": {
+    "name": "auth.launchLogin",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": "null",
+    "result": {
+      "alreadyRunning": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "deviceAuth?": {
+        "union": [
+          "undefined",
+          {
+            "code?": {
+              "union": [
+                "string",
+                "undefined"
+              ]
+            },
+            "needsCode?": {
+              "union": [
+                "false",
+                "true",
+                "undefined"
+              ]
+            },
+            "url": "string"
+          }
+        ]
+      },
+      "launched": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "sessionId": "string"
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

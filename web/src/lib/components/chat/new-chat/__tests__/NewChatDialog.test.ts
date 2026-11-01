@@ -170,6 +170,7 @@ describe('NewChatDialog', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
 		await waitFor(() => expect(messageInput.value).toBe('Continue chat 1787471053739199'));
+		await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' }).disabled).toBe(false));
 		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
 
 		await waitFor(() => expect(onCreateDraft).toHaveBeenCalledTimes(1));

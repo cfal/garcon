@@ -3,12 +3,24 @@ import {
   LOCAL_CAPABILITY_PREFIX,
   parseServerRuntimeDescriptor,
   parseServerRuntimeProbe,
+  parseCliContext,
+  parseCliIdentity,
 } from '../server-runtime.js';
 
 const capability = `${LOCAL_CAPABILITY_PREFIX}${'a'.repeat(43)}`;
 const proof = 'b'.repeat(43);
 
 describe('server runtime contracts', () => {
+  it('keeps CLI HTTP discovery versioned and reverse describe identity-only', () => {
+    const identity = { serverInstanceId: 'synthetic-controller', defaultExecutorId: 'local', workspaceName: null };
+    const context = { ...identity, protocol: { bootstrap: 1, contracts: { 'cli.chats.list': [1, 3] } } };
+    expect(parseCliIdentity(identity)).toEqual(identity);
+    expect(parseCliContext(context)).toEqual(context);
+    expect(Object.isFrozen(parseCliContext(context).protocol.contracts['cli.chats.list'])).toBe(true);
+    for (const protocol of [undefined, { bootstrap: 2, contracts: {} }, { bootstrap: 1, contracts: { 'files.read': [1] } }]) {
+      expect(() => parseCliContext({ ...identity, protocol })).toThrow('unsupported CLI bootstrap');
+    }
+  });
   it('parses a runtime descriptor and normalizes its base URL', () => {
     expect(parseServerRuntimeDescriptor({
       schemaVersion: 1,

@@ -2,6 +2,8 @@ import type { OutstandingCall, OutstandingCallState } from './rpc-protocol.js';
 import type { RpcLane } from './rpc-lane.js';
 import { BULK_JOURNAL_BYTES, RPC_JOURNAL_BYTES } from './limits.js';
 import { RpcAdmission } from './rpc-admission.js';
+import { sameContinuity, type ProtocolContinuity } from './protocol-compatibility.js';
+import type { RpcCallCapture } from './rpc-registrations.js';
 
 // Bounds worker memory for replies awaiting acknowledgement across sessions.
 // Receipt records of recent sessions, so a reconcile interrupted by another
@@ -14,16 +16,19 @@ const DELIVERY_RETRY_MS = 10;
 export interface RpcJournalOwner {
   readonly lane: RpcLane;
   readonly session: string;
+  readonly continuity: ProtocolContinuity;
   offer(payload: string): boolean;
 }
 
 export interface JournaledCall {
   readonly id: string;
   readonly signal: AbortSignal;
+  readonly capture: RpcCallCapture;
 }
 
 interface JournalEntry extends JournaledCall {
   readonly lane: RpcLane;
+  readonly continuity: ProtocolContinuity;
   readonly controller: AbortController;
   // Null once its session is lost, until a replacement claims the call.
   owner: RpcJournalOwner | null;
@@ -52,7 +57,7 @@ export interface RpcReplyJournalOptions {
 export class RpcReplyJournal {
   readonly admission = new RpcAdmission();
   readonly #entries = new Map<string, JournalEntry>();
-  readonly #received = new Map<string, { lane: RpcLane; seq: number }>();
+  readonly #received = new Map<string, { lane: RpcLane; seq: number; continuity: ProtocolContinuity }>();
   readonly #retainedLimit: number;
   readonly #bulkRetainedLimit: number;
   #retainedBytes = 0;
@@ -75,17 +80,18 @@ export class RpcReplyJournal {
   // Requests arrive in order, so the latest sequence covers every earlier one.
   received(owner: RpcJournalOwner, seq: number): void {
     const prior = this.#received.get(owner.session);
-    if (prior && prior.lane !== owner.lane) throw new Error('RPC receipt lane mismatch');
+    if (prior && (prior.lane !== owner.lane || !sameContinuity(prior.continuity, owner.continuity))) throw new Error('RPC receipt ownership mismatch');
     this.#received.delete(owner.session);
-    this.#received.set(owner.session, { lane: owner.lane, seq });
+    this.#received.set(owner.session, { lane: owner.lane, seq, continuity: owner.continuity });
     const sessions = [...this.#received].filter(([, receipt]) => receipt.lane === owner.lane);
     if (sessions.length > RECEIPT_SESSIONS) this.#received.delete(sessions[0]![0]);
   }
 
-  begin(owner: RpcJournalOwner, id: string): JournaledCall {
+  begin(owner: RpcJournalOwner, id: string, capture: RpcCallCapture): JournaledCall {
     const controller = new AbortController();
     const entry: JournalEntry = {
-      id, lane: owner.lane, controller, signal: controller.signal, owner, reply: null, undeliverable: null, bytes: 0, delivered: false, cancelled: false,
+      id, capture, lane: owner.lane, continuity: owner.continuity, controller, signal: controller.signal, owner,
+      reply: null, undeliverable: null, bytes: 0, delivered: false, cancelled: false,
     };
     this.#entries.set(id, entry);
     this.#running += 1;
@@ -140,13 +146,15 @@ export class RpcReplyJournal {
     for (const call of calls) {
       const entry = this.#entries.get(call.id);
       const receipt = this.#received.get(call.session);
-      if (ids.has(call.id) || entry && (entry.lane !== owner.lane || entry.owner !== null && entry.owner !== owner)
+      if (ids.has(call.id) || entry && (entry.lane !== owner.lane
+        || sameContinuity(entry.continuity, owner.continuity) && entry.owner !== null && entry.owner !== owner)
         || receipt && receipt.lane !== owner.lane) throw new Error('RPC reconciliation ownership mismatch');
       ids.add(call.id);
     }
     const claimed = new Set<JournalEntry>();
     const states = calls.map(({ id, session, seq }): OutstandingCallState => {
       const entry = this.#entries.get(id);
+      if (entry && !sameContinuity(entry.continuity, owner.continuity)) return { id, state: 'unknown' };
       if (entry && !entry.cancelled) {
         entry.owner = owner;
         entry.delivered = false;
@@ -154,7 +162,7 @@ export class RpcReplyJournal {
         return { id, state: 'pending' };
       }
       const received = this.#received.get(session);
-      return { id, state: received !== undefined && seq > received.seq ? 'not-received' : 'unknown' };
+      return { id, state: received !== undefined && sameContinuity(received.continuity, owner.continuity) && seq > received.seq ? 'not-received' : 'unknown' };
     });
     for (const entry of [...this.#entries.values()]) {
       if (entry.lane === owner.lane && entry.owner === null && !claimed.has(entry)) this.#discard(entry);

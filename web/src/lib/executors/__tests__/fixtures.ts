@@ -1,3 +1,4 @@
+import { LOCAL_EXECUTOR_OPERATIONS } from '$shared/executor-contracts';
 import type { ExecutorSnapshot } from '$shared/executors';
 
 export const localExecutor = {
@@ -6,7 +7,7 @@ export const localExecutor = {
 	availability: 'ready', projectBasePath: '/workspace', lastError: null,
 	instanceId: 'synthetic-local-instance',
 	bulk: null,
-	executorServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: true },
+	operations: LOCAL_EXECUTOR_OPERATIONS, executorServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: true },
 } satisfies ExecutorSnapshot;
 
 export const remoteExecutor = {
@@ -16,5 +17,5 @@ export const remoteExecutor = {
 	projectBasePath: '/worker', lastError: null,
 	instanceId: 'synthetic-remote-instance',
 	bulk: { availability: 'ready', lastError: null },
-	executorServices: { files: false, git: false, gh: false, terminals: false, directoryCreation: false },
+	operations: LOCAL_EXECUTOR_OPERATIONS, executorServices: { files: false, git: false, gh: false, terminals: false, directoryCreation: false },
 } satisfies ExecutorSnapshot;

@@ -29,6 +29,7 @@ function response() {
       isActive: false,
       isProcessing: false,
       processingPhase: null,
+      hasAgentSession: false,
       canReloadFromNativeHistory: true,
       isUnread: true,
     }],
@@ -38,6 +39,27 @@ function response() {
 }
 
 describe('chat list contract', () => {
+  it('requires the current native-session projection independently of reload support', () => {
+    const value = response();
+    value.sessions[0].hasAgentSession = true;
+    value.sessions[0].canReloadFromNativeHistory = false;
+    expect(parseChatListResponse(value).sessions[0]).toMatchObject({ hasAgentSession: true, canReloadFromNativeHistory: false });
+    for (const invalid of [undefined, null, 'true', 1]) {
+      value.sessions[0].hasAgentSession = invalid;
+      expect(() => parseChatListResponse(value)).toThrow('hasAgentSession');
+    }
+  });
+  it('distinguishes literal absence from a saved schema-one envelope', () => {
+    const value = response();
+    value.sessions[0].agentSettings = null;
+    expect(parseChatListResponse(value).sessions[0].agentSettings).toBeNull();
+    expect(parseChatListResponse(response()).sessions[0].agentSettings)
+      .toEqual({ ownerId: 'codex', schemaVersion: 1, values: {} });
+    for (const malformed of [undefined, {}, { ownerId: 'other', schemaVersion: 1, values: {} }, { ownerId: 'codex', schemaVersion: 0, values: {} }]) {
+      value.sessions[0].agentSettings = malformed;
+      expect(() => parseChatListResponse(value)).toThrow('agentSettings');
+    }
+  });
   it('preserves optional executor identity and rejects malformed explicit IDs', () => {
     for (const executorId of [undefined, null, 'local', '22222222-2222-4222-8222-222222222222']) {
       const value = response();

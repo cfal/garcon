@@ -1,3 +1,4 @@
+import { LOCAL_EXECUTOR_OPERATIONS } from '$shared/executor-contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
@@ -55,7 +56,7 @@ it.each(['tab', 'new window', 'replacement', 'launcher'])(
 				instanceId: null,
 				projectBasePath: '/project',
 				lastError: null,
-				executorServices: { terminals: true, files: true, git: false, gh: false, directoryCreation: true },
+				operations: LOCAL_EXECUTOR_OPERATIONS, executorServices: { terminals: true, files: true, git: false, gh: false, directoryCreation: true },
 				allowControllerCli: false, allowExecutorManagement: false,
 			},
 		]);

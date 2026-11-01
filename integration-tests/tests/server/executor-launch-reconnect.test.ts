@@ -1,3 +1,6 @@
+import { TestWebSocketLink as WebSocketLink, handleTestRpc } from '../../../server/remote/__tests__/test-session-transport.js';
+import { RPC_V1, supportsWorkflow } from '../../../common/executor-contracts.js';
+import type { ContractVersions } from '../../../common/protocol-contracts.js';
 import { expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,7 +10,7 @@ import { AssistantMessage } from '../../../common/chat-types.js';
 import type { AgentRuntimeEvent } from '../../../server-agents/common/src/execution/runtime-events.js';
 import { resolveAgentEndpoint } from '../../../server-agents/common/src/execution/resolve-endpoint.js';
 import {
-  AgentCallError, AgentIntegrationError, type AgentHost, type ExecutorAvailability,
+  AgentCallError, AgentIntegrationError, type AgentHost, type AgentIntegrationErrorCode, type ExecutionRuntimeApi, type ExecutorAvailability,
 } from '../../../server-agents/interface/src/index.js';
 import { ApiProviderEndpointResolver } from '../../../server/controller/api-providers/endpoint-resolver.js';
 import { ChatRegistry } from '../../../server/controller/chats/store.js';
@@ -23,7 +26,7 @@ import { ProducerRelay } from '../../../server/remote/server/producer-relay.js';
 import { RpcReplyJournal } from '../../../server/remote/transport/rpc-journal.js';
 import type { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
 import { connectRemoteExecutor, servePairedRuntime } from '../../../server/remote/__tests__/runtime-adapter.js';
-import { WebSocketLink } from '../../../server/remote/transport/websocket-link.js';
+
 import { TranscriptAdoptionService } from '../../../server/controller/ledger/adoption.js';
 import { TranscriptLedgerService } from '../../../server/controller/ledger/service.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
@@ -53,13 +56,14 @@ type RemoteRouterContext = Awaited<ReturnType<typeof remoteRouter>> & {
   readonly ledger: TranscriptLedgerService;
   readonly native: ReturnType<typeof integrationFixture>;
   readonly controller: WebSocketLink;
-  readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>;
+  readonly remote: ExecutionRuntimeApi;
   readonly controllerFault: ReturnType<typeof outgoingFault>;
   readonly workerFault: ReturnType<typeof outgoingFault>;
   readonly workerPath: ReturnType<typeof outgoingHold>;
   readonly workerAdmission: ReturnType<typeof admissionFault>;
   readonly controllerAdmission: ReturnType<typeof admissionFault>;
   readonly credentialHost: AgentHost;
+  readonly settlementDelivery: { paired: number };
 };
 
 // Runs one chat's turns through the real runtime router against a worker over
@@ -67,7 +71,11 @@ type RemoteRouterContext = Awaited<ReturnType<typeof remoteRouter>> & {
 async function withRemoteRouter(
   dialer: Dialer,
   run: (context: RemoteRouterContext) => Promise<void>,
-  options: { readonly reconnectGraceMs?: number } = {},
+  options: {
+    readonly reconnectGraceMs?: number;
+    readonly coalesceSettlement?: boolean;
+    readonly configure?: (native: ReturnType<typeof integrationFixture>) => void;
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'garcon-launch-reconnect-'));
   const chats = new ChatRegistry(root);
@@ -80,7 +88,29 @@ async function withRemoteRouter(
   const workerPath = outgoingHold(worker);
   const workerAdmission = admissionFault(worker);
   const controllerAdmission = admissionFault(controller);
+  const settlementDelivery = { paired: 0 };
+  if (options.coalesceSettlement) controller.onSession(session => {
+    const attach = session.attach.bind(session);
+    session.attach = socket => {
+      const delivery = attach(socket);
+      let unknownReply: string | null = null;
+      return { ...delivery, receive(encoded) {
+        const frame = JSON.parse(encoded);
+        if (frame.type === 'error' && frame.error.code === 'OUTCOME_UNKNOWN') {
+          unknownReply = encoded;
+          return;
+        }
+        if (unknownReply && frame.type === 'producer' && frame.notification.event.type === 'launch-settled') {
+          settlementDelivery.paired++;
+          delivery.receive(unknownReply);
+          unknownReply = null;
+        }
+        delivery.receive(encoded);
+      } };
+    };
+  });
   const native = integrationFixture(root, EXECUTOR);
+  options.configure?.(native);
   const relay = new ProducerRelay();
   const journal = new RpcReplyJournal();
   const serving: ReturnType<typeof servePairedRuntime>[] = [];
@@ -97,22 +127,22 @@ async function withRemoteRouter(
     resolveCredential: ({ agentId, reference, signal }) => {
       const rpc = workerRpc;
       if (!rpc) throw new AgentCallError('not-dispatched', 'Executor controller is disconnected');
-      return rpc.call(agentId, 'credentials.resolve', { reference }, { signal });
+      return rpc.call(agentId, RPC_V1['credentials.resolve'], { reference }, { signal });
     },
   }).forAgent('test');
   // Serves those reads, as the controller's executor manager does.
-  const connected = connectRemoteExecutor(controller, rpc => rpc.handle(async call => {
+  const connected = connectRemoteExecutor(controller, rpc => handleTestRpc(rpc, async call => {
     if (call.method !== 'credentials.resolve') throw new AgentCallError('rejected', 'Operation is not permitted on the controller');
     return SYNTHETIC_CREDENTIAL;
   }), options);
   if (dialer === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
-  const remote = await connected;
+  const remote = (await connected).runtime;
   try {
-    const routed = await remoteRouter({ root, chats, ledger, remote });
+    const routed = await remoteRouter({ root, chats, ledger, remote, contracts: controller.current!.profile.contracts });
     await run({
       ...routed, ledger, native, controller, remote, controllerFault, workerFault, workerPath, workerAdmission, controllerAdmission,
-      credentialHost,
+      credentialHost, settlementDelivery,
     });
   } finally {
     ledger.close();
@@ -127,11 +157,12 @@ async function withRemoteRouter(
   }
 }
 
-async function remoteRouter({ root, chats, ledger, remote }: {
+async function remoteRouter({ root, chats, ledger, remote, contracts }: {
   readonly root: string;
   readonly chats: ChatRegistry;
   readonly ledger: TranscriptLedgerService;
-  readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>;
+  readonly remote: ExecutionRuntimeApi;
+  readonly contracts: ContractVersions;
 }) {
   const integration = await remote.getAgentIntegration('test');
   const integrations = new IntegrationRegistry({ instances: [integration] });
@@ -139,7 +170,15 @@ async function remoteRouter({ root, chats, ledger, remote }: {
   const executors = {
     isReady: () => remote.availability === 'ready',
     integrationsFor() { return integrations; },
+    captureInventory() {
+      return { instanceId: integration.producers.scope.instanceId, integrations: integrations.list(), assertCurrent: () => { this.requireIntegration({ agentId: 'test', executorId: integration.producers.scope.executorId }); } };
+    },
     knownIntegration: ({ agentId }) => integrations.get(agentId),
+    supportsOperations: (_executorId, operations) => supportsWorkflow(contracts, operations.map(operation => RPC_V1[operation])),
+    requireOperations(executorId, operations) {
+      this.requireIntegration({ executorId, agentId: 'test' });
+      if (!this.supportsOperations(executorId, operations)) throw new DomainError('OPERATION_UNSUPPORTED', 'Unsupported test workflow', 422);
+    },
     requireIntegration({ agentId }) {
       if (remote.availability !== 'ready' && remote.availability !== 'reconnecting') {
         throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
@@ -175,7 +214,7 @@ async function remoteRouter({ root, chats, ledger, remote }: {
   return { router, integration, restored };
 }
 
-function availability(remote: Awaited<ReturnType<typeof connectRemoteExecutor>>, expected: ExecutorAvailability): Promise<void> {
+function availability(remote: ExecutionRuntimeApi, expected: ExecutorAvailability): Promise<void> {
   return new Promise(resolve => {
     const off = remote.onAvailabilityChanged(value => { if (value === expected) { off(); resolve(); } });
   });
@@ -195,7 +234,7 @@ function holdNextReconnect(native: ReturnType<typeof integrationFixture>): () =>
 }
 
 // A round trip on the current session, after which earlier requests have reached the worker.
-async function integrationRoundTrip(remote: Awaited<ReturnType<typeof connectRemoteExecutor>>): Promise<void> {
+async function integrationRoundTrip(remote: ExecutionRuntimeApi): Promise<void> {
   await (await remote.getAgentIntegration('test')).execution.runningSessions();
 }
 
@@ -216,6 +255,62 @@ function runEnds(ledger: TranscriptLedgerService) {
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
+  for (const method of ['execution.start', 'execution.resume', 'compaction.compact'] as const) {
+    for (const coalesceSettlement of [false, true]) {
+      test(`an unrepresentable ${method} failure settles once on a healthy session (${dialer} dials, paired delivery: ${coalesceSettlement})`, async () => {
+        await withRemoteRouter(dialer, async ({ router, ledger, native, integration, remote, controller, restored, controllerFault, settlementDelivery }) => {
+          if (method !== 'execution.start') {
+            await router.startSession(CHAT, 'Synthetic initial turn');
+            native.nativePublishers[0]!({ type: 'run-ended', runId: ledger.activeRunId(CHAT)!, outcome: 'finished' });
+            await until(() => !router.isChatRunning(CHAT));
+          }
+          const code = 'SYNTHETIC_FUTURE_FAILURE';
+          const failure = new AgentIntegrationError(code as AgentIntegrationErrorCode, 'Synthetic rejected launch', false);
+          const fail = async () => { throw failure; };
+          native.integration.execution.start = fail;
+          native.integration.execution.resume = fail;
+          const settlements: string[] = [];
+          integration.producers.subscribe(({ event }) => {
+            if (event.type === 'launch-settled') settlements.push(event.runId);
+          });
+          let cancels = 0;
+          controllerFault.inject = encoded => {
+            if (encoded.includes('"method":"producers.cancelLaunch"')) cancels++;
+            return null;
+          };
+          const admission = new AbortController();
+          const opts = { executionAdmission: { signal: admission.signal, markStarted: async () => {} } };
+          if (method === 'execution.start') await router.startSession(CHAT, 'Synthetic failure', opts);
+          else if (method === 'execution.resume') await router.runAgentTurn(CHAT, 'Synthetic failure', opts);
+          else await router.compactSession(CHAT, opts);
+          await integrationRoundTrip(remote);
+
+          const failedRuns = ledger.currentRows(CHAT).filter(row => row.kind === 'run-ended' && row.outcome === 'failed');
+          expect(failedRuns).toHaveLength(1);
+          expect(failedRuns[0]).toMatchObject({ origin: 'core', error: { code, message: failure.message } });
+          expect(router.isChatRunning(CHAT)).toBe(false);
+          expect(remote.availability).toBe('ready');
+          expect(native.calls.abort).toBe(0);
+          expect(settlements).toHaveLength(1);
+          expect(settlementDelivery.paired).toBe(coalesceSettlement ? 1 : 0);
+
+          // A settled launch must not regain cancellation or resume ownership in a later continuation.
+          admission.abort();
+          await integrationRoundTrip(remote);
+          expect(cancels).toBe(0);
+          const reconnected = restored();
+          controller.disconnect();
+          await reconnected;
+          await integrationRoundTrip(remote);
+          expect(settlements).toHaveLength(1);
+          expect(runEnds(ledger).filter(row => row.outcome === 'failed')).toHaveLength(1);
+        }, { coalesceSettlement, configure(native) {
+          native.integration.compaction = { compact: (request, options) => native.integration.execution.resume(request, options) };
+        } });
+      }, 30_000);
+    }
+  }
+
   test(`a Stop on a live link whose start reply is then lost stops the turn once after the reconnect (${dialer} dials)`, async () => {
     await withRemoteRouter(dialer, async ({ router, ledger, native, remote, restored, workerFault }) => {
       const entered = Promise.withResolvers<void>();

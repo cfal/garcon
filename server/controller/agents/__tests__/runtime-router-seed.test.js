@@ -110,6 +110,8 @@ function makeRouter(overrides = {}) {
     resolveFileMentions: overrides.resolveFileMentions ?? resolveFileMentionsInCommand,
     registry,
     directory: {
+      requireOperations: mock(() => undefined),
+      supportsOperations: () => true,
       require: mock(() => integration),
       get: mock(() => integration),
       list: mock(() => [integration]),
@@ -863,6 +865,23 @@ describe('AgentRuntimeRouter producer boundary', () => {
     producer.emit(bindings[0], { type: 'rows', rows: [] });
     expect(publish).not.toHaveBeenCalled();
     expect(bindings[1]).not.toEqual(bindings[0]);
+  });
+
+  it('ensures a producer without closing a newer active turn or its publication', async () => {
+    let binding;
+    const start = mock(async request => { binding = request.producerBinding; return { id: 'live-handle' }; });
+    const f = makeRouter({ start });
+    await f.router.runAgentTurn('chat-1', 'Synthetic live input', { turnId: 'live-turn' });
+    const sink = f.transcript.sink;
+    const publish = spyOn(sink, 'publish');
+    f.router.ensureProducer('chat-1');
+    f.router.ensureProducer('chat-1');
+    expect(f.transcript.sink).toBe(sink);
+    expect(f.transcript.activeRunId()).toBe('live-turn');
+    f.producer.emit(binding, { type: 'rows', rows: [] });
+    expect(publish).toHaveBeenCalledWith({ type: 'rows', rows: [] });
+    f.producer.emit(binding, { type: 'run-ended', runId: 'live-turn', outcome: 'finished' });
+    expect(f.transcript.activeRunId()).toBeNull();
   });
 });
 

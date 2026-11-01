@@ -1,5 +1,5 @@
 ARG NODE_IMAGE=node:24-bookworm-slim
-ARG BUN_IMAGE=oven/bun:1.4.2
+ARG BUN_IMAGE=oven/bun:1.4.3
 
 FROM ${BUN_IMAGE} AS bun
 

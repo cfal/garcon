@@ -1,0 +1,305 @@
+{
+  "definition": {
+    "name": "forking.fork",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      },
+      {
+        "name": "forking.discard",
+        "version": 1
+      }
+    ],
+    "lane": "primary",
+    "continuity": "session",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "chatId": "string",
+      "endpoint": {
+        "union": [
+          "null",
+          {
+            "apiProviderId": "string",
+            "baseUrl": "string",
+            "capabilities": {
+              "union": [
+                "null",
+                {
+                  "chatCompletions": {
+                    "union": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  "responses": {
+                    "union": [
+                      "false",
+                      "true"
+                    ]
+                  }
+                }
+              ]
+            },
+            "credential": {
+              "union": [
+                "null",
+                {
+                  "apiProviderId": "string",
+                  "endpointId": "string",
+                  "kind": "\"api-provider-endpoint\"",
+                  "revision": "number"
+                }
+              ]
+            },
+            "endpointId": "string",
+            "headers": {
+              "[string]": "string"
+            },
+            "isLocal": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "model": "string",
+            "protocol": {
+              "union": [
+                "\"anthropic-messages\"",
+                "\"openai-compatible\""
+              ]
+            },
+            "providerLabel": "string"
+          }
+        ]
+      },
+      "model": "string",
+      "permissionMode": {
+        "union": [
+          "\"acceptEdits\"",
+          "\"bypassPermissions\"",
+          "\"default\"",
+          "\"manualBypass\"",
+          "\"plan\""
+        ]
+      },
+      "projectPath": "string",
+      "providerMeta": {
+        "union": [
+          "null",
+          {
+            "[string]": {
+              "union": [
+                "false",
+                "null",
+                "number",
+                "string",
+                "true",
+                {
+                  "array": {
+                    "recursive": "JsonValue"
+                  }
+                },
+                {
+                  "recursive": "JsonObject"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "settings": {
+        "ownerId": "string",
+        "schemaVersion": "number",
+        "values": {
+          "[string]": {
+            "union": [
+              "false",
+              "null",
+              "number",
+              "string",
+              "true",
+              {
+                "array": {
+                  "recursive": "JsonValue"
+                }
+              },
+              {
+                "recursive": "JsonObject"
+              }
+            ]
+          }
+        }
+      },
+      "source": {
+        "agentId": "string",
+        "agentSessionId": {
+          "union": [
+            "null",
+            "string"
+          ]
+        },
+        "carryOverRevision": "string",
+        "chatId": "string",
+        "model": "string",
+        "nativeSeedReceipt": {
+          "union": [
+            "null",
+            {
+              "agentSessionId": "string",
+              "codeUnitLength": "number",
+              "format": {
+                "union": [
+                  "\"legacy-v0\"",
+                  "\"v1-marker\"",
+                  "\"v2-xml\"",
+                  "\"v3-xml\""
+                ]
+              },
+              "placement": {
+                "union": [
+                  "\"provider-context\"",
+                  "\"user-prefix\""
+                ]
+              },
+              "sha256": "string"
+            }
+          ]
+        },
+        "nativeSession": {
+          "union": [
+            "null",
+            {
+              "ownerId": "string",
+              "schemaVersion": "number",
+              "value": {
+                "[string]": {
+                  "union": [
+                    "false",
+                    "null",
+                    "number",
+                    "string",
+                    "true",
+                    {
+                      "array": {
+                        "recursive": "JsonValue"
+                      }
+                    },
+                    {
+                      "recursive": "JsonObject"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "projectPath": "string",
+        "settings": {
+          "ownerId": "string",
+          "schemaVersion": "number",
+          "values": {
+            "[string]": {
+              "union": [
+                "false",
+                "null",
+                "number",
+                "string",
+                "true",
+                {
+                  "array": {
+                    "recursive": "JsonValue"
+                  }
+                },
+                {
+                  "recursive": "JsonObject"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "thinkingMode": {
+        "union": [
+          "\"high\"",
+          "\"low\"",
+          "\"max\"",
+          "\"medium\"",
+          "\"none\"",
+          "\"ultra\"",
+          "\"xhigh\""
+        ]
+      }
+    },
+    "result": {
+      "union": [
+        {
+          "kind": "\"materialized\"",
+          "session": {
+            "agentSessionId": "string",
+            "nativeSeedReceipt": {
+              "union": [
+                "null",
+                {
+                  "agentSessionId": "string",
+                  "codeUnitLength": "number",
+                  "format": {
+                    "union": [
+                      "\"legacy-v0\"",
+                      "\"v1-marker\"",
+                      "\"v2-xml\"",
+                      "\"v3-xml\""
+                    ]
+                  },
+                  "placement": {
+                    "union": [
+                      "\"provider-context\"",
+                      "\"user-prefix\""
+                    ]
+                  },
+                  "sha256": "string"
+                }
+              ]
+            },
+            "nativeSession": {
+              "union": [
+                "null",
+                {
+                  "ownerId": "string",
+                  "schemaVersion": "number",
+                  "value": {
+                    "[string]": {
+                      "union": [
+                        "false",
+                        "null",
+                        "number",
+                        "string",
+                        "true",
+                        {
+                          "array": {
+                            "recursive": "JsonValue"
+                          }
+                        },
+                        {
+                          "recursive": "JsonObject"
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "kind": "\"unmaterialized\""
+        }
+      ]
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

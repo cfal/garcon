@@ -1,0 +1,69 @@
+{
+  "definition": {
+    "name": "permissions.respond",
+    "version": 1,
+    "requires": [
+      {
+        "name": "resource.producer-binding",
+        "version": 1,
+        "requires": [],
+        "events": [
+          "rows",
+          "session",
+          "permission",
+          "notice",
+          "run-ended",
+          "started",
+          "steerable",
+          "publication-failed",
+          "publication-gap",
+          "launch-settled"
+        ]
+      },
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "decision": {
+        "allow": {
+          "union": [
+            "false",
+            "true"
+          ]
+        },
+        "alwaysAllow?": {
+          "union": [
+            "false",
+            "true",
+            "undefined"
+          ]
+        },
+        "response?": {
+          "union": [
+            "undefined",
+            {
+              "[string]": "unknown"
+            }
+          ]
+        }
+      },
+      "response": {
+        "executorId": "string",
+        "id": "string",
+        "instanceId": "string",
+        "integrationId": "string",
+        "kind": "\"permission-response\""
+      }
+    },
+    "result": "void"
+  },
+  "failures": "rpc-errors-v1"
+}

@@ -85,7 +85,7 @@ describe('server ownership boundaries', () => {
 
   test('keeps only the public entrypoint and package metadata at the server root', () => {
     expect(readdirSync(server).filter((entry) => entry !== 'node_modules').sort()).toEqual([
-      'common', 'controller', 'main.ts', 'package.json', 'remote', 'runtime', 'tsconfig.json',
+      'common', 'controller', 'main.ts', 'package.json', 'remote', 'runtime', 'tsconfig.contract-tests.json', 'tsconfig.json',
     ]);
     expect(existsSync(join(server, 'runtime/execution-runtime.ts'))).toBe(true);
     expect(existsSync(join(server, 'remote/client/executor-client.ts'))).toBe(true);

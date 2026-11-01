@@ -1,0 +1,10 @@
+{
+  "definition": {
+    "name": "producer.publication-gap",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "type": "\"publication-gap\""
+  }
+}

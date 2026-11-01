@@ -1,6 +1,8 @@
 import type { ChatReloadProgress } from '../../../common/ws-events.js';
 import type { AgentDirectory } from '../agents/directory.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
+import { toAgentChatReference } from '../agents/integration-chat-reference.js';
+import { requireProviderOperations } from '../agents/execution-support.js';
 import type { IChatRegistry } from '../chats/store.js';
 import {
   hasPendingTurnInput,
@@ -8,6 +10,7 @@ import {
 } from '../chat-execution/control-state.js';
 import type { TranscriptSnapshotReservation } from '../chat-execution/types.js';
 import { DomainError } from '../../common/domain-error.js';
+import { executorGenerationChanged } from '../../common/executor-generation-error.js';
 import type { LedgerRowDraft, TranscriptView } from './contracts.js';
 import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import type { TranscriptAdoptionService } from './adoption.js';
@@ -27,7 +30,7 @@ export interface TranscriptReloadServiceOptions {
   readonly ledger: TranscriptLedgerService;
   readonly adoption: TranscriptAdoptionService;
   readonly registry: IChatRegistry;
-  readonly integrations: Pick<AgentDirectory, 'require'>;
+  readonly integrations: Pick<AgentDirectory, 'require' | 'requireOperations' | 'supportsOperations'>;
   readonly execution: ReloadExecutionPort;
   readonly reopenProducer: (chatId: string) => void;
   readonly getCarryOverRevision: (entry: AgentChatEntry) => string;
@@ -106,6 +109,8 @@ export class TranscriptReloadService {
         false,
       );
     }
+    requireProviderOperations(this.options.integrations, entry.executorId, ['history.open']);
+    toAgentChatReference(integration, chatId, entry, this.options.getCarryOverRevision(entry));
 
     const currentRows = await this.options.ledger.rowsThrough(
       chatId,
@@ -120,6 +125,10 @@ export class TranscriptReloadService {
       entry = updated;
     }
     await this.options.registry.flush();
+
+    if (this.options.integrations.require(entry.agentId, entry.executorId) !== integration) {
+      throw executorGenerationChanged();
+    }
 
     this.options.ledger.closeProducer(chatId);
     let staging: TranscriptView | null = null;

@@ -1,10 +1,22 @@
+import { TestWebSocketLink as WebSocketLink, handleTestRpc } from '../../__tests__/test-session-transport.js';
+import { CLI_OPERATIONS } from '@garcon/common/cli-contracts';
+import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { expect, test } from 'bun:test';
 import { ExecutorRpcConnection, type RpcConnectionOptions } from '../rpc-connection.js';
 import { RpcAdmissionBudgets } from '../rpc-admission.js';
 import { ParkedRpcCalls, type ExecutorRpc } from '../rpc.js';
 import { RpcReplyJournal } from '../rpc-journal.js';
-import { WebSocketLink } from '../websocket-link.js';
+
 import type { SessionTransport } from '../session-transport.js';
+import type { FileRpcMethods } from '../file-protocol.js';
+import { createRoleContracts, registerRpcHandlers } from '../rpc-registrations.js';
+import { rpcWireV1 } from '../rpc-wire-v1.js';
+import { cliWireV1 } from '../cli-protocol.js';
+
+const files = (name: string): FileRpcMethods['files.list']['result'] => ({
+  files: [{ name, path: `/project/${name}`, relativePath: name, type: 'file' }], truncated: false,
+});
+const inspected = { resolution: { kind: 'available', effectiveProjectKey: '/project' } } as const;
 
 async function until(condition: () => boolean): Promise<void> {
   const deadline = performance.now() + 3000;
@@ -41,7 +53,7 @@ async function pair(dialer: 'controller' | 'worker', configure?: (controller: Re
   const failures: Parameters<NonNullable<RpcConnectionOptions['bulkFailed']>>[0][] = [];
   const connections = {} as Record<'controller' | 'worker', ExecutorRpcConnection>;
   const endpoints = {} as Record<'controller' | 'worker', ExecutorRpc[]>;
-  const hooks = { read: async () => ['synthetic-file'], reverse: async () => ({ status: 200, body: [] }) };
+  const hooks = { read: async () => files('synthetic-file'), reverse: async () => ({ status: 200, body: [] }) };
   let executions = 0;
   const bulkTiming = { redialDelaysMs: [0, 10, 20], setupTimeoutMs: 300, stableSessionMs: 100 };
   controller.onSession((transport) => {
@@ -50,7 +62,7 @@ async function pair(dialer: 'controller' | 'worker', configure?: (controller: Re
     endpoints.controller = [];
     connections.controller.onEndpoint((rpc) => {
       endpoints.controller.push(rpc);
-      rpc.handle(async () => hooks.reverse());
+      handleTestRpc(rpc, async () => hooks.reverse());
     });
   });
   worker.onSession((transport) => {
@@ -58,9 +70,9 @@ async function pair(dialer: 'controller' | 'worker', configure?: (controller: Re
     endpoints.worker = [];
     connections.worker.onEndpoint((rpc) => {
       endpoints.worker.push(rpc);
-      rpc.handle(async (call) => {
+      handleTestRpc(rpc, async (call) => {
         if (call.method === 'files.list') { executions++; return hooks.read(); }
-        return { ok: true };
+        return inspected;
       });
     });
   });
@@ -80,12 +92,51 @@ async function pair(dialer: 'controller' | 'worker', configure?: (controller: Re
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`bulk activates a complete profile without reconciliation (${dialer} dials)`, async () => {
+    const reverse = registerRpcHandlers([rpcWireV1('controllerCli.describe'), rpcWireV1('controllerCli.request')],
+      async (_context: null, call) => call.method === 'controllerCli.describe'
+        ? { serverInstanceId: 'synthetic-controller', defaultExecutorId: 'local', workspaceName: null }
+        : { status: 200, body: [] });
+    const cli = cliWireV1('GET /api/v1/scheduled-prompts');
+    const controllerContracts = createRoleContracts('controller', { clients: [], handlers: [reverse], resources: [],
+      cli: [{ ...cli, side: 'handler', dispatch: () => {} }] });
+    const workerContracts = createRoleContracts('worker', { clients: reverse.wires, handlers: [], resources: [],
+      cli: [{ ...cli, side: 'forwarder', dispatch: async () => ({ status: 200, body: [] }) }] });
+    const common = { executorId: 'test-executor', secret: Buffer.alloc(32, 42).toString('base64url'), noTls: true };
+    const controller = new WebSocketLink({ ...common, role: 'controller', contracts: controllerContracts });
+    const worker = new WebSocketLink({ ...common, role: 'worker', contracts: workerContracts });
+    let controllerConnection: ExecutorRpcConnection | undefined;
+    let workerConnection: ExecutorRpcConnection | undefined;
+    controller.onSession(transport => {
+      controllerConnection = new ExecutorRpcConnection(controller, transport, { admission: new RpcAdmissionBudgets() });
+      controllerConnection.onEndpoint(rpc => rpc.handle(reverse.bind(null)));
+    });
+    worker.onSession(transport => {
+      workerConnection = new ExecutorRpcConnection(worker, transport, { admission: new RpcAdmissionBudgets() });
+    });
+    try {
+      if (dialer === 'controller') controller.dial(worker.listen());
+      else worker.dial(controller.listen());
+      await Promise.all([controller.ready, worker.ready]);
+      controllerConnection!.activate();
+      await until(() => Boolean(controllerConnection?.bulk.current && workerConnection?.bulk.current));
+      await expect(workerConnection!.primary.call('', RPC_V1['controllerCli.describe'], null))
+        .resolves.toMatchObject({ serverInstanceId: 'synthetic-controller' });
+      await expect(workerConnection!.bulk.current!.call('', RPC_V1['controllerCli.request'], {
+        contract: { name: cli.definition.name, version: cli.definition.version }, expectedServerInstanceId: 'synthetic-controller',
+        http: { operation: cli.operation, query: [], body: null },
+      })).resolves.toEqual({ status: 200, body: [] });
+      expect(controller.current!.connected).toBe(true);
+      expect(controller.current!.profile.contracts['calls.reconcile']).toBeUndefined();
+    } finally { await controller.dispose(); await worker.dispose(); }
+  });
+
   test(`primary works before bulk and bulk flaps never replace it (${dialer} dials)`, async () => {
     const fixture = await pair(dialer);
     try {
       const primary = fixture.connections.controller.primary;
       expect(fixture.connections.controller.bulk.current).toBeNull();
-      await expect(primary.call('', 'projects.inspect', { projectPath: '/project' })).resolves.toEqual({ ok: true });
+      await expect(primary.call('', RPC_V1['projects.inspect'], { projectPath: '/project' }, { timeoutMs: 1000 })).resolves.toEqual(inspected);
       fixture.start();
       await fixture.ready();
       for (let loss = 0; loss < 3; loss++) {
@@ -108,7 +159,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       const workerBulk = fixture.endpoints.worker.find((rpc) => rpc.transport.lane === 'bulk')!;
       let admitted = false;
       const waiting = fixture.connections.worker.bulk.wait().then(() => { admitted = true; });
-      await expect(workerBulk.call('', 'controllerCli.request', {
+      await expect(workerBulk.call('', RPC_V1['controllerCli.request'], { contract: { name: CLI_OPERATIONS['GET /api/v1/chats'][1].name, version: 1 },
         expectedServerInstanceId: 'synthetic-server', http: { operation: 'GET /api/v1/chats', query: [], body: null },
       })).rejects.toMatchObject({ outcome: 'not-dispatched' });
       expect(admitted).toBe(false);
@@ -116,7 +167,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       fixture.gates.controller.bulk = false;
       await fixture.ready();
       await waiting;
-      await expect(workerBulk.call('', 'controllerCli.request', {
+      await expect(workerBulk.call('', RPC_V1['controllerCli.request'], { contract: { name: CLI_OPERATIONS['GET /api/v1/chats'][1].name, version: 1 },
         expectedServerInstanceId: 'synthetic-server', http: { operation: 'GET /api/v1/chats', query: [], body: null },
       })).resolves.toEqual({ status: 200, body: [] });
     } finally { await fixture.dispose(); }
@@ -124,20 +175,20 @@ for (const dialer of ['controller', 'worker'] as const) {
 
   test(`bulk recovery adopts pending calls without waiting for their handlers (${dialer} dials)`, async () => {
     const fixture = await pair(dialer);
-    const release = Promise.withResolvers<string[]>();
+    const release = Promise.withResolvers<FileRpcMethods['files.list']['result']>();
     try {
       fixture.start(); await fixture.ready();
       fixture.hooks.read = () => release.promise;
-      const answer = fixture.connections.controller.bulk.current!.call('', 'files.list', { projectPath: '/project' });
+      const answer = fixture.connections.controller.bulk.current!.call('', RPC_V1['files.list'], { projectPath: '/project' });
       await until(() => fixture.executions === 1);
       fixture.controller.bulk!.close();
       await fixture.ready();
       expect(fixture.executions).toBe(1);
       expect(fixture.workerAdmission.incoming.size).toBe(1);
-      release.resolve(['settled-after-activation']);
-      await expect(answer).resolves.toEqual(['settled-after-activation']);
+      release.resolve(files('settled-after-activation'));
+      await expect(answer).resolves.toEqual(files('settled-after-activation'));
       await until(() => fixture.workerAdmission.incoming.size === 0);
-    } finally { release.resolve([]); await fixture.dispose(); }
+    } finally { release.resolve(files('settled')); await fixture.dispose(); }
   });
 
   test(`bulk nonreceipt resends only after its predecessor is fenced (${dialer} dials)`, async () => {
@@ -147,13 +198,13 @@ for (const dialer of ['controller', 'worker'] as const) {
       const old = fixture.connections.controller.bulk.current!;
       const peer = fixture.connections.worker.bulk.current!;
       fixture.gates.controller.bulk = true;
-      const answer = old.call('', 'files.list', { projectPath: '/project' });
+      const answer = old.call('', RPC_V1['files.list'], { projectPath: '/project' });
       expect(old.transport.channel.queuedFrames).toBe(1);
       expect(fixture.executions).toBe(0);
       old.transport.close();
       fixture.gates.controller.bulk = false;
       await fixture.ready();
-      await expect(answer).resolves.toEqual(['synthetic-file']);
+      await expect(answer).resolves.toEqual(files('synthetic-file'));
       expect(peer.transport.connected).toBe(false);
       expect(fixture.executions).toBe(1);
       expect(fixture.controllerAdmission.outgoing.size).toBe(0);
@@ -165,16 +216,16 @@ for (const dialer of ['controller', 'worker'] as const) {
     const primaryResult = Promise.withResolvers<string[]>();
     try {
       fixture.start(); await fixture.ready();
-      fixture.connections.worker.primary.handle(async () => primaryResult.promise);
-      const primary = fixture.connections.controller.primary.call('test', 'execution.runningSessions', null);
+      handleTestRpc(fixture.connections.worker.primary, async () => primaryResult.promise);
+      const primary = fixture.connections.controller.primary.call('test', RPC_V1['execution.runningSessions'], null);
       await until(() => fixture.workerAdmission.incoming.size === 1);
       fixture.gates.worker.bulk = true;
-      const answer = fixture.connections.controller.bulk.current!.call('', 'files.list', { projectPath: '/project' });
+      const answer = fixture.connections.controller.bulk.current!.call('', RPC_V1['files.list'], { projectPath: '/project' });
       await until(() => fixture.executions === 1 && fixture.worker.bulk!.channel.queuedFrames > 0);
       fixture.controller.bulk!.close();
       fixture.gates.worker.bulk = false;
       await fixture.ready();
-      await expect(answer).resolves.toEqual(['synthetic-file']);
+      await expect(answer).resolves.toEqual(files('synthetic-file'));
       expect(fixture.executions).toBe(1);
       expect(fixture.workerAdmission.incoming.size).toBe(1);
       primaryResult.resolve([]);
@@ -235,8 +286,8 @@ test('a delayed socket-ready continuation cannot undo reconciliation or activati
     release.resolve();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(fixture.connections.worker.status.phase).toBe('ready');
-    await expect(fixture.connections.controller.bulk.current!.call('', 'files.list', { projectPath: '/project' }))
-      .resolves.toEqual(['synthetic-file']);
+    await expect(fixture.connections.controller.bulk.current!.call('', RPC_V1['files.list'], { projectPath: '/project' }))
+      .resolves.toEqual(files('synthetic-file'));
   } finally { release.resolve(); await fixture.dispose(); }
 });
 

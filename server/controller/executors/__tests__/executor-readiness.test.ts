@@ -1,9 +1,10 @@
+import { TestWebSocketLink as WebSocketLink } from '../../../remote/__tests__/test-session-transport.js';
 import { expect, test } from 'bun:test';
 import { servePairedRuntime } from '../../../remote/__tests__/runtime-adapter.js';
 import { serveExecutionRuntime } from '../../../remote/server/executor-rpc-server.js';
 import { ProducerRelay } from '../../../remote/server/producer-relay.js';
 import { RemoteExecutorClient } from '../../../remote/client/executor-client.js';
-import { WebSocketLink } from '../../../remote/transport/websocket-link.js';
+
 import { integrationFixture, linkOptions } from '../../../remote/__tests__/integration-fixture.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
@@ -27,7 +28,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     try {
       expect(executor.id).toBe(executorId);
       expect(executor.availability).toBe('offline');
-      await expect(executor.getAgentIntegration('test')).rejects.toMatchObject({ outcome: 'not-dispatched' });
+      expect(() => executor.runtime).toThrow('Executor is offline');
       if (dialer === 'controller') controller.dial(worker.listen());
       else worker.dial(controller.listen());
       await entering.promise;
@@ -35,7 +36,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(executor.availability).toBe('offline');
       release.resolve();
       await ready.promise;
-      expect((await executor.getAgentIntegration('test')).producers.scope.executorId).toBe(executorId);
+      expect((await executor.runtime.getAgentIntegration('test')).producers.scope.executorId).toBe(executorId);
     } finally { release.resolve(); await executor.dispose(); await worker.dispose(); await scope?.dispose(); }
   });
 }

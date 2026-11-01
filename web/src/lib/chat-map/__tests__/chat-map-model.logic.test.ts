@@ -28,6 +28,7 @@ function chat(id: string, overrides: Partial<ChatSessionRecord> = {}): ChatSessi
 		isArchived: false,
 		isProcessing: false,
 		processingPhase: null,
+		hasAgentSession: false,
 		canReloadFromNativeHistory: false,
 		isUnread: false,
 		status: 'running',

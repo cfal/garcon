@@ -309,6 +309,7 @@ describe('AcceptedInputHandler', () => {
     const settle = settlement();
     const { handler, m } = scaffold({ hasMatchingInput: mock(async () => true) });
     const prepare = mock(async () => undefined);
+    const validateRecovery = mock(async () => { throw new Error('Must not revalidate committed input'); });
 
     await handler.schedule({
       command: command(),
@@ -317,6 +318,7 @@ describe('AcceptedInputHandler', () => {
       settlement: settle,
       preparation: {
         operation: 'fork-run',
+        validateRecovery,
         prepare,
         compensate: mock(async () => undefined),
       },
@@ -325,8 +327,47 @@ describe('AcceptedInputHandler', () => {
     expect(settle.settleDuplicateInput).toHaveBeenCalledWith(command());
     expect(m.read).not.toHaveBeenCalled();
     expect(prepare).not.toHaveBeenCalled();
+    expect(validateRecovery).not.toHaveBeenCalled();
     expect(m.assertProjectAvailable).not.toHaveBeenCalled();
     expect(m.admitInput).not.toHaveBeenCalled();
+  });
+
+  test.each(['reserve', 'checkpoint', 'control', 'validation'])('preserves accepted recovery on %s refusal', async (phase) => {
+    const failure = new DomainError('OPERATION_UNSUPPORTED', 'Synthetic refusal', 422);
+    const { handler, m } = scaffold();
+    const settle = settlement();
+    const preparation = {
+      operation: 'fork-run',
+      validateRecovery: mock(async () => { if (phase === 'validation') throw failure; }),
+      prepare: mock(async () => {}),
+      compensate: mock(async () => {}),
+    };
+    if (phase === 'reserve') m.reserveDirect.mockImplementation(() => { throw failure; });
+    if (phase === 'checkpoint') m.checkpoint.mockImplementation(() => { throw failure; });
+    if (phase === 'control') m.read.mockRejectedValue(failure);
+    await expect(handler.schedule({ command: command(), content: 'recovery', options: { turnId: 'turn-1' },
+      settlement: settle, preparation })).rejects.toBe(failure);
+    expect(m.releaseDirect).toHaveBeenCalledTimes(phase === 'reserve' ? 0 : 1);
+    expect(preparation.prepare).not.toHaveBeenCalled();
+    expect(preparation.compensate).not.toHaveBeenCalled();
+    expect(m.discardPreparedInput).not.toHaveBeenCalled();
+    expect(settle.markPreScheduleFailure).not.toHaveBeenCalled();
+  });
+
+  test('compensates recovery only after taking preparation ownership', async () => {
+    const failure = new Error('Synthetic admission failure');
+    const { handler, m } = scaffold({ admitInput: mock(async () => { throw failure; }) });
+    const settle = settlement();
+    const preparation = { operation: 'fork-run', validateRecovery: mock(async () => {}),
+      prepare: mock(async () => {}), compensate: mock(async () => {}) };
+    await expect(handler.schedule({ command: command(), content: 'recovery', options: { turnId: 'turn-1' },
+      settlement: settle, preparation })).rejects.toBe(failure);
+    expect(preparation.validateRecovery).toHaveBeenCalledOnce();
+    expect(preparation.compensate).toHaveBeenCalledOnce();
+    expect(m.releaseDirect).toHaveBeenCalledOnce();
+    expect(settle.markPreScheduleFailure).toHaveBeenCalledWith(command(), {
+      error: failure, retryable: true, preserveForkPreparation: false,
+    });
   });
 
   describe('admission deadline after a preparation', () => {

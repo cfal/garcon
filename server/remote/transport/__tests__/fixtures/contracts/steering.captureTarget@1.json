@@ -1,0 +1,71 @@
+{
+  "definition": {
+    "name": "steering.captureTarget",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "agentSessionId": "string",
+      "chatId": "string",
+      "expectedRunId": "string",
+      "nativeSession": {
+        "union": [
+          "null",
+          {
+            "ownerId": "string",
+            "schemaVersion": "number",
+            "value": {
+              "[string]": {
+                "union": [
+                  "false",
+                  "null",
+                  "number",
+                  "string",
+                  "true",
+                  {
+                    "array": {
+                      "recursive": "JsonValue"
+                    }
+                  },
+                  {
+                    "recursive": "JsonObject"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "producerBinding": {
+        "executorId": "string",
+        "id": "string",
+        "instanceId": "string",
+        "integrationId": "string",
+        "kind": "\"producer\""
+      }
+    },
+    "result": {
+      "union": [
+        "null",
+        {
+          "executorId": "string",
+          "id": "string",
+          "instanceId": "string",
+          "integrationId": "string",
+          "kind": "\"steer-target\""
+        }
+      ]
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

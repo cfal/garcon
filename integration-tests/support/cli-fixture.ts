@@ -1,13 +1,11 @@
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { cliRuntimeFile, type RuntimeKind } from '../../common/cli-runtime-paths.js';
 import { parseCliRuntimeDescriptor } from '../../common/server-runtime.js';
 import { cliEnvironment } from './cli-environment.js';
 import { withIntegrationFixture, type IntegrationFixture, type IntegrationFixtureOptions } from './integration-fixture.js';
+import { CURRENT_ARTIFACT } from './source-artifact.js';
 
 export type { IntegrationFixture, IntegrationFixtureOptions } from './integration-fixture.js';
-
-const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
 export function cliRuntime(fixture: IntegrationFixture): RuntimeKind {
   return fixture.client.executorId === 'local' ? 'controller' : 'executor';
@@ -31,8 +29,8 @@ export async function runCli(
   runtime = cliRuntime(fixture),
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const child = Bun.spawn({
-    cmd: [process.execPath, 'cli/main.ts', ...cliConnectionArguments(fixture, runtime), ...arguments_],
-    cwd: REPO_ROOT,
+    cmd: [CURRENT_ARTIFACT.bunExecutable, 'cli/main.ts', ...cliConnectionArguments(fixture, runtime), ...arguments_],
+    cwd: CURRENT_ARTIFACT.repoRoot,
     env: cliEnvironment({ HOME: cliDirectories(fixture, runtime).home }),
     stdin: 'ignore',
     stdout: 'pipe',

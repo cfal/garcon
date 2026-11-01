@@ -18,6 +18,7 @@ import type {
   QueueEntrySteerErrorResponse,
   RunningChatsResponse,
 } from '../../../common/chat-command-contracts.ts';
+import type { AgentSettingsPatchFence } from '../../../common/agent-settings.js';
 import {
   parsePermissionDecisionCommandRequest,
   parseProjectPathPatchRequest,
@@ -409,6 +410,7 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
       const chat = registry.getChat(chatId);
       if (!chat) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       const patch: AgentSessionSettingsPatch = {};
+      let settingsFence: AgentSettingsPatchFence | undefined;
       if (body.permissionMode !== undefined) {
         patch.permissionMode = normalizePermissionMode(body.permissionMode);
       }
@@ -416,6 +418,14 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
         patch.thinkingMode = normalizeThinkingMode(body.thinkingMode);
       }
       if (body.agentSettingsPatch !== undefined) {
+        if (!expectedEpoch || typeof body.expectedExecutorInstanceId !== 'string' || !body.expectedExecutorInstanceId
+          || !Number.isSafeInteger(body.expectedSettingsSchemaVersion) || Number(body.expectedSettingsSchemaVersion) < 1) {
+          return jsonError('Provider edits require the captured ownership, executor instance and settings schema. Refresh the executor catalog.', 422, 'VALIDATION_FAILED', false);
+        }
+        settingsFence = {
+          expectedExecutorInstanceId: body.expectedExecutorInstanceId,
+          expectedSettingsSchemaVersion: body.expectedSettingsSchemaVersion,
+        };
         if (!body.agentSettingsPatch || typeof body.agentSettingsPatch !== 'object' || Array.isArray(body.agentSettingsPatch)) {
           return jsonError('agentSettingsPatch must be an object', 400, 'VALIDATION_FAILED');
         }
@@ -423,14 +433,14 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
       }
       const hasPatch = Object.keys(patch).length > 0;
       const updated = hasPatch
-        ? await agents.updateSessionSettings(chatId, patch, expectedEpoch, request.signal)
+        ? await agents.updateSessionSettings(chatId, patch, expectedEpoch, request.signal, settingsFence)
         : chat;
       return Response.json({
         success: true,
         chatId,
         permissionMode: updated.permissionMode,
         thinkingMode: updated.thinkingMode,
-        agentSettings: updated.agentSettingsById?.[updated.agentId] ?? chat.agentSettingsById[chat.agentId],
+        agentSettings: updated.agentSettingsById?.[updated.agentId] ?? null,
       });
     } catch (error: unknown) {
       return chatSettingsPatchErrorResponse(error);

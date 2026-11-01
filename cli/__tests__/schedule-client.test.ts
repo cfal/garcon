@@ -1,10 +1,11 @@
+import { CLI_BOOTSTRAP_VERSION, CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 import { expect, mock, test } from 'bun:test';
 import { GarconClient } from '../garcon-client.js';
 import { main } from '../main.js';
 import { CLI_SERVER_INSTANCE_HEADER } from '@garcon/common/server-runtime';
 import { scheduleId, scheduleChatId, scheduleDefinition, newChatDefinition, schedulePrompt, scheduleSnapshot } from './schedule-fixtures.js';
 
-const connection = { baseUrl: 'http://127.0.0.1:1', instanceId: 'synthetic-controller', endpointInstanceId: 'synthetic-endpoint',
+const connection = { protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS }, baseUrl: 'http://127.0.0.1:1', instanceId: 'synthetic-controller', endpointInstanceId: 'synthetic-endpoint',
   defaultExecutorId: 'local', workspaceName: null, localCapability: 'synthetic-capability' };
 
 test('schedule HTTP methods preserve typed bodies, exact paths and controller fencing', async () => {

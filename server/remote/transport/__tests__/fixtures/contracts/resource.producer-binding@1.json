@@ -1,0 +1,70 @@
+{
+  "definition": {
+    "name": "resource.producer-binding",
+    "version": 1,
+    "requires": [],
+    "events": [
+      "rows",
+      "session",
+      "permission",
+      "notice",
+      "run-ended",
+      "started",
+      "steerable",
+      "publication-failed",
+      "publication-gap",
+      "launch-settled"
+    ]
+  },
+  "frame": {
+    "notification": "unknown",
+    "seq": "number",
+    "type": "\"producer\""
+  },
+  "notification": {
+    "binding": {
+      "executorId": "string",
+      "id": "string",
+      "instanceId": "string",
+      "integrationId": "string",
+      "kind": "\"producer\""
+    },
+    "event": "unknown"
+  },
+  "acknowledgements": {
+    "acknowledgements": {
+      "array": {
+        "bindingId": "string",
+        "seq": "number"
+      }
+    },
+    "type": "\"producer-ack\""
+  },
+  "resume": {
+    "bindingId": "string",
+    "launch": {
+      "union": [
+        "null",
+        {
+          "handle": {
+            "union": [
+              "null",
+              {
+                "executorId": "string",
+                "id": "string",
+                "instanceId": "string",
+                "integrationId": "string",
+                "kind": "\"execution\""
+              }
+            ]
+          },
+          "runId": "string"
+        }
+      ]
+    },
+    "receivedRunIds": {
+      "array": "string"
+    },
+    "replayThroughSeq": "number"
+  }
+}

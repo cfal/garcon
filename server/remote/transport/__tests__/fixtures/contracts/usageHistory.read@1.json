@@ -1,0 +1,63 @@
+{
+  "definition": {
+    "name": "usageHistory.read",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "sinceDay": "string",
+      "timeZone": "string",
+      "untilDay": "string"
+    },
+    "result": {
+      "buckets": {
+        "array": {
+          "cacheSavingsUsd": "number",
+          "categoryCostUsd": {
+            "cacheRead": "number",
+            "cacheWrite": "number",
+            "input": "number",
+            "output": "number"
+          },
+          "costUsd": "number",
+          "day": "string",
+          "model": "string",
+          "records": "number",
+          "sessions": "number",
+          "totals": {
+            "cachedInputTokens": "number",
+            "cacheWriteTokens": "number",
+            "outputTokens": "number",
+            "reasoningTokens": "number",
+            "uncachedInputTokens": "number"
+          },
+          "unpricedRecords": "number",
+          "unpricedTokens": "number"
+        }
+      },
+      "distinctSessions": "number",
+      "malformedRecords": "number",
+      "pricingAsOf": "string",
+      "scannedFiles": "number",
+      "status": {
+        "union": [
+          "\"missing\"",
+          "\"ok\"",
+          "\"partial\""
+        ]
+      },
+      "unreadableFiles": "number"
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

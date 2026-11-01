@@ -1,7 +1,4 @@
 <script lang="ts">
-	// New-chat form used inside the NewChatDialog. Delegates state management
-	// to NewChatFormState and retains only DOM interactions and template logic.
-
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import ComposerInputSurface from '../composer/ComposerInputSurface.svelte';
 	import { NewChatMarkdownState } from './new-chat-markdown-state.svelte.js';
@@ -233,6 +230,12 @@
 	const promptTransformPending = $derived(
 		snippetExpansion.pending || promptRefinement.pending || inputUi.formattedPastePending,
 	);
+	const snippetCommand = $derived<SnippetCommandParseResult>(
+		conversationInput ? parseSnippetCommand(form.firstMessage) : { kind: 'not-command' },
+	);
+	const canSubmit = $derived(initialContentReady && !promptTransformPending && (
+		snippetCommand.kind === 'not-command' ? form.canSubmit : form.executorReady && form.modelCatalogValidated
+	));
 	$effect(() => {
 		executionKey;
 		return () => {
@@ -556,8 +559,8 @@
 	}
 
 	function handleSubmit(): void {
-		if (!form.canSubmit || promptTransformPending) return;
-		const command = conversationInput ? parseSnippetCommand(form.firstMessage) : { kind: 'none' as const };
+		if (!canSubmit) return;
+		const command = snippetCommand;
 		if (command.kind === 'invalid') {
 			notifications.error(
 				command.error === 'short-name-required'
@@ -829,15 +832,11 @@
 					{promptTransformStatus}
 					{permissionOptions}
 					selectedPermission={form.permissionMode}
-					onPermissionSelect={(mode) => {
-						form.setPermissionMode(mode);
-					}}
+					onPermissionSelect={(mode) => form.setPermissionMode(mode)}
 					{thinkingOptions}
 					selectedThinking={form.thinkingMode}
-					onThinkingSelect={(mode) => {
-						form.setThinkingMode(mode);
-					}}
-					canSend={form.canSubmit && !promptTransformPending}
+					onThinkingSelect={(mode) => form.setThinkingMode(mode)}
+					canSend={canSubmit}
 					onSend={handleSubmit}
 					sendTitle={m.chat_new_chat_start_session()}
 					{sendButtonClass}
@@ -846,6 +845,8 @@
 						<AgentSettingsControls
 							descriptors={form.agentSettingDescriptors}
 							envelope={form.agentSettings}
+							compatibility={form.agentSettingsCompatibility}
+							disabled={!form.modelCatalogValidated}
 							onChange={(descriptor, value) => form.setAgentSetting(descriptor, value)}
 						/>
 					{/snippet}
@@ -969,9 +970,7 @@
 		onCreate={async (path, branch, baseRef) => {
 			await form.createWorktree(path, branch, baseRef);
 		}}
-		onRefresh={() => {
-			void form.loadWorktrees();
-		}}
+		onRefresh={() => void form.loadWorktrees()}
 		onClose={() => form.closeWorktreeModal()}
 	/>
 {/if}

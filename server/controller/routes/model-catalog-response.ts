@@ -14,6 +14,7 @@ function etagMatches(request: Request, etag: string): boolean {
 }
 
 export function catalogResponseFromSnapshot(request: Request, snapshot: ModelCatalogSnapshot): Response {
+  snapshot.assertCurrent();
   const headers = {
     ...CATALOG_RESPONSE_HEADERS,
     ETag: snapshot.etag,

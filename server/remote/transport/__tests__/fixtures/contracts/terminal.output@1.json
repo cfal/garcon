@@ -1,0 +1,19 @@
+{
+  "definition": {
+    "name": "terminal.output",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "attachmentId?": {
+      "union": [
+        "string",
+        "undefined"
+      ]
+    },
+    "data": "string",
+    "sequence": "number",
+    "terminalId": "string",
+    "type": "\"terminal-output\""
+  }
+}

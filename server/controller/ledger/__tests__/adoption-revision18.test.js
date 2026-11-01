@@ -218,7 +218,7 @@ async function withFixture(options, run) {
         return { id: chatId, ...entry };
       },
     },
-    integrations: { require: () => integration },
+    integrations: { require: () => integration, requireOperations() {}, supportsOperations: () => true },
     getCarryOverRevision: () => 'carryover-1',
     loadFrozenPrefix: options.loadFrozenPrefix,
     now: () => AT,

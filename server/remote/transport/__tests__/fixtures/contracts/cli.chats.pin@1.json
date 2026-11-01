@@ -1,0 +1,55 @@
+{
+  "definition": {
+    "name": "cli.chats.pin",
+    "version": 1,
+    "requires": [],
+    "mutation": true,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "PUT /api/v1/chats/pin",
+  "wire": {
+    "request": {
+      "body": {
+        "chatId": "string",
+        "isPinned": {
+          "union": [
+            "false",
+            "true"
+          ]
+        }
+      }
+    },
+    "result": {
+      "changed": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "chatId": "string",
+      "isArchived": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "isPinned": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "orderGroup": {
+        "union": [
+          "\"archived\"",
+          "\"normal\"",
+          "\"pinned\""
+        ]
+      },
+      "success": "true"
+    }
+  }
+}

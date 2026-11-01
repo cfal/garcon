@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { LOCAL_EXECUTOR_OPERATIONS } from '../../../common/executor-contracts.js';
+import { DomainError } from '../../../server/common/domain-error.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -55,9 +57,15 @@ for (const backend of ['local', 'controller', 'worker'] as const) {
         const integrations = new IntegrationRegistry({ instances: [integration] });
         const directory = new AgentDirectory(integrations, {
           isReady: () => true,
+          captureInventory: () => ({ instanceId: integration.producers.scope.instanceId, integrations: integrations.list(), assertCurrent() {} }),
           integrationsFor: () => integrations,
           knownIntegration: ({ agentId }) => integrations.get(agentId),
           requireIntegration: ({ agentId }) => integrations.require(agentId),
+          supportsOperations: (_executorId, operations) => operations.every(operation =>
+            (remote?.client.generation?.operations ?? LOCAL_EXECUTOR_OPERATIONS).includes(operation)),
+          requireOperations(executorId, operations) {
+            if (!this.supportsOperations(executorId, operations)) throw new DomainError('OPERATION_UNSUPPORTED', 'Unsupported test workflow', 422);
+          },
         });
         chats.addChat({ id: CHAT, agentId: 'test', executorId: native.scope.executorId,
           projectPath: root, model: 'synthetic-model', agentSettingsById: { test: integration.settings.defaults() },

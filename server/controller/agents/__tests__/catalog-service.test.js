@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AgentCatalogService } from "../catalog-service.ts";
+import { AgentCallError } from '@garcon/server-agent-interface';
 
 function createIntegration() {
   return {
@@ -66,6 +67,67 @@ function createIntegration() {
 }
 
 describe("AgentCatalogService", () => {
+  function replacingFixture() {
+    let current = [createIntegration()];
+    const service = new AgentCatalogService({
+      directory: {
+        get: id => current.find(integration => integration.descriptor.id === id),
+        supportsOperations: () => true,
+        captureInventory() {
+          const integrations = current;
+          return {
+            instanceId: 'synthetic-instance', integrations,
+            assertCurrent() { if (integrations !== current) throw new Error('Generation retired'); },
+          };
+        },
+      },
+      endpointResolver: { getModelOptions: () => [] },
+    });
+    return { service, integration: current[0], replace: integrations => { current = integrations; } };
+  }
+
+  test.each(['success', 'failure'])('rejects a stale whole-inventory %s instead of fallback', async outcome => {
+    const { service, integration, replace } = replacingFixture();
+    const pending = Promise.withResolvers();
+    integration.catalog.snapshot = () => pending.promise;
+    const result = service.getAgentCatalogEntries();
+    replace([createIntegration()]);
+    if (outcome === 'success') pending.resolve({ models: [], defaultModel: '', generation: null, requiresStrictModelDiscovery: false });
+    else pending.reject(new Error('Old provider unavailable'));
+    await expect(result).rejects.toThrow('Generation retired');
+  });
+
+  test('a capture cannot escalate discovery through a replacement', async () => {
+    const { service, replace } = replacingFixture();
+    const captured = service.capture();
+    await captured.getAgentCatalogEntry('sample-agent');
+    expect(captured.requiresStrictModelDiscovery('sample-agent')).toBe(true);
+    replace([createIntegration()]);
+    expect(service.capture().requiresStrictModelDiscovery('sample-agent')).toBe(false);
+    await expect(captured.getAgentCatalogEntry('sample-agent', { strict: true })).rejects.toThrow('Generation retired');
+  });
+
+  test('publishes a valid empty replacement inventory', async () => {
+    const { service, replace } = replacingFixture();
+    replace([]);
+    expect(await service.getAgentCatalogEntries()).toEqual([]);
+  });
+
+  test.each([false, true])('preserves an unsupported catalog refusal (strict: %s)', async strict => {
+    const { service, integration } = replacingFixture();
+    const error = new AgentCallError('not-dispatched', 'Unsupported catalog', 'OPERATION_UNSUPPORTED');
+    integration.catalog.snapshot = async () => { throw error; };
+    await expect(service.getAgentCatalogEntry('sample-agent', { strict })).rejects.toBe(error);
+    await expect(service.getAgentCatalogEntries()).rejects.toBe(error);
+  });
+
+  test('retains best-effort fallback for a supported catalog with failed discovery', async () => {
+    const { service, integration } = replacingFixture();
+    integration.catalog.snapshot = async () => { throw new Error('Synthetic discovery failure'); };
+    await expect(service.getAgentCatalogEntry('sample-agent')).resolves.toMatchObject({ models: [], defaultModel: '' });
+    await expect(service.getAgentCatalogEntry('sample-agent', { strict: true })).rejects.toThrow('Synthetic discovery failure');
+  });
+
   test("projects integration-owned capabilities, modes, and settings into the catalog", async () => {
     const integration = createIntegration();
     const service = new AgentCatalogService({
@@ -77,6 +139,8 @@ describe("AgentCatalogService", () => {
           return integration;
         },
         list: () => [integration],
+        supportsOperations: () => true,
+        captureInventory: () => ({ instanceId: 'synthetic-instance', integrations: [integration], assertCurrent() {} }),
       },
       endpointResolver: {
         getModelOptions: () => [],

@@ -1,11 +1,13 @@
-import { AgentCallError } from '@garcon/server-agent-interface';
+import { RPC_V1 } from '@garcon/common/executor-contracts';
+import { AgentCallError, type AgentIntegrationClass } from '@garcon/server-agent-interface';
 import { mkdir, rm } from 'node:fs/promises';
 import { defaultAgentIntegrations } from '../runtime/agents/default-agent-integrations.js';
 import { ExecutorRpc } from './transport/rpc.js';
 import { ExecutorRpcConnection } from './transport/rpc-connection.js';
 import { RpcAdmissionBudgets } from './transport/rpc-admission.js';
 import { RpcReplyJournal } from './transport/rpc-journal.js';
-import { serveExecutionRuntime } from './server/executor-rpc-server.js';
+import { serveExecutionRuntime, WORKER_RPC_HANDLERS } from './server/executor-rpc-server.js';
+import { WORKER_CONTRACTS } from './server/worker-contracts.js';
 import { ProducerRelay } from './server/producer-relay.js';
 import { ExecutionRuntime } from '../runtime/execution-runtime.js';
 import { shouldLogLinkFailure, WebSocketLink, type ExecutorListenerTls } from './transport/websocket-link.js';
@@ -25,6 +27,7 @@ export interface ExecutorWorkerOptions {
   readonly connection: { readonly kind: 'dial'; readonly url: string; readonly secret: string }
     | { readonly kind: 'listen'; readonly port: number; readonly bindAddress?: string; readonly tls?: ExecutorListenerTls };
   readonly advertisedUrl?: string;
+  readonly integrations?: readonly AgentIntegrationClass[];
 }
 
 export async function runExecutorWorker(
@@ -53,7 +56,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
   process.env.GARCON_CONFIG_DIR = options.configDir;
   process.env.GARCON_RUNTIME = 'executor';
   const secret = options.connection.kind === 'dial' ? options.connection.secret : await loadListenerSecret(dataDir);
-  const link = new WebSocketLink({ role: 'worker', secret,
+  const link = new WebSocketLink({ role: 'worker', contracts: WORKER_CONTRACTS, secret,
     noTls: options.noTls, allowUnverifiedTls: options.allowUnverifiedTls });
   let serving: ReturnType<typeof serveExecutionRuntime> | null = null;
   let runtime: ExecutionRuntime | null = null;
@@ -103,12 +106,8 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
       if (runtime && transport.executorId !== runtime.id) {
         const rpc = new ExecutorRpc(transport);
         currentConnection = null;
-        const retained = runtime;
         // Description lets the controller report the required restart without rebinding retained processes.
-        rpc.handle(async (call) => {
-          if (call.method === 'executor.describe') return { info: await retained.getInfo(), integrations: [] };
-          throw new AgentCallError('not-dispatched', 'Restart the worker to serve a different executor');
-        });
+        rpc.handle(WORKER_RPC_HANDLERS.bind({ retained: runtime }));
         return;
       }
       // Replies outlive sessions only for the controller of the executor this worker serves.
@@ -122,11 +121,11 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
       transport.onFailure(() => { if (currentConnection === connection) currentConnection = null; });
       runtime ??= new ExecutionRuntime({
         id: transport.executorId, workspaceDir: dataDir, projectBasePath: options.projectBasePath,
-        integrations: defaultAgentIntegrations,
+        integrations: options.integrations ?? defaultAgentIntegrations,
         terminalRuntime: terminals!,
         resolveCredential: ({ agentId, reference, signal }) => {
           if (!currentConnection) throw new AgentCallError('not-dispatched', 'Executor controller is disconnected');
-          return currentConnection.primary.call(agentId, 'credentials.resolve', { reference }, { signal });
+          return currentConnection.primary.call(agentId, RPC_V1['credentials.resolve'], { reference }, { signal });
         },
       });
       serving = serveExecutionRuntime(runtime, rpc, relay);

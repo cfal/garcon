@@ -56,7 +56,7 @@ test.each(['success', 'before-commit', 'after-commit'] as const)(
       const reopened = new ChatRegistry(root);
       await reopened.init();
       await new TranscriptAdoptionService({ registry: reopened, ledger,
-        integrations: { require() { throw new Error('Native import must not run'); } },
+        integrations: { require() { throw new Error('Native import must not run'); }, requireOperations() { throw new Error('Native import must not run'); }, supportsOperations() { throw new Error('Native import must not run'); } },
         getCarryOverRevision: () => 'none', loadFrozenPrefix: async () => [],
       }).ensure(chatId);
       await reopened.flush();

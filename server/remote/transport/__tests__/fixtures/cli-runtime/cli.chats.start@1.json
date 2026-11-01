@@ -1,0 +1,13 @@
+{
+  "request": {
+    "executorId": "local", "origin": "cli", "clientRequestId": "synthetic-request", "clientMessageId": "synthetic-message",
+    "chatId": "1700000000000001", "agentId": "shell", "projectPath": "/synthetic", "model": "sh",
+    "apiProviderId": null, "modelEndpointId": null, "modelProtocol": null,
+    "permissionMode": "default", "thinkingMode": "none", "agentSettings": { "ownerId": "shell", "schemaVersion": 1, "values": {} },
+    "command": "printf synthetic", "tags": []
+  },
+  "result": {
+    "success": true, "commandType": "chat-start", "clientRequestId": "synthetic-request", "chatId": "1700000000000001",
+    "turnId": "synthetic-turn", "status": "accepted", "acceptedAt": "2026-01-01T00:00:00.000Z", "parentChat": null, "chat": null
+  }
+}

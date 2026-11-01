@@ -1,0 +1,19 @@
+{
+  "definition": {
+    "name": "producer.publication-failed",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "error": {
+      "code": "string",
+      "message?": {
+        "union": [
+          "string",
+          "undefined"
+        ]
+      }
+    },
+    "type": "\"publication-failed\""
+  }
+}

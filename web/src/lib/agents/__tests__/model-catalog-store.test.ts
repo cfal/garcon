@@ -45,8 +45,8 @@ function agentEntry(id: string, overrides: Record<string, unknown> = {}): Record
 	};
 }
 
-function catalogBody(agents: unknown[], apiProviders: unknown[] = []): unknown {
-	return { catalog: { agents, apiProviders } };
+function catalogBody(agents: unknown[], apiProviders: unknown[] = [], executorInstanceId = localExecutor.instanceId): unknown {
+	return { executorInstanceId, catalog: { agents, apiProviders } };
 }
 
 describe('ModelCatalogStore', () => {
@@ -113,7 +113,7 @@ describe('ModelCatalogStore', () => {
 			{ selectionLabel: undefined }, { selectionLabel: '', inputFormatByModel: {} },
 		])('rejects incomplete HTTP and persisted metadata: %j', async missing => {
 			const entry = agentEntry('sample', missing);
-			const cached = { schemaVersion: 2, agentMetadata: { sample: entry },
+			const cached = { schemaVersion: 3, executorInstanceId: localExecutor.instanceId, agentMetadata: { sample: entry },
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] }, apiProviderCatalog: [],
 				etag: 'old-etag', lastFetchedAt: Date.now(), lastValidatedAt: Date.now() };
 			localStorage.setItem(executorId === 'local' ? STORAGE_KEY : LOCAL_STORAGE_KEYS.modelCatalogExecutors,
@@ -165,9 +165,9 @@ describe('ModelCatalogStore', () => {
 		const store = createModelCatalogStore();
 		const remote = store.forExecutor(remoteExecutor.id);
 		store.reconcileExecutors([localExecutor, remoteExecutor]);
-		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample', {
+		vi.mocked(clientApi.apiFetch).mockImplementation(async url => mockResponse(catalogBody([agentEntry('sample', {
 			models: [{ value: 'same', label: 'Cached model' }],
-		})])));
+		})], [], String(url).includes('executorId') ? remoteExecutor.instanceId : localExecutor.instanceId)));
 		await store.forceRefresh(); await remote.forceRefresh();
 		const stale = Promise.withResolvers<Response>();
 		vi.mocked(clientApi.apiFetch).mockReturnValueOnce(stale.promise);
@@ -218,7 +218,7 @@ describe('ModelCatalogStore', () => {
 		const initial = createModelCatalogStore();
 		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample', {
 			models: [{ value: 'same', label: 'Worker model' }],
-		})])));
+		})], [], remoteExecutor.instanceId)));
 		await initial.forExecutor(remoteExecutor.id).forceRefresh();
 		const store = createModelCatalogStore();
 		if (instantiate) expect(store.forExecutor(remoteExecutor.id).isStale()).toBe(false);
@@ -226,13 +226,14 @@ describe('ModelCatalogStore', () => {
 		store.reconcileExecutors([localExecutor, remoteExecutor]);
 		expect(store.forExecutor(remoteExecutor.id).isStale()).toBe(true);
 		expect(createModelCatalogStore().forExecutor(remoteExecutor.id).isStale()).toBe(true);
+		expect(createModelCatalogStore().forExecutor(remoteExecutor.id).getModels('sample')[0]?.label).toBe('Worker model');
 	});
 
 	it('retains the remote schema and literal policy through reconciliation and cold hydration', async () => {
 		const store = createModelCatalogStore();
 		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample', {
 			executionPolicy: 'literal',
-		})])));
+		})], [], remoteExecutor.instanceId)));
 		await store.forExecutor(remoteExecutor.id).forceRefresh();
 		store.reconcileExecutors([localExecutor, remoteExecutor]);
 		const restored = createModelCatalogStore().forExecutor(remoteExecutor.id);
@@ -244,7 +245,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: { sample: [{ value: 'sample-model', label: 'Sample Model' }] },
 				agentMetadata: {
 					sample: agentEntry('sample', {
@@ -352,7 +354,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
 				apiProviderCatalog: [],
@@ -396,7 +399,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
 				apiProviderCatalog: [],
@@ -419,7 +423,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: { stale: [{ value: 'stale', label: 'Stale' }] },
 				agentMetadata: { stale: agentEntry('stale', { defaultModel: 'stale' }) },
 				apiProviderCatalog: [],
@@ -492,7 +497,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
 				apiProviderCatalog: [],
@@ -505,6 +511,78 @@ describe('ModelCatalogStore', () => {
 
 		expect(store.error).toBe('Model catalog response is invalid');
 		expect(store.getDefaultModel('sample')).toBe('cached');
+	});
+
+	it('accepts an empty inventory and removes obsolete providers', async () => {
+		const store = createModelCatalogStore();
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(catalogBody([agentEntry('removed')])));
+		await store.forceRefresh();
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(catalogBody([])));
+		await store.forceRefresh();
+		expect(store.error).toBeNull();
+		expect(store.isValidated).toBe(true);
+		expect(store.getSelectableAgents()).toEqual([]);
+		expect(createModelCatalogStore().getSelectableAgents()).toEqual([]);
+	});
+
+	it('rejects a response from a different instance than the request inventory', async () => {
+		const store = createModelCatalogStore();
+		store.reconcileExecutors([localExecutor]);
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(catalogBody([agentEntry('stale')], [], 'another-instance')));
+		await store.forceRefresh();
+		expect(store.isValidated).toBe(false);
+		expect(store.executorInstanceId).toBeNull();
+		expect(store.getSelectableAgents()).toEqual([]);
+	});
+
+	it('invalidates a persisted catalog on the first snapshot of a replacement', async () => {
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(catalogBody([agentEntry('sample')])));
+		await createModelCatalogStore().forceRefresh();
+		const restored = createModelCatalogStore();
+		restored.reconcileExecutors([{ ...localExecutor, instanceId: 'replacement-instance' }]);
+		expect(restored.isValidated).toBe(false);
+		expect(restored.getAgent('sample')).not.toBeNull();
+		expect(createModelCatalogStore().isValidated).toBe(false);
+	});
+
+	it('preserves cached remote labels when first discovery is offline without an instance', async () => {
+		const store = createModelCatalogStore();
+		store.reconcileExecutors([localExecutor, remoteExecutor]);
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(catalogBody([agentEntry('sample')], [], remoteExecutor.instanceId)));
+		await store.forExecutor(remoteExecutor.id).forceRefresh();
+		const restored = createModelCatalogStore();
+		restored.reconcileExecutors([localExecutor, { ...remoteExecutor, availability: 'offline', instanceId: null }]);
+		expect(restored.forExecutor(remoteExecutor.id).getAgent('sample')?.label).toBe('sample');
+		expect(restored.forExecutor(remoteExecutor.id).isValidated).toBe(false);
+		expect(createModelCatalogStore().forExecutor(remoteExecutor.id).getAgent('sample')?.label).toBe('sample');
+	});
+
+	it.each(['offline', 'reconnecting', 'disabled'] as const)('preserves labels but not validation across ready to %s and reload', async availability => {
+		const store = createModelCatalogStore();
+		store.reconcileExecutors([localExecutor, remoteExecutor]);
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(catalogBody([agentEntry('sample', {
+			models: [{ value: 'same', label: 'Worker model' }],
+		})], [], remoteExecutor.instanceId)));
+		const catalog = store.forExecutor(remoteExecutor.id);
+		await catalog.forceRefresh();
+		const pending = Promise.withResolvers<Response>();
+		vi.mocked(clientApi.apiFetch).mockReturnValueOnce(pending.promise);
+		const refresh = catalog.forceRefresh();
+		const unavailable = availability === 'disabled'
+			? { ...remoteExecutor, enabled: false }
+			: { ...remoteExecutor, availability, instanceId: availability === 'offline' ? null : remoteExecutor.instanceId };
+		store.reconcileExecutors([localExecutor, unavailable]);
+		pending.resolve(mockResponse(catalogBody([agentEntry('stale')], [], remoteExecutor.instanceId)));
+		await refresh;
+		expect(catalog.isValidated).toBe(false);
+		expect(catalog.getAgent('stale')).toBeNull();
+		expect(catalog.getModels('sample')[0]?.label).toBe('Worker model');
+		const restored = createModelCatalogStore();
+		restored.reconcileExecutors([localExecutor, unavailable]);
+		expect(restored.forExecutor(remoteExecutor.id).getModels('sample')[0]?.label).toBe('Worker model');
+		expect(restored.forExecutor(remoteExecutor.id).isValidated).toBe(false);
+		restored.reconcileExecutors([localExecutor, { ...remoteExecutor, instanceId: 'replacement' }]);
+		expect(createModelCatalogStore().forExecutor(remoteExecutor.id).getAgent('sample')).toBeNull();
 	});
 
 	it('prefers model-level image capability over the integration default', async () => {
@@ -603,7 +681,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: {
 					sample: [
 						{ value: 'sol', label: 'Sol' },
@@ -665,7 +744,8 @@ describe('ModelCatalogStore', () => {
 		localStorage.setItem(
 			STORAGE_KEY,
 			JSON.stringify({
-				schemaVersion: 2,
+				schemaVersion: 3,
+				executorInstanceId: localExecutor.instanceId,
 				agentModels: { 'Bad Id': [{ value: 'bad', label: 'Bad' }] },
 				agentMetadata: { 'Bad Id': agentEntry('Bad Id', { defaultModel: 'bad' }) },
 				apiProviderCatalog: [],

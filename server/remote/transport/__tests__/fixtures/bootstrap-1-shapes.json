@@ -1,0 +1,202 @@
+{
+  "hello": {
+    "build": "string",
+    "executorId": {
+      "union": [
+        "null",
+        "string"
+      ]
+    },
+    "lane": {
+      "union": [
+        "\"bulk\"",
+        "\"primary\""
+      ]
+    },
+    "nonce": "string",
+    "primaryProfileId": {
+      "union": [
+        "null",
+        "string"
+      ]
+    },
+    "primarySessionId": {
+      "union": [
+        "null",
+        "string"
+      ]
+    },
+    "protocol": {
+      "union": [
+        "null",
+        {
+          "bootstrap": "number",
+          "contracts": {
+            "[string]": {
+              "array": "number"
+            }
+          }
+        }
+      ]
+    },
+    "role": {
+      "union": [
+        "\"controller\"",
+        "\"worker\""
+      ]
+    },
+    "runtimeId": "string",
+    "sessionId": {
+      "union": [
+        "null",
+        "string"
+      ]
+    },
+    "type": "\"hello\""
+  },
+  "proof": {
+    "decision": {
+      "union": [
+        {
+          "code": {
+            "union": [
+              "\"BOOTSTRAP_MISMATCH\"",
+              "\"BULK_PROFILE_MISMATCH\"",
+              "\"CONTINUITY_MISMATCH\""
+            ]
+          },
+          "ok": "false"
+        },
+        {
+          "ok": "true",
+          "profileId": "string"
+        }
+      ]
+    },
+    "signature": "string",
+    "type": "\"proof\""
+  },
+  "frames": [
+    {
+      "acknowledgements": {
+        "array": {
+          "bindingId": "string",
+          "seq": "number"
+        }
+      },
+      "type": "\"producer-ack\""
+    },
+    {
+      "attachmentId": "string",
+      "message": "unknown",
+      "type": "\"terminal\""
+    },
+    {
+      "error": "unknown",
+      "id": "string",
+      "type": "\"error\""
+    },
+    {
+      "id": "string",
+      "integrationId": "string",
+      "method": "string",
+      "request": "unknown",
+      "seq": "number",
+      "type": "\"request\"",
+      "version": "number"
+    },
+    {
+      "id": "string",
+      "type": "\"cancel\""
+    },
+    {
+      "id": "string",
+      "type": "\"result\"",
+      "value": "unknown"
+    },
+    {
+      "ids": {
+        "array": "string"
+      },
+      "type": "\"reply-ack\""
+    },
+    {
+      "notification": "unknown",
+      "seq": "number",
+      "type": "\"producer\""
+    },
+    {
+      "request": "unknown",
+      "type": "\"terminal-detach\""
+    },
+    {
+      "sessionId": "string",
+      "type": {
+        "union": [
+          "\"bulk-activate\"",
+          "\"bulk-active\"",
+          "\"bulk-connect\"",
+          "\"bulk-lost\"",
+          "\"bulk-prepare\"",
+          "\"bulk-prepared\""
+        ]
+      }
+    }
+  ],
+  "failure": {
+    "code": "string",
+    "details?": {
+      "union": [
+        "undefined",
+        {
+          "[string]": {
+            "union": [
+              "false",
+              "null",
+              "number",
+              "string",
+              "true",
+              {
+                "array": {
+                  "recursive": "JsonValue"
+                }
+              },
+              {
+                "recursive": "JsonObject"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "domain?": {
+      "union": [
+        "\"executor\"",
+        "\"git\"",
+        "\"terminal\"",
+        "undefined"
+      ]
+    },
+    "message": "string",
+    "outcome?": {
+      "union": [
+        "\"not-dispatched\"",
+        "\"rejected\"",
+        "\"unknown\"",
+        "undefined"
+      ]
+    },
+    "retryable": {
+      "union": [
+        "false",
+        "true"
+      ]
+    },
+    "status?": {
+      "union": [
+        "number",
+        "undefined"
+      ]
+    }
+  }
+}

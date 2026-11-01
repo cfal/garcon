@@ -1,0 +1,24 @@
+{
+  "request": { "sinceDay": "2026-09-28", "untilDay": "2026-10-27", "timeZone": "America/Los_Angeles" },
+  "result": {
+    "status": "partial",
+    "buckets": [{
+      "day": "2026-10-26",
+      "model": "synthetic-model",
+      "totals": { "uncachedInputTokens": 12, "cachedInputTokens": 3400, "cacheWriteTokens": 560, "outputTokens": 78, "reasoningTokens": 9 },
+      "costUsd": 0.123456,
+      "categoryCostUsd": { "input": 0.000012, "cacheRead": 0.0034, "cacheWrite": 0.0007, "output": 0.119344 },
+      "cacheSavingsUsd": 0.0306,
+      "records": 4,
+      "unpricedRecords": 0,
+      "unpricedTokens": 0,
+      "sessions": 2
+    }],
+    "scannedFiles": 3,
+    "unreadableFiles": 1,
+    "malformedRecords": 0,
+    "distinctSessions": 2,
+    "pricingAsOf": "2026-10-27"
+  },
+  "failures": [{ "code": "PROVIDER_FAILURE", "message": "Executor returned an invalid usage report", "retryable": false }]
+}

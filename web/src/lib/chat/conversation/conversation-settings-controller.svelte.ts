@@ -1,6 +1,7 @@
 import { updateChatModel, updateExecutionSettings } from '$lib/api/chats.js';
 import { effectiveExecutorId } from '$shared/executors';
 import { withAgentSetting } from '$shared/agent-settings';
+import { resolveSettingsPresentation } from '$lib/agents/settings-presentation';
 import {
 	normalizeSupportedPermissionMode,
 	normalizeSupportedThinkingMode,
@@ -50,6 +51,10 @@ export interface ConversationSettingsControllerOptions {
 		| 'getModelForSelection'
 		| 'getPermissionModes'
 		| 'getThinkingModes'
+		| 'getDefaultAgentSettings'
+		| 'getAgentSettingsDescriptors'
+		| 'executorInstanceId'
+		| 'isValidated'
 	>;
 	get chatState(): Pick<SessionControllerDeps['chatState'], 'appendLocalNoticeForChat'>;
 	get agentSwitch(): Pick<ConversationAgentSwitchService, 'switchAgent'>;
@@ -198,7 +203,7 @@ export class ConversationSettingsController {
 				patch.thinkingMode,
 				modelCatalog.getThinkingModes(agentState.agentId),
 			);
-		if (patch.agentSettings) agentState.setAgentSettings(patch.agentSettings);
+		if ('agentSettings' in patch) agentState.setAgentSettings(patch.agentSettings ?? null);
 	}
 
 	handleModelSelectionChange(next: AgentSwitchSelection): void {
@@ -338,10 +343,13 @@ export class ConversationSettingsController {
 	}
 
 	handleAgentSettingChange(descriptor: AgentSettingDescriptor, value: JsonValue): void {
-		const { sessions, agentState } = this.options;
+		const { sessions, agentState, modelCatalog } = this.options;
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return;
-		const previous = agentState.agentSettings;
+		const expectedExecutorInstanceId = modelCatalog.executorInstanceId;
+		const { envelope: previous, compatibility } = resolveSettingsPresentation(modelCatalog, agentState.agentId, agentState.agentSettings);
+		if (!expectedExecutorInstanceId || !previous || compatibility !== 'compatible') return;
+		const expectedSettingsSchemaVersion = previous.schemaVersion;
 		const next = withAgentSetting(previous, descriptor, value);
 		if (next === previous) return;
 		if (sessions.isDraft(chatId)) {
@@ -356,10 +364,13 @@ export class ConversationSettingsController {
 			'agentSettings',
 			{ agentSettings: next },
 			async (epoch) => {
+				if (!epoch) throw new Error('Chat ownership changed. Refresh before editing settings.');
 				const response = await updateExecutionSettings({
 					chatId,
 					agentSettingsPatch,
 					expectedAgentOwnershipEpoch: epoch,
+					expectedExecutorInstanceId,
+					expectedSettingsSchemaVersion,
 				});
 				return { agentSettings: response.agentSettings };
 			},

@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["remote/transport/__tests__/rpc-versions.test.ts", "remote/transport/__tests__/cli-http-boundaries.ts"],
+  "exclude": ["node_modules"]
+}

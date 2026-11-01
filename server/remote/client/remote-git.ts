@@ -1,3 +1,4 @@
+import { rpcWireV1 } from '../transport/rpc-wire-v1.js';
 import { AgentCallError, type ExecutionGitService, type ExecutionGhService, type ExecutorCallOptions } from '@garcon/server-agent-interface';
 import type { GitMethod } from '../../../common/git.js';
 import { isGhMutation, type GhRequests } from '../../../common/gh.js';
@@ -7,6 +8,8 @@ import { validateGitResult, validateGhResult } from '../../../common/git-result-
 import { GitServiceError } from '../../../common/git-error.js';
 import type { RemoteSessions } from './executor-client.js';
 import { rpcLane } from '../transport/rpc-routing.js';
+import { RPC_V1 } from '@garcon/common/executor-contracts';
+import type { GitRpcMethods } from '../transport/git-protocol.js';
 
 export class RemoteGitServices {
   readonly git: ExecutionGitService;
@@ -76,9 +79,10 @@ export class RemoteGitServices {
     const mutation = isGitMutation(method);
     try {
       return await withDeadline(options, GIT_OPERATION_TIMEOUT_MS, async (callOptions) => {
-        const { backing, timeoutMs } = await this.sessions.acquire(rpcLane(`git.${method}`, request), callOptions);
+        const contract: (typeof RPC_V1)[`git.${GitMethod}`] = RPC_V1[`git.${method}`];
+        const { backing, timeoutMs } = await this.sessions.acquire(rpcLane(contract), callOptions);
         const budgetMs = timeoutMs ?? callOptions.timeoutMs;
-        const result = await backing.rpc.call('', `git.${method}`, { input: request, budgetMs }, { ...callOptions, timeoutMs: budgetMs })
+        const result = await backing.rpc.call('', contract, { input: request, budgetMs }, { ...callOptions, timeoutMs: budgetMs })
           .catch(error => { throw mutation ? error : readFailure(error, callOptions.signal); });
         validateGitResult(method, result, backing.info);
         return result;
@@ -100,8 +104,10 @@ export class RemoteGitServices {
       return await withDeadline(options, ghOperationTimeoutMs(method), async (callOptions) => {
         const { backing, timeoutMs } = await this.sessions.acquire('bulk', callOptions);
         const budgetMs = timeoutMs ?? callOptions.timeoutMs;
-        const call = backing.rpc.call as (integrationId: string, method: string, request: unknown, options: ExecutorCallOptions) => Promise<unknown>;
-        const result = await call.call(backing.rpc, '', `gh.${method}`, { input: request, budgetMs }, { ...callOptions, timeoutMs: budgetMs })
+        const contract: (typeof RPC_V1)[`gh.${keyof GhRequests}`] = RPC_V1[`gh.${method}`];
+        // The generic method key already pairs this validated input with its wire request.
+        const payload = { input: request, budgetMs } as GitRpcMethods[`gh.${keyof GhRequests}`]['request'];
+        const result = await backing.rpc.call('', contract, payload, { ...callOptions, timeoutMs: budgetMs })
           .catch(error => { throw mutation ? error : readFailure(error, callOptions.signal); });
         validateGhResult(method, result, backing.info);
         return result;
@@ -131,3 +137,57 @@ async function withDeadline<T>(options: ExecutorCallOptions | undefined, maximum
   try { return await operation({ ...options, timeoutMs, signal }); }
   finally { clearTimeout(timer); }
 }
+
+export const GIT_RPC_CLIENTS = Object.freeze([
+  rpcWireV1('gh.createPullRequestComment'),
+  rpcWireV1('gh.getPullRequest'),
+  rpcWireV1('gh.getPullRequestReviewTarget'),
+  rpcWireV1('gh.getStatus'),
+  rpcWireV1('gh.listPullRequests'),
+  rpcWireV1('gh.minimizePullRequestComment'),
+  rpcWireV1('git.acceptConflictSide'),
+  rpcWireV1('git.applyStash'),
+  rpcWireV1('git.checkout'),
+  rpcWireV1('git.collectCommitMessageContext'),
+  rpcWireV1('git.commit'),
+  rpcWireV1('git.commitIndex'),
+  rpcWireV1('git.createBranch'),
+  rpcWireV1('git.createStash'),
+  rpcWireV1('git.createWorktree'),
+  rpcWireV1('git.deleteUntracked'),
+  rpcWireV1('git.discard'),
+  rpcWireV1('git.dropStash'),
+  rpcWireV1('git.fetch'),
+  rpcWireV1('git.getBlame'),
+  rpcWireV1('git.getBranches'),
+  rpcWireV1('git.getCommitSnapshot'),
+  rpcWireV1('git.getComparisonFreshness'),
+  rpcWireV1('git.getComparisonSnapshot'),
+  rpcWireV1('git.getConflictDetails'),
+  rpcWireV1('git.getConflicts'),
+  rpcWireV1('git.getFileHistory'),
+  rpcWireV1('git.getGraph'),
+  rpcWireV1('git.getHistoryCommits'),
+  rpcWireV1('git.getQuickSummary'),
+  rpcWireV1('git.getRefs'),
+  rpcWireV1('git.getRemoteStatus'),
+  rpcWireV1('git.getRemotes'),
+  rpcWireV1('git.getRepoInfo'),
+  rpcWireV1('git.getReviewDocumentFileBodies'),
+  rpcWireV1('git.getStashes'),
+  rpcWireV1('git.getStatus'),
+  rpcWireV1('git.getTargetCandidates'),
+  rpcWireV1('git.getWorkbenchSnapshot'),
+  rpcWireV1('git.getWorkingTreeFingerprint'),
+  rpcWireV1('git.getWorktrees'),
+  rpcWireV1('git.initialCommit'),
+  rpcWireV1('git.markConflictResolved'),
+  rpcWireV1('git.popStash'),
+  rpcWireV1('git.pull'),
+  rpcWireV1('git.push'),
+  rpcWireV1('git.removeWorktree'),
+  rpcWireV1('git.revertCommit'),
+  rpcWireV1('git.stageHunk'),
+  rpcWireV1('git.stagePaths'),
+  rpcWireV1('git.stageSelection'),
+] as const);

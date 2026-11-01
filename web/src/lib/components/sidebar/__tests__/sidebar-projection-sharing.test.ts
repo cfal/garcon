@@ -40,6 +40,7 @@ const chat = {
 	isProcessing: false,
 	processingPhase: null,
 	isUnread: true,
+	hasAgentSession: false,
 	canReloadFromNativeHistory: false,
 	status: 'draft',
 	lastMessage: '',

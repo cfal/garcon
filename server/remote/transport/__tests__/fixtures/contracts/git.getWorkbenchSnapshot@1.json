@@ -1,0 +1,512 @@
+{
+  "definition": {
+    "name": "git.getWorkbenchSnapshot",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "bodyCandidateCount?": {
+          "union": [
+            "number",
+            "undefined"
+          ]
+        },
+        "context": "number",
+        "mode": {
+          "union": [
+            "\"staged\"",
+            "\"working\""
+          ]
+        },
+        "projectPath": "string",
+        "selectedFile?": {
+          "union": [
+            "null",
+            "string",
+            "undefined"
+          ]
+        }
+      }
+    },
+    "result": {
+      "union": [
+        {
+          "diagnostics?": {
+            "union": [
+              "undefined",
+              {
+                "batchCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "bisectionCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "cacheHits?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "commands": {
+                  "array": {
+                    "command": "string",
+                    "durationMs": "number",
+                    "stderrBytes": "number",
+                    "stdoutBytes": "number"
+                  }
+                },
+                "fileCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "phases": {
+                  "array": {
+                    "durationMs": "number",
+                    "name": {
+                      "union": [
+                        "\"body-cache\"",
+                        "\"body-git\"",
+                        "\"body-split\"",
+                        "\"document-register\"",
+                        "\"freshness-after\"",
+                        "\"freshness-before\"",
+                        "\"patch-scan\"",
+                        "\"resolve\"",
+                        "\"serialize\"",
+                        "\"summary-git\""
+                      ]
+                    }
+                  }
+                },
+                "rowCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                }
+              }
+            ]
+          },
+          "executorId": "string",
+          "firstBodyCandidates": {
+            "array": "string"
+          },
+          "instanceId": "string",
+          "project": "string",
+          "reviewSummary": {
+            "collectionLimit?": {
+              "union": [
+                "undefined",
+                {
+                  "message": "string",
+                  "reason": {
+                    "union": [
+                      "\"binary\"",
+                      "\"collection-too-many-bytes\"",
+                      "\"collection-too-many-files\"",
+                      "\"collection-too-many-rows\"",
+                      "\"file-too-many-bytes\"",
+                      "\"file-too-many-rows\"",
+                      "\"git-timeout\"",
+                      "\"line-too-long\"",
+                      "\"unsupported-file-kind\""
+                    ]
+                  },
+                  "totalFilesKnown": "number",
+                  "visibleFiles": "number"
+                }
+              ]
+            },
+            "context": "number",
+            "documentId": "string",
+            "files": {
+              "array": {
+                "additions": "number",
+                "bodyFingerprint": "string",
+                "bodyState": {
+                  "union": [
+                    "\"binary\"",
+                    "\"error\"",
+                    "\"loaded\"",
+                    "\"loading\"",
+                    "\"too-large\"",
+                    "\"unloaded\""
+                  ]
+                },
+                "category": {
+                  "union": [
+                    "\"binary\"",
+                    "\"generated\"",
+                    "\"large\"",
+                    "\"lockfile\"",
+                    "\"normal\""
+                  ]
+                },
+                "deletions": "number",
+                "estimatedRows": "number",
+                "indexStatus": "string",
+                "isBinary": {
+                  "union": [
+                    "false",
+                    "true"
+                  ]
+                },
+                "isGenerated": {
+                  "union": [
+                    "false",
+                    "true"
+                  ]
+                },
+                "isTooLarge": {
+                  "union": [
+                    "false",
+                    "true"
+                  ]
+                },
+                "limitMessage?": {
+                  "union": [
+                    "string",
+                    "undefined"
+                  ]
+                },
+                "limitReason?": {
+                  "union": [
+                    "\"binary\"",
+                    "\"collection-too-many-bytes\"",
+                    "\"collection-too-many-files\"",
+                    "\"collection-too-many-rows\"",
+                    "\"file-too-many-bytes\"",
+                    "\"file-too-many-rows\"",
+                    "\"git-timeout\"",
+                    "\"line-too-long\"",
+                    "\"unsupported-file-kind\"",
+                    "undefined"
+                  ]
+                },
+                "originalPath?": {
+                  "union": [
+                    "string",
+                    "undefined"
+                  ]
+                },
+                "path": "string",
+                "statsKnown?": {
+                  "union": [
+                    "false",
+                    "true",
+                    "undefined"
+                  ]
+                },
+                "workTreeStatus": "string"
+              }
+            },
+            "limits": {
+              "bodyConcurrency": "number",
+              "maxBodyBatchFiles": "number",
+              "maxContextLines": "number",
+              "maxFilePatchBytes": "number",
+              "maxFileRows": "number",
+              "maxLineBytes": "number",
+              "maxLoadedPatchBytes": "number",
+              "maxLoadedRows": "number",
+              "maxSummaryFiles": "number"
+            },
+            "mode": {
+              "union": [
+                "\"staged\"",
+                "\"working\""
+              ]
+            },
+            "project": "string"
+          },
+          "selectedFile": {
+            "union": [
+              "null",
+              "string"
+            ]
+          },
+          "snapshotId": "string",
+          "status": "\"ready\"",
+          "target": {
+            "branch": "string",
+            "label": "string",
+            "projectPath": "string",
+            "repoRoot": "string",
+            "source": {
+              "union": [
+                "\"chat-project\"",
+                "\"worktree\""
+              ]
+            },
+            "worktreePath": "string"
+          },
+          "tree": {
+            "hasCommits": {
+              "union": [
+                "false",
+                "true"
+              ]
+            },
+            "root": {
+              "array": {
+                "additions?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "category?": {
+                  "union": [
+                    "\"binary\"",
+                    "\"generated\"",
+                    "\"large\"",
+                    "\"lockfile\"",
+                    "\"normal\"",
+                    "undefined"
+                  ]
+                },
+                "changeKind?": {
+                  "union": [
+                    "\"added\"",
+                    "\"deleted\"",
+                    "\"modified\"",
+                    "\"renamed\"",
+                    "\"untracked\"",
+                    "undefined"
+                  ]
+                },
+                "children?": {
+                  "union": [
+                    "undefined",
+                    {
+                      "recursive": "TreeNode[]"
+                    }
+                  ]
+                },
+                "deletions?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "hasUnstaged?": {
+                  "union": [
+                    "false",
+                    "true",
+                    "undefined"
+                  ]
+                },
+                "indexStatus": "string",
+                "kind": {
+                  "union": [
+                    "\"directory\"",
+                    "\"file\""
+                  ]
+                },
+                "name": "string",
+                "path": "string",
+                "staged?": {
+                  "union": [
+                    "false",
+                    "true",
+                    "undefined"
+                  ]
+                },
+                "stagedFacet?": {
+                  "union": [
+                    "undefined",
+                    {
+                      "category?": {
+                        "union": [
+                          "\"binary\"",
+                          "\"generated\"",
+                          "\"large\"",
+                          "\"lockfile\"",
+                          "\"normal\"",
+                          "undefined"
+                        ]
+                      },
+                      "changeKind": {
+                        "union": [
+                          "\"added\"",
+                          "\"deleted\"",
+                          "\"modified\"",
+                          "\"renamed\"",
+                          "\"untracked\""
+                        ]
+                      },
+                      "originalPath?": {
+                        "union": [
+                          "string",
+                          "undefined"
+                        ]
+                      },
+                      "stats": {
+                        "additions": "number",
+                        "deletions": "number",
+                        "isBinary?": {
+                          "union": [
+                            "false",
+                            "true",
+                            "undefined"
+                          ]
+                        }
+                      },
+                      "status": "string"
+                    }
+                  ]
+                },
+                "unstagedFacet?": {
+                  "union": [
+                    "undefined",
+                    {
+                      "category?": {
+                        "union": [
+                          "\"binary\"",
+                          "\"generated\"",
+                          "\"large\"",
+                          "\"lockfile\"",
+                          "\"normal\"",
+                          "undefined"
+                        ]
+                      },
+                      "changeKind": {
+                        "union": [
+                          "\"added\"",
+                          "\"deleted\"",
+                          "\"modified\"",
+                          "\"renamed\"",
+                          "\"untracked\""
+                        ]
+                      },
+                      "originalPath?": {
+                        "union": [
+                          "string",
+                          "undefined"
+                        ]
+                      },
+                      "stats": {
+                        "additions": "number",
+                        "deletions": "number",
+                        "isBinary?": {
+                          "union": [
+                            "false",
+                            "true",
+                            "undefined"
+                          ]
+                        }
+                      },
+                      "status": "string"
+                    }
+                  ]
+                },
+                "workTreeStatus": "string"
+              }
+            },
+            "statsState": "\"loaded\""
+          },
+          "workbenchFingerprint": "string"
+        },
+        {
+          "diagnostics?": {
+            "union": [
+              "undefined",
+              {
+                "batchCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "bisectionCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "cacheHits?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "commands": {
+                  "array": {
+                    "command": "string",
+                    "durationMs": "number",
+                    "stderrBytes": "number",
+                    "stdoutBytes": "number"
+                  }
+                },
+                "fileCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                },
+                "phases": {
+                  "array": {
+                    "durationMs": "number",
+                    "name": {
+                      "union": [
+                        "\"body-cache\"",
+                        "\"body-git\"",
+                        "\"body-split\"",
+                        "\"document-register\"",
+                        "\"freshness-after\"",
+                        "\"freshness-before\"",
+                        "\"patch-scan\"",
+                        "\"resolve\"",
+                        "\"serialize\"",
+                        "\"summary-git\""
+                      ]
+                    }
+                  }
+                },
+                "rowCount?": {
+                  "union": [
+                    "number",
+                    "undefined"
+                  ]
+                }
+              }
+            ]
+          },
+          "executorId": "string",
+          "firstBodyCandidates": {
+            "tuple": []
+          },
+          "instanceId": "string",
+          "message": "string",
+          "project": "string",
+          "reviewSummary": "null",
+          "selectedFile": "null",
+          "status": "\"not-git-repository\"",
+          "target": "null",
+          "tree": "null"
+        }
+      ]
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

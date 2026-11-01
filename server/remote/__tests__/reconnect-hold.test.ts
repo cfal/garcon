@@ -1,17 +1,11 @@
 import { expect, spyOn, test } from 'bun:test';
 import { AssistantMessage } from '@garcon/common/chat-types';
-import type { AgentProducerNotification, ExecutorAvailability } from '@garcon/server-agent-interface';
-import type { RemoteExecutorClient } from '../client/executor-client.js';
+import type { AgentProducerNotification } from '@garcon/server-agent-interface';
 import { ExecutorRpc } from '../transport/rpc.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../common/executor-disconnect.js';
 import { readBefore } from '../../common/interactive-deadline.js';
 import { integrationFixture, outgoingFault, outgoingHold, remoteFixture, requestFor } from './integration-fixture.js';
-
-function nextAvailability(executor: RemoteExecutorClient, expected: ExecutorAvailability): Promise<void> {
-  return new Promise((resolve) => {
-    const off = executor.onAvailabilityChanged((value) => { if (value === expected) { off(); resolve(); } });
-  });
-}
+import { nextAvailability } from './replacement-fixture.js';
 
 async function until(condition: () => boolean): Promise<void> {
   const deadline = performance.now() + 10_000;
@@ -35,7 +29,7 @@ function holdNextInstall(worker: ReturnType<typeof integrationFixture>): () => v
 
 // The deadlines the controller sent a method with.
 function sentDeadlines(calls: ReturnType<typeof spyOn<ExecutorRpc, 'call'>>, method: string) {
-  return calls.mock.calls.filter(([, sent]) => sent === method).map(([, , , options]) => options?.timeoutMs);
+  return calls.mock.calls.filter(([, sent]) => sent.name === method).map(([, , , options]) => options?.timeoutMs);
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
@@ -283,7 +277,7 @@ for (const dialer of ['controller', 'worker'] as const) {
           return 'disconnect';
         }
         // Holds the replacement worker's replies after this one, so reconciliation stalls.
-        if (lost && frame.method === 'lifecycle.start') hold.holdAfter((reply) => JSON.parse(reply).id === frame.id);
+        if (lost && frame.method === 'executor.describe') hold.holdAfter((reply) => JSON.parse(reply).id === frame.id);
         return null;
       };
     });
@@ -435,7 +429,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       const pinned = { timeoutMs: 5_000, instanceId: crypto.randomUUID() };
 
       await expect(projects.inspect({ projectPath: '/test-project' }, pinned))
-        .rejects.toMatchObject({ outcome: 'not-dispatched', message: 'The executor restarted before the request was sent.' });
+        .rejects.toMatchObject({ outcome: 'not-dispatched', code: 'STALE_RESOURCE' });
       expect(inspect).not.toHaveBeenCalled();
     } finally { await fixture.dispose(); }
   });

@@ -1,0 +1,30 @@
+{
+  "definition": {
+    "name": "cli.chats.lookupNativeSession",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "POST /api/v1/chats/lookup-native-session",
+  "wire": {
+    "request": {
+      "body": {
+        "agent?": {
+          "union": [
+            "string",
+            "undefined"
+          ]
+        },
+        "executorId": "string",
+        "nativeSessionId": "string"
+      }
+    },
+    "result": {
+      "chatId": "string"
+    }
+  }
+}

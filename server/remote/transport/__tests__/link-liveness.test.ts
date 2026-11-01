@@ -1,9 +1,11 @@
+import { TestWebSocketLink as WebSocketLink, handleTestRpc } from '../../__tests__/test-session-transport.js';
+import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { expect, test } from 'bun:test';
 import { linkOptions } from '../../__tests__/integration-fixture.js';
 import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.js';
 import { ExecutorRpc } from '../rpc.js';
 import type { SessionTransport } from '../session-transport.js';
-import { WebSocketLink, type LinkClosure } from '../websocket-link.js';
+import { type LinkClosure } from '../websocket-link.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
   test(`slow bulk stays live while silent bulk retires without primary loss (${dialer} dials)`, async () => {
@@ -76,7 +78,9 @@ for (const dialer of ['controller', 'worker'] as const) {
     const receiver = new WebSocketLink({ ...linkOptions, role: dialer === 'controller' ? 'worker' : 'controller' });
     const proxy = await tcpLinkProxy(new URL(receiver.listen()));
     let requests = 0;
-    receiver.onSession(session => new ExecutorRpc(session).handle(async () => { requests++; return []; }));
+    const contract = dialer === 'controller' ? RPC_V1['execution.runningSessions'] : RPC_V1['controllerCli.describe'];
+    const response = dialer === 'controller' ? [] : { serverInstanceId: 'synthetic-controller', defaultExecutorId: 'local', workspaceName: null };
+    receiver.onSession(session => handleTestRpc(new ExecutorRpc(session), async () => { requests++; return response; }));
     const closures: LinkClosure[] = [];
     sender.onClosure(closure => closures.push(closure));
     receiver.onClosure(closure => closures.push(closure));
@@ -91,7 +95,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       }));
       proxy.blackhole();
       const started = Date.now();
-      const pending = new ExecutorRpc(sending).call('test', 'execution.runningSessions', null).catch((error: unknown) => error);
+      const pending = new ExecutorRpc(sending).call('test', contract, null).catch((error: unknown) => error);
       await Promise.all(failed.map(result => result.promise));
       expect(Date.now() - started).toBeGreaterThanOrEqual(15_000);
       expect(Date.now() - started).toBeLessThan(25_000);
@@ -107,7 +111,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       proxy.disconnect();
       const next = await replacement.promise;
       expect(next).not.toBe(sending);
-      await expect(new ExecutorRpc(next).call('test', 'execution.runningSessions', null)).resolves.toEqual([]);
+      await expect(new ExecutorRpc(next).call('test', contract, null)).resolves.toEqual(response);
       expect(requests).toBe(1);
       expect(failures).toEqual([1, 1]);
     } finally { await sender.dispose(); await receiver.dispose(); await proxy.close(); }

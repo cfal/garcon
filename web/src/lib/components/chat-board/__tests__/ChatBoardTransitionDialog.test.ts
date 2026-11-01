@@ -47,6 +47,7 @@ function chat(): ChatSessionRecord {
 		isArchived: false,
 		isProcessing: false,
 		processingPhase: null,
+		hasAgentSession: false,
 		canReloadFromNativeHistory: false,
 		isUnread: false,
 		status: 'running',

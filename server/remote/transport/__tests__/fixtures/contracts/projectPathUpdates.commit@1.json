@@ -1,0 +1,27 @@
+{
+  "definition": {
+    "name": "projectPathUpdates.commit",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "executorId": "string",
+      "id": "string",
+      "instanceId": "string",
+      "integrationId": "string",
+      "kind": "\"project-path-preparation\""
+    },
+    "result": "void"
+  },
+  "failures": "rpc-errors-v1"
+}

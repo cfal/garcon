@@ -1,5 +1,5 @@
-import { authenticateHttpRequest } from './http-request.js';
-import { MalformedJsonError } from '../../common/http-body.js';
+import { authenticateHttpRequest, authenticatedWithLocalCapability } from './http-request.js';
+import { MalformedJsonError, parseJsonBody } from '../../common/http-body.js';
 import { isAuthDisabled } from '../config.js';
 import { malformedJsonResponse } from './json-route.js';
 import { compressHttpResponse } from './http-compression.js';
@@ -14,17 +14,29 @@ import { createLogger } from '../../common/log.js';
 import { trackActivity } from '../../common/event-loop-stalls.js';
 import { CLI_SERVER_INSTANCE_HEADER } from '@garcon/common/server-runtime';
 import { stripBasePath } from '@garcon/common/base-path';
+import { CLI_CONTRACT_HEADER, CLI_OPERATIONS, type CliOperation } from '@garcon/common/cli-contracts';
+import { cliRequestContract, cliRoute } from '../../remote/transport/cli-protocol.js';
+import type { JsonValue } from '@garcon/common/json';
+import { DomainError } from '../../common/domain-error.js';
+import type { CliRouteContracts } from './cli-contracts.js';
 
 const logger = createLogger('lib:http-route');
 
 const noAuthRouteMarker: unique symbol = Symbol('no-auth-route');
 const noStoreRouteMarker: unique symbol = Symbol('no-store-route');
 const responseHeadersRouteMarker: unique symbol = Symbol('response-headers-route');
+const bodyReaderRouteMarker: unique symbol = Symbol('body-reader-route');
+
+interface RouteBodyReader {
+  read(request: Request): Promise<unknown>;
+  errorResponse(error: unknown): Response;
+}
 
 type MarkedRouteHandler = RouteHandler & {
   [noAuthRouteMarker]?: true;
   [noStoreRouteMarker]?: true;
   [responseHeadersRouteMarker]?: Readonly<Record<string, string>>;
+  [bodyReaderRouteMarker]?: RouteBodyReader;
 };
 type WrappedRouteHandler = (request: Request, server?: unknown) => Promise<Response>;
 type WrappedRouteMap = Record<string, Record<string, WrappedRouteHandler>>;
@@ -34,6 +46,7 @@ export interface HttpRouteAuthOptions {
   localCapability?: string;
   serverInstanceId?: string;
   isShuttingDown?: () => boolean;
+  cliContracts: CliRouteContracts;
 }
 
 export function cliInstanceMismatch(request: Request, expected: string | undefined): Response | null {
@@ -41,6 +54,44 @@ export function cliInstanceMismatch(request: Request, expected: string | undefin
   return supplied !== null && supplied !== expected
     ? jsonError('Garcon restarted; start a new CLI invocation', 409, 'CLI_CONTROLLER_CHANGED', false)
     : null;
+}
+
+function cliRouteSelection(request: Request, route: string, method: string, localCapability: boolean,
+  handler: RouteHandler, contracts: CliRouteContracts): Response | RouteHandler {
+  if (method === 'GET' && (route === '/api/v1/runtime' || route === '/api/v1/cli/context')) return handler;
+  const hasHeader = request.headers.has(CLI_CONTRACT_HEADER) || request.headers.has(CLI_SERVER_INSTANCE_HEADER);
+  const operation = `${method} ${route}`;
+  if (!Object.hasOwn(CLI_OPERATIONS, operation)) {
+    return hasHeader ? jsonError('This route is outside the CLI contract', 403, 'CLI_ACCESS_DENIED', false) : handler;
+  }
+  if (!hasHeader && !localCapability) return handler;
+  try {
+    const ref = cliRequestContract(request.headers, operation as CliOperation);
+    const registered = contracts.resolve(operation, ref);
+    return async (req, url, server, context) => {
+      const copy = req.clone();
+      const bodyReader = (registered.dispatch as MarkedRouteHandler)[bodyReaderRouteMarker];
+      try {
+        const route = cliRoute(method, url.pathname);
+        let body: JsonValue | null = null;
+        if (bodyReader) body = await bodyReader.read(copy) as JsonValue;
+        else if (copy.body !== null) body = await parseJsonBody(copy) as JsonValue;
+        registered.validateRequest({ ...route, query: [...url.searchParams], body });
+      } catch (error) {
+        // Both tee branches must retire to cancel an unfinished upload.
+        void copy.body?.cancel().catch(() => {});
+        void req.body?.cancel().catch(() => {});
+        if (bodyReader) return bodyReader.errorResponse(error);
+        if (error instanceof DomainError) return jsonError(error.message, error.status, error.code, error.retryable);
+        throw error;
+      }
+      return registered.dispatch(req, url, server, context);
+    };
+  }
+  catch (error) {
+    if (error instanceof DomainError) return jsonError(error.message, error.status, error.code, error.retryable);
+    throw error;
+  }
 }
 
 export function serverShuttingDownResponse(): Response {
@@ -82,6 +133,11 @@ export function isNoAuthHandler(handler: unknown): handler is MarkedRouteHandler
 
 export function markRouteNoStore<T extends RouteHandler>(handler: T): T {
   Object.defineProperty(handler, noStoreRouteMarker, { value: true });
+  return handler;
+}
+
+export function markRouteBodyReader<T extends RouteHandler>(handler: T, reader: RouteBodyReader): T {
+  Object.defineProperty(handler, bodyReaderRouteMarker, { value: reader });
   return handler;
 }
 
@@ -145,7 +201,7 @@ export function wrapRoute(
   handler: RouteHandler,
   routePath: string,
   method: string,
-  authOptions: HttpRouteAuthOptions = {},
+  authOptions: HttpRouteAuthOptions,
 ): WrappedRouteHandler {
   const wrapped = wrapRouteAuth(handler, routePath, method, authOptions);
   const headers = (handler as MarkedRouteHandler)[responseHeadersRouteMarker];
@@ -169,12 +225,26 @@ function wrapRouteAuth(
   authOptions: HttpRouteAuthOptions,
 ): WrappedRouteHandler {
   const activity = `${method} ${routePath}`;
+  function dispatch(
+    req: Request,
+    server: unknown,
+    principal: HttpRouteContext['principal'],
+    localCapability: boolean,
+  ): Response | Promise<Response> {
+    const selected = cliRouteSelection(req, routePath, method, localCapability, handler, authOptions.cliContracts);
+    if (selected instanceof Response) return selected;
+    return invokeRouteHandler(selected, req, server, {
+      principal,
+      cliContracts: authOptions.cliContracts.catalog,
+    }, activity, authOptions.basePath ?? '');
+  }
+
   if (isAuthDisabled()) {
     return async (req: Request, server?: unknown): Promise<Response> => {
       if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
       const mismatch = cliInstanceMismatch(req, authOptions.serverInstanceId);
       if (mismatch) return mismatch;
-      return invokeRouteHandler(handler, req, server, { principal: LOCAL_SERVER_PRINCIPAL }, activity, authOptions.basePath ?? '');
+      return dispatch(req, server, LOCAL_SERVER_PRINCIPAL, authenticatedWithLocalCapability(req, authOptions.localCapability));
     };
   }
 
@@ -182,13 +252,13 @@ function wrapRouteAuth(
     logger.debug(`Skipping auth wrapping for ${method} ${routePath}`);
     return async (req: Request, server?: unknown): Promise<Response> => {
       if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
-      return invokeRouteHandler(handler, req, server, { principal: null }, activity, authOptions.basePath ?? '');
+      return dispatch(req, server, null, false);
     };
   }
 
   return async (req: Request, server?: unknown): Promise<Response> => {
     if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
-    const { errorResponse, principal } = await authenticateHttpRequest(req, authOptions);
+    const { errorResponse, principal, localCapability } = await authenticateHttpRequest(req, authOptions);
     if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
     if (errorResponse) {
       if ((handler as MarkedRouteHandler)[noStoreRouteMarker]) errorResponse.headers.set('Cache-Control', 'no-store');
@@ -196,14 +266,14 @@ function wrapRouteAuth(
     }
     const mismatch = cliInstanceMismatch(req, authOptions.serverInstanceId);
     if (mismatch) return mismatch;
-    return invokeRouteHandler(handler, req, server, { principal }, activity, authOptions.basePath ?? '');
+    return dispatch(req, server, principal, localCapability);
   };
 }
 
 // Wraps all routes in the route table with auth-aware wrappers.
 export function wrapRoutes(
   rawRoutes: RouteMap,
-  authOptions: HttpRouteAuthOptions = {},
+  authOptions: HttpRouteAuthOptions,
 ): WrappedRouteMap {
   const basePath = authOptions.basePath ?? '';
   const mountedRoutes: WrappedRouteMap = Object.fromEntries(

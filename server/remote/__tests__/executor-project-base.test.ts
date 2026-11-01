@@ -1,158 +1,76 @@
 import { expect, spyOn, test } from 'bun:test';
-import type { AgentIntegration, ExecutorAvailability } from '@garcon/server-agent-interface';
-import { servePairedRuntime } from './runtime-adapter.js';
-import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
-import { ProducerRelay } from '../server/producer-relay.js';
-import { RemoteExecutorClient } from '../client/executor-client.js';
+import type { AgentIntegration } from '@garcon/server-agent-interface';
 import { RemoteAgentIntegration } from '../client/remote-agent-integration.js';
-import { WebSocketLink } from '../transport/websocket-link.js';
-import { integrationFixture, linkOptions } from './integration-fixture.js';
-
-function nextAvailability(executor: RemoteExecutorClient, expected: ExecutorAvailability) {
-  return new Promise<void>((resolve) => {
-    const off = executor.onAvailabilityChanged((value) => { if (value === expected) { off(); resolve(); } });
-  });
-}
+import { integrationFixture } from './integration-fixture.js';
+import { nextAvailability, replacementFixture } from './replacement-fixture.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
-  test.each([false, true])(`fresh sessions retain facades and execution policy (${dialer} dials, literal=%s)`, async literal => {
-    const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
-    const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
-    const errors: string[] = [];
-    const executor = new RemoteExecutorClient(linkOptions.executorId, controller, undefined, (message) => errors.push(message));
-    const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
-    const generations: ReturnType<typeof integrationFixture>[] = [];
-    let base = '/workspace';
-    let entered = Promise.withResolvers<void>();
+  test.each([false, true])(`worker replacement refreshes project base and execution policy (${dialer} dials, literal=%s)`, async literal => {
+    const f = replacementFixture(dialer);
     let release = Promise.withResolvers<void>();
     release.resolve();
-    worker.onSession((transport) => {
-      const fixture = integrationFixture(base);
-      const barrier = release.promise;
-      const entering = entered;
-      fixture.integration.lifecycle.start = async () => { entering.resolve(); await barrier; };
-      generations.push(fixture);
-      const integration: AgentIntegration = literal
-        ? { ...fixture.integration, literalExecution: { selectionLabel: 'Runtime', inputFormatByModel: {} }, singleQuery: null }
-        : fixture.integration;
-      scopes.push(servePairedRuntime(worker, transport,
-        { ...fixture.executor, getAgentIntegration: async () => integration }, new ProducerRelay()));
-    });
     try {
-      const firstReady = nextAvailability(executor, 'ready');
-      if (dialer === 'controller') controller.dial(worker.listen());
-      else worker.dial(controller.listen());
-      await firstReady;
-      const integration = await executor.getAgentIntegration('test');
-      expect(integration.literalExecution).toEqual(literal ? { selectionLabel: 'Runtime', inputFormatByModel: {} } : null);
-      const projects = await executor.getProjectService();
-      const inventory = executor.inventory;
-      let info = await executor.getInfo();
-
-      for (const nextBase of ['/', '/workspace/narrow']) {
-        base = nextBase;
-        entered = Promise.withResolvers<void>();
+      const ready = nextAvailability(f.client, 'ready');
+      await f.install(integrationFixture('/workspace').executor);
+      await ready;
+      for (const base of ['/', '/workspace/narrow']) {
+        const previous = f.client.generation!;
+        const integration = await previous.runtime.getAgentIntegration('test');
+        const projects = await previous.runtime.getProjectService();
+        const native = integrationFixture(base);
+        const entered = Promise.withResolvers<void>();
         release = Promise.withResolvers<void>();
-        const ready = nextAvailability(executor, 'ready');
-        controller.current!.close();
+        native.hooks.initialize = async () => { entered.resolve(); await release.promise; };
+        const replacement: AgentIntegration = literal
+          ? { ...native.integration, literalExecution: { selectionLabel: 'Runtime', inputFormatByModel: {} }, singleQuery: null }
+          : native.integration;
+        const replaced = nextAvailability(f.client, 'ready');
+        await f.install({ ...native.executor, getAgentIntegration: async () => replacement });
         await entered.promise;
-        expect(executor.availability).toBe('offline');
-        expect(executor.inventory).toEqual(inventory);
-        await expect(executor.getInfo()).rejects.toMatchObject({ outcome: 'not-dispatched' });
+        expect(f.client.availability).toBe('offline');
+        expect(f.client.generation).toBe(previous);
+        expect(previous.token.retired).toBe(true);
+        await expect(previous.runtime.getInfo()).rejects.toMatchObject({ code: 'STALE_RESOURCE', outcome: 'not-dispatched' });
+        await expect(projects.inspect({ projectPath: base })).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
         release.resolve();
-        await ready;
-        const replacement = await executor.getInfo();
-        expect(replacement.projectBasePath).toBe(nextBase);
-        expect(replacement.instanceId).not.toBe(info.instanceId);
-        expect(await executor.getAgentIntegration('test')).toBe(integration);
-        expect(integration.literalExecution).toEqual(literal ? { selectionLabel: 'Runtime', inputFormatByModel: {} } : null);
-        expect(await executor.getProjectService()).toBe(projects);
-        expect(executor.inventory).toEqual(inventory);
-        info = replacement;
+        await replaced;
+        const current = f.client.runtime;
+        expect((await current.getInfo()).projectBasePath).toBe(base);
+        expect((await current.getInfo()).instanceId).not.toBe(previous.info.instanceId);
+        expect(await current.getAgentIntegration('test')).not.toBe(integration);
+        expect((await current.getAgentIntegration('test')).literalExecution).toEqual(replacement.literalExecution);
+        expect(await current.getProjectService()).not.toBe(projects);
+        expect(native.calls).toMatchObject({ migrate: 1, initialize: 1 });
       }
-      expect(errors).toEqual([]);
-    } finally {
-      release.resolve();
-      await executor.dispose(); await worker.dispose();
-      await Promise.all(scopes.map((scope) => scope.dispose()));
-    }
+      expect(f.errors).toEqual([]);
+    } finally { release.resolve(); await f.dispose(); }
   });
-}
-
-const manifestChanges: Record<string, (integration: AgentIntegration) => AgentIntegration> = {
-  descriptor: (integration) => ({ ...integration, descriptor: { ...integration.descriptor, label: 'Changed' } }),
-  settings: (integration) => ({ ...integration, settings: { ...integration.settings, defaults: () => ({ ownerId: 'test', schemaVersion: 2, values: {} }) } }),
-  capability: (integration) => ({ ...integration, singleQuery: null }),
-  literalExecution: (integration) => ({ ...integration, literalExecution: { selectionLabel: 'Runtime', inputFormatByModel: {} }, singleQuery: null }),
-  readiness: (integration) => ({ ...integration, readiness: { async status() { return { ready: true, reason: 'Available' }; } } }),
-};
-
-for (const dialer of ['controller', 'worker'] as const) {
-  for (const [name, change] of Object.entries(manifestChanges)) {
-    test(`a root change does not permit a changed provider ${name} (${dialer} dials)`, async () => {
-      const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
-      const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
-      const failure = Promise.withResolvers<string>();
-      const executor = new RemoteExecutorClient(linkOptions.executorId, controller, undefined, failure.resolve);
-      const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
-      let replacement = false;
-      worker.onSession((transport) => {
-        const fixture = integrationFixture(replacement ? '/' : '/workspace');
-        const integration = replacement ? change(fixture.integration) : fixture.integration;
-        scopes.push(servePairedRuntime(worker, transport, { ...fixture.executor, getAgentIntegration: async () => integration }, new ProducerRelay()));
-      });
-      try {
-        const ready = nextAvailability(executor, 'ready');
-        if (dialer === 'controller') controller.dial(worker.listen());
-        else worker.dial(controller.listen());
-        await ready;
-        const inventory = executor.inventory;
-        replacement = true;
-        controller.current!.close();
-        expect(await failure.promise).toContain('provider capabilities changed');
-        expect(executor.availability).toBe('offline');
-        expect(executor.inventory).toEqual(inventory);
-      } finally {
-        await executor.dispose(); await worker.dispose();
-        await Promise.all(scopes.map((scope) => scope.dispose()));
-      }
-    });
-  }
 }
 
 test('a superseded candidate cannot publish metadata or errors over the accepted session', async () => {
-  const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
-  const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
-  const errors: string[] = [];
-  const executor = new RemoteExecutorClient(linkOptions.executorId, controller, undefined, (message) => errors.push(message));
+  const f = replacementFixture('controller');
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
-  const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
-  let generation = 0;
-  worker.onSession((transport) => {
-    const candidate = ++generation;
-    const fixture = integrationFixture(candidate === 1 ? '/stale' : '/accepted');
-    scopes.push(servePairedRuntime(worker, transport, fixture.executor, new ProducerRelay()));
-  });
-  const initialize = RemoteAgentIntegration.prototype.initializeReplacement;
-  const initialization = spyOn(RemoteAgentIntegration.prototype, 'initializeReplacement')
-    .mockImplementation(async function (this: RemoteAgentIntegration, backing, initial) {
-      await initialize.call(this, backing, initial);
-      if (backing.info.projectBasePath === '/stale') { entered.resolve(); await release.promise; }
+  const finished = Promise.withResolvers<void>();
+  const initialize = RemoteAgentIntegration.prototype.initialize;
+  const initialization = spyOn(RemoteAgentIntegration.prototype, 'initialize')
+    .mockImplementation(async function (this: RemoteAgentIntegration, backing, assertCurrent) {
+      await initialize.call(this, backing, assertCurrent);
+      if (backing.info.projectBasePath === '/stale') {
+        entered.resolve();
+        await release.promise;
+        finished.resolve();
+      }
     });
   try {
-    const ready = nextAvailability(executor, 'ready');
-    controller.dial(worker.listen());
+    const ready = nextAvailability(f.client, 'ready');
+    await f.install(integrationFixture('/stale').executor);
     await entered.promise;
-    controller.current!.close();
+    await f.install(integrationFixture('/accepted').executor);
     await ready;
     release.resolve();
-    await Promise.resolve();
-    expect((await executor.getInfo()).projectBasePath).toBe('/accepted');
-    expect(errors).toEqual([]);
-  } finally {
-    release.resolve(); initialization.mockRestore();
-    await executor.dispose(); await worker.dispose();
-    await Promise.all(scopes.map((scope) => scope.dispose()));
-  }
+    await finished.promise;
+    expect((await f.client.runtime.getInfo()).projectBasePath).toBe('/accepted');
+    expect(f.errors).toEqual([]);
+  } finally { release.resolve(); initialization.mockRestore(); await f.dispose(); }
 });

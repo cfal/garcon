@@ -1,13 +1,15 @@
-import type { CliContext } from '../../../common/server-runtime.js';
+import type { CliIdentityV1 } from '../../../common/server-runtime.js';
 import type { JsonValue } from '../../../common/json.js';
 import { DomainError } from '../../common/domain-error.js';
 import { readTextStreamWithLimit } from '../../common/bounded-text-stream.js';
 import { trackActivity } from '../../common/event-loop-stalls.js';
 import { invokeRawRouteHandler, unhandledRouteErrorResponse } from '../lib/http-route.js';
-import type { RouteMap } from '../lib/http-route-types.js';
+import type { RouteHandler } from '../lib/http-route-types.js';
 import type { ExecutorRpc, GuardRpcReply } from '../../remote/transport/rpc.js';
 import { CliAdmission } from '../../remote/transport/cli-admission.js';
-import { CLI_ENVELOPE_BYTES, CLI_REPLY_BYTES, CLI_SMALL_REPLY_BYTES, cliPolicy, cliReplyBytes, parseControllerCliRequest, type CliHttpResponse } from '../../remote/transport/cli-protocol.js';
+import { CLI_ENVELOPE_BYTES, CLI_REPLY_BYTES, CLI_SMALL_REPLY_BYTES, cliReplyBytes, type ResolvedCliRequest, type CliHttpResponse } from '../../remote/transport/cli-protocol.js';
+import { assertCliSupported } from '../../remote/transport/protocol-policy.js';
+import type { CliRouteContracts } from '../lib/cli-contracts.js';
 
 export interface CliDispatchAccess {
   readonly executorId: string;
@@ -19,15 +21,16 @@ export interface CliDispatchAccess {
 
 export class ControllerCliDispatcher {
   readonly #admission = new CliAdmission();
+  readonly contracts: CliRouteContracts;
 
   constructor(private readonly options: {
-    readonly routes: RouteMap;
     readonly serverInstanceId: string;
     readonly workspaceName: string | null;
     readonly isShuttingDown: () => boolean;
-  }) {}
+    readonly contracts: CliRouteContracts;
+  }) { this.contracts = options.contracts; }
 
-  describe(access: CliDispatchAccess, guardReply: GuardRpcReply): CliContext {
+  describe(access: CliDispatchAccess, guardReply: GuardRpcReply): CliIdentityV1 {
     this.#assertAdmission(access);
     guardReply(() => this.#assertAdmission(access));
     const release = this.#admission.acquire(access.executorId, 'short', 'primary');
@@ -36,13 +39,15 @@ export class ControllerCliDispatcher {
     } finally { release(); }
   }
 
-  async request(value: unknown, access: CliDispatchAccess, guardReply: GuardRpcReply): Promise<CliHttpResponse> {
+  async request(captured: ResolvedCliRequest, access: CliDispatchAccess, guardReply: GuardRpcReply): Promise<CliHttpResponse> {
     this.#assertAdmission(access);
-    const request = parseControllerCliRequest(value);
+    const { request, policy, wire: registered } = captured;
+    if (registered.side !== 'handler') throw new Error('CLI dispatch requires a captured route handler');
+    const profile = access.rpc.transport.profile;
     if (request.expectedServerInstanceId !== this.options.serverInstanceId) {
       throw new DomainError('CLI_CONTROLLER_CHANGED', 'Garcon restarted; start a new CLI invocation', 409);
     }
-    const policy = cliPolicy(request.http);
+    assertCliSupported(profile, registered.definition);
     if (access.rpc.transport.lane !== policy.lane) throw new DomainError('CLI_ACCESS_DENIED', 'CLI operation arrived on the wrong lane', 403);
     const assertAdmission = () => {
       this.#assertAdmission(access);
@@ -74,8 +79,7 @@ export class ControllerCliDispatcher {
     signal.addEventListener('abort', onAbort, { once: true });
     const work = (async (): Promise<CliHttpResponse> => {
       const [method, pathname] = request.http.operation.split(' ') as [string, string];
-      const handler = this.options.routes[pathname]?.[method];
-      if (!handler) throw new DomainError('CLI_CONTROLLER_UNAVAILABLE', 'Controller CLI services are not initialized', 503, true);
+      const handler = registered.dispatch as RouteHandler;
       const url = new URL(pathname.replace(':executorId', request.http.executorId ?? ''), 'http://controller.invalid');
       for (const [key, value] of request.http.query) url.searchParams.append(key, value);
       const body = request.http.body === null ? undefined : JSON.stringify(request.http.body);

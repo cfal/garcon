@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolveSettingsPresentation } from '$lib/agents/settings-presentation';
 	// Owns the singleton conversation runtime, composer, and dialogs while
 	// rendered panels own transcript presentation and scrolling.
 
@@ -292,6 +293,10 @@
 				remoteSettings.snapshot?.executionDefaults,
 				agentId,
 			);
+			const { envelope: agentSettings, compatibility } = resolveSettingsPresentation(modelCatalog, agentId, defaults.agentSettingsById[agentId]);
+			if (!agentSettings || compatibility !== 'compatible') {
+				throw new Error(compatibility === 'loading' ? m.chat_composer_loading_models() : m.chat_provider_settings_incompatible());
+			}
 			return {
 				permissionMode: normalizeSupportedPermissionMode(
 					defaults.permissionMode,
@@ -301,8 +306,7 @@
 					defaults.thinkingMode,
 					modelCatalog.getThinkingModes(agentId),
 				),
-				agentSettings:
-					defaults.agentSettingsById[agentId] ?? modelCatalog.getDefaultAgentSettings(agentId),
+				agentSettings,
 			};
 		},
 		appShell,

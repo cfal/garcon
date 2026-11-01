@@ -55,7 +55,12 @@ function fixture(options = {}) {
     supportedProtocols: [], acceptsApiProviderEndpoints: false, requiresStrictModelDiscovery: true,
     defaultSettings: { ownerId: 'test', schemaVersion: 1, values: {} },
   };
-  const agents = { getAgentCatalogEntry: mock(async () => entry) };
+  const agents = {
+    getAgentCatalogEntry: mock(async () => entry),
+    captureCatalog(executorId) {
+      return { executorInstanceId: 'synthetic-instance', assertCurrent() {}, getAgentCatalogEntry: (id, query) => this.getAgentCatalogEntry(id, { ...query, executorId }) };
+    },
+  };
   const selection = new AgentStartSelectionService({ agents, apiProviders: { getCatalog: () => options.providers ?? [] } });
   const commands = { submitAgentCommandStartLocked: mock(async (input) => {
     events.push('start'); chats.set(input.chatId, {}); return { chat: { id: input.chatId }, turnId: 'child-turn' };
@@ -196,6 +201,56 @@ describe('assistant action controllers', () => {
     expect(f.agents.getAgentCatalogEntry).toHaveBeenCalledTimes(3);
     expect(f.commands.submitAgentCommandStartLocked).not.toHaveBeenCalled();
     expect(f.notices).toHaveLength(1);
+    expect(f.notices[0].detail).toMatchObject({ status: 'rejected', reason: 'action-failed' });
+  });
+
+  it('rediscovers a replaced worker catalog after waiting for the chat lock', async () => {
+    const f = fixture();
+    const locked = deferred(); const release = deferred(); const queued = deferred();
+    let generation = 'original';
+    f.agents.captureCatalog = () => {
+      const captured = generation;
+      return { executorInstanceId: captured,
+        assertCurrent() { if (generation !== captured) throw new Error('Retired catalog'); },
+        getAgentCatalogEntry: async () => ({ ...f.entry,
+          defaultSettings: { ...f.entry.defaultSettings, values: { generation: captured } },
+        }),
+      };
+    };
+    const capture = mock(f.agents.captureCatalog);
+    f.agents.captureCatalog = capture;
+    const holding = f.context.chatMutationLock.runExclusive(`chat:${SOURCE.chatId}`, async () => {
+      locked.resolve(); await release.promise;
+    });
+    await locked.promise;
+    const acquire = f.context.chatMutationLock.runExclusiveMany.bind(f.context.chatMutationLock);
+    f.context.chatMutationLock.runExclusiveMany = (keys, operation) => {
+      queued.resolve(); return acquire(keys, operation);
+    };
+    try {
+      f.start.request(SOURCE, START);
+      await queued.promise;
+      generation = 'replacement';
+      release.resolve(); await holding; await drain();
+      expect(capture).toHaveBeenCalledTimes(2);
+      expect(f.commands.submitAgentCommandStartLocked).toHaveBeenCalledTimes(1);
+      expect(f.commands.submitAgentCommandStartLocked.mock.calls[0][0].agentSettings.values)
+        .toEqual({ generation: 'replacement' });
+    } finally { release.resolve(); await holding; f.start.shutdown(); }
+  });
+
+  it('bounds rediscovery when every captured worker retires before selection', async () => {
+    const f = fixture();
+    f.agents.captureCatalog = mock(() => {
+      let assertions = 0;
+      return { executorInstanceId: 'synthetic', getAgentCatalogEntry: async () => f.entry,
+        assertCurrent() { if (++assertions > 1) throw new Error('Retired catalog'); },
+      };
+    });
+    f.start.request(SOURCE, START);
+    await drain();
+    expect(f.agents.captureCatalog).toHaveBeenCalledTimes(3);
+    expect(f.commands.submitAgentCommandStartLocked).not.toHaveBeenCalled();
     expect(f.notices[0].detail).toMatchObject({ status: 'rejected', reason: 'action-failed' });
   });
 

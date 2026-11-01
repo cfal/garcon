@@ -1,6 +1,11 @@
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from './agent-integration.js';
 import type { JsonObject, JsonValue } from './json.js';
 
+export interface AgentSettingsPatchFence {
+  expectedExecutorInstanceId: string;
+  expectedSettingsSchemaVersion: number;
+}
+
 export function createEmptyAgentSettings(ownerId: string): AgentSettingsEnvelope {
   return { ownerId, schemaVersion: 1, values: {} };
 }
@@ -42,6 +47,19 @@ export function withAgentSetting(
       [descriptor.key]: value,
     },
   };
+}
+
+export function areAgentSettingsCompatible(
+  envelope: AgentSettingsEnvelope,
+  defaults: AgentSettingsEnvelope,
+  descriptors: readonly AgentSettingDescriptor[],
+): boolean {
+  if (envelope.ownerId !== defaults.ownerId || envelope.schemaVersion !== defaults.schemaVersion) return false;
+  const byKey = new Map(descriptors.map(descriptor => [descriptor.key, descriptor]));
+  return Object.entries(envelope.values).every(([key, value]) => {
+    const descriptor = byKey.get(key);
+    return descriptor !== undefined && isDescriptorValue(descriptor, value);
+  });
 }
 
 function isDescriptorValue(descriptor: AgentSettingDescriptor, value: JsonValue): boolean {

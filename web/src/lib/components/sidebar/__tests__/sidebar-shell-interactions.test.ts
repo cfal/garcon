@@ -45,6 +45,7 @@ function createChat(
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		hasAgentSession: false,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
 		lastMessage: `${title} preview`,

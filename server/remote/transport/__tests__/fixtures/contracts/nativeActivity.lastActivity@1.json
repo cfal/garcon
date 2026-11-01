@@ -1,0 +1,60 @@
+{
+  "definition": {
+    "name": "nativeActivity.lastActivity",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "ownerId": "string",
+      "schemaVersion": "number",
+      "value": {
+        "[string]": {
+          "union": [
+            "false",
+            "null",
+            "number",
+            "string",
+            "true",
+            {
+              "array": {
+                "recursive": "JsonValue"
+              }
+            },
+            {
+              "recursive": "JsonObject"
+            }
+          ]
+        }
+      }
+    },
+    "result": {
+      "union": [
+        {
+          "kind": "\"ready\"",
+          "value": {
+            "lastEntryAt": {
+              "union": [
+                "null",
+                "string"
+              ]
+            }
+          }
+        },
+        {
+          "kind": "\"unavailable\""
+        }
+      ]
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

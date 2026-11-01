@@ -687,11 +687,13 @@ describe('ApiProviderEndpointDialogState', () => {
 		const other = root.forExecutor('33333333-3333-4333-8333-333333333333');
 		for (const catalog of [root, remote, other]) {
 			catalog.apiProviderCatalog = [provider];
+			catalog.executorInstanceId = `synthetic-${catalog.executorId}`;
 			catalog.lastValidatedAt = Date.now();
 			expect(catalog.isValidated).toBe(true);
 		}
 		const refresh = vi.spyOn(remote, 'forceRefresh').mockImplementation(async () => {
 			for (const catalog of [root, remote, other]) expect(catalog.isValidated).toBe(false);
+			remote.executorInstanceId = `synthetic-${remote.executorId}`;
 			remote.lastValidatedAt = Date.now();
 		});
 		vi.mocked(createApiProvider).mockResolvedValueOnce({ ...provider, assignment: { executorIds: [remote.executorId], status: 'assigned' } });

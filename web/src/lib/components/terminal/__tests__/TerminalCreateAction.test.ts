@@ -18,8 +18,8 @@ it('keeps the launcher creation progress visible and blocks another create', asy
 function hosts(remoteAvailable = true, localFull = false) {
 	return {
 		hosts: [
-			{ id: 'local', label: 'Local', available: true, full: localFull },
-			{ id: 'remote', label: 'Build Server', available: remoteAvailable, full: false },
+			{ id: 'local', instanceId: 'local-instance', label: 'Local', available: true, full: localFull },
+			{ id: 'remote', instanceId: 'remote-instance', label: 'Build Server', available: remoteAvailable, full: false },
 		],
 		hasRemoteHosts: remoteAvailable,
 		canCreate: (executorId: string) => (executorId === 'local' ? !localFull : remoteAvailable),
@@ -56,6 +56,20 @@ it('opens a host chooser without spawning and preserves per-host admission', asy
 	);
 	await fireEvent.click(screen.getByRole('menuitem', { name: 'Build Server' }));
 	expect(oncreate).toHaveBeenCalledWith('remote');
+});
+
+it('disables a list-capable host when its creation workflow is unsupported', async () => {
+	const oncreate = vi.fn();
+	const terminals = { ...hosts(), canCreate: (id: string) => id === 'local' };
+	render(TerminalCreateAction, { terminals, oncreate });
+	await fireEvent.click(screen.getByRole('button', { name: 'New Terminal' }));
+	const unavailable = screen.getByRole('menuitem', { name: /^Build Server/ });
+	expect(unavailable.getAttribute('aria-disabled')).toBe('true');
+	expect(unavailable.textContent).toContain('This terminal session is no longer available.');
+	await fireEvent.click(unavailable);
+	expect(oncreate).not.toHaveBeenCalled();
+	await fireEvent.click(screen.getByRole('menuitem', { name: 'Local' }));
+	expect(oncreate).toHaveBeenCalledWith('local');
 });
 
 it('keeps a disconnected host disabled rather than turning an open chooser into Local creation', async () => {

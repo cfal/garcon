@@ -1,10 +1,15 @@
+import { CLI_WIRES_V1 } from '../transport/cli-wire-v1.js';
+import { rpcWireV1 } from '../transport/rpc-wire-v1.js';
+import { RPC_V1 } from '@garcon/common/executor-contracts';
 import crypto from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { cliGatewayRuntimeFile } from '../../../common/cli-runtime-paths.js';
 import { createServer, type IncomingMessage } from 'node:http';
 import { once } from 'node:events';
 import { AgentCallError } from '@garcon/server-agent-interface';
-import { CLI_SERVER_INSTANCE_HEADER, parseCliContext, type CliGatewayDescriptor } from '../../../common/server-runtime.js';
+import { CLI_SERVER_INSTANCE_HEADER, parseCliIdentity, type CliContext, type CliGatewayDescriptor } from '../../../common/server-runtime.js';
+import { CLI_BOOTSTRAP_VERSION } from '../../../common/cli-contracts.js';
+import { supportsDefinition } from '../../../common/protocol-contracts.js';
 import type { JsonValue } from '../../../common/json.js';
 import { DomainError } from '../../common/domain-error.js';
 import { getTokenFromRequest } from '../../common/http-body.js';
@@ -12,9 +17,11 @@ import { jsonError } from '../../common/http-error.js';
 import { createServerRuntimeState, publishRuntimeDescriptor, removeServerRuntime } from '../../common/server-runtime.js';
 import { runtimeProofResponse } from '../../common/runtime-proof.js';
 import { CliAdmission } from '../transport/cli-admission.js';
-import { CLI_OPERATIONS, cliRequestBytes, cliRequestTooLarge, cliRoute, cliPolicy, parseCliHttpResponse, parseControllerCliRequest } from '../transport/cli-protocol.js';
+import { cliRequestBytes, cliRequestTooLarge, cliRoute, cliRequestContract, parseCliHttpResponse,
+  resolveCliRequest, type CliForward } from '../transport/cli-protocol.js';
 import type { ExecutorRpcConnection } from '../transport/rpc-connection.js';
 import type { RpcLane } from '../transport/rpc-lane.js';
+import { assertCliSupported } from '../transport/protocol-policy.js';
 
 function gatewayError(error: unknown): Response {
   if (error instanceof DomainError) {
@@ -113,7 +120,11 @@ export async function startCliGateway(options: {
             reserveHttp('primary');
             const release = admission.acquire('gateway', 'short', 'primary');
             try {
-              const context = parseCliContext(await rpc.call('', 'controllerCli.describe', null, { signal: request.signal, timeoutMs: 5_000 }));
+              const identity = parseCliIdentity(await rpc.call('', RPC_V1['controllerCli.describe'], null, { signal: request.signal, timeoutMs: 5_000 }));
+              const contracts = supportsDefinition(rpc.transport.profile.contracts, RPC_V1['controllerCli.request'])
+                ? Object.fromEntries(Object.entries(rpc.transport.profile.contracts).filter(([name]) => name.startsWith('cli.'))) : {};
+              const context: CliContext = { ...identity, protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts } };
+              if (!rpc.transport.connected || options.currentConnection() !== connection) throw new AgentCallError('not-dispatched', 'Controller connection changed');
               if (context.defaultExecutorId !== rpc.transport.executorId) throw new Error('CLI context does not match the authenticated executor');
               if (expectedServerInstanceId !== null && context.serverInstanceId !== expectedServerInstanceId) {
                 throw new DomainError('CLI_CONTROLLER_CHANGED', 'Garcon restarted; start a new CLI invocation', 409);
@@ -122,23 +133,27 @@ export async function startCliGateway(options: {
             } finally { release(); }
           } else {
             const route = cliRoute(request.method, url.pathname);
-            const lane = CLI_OPERATIONS[route.operation].lane;
+            const contract = cliRequestContract(request.headers, route.operation);
+            const registered = rpc.transport.protocol.contracts.cliRegistration(route.operation, contract);
+            if (registered.side !== 'forwarder') throw new Error('CLI forwarding implementation is unavailable');
+            assertCliSupported(rpc.transport.profile, registered.definition);
+            if (!supportsDefinition(rpc.transport.profile.contracts, RPC_V1['controllerCli.request'])) {
+              throw new DomainError('OPERATION_UNSUPPORTED', 'This connection cannot forward CLI operations', 422);
+            }
+            const lane = registered.definition.lane;
             reserveHttp(lane);
             if (expectedServerInstanceId === null) throw new DomainError('VALIDATION_FAILED', 'Expected controller instance is required', 400);
             const contentLength = incoming.headers['content-length'];
             const hasBody = incoming.headers['transfer-encoding'] !== undefined
               || contentLength !== undefined && contentLength !== '0';
             const body = hasBody ? await readBody(incoming, lane) : null;
-            const call = parseControllerCliRequest({ expectedServerInstanceId, http: { ...route, query: [...url.searchParams], body } });
-            const policy = cliPolicy(call.http);
+            const { request: call, policy } = resolveCliRequest({ expectedServerInstanceId, contract,
+              http: { ...route, query: [...url.searchParams], body } }, rpc.transport.protocol.contracts.cliRegistration);
             const release = admission.acquire('gateway', policy.pool, lane);
             // Native HTTP idle timeouts do not bound maintenance work; restore the drain deadline before replying.
             timeout(0);
             try {
-              const held = await connection!.acquire(lane, { signal: request.signal, timeoutMs: policy.timeoutMs });
-              const result = parseCliHttpResponse(await held.rpc.call('', 'controllerCli.request', call, {
-                signal: request.signal, timeoutMs: held.timeoutMs,
-              }));
+              const result = await registered.dispatch(connection!, call, policy, request.signal);
               response = Response.json(result.body, { status: result.status,
                 headers: result.retryAfter ? { 'Retry-After': result.retryAfter } : {} });
             } finally { release(); timeout(30_000); }
@@ -197,3 +212,17 @@ export async function startCliGateway(options: {
     await removeServerRuntime(runtimeFile, descriptor.instanceId);
   } };
 }
+
+export const CLI_GATEWAY_RPC_CLIENTS = Object.freeze([
+  rpcWireV1('controllerCli.describe'),
+  rpcWireV1('controllerCli.request'),
+] as const);
+
+const forwardCliV1: CliForward = async (connection, request, policy, signal) => {
+  const held = await connection.acquire(policy.lane, { signal, timeoutMs: policy.timeoutMs });
+  return parseCliHttpResponse(await held.rpc.call('', RPC_V1['controllerCli.request'], request, { signal, timeoutMs: held.timeoutMs }));
+};
+
+export const CLI_GATEWAY_REGISTRATIONS = Object.freeze(CLI_WIRES_V1.map(wire => Object.freeze({
+  ...wire, side: 'forwarder' as const, dispatch: forwardCliV1,
+})));

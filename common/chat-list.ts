@@ -14,13 +14,14 @@ export interface ChatListEntry {
   parentChat: ParentChatRef | null;
   agentId: string;
   agentOwnershipEpoch: string;
+  hasAgentSession: boolean;
   model: string | null;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
-  agentSettings: AgentSettingsEnvelope;
+  agentSettings: AgentSettingsEnvelope | null;
   title: string;
   projectPath: string;
   orderGroup: ChatOrderGroup;
@@ -104,7 +105,7 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
   if (!isPermissionMode(value.permissionMode)) fail(field('permissionMode'));
   if (!isThinkingMode(value.thinkingMode)) fail(field('thinkingMode'));
   const agentSettings = parseAgentSettingsEnvelope(value.agentSettings);
-  if (!agentSettings || agentSettings.ownerId !== agentId) fail(field('agentSettings'));
+  if (value.agentSettings !== null && (!agentSettings || agentSettings.ownerId !== agentId)) fail(field('agentSettings'));
   const title = requireString(value.title, field('title'));
   const projectPath = requireString(value.projectPath, field('projectPath'));
   if (!CHAT_ORDER_GROUPS.includes(String(value.orderGroup) as ChatOrderGroup)) {
@@ -169,6 +170,7 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
     isProcessing,
     processingPhase,
     canReloadFromNativeHistory,
+    hasAgentSession: requireBoolean(value.hasAgentSession, field('hasAgentSession')),
     isUnread,
   };
 }

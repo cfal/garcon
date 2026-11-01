@@ -1,4 +1,6 @@
 import { effectiveExecutorId, LOCAL_EXECUTOR_ID } from '../../../common/executors.js';
+import { executionRequirements, nativeForkRequirements, requireProviderOperations } from './execution-support.js';
+import { executorGenerationChanged } from '../../common/executor-generation-error.js';
 import type { CreateCarriedContextInput } from '../chats/carryover/context.js';
 import {
   AgentIntegrationError,
@@ -9,9 +11,11 @@ import {
   type AgentSteerTarget,
   type AgentExecutionHandle,
   type AgentEstablishedSession,
+  type AgentIntegration,
   type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
+import type { ExecutionLaunchOperation } from '@garcon/common/executor-contracts';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
 import type { PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
@@ -43,7 +47,7 @@ import type {
   NativeForkCleanup,
 } from './session-types.js';
 import { assertExecutionAdmissionOpen } from './session-types.js';
-import { requireAgentChatEntry, toAgentEndpointSelection } from './execution-planning.js';
+import { executionAttachments, executionSettings, requireAgentChatEntry, requireAgentChatEntryWithModel, requireCompaction, toAgentEndpointSelection } from './execution-planning.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import { resolveCarryOverOutcome, type CarryOverOutcome } from '../chats/carryover/outcome.js';
@@ -58,10 +62,10 @@ import {
 } from './runtime-router-errors.js';
 import { operationIdentity, operationMetadata } from './turn-operation.js';
 import { ProducerBindings, type LaunchSettledEvent } from './producer-bindings.js';
-import { ExecutionAborts } from './execution-aborts.js';
 import { retryAfterSessionLoss } from './session-loss-retry.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START, EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
 import { readBefore } from '../../common/interactive-deadline.js';
+import { DeferredExecutionAborts } from './deferred-execution-aborts.js';
 const logger = createLogger('agents:runtime-router');
 const EXECUTOR_OUTPUT_GAP_NOTICE = 'Some agent output could not be delivered from the executor. Reload from native history after this turn finishes to recover it.';
 
@@ -104,7 +108,7 @@ export class AgentRuntimeRouter {
   readonly #hasPendingOwnershipTransfer: (chatId: string) => boolean;
   readonly #producerLeases = new Map<string, { readonly executorId: string; readonly lease: TranscriptProducerLease }>();
   readonly #executionHandles = new Map<string, {
-    readonly agentId: string;
+    readonly integration: AgentIntegration;
     readonly runId: string;
     readonly handle: AgentExecutionHandle;
   }>();
@@ -129,8 +133,8 @@ export class AgentRuntimeRouter {
         title: 'Output not delivered', content: EXECUTOR_OUTPUT_GAP_NOTICE, detail: { type: 'publication-gap' },
       });
     },
-    (chatId, lease, agentId, event) => {
-      if (this.#producerLeases.get(chatId)?.lease === lease) this.#settleLostLaunch(chatId, agentId, event);
+    (chatId, lease, integration, event) => {
+      if (this.#producerLeases.get(chatId)?.lease === lease) this.#settleLostLaunch(chatId, integration, event);
     },
     (chatId, lease, runId) => {
       if (this.#producerLeases.get(chatId)?.lease !== lease) return;
@@ -138,12 +142,12 @@ export class AgentRuntimeRouter {
       void this.#events.publishRunSteerable(chatId);
     },
   );
-  readonly #aborts: ExecutionAborts;
+  readonly #aborts: DeferredExecutionAborts;
 
   constructor(options: AgentRuntimeRouterOptions) {
     this.#registry = options.registry;
     this.#directory = options.directory;
-    this.#aborts = new ExecutionAborts(options.directory);
+    this.#aborts = new DeferredExecutionAborts(options.directory);
     this.#endpointResolver = options.endpointResolver;
     this.#events = options.events;
     this.#getCarryOverRevision = options.getCarryOverRevision;
@@ -173,13 +177,15 @@ export class AgentRuntimeRouter {
           true,
         );
       }
+      const integration = this.#admitLaunch(chatId, 'start', opts);
       await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
+      this.#assertCurrent(integration);
       const persistedEntry = this.#registry.getChat(chatId);
       const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
-      const integration = this.#directory.require(entry.agentId, entry.executorId);
+      const settings = executionSettings(integration, entry, opts.agentSettings);
       const selection = this.#resolveExecutionSelection(persistedEntry, entry, opts);
       await this.#validateEndpoint(integration, selection, opts.executionAdmission?.signal, opts.dispatchDeadline);
-      const prepared = await this.#preparePrompt(chatId, prompt, opts);
+      const prepared = await this.#preparePrompt(integration, chatId, prompt, opts);
       assertExecutionAdmissionOpen(opts);
       if (!prepared.dispatch) return;
       const operation = operationIdentity(entry, opts, opts.commandType ?? 'chat-start');
@@ -211,7 +217,7 @@ export class AgentRuntimeRouter {
       opts.onContextPreparation?.('starting-agent');
       const sending = { signal: opts.executionAdmission?.signal, dispatchDeadline: opts.dispatchDeadline };
       const request = {
-        ...this.#executionContextV5(chatId, entry, selection, runId, opts),
+        ...this.#executionContextV5(integration, settings, chatId, entry, selection, runId, opts),
         producerBinding: await this.#bindings.bind(integration, chatId, producer, sending),
         prompt: prepared.outboundPrompt,
         submission: prepared.submission,
@@ -219,10 +225,11 @@ export class AgentRuntimeRouter {
         carriedContext: carryover.context,
       };
       assertExecutionAdmissionOpen(opts);
+      this.#assertCurrent(integration);
       this.#endpointResolver.resolveEndpointReference(selection);
       executionInvoked = true;
       const handle = await this.#launch(chatId, runId, () => integration.execution.start(request, sending));
-      if (handle) await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
+      if (handle) await this.#retainOrAbortHandle(chatId, integration, runId, handle);
       assertExecutionAdmissionOpen(opts);
       // Literal overrides stay turn-local; a late startup must not change queued input's mode.
       const updated = integration.literalExecution ? this.#registry.getChat(chatId) : this.#registry.updateChat(chatId, {
@@ -248,9 +255,12 @@ export class AgentRuntimeRouter {
     let executionInvoked = false;
     try {
       assertExecutionAdmissionOpen(opts);
+      const integration = this.#admitLaunch(chatId, 'run', opts);
       await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
+      this.#assertCurrent(integration);
       const persistedEntry = this.#registry.getChat(chatId);
       const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
+      const settings = executionSettings(integration, entry, opts.agentSettings);
       if (!entry.agentSessionId) {
         // The delegated start classifies its own dispatch outcome.
         return this.startSession(chatId, prompt, {
@@ -259,9 +269,8 @@ export class AgentRuntimeRouter {
         });
       }
       const selection = this.#resolveExecutionSelection(persistedEntry, entry, opts);
-      const integration = this.#directory.require(entry.agentId, entry.executorId);
       await this.#validateEndpoint(integration, selection, opts.executionAdmission?.signal);
-      const prepared = await this.#preparePrompt(chatId, prompt, opts);
+      const prepared = await this.#preparePrompt(integration, chatId, prompt, opts);
       if (!prepared.dispatch) return;
       assertExecutionAdmissionOpen(opts);
       const operation = operationIdentity(entry, opts, opts.commandType ?? 'agent-run');
@@ -272,7 +281,7 @@ export class AgentRuntimeRouter {
       } });
       runId = this.#beginRun(chatId, operation.turnId);
       const request = {
-        ...this.#executionContextV5(chatId, entry, selection, runId, opts),
+        ...this.#executionContextV5(integration, settings, chatId, entry, selection, runId, opts),
         producerBinding: await this.#bindings.bind(integration, chatId, producer, { signal: opts.executionAdmission?.signal }),
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
@@ -281,12 +290,13 @@ export class AgentRuntimeRouter {
         attachments: prepared.attachments,
       };
       assertExecutionAdmissionOpen(opts);
+      this.#assertCurrent(integration);
       this.#endpointResolver.resolveEndpointReference(selection);
       executionInvoked = true;
       const handle = await this.#launch(chatId, runId, () => integration.execution.resume(request, {
         signal: opts.executionAdmission?.signal,
       }));
-      if (handle) await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
+      if (handle) await this.#retainOrAbortHandle(chatId, integration, runId, handle);
     } catch (error) {
       const failure = executionInvoked ? error : executionSetupFailure(error);
       this.#failDefiniteDispatch(chatId, runId, failure);
@@ -313,6 +323,7 @@ export class AgentRuntimeRouter {
     const integration = this.#directory.require(entry.agentId, entry.executorId);
     if (!integration.steering) throw steeringUnsupportedError();
     await prepareDelivery();
+    this.#assertCurrent(integration);
     this.#ledger.takePreparedInput(chatId, options.clientMessageId);
     return integration.steering.steer({
       chatId,
@@ -356,11 +367,14 @@ export class AgentRuntimeRouter {
     let executionInvoked = false;
     try {
       assertExecutionAdmissionOpen(opts);
+      const integration = this.#admitLaunch(chatId, 'compact');
+      const compaction = integration.compaction!;
       await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
+      this.#assertCurrent(integration);
       assertExecutionAdmissionOpen(opts);
       const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+      const settings = executionSettings(integration, entry);
       if (!entry.agentSessionId) throw new Error(`Session missing agent session ID: ${chatId}`);
-      const integration = this.#directory.require(entry.agentId, entry.executorId);
       const selection = this.#endpointResolver.resolveSelection({
         executorId: entry.executorId,
         agentId: entry.agentId,
@@ -369,24 +383,13 @@ export class AgentRuntimeRouter {
         modelEndpointId: entry.modelEndpointId,
       });
       await this.#validateEndpoint(integration, selection, opts.executionAdmission?.signal);
-      // Without the facet there is nothing to call. Sending the literal text
-      // `/compact` as a prompt used to look like success while leaving the context
-      // untouched and a stray message in the transcript.
-      const compaction = integration.compaction;
-      if (!compaction) {
-        throw new DomainError(
-          'VALIDATION_FAILED',
-          `${entry.agentId} does not support native compaction. Use /handoff to continue in a new chat instead.`,
-          400,
-        );
-      }
       const operation = operationIdentity(entry, opts, 'agent-compact');
       const prompt = opts.instructions?.trim() ? `/compact ${opts.instructions.trim()}` : '/compact';
       this.#events.trackTurn(chatId, operationMetadata(operation));
       const producer = this.#producer(chatId);
       runId = this.#beginRun(chatId, operation.turnId);
       const request = {
-        ...this.#executionContextV5(chatId, entry, selection, runId, opts),
+        ...this.#executionContextV5(integration, settings, chatId, entry, selection, runId, opts),
         producerBinding: await this.#bindings.bind(integration, chatId, producer, { signal: opts.executionAdmission?.signal }),
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
@@ -394,12 +397,13 @@ export class AgentRuntimeRouter {
         attachments: [],
       };
       assertExecutionAdmissionOpen(opts);
+      this.#assertCurrent(integration);
       this.#endpointResolver.resolveEndpointReference(selection);
       executionInvoked = true;
       const handle = await this.#launch(chatId, runId, () => compaction.compact(request, {
         signal: opts.executionAdmission?.signal,
       }));
-      if (handle) await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
+      if (handle) await this.#retainOrAbortHandle(chatId, integration, runId, handle);
     } catch (error) {
       const failure = executionInvoked ? error : executionSetupFailure(error);
       this.#failDefiniteDispatch(chatId, runId, failure);
@@ -441,10 +445,11 @@ export class AgentRuntimeRouter {
   }
 
   executionSessionResumed(executorId: string): void {
-    this.#aborts.sessionResumed(executorId);
+    this.#aborts.resumed(executorId);
   }
 
   executionSessionLost(executorId = LOCAL_EXECUTOR_ID): void {
+    this.#aborts.lost(executorId);
     const runs = this.#ledger.activeChatIds()
       .filter((chatId) => effectiveExecutorId(this.#registry.getChat(chatId)?.executorId) === executorId)
       .map((chatId) => ({ chatId, runId: this.#ledger.activeRunId(chatId)! }));
@@ -500,7 +505,7 @@ export class AgentRuntimeRouter {
       return Promise.resolve(true);
     }
     this.#executionHandles.delete(chatId);
-    this.#aborts.request(chatId, active.agentId, active.handle, 'accepted interruption');
+    this.#aborts.request(chatId, active.integration, active.handle, 'accepted interruption');
     return Promise.resolve(true);
   }
 
@@ -592,6 +597,8 @@ export class AgentRuntimeRouter {
       if (this.#directory.get(source.agentId, source.executorId)?.forking === null) return null;
       const integration = this.#directory.require(source.agentId, source.executorId);
       if (!integration.forking) return null;
+      requireProviderOperations(this.#directory, source.executorId, nativeForkRequirements(integration, source));
+      const settings = executionSettings(integration, source);
       const scope = { ...integration.producers.scope };
       const selection = this.#endpointResolver.resolveSelection({
         executorId: source.executorId,
@@ -610,6 +617,8 @@ export class AgentRuntimeRouter {
         this.#getCarryOverRevision(source),
       );
       const context = this.#executionContextV5(
+        integration,
+        settings,
         args.targetChatId,
         source,
         selection,
@@ -691,6 +700,9 @@ export class AgentRuntimeRouter {
     const { agentId } = options;
     const integration = this.#directory.require(agentId, options.executorId);
     if (!integration.singleQuery) throw new Error(`Single query unsupported for agent: ${agentId}`);
+    requireProviderOperations(this.#directory, options.executorId, ['singleQuery.run']);
+    const settings = integration.settings.parse(options.agentSettings === undefined
+      ? integration.settings.defaults() : options.agentSettings);
     const model = typeof options.model === 'string' ? options.model : '';
     const selection = model || options.apiProviderId || options.modelEndpointId ? this.#endpointResolver.resolveSelection({
       executorId: options.executorId,
@@ -705,6 +717,7 @@ export class AgentRuntimeRouter {
       && options.timeoutMs > 0
       ? options.timeoutMs
       : undefined;
+    this.#assertCurrent(integration);
     return integration.singleQuery.run({
       prompt,
       model: selection?.model ?? model,
@@ -713,11 +726,7 @@ export class AgentRuntimeRouter {
         integration.descriptor.supportedThinkingModes,
       ),
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
-      settings: integration.settings.parse(
-        isAgentSettingsEnvelope(options.agentSettings)
-          ? options.agentSettings
-          : integration.settings.defaults(),
-      ),
+      settings,
       endpoint: selection ? toAgentEndpointSelection(this.#endpointResolver, selection) : null,
       signal: options.signal instanceof AbortSignal ? options.signal : new AbortController().signal,
     });
@@ -760,6 +769,7 @@ export class AgentRuntimeRouter {
   ): Promise<void> {
     const endpoint = toAgentEndpointSelection(this.#endpointResolver, selection);
     if (!endpoint) return;
+    this.#directory.requireOperations(integration.producers.scope.executorId, ['credentials.resolve', 'endpoints.validate']);
     const endpoints = integration.endpoints;
     if (!endpoints) {
       throw new Error(
@@ -767,13 +777,16 @@ export class AgentRuntimeRouter {
       );
     }
     await retryAfterSessionLoss(() => endpoints.validate(endpoint, readBefore(deadline, signal)), signal);
+    this.#assertCurrent(integration);
   }
 
   async #preparePrompt(
+    integration: AgentIntegration,
     chatId: string,
     fallbackPrompt: string,
     opts: Pick<RunAgentTurnOptions, 'clientMessageId' | 'images' | 'executionAdmission'> & { readonly dispatchDeadline?: number },
   ): Promise<PreparedAgentPrompt> {
+    this.#assertCurrent(integration);
     const composition = this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
     if (composition && !composition.inserted) {
       return { dispatch: false };
@@ -787,9 +800,9 @@ export class AgentRuntimeRouter {
     const excluded = new Set(promptRows.map((row) => row.ordinal));
     const preparedAttachments = promptRows.length > 0
       ? promptRows.flatMap((row) => row.detail.attachments)
-      : attachments(opts.images);
+      : executionAttachments(opts.images);
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
-    if (this.#directory.require(entry.agentId, entry.executorId).literalExecution) {
+    if (integration.literalExecution) {
       const source = composition?.input.detail.message.content ?? fallbackPrompt;
       return {
         dispatch: true,
@@ -808,8 +821,12 @@ export class AgentRuntimeRouter {
     // The input is already taken, so only the resolution itself is repeated.
     const signal = opts.executionAdmission?.signal;
     const resolvedPrompt = await retryAfterSessionLoss(
-      () => this.#resolveFileMentions(prompt, entry.projectPath, entry.executorId, readBefore(opts.dispatchDeadline, signal)), signal,
+      () => {
+        this.#assertCurrent(integration);
+        return this.#resolveFileMentions(prompt, entry.projectPath, entry.executorId, readBefore(opts.dispatchDeadline, signal));
+      }, signal,
     );
+    this.#assertCurrent(integration);
     return {
       dispatch: true,
       prompt: resolvedPrompt,
@@ -820,15 +837,17 @@ export class AgentRuntimeRouter {
     };
   }
 
-  // A remote launch whose reply was lost with its executor session leaves its
-  // run active rather than failing the turn; the resumed binding settles it.
+  // The binding settles lost replies, including settlement delivered before
+  // this promise continuation on a healthy session.
   async #launch(chatId: string, runId: string, launch: () => Promise<AgentExecutionHandle>): Promise<AgentExecutionHandle | null> {
     if (this.#settingUp.get(chatId) === runId) this.#settingUp.delete(chatId);
     try {
       return await launch();
     } catch (error) {
-      if (!isLostLaunchReply(error) || !this.#ledger.isRunActive(chatId, runId)) throw error;
-      logger.warn('Execution launch reply was lost; the resumed executor settles it', { chatId, runId, reason: error.message });
+      if (!isLostLaunchReply(error) || this.#pendingAbortRuns.has(runKey(chatId, runId))) throw error;
+      if (this.#ledger.isRunActive(chatId, runId)) {
+        logger.warn('Execution launch reply was lost; the binding settles it', { chatId, runId, reason: error.message });
+      }
       return null;
     }
   }
@@ -842,12 +861,12 @@ export class AgentRuntimeRouter {
   // Applies the outcome of a launch whose reply was lost: a run still active
   // keeps a reachable handle, a run stopped or failed meanwhile is aborted, and
   // a run the executor never began fails as a dispatch failure.
-  #settleLostLaunch(chatId: string, agentId: string, event: LaunchSettledEvent): void {
+  #settleLostLaunch(chatId: string, integration: AgentIntegration, event: LaunchSettledEvent): void {
     this.#pendingAbortRuns.delete(runKey(chatId, event.runId));
     const active = this.#ledger.isRunActive(chatId, event.runId);
     if (event.handle) {
-      if (active) this.#executionHandles.set(chatId, { agentId, runId: event.runId, handle: event.handle });
-      else this.#aborts.request(chatId, agentId, event.handle, 'lost launch');
+      if (active) this.#executionHandles.set(chatId, { integration, runId: event.runId, handle: event.handle });
+      else this.#aborts.request(chatId, integration, event.handle, 'lost launch');
       return;
     }
     if (!active) return;
@@ -857,16 +876,16 @@ export class AgentRuntimeRouter {
 
   async #retainOrAbortHandle(
     chatId: string,
-    agentId: string,
+    integration: AgentIntegration,
     runId: string,
     handle: AgentExecutionHandle,
   ): Promise<void> {
     if (this.#pendingAbortRuns.delete(runKey(chatId, runId))) {
-      this.#aborts.request(chatId, agentId, handle, 'interrupted launch');
+      this.#aborts.request(chatId, integration, handle, 'interrupted launch');
       return;
     }
     if (this.#ledger.isRunActive(chatId, runId)) {
-      this.#executionHandles.set(chatId, { agentId, runId, handle });
+      this.#executionHandles.set(chatId, { integration, runId, handle });
     }
   }
 
@@ -874,7 +893,7 @@ export class AgentRuntimeRouter {
     const active = this.#executionHandles.get(chatId);
     if (active?.runId === runId) {
       this.#executionHandles.delete(chatId);
-      this.#aborts.request(chatId, active.agentId, active.handle, 'publication failure');
+      this.#aborts.request(chatId, active.integration, active.handle, 'publication failure');
     } else this.#pendingAbortRuns.add(runKey(chatId, runId));
     this.#bindings.forgetRun(runId);
   }
@@ -895,11 +914,17 @@ export class AgentRuntimeRouter {
     this.#producer(chatId);
   }
 
+  ensureProducer(chatId: string): void {
+    this.#producer(chatId);
+  }
+
   publishSessionFact(chatId: string, session: AgentEstablishedSession): void {
     this.#producer(chatId).sink.publish({ type: 'session', session });
   }
 
   #executionContextV5(
+    integration: AgentIntegration,
+    settings: AgentSettingsEnvelope,
     chatId: string,
     entry: ReturnType<typeof requireAgentChatEntry>,
     selection: ReturnType<ApiProviderEndpointResolver['resolveSelection']>,
@@ -907,11 +932,10 @@ export class AgentRuntimeRouter {
     opts: {
       permissionMode?: RunAgentTurnOptions['permissionMode'];
       thinkingMode?: RunAgentTurnOptions['thinkingMode'];
-      agentSettings?: RunAgentTurnOptions['agentSettings'];
       executionAdmission?: AgentExecutionAdmission;
     },
   ) {
-    const integration = this.#directory.require(entry.agentId, entry.executorId);
+    this.#assertCurrent(integration);
     const permissionMode = supportedValue(
       integration.descriptor.supportedPermissionModes,
       normalizePermissionMode(opts.permissionMode ?? entry.permissionMode),
@@ -920,11 +944,6 @@ export class AgentRuntimeRouter {
     const thinkingMode = normalizeSupportedThinkingMode(
       opts.thinkingMode ?? entry.thinkingMode,
       integration.descriptor.supportedThinkingModes,
-    );
-    const settings = integration.settings.parse(
-      opts.agentSettings
-        ?? entry.agentSettingsById?.[entry.agentId]
-        ?? integration.settings.defaults(),
     );
     if (opts.executionAdmission) this.#bindings.onStarted(runId, () => opts.executionAdmission!.markStarted());
     return {
@@ -938,26 +957,31 @@ export class AgentRuntimeRouter {
       runId,
     };
   }
-}
 
-function requireAgentChatEntryWithModel(
-  chatId: string,
-  entry: AgentChatEntry | null | undefined,
-  model: string | undefined,
-): ReturnType<typeof requireAgentChatEntry> {
-  return requireAgentChatEntry(
-    chatId,
-    entry && model !== undefined ? { ...entry, model } : entry,
-  );
-}
+  #admitLaunch(chatId: string, kind: 'start' | 'run' | 'compact', opts: RunAgentTurnOptions = {}): AgentIntegration {
+    const initial = kind === 'compact' ? requireAgentChatEntry(chatId, this.#registry.getChat(chatId))
+      : requireAgentChatEntryWithModel(chatId, this.#registry.getChat(chatId), opts.model);
+    const integration = this.#directory.require(initial.agentId, initial.executorId);
+    if (kind === 'compact') requireCompaction(integration);
+    let operation: ExecutionLaunchOperation = 'execution.start';
+    if (kind === 'compact') {
+      operation = 'compaction.compact';
+    } else if (kind === 'run' && initial.agentSessionId) {
+      operation = 'execution.resume';
+    }
+    this.#directory.requireOperations(initial.executorId, executionRequirements({ ...initial,
+      apiProviderId: opts.apiProviderId === undefined ? initial.apiProviderId : opts.apiProviderId,
+      modelEndpointId: opts.modelEndpointId === undefined ? initial.modelEndpointId : opts.modelEndpointId,
+    }, [operation]));
+    executionSettings(integration, initial, opts.agentSettings);
+    return integration;
+  }
 
-function attachments(images: RunAgentTurnOptions['images'] = []) {
-  return images.map((image) => ({
-    kind: 'image' as const,
-    data: image.data,
-    name: image.name ?? null,
-    mimeType: image.mimeType ?? 'application/octet-stream',
-  }));
+  #assertCurrent(integration: AgentIntegration): void {
+    if (this.#directory.require(integration.descriptor.id, integration.producers.scope.executorId) !== integration) {
+      throw executorGenerationChanged();
+    }
+  }
 }
 
 function supportedValue<T extends string>(values: readonly string[], value: T, fallback: T): T {
@@ -966,8 +990,4 @@ function supportedValue<T extends string>(values: readonly string[], value: T, f
 
 function runKey(chatId: string, runId: string): string {
   return `${chatId}\u0000${runId}`;
-}
-
-function isAgentSettingsEnvelope(value: unknown): value is AgentSettingsEnvelope {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }

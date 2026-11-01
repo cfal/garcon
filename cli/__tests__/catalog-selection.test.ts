@@ -84,7 +84,7 @@ const provider: ApiProviderCatalogEntry = {
 };
 
 function catalog(entry = agent()): ModelCatalogResponse {
-  return { catalog: { agents: [entry], apiProviders: [provider] } };
+  return { executorInstanceId: 'synthetic-instance', catalog: { agents: [entry], apiProviders: [provider] } };
 }
 
 function settings(permissionMode: 'default' | 'acceptEdits' | 'bypassPermissions' = 'acceptEdits'): RemoteSettingsSnapshot {

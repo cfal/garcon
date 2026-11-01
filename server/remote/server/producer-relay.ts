@@ -13,6 +13,14 @@ import type { AgentProducerFrame, ProducerAcknowledgement, ProducerResumeState }
 import { SESSION_MESSAGE_BYTES } from '../transport/session-socket.js';
 import { EXECUTOR_RECONNECT_GRACE_MS } from '../transport/limits.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../common/executor-disconnect.js';
+import { sameContinuity, type SessionProtocol } from '../transport/protocol-compatibility.js';
+import { decodeProducerEvent, UNREADABLE_EVENT_FAILURE, type ProducerCreator } from '../transport/producer-protocol.js';
+import type { ContractRef } from '@garcon/common/protocol-contracts';
+import { supportsDefinition } from '@garcon/common/protocol-contracts';
+import { createLogger } from '../../common/log.js';
+import { failureReason } from '../transport/failure-reason.js';
+
+const log = createLogger('executor-producer-relay');
 
 // A controller resumes every binding it still holds while installing a new
 // session, so bindings still suspended this long after one starts belong to a
@@ -28,6 +36,7 @@ const PUMP_RETRY_MS = 10;
 const RECEIVED_LAUNCHES = 8;
 
 export interface ProducerRelaySession {
+  readonly protocol: SessionProtocol;
   // Returns false when the session cannot take the frame now; the relay keeps
   // it and offers it again as the session drains.
   offer(payload: string): boolean;
@@ -54,6 +63,8 @@ interface RelayedLaunch {
 }
 
 interface RelayedBinding {
+  readonly creator: ProducerCreator;
+  readonly protocol: SessionProtocol;
   readonly integration: AgentIntegration;
   readonly ref: AgentProducerBinding;
   seq: number;
@@ -122,9 +133,13 @@ export class ProducerRelay {
     }));
   }
 
-  bind(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding): void {
+  bind(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding, creator: ProducerCreator): void {
+    if (!supportsDefinition(session.protocol.profile.contracts, creator.contract)) {
+      throw new AgentCallError('not-dispatched', 'Producer creator is unsupported', 'OPERATION_UNSUPPORTED');
+    }
+    if (this.#bindings.has(ref.id)) throw new AgentCallError('rejected', 'Producer binding already exists', 'STALE_RESOURCE');
     this.#bindings.set(ref.id, {
-      integration, ref, seq: 0, retained: [], sent: 0, retainedBytes: 0, session, grace: null, launch: null, received: [],
+      integration, ref, creator, protocol: session.protocol, seq: 0, retained: [], sent: 0, retainedBytes: 0, session, grace: null, launch: null, received: [],
     });
   }
 
@@ -141,9 +156,16 @@ export class ProducerRelay {
     signal: AbortSignal,
     onUndeliveredReply: ObserveUndeliveredReply,
     run: (signal: AbortSignal) => Promise<AgentExecutionHandle>,
+    resource: ContractRef,
   ): Promise<AgentExecutionHandle> {
     const binding = this.#bindings.get(request.producerBinding.id);
-    if (binding?.integration !== integration) return runLaunch(() => run(signal));
+    if (binding?.integration !== integration || binding.creator.resource.name !== resource.name
+      || binding.creator.resource.version !== resource.version) {
+      throw new AgentCallError('not-dispatched', 'Launch requires a compatible producer binding', 'STALE_RESOURCE');
+    }
+    if (!sameContinuity(binding.protocol.continuity, session.protocol.continuity) || binding.session !== session) {
+      throw new AgentCallError('not-dispatched', 'Producer binding belongs to another continuity', 'STALE_RESOURCE');
+    }
     binding.received.push(request.runId);
     if (binding.received.length > RECEIVED_LAUNCHES) binding.received.shift();
     // The controller begins another run on a binding only after abandoning the previous one.
@@ -187,21 +209,31 @@ export class ProducerRelay {
 
   // The controller abandoned a launch whose call it lost. One that already
   // returned is aborted through its handle once the controller learns it.
-  cancelLaunch(integration: AgentIntegration, ref: AgentProducerBinding, runId: string): void {
+  cancelLaunch(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding, runId: string): void {
     const binding = this.#bindings.get(ref.id);
-    if (binding?.integration !== integration) return;
+    if (binding?.integration !== integration || !sameContinuity(binding.protocol.continuity, session.protocol.continuity)) return;
     if (binding.launch?.runId === runId && !binding.launch.handle) binding.launch.cancellation.abort();
+  }
+
+  assertResource(integration: AgentIntegration, ref: AgentProducerBinding, resource: ContractRef): void {
+    const binding = this.#bindings.get(ref.id);
+    if (binding && (binding.integration !== integration || binding.creator.resource.name !== resource.name
+      || binding.creator.resource.version !== resource.version)) {
+      throw new AgentCallError('not-dispatched', 'Operation requires a compatible producer binding', 'STALE_RESOURCE');
+    }
   }
 
   owns(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding): boolean {
     const binding = this.#bindings.get(ref.id);
-    return binding?.integration === integration && binding.session === session;
+    return binding?.integration === integration && binding.session === session
+      && sameContinuity(binding.protocol.continuity, session.protocol.continuity);
   }
 
   // A suspended binding waits, without a session, for one to resume it.
-  suspended(integration: AgentIntegration, ref: AgentProducerBinding): boolean {
+  suspended(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding): boolean {
     const binding = this.#bindings.get(ref.id);
-    return binding?.integration === integration && binding.session === null;
+    return binding?.integration === integration && binding.session === null
+      && sameContinuity(binding.protocol.continuity, session.protocol.continuity);
   }
 
   close(ref: AgentProducerBinding): void {
@@ -234,7 +266,7 @@ export class ProducerRelay {
     const resumed: ProducerResumeState[] = [];
     for (const { binding: ref, acknowledgedSeq } of requests) {
       const binding = this.#bindings.get(ref.id);
-      if (binding?.integration !== integration) continue;
+      if (binding?.integration !== integration || !sameContinuity(binding.protocol.continuity, session.protocol.continuity)) continue;
       if (binding.grace) clearTimeout(binding.grace.timer);
       binding.grace = null;
       binding.session = session;
@@ -266,7 +298,7 @@ export class ProducerRelay {
   acknowledge(session: ProducerRelaySession, acknowledgements: readonly ProducerAcknowledgement[]): void {
     for (const { bindingId, seq } of acknowledgements) {
       const binding = this.#bindings.get(bindingId);
-      if (binding?.session === session) this.#release(binding, seq);
+      if (binding?.session === session && sameContinuity(binding.protocol.continuity, session.protocol.continuity)) this.#release(binding, seq);
     }
   }
 
@@ -285,17 +317,25 @@ export class ProducerRelay {
   #publish(integration: AgentIntegration, notification: AgentProducerNotification): void {
     const binding = this.#bindings.get(notification.binding.id);
     if (binding?.integration !== integration) return;
-    const { event } = notification;
+    let event: AgentProducerNotification['event'];
+    try {
+      event = decodeProducerEvent(notification.event, binding.ref, binding.creator);
+    } catch (error) {
+      log.warn('Provider event could not be encoded', { integrationId: integration.descriptor.id, bindingId: binding.ref.id, reason: failureReason(error) });
+      event = notification.event?.type === 'rows'
+        ? { type: 'publication-gap' }
+        : { type: 'publication-failed', error: UNREADABLE_EVENT_FAILURE };
+    }
     if (event.type === 'run-ended' && binding.launch?.runId === event.runId) binding.launch = null;
     binding.seq += 1;
     this.#published += 1;
-    const payload = encodeProducerFrame(binding.seq, notification);
+    const payload = encodeProducerFrame(binding.seq, { binding: binding.ref, event });
     const frame: RetainedFrame = {
       seq: binding.seq,
       order: this.#published,
       payload,
       bytes: Buffer.byteLength(payload),
-      droppable: notification.event.type === 'rows',
+      droppable: event.type === 'rows',
     };
     binding.retained.push(frame);
     binding.retainedBytes += frame.bytes;

@@ -1,0 +1,17 @@
+{
+  "definition": {
+    "name": "terminal.terminated",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "attachmentId?": {
+      "union": [
+        "string",
+        "undefined"
+      ]
+    },
+    "terminalId": "string",
+    "type": "\"terminal-terminated\""
+  }
+}

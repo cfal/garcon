@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TerminalStreamServerMessage } from '../../../common/terminal.js';
 import { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
-import { SessionTransport } from '../../../server/remote/transport/session-transport.js';
+import { rpcWireV1 } from '../../../server/remote/transport/rpc-wire-v1.js';
+import { TestSessionTransport as SessionTransport } from '../../../server/remote/__tests__/test-session-transport.js';
 import { TerminalRpcServer } from '../../../server/remote/server/terminal-rpc-server.js';
 import { TerminalRuntime } from '../../../server/runtime/terminals/runtime.js';
 import { withTimeout } from '../../support/deferred.js';
@@ -38,10 +39,10 @@ test('real PTY keeps draining and records exit after reliable transport saturati
     const { terminal } = await service.create(authority, {
       expectedTerminalRuntimeId: inventory.terminalRuntimeId, requestId: 'create', requestedInitialWorkingDirectory: null,
     });
-    await worker.handle({ method: 'terminals.attach', request: {
+    await worker.handle({ method: 'terminals.attach', version: 1, request: {
       authority, attachmentId: 'attachment', attachmentEpoch: inventory.attachmentEpoch,
       type: 'terminal-attach', terminalId: terminal.terminalId, clientId: 'browser', intent: 'restore', afterSequence: 0,
-    } });
+    } }, rpcWireV1('terminals.attach'));
     writable = false;
     while (transport.channel.queuedFrames < 4) transport.send('reliable traffic');
     pty.write('\n');

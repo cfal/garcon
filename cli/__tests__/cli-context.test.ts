@@ -1,10 +1,12 @@
+import { CLI_BOOTSTRAP_VERSION, CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 import { describe, expect, test } from 'bun:test';
 import crypto from 'node:crypto';
 import { runtimeProofPayload } from '@garcon/common/server-runtime';
 import { parseCliArgs } from '../args.js';
 import { GarconClient, GarconHttpError } from '../garcon-client.js';
+import { CliError } from '../errors.js';
 
-const connection = {
+const connection = { protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS },
   baseUrl: 'http://127.0.0.1:8080', instanceId: 'controller', endpointInstanceId: 'gateway',
   defaultExecutorId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', workspaceName: null,
   localCapability: 'secret', workspaceDir: null,
@@ -13,7 +15,7 @@ const request = { clientRequestId: 'request', clientMessageId: 'message', chatId
 
 function runtimeResponse(input: string | URL | Request, controller = 'controller'): Response {
   const url = new URL(String(input));
-  if (url.pathname.endsWith('/cli/context')) return Response.json({
+  if (url.pathname.endsWith('/cli/context')) return Response.json({ protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS },
     serverInstanceId: controller, defaultExecutorId: connection.defaultExecutorId, workspaceName: null,
   });
   return Response.json({ schemaVersion: 1, instanceId: 'gateway', proof: crypto.createHmac('sha256', 'secret')
@@ -21,12 +23,51 @@ function runtimeResponse(input: string | URL | Request, controller = 'controller
 }
 
 describe('CLI endpoint context', () => {
+  test.each(['cli.chats.stop', 'cli.chats.turnReceipt', 'cli.chats.run'])('missing %s refuses submission before any request', async missing => {
+    const contracts = { ...CLI_CONTRACTS };
+    delete contracts[missing];
+    let sent = 0;
+    const client = new GarconClient({ ...connection, protocol: { bootstrap: 1, contracts }, fetch: async () => {
+      sent++;
+      throw new Error('Unexpected request');
+    } });
+    await expect(client.runChat(request)).rejects.toMatchObject({ errorCode: 'OPERATION_UNSUPPORTED', status: 422 });
+    expect(sent).toBe(0);
+  });
+
+  test('pins exact operation headers while context verification remains unversioned', async () => {
+    const client = new GarconClient({ ...connection, fetch: async (input, init) => {
+      const headers = new Headers(init?.headers);
+      if (String(input).endsWith('/cli/context')) {
+        expect(headers.get('X-Garcon-Contract')).toBeNull();
+        expect(headers.get('X-Garcon-Server-Instance')).toBe('controller');
+        return runtimeResponse(input);
+      }
+      if (String(input).includes('/runtime?')) return runtimeResponse(input);
+      expect(headers.get('X-Garcon-Contract')).toBe('cli.models.list@1');
+      return Response.json({ executorInstanceId: 'synthetic-instance', catalog: { agents: [], apiProviders: [] } });
+    } });
+    await client.getModelCatalog();
+    expect(await client.verifyRuntime()).toBe(true);
+  });
+
+  test.each([undefined, { bootstrap: 2, contracts: CLI_CONTRACTS }, { bootstrap: 1, contracts: { 'cli.models.list': 1 } }])('refuses invalid or incompatible CLI bootstrap %j', protocol => {
+    expect(() => new GarconClient({ ...connection, protocol: protocol as typeof connection.protocol })).toThrow('unsupported CLI bootstrap');
+  });
+  test.each([undefined, null, '', 42, {}])('rejects a catalog with invalid executor instance %j', async executorInstanceId => {
+    const client = new GarconClient({ ...connection, fetch: async () => Response.json({
+      executorInstanceId, catalog: { agents: [], apiProviders: [] },
+    }) });
+    const result = client.getModelCatalog();
+    await expect(result).rejects.toBeInstanceOf(CliError);
+    await expect(result).rejects.toMatchObject({ phase: 'catalog resolution' });
+  });
   test('catalogs, native lookups and project defaults use the authenticated executor', async () => {
     const client = new GarconClient({ ...connection, fetch: async (input, init) => {
       const url = new URL(String(input));
       if (url.pathname.endsWith('/models')) {
         expect(url.searchParams.get('executorId')).toBe(connection.defaultExecutorId);
-        return Response.json({ catalog: { agents: [], apiProviders: [] } });
+        return Response.json({ executorInstanceId: 'synthetic-instance', catalog: { agents: [], apiProviders: [] } });
       }
       expect(JSON.parse(String(init?.body)).executorId).toBe(connection.defaultExecutorId);
       return Response.json(url.pathname.endsWith('/project-default')

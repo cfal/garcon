@@ -1,0 +1,27 @@
+{
+  "definition": {
+    "name": "cli.chats.tags",
+    "version": 1,
+    "requires": [],
+    "mutation": false,
+    "management": false,
+    "timeoutMs": 30000,
+    "pool": "short",
+    "lane": "bulk"
+  },
+  "route": "GET /api/v1/chats/tags",
+  "wire": {
+    "request": {
+      "query": {
+        "chatId": "string"
+      }
+    },
+    "result": {
+      "chatId": "string",
+      "success": "true",
+      "tags": {
+        "array": "string"
+      }
+    }
+  }
+}

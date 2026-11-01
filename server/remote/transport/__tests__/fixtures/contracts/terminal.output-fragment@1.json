@@ -1,0 +1,21 @@
+{
+  "definition": {
+    "name": "terminal.output-fragment",
+    "version": 1,
+    "requires": []
+  },
+  "wire": {
+    "attachmentId?": {
+      "union": [
+        "string",
+        "undefined"
+      ]
+    },
+    "dataBase64": "string",
+    "fragmentCount": "number",
+    "fragmentIndex": "number",
+    "sequence": "number",
+    "terminalId": "string",
+    "type": "\"terminal-output-fragment\""
+  }
+}

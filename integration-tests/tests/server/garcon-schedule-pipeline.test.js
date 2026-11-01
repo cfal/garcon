@@ -84,10 +84,11 @@ async function withPipeline(run) {
       appendControlReceipt: () => {},
       isControlInputViewCurrent: (chatId, viewId) => ledger.existingCurrentView(chatId)?.viewId === viewId,
     });
+  /** @satisfies {Pick<import('../../../server/controller/agents/registry.js').AgentRegistryServiceContract, 'currentTranscriptViewId' | 'executionPolicy' | 'assertQueuedExecutionSupported'>} */
+  const agents = { currentTranscriptViewId: async (chatId) => ledger.currentView(chatId).viewId,
+    executionPolicy: () => 'conversation', assertQueuedExecutionSupported: () => {} };
   const commands = new QueueCommands(new CommandSupport({ chats: registry, queue: execution,
-    ledger: new CommandLedger(), chatMutationLock: lock,
-    agents: { currentTranscriptViewId: async (chatId) => ledger.currentView(chatId).viewId,
-      executionPolicy: () => 'conversation' },
+    ledger: new CommandLedger(), chatMutationLock: lock, agents,
   }));
   const scheduler = new ScheduledPromptScheduler({ store: schedules, cron, chats: registry,
     inspectProject: inspectProjectDirectory,

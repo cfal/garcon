@@ -135,6 +135,7 @@ export class StartCommands {
     if (!this.deps.agents.hasAgent(input.agentId, executorId)) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${input.agentId}`);
     }
+    this.deps.agents.assertExecutionSupported({ ...input, executorId }, ['execution.start']);
     const literal = this.deps.agents.executionPolicy(input.agentId, executorId) === 'literal';
     this.deps.agents.assertExecutionModeSelectionSupported(input.agentId, {
       executorId,

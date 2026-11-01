@@ -1,0 +1,120 @@
+{
+  "definition": {
+    "name": "git.getTargetCandidates",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "projectPath": "string"
+      }
+    },
+    "result": {
+      "diagnostics?": {
+        "union": [
+          "undefined",
+          {
+            "batchCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "bisectionCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "cacheHits?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "commands": {
+              "array": {
+                "command": "string",
+                "durationMs": "number",
+                "stderrBytes": "number",
+                "stdoutBytes": "number"
+              }
+            },
+            "fileCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "phases": {
+              "array": {
+                "durationMs": "number",
+                "name": {
+                  "union": [
+                    "\"body-cache\"",
+                    "\"body-git\"",
+                    "\"body-split\"",
+                    "\"document-register\"",
+                    "\"freshness-after\"",
+                    "\"freshness-before\"",
+                    "\"patch-scan\"",
+                    "\"resolve\"",
+                    "\"serialize\"",
+                    "\"summary-git\""
+                  ]
+                }
+              }
+            },
+            "rowCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            }
+          }
+        ]
+      },
+      "executorId": "string",
+      "instanceId": "string",
+      "targets": {
+        "array": {
+          "branch": "string",
+          "isCurrent": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "isMissing": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "label": "string",
+          "projectPath": "string",
+          "repoRoot": "string",
+          "source": {
+            "union": [
+              "\"chat-project\"",
+              "\"worktree\""
+            ]
+          },
+          "worktreePath": "string"
+        }
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

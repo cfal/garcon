@@ -1,0 +1,114 @@
+{
+  "definition": {
+    "name": "git.getGraph",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "limit?": {
+          "union": [
+            "number",
+            "undefined"
+          ]
+        },
+        "projectPath": "string"
+      }
+    },
+    "result": {
+      "commits": {
+        "array": {
+          "author": "string",
+          "date": "string",
+          "decorations": {
+            "array": "string"
+          },
+          "graph": "string",
+          "hash": "string",
+          "parents": {
+            "array": "string"
+          },
+          "subject": "string"
+        }
+      },
+      "diagnostics?": {
+        "union": [
+          "undefined",
+          {
+            "batchCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "bisectionCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "cacheHits?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "commands": {
+              "array": {
+                "command": "string",
+                "durationMs": "number",
+                "stderrBytes": "number",
+                "stdoutBytes": "number"
+              }
+            },
+            "fileCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            },
+            "phases": {
+              "array": {
+                "durationMs": "number",
+                "name": {
+                  "union": [
+                    "\"body-cache\"",
+                    "\"body-git\"",
+                    "\"body-split\"",
+                    "\"document-register\"",
+                    "\"freshness-after\"",
+                    "\"freshness-before\"",
+                    "\"patch-scan\"",
+                    "\"resolve\"",
+                    "\"serialize\"",
+                    "\"summary-git\""
+                  ]
+                }
+              }
+            },
+            "rowCount?": {
+              "union": [
+                "number",
+                "undefined"
+              ]
+            }
+          }
+        ]
+      },
+      "executorId": "string",
+      "instanceId": "string"
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

@@ -65,6 +65,7 @@ import type {
 import {
 	insertServerEntry,
 	normalizeExecutionFields,
+	normalizeRecordExecutionFields,
 	reconcileActivityProjection,
 	sameRecord,
 	toDraftRecord,
@@ -886,7 +887,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		const nextChat = {
 			...chat,
 			...patch,
-			...normalizeExecutionFields({ ...chat, ...patch }),
+			...normalizeRecordExecutionFields({ ...chat, ...patch }),
 		};
 		if (patch.title !== undefined) this.#titles.noteConfirmation();
 		this.#baseById = {

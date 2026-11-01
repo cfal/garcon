@@ -1,3 +1,4 @@
+import { testCliContracts } from '../../lib/__tests__/cli-contract-fixture.js';
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 import { resetServerConfigForTests } from '../../config.ts';
@@ -127,7 +128,7 @@ describe('POST /api/v1/chats/lookup-native-session', () => {
 
   it('inherits authenticated route wrapping and rejects missing credentials', async () => {
     const handler = createNativeSessionLookupRoutes(registry, agents)[ROUTE].POST;
-    const wrapped = wrapRoute(handler, ROUTE, 'POST');
+    const wrapped = wrapRoute(handler, ROUTE, 'POST', { cliContracts: testCliContracts({ [ROUTE]: { ['POST']: handler } }) });
 
     const response = await wrapped(request({ nativeSessionId: 'session-123' }));
 

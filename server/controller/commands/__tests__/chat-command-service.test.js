@@ -9,7 +9,8 @@ import { ChatCommandService } from '../chat-command-service.ts';
 import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
 import { inspectProjectDirectory } from '../../__tests__/project-inspector.ts';
 import { projectAgentTurnReceipt } from '../agent-turn-receipt-projector.ts';
-import { CommandLedger, LEDGER_RECORD_LIMIT, commandLedgerKey } from '../command-ledger.ts';
+import { CommandLedger, LEDGER_RECORD_LIMIT, PRE_SCHEDULE_FAILURE_ERROR_CODE, commandLedgerKey } from '../command-ledger.ts';
+import { OwnershipTransferPendingError } from '../../agents/ownership-transfer-fence.js';
 import {
   AskUserQuestionToolUseMessage,
   AssistantMessage,
@@ -279,12 +280,15 @@ function makeService(overrides = {}) {
   const queue = overrides.queueService ?? {
     scheduleDirectInput: mock(async (input) => {
       let reservation;
+      let validatingRecovery = input.preparation?.validateRecovery !== undefined;
       try {
         reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
         const control = await queue.readChatExecutionControl(input.command.chatId);
         if (control.entries.length > 0 || control.pause) {
           throw new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
         }
+        await input.preparation?.validateRecovery?.({ signal: reservation.executionAdmission.signal });
+        validatingRecovery = false;
         await input.preparation?.prepare({
           signal: reservation.executionAdmission.signal,
           assertAdmissionActive: () => reservation.executionAdmission.signal.throwIfAborted(),
@@ -293,6 +297,7 @@ function makeService(overrides = {}) {
         await input.settlement.markScheduled(input.command, input.options.turnId);
       } catch (error) {
         if (reservation) await queue.releaseDirectTurn(reservation);
+        if (validatingRecovery) throw error;
         let failure = error;
         try {
           await input.preparation?.compensate();
@@ -553,6 +558,10 @@ function makeService(overrides = {}) {
     currentTranscriptViewId: mock(() => Promise.resolve('view-1')),
     hasAgent: mock(() => true),
     assertExecutorReady: mock(() => undefined),
+    assertExecutionSupported: mock((target) => agents.assertAgentAvailable(target.agentId, target.executorId)),
+    assertRunSupported: mock((target) => agents.assertExecutionSupported(target, [target.agentSessionId ? 'execution.resume' : 'execution.start'])),
+    assertNativeForkSupported: mock(() => true),
+    assertQueuedExecutionSupported: mock(() => undefined),
     assertAgentAvailable: mock(() => undefined),
     supportsImages: mock(() => true),
     fileAttachmentAdmission: mock(
@@ -609,6 +618,7 @@ function makeService(overrides = {}) {
   };
   const handoffPreparations = [];
   const defaultHandoffs = {
+    recoverHandoff: mock(async () => false),
     cancelPreparation: mock(() => undefined),
     resolveTarget: mock(async ({ chat, handoff }) => {
       if (handoff.expectedAgentOwnershipEpoch !== chat.agentOwnershipEpoch) {
@@ -683,8 +693,11 @@ function makeService(overrides = {}) {
     appendNotice: mock(() => undefined),
     currentView: mock(() => ({ viewId: 'view-1', contentStartOrdinal: 1 })),
     existingCurrentView: mock(() => ({ viewId: 'view-1', contentStartOrdinal: 1 })),
-    highWatermark: mock(() => ({ viewId: 'view-1', ordinal: 0 })),
-    rowsThrough: mock(async () => []),
+    highWatermark: mock(() => ({ viewId: 'view-1', ordinal: 3 })),
+    rowsThrough: mock(async (_chatId, watermark) => Array.from({ length: watermark.ordinal }, (_, index) => ({
+      kind: 'provider-row', viewId: watermark.viewId, ordinal: index + 1, at: '2030-01-01T00:00:00.000Z',
+      message: new AssistantMessage('2030-01-01T00:00:00.000Z', 'Synthetic source row'), providerMeta: null,
+    }))),
     seedChat: mock(async () => ({ viewId: 'view-2' })),
     deleteChat: mock(() => undefined),
   };
@@ -993,7 +1006,7 @@ describe('ChatCommandService', () => {
       registry: f.chats, commands: f.service, turns: f.ledger, chatMutationLock: new KeyedPromiseLock(),
       chatIds: { allocate: () => TARGET_CHAT_ID }, isEnabled: () => true,
       settings: { getExecutionDefaults: () => ({}) },
-      selection: { catalog: async () => ({}), resolve: () => ({
+      selection: { catalog: async () => ({ assertCurrent() {} }), resolve: () => ({
         agentId: agentSettings().ownerId,
         permissionMode: 'default', thinkingMode: 'none', model: 'opus', agentSettings: agentSettings(),
       }) },
@@ -1208,7 +1221,7 @@ describe('ChatCommandService', () => {
       registry: f.chats, commands: f.service, turns: f.ledger, chatMutationLock: locks,
       chatIds: { allocate: () => TARGET_CHAT_ID }, isEnabled: () => true,
       settings: { getExecutionDefaults: () => ({}) },
-      selection: { catalog: async () => ({}), resolve: () => ({
+      selection: { catalog: async () => ({ assertCurrent() {} }), resolve: () => ({
         agentId: agentSettings().ownerId,
         permissionMode: 'default', thinkingMode: 'none', model: 'opus', agentSettings: agentSettings(),
       }) },
@@ -1799,6 +1812,45 @@ describe('ChatCommandService', () => {
     )).toBeNull();
   });
 
+  it.each(['assertExecutionSupported', 'assertNativeForkSupported'])('refuses fork-run at %s before command or resource creation', async (check) => {
+    const f = makeService({ agents: { [check]: mock(() => {
+      throw new DomainError('OPERATION_UNSUPPORTED', 'Synthetic unsupported workflow', 422);
+    }) } });
+    const input = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, command: 'Synthetic fork input',
+      clientRequestId: 'unsupported-fork', clientMessageId: 'unsupported-fork-input' };
+    await expect(f.service.submitForkRun(input)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', status: 422 });
+    expect(await readLedgerRecord(f.ledger, 'fork-run', input.clientRequestId, TARGET_CHAT_ID)).toBeNull();
+    expect(f.createForkedChat).not.toHaveBeenCalled();
+    expect(f.queue.admitUserInput).not.toHaveBeenCalled();
+    expect(f.sessions.has(TARGET_CHAT_ID)).toBe(false);
+  });
+
+  it.each([null, 'native-session'])('admits a ledger-only fork-run without resume support (source session: %s)', async (agentSessionId) => {
+    const f = makeService({ session: { agentSessionId }, agents: {
+      assertNativeForkSupported: mock(() => false),
+      assertExecutionSupported: mock((_target, operations) => {
+        if (operations.includes('execution.resume')) throw new DomainError('OPERATION_UNSUPPORTED', 'Resume absent', 422);
+      }),
+    } });
+    await expect(f.service.submitForkRun({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, command: 'continue',
+      clientRequestId: 'start-only-fork', clientMessageId: 'start-only-message' })).resolves.toMatchObject({ status: 'accepted' });
+    expect(f.agents.assertExecutionSupported).toHaveBeenCalledWith(expect.anything(), ['execution.start']);
+    expect(f.agents.assertNativeForkSupported).toHaveBeenCalledTimes(agentSessionId ? 1 : 0);
+    expect(f.createForkedChat.mock.calls[0][0].preparedSource.needsNativeFork).toBe(false);
+  });
+
+  it('honors handoff consent when native-fork contracts are absent', async () => {
+    const f = makeService({ agents: { assertNativeForkSupported: mock(() => {
+      throw new DomainError('OPERATION_UNSUPPORTED', 'Native fork absent', 422);
+    }) } });
+    const input = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, command: 'continue',
+      clientRequestId: 'consent-contract-fork', clientMessageId: 'consent-contract-message' };
+    await expect(f.service.submitForkRun(input)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED' });
+    await expect(f.service.submitForkRun({ ...input, allowHandoffFork: true })).resolves.toMatchObject({ status: 'accepted' });
+    expect(f.createForkedChat.mock.calls[0][0].preparedSource.needsNativeFork).toBe(false);
+    expect(f.agents.assertExecutionSupported).toHaveBeenCalledWith(expect.anything(), ['execution.start']);
+  });
+
   it('canonicalizes inherited fork thinking mode without changing routing', async () => {
     const { service, createForkedChat } = makeService({
       session: {
@@ -1827,6 +1879,18 @@ describe('ChatCommandService', () => {
         thinkingMode: 'none',
       }),
     }));
+  });
+
+  it('keeps a ledger-only point fork available without native fork support', async () => {
+    const f = makeService({ agents: { assertNativeForkSupported: mock(() => {
+      throw new DomainError('OPERATION_UNSUPPORTED', 'Native fork unavailable', 422);
+    }) } });
+    f.transcripts.currentView.mockReturnValue({ viewId: 'view-1', contentStartOrdinal: 3 });
+    await expect(f.service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID,
+      upToOrdinal: 1, transcriptViewId: 'view-1', clientRequestId: 'ledger-only-point' })).resolves.toMatchObject({ success: true });
+    expect(f.agents.assertNativeForkSupported).not.toHaveBeenCalled();
+    expect(f.createForkedChat).toHaveBeenCalledWith(expect.objectContaining({ preparedSource: expect.objectContaining({ needsNativeFork: false }) }));
+    expect(f.transcripts.rowsThrough).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a colliding chat ID before accepting a command ledger record', async () => {
@@ -3204,6 +3268,84 @@ describe('ChatCommandService', () => {
     expect(f.sessions.get(chatId).agentOwnershipEpoch).toBe('epoch-1');
     expect(f.queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
     expect(f.queue.admitUserInput).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(f.ledger, 'agent-handoff', clientRequestId)).toMatchObject({
+      status: 'failed', errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+    });
+    f.queue.withChatExecutionControl.mockImplementation(async (_chatId, operation) => {
+      expect(await readLedgerRecord(f.ledger, 'agent-handoff', clientRequestId)).toMatchObject({
+        status: 'accepted', errorCode: undefined,
+      });
+      return operation(storedQueue([]));
+    });
+    await expect(f.service.submitAgentHandoff({ chatId, clientRequestId, handoff }, new AbortController().signal))
+      .resolves.toMatchObject({ success: true, chat: { agentId: 'codex' } });
+    expect(await readLedgerRecord(f.ledger, 'agent-handoff', clientRequestId)).toMatchObject({ status: 'finished' });
+  });
+
+  it('replays a completed promptless handoff without resolving its stale target or epoch', async () => {
+    const f = makeService();
+    const { chatId, clientRequestId, handoff } = handoffRunInput('promptless-replay');
+    const input = { chatId, clientRequestId, handoff };
+    const first = await f.service.submitAgentHandoff(input, new AbortController().signal);
+    f.handoffs.resolveTarget.mockRejectedValue(new DomainError('EXECUTOR_UNAVAILABLE', 'Target changed', 503, true));
+    f.agents.currentTranscriptViewId.mockRejectedValue(new Error('Must not adopt again'));
+    await expect(f.service.submitAgentHandoff(input, new AbortController().signal)).resolves.toEqual(first);
+    expect(f.handoffs.resolveTarget).toHaveBeenCalledTimes(1);
+    expect(f.handoffs.createPreparation).toHaveBeenCalledTimes(1);
+    expect(f.queue.reserveTranscriptSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays a promptless handoff settled before failed producer repair', async () => {
+    const f = makeService();
+    const { chatId, clientRequestId, handoff } = handoffRunInput('promptless-repair');
+    const input = { chatId, clientRequestId, handoff };
+    const create = f.handoffs.createPreparation.getMockImplementation();
+    f.handoffs.createPreparation.mockImplementation(args => {
+      const preparation = create(args);
+      const prepare = preparation.prepare.getMockImplementation();
+      preparation.prepare.mockImplementation(async context => {
+        await prepare(context);
+        await f.ledger.update(commandLedgerKey('agent-handoff', chatId, clientRequestId), { status: 'finished' });
+        throw new DomainError('OWNERSHIP_TRANSFER_PENDING', 'Producer repair pending', 409, true);
+      });
+      return preparation;
+    });
+    await expect(f.service.submitAgentHandoff(input, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'OWNERSHIP_TRANSFER_PENDING' });
+    f.handoffs.resolveTarget.mockRejectedValue(new Error('Must not resolve committed ownership'));
+    await expect(f.service.submitAgentHandoff(input, new AbortController().signal))
+      .resolves.toMatchObject({ success: true, chat: { agentId: 'codex', agentOwnershipEpoch: 'epoch-1:handoff' } });
+    expect(f.handoffs.createPreparation).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains an accepted promptless handoff while its durable decision is pending', async () => {
+    const f = makeService({ handoffs: {
+      createPreparation: mock(() => ({ prepare: mock(async () => { throw new OwnershipTransferPendingError(); }) })),
+    } });
+    const { chatId, clientRequestId, handoff } = handoffRunInput('promptless-pending');
+    const input = { chatId, clientRequestId, handoff };
+    await expect(f.service.submitAgentHandoff(input, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'OWNERSHIP_TRANSFER_PENDING' });
+    expect(await readLedgerRecord(f.ledger, 'agent-handoff', clientRequestId)).toMatchObject({ status: 'accepted' });
+    f.handoffs.recoverHandoff.mockResolvedValue(true);
+    f.handoffs.resolveTarget.mockRejectedValue(new Error('Must not resolve a durable decision again'));
+    await expect(f.service.submitAgentHandoff(input, new AbortController().signal)).resolves.toMatchObject({ success: true });
+    expect(await readLedgerRecord(f.ledger, 'agent-handoff', clientRequestId)).toMatchObject({ status: 'finished' });
+    expect(f.handoffs.createPreparation).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers a durable promptless decision without an ephemeral command record', async () => {
+    const f = makeService({ handoffs: {
+      recoverHandoff: mock(async () => true),
+      resolveTarget: mock(async () => { throw new DomainError('EXECUTOR_UNAVAILABLE', 'Offline target', 503, true); }),
+    } });
+    const { chatId, clientRequestId, handoff } = handoffRunInput('restart-recovery');
+    await expect(f.service.submitAgentHandoff({ chatId, clientRequestId, handoff }, new AbortController().signal))
+      .resolves.toMatchObject({ success: true, chatId });
+    expect(f.handoffs.recoverHandoff).toHaveBeenCalledWith(chatId, clientRequestId, handoff);
+    expect(f.handoffs.resolveTarget).not.toHaveBeenCalled();
+    expect(f.queue.reserveTranscriptSnapshot).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(f.ledger, 'agent-handoff', clientRequestId)).toBeNull();
   });
 
   it('releases a promptless handoff reservation after stale ownership rejection', async () => {
@@ -3448,6 +3590,39 @@ describe('ChatCommandService', () => {
     expect(fixture.handoffs.resolveTarget).toHaveBeenCalledTimes(2);
     expect(fixture.handoffs.createPreparation).toHaveBeenCalledTimes(1);
     expect(prepare).toHaveBeenCalledTimes(1);
+  });
+
+  it('admits a run with absent saved settings without persisting defaults', async () => {
+    const { service, chats, queue } = makeService({ session: { agentSettingsById: {} } });
+
+    const result = await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue with current defaults',
+      clientRequestId: 'req-absent-settings',
+      clientMessageId: 'msg-absent-settings',
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
+    expect(chats.getChat(SOURCE_CHAT_ID).agentSettingsById).toEqual({});
+    expect(chats.updateChat).not.toHaveBeenCalled();
+  });
+
+  it('rejects run settings owned by another agent without changing saved settings', async () => {
+    const { service, chats, queue } = makeService();
+    const saved = structuredClone(chats.getChat(SOURCE_CHAT_ID).agentSettingsById);
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue with mismatched settings',
+      clientRequestId: 'req-wrong-settings-owner',
+      clientMessageId: 'msg-wrong-settings-owner',
+      agentSettings: agentSettings('codex'),
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
+    expect(chats.getChat(SOURCE_CHAT_ID).agentSettingsById).toEqual(saved);
+    expect(chats.updateChat).not.toHaveBeenCalled();
   });
 
   it('applies supported resume overrides to one turn without persisting them', async () => {
@@ -3898,6 +4073,83 @@ describe('ChatCommandService', () => {
     expect(createForkedChat).toHaveBeenCalledOnce();
     expect(agents.discardForkedAgentSession).toHaveBeenCalledWith(cleanup);
     expect((await readLedgerRecord(ledger, 'fork-run', input.clientRequestId, TARGET_CHAT_ID)).forkPreparation).toBeUndefined();
+  });
+
+  async function acceptedForkRecovery() {
+    const cleanup = { scope: { executorId: 'local', instanceId: 'original', integrationId: 'claude' },
+      session: { agentSessionId: 'original-native', nativeSession: null, nativeSeedReceipt: null } };
+    const projection = makeInputProjection();
+    projection.admitInput.mockRejectedValueOnce(new Error('Synthetic admission failure'));
+    const runAgentTurn = mock(async () => {});
+    const queue = makeRealQueue(projection, { runAgentTurn });
+    const createForkedChat = mock(async ({ registry }) => {
+      registry.addChat({ ...registry.getChat(SOURCE_CHAT_ID), id: TARGET_CHAT_ID, agentSessionId: null });
+      return { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, agentId: 'claude', agentSessionId: null,
+        nativeCleanup: cleanup, rollback: async () => { throw new Error('Synthetic rollback failure'); } };
+    });
+    const f = makeService({ queueService: queue, createForkedChat });
+    const update = f.ledger.update.bind(f.ledger);
+    let failSettlement = true;
+    f.ledger.update = mock((key, patch) => {
+      if (failSettlement && patch.status === 'failed') {
+        failSettlement = false;
+        throw new Error('Synthetic settlement failure');
+      }
+      return update(key, patch);
+    });
+    const input = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, command: 'Synthetic recovery',
+      clientRequestId: 'accepted-fork-recovery', clientMessageId: 'accepted-fork-message' };
+    await expect(f.service.submitForkRun(input)).rejects.toThrow('Failed to settle');
+    const record = await readLedgerRecord(f.ledger, 'fork-run', input.clientRequestId, TARGET_CHAT_ID);
+    expect(record.status).toBe('accepted');
+    return { ...f, projection, runAgentTurn, input, record, cleanup };
+  }
+
+  it('replays committed accepted fork input without source or provider admission', async () => {
+    const f = await acceptedForkRecovery();
+    f.sessions.delete(SOURCE_CHAT_ID);
+    f.projection.hasMatchingInput.mockResolvedValue(true);
+    f.agents.assertExecutionSupported.mockClear();
+    f.agents.assertExecutionSupported.mockImplementation(() => { throw new Error('Must not validate'); });
+    f.agents.assertNativeForkSupported.mockClear();
+    await expect(f.service.submitForkRun(f.input)).resolves.toMatchObject({ status: 'duplicate', turnId: f.record.turnId });
+    expect(f.createForkedChat).toHaveBeenCalledOnce();
+    expect(f.agents.assertExecutionSupported).not.toHaveBeenCalled();
+    expect(f.agents.assertNativeForkSupported).not.toHaveBeenCalled();
+    expect(f.runAgentTurn).not.toHaveBeenCalled();
+    const finished = await readLedgerRecord(f.ledger, 'fork-run', f.input.clientRequestId, TARGET_CHAT_ID);
+    expect(finished.status).toBe('finished');
+    expect(finished.forkPreparation).toBeUndefined();
+  });
+
+  it.each([false, true])('preserves accepted fork recovery and cleanup on refusal (target absent: %s)', async (absent) => {
+    const f = await acceptedForkRecovery();
+    if (absent) f.sessions.delete(TARGET_CHAT_ID);
+    else f.sessions.delete(SOURCE_CHAT_ID);
+    f.agents.assertExecutionSupported.mockImplementation(() => { throw new DomainError('OPERATION_UNSUPPORTED', 'Synthetic missing launch', 422); });
+    await expect(f.service.submitForkRun(f.input)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED' });
+    expect(await readLedgerRecord(f.ledger, 'fork-run', f.input.clientRequestId, TARGET_CHAT_ID)).toEqual(f.record);
+    expect(f.agents.discardForkedAgentSession).not.toHaveBeenCalled();
+    expect(f.createForkedChat).toHaveBeenCalledOnce();
+    if (!absent) {
+      expect(f.sessions.has(TARGET_CHAT_ID)).toBe(true);
+      expect(f.agents.assertExecutionSupported).toHaveBeenLastCalledWith(expect.objectContaining({ agentSessionId: null }), ['execution.start']);
+      f.agents.assertExecutionSupported.mockImplementation(() => {});
+      await expect(f.service.submitForkRun(f.input)).resolves.toMatchObject({ status: 'duplicate', turnId: f.record.turnId });
+      await f.queue.waitForDispatches();
+      expect(f.runAgentTurn).toHaveBeenCalledOnce();
+      expect(f.createForkedChat).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('rejects accepted fork payload and cross-command conflicts before support checks', async () => {
+    const f = await acceptedForkRecovery();
+    f.agents.assertExecutionSupported.mockClear();
+    f.agents.assertExecutionSupported.mockImplementation(() => { throw new Error('Must not validate'); });
+    await expect(f.service.submitForkRun({ ...f.input, command: 'Changed input' })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    await expect(f.service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID,
+      clientRequestId: f.input.clientRequestId })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    expect(f.agents.assertExecutionSupported).not.toHaveBeenCalled();
   });
 
   it.each(['transient', 'persistent', 'none'])('retains only unresolved native cleanup after creation throws: %s discard failure', async (failure) => {
@@ -5055,6 +5307,66 @@ describe('ChatCommandService', () => {
     expect(agents.compactSession).not.toHaveBeenCalled();
   });
 
+  it.each([['EXECUTOR_UNAVAILABLE', 503], ['OPERATION_UNSUPPORTED', 422]])('refuses /compact with %s before acceptance and permits the same ID after recovery', async (code, status) => {
+    const f = makeService({ agents: { assertExecutionSupported: mock(() => {
+      throw new DomainError(code, 'Synthetic unavailable workflow', status, status === 503);
+    }) } });
+    const input = { chatId: SOURCE_CHAT_ID, clientRequestId: 'compact-recovery' };
+    await expect(f.service.submitCompact(input)).rejects.toMatchObject({ code, status });
+    expect(await readLedgerRecord(f.ledger, 'agent-compact', input.clientRequestId)).toBeNull();
+    expect(f.queue.scheduleDirectOperation).not.toHaveBeenCalled();
+    f.agents.assertExecutionSupported.mockImplementation(() => {});
+    await expect(f.service.submitCompact(input)).resolves.toMatchObject({ status: 'accepted' });
+    expect(f.queue.scheduleDirectOperation).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays accepted compaction while running and unsupported', async () => {
+    const f = makeService();
+    const input = { chatId: SOURCE_CHAT_ID, clientRequestId: 'compact-replay' };
+    const first = await f.service.submitCompact(input);
+    f.agents.isAgentSessionRunning.mockReturnValue(true);
+    f.agents.assertExecutionSupported.mockImplementation(() => { throw new Error('Must not revalidate'); });
+    await expect(f.service.submitCompact(input)).resolves.toMatchObject({ status: 'duplicate', turnId: first.turnId });
+    expect(f.agents.assertExecutionSupported).toHaveBeenCalledTimes(1);
+    expect(f.queue.scheduleDirectOperation).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses compaction without a native session before acceptance', async () => {
+    const f = makeService({ session: { agentSessionId: null, nativeSession: null } });
+    const input = { chatId: SOURCE_CHAT_ID, clientRequestId: 'compact-sessionless' };
+    await expect(f.service.submitCompact(input)).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+    expect(await readLedgerRecord(f.ledger, 'agent-compact', input.clientRequestId)).toBeNull();
+    expect(f.queue.scheduleDirectOperation).not.toHaveBeenCalled();
+  });
+
+  it('refuses unavailable legacy adoption before accepting compaction', async () => {
+    const f = makeService({ agents: { currentTranscriptViewId: mock(async () => {
+      throw new DomainError('OPERATION_UNSUPPORTED', 'History reader unavailable', 422);
+    }) } });
+    const input = { chatId: SOURCE_CHAT_ID, clientRequestId: 'compact-history' };
+    await expect(f.service.submitCompact(input)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', status: 422 });
+    expect(await readLedgerRecord(f.ledger, 'agent-compact', input.clientRequestId)).toBeNull();
+    expect(f.queue.scheduleDirectOperation).not.toHaveBeenCalled();
+  });
+
+  it('revalidates and reopens a pre-schedule compaction failure', async () => {
+    const f = makeService();
+    const input = { chatId: SOURCE_CHAT_ID, clientRequestId: 'compact-preschedule' };
+    f.queue.readChatExecutionControl.mockResolvedValue(storedQueue([], { pause: manualPause() }));
+    await expect(f.service.submitCompact(input)).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    expect(await readLedgerRecord(f.ledger, 'agent-compact', input.clientRequestId))
+      .toMatchObject({ status: 'failed', errorCode: 'PRE_SCHEDULE_FAILED' });
+    f.queue.readChatExecutionControl.mockResolvedValue(storedQueue([]));
+    f.agents.assertExecutionSupported.mockImplementation(() => {
+      throw new DomainError('OPERATION_UNSUPPORTED', 'Synthetic unsupported workflow', 422);
+    });
+    await expect(f.service.submitCompact(input)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED' });
+    expect(f.queue.scheduleDirectOperation).toHaveBeenCalledTimes(1);
+    f.agents.assertExecutionSupported.mockImplementation(() => {});
+    await expect(f.service.submitCompact(input)).resolves.toMatchObject({ status: 'accepted' });
+    expect(f.queue.scheduleDirectOperation).toHaveBeenCalledTimes(2);
+  });
+
   it('projects a created queue entry without server-private fields', async () => {
     const postCreate = storedQueue([queueEntry('q1', 'still waiting')], {
       version: 7,
@@ -5445,8 +5757,9 @@ describe('ChatCommandService', () => {
       providerTarget: {},
       identity: { clientRequestId: 'request-active', turnId: 'turn-active' },
     };
-    const { service, queue, ledger } = makeService({
+    const { service, queue, ledger, agents } = makeService({
       queue: { captureSteerTarget: mock(() => target) },
+      agents: { assertQueuedExecutionSupported: mock(() => { throw new DomainError('OPERATION_UNSUPPORTED', 'Resume unsupported', 422); }) },
     });
     const input = {
       chatId: SOURCE_CHAT_ID,
@@ -5470,6 +5783,7 @@ describe('ChatCommandService', () => {
     // Capture starts the steer's interactive deadline, which its delivery shares.
     expect(queue.captureSteerTarget).toHaveBeenCalledWith(SOURCE_CHAT_ID, expect.any(Number));
     expect(queue.deliverAcceptedSteer).toHaveBeenCalledTimes(1);
+    expect(agents.assertQueuedExecutionSupported).not.toHaveBeenCalled();
     expect(queue.readChatExecutionControl).not.toHaveBeenCalled();
     expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
     expect(await readLedgerRecord(ledger, 'steer', input.clientRequestId)).toMatchObject({
@@ -5950,6 +6264,20 @@ describe('ChatCommandService', () => {
       entryId: queued.entryId,
     });
     expect(queue.enqueueAcceptedSteer).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a queued steer without resume support before accepting or enqueueing', async () => {
+    const { service, queue, ledger, agents } = makeService({
+      queue: { captureSteerTarget: mock(() => null) },
+      agents: { assertQueuedExecutionSupported: mock(() => { throw new DomainError('OPERATION_UNSUPPORTED', 'Resume unsupported', 422); }) },
+    });
+    const input = { chatId: SOURCE_CHAT_ID, content: 'Synthetic guidance', clientRequestId: 'unsupported-steer',
+      clientMessageId: 'unsupported-message', whenTurnUnavailable: 'queue' };
+    await expect(service.submitSteer(input)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', status: 422 });
+    expect(agents.assertQueuedExecutionSupported).toHaveBeenCalledTimes(1);
+    expect(await readLedgerRecord(ledger, 'steer', input.clientRequestId)).toBeNull();
+    expect(queue.enqueueAcceptedSteer).not.toHaveBeenCalled();
+    expect(queue.deliverAcceptedSteer).not.toHaveBeenCalled();
   });
 
   it('treats a steer identity reused with another unavailable-turn policy as a conflict', async () => {

@@ -1,0 +1,281 @@
+{
+  "definition": {
+    "name": "gh.getPullRequest",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "number": "number",
+        "projectPath": "string",
+        "repository": {
+          "host": "string",
+          "nameWithOwner": "string"
+        }
+      }
+    },
+    "result": {
+      "additions": "number",
+      "author": "string",
+      "baseRefName": "string",
+      "body": "string",
+      "changedFiles": "number",
+      "checks": {
+        "array": {
+          "name": "string",
+          "state": {
+            "union": [
+              "\"failure\"",
+              "\"neutral\"",
+              "\"pending\"",
+              "\"skipped\"",
+              "\"success\""
+            ]
+          },
+          "url?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          }
+        }
+      },
+      "createdAt": "string",
+      "deletions": "number",
+      "executorId": "string",
+      "fileBodies": {
+        "[string]": {
+          "bodyFingerprint": "string",
+          "bodyState": {
+            "union": [
+              "\"binary\"",
+              "\"error\"",
+              "\"loaded\"",
+              "\"loading\"",
+              "\"too-large\"",
+              "\"unloaded\""
+            ]
+          },
+          "category": {
+            "union": [
+              "\"binary\"",
+              "\"generated\"",
+              "\"large\"",
+              "\"lockfile\"",
+              "\"normal\""
+            ]
+          },
+          "error?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "isBinary": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "isTooLarge": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "limitMessage?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "limitReason?": {
+            "union": [
+              "\"binary\"",
+              "\"collection-too-many-bytes\"",
+              "\"collection-too-many-files\"",
+              "\"collection-too-many-rows\"",
+              "\"file-too-many-bytes\"",
+              "\"file-too-many-rows\"",
+              "\"git-timeout\"",
+              "\"line-too-long\"",
+              "\"unsupported-file-kind\"",
+              "undefined"
+            ]
+          },
+          "patch": {
+            "union": [
+              "null",
+              "string"
+            ]
+          },
+          "patchBytes": "number",
+          "patchDigest?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "path": "string",
+          "renderedRowCount": "number"
+        }
+      },
+      "files": {
+        "array": {
+          "additions": "number",
+          "bodyFingerprint": "string",
+          "bodyState": {
+            "union": [
+              "\"binary\"",
+              "\"error\"",
+              "\"loaded\"",
+              "\"loading\"",
+              "\"too-large\"",
+              "\"unloaded\""
+            ]
+          },
+          "category": {
+            "union": [
+              "\"binary\"",
+              "\"generated\"",
+              "\"large\"",
+              "\"lockfile\"",
+              "\"normal\""
+            ]
+          },
+          "deletions": "number",
+          "estimatedRows": "number",
+          "indexStatus": "string",
+          "isBinary": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "isGenerated": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "isTooLarge": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "limitMessage?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "limitReason?": {
+            "union": [
+              "\"binary\"",
+              "\"collection-too-many-bytes\"",
+              "\"collection-too-many-files\"",
+              "\"collection-too-many-rows\"",
+              "\"file-too-many-bytes\"",
+              "\"file-too-many-rows\"",
+              "\"git-timeout\"",
+              "\"line-too-long\"",
+              "\"unsupported-file-kind\"",
+              "undefined"
+            ]
+          },
+          "originalPath?": {
+            "union": [
+              "string",
+              "undefined"
+            ]
+          },
+          "path": "string",
+          "statsKnown?": {
+            "union": [
+              "false",
+              "true",
+              "undefined"
+            ]
+          },
+          "workTreeStatus": "string"
+        }
+      },
+      "headRefName": "string",
+      "headRefOid": "string",
+      "instanceId": "string",
+      "isDraft": {
+        "union": [
+          "false",
+          "true"
+        ]
+      },
+      "mergeable": {
+        "union": [
+          "\"conflicting\"",
+          "\"mergeable\"",
+          "\"unknown\""
+        ]
+      },
+      "number": "number",
+      "reviewDecision": {
+        "union": [
+          "\"approved\"",
+          "\"changes_requested\"",
+          "\"review_required\"",
+          "null"
+        ]
+      },
+      "state": {
+        "union": [
+          "\"closed\"",
+          "\"merged\"",
+          "\"open\""
+        ]
+      },
+      "threads": {
+        "array": {
+          "comments": {
+            "array": {
+              "author": "string",
+              "body": "string",
+              "createdAt": "string",
+              "id": "number"
+            }
+          },
+          "diffHunk": "string",
+          "id": "string",
+          "isOutdated": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "line": "number",
+          "path": "string",
+          "side": {
+            "union": [
+              "\"after\"",
+              "\"before\""
+            ]
+          }
+        }
+      },
+      "title": "string",
+      "updatedAt": "string",
+      "url": "string"
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

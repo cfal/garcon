@@ -5,8 +5,8 @@ import type {
   ForkRunCommandResponse,
 } from '../../../common/chat-command-contracts.js';
 import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
-import { ForkCreationCleanupError, rollbackForkTarget, type ForkedChatResult } from '../chats/fork-chat.js';
-import { commandLedgerKey, PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-ledger.js';
+import { ForkCreationCleanupError, isHandoffForkRefusal, prepareForkSource, rollbackForkTarget, type ForkedChatResult, type PreparedForkSource } from '../chats/fork-chat.js';
+import { PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-ledger.js';
 import {
   CommandSupport,
   CommandValidationError,
@@ -16,7 +16,7 @@ import {
 } from './command-support.js';
 import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
 import type { ThinkingMode } from '../../../common/chat-modes.js';
-import type { NativeForkCleanup } from '../agents/session-types.js';
+import type { ExecutorOperation } from '../../../common/executor-contracts.js';
 
 interface ForkContext {
   sourceChatId: string;
@@ -24,6 +24,7 @@ interface ForkContext {
   sourceSession: ChatRegistryEntry;
   upToOrdinal?: number;
   allowHandoffFork?: boolean;
+  preparedSource?: PreparedForkSource;
 }
 
 export class ForkCommands {
@@ -44,16 +45,12 @@ export class ForkCommands {
     };
     return this.support.withChatMutationLocks([normalized.sourceChatId, normalized.chatId], async () => {
       if (normalized.clientRequestId === undefined) {
-        await this.createFork(normalized, signal);
+        await this.forkChatFromContext(await this.validateFork(normalized, { signal }), signal);
       } else {
         await this.createForkOnce(normalized, normalized.clientRequestId, signal);
       }
       return { success: true, chat: await this.support.projectCommandChat(normalized.chatId) };
     });
-  }
-
-  private async createFork(input: ForkChatCommandRequest, signal: AbortSignal): Promise<void> {
-    await this.forkChatFromContext(await this.validateFork(input, { signal }), signal);
   }
 
   // A repeat of a completed fork returns it. Anything else runs again: a failed fork left no
@@ -63,16 +60,21 @@ export class ForkCommands {
     clientRequestId: string,
     signal: AbortSignal,
   ): Promise<void> {
-    const ledger = await this.deps.ledger.accept({
+    const acceptance = {
       commandType: 'fork',
       chatId: input.chatId,
       clientRequestId: this.support.requireClientRequestId(clientRequestId),
       payload: forkChatPayload(input),
-    });
+    };
+    const observed = await this.deps.ledger.observe(acceptance);
+    if (observed) this.support.throwOnConflict(observed, 'clientRequestId was reused with different payload');
+    if (observed?.record.status === 'finished') return;
+    const context = await this.validateFork(input, { signal });
+    const ledger = await this.deps.ledger.accept(acceptance);
     this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
     if (ledger.kind === 'duplicate' && ledger.record.status === 'finished') return;
     try {
-      await this.createFork(input, signal);
+      await this.forkChatFromContext(context, signal);
     } catch (error) {
       await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
         error: error instanceof Error ? error.message : String(error),
@@ -105,8 +107,6 @@ export class ForkCommands {
     const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.support.requireClientRequestId(input.clientMessageId, 'clientMessageId');
     const turnId = crypto.randomUUID();
-    const ledgerKey = commandLedgerKey('fork-run', input.chatId, clientRequestId);
-    const priorRecord = await this.deps.ledger.getRecord(ledgerKey);
     const ledgerInput = {
       commandType: 'fork-run',
       chatId: input.chatId,
@@ -114,126 +114,136 @@ export class ForkCommands {
       payload: forkPayload(input, clientMessageId),
       turnId,
     } as const;
+    const observed = await this.deps.ledger.observe(ledgerInput);
+    if (observed) this.support.throwOnConflict(observed, 'clientRequestId was reused with different payload');
+    const priorRecord = observed?.record;
 
     const retryingPreScheduleFailure = priorRecord?.status === 'failed'
       && priorRecord.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE;
     if (priorRecord && priorRecord.status !== 'accepted' && !retryingPreScheduleFailure) {
-      const ledger = await this.deps.ledger.accept(ledgerInput);
-      if (ledger.kind === 'conflict') {
-        throw new CommandValidationError(
-          'IDEMPOTENCY_CONFLICT',
-          'clientRequestId was reused with different payload',
-          409,
-        );
-      }
-      this.support.throwRecordedExecutionFailure(ledger.record);
+      this.support.throwRecordedExecutionFailure(priorRecord);
       return {
-        ...agentTurnResultFromRecord(ledger.record, 'duplicate'),
-        chat: await this.support.projectCommandChat(ledger.record.chatId),
+        ...agentTurnResultFromRecord(priorRecord, 'duplicate'),
+        chat: await this.support.projectCommandChat(priorRecord.chatId),
       };
     }
 
-    const preparedFork = priorRecord?.forkPreparation;
-    const forkAlreadyCreated = preparedFork !== undefined
-      && this.deps.chats.getChat(input.chatId) !== null;
-    const forkContext = await this.validateFork(input, {
-      allowExistingTarget: forkAlreadyCreated,
+    const recovering = priorRecord?.status === 'accepted';
+    const preparedFork = recovering ? priorRecord.forkPreparation : undefined;
+    const forkAlreadyCreated = preparedFork !== undefined && this.deps.chats.getChat(input.chatId) !== null;
+    let forkContext: ForkContext | null = null;
+    const validate = async (signal?: AbortSignal) => {
+      if (forkAlreadyCreated) {
+        const target = this.deps.chats.getChat(input.chatId);
+        if (!target) throw new CommandValidationError('SESSION_NOT_FOUND', 'Target session not found', 404);
+        this.assertRunnable(target, input, [target.agentSessionId ? 'execution.resume' : 'execution.start']);
+      } else {
+        forkContext = await this.validateFork(input, { thinkingMode: input.options.thinkingMode, signal });
+        this.assertRunnable(forkContext.sourceSession, input, forkContext.preparedSource?.needsNativeFork
+          ? ['execution.start', 'execution.resume'] : ['execution.start']);
+      }
+    };
+    if (!recovering) await validate();
+    const ledger = recovering
+      ? { kind: 'duplicate' as const, record: priorRecord }
+      : await this.deps.ledger.accept(ledgerInput);
+    this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
+
+    let forkResult: ForkedChatResult | null = null;
+    let nativeCleanup = preparedFork?.nativeCleanup ?? null;
+    const discardNative = async () => {
+      if (!nativeCleanup) return;
+      await this.deps.agents.discardForkedAgentSession(nativeCleanup);
+      nativeCleanup = null;
+      await this.deps.ledger.update(ledger.record.key, {
+        forkPreparation: { phase: forkAlreadyCreated ? 'created' : 'creating', sourceChatId: input.sourceChatId, nativeCleanup: null },
+      });
+    };
+    const result = await this.support.scheduleAcceptedHttpRun(ledger, input, {
+      clientRequestId,
+      clientMessageId,
+      turnId,
+    }, 'fork-run', deadline, {
+      operation: 'fork-run',
+      ...(recovering ? { validateRecovery: ({ signal }: { signal: AbortSignal }) => validate(signal) } : {}),
+      prepare: async ({ signal }) => {
+        if (forkAlreadyCreated) return;
+        if (!forkContext) throw new Error('Fork source was not prepared');
+        // A disappeared target does not discharge its original native cleanup obligation.
+        await discardNative();
+        await this.deps.ledger.update(ledger.record.key, {
+          forkPreparation: {
+            phase: 'creating',
+            sourceChatId: forkContext.sourceChatId,
+          },
+        });
+        try {
+          forkResult = await this.forkChatFromContext(forkContext, signal);
+        } catch (error) {
+          if (error instanceof ForkCreationCleanupError) {
+            nativeCleanup = error.nativeCleanup;
+            await this.deps.ledger.update(ledger.record.key, {
+              forkPreparation: { phase: 'creating', sourceChatId: forkContext.sourceChatId, nativeCleanup },
+            });
+          }
+          throw error;
+        }
+        await this.deps.ledger.update(ledger.record.key, {
+          forkPreparation: {
+            phase: 'created',
+            sourceChatId: forkContext.sourceChatId,
+            nativeCleanup: forkResult.nativeCleanup,
+          },
+        });
+      },
+      compensate: async () => {
+        if (forkResult) {
+          try {
+            await forkResult.rollback();
+          } finally {
+            nativeCleanup = forkResult.nativeCleanup;
+            await this.deps.ledger.update(ledger.record.key, {
+              forkPreparation: { phase: 'created', sourceChatId: input.sourceChatId, nativeCleanup },
+            });
+          }
+        } else {
+          const cleanups = await Promise.allSettled([
+            rollbackForkTarget({ targetChatId: input.chatId, settings: this.deps.settings, ownership: this.deps.ownership }),
+            discardNative(),
+          ]);
+          const failures = cleanups.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+          if (failures.length) throw new AggregateError(failures, `Failed to roll back fork ${input.chatId}`);
+        }
+        forkResult = null;
+        nativeCleanup = null;
+      },
+    });
+    return { ...result, chat: await this.support.projectCommandChat(input.chatId) };
+  }
+
+  private assertRunnable(target: ChatRegistryEntry, input: NormalizedSubmitForkRunInput, operations: readonly ExecutorOperation[]): void {
+    this.deps.agents.assertExecutionModeSelectionSupported(target.agentId, {
+      executorId: target.executorId,
       thinkingMode: input.options.thinkingMode,
     });
-    const source = forkContext.sourceSession;
-    this.deps.agents.assertAgentAvailable(source.agentId, source.executorId);
+    this.deps.agents.assertExecutionSupported({ ...target, ...input.options }, operations);
     this.support.assertAttachmentsSupported({
-      agentId: source.agentId,
-      executorId: source.executorId,
-      model: input.options?.model ?? source.model,
-      apiProviderId: input.options?.apiProviderId === undefined ? source.apiProviderId : input.options.apiProviderId,
-      modelEndpointId: input.options?.modelEndpointId === undefined ? source.modelEndpointId : input.options.modelEndpointId,
+      agentId: target.agentId,
+      executorId: target.executorId,
+      model: input.options.model ?? target.model,
+      apiProviderId: input.options.apiProviderId === undefined ? target.apiProviderId : input.options.apiProviderId,
+      modelEndpointId: input.options.modelEndpointId === undefined ? target.modelEndpointId : input.options.modelEndpointId,
       attachments: input.images ?? [],
     });
-
-    const submit = async () => {
-      const ledger = await this.deps.ledger.accept(ledgerInput);
-
-      if (ledger.kind === 'conflict') {
-        throw new CommandValidationError(
-          'IDEMPOTENCY_CONFLICT',
-          'clientRequestId was reused with different payload',
-          409,
-        );
-      }
-      const recoveringAcceptedCommand = ledger.kind === 'duplicate'
-        && ledger.record.status === 'accepted';
-      if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
-        this.support.throwRecordedExecutionFailure(ledger.record);
-        return {
-          ...agentTurnResultFromRecord(ledger.record, 'duplicate'),
-          chat: await this.support.projectCommandChat(ledger.record.chatId),
-        };
-      }
-
-      let forkResult: ForkedChatResult | null = null;
-      let nativeCleanup = preparedFork?.nativeCleanup ?? null;
-      const result = await this.support.scheduleAcceptedHttpRun(ledger, input, {
-        clientRequestId,
-        clientMessageId,
-        turnId,
-      }, 'fork-run', deadline, {
-        operation: 'fork-run',
-        prepare: async ({ signal }) => {
-          if (forkAlreadyCreated) return;
-          await this.deps.ledger.update(ledger.record.key, {
-            forkPreparation: {
-              phase: 'creating',
-              sourceChatId: forkContext.sourceChatId,
-            },
-          });
-          try {
-            forkResult = await this.forkChatFromContext(forkContext, signal);
-          } catch (error) {
-            if (error instanceof ForkCreationCleanupError) {
-              nativeCleanup = error.nativeCleanup;
-              await this.deps.ledger.update(ledger.record.key, {
-                forkPreparation: { phase: 'creating', sourceChatId: forkContext.sourceChatId, nativeCleanup },
-              });
-            }
-            throw error;
-          }
-          await this.deps.ledger.update(ledger.record.key, {
-            forkPreparation: {
-              phase: 'created',
-              sourceChatId: forkContext.sourceChatId,
-              nativeCleanup: forkResult.nativeCleanup,
-            },
-          });
-        },
-        compensate: async () => {
-          if (forkResult) {
-            await forkResult.rollback();
-          } else {
-            await this.rollbackPreparedFork(forkContext, nativeCleanup);
-          }
-          forkResult = null;
-          nativeCleanup = null;
-        },
-      });
-      return { ...result, chat: await this.support.projectCommandChat(input.chatId) };
-    };
-
-    return submit();
   }
 
   private async validateFork(
     input: ForkChatCommandRequest,
-    options: { allowExistingTarget?: boolean; thinkingMode?: ThinkingMode; signal?: AbortSignal } = {},
+    options: { thinkingMode?: ThinkingMode; signal?: AbortSignal } = {},
   ): Promise<ForkContext> {
-    const sourceChatId = this.support.requireChatId(input.sourceChatId, 'sourceChatId');
-    const targetChatId = this.support.requireChatId(input.chatId);
-    const upToOrdinal = input.upToOrdinal;
+    const { sourceChatId, chatId: targetChatId, upToOrdinal } = input;
 
-    if (
-      upToOrdinal !== undefined
-      && (!Number.isSafeInteger(upToOrdinal) || upToOrdinal <= 0)
-    ) {
+    if (upToOrdinal !== undefined && (!Number.isSafeInteger(upToOrdinal) || upToOrdinal <= 0)) {
       throw new CommandValidationError(
         'VALIDATION_FAILED',
         'upToOrdinal must be a positive safe integer',
@@ -284,7 +294,7 @@ export class ForkCommands {
         422,
       );
     }
-    if (!options.allowExistingTarget && this.deps.chats.getChat(targetChatId)) {
+    if (this.deps.chats.getChat(targetChatId)) {
       throw new CommandValidationError('CHAT_ID_COLLISION', `Session already exists: ${targetChatId}`, 409);
     }
     const viewId = await this.deps.agents.currentTranscriptViewId(sourceChatId, options.signal);
@@ -301,10 +311,20 @@ export class ForkCommands {
         true,
       );
     }
+    const preparedSource = await prepareForkSource(this.deps.transcripts, sourceChatId, sourceSession, upToOrdinal, options.signal);
+    if (preparedSource.needsNativeFork) {
+      try {
+        preparedSource.needsNativeFork = this.deps.agents.assertNativeForkSupported(sourceSession);
+      } catch (error) {
+        if (!input.allowHandoffFork || !isHandoffForkRefusal(error)) throw error;
+        preparedSource.needsNativeFork = false;
+      }
+    }
 
     return {
       sourceChatId,
       targetChatId,
+      preparedSource,
       sourceSession: {
         ...sourceSession,
         thinkingMode: this.deps.agents.normalizeThinkingModeForAgent(
@@ -316,29 +336,6 @@ export class ForkCommands {
       ...(upToOrdinal ? { upToOrdinal } : {}),
       ...(input.allowHandoffFork ? { allowHandoffFork: true } : {}),
     };
-  }
-
-  private async rollbackPreparedFork(context: ForkContext, cleanup: NativeForkCleanup | null): Promise<void> {
-    const failures: unknown[] = [];
-    try {
-      await rollbackForkTarget({
-        targetChatId: context.targetChatId,
-        settings: this.deps.settings,
-        ownership: this.deps.ownership,
-      });
-    } catch (error) {
-      failures.push(error);
-    }
-    if (cleanup) {
-      try {
-        await this.deps.agents.discardForkedAgentSession(cleanup);
-      } catch (error) {
-        failures.push(error);
-      }
-    }
-    if (failures.length > 0) {
-      throw new AggregateError(failures, `Failed to roll back fork ${context.targetChatId}`);
-    }
   }
 
   private async forkChatFromContext(
@@ -354,6 +351,7 @@ export class ForkCommands {
       sourceChatId: context.sourceChatId,
       targetChatId: context.targetChatId,
       signal,
+      preparedSource: context.preparedSource,
       ...(context.upToOrdinal ? { upToOrdinal: context.upToOrdinal } : {}),
       ...(context.allowHandoffFork ? { allowHandoffFork: true } : {}),
       registry: this.deps.chats,

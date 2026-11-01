@@ -1,0 +1,74 @@
+{
+  "definition": {
+    "name": "gh.getPullRequestReviewTarget",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "bulk",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "budgetMs": "number",
+      "input": {
+        "marker": "string",
+        "number": "number",
+        "projectPath": "string",
+        "repository": {
+          "host": "string",
+          "nameWithOwner": "string"
+        }
+      }
+    },
+    "result": {
+      "executorId": "string",
+      "headRefOid": "string",
+      "instanceId": "string",
+      "markedComments": {
+        "array": {
+          "author": {
+            "union": [
+              "null",
+              {
+                "id": "string",
+                "login": "string"
+              }
+            ]
+          },
+          "id": "string",
+          "isMinimized": {
+            "union": [
+              "false",
+              "true"
+            ]
+          },
+          "marker": "string",
+          "url": "string"
+        }
+      },
+      "number": "number",
+      "repository": {
+        "host": "string",
+        "nameWithOwner": "string"
+      },
+      "state": {
+        "union": [
+          "\"closed\"",
+          "\"merged\"",
+          "\"open\""
+        ]
+      },
+      "viewer": {
+        "id": "string",
+        "login": "string"
+      }
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

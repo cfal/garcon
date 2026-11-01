@@ -1,3 +1,4 @@
+import { CLI_BOOTSTRAP_VERSION, CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 import { describe, expect, spyOn, test } from 'bun:test';
 import crypto from 'node:crypto';
 import type {
@@ -12,7 +13,7 @@ import { runtimeProofPayload } from '@garcon/common/server-runtime';
 import { DEFAULT_REMOTE_FEATURE_SETTINGS } from '@garcon/common/settings';
 import { GarconClient, GarconHttpError, GarconTransportError } from '../garcon-client.js';
 
-const connection = {
+const connection = { protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS },
   baseUrl: 'http://127.0.0.1:8080',
   instanceId: 'instance',
   endpointInstanceId: 'instance',
@@ -46,7 +47,7 @@ function accepted(request: AgentRunCommandRequest): Response {
 
 function runtimeResponse(input: string | URL | Request, instanceId = connection.instanceId): Response {
   const url = new URL(input instanceof Request ? input.url : input);
-  if (url.pathname === '/api/v1/cli/context') return Response.json({ serverInstanceId: instanceId, defaultExecutorId: 'local', workspaceName: 'default' });
+  if (url.pathname === '/api/v1/cli/context') return Response.json({ protocol: { bootstrap: CLI_BOOTSTRAP_VERSION, contracts: CLI_CONTRACTS }, serverInstanceId: instanceId, defaultExecutorId: 'local', workspaceName: 'default' });
   const challenge = url.searchParams.get('challenge') ?? '';
   const proof = crypto.createHmac('sha256', connection.localCapability)
     .update(runtimeProofPayload(instanceId, challenge))
@@ -134,6 +135,7 @@ function validChatList(): Record<string, unknown> {
       isActive: false,
       isProcessing: false,
       processingPhase: null,
+      hasAgentSession: false,
       canReloadFromNativeHistory: false,
       isUnread: false,
     }],

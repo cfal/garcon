@@ -1,0 +1,18 @@
+{
+  "request": {
+    "chatId": "synthetic-chat", "projectPath": "/synthetic", "runId": "synthetic-run", "prompt": "Synthetic prompt",
+    "model": "synthetic-model", "permissionMode": "default", "thinkingMode": "none", "endpoint": null,
+    "settings": { "ownerId": "synthetic", "schemaVersion": 1, "values": {} },
+    "producerBinding": { "kind": "producer", "id": "synthetic-binding", "executorId": "local", "instanceId": "synthetic-worker", "integrationId": "synthetic" },
+    "attachments": [], "carriedContext": null
+  },
+  "result": { "kind": "execution", "id": "synthetic-execution", "executorId": "local", "instanceId": "synthetic-worker", "integrationId": "synthetic" },
+  "failures": [
+    {
+      "code": "INVALID_SETTINGS",
+      "message": "Synthetic failure",
+      "retryable": false,
+      "outcome": "rejected"
+    }
+  ]
+}

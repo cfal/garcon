@@ -1,7 +1,9 @@
 import type { ExecutionFileTarget, ExecutionFilesService, ExecutionFileRead } from '@garcon/server-agent-interface';
-import { MAX_FILE_VIEW_BYTES } from '../../../common/file-contracts.js';
+import { MAX_FILE_VIEW_BYTES, isFileRevision, parseFileTreeResponse, parseFileIdentityResponse,
+  parseFileRevisionResponse, parseSaveTextResponse, parseDirectoryEntry } from '../../../common/file-contracts.js';
 import { DomainError } from '../../common/domain-error.js';
 import { isRecord } from '../../../common/json.js';
+import { isExecutorId } from '../../../common/executors.js';
 
 type Call<Q, R> = { readonly request: Q; readonly result: R };
 type Method<K extends keyof ExecutionFilesService> = Call<Parameters<ExecutionFilesService[K]>[0], Awaited<ReturnType<ExecutionFilesService[K]>>>;
@@ -48,4 +50,40 @@ export function validateFileRpcRequest(method: string, request: unknown): void {
   } else {
     if (!validPath(request.projectPath) || method !== 'files.list' && !validPath(request.filePath)) throw invalidFileData();
   }
+  if (method === 'files.save' && (!isFileRevision(request.expectedRevision)
+    || !['reject', 'overwrite'].includes(request.conflictResolution as string))) throw invalidFileData();
+  if (method === 'files.save') decodeFileText(request.data);
+}
+
+export function parseFileRpcResultV1(method: keyof FileRpcMethods, value: unknown): unknown {
+  const entry = (item: unknown) => isRecord(item) && typeof item.name === 'string' && typeof item.path === 'string'
+    && (item.relativePath === undefined || typeof item.relativePath === 'string') && (item.type === 'file' || item.type === 'directory');
+  let valid: unknown;
+  switch (method) {
+    case 'files.tree': valid = parseFileTreeResponse(value); break;
+    case 'files.browse': valid = Array.isArray(value) && value.every(entry); break;
+    case 'files.list': valid = isRecord(value) && Array.isArray(value.files) && value.files.every(entry) && typeof value.truncated === 'boolean'; break;
+    case 'files.identity': valid = isRecord(value) && isExecutorId(value.executorId) && parseFileIdentityResponse({ success: true, identity: value }); break;
+    case 'files.revision': valid = parseFileRevisionResponse(value); break;
+    case 'files.save':
+      if (!parseSaveTextResponse(value)) throw unknownSave();
+      return value;
+    case 'files.createDirectory':
+      if (!parseDirectoryEntry(value)) throw unknownCreation();
+      return value;
+    case 'files.read':
+      valid = isRecord(value) && typeof value.path === 'string' && isFileRevision(value.revision);
+      if (valid) decodeFileData((value as Record<string, unknown>).data);
+      break;
+  }
+  if (!valid) throw invalidFileData();
+  return value;
+}
+
+export function unknownCreation(): DomainError {
+  return new DomainError('FILE_CREATE_OUTCOME_UNKNOWN', 'Directory creation could not be confirmed. Refresh the directory before trying again.', 503);
+}
+
+export function unknownSave(): DomainError {
+  return new DomainError('FILE_SAVE_OUTCOME_UNKNOWN', 'Save could not be confirmed. Reload the file before saving again.', 503);
 }

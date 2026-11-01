@@ -1,7 +1,10 @@
+import { testCliContracts } from '../../lib/__tests__/cli-contract-fixture.js';
+import { handleTestRpc } from '../../../remote/__tests__/test-session-transport.js';
+import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { expect, spyOn, test } from 'bun:test';
 import { ControllerCliDispatcher, type CliDispatchAccess } from '../cli-dispatcher.js';
 import type { GuardRpcReply } from '../../../remote/transport/rpc.js';
-import { CLI_REPLY_BYTES, CLI_OPERATIONS, cliPolicy, cliRoute, parseControllerCliRequest, type CliOperation, type ControllerCliRequest } from '../../../remote/transport/cli-protocol.js';
+import { CLI_REPLY_BYTES, CLI_OPERATIONS, cliRoute, resolveCliRequest, type CliOperation, type ControllerCliRequest } from '../../../remote/transport/cli-protocol.js';
 import { DomainError } from '../../../common/domain-error.js';
 import { cliPair, CLI_EXECUTOR_ID } from '../../../remote/__tests__/cli-fixture.js';
 import type { JsonValue } from '../../../../common/json.js';
@@ -10,6 +13,10 @@ import { CliAdmission } from '../../../remote/transport/cli-admission.js';
 import { CommandLedger } from '../../commands/command-ledger.js';
 import { createAgentTurnReceiptRoutes } from '../../routes/agent-turn-receipt.js';
 import { parseAgentTurnReceipt } from '../../../../common/agent-turn-receipt.js';
+
+const parserContracts = testCliContracts();
+const resolveRequest = (value: unknown) => resolveCliRequest(value, (operation, ref) => parserContracts.resolve(operation, ref));
+const parseControllerCliRequest = (value: unknown) => resolveRequest(value).request;
 
 test('bulk short admission preserves per-executor and global primary reservations', () => {
   const admission = new CliAdmission();
@@ -33,7 +40,7 @@ test.each([false, true])('primary CLI reply bounds preserve mutation uncertainty
   const pair = cliPair(dispatcher({ '/api/v1/chats/stop': { POST: respond }, '/api/v1/chats/turn-receipt': { GET: respond } }));
   try {
     const operation = mutation ? 'POST /api/v1/chats/stop' : 'GET /api/v1/chats/turn-receipt';
-    await expect(pair.primary.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null)))
+    await expect(pair.primary.worker.call('', RPC_V1['controllerCli.request'], request(operation, mutation ? {} : null)))
       .rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_RESULT_TOO_LARGE' });
     expect(pair.primary.worker.active).toBe(true);
   } finally { pair.close(); }
@@ -50,7 +57,7 @@ test.each(['x', '\0', '\u{1f600}'])('forwarded receipts fit escaped output witho
   const routes = createAgentTurnReceiptRoutes(ledger);
   const pair = cliPair(dispatcher(routes));
   try {
-    const reply = await pair.primary.worker.call('', 'controllerCli.request', {
+    const reply = await pair.primary.worker.call('', RPC_V1['controllerCli.request'], { contract: { name: CLI_OPERATIONS['GET /api/v1/chats/turn-receipt'][1].name, version: 1 },
       expectedServerInstanceId: 'controller', http: { operation: 'GET /api/v1/chats/turn-receipt',
         query: [['chatId', 'chat-1'], ['turnId', 'turn-1']], body: null },
     });
@@ -68,10 +75,10 @@ test.each(['x', '\0', '\u{1f600}'])('forwarded receipts fit escaped output witho
 });
 
 function request(operation: CliOperation = 'GET /api/v1/chats', body: JsonValue | null = null): ControllerCliRequest {
-  return { expectedServerInstanceId: 'controller', http: { operation, body, query: [] } };
+  return { contract: { name: CLI_OPERATIONS[operation][1].name, version: 1 }, expectedServerInstanceId: 'controller', http: { operation, body, query: [] } };
 }
 function dispatcher(routes: RouteMap) {
-  return new ControllerCliDispatcher({ routes, serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false });
+  return new ControllerCliDispatcher({ contracts: testCliContracts(routes), serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false });
 }
 
 test('schedule forwarding requires explicit new-chat executors and excludes unrelated browser operations', () => {
@@ -91,7 +98,7 @@ test('schedule forwarding requires explicit new-chat executors and excludes unre
     expect(() => cliRoute(method!, pathname!)).toThrow();
   }
   for (const [operation, policy] of Object.entries(CLI_OPERATIONS).filter(([key]) => key.includes('/scheduled-prompts'))) {
-    expect(policy).toEqual({ lane: 'bulk', pool: 'short', timeoutMs: 30_000, management: false, mutation: !operation.startsWith('GET ') });
+    expect(policy[1]).toMatchObject({ lane: 'bulk', pool: 'short', timeoutMs: 30_000, management: false, mutation: !operation.startsWith('GET ') });
   }
 });
 
@@ -101,11 +108,11 @@ test.each([false, true])('schedule snapshot bounds preserve read/mutation outcom
   const pair = cliPair(dispatcher({ '/api/v1/scheduled-prompts': { GET: handler, DELETE: handler } }), undefined, undefined,
     () => { throw new DomainError('CLI_ACCESS_DENIED', 'Management denied', 403); });
   try {
-    await expect(pair.worker.call('', 'controllerCli.request', request(mutation ? 'DELETE /api/v1/scheduled-prompts' : 'GET /api/v1/scheduled-prompts',
+    await expect(pair.worker.call('', RPC_V1['controllerCli.request'], request(mutation ? 'DELETE /api/v1/scheduled-prompts' : 'GET /api/v1/scheduled-prompts',
       mutation ? { expectedRevision: 0, id: 'synthetic' } : null)))
       .rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_RESULT_TOO_LARGE' });
     expect(calls).toBe(1);
-    await expect(pair.primary.worker.call('', 'controllerCli.request', request('GET /api/v1/scheduled-prompts')))
+    await expect(pair.primary.worker.call('', RPC_V1['controllerCli.request'], request('GET /api/v1/scheduled-prompts')))
       .rejects.toThrow('wrong lane');
   } finally { pair.close(); }
 });
@@ -119,7 +126,7 @@ test('schedule reply revocation cannot roll back a committed mutation or authori
     writes++; committed.resolve(); await release.promise;
     return Response.json({ success: true });
   } } }), () => { if (revoked) throw new DomainError('CLI_ACCESS_DENIED', 'Revoked', 403); });
-  const pending = pair.worker.call('', 'controllerCli.request', request('PUT /api/v1/scheduled-prompts/enabled', { expectedRevision: 0, id: 'synthetic', enabled: false }));
+  const pending = pair.worker.call('', RPC_V1['controllerCli.request'], request('PUT /api/v1/scheduled-prompts/enabled', { expectedRevision: 0, id: 'synthetic', enabled: false }));
   try {
     await committed.promise;
     revoked = true;
@@ -141,8 +148,8 @@ test('restricted envelope rejects unknown routes, implicit Local targets, privil
   ]) expect(() => parseControllerCliRequest(value)).toThrow();
   expect(parseControllerCliRequest(request('PUT /api/v1/app/settings', { features: { transcriptSearch: { enabled: false } } })).http.body)
     .toEqual({ features: { transcriptSearch: { enabled: false } } });
-  expect(cliPolicy(request('POST /api/v1/chats/run', { handoff: {} }).http).timeoutMs).toBe(600_000);
-  expect(CLI_OPERATIONS['POST /api/v1/chats/fork'].timeoutMs).toBeNull();
+  expect(resolveRequest(request('POST /api/v1/chats/run', { handoff: {} })).policy.timeoutMs).toBe(600_000);
+  expect(CLI_OPERATIONS['POST /api/v1/chats/fork'][1].timeoutMs).toBeNull();
 });
 
 test('raw route parity preserves query multiplicity, JSON errors, executor authority and restart fences', async () => {
@@ -157,9 +164,9 @@ test('raw route parity preserves query multiplicity, JSON errors, executor autho
   } } }));
   try {
     const input = { ...request(), http: { ...request().http, query: [['exclude', 'tools'], ['exclude', 'reasoning']] as const } };
-    expect(await pair.worker.call('', 'controllerCli.request', input)).toEqual({ status: 409, retryAfter: '2',
+    expect(await pair.worker.call('', RPC_V1['controllerCli.request'], input)).toEqual({ status: 409, retryAfter: '2',
       body: { success: false, error: 'Synthetic rejection', errorCode: 'SESSION_BUSY' } });
-    await expect(pair.worker.call('', 'controllerCli.request', { ...input, expectedServerInstanceId: 'old' }))
+    await expect(pair.worker.call('', RPC_V1['controllerCli.request'], { ...input, expectedServerInstanceId: 'old' }))
       .rejects.toMatchObject({ code: 'CLI_CONTROLLER_CHANGED' });
     expect(calls).toBe(1);
   } finally { pair.close(); }
@@ -167,7 +174,7 @@ test('raw route parity preserves query multiplicity, JSON errors, executor autho
 
 test('executor route parameters and provider assignment envelopes are narrowly validated', () => {
   const route = cliRoute('PATCH', `/api/v1/executors/${CLI_EXECUTOR_ID}`);
-  const input = { ...request(), http: { ...route, query: [], body: { label: 'Worker' } } };
+  const input = { ...request(route.operation), http: { ...route, query: [], body: { label: 'Worker' } } };
   expect(parseControllerCliRequest(input).http).toEqual(input.http);
   for (const path of ['/api/v1/executors/local', '/api/v1/executors/not-a-uuid', `/api/v1/executors/${CLI_EXECUTOR_ID}/private`]) {
     expect(() => cliRoute('PATCH', path)).toThrow();
@@ -178,7 +185,7 @@ test('executor route parameters and provider assignment envelopes are narrowly v
     { operation: 'PUT /api/v1/api-provider-assignments', query: [['apiProviderId', 'synthetic']], body: null },
     { operation: 'PUT /api/v1/api-provider-assignments', query: [['executorId', 'local'], ['executorId', CLI_EXECUTOR_ID], ['apiProviderId', 'synthetic']], body: null },
     { operation: 'PUT /api/v1/api-provider-assignments', query: [['executorId', 'local'], ['apiProviderId', 'synthetic']], body: { apiKey: 'secret' } },
-  ]) expect(() => parseControllerCliRequest({ ...request(), http })).toThrow();
+  ]) expect(() => parseControllerCliRequest({ ...request(Object.hasOwn(CLI_OPERATIONS, http.operation) ? http.operation as CliOperation : 'GET /api/v1/chats'), http })).toThrow();
 });
 
 test('management grants protect dispatch and secret reply publication without blocking redacted listing', async () => {
@@ -195,13 +202,13 @@ test('management grants protect dispatch and secret reply publication without bl
       return Response.json({ connectionUrl: 'secret' });
     } },
   }), () => {}, () => {}, () => { if (!allowed) throw new DomainError('CLI_ACCESS_DENIED', 'Management denied', 403); });
-  const input: ControllerCliRequest = { ...request(), http: { ...cliRoute('GET', `/api/v1/executors/${CLI_EXECUTOR_ID}/connection`), query: [], body: null } };
+  const input: ControllerCliRequest = { ...request('GET /api/v1/executors/:executorId/connection'), http: { ...cliRoute('GET', `/api/v1/executors/${CLI_EXECUTOR_ID}/connection`), query: [], body: null } };
   try {
-    expect((await pair.worker.call('', 'controllerCli.request', request('GET /api/v1/executors'))).status).toBe(200);
-    await expect(pair.worker.call('', 'controllerCli.request', input)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+    expect((await pair.worker.call('', RPC_V1['controllerCli.request'], request('GET /api/v1/executors'))).status).toBe(200);
+    await expect(pair.worker.call('', RPC_V1['controllerCli.request'], input)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
     expect(calls).toBe(0);
     allowed = true;
-    const pending = pair.worker.call('', 'controllerCli.request', input);
+    const pending = pair.worker.call('', RPC_V1['controllerCli.request'], input);
     await entered.promise;
     allowed = false;
     gate.resolve();
@@ -212,10 +219,10 @@ test('management grants protect dispatch and secret reply publication without bl
 
 test('nested controller-to-worker calls can finish while the reverse request is pending', async () => {
   const pair = cliPair(dispatcher({ '/api/v1/chats': { GET: async () => Response.json(
-    await pair.primary.controller.call('', 'projects.resolveFileMentions', { command: 'Synthetic', projectPath: '/worker' }),
+    await pair.primary.controller.call('', RPC_V1['projects.resolveFileMentions'], { command: 'Synthetic', projectPath: '/worker' }),
   ) } }));
-  pair.primary.worker.handle(async () => 'worker result');
-  try { expect((await pair.worker.call('', 'controllerCli.request', request())).body).toBe('worker result'); }
+  handleTestRpc(pair.primary.worker, async () => 'worker result');
+  try { expect((await pair.worker.call('', RPC_V1['controllerCli.request'], request())).body).toBe('worker result'); }
   finally { pair.close(); }
 });
 
@@ -230,8 +237,8 @@ test('cancelled and retired sessions cannot release unsettled producer reservati
   const first = cliPair(service);
   const second = cliPair(service);
   const abort = new AbortController();
-  const one = first.worker.call('', 'controllerCli.request', request('POST /api/v1/chats/fork', {}), { signal: abort.signal, timeoutMs: null });
-  const two = first.worker.call('', 'controllerCli.request', request('POST /api/v1/chats/fork', {}), { signal: abort.signal, timeoutMs: null });
+  const one = first.worker.call('', RPC_V1['controllerCli.request'], request('POST /api/v1/chats/fork', {}), { signal: abort.signal, timeoutMs: null });
+  const two = first.worker.call('', RPC_V1['controllerCli.request'], request('POST /api/v1/chats/fork', {}), { signal: abort.signal, timeoutMs: null });
   const both = Promise.allSettled([one, two]);
   try {
     await entered.promise;
@@ -239,10 +246,10 @@ test('cancelled and retired sessions cannot release unsettled producer reservati
     expect(await both).toMatchObject([{ status: 'rejected', reason: { outcome: 'unknown' } }, { status: 'rejected', reason: { outcome: 'unknown' } }]);
     expect(pendingSignals.every((signal) => signal.aborted)).toBe(true);
     first.close();
-    await expect(second.worker.call('', 'controllerCli.request', request('POST /api/v1/chats/fork', {})))
+    await expect(second.worker.call('', RPC_V1['controllerCli.request'], request('POST /api/v1/chats/fork', {})))
       .rejects.toMatchObject({ code: 'CLI_SERVICE_BUSY' });
-    expect(await second.primary.worker.call('', 'controllerCli.describe', null)).toMatchObject({ defaultExecutorId: CLI_EXECUTOR_ID });
-    expect((await second.worker.call('', 'controllerCli.request', request())).body).toEqual([]);
+    expect(await second.primary.worker.call('', RPC_V1['controllerCli.describe'], null)).toMatchObject({ defaultExecutorId: CLI_EXECUTOR_ID });
+    expect((await second.worker.call('', RPC_V1['controllerCli.request'], request())).body).toEqual([]);
   } finally { settled.resolve(); first.close(); second.close(); }
 });
 
@@ -253,7 +260,7 @@ test('revocation fences late mutation completion even after access is re-enabled
   const pair = cliPair(dispatcher({ '/api/v1/chats/run': { POST: async () => {
     entered.resolve(); await gate.promise; return Response.json({ secretResult: true });
   } } }), () => { if (generation !== 1) throw new DomainError('CLI_ACCESS_DENIED', 'Lease expired', 403); });
-  const pending = pair.worker.call('', 'controllerCli.request', request('POST /api/v1/chats/run', {}));
+  const pending = pair.worker.call('', RPC_V1['controllerCli.request'], request('POST /api/v1/chats/run', {}));
   try {
     await entered.promise;
     generation = 2;
@@ -265,17 +272,19 @@ test('revocation fences late mutation completion even after access is re-enabled
 test.each([false, true])('revocation after handler settlement still fences RPC publication: mutation=%s', async (mutation) => {
   const lease = new AbortController();
   class RevokingDispatcher extends ControllerCliDispatcher {
-    override async request(value: unknown, access: CliDispatchAccess, guardReply: GuardRpcReply) {
+    override async request(value: Parameters<ControllerCliDispatcher['request']>[0], access: CliDispatchAccess, guardReply: GuardRpcReply) {
       const reply = await super.request(value, { ...access, signal: AbortSignal.any([access.signal, lease.signal]) }, guardReply);
       lease.abort();
       return reply;
     }
   }
   const pair = cliPair(new RevokingDispatcher({ serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false,
-    routes: { '/api/v1/chats': { GET: () => Response.json({ privateData: true }) },
-      '/api/v1/chats/run': { POST: () => Response.json({ committed: true }) } } }));
+    contracts: testCliContracts({ '/api/v1/chats': { GET: () => Response.json({ privateData: true }) },
+      '/api/v1/chats/turn-receipt': { GET: () => Response.json({ success: true }) },
+      '/api/v1/chats/stop': { POST: () => Response.json({ success: true }) },
+      '/api/v1/chats/run': { POST: () => Response.json({ committed: true }) } }) }));
   try {
-    await expect(pair.worker.call('', 'controllerCli.request', request(mutation ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats', mutation ? {} : null)))
+    await expect(pair.worker.call('', RPC_V1['controllerCli.request'], request(mutation ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats', mutation ? {} : null)))
       .rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_CONTROLLER_UNAVAILABLE' });
     expect(lease.signal.aborted).toBe(true);
   } finally { pair.close(); }
@@ -288,18 +297,18 @@ test.each([false, true])('oversize and queue-pressure replies preserve read/muta
   const admitted = Promise.withResolvers<void>();
   const pair = cliPair(dispatcher({ '/api/v1/chats/run': { POST: route }, '/api/v1/chats': { GET: route } }), undefined, admitted.resolve);
   try {
-    await expect(pair.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null)))
+    await expect(pair.worker.call('', RPC_V1['controllerCli.request'], request(operation, mutation ? {} : null)))
       .rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_RESULT_TOO_LARGE' });
     output = 'x'.repeat(128 * 1024);
     pair.block();
     pair.controller.transport.send(JSON.stringify({ type: 'result', id: 'unrelated', value: 'x'.repeat(CLI_REPLY_BYTES) }));
-    const busy = pair.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null));
+    const busy = pair.worker.call('', RPC_V1['controllerCli.request'], request(operation, mutation ? {} : null));
     await admitted.promise;
     pair.unblock();
     await expect(busy).rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_SERVICE_BUSY' });
     expect(pair.worker.transport.connected).toBe(true);
     output = 'small';
-    expect((await pair.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null))).body).toEqual({ output: 'small' });
+    expect((await pair.worker.call('', RPC_V1['controllerCli.request'], request(operation, mutation ? {} : null))).body).toEqual({ output: 'small' });
   } finally { pair.close(); }
 });
 
@@ -324,7 +333,7 @@ test.each([false, true])('bounds and cancels streamed replies before JSON parsin
   }));
   try {
     const operation = mutation ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats/export';
-    await expect(pair.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null)))
+    await expect(pair.worker.call('', RPC_V1['controllerCli.request'], request(operation, mutation ? {} : null)))
       .rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_RESULT_TOO_LARGE' });
     expect(parse).not.toHaveBeenCalled();
     expect(cancelled).toBe(true);
@@ -339,7 +348,7 @@ test.each([false, true])('small replies retain the shared queue headroom during 
   try {
     pair.block();
     pair.controller.transport.send(JSON.stringify({ type: 'result', id: 'unrelated', value: 'x'.repeat(CLI_REPLY_BYTES) }));
-    const pending = pair.worker.call('', 'controllerCli.request', request(mutation ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats', mutation ? {} : null));
+    const pending = pair.worker.call('', RPC_V1['controllerCli.request'], request(mutation ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats', mutation ? {} : null));
     await admitted.promise;
     pair.unblock();
     expect((await pending).body).toEqual({ confirmed: true });
@@ -359,7 +368,7 @@ test('simultaneous bulk completions cannot overbook the shared-channel reply bud
     return Response.json({ data: 'x'.repeat(3 * 1024 * 1024) });
   } } }), undefined, () => { if (++replies === 3) admitted.resolve(); });
   try {
-    const pending = Promise.allSettled(Array.from({ length: 3 }, () => pair.worker.call('', 'controllerCli.request', request())));
+    const pending = Promise.allSettled(Array.from({ length: 3 }, () => pair.worker.call('', RPC_V1['controllerCli.request'], request())));
     await entered.promise;
     pair.block();
     release.resolve();

@@ -13,6 +13,7 @@ export const LOCAL_SERVER_PRINCIPAL: ServerPrincipal = Object.freeze({
 export interface HttpRouteContext {
   principal: ServerPrincipal | null;
   readonly assertCurrent?: () => void;
+  readonly cliContracts?: ContractVersions;
 }
 
 export type RouteHandler = (
@@ -23,3 +24,4 @@ export type RouteHandler = (
 ) => Promise<Response> | Response;
 
 export type RouteMap = Record<string, Record<string, RouteHandler>>;
+import type { ContractVersions } from '@garcon/common/protocol-contracts';

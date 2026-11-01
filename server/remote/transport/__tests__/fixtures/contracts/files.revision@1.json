@@ -1,0 +1,34 @@
+{
+  "definition": {
+    "name": "files.revision",
+    "version": 1,
+    "requires": [
+      {
+        "name": "calls.reconcile",
+        "version": 1,
+        "requires": []
+      }
+    ],
+    "lane": "primary",
+    "continuity": "journaled",
+    "direction": "controller-to-worker"
+  },
+  "wire": {
+    "request": {
+      "filePath": "string",
+      "projectPath": "string"
+    },
+    "result": {
+      "union": [
+        {
+          "revision": "string",
+          "status": "\"ready\""
+        },
+        {
+          "status": "\"missing\""
+        }
+      ]
+    }
+  },
+  "failures": "rpc-errors-v1"
+}

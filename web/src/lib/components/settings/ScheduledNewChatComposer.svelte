@@ -267,6 +267,8 @@
 						<AgentSettingsControls
 							descriptors={startup.agentSettingDescriptors}
 							envelope={startup.agentSettings}
+							compatibility={startup.agentSettingsCompatibility}
+							disabled={!startup.modelCatalogValidated}
 							onChange={(descriptor, value) => startup.setAgentSetting(descriptor, value)}
 						/>
 					{/snippet}

@@ -4,6 +4,8 @@ import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
+import { effectiveExecutorId } from '$shared/executors';
+import { stableJsonStringify } from '$shared/json';
 import {
 	advanceRecurringAnchor,
 	localDateTimeToUtcIso,
@@ -78,6 +80,7 @@ export class ScheduledPromptFormState {
 	#originalLocalTime: string | null = null;
 	#originalEndAt: string | null = null;
 	#originalEndDate: string | null = null;
+	#savedTarget = $state.raw<Extract<ScheduledPrompt['target'], { type: 'new-chat' }> | null>(null);
 
 	constructor(
 		private readonly modelCatalog: ModelCatalogStore,
@@ -200,6 +203,7 @@ export class ScheduledPromptFormState {
 				!this.sessions.isDraft(this.existingChatId),
 			);
 		}
+		if (this.#preservesSavedTarget) return true;
 		return (
 			this.executionPolicy !== null &&
 			this.startup.settingsLoaded &&
@@ -211,6 +215,24 @@ export class ScheduledPromptFormState {
 		);
 	}
 
+	get #preservesSavedTarget(): boolean {
+		const saved = this.#savedTarget;
+		const selected = this.startup.modelSelectionTarget;
+		return saved !== null && selected !== null
+			&& effectiveExecutorId(saved.executorId) === this.startup.executorId
+			&& saved.agentId === this.startup.agentId
+			&& saved.projectPath === this.startup.nonblankPath
+			&& saved.model === selected.model
+			&& saved.apiProviderId === selected.apiProviderId
+			&& saved.modelEndpointId === selected.modelEndpointId
+			&& saved.modelProtocol === selected.modelProtocol
+			&& saved.permissionMode === this.startup.permissionMode
+			&& saved.thinkingMode === this.startup.thinkingMode
+			&& stableJsonStringify(saved.agentSettingsById) === stableJsonStringify(this.startup.agentSettingsById)
+			&& stableJsonStringify(saved.tags) === stableJsonStringify(this.startup.chatTags)
+			&& stableJsonStringify(saved.preambleChoice) === stableJsonStringify(this.startup.preambles.choiceSnapshot);
+	}
+
 	dispose(): void {
 		this.startup.dispose();
 	}
@@ -218,6 +240,7 @@ export class ScheduledPromptFormState {
 	async initialize(scheduledPrompt: ScheduledPrompt | null): Promise<void> {
 		this.error = null;
 		this.saving = false;
+		this.#savedTarget = null;
 		const defaultRunAt = nextLocalTimeUtcIso(this.time);
 		if (defaultRunAt) this.date = localDateValue(new Date(defaultRunAt));
 		if (!scheduledPrompt) {
@@ -271,6 +294,8 @@ export class ScheduledPromptFormState {
 		this.startup.chatTags = [...scheduledPrompt.target.tags];
 		this.startup.showTagInput = false;
 		this.startup.preambles.restoreChoice(scheduledPrompt.target.preambleChoice);
+		// Opaque JSON settings cannot be expanded by Snapshot's recursive type.
+		this.#savedTarget = $state.snapshot<unknown>(scheduledPrompt.target) as typeof scheduledPrompt.target;
 		await this.startup.loadSettingsAndModels();
 		this.startup.validateChangedPath();
 	}
@@ -292,6 +317,12 @@ export class ScheduledPromptFormState {
 				},
 				prompt: this.normalizedPrompt,
 			};
+		}
+		if (this.#preservesSavedTarget) {
+			const target = { ...this.#savedTarget! };
+			delete target.chatTitleTemplate;
+			if (this.customTitleEnabled) target.chatTitleTemplate = this.customTitleTemplate.trim();
+			return { schedule, ...(name ? { name } : {}), target, prompt: this.normalizedPrompt };
 		}
 		const selection = this.startup.resolvedModelSelection;
 		if (!selection) return null;

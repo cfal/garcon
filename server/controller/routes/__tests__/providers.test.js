@@ -27,6 +27,9 @@ describe('agent auth login routes', () => {
     getAgentAuthStatusMap: mock(() => Promise.resolve({})),
     getAgentReadinessMap: mock(() => Promise.resolve({})),
     getAgentCatalogEntries: mock(() => Promise.resolve([])),
+    captureCatalog() {
+      return { executorInstanceId: 'synthetic-instance', assertCurrent() {}, getAgentCatalogEntries: () => this.getAgentCatalogEntries() };
+    },
     launchAgentAuthLogin: mock(() => Promise.resolve({
       launched: true,
       alreadyRunning: false,

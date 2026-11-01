@@ -1,3 +1,4 @@
+import { TestWebSocketLink as WebSocketLink } from './test-session-transport.js';
 import { expect, test, spyOn } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';
@@ -7,12 +8,14 @@ import { descriptorPathsDirectory } from '../../runtime/files/directory-creation
 import { connectRemoteExecutor, servePairedRuntime } from './runtime-adapter.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { ProducerRelay } from '../server/producer-relay.js';
-import { WebSocketLink } from '../transport/websocket-link.js';
-import { linkOptions } from './integration-fixture.js';
+
+import { linkOptions as defaultLinkOptions } from './integration-fixture.js';
 import { decodeFileData, decodeFileText, validateFileRpcRequest } from '../transport/file-protocol.js';
 import { RemoteFilesService } from '../client/remote-files.js';
 import type { RemoteSessions } from '../client/executor-client.js';
 import { MAX_FILE_REVISION_LENGTH, MAX_FILE_VIEW_BYTES } from '../../../common/file-contracts.js';
+
+const linkOptions = { ...defaultLinkOptions, executorId: '33333333-3333-4333-8333-333333333333' };
 
 test('inline file data rejects malformed encoding and oversized payloads', () => {
   for (const data of ['?', 'eA', null]) expect(() => decodeFileData(data)).toThrow(expect.objectContaining({ code: 'FILE_INVALID_DATA' }));
@@ -67,7 +70,7 @@ for (const phase of ['before dispatch', 'after creation'] as const) {
       return result;
     });
     try {
-      const executor = await connecting;
+      const executor = (await connecting).runtime;
       const files = await executor.getFilesService();
       expect(await files.browse({ directoryPath: directory })).toEqual([]);
       if (phase === 'before dispatch') await controller.dispose();
@@ -104,7 +107,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     if (dialer === 'controller') controller.dial(worker.listen());
     else worker.dial(controller.listen());
     try {
-      const executor = await connecting;
+      const executor = (await connecting).runtime;
       const files = await executor.getFilesService();
       const target = { projectPath: directory, filePath: 'example.txt' };
       const content = '\u001f'.repeat(MAX_FILE_VIEW_BYTES);
@@ -152,7 +155,7 @@ for (const phase of ['before dispatch', 'after commit'] as const) {
       return result;
     });
     try {
-      const executor = await connecting;
+      const executor = (await connecting).runtime;
       const files = await executor.getFilesService();
       const target = { projectPath: directory, filePath: 'file.txt' };
       await fs.writeFile(path.join(directory, target.filePath), 'original');
