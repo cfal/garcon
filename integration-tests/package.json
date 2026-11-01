@@ -36,5 +36,8 @@
   "overrides": {
     "minimatch": "11.0.3",
     "undici": "8.12.3"
+  },
+  "patchedDependencies": {
+    "@earendil-works/pi-coding-agent@1.4.0": "../patches/@earendil-works%2Fpi-coding-agent@1.4.0.patch"
   }
 }
