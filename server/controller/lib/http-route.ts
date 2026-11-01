@@ -1,5 +1,5 @@
 import { authenticateHttpRequest, authenticatedWithLocalCapability } from './http-request.js';
-import { MalformedJsonError } from '../../common/http-body.js';
+import { MalformedJsonError, parseJsonBody } from '../../common/http-body.js';
 import { isAuthDisabled } from '../config.js';
 import { malformedJsonResponse } from './json-route.js';
 import { compressHttpResponse } from './http-compression.js';
@@ -15,7 +15,8 @@ import { trackActivity } from '../../common/event-loop-stalls.js';
 import { CLI_SERVER_INSTANCE_HEADER } from '@garcon/common/server-runtime';
 import { stripBasePath } from '@garcon/common/base-path';
 import { CLI_CONTRACT_HEADER, CLI_OPERATIONS, type CliOperation } from '@garcon/common/cli-contracts';
-import { cliRequestContract } from '../../remote/transport/cli-protocol.js';
+import { cliRequestContract, cliRoute } from '../../remote/transport/cli-protocol.js';
+import type { JsonValue } from '@garcon/common/json';
 import { DomainError } from '../../common/domain-error.js';
 import type { CliRouteContracts } from './cli-contracts.js';
 
@@ -24,11 +25,18 @@ const logger = createLogger('lib:http-route');
 const noAuthRouteMarker: unique symbol = Symbol('no-auth-route');
 const noStoreRouteMarker: unique symbol = Symbol('no-store-route');
 const responseHeadersRouteMarker: unique symbol = Symbol('response-headers-route');
+const bodyReaderRouteMarker: unique symbol = Symbol('body-reader-route');
+
+interface RouteBodyReader {
+  read(request: Request): Promise<unknown>;
+  errorResponse(error: unknown): Response;
+}
 
 type MarkedRouteHandler = RouteHandler & {
   [noAuthRouteMarker]?: true;
   [noStoreRouteMarker]?: true;
   [responseHeadersRouteMarker]?: Readonly<Record<string, string>>;
+  [bodyReaderRouteMarker]?: RouteBodyReader;
 };
 type WrappedRouteHandler = (request: Request, server?: unknown) => Promise<Response>;
 type WrappedRouteMap = Record<string, Record<string, WrappedRouteHandler>>;
@@ -59,7 +67,26 @@ function cliRouteSelection(request: Request, route: string, method: string, loca
   if (!hasHeader && !localCapability) return handler;
   try {
     const ref = cliRequestContract(request.headers, operation as CliOperation);
-    return contracts.resolve(operation, ref).dispatch;
+    const registered = contracts.resolve(operation, ref);
+    return async (req, url, server, context) => {
+      const copy = req.clone();
+      const bodyReader = (registered.dispatch as MarkedRouteHandler)[bodyReaderRouteMarker];
+      try {
+        const route = cliRoute(method, url.pathname);
+        let body: JsonValue | null = null;
+        if (bodyReader) body = await bodyReader.read(copy) as JsonValue;
+        else if (copy.body !== null) body = await parseJsonBody(copy) as JsonValue;
+        registered.validateRequest({ ...route, query: [...url.searchParams], body });
+      } catch (error) {
+        // Both tee branches must retire to cancel an unfinished upload.
+        void copy.body?.cancel().catch(() => {});
+        void req.body?.cancel().catch(() => {});
+        if (bodyReader) return bodyReader.errorResponse(error);
+        if (error instanceof DomainError) return jsonError(error.message, error.status, error.code, error.retryable);
+        throw error;
+      }
+      return registered.dispatch(req, url, server, context);
+    };
   }
   catch (error) {
     if (error instanceof DomainError) return jsonError(error.message, error.status, error.code, error.retryable);
@@ -106,6 +133,11 @@ export function isNoAuthHandler(handler: unknown): handler is MarkedRouteHandler
 
 export function markRouteNoStore<T extends RouteHandler>(handler: T): T {
   Object.defineProperty(handler, noStoreRouteMarker, { value: true });
+  return handler;
+}
+
+export function markRouteBodyReader<T extends RouteHandler>(handler: T, reader: RouteBodyReader): T {
+  Object.defineProperty(handler, bodyReaderRouteMarker, { value: reader });
   return handler;
 }
 

@@ -37,7 +37,6 @@ function fixture(advertised: readonly number[] = [1, 2]) {
   const effects: number[] = [];
   const entries: readonly CliRouteRegistration[] = [v1, v2].map(wire => ({ ...wire, side: 'handler',
     dispatch(request, url) {
-      wire.validateRequest({ operation, body: null, query: [...url.searchParams] });
       effects.push(wire.definition.version);
       return Response.json({ version: wire.definition.version, payload: url.searchParams.has('large') ? 'x'.repeat(70_000) : 'synthetic' });
     },
@@ -109,6 +108,18 @@ function forwarded(contract: ContractRef, expectedServerInstanceId = 'synthetic-
   return { contract: { name: contract.name, version: contract.version }, expectedServerInstanceId,
     http: { operation, body: null, query: [['shape', 'second']] } };
 }
+
+test('direct HTTP applies the selected request codec before the raw handler', async () => {
+  const harness = fixture();
+  try {
+    const response = await harness.direct['/api/v1/chats']!.GET!(new Request('http://localhost/api/v1/chats', {
+      headers: { Authorization: 'Bearer synthetic-capability', [CLI_CONTRACT_HEADER]: `${v2.definition.name}@2` },
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ errorCode: 'VALIDATION_FAILED', error: 'Synthetic v2 selector is required' });
+    expect(harness.effects).toEqual([]);
+  } finally { harness.close(); }
+});
 
 test('direct HTTP and one gateway dispatch concurrent nested versions through the same outer contract', async () => {
   const harness = fixture();

@@ -8,7 +8,9 @@ import type { TicketProjectResolver } from '../tickets/project-default.js';
 import { parseExecutorId } from '../../../common/executors.js';
 import type { TicketRuntime } from '../tickets/setup.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
-import { markRouteNoStore } from '../lib/http-route.js';
+import { markRouteBodyReader, markRouteNoStore } from '../lib/http-route.js';
+
+const ticketBodyReader = { read: readTicketBody, errorResponse: ticketErrorResponse };
 
 function authenticated(handler: RouteHandler): RouteHandler {
   return markRouteNoStore(async (request, url, server, context) => {
@@ -45,20 +47,20 @@ export function createTicketRoutes(tickets: TicketRuntime,
       const prefix = validateTicketInput(() => ticketString(raw.prefix ?? '', 'prefix'));
       return ticketJson(tickets.service.facets(raw.field, prefix));
     }) },
-    '/api/v1/tickets/project-default': { POST: authenticated(async (request) => {
+    '/api/v1/tickets/project-default': { POST: markRouteBodyReader(authenticated(async (request) => {
       const raw = await readTicketBody(request);
       const input = validateTicketInput(() => ticketRecord(raw, ['directory', 'executorId']));
       const directory = validateTicketInput(() => ticketString(input.directory, 'directory'));
       const executorId = parseExecutorId(input.executorId);
       if (!executorId) throw new TicketDomainError('TICKET_VALIDATION_FAILED', 'Invalid executor ID');
       return ticketJson(await projectDefault(directory, request.signal, executorId));
-    }) },
-    '/api/v1/tickets/mutate': { POST: authenticated(async (request, _url, _server, context) => {
+    }), ticketBodyReader) },
+    '/api/v1/tickets/mutate': { POST: markRouteBodyReader(authenticated(async (request, _url, _server, context) => {
       const raw = await readTicketBody(request);
       const envelope = validateTicketInput(() => parseHttpTicketMutationRequest(raw));
       const caller = deriveTicketCaller(requireTicketPrincipal(context), envelope.fromChatId);
       const result = tickets.service.executeHttp(envelope, caller, request.signal);
       return ticketJson(result, envelope.payload.action === 'create' ? 201 : 200);
-    }) },
+    }), ticketBodyReader) },
   };
 }

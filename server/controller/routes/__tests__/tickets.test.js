@@ -197,6 +197,57 @@ describe('authenticated Tickets routes', () => {
     expect(fixture.service.list({}).items).toEqual([]);
   });
 
+  for (const operation of ['mutate', 'project-default']) {
+    for (const declared of [true, false]) {
+      test(`bounds unfinished direct CLI ${operation} uploads before EOF, declared=${declared}`, async () => {
+        const wrapped = wrapRoutes(routes, { cliContracts: testCliContracts(routes), localCapability: 'synthetic-capability' });
+        let canceled = false;
+        let finished = false;
+        let source;
+        const body = new ReadableStream({
+          start(controller) {
+            source = controller;
+            controller.enqueue(new Uint8Array(declared ? 1 : TICKET_LIMITS.requestBytes + 1).fill(32));
+          },
+          cancel() { canceled = true; },
+        });
+        const timeout = setTimeout(() => { finished = true; source.close(); }, 1_000);
+        try {
+          const path = `/api/v1/tickets/${operation}`;
+          const response = await wrapped[path].POST(new Request(`http://localhost${path}`, {
+            method: 'POST', body, headers: { Authorization: 'Bearer synthetic-capability', 'Content-Type': 'application/json',
+              'X-Garcon-Contract': `cli.tickets.${operation === 'mutate' ? 'mutate' : 'projectDefault'}@1`,
+              ...(declared ? { 'Content-Length': String(TICKET_LIMITS.requestBytes + 1) } : {}) },
+          }));
+          expect(response.status).toBe(413);
+          expect(await response.json()).toMatchObject({ errorCode: 'TICKET_REQUEST_TOO_LARGE' });
+          expect(response.headers.get('cache-control')).toBe('no-store');
+          expect(finished).toBe(false);
+          expect(canceled).toBe(true);
+          expect(defaultCalls).toEqual([]);
+          expect(fixture.service.list({}).items).toEqual([]);
+        } finally {
+          clearTimeout(timeout);
+          if (!canceled && !finished) source.close();
+        }
+      });
+    }
+  }
+
+  test('direct CLI ticket decoding retains malformed JSON and UTF-8 errors', async () => {
+    const wrapped = wrapRoutes(routes, { cliContracts: testCliContracts(routes), localCapability: 'synthetic-capability' });
+    for (const body of ['{', new Uint8Array([0xff])]) {
+      const response = await wrapped['/api/v1/tickets/mutate'].POST(new Request('http://localhost/api/v1/tickets/mutate', {
+        method: 'POST', body, headers: { Authorization: 'Bearer synthetic-capability', 'Content-Type': 'application/json',
+          'X-Garcon-Contract': 'cli.tickets.mutate@1' },
+      }));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ errorCode: 'TICKET_VALIDATION_FAILED' });
+      expect(response.headers.get('cache-control')).toBe('no-store');
+    }
+    expect(fixture.service.list({}).items).toEqual([]);
+  });
+
   test('decodes UTF-8 across streamed chunk boundaries before validating JSON', async () => {
     const request = fixture.request({ action: 'create', input: { title: 'Synthetic 𐍈', project: 'Frozen' } });
     const bytes = new TextEncoder().encode(JSON.stringify(request));
