@@ -274,7 +274,7 @@ describe('GarconClient', () => {
       }],
     };
     let requestedUrl = '';
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input) => {
         requestedUrl = String(input);
@@ -285,7 +285,7 @@ describe('GarconClient', () => {
     await expect(client.getPreambles()).resolves.toEqual(snapshot);
     expect(requestedUrl).toBe(`${connection.baseUrl}/api/v1/preambles`);
 
-    const malformed = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const malformed = new GarconClient({
       ...connection,
       fetch: async () => Response.json({ ...snapshot, revision: -1 }),
     });
@@ -297,7 +297,7 @@ describe('GarconClient', () => {
 
   test('fetches and strictly validates the complete chat catalog', async () => {
     let requestedUrl = '';
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input) => {
         requestedUrl = String(input);
@@ -307,7 +307,7 @@ describe('GarconClient', () => {
     await expect(client.listChats()).resolves.toMatchObject({ total: 1 });
     expect(requestedUrl).toBe(`${connection.baseUrl}/api/v1/chats`);
 
-    const malformed = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const malformed = new GarconClient({
       ...connection,
       fetch: async () => Response.json({ ...validChatList(), total: 2 }),
     });
@@ -319,7 +319,7 @@ describe('GarconClient', () => {
 
   test('fetches and validates a view-qualified transcript page', async () => {
     let requestedUrl = '';
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input) => {
         requestedUrl = String(input);
@@ -336,7 +336,7 @@ describe('GarconClient', () => {
       `${connection.baseUrl}/api/v1/chats/messages?chatId=${runRequest.chatId}&limit=50&beforeOrdinal=101&transcriptViewId=view-1`,
     );
 
-    const malformed = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const malformed = new GarconClient({
       ...connection,
       fetch: async () => Response.json({ ...validHistory(), transcriptViewId: 'view-2' }),
     });
@@ -350,7 +350,7 @@ describe('GarconClient', () => {
 
   test('posts and validates a request-correlated transcript search', async () => {
     let submitted: unknown;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (_input, init) => {
         submitted = JSON.parse(String(init?.body));
@@ -370,7 +370,7 @@ describe('GarconClient', () => {
     });
     expect(submitted).toEqual(request);
 
-    const malformed = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const malformed = new GarconClient({
       ...connection,
       fetch: async () => Response.json({
         ...validSearch(),
@@ -382,7 +382,7 @@ describe('GarconClient', () => {
       exitCode: 3,
     });
 
-    const invalid = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const invalid = new GarconClient({
       ...connection,
       fetch: async () => Response.json({
         success: false,
@@ -400,7 +400,7 @@ describe('GarconClient', () => {
 
   test('fetches and strictly validates transcript search status', async () => {
     let requestedUrl = '';
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input) => {
         requestedUrl = String(input);
@@ -411,7 +411,7 @@ describe('GarconClient', () => {
     await expect(client.getTranscriptSearchStatus()).resolves.toEqual(validSearchStatus());
     expect(requestedUrl).toBe(`${connection.baseUrl}/api/v1/chats/search/status`);
 
-    const malformed = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const malformed = new GarconClient({
       ...connection,
       fetch: async () => Response.json({
         ...validSearchStatus(),
@@ -428,7 +428,7 @@ describe('GarconClient', () => {
     let requestedUrl = '';
     let method = '';
     const response = { success: true, status: validSearchStatus() };
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input, init) => {
         requestedUrl = String(input);
@@ -445,7 +445,7 @@ describe('GarconClient', () => {
       { ...response, success: false },
       { ...response, status: { ...validSearchStatus(), phase: 'unknown' } },
     ]) {
-      const malformed = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+      const malformed = new GarconClient({
         ...connection,
         fetch: async () => Response.json(value),
       });
@@ -459,7 +459,7 @@ describe('GarconClient', () => {
   test('updates transcript search through the settings contract and verifies desired state', async () => {
     let requestedUrl = '';
     let submitted: unknown;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input, init) => {
         requestedUrl = String(input);
@@ -480,7 +480,7 @@ describe('GarconClient', () => {
       { success: false, settings: validRemoteSettings(true) },
       { success: true, settings: { ...validRemoteSettings(true), features: {} } },
     ]) {
-      const malformed = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+      const malformed = new GarconClient({
         ...connection,
         fetch: async () => Response.json(value),
       });
@@ -498,7 +498,7 @@ describe('GarconClient', () => {
       { success: true, status: validSearchStatus() },
       { success: true, settings: validRemoteSettings(true) },
     ];
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (_input, init) => {
         signals.push(init?.signal);
@@ -521,7 +521,7 @@ describe('GarconClient', () => {
   test('cancels submitted transcript maintenance without claiming rollback', async () => {
     const controller = new AbortController();
     const reason = new Error('maintenance cancelled');
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (_input, init) => {
         const signal = init?.signal;
@@ -543,7 +543,7 @@ describe('GarconClient', () => {
 
   test('fetches and validates a correlated transcript export', async () => {
     let requestedUrl = '';
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input) => {
         requestedUrl = String(input);
@@ -567,7 +567,7 @@ describe('GarconClient', () => {
       { ...validExport(), chatId: '1785337200123457' },
       { ...validExport(), exclusions: [], omitted: [] },
     ]) {
-      const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, ...connection, fetch: async () => Response.json(response) });
+      const client = new GarconClient({ ...connection, fetch: async () => Response.json(response) });
       await expect(client.getTranscriptExport({
         chatId: runRequest.chatId,
         format: 'xml',
@@ -577,7 +577,7 @@ describe('GarconClient', () => {
   });
 
   test('maps export validation failures to an argument-level exit', async () => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async () => Response.json({
         success: false,
@@ -595,7 +595,7 @@ describe('GarconClient', () => {
 
   test('fetches and validates a correlated handoff artifact', async () => {
     let requestedUrl = '';
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input) => {
         requestedUrl = String(input);
@@ -622,7 +622,7 @@ describe('GarconClient', () => {
       { ...validHandoffArtifact(), chatId: '1785337200123457' },
       { ...validHandoffArtifact(), contextWindowTokens: 200_000, usableTokenBudget: 150_000 },
     ]) {
-      const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, ...connection, fetch: async () => Response.json(response) });
+      const client = new GarconClient({ ...connection, fetch: async () => Response.json(response) });
       await expect(client.getChatHandoffArtifact({
         chatId: runRequest.chatId,
         contextWindowTokens: 131_072,
@@ -631,7 +631,7 @@ describe('GarconClient', () => {
   });
 
   test('maps handoff validation failures to an argument-level exit', async () => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async () => Response.json({
         success: false,
@@ -654,7 +654,7 @@ describe('GarconClient', () => {
       contentType: string | null;
       body: unknown;
     } | undefined;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input, init) => {
         const headers = new Headers(init?.headers);
@@ -687,7 +687,7 @@ describe('GarconClient', () => {
     { chatId: '123' },
     { chatId: 1785337200123456 },
   ])('rejects malformed native session lookup response %p', async (body) => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async () => Response.json(body),
     });
@@ -706,7 +706,7 @@ describe('GarconClient', () => {
     [422, 'UNSUPPORTED_AGENT'],
   ])('maps native session lookup HTTP %i %s to exit 2', async (status, errorCode) => {
     let calls = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async () => {
         calls += 1;
@@ -725,7 +725,7 @@ describe('GarconClient', () => {
   });
 
   test('distinguishes native session lookup authentication and transport failures', async () => {
-    const authenticationClient = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const authenticationClient = new GarconClient({
       ...connection,
       fetch: async () => Response.json({
         success: false,
@@ -737,7 +737,7 @@ describe('GarconClient', () => {
     await expect(authenticationClient.lookupNativeSession({ nativeSessionId: 'session-123' }))
       .rejects.toMatchObject({ phase: 'authentication', exitCode: 3 });
 
-    const transportClient = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const transportClient = new GarconClient({
       ...connection,
       fetch: async () => { throw new TypeError('connection refused'); },
     });
@@ -747,7 +747,7 @@ describe('GarconClient', () => {
 
   test('fetches and validates a correlated chat snapshot', async () => {
     let request: { url: string; method: string | undefined; authorization: string | null } | undefined;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input, init) => {
         request = {
@@ -783,7 +783,7 @@ describe('GarconClient', () => {
       control: { ...validSnapshot().control as object, serverInstanceId: 'other-instance' },
     })],
   ])('rejects an uncorrelated snapshot by %s', async (_label, response) => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async () => Response.json(response()),
     });
@@ -793,7 +793,7 @@ describe('GarconClient', () => {
   });
 
   test('rejects a malformed chat snapshot contract', async () => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async () => Response.json(validSnapshot({ processingPhase: 'busy' })),
     });
@@ -803,7 +803,7 @@ describe('GarconClient', () => {
   });
 
   test('maps a missing snapshot to an argument-level exit', async () => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async () => Response.json({
         success: false,
@@ -826,7 +826,7 @@ describe('GarconClient', () => {
   test('authenticates requests with the process capability', async () => {
     let authorization: string | null = null;
     let redirect: RequestRedirect | undefined;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (_input, init) => {
         authorization = new Headers(init?.headers).get('authorization');
@@ -844,7 +844,7 @@ describe('GarconClient', () => {
     { status: 'not-applied', errorCode: 'CHAT_TAG_SAVE_FAILED', retryable: true },
     { status: 'unknown', errorCode: 'CHAT_TAG_SAVE_UNKNOWN', recoveryRequired: true },
   ] as const)('preserves the $status post-admission tag outcome', async (tagMutation) => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async () => Response.json({
         success: true,
@@ -864,7 +864,7 @@ describe('GarconClient', () => {
 
   test('updates a chat title through the existing workspace API', async () => {
     let request: { url: string; method: string | undefined; body: string } | undefined;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input, init) => {
         request = {
@@ -895,7 +895,7 @@ describe('GarconClient', () => {
 
   test('uses desired-state metadata routes and strictly correlates their responses', async () => {
     const requests: Array<{ url: string; method: string | undefined; body: string }> = [];
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input, init) => {
         const url = String(input);
@@ -984,7 +984,7 @@ describe('GarconClient', () => {
     };
     const bodies: string[] = [];
     let attempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
@@ -1010,7 +1010,7 @@ describe('GarconClient', () => {
 
   test('does not retry a definitive stale permission decision', async () => {
     let attempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async () => {
@@ -1050,7 +1050,7 @@ describe('GarconClient', () => {
   ] as const) {
     test(`reports a server-classified ${errorCode} permission decision without retrying it`, async () => {
       let attempts = 0;
-      const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+      const client = new GarconClient({
         ...connection,
         submissionDelay: async () => undefined,
         fetch: async () => {
@@ -1084,7 +1084,7 @@ describe('GarconClient', () => {
   test('retries an ambiguous submission with the identical request body', async () => {
     const bodies: string[] = [];
     let attempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
@@ -1103,7 +1103,7 @@ describe('GarconClient', () => {
   test('retries when an accepted response body is interrupted', async () => {
     const bodies: string[] = [];
     let attempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
@@ -1128,7 +1128,7 @@ describe('GarconClient', () => {
   });
 
   test('classifies an interrupted receipt body as a transport failure', async () => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async () => new Response(new ReadableStream({
         start(controller) {
@@ -1144,7 +1144,7 @@ describe('GarconClient', () => {
   test('retries a malformed successful submission response with the exact body', async () => {
     const bodies: string[] = [];
     let attempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
@@ -1163,7 +1163,7 @@ describe('GarconClient', () => {
 
   test('reports the candidate chat after ambiguous recovery is exhausted', async () => {
     let attempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
@@ -1181,7 +1181,7 @@ describe('GarconClient', () => {
 
   test.each([408, 425, 429, 500, 502, 503, 504])('retries ambiguous HTTP %i responses', async (status) => {
     let attempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
@@ -1199,7 +1199,7 @@ describe('GarconClient', () => {
 
   test('does not retry an ambiguous submission on a replacement runtime', async () => {
     let submissions = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
@@ -1219,7 +1219,7 @@ describe('GarconClient', () => {
 
   test('does not confuse a retryable busy admission with an ambiguous outcome', async () => {
     let attempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async () => {
         attempts += 1;
@@ -1236,7 +1236,7 @@ describe('GarconClient', () => {
   });
 
   test('parses Retry-After for receipt recovery', async () => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async () => Response.json({ error: 'busy' }, {
         status: 503,
@@ -1254,7 +1254,7 @@ describe('GarconClient', () => {
   });
 
   test('caps Retry-After values used by recovery', async () => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async () => Response.json({ error: 'busy' }, {
         status: 503,
@@ -1272,7 +1272,7 @@ describe('GarconClient', () => {
   });
 
   test('does not accept a response without correlated fields', async () => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => String(input).match(/\/api\/v1\/(runtime|cli\/context)/)
@@ -1284,7 +1284,7 @@ describe('GarconClient', () => {
 
   test('recovers from an accepted response for a different request', async () => {
     let attempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
@@ -1324,7 +1324,7 @@ describe('GarconClient', () => {
 
   test('submits a steer to the existing endpoint with the exact body', async () => {
     let request: { url: string; method: string | undefined; body: string } | undefined;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input, init) => {
         request = { url: String(input), method: init?.method, body: String(init?.body) };
@@ -1345,7 +1345,7 @@ describe('GarconClient', () => {
 
   test('does not retry a recorded unknown steering outcome', async () => {
     let submissions = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async () => {
@@ -1365,7 +1365,7 @@ describe('GarconClient', () => {
 
   test('does not retry a definitively non-delivered steering outcome', async () => {
     let submissions = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async () => {
@@ -1386,7 +1386,7 @@ describe('GarconClient', () => {
   test('retries an ambiguous errorCode-less steer submission with the exact body', async () => {
     const bodies: string[] = [];
     let attempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
@@ -1405,7 +1405,7 @@ describe('GarconClient', () => {
   });
 
   test('does not accept a steer response without a correlated turn identity', async () => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => String(input).match(/\/api\/v1\/(runtime|cli\/context)/)
@@ -1450,7 +1450,7 @@ describe('GarconClient', () => {
 
   test('parses and correlates a stop response', async () => {
     let request: { url: string; method: string | undefined; body: string } | undefined;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input, init) => {
         request = { url: String(input), method: init?.method, body: String(init?.body) };
@@ -1472,7 +1472,7 @@ describe('GarconClient', () => {
   test('retries an ambiguous stop submission with the exact request', async () => {
     const bodies: string[] = [];
     let attempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
@@ -1491,7 +1491,7 @@ describe('GarconClient', () => {
 
   test('never accepts a stop response with a malformed outcome', async () => {
     let submissions = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
@@ -1509,7 +1509,7 @@ describe('GarconClient', () => {
 
   test('never accepts a stop response with a malformed control state', async () => {
     let submissions = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
@@ -1527,7 +1527,7 @@ describe('GarconClient', () => {
 
   test('does not retry a stop submission against a replacement runtime', async () => {
     let submissions = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
@@ -1621,7 +1621,7 @@ describe('GarconClient fork', () => {
 
   test('posts and strictly correlates a bare fork without automatic retry', async () => {
     let submitted: { url: string; body: string; signal: AbortSignal | null | undefined } | undefined;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input, init) => {
         submitted = { url: String(input), body: String(init?.body), signal: init?.signal };
@@ -1639,7 +1639,7 @@ describe('GarconClient fork', () => {
 
   test('reports the generated target and never retries an ambiguous bare fork', async () => {
     let attempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async () => {
@@ -1657,7 +1657,7 @@ describe('GarconClient fork', () => {
   test('retries an ambiguous fork-run with the byte-identical command identity', async () => {
     const bodies: string[] = [];
     let attempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
@@ -1688,7 +1688,7 @@ describe('GarconClient fork', () => {
   });
 
   test('reports the generated target when a bare-fork success cannot be correlated', async () => {
-    const bareClient = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const bareClient = new GarconClient({
       ...connection,
       fetch: async () => Response.json({
         success: true,
@@ -1700,7 +1700,7 @@ describe('GarconClient fork', () => {
     );
 
     let attempts = 0;
-    const runClient = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const runClient = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => {
@@ -1727,7 +1727,7 @@ describe('GarconClient fork', () => {
 
   test('recovers an uncorrelated fork-run success with the exact command identity', async () => {
     const bodies: string[] = [];
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
@@ -1759,7 +1759,7 @@ describe('GarconClient fork', () => {
   });
 
   test('rejects fork-run responses whose duplicate parent references disagree', async () => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input) => String(input).match(/\/api\/v1\/(runtime|cli\/context)/)
@@ -1800,7 +1800,7 @@ describe('GarconClient add-row', () => {
 
   test('validates the target and correlates every mutation identity', async () => {
     const seen: Array<{ url: string; body: string | null }> = [];
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async (input, init) => {
         const url = String(input);
@@ -1847,7 +1847,7 @@ describe('GarconClient add-row', () => {
       format: 'markdown' as const,
       content: '**complete**',
     };
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       fetch: async () => Response.json({
         success: true,
@@ -1880,7 +1880,7 @@ describe('GarconClient add-row', () => {
   test('retries an ambiguous mutation with the byte-identical request body', async () => {
     const bodies: string[] = [];
     let postAttempts = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async (input, init) => {
@@ -1906,7 +1906,7 @@ describe('GarconClient add-row', () => {
 
   test('does not retry or refresh a definitive stale-view response', async () => {
     let calls = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS },
+    const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
       fetch: async () => {

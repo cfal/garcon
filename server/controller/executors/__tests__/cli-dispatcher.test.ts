@@ -1,9 +1,10 @@
+import { testCliContracts } from '../../lib/__tests__/cli-contract-fixture.js';
 import { handleTestRpc } from '../../../remote/__tests__/test-session-transport.js';
 import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { expect, spyOn, test } from 'bun:test';
 import { ControllerCliDispatcher, type CliDispatchAccess } from '../cli-dispatcher.js';
 import type { GuardRpcReply } from '../../../remote/transport/rpc.js';
-import { CLI_REPLY_BYTES, CLI_OPERATIONS, cliPolicy, cliRoute, parseControllerCliRequest, type CliOperation, type ControllerCliRequest } from '../../../remote/transport/cli-protocol.js';
+import { CLI_REPLY_BYTES, CLI_OPERATIONS, cliRoute, resolveCliRequest, type CliOperation, type ControllerCliRequest } from '../../../remote/transport/cli-protocol.js';
 import { DomainError } from '../../../common/domain-error.js';
 import { cliPair, CLI_EXECUTOR_ID } from '../../../remote/__tests__/cli-fixture.js';
 import type { JsonValue } from '../../../../common/json.js';
@@ -12,6 +13,10 @@ import { CliAdmission } from '../../../remote/transport/cli-admission.js';
 import { CommandLedger } from '../../commands/command-ledger.js';
 import { createAgentTurnReceiptRoutes } from '../../routes/agent-turn-receipt.js';
 import { parseAgentTurnReceipt } from '../../../../common/agent-turn-receipt.js';
+
+const parserContracts = testCliContracts();
+const resolveRequest = (value: unknown) => resolveCliRequest(value, (operation, ref) => parserContracts.resolve(operation, ref));
+const parseControllerCliRequest = (value: unknown) => resolveRequest(value).request;
 
 test('bulk short admission preserves per-executor and global primary reservations', () => {
   const admission = new CliAdmission();
@@ -73,11 +78,7 @@ function request(operation: CliOperation = 'GET /api/v1/chats', body: JsonValue 
   return { contract: { name: CLI_OPERATIONS[operation][1].name, version: 1 }, expectedServerInstanceId: 'controller', http: { operation, body, query: [] } };
 }
 function dispatcher(routes: RouteMap) {
-  return new ControllerCliDispatcher({ routes: {
-    '/api/v1/chats/stop': { POST: () => Response.json({ success: true }) },
-    '/api/v1/chats/turn-receipt': { GET: () => Response.json({ success: true }) },
-    ...routes,
-  }, serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false });
+  return new ControllerCliDispatcher({ contracts: testCliContracts(routes), serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false });
 }
 
 test('schedule forwarding requires explicit new-chat executors and excludes unrelated browser operations', () => {
@@ -147,7 +148,7 @@ test('restricted envelope rejects unknown routes, implicit Local targets, privil
   ]) expect(() => parseControllerCliRequest(value)).toThrow();
   expect(parseControllerCliRequest(request('PUT /api/v1/app/settings', { features: { transcriptSearch: { enabled: false } } })).http.body)
     .toEqual({ features: { transcriptSearch: { enabled: false } } });
-  expect(cliPolicy(request('POST /api/v1/chats/run', { handoff: {} })).timeoutMs).toBe(600_000);
+  expect(resolveRequest(request('POST /api/v1/chats/run', { handoff: {} })).policy.timeoutMs).toBe(600_000);
   expect(CLI_OPERATIONS['POST /api/v1/chats/fork'][1].timeoutMs).toBeNull();
 });
 
@@ -271,17 +272,17 @@ test('revocation fences late mutation completion even after access is re-enabled
 test.each([false, true])('revocation after handler settlement still fences RPC publication: mutation=%s', async (mutation) => {
   const lease = new AbortController();
   class RevokingDispatcher extends ControllerCliDispatcher {
-    override async request(value: unknown, access: CliDispatchAccess, guardReply: GuardRpcReply) {
+    override async request(value: Parameters<ControllerCliDispatcher['request']>[0], access: CliDispatchAccess, guardReply: GuardRpcReply) {
       const reply = await super.request(value, { ...access, signal: AbortSignal.any([access.signal, lease.signal]) }, guardReply);
       lease.abort();
       return reply;
     }
   }
   const pair = cliPair(new RevokingDispatcher({ serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false,
-    routes: { '/api/v1/chats': { GET: () => Response.json({ privateData: true }) },
+    contracts: testCliContracts({ '/api/v1/chats': { GET: () => Response.json({ privateData: true }) },
       '/api/v1/chats/turn-receipt': { GET: () => Response.json({ success: true }) },
       '/api/v1/chats/stop': { POST: () => Response.json({ success: true }) },
-      '/api/v1/chats/run': { POST: () => Response.json({ committed: true }) } } }));
+      '/api/v1/chats/run': { POST: () => Response.json({ committed: true }) } }) }));
   try {
     await expect(pair.worker.call('', RPC_V1['controllerCli.request'], request(mutation ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats', mutation ? {} : null)))
       .rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_CONTROLLER_UNAVAILABLE' });

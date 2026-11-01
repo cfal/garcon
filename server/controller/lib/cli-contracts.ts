@@ -2,7 +2,8 @@ import { CLI_OPERATIONS, type CliOperation } from '@garcon/common/cli-contracts'
 import { contractKey, contractOffer, type ContractRef } from '@garcon/common/protocol-contracts';
 import { DomainError } from '../../common/domain-error.js';
 import type { RouteHandler, RouteMap } from './http-route-types.js';
-import { cliWireV1, type CliWire } from '../../remote/transport/cli-protocol.js';
+import type { CliWire } from '../../remote/transport/cli-protocol.js';
+import { CLI_WIRES_V1 } from '../../remote/transport/cli-wire-v1.js';
 
 export interface CliRouteRegistration extends CliWire {
   readonly side: 'handler';
@@ -36,33 +37,13 @@ export class CliRouteContracts {
   }
 }
 
-export function registerCliRoutes(routes: RouteMap): CliRouteContracts {
-  const entries: CliRouteRegistration[] = [];
-  for (const operation of CLI_ROUTES_V1) {
+export function registerCliRoutes(routes: RouteMap, wires: readonly CliWire[] = CLI_WIRES_V1): CliRouteContracts {
+  return new CliRouteContracts(wires.map(wire => {
+    const { operation } = wire;
     const [method, path] = operation.split(' ') as [string, string];
-    if (Object.hasOwn(routes, path) && Object.hasOwn(routes[path]!, method)) {
-      entries.push({ ...cliWireV1(operation), side: 'handler', dispatch: routes[path]![method]! });
+    if (!Object.hasOwn(routes, path) || !Object.hasOwn(routes[path]!, method)) {
+      throw new Error(`Missing CLI route implementation: ${operation}`);
     }
-  }
-  return new CliRouteContracts(entries);
+    return { ...wire, side: 'handler', dispatch: routes[path]![method]! };
+  }));
 }
-
-// This list registers implementations, not every version a future allowlist may describe.
-const CLI_ROUTES_V1 = [
-  'GET /api/v1/scheduled-prompts', 'POST /api/v1/scheduled-prompts', 'PUT /api/v1/scheduled-prompts',
-  'DELETE /api/v1/scheduled-prompts', 'PUT /api/v1/scheduled-prompts/enabled',
-  'GET /api/v1/executors', 'POST /api/v1/executors', 'PATCH /api/v1/executors/:executorId',
-  'DELETE /api/v1/executors/:executorId', 'GET /api/v1/executors/:executorId/connection',
-  'GET /api/v1/api-provider-assignments', 'PUT /api/v1/api-provider-assignments', 'DELETE /api/v1/api-provider-assignments',
-  'GET /api/v1/models', 'GET /api/v1/app/settings', 'GET /api/v1/preambles', 'GET /api/v1/chats',
-  'GET /api/v1/chats/messages', 'GET /api/v1/chats/snapshot', 'GET /api/v1/chats/turn-receipt',
-  'GET /api/v1/chats/export', 'GET /api/v1/chats/handoff-artifact', 'POST /api/v1/chats/lookup-native-session',
-  'POST /api/v1/chats/search', 'GET /api/v1/chats/search/status', 'POST /api/v1/chats/search/rebuild',
-  'PUT /api/v1/app/settings', 'POST /api/v1/chats/start', 'POST /api/v1/chats/run', 'POST /api/v1/chats/fork',
-  'POST /api/v1/chats/fork-run', 'POST /api/v1/chats/steer', 'POST /api/v1/chats/stop',
-  'POST /api/v1/chats/permissions/decision', 'GET /api/v1/chats/rows', 'POST /api/v1/chats/rows',
-  'PUT /api/v1/app/session-name', 'PUT /api/v1/chats/pin', 'PUT /api/v1/chats/archive',
-  'GET /api/v1/chats/tags', 'PUT /api/v1/chats/tags', 'GET /api/v1/tickets/bootstrap',
-  'GET /api/v1/tickets', 'GET /api/v1/tickets/detail', 'GET /api/v1/tickets/history',
-  'POST /api/v1/tickets/project-default', 'POST /api/v1/tickets/mutate',
-] as const satisfies readonly CliOperation[];

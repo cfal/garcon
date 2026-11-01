@@ -1,3 +1,4 @@
+import { testCliContracts } from './cli-contract-fixture.js';
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 const authenticatedPrincipal = {
@@ -65,7 +66,7 @@ describe('http route wrapping', () => {
     it(`fences CLI requests before handler dispatch with auth disabled=${disabled}`, async () => {
       isAuthDisabled.mockReturnValue(disabled);
       const handler = mock(() => Response.json({ ok: true }));
-      const wrapped = wrapRoute(handler, '/api/private', 'POST', { serverInstanceId: 'current' });
+      const wrapped = wrapRoute(handler, '/api/private', 'POST', { cliContracts: testCliContracts({ ['/api/private']: { ['POST']: handler } }), serverInstanceId: 'current' });
       const stale = await wrapped(new Request('http://localhost/api/private', { headers: { 'X-Garcon-Server-Instance': 'old' } }));
       expect(stale.status).toBe(409);
       expect(await stale.json()).toMatchObject({ errorCode: 'CLI_CONTROLLER_CHANGED', retryable: false });
@@ -78,7 +79,7 @@ describe('http route wrapping', () => {
     it(`requires exact CLI selectors without changing browser or bootstrap dispatch, auth disabled=${disabled}`, async () => {
       isAuthDisabled.mockReturnValue(disabled);
       const handler = mock(() => Response.json({ ok: true }));
-      const wrapped = wrapRoute(handler, '/api/v1/chats', 'GET', { serverInstanceId: 'current' });
+      const wrapped = wrapRoute(handler, '/api/v1/chats', 'GET', { cliContracts: testCliContracts({ ['/api/v1/chats']: { ['GET']: handler } }), serverInstanceId: 'current' });
       const send = headers => wrapped(new Request('http://localhost/api/v1/chats', { headers }));
       expect((await send({})).status).toBe(200);
       expect((await send({ 'X-Garcon-Server-Instance': 'current' })).status).toBe(422);
@@ -91,7 +92,7 @@ describe('http route wrapping', () => {
       if (disabled) authenticatedWithLocalCapability.mockReturnValueOnce(true);
       else authenticateHttpRequest.mockResolvedValueOnce({ errorResponse: null, principal: { mode: 'local' }, localCapability: true });
       expect((await send({ Authorization: 'Bearer local' })).status).toBe(422);
-      const context = wrapRoute(handler, '/api/v1/cli/context', 'GET', { serverInstanceId: 'current' });
+      const context = wrapRoute(handler, '/api/v1/cli/context', 'GET', { cliContracts: testCliContracts({ ['/api/v1/cli/context']: { ['GET']: handler } }), serverInstanceId: 'current' });
       expect((await context(new Request('http://localhost/api/v1/cli/context', { headers: { 'X-Garcon-Server-Instance': 'current' } }))).status).toBe(200);
     });
   }
@@ -100,7 +101,7 @@ describe('http route wrapping', () => {
       if (mode === 'disabled') isAuthDisabled.mockReturnValue(true);
       const handler = mock(() => Response.json({ ok: true }));
       if (mode === 'public') markRouteNoAuth(handler);
-      const wrapped = wrapRoute(handler, '/api/private', 'POST', { isShuttingDown: () => true });
+      const wrapped = wrapRoute(handler, '/api/private', 'POST', { cliContracts: testCliContracts({ ['/api/private']: { ['POST']: handler } }), isShuttingDown: () => true });
       const response = await wrapped(new Request('http://localhost/api/private'));
       expect(response.status).toBe(503);
       expect(await response.json()).toMatchObject({ errorCode: 'SERVER_SHUTTING_DOWN', retryable: true });
@@ -114,7 +115,7 @@ describe('http route wrapping', () => {
     const authentication = Promise.withResolvers();
     authenticateHttpRequest.mockImplementationOnce(() => authentication.promise);
     const handler = mock(() => Response.json({ ok: true }));
-    const wrapped = wrapRoute(handler, '/api/private', 'POST', { isShuttingDown: () => shuttingDown });
+    const wrapped = wrapRoute(handler, '/api/private', 'POST', { cliContracts: testCliContracts({ ['/api/private']: { ['POST']: handler } }), isShuttingDown: () => shuttingDown });
     const response = wrapped(new Request('http://localhost/api/private'));
     shuttingDown = true;
     authentication.resolve({ errorResponse: null, principal: authenticatedPrincipal });
@@ -123,7 +124,7 @@ describe('http route wrapping', () => {
   });
   it('preserves the no-store route policy on authentication rejection before handler admission', async () => {
     const handler = mock(() => Response.json({ ok: true }));
-    const wrapped = wrapRoute(markRouteNoStore(handler), '/api/v1/tickets', 'GET');
+    const wrapped = wrapRoute(markRouteNoStore(handler), '/api/v1/tickets', 'GET', { cliContracts: testCliContracts({ ['/api/v1/tickets']: { ['GET']: markRouteNoStore(handler) } }) });
     for (const authorization of [null, 'Bearer invalid']) {
       authenticateHttpRequest.mockResolvedValueOnce({ principal: null, errorResponse: Response.json({ error: 'Unauthorized' }, { status: 401 }) });
       const response = await wrapped(new Request('http://localhost/api/v1/tickets', { headers: authorization ? { Authorization: authorization } : {} }));
@@ -142,7 +143,7 @@ describe('http route wrapping', () => {
         return Response.json({ ok: true });
       }), { 'X-Robots-Tag': 'noindex' });
       if (mode === 'public') markRouteNoAuth(handler);
-      const wrapped = wrapRoute(handler, '/shared/:token', 'GET', { isShuttingDown: () => shuttingDown });
+      const wrapped = wrapRoute(handler, '/shared/:token', 'GET', { cliContracts: testCliContracts({ ['/shared/:token']: { ['GET']: handler } }), isShuttingDown: () => shuttingDown });
       const request = () => wrapped(new Request('http://localhost/shared/token'));
 
       const responses = [await request()];
@@ -175,7 +176,7 @@ describe('http route wrapping', () => {
         return new Response('ok');
       });
       await Bun.sleep(60);
-      await wrapRoute(handler, '/shared/:token', 'GET')(new Request('http://localhost/shared/synthetic-token'));
+      await wrapRoute(handler, '/shared/:token', 'GET', { cliContracts: testCliContracts({ ['/shared/:token']: { ['GET']: handler } }) })(new Request('http://localhost/shared/synthetic-token'));
       await Bun.sleep(60);
 
       expect(stalls).toHaveLength(1);
@@ -188,7 +189,7 @@ describe('http route wrapping', () => {
 
   it('requires auth for unmarked handlers', async () => {
     const handler = mock(() => Response.json({ ok: true }));
-    const wrapped = wrapRoute(handler, '/api/private', 'GET');
+    const wrapped = wrapRoute(handler, '/api/private', 'GET', { cliContracts: testCliContracts({ ['/api/private']: { ['GET']: handler } }) });
     const response = await wrapped(new Request('http://localhost/api/private'));
     const payload = await response.json();
 
@@ -199,7 +200,8 @@ describe('http route wrapping', () => {
   it('passes the Bun server object through to handlers', async () => {
     const server = { requestIP: mock(() => ({ address: '127.0.0.1', family: 'IPv4', port: 1234 })) };
     const handler = mock((_request, _url, bunServer) => Response.json({ hasServer: bunServer === server }));
-    const wrapped = wrapRoute(handler, '/api/private', 'GET');
+    const cliContracts = testCliContracts({ '/api/private': { GET: handler } });
+    const wrapped = wrapRoute(handler, '/api/private', 'GET', { cliContracts });
     const response = await wrapped(new Request('http://localhost/api/private'), server);
     const payload = await response.json();
 
@@ -208,13 +210,13 @@ describe('http route wrapping', () => {
       expect.any(Request),
       expect.any(URL),
       server,
-      { principal: authenticatedPrincipal, cliContracts: {} },
+      { principal: authenticatedPrincipal, cliContracts: cliContracts.catalog },
     );
   });
 
   it('returns 400 for typed malformed JSON errors', async () => {
     const handler = mock(() => { throw new MalformedJsonError(); });
-    const wrapped = wrapRoute(handler, '/api/private', 'POST');
+    const wrapped = wrapRoute(handler, '/api/private', 'POST', { cliContracts: testCliContracts({ ['/api/private']: { ['POST']: handler } }) });
     const response = await wrapped(new Request('http://localhost/api/private', { method: 'POST' }));
     const payload = await response.json();
 
@@ -225,7 +227,7 @@ describe('http route wrapping', () => {
 
   it('does not classify same-message errors as malformed JSON', async () => {
     const handler = mock(() => { throw new Error('Malformed JSON'); });
-    const wrapped = wrapRoute(handler, '/api/private', 'POST');
+    const wrapped = wrapRoute(handler, '/api/private', 'POST', { cliContracts: testCliContracts({ ['/api/private']: { ['POST']: handler } }) });
 
     await expect(wrapped(new Request('http://localhost/api/private', { method: 'POST' })))
       .rejects.toThrow('Malformed JSON');
@@ -265,7 +267,7 @@ describe('http route wrapping', () => {
       ok: true,
       principal: context?.principal ?? null,
     })));
-    const wrapped = wrapRoute(handler, '/api/public', 'GET');
+    const wrapped = wrapRoute(handler, '/api/public', 'GET', { cliContracts: testCliContracts({ ['/api/public']: { ['GET']: handler } }) });
     const response = await wrapped(new Request('http://localhost/api/public'));
     const payload = await response.json();
 
@@ -278,7 +280,7 @@ describe('http route wrapping', () => {
     const noauthByNameOnly = function noauthAccidentalByName() {
       return Response.json({ ok: true });
     };
-    const wrapped = wrapRoute(noauthByNameOnly, '/api/private', 'GET');
+    const wrapped = wrapRoute(noauthByNameOnly, '/api/private', 'GET', { cliContracts: testCliContracts({ ['/api/private']: { ['GET']: noauthByNameOnly } }) });
     const response = await wrapped(new Request('http://localhost/api/private'));
     const payload = await response.json();
 
@@ -298,7 +300,7 @@ describe('http route wrapping', () => {
       '/api/public': { GET: markRouteNoAuth(() => Response.json({ public: true })) },
       '/api/private': { POST: () => Response.json({ private: true }) },
     };
-    const wrappedRoutes = wrapRoutes(rawRoutes);
+    const wrappedRoutes = wrapRoutes(rawRoutes, { cliContracts: testCliContracts(rawRoutes) });
 
     const publicResponse = await wrappedRoutes['/api/public'].GET(new Request('http://localhost/api/public'));
     const privateResponse = await wrappedRoutes['/api/private'].POST(new Request('http://localhost/api/private'));
@@ -313,7 +315,7 @@ describe('http route wrapping', () => {
     const handler = mock(async (incoming, url) => Response.json({
       sameRequest: incoming === request, path: url.pathname, query: url.searchParams.get('x'), body: await incoming.text(),
     }));
-    const wrapped = wrapRoutes({ '/api/private': { POST: handler } }, { basePath: '/tools/garcon' });
+    const wrapped = wrapRoutes({ '/api/private': { POST: handler } }, { cliContracts: testCliContracts({ '/api/private': { POST: handler } }), basePath: '/tools/garcon' });
     expect(wrapped['/api/private']).toBeUndefined();
     const response = await wrapped['/tools/garcon/api/private'].POST(request);
     expect(await response.json()).toEqual({ sameRequest: true, path: '/api/private', query: 'a/b', body: 'payload' });
@@ -336,7 +338,7 @@ describe('http route wrapping', () => {
         DELETE: () => new Response('private DELETE'),
       },
     };
-    const wrapped = wrapRoutes(rawRoutes, { basePath });
+    const wrapped = wrapRoutes(rawRoutes, { cliContracts: testCliContracts(rawRoutes), basePath });
     const expectedPaths = [`${basePath}/api/public`, `${basePath}/api/private`];
     if (basePath) expectedPaths.push(basePath);
     expect(Object.keys(wrapped)).toEqual(expectedPaths);
@@ -355,7 +357,7 @@ describe('http route wrapping', () => {
 
   it('redirects the bare mount without auth and honors subsequent shutdown', async () => {
     let shuttingDown = false;
-    const wrapped = wrapRoutes({}, {
+    const wrapped = wrapRoutes({}, { cliContracts: testCliContracts({}),
       basePath: '/tools/garcon',
       isShuttingDown: () => shuttingDown,
     });
@@ -378,7 +380,7 @@ describe('http route wrapping', () => {
       ok: true,
       principal: context?.principal,
     }));
-    const wrapped = wrapRoute(handler, '/api/private', 'GET');
+    const wrapped = wrapRoute(handler, '/api/private', 'GET', { cliContracts: testCliContracts({ ['/api/private']: { ['GET']: handler } }) });
     const response = await wrapped(new Request('http://localhost/api/private'));
     const payload = await response.json();
 
@@ -394,7 +396,7 @@ describe('http route wrapping', () => {
 
   it('compresses wrapped route responses with Accept-Encoding: gzip', async () => {
     const handler = markRouteNoAuth(() => Response.json({ ok: true }));
-    const wrapped = wrapRoute(handler, '/api/public', 'GET');
+    const wrapped = wrapRoute(handler, '/api/public', 'GET', { cliContracts: testCliContracts({ ['/api/public']: { ['GET']: handler } }) });
     const response = await wrapped(
       new Request('http://localhost/api/public', { headers: { 'Accept-Encoding': 'gzip' } }),
     );
@@ -406,7 +408,7 @@ describe('http route wrapping', () => {
 
   it('compresses wrapped route responses with Accept-Encoding: zstd', async () => {
     const handler = markRouteNoAuth(() => Response.json({ ok: true }));
-    const wrapped = wrapRoute(handler, '/api/public', 'GET');
+    const wrapped = wrapRoute(handler, '/api/public', 'GET', { cliContracts: testCliContracts({ ['/api/public']: { ['GET']: handler } }) });
     const response = await wrapped(
       new Request('http://localhost/api/public', { headers: { 'Accept-Encoding': 'zstd' } }),
     );
@@ -417,7 +419,7 @@ describe('http route wrapping', () => {
 
   it('compresses wrapped route responses with Accept-Encoding: deflate', async () => {
     const handler = markRouteNoAuth(() => Response.json({ ok: true }));
-    const wrapped = wrapRoute(handler, '/api/public', 'GET');
+    const wrapped = wrapRoute(handler, '/api/public', 'GET', { cliContracts: testCliContracts({ ['/api/public']: { ['GET']: handler } }) });
     const response = await wrapped(
       new Request('http://localhost/api/public', { headers: { 'Accept-Encoding': 'deflate' } }),
     );
@@ -428,7 +430,7 @@ describe('http route wrapping', () => {
 
   it('does not compress wrapped route responses with Accept-Encoding: br', async () => {
     const handler = markRouteNoAuth(() => Response.json({ ok: true }));
-    const wrapped = wrapRoute(handler, '/api/public', 'GET');
+    const wrapped = wrapRoute(handler, '/api/public', 'GET', { cliContracts: testCliContracts({ ['/api/public']: { ['GET']: handler } }) });
     const response = await wrapped(
       new Request('http://localhost/api/public', { headers: { 'Accept-Encoding': 'br' } }),
     );
@@ -440,7 +442,7 @@ describe('http route wrapping', () => {
   it('does not compress when HTTP compression is disabled by config', async () => {
     isHttpCompressionEnabled.mockReturnValue(false);
     const handler = markRouteNoAuth(() => Response.json({ ok: true }));
-    const wrapped = wrapRoute(handler, '/api/public', 'GET');
+    const wrapped = wrapRoute(handler, '/api/public', 'GET', { cliContracts: testCliContracts({ ['/api/public']: { ['GET']: handler } }) });
     const response = await wrapped(
       new Request('http://localhost/api/public', { headers: { 'Accept-Encoding': 'gzip' } }),
     );

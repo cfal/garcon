@@ -1,5 +1,5 @@
 import type { CliIdentityV1 } from '../../../common/server-runtime.js';
-import { CLI_CONTRACT_HEADER, CLI_OPERATIONS, findCliRoute, findCliDefinition, parseContractSelector, type CliOperation, type CliOperationDefinition } from '../../../common/cli-contracts.js';
+import { CLI_CONTRACT_HEADER, CLI_OPERATIONS, findCliRoute, parseContractSelector, type CliOperation, type CliOperationDefinition } from '../../../common/cli-contracts.js';
 import { isContractRef, type ContractRef } from '../../../common/protocol-contracts.js';
 import { isExecutorId, isRemoteExecutorId } from '../../../common/executors.js';
 import { isApiProviderId } from '../../../common/api-providers.js';
@@ -63,11 +63,11 @@ export type CliRegistration = CliWire & (
   | { readonly side: 'handler'; readonly dispatch: (...args: never[]) => unknown }
   | { readonly side: 'forwarder'; readonly dispatch: CliForward }
 );
-export type CliLookup = (operation: string, contract: ContractRef) => CliWire;
+export type CliLookup = (operation: string, contract: ContractRef) => CliRegistration;
 
 export interface ResolvedCliRequest {
   readonly request: ControllerCliRequest;
-  readonly wire: CliWire;
+  readonly wire: CliRegistration;
   readonly policy: CliOperationDefinition;
 }
 
@@ -80,27 +80,10 @@ export function cliWireV1(operation: CliOperation): CliWire {
   });
 }
 
-export function cliOperation(method: string, pathname: string): CliOperation {
-  const key = `${method} ${pathname}`;
-  if (!Object.hasOwn(CLI_OPERATIONS, key)) throw new DomainError('CLI_ACCESS_DENIED', 'This operation is not available through the CLI gateway', 403);
-  return key as CliOperation;
-}
-
 export function cliRoute(method: string, pathname: string): { readonly operation: CliOperation; readonly executorId?: string } {
   const route = findCliRoute(method, pathname);
   if (!route) throw new DomainError('CLI_ACCESS_DENIED', 'This operation is not available through the CLI gateway', 403);
   return route;
-}
-
-export function cliPolicy({ http, contract }: Pick<ControllerCliRequest, 'http' | 'contract'>): CliOperationDefinition {
-  return requireCliWireV1(http.operation, contract).policy(http);
-}
-
-export function requireCliDefinition(operation: string, contract: ContractRef): CliOperationDefinition {
-  if (Object.hasOwn(CLI_OPERATIONS, operation) && CLI_OPERATIONS[operation as CliOperation][1].name !== contract.name) invalid();
-  const definition = findCliDefinition(operation, contract);
-  if (!definition) throw new DomainError('OPERATION_UNSUPPORTED', 'This CLI operation version is not supported', 422);
-  return definition;
 }
 
 export function cliRequestContract(headers: Headers, operation: CliOperation): ContractRef {
@@ -141,16 +124,6 @@ export function resolveCliRequest(value: unknown, lookup: CliLookup): ResolvedCl
   const size = Buffer.byteLength(JSON.stringify(request)) + CLI_ENVELOPE_BYTES;
   if (size > cliRequestBytes(policy.lane)) throw cliRequestTooLarge(policy.lane);
   return Object.freeze({ request, wire, policy });
-}
-
-function requireCliWireV1(operation: string, contract: ContractRef): CliWire {
-  if (contract.version !== 1) throw new DomainError('OPERATION_UNSUPPORTED', 'This CLI operation version is not supported', 422);
-  requireCliDefinition(operation, contract);
-  return cliWireV1(operation as CliOperation);
-}
-
-export function parseControllerCliRequest(value: unknown): ControllerCliRequest {
-  return resolveCliRequest(value, requireCliWireV1).request;
 }
 
 function validateCliHttpRequestV1(http: CliHttpRequest): void {

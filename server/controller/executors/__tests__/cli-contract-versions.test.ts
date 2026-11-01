@@ -44,13 +44,13 @@ function fixture(advertised: readonly number[] = [1, 2]) {
   }));
   const routes = { '/api/v1/chats': { GET: entries[0]!.dispatch } };
   const contracts = new CliRouteContracts(entries);
-  const dispatcher = new ControllerCliDispatcher({ routes, contracts, serverInstanceId: 'synthetic-controller',
+  const dispatcher = new ControllerCliDispatcher({ contracts, serverInstanceId: 'synthetic-controller',
     workspaceName: null, isShuttingDown: () => false });
   const handler = registerRpcHandlers([rpcWireV1('controllerCli.describe'), rpcWireV1('controllerCli.request')],
     async (rpc: ExecutorRpc, call, signal, guard, _undelivered, capture) => {
       const access = { executorId: 'local', rpc, signal, assertCurrent() {}, assertManagement() {} };
       return call.method === 'controllerCli.describe' ? dispatcher.describe(access, guard)
-        : dispatcher.request(call.request, access, guard, capture.policy.cli);
+        : dispatcher.request(capture.policy.cli!, access, guard);
     });
   const forward = CLI_GATEWAY_REGISTRATIONS.find(entry => entry.operation === operation)!.dispatch;
   const forwarding: readonly CliRegistration[] = [v1, v2].map(wire => ({ ...wire, side: 'forwarder', dispatch: forward }));

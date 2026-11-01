@@ -36,7 +36,7 @@ describe('CLI endpoint context', () => {
   });
 
   test('pins exact operation headers while context verification remains unversioned', async () => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, ...connection, fetch: async (input, init) => {
+    const client = new GarconClient({ ...connection, fetch: async (input, init) => {
       const headers = new Headers(init?.headers);
       if (String(input).endsWith('/cli/context')) {
         expect(headers.get('X-Garcon-Contract')).toBeNull();
@@ -55,7 +55,7 @@ describe('CLI endpoint context', () => {
     expect(() => new GarconClient({ ...connection, protocol: protocol as typeof connection.protocol })).toThrow('unsupported CLI bootstrap');
   });
   test.each([undefined, null, '', 42, {}])('rejects a catalog with invalid executor instance %j', async executorInstanceId => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, ...connection, fetch: async () => Response.json({
+    const client = new GarconClient({ ...connection, fetch: async () => Response.json({
       executorInstanceId, catalog: { agents: [], apiProviders: [] },
     }) });
     const result = client.getModelCatalog();
@@ -63,7 +63,7 @@ describe('CLI endpoint context', () => {
     await expect(result).rejects.toMatchObject({ phase: 'catalog resolution' });
   });
   test('catalogs, native lookups and project defaults use the authenticated executor', async () => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, ...connection, fetch: async (input, init) => {
+    const client = new GarconClient({ ...connection, fetch: async (input, init) => {
       const url = new URL(String(input));
       if (url.pathname.endsWith('/models')) {
         expect(url.searchParams.get('executorId')).toBe(connection.defaultExecutorId);
@@ -89,7 +89,7 @@ describe('CLI endpoint context', () => {
   });
 
   test('a stable endpoint proof cannot hide controller restart', async () => {
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, ...connection, fetch: async (input, init) => {
+    const client = new GarconClient({ ...connection, fetch: async (input, init) => {
       if (String(input).endsWith('/cli/context')) expect(new Headers(init?.headers).get('X-Garcon-Server-Instance')).toBe('controller');
       return runtimeResponse(input, 'replacement');
     } });
@@ -98,7 +98,7 @@ describe('CLI endpoint context', () => {
 
   test.each(['CLI_SERVICE_BUSY', 'CLI_CONTROLLER_UNAVAILABLE', 'CLI_CONTROLLER_CHANGED', 'CLI_ACCESS_DENIED'])('%s never triggers a mutation retry by itself', async (errorCode) => {
     let calls = 0;
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, ...connection, fetch: async () => {
+    const client = new GarconClient({ ...connection, fetch: async () => {
       calls++;
       return Response.json({ error: 'rejected before dispatch', errorCode, retryable: false }, { status: 503 });
     } });
@@ -108,7 +108,7 @@ describe('CLI endpoint context', () => {
 
   test('later admission rejection cannot erase an uncertain steer attempt', async () => {
     const bodies: string[] = [];
-    const client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, ...connection, submissionDelay: async () => {}, fetch: async (input, init) => {
+    const client = new GarconClient({ ...connection, submissionDelay: async () => {}, fetch: async (input, init) => {
       if (/runtime|cli\/context/.test(String(input))) return runtimeResponse(input);
       bodies.push(String(init?.body));
       return Response.json({ error: 'unavailable', errorCode: bodies.length === 1 ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_SERVICE_BUSY' }, { status: 503 });

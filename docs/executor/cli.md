@@ -280,12 +280,18 @@ No legacy default-to-v1 or current-handler fallback exists.
 
 ## Forwarding Allowlist
 
-`CLI_OPERATIONS` in `server/remote/transport/cli-protocol.ts` is the authoritative
+`CLI_OPERATIONS` in `common/cli-contracts.ts` is the authoritative
 method/path registry. `server/remote/transport/__tests__/cli-allowlist.test.ts`
 checks it against the HTTP operations emitted by the client. Every entry declares
 its exact name/version, lane, mutation semantics, deadline, and management permission. Additions
 require explicit contract and authorization tests; a route prefix never grants
 access to all routes beneath it.
+
+`server/remote/transport/cli-wire-v1.ts` explicitly opts released v1 operations
+into the shared direct/forwarded adapter inventory. Controller registration
+requires a real route handler for every entry; workers attach their own forwarder.
+Missing production handlers fail startup. Reduced test registries pass their
+smaller adapter set explicitly, rather than silently omitting missing routes.
 
 Ordinary workspace CLI access covers chat commands, catalogs, search, metadata,
 tickets, scheduled prompts, and redacted executor listing. Executor administration, connection

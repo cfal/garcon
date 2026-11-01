@@ -1,3 +1,4 @@
+import { testCliContracts } from '../../lib/__tests__/cli-contract-fixture.js';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { renameSync } from 'node:fs';
 import { join } from 'node:path';
@@ -58,7 +59,7 @@ describe('authenticated Tickets routes', () => {
   });
 
   test('keeps no-store on production-wrapped authentication failures for every ticket endpoint', async () => {
-    const wrapped = wrapRoutes(routes);
+    const wrapped = wrapRoutes(routes, { cliContracts: testCliContracts(routes) });
     for (const [path, methods] of Object.entries(wrapped)) {
       for (const [method, handler] of Object.entries(methods)) {
         for (const authorization of [null, 'Bearer synthetic-invalid-token']) {

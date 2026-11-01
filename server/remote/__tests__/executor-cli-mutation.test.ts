@@ -1,3 +1,4 @@
+import { testCliContracts } from '../../controller/lib/__tests__/cli-contract-fixture.js';
 import { CLI_CONTRACTS } from '@garcon/common/cli-contracts';
 import { expect, spyOn, test } from 'bun:test';
 import { promises as fs } from 'node:fs';
@@ -27,14 +28,14 @@ test.each(['direct', 'gateway'] as const)('executor creation reports a post-rena
     let client: GarconClient;
     if (transport === 'direct') {
       const server = Bun.serve({ hostname: '0.0.0.0', port: 0,
-        routes: wrapRoutes(routes, { localCapability: 'synthetic-capability', serverInstanceId: 'controller' }),
+        routes: wrapRoutes(routes, { cliContracts: testCliContracts(routes), localCapability: 'synthetic-capability', serverInstanceId: 'controller' }),
       });
       cleanups.push(() => server.stop(true));
       client = new GarconClient({ protocol: { bootstrap: 1, contracts: CLI_CONTRACTS }, baseUrl: `http://127.0.0.1:${server.port}`, instanceId: 'controller',
         endpointInstanceId: 'controller', defaultExecutorId: 'local', workspaceName: null, workspaceDir: null,
         localCapability: 'synthetic-capability' });
     } else {
-      const pair = cliPair(new ControllerCliDispatcher({ routes, serverInstanceId: 'controller',
+      const pair = cliPair(new ControllerCliDispatcher({ contracts: testCliContracts(routes), serverInstanceId: 'controller',
         workspaceName: null, isShuttingDown: () => false }));
       cleanups.push(() => pair.close());
       const gateway = await startCliGateway({ dataDir: join(root, 'executor'), currentConnection: () => pair.connection });

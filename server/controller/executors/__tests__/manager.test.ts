@@ -1,3 +1,4 @@
+import { testCliContracts } from '../../lib/__tests__/cli-contract-fixture.js';
 import { TestWebSocketLink as WebSocketLink } from '../../../remote/__tests__/test-session-transport.js';
 import { RPC_V1 } from '@garcon/common/executor-contracts';
 import { CLI_OPERATIONS } from '@garcon/common/cli-contracts';
@@ -29,7 +30,7 @@ const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
 async function fixture(logger?: Logger, resolveCredential: Parameters<typeof ExecutorManager.create>[0]['resolveCredential'] = async () => null,
-  dispatcher: ControllerCliDispatcher | null = new ControllerCliDispatcher({ serverInstanceId: 'controller', workspaceName: null, routes: {}, isShuttingDown: () => false })) {
+  dispatcher: ControllerCliDispatcher | null = new ControllerCliDispatcher({ serverInstanceId: 'controller', workspaceName: null, contracts: testCliContracts({}), isShuttingDown: () => false })) {
   const temporary = join(homedir(), 'tmp');
   await mkdir(temporary, { recursive: true });
   const root = await mkdtemp(join(temporary, 'executor-manager-'));
@@ -247,13 +248,13 @@ test('reverse CLI dispatch checks initialization, executor grant, revocation lea
   const release = Promise.withResolvers<void>();
   let calls = 0;
   await manager.setCliDispatcher(new ControllerCliDispatcher({ serverInstanceId: 'controller', workspaceName: 'workspace',
-    isShuttingDown: () => false, routes: {
+    isShuttingDown: () => false, contracts: testCliContracts({
       '/api/v1/chats/stop': { POST: () => Response.json({ success: true }) },
       '/api/v1/chats/turn-receipt': { GET: () => Response.json({ success: true }) },
       '/api/v1/chats/run': { POST: async () => {
         calls++; entered.resolve(); await release.promise; return Response.json({ confirmed: true });
       } },
-    } }));
+    }) }));
   const { url } = sharedListener(manager);
   const link = new WebSocketLink({ role: 'worker', secret: config.secret, noTls: true });
   cleanups.push(() => link.dispose());
@@ -308,17 +309,17 @@ test.each(['context', 'read', 'mutation'] as const)('quiescence after handler se
       manager.quiesce();
       return context;
     }
-    override async request(value: unknown, access: CliDispatchAccess, guardReply: GuardRpcReply) {
+    override async request(value: Parameters<ControllerCliDispatcher['request']>[0], access: CliDispatchAccess, guardReply: GuardRpcReply) {
       const reply = await super.request(value, access, guardReply);
       manager.quiesce();
       return reply;
     }
   }
   await manager.setCliDispatcher(new QuiescingDispatcher({ serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false,
-    routes: { '/api/v1/chats/stop': { POST: () => Response.json({ success: true }) },
+    contracts: testCliContracts({ '/api/v1/chats/stop': { POST: () => Response.json({ success: true }) },
       '/api/v1/chats/turn-receipt': { GET: () => Response.json({ success: true }) },
       '/api/v1/chats': { GET: () => Response.json({ privateData: true }) },
-      '/api/v1/chats/run': { POST: () => Response.json({ committed: true }) } } }));
+      '/api/v1/chats/run': { POST: () => Response.json({ committed: true }) } }) }));
   link.dial(url(config.id));
   const connection = await connected.promise;
   const rpc = operation === 'context' ? connection.primary : await connection.bulk.wait();
@@ -360,7 +361,7 @@ test.each(['executor-connects', 'controller-connects'] as const)(
       connected.resolve(serving.connection);
     });
     const dispatcher = new ControllerCliDispatcher({ serverInstanceId: 'controller', workspaceName: null,
-      isShuttingDown: () => false, routes: { '/api/v1/chats': { GET: () => Response.json({ chats: [] }) } } });
+      isShuttingDown: () => false, contracts: testCliContracts({ '/api/v1/chats': { GET: () => Response.json({ chats: [] }) } }) });
     await manager.setCliDispatcher(dispatcher);
     if (direction === 'executor-connects') remote.dial(sharedListener(manager).url(configured.id));
     const connection = await connected.promise;

@@ -1,3 +1,4 @@
+import { testCliContracts } from '../../controller/lib/__tests__/cli-contract-fixture.js';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { chmod, mkdir, mkdtemp, rm, stat, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -25,11 +26,7 @@ async function fixture(routes: RouteMap = {}, workspaceName: string | null = 'wo
   let live: ReturnType<typeof cliPair> | null = null;
   const replace = (serverInstanceId: string) => {
     live?.close();
-    live = cliPair(new ControllerCliDispatcher({ routes: {
-      '/api/v1/chats/stop': { POST: () => Response.json({ success: true }) },
-      '/api/v1/chats/turn-receipt': { GET: () => Response.json({ success: true }) },
-      ...routes,
-    }, serverInstanceId, workspaceName, isShuttingDown: () => false }),
+    live = cliPair(new ControllerCliDispatcher({ contracts: testCliContracts(routes), serverInstanceId, workspaceName, isShuttingDown: () => false }),
       () => { if (!allowed) throw new DomainError('CLI_ACCESS_DENIED', 'Disabled', 403); });
     cleanups.push(() => live?.close());
   };

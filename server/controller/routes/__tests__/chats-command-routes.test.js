@@ -418,7 +418,8 @@ function createRouteAgent(sessionOverrides = {}) {
     hasAgent: mock(() => true),
     assertExecutorReady: mock(() => undefined),
     assertExecutionSupported: mock(() => undefined),
-    assertNativeForkSupported: mock(() => undefined),
+    assertRunSupported: mock(() => undefined),
+    assertNativeForkSupported: mock(() => true),
     assertQueuedExecutionSupported: mock(() => undefined),
     assertAgentAvailable: mock(() => undefined),
     supportsFork: mock(() => true),
@@ -1714,10 +1715,11 @@ describe('REST chat command routes', () => {
       chatId: CHAT_ID, permissionMode: 'default',
     }, 'PATCH');
     if (outcome === 'not-dispatched') {
-      expect(response.status).toBe(422);
-      expect(body).toMatchObject({ errorCode: 'VALIDATION_FAILED', retryable: false });
+      expect(response.status).toBe(503);
+      expect(body).toMatchObject({ errorCode: 'EXECUTOR_UNAVAILABLE', retryable: true });
     } else {
-      expect(body.errorCode).not.toBe('VALIDATION_FAILED');
+      expect(response.status).toBe(503);
+      expect(body).toMatchObject({ errorCode: 'STALE_RESOURCE', retryable: false });
     }
   });
 

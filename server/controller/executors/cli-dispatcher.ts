@@ -4,12 +4,12 @@ import { DomainError } from '../../common/domain-error.js';
 import { readTextStreamWithLimit } from '../../common/bounded-text-stream.js';
 import { trackActivity } from '../../common/event-loop-stalls.js';
 import { invokeRawRouteHandler, unhandledRouteErrorResponse } from '../lib/http-route.js';
-import type { RouteMap } from '../lib/http-route-types.js';
+import type { RouteHandler } from '../lib/http-route-types.js';
 import type { ExecutorRpc, GuardRpcReply } from '../../remote/transport/rpc.js';
 import { CliAdmission } from '../../remote/transport/cli-admission.js';
-import { CLI_ENVELOPE_BYTES, CLI_REPLY_BYTES, CLI_SMALL_REPLY_BYTES, cliReplyBytes, resolveCliRequest, type ResolvedCliRequest, type CliHttpResponse } from '../../remote/transport/cli-protocol.js';
+import { CLI_ENVELOPE_BYTES, CLI_REPLY_BYTES, CLI_SMALL_REPLY_BYTES, cliReplyBytes, type ResolvedCliRequest, type CliHttpResponse } from '../../remote/transport/cli-protocol.js';
 import { assertCliSupported } from '../../remote/transport/protocol-policy.js';
-import { registerCliRoutes, type CliRouteContracts } from '../lib/cli-contracts.js';
+import type { CliRouteContracts } from '../lib/cli-contracts.js';
 
 export interface CliDispatchAccess {
   readonly executorId: string;
@@ -24,12 +24,11 @@ export class ControllerCliDispatcher {
   readonly contracts: CliRouteContracts;
 
   constructor(private readonly options: {
-    readonly routes: RouteMap;
     readonly serverInstanceId: string;
     readonly workspaceName: string | null;
     readonly isShuttingDown: () => boolean;
-    readonly contracts?: CliRouteContracts;
-  }) { this.contracts = options.contracts ?? registerCliRoutes(options.routes); }
+    readonly contracts: CliRouteContracts;
+  }) { this.contracts = options.contracts; }
 
   describe(access: CliDispatchAccess, guardReply: GuardRpcReply): CliIdentityV1 {
     this.#assertAdmission(access);
@@ -40,14 +39,14 @@ export class ControllerCliDispatcher {
     } finally { release(); }
   }
 
-  async request(value: unknown, access: CliDispatchAccess, guardReply: GuardRpcReply, captured?: ResolvedCliRequest): Promise<CliHttpResponse> {
+  async request(captured: ResolvedCliRequest, access: CliDispatchAccess, guardReply: GuardRpcReply): Promise<CliHttpResponse> {
     this.#assertAdmission(access);
-    const { request, policy } = captured ?? resolveCliRequest(value, (operation, ref) => this.contracts.resolve(operation, ref));
+    const { request, policy, wire: registered } = captured;
+    if (registered.side !== 'handler') throw new Error('CLI dispatch requires a captured route handler');
     const profile = access.rpc.transport.profile;
     if (request.expectedServerInstanceId !== this.options.serverInstanceId) {
       throw new DomainError('CLI_CONTROLLER_CHANGED', 'Garcon restarted; start a new CLI invocation', 409);
     }
-    const registered = this.contracts.resolve(request.http.operation, request.contract);
     assertCliSupported(profile, registered.definition);
     if (access.rpc.transport.lane !== policy.lane) throw new DomainError('CLI_ACCESS_DENIED', 'CLI operation arrived on the wrong lane', 403);
     const assertAdmission = () => {
@@ -80,7 +79,7 @@ export class ControllerCliDispatcher {
     signal.addEventListener('abort', onAbort, { once: true });
     const work = (async (): Promise<CliHttpResponse> => {
       const [method, pathname] = request.http.operation.split(' ') as [string, string];
-      const handler = registered.dispatch;
+      const handler = registered.dispatch as RouteHandler;
       const url = new URL(pathname.replace(':executorId', request.http.executorId ?? ''), 'http://controller.invalid');
       for (const [key, value] of request.http.query) url.searchParams.append(key, value);
       const body = request.http.body === null ? undefined : JSON.stringify(request.http.body);

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { CLI_OPERATIONS, cliPolicy, type CliOperation } from '../cli-protocol.js';
+import { CLI_OPERATIONS, resolveCliRequest, type CliOperation } from '../cli-protocol.js';
 import { rpcLane } from '../rpc-routing.js';
 import { parseBulkControl } from '../rpc-lane.js';
 import { RPC_V1 } from '@garcon/common/executor-contracts';
@@ -24,9 +24,11 @@ test('only explicit small CLI controls use primary', () => {
   for (const [operation, versions] of Object.entries(CLI_OPERATIONS)) {
     expect(versions[1].lane).toBe(primary.includes(operation as CliOperation) ? 'primary' : 'bulk');
   }
-  expect(cliPolicy({ contract: CLI_OPERATIONS['POST /api/v1/chats/run'][1],
-    http: { operation: 'POST /api/v1/chats/run', query: [], body: { handoff: true } } })).toMatchObject({ lane: 'bulk', pool: 'long' });
   const lookup = testSessionProtocol().contracts.cliRegistration;
+  expect(resolveCliRequest({ contract: { name: CLI_OPERATIONS['POST /api/v1/chats/run'][1].name, version: 1 },
+    expectedServerInstanceId: 'synthetic-controller',
+    http: { operation: 'POST /api/v1/chats/run', query: [], body: { handoff: true } } }, lookup).policy)
+    .toMatchObject({ lane: 'bulk', pool: 'long' });
   expect(rpcLane(RPC_V1['controllerCli.request'], {
     contract: { name: CLI_OPERATIONS['POST /api/v1/chats/stop'][1].name, version: 1 },
     expectedServerInstanceId: 'controller', http: { operation: primary[1], query: [], body: {} },

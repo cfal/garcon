@@ -85,13 +85,6 @@ export function findCliRoute(method: string, pathname: string): { readonly opera
   return { operation: operation as CliOperation, ...(executorId ? { executorId } : {}) };
 }
 
-export function findCliDefinition(operation: string, ref: ContractRef): CliOperationDefinition | null {
-  if (!Object.hasOwn(CLI_OPERATIONS, operation)) return null;
-  const versions: Readonly<Record<number, CliOperationDefinition>> = CLI_OPERATIONS[operation as CliOperation];
-  const definition = Object.hasOwn(versions, ref.version) ? versions[ref.version] : undefined;
-  return definition?.name === ref.name ? definition : null;
-}
-
 export function parseContractSelector(value: string): ContractRef | null {
   const match = /^([a-z][A-Za-z0-9.-]{0,63})@([1-9][0-9]{0,4})$/.exec(value);
   if (!match || !isContractVersion(Number(match[2]))) return null;

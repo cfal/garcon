@@ -1,3 +1,4 @@
+import { testCliContracts } from '../../lib/__tests__/cli-contract-fixture.js';
 import { afterAll, describe, expect, it, mock } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -344,7 +345,8 @@ describe('public share responses', () => {
   }
 
   it.each(publicRequests)('keeps %s (%s) out of search indexes and referrers', async (route, href, headers) => {
-    const served = wrapRoutes(createRoutes().routes);
+    const { routes } = createRoutes();
+    const served = wrapRoutes(routes, { cliContracts: testCliContracts(routes) });
     expectPublicHeaders(await served[route].GET(new Request(href, { headers })));
   });
 
@@ -354,7 +356,7 @@ describe('public share responses', () => {
     const { routes } = createRoutes(createSnapshot(), null, {
       shareStore: { getHeader: failure, getMessages: failure, getTextPath: failure },
     });
-    const served = wrapRoutes(routes, { isShuttingDown: () => shuttingDown });
+    const served = wrapRoutes(routes, { cliContracts: testCliContracts(routes), isShuttingDown: () => shuttingDown });
     const request = (route) => served[route].GET(new Request(`http://localhost${route.replace(':token', 'share-token')}?token=share-token`, {
       headers: { Accept: 'text/html' },
     }));

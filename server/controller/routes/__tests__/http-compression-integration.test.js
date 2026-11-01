@@ -1,3 +1,4 @@
+import { testCliContracts } from '../../lib/__tests__/cli-contract-fixture.js';
 import { describe, it, expect, beforeEach, mock, afterEach } from 'bun:test';
 
 import { mkdtemp, rm, writeFile } from 'fs/promises';
@@ -58,7 +59,8 @@ describe('HTTP compression integration', () => {
   beforeEach(async () => {
     dir = await mkdtemp(path.join(tmpdir(), 'garcon-compress-'));
     await writeFile(path.join(dir, 'sample.txt'), 'hello '.repeat(2000));
-    const wrapped = wrapRoute(makeStaticRoute(dir), '/sample.txt', 'GET');
+    const handler = makeStaticRoute(dir);
+    const wrapped = wrapRoute(handler, '/sample.txt', 'GET', { cliContracts: testCliContracts({ '/sample.txt': { GET: handler } }) });
     server = Bun.serve({
       port: 0,
       hostname: '0.0.0.0',

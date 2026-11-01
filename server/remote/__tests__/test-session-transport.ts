@@ -5,7 +5,8 @@ import type { RpcLane } from '../transport/rpc-lane.js';
 import { WORKER_CONTRACTS } from '../server/worker-contracts.js';
 import { WORKER_RPC_HANDLERS } from '../server/executor-rpc-server.js';
 import { controllerContracts } from '../../controller/executors/controller-contracts.js';
-import { CLI_GATEWAY_REGISTRATIONS } from '../server/cli-gateway.js';
+import { testCliContracts } from '../../controller/lib/__tests__/cli-contract-fixture.js';
+import type { CliRegistration } from '../transport/cli-protocol.js';
 import { registerRpcHandlers, type RpcHandler } from '../transport/rpc-registrations.js';
 import { rpcWireV1 } from '../transport/rpc-wire-v1.js';
 import type { ExecutorRpc } from '../transport/rpc.js';
@@ -14,8 +15,8 @@ import { WebSocketLink, type WebSocketLinkOptions } from '../transport/websocket
 const reverse = registerRpcHandlers([
   rpcWireV1('controllerCli.describe'), rpcWireV1('controllerCli.request'), rpcWireV1('credentials.resolve'),
 ], async (handler: RpcHandler, ...args) => handler(...args));
-const controller = controllerContracts(reverse, CLI_GATEWAY_REGISTRATIONS.map(entry => ({ ...entry,
-  side: 'handler' as const, dispatch: () => { throw new Error('Synthetic CLI route is not installed'); } })));
+export function testControllerContracts(cli: readonly CliRegistration[]) { return controllerContracts(reverse, cli); }
+const controller = testControllerContracts(testCliContracts().entries);
 
 export function testRoleContracts(role: 'controller' | 'worker') {
   return role === 'controller' ? controller : WORKER_CONTRACTS;

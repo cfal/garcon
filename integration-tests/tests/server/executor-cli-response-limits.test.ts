@@ -1,10 +1,11 @@
-import { TestWebSocketLink as WebSocketLink, handleTestRpc } from '../../../server/remote/__tests__/test-session-transport.js';
+import { TestWebSocketLink as WebSocketLink, handleTestRpc, testControllerContracts } from '../../../server/remote/__tests__/test-session-transport.js';
 import { expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { CLI_CONTRACT_HEADER } from '../../../common/cli-contracts.js';
 import { ControllerCliDispatcher } from '../../../server/controller/executors/cli-dispatcher.js';
+import { testCliContracts } from '../../../server/controller/lib/__tests__/cli-contract-fixture.js';
 import { CLI_EXECUTOR_ID } from '../../../server/remote/__tests__/cli-fixture.js';
 import { linkOptions } from '../../../server/remote/__tests__/integration-fixture.js';
 import { startCliGateway } from '../../../server/remote/server/cli-gateway.js';
@@ -16,7 +17,6 @@ import { RpcAdmissionBudgets } from '../../../server/remote/transport/rpc-admiss
 for (const dialer of ['controller', 'worker'] as const) {
   test(`CLI HTTP gateway rejects and cancels oversized replies over Noise (${dialer} dials)`, async () => {
     const root = await mkdtemp(join(homedir(), 'cli-response-limits-'));
-    const controller = new WebSocketLink({ ...linkOptions, executorId: CLI_EXECUTOR_ID, role: 'controller' });
     const worker = new WebSocketLink({ ...linkOptions, executorId: CLI_EXECUTOR_ID, role: 'worker' });
     let workerConnection: ExecutorRpcConnection | null = null;
     const controllerAdmission = new RpcAdmissionBudgets();
@@ -36,18 +36,20 @@ for (const dialer of ['controller', 'worker'] as const) {
     }), { headers: { 'Content-Type': 'application/json' } }) : Response.json({ output: 'small' });
     const dispatcher = new ControllerCliDispatcher({
       serverInstanceId: 'controller', workspaceName: null, isShuttingDown: () => false,
-      routes: {
+      contracts: testCliContracts({
         '/api/v1/chats/export': { GET: respond }, '/api/v1/chats/run': { POST: respond },
         '/api/v1/chats/turn-receipt': { GET: () => Response.json({ success: true }) },
         '/api/v1/chats/stop': { POST: () => Response.json({ success: true }) },
-      },
+      }),
     });
+    const controller = new WebSocketLink({ ...linkOptions, executorId: CLI_EXECUTOR_ID, role: 'controller',
+      contracts: testControllerContracts(dispatcher.contracts.entries) });
     controller.onSession(session => {
       const connection = new ExecutorRpcConnection(controller, session, { admission: controllerAdmission });
-      connection.onEndpoint(rpc => handleTestRpc(rpc, async (call, signal, guard) => {
+      connection.onEndpoint(rpc => handleTestRpc(rpc, async (call, signal, guard, _undelivered, capture) => {
         const access = { executorId: CLI_EXECUTOR_ID, rpc, signal, assertCurrent() {}, assertManagement() {} };
         if (call.method === 'controllerCli.describe') return dispatcher.describe(access, guard);
-        if (call.method === 'controllerCli.request') return dispatcher.request(call.request, access, guard);
+        if (call.method === 'controllerCli.request') return dispatcher.request(capture.policy.cli!, access, guard);
         throw new Error('Unexpected reverse request');
       }));
       void session.ready.then(() => connection.activate());

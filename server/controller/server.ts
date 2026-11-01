@@ -1,5 +1,4 @@
-// Composition root. Instantiates all services and wires them together.
-// This is the single place where dependencies are resolved.
+// Composition root. Instantiates services and wires their dependencies.
 
 import path from 'path';
 import { rm } from 'node:fs/promises';
@@ -7,6 +6,7 @@ import { cliRuntimeFile } from '@garcon/common/cli-runtime-paths';
 import { getConfigDir, initializeServerConfig } from './config.js';
 import { wrapRoutes, unhandledRouteErrorResponse } from './lib/http-route.js';
 import { ControllerCliDispatcher } from './executors/cli-dispatcher.js';
+import { registerCliRoutes } from './lib/cli-contracts.js';
 import { createWebSocketUpgradeHandler } from './ws/upgrade.js';
 import { getAuthStore, init as initAuthStore } from './auth/store.js';
 import { isCurrentBrowserPrincipal } from './auth/token.js';
@@ -544,7 +544,7 @@ export async function startServer(): Promise<void> {
       agentRegistry,
       (chatId) => {
         const chat = chatRegistry.getChat(chatId);
-        if (chat) agentRegistry.assertExecutionSupported(chat, [chat.agentSessionId ? 'execution.resume' : 'execution.start']);
+        if (chat) agentRegistry.assertRunSupported(chat);
         return queueDrainOptions(chatId, chatRegistry);
       },
       (chatId) => chatRegistry.hasChat(chatId),
@@ -840,7 +840,7 @@ export async function startServer(): Promise<void> {
     // handshakes on some executors' endpoints turn away every other executor.
     const executionSockets = createNoiseServer({ maxConnections: EXECUTOR_SOCKET_LIMIT, maxPendingHandshakes: EXECUTOR_PENDING_SOCKET_LIMIT });
     let shuttingDown = false;
-    const cliDispatcher = new ControllerCliDispatcher({ routes, serverInstanceId: runtimeState.identity.instanceId,
+    const cliDispatcher = new ControllerCliDispatcher({ contracts: registerCliRoutes(routes), serverInstanceId: runtimeState.identity.instanceId,
       workspaceName: config.workspaceName, isShuttingDown: () => shuttingDown });
     await executors.setCliDispatcher(cliDispatcher);
 

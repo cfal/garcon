@@ -1,4 +1,4 @@
-import type { CliOperation } from '@garcon/common/cli-contracts';
+import { CLI_WIRES_V1 } from '../transport/cli-wire-v1.js';
 import { rpcWireV1 } from '../transport/rpc-wire-v1.js';
 import { RPC_V1 } from '@garcon/common/executor-contracts';
 import crypto from 'node:crypto';
@@ -17,7 +17,7 @@ import { jsonError } from '../../common/http-error.js';
 import { createServerRuntimeState, publishRuntimeDescriptor, removeServerRuntime } from '../../common/server-runtime.js';
 import { runtimeProofResponse } from '../../common/runtime-proof.js';
 import { CliAdmission } from '../transport/cli-admission.js';
-import { cliRequestBytes, cliRequestTooLarge, cliRoute, cliWireV1, cliRequestContract, parseCliHttpResponse,
+import { cliRequestBytes, cliRequestTooLarge, cliRoute, cliRequestContract, parseCliHttpResponse,
   resolveCliRequest, type CliForward } from '../transport/cli-protocol.js';
 import type { ExecutorRpcConnection } from '../transport/rpc-connection.js';
 import type { RpcLane } from '../transport/rpc-lane.js';
@@ -223,56 +223,6 @@ const forwardCliV1: CliForward = async (connection, request, policy, signal) => 
   return parseCliHttpResponse(await held.rpc.call('', RPC_V1['controllerCli.request'], request, { signal, timeoutMs: held.timeoutMs }));
 };
 
-const CLI_GATEWAY_V1 = [
-  'GET /api/v1/scheduled-prompts',
-  'POST /api/v1/scheduled-prompts',
-  'PUT /api/v1/scheduled-prompts',
-  'DELETE /api/v1/scheduled-prompts',
-  'PUT /api/v1/scheduled-prompts/enabled',
-  'GET /api/v1/executors',
-  'POST /api/v1/executors',
-  'PATCH /api/v1/executors/:executorId',
-  'DELETE /api/v1/executors/:executorId',
-  'GET /api/v1/executors/:executorId/connection',
-  'GET /api/v1/api-provider-assignments',
-  'PUT /api/v1/api-provider-assignments',
-  'DELETE /api/v1/api-provider-assignments',
-  'GET /api/v1/models',
-  'GET /api/v1/app/settings',
-  'GET /api/v1/preambles',
-  'GET /api/v1/chats',
-  'GET /api/v1/chats/messages',
-  'GET /api/v1/chats/snapshot',
-  'GET /api/v1/chats/turn-receipt',
-  'GET /api/v1/chats/export',
-  'GET /api/v1/chats/handoff-artifact',
-  'POST /api/v1/chats/lookup-native-session',
-  'POST /api/v1/chats/search',
-  'GET /api/v1/chats/search/status',
-  'POST /api/v1/chats/search/rebuild',
-  'PUT /api/v1/app/settings',
-  'POST /api/v1/chats/start',
-  'POST /api/v1/chats/run',
-  'POST /api/v1/chats/fork',
-  'POST /api/v1/chats/fork-run',
-  'POST /api/v1/chats/steer',
-  'POST /api/v1/chats/stop',
-  'POST /api/v1/chats/permissions/decision',
-  'GET /api/v1/chats/rows',
-  'POST /api/v1/chats/rows',
-  'PUT /api/v1/app/session-name',
-  'PUT /api/v1/chats/pin',
-  'PUT /api/v1/chats/archive',
-  'GET /api/v1/chats/tags',
-  'PUT /api/v1/chats/tags',
-  'GET /api/v1/tickets/bootstrap',
-  'GET /api/v1/tickets',
-  'GET /api/v1/tickets/detail',
-  'GET /api/v1/tickets/history',
-  'POST /api/v1/tickets/project-default',
-  'POST /api/v1/tickets/mutate',
-] as const satisfies readonly CliOperation[];
-
-export const CLI_GATEWAY_REGISTRATIONS = Object.freeze(CLI_GATEWAY_V1.map(operation => Object.freeze({
-  ...cliWireV1(operation), side: 'forwarder' as const, dispatch: forwardCliV1,
+export const CLI_GATEWAY_REGISTRATIONS = Object.freeze(CLI_WIRES_V1.map(wire => Object.freeze({
+  ...wire, side: 'forwarder' as const, dispatch: forwardCliV1,
 })));

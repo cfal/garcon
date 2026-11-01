@@ -12,6 +12,7 @@ import {
 } from '../../../common/executors.js';
 import { IntegrationRegistry } from '../../runtime/agents/integration-registry.js';
 import { DomainError } from '../../common/domain-error.js';
+import { executorGenerationChanged } from '../../common/executor-generation-error.js';
 import { createLogger, type Logger } from '../../common/log.js';
 import { ExecutorConfigStore, type RemoteExecutorConfig } from './config-store.js';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.js';
@@ -126,7 +127,7 @@ export class ExecutorManager {
       integrations: registry.list(),
       assertCurrent: () => {
         if (this.requireExecutor(executorId) !== runtime || this.integrationsFor(executorId) !== registry) {
-          throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor inventory changed. Refresh and try again.', 503, true);
+          throw executorGenerationChanged();
         }
       },
     };
@@ -343,7 +344,8 @@ export class ExecutorManager {
             if (call.request !== null) throw new DomainError('VALIDATION_FAILED', 'Invalid CLI context request', 400);
             return dispatcher.describe(access, guardReply);
           }
-          return dispatcher.request(call.request, access, guardReply, capture.policy.cli);
+          if (!capture.policy.cli) throw new Error('CLI request policy was not captured');
+          return dispatcher.request(capture.policy.cli, access, guardReply);
         }
         if (call.method !== 'credentials.resolve' || !this.#current(entry)) {
           throw new AgentCallError('rejected', 'Operation is not permitted on the controller');

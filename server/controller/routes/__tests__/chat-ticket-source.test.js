@@ -1,3 +1,4 @@
+import { testCliContracts } from '../../lib/__tests__/cli-contract-fixture.js';
 import { expect, test } from 'bun:test';
 import { createChatTicketSourceRoutes } from '../chat-ticket-source.js';
 import { wrapRoutes } from '../../lib/http-route.js';
@@ -12,12 +13,13 @@ const query = new URLSearchParams({ ...source, ordinal: String(source.ordinal) }
 function fixture() {
   const calls = [];
   let exists = true;
-  const routes = wrapRoutes(createChatTicketSourceRoutes({ hasChat: () => exists }, {
+  const rawRoutes = createChatTicketSourceRoutes({ hasChat: () => exists }, {
     async resolveTicketSource(value, signal) {
       calls.push(value); signal.throwIfAborted();
       return { kind: 'found', target: { ...value, ordinal: 9 } };
     },
-  }), { localCapability: capability });
+  });
+  const routes = wrapRoutes(rawRoutes, { cliContracts: testCliContracts(rawRoutes), localCapability: capability });
   return { calls, remove: () => { exists = false; }, async call(search = query, authorized = true) {
     return routes[routePath].GET(new Request(`http://localhost${routePath}?${search}`, {
       headers: authorized ? { authorization: `Bearer ${capability}` } : {},
@@ -55,12 +57,13 @@ test('rejects malformed/duplicate addresses and deleted chats before ledger acce
 
 test('preserves no-store cancellation without treating it as a server failure', async () => {
   const abort = new AbortController();
-  const routes = wrapRoutes(createChatTicketSourceRoutes({ hasChat: () => true }, {
+  const rawRoutes = createChatTicketSourceRoutes({ hasChat: () => true }, {
     async resolveTicketSource(_source, signal) {
       await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
       signal.throwIfAborted();
     },
-  }), { localCapability: capability });
+  });
+  const routes = wrapRoutes(rawRoutes, { cliContracts: testCliContracts(rawRoutes), localCapability: capability });
   const response = routes[routePath].GET(new Request(`http://localhost${routePath}?${query}`, {
     signal: abort.signal,
     headers: { authorization: `Bearer ${capability}` },

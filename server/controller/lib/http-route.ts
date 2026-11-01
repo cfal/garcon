@@ -17,7 +17,7 @@ import { stripBasePath } from '@garcon/common/base-path';
 import { CLI_CONTRACT_HEADER, CLI_OPERATIONS, type CliOperation } from '@garcon/common/cli-contracts';
 import { cliRequestContract } from '../../remote/transport/cli-protocol.js';
 import { DomainError } from '../../common/domain-error.js';
-import { registerCliRoutes, type CliRouteContracts } from './cli-contracts.js';
+import type { CliRouteContracts } from './cli-contracts.js';
 
 const logger = createLogger('lib:http-route');
 
@@ -38,7 +38,7 @@ export interface HttpRouteAuthOptions {
   localCapability?: string;
   serverInstanceId?: string;
   isShuttingDown?: () => boolean;
-  cliContracts?: CliRouteContracts;
+  cliContracts: CliRouteContracts;
 }
 
 export function cliInstanceMismatch(request: Request, expected: string | undefined): Response | null {
@@ -169,9 +169,8 @@ export function wrapRoute(
   handler: RouteHandler,
   routePath: string,
   method: string,
-  authOptions: HttpRouteAuthOptions = {},
+  authOptions: HttpRouteAuthOptions,
 ): WrappedRouteHandler {
-  authOptions = { ...authOptions, cliContracts: authOptions.cliContracts ?? registerCliRoutes({ [routePath]: { [method]: handler } }) };
   const wrapped = wrapRouteAuth(handler, routePath, method, authOptions);
   const headers = (handler as MarkedRouteHandler)[responseHeadersRouteMarker];
   if (!headers) return wrapped;
@@ -194,14 +193,26 @@ function wrapRouteAuth(
   authOptions: HttpRouteAuthOptions,
 ): WrappedRouteHandler {
   const activity = `${method} ${routePath}`;
+  function dispatch(
+    req: Request,
+    server: unknown,
+    principal: HttpRouteContext['principal'],
+    localCapability: boolean,
+  ): Response | Promise<Response> {
+    const selected = cliRouteSelection(req, routePath, method, localCapability, handler, authOptions.cliContracts);
+    if (selected instanceof Response) return selected;
+    return invokeRouteHandler(selected, req, server, {
+      principal,
+      cliContracts: authOptions.cliContracts.catalog,
+    }, activity, authOptions.basePath ?? '');
+  }
+
   if (isAuthDisabled()) {
     return async (req: Request, server?: unknown): Promise<Response> => {
       if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
       const mismatch = cliInstanceMismatch(req, authOptions.serverInstanceId);
       if (mismatch) return mismatch;
-      const selected = cliRouteSelection(req, routePath, method, authenticatedWithLocalCapability(req, authOptions.localCapability), handler, authOptions.cliContracts!);
-      if (selected instanceof Response) return selected;
-      return invokeRouteHandler(selected, req, server, { principal: LOCAL_SERVER_PRINCIPAL, cliContracts: authOptions.cliContracts!.catalog }, activity, authOptions.basePath ?? '');
+      return dispatch(req, server, LOCAL_SERVER_PRINCIPAL, authenticatedWithLocalCapability(req, authOptions.localCapability));
     };
   }
 
@@ -209,9 +220,7 @@ function wrapRouteAuth(
     logger.debug(`Skipping auth wrapping for ${method} ${routePath}`);
     return async (req: Request, server?: unknown): Promise<Response> => {
       if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
-      const selected = cliRouteSelection(req, routePath, method, false, handler, authOptions.cliContracts!);
-      if (selected instanceof Response) return selected;
-      return invokeRouteHandler(selected, req, server, { principal: null, cliContracts: authOptions.cliContracts!.catalog }, activity, authOptions.basePath ?? '');
+      return dispatch(req, server, null, false);
     };
   }
 
@@ -225,18 +234,15 @@ function wrapRouteAuth(
     }
     const mismatch = cliInstanceMismatch(req, authOptions.serverInstanceId);
     if (mismatch) return mismatch;
-    const selected = cliRouteSelection(req, routePath, method, localCapability, handler, authOptions.cliContracts!);
-    if (selected instanceof Response) return selected;
-    return invokeRouteHandler(selected, req, server, { principal, cliContracts: authOptions.cliContracts!.catalog }, activity, authOptions.basePath ?? '');
+    return dispatch(req, server, principal, localCapability);
   };
 }
 
 // Wraps all routes in the route table with auth-aware wrappers.
 export function wrapRoutes(
   rawRoutes: RouteMap,
-  authOptions: HttpRouteAuthOptions = {},
+  authOptions: HttpRouteAuthOptions,
 ): WrappedRouteMap {
-  authOptions = { ...authOptions, cliContracts: authOptions.cliContracts ?? registerCliRoutes(rawRoutes) };
   const basePath = authOptions.basePath ?? '';
   const mountedRoutes: WrappedRouteMap = Object.fromEntries(
     Object.entries(rawRoutes).map(([routePath, methods]) => {
