@@ -115,65 +115,63 @@ export function parseRpcRequestV1(method: Method, value: unknown): unknown {
   switch (method) {
     case 'executor.describe': case 'controllerCli.describe': case 'execution.runningSessions':
     case 'lifecycle.start': case 'lifecycle.stop': case 'lifecycle.migrateOwnedStorage':
-    case 'auth.status': case 'auth.launchLogin': case 'readiness.status': requireValue(value === null); break;
+    case 'auth.status': case 'auth.launchLogin': case 'readiness.status': requireValue(value === null); return value;
     case 'controllerCli.request': return parseControllerCliEnvelope(value);
-    case 'execution.abort': requireValue(isAgentResourceRef(value, 'execution')); break;
-    case 'producers.close': requireValue(isAgentResourceRef(value, 'producer')); break;
-    case 'history.close': requireValue(isAgentResourceRef(value, 'history-reader')); break;
-    case 'projectPathUpdates.commit': case 'projectPathUpdates.rollback': requireValue(isAgentResourceRef(value, 'project-path-preparation')); break;
-    case 'settings.migrate': requireValue(parseAgentSettingsEnvelope(value)); break;
-    case 'configurationValidation.validate': requireValue(configuration(value)); break;
-    default: {
-      requireValue(isRecord(value));
-      switch (method) {
-        case 'execution.start': case 'execution.resume': case 'compaction.compact':
-          launch(value, method === 'execution.start');
-          break;
-        case 'producers.bind': requireValue(isAgentResourceRef(value.binding, 'producer') && nonempty(value.chatId)); break;
-        case 'producers.cancelLaunch': requireValue(isAgentResourceRef(value.binding, 'producer') && text(value.runId)); break;
-        case 'producers.resume': requireValue(Array.isArray(value.bindings) && value.bindings.every(item => isRecord(item)
-          && isAgentResourceRef(item.binding, 'producer') && Number.isSafeInteger(item.acknowledgedSeq) && (item.acknowledgedSeq as number) >= 0)); break;
-        case 'history.open': requireValue(['legacyHistoryImport', 'nativeHistoryImport'].includes(value.source as string)
-          && isRecord(value.request) && chatReference(value.request.chat)); break;
-        case 'history.next': requireValue(isAgentResourceRef(value.reader, 'history-reader') && Number.isSafeInteger(value.page) && (value.page as number) >= 0); break;
-        case 'calls.reconcile': requireValue(Array.isArray(value.calls) && value.calls.every(item => fields(item, ['id', 'session'])
-          && isRecord(item) && positiveInteger(item.seq)) && new Set(value.calls.map(item => item.id)).size === value.calls.length); break;
-        case 'catalog.snapshot': requireValue(bool(value.strict)); break;
-        case 'credentials.resolve': requireValue(credential(value.reference)); break;
-        case 'projects.inspect': requireValue(text(value.projectPath) && optionalBoolean(value.includeGitRepository)); break;
-        case 'projects.ticketProjectDefault': case 'commands.discover': requireValue(text(value.projectPath)); break;
-        case 'projects.resolveFileMentions': requireValue(fields(value, ['projectPath', 'command'])); break;
-        case 'apiProviders.discoverModels': requireValue(protocol(value.protocol) && text(value.baseUrl) && optionalText(value.apiKey)
-          && ['none', 'anthropic-models', 'openai-models', 'ollama-tags', 'openrouter-models'].includes(value.modelDiscovery as string)); break;
-        case 'auth.completeLogin': requireValue(fields(value, ['sessionId', 'code'])); break;
-        case 'auth.loginStatus': requireValue(value.expectedSessionId === undefined || text(value.expectedSessionId)); break;
-        case 'migration.translateLegacyModel': requireValue(legacyScope(value.scope) && isRecord(value.scope) && value.scope.kind !== 'execution-defaults' && text(value.model)); break;
-        case 'migration.translateLegacyNativeSession': requireValue(fields(value, ['chatId', 'projectPath', 'model'])
-          && nullableText(value.agentSessionId) && nullableText(value.legacyNativePath) && isJsonObject(value.legacyValues)); break;
-        case 'migration.translateLegacySettings': requireValue(legacyScope(value.scope) && isJsonObject(value.legacyValues)); break;
-        case 'permissions.respond': requireValue(isAgentResourceRef(value.response, 'permission-response') && isRecord(value.decision)
-          && bool(value.decision.allow) && optionalBoolean(value.decision.alwaysAllow)
-          && (value.decision.response === undefined || isJsonObject(value.decision.response))); break;
-        case 'forking.fork': requireValue(configuration(value) && fields(value, ['chatId', 'projectPath']) && chatReference(value.source)
-          && (value.providerMeta === null || isJsonObject(value.providerMeta))); break;
-        case 'forking.discard': decodeEstablishedSessionV1(value); break;
-        case 'steering.captureTarget': requireValue(fields(value, ['chatId', 'agentSessionId', 'expectedRunId'])
-          && nativeOrNull(value.nativeSession) && isAgentResourceRef(value.producerBinding, 'producer')); break;
-        case 'steering.steer': requireValue(fields(value, ['chatId', 'projectPath', 'agentSessionId', 'input', 'clientMessageId'])
-          && nativeOrNull(value.nativeSession) && (value.target === null || isAgentResourceRef(value.target, 'steer-target'))); break;
-        case 'singleQuery.run': requireValue(fields(value, ['prompt', 'model']) && isThinkingMode(value.thinkingMode)
-          && parseAgentSettingsEnvelope(value.settings) && (value.endpoint === null || endpoint(value.endpoint))
-          && (value.timeoutMs === undefined || positiveInteger(value.timeoutMs))); break;
-        case 'nativeSessions.resolveNativeSession': case 'nativeSessions.describeSource': requireValue(chatReference(value.chat)); break;
-        case 'nativeSessions.release': requireValue(chatReference(value.chat) && ['deleted', 'transferred'].includes(value.reason as string)); break;
-        case 'nativeActivity.lastActivity': requireValue(native(value)); break;
-        case 'projectPathUpdates.prepare': requireValue(chatReference(value.chat) && text(value.nextProjectPath)); break;
-        case 'sessionConfiguration.apply': requireValue(Array.isArray(value.args) && value.args.length === 3 && text(value.args[0]) && configuration(value.args[1]) && configuration(value.args[2])); break;
-        case 'endpoints.validate': requireValue(endpoint(value)); break;
-        case 'usageHistory.read': requireValue(parseUsageReadRequest(value)); break;
-        default: throw new SyntaxError('Unknown RPC v1 method');
-      }
-    }
+    case 'execution.abort': requireValue(isAgentResourceRef(value, 'execution')); return value;
+    case 'producers.close': requireValue(isAgentResourceRef(value, 'producer')); return value;
+    case 'history.close': requireValue(isAgentResourceRef(value, 'history-reader')); return value;
+    case 'projectPathUpdates.commit': case 'projectPathUpdates.rollback': requireValue(isAgentResourceRef(value, 'project-path-preparation')); return value;
+    case 'settings.migrate': requireValue(parseAgentSettingsEnvelope(value)); return value;
+    case 'configurationValidation.validate': requireValue(configuration(value)); return value;
+  }
+  requireValue(isRecord(value));
+  switch (method) {
+    case 'execution.start': case 'execution.resume': case 'compaction.compact':
+      launch(value, method === 'execution.start');
+      break;
+    case 'producers.bind': requireValue(isAgentResourceRef(value.binding, 'producer') && nonempty(value.chatId)); break;
+    case 'producers.cancelLaunch': requireValue(isAgentResourceRef(value.binding, 'producer') && text(value.runId)); break;
+    case 'producers.resume': requireValue(Array.isArray(value.bindings) && value.bindings.every(item => isRecord(item)
+      && isAgentResourceRef(item.binding, 'producer') && Number.isSafeInteger(item.acknowledgedSeq) && (item.acknowledgedSeq as number) >= 0)); break;
+    case 'history.open': requireValue(['legacyHistoryImport', 'nativeHistoryImport'].includes(value.source as string)
+      && isRecord(value.request) && chatReference(value.request.chat)); break;
+    case 'history.next': requireValue(isAgentResourceRef(value.reader, 'history-reader') && Number.isSafeInteger(value.page) && (value.page as number) >= 0); break;
+    case 'calls.reconcile': requireValue(Array.isArray(value.calls) && value.calls.every(item => fields(item, ['id', 'session'])
+      && isRecord(item) && positiveInteger(item.seq)) && new Set(value.calls.map(item => item.id)).size === value.calls.length); break;
+    case 'catalog.snapshot': requireValue(bool(value.strict)); break;
+    case 'credentials.resolve': requireValue(credential(value.reference)); break;
+    case 'projects.inspect': requireValue(text(value.projectPath) && optionalBoolean(value.includeGitRepository)); break;
+    case 'projects.ticketProjectDefault': case 'commands.discover': requireValue(text(value.projectPath)); break;
+    case 'projects.resolveFileMentions': requireValue(fields(value, ['projectPath', 'command'])); break;
+    case 'apiProviders.discoverModels': requireValue(protocol(value.protocol) && text(value.baseUrl) && optionalText(value.apiKey)
+      && ['none', 'anthropic-models', 'openai-models', 'ollama-tags', 'openrouter-models'].includes(value.modelDiscovery as string)); break;
+    case 'auth.completeLogin': requireValue(fields(value, ['sessionId', 'code'])); break;
+    case 'auth.loginStatus': requireValue(value.expectedSessionId === undefined || text(value.expectedSessionId)); break;
+    case 'migration.translateLegacyModel': requireValue(legacyScope(value.scope) && isRecord(value.scope) && value.scope.kind !== 'execution-defaults' && text(value.model)); break;
+    case 'migration.translateLegacyNativeSession': requireValue(fields(value, ['chatId', 'projectPath', 'model'])
+      && nullableText(value.agentSessionId) && nullableText(value.legacyNativePath) && isJsonObject(value.legacyValues)); break;
+    case 'migration.translateLegacySettings': requireValue(legacyScope(value.scope) && isJsonObject(value.legacyValues)); break;
+    case 'permissions.respond': requireValue(isAgentResourceRef(value.response, 'permission-response') && isRecord(value.decision)
+      && bool(value.decision.allow) && optionalBoolean(value.decision.alwaysAllow)
+      && (value.decision.response === undefined || isJsonObject(value.decision.response))); break;
+    case 'forking.fork': requireValue(configuration(value) && fields(value, ['chatId', 'projectPath']) && chatReference(value.source)
+      && (value.providerMeta === null || isJsonObject(value.providerMeta))); break;
+    case 'forking.discard': decodeEstablishedSessionV1(value); break;
+    case 'steering.captureTarget': requireValue(fields(value, ['chatId', 'agentSessionId', 'expectedRunId'])
+      && nativeOrNull(value.nativeSession) && isAgentResourceRef(value.producerBinding, 'producer')); break;
+    case 'steering.steer': requireValue(fields(value, ['chatId', 'projectPath', 'agentSessionId', 'input', 'clientMessageId'])
+      && nativeOrNull(value.nativeSession) && (value.target === null || isAgentResourceRef(value.target, 'steer-target'))); break;
+    case 'singleQuery.run': requireValue(fields(value, ['prompt', 'model']) && isThinkingMode(value.thinkingMode)
+      && parseAgentSettingsEnvelope(value.settings) && (value.endpoint === null || endpoint(value.endpoint))
+      && (value.timeoutMs === undefined || positiveInteger(value.timeoutMs))); break;
+    case 'nativeSessions.resolveNativeSession': case 'nativeSessions.describeSource': requireValue(chatReference(value.chat)); break;
+    case 'nativeSessions.release': requireValue(chatReference(value.chat) && ['deleted', 'transferred'].includes(value.reason as string)); break;
+    case 'nativeActivity.lastActivity': requireValue(native(value)); break;
+    case 'projectPathUpdates.prepare': requireValue(chatReference(value.chat) && text(value.nextProjectPath)); break;
+    case 'sessionConfiguration.apply': requireValue(Array.isArray(value.args) && value.args.length === 3 && text(value.args[0]) && configuration(value.args[1]) && configuration(value.args[2])); break;
+    case 'endpoints.validate': requireValue(endpoint(value)); break;
+    case 'usageHistory.read': requireValue(parseUsageReadRequest(value)); break;
+    default: throw new SyntaxError('Unknown RPC v1 method');
   }
   return value;
 }
@@ -197,85 +195,83 @@ export function parseRpcResultV1(method: Method, value: unknown): unknown {
     return value;
   }
   switch (method) {
-    case 'terminals.list': requireValue(parseTerminalListResponse(value)); break;
-    case 'terminals.create': requireValue(parseTerminalCreateResponse(value)); break;
-    case 'terminals.rename': requireValue(parseTerminalRenameResponse(value)); break;
-    case 'terminals.terminate': requireValue(parseTerminalTerminateResponse(value)); break;
-    case 'controllerCli.describe': requireValue(parseCliIdentity(value)); break;
+    case 'terminals.list': requireValue(parseTerminalListResponse(value)); return value;
+    case 'terminals.create': requireValue(parseTerminalCreateResponse(value)); return value;
+    case 'terminals.rename': requireValue(parseTerminalRenameResponse(value)); return value;
+    case 'terminals.terminate': requireValue(parseTerminalTerminateResponse(value)); return value;
+    case 'controllerCli.describe': requireValue(parseCliIdentity(value)); return value;
     case 'controllerCli.request': return parseCliHttpResponse(value);
     case 'usageHistory.read': {
       const report = parseAgentUsageReport(value);
       if (!report) throw new AgentIntegrationError('PROVIDER_FAILURE', 'Executor returned an invalid usage report', false);
       return report;
     }
-    case 'execution.start': case 'execution.resume': case 'compaction.compact': requireValue(isAgentResourceRef(value, 'execution')); break;
-    case 'history.open': requireValue(isAgentResourceRef(value, 'history-reader')); break;
-    case 'steering.captureTarget': requireValue(value === null || isAgentResourceRef(value, 'steer-target')); break;
-    case 'execution.abort': requireValue(bool(value)); break;
-    case 'settings.migrate': requireValue(parseAgentSettingsEnvelope(value)); break;
-    case 'migration.translateLegacySettings': requireValue(value === null || parseAgentSettingsEnvelope(value)); break;
-    case 'migration.translateLegacyNativeSession': case 'nativeSessions.resolveNativeSession': requireValue(value === null || native(value)); break;
-    case 'projects.resolveFileMentions': case 'singleQuery.run': case 'migration.translateLegacyModel': requireValue(text(value)); break;
+    case 'execution.start': case 'execution.resume': case 'compaction.compact': requireValue(isAgentResourceRef(value, 'execution')); return value;
+    case 'history.open': requireValue(isAgentResourceRef(value, 'history-reader')); return value;
+    case 'steering.captureTarget': requireValue(value === null || isAgentResourceRef(value, 'steer-target')); return value;
+    case 'execution.abort': requireValue(bool(value)); return value;
+    case 'settings.migrate': requireValue(parseAgentSettingsEnvelope(value)); return value;
+    case 'migration.translateLegacySettings': requireValue(value === null || parseAgentSettingsEnvelope(value)); return value;
+    case 'migration.translateLegacyNativeSession': case 'nativeSessions.resolveNativeSession': requireValue(value === null || native(value)); return value;
+    case 'projects.resolveFileMentions': case 'singleQuery.run': case 'migration.translateLegacyModel': requireValue(text(value)); return value;
     case 'terminals.attach': case 'terminals.detach': case 'terminals.input': case 'terminals.resize':
     case 'producers.bind': case 'producers.close': case 'producers.cancelLaunch': case 'permissions.respond':
     case 'lifecycle.start': case 'lifecycle.stop': case 'lifecycle.migrateOwnedStorage':
     case 'forking.discard': case 'endpoints.validate': case 'history.close': case 'nativeSessions.release':
     case 'configurationValidation.validate': case 'sessionConfiguration.apply':
-    case 'projectPathUpdates.commit': case 'projectPathUpdates.rollback': requireValue(value === undefined || value === null); break;
+    case 'projectPathUpdates.commit': case 'projectPathUpdates.rollback': requireValue(value === undefined || value === null); return value;
     case 'execution.runningSessions': requireValue(Array.isArray(value) && value.every(item => isRecord(item) && nonempty(item.agentSessionId)
-      && nullableText(item.status) && nullableText(item.startedAt)) && new Set(value.map(item => item.agentSessionId)).size === value.length); break;
+      && nullableText(item.status) && nullableText(item.startedAt)) && new Set(value.map(item => item.agentSessionId)).size === value.length); return value;
     case 'commands.discover': requireValue(Array.isArray(value) && value.every(item => isRecord(item) && text(item.name)
-      && ['command', 'skill'].includes(item.source as string) && optionalText(item.description))); break;
-    case 'credentials.resolve': requireValue(value === null || fields(value, ['kind', 'value'])); break;
+      && ['command', 'skill'].includes(item.source as string) && optionalText(item.description))); return value;
+    case 'credentials.resolve': requireValue(value === null || fields(value, ['kind', 'value'])); return value;
     case 'projectPathUpdates.prepare': requireValue(value === null || isRecord(value) && isAgentResourceRef(value.preparation, 'project-path-preparation')
-      && (value.nativeSession === undefined || nativeOrNull(value.nativeSession))); break;
+      && (value.nativeSession === undefined || nativeOrNull(value.nativeSession))); return value;
     case 'nativeSessions.describeSource': requireValue(value === null || isRecord(value)
-      && ['filesystem-path', 'provider-reference'].includes(value.kind as string) && text(value.value)); break;
-    default: {
-      requireValue(isRecord(value));
-      switch (method) {
-        case 'executor.describe': requireValue(isRecord(value.info) && fields(value.info, ['executorId', 'instanceId', 'projectBasePath'])
-          && texts(value.info.integrationIds) && new Set(value.info.integrationIds).size === value.info.integrationIds.length
-          && booleanFields(value.info.services, ['files', 'git', 'gh', 'terminals', 'directoryCreation'])
-          && Array.isArray(value.integrations));
-          for (const manifest of value.integrations) validateManifest(manifest as IntegrationManifest);
-          break;
-        case 'calls.reconcile': requireValue(Array.isArray(value.states) && value.states.every(item => isRecord(item) && text(item.id) && ['pending', 'not-received', 'unknown'].includes(item.state as string))); break;
-        case 'producers.resume': requireValue(Array.isArray(value.resumed)); break;
-        case 'catalog.snapshot': requireValue(Array.isArray(value.models) && value.models.every(model) && text(value.defaultModel) && bool(value.requiresStrictModelDiscovery)
-          && (value.generation === null || isRecord(value.generation) && text(value.generation.model) && Number.isFinite(value.generation.priority))); break;
-        case 'readiness.status': requireValue(bool(value.ready) && text(value.reason)); break;
-        case 'history.next': requireValue(bool(value.done) && Array.isArray(value.rows));
-          for (const row of value.rows as unknown[]) {
-            requireValue(isRecord(row) && (row.providerMeta === undefined || isJsonObject(row.providerMeta)));
-            decodeRenderedMessageV1(row.message);
-          }
-          break;
-        case 'forking.fork': requireValue(value.kind === 'unmaterialized' || value.kind === 'materialized');
-          if (value.kind === 'materialized') decodeEstablishedSessionV1(value.session);
-          break;
-        case 'steering.steer': requireValue(value.kind === 'accepted' || value.kind === 'rejected'
-          && ['no-active-turn', 'turn-changed', 'turn-not-steerable', 'invalid-input', 'provider-rejected'].includes(value.reason as string) && text(value.message)
-          || value.kind === 'failed' && ['unknown', 'not-sent'].includes(value.outcome as string) && text(value.message)); break;
-        case 'nativeActivity.lastActivity': requireValue(value.kind === 'unavailable' || value.kind === 'ready' && isRecord(value.value) && nullableText(value.value.lastEntryAt)); break;
-        case 'projects.inspect': requireValue(parseProjectResolution(value.resolution) && optionalBoolean(value.isGitRepository)); break;
-        case 'projects.ticketProjectDefault': parseTicketProjectDefault(value); break;
-        case 'apiProviders.discoverModels': requireValue(bool(value.success) && (value.models === undefined || Array.isArray(value.models)
-          && value.models.every(model)) && optionalText(value.error)); break;
-        case 'auth.status': requireValue(bool(value.authenticated) && bool(value.canReauth) && text(value.label)
-          && ['oauth', 'api-key', 'environment', 'cli', 'none', 'unknown'].includes(value.source as string) && optionalText(value.detail)); break;
-        case 'auth.launchLogin': requireValue(bool(value.launched) && bool(value.alreadyRunning) && text(value.sessionId) && deviceAuth(value.deviceAuth)); break;
-        case 'auth.completeLogin': requireValue(value.submitted === true && text(value.sessionId)); break;
-        case 'auth.loginStatus': requireValue(bool(value.running) && (value.state === 'idle' && value.running === false
-          || ['running', 'succeeded', 'failed'].includes(value.state as string) && text(value.sessionId)));
-          if (value.state === 'running') requireValue(value.running === true && bool(value.completionPending)
-            && optionalText(value.retryableError) && deviceAuth(value.deviceAuth));
-          else requireValue(value.running === false);
-          if (value.state === 'failed') requireValue(text(value.error));
-          break;
-        default: throw new SyntaxError('Unknown RPC v1 method');
+      && ['filesystem-path', 'provider-reference'].includes(value.kind as string) && text(value.value)); return value;
+  }
+  requireValue(isRecord(value));
+  switch (method) {
+    case 'executor.describe': requireValue(isRecord(value.info) && fields(value.info, ['executorId', 'instanceId', 'projectBasePath'])
+      && texts(value.info.integrationIds) && new Set(value.info.integrationIds).size === value.info.integrationIds.length
+      && booleanFields(value.info.services, ['files', 'git', 'gh', 'terminals', 'directoryCreation'])
+      && Array.isArray(value.integrations));
+      for (const manifest of value.integrations) validateManifest(manifest as IntegrationManifest);
+      break;
+    case 'calls.reconcile': requireValue(Array.isArray(value.states) && value.states.every(item => isRecord(item) && text(item.id) && ['pending', 'not-received', 'unknown'].includes(item.state as string))); break;
+    case 'producers.resume': requireValue(Array.isArray(value.resumed)); break;
+    case 'catalog.snapshot': requireValue(Array.isArray(value.models) && value.models.every(model) && text(value.defaultModel) && bool(value.requiresStrictModelDiscovery)
+      && (value.generation === null || isRecord(value.generation) && text(value.generation.model) && Number.isFinite(value.generation.priority))); break;
+    case 'readiness.status': requireValue(bool(value.ready) && text(value.reason)); break;
+    case 'history.next': requireValue(bool(value.done) && Array.isArray(value.rows));
+      for (const row of value.rows as unknown[]) {
+        requireValue(isRecord(row) && (row.providerMeta === undefined || isJsonObject(row.providerMeta)));
+        decodeRenderedMessageV1(row.message);
       }
-    }
+      break;
+    case 'forking.fork': requireValue(value.kind === 'unmaterialized' || value.kind === 'materialized');
+      if (value.kind === 'materialized') decodeEstablishedSessionV1(value.session);
+      break;
+    case 'steering.steer': requireValue(value.kind === 'accepted' || value.kind === 'rejected'
+      && ['no-active-turn', 'turn-changed', 'turn-not-steerable', 'invalid-input', 'provider-rejected'].includes(value.reason as string) && text(value.message)
+      || value.kind === 'failed' && ['unknown', 'not-sent'].includes(value.outcome as string) && text(value.message)); break;
+    case 'nativeActivity.lastActivity': requireValue(value.kind === 'unavailable' || value.kind === 'ready' && isRecord(value.value) && nullableText(value.value.lastEntryAt)); break;
+    case 'projects.inspect': requireValue(parseProjectResolution(value.resolution) && optionalBoolean(value.isGitRepository)); break;
+    case 'projects.ticketProjectDefault': parseTicketProjectDefault(value); break;
+    case 'apiProviders.discoverModels': requireValue(bool(value.success) && (value.models === undefined || Array.isArray(value.models)
+      && value.models.every(model)) && optionalText(value.error)); break;
+    case 'auth.status': requireValue(bool(value.authenticated) && bool(value.canReauth) && text(value.label)
+      && ['oauth', 'api-key', 'environment', 'cli', 'none', 'unknown'].includes(value.source as string) && optionalText(value.detail)); break;
+    case 'auth.launchLogin': requireValue(bool(value.launched) && bool(value.alreadyRunning) && text(value.sessionId) && deviceAuth(value.deviceAuth)); break;
+    case 'auth.completeLogin': requireValue(value.submitted === true && text(value.sessionId)); break;
+    case 'auth.loginStatus': requireValue(bool(value.running) && (value.state === 'idle' && value.running === false
+      || ['running', 'succeeded', 'failed'].includes(value.state as string) && text(value.sessionId)));
+      if (value.state === 'running') requireValue(value.running === true && bool(value.completionPending)
+        && optionalText(value.retryableError) && deviceAuth(value.deviceAuth));
+      else requireValue(value.running === false);
+      if (value.state === 'failed') requireValue(text(value.error));
+      break;
+    default: throw new SyntaxError('Unknown RPC v1 method');
   }
   return value;
 }
