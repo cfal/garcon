@@ -80,7 +80,7 @@ export class RemoteGitServices {
     try {
       return await withDeadline(options, GIT_OPERATION_TIMEOUT_MS, async (callOptions) => {
         const contract: (typeof RPC_V1)[`git.${GitMethod}`] = RPC_V1[`git.${method}`];
-        const { backing, timeoutMs } = await this.sessions.acquire(rpcLane(contract, request), callOptions);
+        const { backing, timeoutMs } = await this.sessions.acquire(rpcLane(contract), callOptions);
         const budgetMs = timeoutMs ?? callOptions.timeoutMs;
         const result = await backing.rpc.call('', contract, { input: request, budgetMs }, { ...callOptions, timeoutMs: budgetMs })
           .catch(error => { throw mutation ? error : readFailure(error, callOptions.signal); });

@@ -6,11 +6,9 @@ import { PRIMARY_SMALL_RPC_BYTES } from './limits.js';
 import { GitServiceError } from '../../../common/git-error.js';
 import { DomainError } from '../../common/domain-error.js';
 
-export function rpcLane(definition: RpcContractDefinition, request: unknown, callingLane: RpcLane = 'primary', cli?: CliLookup): RpcLane {
-  if (definition.lane === 'calling') return callingLane;
-  if (definition.lane === 'cli') {
-    if (!cli) throw new Error('CLI routing requires registered operation codecs');
-    return resolveCliRequest(request, cli).policy.lane;
+export function rpcLane(definition: RpcContractDefinition): RpcLane {
+  if (definition.lane === 'calling' || definition.lane === 'cli') {
+    throw new Error('Request-dependent routing requires a captured RPC policy');
   }
   return definition.lane;
 }

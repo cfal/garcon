@@ -31,7 +31,7 @@ const REPORT: AgentUsageReport = {
 
 test('usage reads are journaled and use the bulk lane', () => {
   expect(RPC_V1['usageHistory.read'].continuity).toBe('journaled');
-  expect(rpcLane(RPC_V1['usageHistory.read'], WINDOW)).toBe('bulk');
+  expect(rpcLane(RPC_V1['usageHistory.read'])).toBe('bulk');
   expect(RPC_V1['usageHistory.read'].requires).toEqual([{ name: 'calls.reconcile', version: 1, requires: [] }]);
 });
 

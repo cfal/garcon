@@ -66,7 +66,7 @@ export class RemoteExecutorGeneration {
         assertBacking(session.backing);
         return send(session);
       }),
-      call: async (integrationId, method, request, options = {}) => source.send(rpcLane(method, request), pin(options), ({ backing: held, timeoutMs }) => {
+      call: async (integrationId, method, request, options = {}) => source.send(rpcLane(method), pin(options), ({ backing: held, timeoutMs }) => {
         assertBacking(held);
         return held.rpc.call(integrationId, method, request, { ...options, timeoutMs });
       }),
