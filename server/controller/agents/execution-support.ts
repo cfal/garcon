@@ -1,5 +1,5 @@
 import type { AgentIntegration } from '@garcon/server-agent-interface';
-import { EXECUTION_INITIALIZATION_V1, EXECUTION_WORKFLOW_V1, supportsProviderInitialization, type ExecutorOperation } from '@garcon/common/executor-contracts';
+import { EXECUTION_WORKFLOW_OPERATIONS_V1, supportsProviderInitialization, type ExecutorOperation } from '@garcon/common/executor-contracts';
 import type { AgentDirectory } from './directory.js';
 import { DomainError } from '../../common/domain-error.js';
 
@@ -10,11 +10,10 @@ export interface ExecutionSupportTarget {
   readonly modelEndpointId?: string | null;
 }
 
-export function executionRequirements(integration: AgentIntegration, target: ExecutionSupportTarget,
+export function executionRequirements(target: ExecutionSupportTarget,
   operations: readonly ExecutorOperation[]): readonly ExecutorOperation[] {
   return [
-    ...EXECUTION_WORKFLOW_V1.map(definition => definition.name), ...operations,
-    ...(integration.configurationValidation ? ['configurationValidation.validate'] as const : []),
+    ...EXECUTION_WORKFLOW_OPERATIONS_V1, ...operations,
     ...(target.apiProviderId || target.modelEndpointId ? ['credentials.resolve', 'endpoints.validate'] as const : []),
   ];
 }
@@ -22,7 +21,7 @@ export function executionRequirements(integration: AgentIntegration, target: Exe
 export function nativeForkRequirements(integration: AgentIntegration,
   source: ExecutionSupportTarget & { readonly agentSessionId?: string | null }): readonly ExecutorOperation[] {
   if (!integration.forking || !source.agentSessionId) return [];
-  return [...EXECUTION_INITIALIZATION_V1.map(definition => definition.name), 'forking.fork',
+  return ['forking.fork',
     ...(integration.nativeHistoryImport ? ['history.open'] as const : []),
     ...(source.apiProviderId || source.modelEndpointId ? ['credentials.resolve', 'endpoints.validate'] as const : [])];
 }

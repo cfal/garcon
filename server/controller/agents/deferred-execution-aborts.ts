@@ -5,19 +5,21 @@ import type { AgentDirectory } from './directory.js';
 const logger = createLogger('agents:execution-aborts');
 
 export class DeferredExecutionAborts {
-  readonly #directory: Pick<AgentDirectory, 'isReady'>;
+  readonly #directory: Pick<AgentDirectory, 'isReady' | 'get'>;
   readonly #pending = new Map<string, { readonly integration: AgentIntegration; readonly handle: AgentExecutionHandle }>();
 
-  constructor(directory: Pick<AgentDirectory, 'isReady'>) {
+  constructor(directory: Pick<AgentDirectory, 'isReady' | 'get'>) {
     this.#directory = directory;
   }
 
   request(chatId: string, integration: AgentIntegration, handle: AgentExecutionHandle, context: string): void {
+    if (this.#abandonRetired(chatId, integration, context)) return;
     if (!this.#directory.isReady(handle.executorId)) {
       this.#pending.set(chatId, { integration, handle });
       return;
     }
     const failed = (error: unknown) => {
+      if (this.#abandonRetired(chatId, integration, context)) return;
       if (error instanceof AgentCallError && error.code === 'STALE_RESOURCE') return;
       if (!this.#directory.isReady(handle.executorId)) {
         this.#pending.set(chatId, { integration, handle });
@@ -39,8 +41,21 @@ export class DeferredExecutionAborts {
     for (const [chatId, deferred] of [...this.#pending]) {
       if (deferred.handle.executorId !== executorId) continue;
       this.#pending.delete(chatId);
-      // The originating facade either reaches the same worker or rejects its stale handle.
       this.request(chatId, deferred.integration, deferred.handle, 'executor reconnect');
     }
+  }
+
+  lost(executorId: string): void {
+    for (const [chatId, deferred] of this.#pending) {
+      if (deferred.handle.executorId === executorId) this.#abandonRetired(chatId, deferred.integration, 'executor retirement');
+    }
+  }
+
+  #abandonRetired(chatId: string, integration: AgentIntegration, context: string): boolean {
+    const executorId = integration.producers.scope.executorId;
+    if (this.#directory.get(integration.descriptor.id, executorId) === integration) return false;
+    if (this.#pending.get(chatId)?.integration === integration) this.#pending.delete(chatId);
+    logger.warn('Deferred Stop abandoned after executor retirement; native execution may still be running', { chatId, executorId, context });
+    return true;
   }
 }

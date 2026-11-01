@@ -185,13 +185,17 @@ export const RPC_V1 = Object.freeze({
 
 export type ExecutorOperation = keyof typeof RPC_V1;
 
-export const EXECUTION_INITIALIZATION_V1 = Object.freeze([
-  RPC_V1['lifecycle.migrateOwnedStorage'], RPC_V1['lifecycle.start'], RPC_V1['lifecycle.stop'],
-]);
+export const EXECUTION_LAUNCH_OPERATIONS_V1 = Object.freeze([
+  'execution.start', 'execution.resume', 'compaction.compact',
+] as const);
+export type ExecutionLaunchOperation = (typeof EXECUTION_LAUNCH_OPERATIONS_V1)[number];
+
 export const EXECUTION_WORKFLOW_V1 = Object.freeze([
-  ...EXECUTION_INITIALIZATION_V1, RPC_V1['producers.bind'], RPC_V1['catalog.snapshot'],
+  RPC_V1['lifecycle.migrateOwnedStorage'], RPC_V1['lifecycle.start'], RPC_V1['lifecycle.stop'],
+  RPC_V1['producers.bind'], RPC_V1['catalog.snapshot'],
   RPC_V1['execution.runningSessions'], RPC_V1['projects.inspect'], RPC_V1['projects.resolveFileMentions'],
 ]);
+export const EXECUTION_WORKFLOW_OPERATIONS_V1 = Object.freeze(EXECUTION_WORKFLOW_V1.map(definition => definition.name));
 
 export function supportsWorkflow(contracts: ContractVersions, definitions: readonly ContractDefinition[]): boolean {
   return definitions.every(definition => supportsDefinition(contracts, definition));
@@ -199,8 +203,7 @@ export function supportsWorkflow(contracts: ContractVersions, definitions: reado
 
 export function supportsProviderInitialization(supports: (requirements: readonly RpcContractDefinition[]) => boolean): boolean {
   return supports(EXECUTION_WORKFLOW_V1)
-    && [RPC_V1['execution.start'], RPC_V1['execution.resume'], RPC_V1['compaction.compact']]
-      .some(definition => supports([definition]));
+    && EXECUTION_LAUNCH_OPERATIONS_V1.some(name => supports([RPC_V1[name]]));
 }
 
 export function supportedExecutorOperations(contracts: ContractVersions): readonly ExecutorOperation[] {

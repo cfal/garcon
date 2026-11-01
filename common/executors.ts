@@ -1,6 +1,6 @@
 import { isRecord } from './json.js';
 import { isContractName } from './protocol-contracts.js';
-import { EXECUTION_WORKFLOW_V1, type ExecutorOperation } from './executor-contracts.js';
+import { EXECUTION_WORKFLOW_OPERATIONS_V1, type ExecutionLaunchOperation, type ExecutorOperation } from './executor-contracts.js';
 
 export const LOCAL_EXECUTOR_ID = 'local';
 export const LOCAL_EXECUTOR_LABEL = 'Local';
@@ -187,8 +187,8 @@ export function executorSupports(snapshot: Pick<ExecutorSnapshot, 'operations'> 
 }
 
 export function executorSupportsExecution(snapshot: Pick<ExecutorSnapshot, 'operations'> | null | undefined,
-  operation: 'execution.start' | 'execution.resume' | 'compaction.compact'): boolean {
-  return executorSupports(snapshot, ...EXECUTION_WORKFLOW_V1.map(definition => definition.name), operation);
+  operation: ExecutionLaunchOperation): boolean {
+  return executorSupports(snapshot, ...EXECUTION_WORKFLOW_OPERATIONS_V1, operation);
 }
 
 function isExecutorError(value: unknown): boolean {

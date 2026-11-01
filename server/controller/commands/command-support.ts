@@ -99,6 +99,7 @@ export type AgentRegistryDep = Pick<
   | 'executionPolicy'
   | 'assertExecutorReady'
   | 'assertExecutionSupported'
+  | 'assertRunSupported'
   | 'assertNativeForkSupported'
   | 'assertQueuedExecutionSupported'
   | 'assertAgentAvailable'

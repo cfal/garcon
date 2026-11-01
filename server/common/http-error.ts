@@ -41,6 +41,9 @@ export function jsonErrorFromUnknown(
   retryable = defaultRetryableForStatus(status),
 ): Response {
   if (error instanceof AgentCallError) {
+    if (error.code === 'STALE_RESOURCE' && error.outcome === 'not-dispatched') {
+      return jsonError(error.message, 503, 'EXECUTOR_UNAVAILABLE', true);
+    }
     return jsonError(error.message, error.code === 'OPERATION_UNSUPPORTED' ? 501 : 503, error.code, false);
   }
   if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {

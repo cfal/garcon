@@ -112,7 +112,6 @@ export class ModelCatalogResponseCache {
   }>();
 
   async getSnapshot(modelCatalog: ModelCatalog, executorId = effectiveExecutorId(undefined)): Promise<ModelCatalogSnapshot> {
-    const captured = modelCatalog.agents.captureCatalog(executorId);
     let entry = this.#executors.get(executorId);
     if (entry) {
       try {
@@ -123,13 +122,13 @@ export class ModelCatalogResponseCache {
       }
     }
     if (!entry) {
-      entry = { owner: captured, cached: null, inflight: null };
+      entry = { owner: modelCatalog.agents.captureCatalog(executorId), cached: null, inflight: null };
       this.#executors.set(executorId, entry);
     }
     if (entry.cached && isFresh(entry.cached)) return entry.cached;
     if (entry.inflight) return entry.inflight;
     const current = entry;
-    current.inflight = buildCatalogResponse(modelCatalog, executorId, captured)
+    current.inflight = buildCatalogResponse(modelCatalog, executorId, current.owner)
       .then((snapshot) => {
         snapshot.assertCurrent();
         if (this.#executors.get(executorId) === current) current.cached = snapshot;

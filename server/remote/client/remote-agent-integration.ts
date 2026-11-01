@@ -1,5 +1,5 @@
 import { rpcWireV1 } from '../transport/rpc-wire-v1.js';
-import { RPC_V1, supportsProviderInitialization, supportsWorkflow } from '@garcon/common/executor-contracts';
+import { RPC_V1, supportsProviderInitialization, supportsWorkflow, type ExecutionLaunchOperation } from '@garcon/common/executor-contracts';
 import { isInputFormatByModel } from '@garcon/common/input-format';
 import {
   AgentCallError,
@@ -112,7 +112,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
       if (!method.name.startsWith('lifecycle.')) this.#assertInitialized();
       return sessions.call(this.descriptor.id, method, request, options);
     };
-    const launch = async <D extends (typeof RPC_V1)['execution.start' | 'execution.resume' | 'compaction.compact']>(
+    const launch = async <D extends (typeof RPC_V1)[ExecutionLaunchOperation]>(
       method: D, request: NoInfer<RpcRequest<D>>, options?: ExecutorCallOptions,
     ) => {
       const state = this.#bindings.get(request.producerBinding.id);
@@ -159,15 +159,16 @@ export class RemoteAgentIntegration implements AgentIntegration {
         this.#forgetLaunch(state, request.runId);
         return handle;
       } catch (error) {
-        // A binding closed or failed meanwhile has no run left to settle or cancel.
-        if (this.#bindings.get(state.ref.id) === state && state.unsettledLaunches.get(request.runId) === lost
-          && error instanceof AgentCallError && error.outcome === 'unknown' && !signal?.aborted) {
+        const outcomeUnknown = error instanceof AgentCallError && error.outcome === 'unknown';
+        if (!outcomeUnknown) {
+          this.#forgetLaunch(state, request.runId);
+        } else if (this.#bindings.get(state.ref.id) === state && state.unsettledLaunches.get(request.runId) === lost && !signal?.aborted) {
           // A lost call no longer carries the caller's cancellation, so a later
-          // Stop cancels the launch through the worker's relay instead.
+          // Stop cancels it through the worker's relay while its binding still owns it.
           lost.lost = true;
           lost.send = (replacement) => send(replacement, null);
           signal?.addEventListener('abort', cancel, { once: true });
-        } else if (!(error instanceof AgentCallError && error.outcome === 'unknown')) this.#forgetLaunch(state, request.runId);
+        }
         throw error;
       }
     };

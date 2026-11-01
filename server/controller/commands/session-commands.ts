@@ -228,7 +228,7 @@ export class SessionCommands {
       );
       return applyPostAdmissionChatTags(result, input.chatId, input.tagsToAdd, this.deps.chatTags);
     }
-    this.deps.agents.assertExecutionSupported({ ...chat, ...runOptionsForCommand(input) }, [chat.agentSessionId ? 'execution.resume' : 'execution.start']);
+    this.deps.agents.assertRunSupported({ ...chat, ...runOptionsForCommand(input) });
     if (!input.model && !chat.model) {
       throw new CommandValidationError(
         'INCOMPLETE_EXECUTION_CONFIG',

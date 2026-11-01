@@ -118,14 +118,14 @@ describe('self handoff commands', () => {
   it('rejects an offline executor before accepting or creating a continuation', async () => {
     const executorId = '22222222-2222-4222-8222-222222222222';
     const { commands, support } = harness({ source: sourceChat({ executorId }) });
-    support.deps.agents.assertAgentAvailable.mockImplementation(() => {
+    support.deps.agents.assertExecutionSupported.mockImplementation(() => {
       throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
     });
 
     await expect(commands.submitSelfHandoffRun(request()))
       .rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503 });
 
-    expect(support.deps.agents.assertAgentAvailable).toHaveBeenCalledWith('claude', executorId);
+    expect(support.deps.agents.assertExecutionSupported).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'claude', executorId }), ['execution.start']);
     expect(support.deps.ledger.accept).not.toHaveBeenCalled();
     expect(support.deps.chats.addChat).not.toHaveBeenCalled();
     expect(support.deps.handoffs.seedContinuationLedger).not.toHaveBeenCalled();

@@ -1,4 +1,4 @@
-import { AgentCallError, AgentIntegrationError } from '@garcon/server-agent-interface';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import {
   parseAgentHandoffCommandRequest,
   parseAgentInterruptAndSendCommandRequest,
@@ -110,9 +110,6 @@ function optionalStringOrNull(value: unknown): string | null | undefined {
 }
 
 function chatSettingsPatchErrorResponse(error: unknown): Response {
-  if (error instanceof AgentCallError && error.code === 'STALE_RESOURCE' && error.outcome === 'not-dispatched') {
-    return jsonError('Provider settings changed. Refresh the executor catalog before editing settings.', 422, 'VALIDATION_FAILED', false);
-  }
   if (error instanceof ModelSelectionError) {
     return jsonError(error.message, 422, 'MODEL_SELECTION_ERROR');
   }

@@ -10,6 +10,7 @@ import {
 } from '../chat-execution/control-state.js';
 import type { TranscriptSnapshotReservation } from '../chat-execution/types.js';
 import { DomainError } from '../../common/domain-error.js';
+import { executorGenerationChanged } from '../../common/executor-generation-error.js';
 import type { LedgerRowDraft, TranscriptView } from './contracts.js';
 import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import type { TranscriptAdoptionService } from './adoption.js';
@@ -126,7 +127,7 @@ export class TranscriptReloadService {
     await this.options.registry.flush();
 
     if (this.options.integrations.require(entry.agentId, entry.executorId) !== integration) {
-      throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor generation changed before history reload', 503, true);
+      throw executorGenerationChanged();
     }
 
     this.options.ledger.closeProducer(chatId);

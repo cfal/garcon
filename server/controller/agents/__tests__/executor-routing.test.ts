@@ -76,14 +76,15 @@ async function fixture(chatExecutors: readonly string[] = IDS) {
     ledger.initializeChat(CHAT_IDS[index]!);
   }
   const mentions: string[] = [];
+  const events = new AgentEventBus();
   const router = new AgentRuntimeRouter({
-    registry: chats, directory, ledger, adoption, events: new AgentEventBus(),
+    registry: chats, directory, ledger, adoption, events,
     endpointResolver: new ApiProviderEndpointResolver(() => [], () => []),
     getCarryOverRevision: () => '', createCarriedContext: async () => ({ kind: 'no-history' }),
     hasPendingOwnershipTransfer: () => false,
     async resolveFileMentions(prompt, _projectPath, executorId) { mentions.push(effectiveExecutorId(executorId)); return prompt; },
   });
-  return { root, chats, providers, directory, ledger, router, mentions, ready, registries, contracts };
+  return { root, chats, providers, directory, ledger, router, mentions, ready, registries, contracts, events };
 }
 
 test.each(['execution.abort', 'producers.cancelLaunch', 'producer.launch-settled'])('missing %s refuses launch before binding or transcript effects', async missing => {
@@ -116,6 +117,27 @@ test('same-agent execution, expansion, Stop, and one-shot queries resolve the se
   f.ready.delete(SECOND);
   await expect(f.router.runSingleQuery('synthetic query', { agentId: 'test', executorId: SECOND })).rejects.toThrow('unavailable');
   expect(f.providers.map((provider) => provider.calls.query)).toEqual([0, 0, 1]);
+});
+
+test.each(['configurationValidation.validate', 'compaction.compact'] as const)('missing %s leaves start and resume usable on the same executor', async missing => {
+  const f = await fixture();
+  const validate = mock(async () => {});
+  const provider = f.providers[1]!;
+  f.registries.set(FIRST, new IntegrationRegistry({ instances: [{
+    ...provider.integration, configurationValidation: { validate },
+  }] }));
+  const contracts = { ...f.contracts.get(FIRST) };
+  delete contracts[missing];
+  f.contracts.set(FIRST, contracts);
+  const chatId = CHAT_IDS[1]!;
+  await f.router.startSession(chatId, 'Synthetic first input');
+  await f.router.abortSession(chatId);
+  f.events.clearTurn(chatId);
+  f.chats.updateChat(chatId, { agentSessionId: 'test-session' });
+  await f.router.runAgentTurn(chatId, 'Synthetic resumed input');
+  expect(provider.calls.start).toBe(1);
+  expect(provider.calls.resume).toBe(1);
+  expect(validate).not.toHaveBeenCalled();
 });
 
 test('executor loss settles its pending launch and fences its producer without disturbing other executors', async () => {

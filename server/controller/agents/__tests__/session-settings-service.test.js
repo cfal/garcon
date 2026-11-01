@@ -3,6 +3,7 @@ import { describe, expect, it, mock, spyOn } from 'bun:test';
 import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
 import { AgentSessionSettingsService } from '../session-settings-service.ts';
 import { AgentIntegrationError, AgentCallError } from '@garcon/server-agent-interface';
+import { jsonErrorFromUnknown } from '../../../common/http-error.js';
 
 function makeService(thinkingMode = 'high') {
   const entry = {
@@ -142,8 +143,22 @@ describe('AgentSessionSettingsService', () => {
     const replacement = { ...f.integration };
     f.integration.configurationValidation = { validate: mock(async () => { f.directory.require = () => replacement; }) };
     f.integration.sessionConfiguration = { apply: mock(async () => {}) };
-    await expect(f.service.updateSessionSettings('chat-1', { model: 'new' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+    await expect(f.service.updateSessionSettings('chat-1', { model: 'new' })).rejects.toMatchObject({ code: 'STALE_RESOURCE', outcome: 'not-dispatched' });
     expect(f.integration.sessionConfiguration.apply).not.toHaveBeenCalled();
+    expect(f.updateChat).not.toHaveBeenCalled();
+  });
+
+  it('reports a replaced start configuration as retryable, not an invalid settings edit', async () => {
+    const f = makeService();
+    const replacement = { ...f.integration };
+    f.integration.configurationValidation = { validate: mock(async () => { f.directory.require = () => replacement; }) };
+    const failure = await f.service.validateConfiguration({ agentId: 'amp', model: 'synthetic',
+      permissionMode: 'default', thinkingMode: 'none', agentSettings: f.integration.settings.defaults(),
+    }).catch(error => error);
+    expect(failure).toMatchObject({ code: 'STALE_RESOURCE', outcome: 'not-dispatched' });
+    const response = jsonErrorFromUnknown(failure);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ errorCode: 'EXECUTOR_UNAVAILABLE', retryable: true });
     expect(f.updateChat).not.toHaveBeenCalled();
   });
 

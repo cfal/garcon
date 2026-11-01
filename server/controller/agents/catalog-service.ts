@@ -6,7 +6,8 @@ import type { ApiProviderEndpointResolver } from "../api-providers/endpoint-reso
 import type { AgentDirectory } from "./directory.js";
 import { createLogger } from "../../common/log.js";
 import { effectiveExecutorId } from '../../../common/executors.js';
-import type { AgentIntegration } from '@garcon/server-agent-interface';
+import { AgentCallError, type AgentIntegration } from '@garcon/server-agent-interface';
+import { supportsProviderOperations } from './execution-support.js';
 
 const logger = createLogger("agents:catalog-service");
 
@@ -127,13 +128,13 @@ export class AgentCatalogService {
       executionPolicy: integration.literalExecution ? 'literal' : 'conversation',
       selectionLabel: integration.literalExecution?.selectionLabel ?? 'Model',
       inputFormatByModel: integration.literalExecution?.inputFormatByModel ?? {},
-      supportsCompact: integration.compaction !== null && this.deps.directory.supportsOperations(query.executorId, ['compaction.compact']),
+      supportsCompact: integration.compaction !== null && supportsProviderOperations(this.deps.directory, query.executorId, ['compaction.compact']),
       supportsFork: true,
       supportsForkAtMessage: true,
       supportsForkWhileRunning: true,
       supportsUpdateProjectPath:
         integration.descriptor.supportsProjectPathUpdate,
-      supportsSteering: integration.steering !== null && this.deps.directory.supportsOperations(query.executorId, ['steering.captureTarget', 'steering.steer']),
+      supportsSteering: integration.steering !== null && supportsProviderOperations(this.deps.directory, query.executorId, ['steering.captureTarget', 'steering.steer']),
       supportsImages: integration.descriptor.supportsImages,
       fileAttachmentMimeTypes: integration.attachments?.fileMimeTypes ?? [],
       acceptsApiProviderEndpoints: integration.endpoints !== null,
@@ -171,6 +172,7 @@ export class AgentCatalogService {
       assertCurrent();
       signal.throwIfAborted();
       if (error instanceof Error && error.name === 'AbortError') throw error;
+      if (error instanceof AgentCallError && error.code === 'OPERATION_UNSUPPORTED') throw error;
       if (query.strict) throw error;
       logger.warn('Agent catalog snapshot failed.', {
         code: 'CATALOG_SNAPSHOT_FAILED',

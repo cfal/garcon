@@ -280,12 +280,15 @@ function makeService(overrides = {}) {
   const queue = overrides.queueService ?? {
     scheduleDirectInput: mock(async (input) => {
       let reservation;
+      let validatingRecovery = input.preparation?.validateRecovery !== undefined;
       try {
         reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
         const control = await queue.readChatExecutionControl(input.command.chatId);
         if (control.entries.length > 0 || control.pause) {
           throw new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
         }
+        await input.preparation?.validateRecovery?.({ signal: reservation.executionAdmission.signal });
+        validatingRecovery = false;
         await input.preparation?.prepare({
           signal: reservation.executionAdmission.signal,
           assertAdmissionActive: () => reservation.executionAdmission.signal.throwIfAborted(),
@@ -294,6 +297,7 @@ function makeService(overrides = {}) {
         await input.settlement.markScheduled(input.command, input.options.turnId);
       } catch (error) {
         if (reservation) await queue.releaseDirectTurn(reservation);
+        if (validatingRecovery) throw error;
         let failure = error;
         try {
           await input.preparation?.compensate();
@@ -554,8 +558,9 @@ function makeService(overrides = {}) {
     currentTranscriptViewId: mock(() => Promise.resolve('view-1')),
     hasAgent: mock(() => true),
     assertExecutorReady: mock(() => undefined),
-    assertExecutionSupported: mock(() => undefined),
-    assertNativeForkSupported: mock(() => undefined),
+    assertExecutionSupported: mock((target) => agents.assertAgentAvailable(target.agentId, target.executorId)),
+    assertRunSupported: mock((target) => agents.assertExecutionSupported(target, [target.agentSessionId ? 'execution.resume' : 'execution.start'])),
+    assertNativeForkSupported: mock(() => true),
     assertQueuedExecutionSupported: mock(() => undefined),
     assertAgentAvailable: mock(() => undefined),
     supportsImages: mock(() => true),
@@ -1818,6 +1823,32 @@ describe('ChatCommandService', () => {
     expect(f.createForkedChat).not.toHaveBeenCalled();
     expect(f.queue.admitUserInput).not.toHaveBeenCalled();
     expect(f.sessions.has(TARGET_CHAT_ID)).toBe(false);
+  });
+
+  it.each([null, 'native-session'])('admits a ledger-only fork-run without resume support (source session: %s)', async (agentSessionId) => {
+    const f = makeService({ session: { agentSessionId }, agents: {
+      assertNativeForkSupported: mock(() => false),
+      assertExecutionSupported: mock((_target, operations) => {
+        if (operations.includes('execution.resume')) throw new DomainError('OPERATION_UNSUPPORTED', 'Resume absent', 422);
+      }),
+    } });
+    await expect(f.service.submitForkRun({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, command: 'continue',
+      clientRequestId: 'start-only-fork', clientMessageId: 'start-only-message' })).resolves.toMatchObject({ status: 'accepted' });
+    expect(f.agents.assertExecutionSupported).toHaveBeenCalledWith(expect.anything(), ['execution.start']);
+    expect(f.agents.assertNativeForkSupported).toHaveBeenCalledTimes(agentSessionId ? 1 : 0);
+    expect(f.createForkedChat.mock.calls[0][0].preparedSource.needsNativeFork).toBe(false);
+  });
+
+  it('honors handoff consent when native-fork contracts are absent', async () => {
+    const f = makeService({ agents: { assertNativeForkSupported: mock(() => {
+      throw new DomainError('OPERATION_UNSUPPORTED', 'Native fork absent', 422);
+    }) } });
+    const input = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, command: 'continue',
+      clientRequestId: 'consent-contract-fork', clientMessageId: 'consent-contract-message' };
+    await expect(f.service.submitForkRun(input)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED' });
+    await expect(f.service.submitForkRun({ ...input, allowHandoffFork: true })).resolves.toMatchObject({ status: 'accepted' });
+    expect(f.createForkedChat.mock.calls[0][0].preparedSource.needsNativeFork).toBe(false);
+    expect(f.agents.assertExecutionSupported).toHaveBeenCalledWith(expect.anything(), ['execution.start']);
   });
 
   it('canonicalizes inherited fork thinking mode without changing routing', async () => {
@@ -4044,6 +4075,83 @@ describe('ChatCommandService', () => {
     expect((await readLedgerRecord(ledger, 'fork-run', input.clientRequestId, TARGET_CHAT_ID)).forkPreparation).toBeUndefined();
   });
 
+  async function acceptedForkRecovery() {
+    const cleanup = { scope: { executorId: 'local', instanceId: 'original', integrationId: 'claude' },
+      session: { agentSessionId: 'original-native', nativeSession: null, nativeSeedReceipt: null } };
+    const projection = makeInputProjection();
+    projection.admitInput.mockRejectedValueOnce(new Error('Synthetic admission failure'));
+    const runAgentTurn = mock(async () => {});
+    const queue = makeRealQueue(projection, { runAgentTurn });
+    const createForkedChat = mock(async ({ registry }) => {
+      registry.addChat({ ...registry.getChat(SOURCE_CHAT_ID), id: TARGET_CHAT_ID, agentSessionId: null });
+      return { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, agentId: 'claude', agentSessionId: null,
+        nativeCleanup: cleanup, rollback: async () => { throw new Error('Synthetic rollback failure'); } };
+    });
+    const f = makeService({ queueService: queue, createForkedChat });
+    const update = f.ledger.update.bind(f.ledger);
+    let failSettlement = true;
+    f.ledger.update = mock((key, patch) => {
+      if (failSettlement && patch.status === 'failed') {
+        failSettlement = false;
+        throw new Error('Synthetic settlement failure');
+      }
+      return update(key, patch);
+    });
+    const input = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, command: 'Synthetic recovery',
+      clientRequestId: 'accepted-fork-recovery', clientMessageId: 'accepted-fork-message' };
+    await expect(f.service.submitForkRun(input)).rejects.toThrow('Failed to settle');
+    const record = await readLedgerRecord(f.ledger, 'fork-run', input.clientRequestId, TARGET_CHAT_ID);
+    expect(record.status).toBe('accepted');
+    return { ...f, projection, runAgentTurn, input, record, cleanup };
+  }
+
+  it('replays committed accepted fork input without source or provider admission', async () => {
+    const f = await acceptedForkRecovery();
+    f.sessions.delete(SOURCE_CHAT_ID);
+    f.projection.hasMatchingInput.mockResolvedValue(true);
+    f.agents.assertExecutionSupported.mockClear();
+    f.agents.assertExecutionSupported.mockImplementation(() => { throw new Error('Must not validate'); });
+    f.agents.assertNativeForkSupported.mockClear();
+    await expect(f.service.submitForkRun(f.input)).resolves.toMatchObject({ status: 'duplicate', turnId: f.record.turnId });
+    expect(f.createForkedChat).toHaveBeenCalledOnce();
+    expect(f.agents.assertExecutionSupported).not.toHaveBeenCalled();
+    expect(f.agents.assertNativeForkSupported).not.toHaveBeenCalled();
+    expect(f.runAgentTurn).not.toHaveBeenCalled();
+    const finished = await readLedgerRecord(f.ledger, 'fork-run', f.input.clientRequestId, TARGET_CHAT_ID);
+    expect(finished.status).toBe('finished');
+    expect(finished.forkPreparation).toBeUndefined();
+  });
+
+  it.each([false, true])('preserves accepted fork recovery and cleanup on refusal (target absent: %s)', async (absent) => {
+    const f = await acceptedForkRecovery();
+    if (absent) f.sessions.delete(TARGET_CHAT_ID);
+    else f.sessions.delete(SOURCE_CHAT_ID);
+    f.agents.assertExecutionSupported.mockImplementation(() => { throw new DomainError('OPERATION_UNSUPPORTED', 'Synthetic missing launch', 422); });
+    await expect(f.service.submitForkRun(f.input)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED' });
+    expect(await readLedgerRecord(f.ledger, 'fork-run', f.input.clientRequestId, TARGET_CHAT_ID)).toEqual(f.record);
+    expect(f.agents.discardForkedAgentSession).not.toHaveBeenCalled();
+    expect(f.createForkedChat).toHaveBeenCalledOnce();
+    if (!absent) {
+      expect(f.sessions.has(TARGET_CHAT_ID)).toBe(true);
+      expect(f.agents.assertExecutionSupported).toHaveBeenLastCalledWith(expect.objectContaining({ agentSessionId: null }), ['execution.start']);
+      f.agents.assertExecutionSupported.mockImplementation(() => {});
+      await expect(f.service.submitForkRun(f.input)).resolves.toMatchObject({ status: 'duplicate', turnId: f.record.turnId });
+      await f.queue.waitForDispatches();
+      expect(f.runAgentTurn).toHaveBeenCalledOnce();
+      expect(f.createForkedChat).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('rejects accepted fork payload and cross-command conflicts before support checks', async () => {
+    const f = await acceptedForkRecovery();
+    f.agents.assertExecutionSupported.mockClear();
+    f.agents.assertExecutionSupported.mockImplementation(() => { throw new Error('Must not validate'); });
+    await expect(f.service.submitForkRun({ ...f.input, command: 'Changed input' })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    await expect(f.service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID,
+      clientRequestId: f.input.clientRequestId })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    expect(f.agents.assertExecutionSupported).not.toHaveBeenCalled();
+  });
+
   it.each(['transient', 'persistent', 'none'])('retains only unresolved native cleanup after creation throws: %s discard failure', async (failure) => {
     const session = { agentSessionId: 'original-native', nativeSession: null, nativeSeedReceipt: null };
     const cleanup = { scope: { executorId: 'local', instanceId: 'original', integrationId: 'claude' }, session };
@@ -5649,8 +5757,9 @@ describe('ChatCommandService', () => {
       providerTarget: {},
       identity: { clientRequestId: 'request-active', turnId: 'turn-active' },
     };
-    const { service, queue, ledger } = makeService({
+    const { service, queue, ledger, agents } = makeService({
       queue: { captureSteerTarget: mock(() => target) },
+      agents: { assertQueuedExecutionSupported: mock(() => { throw new DomainError('OPERATION_UNSUPPORTED', 'Resume unsupported', 422); }) },
     });
     const input = {
       chatId: SOURCE_CHAT_ID,
@@ -5674,6 +5783,7 @@ describe('ChatCommandService', () => {
     // Capture starts the steer's interactive deadline, which its delivery shares.
     expect(queue.captureSteerTarget).toHaveBeenCalledWith(SOURCE_CHAT_ID, expect.any(Number));
     expect(queue.deliverAcceptedSteer).toHaveBeenCalledTimes(1);
+    expect(agents.assertQueuedExecutionSupported).not.toHaveBeenCalled();
     expect(queue.readChatExecutionControl).not.toHaveBeenCalled();
     expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
     expect(await readLedgerRecord(ledger, 'steer', input.clientRequestId)).toMatchObject({
@@ -6154,6 +6264,20 @@ describe('ChatCommandService', () => {
       entryId: queued.entryId,
     });
     expect(queue.enqueueAcceptedSteer).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a queued steer without resume support before accepting or enqueueing', async () => {
+    const { service, queue, ledger, agents } = makeService({
+      queue: { captureSteerTarget: mock(() => null) },
+      agents: { assertQueuedExecutionSupported: mock(() => { throw new DomainError('OPERATION_UNSUPPORTED', 'Resume unsupported', 422); }) },
+    });
+    const input = { chatId: SOURCE_CHAT_ID, content: 'Synthetic guidance', clientRequestId: 'unsupported-steer',
+      clientMessageId: 'unsupported-message', whenTurnUnavailable: 'queue' };
+    await expect(service.submitSteer(input)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', status: 422 });
+    expect(agents.assertQueuedExecutionSupported).toHaveBeenCalledTimes(1);
+    expect(await readLedgerRecord(ledger, 'steer', input.clientRequestId)).toBeNull();
+    expect(queue.enqueueAcceptedSteer).not.toHaveBeenCalled();
+    expect(queue.deliverAcceptedSteer).not.toHaveBeenCalled();
   });
 
   it('treats a steer identity reused with another unavailable-turn policy as a conflict', async () => {

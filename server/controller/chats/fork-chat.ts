@@ -8,6 +8,7 @@ import type {
 import type { DerivedChatNameInput } from './chat-title.js';
 import type { AgentOwnershipJournal } from './agent-ownership-journal.js';
 import { DomainError } from '../../common/domain-error.js';
+import { AgentCallError } from '@garcon/server-agent-interface';
 import { createLogger } from '../../common/log.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import type { LedgerRow, LedgerRowDraft } from '../ledger/contracts.js';
@@ -71,8 +72,9 @@ export type PreparedForkSource = Awaited<ReturnType<typeof prepareForkSource>>;
 
 // The integration refuses a point it cannot fork natively. With consent that refusal means
 // "seed from the frozen conversation instead"; without it, it reaches the caller unchanged.
-function isUnsettledForkPoint(error: unknown): boolean {
-  return error instanceof DomainError && error.code === 'TRANSCRIPT_NOT_YET_PERSISTED';
+export function isHandoffForkRefusal(error: unknown): boolean {
+  return (error instanceof DomainError && (error.code === 'TRANSCRIPT_NOT_YET_PERSISTED' || error.code === 'OPERATION_UNSUPPORTED'))
+    || (error instanceof AgentCallError && error.outcome === 'not-dispatched' && error.code === 'OPERATION_UNSUPPORTED');
 }
 
 interface ForkChatSettings {
@@ -200,7 +202,7 @@ export async function createForkedChat({
       });
     } catch (error) {
       signal.throwIfAborted();
-      if (!allowHandoffFork || !isUnsettledForkPoint(error)) throw error;
+      if (!allowHandoffFork || !isHandoffForkRefusal(error)) throw error;
       forkOutcome = null;
     }
   }
@@ -429,7 +431,7 @@ export async function createForkedChat({
     chatId: targetChatId,
     agentId: sourceSession.agentId,
     agentSessionId: nativeFork?.agentSessionId ?? null,
-    nativeCleanup,
+    get nativeCleanup() { return pendingNativeCleanup; },
     rollback,
   };
 }

@@ -141,6 +141,8 @@ export interface CommandSettlementPort {
 
 export interface DirectInputPreparation {
   operation: 'chat-start' | 'fork-run' | 'agent-handoff';
+  // Accepted recovery remains non-owning until this check passes; refusal preserves its record and resources.
+  validateRecovery?(context: DirectInputPreparationContext): Promise<void>;
   prepare(context: DirectInputPreparationContext): Promise<void>;
   compensate(): Promise<void>;
 }

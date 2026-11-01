@@ -15,6 +15,7 @@ import {
   normalizeSupportedThinkingMode,
 } from '../../../common/execution-defaults.js';
 import { DomainError } from '../../common/domain-error.js';
+import { executorGenerationChanged } from '../../common/executor-generation-error.js';
 import { interactiveDeadline, readBefore } from '../../common/interactive-deadline.js';
 import type { ChatExecutionCommands } from '../chat-execution/types.js';
 import { hasPendingTurnInput, type StoredChatExecutionControlState } from '../chat-execution/control-state.js';
@@ -66,7 +67,7 @@ export class AgentSessionSettingsService {
       settings,
       endpoint: toAgentEndpointSelection(this.deps.endpointResolver, selection),
     }, options);
-    if (this.deps.directory.require(input.agentId, input.executorId) !== integration) throw settingsRefreshRequired();
+    if (this.deps.directory.require(input.agentId, input.executorId) !== integration) throw executorGenerationChanged();
   }
 
   updateSessionSettings(
@@ -91,7 +92,7 @@ export class AgentSessionSettingsService {
         || settingsFence.expectedSettingsSchemaVersion !== integration.settings.defaults().schemaVersion
       )) throw settingsRefreshRequired();
       const assertCurrent = () => {
-        if (this.deps.directory.require(entry.agentId, entry.executorId) !== integration) throw settingsRefreshRequired();
+        if (this.deps.directory.require(entry.agentId, entry.executorId) !== integration) throw executorGenerationChanged();
       };
       const currentSettings = integration.settings.parse(
         entry.agentSettingsById[entry.agentId] ?? integration.settings.defaults(),

@@ -80,19 +80,26 @@ export class SteerCommands {
     try {
       let providerContent = input.content;
       const scheduleResponse = () => this.support.withChatMutationLock(input.chatId, async () => {
-        if (!initialChat) {
-          const observed = await this.deps.ledger.observe(ledgerInput);
-          if (observed) {
-            this.support.throwOnConflict(
-              observed,
-              'clientRequestId was reused with different payload',
-            );
-            return this.#duplicateResponse(observed.record);
-          }
-          throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+        const observed = await this.deps.ledger.observe(ledgerInput);
+        if (observed) {
+          this.support.throwOnConflict(observed, 'clientRequestId was reused with different payload');
+          return this.#duplicateResponse(observed.record);
         }
+        if (!initialChat) throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
 
         await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
+        let target: CapturedSteerTarget | null = null;
+        let targetFailure: unknown;
+        try {
+          target = queueWhenUnavailable
+            ? await this.#targetUnlessSteersQueued(input.chatId, observedTarget, deadline)
+            : await this.#currentTarget(input.chatId, observedTarget, deadline);
+        } catch (error) {
+          targetFailure = error;
+        }
+        if (!targetFailure && queueWhenUnavailable && !target?.providerTarget) {
+          this.deps.agents.assertQueuedExecutionSupported(input.chatId);
+        }
 
         let ledger: LedgerAcceptResult;
         try {
@@ -129,14 +136,9 @@ export class SteerCommands {
           await this.support.settlement.settleSteerFailure(command, error);
           throw error;
         }
-        let target: CapturedSteerTarget | null;
-        try {
-          target = queueWhenUnavailable
-            ? await this.#targetUnlessSteersQueued(input.chatId, observedTarget, deadline)
-            : await this.#currentTarget(input.chatId, observedTarget, deadline);
-        } catch (error) {
-          await this.support.settlement.settleSteerFailure(command, error);
-          throw error;
+        if (targetFailure) {
+          await this.support.settlement.settleSteerFailure(command, targetFailure);
+          throw targetFailure;
         }
         outcomeTurnId = target?.identity.turnId;
         if (queueWhenUnavailable && !target?.providerTarget) {

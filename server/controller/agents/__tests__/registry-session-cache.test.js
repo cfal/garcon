@@ -18,6 +18,9 @@ import { AgentRegistry } from '../registry.ts';
 import { MetadataIndex } from '../../chats/metadata-store.ts';
 import { resolveChatTitle } from '../../chats/chat-title.ts';
 import createAgentRoutes from '../../routes/agents.ts';
+import { integrationFixture } from '../../../remote/__tests__/integration-fixture.ts';
+import { IntegrationRegistry } from '../../../runtime/agents/integration-registry.ts';
+import { DomainError } from '../../../common/domain-error.ts';
 
 const CHAT_ID = '1783725900000200';
 const AT = '2026-08-15T00:00:00.000Z';
@@ -67,11 +70,13 @@ describe('AgentRegistry session cache', () => {
       require: () => { throw new Error('unused'); },
       list: () => [],
     },
+    executors,
   ) {
     return new AgentRegistry({
     resolveFileMentions: resolveFileMentionsInCommand,
       registry: chats,
       integrations,
+      executors,
       endpointResolver: {},
       getCarryOverRevision: () => 'carry-1',
       ledger,
@@ -115,6 +120,35 @@ describe('AgentRegistry session cache', () => {
     const message = ledger.currentRows(CHAT_ID).find(row => row.kind === 'user-input').detail.message;
     expect(message.metadata?.contentMode).toBeUndefined();
     expect(message.metadata?.contentFormat).toBeUndefined();
+  });
+
+  it('classifies a native-session source without a forking facet as ledger-only', () => {
+    const { integration } = integrationFixture(root, 'local');
+    expect(integration.forking).toBeNull();
+    const registry = createRegistry(undefined, undefined, new IntegrationRegistry({ instances: [integration] }));
+    const source = { ...chats.getChat(CHAT_ID), agentSessionId: 'synthetic-native-session' };
+    expect(registry.assertNativeForkSupported(source)).toBe(false);
+  });
+
+  it('keeps an offline native-session ledger fork available without admitting native forks or runs', () => {
+    const executorId = '22222222-2222-4222-8222-222222222222';
+    const { integration } = integrationFixture(root, executorId);
+    const integrations = new IntegrationRegistry({ instances: [integration] });
+    const requireIntegration = mock(() => { throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true); });
+    const registry = createRegistry(undefined, undefined, integrations, {
+      knownIntegration: () => integration,
+      requireIntegration,
+      integrationsFor: () => integrations,
+      isReady: () => false,
+    });
+    const source = { ...chats.getChat(CHAT_ID), executorId, agentSessionId: 'synthetic-native-session' };
+    expect(registry.assertNativeForkSupported(source)).toBe(false);
+    expect(requireIntegration).not.toHaveBeenCalled();
+    expect(() => registry.assertExecutorReady(executorId)).toThrow('Executor is unavailable');
+    expect(() => registry.assertRunSupported(source)).toThrow('Executor is unavailable');
+    integration.forking = { fork: mock(), discard: mock() };
+    expect(() => registry.assertNativeForkSupported(source)).toThrow('Executor is unavailable');
+    expect(integration.forking.fork).not.toHaveBeenCalled();
   });
 
   it('reports steering support only for integrations the executor has reported', () => {

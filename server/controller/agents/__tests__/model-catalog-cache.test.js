@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
 import { ModelCatalogResponseCache } from '../model-catalog-cache.js';
 
 function fixture(load = mock(async () => [{ id: 'synthetic-agent' }])) {
@@ -26,6 +26,19 @@ describe('ModelCatalogResponseCache', () => {
     expect(await cache.getSnapshot(catalog)).toBe(first);
     expect(first.body.executorInstanceId).toBe('instance-a');
     expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('captures once per cache owner, including TTL refreshes', async () => {
+    const { cache, catalog, load, replace } = fixture();
+    const capture = spyOn(catalog.agents, 'captureCatalog');
+    const first = await cache.getSnapshot(catalog);
+    first.createdAt -= 60_001;
+    expect(await cache.getSnapshot(catalog)).not.toBe(first);
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(capture).toHaveBeenCalledTimes(1);
+    replace();
+    expect((await cache.getSnapshot(catalog)).body.executorInstanceId).toBe('instance-b');
+    expect(capture).toHaveBeenCalledTimes(2);
   });
 
   it('does not cache rejected lookups or let a stale rejection evict a replacement', async () => {

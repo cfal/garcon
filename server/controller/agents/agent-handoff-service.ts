@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { executorGenerationChanged } from '../../common/executor-generation-error.js';
 import type { AgentIntegration } from '@garcon/server-agent-interface';
 import type {
   AgentHandoffRequest,
@@ -408,7 +409,7 @@ export class AgentHandoffService {
 
   #assertIntegrationCurrent(integration: AgentIntegration, executorId?: string | null): void {
     if (this.deps.integrations.require(integration.descriptor.id, executorId) !== integration) {
-      throw new DomainError('VALIDATION_FAILED', 'The handoff destination changed. Refresh its configuration and try again.', 422);
+      throw executorGenerationChanged();
     }
   }
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AgentCatalogService } from "../catalog-service.ts";
+import { AgentCallError } from '@garcon/server-agent-interface';
 
 function createIntegration() {
   return {
@@ -110,6 +111,21 @@ describe("AgentCatalogService", () => {
     const { service, replace } = replacingFixture();
     replace([]);
     expect(await service.getAgentCatalogEntries()).toEqual([]);
+  });
+
+  test.each([false, true])('preserves an unsupported catalog refusal (strict: %s)', async strict => {
+    const { service, integration } = replacingFixture();
+    const error = new AgentCallError('not-dispatched', 'Unsupported catalog', 'OPERATION_UNSUPPORTED');
+    integration.catalog.snapshot = async () => { throw error; };
+    await expect(service.getAgentCatalogEntry('sample-agent', { strict })).rejects.toBe(error);
+    await expect(service.getAgentCatalogEntries()).rejects.toBe(error);
+  });
+
+  test('retains best-effort fallback for a supported catalog with failed discovery', async () => {
+    const { service, integration } = replacingFixture();
+    integration.catalog.snapshot = async () => { throw new Error('Synthetic discovery failure'); };
+    await expect(service.getAgentCatalogEntry('sample-agent')).resolves.toMatchObject({ models: [], defaultModel: '' });
+    await expect(service.getAgentCatalogEntry('sample-agent', { strict: true })).rejects.toThrow('Synthetic discovery failure');
   });
 
   test("projects integration-owned capabilities, modes, and settings into the catalog", async () => {

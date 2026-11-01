@@ -268,7 +268,7 @@ export class QueueCommands {
         options: {},
       };
       if (!await this.support.replayHttpRun(run, deadline)) {
-        this.deps.agents.assertExecutionSupported(session, [session.agentSessionId ? 'execution.resume' : 'execution.start']);
+        this.deps.agents.assertRunSupported(session);
         await this.support.submitHttpRun(run, deadline);
       }
       return { type: 'sent', chatId };

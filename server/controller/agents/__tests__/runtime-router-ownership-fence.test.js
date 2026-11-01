@@ -1,6 +1,7 @@
 import { resolveFileMentionsInCommand } from "../../../runtime/projects/file-mentions.ts";
 import { describe, expect, it, mock } from 'bun:test';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { DeferredExecutionAborts } from '../deferred-execution-aborts.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 import { createProducerFixture } from './producer-fixture.ts';
 import { AgentCallError } from '@garcon/server-agent-interface';
@@ -47,6 +48,7 @@ function makeRouter(hasPendingOwnershipTransfer) {
     requireOperations: mock(() => undefined),
     supportsOperations: () => true,
     require: mock(() => integration),
+    get: mock(() => integration),
     list: mock(() => [integration]),
     isReady: mock(() => true),
   };
@@ -77,6 +79,16 @@ describe('AgentRuntimeRouter ownership fence', () => {
   const launch = (router, method, opts) => method === 'compactSession'
     ? router.compactSession('chat-1', opts)
     : router[method]('chat-1', 'hello', opts);
+
+  it.each(launches)('does not require configuration validation for %s', async (_operation, method) => {
+    const { router, integration, directory } = makeRouter(() => false);
+    integration.configurationValidation = { validate: mock(async () => {}) };
+    directory.requireOperations.mockImplementation((_executorId, operations) => {
+      if (operations.includes('configurationValidation.validate')) throw new DomainError('OPERATION_UNSUPPORTED', 'Validation unavailable', 422);
+    });
+    await launch(router, method, {});
+    expect(integration.configurationValidation.validate).not.toHaveBeenCalled();
+  });
 
   it.each(launches)('rejects incompatible settings before adoption or %s effects', async (_operation, method) => {
     const { router, integration, adoption, execution } = makeRouter(() => false);
@@ -146,16 +158,50 @@ describe('AgentRuntimeRouter ownership fence', () => {
     expect(execution.abort).not.toHaveBeenCalled();
     router.executionSessionResumed(integration.producers.scope.executorId);
     expect(execution.abort).not.toHaveBeenCalled();
-    execution.abort.mockRejectedValueOnce(new AgentCallError('not-dispatched', 'Retired worker', 'STALE_RESOURCE'));
     const replacementAbort = mock(async () => true);
-    directory.require.mockReturnValue({ ...integration, execution: { ...execution, abort: replacementAbort } });
+    directory.get.mockReturnValue({ ...integration, execution: { ...execution, abort: replacementAbort } });
     directory.isReady.mockReturnValue(true);
     router.executionSessionResumed(integration.producers.scope.executorId);
     await Promise.resolve();
-    expect(execution.abort).toHaveBeenCalledTimes(1);
+    expect(execution.abort).not.toHaveBeenCalled();
     router.executionSessionResumed(integration.producers.scope.executorId);
-    expect(execution.abort).toHaveBeenCalledTimes(1);
+    expect(execution.abort).not.toHaveBeenCalled();
     expect(replacementAbort).not.toHaveBeenCalled();
+  });
+
+  it('does not erase a replacement Stop when a retired abort rejects late', async () => {
+    const { integration, directory, execution } = makeRouter(() => false);
+    const pending = Promise.withResolvers();
+    execution.abort.mockImplementation(() => pending.promise);
+    const aborts = new DeferredExecutionAborts(directory);
+    const handle = { executorId: integration.producers.scope.executorId };
+    aborts.request('chat-1', integration, handle, 'original');
+    const replacementAbort = mock(async () => true);
+    const replacement = { ...integration, execution: { ...execution, abort: replacementAbort } };
+    directory.get.mockReturnValue(replacement);
+    directory.isReady.mockReturnValue(false);
+    aborts.request('chat-1', replacement, handle, 'replacement');
+    pending.reject(new AgentCallError('not-dispatched', 'Retired', 'STALE_RESOURCE'));
+    await Promise.resolve();
+    directory.isReady.mockReturnValue(true);
+    aborts.resumed(handle.executorId);
+    aborts.resumed(handle.executorId);
+    expect(replacementAbort).toHaveBeenCalledTimes(1);
+    expect(execution.abort).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])('retains deferred Stop only while its generation survives loss: retired=%s', async retired => {
+    const { router, integration, directory, execution } = makeRouter(() => false);
+    await router.runAgentTurn('chat-1', 'prompt', { turnId: 'turn-1' });
+    directory.isReady.mockReturnValue(false);
+    await router.abortSession('chat-1');
+    if (retired) directory.get.mockReturnValue(null);
+    router.executionSessionLost(integration.producers.scope.executorId);
+    directory.get.mockReturnValue(integration);
+    directory.isReady.mockReturnValue(true);
+    router.executionSessionResumed(integration.producers.scope.executorId);
+    router.executionSessionResumed(integration.producers.scope.executorId);
+    expect(execution.abort).toHaveBeenCalledTimes(retired ? 0 : 1);
   });
 
   it.each(launches)('rechecks provider policy after asynchronous preparation before %s dispatch', async (_operation, method) => {

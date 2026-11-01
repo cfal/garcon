@@ -6,7 +6,7 @@ import {
 	parseExecutors,
 	type ExecutorSnapshot,
 } from '$shared/executors';
-import { LOCAL_EXECUTOR_OPERATIONS, type ExecutorOperation } from '$shared/executor-contracts';
+import { LOCAL_EXECUTOR_OPERATIONS, type ExecutionLaunchOperation, type ExecutorOperation } from '$shared/executor-contracts';
 
 const localFallback: readonly ExecutorSnapshot[] = [
 	{
@@ -64,7 +64,7 @@ export class ExecutorsStore {
 		return executorSupports(this.get(id), ...operations);
 	}
 
-	supportsExecution(id: string | null | undefined, operation: 'execution.start' | 'execution.resume' | 'compaction.compact'): boolean {
+	supportsExecution(id: string | null | undefined, operation: ExecutionLaunchOperation): boolean {
 		return executorSupportsExecution(this.get(id), operation);
 	}
 

@@ -547,11 +547,12 @@ export class AcceptedInputHandler {
   }
 
   async #prepareDirect(input: AcceptedDirectInput): Promise<DirectTurnReservation | null> {
+    let validatingRecovery = input.preparation?.validateRecovery !== undefined;
     let reservation: DirectTurnReservation;
     try {
       reservation = this.#coordinator.reserveDirect(input.command.chatId, input.options);
     } catch (error) {
-      await this.#recordAdmissionFailure(input, error);
+      if (!validatingRecovery) await this.#recordAdmissionFailure(input, error);
       throw error;
     }
     try {
@@ -571,6 +572,13 @@ export class AcceptedInputHandler {
       }
       const control = await this.#checkpointAfter(reservation, this.#controls.read(input.command.chatId));
       assertDirectControlAvailable(control);
+      if (input.preparation?.validateRecovery) {
+        await this.#checkpointAfter(reservation, input.preparation.validateRecovery({
+          signal: reservation.executionAdmission.signal,
+          assertAdmissionActive: () => this.#checkpoint(reservation),
+        }));
+      }
+      validatingRecovery = false;
       const preparing = performance.now();
       await this.#checkpointAfter(reservation, Promise.resolve(input.preparation?.prepare({
           signal: reservation.executionAdmission.signal,
@@ -604,6 +612,14 @@ export class AcceptedInputHandler {
       return reservation;
     } catch (error) {
       let failure: unknown = error;
+      if (validatingRecovery) {
+        try {
+          await this.#coordinator.releaseDirect(reservation);
+        } catch (releaseError) {
+          failure = aggregateFailure(failure, releaseError, `Failed to release direct input for ${input.command.chatId}`);
+        }
+        throw failure;
+      }
       // A recoverable preamble rejection retains a prepared new-chat, fork, or
       // continuation target so the user can reconfigure and retry.
       const retainPreparedTarget = Boolean(input.preparation)

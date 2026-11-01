@@ -1,5 +1,6 @@
 import { effectiveExecutorId, LOCAL_EXECUTOR_ID } from '../../../common/executors.js';
-import { executionRequirements, nativeForkRequirements, requireProviderOperations, type ExecutionSupportTarget } from './execution-support.js';
+import { executionRequirements, nativeForkRequirements, requireProviderOperations } from './execution-support.js';
+import { executorGenerationChanged } from '../../common/executor-generation-error.js';
 import type { CreateCarriedContextInput } from '../chats/carryover/context.js';
 import {
   AgentIntegrationError,
@@ -14,6 +15,7 @@ import {
   type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
+import type { ExecutionLaunchOperation } from '@garcon/common/executor-contracts';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
 import type { PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
@@ -175,12 +177,7 @@ export class AgentRuntimeRouter {
           true,
         );
       }
-      const initial = requireAgentChatEntryWithModel(chatId, this.#registry.getChat(chatId), opts.model);
-      const integration = this.#directory.require(initial.agentId, initial.executorId);
-      this.#requireLaunch(integration, 'execution.start', { ...initial,
-        apiProviderId: opts.apiProviderId === undefined ? initial.apiProviderId : opts.apiProviderId,
-        modelEndpointId: opts.modelEndpointId === undefined ? initial.modelEndpointId : opts.modelEndpointId });
-      executionSettings(integration, initial, opts.agentSettings);
+      const integration = this.#admitLaunch(chatId, 'start', opts);
       await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
       this.#assertCurrent(integration);
       const persistedEntry = this.#registry.getChat(chatId);
@@ -258,12 +255,7 @@ export class AgentRuntimeRouter {
     let executionInvoked = false;
     try {
       assertExecutionAdmissionOpen(opts);
-      const initial = requireAgentChatEntryWithModel(chatId, this.#registry.getChat(chatId), opts.model);
-      const integration = this.#directory.require(initial.agentId, initial.executorId);
-      this.#requireLaunch(integration, initial.agentSessionId ? 'execution.resume' : 'execution.start', { ...initial,
-        apiProviderId: opts.apiProviderId === undefined ? initial.apiProviderId : opts.apiProviderId,
-        modelEndpointId: opts.modelEndpointId === undefined ? initial.modelEndpointId : opts.modelEndpointId });
-      executionSettings(integration, initial, opts.agentSettings);
+      const integration = this.#admitLaunch(chatId, 'run', opts);
       await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
       this.#assertCurrent(integration);
       const persistedEntry = this.#registry.getChat(chatId);
@@ -375,11 +367,8 @@ export class AgentRuntimeRouter {
     let executionInvoked = false;
     try {
       assertExecutionAdmissionOpen(opts);
-      const initial = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
-      const integration = this.#directory.require(initial.agentId, initial.executorId);
-      const compaction = requireCompaction(integration);
-      this.#requireLaunch(integration, 'compaction.compact', initial);
-      executionSettings(integration, initial);
+      const integration = this.#admitLaunch(chatId, 'compact');
+      const compaction = integration.compaction!;
       await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
       this.#assertCurrent(integration);
       assertExecutionAdmissionOpen(opts);
@@ -460,6 +449,7 @@ export class AgentRuntimeRouter {
   }
 
   executionSessionLost(executorId = LOCAL_EXECUTOR_ID): void {
+    this.#aborts.lost(executorId);
     const runs = this.#ledger.activeChatIds()
       .filter((chatId) => effectiveExecutorId(this.#registry.getChat(chatId)?.executorId) === executorId)
       .map((chatId) => ({ chatId, runId: this.#ledger.activeRunId(chatId)! }));
@@ -968,13 +958,28 @@ export class AgentRuntimeRouter {
     };
   }
 
-  #requireLaunch(integration: AgentIntegration, operation: 'execution.start' | 'execution.resume' | 'compaction.compact', target: ExecutionSupportTarget): void {
-    this.#directory.requireOperations(integration.producers.scope.executorId, executionRequirements(integration, target, [operation]));
+  #admitLaunch(chatId: string, kind: 'start' | 'run' | 'compact', opts: RunAgentTurnOptions = {}): AgentIntegration {
+    const initial = kind === 'compact' ? requireAgentChatEntry(chatId, this.#registry.getChat(chatId))
+      : requireAgentChatEntryWithModel(chatId, this.#registry.getChat(chatId), opts.model);
+    const integration = this.#directory.require(initial.agentId, initial.executorId);
+    if (kind === 'compact') requireCompaction(integration);
+    let operation: ExecutionLaunchOperation = 'execution.start';
+    if (kind === 'compact') {
+      operation = 'compaction.compact';
+    } else if (kind === 'run' && initial.agentSessionId) {
+      operation = 'execution.resume';
+    }
+    this.#directory.requireOperations(initial.executorId, executionRequirements({ ...initial,
+      apiProviderId: opts.apiProviderId === undefined ? initial.apiProviderId : opts.apiProviderId,
+      modelEndpointId: opts.modelEndpointId === undefined ? initial.modelEndpointId : opts.modelEndpointId,
+    }, [operation]));
+    executionSettings(integration, initial, opts.agentSettings);
+    return integration;
   }
 
   #assertCurrent(integration: AgentIntegration): void {
     if (this.#directory.require(integration.descriptor.id, integration.producers.scope.executorId) !== integration) {
-      throw new AgentCallError('not-dispatched', 'Executor generation changed during execution preparation', 'STALE_RESOURCE');
+      throw executorGenerationChanged();
     }
   }
 }

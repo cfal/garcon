@@ -134,7 +134,7 @@ describe('AgentHandoffService', () => {
         guardDecision: async decide => { if (phase === 'decision') replace(); return decide(); },
       }).prepare(context());
     };
-    await expect(operation()).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+    await expect(operation()).rejects.toMatchObject({ code: 'STALE_RESOURCE', outcome: 'not-dispatched' });
     expect(ownership.decideHandoff).not.toHaveBeenCalled();
     expect(current).toEqual(sourceChat());
   });

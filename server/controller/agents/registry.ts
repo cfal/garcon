@@ -98,7 +98,8 @@ export interface AgentRegistryServiceContract {
   hasAgent(agentId: string, executorId?: string | null): boolean;
   assertExecutorReady(executorId?: string | null): void;
   assertExecutionSupported(target: ExecutionSupportTarget, operations: readonly ExecutorOperation[]): void;
-  assertNativeForkSupported(source: AgentChatEntry): void;
+  assertRunSupported(target: ExecutionSupportTarget & { readonly agentSessionId?: string | null }): void;
+  assertNativeForkSupported(source: AgentChatEntry): boolean;
   assertQueuedExecutionSupported(chatId: string): void;
   assertAgentAvailable(agentId: string, executorId?: string | null): void;
   supportsAuthLogin(agentId: string, executorId?: string | null): boolean;
@@ -295,18 +296,22 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.assertAgentAvailable(target.agentId, target.executorId);
     const integration = this.#directory.require(target.agentId, target.executorId);
     if (operations.includes('compaction.compact')) requireCompaction(integration);
-    this.#directory.requireOperations(target.executorId, executionRequirements(integration, target, operations));
+    this.#directory.requireOperations(target.executorId, executionRequirements(target, operations));
   }
-  assertNativeForkSupported(source: AgentChatEntry): void {
-    const integration = this.#directory.get(source.agentId, source.executorId);
-    if (!integration) return;
+  assertRunSupported(target: ExecutionSupportTarget & { readonly agentSessionId?: string | null }): void {
+    this.assertExecutionSupported(target, [target.agentSessionId ? 'execution.resume' : 'execution.start']);
+  }
+  assertNativeForkSupported(source: AgentChatEntry): boolean {
+    if (this.#directory.get(source.agentId, source.executorId)?.forking === null) return false;
+    const integration = this.#directory.require(source.agentId, source.executorId);
     const requirements = nativeForkRequirements(integration, source);
     if (requirements.length) requireProviderOperations(this.#directory, source.executorId, requirements);
+    return requirements.length > 0;
   }
   assertQueuedExecutionSupported(chatId: string): void {
     const chat = this.#registry.getChat(chatId);
     if (chat && this.#directory.isReady(chat.executorId)) {
-      this.assertExecutionSupported(chat, [chat.agentSessionId ? 'execution.resume' : 'execution.start']);
+      this.assertRunSupported(chat);
     }
   }
   assertAgentAvailable(agentId: string, executorId?: string | null): void {
