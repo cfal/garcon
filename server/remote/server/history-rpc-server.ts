@@ -86,7 +86,6 @@ export class HistoryRpcServer {
           ref = table.add(resource);
         } catch (error) { await this.#close(resource); throw error; }
         resource.timer = setTimeout(() => {
-          table.delete(ref);
           void this.#close(resource).catch(() => undefined);
         }, 120_000);
         resource.timer.unref();
@@ -117,7 +116,6 @@ export class HistoryRpcServer {
         const resource = table.get(call.request);
         this.#assertResource(resource, definition);
         this.#assertOpen(signal, resource);
-        table.take(call.request);
         return this.#close(resource);
       }
     }

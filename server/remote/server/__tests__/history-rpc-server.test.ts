@@ -1,5 +1,5 @@
 import { RPC_V1, type RpcContractDefinition } from '@garcon/common/executor-contracts';
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import type { AgentImportedTranscriptRow, AgentRunningSession } from '@garcon/server-agent-interface';
 import { AssistantMessage } from '@garcon/common/chat-types';
 import { integrationFixture } from '../../__tests__/integration-fixture.js';
@@ -119,10 +119,44 @@ test('unstarted native iterators are returned and a row above the page target st
     const first = await fixture.open();
     await fixture.server.handle(request('history.close', first), signal, RPC_V1['history.close']);
     expect(returned).toBe(1);
+    await expect(fixture.server.handle(request('history.next', { reader: first, page: 0 }), signal, RPC_V1['history.next']))
+      .rejects.toMatchObject({ code: 'STALE_RESOURCE', outcome: 'rejected' });
+    await expect(fixture.server.handle(request('history.close', first), signal, RPC_V1['history.close']))
+      .rejects.toMatchObject({ code: 'STALE_RESOURCE', outcome: 'rejected' });
+    expect(returned).toBe(1);
     const message = new AssistantMessage('2026-01-01T00:00:00Z', 'x'.repeat(1200 * 1024));
     fixture.native.integration.nativeHistoryImport.load = async function* () { yield [{ message }]; };
     const second = await fixture.open();
     expect(await fixture.server.handle(request('history.next', { reader: second, page: 0 }), signal, RPC_V1['history.next'])).toEqual({ done: false, rows: [{ message }] });
     expect(await fixture.server.handle(request('history.next', { reader: second, page: 1 }), signal, RPC_V1['history.next'])).toEqual({ done: true, rows: [] });
   } finally { fixture.server.dispose(); await fixture.native.executor.dispose(); }
+});
+
+test('idle expiry removes the reader and closes its source exactly once', async () => {
+  const fixture = historyFixture();
+  const timers = spyOn(globalThis, 'setTimeout');
+  const closed = Promise.withResolvers<void>();
+  let returned = 0;
+  fixture.native.integration.nativeHistoryImport.load = () => ({
+    [Symbol.asyncIterator]() {
+      return {
+        async next(): Promise<IteratorResult<readonly AgentImportedTranscriptRow[]>> { return { done: true, value: [] }; },
+        async return() { returned++; closed.resolve(); return { done: true, value: [] }; },
+      };
+    },
+  });
+  try {
+    const reader = await fixture.open();
+    const expire = timers.mock.calls.find(([, delay]) => delay === 120_000)?.[0];
+    expect(expire).toBeDefined();
+    timers.mockRestore();
+    expire!();
+    await expect(fixture.server.handle(request('history.next', { reader, page: 0 }), signal, RPC_V1['history.next']))
+      .rejects.toMatchObject({ code: 'STALE_RESOURCE', outcome: 'rejected' });
+    await expect(fixture.server.handle(request('history.close', reader), signal, RPC_V1['history.close']))
+      .rejects.toMatchObject({ code: 'STALE_RESOURCE', outcome: 'rejected' });
+    await closed.promise;
+    fixture.server.dispose();
+    expect(returned).toBe(1);
+  } finally { timers.mockRestore(); fixture.server.dispose(); await fixture.native.executor.dispose(); }
 });
