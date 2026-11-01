@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { commandOutput, sha256 } from './artifacts.js';
+import { commandOutput, COMPATIBILITY_BUN_VERSION, sha256 } from './artifacts.js';
 import { CURRENT_ARTIFACT } from '../support/source-artifact.js';
 
 const output = process.argv[2];
 assert(output, 'Usage: bun integration-tests/compatibility/archive.ts <source.tar.gz>');
-assert.equal(Bun.version, '1.4.3', 'Archive the contracts-v1 baseline with the CI-pinned Bun 1.4.3');
+assert.equal(Bun.version, COMPATIBILITY_BUN_VERSION, `Archive the contracts-v1 baseline with the CI-pinned Bun ${COMPATIBILITY_BUN_VERSION}`);
 assert.equal(await commandOutput(['git', 'diff', 'HEAD', '--name-only']), '', 'Commit and validate implementation before archiving');
 const sourceSha = await commandOutput(['git', 'rev-parse', 'HEAD']);
 const sourceTime = await commandOutput(['git', 'show', '-s', '--format=%ct', sourceSha]);

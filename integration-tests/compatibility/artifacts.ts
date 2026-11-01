@@ -5,6 +5,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { CURRENT_ARTIFACT, type SourceArtifact } from '../support/source-artifact.js';
 
+export const COMPATIBILITY_BUN_VERSION = '1.4.3';
+
 export interface Baseline {
   readonly sourceSha: string;
   readonly archiveUrl: string;
@@ -22,7 +24,8 @@ export interface BaselineManifest {
 
 export interface CompatibilityArtifact extends SourceArtifact { readonly sourceSha: string }
 
-export function validateManifest(value: unknown, packageVersion: string): BaselineManifest {
+export function validateManifest(value: unknown, packageVersion: string, runtimeVersion = Bun.version): BaselineManifest {
+  assert.equal(runtimeVersion, COMPATIBILITY_BUN_VERSION, `Compatibility qualification requires Bun ${COMPATIBILITY_BUN_VERSION}`);
   assert(value && typeof value === 'object');
   const manifest = value as BaselineManifest;
   assert.equal(manifest.bootstrap, 1);
@@ -35,7 +38,7 @@ export function validateManifest(value: unknown, packageVersion: string): Baseli
     assert(manifest.baselines.length > 0, 'Cross-build acceptance requires an immutable baseline');
     for (const baseline of manifest.baselines) {
       assert.match(baseline.sourceSha, /^[a-f0-9]{40}$/);
-      assert.match(baseline.runtime.version, /^\d+\.\d+\.\d+$/);
+      assert.equal(baseline.runtime.version, COMPATIBILITY_BUN_VERSION, `Baseline qualification requires Bun ${COMPATIBILITY_BUN_VERSION}`);
       for (const archive of [baseline, baseline.runtime]) {
         assert.match(archive.archiveSha256, /^[a-f0-9]{64}$/);
         assert.equal(new URL(archive.archiveUrl).protocol, 'https:');

@@ -13,6 +13,11 @@ test('bootstrap is explicit and cannot extend into another release', () => {
   expect(() => validateManifest({ bootstrap: 1, baselines: [] }, '0.3.4')).toThrow();
 });
 
+test.each(['1.4.2', '1.4.4'])('qualification rejects current Bun %s instead of the pinned runtime', version => {
+  const manifest = { bootstrap: 1, stage: 'bootstrap', bootstrapPackageVersion: '0.3.4', baselines: [] };
+  expect(() => validateManifest(manifest, '0.3.4', version)).toThrow('Bun 1.4.3');
+});
+
 test('missing and corrupt immutable archives fail instead of using the current checkout', async () => {
   const scratch = join(homedir(), 'tmp');
   await mkdir(scratch, { recursive: true });
@@ -49,21 +54,22 @@ test('cross-build pins source, runtime and both independent lockfiles', () => {
   }
 });
 
-test.each(['same revision', 'missing', 'corrupt'])('artifact selection rejects a %s baseline without fallback', async failure => {
+test.each(['runtime mismatch', 'same revision', 'missing', 'corrupt'])('artifact selection rejects a %s baseline without fallback', async failure => {
   const current = await commandOutput(['git', 'rev-parse', 'HEAD']);
   const baseline = {
     sourceSha: failure === 'same revision' ? current : 'a'.repeat(40),
     archiveUrl: 'https://example.invalid/source.tar.gz', archiveSha256: 'b'.repeat(64),
     lockfiles: { 'bun.lock': 'c'.repeat(64), 'integration-tests/bun.lock': 'd'.repeat(64) },
-    runtime: { version: '1.4.3', archiveUrl: 'https://example.invalid/runtime.zip', archiveSha256: 'e'.repeat(64) },
+    runtime: { version: failure === 'runtime mismatch' ? '1.4.2' : '1.4.3', archiveUrl: 'https://example.invalid/runtime.zip', archiveSha256: 'e'.repeat(64) },
   };
   const download = spyOn(globalThis, 'fetch').mockResolvedValue(
     failure === 'missing' ? new Response(null, { status: 404 }) : new Response('Synthetic corrupt archive'));
   try {
     await expect(prepareArtifacts({ bootstrap: 1, stage: 'cross-build', baselines: [baseline] })).rejects.toThrow(
-      failure === 'same revision' ? 'distinct source revisions'
+      failure === 'runtime mismatch' ? 'Baseline qualification requires Bun 1.4.3'
+        : failure === 'same revision' ? 'distinct source revisions'
         : failure === 'missing' ? 'Baseline download failed: 404' : 'Immutable artifact digest mismatch',
     );
-    expect(download).toHaveBeenCalledTimes(failure === 'same revision' ? 0 : 1);
+    expect(download).toHaveBeenCalledTimes(failure === 'runtime mismatch' || failure === 'same revision' ? 0 : 1);
   } finally { download.mockRestore(); }
 });
