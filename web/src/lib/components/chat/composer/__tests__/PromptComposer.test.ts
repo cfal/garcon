@@ -80,6 +80,20 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 }
 
 describe('PromptComposer focus', () => {
+	it.each(['click', 'enter', 'shortcut'])('expands snippets without execution support using %s', async gesture => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({ success: true, source: 'snippet',
+			sourceId: 'snippet-review', sourceUpdatedAt: '2026-01-01T00:00:00.000Z', shortName: 'review',
+			contextExecutorId: 'local', contextProjectPath: '/workspace/project', expandedText: 'Synthetic expanded draft' });
+		const onsubmit = vi.fn();
+		render(PromptComposerTestHost, { onsubmit, executors: [{ ...localExecutor,
+			operations: localExecutor.operations.filter(name => name !== 'execution.start' && name !== 'execution.resume') }] });
+		const input = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.input(input, { target: { value: '/snippet review' } });
+		if (gesture === 'click') await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+		else await fireEvent.keyDown(input, { key: 'Enter', ctrlKey: gesture === 'shortcut' });
+		await waitFor(() => expect(input.value).toBe('Synthetic expanded draft'));
+		expect(onsubmit).not.toHaveBeenCalled();
+	});
 	it.each(['in', 'rename', 'move', 'tag', 'fork'])(
 		'completes the literal /%s app command without provider discovery or submission', async name => {
 			const onsubmit = vi.fn();
@@ -407,7 +421,7 @@ describe('PromptComposer focus', () => {
 	});
 
 	it.each((['ready', 'offline'] as const).flatMap(availability => [false, true].map(supportsFork => ({ availability, supportsFork }))))(
-		'gates bare /fork using its effective provider support: $availability, supportsFork=$supportsFork', async ({ availability, supportsFork }) => {
+		'gates bare /fork by readiness, leaving support to its workflow: $availability, supportsFork=$supportsFork', async ({ availability, supportsFork }) => {
 		const catalog = conversationalCatalog();
 		catalog.forExecutor(remoteExecutor.id).executorInstanceId = remoteExecutor.instanceId;
 		catalog.forExecutor(remoteExecutor.id).lastValidatedAt = Date.now();
@@ -428,9 +442,9 @@ describe('PromptComposer focus', () => {
 			await fireEvent.input(textarea, { target: { value: '/fork' } });
 			await fireEvent.keyDown(textarea, { key: 'Escape' });
 			const send = screen.getByRole<HTMLButtonElement>('button', {
-				name: availability === 'ready' && !supportsFork ? 'This executor does not support this operation.' : 'Send message',
+				name: 'Send message',
 			});
-			const admitted = availability === 'ready' && supportsFork;
+			const admitted = availability === 'ready';
 			expect(send.disabled).toBe(!admitted);
 			await fireEvent.click(send);
 			await fireEvent.keyDown(textarea, { key: 'Enter' });

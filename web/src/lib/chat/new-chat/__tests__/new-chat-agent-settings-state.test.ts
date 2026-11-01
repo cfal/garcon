@@ -5,15 +5,34 @@ import { NewChatAgentSettingsState } from '../new-chat-agent-settings-state.svel
 const descriptor: AgentSettingDescriptor = { key: 'mode', label: 'Mode', type: 'string' };
 const defaults: AgentSettingsEnvelope = { ownerId: 'synthetic', schemaVersion: 3, values: { mode: 'current' } };
 const catalog = {
+	isValidated: true,
 	getDefaultAgentSettings: () => defaults,
 	getAgentSettingsDescriptors: () => [descriptor],
 };
 
 describe('NewChatAgentSettingsState', () => {
+	it.each<Record<string, AgentSettingsEnvelope>>([{}, { synthetic: { ...defaults, schemaVersion: 1, values: {} } }])(
+		'keeps restored settings unchanged when applying defaults: %j',
+		(saved) => {
+			const settings = new NewChatAgentSettingsState();
+			settings.restore(saved);
+			settings.applyDefault('synthetic', defaults, catalog);
+			expect(settings.byId).toEqual(saved);
+		},
+	);
+
+	it('applies configured defaults once without replacing them on subsequent calls', () => {
+		const settings = new NewChatAgentSettingsState();
+		const configured = { ...defaults, values: { mode: 'configured' } };
+		settings.applyDefault('synthetic', configured, catalog);
+		settings.applyDefault('synthetic', { ...defaults, values: { mode: 'replacement' } }, catalog);
+		expect(settings.forAgent('synthetic', catalog)).toEqual(configured);
+	});
+
 	it('preserves incompatible saved settings without mixing in current values', () => {
 		const settings = new NewChatAgentSettingsState();
 		const saved = { ownerId: 'synthetic', schemaVersion: 1, values: {} };
-		settings.restore({ synthetic: saved }, ['synthetic'], catalog);
+		settings.restore({ synthetic: saved });
 		settings.reconcileCatalog(['synthetic'], catalog);
 		settings.setSetting('synthetic', descriptor, 'edited', catalog);
 		expect(settings.isCompatible('synthetic', catalog)).toBe(false);
@@ -22,7 +41,9 @@ describe('NewChatAgentSettingsState', () => {
 
 	it('uses actual defaults for absence, distinct from a real empty schema-1 envelope', () => {
 		const settings = new NewChatAgentSettingsState();
-		settings.restore({}, ['synthetic'], catalog);
+		settings.restore({});
+		settings.reconcileCatalog(['synthetic'], catalog);
+		expect(settings.byId).toEqual({});
 		expect(settings.forAgent('synthetic', catalog)).toEqual(defaults);
 		expect(settings.isCompatible('synthetic', catalog)).toBe(true);
 	});

@@ -97,7 +97,7 @@ it('edits and round-trips every automatic-review filter and limit while offline'
 	};
 	const { form, repository } = await offlineForm(settings);
 	try {
-		expect(form.startup.agentSettingsCompatible).toBe(false);
+		expect(form.startup.agentSettingsCompatibility).toBe('incompatible');
 		expect(form.baseBranches).toBe('main\nrelease/stable');
 		expect(form.includeLabels).toBe('review, please');
 		expect(form.excludeLabels).toBe('blocked');

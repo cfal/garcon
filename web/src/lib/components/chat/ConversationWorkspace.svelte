@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { areAgentSettingsCompatible } from '$shared/agent-settings';
+	import { resolveSettingsPresentation } from '$lib/agents/settings-presentation';
 	// Owns the singleton conversation runtime, composer, and dialogs while
 	// rendered panels own transcript presentation and scrolling.
 
@@ -285,20 +285,17 @@
 			return modelCatalog;
 		},
 		modelCatalogForExecutor: (executorId) => rootModelCatalog.forExecutor(executorId),
-		canSubmitToExecutor: (executorId, operation) =>
-			executors.isReady(executorId) && rootModelCatalog.forExecutor(executorId).isValidated
-			&& (operation === undefined || executors.supportsExecution(executorId, operation)),
+		canSubmitToExecutor: (executorId) =>
+			executors.isReady(executorId) && rootModelCatalog.forExecutor(executorId).isValidated,
 		getExecutionDefaults: (agentId, executorId) => {
 			const modelCatalog = rootModelCatalog.forExecutor(executorId ?? agentState.executorId);
 			const defaults = executionDefaultsForAgent(
 				remoteSettings.snapshot?.executionDefaults,
 				agentId,
 			);
-			const catalogDefaults = modelCatalog.getDefaultAgentSettings(agentId);
-			const agentSettings = defaults.agentSettingsById[agentId] ?? catalogDefaults;
-			if (!modelCatalog.isValidated || !catalogDefaults || !agentSettings
-				|| !areAgentSettingsCompatible(agentSettings, catalogDefaults, modelCatalog.getAgentSettingsDescriptors(agentId))) {
-				throw new Error('Saved provider settings are unavailable or incompatible with this executor.');
+			const { envelope: agentSettings, compatibility } = resolveSettingsPresentation(modelCatalog, agentId, defaults.agentSettingsById[agentId]);
+			if (!agentSettings || compatibility !== 'compatible') {
+				throw new Error(compatibility === 'loading' ? m.chat_composer_loading_models() : m.chat_provider_settings_incompatible());
 			}
 			return {
 				permissionMode: normalizeSupportedPermissionMode(

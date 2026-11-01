@@ -126,7 +126,7 @@ describe('scheduled chat executor initialization', () => {
 		remoteCatalog.lastValidatedAt = Date.now();
 		discovery.resolve();
 		await vi.waitFor(() => {
-			expect(form.startup.agentSettingsById.codex).toBeDefined();
+			expect(form.startup.agentSettingsById).toEqual(prompt.target.agentSettingsById);
 			expect(form.startup.agentSettings?.values).toEqual(kind === 'omitted'
 				? { thinkingMode: 'catalog-default' }
 				: savedValues);

@@ -1111,6 +1111,59 @@ describe('NewChatForm', () => {
 		expect(screen.queryByText('Recent models')).toBeNull();
 	});
 
+	it.each(['click', 'Enter'].flatMap(gesture => ['unsupported', 'incompatible'].map(obstacle => ({ gesture, obstacle }))))(
+		'expands snippets via $gesture without $obstacle launch admission', async ({ gesture, obstacle }) => {
+			stubMatchMedia(false);
+			const chatsApi = await import('$lib/api/chats');
+			vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+			vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+				paths: { recentProjectPaths: ['/workspace/project'] },
+				executionDefaults: { global: { agentSettingsById: obstacle === 'incompatible'
+					? { claude: { ownerId: 'claude', schemaVersion: 2, values: {} } } : {} } },
+			}));
+			vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+				success: true, source: 'snippet', sourceId: 'snippet-review', sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+				shortName: 'review', contextExecutorId: 'local', contextProjectPath: '/workspace/project', expandedText: 'Expanded prompt',
+			});
+			const onStartChat = vi.fn();
+			render(NewChatFormTestHost, { onStartChat, executorSnapshots: [{ ...localExecutor,
+				operations: obstacle === 'unsupported' ? localExecutor.operations.filter(name => name !== 'execution.start') : localExecutor.operations,
+			}] });
+			await waitFor(() => expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull());
+			const input = screen.getByPlaceholderText<HTMLTextAreaElement>('How can I help you today?');
+			await fireEvent.input(input, { target: { value: 'Ordinary prompt' } });
+			const start = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
+			expect(start.disabled).toBe(true);
+			await fireEvent.input(input, { target: { value: '/snippet review' } });
+			expect(start.disabled).toBe(false);
+			await fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+			expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+			if (gesture === 'click') await fireEvent.click(start);
+			else await fireEvent.keyDown(input, { key: 'Enter' });
+			await waitFor(() => expect(input.value).toBe('Expanded prompt'));
+			expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(1);
+			expect(onStartChat).not.toHaveBeenCalled();
+			expect(start.disabled).toBe(true);
+		},
+	);
+
+	it.each(['offline', 'unvalidated'] as const)('keeps snippet submission gated while %s', async obstacle => {
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());
+		render(NewChatFormTestHost, {
+			executorSnapshots: [{ ...localExecutor, availability: obstacle === 'offline' ? 'offline' : 'ready' }],
+			catalogValidated: obstacle !== 'unvalidated',
+		});
+		await waitFor(() => expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull());
+		const input = screen.getByPlaceholderText('How can I help you today?');
+		await fireEvent.input(input, { target: { value: '/snippet review' } });
+		const start = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
+		expect(start.disabled).toBe(true);
+		await fireEvent.click(start);
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+	});
+
 	it('expands /snippet for review before starting a new chat', async () => {
 		stubMatchMedia(false);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({

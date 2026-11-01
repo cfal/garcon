@@ -4,6 +4,8 @@ import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
+import { effectiveExecutorId } from '$shared/executors';
+import { stableJsonStringify } from '$shared/json';
 import {
 	advanceRecurringAnchor,
 	localDateTimeToUtcIso,
@@ -79,7 +81,6 @@ export class ScheduledPromptFormState {
 	#originalEndAt: string | null = null;
 	#originalEndDate: string | null = null;
 	#savedTarget = $state.raw<Extract<ScheduledPrompt['target'], { type: 'new-chat' }> | null>(null);
-	#savedDraft = '';
 
 	constructor(
 		private readonly modelCatalog: ModelCatalogStore,
@@ -215,16 +216,21 @@ export class ScheduledPromptFormState {
 	}
 
 	get #preservesSavedTarget(): boolean {
-		return this.#savedTarget !== null && this.#savedDraft === this.#startupDraft();
-	}
-
-	#startupDraft(): string {
-		return JSON.stringify([
-			this.startup.executorId, this.startup.agentId, this.startup.nonblankPath,
-			this.startup.modelValue, this.startup.modelSelectionTarget, this.startup.permissionMode,
-			this.startup.thinkingMode, this.startup.agentSettingsById, this.startup.chatTags,
-			this.startup.preambles.choiceSnapshot,
-		]);
+		const saved = this.#savedTarget;
+		const selected = this.startup.modelSelectionTarget;
+		return saved !== null && selected !== null
+			&& effectiveExecutorId(saved.executorId) === this.startup.executorId
+			&& saved.agentId === this.startup.agentId
+			&& saved.projectPath === this.startup.nonblankPath
+			&& saved.model === selected.model
+			&& saved.apiProviderId === selected.apiProviderId
+			&& saved.modelEndpointId === selected.modelEndpointId
+			&& saved.modelProtocol === selected.modelProtocol
+			&& saved.permissionMode === this.startup.permissionMode
+			&& saved.thinkingMode === this.startup.thinkingMode
+			&& stableJsonStringify(saved.agentSettingsById) === stableJsonStringify(this.startup.agentSettingsById)
+			&& stableJsonStringify(saved.tags) === stableJsonStringify(this.startup.chatTags)
+			&& stableJsonStringify(saved.preambleChoice) === stableJsonStringify(this.startup.preambles.choiceSnapshot);
 	}
 
 	dispose(): void {
@@ -290,7 +296,6 @@ export class ScheduledPromptFormState {
 		this.startup.preambles.restoreChoice(scheduledPrompt.target.preambleChoice);
 		// Opaque JSON settings cannot be expanded by Snapshot's recursive type.
 		this.#savedTarget = $state.snapshot<unknown>(scheduledPrompt.target) as typeof scheduledPrompt.target;
-		this.#savedDraft = this.#startupDraft();
 		await this.startup.loadSettingsAndModels();
 		this.startup.validateChangedPath();
 	}

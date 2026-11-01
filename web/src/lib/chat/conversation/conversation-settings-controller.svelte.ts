@@ -1,6 +1,7 @@
 import { updateChatModel, updateExecutionSettings } from '$lib/api/chats.js';
 import { effectiveExecutorId } from '$shared/executors';
-import { areAgentSettingsCompatible, withAgentSetting } from '$shared/agent-settings';
+import { withAgentSetting } from '$shared/agent-settings';
+import { resolveSettingsPresentation } from '$lib/agents/settings-presentation';
 import {
 	normalizeSupportedPermissionMode,
 	normalizeSupportedThinkingMode,
@@ -346,12 +347,9 @@ export class ConversationSettingsController {
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return;
 		const expectedExecutorInstanceId = modelCatalog.executorInstanceId;
-		const defaults = modelCatalog.getDefaultAgentSettings(agentState.agentId);
-		const previous = agentState.agentSettings ?? defaults;
-		if (!modelCatalog.isValidated || !expectedExecutorInstanceId || !defaults
-			|| !previous
-			|| !areAgentSettingsCompatible(previous, defaults, modelCatalog.getAgentSettingsDescriptors(agentState.agentId))) return;
-		const expectedSettingsSchemaVersion = defaults.schemaVersion;
+		const { envelope: previous, compatibility } = resolveSettingsPresentation(modelCatalog, agentState.agentId, agentState.agentSettings);
+		if (!expectedExecutorInstanceId || !previous || compatibility !== 'compatible') return;
+		const expectedSettingsSchemaVersion = previous.schemaVersion;
 		const next = withAgentSetting(previous, descriptor, value);
 		if (next === previous) return;
 		if (sessions.isDraft(chatId)) {

@@ -291,7 +291,13 @@ export class TerminalRegistry {
 		if (!requestId) throw new Error('Terminal creation requires a request ID');
 		if (!this.canCreate(executorId) && !this.pendingCreates[requestId])
 			throw new Error(m.terminal_unavailable());
+		const executorInstanceId = this.#executorInstances.get(executorId);
+		const version = this.#executorVersions.get(executorId) ?? Symbol('executor-inventory');
+		this.#executorVersions.set(executorId, version);
 		if (this.executorInventories[executorId]?.status !== 'ready') await this.list(executorId);
+		if (this.#destroyed || version !== this.#executorVersions.get(executorId)
+			|| executorInstanceId !== this.#executorInstances.get(executorId))
+			throw new ApiError(409, m.terminal_create_requires_list(), 'terminal-runtime-changed');
 		if (
 			this.executorInventories[executorId]?.status !== 'ready' ||
 			!this.hosts.some((host) => host.id === executorId && host.available)
@@ -301,7 +307,7 @@ export class TerminalRegistry {
 		if (!attempt) {
 			const createdAttempt: PendingTerminalCreate = {
 				executorId,
-				executorInstanceId: this.#executorInstances.get(executorId),
+				executorInstanceId,
 				terminalRuntimeId: this.executorInventories[executorId]?.runtimeId,
 				requestId,
 				requestedInitialWorkingDirectory,
@@ -916,8 +922,8 @@ export class TerminalRegistry {
 		for (const host of hosts) {
 			const availability = host.available ? 'ready' : 'offline';
 			const previous = this.#executorAvailability.get(host.id);
-			const replaced = this.#executorInstances.has(host.id)
-				&& this.#executorInstances.get(host.id) !== host.instanceId;
+			const previousInstanceId = this.#executorInstances.get(host.id);
+			const replaced = previousInstanceId != null && host.instanceId != null && previousInstanceId !== host.instanceId;
 			this.#executorAvailability.set(host.id, availability);
 			this.#executorInstances.set(host.id, host.instanceId);
 			if (previous === availability && !replaced) continue;

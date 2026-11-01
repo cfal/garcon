@@ -1031,10 +1031,23 @@ describe('ConversationSessionController', () => {
 		controller.executorHandoff.cancel();
 	});
 
+	it('permits selection-only handoff to a ready executor without start support', () => {
+		const executors = new ExecutorsStore();
+		executors.applySnapshot([{ ...remoteExecutor, operations: remoteExecutor.operations.filter(name => name !== 'execution.start') }]);
+		const { deps } = createDeps();
+		deps.canSubmitToExecutor.mockImplementation(id => executors.isReady(id));
+		const controller = new ConversationSessionController(deps);
+		void controller.executorHandoff.ask('chat-1', remoteExecutor.id, '/workspace/project', {
+			agentId: 'claude', model: 'opus', apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+		});
+		expect(controller.executorHandoff.canConfirm).toBe(true);
+		expect(deps.canSubmitToExecutor).toHaveBeenCalledWith(remoteExecutor.id);
+		controller.executorHandoff.cancel();
+	});
+
 	it.each([
 		['submitForChat', false],
 		['submitComposerWithSteerPreference', false],
-		['submitComposerWithSteerPreference', true],
 	] as const)(
 		'preserves incompatible settings and composer input through %s while processing=%s', async (submit, isProcessing) => {
 			const saved = { ownerId: 'claude', schemaVersion: 7, values: { preserved: true } };
@@ -1042,10 +1055,11 @@ describe('ConversationSessionController', () => {
 			const controller = new ConversationSessionController(deps);
 			controller.handleChatSwitchIfChanged('chat-1');
 			deps.composerState.inputText = 'Synthetic draft';
+			mockRunChat.mockRejectedValueOnce(new ApiError(422, 'Saved provider settings are incompatible', 'INVALID_SETTINGS'));
 			expect(await controller[submit]('chat-1')).toBe('rejected');
 			expect(deps.agentState.agentSettings).toEqual(saved);
 			expect(deps.composerState.inputText).toBe('Synthetic draft');
-			expect(mockRunChat).not.toHaveBeenCalled();
+			expect(mockRunChat).toHaveBeenCalledOnce();
 			expect(mockSteerChat).not.toHaveBeenCalled();
 		});
 
@@ -1083,85 +1097,32 @@ describe('ConversationSessionController', () => {
 	});
 
 	for (const submit of ['submitForChat', 'submitComposerWithSteerPreference'] as const) {
-		it.each([
-			{ hasAgentSession: false, text: 'Synthetic fresh turn', missing: 'execution.start' },
-			{ hasAgentSession: true, text: 'Synthetic resumed turn', missing: 'execution.resume' },
-			{ hasAgentSession: true, text: '/compact', missing: 'compaction.compact' },
-			{ hasAgentSession: true, text: '/fork Synthetic fork input', missing: 'execution.start' },
-			{ hasAgentSession: true, text: '/fork Synthetic fork input', missing: 'execution.resume' },
-		])(`fences $missing through ${submit} without consuming the draft`, async ({ hasAgentSession, text, missing }) => {
+		it(`preserves the draft on authoritative unsupported refusal through ${submit}`, async () => {
 			const executors = new ExecutorsStore();
-			executors.applySnapshot([{ ...remoteExecutor, operations: remoteExecutor.operations.filter(name => name !== missing) }]);
-			const { deps } = createDeps(createRunningChat({ executorId: remoteExecutor.id, hasAgentSession }));
-			deps.canSubmitToExecutor.mockImplementation((id, operation) =>
-				executors.isReady(id) && (operation === undefined || executors.supportsExecution(id, operation)));
-			deps.composerState.inputText = text;
-			const controller = new ConversationSessionController(deps);
-			expect(await controller[submit]('chat-1')).toBe('no-op');
-			expect(deps.canSubmitToExecutor).toHaveBeenCalledWith(remoteExecutor.id, missing);
-			expect(deps.composerState.inputText).toBe(text);
-			expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
-			expect(mockRunChat).not.toHaveBeenCalled();
-			expect(mockForkRunChat).not.toHaveBeenCalled();
-			expect(mockSteerChat).not.toHaveBeenCalled();
-		});
-
-		it.each([false, true])(`selects the actual launch for a persisted chat through ${submit}, native=%s`, async hasAgentSession => {
-			const executors = new ExecutorsStore();
-			const operation = hasAgentSession ? 'execution.resume' : 'execution.start';
-			const excluded = hasAgentSession ? 'execution.start' : 'execution.resume';
-			executors.applySnapshot([{ ...remoteExecutor, operations: remoteExecutor.operations.filter(name => name !== excluded) }]);
-			const { deps } = createDeps(createRunningChat({ executorId: remoteExecutor.id, hasAgentSession }));
-			deps.canSubmitToExecutor.mockImplementation((id, selected) =>
-				executors.isReady(id) && (selected === undefined || executors.supportsExecution(id, selected)));
+			executors.applySnapshot([{ ...remoteExecutor, operations: remoteExecutor.operations.filter(name => name !== 'execution.resume') }]);
+			const { deps } = createDeps(createRunningChat({ executorId: remoteExecutor.id, hasAgentSession: true }));
+			deps.canSubmitToExecutor.mockImplementation(id => executors.isReady(id));
 			deps.composerState.inputText = 'Synthetic input';
-			mockRunChat.mockResolvedValueOnce({ success: true, commandType: 'agent-run', clientRequestId: 'synthetic-request',
-				chatId: 'chat-1', turnId: 'synthetic-turn', status: 'accepted', acceptedAt: '2030-01-01T00:00:00.000Z' });
-			expect(await new ConversationSessionController(deps)[submit]('chat-1')).toBe('accepted');
-			expect(deps.canSubmitToExecutor).toHaveBeenCalledWith(remoteExecutor.id, operation);
-			expect(mockRunChat).toHaveBeenCalledTimes(1);
-		});
-
-		it.each(['ready', 'offline'] as const)(`requires readiness but no launch support for bare /fork through ${submit}: %s`, async availability => {
-			const executors = new ExecutorsStore();
-			executors.applySnapshot([{ ...remoteExecutor, availability,
-				operations: remoteExecutor.operations.filter(name => name !== 'execution.start' && name !== 'execution.resume') }]);
-			const { deps } = createDeps(createRunningChat({ executorId: remoteExecutor.id }));
-			deps.canSubmitToExecutor.mockImplementation((id, operation) =>
-				executors.isReady(id) && (operation === undefined || executors.supportsExecution(id, operation)));
-			deps.composerState.inputText = '/fork';
-			mockForkChat.mockResolvedValueOnce({ success: true, chat: createServerEntry('456') });
-			expect(await new ConversationSessionController(deps)[submit]('chat-1')).toBe(availability === 'ready' ? 'accepted' : 'no-op');
+			mockRunChat.mockRejectedValueOnce(new ApiError(422, 'Synthetic unsupported operation', 'OPERATION_UNSUPPORTED'));
+			expect(await new ConversationSessionController(deps)[submit]('chat-1')).toBe('rejected');
+			expect(mockRunChat).toHaveBeenCalledOnce();
 			expect(deps.canSubmitToExecutor).toHaveBeenCalledWith(remoteExecutor.id);
-			expect(deps.canSubmitToExecutor.mock.calls.every(([, operation]) => operation === undefined)).toBe(true);
-			expect(mockForkChat).toHaveBeenCalledTimes(availability === 'ready' ? 1 : 0);
-			if (availability === 'offline') expect(deps.composerState.inputText).toBe('/fork');
-			expect(mockForkRunChat).not.toHaveBeenCalled();
-			expect(mockRunChat).not.toHaveBeenCalled();
-		});
-
-		it.each([false, true])(`requires ordinary launch support when fork is not supported through ${submit}, native=%s`, async hasAgentSession => {
-			const executors = new ExecutorsStore();
-			const missing = hasAgentSession ? 'execution.resume' : 'execution.start';
-			executors.applySnapshot([{ ...remoteExecutor, operations: remoteExecutor.operations.filter(name => name !== missing) }]);
-			const { deps } = createDeps(createRunningChat({ executorId: remoteExecutor.id, hasAgentSession }));
-			deps.modelCatalog.supportsFork.mockReturnValue(false);
-			deps.canSubmitToExecutor.mockImplementation((id, operation) =>
-				executors.isReady(id) && (operation === undefined || executors.supportsExecution(id, operation)));
-			const controller = new ConversationSessionController(deps);
-			for (const text of ['/fork', '/fork Synthetic input']) {
-				deps.composerState.inputText = text;
-				expect(await controller[submit]('chat-1')).toBe('no-op');
-				expect(deps.composerState.inputText).toBe(text);
-			}
-			expect(deps.canSubmitToExecutor).toHaveBeenCalledWith(remoteExecutor.id, missing);
-			expect(mockForkChat).not.toHaveBeenCalled();
-			expect(mockForkRunChat).not.toHaveBeenCalled();
-			expect(mockRunChat).not.toHaveBeenCalled();
-			expect(mockSteerChat).not.toHaveBeenCalled();
+			expect(deps.composerState.inputText).toBe('Synthetic input');
 		});
 	}
 
+	it.each(['typed', 'preferred'])('steers without resume or compatible launch settings: %s', async gesture => {
+		const executors = new ExecutorsStore();
+		executors.applySnapshot([{ ...remoteExecutor, operations: remoteExecutor.operations.filter(name => name !== 'execution.resume') }]);
+		const { deps } = createDeps(createRunningChat({ executorId: remoteExecutor.id, hasAgentSession: true, isProcessing: true,
+			agentSettings: { ownerId: 'claude', schemaVersion: 99, values: {} } }));
+		deps.canSubmitToExecutor.mockImplementation(id => executors.isReady(id));
+		deps.composerState.inputText = gesture === 'typed' ? '/steer Synthetic guidance' : 'Synthetic guidance';
+		const controller = new ConversationSessionController(deps);
+		await controller[gesture === 'typed' ? 'submitForChat' : 'submitComposerWithSteerPreference']('chat-1');
+		expect(mockSteerChat).toHaveBeenCalledOnce();
+		expect(mockRunChat).not.toHaveBeenCalled();
+	});
 	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
 		'preserves source without interpreting controls while policy is unknown through %s',
 		async (submit) => {
@@ -3027,8 +2988,7 @@ describe('ConversationSessionController', () => {
 			const controller = new ConversationSessionController({ ...deps, composerState: composer });
 			const executors = new ExecutorsStore();
 			executors.applySnapshot([remoteExecutor]);
-			deps.canSubmitToExecutor.mockImplementation((id, operation) =>
-				id !== executorId || executors.isReady(id) && (operation === undefined || executors.supportsExecution(id, operation)));
+			deps.canSubmitToExecutor.mockImplementation(id => id !== executorId || executors.isReady(id));
 			const otherRequest = deferred<Awaited<ReturnType<typeof runChat>>>();
 			let otherSubmission: Promise<unknown> | undefined;
 			if (scenario === 'other-submission') {
@@ -3041,9 +3001,8 @@ describe('ConversationSessionController', () => {
 			}
 			controller.handleChatSwitch('draft-1');
 			// Invalidates between activation and the queued automatic submission.
-			executors.applySnapshot([{ ...remoteExecutor, instanceId: 'replacement-instance',
-				operations: remoteExecutor.operations.filter(name => name !== 'execution.start') }]);
-			expect(executors.isReady(executorId)).toBe(true);
+			executors.applySnapshot([{ ...remoteExecutor, availability: 'offline' }]);
+			expect(executors.isReady(executorId)).toBe(false);
 			if (scenario === 'background') {
 				const other = createRunningChat({ id: 'other-chat' });
 				deps.sessions.byId[other.id] = other;

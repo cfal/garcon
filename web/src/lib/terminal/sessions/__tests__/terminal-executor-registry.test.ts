@@ -40,7 +40,7 @@ function executor(
 		direction: id === 'local' ? null : 'executor-connects',
 		availability,
 		bulk: id === 'local' ? null : { availability: 'ready', lastError: null },
-		instanceId: null,
+		instanceId: `${id}-instance`,
 		projectBasePath: '/project',
 		lastError: null,
 		operations: LOCAL_EXECUTOR_OPERATIONS, executorServices: { terminals: true, files: true, git: false, gh: false, directoryCreation: true },
@@ -177,23 +177,54 @@ describe('executor-qualified terminal registry', () => {
 	it('waits for the first authoritative host snapshot before allowing terminal creation', async () => {
 		const { registry, executors, list, create } = setup({ awaitingExecutors: true });
 		const initial = Promise.withResolvers<TerminalListResponse>();
-		const current = Promise.withResolvers<TerminalListResponse>();
-		list.mockImplementationOnce(() => initial.promise).mockImplementationOnce(() => current.promise);
+		list.mockImplementationOnce(() => initial.promise);
 		const initializing = registry.initialize();
 		expect(registry.canCreate('local')).toBe(false);
 		await expect(registry.create('/project', 'early-create')).rejects.toThrow();
 		expect(create).not.toHaveBeenCalled();
 		await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(1));
 		executors.applySnapshot([{ ...executor('local'), instanceId: 'local-instance' }]);
-		await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+		expect(list).toHaveBeenCalledTimes(1);
 		initial.resolve(inventory([]));
 		create.mockResolvedValueOnce({ success: true, terminal: terminal('local') });
 		const creating = registry.create('/project', 'current-create');
-		current.resolve(inventory([]));
 		await expect(creating).resolves.toBe(terminal('local').terminalId);
 		await initializing;
 		expect(create).toHaveBeenCalledOnce();
 		expect(create).toHaveBeenCalledWith(expect.objectContaining({ expectedTerminalRuntimeId: runtimeId }));
+	});
+
+	it('keeps attached Local terminals across initial executor discovery', async () => {
+		const { registry, executors, list, sent, callbacks } = setup({ awaitingExecutors: true, realTransport: true });
+		await registry.initialize();
+		await vi.waitFor(() => expect(sent.some(message => message.type === 'terminal-attach')).toBe(true));
+		const attachment = sent.find(message => message.type === 'terminal-attach')!;
+		callbacks.onMessage({ type: 'terminal-attached', attachmentId: attachment.attachmentId,
+			terminal: terminal('local'), replay: [] });
+		const originalMessages = [...sent];
+		const originalSession = registry.sessions[terminal('local').terminalId];
+		executors.applySnapshot([executor('local')]);
+		await Promise.resolve();
+		expect(list).toHaveBeenCalledOnce();
+		expect(sent).toEqual(originalMessages);
+		expect(registry.sessions[terminal('local').terminalId]).toEqual(originalSession);
+		expect(registry.sessions[terminal('local').terminalId].attachmentState).toBe('attached');
+	});
+
+	it('never retargets creation when the replacement list completes before its original inventory await', async () => {
+		const { registry, executors, list, create } = setup();
+		await registry.initialize();
+		const oldList = Promise.withResolvers<TerminalListResponse>();
+		list.mockImplementationOnce(() => oldList.promise);
+		const listing = registry.list(remoteId);
+		const creating = registry.create('/project', 'pending-inventory-create', remoteId);
+		list.mockImplementation(async id => inventory([terminal(id, 1, replacementRuntimeId)], replacementRuntimeId));
+		executors.applySnapshot([executor('local'), { ...executor(remoteId), instanceId: 'replacement-instance' }]);
+		await registry.list(remoteId);
+		oldList.resolve(inventory([terminal(remoteId)]));
+		await listing;
+		await expect(creating).rejects.toMatchObject({ errorCode: 'terminal-runtime-changed' });
+		expect(create).not.toHaveBeenCalled();
 	});
 
 	it('rejects a late create across ready-to-ready replacement before its list settles', async () => {

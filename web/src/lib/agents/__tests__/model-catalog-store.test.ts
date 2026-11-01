@@ -218,7 +218,7 @@ describe('ModelCatalogStore', () => {
 		const initial = createModelCatalogStore();
 		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample', {
 			models: [{ value: 'same', label: 'Worker model' }],
-		})])));
+		})], [], remoteExecutor.instanceId)));
 		await initial.forExecutor(remoteExecutor.id).forceRefresh();
 		const store = createModelCatalogStore();
 		if (instantiate) expect(store.forExecutor(remoteExecutor.id).isStale()).toBe(false);
@@ -226,6 +226,7 @@ describe('ModelCatalogStore', () => {
 		store.reconcileExecutors([localExecutor, remoteExecutor]);
 		expect(store.forExecutor(remoteExecutor.id).isStale()).toBe(true);
 		expect(createModelCatalogStore().forExecutor(remoteExecutor.id).isStale()).toBe(true);
+		expect(createModelCatalogStore().forExecutor(remoteExecutor.id).getModels('sample')[0]?.label).toBe('Worker model');
 	});
 
 	it('retains the remote schema and literal policy through reconciliation and cold hydration', async () => {
@@ -542,6 +543,46 @@ describe('ModelCatalogStore', () => {
 		expect(restored.isValidated).toBe(false);
 		expect(restored.getAgent('sample')).not.toBeNull();
 		expect(createModelCatalogStore().isValidated).toBe(false);
+	});
+
+	it('preserves cached remote labels when first discovery is offline without an instance', async () => {
+		const store = createModelCatalogStore();
+		store.reconcileExecutors([localExecutor, remoteExecutor]);
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(catalogBody([agentEntry('sample')], [], remoteExecutor.instanceId)));
+		await store.forExecutor(remoteExecutor.id).forceRefresh();
+		const restored = createModelCatalogStore();
+		restored.reconcileExecutors([localExecutor, { ...remoteExecutor, availability: 'offline', instanceId: null }]);
+		expect(restored.forExecutor(remoteExecutor.id).getAgent('sample')?.label).toBe('sample');
+		expect(restored.forExecutor(remoteExecutor.id).isValidated).toBe(false);
+		expect(createModelCatalogStore().forExecutor(remoteExecutor.id).getAgent('sample')?.label).toBe('sample');
+	});
+
+	it.each(['offline', 'reconnecting', 'disabled'] as const)('preserves labels but not validation across ready to %s and reload', async availability => {
+		const store = createModelCatalogStore();
+		store.reconcileExecutors([localExecutor, remoteExecutor]);
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(mockResponse(catalogBody([agentEntry('sample', {
+			models: [{ value: 'same', label: 'Worker model' }],
+		})], [], remoteExecutor.instanceId)));
+		const catalog = store.forExecutor(remoteExecutor.id);
+		await catalog.forceRefresh();
+		const pending = Promise.withResolvers<Response>();
+		vi.mocked(clientApi.apiFetch).mockReturnValueOnce(pending.promise);
+		const refresh = catalog.forceRefresh();
+		const unavailable = availability === 'disabled'
+			? { ...remoteExecutor, enabled: false }
+			: { ...remoteExecutor, availability, instanceId: availability === 'offline' ? null : remoteExecutor.instanceId };
+		store.reconcileExecutors([localExecutor, unavailable]);
+		pending.resolve(mockResponse(catalogBody([agentEntry('stale')], [], remoteExecutor.instanceId)));
+		await refresh;
+		expect(catalog.isValidated).toBe(false);
+		expect(catalog.getAgent('stale')).toBeNull();
+		expect(catalog.getModels('sample')[0]?.label).toBe('Worker model');
+		const restored = createModelCatalogStore();
+		restored.reconcileExecutors([localExecutor, unavailable]);
+		expect(restored.forExecutor(remoteExecutor.id).getModels('sample')[0]?.label).toBe('Worker model');
+		expect(restored.forExecutor(remoteExecutor.id).isValidated).toBe(false);
+		restored.reconcileExecutors([localExecutor, { ...remoteExecutor, instanceId: 'replacement' }]);
+		expect(createModelCatalogStore().forExecutor(remoteExecutor.id).getAgent('sample')).toBeNull();
 	});
 
 	it('prefers model-level image capability over the integration default', async () => {

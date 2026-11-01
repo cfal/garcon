@@ -1,7 +1,3 @@
-// Reactive state management for the new-chat form. Encapsulates agent,
-// model, permission/thinking mode, path validation, image attachments, and
-// the config payload used to start a session.
-
 import { ProjectPathCompletionController } from '$lib/project-paths/project-path-completion.js';
 import { effectiveExecutorId } from '$shared/executors';
 import { NewChatPathValidationController } from './new-chat-path-validation-controller.js';
@@ -15,6 +11,7 @@ import type { GitWorktreeItem } from '$lib/api/git.js';
 import type { NewChatConfig, SessionAgentId } from '$lib/chat/sessions/chat-session-types.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat.js';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
+import { resolveSettingsPresentation } from '$lib/agents/settings-presentation';
 import type { JsonValue } from '$shared/json';
 import { DEFAULT_AGENT_ID } from '$shared/agents';
 import type {
@@ -214,7 +211,7 @@ export class NewChatFormState {
 		return (
 			this.settingsLoaded &&
 			this.modelCatalogValidated &&
-			this.agentSettingsCompatible &&
+			this.agentSettingsCompatibility === 'compatible' &&
 			this.#selectableAgentIds.includes(this.agentId) &&
 			!this.modelSelectionPending &&
 			!this.modelSelectionError &&
@@ -309,8 +306,8 @@ export class NewChatFormState {
 		return this.#agentSettings.forAgent(this.agentId, this.#modelCatalog);
 	}
 
-	get agentSettingsCompatible(): boolean {
-		return this.#agentSettings.isCompatible(this.agentId, this.#modelCatalog);
+	get agentSettingsCompatibility() {
+		return resolveSettingsPresentation(this.#modelCatalog, this.agentId, this.#agentSettings.byId[this.agentId]).compatibility;
 	}
 
 	get agentSettingsById(): Record<string, AgentSettingsEnvelope> {
@@ -379,7 +376,7 @@ export class NewChatFormState {
 	}
 
 	replaceAgentSettingsById(settingsById: Record<string, AgentSettingsEnvelope>): void {
-		this.#agentSettings.restore(settingsById, this.#selectableAgentIds, this.#modelCatalog);
+		this.#agentSettings.restore(settingsById);
 	}
 
 	// Model
@@ -746,8 +743,9 @@ export class NewChatFormState {
 			return null;
 		}
 		const agentSettings = this.agentSettings;
-		if (!agentSettings || !this.agentSettingsCompatible) {
-			this.error = 'Saved provider settings are unavailable or incompatible with this executor.';
+		if (!agentSettings || this.agentSettingsCompatibility !== 'compatible') {
+			this.error = this.agentSettingsCompatibility === 'incompatible'
+				? m.chat_provider_settings_incompatible() : m.chat_composer_loading_models();
 			return null;
 		}
 		if (!this.modelCatalogValidated || this.modelSelectionPending || this.modelSelectionError || this.attachmentError)

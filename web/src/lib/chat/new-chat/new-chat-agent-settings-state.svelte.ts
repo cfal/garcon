@@ -1,10 +1,11 @@
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
-import { areAgentSettingsCompatible, cloneAgentSettings, withAgentSetting } from '$shared/agent-settings';
+import { cloneAgentSettings, withAgentSetting } from '$shared/agent-settings';
+import { resolveSettingsPresentation } from '$lib/agents/settings-presentation';
 import type { JsonValue } from '$shared/json';
 import type { RemoteExecutionDefaults } from '$shared/settings';
 
-type SettingsCatalog = Pick<ModelCatalogStore, 'getDefaultAgentSettings' | 'getAgentSettingsDescriptors'>;
+type SettingsCatalog = Pick<ModelCatalogStore, 'isValidated' | 'getDefaultAgentSettings' | 'getAgentSettingsDescriptors'>;
 
 export class NewChatAgentSettingsState {
 	byId = $state<Record<string, AgentSettingsEnvelope>>({});
@@ -17,10 +18,7 @@ export class NewChatAgentSettingsState {
 	}
 
 	isCompatible(agentId: string, catalog: SettingsCatalog): boolean {
-		const defaults = catalog.getDefaultAgentSettings(agentId);
-		const envelope = this.byId[agentId] ?? defaults;
-		return Boolean(defaults && envelope
-			&& areAgentSettingsCompatible(envelope, defaults, catalog.getAgentSettingsDescriptors(agentId)));
+		return resolveSettingsPresentation(catalog, agentId, this.byId[agentId]).compatibility === 'compatible';
 	}
 
 	setSetting(
@@ -40,8 +38,6 @@ export class NewChatAgentSettingsState {
 
 	restore(
 		settingsById: Record<string, AgentSettingsEnvelope>,
-		agentIds: readonly string[],
-		catalog: SettingsCatalog,
 	): void {
 		this.#hasRestoredSettings = true;
 		this.#configuredAgentIds.clear();
@@ -50,10 +46,6 @@ export class NewChatAgentSettingsState {
 			if (settings.ownerId !== agentId) continue;
 			next[agentId] = cloneAgentSettings(settings);
 			this.#configuredAgentIds.add(agentId);
-		}
-		for (const agentId of agentIds) {
-			const envelope = next[agentId] ?? catalog.getDefaultAgentSettings(agentId);
-			if (envelope) next[agentId] = cloneAgentSettings(envelope);
 		}
 		this.byId = next;
 	}
@@ -86,8 +78,9 @@ export class NewChatAgentSettingsState {
 		defaultSettings: AgentSettingsEnvelope | undefined,
 		catalog: SettingsCatalog,
 	): void {
+		if (this.#hasRestoredSettings) return;
 		let current = this.byId[agentId];
-		if (defaultSettings && !this.#hasRestoredSettings && !this.#configuredAgentIds.has(agentId)) {
+		if (defaultSettings && !this.#configuredAgentIds.has(agentId)) {
 			this.#configuredAgentIds.add(agentId);
 			current = defaultSettings;
 		}
@@ -96,11 +89,13 @@ export class NewChatAgentSettingsState {
 	}
 
 	ensure(agentId: string, catalog: SettingsCatalog): void {
+		if (this.#hasRestoredSettings) return;
 		const envelope = this.forAgent(agentId, catalog);
 		if (envelope) this.byId = { ...this.byId, [agentId]: envelope };
 	}
 
 	reconcileCatalog(agentIds: readonly string[], catalog: SettingsCatalog): void {
+		if (this.#hasRestoredSettings) return;
 		const next = { ...this.byId };
 		for (const agentId of agentIds) {
 			if (this.#configuredAgentIds.has(agentId)) continue;

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { composerExecutionOperations, isComposerControllerCommand } from '$lib/chat/composer/execution-operation';
+	import { isComposerControllerCommand } from '$lib/chat/composer/execution-operation';
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import ComposerInputSurface from './ComposerInputSurface.svelte';
 	import { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
@@ -702,15 +702,10 @@
 	const controllerCommand = $derived(isComposerControllerCommand(
 		sessions.selectedChat, composerState.inputText, executionAgent?.executionPolicy ?? null,
 	));
-	const { settingsEnvelope, settingsCompatible, sendTitle } = $derived(buildComposerSendPresentation(
+	const { settingsEnvelope, compatibility, sendTitle } = $derived(buildComposerSendPresentation(
 		modelCatalog, agentState,
 		{ executorReady: executors.isReady(agentState.executorId), controllerCommand, requiresQueuedSubmission },
 	));
-	const executionSupported = $derived(composerExecutionOperations(
-		sessions.selectedChat, composerState.inputText, {
-			executionPolicy: executionAgent?.executionPolicy ?? 'conversation', supportsFork: modelCatalog.supportsFork(capabilityAgentId),
-		},
-	).every(operation => executors.supportsExecution(agentState.executorId, operation)));
 
 	const canSubmit = $derived(
 		canSubmitComposer(
@@ -718,9 +713,8 @@
 				directAdmissionPending ||
 				promptTransformPending ||
 				(!controllerCommand &&
-					(!executors.isReady(agentState.executorId) || !executionSupported ||
+					(!executors.isReady(agentState.executorId) ||
 						!modelCatalog.isValidated ||
-						!settingsCompatible ||
 						!providerAvailable)),
 			composerState.inputText,
 			composerState.images.length,
@@ -914,16 +908,16 @@
 				}}
 				canSend={canSubmit}
 				onSend={() => handleFormSubmit()}
-				sendTitle={!controllerCommand && executors.isReady(agentState.executorId) && !executionSupported ? 'This executor does not support this operation.' : sendTitle}
+				{sendTitle}
 				{sendButtonClass}
 			>
 				{#snippet agentSettings()}
 					<AgentSettingsControls
 						descriptors={modelCatalog.getAgentSettingsDescriptors(agentState.agentId)}
 						envelope={settingsEnvelope}
-						compatible={settingsCompatible}
+						{compatibility}
 						onChange={(descriptor, value) => onAgentSettingChange?.(descriptor, value)}
-						disabled={!onAgentSettingChange || directAdmissionPending}
+						disabled={!onAgentSettingChange || directAdmissionPending || !modelCatalog.isValidated}
 					/>
 				{/snippet}
 				{#snippet modelSelector()}

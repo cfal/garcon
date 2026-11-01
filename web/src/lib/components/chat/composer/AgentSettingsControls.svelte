@@ -2,6 +2,8 @@
 	import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
 	import type { JsonValue } from '$shared/json';
 	import { settingValue } from '$shared/agent-settings';
+	import type { SettingsCompatibility } from '$lib/agents/settings-presentation';
+	import * as m from '$lib/paraglide/messages.js';
 	import {
 		agentSettingLabel,
 		agentSettingOptionDescription,
@@ -21,12 +23,12 @@
 	interface Props {
 		descriptors: readonly AgentSettingDescriptor[];
 		envelope: AgentSettingsEnvelope | null;
-		compatible?: boolean;
+		compatibility?: SettingsCompatibility;
 		onChange: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;
 		disabled?: boolean;
 	}
 
-	let { descriptors, envelope, onChange, disabled = false, compatible = true }: Props = $props();
+	let { descriptors, envelope, onChange, disabled = false, compatibility = 'compatible' }: Props = $props();
 
 	function controlId(descriptor: AgentSettingDescriptor): string {
 		return `agent-setting-${envelope?.ownerId ?? ''}-${descriptor.key}`.replace(/[^a-zA-Z0-9_-]/g, '-');
@@ -51,16 +53,16 @@
 	}
 </script>
 
-{#if !compatible || !envelope}
+{#if compatibility === 'incompatible'}
 	<span
 		class="inline-flex size-9 shrink-0 items-center justify-center text-muted-foreground"
 		role="status"
-		title="Provider settings are unavailable or incompatible."
+		title={m.chat_provider_settings_incompatible()}
 	>
 		<CircleAlert class="size-4" aria-hidden="true" />
-		<span class="sr-only">Provider settings are unavailable or incompatible.</span>
+		<span class="sr-only">{m.chat_provider_settings_incompatible()}</span>
 	</span>
-{:else if descriptors.length > 0}
+{:else if envelope && descriptors.length > 0}
 	<div class="flex flex-wrap items-center gap-2" data-slot="agent-settings-controls">
 		{#each descriptors as descriptor (descriptor.key)}
 			<svelte:boundary>

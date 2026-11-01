@@ -14,6 +14,7 @@ import { findModelForSelection } from '../../../../test/model-catalog';
 import * as chatsApi from '$lib/api/chats';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-settings-snapshot-fixture';
 
 interface CatalogOverrides {
 	executionPolicy?: 'conversation' | 'literal' | null;
@@ -30,6 +31,7 @@ function createForm(
 	selectableAgentIds: () => readonly SessionAgentId[] = () => ['claude', 'codex'],
 	catalogOverrides: CatalogOverrides = {},
 	executors?: ExecutorsStore,
+	realHydration = false,
 ): ScheduledPromptFormState {
 	const sessions = {
 		get byId() { return Object.fromEntries([...existingIds].map(id => [id, { agentId: 'claude', executorId: 'local' }])); },
@@ -71,13 +73,15 @@ function createForm(
 		}),
 		getModelForSelection,
 	} satisfies Partial<ModelCatalogStore>);
-	const form = new ScheduledPromptFormState(modelCatalog, new RemoteSettingsStore(), sessions, {
+	const remoteSettings = new RemoteSettingsStore();
+	remoteSettings.snapshot = makeRemoteSettingsSnapshot();
+	const form = new ScheduledPromptFormState(modelCatalog, remoteSettings, sessions, {
 		executors,
 		get selectableAgentIds() {
 			return selectableAgentIds();
 		},
 	});
-	form.startup.loadSettingsAndModels = vi.fn().mockResolvedValue(undefined);
+	if (!realHydration) form.startup.loadSettingsAndModels = vi.fn().mockResolvedValue(undefined);
 	return form;
 }
 
@@ -330,6 +334,37 @@ describe('ScheduledPromptFormState', () => {
 		expect(form.buildDefinition(new Date('2029-12-01T00:00:00Z'))?.target).toMatchObject({
 			permissionMode: 'acceptEdits', thinkingMode: 'high', model: 'gpt-5',
 		});
+		form.dispose();
+	});
+
+	it('round-trips omitted settings after cold hydration and still permits definition edits offline', async () => {
+		const discovery = Promise.withResolvers<void>();
+		const catalog: CatalogOverrides = { isValidated: false, refreshIfStale: () => discovery.promise };
+		const executors = new ExecutorsStore();
+		executors.applySnapshot([localExecutor, remoteExecutor]);
+		const form = createForm(undefined, undefined, catalog, executors, true);
+		form.startup.validatePath = vi.fn();
+		const prompt = newChatPrompt({ type: 'new-chat', executorId: remoteExecutor.id,
+			agentId: 'codex', projectPath: '/synthetic/project', model: 'gpt-5',
+			apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+			permissionMode: 'acceptEdits', thinkingMode: 'high', agentSettingsById: {}, tags: [] });
+		await form.initialize(prompt);
+		catalog.isValidated = true;
+		discovery.resolve();
+		await discovery.promise;
+		await Promise.resolve();
+		const now = new Date('2029-12-01T00:00:00Z');
+		expect(form.startup.agentSettings).not.toBeNull();
+		expect(form.startup.agentSettingsById).toEqual({});
+		expect(form.buildDefinition(now)?.target).toEqual(prompt.target);
+		catalog.isValidated = false;
+		executors.applySnapshot([localExecutor, { ...remoteExecutor, availability: 'offline' }]);
+		form.taskName = 'Edited while offline';
+		form.prompt = 'Edited synthetic prompt';
+		expect(form.canSaveAt(now)).toBe(true);
+		expect(form.buildDefinition(now)?.target).toEqual(prompt.target);
+		form.startup.projectPath = '/explicit/change';
+		expect(form.canSaveAt(now)).toBe(false);
 		form.dispose();
 	});
 

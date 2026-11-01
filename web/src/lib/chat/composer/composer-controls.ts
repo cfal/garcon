@@ -1,7 +1,7 @@
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import { THINKING_MODES } from '$lib/chat/composer/chat-ui-constants.js';
 import { isCodexSolModel } from '@garcon/common/models';
-import { areAgentSettingsCompatible } from '$shared/agent-settings';
+import { resolveSettingsPresentation } from '$lib/agents/settings-presentation';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -15,20 +15,16 @@ export function buildComposerSendPresentation(
 	selection: { readonly agentId: string; readonly agentSettings: AgentSettingsEnvelope | null },
 	availability: { executorReady: boolean; controllerCommand: boolean; requiresQueuedSubmission: boolean },
 ) {
-	const defaults = catalog.getDefaultAgentSettings(selection.agentId);
-	const settingsEnvelope = selection.agentSettings ?? defaults;
-	const settingsCompatible = Boolean(defaults && settingsEnvelope
-		&& areAgentSettingsCompatible(settingsEnvelope, defaults, catalog.getAgentSettingsDescriptors(selection.agentId)));
+	const { envelope: settingsEnvelope, compatibility } = resolveSettingsPresentation(catalog, selection.agentId, selection.agentSettings);
 	const { executorReady, controllerCommand, requiresQueuedSubmission } = availability;
 	const modelsLoading = executorReady && !catalog.isValidated && !catalog.error;
 	let sendTitle: string = m.chat_composer_send_message();
 	if (!controllerCommand) {
 		// Loading is explained by the disabled send button so the composer keeps its height.
 		if (modelsLoading) sendTitle = m.chat_composer_loading_models();
-		else if (!settingsCompatible) sendTitle = 'Saved provider settings are unavailable or incompatible.';
 		else if (requiresQueuedSubmission) sendTitle = m.chat_composer_queue_message();
 	}
-	return { settingsEnvelope, settingsCompatible, sendTitle };
+	return { settingsEnvelope, compatibility, sendTitle };
 }
 
 export type ComposerModeIconId =

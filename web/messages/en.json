@@ -249,6 +249,7 @@
 	"chat_composer_drop_images": "Drop files here",
 	"chat_composer_executor_removed_detail": "This chat's executor is no longer configured.",
 	"chat_composer_executor_unavailable": "Executor unavailable",
+	"chat_provider_settings_incompatible": "Saved provider settings are incompatible with this executor.",
 	"chat_composer_executor_unavailable_detail": "{label} is unavailable.",
 	"chat_composer_executor_reconnecting": "Reconnecting to executor",
 	"chat_composer_executor_reconnecting_detail": "{label} lost its connection. Running turns continue, and their output resumes when it reconnects.",

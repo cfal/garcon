@@ -17,7 +17,7 @@ describe('buildComposerSendPresentation', () => {
 	it('uses catalog defaults only for absent settings', () => {
 		const presentation = buildComposerSendPresentation(catalog, selection, availability);
 		expect(presentation.settingsEnvelope).toBe(defaults);
-		expect(presentation.settingsCompatible).toBe(true);
+		expect(presentation.compatibility).toBe('compatible');
 		expect(presentation.sendTitle).toBe(m.chat_composer_send_message());
 		expect(selection.agentSettings).toBeNull();
 	});
@@ -26,8 +26,8 @@ describe('buildComposerSendPresentation', () => {
 		const saved = { ...defaults, schemaVersion: 1 };
 		const presentation = buildComposerSendPresentation(catalog, { ...selection, agentSettings: saved }, availability);
 		expect(presentation.settingsEnvelope).toBe(saved);
-		expect(presentation.settingsCompatible).toBe(false);
-		expect(presentation.sendTitle).toBe('Saved provider settings are unavailable or incompatible.');
+		expect(presentation.compatibility).toBe('incompatible');
+		expect(presentation.sendTitle).toBe(m.chat_composer_send_message());
 	});
 
 	it('does not invent settings while catalog defaults are unavailable', () => {
@@ -35,7 +35,7 @@ describe('buildComposerSendPresentation', () => {
 			{ ...catalog, getDefaultAgentSettings: () => null }, selection, availability,
 		);
 		expect(presentation.settingsEnvelope).toBeNull();
-		expect(presentation.settingsCompatible).toBe(false);
+		expect(presentation.compatibility).toBe('loading');
 	});
 
 	it('prioritizes loading over compatibility and queue labels', () => {
@@ -53,7 +53,7 @@ describe('buildComposerSendPresentation', () => {
 			{ ...catalog, isValidated: false, getDefaultAgentSettings: () => null }, selection,
 			{ ...availability, controllerCommand: true, requiresQueuedSubmission: true },
 		);
-		expect(presentation.settingsCompatible).toBe(false);
+		expect(presentation.compatibility).toBe('loading');
 		expect(presentation.sendTitle).toBe(m.chat_composer_send_message());
 	});
 });

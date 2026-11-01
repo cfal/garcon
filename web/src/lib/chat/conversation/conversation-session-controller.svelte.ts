@@ -1,7 +1,6 @@
 // Owns chat lifecycle and delegates all viewport operations through the dependency interface.
 
 import { getChatSnapshot, handoffChat, interruptAndSendChat, stopChat } from '$lib/api/chats.js';
-import { composerExecutionOperations } from '$lib/chat/composer/execution-operation';
 import { literalInputFormat } from '$shared/input-format';
 import { isStopSatisfied, type ChatImage, type ChatStopOutcome } from '$shared/chat-types';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
@@ -55,7 +54,7 @@ import {
 	type ConversationExecutionSelection,
 	type ConversationExecutionSnapshot,
 } from './conversation-execution-selection.js';
-import { areAgentSettingsCompatible } from '$shared/agent-settings';
+import { resolveSettingsPresentation } from '$lib/agents/settings-presentation';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { ApiError } from '$lib/api/client.js';
 import { CommandOutcomeUnknownError } from './idempotent-command.js';
@@ -100,7 +99,7 @@ export class ConversationSessionController {
 		this.clearHistory = new ConversationClearController(deps);
 		this.executorHandoff = new ExecutorHandoffProjectState(
 			(executorId, selection) => {
-				if (!deps.canSubmitToExecutor(executorId, 'execution.start')) return false;
+				if (!deps.canSubmitToExecutor(executorId)) return false;
 				const catalog = deps.modelCatalogForExecutor(executorId);
 				const target = this.executorHandoff.target;
 				const isDraft = target !== null && deps.sessions.isDraft(target.chatId);
@@ -178,10 +177,8 @@ export class ConversationSessionController {
 		const selection = executionSelectionFromProjection(this.deps.sessions.byId[chatId]);
 		if (!selection) return null;
 		const catalog = this.deps.modelCatalogForExecutor(selection.executorId ?? 'local');
-		const defaults = catalog.getDefaultAgentSettings(selection.agentId);
-		const agentSettings = selection.agentSettings ?? defaults;
-		if (!catalog.isValidated || !defaults || !agentSettings
-			|| !areAgentSettingsCompatible(agentSettings, defaults, catalog.getAgentSettingsDescriptors(selection.agentId))) return null;
+		const { envelope: agentSettings, compatibility } = resolveSettingsPresentation(catalog, selection.agentId, selection.agentSettings);
+		if (!agentSettings || compatibility !== 'compatible') return null;
 		return {
 			...selection,
 			agentSettings,
@@ -589,19 +586,11 @@ export class ConversationSessionController {
 		if (
 			requiresExecutor &&
 			(!deps.canSubmitToExecutor(executorId) ||
-				!composerExecutionOperations(selected, text, { ...agent, supportsFork: catalog.supportsFork(agent.id) }).every(operation => deps.canSubmitToExecutor(executorId, operation)) ||
 				!isCustomProviderSelectionAvailable(catalog, selection))
 		) {
 			return selected.status === 'draft' && source === 'automatic-start'
 				? rejectUnavailableDraftStart(deps, chatId)
 				: 'no-op';
-		}
-		const defaults = catalog.getDefaultAgentSettings(agent.id);
-		const envelope = selection.agentSettings ?? defaults;
-		if (requiresExecutor
-			&& (!defaults || !envelope || !areAgentSettingsCompatible(envelope, defaults, agent.settings))) {
-			deps.chatState.appendLocalNoticeForChat(chatId, 'error', 'Saved provider settings are incompatible with this executor.');
-			return 'rejected';
 		}
 		if (!text.trim() && submissionImages.length === 0) return 'no-op';
 		const previousText = draft.text;
@@ -754,7 +743,6 @@ export class ConversationSessionController {
 			return this.submitForChat(chatId);
 		if (
 			!deps.canSubmitToExecutor(deps.agentState.executorId) ||
-			!composerExecutionOperations(selected, text, { ...agent, supportsFork: catalog.supportsFork(agent.id) }).every(operation => deps.canSubmitToExecutor(deps.agentState.executorId, operation)) ||
 			!isCustomProviderSelectionAvailable(
 				deps.modelCatalogForExecutor(deps.agentState.executorId),
 				deps.agentState,
@@ -764,12 +752,6 @@ export class ConversationSessionController {
 		}
 		if (selected.status !== 'running' || !selected.isProcessing || !text) {
 			return this.submitForChat(chatId);
-		}
-		const defaults = catalog.getDefaultAgentSettings(agent.id);
-		const envelope = deps.agentState.agentSettings ?? defaults;
-		if (!defaults || !envelope || !areAgentSettingsCompatible(envelope, defaults, agent.settings)) {
-			deps.chatState.appendLocalNoticeForChat(chatId, 'error', 'Saved provider settings are incompatible with this executor.');
-			return 'rejected';
 		}
 		return submitSteerPreferenceRoute(deps, this.#acceptedInputs, {
 			chatId,

@@ -497,19 +497,27 @@ export class ModelCatalogStore {
 		}
 		for (const executor of executors) {
 			const previous = this.executors.get(executor.id);
-			const cachedInstance = this.catalogs.get(executor.id)?.executorInstanceId ?? persisted[executor.id]?.executorInstanceId;
+			const snapshot = executor.id === 'local' ? readPersisted(executor.id) : persisted[executor.id];
+			const cachedInstance = this.catalogs.get(executor.id)?.executorInstanceId ?? snapshot?.executorInstanceId;
 			const executorChanged = previous && (
 				executor.enabled !== previous.enabled
 				|| executor.availability !== previous.availability
 				|| executor.instanceId !== previous.instanceId
 			);
-			const cachedInstanceChanged = cachedInstance && cachedInstance !== executor.instanceId;
-			const initiallyUnavailable = !previous && (!executor.enabled || executor.availability !== 'ready');
-			if (executorChanged || cachedInstanceChanged || initiallyUnavailable) {
+			const cachedInstanceChanged = cachedInstance && executor.instanceId && cachedInstance !== executor.instanceId;
+			if (cachedInstanceChanged) {
 				if (executor.id === 'local') {
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog);
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
 				} else delete persisted[executor.id];
+			}
+			const initiallyUnavailable = !previous && (!executor.enabled || executor.availability !== 'ready');
+			if (executorChanged || cachedInstanceChanged || initiallyUnavailable) {
+				if (!cachedInstanceChanged && snapshot?.executorInstanceId) {
+					const unvalidated = { ...snapshot, etag: null, lastFetchedAt: null, lastValidatedAt: null };
+					if (executor.id === 'local') persist(executor.id, unvalidated);
+					else persisted[executor.id] = unvalidated;
+				}
 				this.catalogs.get(executor.id)?.invalidate();
 			}
 			this.executors.set(executor.id, executor);
