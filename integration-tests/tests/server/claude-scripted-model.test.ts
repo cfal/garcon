@@ -93,6 +93,39 @@ describe('Claude against a scripted model', () => {
     });
   });
 
+  test('preserves escaped control and format characters through live output and native reload', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const prompt = 'Return the synthetic character sample.';
+    const reply = 'Synthetic sample: DEL=\u007f C1=\u0085 FORMAT=\u200e\u2066text\u2069';
+    const requestStart = testEnvironment.model.markRequests();
+    testEnvironment.model.scriptTurn([claudeText(reply)]);
+
+    await withIntegrationFixture('claude-scripted-json-escapes', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor,
+      });
+
+      expect(assistantContents((await fixture.client.getMessages(chatId)).messages)).toEqual([reply]);
+      await reloadUntilNativeContains(fixture, chatId, reply);
+      const reloaded = await fixture.client.getMessages(chatId);
+      expect(userContents(reloaded.messages)).toEqual([prompt]);
+      expect(assistantContents(reloaded.messages)).toEqual([reply]);
+      expect(testEnvironment.model.requestsSince(requestStart)).toHaveLength(1);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  }, 60_000);
+
   test.each([
     ['Explore', ''], ['Explore', '[922k]'], ['fork', ''], ['fork', '[922k]'],
   ])('pins %s subagents to the selected custom endpoint model with suffix %j', async (subagentType, suffix) => {

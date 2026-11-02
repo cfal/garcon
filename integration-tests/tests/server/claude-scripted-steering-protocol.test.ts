@@ -19,6 +19,32 @@ afterEach(async () => {
 });
 
 describe('pinned Claude steering protocol', () => {
+  test.each(['bash-stdout', 'local-command-stdout'])(
+    'acknowledges user input containing a literal %s tag',
+    async (tag) => {
+      const harness = await createHarness();
+      const inputId = '00000000-0000-4000-8000-000000000001';
+      const prompt = `Quote this literal snippet: <${tag}>Synthetic output</${tag}>`;
+      const reply = 'The synthetic snippet was received.';
+      harness.model.scriptTurn([claudeText(reply)]);
+
+      await harness.send(userFrame(harness.sessionId, inputId, prompt));
+      await harness.waitFor(commandLifecycle(inputId, 'started'), 'tagged input started');
+      await harness.waitFor(userReplay(inputId), 'tagged input replay');
+      const result = await harness.waitFor((message) => message.type === 'result'
+        && message.user_message_uuid === inputId, 'tagged input result');
+      await harness.waitFor(providerState('idle'), 'tagged input provider idle');
+
+      expect(result.is_error).toBe(false);
+      expect(result.result).toBe(reply);
+      expect(harness.results()).toHaveLength(1);
+      expect(harness.model.requests()).toHaveLength(1);
+      expect(harness.model.requests()[0]?.lastUserText).toContain(prompt);
+      harness.model.assertSettled();
+    },
+    30_000,
+  );
+
   test('correlates background notification continuations through provider idle', async () => {
     const harness = await createHarness();
     const inputId = '00000000-0000-4000-8000-000000000001';

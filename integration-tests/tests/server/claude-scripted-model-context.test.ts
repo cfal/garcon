@@ -177,7 +177,7 @@ for (const { suffix, nextSuffix, expectsCompaction } of [
   }, 60_000);
 }
 
-test('Claude updates numeric caps in place through the settings API and restarts for automatic policy', async () => {
+test('Claude updates custom and known model caps in place and restarts for automatic policy', async () => {
   const environment = await startScriptedClaudeTestEnvironment();
   const probe = createLiveClaudeProtocolProbe(environment.serverEnvironment, {
     flagEnvironment: { GARCON_SYNTHETIC_CONTEXT_FLAG: 'retained' },
@@ -194,6 +194,8 @@ test('Claude updates numeric caps in place through the settings API and restarts
         { model: 'third[1m]', expectedLaunches: 2 },
         { model: 'third[900k]', expectedLaunches: 3 },
         { model: 'third[800k]', expectedLaunches: 3 },
+        { model: 'claude-opus-5-5[922k]', expectedLaunches: 3 },
+        { model: 'claude-opus-5-5[850k]', expectedLaunches: 3 },
       ];
       for (const [index, { model, expectedLaunches }] of selections.entries()) {
         const reply = `Scripted model switch ${index} complete.`;
@@ -227,9 +229,9 @@ test('Claude updates numeric caps in place through the settings API and restarts
       const transcript = await fixture.client.getMessages(chatId);
       expect(messagesOfType(transcript.messages, 'user-message')).toHaveLength(selections.length);
       expect(await throwingRejectionOf(fixture.client.patch('/api/v1/chats/model', { chatId, model: 'third[99k]' }))).toThrow(/returned 422:.*context suffix/);
-      expect((await fixture.client.getChatSnapshot(chatId)).chat.model).toBe('third[800k]');
+      expect((await fixture.client.getChatSnapshot(chatId)).chat.model).toBe('claude-opus-5-5[850k]');
       expect(fixture.executionLogs.filter(line => line.includes('Claude context window updated without restarting')))
-        .toHaveLength(3);
+        .toHaveLength(5);
       expect(fixture.executionLogs.some(line => line.includes('Claude context-window update failed'))).toBe(false);
       const observations = await probe.readContextObservations();
       const windows = observations.filter(entry => entry.type === 'context-window');
@@ -238,11 +240,13 @@ test('Claude updates numeric caps in place through the settings API and restarts
           { model: 'second[1m]', source: 'env', window: 850_000 },
           { model: 'third[1m]', source: 'env', window: 950_000 },
           { model: 'third[1m]', source: 'env', window: 800_000 },
+          { model: 'claude-opus-5-5', source: 'env', window: 922_000 },
+          { model: 'claude-opus-5-5', source: 'env', window: 850_000 },
         ]);
       expect(windows[0]?.processId).toBe(windows[1]?.processId);
       expect(windows[2]?.processId).not.toBe(windows[1]?.processId);
       const environments = observations.filter(entry => entry.type === 'flag-environment');
-      expect(environments).toHaveLength(3);
+      expect(environments).toHaveLength(5);
       expect(environments.every(entry => entry.keys.includes('GARCON_SYNTHETIC_CONTEXT_FLAG'))).toBe(true);
       expect(await Bun.file(join(fixture.executionDirs.home, '.claude', 'settings.json')).exists()).toBe(false);
       environment.model.assertSettled();
