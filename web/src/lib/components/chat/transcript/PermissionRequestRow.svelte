@@ -170,7 +170,6 @@
 	}
 
 	const isExitPlanMode = $derived(request.requestedTool.type === 'exit-plan-mode-tool-use');
-	const isAskUserQuestion = $derived(request.requestedTool.type === 'ask-user-question-tool-use');
 	const isCursorCreatePlan = $derived(request.requestedTool.type === 'cursor-create-plan-tool-use');
 
 	const exitPlanRequest = $derived(
@@ -209,8 +208,11 @@
 		rawInputOpen: false,
 	});
 	let localDraftOccurrence = $state<string | null>(null);
-	let effectiveDraft = $derived(controlledDraft ?? (localDraftOccurrence === request.permissionOccurrenceId
-		? localDraft : { selectedQuestionOptions: {}, rawInputOpen: false }));
+	let effectiveDraft = $derived.by(() => {
+		if (controlledDraft != null) return controlledDraft;
+		if (localDraftOccurrence === request.permissionOccurrenceId) return localDraft;
+		return { selectedQuestionOptions: {}, rawInputOpen: false };
+	});
 	function setDraft(next: PermissionQuestionDraft): void {
 		if (onDraftChange) onDraftChange(next);
 		else {
@@ -401,7 +403,7 @@
 			{/if}
 		{/snippet}
 	</ChatEventCard>
-{:else if isAskUserQuestion && askUserQuestionRequest}
+{:else if askUserQuestionRequest}
 	<ChatEventCard variant={permCardVariant} class={resolvedOpacity}>
 		{#snippet header()}
 			<div class="flex items-center gap-2">

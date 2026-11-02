@@ -6,13 +6,14 @@ import {
 	CursorCreatePlanToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	PermissionRequestMessage,
+	type AskUserQuestionPrompt,
 } from '$shared/chat-types';
 import PermissionRequestRowTestHost from './PermissionRequestRowTestHost.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 const TS = '2026-07-02T00:00:00.000Z';
 
-function askUserQuestionRequest(): PermissionRequestMessage {
+function askUserQuestionRequest(questionOverrides: Partial<AskUserQuestionPrompt> = {}): PermissionRequestMessage {
 	return new PermissionRequestMessage(
 		TS,
 		'incarnation-question',
@@ -31,12 +32,13 @@ function askUserQuestionRequest(): PermissionRequestMessage {
 					},
 				],
 				allowMultiple: false,
+				...questionOverrides,
 			},
 		]),
 	);
 }
 
-function cursorAskQuestionRequest(): PermissionRequestMessage {
+function titledQuestionRequest(): PermissionRequestMessage {
 	return new PermissionRequestMessage(
 		TS,
 		'incarnation-cursor-question',
@@ -56,10 +58,8 @@ describe('PermissionRequestRow', () => {
 	});
 
 	it.each([undefined, 'Mode'])('preserves prompt whitespace without source indentation, header=%s', (header) => {
-		const request = askUserQuestionRequest();
-		if (request.requestedTool.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
 		const prompt = 'Which mode?\nPick a path.';
-		Object.assign(request.requestedTool.questions[0], { header, prompt });
+		const request = askUserQuestionRequest({ header, prompt });
 		render(PermissionRequestRowTestHost, { request, onDecision: vi.fn() });
 		const shown = screen.getByText('Which mode? Pick a path.');
 		expect(shown.textContent).toBe(prompt);
@@ -96,9 +96,9 @@ describe('PermissionRequestRow', () => {
 		});
 	});
 
-	it('submits Cursor question answers through the provider-neutral permission response', async () => {
+	it('submits question and option IDs independently of their display labels', async () => {
 		const onDecision = vi.fn();
-		render(PermissionRequestRowTestHost, { request: cursorAskQuestionRequest(), onDecision });
+		render(PermissionRequestRowTestHost, { request: titledQuestionRequest(), onDecision });
 
 		await fireEvent.click(screen.getByRole('radio', { name: /Agent/ }));
 		await fireEvent.click(screen.getByRole('button', { name: /submit answer/i }));
@@ -114,9 +114,7 @@ describe('PermissionRequestRow', () => {
 	});
 
 	it('submits free text through the same form gate and clears it on option selection', async () => {
-		const request = askUserQuestionRequest();
-		if (request.requestedTool.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
-		request.requestedTool.questions[0].allowFreeText = true;
+		const request = askUserQuestionRequest({ allowFreeText: true });
 		const onDecision = vi.fn();
 		render(PermissionRequestRowTestHost, { request, onDecision });
 		await fireEvent.click(screen.getByRole('radio', { name: 'Other' }));
@@ -126,9 +124,14 @@ describe('PermissionRequestRow', () => {
 		expect(onDecision).not.toHaveBeenCalled();
 		await fireEvent.input(input, { target: { value: 'Custom mode' } });
 		await fireEvent.submit(input.closest('form')!);
-		expect(onDecision).toHaveBeenCalledWith('incarnation-question', { allow: true, response: {
-			type: 'ask-user-question-response', outcome: 'answered', answers: [{ questionId: 'Which mode?', selectedOptionIds: [], text: 'Custom mode' }],
-		} });
+		expect(onDecision).toHaveBeenCalledWith('incarnation-question', {
+			allow: true,
+			response: {
+				type: 'ask-user-question-response',
+				outcome: 'answered',
+				answers: [{ questionId: 'Which mode?', selectedOptionIds: [], text: 'Custom mode' }],
+			},
+		});
 		await fireEvent.click(screen.getByRole('radio', { name: /Fast/ }));
 		expect(screen.queryByRole('textbox')).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: /submit answer/i }));
@@ -136,13 +139,17 @@ describe('PermissionRequestRow', () => {
 	});
 
 	it('renders resolved secret text masked and read-only', () => {
-		const request = askUserQuestionRequest();
-		if (request.requestedTool.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
-		Object.assign(request.requestedTool.questions[0], { allowFreeText: true, isSecret: true, options: [] });
-		render(PermissionRequestRowTestHost, { request, onDecision: vi.fn(), terminal: {
-			permissionOccurrenceId: request.permissionOccurrenceId, state: 'resolved', allowed: true,
-			questionTextAnswers: { 'Which mode?': 'Synthetic secret' },
-		} });
+		const request = askUserQuestionRequest({ allowFreeText: true, isSecret: true, options: [] });
+		render(PermissionRequestRowTestHost, {
+			request,
+			onDecision: vi.fn(),
+			terminal: {
+				permissionOccurrenceId: request.permissionOccurrenceId,
+				state: 'resolved',
+				allowed: true,
+				questionTextAnswers: { 'Which mode?': 'Synthetic secret' },
+			},
+		});
 		const input = screen.getByLabelText('Which mode?') as HTMLInputElement;
 		expect(input.type).toBe('password');
 		expect(input.readOnly).toBe(true);
@@ -151,9 +158,7 @@ describe('PermissionRequestRow', () => {
 	});
 
 	it('allows Other to be unchecked on a multi-select question', async () => {
-		const request = askUserQuestionRequest();
-		if (request.requestedTool.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
-		Object.assign(request.requestedTool.questions[0], { allowFreeText: true, allowMultiple: true });
+		const request = askUserQuestionRequest({ allowFreeText: true, allowMultiple: true });
 		const onDecision = vi.fn();
 		render(PermissionRequestRowTestHost, { request, onDecision });
 		const other = screen.getByRole<HTMLInputElement>('checkbox', { name: 'Other' });
@@ -169,14 +174,18 @@ describe('PermissionRequestRow', () => {
 	});
 
 	it('preserves line breaks in resolved free text', () => {
-		const request = askUserQuestionRequest();
-		if (request.requestedTool.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
-		Object.assign(request.requestedTool.questions[0], { allowFreeText: true });
+		const request = askUserQuestionRequest({ allowFreeText: true });
 		const answer = 'first line\nsecond line';
-		render(PermissionRequestRowTestHost, { request, onDecision: vi.fn(), terminal: {
-			permissionOccurrenceId: request.permissionOccurrenceId, state: 'resolved', allowed: true,
-			questionTextAnswers: { 'Which mode?': answer },
-		} });
+		render(PermissionRequestRowTestHost, {
+			request,
+			onDecision: vi.fn(),
+			terminal: {
+				permissionOccurrenceId: request.permissionOccurrenceId,
+				state: 'resolved',
+				allowed: true,
+				questionTextAnswers: { 'Which mode?': answer },
+			},
+		});
 		const shown = screen.getByText('first line second line');
 		expect(shown.textContent).toBe(answer);
 		expect(shown.classList.contains('whitespace-pre-wrap')).toBe(true);
@@ -374,7 +383,7 @@ describe('PermissionRequestRow', () => {
 	it.each([
 		new ExitPlanModeToolUseMessage(TS, 'tool-plan', 'Proposed plan'),
 		askUserQuestionRequest().requestedTool,
-		cursorAskQuestionRequest().requestedTool,
+		titledQuestionRequest().requestedTool,
 		new CursorCreatePlanToolUseMessage(TS, 'tool-cursor-plan', 'Proposed plan'),
 	])('shows the reason in pending and resolved $type cards as plain text', async (requestedTool) => {
 		const reason = 'Review <b>the proposed action</b> before continuing.';

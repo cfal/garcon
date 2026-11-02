@@ -1,10 +1,31 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { runCli, withCliFixture } from '../../support/cli-fixture.js';
-import { codexFinalAnswerMessage } from '../../support/fake-codex-model.js';
+import { codexFinalAnswerMessage, type CodexScriptedItem } from '../../support/fake-codex-model.js';
 import { liveCodexStartRequest } from '../../support/live-codex.js';
 import { LIVE_TURN_TIMEOUT_MS, waitForVisibleResponse } from '../../support/live-agent.js';
 import { startScriptedCodexTestEnvironment, type ScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
+
+function questionCall(callId: string): CodexScriptedItem {
+  return {
+    type: 'function_call',
+    name: 'request_user_input',
+    call_id: callId,
+    arguments: JSON.stringify({
+      questions: [
+        {
+          id: 'mode',
+          header: 'Mode',
+          question: 'Which mode?',
+          options: [
+            { label: 'Fast', description: 'Quick path' },
+            { label: 'Careful', description: 'Detailed path' },
+          ],
+        },
+      ],
+    }),
+  };
+}
 
 describe('scripted Codex synchronous questions', () => {
   let environment: ScriptedCodexTestEnvironment;
@@ -22,38 +43,14 @@ describe('scripted Codex synchronous questions', () => {
       let originalUserTexts: readonly string[] = [];
       environment.model.scriptTurn((request) => {
         originalUserTexts = request.userTexts;
-        return [
-          {
-            type: 'function_call',
-            name: 'request_user_input',
-            call_id: callId,
-            arguments: JSON.stringify({
-              questions: [
-                {
-                  id: 'mode',
-                  header: 'Mode',
-                  question: 'Which mode?',
-                  options: [
-                    { label: 'Fast', description: 'Quick path' },
-                    { label: 'Careful', description: 'Detailed path' },
-                  ],
-                },
-              ],
-            }),
-          },
-        ];
+        return [questionCall(callId)];
       });
       environment.model.scriptTurn((request) => {
         const output = request.functionCallOutputs.find((item) => item.callId === callId);
         expect(output).toBeDefined();
-        expect(JSON.parse(output!.output)).toEqual({
-          answers:
-            mode === 'skip'
-              ? {}
-              : {
-                  mode: { answers: [mode === 'text' ? 'Custom mode' : 'Careful'] },
-                },
-        });
+        const expectedAnswer = mode === 'text' ? 'Custom mode' : 'Careful';
+        const answers = mode === 'skip' ? {} : { mode: { answers: [expectedAnswer] } };
+        expect(JSON.parse(output!.output)).toEqual({ answers });
         expect(request.userTexts).toEqual(originalUserTexts);
         return [codexFinalAnswerMessage(reply)];
       });
@@ -150,26 +147,7 @@ describe('scripted Codex synchronous questions', () => {
 
   for (const end of ['stop', 'restart'] as const) {
     test(`keeps unanswered question history inert after ${end}`, async () => {
-      environment.model.scriptTurn([
-        {
-          type: 'function_call',
-          name: 'request_user_input',
-          call_id: `call-${end}`,
-          arguments: JSON.stringify({
-            questions: [
-              {
-                id: 'mode',
-                header: 'Mode',
-                question: 'Which mode?',
-                options: [
-                  { label: 'Fast', description: 'Quick path' },
-                  { label: 'Careful', description: 'Detailed path' },
-                ],
-              },
-            ],
-          }),
-        },
-      ]);
+      environment.model.scriptTurn([questionCall(`call-${end}`)]);
       await withCliFixture(
         `codex-question-${end}`,
         async (fixture) => {

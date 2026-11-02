@@ -377,12 +377,14 @@ function normalizeResponseItem(
       const normalized = asString(rawPayload.output);
       const execution = normalized === undefined ? null : normalizeExecOutput(normalized);
       const answers = codexHistoricalAnswers(rawPayload.output);
+      const content = { ...normalizeToolResultContent(execution?.content ?? rawPayload.output) };
+      if (answers) content.toolUseResult = { answers };
+      const isQuestionError = !answers && normalized?.startsWith('request_user_input ') === true;
       result.canonical.push(new ToolResultMessage(
         ts,
         asString(rawPayload.call_id) || '',
-        { ...normalizeToolResultContent(execution?.content ?? rawPayload.output),
-          ...(answers ? { toolUseResult: { answers } } : {}) },
-        execution?.isError ?? (!answers && normalized?.startsWith('request_user_input ') === true),
+        content,
+        execution?.isError ?? isQuestionError,
       ));
       return result;
     }

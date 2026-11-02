@@ -112,4 +112,26 @@ describe('Codex synchronous questions', () => {
     expect(codexHistoricalAnswers('{"answers":{}}')).toEqual({});
     expect(codexHistoricalAnswers('{"answers":{"mode":false}}')).toBeNull();
   });
+
+  it('preserves arbitrary historical question IDs and exact answer arrays', () => {
+    const nativeAnswers = Object.fromEntries([
+      ['__proto__', { answers: ['  Custom\nmode  '] }],
+      ['constructor', { answers: [] }],
+    ]);
+    const answers = codexHistoricalAnswers({ answers: nativeAnswers });
+    expect(answers).toEqual(Object.fromEntries([
+      ['__proto__', ['  Custom\nmode  ']],
+      ['constructor', []],
+    ]));
+    expect(Object.getPrototypeOf(answers)).toBe(Object.prototype);
+    expect(answers!.__proto__).toBe(nativeAnswers.__proto__.answers);
+  });
+
+  it('rejects the whole historical answer map when any entry is malformed', () => {
+    for (const invalid of [null, {}, { answers: 'Custom' }, { answers: ['Custom', 1] }]) {
+      expect(codexHistoricalAnswers({
+        answers: { valid: { answers: ['Fast'] }, invalid },
+      })).toBeNull();
+    }
+  });
 });

@@ -1,4 +1,4 @@
-import type { ToolUseChatMessage } from './chat-types.js';
+import type { AskUserQuestionPrompt, ToolUseChatMessage } from './chat-types.js';
 
 export interface AskUserQuestionAnswerPayload {
   questionId: string;
@@ -30,13 +30,6 @@ export interface AskUserQuestionSkippedResponse extends Record<string, unknown> 
 export type AskUserQuestionDecisionResponse =
   | AskUserQuestionAnsweredResponse
   | AskUserQuestionSkippedResponse;
-
-type StructuredQuestionTool = Extract<
-  ToolUseChatMessage,
-  { type: 'ask-user-question-tool-use' }
->;
-
-type StructuredQuestion = StructuredQuestionTool['questions'][number];
 
 export function normalizeAskUserQuestionDecisionResponse(
   value: unknown,
@@ -75,22 +68,24 @@ export function askUserQuestionDecisionValidationError(
   allow: boolean,
   response: AskUserQuestionDecisionResponse,
 ): string | null {
-  const questions = structuredQuestions(requestedTool);
-  if (!questions) return 'Structured answers require a pending question request';
+  if (requestedTool.type !== 'ask-user-question-tool-use' || !requestedTool.questions) {
+    return 'Structured answers require a pending question request';
+  }
+  const questions = requestedTool.questions;
 
   if (response.outcome === 'skipped') {
     return allow ? 'A skipped question response must deny the request' : null;
   }
   if (!allow) return 'An answered question response must allow the request';
 
-  const questionsById = new Map(questions.map((question) => [question.id, question]));
-  if (questionsById.size !== questions.length) {
+  const questionIds = new Set(questions.map((question) => question.id));
+  if (questionIds.size !== questions.length) {
     return 'The pending question request contains duplicate question IDs';
   }
 
   const answersById = new Map(response.answers.map((answer) => [answer.questionId, answer]));
   for (const answer of response.answers) {
-    if (!questionsById.has(answer.questionId)) {
+    if (!questionIds.has(answer.questionId)) {
       return `Structured answers contain an unknown question ID: ${answer.questionId}`;
     }
   }
@@ -102,8 +97,12 @@ export function askUserQuestionDecisionValidationError(
     const answer = answersById.get(question.id)!;
     if (answer.text !== undefined) {
       if (!question.allowFreeText) return `Question ${question.id} does not accept free text`;
-      if (!boundedText(answer.text, ASK_USER_QUESTION_TEXT_MAX_BYTES)) return `Question ${question.id} requires valid nonblank text`;
-      if (answer.selectedOptionIds.length > 0) return `Question ${question.id} accepts either text or option selections`;
+      if (!boundedText(answer.text, ASK_USER_QUESTION_TEXT_MAX_BYTES)) {
+        return `Question ${question.id} requires valid nonblank text`;
+      }
+      if (answer.selectedOptionIds.length > 0) {
+        return `Question ${question.id} accepts either text or option selections`;
+      }
       continue;
     }
     if (question.allowFreeText && question.options.length === 0) return `Question ${question.id} requires text`;
@@ -113,19 +112,8 @@ export function askUserQuestionDecisionValidationError(
   return null;
 }
 
-function structuredQuestions(
-  requestedTool: ToolUseChatMessage,
-): readonly StructuredQuestion[] | null {
-  switch (requestedTool.type) {
-    case 'ask-user-question-tool-use':
-      return requestedTool.questions;
-    default:
-      return null;
-  }
-}
-
 function selectedOptionsValidationError(
-  question: StructuredQuestion,
+  question: AskUserQuestionPrompt,
   selectedOptionIds: readonly string[],
 ): string | null {
   const optionIds = new Set(question.options.map((option) => option.id));
@@ -175,7 +163,9 @@ function normalizeAnswers(response: Record<string, unknown>): AskUserQuestionAns
     const selectedOptionIds = normalizeOptionIds(answer.selectedOptionIds);
     if (!selectedOptionIds) return null;
     questionIds.add(answer.questionId);
-    answers.push({ questionId: answer.questionId, selectedOptionIds,
+    answers.push({
+      questionId: answer.questionId,
+      selectedOptionIds,
       ...(answer.text === undefined ? {} : { text: answer.text }),
     });
   }

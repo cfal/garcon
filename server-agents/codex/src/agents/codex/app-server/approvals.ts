@@ -56,8 +56,8 @@ export function buildApprovalMessage(pending: CodexPendingApproval): PermissionR
   const now = new Date().toISOString();
 
   if (pending.method === CODEX_USER_INPUT_METHOD) {
-    return new PermissionRequestMessage(now, pending.permissionOccurrenceId,
-      codexUserInputMessage(now, pending.params.itemId, pending.params.questions));
+    const tool = codexUserInputMessage(now, pending.params.itemId, pending.params.questions);
+    return new PermissionRequestMessage(now, pending.permissionOccurrenceId, tool);
   }
 
   if (pending.method === 'item/commandExecution/requestApproval') {
@@ -136,7 +136,8 @@ export function buildApprovalResponse(
   decision: PermissionDecisionPayload,
 ): unknown {
   if (pending.method === CODEX_USER_INPUT_METHOD) {
-    return codexUserInputResponse(codexUserInputMessage(new Date().toISOString(), pending.params.itemId, pending.params.questions), decision);
+    const tool = codexUserInputMessage(new Date().toISOString(), pending.params.itemId, pending.params.questions);
+    return codexUserInputResponse(tool, decision);
   }
   if (pending.method === 'item/commandExecution/requestApproval') {
     if (commandApprovalKind(pending) === 'writeStdin') {

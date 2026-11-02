@@ -215,15 +215,21 @@ export function buildConversationFeedRenderModel(
 		const message = row.message;
 
 		if (message instanceof PermissionResolvedMessage) {
-			permissionTerminalByOccurrence.set(message.permissionOccurrenceId, {
+			const terminal: PermissionTerminalState = {
 				permissionOccurrenceId: message.permissionOccurrenceId,
 				state: 'resolved',
 				allowed: message.allowed,
-				...(message.questionResponse?.outcome === 'answered' ? {
-					selectedQuestionOptions: Object.fromEntries(message.questionResponse.answers.map((answer) => [answer.questionId, answer.selectedOptionIds])),
-					questionTextAnswers: Object.fromEntries(message.questionResponse.answers.filter((answer) => answer.text !== undefined).map((answer) => [answer.questionId, answer.text!])),
-				} : {}),
-			});
+			};
+			if (message.questionResponse?.outcome === 'answered') {
+				const answers = message.questionResponse.answers;
+				terminal.selectedQuestionOptions = Object.fromEntries(
+					answers.map((answer) => [answer.questionId, answer.selectedOptionIds]),
+				);
+				terminal.questionTextAnswers = Object.fromEntries(
+					answers.flatMap(({ questionId, text }) => text === undefined ? [] : [[questionId, text]]),
+				);
+			}
+			permissionTerminalByOccurrence.set(message.permissionOccurrenceId, terminal);
 		} else if (message instanceof PermissionCancelledMessage) {
 			permissionTerminalByOccurrence.set(message.permissionOccurrenceId, {
 				permissionOccurrenceId: message.permissionOccurrenceId,

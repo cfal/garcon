@@ -11,11 +11,13 @@ import { isRecord } from '@garcon/common/json';
 
 export const CODEX_USER_INPUT_METHOD = 'item/tool/requestUserInput';
 
-export interface CodexUserInputResponse {
+interface CodexUserInputResponse {
   answers: Record<string, { answers: string[] }>;
 }
 
-export function codexUserInputQuestions(value: unknown): AskUserQuestionPrompt[] {
+const idEncoder = new TextEncoder();
+
+function parseCodexUserInputQuestions(value: unknown): AskUserQuestionPrompt[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > ASK_USER_QUESTION_MAX_ANSWERS) {
     throw new TypeError('Invalid Codex questions');
   }
@@ -26,7 +28,7 @@ export function codexUserInputQuestions(value: unknown): AskUserQuestionPrompt[]
       typeof question.id !== 'string' ||
       !question.id.trim() ||
       !question.id.isWellFormed() ||
-      new TextEncoder().encode(question.id).length > ASK_USER_QUESTION_ID_MAX_BYTES ||
+      idEncoder.encode(question.id).length > ASK_USER_QUESTION_ID_MAX_BYTES ||
       ids.has(question.id) ||
       typeof question.question !== 'string' ||
       !question.question.trim() ||
@@ -67,7 +69,7 @@ export function codexUserInputMessage(
   questions: unknown,
 ): AskUserQuestionToolUseMessage {
   if (typeof itemId !== 'string' || !itemId.trim()) throw new TypeError('Missing Codex question item ID');
-  return new AskUserQuestionToolUseMessage(timestamp, itemId, undefined, codexUserInputQuestions(questions));
+  return new AskUserQuestionToolUseMessage(timestamp, itemId, undefined, parseCodexUserInputQuestions(questions));
 }
 
 export function codexUserInputResponse(
@@ -83,21 +85,17 @@ export function codexUserInputResponse(
   if (!decision.allow) return { answers: {} };
   if (!response || response.outcome !== 'answered') throw new TypeError('Codex questions require structured answers');
   const questions = new Map(tool.questions.map((question) => [question.id, question]));
-  return {
-    answers: Object.fromEntries(
-      response.answers.map((answer) => [
-        answer.questionId,
-        {
-          answers:
-            answer.text !== undefined
-              ? [answer.text]
-              : answer.selectedOptionIds.map(
-                  (id) => questions.get(answer.questionId)!.options.find((option) => option.id === id)!.label,
-                ),
-        },
-      ]),
-    ),
-  };
+  const answerEntries = response.answers.map((answer): [string, { answers: string[] }] => {
+    let values: string[];
+    if (answer.text !== undefined) {
+      values = [answer.text];
+    } else {
+      const question = questions.get(answer.questionId)!;
+      values = answer.selectedOptionIds.map((id) => question.options.find((option) => option.id === id)!.label);
+    }
+    return [answer.questionId, { answers: values }];
+  });
+  return { answers: Object.fromEntries(answerEntries) };
 }
 
 export function codexHistoricalUserInput(
@@ -107,9 +105,10 @@ export function codexHistoricalUserInput(
 ): AskUserQuestionToolUseMessage {
   try {
     // The native handler adds Other after recording the original model arguments.
-    const questions = Array.isArray(input.questions)
-      ? input.questions.map((question) => (isRecord(question) ? { ...question, isOther: true } : question))
-      : input.questions;
+    let questions = input.questions;
+    if (Array.isArray(questions)) {
+      questions = questions.map((question) => (isRecord(question) ? { ...question, isOther: true } : question));
+    }
     return codexUserInputMessage(timestamp, callId, questions);
   } catch {
     return new AskUserQuestionToolUseMessage(timestamp, callId, undefined, []);
@@ -126,13 +125,13 @@ export function codexHistoricalAnswers(output: unknown): Record<string, string[]
     }
   }
   if (!isRecord(value) || !isRecord(value.answers)) return null;
-  const entries = Object.entries(value.answers);
-  if (
-    !entries.every(
-      ([, answer]) =>
-        isRecord(answer) && Array.isArray(answer.answers) && answer.answers.every((text) => typeof text === 'string'),
-    )
-  )
-    return null;
-  return Object.fromEntries(entries.map(([id, answer]) => [id, (answer as { answers: string[] }).answers]));
+  const answers = new Map<string, string[]>();
+  for (const [id, answer] of Object.entries(value.answers)) {
+    if (!isRecord(answer) || !Array.isArray(answer.answers)
+      || !answer.answers.every((text) => typeof text === 'string')) {
+      return null;
+    }
+    answers.set(id, answer.answers);
+  }
+  return Object.fromEntries(answers);
 }

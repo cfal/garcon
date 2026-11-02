@@ -12,15 +12,29 @@ import {
 const TIMESTAMP = '2026-09-08T00:00:00.000Z';
 
 describe('free-text question answers', () => {
-  const tool = new AskUserQuestionToolUseMessage(TIMESTAMP, 'question', undefined, [{
-    id: 'detail', prompt: 'Which detail?', options: [{ id: 'preset', label: 'Preset' }], allowFreeText: true,
-  }]);
-  const response = (text, selectedOptionIds = []) => ({ type: 'ask-user-question-response', outcome: 'answered',
-    answers: [{ questionId: 'detail', selectedOptionIds, text }] });
+  const tool = new AskUserQuestionToolUseMessage(TIMESTAMP, 'question', undefined, [
+    {
+      id: 'detail',
+      prompt: 'Which detail?',
+      options: [{ id: 'preset', label: 'Preset' }],
+      allowFreeText: true,
+    },
+  ]);
+  const response = (text, selectedOptionIds = []) => ({
+    type: 'ask-user-question-response',
+    outcome: 'answered',
+    answers: [{ questionId: 'detail', selectedOptionIds, text }],
+  });
 
   it('preserves exact text, bounds UTF-8, and rejects malformed text', () => {
     expect(normalizeAskUserQuestionDecisionResponse(response('  Custom detail  '))).toEqual(response('  Custom detail  '));
-    for (const text of ['', '   ', '\ud800', 'a'.repeat(ASK_USER_QUESTION_TEXT_MAX_BYTES + 1), '\u00e9'.repeat(ASK_USER_QUESTION_TEXT_MAX_BYTES)]) {
+    for (const text of [
+      '',
+      '   ',
+      '\ud800',
+      'a'.repeat(ASK_USER_QUESTION_TEXT_MAX_BYTES + 1),
+      '\u00e9'.repeat(ASK_USER_QUESTION_TEXT_MAX_BYTES),
+    ]) {
       expect(normalizeAskUserQuestionDecisionResponse(response(text))).toBeNull();
     }
   });
@@ -36,6 +50,7 @@ describe('free-text question answers', () => {
     expect(askUserQuestionDecisionValidationError(textOnly, true, response('Custom'))).toBeNull();
   });
 });
+
 const answered = {
   type: 'ask-user-question-response',
   outcome: 'answered',
@@ -74,7 +89,7 @@ function questionTool() {
 }
 
 describe('structured question decision validation', () => {
-  it('accepts exact generic and Cursor question answers', () => {
+  it('accepts exact option identities and skipped questions', () => {
     expect(askUserQuestionDecisionValidationError(questionTool(), true, answered)).toBeNull();
     expect(askUserQuestionDecisionValidationError(
       new AskUserQuestionToolUseMessage(TIMESTAMP, 'tool-2', 'Configure', [{

@@ -2,6 +2,7 @@ import {
 	AskUserQuestionToolUseMessage,
 	PermissionRequestMessage,
 	ToolResultMessage,
+	type AskUserQuestionPrompt,
 } from '$shared/chat-types';
 import { isRecord } from '$shared/json';
 import type { PermissionTerminalState } from './conversation-feed-items.js';
@@ -23,13 +24,13 @@ function answerMap(result: ToolResultMessage): Record<string, unknown> | null {
 	return toolUseResult && isRecord(toolUseResult.answers) ? toolUseResult.answers : null;
 }
 
-function answerValues(
+function legacyAnswerValues(
 	answer: unknown,
 	optionLabels: Set<string>,
 	optionIds: Set<string>,
 ): string[] {
 	if (Array.isArray(answer)) {
-		return answer.flatMap((entry) => answerValues(entry, optionLabels, optionIds));
+		return answer.flatMap((entry) => legacyAnswerValues(entry, optionLabels, optionIds));
 	}
 	if (typeof answer !== 'string') return [];
 	const trimmed = answer.trim();
@@ -41,16 +42,21 @@ function answerValues(
 		.filter(Boolean);
 }
 
+function completeAnswerValues(answer: unknown): string[] {
+	if (typeof answer === 'string') return [answer];
+	if (Array.isArray(answer)) return answer.filter((value): value is string => typeof value === 'string');
+	return [];
+}
+
 function selectedOptionIds(
-	question: AskUserQuestionToolUseMessage['questions'][number],
+	question: AskUserQuestionPrompt,
 	answer: unknown,
 ): string[] {
 	const optionIdByLabel = new Map(question.options.map((option) => [option.label, option.id]));
 	const optionIds = new Set(question.options.map((option) => option.id));
 	const values = question.allowFreeText
-		? (Array.isArray(answer) ? answer.filter((value): value is string => typeof value === 'string')
-			: typeof answer === 'string' ? [answer] : [])
-		: answerValues(answer, new Set(optionIdByLabel.keys()), optionIds);
+		? completeAnswerValues(answer)
+		: legacyAnswerValues(answer, new Set(optionIdByLabel.keys()), optionIds);
 	if (question.allowFreeText && values.some((value) => !optionIds.has(value) && !optionIdByLabel.has(value))) {
 		return [];
 	}
@@ -95,18 +101,24 @@ function answersFromLegacyText(
 	return answers;
 }
 
-function questionTextAnswers(tool: AskUserQuestionToolUseMessage, answers: Record<string, unknown>): Record<string, string> {
-	return Object.fromEntries(tool.questions.filter((question) => question.allowFreeText).flatMap((question) => {
+function questionTextAnswers(
+	tool: AskUserQuestionToolUseMessage,
+	answers: Record<string, unknown>,
+): Record<string, string> {
+	const texts = new Map<string, string>();
+	for (const question of tool.questions) {
+		if (!question.allowFreeText) continue;
 		const answer = answers[question.id] ?? answers[question.prompt];
-		if (selectedOptionIds(question, answer).length > 0) return [];
-		const text = typeof answer === 'string' ? answer : Array.isArray(answer) ? answer.filter((value) => typeof value === 'string').join('\n') : '';
-		return text ? [[question.id, text]] : [];
-	}));
+		if (selectedOptionIds(question, answer).length > 0) continue;
+		const text = completeAnswerValues(answer).join('\n');
+		if (text) texts.set(question.id, text);
+	}
+	return Object.fromEntries(texts);
 }
 
 function terminalFromResult(
-  tool: AskUserQuestionToolUseMessage,
-  result: ToolResultMessage,
+	tool: AskUserQuestionToolUseMessage,
+	result: ToolResultMessage,
 ): Omit<PermissionTerminalState, 'permissionOccurrenceId'> {
 	const answers = answerMap(result);
 	const rawText = rawToolResultText(result.content);

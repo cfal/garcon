@@ -366,6 +366,56 @@ describe('buildConversationFeedRenderItems', () => {
 		))).toEqual(['first-occurrence', 'second-occurrence']);
 	});
 
+	it('projects answer fields only for answered permission resolutions', () => {
+		const model = buildConversationFeedRenderModel(rows([
+			new PermissionResolvedMessage(TS, 'answered', true, {
+				type: 'ask-user-question-response',
+				outcome: 'answered',
+				answers: [
+					{ questionId: 'mode', selectedOptionIds: ['careful'] },
+					{ questionId: 'details', selectedOptionIds: [], text: '  Custom\nconstraint  ' },
+				],
+			}),
+			new PermissionResolvedMessage(TS, 'empty', true, {
+				type: 'ask-user-question-response',
+				outcome: 'answered',
+				answers: [],
+			}),
+			new PermissionResolvedMessage(TS, 'skipped', false, {
+				type: 'ask-user-question-response',
+				outcome: 'skipped',
+			}),
+			new PermissionResolvedMessage(TS, 'plain', true),
+		]));
+
+		expect(Object.fromEntries(model.permissionTerminalByOccurrence)).toStrictEqual({
+			answered: {
+				permissionOccurrenceId: 'answered',
+				state: 'resolved',
+				allowed: true,
+				selectedQuestionOptions: { mode: ['careful'], details: [] },
+				questionTextAnswers: { details: '  Custom\nconstraint  ' },
+			},
+			empty: {
+				permissionOccurrenceId: 'empty',
+				state: 'resolved',
+				allowed: true,
+				selectedQuestionOptions: {},
+				questionTextAnswers: {},
+			},
+			skipped: {
+				permissionOccurrenceId: 'skipped',
+				state: 'resolved',
+				allowed: false,
+			},
+			plain: {
+				permissionOccurrenceId: 'plain',
+				state: 'resolved',
+				allowed: true,
+			},
+		});
+	});
+
 	it('pairs interleaved results to individual tool rows in source order', () => {
 		const first = new GlobToolUseMessage(TS, 'glob-1', 'src/**/*.ts');
 		const second = new GlobToolUseMessage(TS, 'glob-2', 'test/**/*.ts');

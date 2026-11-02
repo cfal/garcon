@@ -4502,10 +4502,22 @@ describe('CodexAppServerRuntime', () => {
     const provider = createRuntime({ createClient: () => fake });
     const published = collectOperation();
     await provider.startSession(makeRequest({ operation: published.operation, permissionMode: 'manualBypass' }));
-    const request = { id: 17, method: 'item/tool/requestUserInput', params: {
-      threadId: 'thread-1', turnId: 'turn-1', itemId: 'call-question', isBlocking: false,
-      questions: [{ id: 'mode', question: 'Which mode?', isOther: true, options: [{ label: 'Fast' }, { label: 'Careful' }] }],
-    } };
+    const request = {
+      id: 17,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'call-question',
+        isBlocking: false,
+        questions: [{
+          id: 'mode',
+          question: 'Which mode?',
+          isOther: true,
+          options: [{ label: 'Fast' }, { label: 'Careful' }],
+        }],
+      },
+    };
     fake.emit('serverRequest', request);
     expect(fake.respond).not.toHaveBeenCalled();
     const first = permissionEvents(published.events)[0];
@@ -4513,8 +4525,14 @@ describe('CodexAppServerRuntime', () => {
     await expect(first.decision.respond({ allow: true })).rejects.toThrow('structured answers');
     fake.emit('notification', { method: 'serverRequest/resolved', params: { threadId: 'unrelated', requestId: 17 } });
     expect(permissionEvents(published.events)).toHaveLength(1);
-    await first.decision.respond({ allow: true, response: { type: 'ask-user-question-response', outcome: 'answered',
-      answers: [{ questionId: 'mode', selectedOptionIds: [], text: 'Custom mode' }] } });
+    await first.decision.respond({
+      allow: true,
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'answered',
+        answers: [{ questionId: 'mode', selectedOptionIds: [], text: 'Custom mode' }],
+      },
+    });
     expect(fake.respond).toHaveBeenLastCalledWith(17, { answers: { mode: { answers: ['Custom mode'] } } });
     fake.emit('notification', { method: 'serverRequest/resolved', params: { threadId: 'thread-1', requestId: 17 } });
     expect(permissionEvents(published.events)).toHaveLength(1);
@@ -4541,12 +4559,25 @@ describe('CodexAppServerRuntime', () => {
     const provider = createRuntime({ createClient: () => fake });
     const published = collectOperation();
     await provider.startSession(makeRequest({ operation: published.operation }));
-    fake.emit('serverRequest', { id: 17, method: 'item/tool/requestUserInput', params: {
-      threadId: 'thread-1', turnId: 'turn-1', itemId: 'call-question', questions: [{ id: 'mode', question: 'Which mode?', options: [{ label: 'Fast' }] }],
-    } });
+    fake.emit('serverRequest', {
+      id: 17,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'call-question',
+        questions: [{ id: 'mode', question: 'Which mode?', options: [{ label: 'Fast' }] }],
+      },
+    });
     const pending = permissionEvents(published.events)[0];
-    if (terminal === 'exit') fake.emit('exit', 1);
-    else fake.emit('notification', { method: terminal, params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1', status: 'completed' }) } });
+    if (terminal === 'exit') {
+      fake.emit('exit', 1);
+    } else {
+      fake.emit('notification', {
+        method: terminal,
+        params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1', status: 'completed' }) },
+      });
+    }
     await new Promise((resolve) => setImmediate(resolve));
     expect(permissionEvents(published.events).at(-1).lifecycle.kind).toBe('cancelled');
     await expect(pending.decision.respond({ allow: false })).rejects.toThrow('no longer pending');
