@@ -48,6 +48,16 @@ describe('updateClaudeContextWindow', () => {
     ]);
   });
 
+  it.each(['claude-opus-5-5[1m]', 'claude-opus-5-5'])(
+    'accepts the reported model ID %s while verifying the live window', async model => {
+      const request = controller({ sources: [] }, {
+        model, autocompactSource: 'env', rawMaxTokens: 850_000,
+      });
+      await updateClaudeContextWindow(request, 'claude-opus-5-5[1m]', 'claude-opus-5-5[1m]', 850_000);
+      expect(request.mock.calls.at(-1)?.[0]).toEqual({ subtype: 'get_context_usage' });
+    },
+  );
+
   it.each([
     null,
     {},
@@ -74,9 +84,11 @@ describe('updateClaudeContextWindow', () => {
     null,
     {},
     { model: 'wrong[1m]', autocompactSource: 'env', rawMaxTokens: 850_000 },
+    { model: 'next[2m]', autocompactSource: 'env', rawMaxTokens: 850_000 },
     { model: 'next[1m]', autocompactSource: 'settings', rawMaxTokens: 850_000 },
     { model: 'next[1m]', autocompactSource: 'env', rawMaxTokens: 922_000 },
     { model: 'next[1m]', autocompactSource: 'env', rawMaxTokens: '850000' },
+    { model: 'next', autocompactSource: 'env', rawMaxTokens: 922_000 },
   ])('rejects ineffective controls despite successful ACKs: %j', async usage => {
     const request = controller({ sources: [] }, usage);
     await expect(updateClaudeContextWindow(request, 'previous[1m]', 'next[1m]', 850_000))
