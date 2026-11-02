@@ -35,6 +35,7 @@ COPY common/package.json common/
 COPY server/package.json server/
 COPY web/package.json web/
 COPY cli/package.json cli/
+COPY native/package.json native/
 COPY server-agents/interface/package.json server-agents/interface/
 COPY server-agents/common/package.json server-agents/common/
 COPY server-agents/amp/package.json server-agents/amp/

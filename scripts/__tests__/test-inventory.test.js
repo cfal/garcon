@@ -14,6 +14,7 @@ const lanes = [
   { name: 'providers', include: ['server-agents/**/__tests__/*.{test.js,test.ts}'] },
   { name: 'server', include: ['server/**/__tests__/*.{test.js,test.ts}'] },
   { name: 'cli', include: ['cli/__tests__/*.test.ts'] },
+  { name: 'native launcher', include: ['native/tests/*.test.js'] },
   { name: 'web logic', include: ['web/src/**/*.logic.test.ts'] },
   { name: 'web ui', include: ['web/src/**/*.test.ts'], exclude: ['web/src/**/*.logic.test.ts'] },
   { name: 'integration server', include: ['integration-tests/tests/server/*.test.{ts,js}'] },
@@ -34,11 +35,12 @@ function owners(file, definitions = lanes) {
 }
 
 test('inventory patterns match the executable discovery commands', () => {
-  expect(rootScripts.test).toBe('bun run test:server && bun run test:cli && bun run --cwd web test');
+  expect(rootScripts.test).toBe('bun run test:server && bun run test:cli && bun run --cwd native test && bun run --cwd web test');
   expect(rootScripts['test:server']).toBe(`bun test ./${pattern('common')} && bun test ./${pattern('scripts')} && bun scripts/run-test-files.js '${pattern('providers')}' && bun scripts/run-test-files.js '${pattern('server')}'`);
   expect(rootScripts['test:cli']).toBe('bun run --cwd cli test');
   expect(scripts('cli').test).toBe(`bun test ${pattern('cli').replace(/^cli\//, '')}`);
   expect(scripts('web').test).toBe('vitest run');
+  expect(scripts('native').test).toBe(`bun test ${pattern('native launcher').replace(/^native\//, '')}`);
   for (const [name, target] of [
     ['integration', 'test'], ['integration:server', 'test:server'], ['integration:e2e', 'test:e2e'],
     ['integration:chromium', 'test:chromium'], ['integration:webkit', 'test:webkit'], ['search-gate', 'test:search-gate'],

@@ -1,0 +1,20 @@
+{
+  "name": "garcon-native",
+  "private": true,
+  "version": "0.3.4",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "build": "bun scripts/build.js",
+    "test": "bun test tests/*.test.js",
+    "test:host": "cargo test --locked --manifest-path src-tauri/Cargo.toml",
+    "test:smoke": "bun scripts/smoke.js"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.4"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4",
+    "happy-dom": "^21.0.3"
+  }
+}

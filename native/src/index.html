@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
+    <title>Garcon</title>
+    <link rel="stylesheet" href="./launcher.css">
+    <script type="module" src="./launcher.js"></script>
+  </head>
+  <body>
+    <main>
+      <header><img src="./icon.png" width="48" height="48" alt=""><h1>Garcon</h1></header>
+      <form id="server-form">
+        <label for="server-url">Server URL</label>
+        <input id="server-url" name="server-url" type="url" placeholder="https://garcon.example.com/" required autocapitalize="none" autocomplete="url" spellcheck="false" aria-describedby="connection-error">
+        <p id="connection-error" role="alert"></p>
+        <button type="submit" disabled>Connect</button>
+      </form>
+    </main>
+  </body>
+</html>
