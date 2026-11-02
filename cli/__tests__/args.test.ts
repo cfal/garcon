@@ -677,6 +677,15 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['unarchive', CHAT_ID], ENV)).toMatchObject({
       kind: 'unarchive', chatId: CHAT_ID, json: false,
     });
+
+    expect(parseCliArgs([
+      'permission-answer', CHAT_ID, 'permission-text', '--answers',
+      JSON.stringify([{ questionId: 'details', selectedOptionIds: [], text: 'Custom details' }]),
+      '--run', 'run-1', '--server-instance', 'instance-1',
+    ], ENV)).toMatchObject({ response: {
+      type: 'ask-user-question-response', outcome: 'answered',
+      answers: [{ questionId: 'details', selectedOptionIds: [], text: 'Custom details' }],
+    } });
     expect(parseCliArgs(['rename', CHAT_ID, '  Review', 'results  ', '--json'], ENV)).toMatchObject({
       kind: 'rename', chatId: CHAT_ID, title: 'Review results', json: true,
     });

@@ -23,6 +23,7 @@ export interface PermissionTerminalState {
 	allowed?: boolean;
 	reason?: string;
 	selectedQuestionOptions?: Record<string, string[]>;
+	questionTextAnswers?: Record<string, string>;
 }
 
 export interface ConversationFeedMessageRenderItem {
@@ -218,6 +219,10 @@ export function buildConversationFeedRenderModel(
 				permissionOccurrenceId: message.permissionOccurrenceId,
 				state: 'resolved',
 				allowed: message.allowed,
+				...(message.questionResponse?.outcome === 'answered' ? {
+					selectedQuestionOptions: Object.fromEntries(message.questionResponse.answers.map((answer) => [answer.questionId, answer.selectedOptionIds])),
+					questionTextAnswers: Object.fromEntries(message.questionResponse.answers.filter((answer) => answer.text !== undefined).map((answer) => [answer.questionId, answer.text!])),
+				} : {}),
 			});
 		} else if (message instanceof PermissionCancelledMessage) {
 			permissionTerminalByOccurrence.set(message.permissionOccurrenceId, {

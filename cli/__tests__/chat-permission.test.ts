@@ -155,4 +155,13 @@ describe('permission decision', () => {
       exitCode: 2,
     });
   });
+
+  test('maps a question allow without structured answers to an invalid request', async () => {
+    await expect(runPermissionDecision(command, {
+      async decidePermission() {
+        throw new GarconHttpError('submission', 'Permission response contains an invalid structured answer',
+          400, 'VALIDATION_FAILED', false);
+      },
+    }, captureOutput())).rejects.toMatchObject({ phase: 'arguments', exitCode: 2 });
+  });
 });

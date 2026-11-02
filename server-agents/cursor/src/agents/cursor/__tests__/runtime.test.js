@@ -2,7 +2,7 @@ import { describe, expect, it, mock } from 'bun:test';
 
 import {
   BashToolUseMessage,
-  CursorAskQuestionToolUseMessage,
+  AskUserQuestionToolUseMessage,
   CursorCreatePlanToolUseMessage,
   ErrorMessage,
 } from '@garcon/common/chat-types';
@@ -965,7 +965,7 @@ describe('Cursor ACP runtime', () => {
       answers: [{ questionId: 'q1', selectedOptionIds: ['agent'] }],
     };
     const permission = await operation.waitForEvent((event) => event.type === 'permission');
-    expect(permission.lifecycle.requestedTool).toBeInstanceOf(CursorAskQuestionToolUseMessage);
+    expect(permission.lifecycle.requestedTool).toBeInstanceOf(AskUserQuestionToolUseMessage);
     expect(permission.lifecycle.requestedTool.questions[0].prompt).toBe('Which mode?');
     await permission.decision.respond({ allow: true, response: answered });
 

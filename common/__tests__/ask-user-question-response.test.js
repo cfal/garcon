@@ -1,14 +1,41 @@
 import { describe, expect, it } from 'bun:test';
 import {
   askUserQuestionDecisionValidationError,
+  normalizeAskUserQuestionDecisionResponse,
+  ASK_USER_QUESTION_TEXT_MAX_BYTES,
 } from '../ask-user-question-response.ts';
 import {
   AskUserQuestionToolUseMessage,
   BashToolUseMessage,
-  CursorAskQuestionToolUseMessage,
 } from '../chat-types.ts';
 
 const TIMESTAMP = '2026-09-08T00:00:00.000Z';
+
+describe('free-text question answers', () => {
+  const tool = new AskUserQuestionToolUseMessage(TIMESTAMP, 'question', undefined, [{
+    id: 'detail', prompt: 'Which detail?', options: [{ id: 'preset', label: 'Preset' }], allowFreeText: true,
+  }]);
+  const response = (text, selectedOptionIds = []) => ({ type: 'ask-user-question-response', outcome: 'answered',
+    answers: [{ questionId: 'detail', selectedOptionIds, text }] });
+
+  it('preserves exact text, bounds UTF-8, and rejects malformed text', () => {
+    expect(normalizeAskUserQuestionDecisionResponse(response('  Custom detail  '))).toEqual(response('  Custom detail  '));
+    for (const text of ['', '   ', '\ud800', 'a'.repeat(ASK_USER_QUESTION_TEXT_MAX_BYTES + 1), '\u00e9'.repeat(ASK_USER_QUESTION_TEXT_MAX_BYTES)]) {
+      expect(normalizeAskUserQuestionDecisionResponse(response(text))).toBeNull();
+    }
+  });
+  it('requires a text capability and an exclusive answer', () => {
+    expect(askUserQuestionDecisionValidationError(tool, true, response('Custom'))).toBeNull();
+    expect(askUserQuestionDecisionValidationError(tool, true, response('Custom', ['preset']))).toContain('either text');
+    const restricted = new AskUserQuestionToolUseMessage(TIMESTAMP, 'restricted', undefined, [{ ...tool.questions[0], allowFreeText: false }]);
+    expect(askUserQuestionDecisionValidationError(restricted, true, response('Custom'))).toContain('does not accept free text');
+  });
+  it('requires text on free-text-only questions, not empty selections', () => {
+    const textOnly = new AskUserQuestionToolUseMessage(TIMESTAMP, 'text-only', undefined, [{ ...tool.questions[0], options: [] }]);
+    expect(askUserQuestionDecisionValidationError(textOnly, true, response(undefined))).toContain('requires text');
+    expect(askUserQuestionDecisionValidationError(textOnly, true, response('Custom'))).toBeNull();
+  });
+});
 const answered = {
   type: 'ask-user-question-response',
   outcome: 'answered',
@@ -50,7 +77,7 @@ describe('structured question decision validation', () => {
   it('accepts exact generic and Cursor question answers', () => {
     expect(askUserQuestionDecisionValidationError(questionTool(), true, answered)).toBeNull();
     expect(askUserQuestionDecisionValidationError(
-      new CursorAskQuestionToolUseMessage(TIMESTAMP, 'tool-2', 'Configure', [{
+      new AskUserQuestionToolUseMessage(TIMESTAMP, 'tool-2', 'Configure', [{
         id: 'mode',
         prompt: 'Which mode?',
         options: [{ id: 'careful', label: 'Careful' }],

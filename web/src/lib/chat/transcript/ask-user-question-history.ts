@@ -47,7 +47,13 @@ function selectedOptionIds(
 ): string[] {
 	const optionIdByLabel = new Map(question.options.map((option) => [option.label, option.id]));
 	const optionIds = new Set(question.options.map((option) => option.id));
-	const values = answerValues(answer, new Set(optionIdByLabel.keys()), optionIds);
+	const values = question.allowFreeText
+		? (Array.isArray(answer) ? answer.filter((value): value is string => typeof value === 'string')
+			: typeof answer === 'string' ? [answer] : [])
+		: answerValues(answer, new Set(optionIdByLabel.keys()), optionIds);
+	if (question.allowFreeText && values.some((value) => !optionIds.has(value) && !optionIdByLabel.has(value))) {
+		return [];
+	}
 	return Array.from(
 		new Set(
 			values.flatMap((value) => {
@@ -89,6 +95,15 @@ function answersFromLegacyText(
 	return answers;
 }
 
+function questionTextAnswers(tool: AskUserQuestionToolUseMessage, answers: Record<string, unknown>): Record<string, string> {
+	return Object.fromEntries(tool.questions.filter((question) => question.allowFreeText).flatMap((question) => {
+		const answer = answers[question.id] ?? answers[question.prompt];
+		if (selectedOptionIds(question, answer).length > 0) return [];
+		const text = typeof answer === 'string' ? answer : Array.isArray(answer) ? answer.filter((value) => typeof value === 'string').join('\n') : '';
+		return text ? [[question.id, text]] : [];
+	}));
+}
+
 function terminalFromResult(
   tool: AskUserQuestionToolUseMessage,
   result: ToolResultMessage,
@@ -103,6 +118,7 @@ function terminalFromResult(
 			state: 'resolved',
 			allowed: true,
 			selectedQuestionOptions: selectedQuestionOptions(tool, answers),
+			questionTextAnswers: questionTextAnswers(tool, answers),
 		};
 	}
 

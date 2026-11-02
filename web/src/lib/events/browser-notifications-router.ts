@@ -93,8 +93,7 @@ export class BrowserNotificationsRouter {
 			entry.announced = true;
 			const { chatId, row } = entry;
 			const question =
-				row.message.requestedTool.type === 'ask-user-question-tool-use' ||
-				row.message.requestedTool.type === 'cursor-ask-question-tool-use';
+				row.message.requestedTool.type === 'ask-user-question-tool-use';
 			this.#notify(
 				key,
 				chatId,

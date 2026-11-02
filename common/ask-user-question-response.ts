@@ -3,12 +3,14 @@ import type { ToolUseChatMessage } from './chat-types.js';
 export interface AskUserQuestionAnswerPayload {
   questionId: string;
   selectedOptionIds: string[];
+  text?: string;
 }
 
 export const ASK_USER_QUESTION_MAX_ANSWERS = 100;
 export const ASK_USER_QUESTION_MAX_SELECTED_OPTIONS = 100;
 export const ASK_USER_QUESTION_ID_MAX_BYTES = 1_024;
 export const ASK_USER_QUESTION_REASON_MAX_BYTES = 4_096;
+export const ASK_USER_QUESTION_TEXT_MAX_BYTES = 16 * 1_024;
 export const ASK_USER_QUESTION_RESPONSE_MAX_BYTES = 64 * 1_024;
 
 const responseEncoder = new TextEncoder();
@@ -31,7 +33,7 @@ export type AskUserQuestionDecisionResponse =
 
 type StructuredQuestionTool = Extract<
   ToolUseChatMessage,
-  { type: 'ask-user-question-tool-use' | 'cursor-ask-question-tool-use' }
+  { type: 'ask-user-question-tool-use' }
 >;
 
 type StructuredQuestion = StructuredQuestionTool['questions'][number];
@@ -92,12 +94,19 @@ export function askUserQuestionDecisionValidationError(
       return `Structured answers contain an unknown question ID: ${answer.questionId}`;
     }
   }
-  if (answersById.size !== questions.length) {
+  if (answersById.size !== questions.length || answersById.size !== response.answers.length) {
     return 'Structured answers must answer every pending question exactly once';
   }
 
   for (const question of questions) {
     const answer = answersById.get(question.id)!;
+    if (answer.text !== undefined) {
+      if (!question.allowFreeText) return `Question ${question.id} does not accept free text`;
+      if (!boundedText(answer.text, ASK_USER_QUESTION_TEXT_MAX_BYTES)) return `Question ${question.id} requires valid nonblank text`;
+      if (answer.selectedOptionIds.length > 0) return `Question ${question.id} accepts either text or option selections`;
+      continue;
+    }
+    if (question.allowFreeText && question.options.length === 0) return `Question ${question.id} requires text`;
     const error = selectedOptionsValidationError(question, answer.selectedOptionIds);
     if (error) return error;
   }
@@ -109,7 +118,6 @@ function structuredQuestions(
 ): readonly StructuredQuestion[] | null {
   switch (requestedTool.type) {
     case 'ask-user-question-tool-use':
-    case 'cursor-ask-question-tool-use':
       return requestedTool.questions;
     default:
       return null;
@@ -155,7 +163,8 @@ function normalizeAnswers(response: Record<string, unknown>): AskUserQuestionAns
   const questionIds = new Set<string>();
   for (const value of response.answers) {
     const answer = asRecord(value);
-    if (!answer || !hasExactKeys(answer, ['questionId', 'selectedOptionIds'])) return null;
+    if (!answer || !hasExactKeys(answer, ['questionId', 'selectedOptionIds'], ['text'])) return null;
+    if (answer.text !== undefined && !boundedText(answer.text, ASK_USER_QUESTION_TEXT_MAX_BYTES)) return null;
     if (!boundedId(answer.questionId) || questionIds.has(answer.questionId)) return null;
     if (
       !Array.isArray(answer.selectedOptionIds)
@@ -166,7 +175,9 @@ function normalizeAnswers(response: Record<string, unknown>): AskUserQuestionAns
     const selectedOptionIds = normalizeOptionIds(answer.selectedOptionIds);
     if (!selectedOptionIds) return null;
     questionIds.add(answer.questionId);
-    answers.push({ questionId: answer.questionId, selectedOptionIds });
+    answers.push({ questionId: answer.questionId, selectedOptionIds,
+      ...(answer.text === undefined ? {} : { text: answer.text }),
+    });
   }
   return answers;
 }

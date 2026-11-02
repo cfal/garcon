@@ -84,8 +84,7 @@ export function formatChatStatus(
     lines.push(`pending permissions: ${snapshot.transientFeed.rows.length}`);
     for (const row of snapshot.transientFeed.rows) {
       const message = row.message;
-      const structured = message.requestedTool.type === 'ask-user-question-tool-use'
-        || message.requestedTool.type === 'cursor-ask-question-tool-use';
+      const structured = message.requestedTool.type === 'ask-user-question-tool-use';
       lines.push(
         '',
         `permission occurrence: ${row.permissionOccurrenceId}`,

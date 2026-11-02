@@ -13,6 +13,7 @@
     "./agent-turn-receipt": "./agent-turn-receipt.ts",
     "./agents": "./agents.ts",
     "./attachments": "./attachments.ts",
+    "./ask-user-question-response": "./ask-user-question-response.ts",
     "./api-provider-templates": "./api-provider-templates.ts",
     "./api-providers": "./api-providers.ts",
     "./chat-command-contracts": "./chat-command-contracts.ts",

@@ -737,7 +737,10 @@ function makeService(overrides = {}) {
     ownership,
     handoffs,
     transientFeeds: overrides.transientFeeds ?? {
-      validateAction: mock(() => undefined),
+      validateAction: mock(() => ({
+        message: new PermissionRequestMessage('2026-11-02T00:00:00.000Z', 'permission-test',
+          new BashToolUseMessage('2026-11-02T00:00:00.000Z', 'tool-test', 'pwd')),
+      })),
     },
     preambles: overrides.preambles ?? {
       snapshot: () => ({ revision: 0, preambles: [] }),
@@ -4791,6 +4794,17 @@ describe('ChatCommandService', () => {
         permissionOccurrenceId,
       },
     };
+
+    for (const decision of [
+      { allow: true },
+      { allow: true, response: { outcome: { outcome: 'accepted' } } },
+      { allow: false, response: { outcome: { outcome: 'rejected' } } },
+    ]) {
+      await expect(service.submitPermissionDecision({ ...request, ...decision }))
+        .rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+      expect(await readLedgerRecord(ledger, 'permission-decision', clientRequestId)).toBeNull();
+      expect(agents.resolvePermission).not.toHaveBeenCalled();
+    }
 
     for (const answers of [
       [{ questionId: 'unknown', selectedOptionIds: ['careful'] }],

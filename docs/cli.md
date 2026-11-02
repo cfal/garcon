@@ -863,6 +863,16 @@ bun cli/main.ts --runtime controller permission-answer 1785337200123456 \
 `--answers` is a JSON array with one row per answered question. Each row has a
 unique `questionId` and a `selectedOptionIds` array containing unique option
 IDs. Use `permission-decision ... deny` to skip or decline the request.
+Plain `permission-decision ... allow` is not an answer to a question: it returns
+a validation error (exit 2) and leaves the question pending for `permission-answer`.
+
+Questions with `allowFreeText: true` also accept an answer such as
+`{"questionId":"QUESTION_ID","selectedOptionIds":[],"text":"Custom answer"}`.
+Text replaces option selections; do not send both. Text must be nonblank and at
+most 16 KiB UTF-8 per answer. Every pending question must have one answer.
+The same payload works through the controller and executor CLI gateway, subject
+to the gateway's total request-size limit. Secret-input masking is presentation
+only: submitted answers remain part of conversation history.
 
 The command never fetches or substitutes the newest request. Its deterministic
 idempotency identity binds the server instance, chat, run, and occurrence while

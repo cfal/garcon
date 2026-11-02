@@ -1,11 +1,11 @@
 import {
   AssistantMessage,
-  CursorAskQuestionToolUseMessage,
+  AskUserQuestionToolUseMessage,
   CursorCreatePlanToolUseMessage,
   ThinkingMessage,
   ToolResultMessage,
   type ChatMessage,
-  type CursorAskQuestionPrompt,
+  type AskUserQuestionPrompt,
   type CursorPlanPhase,
   type CursorPlanTodo,
   type CursorPlanTodoStatus,
@@ -191,8 +191,8 @@ function cursorToolCallId(params: Record<string, unknown>, fallback: string): st
   return asString(params.toolCallId ?? params.tool_call_id ?? params.callId ?? params.id) ?? fallback;
 }
 
-function cursorAskQuestions(rawQuestions: unknown): CursorAskQuestionPrompt[] {
-  const questions: CursorAskQuestionPrompt[] = [];
+function cursorAskQuestions(rawQuestions: unknown): AskUserQuestionPrompt[] {
+  const questions: AskUserQuestionPrompt[] = [];
   for (const rawQuestion of asArray(rawQuestions)) {
     const question = asObject(rawQuestion);
     const id = asString(question.id);
@@ -319,7 +319,7 @@ export class CursorAcpEventConverter implements AcpEventConverter {
     if (request.method === 'cursor/ask_question') {
       const toolId = cursorToolCallId(params, request.permissionOccurrenceId);
       return {
-        tool: new CursorAskQuestionToolUseMessage(
+        tool: new AskUserQuestionToolUseMessage(
           context.timestamp,
           toolId,
           asString(params.title),

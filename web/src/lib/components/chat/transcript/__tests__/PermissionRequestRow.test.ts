@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	AskUserQuestionToolUseMessage,
 	BashToolUseMessage,
-	CursorAskQuestionToolUseMessage,
 	CursorCreatePlanToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	PermissionRequestMessage,
@@ -41,7 +40,7 @@ function cursorAskQuestionRequest(): PermissionRequestMessage {
 	return new PermissionRequestMessage(
 		TS,
 		'incarnation-cursor-question',
-		new CursorAskQuestionToolUseMessage(TS, 'tool-cursor-question', 'Choose a mode', [
+		new AskUserQuestionToolUseMessage(TS, 'tool-cursor-question', 'Choose a mode', [
 			{
 				id: 'mode',
 				prompt: 'Which mode?',
@@ -54,6 +53,17 @@ function cursorAskQuestionRequest(): PermissionRequestMessage {
 describe('PermissionRequestRow', () => {
 	afterEach(() => {
 		cleanup();
+	});
+
+	it.each([undefined, 'Mode'])('preserves prompt whitespace without source indentation, header=%s', (header) => {
+		const request = askUserQuestionRequest();
+		if (request.requestedTool.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
+		const prompt = 'Which mode?\nPick a path.';
+		Object.assign(request.requestedTool.questions[0], { header, prompt });
+		render(PermissionRequestRowTestHost, { request, onDecision: vi.fn() });
+		const shown = screen.getByText('Which mode? Pick a path.');
+		expect(shown.textContent).toBe(prompt);
+		expect(shown.classList.contains('whitespace-pre-wrap')).toBe(true);
 	});
 
 	it('submits generic ask-user-question answers as canonical permission responses', async () => {
@@ -103,6 +113,76 @@ describe('PermissionRequestRow', () => {
 		});
 	});
 
+	it('submits free text through the same form gate and clears it on option selection', async () => {
+		const request = askUserQuestionRequest();
+		if (request.requestedTool.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
+		request.requestedTool.questions[0].allowFreeText = true;
+		const onDecision = vi.fn();
+		render(PermissionRequestRowTestHost, { request, onDecision });
+		await fireEvent.click(screen.getByRole('radio', { name: 'Other' }));
+		const input = screen.getByRole('textbox', { name: 'Which mode?' });
+		await fireEvent.input(input, { target: { value: '   ' } });
+		await fireEvent.submit(input.closest('form')!);
+		expect(onDecision).not.toHaveBeenCalled();
+		await fireEvent.input(input, { target: { value: 'Custom mode' } });
+		await fireEvent.submit(input.closest('form')!);
+		expect(onDecision).toHaveBeenCalledWith('incarnation-question', { allow: true, response: {
+			type: 'ask-user-question-response', outcome: 'answered', answers: [{ questionId: 'Which mode?', selectedOptionIds: [], text: 'Custom mode' }],
+		} });
+		await fireEvent.click(screen.getByRole('radio', { name: /Fast/ }));
+		expect(screen.queryByRole('textbox')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: /submit answer/i }));
+		expect(onDecision.mock.calls.at(-1)?.[1].response.answers).toEqual([{ questionId: 'Which mode?', selectedOptionIds: ['Fast'] }]);
+	});
+
+	it('renders resolved secret text masked and read-only', () => {
+		const request = askUserQuestionRequest();
+		if (request.requestedTool.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
+		Object.assign(request.requestedTool.questions[0], { allowFreeText: true, isSecret: true, options: [] });
+		render(PermissionRequestRowTestHost, { request, onDecision: vi.fn(), terminal: {
+			permissionOccurrenceId: request.permissionOccurrenceId, state: 'resolved', allowed: true,
+			questionTextAnswers: { 'Which mode?': 'Synthetic secret' },
+		} });
+		const input = screen.getByLabelText('Which mode?') as HTMLInputElement;
+		expect(input.type).toBe('password');
+		expect(input.readOnly).toBe(true);
+		expect(input.value).toBe('Synthetic secret');
+		expect(screen.queryByRole('button', { name: /submit answer/i })).toBeNull();
+	});
+
+	it('allows Other to be unchecked on a multi-select question', async () => {
+		const request = askUserQuestionRequest();
+		if (request.requestedTool.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
+		Object.assign(request.requestedTool.questions[0], { allowFreeText: true, allowMultiple: true });
+		const onDecision = vi.fn();
+		render(PermissionRequestRowTestHost, { request, onDecision });
+		const other = screen.getByRole<HTMLInputElement>('checkbox', { name: 'Other' });
+		await fireEvent.click(other);
+		await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'Custom' } });
+		expect(other.checked).toBe(true);
+		await fireEvent.click(other);
+		expect(other.checked).toBe(false);
+		expect(screen.queryByRole('textbox')).toBeNull();
+		await fireEvent.click(screen.getByRole('checkbox', { name: /Fast/ }));
+		await fireEvent.click(screen.getByRole('button', { name: /submit answer/i }));
+		expect(onDecision.mock.calls[0][1].response.answers).toEqual([{ questionId: 'Which mode?', selectedOptionIds: ['Fast'] }]);
+	});
+
+	it('preserves line breaks in resolved free text', () => {
+		const request = askUserQuestionRequest();
+		if (request.requestedTool.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
+		Object.assign(request.requestedTool.questions[0], { allowFreeText: true });
+		const answer = 'first line\nsecond line';
+		render(PermissionRequestRowTestHost, { request, onDecision: vi.fn(), terminal: {
+			permissionOccurrenceId: request.permissionOccurrenceId, state: 'resolved', allowed: true,
+			questionTextAnswers: { 'Which mode?': answer },
+		} });
+		const shown = screen.getByText('first line second line');
+		expect(shown.textContent).toBe(answer);
+		expect(shown.classList.contains('whitespace-pre-wrap')).toBe(true);
+		expect(screen.queryByRole('textbox')).toBeNull();
+	});
+
 	it('renders resolved generic ask-user-question answers as selected read-only options', () => {
 		const onDecision = vi.fn();
 		const request = askUserQuestionRequest();
@@ -149,6 +229,7 @@ describe('PermissionRequestRow', () => {
 		const careful = screen.getByRole('radio', { name: /Careful/ }) as HTMLInputElement;
 
 		expect(screen.getByText('Question skipped')).toBeTruthy();
+		expect(screen.getByText('The user did not answer the questions.')).toBeTruthy();
 		expect(fast.checked).toBe(false);
 		expect(careful.checked).toBe(false);
 		expect(fast.disabled).toBe(true);
@@ -170,6 +251,7 @@ describe('PermissionRequestRow', () => {
 		await fireEvent.click(screen.getByRole('radio', { name: /Careful/ }));
 		expect(onDraftChange).toHaveBeenCalledWith({
 			selectedQuestionOptions: { 'Which mode?': ['Careful'] },
+			questionTextAnswers: {},
 			rawInputOpen: false,
 		});
 		expect(draft).toEqual({ selectedQuestionOptions: {}, rawInputOpen: false });
