@@ -280,6 +280,7 @@ export class CodexAppServerRuntime {
         codexHome: initialized.codexHome || null,
         client,
         runtimeIdentity: codexSourceRuntimeIdentity(request),
+        modelEndpointId: request.modelEndpointId,
         providerOwnsReasoningEffort: providerOwnsReasoningEffort(request),
         confirmedThreadSettings: this.#initialThreadSettings(request, started),
         operation,
@@ -459,8 +460,8 @@ export class CodexAppServerRuntime {
     return status !== undefined && isActiveSessionStatus(status);
   }
 
-  hasSource(agentSessionId: string): boolean {
-    return this.#sourceForThread(agentSessionId) !== null;
+  sourceEndpointId(agentSessionId: string): string | null | undefined {
+    return this.#sourceForThread(agentSessionId)?.modelEndpointId;
   }
 
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }> {
@@ -628,6 +629,7 @@ export class CodexAppServerRuntime {
   #newClient(request: Pick<CodexStartRequest, 'envOverrides' | 'codexConfig'>, bufferNotifications = false): CodexAppServerClient {
     const client = this.#createClient({
       env: buildCodexEnv(request.envOverrides, request.codexConfig),
+      config: request.codexConfig?.config,
       modelCatalogPath: request.codexConfig?.modelCatalogPath,
     });
     if (bufferNotifications) this.#bufferingClients.add(client);
@@ -753,6 +755,7 @@ export class CodexAppServerRuntime {
     codexHome: string | null;
     client: CodexAppServerClient;
     runtimeIdentity: string;
+    modelEndpointId: string | null;
     providerOwnsReasoningEffort: boolean;
     confirmedThreadSettings: CodexConfirmedThreadSettings;
     operation: CodexOperation;
@@ -767,6 +770,7 @@ export class CodexAppServerRuntime {
       codexHome: args.codexHome,
       client: args.client,
       runtimeIdentity: args.runtimeIdentity,
+      modelEndpointId: args.modelEndpointId,
       activeTurnId: null,
       status: 'running',
       permissionMode: args.confirmedThreadSettings.permissionMode,
@@ -926,6 +930,7 @@ export class CodexAppServerRuntime {
           codexHome: initialized.codexHome || null,
           client,
           runtimeIdentity,
+          modelEndpointId: request.modelEndpointId,
           providerOwnsReasoningEffort: providerOwnsReasoningEffort(request),
           confirmedThreadSettings: this.#initialThreadSettings(request, resumed),
           operation,

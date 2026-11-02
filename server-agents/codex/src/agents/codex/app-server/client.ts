@@ -1,5 +1,7 @@
 import { EventEmitter } from 'events';
+import type { CodexConfigObject } from '../runtime-types.js';
 import { resolveCodexCli, type ResolvedCodexCli } from './cli.js';
+import { appendCodexConfigArgs } from './config-overrides.js';
 import { parseThreadItemsListResponse, parseThreadTurnsListResponse } from './protocol.js';
 import type {
   InitializeResponse,
@@ -86,6 +88,7 @@ export const CODEX_STEER_ACKNOWLEDGEMENT_TIMEOUT_MS = 15_000;
 
 export interface CodexAppServerClientOptions {
   env?: Record<string, string>;
+  config?: CodexConfigObject;
   modelCatalogPath?: string;
   spawn?: SpawnCodexAppServer;
   resolveCli?: () => Promise<ResolvedCodexCli>;
@@ -167,6 +170,7 @@ export class CodexAppServerClient extends EventEmitter {
   #spawn: SpawnCodexAppServer;
   #resolveCli: () => Promise<ResolvedCodexCli>;
   #env: Record<string, string>;
+  #config: CodexConfigObject | undefined;
   #modelCatalogPath: string | undefined;
   #clientVersion: () => string;
   #shutdownGraceMs: number;
@@ -184,6 +188,7 @@ export class CodexAppServerClient extends EventEmitter {
         ? async () => ({ command: await resolveCommand(), source: 'path' })
         : resolveCodexCli);
     this.#env = mergedEnv(options.env);
+    this.#config = options.config;
     this.#modelCatalogPath = options.modelCatalogPath;
     this.#clientVersion = options.clientVersion ?? (() => '0.1.0');
     this.#shutdownGraceMs = options.shutdownGraceMs ?? 2_000;
@@ -322,12 +327,15 @@ export class CodexAppServerClient extends EventEmitter {
     const startedAt = performance.now();
     const resolved = await this.#resolveCli();
     if (this.#shutdownRequested) throw new Error('Codex app-server client is shut down');
+    const args = ['app-server', '--listen', 'stdio://'];
+    // Provider admission compares saved routes with launch configuration, not thread overrides.
+    // https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/config_manager.rs#L434-L452
+    appendCodexConfigArgs(args, this.#config);
     // Disables native goal continuation and idle agent-message wakes before loading threads.
-    const args = [
-      'app-server', '--listen', 'stdio://',
+    args.push(
       '--config', 'features.goals=false',
       '--config', 'features.wake_on_agent_messages=false',
-    ];
+    );
     if (this.#modelCatalogPath) {
       args.push('--config', `model_catalog_json=${JSON.stringify(this.#modelCatalogPath)}`);
     }

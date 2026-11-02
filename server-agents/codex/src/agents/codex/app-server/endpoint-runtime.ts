@@ -1,4 +1,5 @@
 import type { ResolvedAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { CodexConfig } from '../../../config.js';
 import type { CodexAuthStatus } from '../codex-auth.js';
 import type { CodexConfigObject, CodexProviderConfig } from '../runtime-types.js';
@@ -6,6 +7,15 @@ import { withCodexModelCatalog } from './model-catalog.js';
 
 export interface CodexEndpointRuntime {
   readonly codexConfig: CodexProviderConfig;
+}
+
+export function assertCodexSessionEndpoint(expected: string | null, requested: string | null): void {
+  if (expected === requested) return;
+  throw new AgentIntegrationError(
+    'INVALID_ENDPOINT',
+    'Codex sessions cannot change model providers. Start a new chat to use a different endpoint, or restore this session\'s original endpoint.',
+    false,
+  );
 }
 
 export function buildCodexAppServerEndpointRuntime(
@@ -18,6 +28,7 @@ export function buildCodexAppServerEndpointRuntime(
   const envKey = endpoint.credential
     ? codexApiKeyEnvForEndpoint(endpoint.selection.endpointId)
     : null;
+  const env: Record<string, string> = envKey ? { [envKey]: endpoint.credential! } : {};
   const providerConfig: CodexConfigObject = {
     name: endpoint.selection.providerLabel || endpoint.selection.apiProviderId,
     base_url: endpoint.selection.baseUrl,
@@ -27,9 +38,20 @@ export function buildCodexAppServerEndpointRuntime(
   };
 
   if (envKey) providerConfig.env_key = envKey;
-  if (Object.keys(endpoint.selection.headers).length > 0) {
-    providerConfig.http_headers = { ...endpoint.selection.headers };
+  const literalHeaders: Record<string, string> = {};
+  const envHeaders: Record<string, string> = {};
+  for (const [index, [header, value]] of Object.entries(endpoint.selection.headers).entries()) {
+    // Codex ignores blank env_http_headers values, but accepts literal blank headers.
+    if (!value.trim()) {
+      literalHeaders[header] = value;
+      continue;
+    }
+    const envName = `GARCON_CODEX_PROVIDER_HEADER_${index}_${endpoint.selection.endpointId.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+    env[envName] = value;
+    envHeaders[header] = envName;
   }
+  if (Object.keys(literalHeaders).length > 0) providerConfig.http_headers = literalHeaders;
+  if (Object.keys(envHeaders).length > 0) providerConfig.env_http_headers = envHeaders;
   return {
     codexConfig: withCodexModelCatalog({
       config: {
@@ -38,7 +60,7 @@ export function buildCodexAppServerEndpointRuntime(
           [providerId]: providerConfig,
         },
       },
-      ...(envKey ? { env: { [envKey]: endpoint.credential! } } : {}),
+      ...(Object.keys(env).length > 0 ? { env } : {}),
     }),
   };
 }
