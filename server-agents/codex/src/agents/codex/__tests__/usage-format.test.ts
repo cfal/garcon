@@ -38,7 +38,7 @@ function tokenCount(last: unknown, total?: unknown, timestamp = '2026-10-01T05:1
   return JSON.stringify({ type: 'event_msg', timestamp, payload: { type: 'token_count', info: { last_token_usage: last, total_token_usage: total } } });
 }
 
-// Mirrors the pinned 0.164.0 rollout line written for each billed response.
+// Mirrors the pinned 0.166.0 rollout line written for each billed response.
 function usageRecordLine(responseId: unknown, usage: unknown, timestamp = '2026-10-01T05:17:49.900Z'): string {
   return JSON.stringify({
     type: 'token_usage_record',
