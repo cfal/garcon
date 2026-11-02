@@ -32,6 +32,8 @@ test('CI builds all five platform families without distribution secrets', () => 
     expect(trigger.paths).toContain('bunfig.toml');
   }
   const android = workflow.jobs.android.steps.find(step => step.name === 'Build Android APK');
+  const androidSetup = workflow.jobs.android.steps.find(step => step.uses === 'android-actions/setup-android@v3');
+  expect(androidSetup.with.packages).toBe('platform-tools');
   expect(android.run).toContain('--debug --apk');
   expect(android.run).toContain('--target aarch64 --target x86_64');
   const ios = workflow.jobs.ios.steps.find(step => step.name === 'Build unsigned simulator app');

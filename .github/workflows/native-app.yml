@@ -138,6 +138,8 @@ jobs:
           distribution: temurin
           java-version: '25'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Install pinned Android SDK and NDK
         run: |
           sdkmanager 'platform-tools' 'platforms;android-37' 'ndk;29.0.13846066'
