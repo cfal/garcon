@@ -34,6 +34,8 @@ test('CI builds all five platform families without distribution secrets', () => 
   const android = workflow.jobs.android.steps.find(step => step.name === 'Build Android APK');
   const androidSetup = workflow.jobs.android.steps.find(step => step.uses === 'android-actions/setup-android@v3');
   expect(androidSetup.with.packages).toBe('platform-tools');
+  const androidSdk = workflow.jobs.android.steps.find(step => step.name === 'Install pinned Android SDK and NDK');
+  expect(androidSdk.run).toContain("'platforms;android-37.0'");
   expect(android.run).toContain('--debug --apk');
   expect(android.run).toContain('--target aarch64 --target x86_64');
   const ios = workflow.jobs.ios.steps.find(step => step.name === 'Build unsigned simulator app');

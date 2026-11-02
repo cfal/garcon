@@ -56,7 +56,7 @@ Run these commands inside `native/`. Rust builds should set `CARGO_BUILD_JOBS=1`
 # Desktop, on the corresponding operating system.
 bun run tauri build --ci --no-sign -- --locked
 
-# Android, after installing SDK 37, NDK 29.0.13846066, and JDK 25.
+# Android, after installing platforms;android-37.0, NDK 29.0.13846066, and JDK 25.
 export NDK_HOME="$ANDROID_HOME/ndk/29.0.13846066"
 rustup target add aarch64-linux-android x86_64-linux-android
 bun run build

@@ -142,7 +142,7 @@ jobs:
           packages: platform-tools
       - name: Install pinned Android SDK and NDK
         run: |
-          sdkmanager 'platform-tools' 'platforms;android-37' 'ndk;29.0.13846066'
+          sdkmanager 'platform-tools' 'platforms;android-37.0' 'ndk;29.0.13846066'
           echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.13846066" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         with:
