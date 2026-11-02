@@ -6,11 +6,14 @@ import {
   type AgentEstablishedSession,
 } from '@garcon/server-agent-interface';
 import { missingNativePoint } from '@garcon/server-agent-common/forking/jsonl-forking';
+import type { PathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { CodexAppServerRpcError } from './app-server/client.js';
+import { assertCodexSessionEndpoint } from './app-server/endpoint-runtime.js';
 import type { CodexHistoryProfile } from './history-profile.js';
 import { codexTurnIdFromEntryId } from './message-source-identity.js';
 
 export interface CodexForkingOptions {
+  readonly nativeSessions: Pick<PathNativeSessionCodec, 'decode'>;
   readonly journal: AgentNativeFork;
   readonly resolveNativeSession: AgentNativeSessionAccess['resolveNativeSession'];
   readonly resolveProfile: (request: {
@@ -35,6 +38,10 @@ export function createCodexForking(options: CodexForkingOptions): AgentNativeFor
   return {
     async fork(request) {
       request.signal.throwIfAborted();
+      if (request.source.nativeSession || request.source.agentSessionId) {
+        const source = options.nativeSessions.decode(request.source.nativeSession);
+        assertCodexSessionEndpoint(source.modelEndpointId, request.endpoint?.endpointId ?? null);
+      }
       try {
         const nativeSession = await options.resolveNativeSession({ chat: request.source, signal: request.signal });
         request.signal.throwIfAborted();

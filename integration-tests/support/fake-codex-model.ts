@@ -37,7 +37,7 @@ export type CodexScriptedFault =
       readonly message: string;
       readonly headers?: Readonly<Record<string, string>>;
     }
-  | { readonly kind: 'stream-error'; readonly message: string }
+  | { readonly kind: 'stream-error'; readonly message: string; readonly code?: string }
   | { readonly kind: 'incomplete-response'; readonly reason: string; readonly items: CodexScriptedItem[] }
   | { readonly kind: 'truncated-stream' };
 
@@ -219,10 +219,10 @@ function turnEvents(items: CodexScriptedItem[], responseId: string): Array<Recor
   ];
 }
 
-function failedEvents(message: string): Array<Record<string, unknown>> {
+function failedEvents(message: string, code = 'fake_model_unscripted'): Array<Record<string, unknown>> {
   return [
     { type: 'response.created', response: {} },
-    { type: 'response.failed', response: { error: { code: 'fake_model_unscripted', message } } },
+    { type: 'response.failed', response: { error: { code, message } } },
   ];
 }
 
@@ -459,7 +459,7 @@ export class FakeCodexModel {
         });
       }
       if (turn.kind === 'stream-error') {
-        return sseResponse(failedEvents(turn.message));
+        return sseResponse(failedEvents(turn.message, turn.code));
       }
       if (turn.kind === 'incomplete-response') {
         const events = turnEvents(turn.items, `resp_fake_${recorded.id}`);

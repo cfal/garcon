@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { CodexAppServerRpcError } from '../app-server/client.ts';
 import { createCodexForking, isCodexThreadNotFound } from '../codex-forking.ts';
 
@@ -12,6 +13,7 @@ const paginatedProfile = {
 };
 const startedSession = { agentSessionId: 'target', nativeSession: null };
 const materialized = { kind: 'materialized', session: startedSession };
+const nativeSessions = createPathNativeSessionCodec('codex');
 
 function request(providerMeta = null) {
   return {
@@ -41,6 +43,7 @@ function setup(profile, nativeImplementation = async () => startedSession) {
   const resolveNativeSession = mock(async ({ chat }) => chat.nativeSession);
   return {
     forking: createCodexForking({
+      nativeSessions,
       journal: {
         fork: legacyFork,
         discard: mock(async () => undefined),
@@ -59,6 +62,41 @@ function setup(profile, nativeImplementation = async () => startedSession) {
 }
 
 describe('createCodexForking', () => {
+  it.each([
+    [legacyProfile, null],
+    [legacyProfile, { entryId: 'item-2' }],
+    [paginatedProfile, null],
+    [paginatedProfile, { entryId: 'turn:turn-1:item:item-2' }],
+  ])('refuses cross-provider forks before selecting a strategy (%j, %j)', async (profile, point) => {
+    for (const [sourceEndpoint, targetEndpoint] of [
+      ['endpoint-1', 'endpoint-2'], ['endpoint-1', null], [null, 'endpoint-1'],
+    ]) {
+      const values = setup(profile);
+      const input = request(point);
+      input.source.nativeSession = nativeSessions.encode({
+        path: profile.nativePath, agentSessionId: 'source', modelEndpointId: sourceEndpoint,
+      });
+      input.endpoint = targetEndpoint ? { endpointId: targetEndpoint } : null;
+      await expect(values.forking.fork(input)).rejects.toMatchObject({
+        code: 'INVALID_ENDPOINT', retryable: false,
+      });
+      expect(values.resolveNativeSession).not.toHaveBeenCalled();
+      expect(values.resolveProfile).not.toHaveBeenCalled();
+      expect(values.legacyFork).not.toHaveBeenCalled();
+      expect(values.forkPaginatedWhole).not.toHaveBeenCalled();
+      expect(values.forkPaginatedPoint).not.toHaveBeenCalled();
+    }
+  });
+
+  it('does not bind a sessionless source to a provider before its first execution', async () => {
+    const values = setup(null);
+    const input = request();
+    input.source.agentSessionId = null;
+    input.endpoint = { endpointId: 'endpoint-1' };
+    values.legacyFork.mockResolvedValue({ kind: 'unmaterialized' });
+    await expect(values.forking.fork(input)).resolves.toEqual({ kind: 'unmaterialized' });
+  });
+
   it.each([
     [legacyProfile, null, 'legacyFork'],
     [legacyProfile, { entryId: 'item-2' }, 'legacyFork'],

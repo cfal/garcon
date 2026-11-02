@@ -8,8 +8,8 @@ import {
   type UsageSpeed,
 } from '@garcon/server-agent-common/usage/usage-record';
 
-// Mirrors codex-rs TokenUsage at the pinned 0.164.0:
-// https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/protocol/src/protocol.rs#L2370-L2389
+// Mirrors codex-rs TokenUsage at the pinned 0.166.0:
+// https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/protocol/src/protocol.rs#L2471-L2490
 interface CodexTokenUsage {
   readonly input_tokens: number;
   readonly cached_input_tokens: number;
@@ -37,7 +37,7 @@ const FORK_COPY_MAX_GAP_MS = 1000;
  * from the latest `turn_context` and `thread_settings_applied`. Codex writes a
  * `token_usage_record` for every billed response, including remote compaction,
  * before that response's `token_count`:
- * https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/core/src/session/turn.rs#L3202-L3215
+ * https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/core/src/session/turn.rs#L3257-L3273
  * Once a session has records they alone are billed; `token_count` then reports
  * context size, which after compaction is an estimate rather than a request.
  * Rollouts written before records existed bill `token_count` deltas, validated
@@ -121,8 +121,8 @@ function isForkedSessionMeta(payload: Record<string, unknown>): boolean {
 }
 
 // Missing, default, and standard tiers bill as standard; `fast` aliases priority.
-// Mirrors codex-rs ServiceTier at the pinned 0.164.0:
-// https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/protocol/src/config_types.rs#L528-L531
+// Mirrors codex-rs ServiceTier at the pinned 0.166.0:
+// https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/protocol/src/config_types.rs#L528-L531
 function codexSpeed(serviceTier: unknown): UsageSpeed {
   if (serviceTier === 'priority' || serviceTier === 'fast') return 'fast';
   return serviceTier === 'flex' ? 'flex' : 'standard';

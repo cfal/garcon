@@ -12,6 +12,7 @@ import {
 } from '../client.ts';
 import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from '../converter.ts';
 import { waitForMaterializedThread } from '../durability.ts';
+import { buildCodexAppServerEndpointRuntime } from '../endpoint-runtime.ts';
 import { CodexAppServerRuntime } from '../runtime.ts';
 import { isRetainedSourceInUse } from '../runtime-support.ts';
 import { loadCodexChatMessages } from '../../history-loader.ts';
@@ -80,6 +81,7 @@ function makeRequest(overrides = {}) {
     command: 'hello',
     projectPath: '/repo',
     model: 'gpt-5.4-codex',
+    modelEndpointId: null,
     permissionMode: 'default',
     thinkingMode: 'medium',
     ...overrides,
@@ -345,6 +347,8 @@ function createRpcClientFixture(responder, options = {}) {
   const spawn = mock(() => proc);
   const client = new CodexAppServerClient({
     spawn,
+    env: options.env,
+    config: options.config,
     modelCatalogPath: options.modelCatalogPath,
     resolveCli: options.resolveCli ?? (async () => ({ command: '/tmp/codex', source: 'bundled' })),
     shutdownGraceMs: options.shutdownGraceMs,
@@ -373,6 +377,61 @@ const initializeResponse = {
 };
 
 describe('CodexAppServerClient lifecycle RPCs', () => {
+  it('supplies endpoint header secrets only in the spawned environment', async () => {
+    const { codexConfig } = buildCodexAppServerEndpointRuntime({
+      selection: {
+        apiProviderId: 'synthetic', endpointId: 'synthetic', providerLabel: 'Synthetic',
+        protocol: 'openai-compatible', baseUrl: 'https://example.test/v1',
+        capabilities: { responses: true }, headers: { 'X.Gateway.Key': 'synthetic-header-secret' },
+      },
+      credential: 'synthetic-api-secret',
+    });
+    const { client, spawn } = createRpcClientFixture(() => initializeResponse, {
+      config: codexConfig.config, env: codexConfig.env,
+    });
+    await client.connect();
+    const [, args, options] = spawn.mock.calls[0];
+    expect(args.join(' ')).not.toContain('synthetic-header-secret');
+    expect(args.join(' ')).not.toContain('synthetic-api-secret');
+    expect(options.env.GARCON_CODEX_PROVIDER_HEADER_0_SYNTHETIC).toBe('synthetic-header-secret');
+    expect(options.env.GARCON_CODEX_PROVIDER_API_KEY_SYNTHETIC).toBe('synthetic-api-secret');
+    await client.shutdown();
+  });
+
+  it('supplies provider launch overrides before disabling autonomous work', async () => {
+    const { client, spawn } = createRpcClientFixture(() => initializeResponse, {
+      config: {
+        model_provider: 'synthetic-provider',
+        model_providers: {
+          'synthetic-provider': {
+            name: 'Synthetic provider',
+            base_url: 'https://example.test/v1',
+            wire_api: 'responses',
+            env_key: 'SYNTHETIC_PROVIDER_KEY',
+          },
+        },
+        features: { goals: true, wake_on_agent_messages: true },
+      },
+    });
+    await client.connect();
+    const args = spawn.mock.calls[0][1];
+    expect(args).toContain('model_provider="synthetic-provider"');
+    expect(Bun.TOML.parse(args.find((arg) => arg.startsWith('model_providers=')))).toEqual({
+      model_providers: {
+        'synthetic-provider': {
+          name: 'Synthetic provider',
+          base_url: 'https://example.test/v1',
+          wire_api: 'responses',
+          env_key: 'SYNTHETIC_PROVIDER_KEY',
+        },
+      },
+    });
+    expect(args.slice(-4)).toEqual([
+      '--config', 'features.goals=false', '--config', 'features.wake_on_agent_messages=false',
+    ]);
+    await client.shutdown();
+  });
+
   it.each(['closing', 'closed'])('does not reconnect an explicitly %s client', async (phase) => {
     const { client, spawn, finishExit } = createRpcClientFixture(
       () => initializeResponse,
@@ -2841,6 +2900,7 @@ describe('CodexAppServerRuntime', () => {
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       nativePath: null,
+      modelEndpointId: 'endpoint-1',
       operation: published.operation,
     }));
     await expect(provider.abort('thread-1')).resolves.toBe(true);
@@ -2894,6 +2954,8 @@ describe('CodexAppServerRuntime', () => {
       expect.objectContaining({ outcome: 'finished' }),
     ]);
     expect(provider.isRunning('thread-1')).toBe(false);
+    expect(provider.sourceEndpointId('thread-1')).toBe('endpoint-1');
+    expect(provider.sourceEndpointId('missing-thread')).toBeUndefined();
     expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
@@ -4025,6 +4087,7 @@ describe('CodexAppServerRuntime', () => {
       CODEX_HOME: '/tmp/codex-home',
     });
     expect(clientOptions[0].modelCatalogPath).toBe('/opt/garcon/codex-models.json');
+    expect(clientOptions[0].config).toEqual({ model_provider: 'custom-openai' });
     expect(operationClient.forkThread).toHaveBeenCalledWith(expect.objectContaining({
       threadId: 'thread-1',
       config: { model_provider: 'custom-openai' },
@@ -5815,13 +5878,15 @@ describe('CodexAppServerRuntime', () => {
   });
 
   it('updates a retained idle source while preserving provider-default effort', async () => {
-    const { fake, provider, started } = await startSettingsSession({}, { thinkingMode: 'none' });
+    const { fake, provider, started } = await startSettingsSession({}, {
+      thinkingMode: 'none', modelEndpointId: 'endpoint-1',
+    });
     fake.emit('notification', {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
     });
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(provider.hasSource('thread-1')).toBe(true);
+    expect(provider.sourceEndpointId('thread-1')).toBe('endpoint-1');
     fake.updateThreadSettings.mockImplementation(async () => {
       emitThreadSettings(fake, {
         approvalPolicy: 'on-request',

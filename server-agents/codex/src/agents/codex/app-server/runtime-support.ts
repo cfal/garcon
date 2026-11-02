@@ -28,6 +28,17 @@ export function denialResponseForRequest(method: string, params?: Record<string,
 
 export function humanizeCodexAppServerError(error: unknown): string {
   const raw = String((error as Error)?.message || error || '');
+  if (error instanceof CodexAppServerRpcError) {
+    const data = error.data;
+    if (data && typeof data === 'object' && 'type' in data) {
+      switch (data.type) {
+        case 'modelProviderMismatch':
+        case 'modelProviderNotConfigured':
+        case 'modelProviderPolicyConflict':
+          return `Codex error: ${raw}`;
+      }
+    }
+  }
   if (/not found|ENOENT.*codex|spawn codex/i.test(raw)) {
     return 'Codex CLI is not installed or not in PATH. Install it with: npm i -g @openai/codex';
   }

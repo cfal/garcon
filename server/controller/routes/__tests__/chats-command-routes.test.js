@@ -1765,6 +1765,25 @@ describe('REST chat command routes', () => {
     expect(body.error).toBe('Endpoint not found');
   });
 
+  it.each(['model', 'execution-settings'])('PATCH /%s preserves typed provider validation refusals', async (route) => {
+    for (const code of ['INVALID_SETTINGS', 'INVALID_ENDPOINT']) {
+      const agent = createRouteAgent();
+      agent.agents.updateSessionSettings.mockRejectedValueOnce(
+        new AgentIntegrationError(code, 'Synthetic configuration refusal', false),
+      );
+      const { response, body } = await callJson(
+        agent.routes[`/api/v1/chats/${route}`].PATCH,
+        { chatId: CHAT_ID, model: 'synthetic-model', thinkingMode: 'high' },
+        'PATCH',
+      );
+      expect(response.status).toBe(422);
+      expect(body).toMatchObject({
+        success: false, errorCode: code, error: 'Synthetic configuration refusal', retryable: false,
+      });
+      expect(agent.registry.updateChat).not.toHaveBeenCalled();
+    }
+  });
+
   it('PATCH /project-path validates, prepares the agent, and patches the registry', async () => {
     const agent = createRouteAgent();
     const nextPath = path.join(testBasePath, 'repo-worktree');
