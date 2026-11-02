@@ -100,11 +100,39 @@ describe('bundled Codex experimental schema compatibility', () => {
     }
   });
 
+  it('preserves optional lifecycle times on every published item variant', () => {
+    expect(Object.keys(definitions.ThreadItem.properties).toSorted())
+      .toEqual(['completedAtMs', 'startedAtMs']);
+    for (const type of Object.keys(itemFields)) {
+      for (const times of [
+        {},
+        { startedAtMs: null, completedAtMs: null },
+        { startedAtMs: 1_790_000_000_000, completedAtMs: 1_790_000_001_000 },
+      ]) {
+        const item = { type, id: `synthetic-${type}`, ...itemFields[type], ...times };
+        expect(decodeItem(item)).toEqual(item);
+        expect(convertCodexAppServerItem(item).some((message) => message.type === 'unknown-tool-use')).toBe(false);
+        const timestamp = '2026-10-01T00:00:00.000Z';
+        expect(convertCodexAppServerItem(item, timestamp)).toEqual(convertCodexAppServerItem({
+          type, id: item.id, ...itemFields[type],
+        }, timestamp));
+      }
+    }
+    for (const field of Object.keys(definitions.ThreadItem.properties)) {
+      for (const value of ['synthetic', true, {}, [], NaN, Infinity, 1.5]) {
+        expect(() => decodeItem({
+          type: 'contextCompaction', id: 'synthetic-invalid-time', [field]: value,
+        })).toThrow(field);
+      }
+    }
+  });
+
   it('decodes both generated-image representations without dropping stored file references', () => {
     const schema = definitions.ThreadItem.oneOf.find((variant) => (
       variant.properties.type.enum.includes('imageGeneration')
     ));
     expect(schema.anyOf.map((variant) => variant.required)).toEqual([['fileId'], ['result']]);
+    expect(schema.properties.generationId.type).toEqual(['string', 'null']);
     for (const image of [
       { result: 'synthetic-image' },
       { fileId: 'synthetic-file' },
@@ -114,6 +142,7 @@ describe('bundled Codex experimental schema compatibility', () => {
         type: 'imageGeneration', id: 'synthetic-image', status: 'completed',
         revisedPrompt: null, savedPath: '/synthetic/image.png',
         inputImages: [{ path: '/synthetic/input.png', sha256: 'ab'.repeat(32) }],
+        generationId: 'synthetic-generation',
         ...image,
       };
       const parsed = decodeItem(item);
@@ -135,6 +164,7 @@ describe('bundled Codex experimental schema compatibility', () => {
       {}, { fileId: null }, { fileId: 3 }, { result: 3 },
       { fileId: 'synthetic-file', result: 3 },
       { result: 'synthetic', savedPath: 3 },
+      { result: 'synthetic', generationId: 3 },
       { result: 'synthetic', inputImages: {} },
       { result: 'synthetic', inputImages: [{ path: 3, sha256: 'synthetic' }] },
       { result: 'synthetic', inputImages: [{ path: '/synthetic/input.png', sha256: 3 }] },
