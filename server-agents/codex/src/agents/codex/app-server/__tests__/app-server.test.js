@@ -426,8 +426,9 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
         },
       },
     });
-    expect(args.slice(-4)).toEqual([
+    expect(args.slice(-6)).toEqual([
       '--config', 'features.goals=false', '--config', 'features.wake_on_agent_messages=false',
+      '--config', 'features.default_mode_request_user_input=true',
     ]);
     await client.shutdown();
   });
@@ -857,6 +858,8 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
       'features.goals=false',
       '--config',
       'features.wake_on_agent_messages=false',
+      '--config',
+      'features.default_mode_request_user_input=true',
       '--config',
       'model_catalog_json="/opt/garcon/codex-models.json"',
     ], expect.any(Object));
@@ -4485,6 +4488,68 @@ describe('CodexAppServerRuntime', () => {
 
     expect(fake.respond).toHaveBeenCalledWith(7, { decision: 'accept' });
     expect(permissionEvents(published.events)).toHaveLength(1);
+  });
+
+  it('keeps synchronous questions interactive, validates answers, and fences reused occurrences', async () => {
+    const nativePath = path.join(tmpDir, 'questions-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation, permissionMode: 'manualBypass' }));
+    const request = { id: 17, method: 'item/tool/requestUserInput', params: {
+      threadId: 'thread-1', turnId: 'turn-1', itemId: 'call-question', isBlocking: false,
+      questions: [{ id: 'mode', question: 'Which mode?', isOther: true, options: [{ label: 'Fast' }, { label: 'Careful' }] }],
+    } };
+    fake.emit('serverRequest', request);
+    expect(fake.respond).not.toHaveBeenCalled();
+    const first = permissionEvents(published.events)[0];
+    expect(first.lifecycle.requestedTool.type).toBe('ask-user-question-tool-use');
+    await expect(first.decision.respond({ allow: true })).rejects.toThrow('structured answers');
+    fake.emit('notification', { method: 'serverRequest/resolved', params: { threadId: 'unrelated', requestId: 17 } });
+    expect(permissionEvents(published.events)).toHaveLength(1);
+    await first.decision.respond({ allow: true, response: { type: 'ask-user-question-response', outcome: 'answered',
+      answers: [{ questionId: 'mode', selectedOptionIds: [], text: 'Custom mode' }] } });
+    expect(fake.respond).toHaveBeenLastCalledWith(17, { answers: { mode: { answers: ['Custom mode'] } } });
+    fake.emit('notification', { method: 'serverRequest/resolved', params: { threadId: 'thread-1', requestId: 17 } });
+    expect(permissionEvents(published.events)).toHaveLength(1);
+    fake.emit('serverRequest', request);
+    const second = permissionEvents(published.events)[1];
+    expect(second.lifecycle.permissionOccurrenceId).not.toBe(first.lifecycle.permissionOccurrenceId);
+    await expect(first.decision.respond({ allow: false })).rejects.toThrow('no longer pending');
+    fake.emit('notification', { method: 'serverRequest/resolved', params: { threadId: 'thread-1', requestId: 17 } });
+    expect(permissionEvents(published.events).at(-1).lifecycle.kind).toBe('expired');
+    await expect(second.decision.respond({ allow: false })).rejects.toThrow('no longer pending');
+    fake.emit('serverRequest', { ...request, params: { ...request.params, turnId: 'obsolete' } });
+    expect(fake.respond).toHaveBeenLastCalledWith(17, { answers: {} });
+  });
+
+  it.each(['exit', 'turn/completed'])('retires unanswered questions on %s', async (terminal) => {
+    const nativePath = path.join(tmpDir, `question-${terminal.replace('/', '-')}.jsonl`);
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
+    fake.emit('serverRequest', { id: 17, method: 'item/tool/requestUserInput', params: {
+      threadId: 'thread-1', turnId: 'turn-1', itemId: 'call-question', questions: [{ id: 'mode', question: 'Which mode?', options: [{ label: 'Fast' }] }],
+    } });
+    const pending = permissionEvents(published.events)[0];
+    if (terminal === 'exit') fake.emit('exit', 1);
+    else fake.emit('notification', { method: terminal, params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1', status: 'completed' }) } });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(permissionEvents(published.events).at(-1).lifecycle.kind).toBe('cancelled');
+    await expect(pending.decision.respond({ allow: false })).rejects.toThrow('no longer pending');
   });
 
   it('keeps write-stdin reviews distinct when they share a parent command', async () => {

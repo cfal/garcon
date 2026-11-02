@@ -511,7 +511,7 @@ export class CodexAppServerRuntime {
 
   async #resolvePermission(
     pending: CodexTrackedApproval<CodexAppServerClient>,
-    decision: { allow: boolean; alwaysAllow?: boolean },
+    decision: PermissionDecisionPayload,
   ): Promise<void> {
     if (this.#pendingApprovals.get(pending.client)?.get(pending.requestId) !== pending) {
       throw new Error('Codex permission occurrence is no longer pending');
@@ -1188,7 +1188,9 @@ export class CodexAppServerRuntime {
     client: CodexAppServerClient,
     params: ServerRequestResolvedNotification,
   ): void {
-    const pending = takePendingApproval(this.#pendingApprovals, client, params.requestId);
+    const candidate = this.#pendingApprovals.get(client)?.get(params.requestId);
+    if (candidate?.params.threadId !== params.threadId) return;
+    const pending = takePendingApproval(this.#pendingApprovals, client, params.requestId, candidate);
     if (!pending) return;
     publishPermissionExpired(
       this.#logger,
@@ -1453,7 +1455,7 @@ export class CodexAppServerRuntime {
       client.respond(request.id, denialResponseForRequest(request.method, params));
       return;
     }
-    if (session.permissionMode === 'manualBypass') {
+    if (session.permissionMode === 'manualBypass' && message.requestedTool.type !== 'ask-user-question-tool-use') {
       client.respond(request.id, buildApprovalResponse(pending, { allow: true, alwaysAllow: false }));
       return;
     }

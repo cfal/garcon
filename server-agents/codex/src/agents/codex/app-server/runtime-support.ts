@@ -1,4 +1,5 @@
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import { CODEX_USER_INPUT_METHOD } from '../user-input.js';
 import { CodexAppServerRpcError } from './client.js';
 import type { CodexTurnError } from './protocol.js';
 import type {
@@ -17,6 +18,7 @@ export const NOOP_LOGGER: AgentLogger = {
 };
 
 export function denialResponseForRequest(method: string, params?: Record<string, unknown>): unknown {
+  if (method === CODEX_USER_INPUT_METHOD) return { answers: {} };
   if (method === 'item/commandExecution/requestApproval' && params?.kind === 'writeStdin') {
     return { decision: 'cancel' };
   }

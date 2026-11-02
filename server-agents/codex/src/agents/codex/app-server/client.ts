@@ -331,10 +331,11 @@ export class CodexAppServerClient extends EventEmitter {
     // Provider admission compares saved routes with launch configuration, not thread overrides.
     // https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/config_manager.rs#L434-L452
     appendCodexConfigArgs(args, this.#config);
-    // Disables native goal continuation and idle agent-message wakes before loading threads.
+    // Keeps turn ownership in Garcon while enabling its synchronous question response UI.
     args.push(
       '--config', 'features.goals=false',
       '--config', 'features.wake_on_agent_messages=false',
+      '--config', 'features.default_mode_request_user_input=true',
     );
     if (this.#modelCatalogPath) {
       args.push('--config', `model_catalog_json=${JSON.stringify(this.#modelCatalogPath)}`);

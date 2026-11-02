@@ -14,6 +14,7 @@ import {
 } from '@garcon/common/chat-types';
 import { normalizeToolInput, normalizeTodoItems } from '@garcon/server-agent-common/shared/normalize-util';
 import { convertCodexSubagentToolUse } from './subagent-tool-use.js';
+import { codexHistoricalUserInput } from './user-input.js';
 
 interface ApplyPatchPayload {
   file_path: string;
@@ -69,6 +70,7 @@ export function convertCodexFunctionCall(ts: string, payload: unknown): ToolUseC
   const input = asObject(normalizeToolInput(rawArgs));
 
   const subagentToolUse = convertCodexSubagentToolUse(ts, callId, rawName, input);
+  if (rawName === 'request_user_input') return codexHistoricalUserInput(ts, callId, input);
   if (subagentToolUse) return subagentToolUse;
 
   if (rawName === 'wait') {

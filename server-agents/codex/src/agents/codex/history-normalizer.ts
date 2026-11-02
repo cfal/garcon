@@ -12,6 +12,7 @@ import {
   type ChatMessage,
 } from '@garcon/common/chat-types';
 import { convertCodexFunctionCall, convertCodexCustomToolCall } from './jsonl-tool-use-converter.js';
+import { codexHistoricalAnswers } from './user-input.js';
 import {
   convertCodexSubagentActivity,
   convertCodexInterAgentLifecycle,
@@ -375,11 +376,13 @@ function normalizeResponseItem(
     case 'function_call_output': {
       const normalized = asString(rawPayload.output);
       const execution = normalized === undefined ? null : normalizeExecOutput(normalized);
+      const answers = codexHistoricalAnswers(rawPayload.output);
       result.canonical.push(new ToolResultMessage(
         ts,
         asString(rawPayload.call_id) || '',
-        normalizeToolResultContent(execution?.content ?? rawPayload.output),
-        execution?.isError ?? false,
+        { ...normalizeToolResultContent(execution?.content ?? rawPayload.output),
+          ...(answers ? { toolUseResult: { answers } } : {}) },
+        execution?.isError ?? (!answers && normalized?.startsWith('request_user_input ') === true),
       ));
       return result;
     }
