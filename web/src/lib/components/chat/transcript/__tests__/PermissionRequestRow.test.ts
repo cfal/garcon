@@ -224,8 +224,10 @@ describe('PermissionRequestRow', () => {
 		} });
 		expect(screen.getByRole<HTMLInputElement>('radio', { name: /Careful/ }).checked).toBe(true);
 		expect(screen.getByRole<HTMLInputElement>('radio', { name: 'Other' }).checked).toBe(false);
+		expect(screen.getByText('Notes')).toBeTruthy();
+		expect(screen.queryByText('Notes (optional)')).toBeNull();
 		if (isSecret) {
-			const input = screen.getByLabelText<HTMLInputElement>('Notes (optional)');
+			const input = screen.getByLabelText<HTMLInputElement>('Notes');
 			expect(input.type).toBe('password');
 			expect(input.readOnly).toBe(true);
 			expect(screen.queryByText('Only tests Keep defaults.')).toBeNull();

@@ -38,6 +38,9 @@
 	const texts = $derived(
 		terminal ? (terminal.questionTextAnswers ?? {}) : (draft.questionTextAnswers ?? {}),
 	);
+	const notesLabel = $derived(isPending
+		? m.chat_permission_question_notes_optional()
+		: m.chat_permission_question_notes());
 	const response = $derived<AskUserQuestionDecisionResponse>({
 		type: 'ask-user-question-response',
 		outcome: 'answered',
@@ -190,11 +193,11 @@
 					</label>
 				{:else}
 					{#if notesMode(question)}
-						<div class="text-xs text-muted-foreground">{m.chat_permission_question_notes_optional()}</div>
+						<div class="text-xs text-muted-foreground">{notesLabel}</div>
 					{/if}
 					<input
 						type={question.isSecret ? 'password' : 'text'}
-						aria-label={notesMode(question) ? m.chat_permission_question_notes_optional() : question.prompt}
+						aria-label={notesMode(question) ? notesLabel : question.prompt}
 						value={Object.hasOwn(texts, question.id) ? texts[question.id] : ''}
 						readonly={!isPending}
 						oninput={(event) => notesMode(question)
