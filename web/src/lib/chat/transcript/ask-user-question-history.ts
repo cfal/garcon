@@ -63,42 +63,53 @@ function selectedOptionIds(
 	return Array.from(
 		new Set(
 			values.flatMap((value) => {
-				if (optionIds.has(value)) return [value];
 				const id = optionIdByLabel.get(value);
+				// Complete native labels take precedence over colliding synthetic IDs.
+				if (question.allowFreeText && id !== undefined) return [id];
+				if (optionIds.has(value)) return [value];
 				return id ? [id] : [];
 			}),
 		),
 	);
 }
 
+function answerForQuestion(
+	question: AskUserQuestionPrompt,
+	answers: Record<string, unknown>,
+): unknown {
+	const answer = Object.hasOwn(answers, question.id) ? answers[question.id] : undefined;
+	if (answer != null) return answer;
+	return Object.hasOwn(answers, question.prompt) ? answers[question.prompt] : undefined;
+}
+
 function selectedQuestionOptions(
 	tool: AskUserQuestionToolUseMessage,
 	answers: Record<string, unknown>,
 ): Record<string, string[]> {
-	const selected: Record<string, string[]> = {};
+	const selected = new Map<string, string[]>();
 	for (const question of tool.questions) {
-		const answer = answers[question.id] ?? answers[question.prompt];
+		const answer = answerForQuestion(question, answers);
 		if (answer === undefined) continue;
 		const optionIds = selectedOptionIds(question, answer);
-		if (optionIds.length > 0) selected[question.id] = optionIds;
+		if (optionIds.length > 0) selected.set(question.id, optionIds);
 	}
-	return selected;
+	return Object.fromEntries(selected);
 }
 
 function answersFromLegacyText(
 	tool: AskUserQuestionToolUseMessage,
 	text: string,
 ): Record<string, unknown> {
-	const answers: Record<string, unknown> = {};
+	const answers = new Map<string, string>();
 	for (const question of tool.questions) {
 		const prefix = `"${question.prompt}"="`;
 		const questionIndex = text.indexOf(prefix);
 		if (questionIndex === -1) continue;
 		const valueStart = questionIndex + prefix.length;
 		const valueEnd = text.indexOf('"', valueStart);
-		if (valueEnd !== -1) answers[question.id] = text.slice(valueStart, valueEnd);
+		if (valueEnd !== -1) answers.set(question.id, text.slice(valueStart, valueEnd));
 	}
-	return answers;
+	return Object.fromEntries(answers);
 }
 
 function questionTextAnswers(
@@ -108,7 +119,7 @@ function questionTextAnswers(
 	const texts = new Map<string, string>();
 	for (const question of tool.questions) {
 		if (!question.allowFreeText) continue;
-		const answer = answers[question.id] ?? answers[question.prompt];
+		const answer = answerForQuestion(question, answers);
 		if (selectedOptionIds(question, answer).length > 0) continue;
 		const text = completeAnswerValues(answer).join('\n');
 		if (text) texts.set(question.id, text);

@@ -42,6 +42,47 @@ describe('historicalAskUserQuestion', () => {
 		expect(reconstructed.terminal.questionTextAnswers).toEqual({});
 	});
 
+	it.each([
+		{ allowFreeText: true, expectedId: 'option-1' },
+		{ allowFreeText: false, expectedId: 'option-0' },
+	])('disambiguates labels and IDs for allowFreeText=$allowFreeText', ({ allowFreeText, expectedId }) => {
+		const tool = question();
+		tool.questions[0].allowFreeText = allowFreeText;
+		tool.questions[0].options = [
+			{ id: 'option-0', label: 'Fast' },
+			{ id: 'option-1', label: 'option-0' },
+		];
+		const result = new ToolResultMessage(TS, tool.toolId, {
+			toolUseResult: { answers: { mode: ['option-0'] } },
+		}, false);
+		expect(historicalAskUserQuestion(tool, result).terminal.selectedQuestionOptions)
+			.toEqual({ mode: [expectedId] });
+	});
+
+	it.each(['structured', 'legacy'])('preserves prototype-like IDs in %s answer maps', (format) => {
+		const tool = question();
+		tool.questions[0].id = '__proto__';
+		const content = format === 'structured'
+			? { toolUseResult: { answers: { ['__proto__']: ['Careful'] } } }
+			: { raw: 'User answered: "Which mode?"="Careful"' };
+		const result = new ToolResultMessage(TS, tool.toolId, content, false);
+		const selected = historicalAskUserQuestion(tool, result).terminal.selectedQuestionOptions;
+		expect(selected).toStrictEqual({ ['__proto__']: ['careful'] });
+		expect(Object.getPrototypeOf(selected)).toBe(Object.prototype);
+	});
+
+	it.each(['__proto__', 'constructor', 'toString'])('uses own prompt answers when ID %s is absent', (id) => {
+		const tool = question();
+		tool.questions[0].id = id;
+		const result = new ToolResultMessage(TS, tool.toolId, {
+			toolUseResult: { answers: { 'Which mode?': 'Careful' } },
+		}, false);
+		const selected = historicalAskUserQuestion(tool, result).terminal.selectedQuestionOptions;
+		expect(Object.keys(selected ?? {})).toEqual([id]);
+		expect(selected?.[id]).toEqual(['careful']);
+		expect(Object.getPrototypeOf(selected)).toBe(Object.prototype);
+	});
+
 	it('retains comma-separated legacy selections for option-only questions', () => {
 		const tool = question();
 		const reconstructed = historicalAskUserQuestion(tool, new ToolResultMessage(TS, tool.toolId,
