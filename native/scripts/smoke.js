@@ -34,8 +34,7 @@ async function until(check, description) {
 const port = await unusedPort();
 const nativePort = await unusedPort();
 const driver = Bun.spawn(['tauri-driver', '--port', String(port), '--native-port', String(nativePort)], {
-  env: { ...process.env, XDG_DATA_HOME: isolation, XDG_CONFIG_HOME: isolation, XDG_CACHE_HOME: isolation,
-    WEBKIT_DISABLE_DMABUF_RENDERER: '1' },
+  env: { ...process.env, XDG_DATA_HOME: isolation, XDG_CONFIG_HOME: isolation, XDG_CACHE_HOME: isolation },
   detached: true,
   stdout: 'pipe', stderr: 'pipe',
 });
@@ -48,6 +47,8 @@ async function webdriver(path, body, method = body === undefined ? 'GET' : 'POST
   const response = await fetch(endpoint + path, {
     method, body: body === undefined ? undefined : JSON.stringify(body),
     headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(35_000),
+  }).catch(cause => {
+    throw new Error(`WebDriver ${method} ${path} failed`, { cause });
   });
   const result = await response.json();
   if (!response.ok || result.value?.error) throw new Error(JSON.stringify(result));
@@ -152,6 +153,14 @@ try {
       await openApp();
       await webdriver(`/session/${session}/window/rect`, base ? { width: 390, height: 844 } : { width: 1200, height: 800 });
       assert.equal(await evaluate('return document.documentElement.scrollWidth <= innerWidth'), true);
+      const rendered = await webdriver(`/session/${session}/execute/async`, {
+        script: `const done = arguments[arguments.length - 1];
+          Promise.all([document.fonts.ready, ...Array.from(document.images, image => image.decode())])
+            .then(() => requestAnimationFrame(() => requestAnimationFrame(() => done(null))))
+            .catch(error => done(error.message));`,
+        args: [],
+      });
+      assert.equal(rendered, null, 'launcher assets must render before capture');
       const screenshot = await webdriver(`/session/${session}/screenshot`);
       await Bun.write(resolve(artifacts, base ? 'launcher-mobile.png' : 'launcher.png'), Buffer.from(screenshot, 'base64'));
       await connect(remote.url);

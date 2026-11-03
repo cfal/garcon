@@ -122,6 +122,9 @@ from a clean checkout. Linux smoke tests need `webkit2gtk-driver`, `xvfb`, and
 user server. The real native WebView is tested for launcher rendering, root and
 mounted URLs, bearer HTTP and WebSocket transport, remote command denial,
 navigation confinement, saved selection, and sibling-mount rejection.
+The smoke test uses WebKit's default renderer: forcing
+`WEBKIT_DISABLE_DMABUF_RENDERER=1` stalls screenshot capture on WebKitGTK 2.50.4
+under Xvfb.
 
 These synthetic transport checks do not replace testing Garcon login and chat
 flows on each real platform. Android/iOS/Windows/macOS currently have build gates,
