@@ -90,6 +90,9 @@ export function formatChatStatus(
         : null;
       const allowsFreeText = questionTool?.questions.some((question) => question.allowFreeText) ?? false;
       const allowsNotes = questionTool?.questions.some((question) => question.allowNotes) ?? false;
+      const hasOptions = questionTool?.questions.some((question) => question.options.length > 0) ?? false;
+      const needsEmptySelectionTemplate = (hasOptions || allowsFreeText)
+        && (questionTool?.questions.some((question) => question.options.length === 0 && !question.allowFreeText) ?? false);
       lines.push(
         '',
         `permission occurrence: ${row.permissionOccurrenceId}`,
@@ -100,14 +103,20 @@ export function formatChatStatus(
       );
       if (message.reason) lines.push(`permission reason: ${terminalLine(message.reason)}`);
       if (questionTool) {
-        lines.push(allowsFreeText
-          ? 'action: use permission-answer with the exact question IDs above and option selections or free text where allowed'
-          : 'action: use permission-answer with the exact question and option IDs above');
+        if (allowsFreeText) {
+          lines.push('action: use permission-answer with the exact question IDs above and option selections or free text where allowed');
+        } else if (hasOptions) {
+          lines.push('action: use permission-answer with the exact question and option IDs above');
+        } else {
+          lines.push('action: use permission-answer with the exact question IDs above and empty option selections');
+        }
+        if (needsEmptySelectionTemplate) {
+          lines.push('empty selections: questions without options or free text require selectedOptionIds: []');
+        }
         if (allowsNotes) lines.push('notes: selected options may include text when allowNotes is true');
       }
       if (connection) {
         if (questionTool) {
-          const hasOptions = questionTool.questions.some((question) => question.options.length > 0);
           const appendAnswerTemplate = (label: string, answer: AskUserQuestionAnswerPayload): void => {
             lines.push(`${label}: ${permissionAnswerCommand(
               connection,
@@ -119,7 +128,7 @@ export function formatChatStatus(
           };
           if (!allowsFreeText || hasOptions) {
             appendAnswerTemplate('answer command template', {
-              questionId: 'QUESTION_ID', selectedOptionIds: ['OPTION_ID'],
+              questionId: 'QUESTION_ID', selectedOptionIds: hasOptions ? ['OPTION_ID'] : [],
             });
           }
           if (allowsFreeText) {
@@ -130,6 +139,11 @@ export function formatChatStatus(
           if (allowsNotes) {
             appendAnswerTemplate('option with notes command template', {
               questionId: 'QUESTION_ID', selectedOptionIds: ['OPTION_ID'], text: 'NOTE_TEXT',
+            });
+          }
+          if (needsEmptySelectionTemplate) {
+            appendAnswerTemplate('empty selection command template', {
+              questionId: 'QUESTION_ID', selectedOptionIds: [],
             });
           }
         } else {

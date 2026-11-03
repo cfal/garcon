@@ -864,13 +864,15 @@ bun cli/main.ts --runtime controller permission-answer 1785337200123456 \
 `--answers` is a JSON array with one row per answered question. Each row has a
 unique `questionId` and a `selectedOptionIds` array containing unique option
 IDs. Use `permission-decision ... deny` to skip or decline the request.
+For a question without options or free text, use `selectedOptionIds: []`.
 Plain `permission-decision ... allow` is not an answer to a question: it returns
 a validation error (exit 2) and leaves the question pending for `permission-answer`.
 
 Questions with `allowFreeText: true` also accept an answer such as
 `{"questionId":"QUESTION_ID","selectedOptionIds":[],"text":"Custom answer"}`.
 Text replaces option selections unless the question also has `allowNotes: true`.
-Such questions accept selected options with a note, for example
+Independently, questions with `allowNotes: true` accept selected options with a
+note, for example
 `{"questionId":"QUESTION_ID","selectedOptionIds":["OPTION_ID"],"text":"Only for tests"}`.
 Text and notes must be nonblank and at most 16 KiB UTF-8 per answer. Omit `text`
 for an option answer without notes. Every pending question must have one answer.
