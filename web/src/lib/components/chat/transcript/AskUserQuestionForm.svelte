@@ -58,27 +58,29 @@
 	function selectedOptions(id: string): string[] {
 		return Object.hasOwn(selections, id) ? selections[id] : [];
 	}
+	function answerText(id: string): string {
+		return Object.hasOwn(texts, id) ? texts[id] : '';
+	}
 	function textMode(question: AskUserQuestionPrompt): boolean {
-		return Boolean(
-			question.allowFreeText && selectedOptions(question.id).length === 0 &&
-			(question.options.length === 0 || Object.hasOwn(texts, question.id)),
-		);
+		if (!question.allowFreeText || selectedOptions(question.id).length > 0) return false;
+		return question.options.length === 0 || Object.hasOwn(texts, question.id);
 	}
 	function notesMode(question: AskUserQuestionPrompt): boolean {
 		return Boolean(question.allowNotes && selectedOptions(question.id).length > 0);
 	}
 	function selectedPreviewOptions(question: AskUserQuestionPrompt) {
-		return question.options.filter((option) => option.preview && selectedOptions(question.id).includes(option.id));
+		const selected = selectedOptions(question.id);
+		return question.options.filter((option) => option.preview && selected.includes(option.id));
 	}
 	function select(question: AskUserQuestionPrompt, optionId: string, checked: boolean): void {
 		if (!isPending) return;
-		const selected = new Set(question.allowMultiple ? selectedOptions(question.id) : []);
+		const previousSelection = selectedOptions(question.id);
+		const selected = new Set(question.allowMultiple ? previousSelection : []);
 		if (checked) selected.add(optionId);
 		else selected.delete(optionId);
 		const textAnswers = { ...draft.questionTextAnswers };
-		if (!question.allowNotes || selectedOptions(question.id).length === 0 || selected.size === 0) {
-			delete textAnswers[question.id];
-		}
+		const keepNote = question.allowNotes && previousSelection.length > 0 && selected.size > 0;
+		if (!keepNote) delete textAnswers[question.id];
 		onDraftChange({
 			...draft,
 			questionTextAnswers: textAnswers,
@@ -177,16 +179,16 @@
 			</div>
 			{#if (textMode(question) || notesMode(question)) && (isPending || Object.hasOwn(texts, question.id))}
 				{#if !isPending && !question.isSecret}
-					{#if notesMode(question)}<div class="text-xs text-muted-foreground">{m.chat_permission_question_notes()}</div>{/if}
+					{#if notesMode(question)}<div class="text-xs text-muted-foreground">{notesLabel}</div>{/if}
 					<p class="whitespace-pre-wrap break-words text-sm text-foreground">
-						{texts[question.id]}
+						{answerText(question.id)}
 					</p>
 				{:else if notesMode(question) && !question.isSecret}
 					<label class="block space-y-1 text-xs text-muted-foreground">
-						<span>{m.chat_permission_question_notes_optional()}</span>
+						<span>{notesLabel}</span>
 						<textarea
 							rows="2"
-							value={Object.hasOwn(texts, question.id) ? texts[question.id] : ''}
+							value={answerText(question.id)}
 							oninput={(event) => setNote(question.id, event.currentTarget.value)}
 							class="block w-full min-w-0 rounded-md border border-border bg-background px-2.5 py-2 text-base text-foreground"
 						></textarea>
@@ -198,7 +200,7 @@
 					<input
 						type={question.isSecret ? 'password' : 'text'}
 						aria-label={notesMode(question) ? notesLabel : question.prompt}
-						value={Object.hasOwn(texts, question.id) ? texts[question.id] : ''}
+						value={answerText(question.id)}
 						readonly={!isPending}
 						oninput={(event) => notesMode(question)
 							? setNote(question.id, event.currentTarget.value)

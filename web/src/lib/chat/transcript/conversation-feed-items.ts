@@ -221,13 +221,14 @@ export function buildConversationFeedRenderModel(
 				allowed: message.allowed,
 			};
 			if (message.questionResponse?.outcome === 'answered') {
-				const answers = message.questionResponse.answers;
-				terminal.selectedQuestionOptions = Object.fromEntries(
-					answers.map((answer) => [answer.questionId, answer.selectedOptionIds]),
-				);
-				terminal.questionTextAnswers = Object.fromEntries(
-					answers.flatMap(({ questionId, text }) => text === undefined ? [] : [[questionId, text]]),
-				);
+				const selections = new Map<string, string[]>();
+				const texts = new Map<string, string>();
+				for (const answer of message.questionResponse.answers) {
+					selections.set(answer.questionId, answer.selectedOptionIds);
+					if (answer.text !== undefined) texts.set(answer.questionId, answer.text);
+				}
+				terminal.selectedQuestionOptions = Object.fromEntries(selections);
+				terminal.questionTextAnswers = Object.fromEntries(texts);
 			}
 			permissionTerminalByOccurrence.set(message.permissionOccurrenceId, terminal);
 		} else if (message instanceof PermissionCancelledMessage) {

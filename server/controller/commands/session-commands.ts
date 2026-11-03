@@ -323,6 +323,7 @@ export class SessionCommands {
     }
     try {
       if (actionError) throw actionError;
+      // Acceptance can yield while the pending occurrence is retired.
       this.deps.transientFeeds.validateAction(input.control);
       await this.deps.agents.resolvePermission(input.chatId, input.permissionOccurrenceId, {
         allow: input.allow,

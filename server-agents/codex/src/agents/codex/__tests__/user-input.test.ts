@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+import { ASK_USER_QUESTION_ID_MAX_BYTES } from '@garcon/common/ask-user-question-response';
 import {
   codexUserInputMessage,
   codexUserInputResponse,
   codexHistoricalUserInput,
-  codexHistoricalAnswers,
   codexHistoricalQuestionResult,
 } from '../user-input.js';
 import {
@@ -106,6 +106,29 @@ describe('Codex synchronous questions', () => {
     ).toMatchObject({ options: [], allowFreeText: true, isSecret: true });
   });
 
+  it('preserves valid IDs exactly and enforces the shared UTF-8 bound', () => {
+    for (const id of [
+      '  mode  ',
+      'x'.repeat(ASK_USER_QUESTION_ID_MAX_BYTES),
+      '\u00e9'.repeat(ASK_USER_QUESTION_ID_MAX_BYTES / 2),
+    ]) {
+      const message = codexUserInputMessage(at, 'call', [{ ...questions[0], id }]);
+      expect(message.questions[0].id).toBe(id);
+    }
+    for (const id of [
+      null,
+      1,
+      '',
+      '   ',
+      '\ud800',
+      'x'.repeat(ASK_USER_QUESTION_ID_MAX_BYTES + 1),
+      '\u00e9'.repeat(ASK_USER_QUESTION_ID_MAX_BYTES / 2 + 1),
+    ]) {
+      expect(() => codexUserInputMessage(at, 'call', [{ ...questions[0], id }]))
+        .toThrow('Invalid Codex question');
+    }
+  });
+
   it('delivers option notes in the native TUI encoding without trimming', () => {
     const text = '  Only tests\nKeep defaults.  ';
     expect(codexUserInputResponse(tool, {
@@ -145,9 +168,11 @@ describe('Codex synchronous questions', () => {
       codexHistoricalUserInput(at, 'call', { questions: [{ ...questions[0], isOther: undefined }] }).questions[0]
         .allowFreeText,
     ).toBe(true);
-    expect(codexHistoricalAnswers('{"answers":{"mode":{"answers":["Custom"]}}}')).toEqual({ mode: ['Custom'] });
-    expect(codexHistoricalAnswers('{"answers":{}}')).toEqual({});
-    expect(codexHistoricalAnswers('{"answers":{"mode":false}}')).toBeNull();
+    expect(codexHistoricalQuestionResult('{"answers":{"mode":{"answers":["Custom"]}}}', tool.questions))
+      .toEqual({ answers: { mode: ['Custom'] }, textAnswers: {} });
+    expect(codexHistoricalQuestionResult('{"answers":{}}', tool.questions))
+      .toEqual({ answers: {}, textAnswers: {} });
+    expect(codexHistoricalQuestionResult('{"answers":{"mode":false}}', tool.questions)).toBeNull();
   });
 
   it('preserves arbitrary historical question IDs and exact answer arrays', () => {
@@ -155,20 +180,20 @@ describe('Codex synchronous questions', () => {
       ['__proto__', { answers: ['  Custom\nmode  '] }],
       ['constructor', { answers: [] }],
     ]);
-    const answers = codexHistoricalAnswers({ answers: nativeAnswers });
+    const answers = codexHistoricalQuestionResult({ answers: nativeAnswers }, tool.questions)!.answers;
     expect(answers).toEqual(Object.fromEntries([
       ['__proto__', ['  Custom\nmode  ']],
       ['constructor', []],
     ]));
     expect(Object.getPrototypeOf(answers)).toBe(Object.prototype);
-    expect(answers!.__proto__).toBe(nativeAnswers.__proto__.answers);
+    expect(answers.__proto__).toBe(nativeAnswers.__proto__.answers);
   });
 
   it('rejects the whole historical answer map when any entry is malformed', () => {
     for (const invalid of [null, {}, { answers: 'Custom' }, { answers: ['Custom', 1] }]) {
-      expect(codexHistoricalAnswers({
+      expect(codexHistoricalQuestionResult({
         answers: { valid: { answers: ['Fast'] }, invalid },
-      })).toBeNull();
+      }, tool.questions)).toBeNull();
     }
   });
 });

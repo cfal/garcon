@@ -375,6 +375,7 @@ describe('buildConversationFeedRenderItems', () => {
 					{ questionId: 'mode', selectedOptionIds: ['careful'] },
 					{ questionId: 'details', selectedOptionIds: [], text: '  Custom\nconstraint  ' },
 					{ questionId: 'with-note', selectedOptionIds: ['careful'], text: '  Only tests\n ' },
+					{ questionId: '__proto__', selectedOptionIds: [], text: 'Prototype-safe answer' },
 				],
 			}),
 			new PermissionResolvedMessage(TS, 'empty', true, {
@@ -394,8 +395,12 @@ describe('buildConversationFeedRenderItems', () => {
 				permissionOccurrenceId: 'answered',
 				state: 'resolved',
 				allowed: true,
-				selectedQuestionOptions: { mode: ['careful'], details: [], 'with-note': ['careful'] },
-				questionTextAnswers: { details: '  Custom\nconstraint  ', 'with-note': '  Only tests\n ' },
+				selectedQuestionOptions: {
+					mode: ['careful'], details: [], 'with-note': ['careful'], ['__proto__']: [],
+				},
+				questionTextAnswers: {
+					details: '  Custom\nconstraint  ', 'with-note': '  Only tests\n ', ['__proto__']: 'Prototype-safe answer',
+				},
 			},
 			empty: {
 				permissionOccurrenceId: 'empty',

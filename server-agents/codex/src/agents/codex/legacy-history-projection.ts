@@ -38,7 +38,7 @@ export class LegacyCodexProjection {
       }
     }
     if (isHiddenCodeModeWaitCall(payload)) {
-      this.#rememberCall(this.#hiddenWaitCallIds, payload.call_id);
+      this.#rememberHiddenWait(payload.call_id);
       return emptyResult();
     }
     if (isToolOutput(payload)) {
@@ -89,11 +89,11 @@ export class LegacyCodexProjection {
     return normalizeCodexJsonlEntry(entry, context);
   }
 
-  #rememberCall(callIds: Set<string>, callId: string): void {
-    callIds.add(callId);
-    if (callIds.size <= MAX_PENDING_CALLS) return;
-    const oldest = callIds.values().next().value;
-    if (oldest) callIds.delete(oldest);
+  #rememberHiddenWait(callId: string): void {
+    this.#hiddenWaitCallIds.add(callId);
+    if (this.#hiddenWaitCallIds.size <= MAX_PENDING_CALLS) return;
+    const oldest = this.#hiddenWaitCallIds.values().next().value;
+    if (oldest) this.#hiddenWaitCallIds.delete(oldest);
   }
 }
 

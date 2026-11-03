@@ -103,6 +103,19 @@ describe('historicalAskUserQuestion', () => {
 		expect(reconstructed.terminal.selectedQuestionOptions).toEqual({ mode: ['fast', 'careful'] });
 	});
 
+	it.each([
+		{ allowFreeText: true, answers: ['Careful', 'Fast', 'Careful'] },
+		{ allowFreeText: false, answers: ['careful', 'Unknown', 'Fast, Careful', 'fast'] },
+	])('keeps the first selection order while deduplicating, allowFreeText=$allowFreeText', ({ allowFreeText, answers }) => {
+		const tool = question();
+		tool.questions[0].allowFreeText = allowFreeText;
+		const result = new ToolResultMessage(TS, tool.toolId, {
+			toolUseResult: { answers: { mode: answers } },
+		}, false);
+		expect(historicalAskUserQuestion(tool, result).terminal.selectedQuestionOptions)
+			.toEqual({ mode: ['careful', 'fast'] });
+	});
+
 	it('keeps failed question results unanswered with their reason', () => {
 		const reason = 'request_user_input is unavailable in Default mode';
 		const reconstructed = historicalAskUserQuestion(question(), new ToolResultMessage(TS, 'question-1', { raw: reason }, true));

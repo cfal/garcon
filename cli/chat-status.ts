@@ -107,32 +107,30 @@ export function formatChatStatus(
       }
       if (connection) {
         if (questionTool) {
-          if (!allowsFreeText || questionTool.questions.some((question) => question.options.length > 0)) {
-            lines.push(`answer command template: ${permissionAnswerCommand(
+          const hasOptions = questionTool.questions.some((question) => question.options.length > 0);
+          const appendAnswerTemplate = (label: string, answer: AskUserQuestionAnswerPayload): void => {
+            lines.push(`${label}: ${permissionAnswerCommand(
               connection,
               snapshot,
               row.permissionOccurrenceId,
               row.runId,
-              { questionId: 'QUESTION_ID', selectedOptionIds: ['OPTION_ID'] },
+              answer,
             )}`);
+          };
+          if (!allowsFreeText || hasOptions) {
+            appendAnswerTemplate('answer command template', {
+              questionId: 'QUESTION_ID', selectedOptionIds: ['OPTION_ID'],
+            });
           }
           if (allowsFreeText) {
-            lines.push(`text answer command template: ${permissionAnswerCommand(
-              connection,
-              snapshot,
-              row.permissionOccurrenceId,
-              row.runId,
-              { questionId: 'QUESTION_ID', selectedOptionIds: [], text: 'ANSWER_TEXT' },
-            )}`);
+            appendAnswerTemplate('text answer command template', {
+              questionId: 'QUESTION_ID', selectedOptionIds: [], text: 'ANSWER_TEXT',
+            });
           }
           if (allowsNotes) {
-            lines.push(`option with notes command template: ${permissionAnswerCommand(
-              connection,
-              snapshot,
-              row.permissionOccurrenceId,
-              row.runId,
-              { questionId: 'QUESTION_ID', selectedOptionIds: ['OPTION_ID'], text: 'NOTE_TEXT' },
-            )}`);
+            appendAnswerTemplate('option with notes command template', {
+              questionId: 'QUESTION_ID', selectedOptionIds: ['OPTION_ID'], text: 'NOTE_TEXT',
+            });
           }
         } else {
           lines.push(`allow command: ${permissionDecisionCommand(

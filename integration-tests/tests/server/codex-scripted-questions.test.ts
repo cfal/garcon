@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import type { AskUserQuestionAnswerPayload } from '../../../common/ask-user-question-response.js';
 import { runCli, withCliFixture } from '../../support/cli-fixture.js';
 import { codexFinalAnswerMessage, type CodexScriptedItem } from '../../support/fake-codex-model.js';
 import { liveCodexStartRequest } from '../../support/live-codex.js';
@@ -27,6 +28,29 @@ function questionCall(callId: string): CodexScriptedItem {
   };
 }
 
+const answerScenarios: {
+  mode: string;
+  answer: AskUserQuestionAnswerPayload | null;
+  nativeValues: string[] | null;
+}[] = [
+  {
+    mode: 'option',
+    answer: { questionId: 'mode', selectedOptionIds: ['option-1'] },
+    nativeValues: ['Careful'],
+  },
+  {
+    mode: 'text',
+    answer: { questionId: 'mode', selectedOptionIds: [], text: 'Custom mode' },
+    nativeValues: ['Custom mode'],
+  },
+  {
+    mode: 'notes',
+    answer: { questionId: 'mode', selectedOptionIds: ['option-1'], text: 'Only tests\nKeep defaults.' },
+    nativeValues: ['Careful', 'user_note: Only tests\nKeep defaults.'],
+  },
+  { mode: 'skip', answer: null, nativeValues: null },
+];
+
 describe('scripted Codex synchronous questions', () => {
   let environment: ScriptedCodexTestEnvironment;
   beforeEach(async () => {
@@ -36,7 +60,7 @@ describe('scripted Codex synchronous questions', () => {
     await environment?.dispose();
   });
 
-  for (const mode of ['option', 'text', 'notes', 'skip'] as const) {
+  for (const { mode, answer, nativeValues } of answerScenarios) {
     test(`returns ${mode} through the original tool request, including manual bypass`, async () => {
       const callId = `call-question-${mode}`;
       const reply = `QUESTION_${mode}_COMPLETE`;
@@ -48,9 +72,7 @@ describe('scripted Codex synchronous questions', () => {
       environment.model.scriptTurn((request) => {
         const output = request.functionCallOutputs.find((item) => item.callId === callId);
         expect(output).toBeDefined();
-        const expectedAnswer = mode === 'text' ? 'Custom mode' : 'Careful';
-        const nativeValues = mode === 'notes' ? ['Careful', 'user_note: Only tests\nKeep defaults.'] : [expectedAnswer];
-        const answers = mode === 'skip' ? {} : { mode: { answers: nativeValues } };
+        const answers = nativeValues === null ? {} : { mode: { answers: nativeValues } };
         expect(JSON.parse(output!.output)).toEqual({ answers });
         expect(request.userTexts).toEqual(originalUserTexts);
         return [codexFinalAnswerMessage(reply)];
@@ -100,38 +122,33 @@ describe('scripted Codex synchronous questions', () => {
           expect(invalid.exitCode).toBe(2);
           expect(invalid.stderr).toContain('unknown option ID');
           expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows).toHaveLength(1);
-          const answers = [
-            {
-              questionId: 'mode',
-              selectedOptionIds: mode === 'text' ? [] : ['option-1'],
-              ...(mode === 'text' ? { text: 'Custom mode' } : {}),
-              ...(mode === 'notes' ? { text: 'Only tests\nKeep defaults.' } : {}),
-            },
-          ];
-          const decision = await runCli(
-            fixture,
-            mode === 'skip'
-              ? ['permission-decision', chatId, permission.permissionOccurrenceId, 'deny', ...fences]
-              : [
-                  'permission-answer',
-                  chatId,
-                  permission.permissionOccurrenceId,
-                  '--answers',
-                  JSON.stringify(answers),
-                  ...fences,
-                ],
-          );
+          let command: string[];
+          if (answer === null) {
+            command = ['permission-decision', chatId, permission.permissionOccurrenceId, 'deny', ...fences];
+          } else {
+            command = [
+              'permission-answer',
+              chatId,
+              permission.permissionOccurrenceId,
+              '--answers',
+              JSON.stringify([answer]),
+              ...fences,
+            ];
+          }
+          const decision = await runCli(fixture, command);
           expect(decision).toMatchObject({ exitCode: 0, stderr: '' });
           await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor });
           const transcript = await fixture.client.getMessages(chatId);
           const resolution = transcript.messages.find((entry) => entry.message.type === 'permission-resolved')?.message;
           expect(resolution).toMatchObject({
             type: 'permission-resolved',
-            allowed: mode !== 'skip',
-            ...(mode === 'skip'
-              ? {}
-              : { questionResponse: { type: 'ask-user-question-response', outcome: 'answered', answers } }),
+            allowed: answer !== null,
           });
+          if (answer !== null) {
+            expect(resolution).toMatchObject({
+              questionResponse: { type: 'ask-user-question-response', outcome: 'answered', answers: [answer] },
+            });
+          }
           expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows).toEqual([]);
           await fixture.restartGarcon();
           expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows).toEqual([]);

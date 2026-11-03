@@ -53,24 +53,24 @@ function selectedOptionIds(
 	answer: unknown,
 ): string[] {
 	const optionIdByLabel = new Map(question.options.map((option) => [option.label, option.id]));
-	const optionIds = new Set(question.options.map((option) => option.id));
-	const values = question.allowFreeText
-		? completeAnswerValues(answer)
-		: legacyAnswerValues(answer, new Set(optionIdByLabel.keys()), optionIds);
 	if (question.allowFreeText) {
 		// Native answers contain labels or text, never generated option IDs.
+		const values = completeAnswerValues(answer);
 		if (values.some((value) => !optionIdByLabel.has(value))) return [];
 		return Array.from(new Set(values.map((value) => optionIdByLabel.get(value)!)));
 	}
-	return Array.from(
-		new Set(
-			values.flatMap((value) => {
-				const id = optionIdByLabel.get(value);
-				if (optionIds.has(value)) return [value];
-				return id ? [id] : [];
-			}),
-		),
-	);
+	const optionIds = new Set(question.options.map((option) => option.id));
+	const values = legacyAnswerValues(answer, new Set(optionIdByLabel.keys()), optionIds);
+	const selected = new Set<string>();
+	for (const value of values) {
+		if (optionIds.has(value)) {
+			selected.add(value);
+		} else {
+			const id = optionIdByLabel.get(value);
+			if (id) selected.add(id);
+		}
+	}
+	return Array.from(selected);
 }
 
 function answerForQuestion(
@@ -118,10 +118,10 @@ function questionTextAnswers(
 	explicitTexts: unknown,
 ): Record<string, string> {
 	const texts = new Map<string, string>();
+	const submittedTexts = isRecord(explicitTexts) ? explicitTexts : {};
 	for (const question of tool.questions) {
 		if (!question.allowFreeText && !question.allowNotes) continue;
-		const explicitText = isRecord(explicitTexts) && Object.hasOwn(explicitTexts, question.id)
-			? explicitTexts[question.id] : undefined;
+		const explicitText = Object.hasOwn(submittedTexts, question.id) ? submittedTexts[question.id] : undefined;
 		if (typeof explicitText === 'string') {
 			texts.set(question.id, explicitText);
 			continue;
@@ -144,12 +144,14 @@ function terminalFromResult(
 		if (Object.keys(answers).length === 0) {
 			return { state: 'resolved', allowed: false, reason: rawText || 'User skipped question' };
 		}
+		const textAnswers = isRecord(result.content.toolUseResult)
+			? result.content.toolUseResult.textAnswers
+			: undefined;
 		return {
 			state: 'resolved',
 			allowed: true,
 			selectedQuestionOptions: selectedQuestionOptions(tool, answers),
-			questionTextAnswers: questionTextAnswers(tool, answers,
-				isRecord(result.content.toolUseResult) ? result.content.toolUseResult.textAnswers : undefined),
+			questionTextAnswers: questionTextAnswers(tool, answers, textAnswers),
 		};
 	}
 

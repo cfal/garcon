@@ -1,10 +1,10 @@
 import { AskUserQuestionToolUseMessage, type AskUserQuestionPrompt } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import {
-  ASK_USER_QUESTION_ID_MAX_BYTES,
   ASK_USER_QUESTION_MAX_ANSWERS,
   ASK_USER_QUESTION_MAX_SELECTED_OPTIONS,
   askUserQuestionDecisionValidationError,
+  isAskUserQuestionId,
   normalizeAskUserQuestionDecisionResponse,
 } from '@garcon/common/ask-user-question-response';
 import { isRecord } from '@garcon/common/json';
@@ -15,7 +15,6 @@ interface CodexUserInputResponse {
   answers: Record<string, { answers: string[] }>;
 }
 
-const idEncoder = new TextEncoder();
 const USER_NOTE_PREFIX = 'user_note: ';
 const OTHER_OPTION_LABEL = 'None of the above';
 
@@ -25,15 +24,14 @@ function parseCodexUserInputQuestions(value: unknown): AskUserQuestionPrompt[] {
   }
   const ids = new Set<string>();
   return value.map((question): AskUserQuestionPrompt => {
+    if (!isRecord(question)) throw new TypeError('Invalid Codex question');
+    if (!isAskUserQuestionId(question.id) || ids.has(question.id)) {
+      throw new TypeError('Invalid Codex question');
+    }
+    if (typeof question.question !== 'string' || !question.question.trim()) {
+      throw new TypeError('Invalid Codex question');
+    }
     if (
-      !isRecord(question) ||
-      typeof question.id !== 'string' ||
-      !question.id.trim() ||
-      !question.id.isWellFormed() ||
-      idEncoder.encode(question.id).length > ASK_USER_QUESTION_ID_MAX_BYTES ||
-      ids.has(question.id) ||
-      typeof question.question !== 'string' ||
-      !question.question.trim() ||
       (question.isOther !== undefined && typeof question.isOther !== 'boolean') ||
       (question.isSecret !== undefined && typeof question.isSecret !== 'boolean')
     ) {
@@ -119,7 +117,7 @@ export function codexHistoricalUserInput(
   }
 }
 
-export function codexHistoricalAnswers(output: unknown): Record<string, string[]> | null {
+function parseHistoricalAnswers(output: unknown): Map<string, string[]> | null {
   let value = output;
   if (typeof value === 'string') {
     try {
@@ -137,16 +135,15 @@ export function codexHistoricalAnswers(output: unknown): Record<string, string[]
     }
     answers.set(id, answer.answers);
   }
-  return Object.fromEntries(answers);
+  return answers;
 }
 
 export function codexHistoricalQuestionResult(
   output: unknown,
   questions: readonly AskUserQuestionPrompt[],
 ): { answers: Record<string, string[]>; textAnswers: Record<string, string> } | null {
-  const rawAnswers = codexHistoricalAnswers(output);
-  if (!rawAnswers) return null;
-  const answers = new Map(Object.entries(rawAnswers));
+  const answers = parseHistoricalAnswers(output);
+  if (!answers) return null;
   const textAnswers = new Map<string, string>();
   for (const question of questions) {
     const values = answers.get(question.id);

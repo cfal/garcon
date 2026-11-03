@@ -97,7 +97,9 @@ export function askUserQuestionDecisionValidationError(
     const answer = answersById.get(question.id)!;
     if (answer.text !== undefined) {
       const hasSelections = answer.selectedOptionIds.length > 0;
-      if (!hasSelections && !question.allowFreeText) return `Question ${question.id} does not accept free text`;
+      if (!hasSelections && !question.allowFreeText) {
+        return `Question ${question.id} does not accept free text`;
+      }
       if (!boundedText(answer.text, ASK_USER_QUESTION_TEXT_MAX_BYTES)) {
         return `Question ${question.id} requires valid nonblank text`;
       }
@@ -106,7 +108,9 @@ export function askUserQuestionDecisionValidationError(
       }
       if (!hasSelections) continue;
     }
-    if (question.allowFreeText && question.options.length === 0) return `Question ${question.id} requires text`;
+    if (question.allowFreeText && question.options.length === 0) {
+      return `Question ${question.id} requires text`;
+    }
     const error = selectedOptionsValidationError(question, answer.selectedOptionIds);
     if (error) return error;
   }
@@ -153,8 +157,10 @@ function normalizeAnswers(response: Record<string, unknown>): AskUserQuestionAns
   for (const value of response.answers) {
     const answer = asRecord(value);
     if (!answer || !hasExactKeys(answer, ['questionId', 'selectedOptionIds'], ['text'])) return null;
-    if (answer.text !== undefined && !boundedText(answer.text, ASK_USER_QUESTION_TEXT_MAX_BYTES)) return null;
-    if (!boundedId(answer.questionId) || questionIds.has(answer.questionId)) return null;
+    if (answer.text !== undefined && !boundedText(answer.text, ASK_USER_QUESTION_TEXT_MAX_BYTES)) {
+      return null;
+    }
+    if (!isAskUserQuestionId(answer.questionId) || questionIds.has(answer.questionId)) return null;
     if (
       !Array.isArray(answer.selectedOptionIds)
       || answer.selectedOptionIds.length > ASK_USER_QUESTION_MAX_SELECTED_OPTIONS
@@ -176,7 +182,7 @@ function normalizeAnswers(response: Record<string, unknown>): AskUserQuestionAns
 function normalizeOptionIds(values: unknown[]): string[] | null {
   const optionIds = new Set<string>();
   for (const value of values) {
-    if (!boundedId(value) || optionIds.has(value)) return null;
+    if (!isAskUserQuestionId(value) || optionIds.has(value)) return null;
     optionIds.add(value);
   }
   return [...optionIds];
@@ -188,7 +194,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function boundedId(value: unknown): value is string {
+export function isAskUserQuestionId(value: unknown): value is string {
   return boundedText(value, ASK_USER_QUESTION_ID_MAX_BYTES);
 }
 
