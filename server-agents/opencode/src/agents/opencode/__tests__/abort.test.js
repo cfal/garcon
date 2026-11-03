@@ -143,9 +143,10 @@ function createEventStream({ connected = true } = {}) {
 }
 
 async function waitFor(predicate) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const deadline = performance.now() + 1_000;
+  while (performance.now() < deadline) {
     if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 1));
   }
   throw new Error('Timed out waiting for condition');
 }
