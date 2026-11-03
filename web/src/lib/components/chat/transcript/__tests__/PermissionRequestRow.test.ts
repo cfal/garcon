@@ -74,6 +74,14 @@ describe('PermissionRequestRow', () => {
 
 		const submit = screen.getByRole('button', { name: /submit answer/i }) as HTMLButtonElement;
 		expect(submit.disabled).toBe(true);
+		expect(submit.classList.contains('hover:bg-status-warning/90')).toBe(true);
+		expect(submit.classList.contains('transition-colors')).toBe(true);
+		const skip = screen.getByRole('button', { name: /skip/i });
+		expect(skip.classList.contains('hover:bg-status-error/20')).toBe(true);
+		expect(skip.classList.contains('transition-colors')).toBe(true);
+		const iconFrame = screen.getByText('Input requested').previousElementSibling;
+		expect(iconFrame?.classList.contains('border-current/25')).toBe(true);
+		expect(iconFrame?.classList.contains('h-7')).toBe(true);
 		expect(screen.getByText('Mode')).toBeTruthy();
 		expect(screen.getByText('Which mode?')).toBeTruthy();
 
@@ -83,6 +91,8 @@ describe('PermissionRequestRow', () => {
 		expect(screen.getByText('<pre>careful</pre>').classList.contains('typography-chat-code')).toBe(
 			true,
 		);
+		expect(screen.getByText('<pre>careful</pre>').style.getPropertyValue('--chat-code-default-size'))
+			.toBe('11px');
 
 		await fireEvent.click(submit);
 

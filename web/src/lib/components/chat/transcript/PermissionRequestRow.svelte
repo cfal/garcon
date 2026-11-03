@@ -407,7 +407,11 @@
 	<ChatEventCard variant={permCardVariant} class={resolvedOpacity}>
 		{#snippet header()}
 			<div class="flex items-center gap-2">
-				<ShieldAlert class="w-4 h-4" />
+				<div
+					class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-current/25"
+				>
+					<ShieldAlert class="w-4 h-4" />
+				</div>
 				<span class="text-sm font-semibold">{askUserQuestionTitle}</span>
 			</div>
 		{/snippet}

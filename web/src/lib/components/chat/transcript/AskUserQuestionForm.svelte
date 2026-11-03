@@ -175,7 +175,8 @@
 			{/if}
 			{#each question.options.filter((option) => option.preview && selectedOptions(question.id).includes(option.id)) as option (option.id)}
 				<pre
-					class="typography-chat-code max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/40 p-2 text-xs text-foreground">{option.preview}</pre>
+					style:--chat-code-default-size="11px"
+					class="typography-chat-code max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/40 p-2 text-[11px] text-foreground">{option.preview}</pre>
 			{/each}
 		</fieldset>
 	{/each}
@@ -190,7 +191,7 @@
 			<button
 				type="submit"
 				disabled={!canAnswer || !valid}
-				class="inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+				class="inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-warning/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 			>
 				<Check class="w-3.5 h-3.5" />{m.chat_permission_submit_answer()}
 			</button>
@@ -198,7 +199,7 @@
 				type="button"
 				onclick={skip}
 				disabled={!canAnswer}
-				class="inline-flex items-center gap-1.5 rounded-md border border-status-error-border text-status-error-foreground text-xs font-medium px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+				class="inline-flex items-center gap-1.5 rounded-md border border-status-error-border text-status-error-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-error/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 			>
 				<X class="w-3.5 h-3.5" />{m.chat_permission_skip()}
 			</button>
