@@ -156,7 +156,7 @@
 					</label>
 				{/if}
 			</div>
-			{#if textMode(question)}
+			{#if textMode(question) && (isPending || Object.hasOwn(texts, question.id))}
 				{#if !isPending && !question.isSecret}
 					<p class="whitespace-pre-wrap break-words text-sm text-foreground">
 						{texts[question.id]}

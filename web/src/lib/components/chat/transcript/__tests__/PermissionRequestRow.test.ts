@@ -173,6 +173,27 @@ describe('PermissionRequestRow', () => {
 		expect(onDecision.mock.calls[0][1].response.answers).toEqual([{ questionId: 'Which mode?', selectedOptionIds: ['Fast'] }]);
 	});
 
+	it.each([
+		{ id: 'details', isSecret: false },
+		{ id: 'constructor', isSecret: false },
+		{ id: 'toString', isSecret: false },
+		{ id: 'constructor', isSecret: true },
+	])('omits unanswered terminal text controls for $id, secret=$isSecret', ({ id, isSecret }) => {
+		const request = askUserQuestionRequest({ id, isSecret, allowFreeText: true, options: [] });
+		const { container } = render(PermissionRequestRowTestHost, {
+			request,
+			onDecision: vi.fn(),
+			terminal: {
+				permissionOccurrenceId: request.permissionOccurrenceId,
+				state: 'resolved',
+				allowed: false,
+			},
+		});
+		expect(container.querySelector('fieldset p')).toBeNull();
+		expect(container.querySelector('fieldset input')).toBeNull();
+		expect(container.textContent).not.toContain('[native code]');
+	});
+
 	it('preserves line breaks in resolved free text', () => {
 		const request = askUserQuestionRequest({ allowFreeText: true });
 		const answer = 'first line\nsecond line';
