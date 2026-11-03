@@ -828,9 +828,10 @@ bun cli/main.ts --runtime controller status 1785337200123456 \
 permission requests, and 10 recent normalized transcript messages by default.
 Plain permission rows include the exact occurrence, run, and server-instance
 fences plus shell-safe allow and deny commands where the request supports a
-boolean decision. Structured rows include a typed answer template instead of an
-allow command. They remain visible with `--messages 0` or an unavailable
-transcript. `--messages` accepts 0 through 200; zero skips transcript loading.
+boolean decision. Structured rows include typed answer templates for option
+selections or free text, as supported by their questions, instead of an allow
+command. They remain visible with `--messages 0` or an unavailable transcript.
+`--messages` accepts 0 through 200; zero skips transcript loading.
 JSON is the stable machine-readable interface; plain text redacts image bodies
 and truncates long messages.
 

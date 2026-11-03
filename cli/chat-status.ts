@@ -1,4 +1,5 @@
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
+import type { AskUserQuestionAnswerPayload } from '@garcon/common/ask-user-question-response';
 import type { CliConnectionOptions, StatusCliCommand } from './args.js';
 import { connectionCommandPrefix } from './connection-options.js';
 import { CliError } from './errors.js';
@@ -84,7 +85,10 @@ export function formatChatStatus(
     lines.push(`pending permissions: ${snapshot.transientFeed.rows.length}`);
     for (const row of snapshot.transientFeed.rows) {
       const message = row.message;
-      const structured = message.requestedTool.type === 'ask-user-question-tool-use';
+      const questionTool = message.requestedTool.type === 'ask-user-question-tool-use'
+        ? message.requestedTool
+        : null;
+      const allowsFreeText = questionTool?.questions.some((question) => question.allowFreeText) ?? false;
       lines.push(
         '',
         `permission occurrence: ${row.permissionOccurrenceId}`,
@@ -94,19 +98,31 @@ export function formatChatStatus(
         `requested tool details:\n${formatPermissionRequestedTool(message.requestedTool)}`,
       );
       if (message.reason) lines.push(`permission reason: ${terminalLine(message.reason)}`);
-      if (structured) {
-        lines.push(
-          'action: use permission-answer with the exact question and option IDs above',
-        );
+      if (questionTool) {
+        lines.push(allowsFreeText
+          ? 'action: use permission-answer with the exact question IDs above and option selections or free text where allowed'
+          : 'action: use permission-answer with the exact question and option IDs above');
       }
       if (connection) {
-        if (structured) {
-          lines.push(`answer command template: ${permissionAnswerCommand(
-            connection,
-            snapshot,
-            row.permissionOccurrenceId,
-            row.runId,
-          )}`);
+        if (questionTool) {
+          if (!allowsFreeText || questionTool.questions.some((question) => question.options.length > 0)) {
+            lines.push(`answer command template: ${permissionAnswerCommand(
+              connection,
+              snapshot,
+              row.permissionOccurrenceId,
+              row.runId,
+              { questionId: 'QUESTION_ID', selectedOptionIds: ['OPTION_ID'] },
+            )}`);
+          }
+          if (allowsFreeText) {
+            lines.push(`text answer command template: ${permissionAnswerCommand(
+              connection,
+              snapshot,
+              row.permissionOccurrenceId,
+              row.runId,
+              { questionId: 'QUESTION_ID', selectedOptionIds: [], text: 'ANSWER_TEXT' },
+            )}`);
+          }
         } else {
           lines.push(`allow command: ${permissionDecisionCommand(
             connection,
@@ -151,6 +167,7 @@ function permissionAnswerCommand(
   snapshot: ChatSnapshotResponse,
   permissionOccurrenceId: string,
   runId: string,
+  answer: AskUserQuestionAnswerPayload,
 ): string {
   return [
     ...connectionCommandPrefix(connection),
@@ -158,7 +175,7 @@ function permissionAnswerCommand(
     shellQuote(snapshot.chat.id),
     shellQuote(permissionOccurrenceId),
     '--answers',
-    shellQuote('[{"questionId":"QUESTION_ID","selectedOptionIds":["OPTION_ID"]}]'),
+    shellQuote(JSON.stringify([answer])),
     '--run',
     shellQuote(runId),
     '--server-instance',

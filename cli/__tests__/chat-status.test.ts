@@ -259,6 +259,41 @@ describe('chat status', () => {
     expect(value).not.toContain('allow command:');
   });
 
+  test.each([
+    ['controller', false],
+    ['controller', true],
+    ['executor', false],
+    ['executor', true],
+  ] as const)('renders a text-answer template for runtime %s, options=%s', (runtime, hasOptions) => {
+    const value = snapshot();
+    value.transientFeed.rows.push({
+      permissionOccurrenceId: 'text-question',
+      runId: 'run-1',
+      transcript: { transcriptViewId: 'view-1', afterOrdinal: 2 },
+      displayOrder: 2,
+      message: new PermissionRequestMessage(
+        TIMESTAMP,
+        'text-question',
+        new AskUserQuestionToolUseMessage(TIMESTAMP, 'tool-1', undefined, [{
+          id: 'details',
+          prompt: 'Which details?',
+          allowFreeText: true,
+          options: hasOptions ? [{ id: 'preset', label: 'Preset' }] : [],
+        }]),
+      ),
+    });
+    const rendered = formatChatStatus(value, { ...command, runtime });
+    expect(rendered).toContain('option selections or free text where allowed');
+    expect(rendered).toContain(
+      `text answer command template: garcon-cli --config-dir '/config' --runtime '${runtime}' `
+        + `permission-answer '${CHAT_ID}' 'text-question' --answers `
+        + `'[{"questionId":"QUESTION_ID","selectedOptionIds":[],"text":"ANSWER_TEXT"}]' `
+        + `--run 'run-1' --server-instance 'instance-1'`,
+    );
+    expect(rendered.includes('OPTION_ID')).toBe(hasOptions);
+    expect(rendered).not.toContain('allow command:');
+  });
+
   test('redacts images and data URLs while preserving unrelated data fields', () => {
     const value = formatChatStatus(snapshot({
       transcript: {
