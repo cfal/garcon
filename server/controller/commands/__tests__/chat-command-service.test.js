@@ -4850,6 +4850,62 @@ describe('ChatCommandService', () => {
     expect(agents.resolvePermission).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['before acceptance', 'during acceptance'])('fences a question retired %s without provider IO', async (timing) => {
+    const permissionOccurrenceId = 'incarnation-1';
+    let retired = timing === 'before acceptance';
+    const validateAction = mock(() => {
+      if (retired) throw new TransientControlActionError('TRANSIENT_CONTROL_STALE');
+      return {
+        permissionOccurrenceId,
+        runId: 'run-1',
+        transcript: { transcriptViewId: 'view-1', afterOrdinal: 1 },
+        displayOrder: 1,
+        message: new PermissionRequestMessage(
+          '2026-09-08T00:00:00.000Z', permissionOccurrenceId,
+          new AskUserQuestionToolUseMessage('2026-09-08T00:00:00.000Z', 'tool-1', undefined, [{
+            id: 'mode', prompt: 'Which mode?', allowNotes: true,
+            options: [{ id: 'fast', label: 'Fast' }],
+          }]),
+        ),
+      };
+    });
+    const { service, agents, ledger } = makeService({ transientFeeds: { validateAction } });
+    const accept = ledger.accept.bind(ledger);
+    const acceptance = spyOn(ledger, 'accept').mockImplementation(async (input) => {
+      const result = await accept(input);
+      retired = true;
+      return result;
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID, permissionOccurrenceId, allow: true, alwaysAllow: false,
+      clientRequestId: 'req-question-retired',
+      control: { serverInstanceId: 'server-instance-test', chatId: SOURCE_CHAT_ID, runId: 'run-1', permissionOccurrenceId },
+      response: {
+        type: 'ask-user-question-response', outcome: 'answered',
+        answers: [{ questionId: 'mode', selectedOptionIds: ['fast'], text: 'Only tests' }],
+      },
+    };
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await expect(service.submitPermissionDecision(input)).rejects.toMatchObject({
+          code: 'PERMISSION_NOT_ACTIONABLE', status: 409,
+        });
+      }
+      expect(agents.resolvePermission).not.toHaveBeenCalled();
+      const record = await readLedgerRecord(ledger, 'permission-decision', input.clientRequestId);
+      if (timing === 'before acceptance') {
+        expect(acceptance).not.toHaveBeenCalled();
+        expect(record).toBeNull();
+      } else {
+        expect(acceptance).toHaveBeenCalledTimes(1);
+        expect(record).toMatchObject({ status: 'failed', errorCode: 'PERMISSION_NOT_ACTIONABLE' });
+      }
+      expect(validateAction).toHaveBeenCalledTimes(2);
+    } finally {
+      acceptance.mockRestore();
+    }
+  });
+
   it('fails a stale permission action once and does not re-enter provider IO on retry', async () => {
     const validateAction = mock(() => {
       throw new TransientControlActionError('TRANSIENT_CONTROL_STALE');

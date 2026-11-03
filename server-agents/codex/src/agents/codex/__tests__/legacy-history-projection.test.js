@@ -71,9 +71,10 @@ describe('LegacyCodexProjection questions', () => {
     expect(result.canonical[0].content.raw).toBeUndefined();
   });
 
-  it('does not attach question metadata to unrelated answer-shaped output', () => {
+  it.each(['custom_tool', 'request_user_input_async'])('does not treat %s as a synchronous question', (name) => {
     const projection = new LegacyCodexProjection();
-    projection.project(functionCall('ordinary', 'custom_tool'), {});
+    const call = projection.project(functionCall('ordinary', name), {});
+    expect(call.canonical[0].type).not.toBe('ask-user-question-tool-use');
     const result = projection.project(functionOutput('ordinary', '{"answers":{}}'), {});
     expect(result.canonical[0].content).toEqual({ answers: {} });
   });

@@ -18,6 +18,49 @@ async function withTempJsonl(lines, fn) {
 }
 
 describe('loadCodexChatMessages', () => {
+  it('pairs interleaved legacy questions and tagged notes across JSONL records in source order', async () => {
+    const timestamp = '2026-01-01T00:00:00.000Z';
+    const calls = [
+      { callId: 'first', questionId: 'mode', labels: ['Fast', 'Careful'] },
+      { callId: 'second', questionId: 'scope', labels: ['Alpha', 'Beta'] },
+    ].map(({ callId, questionId, labels }) => ({
+      type: 'response_item', timestamp, payload: {
+        type: 'function_call', name: 'request_user_input', call_id: callId,
+        arguments: JSON.stringify({ questions: [{
+          id: questionId, header: 'Choice', question: `Choose ${questionId}`,
+          options: labels.map((label) => ({ label })),
+        }] }),
+      },
+    }));
+    const outputs = [
+      { call_id: 'second', questionId: 'scope', answers: ['None of the above', 'user_note:   Custom scope  '] },
+      { call_id: 'first', questionId: 'mode', answers: ['Careful', 'user_note:   Only tests\nKeep defaults.  '] },
+    ].map(({ call_id, questionId, answers }) => ({
+      type: 'response_item', timestamp, payload: {
+        type: 'function_call_output', call_id,
+        output: JSON.stringify({ answers: { [questionId]: { answers } } }),
+      },
+    }));
+    const messages = await withTempJsonl([...calls, ...outputs].map((entry) => JSON.stringify(entry)),
+      (filePath) => loadCodexChatMessages(filePath, undefined, { throwOnError: true }));
+    expect(messages.map((message) => [message.type, message.toolId])).toEqual([
+      ['ask-user-question-tool-use', 'first'], ['ask-user-question-tool-use', 'second'],
+      ['tool-result', 'second'], ['tool-result', 'first'],
+    ]);
+    expect(messages[0].questions[0]).toMatchObject({ id: 'mode', allowNotes: true, allowFreeText: true });
+    expect(messages[0].questions[0].options.map(({ id, label }) => ({ id, label }))).toEqual([
+      { id: 'option-0', label: 'Fast' }, { id: 'option-1', label: 'Careful' },
+    ]);
+    expect(messages[2].isError).toBe(false);
+    expect(messages[2].content.toolUseResult).toEqual({
+      answers: { scope: [] }, textAnswers: { scope: '  Custom scope  ' },
+    });
+    expect(messages[3].isError).toBe(false);
+    expect(messages[3].content.toolUseResult).toEqual({
+      answers: { mode: ['Careful'] }, textAnswers: { mode: '  Only tests\nKeep defaults.  ' },
+    });
+  });
+
   it('[TLV5-ADOPT.07-CODEX-UNIT-01] rejects incomplete records and recognized content payloads before retry', async () => {
     const invalidEntry = JSON.stringify({
       type: 'response_item',

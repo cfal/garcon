@@ -7,28 +7,30 @@
 	import { ConversationFeedItemState } from '../ConversationFeedItemState.svelte.js';
 	import { buildConversationVirtualFeedModel } from '../conversation-feed-virtual-items.js';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
-	import { AskUserQuestionToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
+	import { AskUserQuestionToolUseMessage, PermissionRequestMessage, type AskUserQuestionPrompt } from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	interface Props {
+		mounted?: boolean;
+		questionOverrides?: Partial<AskUserQuestionPrompt>;
 		onDecision: (
 			permissionOccurrenceId: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 	}
 
-	let { onDecision }: Props = $props();
+	let { onDecision, mounted = true, questionOverrides = {} }: Props = $props();
 	setCanonicalWorkspaceLayout();
 	setNotifications(createNotificationsStore());
 
 	const timestamp = '2026-08-15T00:00:00.000Z';
 	const itemState = new ConversationFeedItemState();
-	const requests: PendingPermissionRequest[] = [
+	const requests: PendingPermissionRequest[] = $derived([
 		permissionRequest('occurrence-one', 'First'),
 		permissionRequest('occurrence-two', 'Second'),
-	];
-	const model = buildConversationVirtualFeedModel({
+	]);
+	const model = $derived(buildConversationVirtualFeedModel({
 		combineToolUseMessages: false,
 		expandedToolMemberIds: new Set(),
 		protectedVirtualKeys: [],
@@ -40,8 +42,8 @@
 		surfaceIdentity: 'chat-1:view-1',
 		transcriptItems: [],
 		pendingPermissions: requests,
-	});
-	const permissionItems = model.items.filter((item) => item.kind === 'permission');
+	}));
+	const permissionItems = $derived(model.items.filter((item) => item.kind === 'permission'));
 
 	setChatSessions({
 		get selectedChat() {
@@ -89,6 +91,7 @@
 							},
 						],
 						allowMultiple: false,
+						...questionOverrides,
 					},
 				],
 			),
@@ -104,14 +107,16 @@
 	}
 </script>
 
-{#each permissionItems as item (item.key)}
-	<section data-testid="permission-occurrence" data-virtual-key={item.key}>
-		<PermissionRequestRow
-			request={requestMessage(item.request)}
-			{onDecision}
-			draft={itemState.permissionDraft(item.request.permissionOccurrenceId)}
-			onDraftChange={(draft) =>
-				itemState.setPermissionDraft(item.request.permissionOccurrenceId, draft)}
-		/>
-	</section>
-{/each}
+{#if mounted}
+	{#each permissionItems as item (item.key)}
+		<section data-testid="permission-occurrence" data-virtual-key={item.key}>
+			<PermissionRequestRow
+				request={requestMessage(item.request)}
+				{onDecision}
+				draft={itemState.permissionDraft(item.request.permissionOccurrenceId)}
+				onDraftChange={(draft) =>
+					itemState.setPermissionDraft(item.request.permissionOccurrenceId, draft)}
+			/>
+		</section>
+	{/each}
+{/if}

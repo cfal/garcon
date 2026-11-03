@@ -939,7 +939,7 @@ describe('Cursor ACP runtime', () => {
     runtime.shutdown();
   });
 
-  it('emits Cursor ask-question requests and forwards answered responses', async () => {
+  it.each([false, true])('preserves Cursor question identities and answered selections, multiple=%p', async (allowMultiple) => {
     const { acp, runtime } = createRuntimeHarness();
     const operation = collectOperation('run-1');
     await runtime.startSession(startRequest({ operation: operation.operation }));
@@ -954,31 +954,76 @@ describe('Cursor ACP runtime', () => {
         questions: [{
           id: 'q1',
           prompt: 'Which mode?',
-          options: [{ id: 'agent', label: 'Agent' }],
+          allowMultiple,
+          options: [{ id: 'agent', label: 'Agent' }, { id: 'plan', label: 'Plan' }],
         }],
       },
     });
 
+    const selectedOptionIds = allowMultiple ? ['plan', 'agent'] : ['agent'];
     const answered = {
       type: 'ask-user-question-response',
       outcome: 'answered',
-      answers: [{ questionId: 'q1', selectedOptionIds: ['agent'] }],
+      answers: [{ questionId: 'q1', selectedOptionIds }],
     };
     const permission = await operation.waitForEvent((event) => event.type === 'permission');
     expect(permission.lifecycle.requestedTool).toBeInstanceOf(AskUserQuestionToolUseMessage);
-    expect(permission.lifecycle.requestedTool.questions[0].prompt).toBe('Which mode?');
+    expect(permission.lifecycle.requestedTool.title).toBe('Need input');
+    expect(permission.lifecycle.requestedTool.questions).toEqual([{
+      id: 'q1', prompt: 'Which mode?', allowMultiple,
+      options: [{ id: 'agent', label: 'Agent' }, { id: 'plan', label: 'Plan' }],
+    }]);
     await permission.decision.respond({ allow: true, response: answered });
 
     const response = await acp.waitForWrite((message) => message.id === 'question-1' && message.result);
     expect(response.result).toEqual({
       outcome: {
         outcome: 'answered',
-        answers: [{ questionId: 'q1', selectedOptionIds: ['agent'] }],
+        answers: [{ questionId: 'q1', selectedOptionIds }],
       },
     });
 
     acp.finishPrompt();
     runtime.shutdown();
+  });
+
+  it.each(['deny', 'skip', 'cancel'])('returns the exact Cursor question envelope for %s without selecting a default', async (action) => {
+    const { acp, runtime } = createRuntimeHarness();
+    const operation = collectOperation('run-question');
+    const started = await runtime.startSession(startRequest({ operation: operation.operation }));
+    await acp.waitForClientMethod('session/prompt');
+    try {
+      acp.serverRequest({
+        id: 'question-1', method: 'cursor/ask_question',
+        params: { toolCallId: 'call-question', title: 'Need input', questions: [{
+          id: 'q1', prompt: 'Which mode?', options: [{ id: 'agent', label: 'Agent' }],
+        }] },
+      });
+      const permission = await operation.waitForEvent((event) => event.type === 'permission');
+      if (action === 'cancel') {
+        expect(runtime.abort(started.agentSessionId)).toBe(true);
+        expect(operation.events.filter((event) => event.type === 'permission').at(-1).lifecycle).toEqual({
+          kind: 'cancelled', permissionOccurrenceId: permission.lifecycle.permissionOccurrenceId, reason: 'aborted',
+        });
+      } else if (action === 'skip') {
+        await permission.decision.respond({ allow: false, response: {
+          type: 'ask-user-question-response', outcome: 'skipped', reason: 'Not now',
+        } });
+      } else {
+        await permission.decision.respond({ allow: false });
+      }
+      const response = await acp.waitForWrite((message) => message.id === 'question-1' && message.result);
+      if (action === 'cancel') {
+        expect(response.result).toEqual({ outcome: { outcome: 'cancelled' } });
+      } else {
+        expect(response.result).toEqual({ outcome: {
+          outcome: 'skipped', reason: action === 'skip' ? 'Not now' : 'User skipped question',
+        } });
+        acp.finishPrompt();
+      }
+    } finally {
+      runtime.shutdown();
+    }
   });
 
   it('emits Cursor create-plan requests and can reject them', async () => {

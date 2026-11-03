@@ -13,6 +13,11 @@ import { DomainError } from '../../common/domain-error.js';
 import { parseJsonBody } from '../../common/http-body.js';
 import type { RouteMap } from '../../controller/lib/http-route-types.js';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
+import { CLI_ENVELOPE_BYTES, cliRequestBytes, cliRoute } from '../transport/cli-protocol.js';
+import {
+  ASK_USER_QUESTION_TEXT_MAX_BYTES,
+  normalizeAskUserQuestionDecisionResponse,
+} from '../../../common/ask-user-question-response.js';
 
 const cleanups: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -154,6 +159,50 @@ test('encoded request limits are rejected before effects and raw exceptions stay
   const failure = await f.call('/api/v1/chats/run', { method: 'POST' });
   expect(failure.status).toBe(500);
   expect(await failure.json()).toMatchObject({ error: 'Internal server error' });
+});
+
+test('question answers respect gateway envelope overhead and smaller notes pass through unchanged', async () => {
+  const received: unknown[] = [];
+  const f = await fixture({ '/api/v1/chats/permissions/decision': { POST: async (request) => {
+    received.push(await parseJsonBody(request));
+    return Response.json({ success: true });
+  } } });
+  const response = {
+    type: 'ask-user-question-response', outcome: 'answered',
+    answers: Array.from({ length: 4 }, (_, index) => ({
+      questionId: `question-${index}`, selectedOptionIds: ['preset'],
+      text: index < 3 ? 'x'.repeat(ASK_USER_QUESTION_TEXT_MAX_BYTES) : '',
+    })),
+  };
+  const body = {
+    chatId: '1234567890123456', clientRequestId: 'question-answer',
+    permissionOccurrenceId: 'question-occurrence', allow: true, alwaysAllow: false,
+    control: {
+      serverInstanceId: 'controller', chatId: '1234567890123456',
+      runId: 'run-1', permissionOccurrenceId: 'question-occurrence',
+    },
+    response,
+  };
+  const limit = cliRequestBytes('primary');
+  response.answers[3].text = 'x'.repeat(limit - 1 - Buffer.byteLength(JSON.stringify(body)));
+  const envelope = {
+    expectedServerInstanceId: 'controller',
+    http: { ...cliRoute('POST', '/api/v1/chats/permissions/decision'), query: [], body },
+  };
+  expect(normalizeAskUserQuestionDecisionResponse(response)).toEqual(response);
+  expect(Buffer.byteLength(JSON.stringify(body))).toBe(limit - 1);
+  expect(Buffer.byteLength(JSON.stringify(envelope)) + CLI_ENVELOPE_BYTES).toBeGreaterThan(limit);
+  const send = () => f.call('/api/v1/chats/permissions/decision', {
+    method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' },
+  });
+  const oversized = await send();
+  expect(oversized.status).toBe(413);
+  expect(await oversized.json()).toMatchObject({ errorCode: 'CLI_REQUEST_TOO_LARGE' });
+  expect(received).toEqual([]);
+
+  response.answers[3].text = '  Smaller note\nPreserve whitespace.  ';
+  expect((await send()).status).toBe(200);
+  expect(received).toEqual([body]);
 });
 
 test('HTTP cancellation reaches raw handlers without releasing unsettled controller work', async () => {

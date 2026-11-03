@@ -259,46 +259,55 @@ describe('chat status', () => {
     expect(value).not.toContain('allow command:');
   });
 
-  test.each([
-    ['controller', false],
-    ['controller', true],
-    ['executor', false],
-    ['executor', true],
-  ] as const)('renders a text-answer template for runtime %s, options=%s', (runtime, hasOptions) => {
-    const value = snapshot();
-    value.transientFeed.rows.push({
-      permissionOccurrenceId: 'text-question',
-      runId: 'run-1',
-      transcript: { transcriptViewId: 'view-1', afterOrdinal: 2 },
-      displayOrder: 2,
-      message: new PermissionRequestMessage(
-        TIMESTAMP,
-        'text-question',
-        new AskUserQuestionToolUseMessage(TIMESTAMP, 'tool-1', undefined, [{
-          id: 'details',
-          prompt: 'Which details?',
-          allowFreeText: true,
-          allowNotes: hasOptions,
-          options: hasOptions ? [{ id: 'preset', label: 'Preset' }] : [],
-        }]),
-      ),
+  for (const runtime of ['controller', 'executor'] as const) {
+    test.each([
+      { kind: 'options', hasOptions: true, allowFreeText: false, allowNotes: false, templates: ['answer'] },
+      { kind: 'text only', hasOptions: false, allowFreeText: true, allowNotes: false, templates: ['text answer'] },
+      { kind: 'options or text', hasOptions: true, allowFreeText: true, allowNotes: false, templates: ['answer', 'text answer'] },
+      { kind: 'options with notes', hasOptions: true, allowFreeText: false, allowNotes: true, templates: ['answer', 'option with notes'] },
+      { kind: 'options, text and notes', hasOptions: true, allowFreeText: true, allowNotes: true, templates: ['answer', 'text answer', 'option with notes'] },
+      { kind: 'optionless legacy', hasOptions: false, allowFreeText: false, allowNotes: false, templates: ['answer'] },
+    ])(`renders $kind templates for ${runtime}`, ({ hasOptions, allowFreeText, allowNotes, templates }) => {
+      const value = snapshot();
+      value.transientFeed.rows.push({
+        permissionOccurrenceId: 'text-question',
+        runId: 'run-1',
+        transcript: { transcriptViewId: 'view-1', afterOrdinal: 2 },
+        displayOrder: 2,
+        message: new PermissionRequestMessage(
+          TIMESTAMP,
+          'text-question',
+          new AskUserQuestionToolUseMessage(TIMESTAMP, 'tool-1', undefined, [{
+            id: 'details',
+            prompt: 'Which details?',
+            allowFreeText,
+            allowNotes,
+            options: hasOptions ? [{ id: 'preset', label: 'Preset' }] : [],
+          }]),
+        ),
+      });
+      const rendered = formatChatStatus(value, { ...command, runtime });
+      const templateLabels = rendered.split('\n')
+        .filter((line) => line.includes('command template:'))
+        .map((line) => line.split(' command template:')[0]);
+      expect(templateLabels).toEqual(templates);
+      expect(rendered.includes('option selections or free text where allowed')).toBe(allowFreeText);
+      if (allowFreeText) {
+        expect(rendered).toContain(
+          `text answer command template: garcon-cli --config-dir '/config' --runtime '${runtime}' `
+            + `permission-answer '${CHAT_ID}' 'text-question' --answers `
+            + `'[{"questionId":"QUESTION_ID","selectedOptionIds":[],"text":"ANSWER_TEXT"}]' `
+            + `--run 'run-1' --server-instance 'instance-1'`,
+        );
+      }
+      if (allowFreeText || hasOptions) expect(rendered.includes('OPTION_ID')).toBe(hasOptions);
+      expect(rendered.includes('notes: selected options may include text when allowNotes is true')).toBe(allowNotes);
+      if (allowNotes) {
+        expect(rendered).toContain('"selectedOptionIds":["OPTION_ID"],"text":"NOTE_TEXT"');
+      }
+      expect(rendered).not.toContain('allow command:');
     });
-    const rendered = formatChatStatus(value, { ...command, runtime });
-    expect(rendered).toContain('option selections or free text where allowed');
-    expect(rendered).toContain(
-      `text answer command template: garcon-cli --config-dir '/config' --runtime '${runtime}' `
-        + `permission-answer '${CHAT_ID}' 'text-question' --answers `
-        + `'[{"questionId":"QUESTION_ID","selectedOptionIds":[],"text":"ANSWER_TEXT"}]' `
-        + `--run 'run-1' --server-instance 'instance-1'`,
-    );
-    expect(rendered.includes('OPTION_ID')).toBe(hasOptions);
-    expect(rendered.includes('option with notes command template:')).toBe(hasOptions);
-    if (hasOptions) {
-      expect(rendered).toContain('"selectedOptionIds":["OPTION_ID"],"text":"NOTE_TEXT"');
-      expect(rendered).toContain('notes: selected options may include text when allowNotes is true');
-    }
-    expect(rendered).not.toContain('allow command:');
-  });
+  }
 
   test('redacts images and data URLs while preserving unrelated data fields', () => {
     const value = formatChatStatus(snapshot({

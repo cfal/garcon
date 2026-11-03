@@ -3,6 +3,7 @@ import {
   askUserQuestionDecisionValidationError,
   normalizeAskUserQuestionDecisionResponse,
   ASK_USER_QUESTION_TEXT_MAX_BYTES,
+  ASK_USER_QUESTION_RESPONSE_MAX_BYTES,
 } from '../ask-user-question-response.ts';
 import {
   AskUserQuestionToolUseMessage,
@@ -44,6 +45,42 @@ describe('free-text question answers', () => {
     expect(askUserQuestionDecisionValidationError(tool, true, response('Custom', ['preset']))).toContain('either text');
     const restricted = new AskUserQuestionToolUseMessage(TIMESTAMP, 'restricted', undefined, [{ ...tool.questions[0], allowFreeText: false }]);
     expect(askUserQuestionDecisionValidationError(restricted, true, response('Custom'))).toContain('does not accept free text');
+  });
+
+  it.each(['x', '\u00e9'])('accepts the exact UTF-8 text limit and rejects one more character: %s', (character) => {
+    const text = character.repeat(ASK_USER_QUESTION_TEXT_MAX_BYTES / Buffer.byteLength(character));
+    for (const selections of [[], ['preset']]) {
+      expect(normalizeAskUserQuestionDecisionResponse(response(text, selections)))
+        .toEqual(response(text, selections));
+      expect(normalizeAskUserQuestionDecisionResponse(response(text + character, selections))).toBeNull();
+    }
+  });
+
+  it('bounds the complete encoded response even when every answer fits its individual limit', () => {
+    const answer = {
+      type: 'ask-user-question-response',
+      outcome: 'answered',
+      answers: Array.from({ length: 4 }, (_, index) => ({
+        questionId: `question-${index}`,
+        selectedOptionIds: [],
+        text: index < 3 ? 'x'.repeat(ASK_USER_QUESTION_TEXT_MAX_BYTES) : '',
+      })),
+    };
+    const remaining = ASK_USER_QUESTION_RESPONSE_MAX_BYTES - Buffer.byteLength(JSON.stringify(answer));
+    answer.answers[3].text = 'x'.repeat(remaining);
+    expect(Buffer.byteLength(JSON.stringify(answer))).toBe(ASK_USER_QUESTION_RESPONSE_MAX_BYTES);
+    expect(normalizeAskUserQuestionDecisionResponse(answer)).toEqual(answer);
+
+    answer.answers[3].text += 'x';
+    expect(answer.answers.every(({ text }) => Buffer.byteLength(text) <= ASK_USER_QUESTION_TEXT_MAX_BYTES)).toBe(true);
+    expect(normalizeAskUserQuestionDecisionResponse(answer)).toBeNull();
+  });
+
+  it('counts JSON escaping toward the response bound, not just raw text bytes', () => {
+    const text = 'x' + '\u0001'.repeat(ASK_USER_QUESTION_TEXT_MAX_BYTES - 1);
+    expect(Buffer.byteLength(text)).toBe(ASK_USER_QUESTION_TEXT_MAX_BYTES);
+    expect(Buffer.byteLength(JSON.stringify(response(text)))).toBeGreaterThan(ASK_USER_QUESTION_RESPONSE_MAX_BYTES);
+    expect(normalizeAskUserQuestionDecisionResponse(response(text))).toBeNull();
   });
   it('requires text on free-text-only questions, not empty selections', () => {
     const textOnly = new AskUserQuestionToolUseMessage(TIMESTAMP, 'text-only', undefined, [{ ...tool.questions[0], options: [] }]);

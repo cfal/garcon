@@ -3,7 +3,7 @@ import type { AskUserQuestionAnswerPayload } from '../../../common/ask-user-ques
 import { runCli, withCliFixture } from '../../support/cli-fixture.js';
 import { codexFinalAnswerMessage, type CodexScriptedItem } from '../../support/fake-codex-model.js';
 import { liveCodexStartRequest } from '../../support/live-codex.js';
-import { LIVE_TURN_TIMEOUT_MS, waitForVisibleResponse } from '../../support/live-agent.js';
+import { LIVE_TURN_TIMEOUT_MS, reloadUntilNativeContains, waitForVisibleResponse } from '../../support/live-agent.js';
 import { startScriptedCodexTestEnvironment, type ScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 
@@ -139,30 +139,97 @@ describe('scripted Codex synchronous questions', () => {
           expect(decision).toMatchObject({ exitCode: 0, stderr: '' });
           await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex: cursor });
           const transcript = await fixture.client.getMessages(chatId);
+          expect(transcript.messages.filter((entry) => entry.message.type === 'permission-resolved')).toHaveLength(1);
           const resolution = transcript.messages.find((entry) => entry.message.type === 'permission-resolved')?.message;
+          if (resolution?.type !== 'permission-resolved') throw new Error('Expected resolved question');
           expect(resolution).toMatchObject({
             type: 'permission-resolved',
             allowed: answer !== null,
           });
           if (answer !== null) {
-            expect(resolution).toMatchObject({
-              questionResponse: { type: 'ask-user-question-response', outcome: 'answered', answers: [answer] },
+            expect(resolution.questionResponse).toEqual({
+              type: 'ask-user-question-response', outcome: 'answered', answers: [answer],
             });
           }
+          const replay = await runCli(fixture, command);
+          expect(replay).toMatchObject({ exitCode: 0, stderr: '' });
+          expect(JSON.parse(replay.stdout).status).toBe('duplicate');
+          expect((await fixture.client.getMessages(chatId)).messages).toEqual(transcript.messages);
           expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows).toEqual([]);
           await fixture.restartGarcon();
           expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows).toEqual([]);
-          expect(
-            (await fixture.client.getMessages(chatId)).messages.find(
-              (entry) => entry.message.type === 'permission-resolved',
-            )?.message,
-          ).toEqual(resolution);
+          expect((await fixture.client.getMessages(chatId)).messages).toEqual(transcript.messages);
+          if (mode === 'notes') {
+            await reloadUntilNativeContains(fixture, chatId, reply);
+            const reloaded = await fixture.client.getMessages(chatId);
+            expect(reloaded.transcriptViewId).not.toBe(transcript.transcriptViewId);
+            // Paginated Codex history omits question calls; legacy JSONL import has separate coverage.
+            expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows).toEqual([]);
+          }
           environment.model.assertSettled();
         },
         { serverEnvironment: environment.serverEnvironment, prepareWorkspace: environment.prepareWorkspace },
       );
     }, 90_000);
   }
+
+  test('answers every question atomically with independent option, note and text identities', async () => {
+    const callId = 'call-mixed-questions';
+    const answers = [
+      { questionId: 'detail', selectedOptionIds: [], text: '  Custom detail\nKeep defaults.  ' },
+      { questionId: '__proto__', selectedOptionIds: ['option-1'], text: '  Only tests  ' },
+    ];
+    environment.model.scriptTurn([{
+      type: 'function_call', name: 'request_user_input', call_id: callId,
+      arguments: JSON.stringify({ questions: ['__proto__', 'detail'].map((id) => ({
+        id, header: 'Choice', question: `Choose ${id}`,
+        options: [{ label: 'Fast', description: 'Quick path' }, { label: 'Careful', description: 'Detailed path' }],
+      })) }),
+    }]);
+    environment.model.scriptTurn((request) => {
+      const output = request.functionCallOutputs.find((item) => item.callId === callId);
+      expect(output).toBeDefined();
+      expect(JSON.parse(output!.output)).toEqual({ answers: {
+        ['__proto__']: { answers: ['Careful', 'user_note:   Only tests  '] },
+        detail: { answers: ['  Custom detail\nKeep defaults.  '] },
+      } });
+      return [codexFinalAnswerMessage('MIXED_ANSWERS_RECEIVED')];
+    });
+    await withCliFixture('codex-mixed-questions', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveCodexStartRequest({
+        chatId, projectPath: fixture.executionDirs.project, command: 'Ask for both choices.',
+      }));
+      const permission = await fixture.client.waitForTransientPermission(chatId, () => true, {
+        afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      const serverInstanceId = (await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.serverInstanceId;
+      const command = ['permission-answer', chatId, permission.permissionOccurrenceId];
+      const fences = ['--run', permission.runId, '--server-instance', serverInstanceId, '--json'];
+      const partial = await runCli(fixture, [...command, '--answers', JSON.stringify(answers.slice(0, 1)), ...fences]);
+      expect(partial.exitCode).toBe(2);
+      expect(partial.stderr).toContain('every pending question exactly once');
+      expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows).toHaveLength(1);
+      expect(environment.model.requests()).toHaveLength(1);
+      expect((await fixture.client.getMessages(chatId)).messages.some((entry) => entry.message.type === 'permission-resolved'))
+        .toBe(false);
+
+      const complete = await runCli(fixture, [...command, '--answers', JSON.stringify(answers), ...fences]);
+      expect(complete).toMatchObject({ exitCode: 0, stderr: '' });
+      await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: 'MIXED_ANSWERS_RECEIVED', afterIndex: cursor });
+      const resolutions = (await fixture.client.getMessages(chatId)).messages
+        .filter((entry) => entry.message.type === 'permission-resolved');
+      expect(resolutions).toHaveLength(1);
+      const resolution = resolutions[0].message;
+      if (resolution.type !== 'permission-resolved') throw new Error('Expected resolved question');
+      expect(resolution.allowed).toBe(true);
+      expect(resolution.questionResponse).toEqual({
+        type: 'ask-user-question-response', outcome: 'answered', answers,
+      });
+      environment.model.assertSettled();
+    }, { serverEnvironment: environment.serverEnvironment, prepareWorkspace: environment.prepareWorkspace });
+  }, 90_000);
 
   for (const end of ['stop', 'restart'] as const) {
     test(`keeps unanswered question history inert after ${end}`, async () => {

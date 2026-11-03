@@ -7,6 +7,43 @@ describe('permission occurrence feed rendering', () => {
 		cleanup();
 	});
 
+	it('retains independently typed notes and Other text through controlled row remounts', async () => {
+		const onDecision = vi.fn();
+		const { rerender } = render(PermissionOccurrenceFeedTestHost, {
+			onDecision, questionOverrides: { allowFreeText: true, allowNotes: true },
+		});
+		const occurrences = screen.getAllByTestId('permission-occurrence');
+		const first = within(occurrences[0]);
+		const second = within(occurrences[1]);
+		await fireEvent.click(first.getByRole('radio', { name: /First careful/ }));
+		await fireEvent.input(first.getByRole('textbox', { name: 'Notes (optional)' }), {
+			target: { value: '  First note\nKeep defaults.  ' },
+		});
+		await fireEvent.click(second.getByRole('radio', { name: 'Other' }));
+		await fireEvent.input(second.getByRole('textbox', { name: 'Second mode?' }), {
+			target: { value: '  Second custom answer  ' },
+		});
+		await rerender({ mounted: false });
+		expect(screen.queryAllByTestId('permission-occurrence')).toEqual([]);
+		await rerender({ mounted: true });
+		const remounted = screen.getAllByTestId('permission-occurrence');
+		expect(remounted[0]).not.toBe(occurrences[0]);
+		const restoredFirst = within(remounted[0]);
+		const restoredSecond = within(remounted[1]);
+		expect(restoredFirst.getByRole<HTMLInputElement>('radio', { name: /First careful/ }).checked).toBe(true);
+		expect(restoredFirst.getByRole<HTMLTextAreaElement>('textbox').value).toBe('  First note\nKeep defaults.  ');
+		expect(restoredSecond.getByRole<HTMLInputElement>('radio', { name: 'Other' }).checked).toBe(true);
+		expect(restoredSecond.getByRole<HTMLInputElement>('textbox').value).toBe('  Second custom answer  ');
+		await fireEvent.click(restoredFirst.getByRole('button', { name: /submit answer/i }));
+		await fireEvent.click(restoredSecond.getByRole('button', { name: /submit answer/i }));
+		expect(onDecision.mock.calls).toEqual([
+			['occurrence-one', { allow: true, response: { type: 'ask-user-question-response', outcome: 'answered',
+				answers: [{ questionId: 'First mode?', selectedOptionIds: ['First careful'], text: '  First note\nKeep defaults.  ' }] } }],
+			['occurrence-two', { allow: true, response: { type: 'ask-user-question-response', outcome: 'answered',
+				answers: [{ questionId: 'Second mode?', selectedOptionIds: [], text: '  Second custom answer  ' }] } }],
+		]);
+	});
+
 	it('keeps permission occurrences mounted, editable, and actionable independently', async () => {
 		const onDecision = vi.fn();
 		render(PermissionOccurrenceFeedTestHost, { onDecision });

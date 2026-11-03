@@ -23,7 +23,7 @@ function stored(kind: StoredLedgerRow['kind'], value: unknown): StoredLedgerRow 
 }
 
 describe('stored question messages', () => {
-  it('decodes old Cursor provider and permission rows into the generic type without rewriting bytes', () => {
+  it('decodes old Cursor provider and permission rows without mutating their stored payloads', () => {
     const provider = stored('provider-row', oldQuestion);
     const permission = stored('permission-requested', {
       kind: 'requested',
@@ -39,7 +39,7 @@ describe('stored question messages', () => {
       expect(row.payload_json).toBe(original);
     }
   });
-  it('projects and round-trips durable submitted text with no pending capability', () => {
+  it('projects and round-trips durable submitted text', () => {
     const response = {
       type: 'ask-user-question-response',
       outcome: 'answered',
