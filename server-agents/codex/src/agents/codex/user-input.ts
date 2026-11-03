@@ -16,6 +16,8 @@ interface CodexUserInputResponse {
 }
 
 const idEncoder = new TextEncoder();
+const USER_NOTE_PREFIX = 'user_note: ';
+const OTHER_OPTION_LABEL = 'None of the above';
 
 function parseCodexUserInputQuestions(value: unknown): AskUserQuestionPrompt[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > ASK_USER_QUESTION_MAX_ANSWERS) {
@@ -48,6 +50,7 @@ function parseCodexUserInputQuestions(value: unknown): AskUserQuestionPrompt[] {
       prompt: question.question,
       ...(typeof question.header === 'string' ? { header: question.header } : {}),
       allowFreeText: question.isOther === true,
+      allowNotes: options.length > 0,
       isSecret: question.isSecret === true,
       options: options.map((option, index) => {
         if (!isRecord(option) || typeof option.label !== 'string' || !option.label.trim()) {
@@ -87,11 +90,12 @@ export function codexUserInputResponse(
   const questions = new Map(tool.questions.map((question) => [question.id, question]));
   const answerEntries = response.answers.map((answer): [string, { answers: string[] }] => {
     let values: string[];
-    if (answer.text !== undefined) {
+    if (answer.selectedOptionIds.length === 0 && answer.text !== undefined) {
       values = [answer.text];
     } else {
       const question = questions.get(answer.questionId)!;
       values = answer.selectedOptionIds.map((id) => question.options.find((option) => option.id === id)!.label);
+      if (answer.text !== undefined) values.push(`${USER_NOTE_PREFIX}${answer.text}`);
     }
     return [answer.questionId, { answers: values }];
   });
@@ -134,4 +138,24 @@ export function codexHistoricalAnswers(output: unknown): Record<string, string[]
     answers.set(id, answer.answers);
   }
   return Object.fromEntries(answers);
+}
+
+export function codexHistoricalQuestionResult(
+  output: unknown,
+  questions: readonly AskUserQuestionPrompt[],
+): { answers: Record<string, string[]>; textAnswers: Record<string, string> } | null {
+  const rawAnswers = codexHistoricalAnswers(output);
+  if (!rawAnswers) return null;
+  const answers = new Map(Object.entries(rawAnswers));
+  const textAnswers = new Map<string, string>();
+  for (const question of questions) {
+    const values = answers.get(question.id);
+    if (values?.length !== 2 || !values[1].startsWith(USER_NOTE_PREFIX)) continue;
+    // The TUI appends a tagged note after its selected label, including Other.
+    const selected = question.options.some((option) => option.label === values[0]);
+    if (!selected && values[0] !== OTHER_OPTION_LABEL) continue;
+    answers.set(question.id, selected ? [values[0]] : []);
+    textAnswers.set(question.id, values[1].slice(USER_NOTE_PREFIX.length));
+  }
+  return { answers: Object.fromEntries(answers), textAnswers: Object.fromEntries(textAnswers) };
 }

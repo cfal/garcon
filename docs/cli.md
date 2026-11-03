@@ -869,8 +869,11 @@ a validation error (exit 2) and leaves the question pending for `permission-answ
 
 Questions with `allowFreeText: true` also accept an answer such as
 `{"questionId":"QUESTION_ID","selectedOptionIds":[],"text":"Custom answer"}`.
-Text replaces option selections; do not send both. Text must be nonblank and at
-most 16 KiB UTF-8 per answer. Every pending question must have one answer.
+Text replaces option selections unless the question also has `allowNotes: true`.
+Such questions accept selected options with a note, for example
+`{"questionId":"QUESTION_ID","selectedOptionIds":["OPTION_ID"],"text":"Only for tests"}`.
+Text and notes must be nonblank and at most 16 KiB UTF-8 per answer. Omit `text`
+for an option answer without notes. Every pending question must have one answer.
 The same payload works through the controller and executor CLI gateway, subject
 to the gateway's total request-size limit. Secret-input masking is presentation
 only: submitted answers remain part of conversation history.

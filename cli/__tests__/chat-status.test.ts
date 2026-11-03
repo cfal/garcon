@@ -278,6 +278,7 @@ describe('chat status', () => {
           id: 'details',
           prompt: 'Which details?',
           allowFreeText: true,
+          allowNotes: hasOptions,
           options: hasOptions ? [{ id: 'preset', label: 'Preset' }] : [],
         }]),
       ),
@@ -291,6 +292,11 @@ describe('chat status', () => {
         + `--run 'run-1' --server-instance 'instance-1'`,
     );
     expect(rendered.includes('OPTION_ID')).toBe(hasOptions);
+    expect(rendered.includes('option with notes command template:')).toBe(hasOptions);
+    if (hasOptions) {
+      expect(rendered).toContain('"selectedOptionIds":["OPTION_ID"],"text":"NOTE_TEXT"');
+      expect(rendered).toContain('notes: selected options may include text when allowNotes is true');
+    }
     expect(rendered).not.toContain('allow command:');
   });
 

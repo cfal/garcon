@@ -89,6 +89,7 @@ export function formatChatStatus(
         ? message.requestedTool
         : null;
       const allowsFreeText = questionTool?.questions.some((question) => question.allowFreeText) ?? false;
+      const allowsNotes = questionTool?.questions.some((question) => question.allowNotes) ?? false;
       lines.push(
         '',
         `permission occurrence: ${row.permissionOccurrenceId}`,
@@ -102,6 +103,7 @@ export function formatChatStatus(
         lines.push(allowsFreeText
           ? 'action: use permission-answer with the exact question IDs above and option selections or free text where allowed'
           : 'action: use permission-answer with the exact question and option IDs above');
+        if (allowsNotes) lines.push('notes: selected options may include text when allowNotes is true');
       }
       if (connection) {
         if (questionTool) {
@@ -121,6 +123,15 @@ export function formatChatStatus(
               row.permissionOccurrenceId,
               row.runId,
               { questionId: 'QUESTION_ID', selectedOptionIds: [], text: 'ANSWER_TEXT' },
+            )}`);
+          }
+          if (allowsNotes) {
+            lines.push(`option with notes command template: ${permissionAnswerCommand(
+              connection,
+              snapshot,
+              row.permissionOccurrenceId,
+              row.runId,
+              { questionId: 'QUESTION_ID', selectedOptionIds: ['OPTION_ID'], text: 'NOTE_TEXT' },
             )}`);
           }
         } else {

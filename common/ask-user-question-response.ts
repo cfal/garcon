@@ -96,14 +96,15 @@ export function askUserQuestionDecisionValidationError(
   for (const question of questions) {
     const answer = answersById.get(question.id)!;
     if (answer.text !== undefined) {
-      if (!question.allowFreeText) return `Question ${question.id} does not accept free text`;
+      const hasSelections = answer.selectedOptionIds.length > 0;
+      if (!hasSelections && !question.allowFreeText) return `Question ${question.id} does not accept free text`;
       if (!boundedText(answer.text, ASK_USER_QUESTION_TEXT_MAX_BYTES)) {
         return `Question ${question.id} requires valid nonblank text`;
       }
-      if (answer.selectedOptionIds.length > 0) {
+      if (hasSelections && !question.allowNotes) {
         return `Question ${question.id} accepts either text or option selections`;
       }
-      continue;
+      if (!hasSelections) continue;
     }
     if (question.allowFreeText && question.options.length === 0) return `Question ${question.id} requires text`;
     const error = selectedOptionsValidationError(question, answer.selectedOptionIds);

@@ -7,6 +7,7 @@ import {
 import {
   AskUserQuestionToolUseMessage,
   BashToolUseMessage,
+  parseChatMessage,
 } from '../chat-types.ts';
 
 const TIMESTAMP = '2026-09-08T00:00:00.000Z';
@@ -48,6 +49,37 @@ describe('free-text question answers', () => {
     const textOnly = new AskUserQuestionToolUseMessage(TIMESTAMP, 'text-only', undefined, [{ ...tool.questions[0], options: [] }]);
     expect(askUserQuestionDecisionValidationError(textOnly, true, response(undefined))).toContain('requires text');
     expect(askUserQuestionDecisionValidationError(textOnly, true, response('Custom'))).toBeNull();
+  });
+
+  it('round-trips the opt-in notes capability and preserves selections with exact text', () => {
+    const notesTool = new AskUserQuestionToolUseMessage(TIMESTAMP, 'notes', undefined, [
+      { ...tool.questions[0], allowFreeText: false, allowNotes: true },
+    ]);
+    const decoded = parseChatMessage(JSON.parse(JSON.stringify(notesTool)));
+    expect(decoded.questions[0].allowNotes).toBe(true);
+    const answer = response('  Only for tests\nKeep the default.  ', ['preset']);
+    expect(normalizeAskUserQuestionDecisionResponse(answer)).toEqual(answer);
+    expect(askUserQuestionDecisionValidationError(decoded, true, answer)).toBeNull();
+    expect(askUserQuestionDecisionValidationError(decoded, true, response('Note without selection')))
+      .toContain('does not accept free text');
+    expect(askUserQuestionDecisionValidationError(decoded, true, response('Note', ['unknown'])))
+      .toContain('unknown option');
+    expect(askUserQuestionDecisionValidationError(decoded, true, response('   ', ['preset'])))
+      .toContain('nonblank');
+    for (const text of ['', '\ud800', 'x'.repeat(ASK_USER_QUESTION_TEXT_MAX_BYTES + 1)]) {
+      expect(normalizeAskUserQuestionDecisionResponse(response(text, ['preset']))).toBeNull();
+    }
+  });
+
+  it('keeps option cardinality validation when notes are present', () => {
+    const notesTool = new AskUserQuestionToolUseMessage(TIMESTAMP, 'notes', undefined, [{
+      ...tool.questions[0], allowNotes: true,
+      options: [{ id: 'preset', label: 'Preset' }, { id: 'second', label: 'Second' }],
+    }]);
+    const answer = response('Note', ['preset', 'second']);
+    expect(askUserQuestionDecisionValidationError(notesTool, true, answer)).toContain('exactly one');
+    notesTool.questions[0].allowMultiple = true;
+    expect(askUserQuestionDecisionValidationError(notesTool, true, answer)).toBeNull();
   });
 });
 

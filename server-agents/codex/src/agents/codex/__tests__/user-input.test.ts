@@ -4,6 +4,7 @@ import {
   codexUserInputResponse,
   codexHistoricalUserInput,
   codexHistoricalAnswers,
+  codexHistoricalQuestionResult,
 } from '../user-input.js';
 import {
   buildApprovalMessage,
@@ -45,6 +46,7 @@ describe('Codex synchronous questions', () => {
         {
           id: 'mode',
           allowFreeText: true,
+          allowNotes: true,
           options: [
             { id: 'option-0', label: 'Fast' },
             { id: 'option-1', label: 'Careful' },
@@ -102,6 +104,41 @@ describe('Codex synchronous questions', () => {
     expect(
       codexUserInputMessage(at, 'call', [{ ...questions[0], options: null, isSecret: true }]).questions[0],
     ).toMatchObject({ options: [], allowFreeText: true, isSecret: true });
+  });
+
+  it('delivers option notes in the native TUI encoding without trimming', () => {
+    const text = '  Only tests\nKeep defaults.  ';
+    expect(codexUserInputResponse(tool, {
+      allow: true,
+      response: { type: 'ask-user-question-response', outcome: 'answered',
+        answers: [{ questionId: 'mode', selectedOptionIds: ['option-1'], text }] },
+    })).toEqual({ answers: { mode: { answers: ['Careful', `user_note: ${text}`] } } });
+    expect(() => codexUserInputResponse(tool, {
+      allow: true,
+      response: { type: 'ask-user-question-response', outcome: 'answered',
+        answers: [{ questionId: 'mode', selectedOptionIds: ['missing'], text }] },
+    })).toThrow('unknown option');
+  });
+
+  it.each([
+    { values: ['Careful', 'user_note:  Only tests\n '], answers: ['Careful'], text: ' Only tests\n ' },
+    { values: ['None of the above', 'user_note: Custom'], answers: [], text: 'Custom' },
+    { values: ['user_note: literal text'], answers: ['user_note: literal text'], text: undefined },
+    { values: ['Unknown', 'user_note: literal text'], answers: ['Unknown', 'user_note: literal text'], text: undefined },
+  ])('normalizes TUI notes without reinterpreting unrelated text: $values', ({ values, answers, text }) => {
+    expect(codexHistoricalQuestionResult({ answers: { mode: { answers: values } } }, tool.questions))
+      .toEqual({ answers: { mode: answers }, textAnswers: text === undefined ? {} : { mode: text } });
+  });
+
+  it('keeps real options named like Other and prototype-like question IDs', () => {
+    const questions = [{ id: '__proto__', prompt: 'Pick one', options: [{ id: 'option-0', label: 'None of the above' }] }];
+    const raw = { answers: Object.fromEntries([['__proto__', { answers: ['None of the above', 'user_note: note'] }]]) };
+    const result = codexHistoricalQuestionResult(raw, questions)!;
+    expect(Object.hasOwn(result.answers, '__proto__')).toBe(true);
+    expect(result.answers.__proto__).toEqual(['None of the above']);
+    expect(Object.hasOwn(result.textAnswers, '__proto__')).toBe(true);
+    expect(result.textAnswers.__proto__).toBe('note');
+    expect(Object.getPrototypeOf(result.textAnswers)).toBe(Object.prototype);
   });
   it('normalizes raw historical arguments and results without pending capabilities', () => {
     expect(

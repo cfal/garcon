@@ -5,10 +5,6 @@ import { liveCodexStartRequest } from '../../support/live-codex.js';
 import { LIVE_TURN_TIMEOUT_MS, waitForVisibleResponse } from '../../support/live-agent.js';
 import { startScriptedCodexTestEnvironment, type ScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
-import { LegacyCodexProjection } from '../../../server-agents/codex/src/agents/codex/legacy-history-projection.js';
-import { codexUserInputResponse } from '../../../server-agents/codex/src/agents/codex/user-input.js';
-import { historicalAskUserQuestion } from '../../../web/src/lib/chat/transcript/ask-user-question-history.js';
-import type { PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
 
 function questionCall(callId: string): CodexScriptedItem {
   return {
@@ -31,55 +27,6 @@ function questionCall(callId: string): CodexScriptedItem {
   };
 }
 
-describe('Codex question history round-trip', () => {
-  function reconstruct(decision: PermissionDecisionPayload | string) {
-    const projection = new LegacyCodexProjection();
-    const timestamp = '2026-01-01T00:00:00.000Z';
-    const tool = projection.project({
-      type: 'response_item', timestamp, payload: questionCall('call-history'),
-    }, {})?.canonical[0];
-    if (tool?.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
-    const output = typeof decision === 'string'
-      ? decision
-      : JSON.stringify(codexUserInputResponse(tool, decision));
-    const result = projection.project({
-      type: 'response_item', timestamp,
-      payload: { type: 'function_call_output', call_id: 'call-history', output },
-    }, {})?.canonical[0];
-    if (result?.type !== 'tool-result') throw new Error('Expected question result');
-    return historicalAskUserQuestion(tool, result).terminal;
-  }
-
-  test.each(['option-0', 'option-1', 'request_user_input was cancelled'])(
-    'preserves native free text verbatim: %s', (text) => {
-      const terminal = reconstruct({ allow: true, response: {
-        type: 'ask-user-question-response', outcome: 'answered',
-        answers: [{ questionId: 'mode', selectedOptionIds: [], text }],
-      } });
-      expect(terminal.selectedQuestionOptions).toEqual({});
-      expect(terminal.questionTextAnswers).toEqual({ mode: text });
-    },
-  );
-
-  test('reconstructs selected options through native labels', () => {
-    const terminal = reconstruct({ allow: true, response: {
-      type: 'ask-user-question-response', outcome: 'answered',
-      answers: [{ questionId: 'mode', selectedOptionIds: ['option-1'] }],
-    } });
-    expect(terminal.selectedQuestionOptions).toEqual({ mode: ['option-1'] });
-    expect(terminal.questionTextAnswers).toEqual({});
-  });
-
-  test('shows a skipped native result without a raw JSON reason', () => {
-    expect(reconstruct({ allow: false })).toMatchObject({ allowed: false, reason: 'User skipped question' });
-  });
-
-  test('shows a native argument failure as unanswered with its reason', () => {
-    const reason = 'failed to parse function arguments: missing field `header`';
-    expect(reconstruct(reason)).toMatchObject({ allowed: false, reason });
-  });
-});
-
 describe('scripted Codex synchronous questions', () => {
   let environment: ScriptedCodexTestEnvironment;
   beforeEach(async () => {
@@ -89,7 +36,7 @@ describe('scripted Codex synchronous questions', () => {
     await environment?.dispose();
   });
 
-  for (const mode of ['option', 'text', 'skip'] as const) {
+  for (const mode of ['option', 'text', 'notes', 'skip'] as const) {
     test(`returns ${mode} through the original tool request, including manual bypass`, async () => {
       const callId = `call-question-${mode}`;
       const reply = `QUESTION_${mode}_COMPLETE`;
@@ -102,7 +49,8 @@ describe('scripted Codex synchronous questions', () => {
         const output = request.functionCallOutputs.find((item) => item.callId === callId);
         expect(output).toBeDefined();
         const expectedAnswer = mode === 'text' ? 'Custom mode' : 'Careful';
-        const answers = mode === 'skip' ? {} : { mode: { answers: [expectedAnswer] } };
+        const nativeValues = mode === 'notes' ? ['Careful', 'user_note: Only tests\nKeep defaults.'] : [expectedAnswer];
+        const answers = mode === 'skip' ? {} : { mode: { answers: nativeValues } };
         expect(JSON.parse(output!.output)).toEqual({ answers });
         expect(request.userTexts).toEqual(originalUserTexts);
         return [codexFinalAnswerMessage(reply)];
@@ -127,7 +75,7 @@ describe('scripted Codex synchronous questions', () => {
           expect(permission.message.requestedTool).toMatchObject({
             type: 'ask-user-question-tool-use',
             toolId: callId,
-            questions: [{ id: 'mode', allowFreeText: true }],
+            questions: [{ id: 'mode', allowFreeText: true, allowNotes: true }],
           });
           const serverInstanceId = (await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.serverInstanceId;
           const fences = ['--run', permission.runId, '--server-instance', serverInstanceId, '--json'];
@@ -157,6 +105,7 @@ describe('scripted Codex synchronous questions', () => {
               questionId: 'mode',
               selectedOptionIds: mode === 'text' ? [] : ['option-1'],
               ...(mode === 'text' ? { text: 'Custom mode' } : {}),
+              ...(mode === 'notes' ? { text: 'Only tests\nKeep defaults.' } : {}),
             },
           ];
           const decision = await runCli(

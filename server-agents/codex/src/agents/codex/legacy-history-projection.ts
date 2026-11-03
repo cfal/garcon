@@ -3,8 +3,8 @@ import type {
   CodexJsonlNormalizationResult,
 } from './history-normalizer.js';
 import { normalizeCodexJsonlEntry } from './history-normalizer.js';
-import { ExecToolUseMessage } from '@garcon/common/chat-types';
-import { codexHistoricalAnswers } from './user-input.js';
+import { ExecToolUseMessage, type AskUserQuestionPrompt } from '@garcon/common/chat-types';
+import { codexHistoricalQuestionResult } from './user-input.js';
 import {
   codexCodeModeResultToolId,
   createCodexCodeModeBashMessages,
@@ -16,7 +16,7 @@ const MAX_PENDING_CALLS = 10_000;
 
 export class LegacyCodexProjection {
   readonly #hiddenWaitCallIds = new Set<string>();
-  readonly #questionCallIds = new Set<string>();
+  readonly #questionCalls = new Map<string, readonly AskUserQuestionPrompt[]>();
   readonly #codeModeResultToolIds = new Map<string, string>();
 
   project(
@@ -26,9 +26,15 @@ export class LegacyCodexProjection {
     const payload = entry.type === 'response_item' ? record(entry.payload) : null;
     const callId = string(payload?.call_id);
     if (callId && (payload?.type === 'function_call' || payload?.type === 'custom_tool_call')) {
-      this.#questionCallIds.delete(callId);
+      this.#questionCalls.delete(callId);
       if (payload.type === 'function_call' && payload.name === 'request_user_input') {
-        this.#rememberCall(this.#questionCallIds, callId);
+        const normalized = normalizeCodexJsonlEntry(entry, context);
+        const tool = normalized?.canonical[0];
+        this.#questionCalls.set(callId, tool?.type === 'ask-user-question-tool-use' ? tool.questions : []);
+        if (this.#questionCalls.size > MAX_PENDING_CALLS) {
+          this.#questionCalls.delete(this.#questionCalls.keys().next().value!);
+        }
+        return normalized;
       }
     }
     if (isHiddenCodeModeWaitCall(payload)) {
@@ -37,13 +43,15 @@ export class LegacyCodexProjection {
     }
     if (isToolOutput(payload)) {
       if (callId && this.#hiddenWaitCallIds.delete(callId)) return emptyResult();
-      if (callId && this.#questionCallIds.delete(callId)) {
+      const questions = callId ? this.#questionCalls.get(callId) : undefined;
+      if (callId && questions) {
+        this.#questionCalls.delete(callId);
         const normalized = normalizeCodexJsonlEntry(entry, context);
-        const answers = codexHistoricalAnswers(payload?.output);
+        const questionResult = codexHistoricalQuestionResult(payload?.output, questions);
         for (const message of normalized?.canonical ?? []) {
           if (message.type !== 'tool-result') continue;
-          message.isError = answers === null;
-          if (answers) message.content = { ...message.content, toolUseResult: { answers } };
+          message.isError = questionResult === null;
+          if (questionResult) message.content = { ...message.content, toolUseResult: questionResult };
         }
         return normalized;
       }

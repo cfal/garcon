@@ -425,6 +425,7 @@ export interface AskUserQuestionPrompt {
   header?: string;
   allowMultiple?: boolean;
   allowFreeText?: boolean;
+  allowNotes?: boolean;
   isSecret?: boolean;
 }
 

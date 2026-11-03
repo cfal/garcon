@@ -157,6 +157,7 @@ export function asAskUserQuestions(value: unknown): AskUserQuestionPrompt[] {
     if (typeof raw.header === 'string') question.header = raw.header;
     question.allowMultiple = asOptionalBoolean(raw.allowMultiple);
     question.allowFreeText = asOptionalBoolean(raw.allowFreeText);
+    question.allowNotes = asOptionalBoolean(raw.allowNotes);
     question.isSecret = asOptionalBoolean(raw.isSecret);
     questions.push(question);
   }

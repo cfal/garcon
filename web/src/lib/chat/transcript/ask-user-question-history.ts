@@ -115,10 +115,17 @@ function answersFromLegacyText(
 function questionTextAnswers(
 	tool: AskUserQuestionToolUseMessage,
 	answers: Record<string, unknown>,
+	explicitTexts: unknown,
 ): Record<string, string> {
 	const texts = new Map<string, string>();
 	for (const question of tool.questions) {
-		if (!question.allowFreeText) continue;
+		if (!question.allowFreeText && !question.allowNotes) continue;
+		const explicitText = isRecord(explicitTexts) && Object.hasOwn(explicitTexts, question.id)
+			? explicitTexts[question.id] : undefined;
+		if (typeof explicitText === 'string') {
+			texts.set(question.id, explicitText);
+			continue;
+		}
 		const answer = answerForQuestion(question, answers);
 		if (selectedOptionIds(question, answer).length > 0) continue;
 		const text = completeAnswerValues(answer).join('\n');
@@ -141,7 +148,8 @@ function terminalFromResult(
 			state: 'resolved',
 			allowed: true,
 			selectedQuestionOptions: selectedQuestionOptions(tool, answers),
-			questionTextAnswers: questionTextAnswers(tool, answers),
+			questionTextAnswers: questionTextAnswers(tool, answers,
+				isRecord(result.content.toolUseResult) ? result.content.toolUseResult.textAnswers : undefined),
 		};
 	}
 

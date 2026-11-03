@@ -61,7 +61,7 @@ describe('PermissionRequestRow', () => {
 	it.each(['ask-user-question-tool-use', 'cursor-ask-question-tool-use'])(
 		'retains the empty-question body for %s', (type) => {
 			const tool = parseChatMessage({ type, timestamp: TS, toolId: 'empty-question', questions: [] });
-			if (tool.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
+			if (tool?.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
 			const request = new PermissionRequestMessage(TS, 'empty-occurrence', tool);
 			render(PermissionRequestRowTestHost, { request, onDecision: vi.fn() });
 			expect(screen.getAllByText('Input requested')).toHaveLength(2);
@@ -178,6 +178,72 @@ describe('PermissionRequestRow', () => {
 		expect(input.readOnly).toBe(true);
 		expect(input.value).toBe('Synthetic secret');
 		expect(screen.queryByRole('button', { name: /submit answer/i })).toBeNull();
+	});
+
+	it('submits options with notes through the shared gate and keeps notes when changing options', async () => {
+		const onDecision = vi.fn();
+		render(PermissionRequestRowTestHost, {
+			request: askUserQuestionRequest({ allowFreeText: true, allowNotes: true }), onDecision,
+		});
+		expect(screen.queryByRole('textbox', { name: 'Notes (optional)' })).toBeNull();
+		await fireEvent.click(screen.getByRole('radio', { name: /Careful/ }));
+		const note = screen.getByRole('textbox', { name: 'Notes (optional)' });
+		const submit = screen.getByRole<HTMLButtonElement>('button', { name: /submit answer/i });
+		expect(submit.disabled).toBe(false);
+		await fireEvent.input(note, { target: { value: '   ' } });
+		expect(submit.disabled).toBe(true);
+		await fireEvent.submit(note.closest('form')!);
+		expect(onDecision).not.toHaveBeenCalled();
+		const text = '  Only tests\nKeep defaults.  ';
+		await fireEvent.input(note, { target: { value: text } });
+		await fireEvent.click(screen.getByRole('radio', { name: /Fast/ }));
+		expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Notes (optional)' }).value).toBe(text);
+		expect(screen.getByRole<HTMLInputElement>('radio', { name: 'Other' }).checked).toBe(false);
+		await fireEvent.submit(note.closest('form')!);
+		expect(onDecision.mock.calls.at(-1)?.[1].response.answers).toEqual([
+			{ questionId: 'Which mode?', selectedOptionIds: ['Fast'], text },
+		]);
+		await fireEvent.input(note, { target: { value: '' } });
+		await fireEvent.click(submit);
+		expect(onDecision.mock.calls.at(-1)?.[1].response.answers).toEqual([
+			{ questionId: 'Which mode?', selectedOptionIds: ['Fast'] },
+		]);
+		await fireEvent.click(screen.getByRole('radio', { name: 'Other' }));
+		expect(screen.queryByRole('textbox', { name: 'Notes (optional)' })).toBeNull();
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Which mode?' }), { target: { value: 'Custom' } });
+		await fireEvent.click(screen.getByRole('radio', { name: /Careful/ }));
+		expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Notes (optional)' }).value).toBe('');
+	});
+
+	it.each([false, true])('shows resolved options alongside notes, secret=%s', (isSecret) => {
+		const request = askUserQuestionRequest({ allowFreeText: true, allowNotes: true, isSecret });
+		render(PermissionRequestRowTestHost, { request, onDecision: vi.fn(), terminal: {
+			permissionOccurrenceId: request.permissionOccurrenceId, state: 'resolved', allowed: true,
+			selectedQuestionOptions: { 'Which mode?': ['Careful'] },
+			questionTextAnswers: { 'Which mode?': 'Only tests\nKeep defaults.' },
+		} });
+		expect(screen.getByRole<HTMLInputElement>('radio', { name: /Careful/ }).checked).toBe(true);
+		expect(screen.getByRole<HTMLInputElement>('radio', { name: 'Other' }).checked).toBe(false);
+		if (isSecret) {
+			const input = screen.getByLabelText<HTMLInputElement>('Notes (optional)');
+			expect(input.type).toBe('password');
+			expect(input.readOnly).toBe(true);
+			expect(screen.queryByText('Only tests Keep defaults.')).toBeNull();
+		} else {
+			expect(screen.getByText('Only tests Keep defaults.').textContent).toBe('Only tests\nKeep defaults.');
+		}
+	});
+
+	it('restores controlled notes with their selected options', () => {
+		const draft = {
+			selectedQuestionOptions: { 'Which mode?': ['Careful'] },
+			questionTextAnswers: { 'Which mode?': 'Saved note' }, rawInputOpen: false,
+		};
+		render(PermissionRequestRowTestHost, {
+			request: askUserQuestionRequest({ allowNotes: true }), draft, onDecision: vi.fn(),
+		});
+		expect(screen.getByRole<HTMLInputElement>('radio', { name: /Careful/ }).checked).toBe(true);
+		expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Notes (optional)' }).value).toBe('Saved note');
 	});
 
 	it('allows Other to be unchecked on a multi-select question', async () => {
