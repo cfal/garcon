@@ -4547,6 +4547,34 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.respond).toHaveBeenLastCalledWith(17, { answers: {} });
   });
 
+  it.each([{ itemId: undefined }, { questions: [] }])('declines malformed questions without publishing a permission: %j', async (invalid) => {
+    const nativePath = path.join(tmpDir, 'invalid-question-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
+    fake.emit('serverRequest', {
+      id: 17,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'call-question',
+        questions: [{ id: 'mode', question: 'Which mode?', options: [{ label: 'Fast' }] }],
+        ...invalid,
+      },
+    });
+    expect(fake.respond).toHaveBeenCalledTimes(1);
+    expect(fake.respond).toHaveBeenCalledWith(17, { answers: {} });
+    expect(permissionEvents(published.events)).toEqual([]);
+  });
+
   it.each(['exit', 'turn/completed'])('retires unanswered questions on %s', async (terminal) => {
     const nativePath = path.join(tmpDir, `question-${terminal.replace('/', '-')}.jsonl`);
     const fake = new FakeClient({
