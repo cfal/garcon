@@ -705,6 +705,16 @@ describe('parseCliArgs', () => {
     });
   });
 
+  test.each(['', ' '.repeat(3), 'x'.repeat(16 * 1024 + 1), '\ud800'])(
+    'describes the text constraint when a free-text answer is invalid', (text) => {
+      expect(() => parseCliArgs([
+        'permission-answer', CHAT_ID, 'permission-text', '--answers',
+        JSON.stringify([{ questionId: 'details', selectedOptionIds: [], text }]),
+        '--run', 'run-1', '--server-instance', 'instance-1',
+      ], ENV)).toThrow('optional nonblank text of at most 16 KiB UTF-8');
+    },
+  );
+
   test.each([
     [['permission-decision', CHAT_ID, 'permission-1', 'allow', '--run', 'run-1'], '--server-instance'],
     [['permission-decision', CHAT_ID, 'permission-1', 'maybe', '--run', 'run-1', '--server-instance', 'instance-1'], 'allow or deny'],
