@@ -601,27 +601,6 @@ describe('normalizeCodexJsonlEntry', () => {
   });
 
   describe('response_item function_call_output', () => {
-    it.each([
-      'request_user_input is unavailable in Default mode',
-      'request_user_input was cancelled before receiving a response',
-    ])('marks native question failures as errors: %s', (output) => {
-      const result = normalizeCodexJsonlEntry({
-        type: 'response_item', timestamp: ts,
-        payload: { type: 'function_call_output', call_id: 'call-question', output },
-      });
-      expect(result.canonical[0]).toMatchObject({ type: 'tool-result', isError: true, content: { raw: output } });
-    });
-
-    it('projects successful native question answers without treating the answer text as an error', () => {
-      const output = JSON.stringify({ answers: { mode: { answers: ['request_user_input was cancelled'] } } });
-      const result = normalizeCodexJsonlEntry({
-        type: 'response_item', timestamp: ts,
-        payload: { type: 'function_call_output', call_id: 'call-question', output },
-      });
-      expect(result.canonical[0]).toMatchObject({ type: 'tool-result', isError: false,
-        content: { toolUseResult: { answers: { mode: ['request_user_input was cancelled'] } } } });
-    });
-
     it('passes through non-wrapper output with call_id pairing', () => {
       const entry = {
         type: 'response_item',

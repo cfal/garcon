@@ -57,15 +57,15 @@ function selectedOptionIds(
 	const values = question.allowFreeText
 		? completeAnswerValues(answer)
 		: legacyAnswerValues(answer, new Set(optionIdByLabel.keys()), optionIds);
-	if (question.allowFreeText && values.some((value) => !optionIds.has(value) && !optionIdByLabel.has(value))) {
-		return [];
+	if (question.allowFreeText) {
+		// Native answers contain labels or text, never generated option IDs.
+		if (values.some((value) => !optionIdByLabel.has(value))) return [];
+		return Array.from(new Set(values.map((value) => optionIdByLabel.get(value)!)));
 	}
 	return Array.from(
 		new Set(
 			values.flatMap((value) => {
 				const id = optionIdByLabel.get(value);
-				// Complete native labels take precedence over colliding synthetic IDs.
-				if (question.allowFreeText && id !== undefined) return [id];
 				if (optionIds.has(value)) return [value];
 				return id ? [id] : [];
 			}),

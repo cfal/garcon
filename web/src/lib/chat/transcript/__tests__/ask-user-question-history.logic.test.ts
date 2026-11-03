@@ -24,6 +24,7 @@ describe('historicalAskUserQuestion', () => {
 		['Fast, but only for tests'],
 		['Fast', 'Custom\nconstraint'],
 		[' Fast '],
+		['fast'],
 	])('preserves complete free-text answers without partial option matches: %j', (...answers) => {
 		const tool = question();
 		tool.questions[0].allowFreeText = true;
@@ -31,6 +32,18 @@ describe('historicalAskUserQuestion', () => {
 			{ toolUseResult: { answers: { mode: answers } } }, false));
 		expect(reconstructed.terminal.selectedQuestionOptions).toEqual({});
 		expect(reconstructed.terminal.questionTextAnswers).toEqual({ mode: answers.join('\n') });
+	});
+
+	it('preserves text matching a synthetic option ID rather than a native label', () => {
+		const tool = question();
+		tool.questions[0].allowFreeText = true;
+		tool.questions[0].options = [{ id: 'option-0', label: 'Fast' }];
+		const result = new ToolResultMessage(TS, tool.toolId, {
+			toolUseResult: { answers: { mode: ['option-0'] } },
+		}, false);
+		const terminal = historicalAskUserQuestion(tool, result).terminal;
+		expect(terminal.selectedQuestionOptions).toEqual({});
+		expect(terminal.questionTextAnswers).toEqual({ mode: 'option-0' });
 	});
 
 	it('recognizes complete option labels on free-text questions', () => {
