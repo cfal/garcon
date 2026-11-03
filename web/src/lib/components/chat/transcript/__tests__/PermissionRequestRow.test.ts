@@ -6,6 +6,7 @@ import {
 	CursorCreatePlanToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	PermissionRequestMessage,
+	parseChatMessage,
 	type AskUserQuestionPrompt,
 } from '$shared/chat-types';
 import PermissionRequestRowTestHost from './PermissionRequestRowTestHost.svelte';
@@ -57,6 +58,16 @@ describe('PermissionRequestRow', () => {
 		cleanup();
 	});
 
+	it.each(['ask-user-question-tool-use', 'cursor-ask-question-tool-use'])(
+		'retains the empty-question body for %s', (type) => {
+			const tool = parseChatMessage({ type, timestamp: TS, toolId: 'empty-question', questions: [] });
+			if (tool.type !== 'ask-user-question-tool-use') throw new Error('Expected question');
+			const request = new PermissionRequestMessage(TS, 'empty-occurrence', tool);
+			render(PermissionRequestRowTestHost, { request, onDecision: vi.fn() });
+			expect(screen.getAllByText('Input requested')).toHaveLength(2);
+		},
+	);
+
 	it.each([undefined, 'Mode'])('preserves prompt whitespace without source indentation, header=%s', (header) => {
 		const prompt = 'Which mode?\nPick a path.';
 		const request = askUserQuestionRequest({ header, prompt });
@@ -83,6 +94,8 @@ describe('PermissionRequestRow', () => {
 		expect(iconFrame?.classList.contains('border-current/25')).toBe(true);
 		expect(iconFrame?.classList.contains('h-7')).toBe(true);
 		expect(screen.getByText('Mode')).toBeTruthy();
+		expect(screen.getByText('Mode').parentElement?.classList.contains('space-y-1')).toBe(true);
+		expect(screen.getByText('Quick path.').parentElement?.classList.contains('space-y-0.5')).toBe(true);
 		expect(screen.getByText('Which mode?')).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('radio', { name: /Careful/ }));

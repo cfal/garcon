@@ -114,7 +114,7 @@
 >
 	{#each tool.questions as question (question.id)}
 		<fieldset class="min-w-0 space-y-2">
-			<legend class="text-xs font-medium text-foreground break-words">
+			<legend class="space-y-1 text-xs font-medium text-foreground break-words">
 				{#if question.header}<span class="block text-[10px] uppercase text-muted-foreground"
 						>{question.header}</span
 					>{/if}
@@ -133,7 +133,7 @@
 							onchange={(event) => select(question, option.id, event.currentTarget.checked)}
 							class="mt-0.5 size-3.5 shrink-0 accent-current"
 						/>
-						<span class="min-w-0 break-words"
+						<span class="min-w-0 space-y-0.5 break-words"
 							><span class="block whitespace-pre-wrap font-medium">{option.label}</span>
 							{#if option.description}<span class="block whitespace-pre-wrap text-muted-foreground"
 									>{option.description}</span
@@ -179,6 +179,8 @@
 					class="typography-chat-code max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/40 p-2 text-[11px] text-foreground">{option.preview}</pre>
 			{/each}
 		</fieldset>
+	{:else}
+		<div class="text-xs text-muted-foreground">{m.chat_permission_question_required()}</div>
 	{/each}
 	{#if terminal?.reason}
 		<p class="whitespace-pre-wrap break-words text-xs text-muted-foreground">{terminal.reason}</p>
