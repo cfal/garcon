@@ -1594,7 +1594,10 @@ describe('ChatExecutionCoordinator', () => {
     await expect(coordinator.interruptActiveTurn('chat-1')).resolves.toBe('already-idle');
 
     expect(fixture.turnRunner.abortSession).toHaveBeenCalledTimes(1);
+    // Interruption also requests an asynchronous queue drain, even while idle.
+    await waitFor(() => !coordinator.ownsExecution('chat-1'));
     expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
   });
 
   it('coalesces simultaneous interruption requests around one provider abort', async () => {

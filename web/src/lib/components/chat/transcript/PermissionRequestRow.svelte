@@ -3,13 +3,10 @@
 	// pending/resolved/cancelled state via ChatEventCard status variants.
 
 	import type {
-		AskUserQuestionPrompt,
-		CursorAskQuestionPrompt,
 		CursorPlanTodoStatus,
 		PermissionRequestMessage,
 	} from '$shared/chat-types';
 	import type {
-		AskUserQuestionDecisionResponse,
 		PermissionDecisionPayload,
 	} from '$shared/chat-command-contracts';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
@@ -25,6 +22,7 @@
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
 	import X from '@lucide/svelte/icons/x';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
+	import AskUserQuestionForm from './AskUserQuestionForm.svelte';
 	import Markdown from '$lib/components/rich-text/Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
 	import {
@@ -47,8 +45,6 @@
 	import type { PermissionQuestionDraft } from './ConversationFeedItemState.svelte.js';
 
 	type PlanExitChoice = 'bypass-new' | 'bypass' | 'approve-edits' | 'deny';
-	type StructuredQuestionOutcome = 'answered' | 'skipped';
-	type StructuredQuestionPrompt = AskUserQuestionPrompt | CursorAskQuestionPrompt;
 
 	interface Props {
 		request: PermissionRequestMessage;
@@ -174,10 +170,6 @@
 	}
 
 	const isExitPlanMode = $derived(request.requestedTool.type === 'exit-plan-mode-tool-use');
-	const isAskUserQuestion = $derived(request.requestedTool.type === 'ask-user-question-tool-use');
-	const isCursorAskQuestion = $derived(
-		request.requestedTool.type === 'cursor-ask-question-tool-use',
-	);
 	const isCursorCreatePlan = $derived(request.requestedTool.type === 'cursor-create-plan-tool-use');
 
 	const exitPlanRequest = $derived(
@@ -185,9 +177,6 @@
 	);
 	const askUserQuestionRequest = $derived(
 		request.requestedTool.type === 'ask-user-question-tool-use' ? request.requestedTool : null,
-	);
-	const cursorAskQuestionRequest = $derived(
-		request.requestedTool.type === 'cursor-ask-question-tool-use' ? request.requestedTool : null,
 	);
 	const cursorCreatePlanRequest = $derived(
 		request.requestedTool.type === 'cursor-create-plan-tool-use' ? request.requestedTool : null,
@@ -218,42 +207,19 @@
 		selectedQuestionOptions: {},
 		rawInputOpen: false,
 	});
-	let effectiveDraft = $derived(controlledDraft ?? localDraft);
-	let selectedQuestionOptions = $derived(effectiveDraft.selectedQuestionOptions);
-	const terminalQuestionOptions = $derived(terminal?.selectedQuestionOptions ?? {});
-
+	let localDraftOccurrence = $state<string | null>(null);
+	let effectiveDraft = $derived.by(() => {
+		if (controlledDraft != null) return controlledDraft;
+		if (localDraftOccurrence === request.permissionOccurrenceId) return localDraft;
+		return { selectedQuestionOptions: {}, rawInputOpen: false };
+	});
 	function setDraft(next: PermissionQuestionDraft): void {
 		if (onDraftChange) onDraftChange(next);
-		else localDraft = next;
+		else {
+			localDraftOccurrence = request.permissionOccurrenceId;
+			localDraft = next;
+		}
 	}
-
-	function setSelectedOptions(questionId: string, selected: string[]): void {
-		setDraft({
-			...effectiveDraft,
-			selectedQuestionOptions: {
-				...effectiveDraft.selectedQuestionOptions,
-				[questionId]: selected,
-			},
-		});
-	}
-
-	const canAnswerAskUserQuestion = $derived.by(() => {
-		const questions = askUserQuestionRequest?.questions ?? [];
-		if (questions.length === 0) return true;
-		return questions.every((question) => {
-			if (question.options.length === 0) return true;
-			return (selectedQuestionOptions[question.id] ?? []).length > 0;
-		});
-	});
-
-	const canAnswerCursorQuestion = $derived.by(() => {
-		const questions = cursorAskQuestionRequest?.questions ?? [];
-		if (questions.length === 0) return true;
-		return questions.every((question) => {
-			if (question.options.length === 0) return true;
-			return (selectedQuestionOptions[question.id] ?? []).length > 0;
-		});
-	});
 
 	const cursorPlanTitle = $derived.by(() => {
 		if (isPending) return m.chat_permission_cursor_plan_ready();
@@ -264,83 +230,11 @@
 
 	const askUserQuestionTitle = $derived.by(() => {
 		if (isPending)
-			return askUserQuestionRequest?.title || m.chat_permission_cursor_question_required();
-		if (wasAllowed) return m.chat_permission_cursor_question_answered();
-		if (isResolved) return m.chat_permission_cursor_question_skipped();
+			return askUserQuestionRequest?.title || m.chat_permission_question_required();
+		if (wasAllowed) return m.chat_permission_question_answered();
+		if (isResolved) return m.chat_permission_question_skipped();
 		return m.chat_permission_permission_cancelled();
 	});
-
-	const cursorQuestionTitle = $derived.by(() => {
-		if (isPending)
-			return cursorAskQuestionRequest?.title || m.chat_permission_cursor_question_required();
-		if (wasAllowed) return m.chat_permission_cursor_question_answered();
-		if (isResolved) return m.chat_permission_cursor_question_skipped();
-		return m.chat_permission_permission_cancelled();
-	});
-
-	function selectedOptionsFor(questionId: string): string[] {
-		return terminalQuestionOptions[questionId] ?? selectedQuestionOptions[questionId] ?? [];
-	}
-
-	function isOptionSelected(questionId: string, optionId: string): boolean {
-		return selectedOptionsFor(questionId).includes(optionId);
-	}
-
-	function updateQuestionOption(
-		question: StructuredQuestionPrompt,
-		optionId: string,
-		checked: boolean,
-	): void {
-		if (question.allowMultiple) {
-			const current = new Set(selectedOptionsFor(question.id));
-			if (checked) current.add(optionId);
-			else current.delete(optionId);
-			setSelectedOptions(question.id, Array.from(current));
-			return;
-		}
-		setSelectedOptions(question.id, checked ? [optionId] : []);
-	}
-
-	function selectedQuestionPreview(question: AskUserQuestionPrompt): string | undefined {
-		const selected = selectedOptionsFor(question.id);
-		const option = question.options.find((candidate) => selected.includes(candidate.id));
-		return option?.preview;
-	}
-
-	function structuredQuestionResponse(
-		questions: readonly StructuredQuestionPrompt[],
-		outcome: StructuredQuestionOutcome,
-	): AskUserQuestionDecisionResponse {
-		if (outcome === 'skipped') {
-			return {
-				type: 'ask-user-question-response',
-				outcome: 'skipped',
-				reason: 'User skipped question',
-			};
-		}
-		return {
-			type: 'ask-user-question-response',
-			outcome: 'answered',
-			answers: questions.map((question) => ({
-				questionId: question.id,
-				selectedOptionIds: selectedOptionsFor(question.id),
-			})),
-		};
-	}
-
-	function respondToAskUserQuestion(outcome: StructuredQuestionOutcome): void {
-		onDecision(request.permissionOccurrenceId, {
-			allow: outcome === 'answered',
-			response: structuredQuestionResponse(askUserQuestionRequest?.questions ?? [], outcome),
-		});
-	}
-
-	function respondToCursorQuestion(outcome: StructuredQuestionOutcome): void {
-		onDecision(request.permissionOccurrenceId, {
-			allow: outcome === 'answered',
-			response: structuredQuestionResponse(cursorAskQuestionRequest?.questions ?? [], outcome),
-		});
-	}
 
 	function cursorPlanResponse(outcome: 'accepted' | 'rejected'): Record<string, unknown> {
 		if (outcome === 'accepted') return { outcome: { outcome: 'accepted' } };
@@ -509,7 +403,7 @@
 			{/if}
 		{/snippet}
 	</ChatEventCard>
-{:else if isAskUserQuestion}
+{:else if askUserQuestionRequest}
 	<ChatEventCard variant={permCardVariant} class={resolvedOpacity}>
 		{#snippet header()}
 			<div class="flex items-center gap-2">
@@ -518,176 +412,21 @@
 				>
 					<ShieldAlert class="w-4 h-4" />
 				</div>
-				<span class="text-sm font-semibold">
-					{askUserQuestionTitle}
-				</span>
+				<span class="text-sm font-semibold">{askUserQuestionTitle}</span>
 			</div>
 		{/snippet}
-
 		{#snippet body()}
 			{@render permissionReason()}
-			{#if askUserQuestionRequest && askUserQuestionRequest.questions.length > 0}
-				<div class="space-y-3">
-					{#each askUserQuestionRequest.questions as question (question.id)}
-						<div class="space-y-2">
-							<div class="space-y-1">
-								{#if question.header}
-									<div
-										class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
-									>
-										{question.header}
-									</div>
-								{/if}
-								<div class="text-xs font-medium text-foreground">{question.prompt}</div>
-							</div>
-							<div class="grid gap-1.5">
-								{#each question.options as option (option.id)}
-									<label
-										class="flex items-start gap-2 rounded-md border border-border/60 bg-background/50 px-2.5 py-1.5 text-xs text-foreground"
-									>
-										<input
-											type={question.allowMultiple ? 'checkbox' : 'radio'}
-											name={`${request.permissionOccurrenceId}-${question.id}`}
-											checked={isOptionSelected(question.id, option.id)}
-											disabled={!isPending}
-											onchange={(event) =>
-												updateQuestionOption(
-													question,
-													option.id,
-													(event.currentTarget as HTMLInputElement).checked,
-												)}
-											class="mt-0.5 size-3.5 accent-current"
-										/>
-										<span class="min-w-0 space-y-0.5">
-											<span class="block font-medium">{option.label}</span>
-											{#if option.description}
-												<span class="block text-muted-foreground">{option.description}</span>
-											{/if}
-										</span>
-									</label>
-								{/each}
-							</div>
-							{#if selectedQuestionPreview(question)}
-								<pre
-									style:--chat-code-default-size="11px"
-									class="typography-chat-code max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/40 p-2 text-[11px] text-foreground">{selectedQuestionPreview(
-										question,
-									)}</pre>
-							{/if}
-						</div>
-					{/each}
-				</div>
-			{:else}
-				<div class="text-xs text-muted-foreground">
-					{m.chat_permission_cursor_question_required()}
-				</div>
-			{/if}
-		{/snippet}
-
-		{#snippet footer()}
-			{#if isPending}
-				<div class="flex flex-wrap gap-2">
-					{@render executorWaitNotice()}
-					<button
-						type="button"
-						disabled={!canAnswer || !canAnswerAskUserQuestion}
-						onclick={() => respondToAskUserQuestion('answered')}
-						class="inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-warning/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-					>
-						<Check class="w-3.5 h-3.5" />
-						{m.chat_permission_submit_answer()}
-					</button>
-					<button
-						type="button"
-						disabled={!canAnswer}
-						onclick={() => respondToAskUserQuestion('skipped')}
-						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 border border-status-error-border text-status-error-foreground hover:bg-status-error/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-					>
-						<X class="w-3.5 h-3.5" />
-						{m.chat_permission_skip()}
-					</button>
-				</div>
-			{/if}
-		{/snippet}
-	</ChatEventCard>
-{:else if isCursorAskQuestion}
-	<ChatEventCard variant={permCardVariant} class={resolvedOpacity}>
-		{#snippet header()}
-			<div class="flex items-center gap-2">
-				<div
-					class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-current/25"
-				>
-					<ShieldAlert class="w-4 h-4" />
-				</div>
-				<span class="text-sm font-semibold">
-					{cursorQuestionTitle}
-				</span>
-			</div>
-		{/snippet}
-
-		{#snippet body()}
-			{@render permissionReason()}
-			{#if cursorAskQuestionRequest && cursorAskQuestionRequest.questions.length > 0}
-				<div class="space-y-3">
-					{#each cursorAskQuestionRequest.questions as question (question.id)}
-						<div class="space-y-2">
-							<div class="text-xs font-medium text-foreground">{question.prompt}</div>
-							<div class="grid gap-1.5">
-								{#each question.options as option (option.id)}
-									<label
-										class="flex items-center gap-2 rounded-md border border-border/60 bg-background/50 px-2.5 py-1.5 text-xs text-foreground"
-									>
-										<input
-											type={question.allowMultiple ? 'checkbox' : 'radio'}
-											name={`${request.permissionOccurrenceId}-${question.id}`}
-											checked={isOptionSelected(question.id, option.id)}
-											disabled={!isPending}
-											onchange={(event) =>
-												updateQuestionOption(
-													question,
-													option.id,
-													(event.currentTarget as HTMLInputElement).checked,
-												)}
-											class="size-3.5 accent-current"
-										/>
-										<span>{option.label}</span>
-									</label>
-								{/each}
-							</div>
-						</div>
-					{/each}
-				</div>
-			{:else}
-				<div class="text-xs text-muted-foreground">
-					{m.chat_permission_cursor_question_required()}
-				</div>
-			{/if}
-		{/snippet}
-
-		{#snippet footer()}
-			{#if isPending}
-				<div class="flex flex-wrap gap-2">
-					{@render executorWaitNotice()}
-					<button
-						type="button"
-						disabled={!canAnswer || !canAnswerCursorQuestion}
-						onclick={() => respondToCursorQuestion('answered')}
-						class="inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-warning/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-					>
-						<Check class="w-3.5 h-3.5" />
-						{m.chat_permission_submit_answer()}
-					</button>
-					<button
-						type="button"
-						disabled={!canAnswer}
-						onclick={() => respondToCursorQuestion('skipped')}
-						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 border border-status-error-border text-status-error-foreground hover:bg-status-error/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-					>
-						<X class="w-3.5 h-3.5" />
-						{m.chat_permission_skip()}
-					</button>
-				</div>
-			{/if}
+			<AskUserQuestionForm
+				tool={askUserQuestionRequest}
+				permissionOccurrenceId={request.permissionOccurrenceId}
+				{isPending}
+				{canAnswer}
+				{terminal}
+				draft={effectiveDraft}
+				onDraftChange={setDraft}
+				onDecision={(decision) => onDecision(request.permissionOccurrenceId, decision)}
+			/>
 		{/snippet}
 	</ChatEventCard>
 {:else if isCursorCreatePlan}

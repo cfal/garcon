@@ -61,13 +61,32 @@ function formatPermissionReceipt(
   ].map(terminalLine).join('\n');
 }
 
+async function submitPermissionDecision(
+  client: PermissionDecisionClient,
+  request: PermissionDecisionCommandRequest,
+  signal?: AbortSignal,
+): Promise<CommandAcceptedResponse> {
+  try {
+    return await client.decidePermission(request, signal);
+  } catch (error) {
+    if (
+      error instanceof GarconHttpError
+      && error.status === 400
+      && error.errorCode === 'VALIDATION_FAILED'
+    ) {
+      throw argumentError(error.message, { cause: error });
+    }
+    throw error;
+  }
+}
+
 export async function runPermissionDecision(
   command: PermissionDecisionCliCommand,
   client: PermissionDecisionClient,
   output: CliOutput,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await client.decidePermission({
+  const response = await submitPermissionDecision(client, {
     clientRequestId: permissionDecisionClientRequestId(command),
     chatId: command.chatId,
     permissionOccurrenceId: command.permissionOccurrenceId,
@@ -88,27 +107,15 @@ export async function runPermissionAnswer(
   output: CliOutput,
   signal?: AbortSignal,
 ): Promise<void> {
-  let response: CommandAcceptedResponse;
-  try {
-    response = await client.decidePermission({
-      clientRequestId: permissionDecisionClientRequestId(command),
-      chatId: command.chatId,
-      permissionOccurrenceId: command.permissionOccurrenceId,
-      allow: true,
-      alwaysAllow: false,
-      response: command.response,
-      control: permissionControl(command),
-    }, signal);
-  } catch (error) {
-    if (
-      error instanceof GarconHttpError
-      && error.status === 400
-      && error.errorCode === 'VALIDATION_FAILED'
-    ) {
-      throw argumentError(error.message, { cause: error });
-    }
-    throw error;
-  }
+  const response = await submitPermissionDecision(client, {
+    clientRequestId: permissionDecisionClientRequestId(command),
+    chatId: command.chatId,
+    permissionOccurrenceId: command.permissionOccurrenceId,
+    allow: true,
+    alwaysAllow: false,
+    response: command.response,
+    control: permissionControl(command),
+  }, signal);
   output.result(formatPermissionReceipt(
     command,
     response,

@@ -8,6 +8,8 @@ import {
   WriteStdinToolUseMessage,
 } from '@garcon/common/chat-types';
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
+import { CODEX_USER_INPUT_METHOD, codexUserInputMessage, codexUserInputResponse } from '../user-input.js';
 import { publishPermissionCancelled, type CodexOperation } from './operation-routes.js';
 import type { JsonRpcId, JsonRpcServerRequest } from './protocol.js';
 
@@ -31,6 +33,7 @@ export type CodexPendingApprovalRegistry<TClient extends object> = Map<
 
 export function isApprovalRequest(request: JsonRpcServerRequest): boolean {
   return [
+    CODEX_USER_INPUT_METHOD,
     'item/commandExecution/requestApproval',
     'item/fileChange/requestApproval',
     'item/permissions/requestApproval',
@@ -51,6 +54,11 @@ export function createPendingApproval(chatId: string, request: JsonRpcServerRequ
 
 export function buildApprovalMessage(pending: CodexPendingApproval): PermissionRequestMessage {
   const now = new Date().toISOString();
+
+  if (pending.method === CODEX_USER_INPUT_METHOD) {
+    const tool = codexUserInputMessage(now, pending.params.itemId, pending.params.questions);
+    return new PermissionRequestMessage(now, pending.permissionOccurrenceId, tool);
+  }
 
   if (pending.method === 'item/commandExecution/requestApproval') {
     const kind = commandApprovalKind(pending);
@@ -125,8 +133,12 @@ export function buildApprovalMessage(pending: CodexPendingApproval): PermissionR
 
 export function buildApprovalResponse(
   pending: CodexPendingApproval,
-  decision: { allow: boolean; alwaysAllow?: boolean },
+  decision: PermissionDecisionPayload,
 ): unknown {
+  if (pending.method === CODEX_USER_INPUT_METHOD) {
+    const tool = codexUserInputMessage(new Date().toISOString(), pending.params.itemId, pending.params.questions);
+    return codexUserInputResponse(tool, decision);
+  }
   if (pending.method === 'item/commandExecution/requestApproval') {
     if (commandApprovalKind(pending) === 'writeStdin') {
       if (!stringField(pending.params.approvalId)) {

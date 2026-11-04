@@ -34,11 +34,15 @@ describe('ConversationFeedItemState', () => {
 		items.reconcile('chat-1:generation-1', new Set(['row-1']), new Set([PERMISSION_OCCURRENCE]));
 		items.setPermissionDraft(PERMISSION_OCCURRENCE, {
 			selectedQuestionOptions: { question: ['answer'] },
+			questionTextAnswers: { question: '  Saved note\n ', details: 'Custom answer' },
 			rawInputOpen: true,
 		});
+		items.reconcile('chat-1:generation-1', new Set(), new Set([PERMISSION_OCCURRENCE]));
+		items.reconcile('chat-1:generation-1', new Set(['row-1']), new Set([PERMISSION_OCCURRENCE]));
 
 		expect(items.permissionDraft(PERMISSION_OCCURRENCE)).toEqual({
 			selectedQuestionOptions: { question: ['answer'] },
+			questionTextAnswers: { question: '  Saved note\n ', details: 'Custom answer' },
 			rawInputOpen: true,
 		});
 	});
@@ -50,25 +54,31 @@ describe('ConversationFeedItemState', () => {
 		items.reconcile('chat-1:generation-1', new Set(), new Set([first, second]));
 		items.setPermissionDraft(first, {
 			selectedQuestionOptions: { database: ['Postgres'] },
+			questionTextAnswers: { database: 'First note' },
 			rawInputOpen: false,
 		});
 		items.setPermissionDraft(second, {
 			selectedQuestionOptions: { database: ['SQLite'] },
+			questionTextAnswers: { database: 'Second note' },
 			rawInputOpen: true,
 		});
 
 		expect(items.permissionDraft(first)).toEqual({
 			selectedQuestionOptions: { database: ['Postgres'] },
+			questionTextAnswers: { database: 'First note' },
 			rawInputOpen: false,
 		});
 		expect(items.permissionDraft(second)).toEqual({
 			selectedQuestionOptions: { database: ['SQLite'] },
+			questionTextAnswers: { database: 'Second note' },
 			rawInputOpen: true,
 		});
 
 		items.reconcile('chat-1:generation-1', new Set(), new Set([second]));
 
 		expect(items.permissionDraft(first).selectedQuestionOptions).toEqual({});
+		expect(items.permissionDraft(first).questionTextAnswers).toBeUndefined();
+		expect(items.permissionDraft(second).questionTextAnswers).toEqual({ database: 'Second note' });
 		expect(items.permissionDraft(second).selectedQuestionOptions).toEqual({
 			database: ['SQLite'],
 		});
@@ -93,17 +103,19 @@ describe('ConversationFeedItemState', () => {
 		});
 	});
 
-	it('clears all presentation state across chat or generation identity changes', () => {
+	it.each(['chat-2:generation-1', 'chat-1:generation-2'])('clears presentation state on surface replacement: %s', (surface) => {
 		const items = new ConversationFeedItemState();
 		items.reconcile('chat-1:generation-1', new Set(['row-1']), new Set([PERMISSION_OCCURRENCE]));
 		items.disclosurePort('row-1').setOpen('thinking', 'thinking', false, true);
 		items.setPermissionDraft(PERMISSION_OCCURRENCE, {
 			selectedQuestionOptions: { question: ['answer'] },
+			questionTextAnswers: { question: 'Saved note' },
 			rawInputOpen: true,
 		});
-		items.reconcile('chat-2:generation-1', new Set(['row-1']), new Set([PERMISSION_OCCURRENCE]));
+		items.reconcile(surface, new Set(['row-1']), new Set([PERMISSION_OCCURRENCE]));
 
 		expect(items.disclosurePort('row-1').open('thinking', 'thinking', true)).toBe(true);
 		expect(items.permissionDraft(PERMISSION_OCCURRENCE).selectedQuestionOptions).toEqual({});
+		expect(items.permissionDraft(PERMISSION_OCCURRENCE).questionTextAnswers).toBeUndefined();
 	});
 });

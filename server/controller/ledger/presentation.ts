@@ -10,6 +10,7 @@ import {
   type ChatMessage,
 } from '../../../common/chat-types.js';
 import { parseTranscriptNoticeDetail } from '../../../common/transcript-notice-details.js';
+import { normalizeAskUserQuestionDecisionResponse } from '../../../common/ask-user-question-response.js';
 import { parseAgentStartProgressNotice } from '../../../common/agent-start-progress.js';
 import type { TranscriptMessage } from '../../../common/chat-view.js';
 import { isLedgerPrivateGarconCommandRow } from './garcon-command-request.js';
@@ -116,6 +117,7 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
           row.at,
           row.lifecycle.permissionOccurrenceId,
           row.lifecycle.decision.allow,
+          normalizeAskUserQuestionDecisionResponse(row.lifecycle.decision.response) ?? undefined,
         )
         : null;
     case 'permission-cancelled':

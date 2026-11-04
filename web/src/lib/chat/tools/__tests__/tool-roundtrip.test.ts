@@ -22,7 +22,6 @@ import {
 	EnterPlanModeToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	AskUserQuestionToolUseMessage,
-	CursorAskQuestionToolUseMessage,
 	CursorCreatePlanToolUseMessage,
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
@@ -262,6 +261,8 @@ describe('tool-use serialization round-trip', () => {
 					},
 				],
 				allowMultiple: false,
+				allowFreeText: true,
+				isSecret: true,
 			},
 		]);
 		const parsed = roundTrip(msg);
@@ -280,12 +281,14 @@ describe('tool-use serialization round-trip', () => {
 				],
 				header: 'Mode',
 				allowMultiple: false,
+				allowFreeText: true,
+				isSecret: true,
 			},
 		]);
 	});
 
-	it('CursorAskQuestionToolUseMessage preserves questions', () => {
-		const msg = new CursorAskQuestionToolUseMessage(TS, 'id-cursor-question', 'Need input', [
+	it('decodes historical Cursor questions into generic questions', () => {
+		const msg = new AskUserQuestionToolUseMessage(TS, 'id-cursor-question', 'Need input', [
 			{
 				id: 'q1',
 				prompt: 'Which mode?',
@@ -293,8 +296,8 @@ describe('tool-use serialization round-trip', () => {
 				allowMultiple: false,
 			},
 		]);
-		const parsed = roundTrip(msg);
-		expect(parsed).toBeInstanceOf(CursorAskQuestionToolUseMessage);
+		const parsed = parseChatMessage({ ...JSON.parse(JSON.stringify(msg)), type: 'cursor-ask-question-tool-use' }) as AskUserQuestionToolUseMessage;
+		expect(parsed).toBeInstanceOf(AskUserQuestionToolUseMessage);
 		expect(parsed.questions).toEqual([
 			{
 				id: 'q1',

@@ -4,8 +4,6 @@ import type {
   ChatImage,
   ChatMessageMetadata,
   CodexSubagentInputItem,
-  CursorAskQuestionOption,
-  CursorAskQuestionPrompt,
   CursorPlanPhase,
   CursorPlanTodo,
   CursorPlanTodoStatus,
@@ -158,34 +156,10 @@ export function asAskUserQuestions(value: unknown): AskUserQuestionPrompt[] {
     };
     if (typeof raw.header === 'string') question.header = raw.header;
     question.allowMultiple = asOptionalBoolean(raw.allowMultiple);
+    question.allowFreeText = asOptionalBoolean(raw.allowFreeText);
+    question.allowNotes = asOptionalBoolean(raw.allowNotes);
+    question.isSecret = asOptionalBoolean(raw.isSecret);
     questions.push(question);
-  }
-  return questions;
-}
-
-function asCursorAskQuestionOptions(value: unknown): CursorAskQuestionOption[] {
-  if (!Array.isArray(value)) return [];
-  const options: CursorAskQuestionOption[] = [];
-  for (const entry of value) {
-    const raw = asRecord(entry);
-    if (typeof raw.id !== 'string' || typeof raw.label !== 'string') continue;
-    options.push({ id: raw.id, label: raw.label });
-  }
-  return options;
-}
-
-export function asCursorAskQuestions(value: unknown): CursorAskQuestionPrompt[] {
-  if (!Array.isArray(value)) return [];
-  const questions: CursorAskQuestionPrompt[] = [];
-  for (const entry of value) {
-    const raw = asRecord(entry);
-    if (typeof raw.id !== 'string' || typeof raw.prompt !== 'string') continue;
-    questions.push({
-      id: raw.id,
-      prompt: raw.prompt,
-      options: asCursorAskQuestionOptions(raw.options),
-      allowMultiple: asOptionalBoolean(raw.allowMultiple),
-    });
   }
   return questions;
 }

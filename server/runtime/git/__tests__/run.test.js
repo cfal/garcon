@@ -196,9 +196,9 @@ stream.write(output);
   });
 
   it('spends one timeout budget across lock retries', async () => {
-    let attempts = 0;
+    const attemptTimes = [];
     spawnMock.mockImplementation(() => {
-      attempts += 1;
+      attemptTimes.push(performance.now());
       return {
         stdout: textStream(''),
         stderr: textStream("fatal: Unable to create '.git/index.lock': File exists."),
@@ -207,17 +207,18 @@ stream.write(output);
       };
     });
 
+    const startedAt = performance.now();
     await expect(
       runGit('/repo', ['reset', 'HEAD', '--', 'a.txt'], { timeoutMs: 150 }),
     ).rejects.toMatchObject({
       timedOut: true,
       stderr: expect.stringContaining('index.lock'),
     });
-    // The delay is bounded by the remaining budget, so quick failing attempts
-    // can squeeze a third spawn in before expiry; pin the range instead: the
-    // budget always runs out, never an unbounded retry loop.
-    expect(attempts).toBeGreaterThanOrEqual(1);
-    expect(attempts).toBeLessThanOrEqual(3);
+    // Instant mock exits can squeeze extra attempts into the final fractional millisecond.
+    expect(attemptTimes.length).toBeGreaterThanOrEqual(2);
+    expect(attemptTimes[1] - attemptTimes[0]).toBeGreaterThanOrEqual(90);
+    expect(performance.now() - startedAt).toBeGreaterThanOrEqual(150);
+    expect(performance.now() - startedAt).toBeLessThan(300);
   });
 
   it('keeps the lock retry delay inside the timeout budget', async () => {
