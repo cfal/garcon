@@ -578,6 +578,10 @@ export class TranscriptLedgerService {
     return this.#store.recoveredHead(chatId);
   }
 
+  submissionOrdinals(chatId: string, viewId: TranscriptViewId, clientMessageIds: readonly string[]) {
+    return this.#store.submissionOrdinals(chatId, viewId, clientMessageIds);
+  }
+
   withStoredRowFrames<T>(chatId: string, watermark: TranscriptWatermark, fromOrdinal: number,
     consume: (frames: AsyncIterable<readonly StoredLedgerRow[]>) => Promise<T>, signal?: AbortSignal): Promise<T> {
     return this.#store.withStoredRowFrames(chatId, watermark, fromOrdinal, consume, signal);

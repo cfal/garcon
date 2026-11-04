@@ -7,6 +7,10 @@ describe('Worker entrypoint resolution', () => {
   it('uses source Worker entrypoints outside compiled mode', () => {
     const sourceUrl = new URL('../../search/indexer-main.ts', import.meta.url);
     expect(resolveWorkerEntrypoint('search-indexer', sourceUrl)).toBe(sourceUrl.href);
+    for (const role of ['builder', 'reader'] as const) {
+      const source = new URL(`../../../../../../server/controller/transcript-display/${role}-main.ts`, import.meta.url);
+      expect(resolveWorkerEntrypoint(`transcript-display-${role}`, source)).toBe(source.href);
+    }
   });
 
   it('requires complete absolute compiled manifest entries', async () => {

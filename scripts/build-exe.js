@@ -7,11 +7,13 @@ import { GARCON_WORKER_NAMES } from '../server-agents/common/src/build/standalon
 import { collectAgentBuildContributions } from './agent-build-metadata.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const EMBEDDED_WORKER_SOURCES = {
+export const EMBEDDED_WORKER_SOURCES = {
   'search-indexer': 'server-agents/common/src/search/indexer-main.ts',
   'search-reader': 'server-agents/common/src/search/reader-main.ts',
   'token-fitting': 'server/controller/chats/token-fitting/worker-main.ts',
   'transcript-rendering': 'server/controller/chats/transcript-rendering/worker-main.ts',
+  'transcript-display-builder': 'server/controller/transcript-display/builder-main.ts',
+  'transcript-display-reader': 'server/controller/transcript-display/reader-main.ts',
 };
 const distDir = path.resolve(repoRoot, 'web', 'build');
 const executableDir = path.resolve(repoRoot, 'dist');
