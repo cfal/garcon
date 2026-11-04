@@ -1180,15 +1180,15 @@ describe('ConversationScrollController', () => {
 			state: { canLoadEarlier: true, loadEarlierPage },
 		});
 		await fixture.controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(10);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(50);
 		await fixture.controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(10);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(50);
 		await expect(fixture.controller.requestPage('earlier', 'button')).resolves.toBe('loaded');
-		expect(loadEarlierPage).toHaveBeenCalledTimes(11);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(51);
 		fixture.sessions.selectedChatId = 'chat-2';
 		fixture.state.isUserScrolledUp = false;
 		await fixture.controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(21);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(101);
 	});
 
 	it('resets the compressed-history budget when the transcript view changes', async () => {
@@ -1203,10 +1203,10 @@ describe('ConversationScrollController', () => {
 			state: { canLoadEarlier: true, loadEarlierPage },
 		});
 		await controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(10);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(50);
 		state.transcriptViewId = 'generation-2';
 		await controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(20);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(100);
 	});
 
 	it('does not charge cached-row reveals against the compressed request budget', async () => {
@@ -1227,8 +1227,8 @@ describe('ConversationScrollController', () => {
 			state: { canLoadEarlier: true, revealEarlierLoadedRows, loadEarlierPage },
 		});
 		await controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(10);
-		expect(revealEarlierLoadedRows).toHaveBeenCalledTimes(14);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(50);
+		expect(revealEarlierLoadedRows).toHaveBeenCalledTimes(54);
 	});
 
 	it('counts a failed compressed request toward the automatic work limit', async () => {
@@ -1246,10 +1246,10 @@ describe('ConversationScrollController', () => {
 		await controller.fillUnderfilledViewport();
 		expect(loadEarlierPage).toHaveBeenCalledOnce();
 		await controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(10);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(50);
 	});
 
-	it('fills through eight compressed pages before measured content overflows', async () => {
+	it.each([8, 12])('fills through %i compressed pages before measured content overflows', async (pagesToFill) => {
 		let loadedPages = 0;
 		const loadEarlierPage = vi.fn(async () => {
 			loadedPages += 1;
@@ -1259,13 +1259,13 @@ describe('ConversationScrollController', () => {
 			viewport: fakeViewport({
 				hasCollapsedToolGroups: vi.fn(() => true),
 				measureViewportFill: vi.fn(async () =>
-					loadedPages < 8 ? 'underfilled' : 'overflow',
+					loadedPages < pagesToFill ? 'underfilled' : 'overflow',
 				),
 			}),
 			state: { canLoadEarlier: true, loadEarlierPage },
 		});
 		await controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(8);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(pagesToFill);
 		expect(loadEarlierPage).toHaveBeenNthCalledWith(1, 'chat-1', {
 			visibleLimit: CHAT_MESSAGES_MAX_LIMIT,
 		});
@@ -1280,13 +1280,13 @@ describe('ConversationScrollController', () => {
 		const { controller } = controllerFixture({
 			viewport: fakeViewport({
 				measureViewportFill: vi.fn(async () =>
-					loadedPages < 12 ? 'underfilled' : 'overflow',
+					loadedPages < 52 ? 'underfilled' : 'overflow',
 				),
 			}),
 			state: { canLoadEarlier: true, loadEarlierPage },
 		});
 		await controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(12);
+		expect(loadEarlierPage).toHaveBeenCalledTimes(52);
 		expect(loadEarlierPage).toHaveBeenNthCalledWith(1, 'chat-1');
 	});
 
