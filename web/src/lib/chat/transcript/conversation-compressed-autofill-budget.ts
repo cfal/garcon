@@ -1,4 +1,4 @@
-const MAX_AUTOMATIC_COMPRESSED_PAGE_DEMANDS = 10;
+const MAX_AUTOMATIC_COMPRESSED_PAGE_DEMANDS = 50;
 
 export class ConversationCompressedAutoFillBudget {
 	#chatId: string | null = null;

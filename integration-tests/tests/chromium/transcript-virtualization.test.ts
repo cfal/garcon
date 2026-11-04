@@ -5452,8 +5452,13 @@ describe('Chromium short transcript alignment', () => {
 });
 
 describe('Chromium combined tool-use presentation', () => {
-  test('fills cold compressed history and restores the warm window without paging', async () => {
+  test.each([
+    [600, 'wide', TRANSCRIPT_VIEWPORTS[1]],
+    [1_500, 'wide', TRANSCRIPT_VIEWPORTS[1]],
+    [1_500, 'compact', TRANSCRIPT_VIEWPORTS[0]],
+  ] as const)('fills cold compressed history with %i tools at %s width and restores the warm window without paging', async (toolCount, _label, viewport) => {
     await withChromiumFixture('combined-tool-history-refill', async (fixture) => {
+      await fixture.page.setViewportSize(viewport);
       await initializeCombineToolUses(fixture, true);
       const chatId = await seedTranscript(fixture.integration, 1, 'compressed-history');
       const otherChatId = await seedTranscript(fixture.integration, 1, 'compressed-switch-target');
@@ -5465,7 +5470,7 @@ describe('Chromium combined tool-use presentation', () => {
         message: new AssistantMessage(timestamp, `earlier-context-${index}`),
         providerMeta: null,
       }));
-      const toolRows = Array.from({ length: 600 }, (_, index): LedgerRowDraft[] => {
+      const toolRows = Array.from({ length: toolCount }, (_, index): LedgerRowDraft[] => {
         const toolId = `compressed-tool-${index}`;
         return [
           {
@@ -5500,19 +5505,25 @@ describe('Chromium combined tool-use presentation', () => {
       await prepareTranscript(fixture, chatId, 1);
       const waitForContext = async () => {
         await fixture.page.waitForFunction(
-          (selector) => {
+          ({ selector, toolRowCount }) => {
             const sizer = document.querySelector<HTMLElement>(selector);
-            return Number(sizer?.dataset.chatTranscriptEntryCount) > 1_200;
+            return Number(sizer?.dataset.chatTranscriptEntryCount) > toolRowCount;
           },
-          SIZER_SELECTOR,
+          { selector: SIZER_SELECTOR, toolRowCount: toolRows.length },
           { timeout: 45_000 },
         );
         await fixture.page.locator(FEED_SELECTOR).getByText('earlier-context-19').waitFor({ state: 'visible' });
         expect(await fixture.page.locator('[data-chat-tool-group]').count()).toBe(1);
-        expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
+        const geometry = await transcriptGeometry(fixture.page);
+        expect(geometry.overlaps).toEqual([]);
+        expect(geometry.itemCount).toBeLessThan(40);
+        const layout = await shortTranscriptLayout(fixture.page);
+        expect(layout.sizerHeight).toBeGreaterThan(layout.feedHeight);
       };
       await waitForContext();
       expect(earlierRequestLimits).toContain(200);
+      expect(earlierRequestLimits.every((limit) => limit <= 200)).toBe(true);
+      if (toolCount > 1_000) expect(earlierRequestLimits.length).toBeGreaterThan(10);
 
       await selectSidebarChat(fixture.page, otherChatId, 'compressed-switch-target-0');
       earlierRequestLimits.length = 0;
