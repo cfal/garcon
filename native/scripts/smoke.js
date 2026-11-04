@@ -3,6 +3,7 @@ import { createServer } from 'node:net';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { GARCON_WS_PROTOCOL, webSocketProtocolsForAuth } from '../../common/ws-auth.ts';
 import { prepareWorkflows, checkWorkflows } from './workflows-smoke.js';
 
@@ -113,6 +114,12 @@ async function openChooser(remote) {
 }
 
 async function menuChooser(key, shift = false) {
+  await nativeRemoteKey(shift ? `ctrl+shift+${key}` : `ctrl+${key}`);
+  const action = key === 'r' ? 'Reload Server' : 'Switch Server';
+  await until(() => evaluate('return !document.querySelector("#cancel").hidden && document.querySelector("#server-form button").textContent === arguments[0]', [action]), 'native menu chooser');
+}
+
+async function nativeRemoteKey(key) {
   // Native menu accelerators require OS input, not synthesized DOM keyboard events.
   const visible = Bun.spawn(['xdotool', 'search', '--onlyvisible', '--name', '^Garcon$'], { stdout: 'pipe', stderr: 'pipe' });
   const windows = (await new Response(visible.stdout).text()).trim().split('\n');
@@ -120,9 +127,7 @@ async function menuChooser(key, shift = false) {
   assert.equal(windows.length, 1, 'only the remote window is visible before a native menu request');
   const focus = Bun.spawn(['xdotool', 'windowfocus', '--sync', windows[0]], { stdout: 'ignore', stderr: 'inherit' });
   assert.equal(await focus.exited, 0, 'native remote window focus');
-  await nativeKey(shift ? `ctrl+shift+${key}` : `ctrl+${key}`);
-  const action = key === 'r' ? 'Reload Server' : 'Switch Server';
-  await until(() => evaluate('return !document.querySelector("#cancel").hidden && document.querySelector("#server-form button").textContent === arguments[0]', [action]), 'native menu chooser');
+  await nativeKey(key);
 }
 
 async function nativeKey(key) {
@@ -173,7 +178,7 @@ async function assertRemoteWorkflows(remote, handle) {
     await checkWorkflows({
       evaluate: remote.run,
       webdriver: (path, body) => webdriver(`/session/${session}${path}`, body),
-      until, workflows, remoteUrl: remote.url,
+      until, workflows, remoteUrl: remote.url, nativeKey: nativeRemoteKey,
     });
     assert.equal(remote.socketConnections(), connections, 'native workflows must not replace the app socket');
   } finally {
@@ -330,6 +335,12 @@ try {
               .then(() => false, () => true))).then(results => results.every(Boolean));`);
       assert.equal(denied, true, 'remote page must not read host settings');
       await assertRemoteWorkflows(remote, aHandle);
+      await assertNavigationBlocked(pathToFileURL(workflows.attachment).href, remote.url, remote);
+      await remote.run(`
+        window.syntheticDocument = URL.createObjectURL(new Blob(['<h1>Synthetic document</h1>'], { type: 'text/html' }));
+      `);
+      await assertNavigationBlocked(await remote.run('return window.syntheticDocument'), remote.url, remote);
+      await remote.run('URL.revokeObjectURL(window.syntheticDocument); delete window.syntheticDocument;');
       await assertNavigationBlocked(outside.url, remote.url, remote);
       await assertPostNavigationBlocked(outside.url, remote.url, remote);
       assert.equal(outside.requests(), 0, 'external navigation must not reach the destination');
@@ -380,7 +391,11 @@ try {
       assert.equal(await remote.run('return document.cookie.includes("synthetic-session=synthetic-a")'), true);
       assert.equal(await remote.run('return typeof window.cancelSentinel'), 'undefined', 'old remote page must not remain alive');
       await assertRemoteWorkflows(remote, beforeReload);
-      await menuChooser('r');
+      await remote.run(`window.nativeKeys = []; document.addEventListener('keydown', event => window.nativeKeys.push([event.key, event.ctrlKey, event.shiftKey]));`);
+      await menuChooser('r').catch(async error => {
+        console.error('Menu diagnostics', await remote.run('return { keys: window.nativeKeys, active: document.activeElement.tagName }'), await evaluate('return { button: document.querySelector("#server-form button").textContent, cancelHidden: document.querySelector("#cancel").hidden }'));
+        throw error;
+      });
       await until(() => evaluate('return document.querySelector("#server-form button").textContent === "Reload Server"'), 'host reload confirmation');
       await connect(remote.url);
       await replacementRemote(beforeReload);

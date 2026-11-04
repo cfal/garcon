@@ -41,6 +41,7 @@ pub fn run() {
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                     .title("Garcon")
                     .inner_size(520.0, 720.0)
+                    .disable_drag_drop_handler()
                     .on_navigation(move |url| {
                         let host = navigation_app.state::<host::Host>();
                         let Ok(host) = host.lock() else {

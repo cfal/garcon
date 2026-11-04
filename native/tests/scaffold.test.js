@@ -27,6 +27,12 @@ test('remote bridge only requests chooser navigation, without native command per
   expect(read('../src-tauri/src/host.rs')).toContain('host.request_chooser(generation)');
 });
 
+test('server pages retain browser file drag and drop instead of native path events', () => {
+  for (const owner of ['host.rs', 'lib.rs']) {
+    expect(read(`../src-tauri/src/${owner}`)).toContain('.disable_drag_drop_handler()');
+  }
+});
+
 test('CI builds all five platform families without distribution secrets', () => {
   const desktop = workflow.jobs.desktop.strategy.matrix.include;
   expect(desktop.map(row => row.target)).toEqual([

@@ -135,8 +135,16 @@ verifying OS dispatch without opening the user's browser or contacting external
 sites. The smoke runner honors `CARGO_TARGET_DIR`, `GARCON_NATIVE_SMOKE_TMP`, and
 `TMPDIR`. Root/mount fixtures also check trusted pointer/keyboard activation,
 file-input assignment, multipart upload bytes, shared clipboard copy/paste, focus,
-and unchanged socket count, both initially and after replacing a remote window.
+OS-level Ctrl+C/Ctrl+Z delivery to page key handlers, and unchanged socket count,
+both initially and after replacing a remote window.
 These checks do not qualify the OS file chooser or a real Garcon terminal session.
+The Linux WebDriver probe emitted cancellation without presenting an OS dialog;
+file assignment is not evidence of native picker selection/cancellation behavior.
+The server WebViews disable Tauri's native file-drop handler so the browser's
+`File`/`DataTransfer` events can reach the composer. Tauri otherwise replaces
+WebView2's HTML5 drop handling on Windows. No native file paths or filesystem
+commands are exposed to the page. Actual OS file dragging still needs platform
+qualification; file and blob document navigation remain blocked in the smoke.
 The smoke test uses WebKit's default renderer: forcing
 `WEBKIT_DISABLE_DMABUF_RENDERER=1` stalls screenshot capture on WebKitGTK 2.50.4
 under Xvfb.
@@ -291,7 +299,9 @@ requests from a retiring page or while switching are rejected.
 
 ## Later Work
 
-Bundled web assets remain an explicit next phase: materialize the runtime shell,
+Full web UI bundling is deferred. The selected server continues to supply its
+matching UI; only the launcher/recovery shell ships with the native app. A future,
+separately approved bundled mode would need to materialize the runtime shell,
 separate local routes from server endpoints, partition credentials/drafts/caches
 by deployment, configure cross-origin transport, and admit only compatible
 controller/client revisions. Loading the current `web/build` directly is not a

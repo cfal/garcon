@@ -172,6 +172,8 @@ async fn replace_remote(
     )
     .title("Garcon")
     .inner_size(1200.0, 800.0)
+    // File attachments use browser File events, not Tauri's native path events.
+    .disable_drag_drop_handler()
     .initialization_script(include_str!("../bridge.js"))
     .on_navigation(move |destination| {
         let host = navigation_app.state::<Host>();

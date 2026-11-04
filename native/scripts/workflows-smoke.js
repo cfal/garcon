@@ -34,7 +34,7 @@ x-scheme-handler/https=garcon-smoke-browser.desktop
   return { env, browserLog, attachment, clipboardScript: await clipboard.outputs[0].text() };
 }
 
-export async function checkWorkflows({ evaluate, webdriver, until, workflows, remoteUrl }) {
+export async function checkWorkflows({ evaluate, webdriver, until, workflows, remoteUrl, nativeKey }) {
   const launches = async () => (await Bun.file(workflows.browserLog).text()).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
   const before = (await launches()).length;
   const target = 'https://external.example.test/guide?q=synthetic#section';
@@ -116,6 +116,22 @@ export async function checkWorkflows({ evaluate, webdriver, until, workflows, re
   ] }] });
   await until(() => evaluate('return document.querySelector("#paste").value === "Synthetic clipboard content."'), 'keyboard paste');
   assert.equal(await evaluate('return document.activeElement.id'), 'paste');
-  console.log('Native browser primitives passed: file selection through WebDriver, multipart upload, shared clipboard helper + keyboard paste, input focus.');
-  await evaluate('for (const id of ["attachment", "copy", "paste"]) document.getElementById(id).remove()');
+  await evaluate(`
+    window.controlKeys = [];
+    window.controlReleases = 0;
+    document.querySelector('#paste').onkeydown = event => {
+      if (event.ctrlKey && ['c', 'z'].includes(event.key)) {
+        event.preventDefault(); window.controlKeys.push(event.key);
+      }
+    };
+    document.querySelector('#paste').onkeyup = event => {
+      if (event.key === 'Control') window.controlReleases++;
+    };
+  `);
+  await nativeKey('ctrl+c');
+  await nativeKey('ctrl+z');
+  await until(() => evaluate('return window.controlKeys.length === 2 && window.controlReleases === 2'), 'terminal/editor control keys and modifier release');
+  assert.deepEqual(await evaluate('return window.controlKeys'), ['c', 'z']);
+  console.log('Native browser primitives passed: file selection through WebDriver, multipart upload, shared clipboard helper + keyboard paste, input focus, OS-level Ctrl+C/Ctrl+Z.');
+  await evaluate('for (const id of ["attachment", "copy", "paste"]) document.getElementById(id).remove(); delete window.uploadResult; delete window.copyResult; delete window.controlKeys; delete window.controlReleases;');
 }
