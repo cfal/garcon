@@ -105,60 +105,8 @@ export const FORK_OPEN_PLACEMENT_VALUES = [
 	'replace',
 ] as const;
 export type ForkOpenPlacementPreference = (typeof FORK_OPEN_PLACEMENT_VALUES)[number];
-export const HIDEABLE_TOOL_GROUPS = [
-	{
-		id: 'bash',
-		toolTypes: ['bash-tool-use', 'write-stdin-tool-use', 'claude-monitor-tool-use'],
-	},
-	{
-		id: 'exec',
-		toolTypes: ['exec-tool-use', 'wait-tool-use'],
-	},
-	{
-		id: 'file-reads',
-		toolTypes: ['read-tool-use', 'list-tool-use', 'grep-tool-use', 'glob-tool-use'],
-	},
-	{
-		id: 'file-changes',
-		toolTypes: ['edit-tool-use', 'write-tool-use', 'apply-patch-tool-use'],
-	},
-	{
-		id: 'web',
-		toolTypes: ['web-search-tool-use', 'web-fetch-tool-use'],
-	},
-	{
-		id: 'tasks',
-		toolTypes: [
-			'todo-write-tool-use',
-			'todo-read-tool-use',
-			'task-tool-use',
-			'codex-subagent-tool-use',
-			'update-plan-tool-use',
-			'enter-plan-mode-tool-use',
-			'cursor-create-plan-tool-use',
-			'amp-task-list-tool-use',
-			'amp-handoff-tool-use',
-		],
-	},
-	{
-		id: 'provider',
-		toolTypes: [
-			'amp-finder-tool-use',
-			'amp-oracle-tool-use',
-			'amp-librarian-tool-use',
-			'amp-skill-tool-use',
-			'amp-mermaid-tool-use',
-			'amp-look-at-tool-use',
-			'amp-find-thread-tool-use',
-			'amp-read-thread-tool-use',
-			'external-tool-use',
-			'mcp-tool-use',
-			'pi-tool-search-tool-use',
-			'claude-tool-search-tool-use',
-		],
-	},
-] as const;
-export type HideableToolType = (typeof HIDEABLE_TOOL_GROUPS)[number]['toolTypes'][number];
+import { HIDEABLE_TOOL_GROUPS, type HideableToolType } from '$shared/transcript-display-policy.js';
+export { HIDEABLE_TOOL_GROUPS, type HideableToolType };
 
 export interface LocalSettingsSnapshot extends TypographyPreferences, ComposerStatusBarPreferences {
 	themePreference: ThemePreference;
