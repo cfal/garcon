@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../common/automation.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import { ApiError } from '$lib/api/client.js';
@@ -83,6 +84,7 @@ const OTHER_WINDOW: WorkspaceWindowId = 'window-2';
 
 function makeChatEntry(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: '1788698026082000',
 		parentChat: null,
 		agentId: 'codex',

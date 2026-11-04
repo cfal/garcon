@@ -4,6 +4,7 @@
      background and selection styling. -->
 <script lang="ts">
 	import ChatSummary from '../chat/ChatSummary.svelte';
+	import { CONVERSATION_PRESENTATION } from '$shared/automation';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { cn } from '$lib/utils/cn.js';
@@ -17,6 +18,7 @@
 
 	const PREVIEW_NOW = new Date('2026-09-04T12:00:00.000Z');
 	const previewSession: ChatSessionRecord = {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'onboarding-layout-preview',
 		parentChat: null,
 		projectPath: '/workspace/aurora',

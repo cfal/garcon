@@ -20,6 +20,7 @@
 		chatListAutohideAvailable?: boolean;
 		dockOnRight?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
+		hasAutomationChats?: boolean;
 		sidebarPillSearches: SavedChatSearch[];
 		activeQuery: string;
 		onOpenSearchDialog: () => void;
@@ -54,6 +55,7 @@
 		chatListAutohideAvailable = false,
 		dockOnRight = false,
 		sidebarMenuSearches = [],
+		hasAutomationChats = false,
 		sidebarPillSearches,
 		activeQuery,
 		onOpenSearchDialog,
@@ -95,6 +97,7 @@
 		{chatListAutohideAvailable}
 		{dockOnRight}
 		{sidebarMenuSearches}
+		{hasAutomationChats}
 		hasAdjacentSearchContext={hasContentBelowControls}
 		{onOpenSearchDialog}
 		{onCreateChat}

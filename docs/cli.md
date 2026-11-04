@@ -675,13 +675,22 @@ bun cli/main.ts --runtime controller chats \
 Supported metadata operators are `title:`, `tag:`, `agent:`, `model:`,
 `project:`, exact `id:`, direct-parent `parent:`, `created-before:`,
 `created-after:`, `updated-before:`, `updated-after:`, `status:active|unread`,
-and `is:pinned|normal|archived`. Negate an
+`collection:conversation|automation|all`, and `is:pinned|normal|archived`. Negate an
 order group with `is:!pinned`, `is:!normal`, or `is:!archived`. Pipe-separated
 identity values are OR alternatives within one clause and repeated identity
 clauses are ANDed. Repeated title and tag groups are also ANDed; agent,
 model, and project values accumulate as alternatives. Bare terms are ANDed and
 match chat title, project path, first and last previews, and tags. `chats` sorts
 by effective activity descending and uses the chat ID as a stable tie-breaker.
+
+Unfiltered CLI lists and transcript searches include automation chats. Use
+`--filter 'collection:automation'` to inspect workers or `collection:conversation`
+for ordinary chats. List and snapshot DTOs include `presentation.collection` and
+`presentation.notifications`. Direct and forwarded `GET /api/v1/chats` support
+the same optional `collection` query parameter; omission retains full enumeration.
+The browser sidebar defaults to Conversations, with Automation available when
+workers exist, even with Workflows disabled. Moving a worker to Conversations
+restores ordinary ordering and notifications without changing execution guards.
 
 Date-only filter values mean `00:00:00.000Z`. Datetimes must be RFC3339 with an
 explicit `Z` or numeric offset and at most millisecond precision. Before and
@@ -845,6 +854,11 @@ permission mode changed after a restart.
 Status is a one-shot, non-transactional observation. Use `wait` with the exact accepted chat and turn IDs when completion identity matters.
 
 Submit an exact pending permission decision using every fence shown by status:
+
+Guarded automation chats require a current authenticated browser session for
+permission decisions, including structured answers and denials. Local CLI and
+executor-gateway requests receive `PERMISSION_DECISION_FORBIDDEN`; the permission
+remains pending and Stop remains available. Ordinary chats are unchanged.
 
 ```bash
 bun cli/main.ts --runtime controller permission-decision 1785337200123456 \

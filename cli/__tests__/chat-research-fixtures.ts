@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../common/automation.js';
 import type { ChatListEntry, ChatListResponse } from '@garcon/common/chat-list';
 
 export const CHAT_ID = '1785337200123456';
@@ -7,6 +8,7 @@ export const TS = '2026-09-07T00:00:00.000Z';
 export function chat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
   const agentId = overrides.agentId ?? 'codex';
   return {
+    presentation: CONVERSATION_PRESENTATION,
     id: CHAT_ID,
     parentChat: null,
     agentId,

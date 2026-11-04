@@ -27,6 +27,7 @@ import {
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import type { AgentName } from '../agents/session-types.js';
 import { isExecutorId } from '../../../common/executors.js';
+import { CONVERSATION_PRESENTATION, INHERITED_AUTOMATION_POLICY, parseChatPresentation, parseChatAutomationPolicy } from '../../../common/automation.js';
 import { createLogger } from '../../common/log.js';
 import { isCarryOverSegmentId } from './carryover/segment-types.js';
 import { CHAT_REGISTRY_VERSION, type CarryOverHandoffTarget, type CarryOverMigrationQuarantine, type CarryOverSegmentRef, type ChatRegistryEntry, type ChatRegistrySnapshot } from './registry-contracts.js';
@@ -116,7 +117,12 @@ export function normalizeChatRegistryEntry(
   const preambleSelection = normalizePreambleSelection(rawEntry.preambleSelection);
   assertPreambleBoundaryBinding({ agentOwnershipEpoch, pendingPreambleBoundary, preambleSelection });
   assertSeedReceiptBinding({ agentSessionId, nativeSeedReceipt });
+  const presentation = rawEntry.presentation === undefined ? CONVERSATION_PRESENTATION : parseChatPresentation(rawEntry.presentation);
+  const automationPolicy = rawEntry.automationPolicy === undefined ? INHERITED_AUTOMATION_POLICY : parseChatAutomationPolicy(rawEntry.automationPolicy);
+  if (!presentation || !automationPolicy) throw new Error('Invalid chat automation configuration');
   return {
+    presentation: { ...presentation },
+    automationPolicy: { ...automationPolicy },
     ...(executorId === undefined ? {} : { executorId }),
     agentId,
     agentSessionId,

@@ -1,4 +1,6 @@
 import { effectiveExecutorId, LOCAL_EXECUTOR_ID } from '../../../common/executors.js';
+import type { ServerPrincipal } from '../lib/http-route-types.js';
+import { assertPermissionDecisionAuthority } from './permission-authority.js';
 import type { CreateCarriedContextInput } from '../chats/carryover/context.js';
 import {
   AgentIntegrationError,
@@ -123,6 +125,7 @@ export class AgentRuntimeRouter {
     },
     (chatId, lease) => {
       if (this.#producerLeases.get(chatId)?.lease !== lease || lease.closed) return;
+      this.#ledger.markOutputGap(chatId);
       const view = this.#ledger.currentView(chatId);
       if (!view) return;
       this.#ledger.appendNotice(chatId, view.viewId, {
@@ -220,6 +223,13 @@ export class AgentRuntimeRouter {
       };
       assertExecutionAdmissionOpen(opts);
       this.#endpointResolver.resolveEndpointReference(selection);
+      if (opts.automation) {
+        opts.automation.control.revoked.throwIfAborted();
+        opts.automation.canceled.throwIfAborted();
+        if ((selection.endpoint?.credential?.revision ?? null) !== opts.automation.effective.providerRevision) {
+          throw new DomainError('API_PROVIDER_CONFIGURATION_CHANGED', 'Provider configuration changed after automation approval', 409);
+        }
+      }
       executionInvoked = true;
       const handle = await this.#launch(chatId, runId, () => integration.execution.start(request, sending));
       if (handle) await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
@@ -234,7 +244,12 @@ export class AgentRuntimeRouter {
       if (!updated) throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
     } catch (error) {
       const failure = executionInvoked ? error : executionSetupFailure(error);
-      this.#failDefiniteDispatch(chatId, runId, failure);
+      this.#failDefiniteDispatch(chatId, runId, failure, !executionInvoked);
+      if (!executionInvoked && opts.automation) {
+        const undispatched = new AgentCallError('not-dispatched', failure instanceof Error ? failure.message : 'Automation preparation failed before provider invocation.');
+        undispatched.cause = failure;
+        throw undispatched;
+      }
       throw failure;
     }
   }
@@ -289,7 +304,7 @@ export class AgentRuntimeRouter {
       if (handle) await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
     } catch (error) {
       const failure = executionInvoked ? error : executionSetupFailure(error);
-      this.#failDefiniteDispatch(chatId, runId, failure);
+      this.#failDefiniteDispatch(chatId, runId, failure, !executionInvoked);
       throw failure;
     }
   }
@@ -402,7 +417,7 @@ export class AgentRuntimeRouter {
       if (handle) await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
     } catch (error) {
       const failure = executionInvoked ? error : executionSetupFailure(error);
-      this.#failDefiniteDispatch(chatId, runId, failure);
+      this.#failDefiniteDispatch(chatId, runId, failure, !executionInvoked);
       throw failure;
     }
   }
@@ -460,7 +475,7 @@ export class AgentRuntimeRouter {
         this.#ledger.failRun(chatId, runId, settingUp ? EXECUTOR_DISCONNECTED_BEFORE_START : {
           code: 'OUTCOME_UNKNOWN',
           message: EXECUTOR_DISCONNECTED_MID_TURN,
-        });
+        }, settingUp ? 'not-started' : 'unknown');
       } catch (error) {
         logger.warn('Unable to record executor loss', {
           executorId, chatId, reason: error instanceof Error ? error.message : String(error),
@@ -481,13 +496,15 @@ export class AgentRuntimeRouter {
     }
   }
 
-  #failDefiniteDispatch(chatId: string, runId: string | null, error: unknown): void {
+  #failDefiniteDispatch(chatId: string, runId: string | null, error: unknown, notInvoked: boolean): void {
     if (!runId) return;
     if (this.#settingUp.get(chatId) === runId) this.#settingUp.delete(chatId);
     this.#pendingAbortRuns.delete(runKey(chatId, runId));
     if (error instanceof AgentCallError && error.outcome === 'unknown') return;
     this.#bindings.forgetRun(runId);
-    this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error));
+    const certainty = notInvoked || error instanceof AgentCallError && error.outcome === 'not-dispatched'
+      ? 'not-started' : error instanceof AgentCallError && error.outcome === 'rejected' ? 'definite' : 'unknown';
+    this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error), certainty);
   }
 
   abortSession(chatId: string): Promise<boolean> {
@@ -542,6 +559,7 @@ export class AgentRuntimeRouter {
     decision: PermissionDecisionPayload,
     control: ChatTransientControlAction,
     deadline: number,
+    principal: ServerPrincipal | null,
   ): Promise<void> {
     if (!permissionOccurrenceId) throw new Error('Permission occurrence ID is required');
     if (
@@ -552,6 +570,7 @@ export class AgentRuntimeRouter {
     }
     const entry = this.#registry.getChat(chatId);
     if (!entry) throw new AgentCallError('rejected', 'Permission chat no longer exists');
+    assertPermissionDecisionAuthority(entry.automationPolicy, principal);
     const integration = this.#directory.require(entry.agentId, entry.executorId);
     const claim = this.#ledger.claimPermissionResolution(control);
     try {

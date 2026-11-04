@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
@@ -49,6 +50,7 @@ function existingChat(chatId: string): ScheduledPromptTarget {
 
 function chat(id: string, executorId: string): ChatListEntry {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id,
 		executorId,
 		parentChat: null,

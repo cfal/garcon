@@ -63,6 +63,7 @@ import type {
 	ChatTagReconciliationKind,
 } from './chat-sessions-contract.js';
 import {
+	chatHasUnreadActivity,
 	insertServerEntry,
 	normalizeExecutionFields,
 	reconcileActivityProjection,
@@ -845,9 +846,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		if (!chat) return;
 		if (timestamp && chat.lastActivityAt && timestamp < chat.lastActivityAt) return;
 		const lastActivityAt = timestamp ?? chat.lastActivityAt;
-		const isUnread = timestamp
-			? Boolean(lastActivityAt && (!chat.lastReadAt || lastActivityAt > chat.lastReadAt))
-			: chat.isUnread;
+		const isUnread = timestamp ? chatHasUnreadActivity(chat, lastActivityAt)
+			: chat.presentation.notifications === 'normal' && chat.isUnread;
 		if (
 			(chat.lastMessage || '') === content &&
 			chat.lastActivityAt === lastActivityAt &&
@@ -864,7 +864,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	patchActivity(chatId: string, timestamp: string): void {
 		const chat = this.#baseById[chatId];
 		if (!chat || (chat.lastActivityAt && timestamp < chat.lastActivityAt)) return;
-		const isUnread = Boolean(!chat.lastReadAt || timestamp > chat.lastReadAt);
+		const isUnread = chatHasUnreadActivity(chat, timestamp);
 		if (chat.lastActivityAt === timestamp && chat.isUnread === isUnread) return;
 		this.#baseById = {
 			...this.#baseById,
@@ -911,7 +911,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		if (!chat) return;
 		const reconciledLastReadAt =
 			chat.lastReadAt && chat.lastReadAt > lastReadAt ? chat.lastReadAt : lastReadAt;
-		const isUnread = Boolean(chat.lastActivityAt && chat.lastActivityAt > reconciledLastReadAt);
+		const isUnread = chatHasUnreadActivity(chat, chat.lastActivityAt, reconciledLastReadAt);
 		if (chat.lastReadAt === reconciledLastReadAt && chat.isUnread === isUnread) return;
 		this.#baseById = {
 			...this.#baseById,

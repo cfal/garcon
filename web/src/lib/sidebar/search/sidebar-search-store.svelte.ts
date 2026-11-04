@@ -12,8 +12,6 @@ import {
 import { searchChatTranscripts as searchChatTranscriptsApi } from '$lib/api/chats';
 import { ApiError } from '$lib/api/client';
 import {
-	isEmptyFilter,
-	matchesChatFilter,
 	parseChatSearch,
 	type ChatFilterSpec,
 } from '$shared/chat-filter-query';
@@ -34,6 +32,7 @@ import {
 } from '$lib/sidebar/search/transcript-search-request.js';
 import {
 	facetFilteredChats,
+	matchesSidebarChatFilter,
 	mergeTranscriptMatches,
 } from '$lib/sidebar/search/transcript-search-merge.js';
 import type {
@@ -158,9 +157,7 @@ export class SidebarSearchStore {
 	#parsedDraftQuery = $derived(parseChatSearch(this.draftQuery));
 	#filteredChats = $derived.by(() => {
 		const chats = this.deps.getChats();
-		const metadataMatches = isEmptyFilter(this.#parsedQuery)
-			? chats
-			: chats.filter((chat) => matchesChatFilter(chat, this.#parsedQuery));
+		const metadataMatches = chats.filter((chat) => matchesSidebarChatFilter(chat, this.#parsedQuery));
 		return mergeTranscriptMatches(this.activeQuery, metadataMatches, chats, {
 			query: this.transcriptSearchQuery,
 			results: this.transcriptSearchResults,
@@ -168,8 +165,7 @@ export class SidebarSearchStore {
 	});
 	#dialogFilteredChats = $derived.by(() => {
 		const chats = this.deps.getChats();
-		if (isEmptyFilter(this.#parsedDraftQuery)) return chats;
-		return chats.filter((chat) => matchesChatFilter(chat, this.#parsedDraftQuery));
+		return chats.filter((chat) => matchesSidebarChatFilter(chat, this.#parsedDraftQuery));
 	});
 	#dialogDisplayChats = $derived.by(() => {
 		const sort = this.deps.getSearchResultSort();
@@ -199,6 +195,10 @@ export class SidebarSearchStore {
 	);
 
 	constructor(private readonly deps: SidebarSearchStoreDeps) {}
+
+	get hasAutomationChats(): boolean {
+		return this.deps.getChats().some((chat) => chat.presentation.collection === 'automation');
+	}
 
 	get parsedQuery(): ChatFilterSpec {
 		return this.#parsedQuery;

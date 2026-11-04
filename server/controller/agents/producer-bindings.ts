@@ -137,7 +137,19 @@ export class ProducerBindings {
           try {
             route.lease.sink.publish(event);
           } catch (error) {
+            if (event.type === 'rows' && !route.lease.closed) {
+              try { this.onPublicationGap(route.chatId, route.lease); }
+              catch (failure) { this.onError(failure); }
+            }
             this.onError(error);
+            if (event.type === 'run-ended' && !route.lease.closed) {
+              try {
+                this.onPublicationFailed(route.chatId, route.lease, {
+                  code: 'OUTCOME_UNKNOWN', message: 'The agent terminal could not be accepted.',
+                });
+              } catch (failure) { this.onError(failure); }
+              finally { route.lease.close(); }
+            }
           }
         }
       });

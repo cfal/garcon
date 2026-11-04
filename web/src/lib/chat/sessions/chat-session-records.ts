@@ -5,6 +5,19 @@ import { normalizePermissionMode, normalizeThinkingMode } from '$shared/chat-mod
 import { stableJsonStringify } from '$shared/json';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
 import type { ChatListEntry } from '$shared/chat-list';
+import { CONVERSATION_PRESENTATION } from '$shared/automation';
+
+export function allowsChatNotifications(chat: Pick<ChatSessionRecord, 'presentation'> | null | undefined): boolean {
+	return chat?.presentation.notifications === 'normal';
+}
+
+export function chatHasUnreadActivity(
+	chat: Pick<ChatSessionRecord, 'presentation' | 'lastActivityAt' | 'lastReadAt'>,
+	lastActivityAt = chat.lastActivityAt,
+	lastReadAt = chat.lastReadAt,
+): boolean {
+	return allowsChatNotifications(chat) && Boolean(lastActivityAt && (!lastReadAt || lastActivityAt > lastReadAt));
+}
 
 export function normalizeExecutionFields<
 	T extends {
@@ -31,6 +44,7 @@ export function toRecord(session: ChatListEntry): ChatSessionRecord {
 	}
 	return {
 		id: session.id,
+		presentation: session.presentation,
 		executorId: session.executorId,
 		parentChat: session.parentChat,
 		projectPath: session.projectPath,
@@ -67,6 +81,7 @@ export function toDraftRecord(
 ): ChatSessionRecord {
 	return {
 		id,
+		presentation: { ...CONVERSATION_PRESENTATION },
 		parentChat: null,
 		projectPath,
 		executorId: startup.executorId,
@@ -121,6 +136,8 @@ function sameParentChat(
 export function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 	return (
 		a.id === b.id &&
+		a.presentation.collection === b.presentation.collection &&
+		a.presentation.notifications === b.presentation.notifications &&
 		(a.executorId ?? 'local') === (b.executorId ?? 'local') &&
 		sameParentChat(a.parentChat, b.parentChat) &&
 		a.projectPath === b.projectPath &&
@@ -175,9 +192,7 @@ export function reconcileActivityProjection(
 	}
 
 	if (preservedLocalTimestamp) {
-		next.isUnread = Boolean(
-			next.lastActivityAt && (!next.lastReadAt || next.lastActivityAt > next.lastReadAt),
-		);
+		next.isUnread = chatHasUnreadActivity(next);
 	}
 }
 

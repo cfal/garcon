@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../common/automation.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/svelte';
 import RouterIntegrationHost from './RouterIntegrationHost.svelte';
@@ -45,6 +46,7 @@ function executionControl(serverInstanceId: string, version: number, content: st
 
 function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-a',
 		parentChat: null,
 		projectPath: '/repo',
@@ -93,6 +95,7 @@ function chatSnapshot(transcriptViewId: string): ChatSnapshotResponse {
 		observedAt: TS,
 		messageLimit: 1,
 		chat: {
+			presentation: CONVERSATION_PRESENTATION,
 			id: 'chat-a',
 			title: 'Chat A',
 			agentId: 'claude',

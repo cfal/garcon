@@ -6,6 +6,7 @@ import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import type { AgentName } from '../agents/session-types.js';
 import type { NativeSeedReceipt } from '../../../common/transcript-seed.js';
 import type { ChatPreambleSelection, PendingPreambleBoundary } from '../../../common/preambles.js';
+import type { ChatPresentation, ChatAutomationPolicy } from '../../../common/automation.js';
 
 
 export const CHAT_REGISTRY_VERSION = 5;
@@ -31,6 +32,8 @@ export interface CarryOverSegmentRef {
 }
 
 export interface ChatRegistryEntry {
+  presentation?: ChatPresentation;
+  automationPolicy?: ChatAutomationPolicy;
   executorId?: string | null;
   agentId: AgentName;
   nativeSession: AgentNativeSessionRef | null;

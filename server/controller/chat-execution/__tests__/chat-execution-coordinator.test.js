@@ -8,6 +8,7 @@ import { AgentCommandRejections } from '../../chats/agent-command-rejections.js'
 import { DEFAULT_REMOTE_FEATURE_SETTINGS } from '../../../../common/settings.js';
 import { TicketCommandController } from '../../tickets/command-controller.js';
 import { CHAT_ID, VIEW_ID, ticketFixture } from '../../tickets/__tests__/fixture.js';
+import { AutomationLifecycle } from '../../automation/lifecycle.js';
 
 function deferred() {
   let resolve;
@@ -88,6 +89,7 @@ function createFixture(overrides = {}) {
     {
       projectAdmission,
       attachmentAdmission,
+      automation: overrides.automation,
       canDispatch: overrides.canDispatch,
       executionPolicy: overrides.executionPolicy,
       workingDirectorySettlement: overrides.workingDirectorySettlement,
@@ -116,6 +118,140 @@ describe('ChatExecutionCoordinator', () => {
 
   afterEach(async () => {
     coordinator.beginShutdown();
+  });
+
+  async function automatedTurn(overrides = {}) {
+    const lifecycle = new AutomationLifecycle();
+    const lease = lifecycle.acquire({ serverInstanceId: 'synthetic', chatId: 'chat-1', turnId: 'turn-1', clientRequestId: 'request-1' });
+    const fixture = createFixture({ ...overrides, automation: lifecycle });
+    coordinator = fixture.coordinator;
+    const started = deferred();
+    let admission;
+    await coordinator.scheduleDirectInput({
+      command: { key: 'synthetic', ...lease.key }, content: 'Synthetic input',
+      options: { clientMessageId: 'synthetic-message', ...lease.key }, controlLease: lease,
+      admissionDeadline: null,
+      settlement: { markScheduled: async () => {}, settleOperationFailure: async () => {}, markPreScheduleFailure: async () => {} },
+      dispatch: async value => { admission = value; started.resolve(); },
+    });
+    await started.promise;
+    await coordinator.waitForDispatches();
+    return { ...fixture, lease, lifecycle, admission };
+  }
+
+  it('exact Stop does not pause a queue, keeps lease ownership, and reports only a request', async () => {
+    const f = await automatedTurn();
+    expect(await coordinator.stopExactTurn(f.lease)).toBe('interrupt-requested');
+    expect(f.turnRunner.abortSession).toHaveBeenCalledTimes(1);
+    expect(f.lifecycle.owns(f.lease)).toBe(true);
+    expect((await coordinator.readChatExecutionControl('chat-1')).pause).toBeNull();
+    expect(await coordinator.stopExactTurn(f.lease)).toBe('already-idle');
+    expect(f.turnRunner.abortSession).toHaveBeenCalledTimes(1);
+    f.lease.release();
+  });
+
+  it('exact Stop never aborts a revoked same-turn lease or a forged replacement', async () => {
+    const f = await automatedTurn();
+    expect(await coordinator.stopExactTurn({ ...f.lease })).toBe('stale-target');
+    f.lifecycle.observe('chat-1', 'steer');
+    expect(await coordinator.stopExactTurn(f.lease)).toBe('stale-target');
+    expect(f.turnRunner.abortSession).not.toHaveBeenCalled();
+    f.lease.release();
+  });
+
+  it('exact Stop remains available after a global observer failure without actor takeover', async () => {
+    const f = await automatedTurn();
+    const other = f.lifecycle.acquire({ ...f.lease.key, chatId: 'chat-2' });
+    f.lifecycle.subscribe(() => { throw new Error('Synthetic observer failure'); });
+    f.lifecycle.observe('chat-2', 'input');
+    expect(f.lease.revoked.aborted).toBe(true);
+    expect(f.lease.actorRevoked.aborted).toBe(false);
+    expect(await coordinator.stopExactTurn(f.lease)).toBe('interrupt-requested');
+    expect(f.turnRunner.abortSession).toHaveBeenCalledTimes(1);
+    f.lease.release(); other.release();
+  });
+
+  it('exact Stop rechecks synchronous takeover during admission cancellation before native abort', async () => {
+    const f = await automatedTurn();
+    f.admission.signal.addEventListener('abort', () => f.lifecycle.observe('chat-1', 'steer'), { once: true });
+    expect(await coordinator.stopExactTurn(f.lease)).toBe('failed');
+    expect(f.turnRunner.abortSession).not.toHaveBeenCalled();
+    f.lease.release();
+  });
+
+  it.each(['stop', 'interrupt', 'delete', 'queue', 'control'])('revokes automation before an actor %s becomes visible', async action => {
+    const f = await automatedTurn();
+    const observed = [];
+    f.lifecycle.subscribe(event => observed.push(event.action));
+    coordinator.on('execution-control-updated', () => expect(f.lease.revoked.aborted).toBe(true));
+    f.turnRunner.abortSession.mockImplementation(async () => {
+      expect(f.lease.revoked.aborted).toBe(true);
+      return true;
+    });
+    switch (action) {
+      case 'stop': await coordinator.stopActiveTurn('chat-1'); break;
+      case 'interrupt': await coordinator.interruptActiveTurn('chat-1'); break;
+      case 'delete': await coordinator.abortForChatDeletion('chat-1'); break;
+      case 'queue': await coordinator.createChatQueueEntry('chat-1', 'Synthetic queued input'); break;
+      case 'control': await coordinator.queueServerControlInput('chat-1', interAgentInput(), new AbortController().signal); break;
+    }
+    expect(f.lease.revoked.aborted).toBe(true);
+    expect(observed).toHaveLength(1);
+    f.lease.release();
+  });
+
+  it('does not revoke for an empty-queue pause with no change', async () => {
+    const f = await automatedTurn();
+    expect((await coordinator.pauseChatQueue('chat-1')).pause).toBeNull();
+    expect(f.lifecycle.owns(f.lease)).toBe(true);
+    f.lease.release();
+  });
+
+  it.each(['pause', 'clear', 'discard', 'replace', 'delete', 'resume'])('revokes a retained lease before queue %s commits', async action => {
+    const f = await automatedTurn();
+    f.lease.release();
+    const queued = await coordinator.createChatQueueEntry('chat-1', 'Synthetic pending input');
+    const paused = action === 'resume' ? await coordinator.pauseChatQueue('chat-1') : null;
+    const lease = f.lifecycle.acquire(f.lease.key);
+    coordinator.on('execution-control-updated', () => expect(lease.revoked.aborted).toBe(true));
+    switch (action) {
+      case 'pause': await coordinator.pauseChatQueue('chat-1'); break;
+      case 'clear': await coordinator.clearChatQueue('chat-1'); break;
+      case 'discard': await coordinator.discardPendingChatInput('chat-1'); break;
+      case 'replace': await coordinator.replaceChatQueueEntry('chat-1', queued.entry.id, 'Synthetic replacement', queued.entry.revision); break;
+      case 'delete': await coordinator.deleteChatQueueEntry('chat-1', queued.entry.id); break;
+      case 'resume': await coordinator.resumeChatQueue('chat-1', paused.pause.id); break;
+    }
+    expect(lease.revoked.aborted).toBe(true);
+    lease.release();
+  });
+
+  it('revokes at control steer delivery without admitting a user input', async () => {
+    const f = await automatedTurn({ turnRunner: { captureSteerTarget: mock(() => ({ providerTurnId: 'synthetic' })) } });
+    f.turnRunner.steerInput.mockImplementation(async (_chatId, _content, _options, _target, prepare) => {
+      expect(f.lease.revoked.aborted).toBe(false);
+      await prepare();
+      expect(f.lease.revoked.aborted).toBe(true);
+      return { kind: 'accepted' };
+    });
+    f.projection.admitInput.mockClear();
+    expect(await coordinator.offerServerControlInput('chat-1', interAgentInput(), new AbortController().signal, null))
+      .toEqual({ kind: 'delivered' });
+    expect(f.projection.admitInput).not.toHaveBeenCalled();
+    expect(await coordinator.stopExactTurn(f.lease)).toBe('stale-target');
+    f.lease.release();
+  });
+
+  it('retains the lease through literal failure settlement but revokes a later control run', async () => {
+    const f = await automatedTurn({ executionPolicy: () => 'literal' });
+    coordinator.markRunTerminalCommitted('chat-1', 'turn-1');
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: 'turn-1', clientRequestId: 'request-1' }, 'failed');
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    expect(f.lifecycle.owns(f.lease)).toBe(true);
+    f.turnRunner.runAgentTurn.mockImplementation(async () => { expect(f.lease.revoked.aborted).toBe(true); });
+    await coordinator.queueServerControlInput('chat-1', interAgentInput(), new AbortController().signal);
+    expect(f.lease.revoked.aborted).toBe(true);
+    f.lease.release();
   });
 
   it('retains a committed terminal owner across Stop and interrupt-and-send while cwd settles', async () => {

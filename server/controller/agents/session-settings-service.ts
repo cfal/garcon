@@ -5,7 +5,7 @@ import type { ExecutorCallOptions } from '@garcon/server-agent-interface';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
-import { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import type { ChatMutationGuard } from '../automation/mutation-guard.js';
 import type { AgentChatEntry, AgentSessionSettingsPatch } from './session-types.js';
 import type { AgentDirectory } from './directory.js';
 import { toAgentEndpointSelection } from './execution-planning.js';
@@ -37,18 +37,14 @@ export interface AgentConfigurationInput {
 }
 
 export class AgentSessionSettingsService {
-  readonly #lock: KeyedPromiseLock;
-
   constructor(private readonly deps: {
     registry: IChatRegistry;
     directory: AgentDirectory;
     endpointResolver: ApiProviderEndpointResolver;
     execution: SettingsExecutionPort;
-    chatMutationLock?: KeyedPromiseLock;
+    mutationGuard: ChatMutationGuard;
     onCommitted?: (chatId: string) => void;
-  }) {
-    this.#lock = deps.chatMutationLock ?? new KeyedPromiseLock();
-  }
+  }) {}
 
   async validateConfiguration(input: AgentConfigurationInput, options?: ExecutorCallOptions): Promise<void> {
     const integration = this.deps.directory.require(input.agentId, input.executorId);
@@ -74,7 +70,7 @@ export class AgentSessionSettingsService {
   ): Promise<AgentChatEntry> {
     // Starts before the lock, so a change queued behind another gives up in turn.
     const deadline = interactiveDeadline();
-    return this.#lock.runExclusive(`chat:${chatId}`, async () => {
+    return this.deps.mutationGuard.lock.runExclusive(`chat:${chatId}`, async () => {
       const entry = this.deps.registry.getChat(chatId);
       if (!entry) throw new Error(`Session not found: ${chatId}`);
       if (expectedAgentOwnershipEpoch !== undefined && entry.agentOwnershipEpoch !== expectedAgentOwnershipEpoch) {
@@ -144,6 +140,7 @@ export class AgentSessionSettingsService {
         await integration.configurationValidation?.validate(configuration, readBefore(deadline, signal));
         this.deps.endpointResolver.resolveEndpointReference(next);
         const commit = async (): Promise<AgentChatEntry> => {
+          this.deps.mutationGuard.observe(chatId, 'execution-settings');
           if (entry.agentSessionId && integration.sessionConfiguration) {
             await integration.sessionConfiguration.apply(
               entry.agentSessionId,

@@ -514,7 +514,7 @@ function createRouteAgent(sessionOverrides = {}) {
   };
 }
 
-async function callJson(handler, body, method = 'POST', server, pathname = '/api/v1/chats/run') {
+async function callJson(handler, body, method = 'POST', server, pathname = '/api/v1/chats/run', context) {
   const inputBody = body && typeof body === 'object' && 'chatId' in body
     ? {
         ...body,
@@ -530,7 +530,7 @@ async function callJson(handler, body, method = 'POST', server, pathname = '/api
   const requestBody = inputBody;
   parseJsonBody.mockResolvedValueOnce(requestBody);
   const request = new Request(`http://localhost${pathname}`, { method });
-  const response = await handler(request, new URL(request.url), server);
+  const response = await handler(request, new URL(request.url), server, context);
   return { request, response, body: await response.json() };
 }
 
@@ -1583,8 +1583,25 @@ describe('REST chat command routes', () => {
       allow: true,
       alwaysAllow: false,
       response: { outcome: { outcome: 'accepted' } },
-    }, decision.control, expect.any(Number));
+    }, decision.control, expect.any(Number), null);
   });
+
+  it.each([null, { mode: 'local', key: 'local', username: 'local', expiresAtMs: null },
+    { mode: 'executor', key: 'synthetic-executor', executorId: 'synthetic-executor', expiresAtMs: null }])(
+    'denies guarded permission decisions from direct and forwarded non-browser principals: %j', async principal => {
+      const agent = createRouteAgent({ automationPolicy: { permissionDecisionAuthority: 'browser-session', inBandCommands: 'deny' } });
+      const decision = { clientRequestId: 'synthetic-decision', chatId: CHAT_ID,
+        permissionOccurrenceId: 'incarnation-1', allow: true, alwaysAllow: false,
+        control: { serverInstanceId: 'server-instance-test', chatId: CHAT_ID, runId: 'run-1', permissionOccurrenceId: 'incarnation-1' } };
+      const result = await callJson(agent.routes['/api/v1/chats/permissions/decision'].POST, decision,
+        'POST', undefined, '/api/v1/chats/permissions/decision', { principal });
+      expect(result.response.status).toBe(403);
+      expect(result.body.errorCode).toBe('PERMISSION_DECISION_FORBIDDEN');
+      expect(agent.agents.resolvePermission).not.toHaveBeenCalled();
+      expect(await agent.commandLedger.observe({ commandType: 'permission-decision', chatId: CHAT_ID,
+        clientRequestId: decision.clientRequestId, payload: {} })).toBeNull();
+    },
+  );
 
   it('POST /stop deduplicates pause-and-stop requests', async () => {
     const agent = createRouteAgent();

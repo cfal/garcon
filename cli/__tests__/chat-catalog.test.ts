@@ -20,6 +20,17 @@ const command: ChatsCliCommand = {
 };
 
 describe('chat catalog', () => {
+  test('enumerates automation by default and supports explicit collection filters', () => {
+    const snapshot = chatList([chat(), chat({ id: OTHER_CHAT_ID,
+      presentation: { collection: 'automation', notifications: 'attention-only' } })]);
+    const list = (filter: string) => buildChatCatalogResult({ filter, limit: 20, offset: 0 }, snapshot).chats;
+    expect(list('')).toHaveLength(2);
+    expect(list('collection:all')).toHaveLength(2);
+    expect(list('collection:conversation').map((entry) => entry.chatId)).toEqual([CHAT_ID]);
+    expect(list('collection:automation').map((entry) => entry.chatId)).toEqual([OTHER_CHAT_ID]);
+    expect(list('collection:automation')[0]?.presentation.notifications).toBe('attention-only');
+    expect(() => list('collection:hidden')).toThrow('invalid chat filter token');
+  });
   test('distinguishes identical project paths on Local and remote executors', () => {
     const executorId = '11111111-1111-4111-8111-111111111111';
     const result = buildChatCatalogResult({ filter: '', limit: 20, offset: 0 }, chatList([

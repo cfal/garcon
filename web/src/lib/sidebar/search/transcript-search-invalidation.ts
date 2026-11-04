@@ -1,8 +1,5 @@
-import {
-	isEmptyFilter,
-	matchesChatFilter,
-	parseChatSearch,
-} from '$shared/chat-filter-query';
+import { parseChatSearch } from '$shared/chat-filter-query';
+import { facetFilteredChats } from './transcript-search-merge.js';
 import { captureChatSearchTimeOrder } from '$lib/sidebar/search/search-result-order.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatSearchSort } from '$shared/chat-search';
@@ -28,10 +25,7 @@ export function transcriptSearchInvalidationProjection(
 ): TranscriptSearchInvalidationProjection {
 	const spec = parseChatSearch(query);
 	if (spec.textTokens.length === 0) return EMPTY_TRANSCRIPT_SEARCH_INVALIDATION;
-	const facetSpec = { ...spec, textTokens: [] };
-	const candidates = isEmptyFilter(facetSpec)
-		? [...chats]
-		: chats.filter((chat) => matchesChatFilter(chat, facetSpec));
+	const candidates = facetFilteredChats(spec, chats);
 	const lexical = [...candidates].sort((left, right) => left.id.localeCompare(right.id));
 	const timeOrder = captureChatSearchTimeOrder(candidates, sort);
 	return {

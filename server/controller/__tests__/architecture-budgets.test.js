@@ -27,7 +27,10 @@ const MAX_LINES = 1000;
 // Literal execution adds exact-source admission, failure pausing,
 // and terminal settlement while keeping shell mechanics in its integration.
 // Compensated startup failures release direct ownership even when their chat no longer exists.
-const EXECUTION_FOOTPRINT_BUDGET = 9280;
+// Includes parentless reserved starts, exact-turn Stop, control leases and captured
+// input/result evidence. Automation is counted even though its policy-free adapter
+// lives outside commands; workflow scheduling and durable intent remain downstream.
+const EXECUTION_FOOTPRINT_BUDGET = 9900;
 
 const GRANDFATHER = {
   'server/runtime/git/diff-engine.ts': 1575,
@@ -82,7 +85,8 @@ function codeLineCount(file) {
 
 function isExecutionFootprintFile(file) {
   return file.startsWith('server/controller/chat-execution/')
-    || file.startsWith('server/controller/commands/');
+    || file.startsWith('server/controller/commands/')
+    || file.startsWith('server/controller/automation/');
 }
 
 const roots = ['server', 'common', ...serverAgentSrcRoots()];

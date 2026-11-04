@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { CONVERSATION_PRESENTATION } from '../../../../../../../common/automation.js';
+
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import PromptComposer from '../PromptComposer.svelte';
@@ -288,6 +290,7 @@
 	}
 
 	const selectedChat = $derived<ChatSessionRecord>({
+		presentation: CONVERSATION_PRESENTATION,
 		executorId: selectedExecutorId,
 		id: selectedChatId,
 		parentChat: null,

@@ -136,12 +136,12 @@ for (const dialer of ['controller', 'worker'] as const) {
       throw new Error('Synthetic uncertain permission response');
     }, async ({ router, control, remote, controller, ledger, feed, runId, native, integration }) => {
       const original = controller.current;
-      expect(await throwingRejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))).toThrow('Synthetic uncertain permission response');
+      expect(await throwingRejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline(), null))).toThrow('Synthetic uncertain permission response');
       expect(controller.current).toBe(original);
       expect(remote.availability).toBe('ready');
       expect(ledger.isRunActive(CHAT, runId)).toBe(true);
       expect(feed.currentSnapshot(CHAT)?.rows).toEqual([]);
-      expect(await rejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))).toBeInstanceOf(PermissionNotActionableError);
+      expect(await rejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline(), null))).toBeInstanceOf(PermissionNotActionableError);
       expect(decisions).toEqual([true]);
       expect(permissionRows(ledger)).toEqual(['permission-requested']);
       native.nativePublishers[0]!({ type: 'permission', runId,
@@ -162,17 +162,17 @@ for (const dialer of ['controller', 'worker'] as const) {
       disconnect();
       expect(remote.availability).toBe('reconnecting');
       // A decision cannot reach the worker yet; it stays actionable instead of being consumed.
-      expect(await rejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))).toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
+      expect(await rejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline(), null))).toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
       expect(feed.validateAction(control).permissionOccurrenceId).toBe(OCCURRENCE);
       await reconnected;
       expect(controller.current).not.toBe(original);
       expect(serving).toHaveLength(2);
       expect(ledger.isRunActive(CHAT, runId)).toBe(true);
 
-      await router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline());
+      await router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline(), null);
       expect(decisions).toEqual([true]);
       expect(permissionRows(ledger)).toEqual(['permission-requested', 'permission-resolved']);
-      expect(await rejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))).toBeInstanceOf(PermissionNotActionableError);
+      expect(await rejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline(), null))).toBeInstanceOf(PermissionNotActionableError);
       expect(decisions).toEqual([true]);
     });
   }, 30_000);
@@ -231,7 +231,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       await reconnected;
       await Bun.sleep(10);
 
-      expect(await rejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))).toBeInstanceOf(PermissionNotActionableError);
+      expect(await rejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline(), null))).toBeInstanceOf(PermissionNotActionableError);
       expect(decisions).toEqual([false]);
       expect(ledger.currentRows(CHAT).filter(row => row.kind === 'permission-resolved')).toHaveLength(0);
       expect(ledger.currentRows(CHAT).find(row => row.kind === 'run-ended')).toMatchObject({

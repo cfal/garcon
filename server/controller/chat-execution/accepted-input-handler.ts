@@ -37,13 +37,14 @@ import {
   type StoredChatExecutionControlState,
 } from './control-state.ts';
 import { isRecoverablePreambleAdmissionError } from '../preambles/selection.js';
+import type { AutomationControlLease } from '../automation/lifecycle.js';
 
 const logger = createLogger('accepted-input');
 
 // Exposes coordinator-owned operations that accepted-input handling drives.
 export interface AcceptedInputCoordinator {
   requestDrain(chatId: string, context: string): void;
-  reserveDirect(chatId: string, turn: TurnIdentity): DirectTurnReservation;
+  reserveDirect(chatId: string, turn: TurnIdentity, controlLease?: AutomationControlLease): DirectTurnReservation;
   checkpoint(reservation: DirectTurnReservation): void;
   hasMatchingInput(
     chatId: string,
@@ -549,7 +550,7 @@ export class AcceptedInputHandler {
   async #prepareDirect(input: AcceptedDirectInput): Promise<DirectTurnReservation | null> {
     let reservation: DirectTurnReservation;
     try {
-      reservation = this.#coordinator.reserveDirect(input.command.chatId, input.options);
+      reservation = this.#coordinator.reserveDirect(input.command.chatId, input.options, input.controlLease);
     } catch (error) {
       await this.#recordAdmissionFailure(input, error);
       throw error;
@@ -607,7 +608,9 @@ export class AcceptedInputHandler {
       // A recoverable preamble rejection retains a prepared new-chat, fork, or
       // continuation target so the user can reconfigure and retry.
       const retainPreparedTarget = Boolean(input.preparation)
-        && isRecoverablePreambleAdmissionError(error);
+        && (input.options.automation
+          ? input.options.automation.inputPublished || input.options.automation.control.actorRevoked.aborted
+          : isRecoverablePreambleAdmissionError(error));
       let retryable = !retainPreparedTarget;
       let preserveForkPreparation = false;
       if (input.preparation && !retainPreparedTarget) {
@@ -654,6 +657,7 @@ export class AcceptedInputHandler {
   }
 
   async #settleInitialFailure(input: AcceptedDirectInput, error: unknown): Promise<void> {
+    input.settlement.recordOperationFailure(input.command, error);
     let failure = error;
     if (input.preparation && !(error instanceof AgentCallError && error.outcome === 'unknown')) {
       try {

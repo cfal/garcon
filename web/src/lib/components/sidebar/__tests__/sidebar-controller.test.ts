@@ -1,9 +1,11 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SidebarController, type SidebarControllerDeps } from '../sidebar-controller.svelte';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 vi.mock('$lib/api/chats.js', () => ({
 	togglePinned: vi.fn(),
+	promoteChat: vi.fn(),
 	setChatArchived: vi.fn(),
 	deleteChat: vi.fn(),
 	reorderChat: vi.fn(),
@@ -14,6 +16,7 @@ vi.mock('$lib/api/chats.js', () => ({
 
 import {
 	togglePinned,
+	promoteChat,
 	setChatArchived,
 	reorderChat,
 	sortChatOrder,
@@ -27,6 +30,7 @@ const mockSortChatOrder = vi.mocked(sortChatOrder);
 
 function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'c-1',
 		projectPath: '/tmp/project',
 		orderGroup: 'normal',
@@ -82,6 +86,19 @@ describe('SidebarController', () => {
 			},
 		};
 		controller = new SidebarController(deps);
+	});
+
+	it('refreshes after promotion without changing chat selection', async () => {
+		const promoted = Promise.withResolvers<Awaited<ReturnType<typeof promoteChat>>>();
+		vi.mocked(promoteChat).mockReturnValueOnce(promoted.promise);
+		const pending = controller.promoteChat('1783725900000800');
+		expect(promoteChat).toHaveBeenCalledWith('1783725900000800');
+		expect(quietRefresh).not.toHaveBeenCalled();
+		promoted.reject(new Error('Synthetic promotion failure'));
+		await expect(pending).rejects.toThrow('Synthetic promotion failure');
+		expect(quietRefresh).not.toHaveBeenCalled();
+		await controller.promoteChat('1783725900000800');
+		expect(quietRefresh).toHaveBeenCalledOnce();
 	});
 
 	describe('reorderChat', () => {

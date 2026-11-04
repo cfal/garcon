@@ -8,6 +8,7 @@ import { AuthService } from '../service.js';
 import { verifyAuthTokenClaims, signAuthSnapshot } from '../token.js';
 import { resetServerConfigForTests } from '../../config.js';
 import { fixturePasswords } from './fixture.js';
+import { assertPermissionDecisionAuthority } from '../../agents/permission-authority.js';
 
 let directory;
 let previous;
@@ -55,4 +56,19 @@ test('rejects legacy, malformed, missing, expired and wrong-algorithm tokens', a
     jwt.sign(claims, jwtSecret, { expiresIn: -1 }),
     jwt.sign(claims, jwtSecret, { algorithm: 'HS384', expiresIn: '1h' }),
   ]) expect(await verifyAuthTokenClaims(token)).toBeNull();
+});
+
+test('guarded permission authority requires a current browser credential and session', async () => {
+  const { token } = await service.register({ username: 'synthetic-owner', password: 'synthetic-password' });
+  const claims = await verifyAuthTokenClaims(token);
+  const principal = { mode: 'authenticated', key: claims.ownerKey, ...claims };
+  const policy = { permissionDecisionAuthority: 'browser-session' };
+  expect(() => assertPermissionDecisionAuthority(policy, principal)).not.toThrow();
+  for (const changed of [{ ...principal, credentialRevision: 0 }, { ...principal, sessionId: 'stale' },
+    { ...principal, expiresAtMs: 1 }, { mode: 'local', key: 'local' }, null]) {
+    expect(() => assertPermissionDecisionAuthority(policy, changed)).toThrow('authenticated browser session');
+  }
+  await getAuthStore().revokeSession(principal.key, principal.sessionId);
+  expect(() => assertPermissionDecisionAuthority(policy, principal)).toThrow('authenticated browser session');
+  expect(() => assertPermissionDecisionAuthority(undefined, null)).not.toThrow();
 });

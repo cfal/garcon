@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createExecutorStartupFixture, executorStartupSnapshot } from '$lib/chat/new-chat/__tests__/executor-startup-fixture';
@@ -44,6 +45,7 @@ function renderExistingSchedule() {
 	settings = new LocalSettingsStore();
 	sessions = new ChatSessionsStore();
 	const chat = {
+		presentation: CONVERSATION_PRESENTATION,
 		id: '1791420000000010', agentId: 'claude', executorId: remoteExecutor.id,
 		model: 'worker-default', title: 'Synthetic remote chat', projectPath: '/workspace',
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },

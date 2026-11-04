@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MobileSidebarLifecycleHost from './MobileSidebarLifecycleHost.svelte';
@@ -16,6 +17,7 @@ vi.mock('$lib/api/settings', async () => {
 
 function createChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		projectPath: '/tmp/project',
 		orderGroup: 'normal',

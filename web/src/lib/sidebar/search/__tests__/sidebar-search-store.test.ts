@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -17,6 +18,7 @@ import { ReactiveChatList } from './reactive-chat-list.svelte.js';
 
 function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
@@ -130,6 +132,27 @@ function makeSearchResponse(
 }
 
 describe('SidebarSearchStore', () => {
+	it('keeps automation out of ordinary metadata and transcript candidates, with explicit recovery access', async () => {
+		const chats = [makeChat({ id: 'conversation' }), makeChat({ id: 'worker',
+			presentation: { collection: 'automation', notifications: 'attention-only' } })];
+		const searchChatTranscripts = vi.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+			.mockResolvedValue(makeSearchResponse(chats.map((chat) => makeSearchResult(chat.id)), makeSearchPage(2)));
+		const { store } = createStore(chats, null, { searchChatTranscripts });
+		expect(store.hasAutomationChats).toBe(true);
+		expect(store.filteredChats.map((chat) => chat.id)).toEqual(['conversation']);
+		store.updateDraftQuery('needle');
+		await store.refreshTranscriptSearch('needle');
+		expect(searchChatTranscripts).toHaveBeenLastCalledWith(expect.objectContaining({ chatIds: ['conversation'] }), expect.any(Object));
+		expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(['conversation']);
+		store.activeQuery = 'collection:automation';
+		expect(store.filteredChats.map((chat) => chat.id)).toEqual(['worker']);
+		store.updateDraftQuery('needle collection:automation');
+		await store.refreshTranscriptSearch('needle collection:automation');
+		expect(searchChatTranscripts).toHaveBeenLastCalledWith(expect.objectContaining({ chatIds: ['worker'] }), expect.any(Object));
+		store.activeQuery = 'collection:all';
+		expect(store.filteredChats).toHaveLength(2);
+		store.destroy();
+	});
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});
@@ -1019,6 +1042,19 @@ describe('SidebarSearchStore', () => {
 	});
 
 	describe('transcript search invalidation', () => {
+		it('ignores automation membership and activity for ordinary searches', () => {
+			const conversation = makeChat({ id: 'conversation', lastActivityAt: '2026-01-01T00:00:00Z' });
+			const worker = makeChat({ id: 'worker', presentation: { collection: 'automation', notifications: 'attention-only' } });
+			const initial = transcriptSearchInvalidationProjection([conversation], 'needle', 'activity');
+			for (const lastActivityAt of [null, '2026-02-01T00:00:00Z']) {
+				const chats = [conversation, { ...worker, lastActivityAt }];
+				expect(transcriptSearchInvalidationProjection(chats, 'needle', 'activity')).toEqual(initial);
+				expect(transcriptSearchInvalidationProjection(chats, 'needle collection:all', 'activity')).not.toEqual(initial);
+				expect(transcriptSearchInvalidationProjection(chats, 'needle collection:automation', 'activity').candidateSignature)
+					.toBe(JSON.stringify(['worker']));
+			}
+		});
+
 		it('memoizes expensive projections across unrelated highlight changes', () => {
 			const { store } = createStore([makeChat({ id: 'c1', title: 'Needle' })]);
 			store.updateDraftQuery('needle');

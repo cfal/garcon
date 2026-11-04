@@ -1,10 +1,13 @@
 <script lang="ts">
+	import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
+
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 	import { buildSidebarChatListProjection } from '$lib/components/sidebar/sidebar-row-model.js';
 	import { ChatSessionsStore } from '../chat-sessions.svelte.js';
 
 	function chat(id: string, title: string): ChatSessionRecord {
 		return {
+			presentation: CONVERSATION_PRESENTATION,
 			id,
 			parentChat: null,
 			projectPath: '/workspace/project',

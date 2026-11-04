@@ -49,6 +49,7 @@ import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { createLogger } from '../../common/log.js';
 import type { ChatProjectPathUpdatedPayload } from '../../../common/ws-events.js';
 import { normalizeTags } from '../../../common/tags.js';
+import { parseChatPresentation } from '../../../common/automation.js';
 import {
   parseNativeSeedReceipt,
   type NativeSeedReceipt,
@@ -80,6 +81,7 @@ interface ChatRegistryOptions {
   retainProviderReferences?: RetainProviderReferences;
 }
 const ALLOWED_PATCH_FIELDS = [
+  'presentation',
   'agentId',
   'nativeSession',
   'agentOwnershipEpoch',
@@ -123,6 +125,8 @@ export class ChatRegistryDurabilityUnknownError extends Error {
 }
 
 export interface NewChatRegistryEntry {
+  presentation?: ChatRegistryEntry['presentation'];
+  automationPolicy?: ChatRegistryEntry['automationPolicy'];
   id: string;
   executorId?: string | null;
   agentId: AgentName;
@@ -357,6 +361,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 
   addChat({
     id,
+    presentation,
+    automationPolicy,
     executorId,
     agentId,
     model,
@@ -412,6 +418,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       const releaseProvider = this.#providerReferences.retain?.([apiProviderId]);
       try {
         registry.sessions[chatId] = {
+          ...(presentation ? { presentation: { ...presentation } } : {}),
+          ...(automationPolicy ? { automationPolicy: { ...automationPolicy } } : {}),
           ...(executorId == null || executorId === LOCAL_EXECUTOR_ID ? {} : { executorId }),
           agentId,
           nativeSession: nativeSession ? structuredClone(nativeSession) : null,
@@ -534,6 +542,11 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     patch: ChatRegistryPatch,
   ): ChatRegistryPatch {
     const normalizedPatch = pickAllowedPatch(patch);
+    if ('presentation' in normalizedPatch) {
+      const presentation = parseChatPresentation(normalizedPatch.presentation);
+      if (!presentation) throw new Error(`Invalid chat presentation for ${id}`);
+      normalizedPatch.presentation = presentation;
+    }
     if ('permissionMode' in normalizedPatch) {
       normalizedPatch.permissionMode = normalizePermissionMode(normalizedPatch.permissionMode);
     }
@@ -876,6 +889,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 function cloneRegistryEntry(entry: ChatRegistryEntry): ChatRegistryEntry {
   return {
     ...entry,
+    ...(entry.presentation ? { presentation: { ...entry.presentation } } : {}),
+    ...(entry.automationPolicy ? { automationPolicy: { ...entry.automationPolicy } } : {}),
     // Deeply frozen fields (parentChat, carryOverSegments) are safe to share; every
     // other nested field must be copied here so callers cannot mutate registry
     // state through a handed-out entry. New entry fields declare themselves by

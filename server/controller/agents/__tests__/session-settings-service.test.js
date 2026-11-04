@@ -2,6 +2,9 @@ import { describe, expect, it, mock, spyOn } from 'bun:test';
 
 import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
 import { AgentSessionSettingsService } from '../session-settings-service.ts';
+import { KeyedPromiseLock } from '../../../common/keyed-lock.ts';
+import { ChatMutationGuard } from '../../automation/mutation-guard.ts';
+import { AutomationLifecycle } from '../../automation/lifecycle.ts';
 
 function makeService(thinkingMode = 'high') {
   const entry = {
@@ -43,6 +46,7 @@ function makeService(thinkingMode = 'high') {
     resolveEndpointReference: () => null,
   };
   const onCommitted = mock(() => undefined);
+  const lifecycle = new AutomationLifecycle();
   const control = { entries: [], controlEntries: [], pause: null };
   const execution = {
     reserveTranscriptSnapshot: mock(chatId => ({ chatId, reservationId: 'settings-reservation' })),
@@ -51,6 +55,7 @@ function makeService(thinkingMode = 'high') {
     withChatExecutionControl: mock(async (_chatId, operation) => operation(control)),
   };
   const service = new AgentSessionSettingsService({
+    mutationGuard: new ChatMutationGuard(new KeyedPromiseLock(), lifecycle),
     execution,
     onCommitted,
     registry: {
@@ -60,10 +65,19 @@ function makeService(thinkingMode = 'high') {
     directory: { require: () => integration },
     endpointResolver,
   });
-  return { service, updateChat, entry, integration, endpointResolver, onCommitted, execution, control };
+  return { service, updateChat, entry, integration, endpointResolver, onCommitted, execution, control, lifecycle };
 }
 
 describe('AgentSessionSettingsService', () => {
+  it('revokes automation before a live provider configuration change', async () => {
+    const f = makeService();
+    const lease = f.lifecycle.acquire({ serverInstanceId: 'synthetic', chatId: 'chat-1', turnId: 'turn', clientRequestId: 'request' });
+    f.entry.agentSessionId = 'synthetic-session';
+    f.integration.sessionConfiguration = { apply: mock(async () => { expect(lease.revoked.aborted).toBe(true); }) };
+    await f.service.updateSessionSettings('chat-1', { permissionMode: 'default' });
+    expect(f.integration.sessionConfiguration.apply).toHaveBeenCalledTimes(1);
+    expect(f.updateChat).toHaveBeenCalledTimes(1);
+  });
   it.each(['entries', 'controlEntries'])('rejects literal mode changes with pending %s', async lane => {
     const f = makeService('none');
     f.integration.literalExecution = { selectionLabel: 'Mode', inputFormatByModel: {} };

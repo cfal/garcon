@@ -10,6 +10,7 @@ import {
 } from './control-state.ts';
 import { DomainError } from '../../common/domain-error.ts';
 import { createLogger } from '../../common/log.ts';
+import type { AutomationMutation } from '../automation/lifecycle.js';
 import type { ChatExecutionControlRepository } from './chat-execution-control-repository.ts';
 import {
   clearQueue,
@@ -47,6 +48,7 @@ import {
 const logger = createLogger('chat-execution-control');
 
 export interface ChatExecutionControlOperationsHost {
+  observeMutation?: (chatId: string, action: AutomationMutation) => void;
   runExclusive<T>(chatId: string, operation: () => Promise<T>): Promise<T>;
   chatExists(chatId: string): boolean;
   unsettledQueueReceiptKeys(chatId: string): ReadonlySet<string>;
@@ -97,7 +99,7 @@ export class ChatExecutionControlOperations {
           this.attachmentAdmission.assertSupported(chatId, input.images);
         }
       }
-      const committed = await this.#commitTransition(chatId, current, transition);
+      const committed = await this.#commitTransition(chatId, current, transition, 'queue');
       const result = committed.value;
       if (!result.duplicate) {
         this.#logMutation('create', chatId, result.entryId, committed.control, result.entry?.revision);
@@ -118,6 +120,7 @@ export class ChatExecutionControlOperations {
         chatId,
         current,
         createQueuedSteer(current, { content, command, submission }, this.#transitionContext(chatId)),
+        'steer',
       );
       const result = committed.value;
       if (!result.duplicate) {
@@ -135,6 +138,7 @@ export class ChatExecutionControlOperations {
         chatId,
         current,
         markQueueEntrySteer(current, input, transitionContext()),
+        'steer',
       );
       if (committed.changed) this.#logMutation('mark-steer', chatId, input.entryId, committed.control);
       return committed.control;
@@ -166,7 +170,7 @@ export class ChatExecutionControlOperations {
           transition.outcome.rejection.code,
         );
       }
-      const committed = await this.#commitTransition(chatId, current, transition);
+      const committed = await this.#commitTransition(chatId, current, transition, 'queue');
       const result = committed.value;
       if (!result.duplicate) {
         this.#logMutation('replace', chatId, entryId, committed.control, result.entry?.revision);
@@ -197,7 +201,7 @@ export class ChatExecutionControlOperations {
           transition.outcome.rejection.code,
         );
       }
-      const committed = await this.#commitTransition(chatId, current, transition);
+      const committed = await this.#commitTransition(chatId, current, transition, 'queue');
       if (!committed.value.duplicate) this.#logMutation('delete', chatId, entryId, committed.control);
       return {
         entryId: committed.value.entryId,
@@ -235,7 +239,7 @@ export class ChatExecutionControlOperations {
           transition.outcome.rejection.code,
         );
       }
-      const committed = await this.#commitTransition(chatId, current, transition);
+      const committed = await this.#commitTransition(chatId, current, transition, 'queue');
       if (!committed.value.duplicate) {
         this.#logMove(chatId, input, committed.control, committed.value.rebased);
       }
@@ -255,6 +259,7 @@ export class ChatExecutionControlOperations {
         chatId,
         current,
         clearQueue(current, transitionContext()),
+        'queue',
       )).control;
     });
   }
@@ -266,6 +271,7 @@ export class ChatExecutionControlOperations {
         chatId,
         current,
         discardPendingInput(current, transitionContext()),
+        'queue',
       )).control;
     });
   }
@@ -281,6 +287,7 @@ export class ChatExecutionControlOperations {
         chatId,
         current,
         enqueueControlInput(current, input, transitionContext()),
+        'control-input',
       );
       this.#logControlMutation('enqueue', chatId, committed.value, committed.control);
       return { entry: committed.value, control: committed.control };
@@ -288,16 +295,17 @@ export class ChatExecutionControlOperations {
   }
 
   async pause(chatId: string): Promise<ControlChangeResult> {
-    return this.#pause(chatId);
+    return this.#pause(chatId, 'queue');
   }
 
   async pauseForUnavailableProject(chatId: string): Promise<ControlChangeResult> {
-    return this.#pause(chatId, (current) =>
+    return this.#pause(chatId, 'lifecycle', (current) =>
       current.entries.length > 0 && current.entries.every((entry) => entry.status === 'queued'));
   }
 
   async #pause(
     chatId: string,
+    source: 'queue' | 'lifecycle',
     eligible: (control: StoredChatExecutionControlState) => boolean = () => true,
   ): Promise<ControlChangeResult> {
     return this.host.runExclusive(chatId, async () => {
@@ -307,6 +315,7 @@ export class ChatExecutionControlOperations {
         chatId,
         current,
         pauseQueue(current, transitionContext()),
+        source,
       );
       if (committed.changed) this.#logPauseMutation('pause', chatId, committed.control);
       return { control: committed.control, changed: committed.changed };
@@ -323,6 +332,7 @@ export class ChatExecutionControlOperations {
         chatId,
         current,
         resumeQueue(current, pauseId, transitionContext()),
+        'queue',
       );
       if (committed.changed) this.#logPauseMutation('resume', chatId, committed.control);
       return { control: committed.control, changed: committed.changed };
@@ -378,6 +388,7 @@ export class ChatExecutionControlOperations {
         chatId,
         current,
         reserve(current, input, transitionContext()),
+        'lifecycle',
       );
       const entry = committed.control.entries.find((candidate) => candidate.id === input.entryId)!;
       this.#logMutation('steer-reserve', chatId, entry.id, committed.control, entry.revision);
@@ -396,6 +407,7 @@ export class ChatExecutionControlOperations {
         chatId,
         current,
         releaseQueueSteer(current, entryId, transitionContext()),
+        'lifecycle',
       );
       if (committed.changed) this.#logMutation('steer-release', chatId, entryId, committed.control);
       return committed.control;
@@ -413,6 +425,7 @@ export class ChatExecutionControlOperations {
         chatId,
         current,
         consumeQueueSteer(current, entryId, transitionContext()),
+        'lifecycle',
       );
       if (committed.changed) this.#logMutation('steer-consume', chatId, entryId, committed.control);
       return committed.control;
@@ -431,6 +444,7 @@ export class ChatExecutionControlOperations {
         chatId,
         current,
         requeueAndPause(current, { entryId, kind }, transitionContext()),
+        'lifecycle',
       );
       if (priorEntry) {
         this.#logMutation('requeue', chatId, entryId, committed.control, priorEntry.revision);
@@ -447,6 +461,7 @@ export class ChatExecutionControlOperations {
         chatId,
         current,
         pauseAfterFailure(current, cause, transitionContext()),
+        'lifecycle',
       );
       if (committed.changed) {
         this.#logPauseMutation('pause', chatId, committed.control, cause.kind === 'queued-turn-failed' ? cause.entryId : undefined);
@@ -507,6 +522,7 @@ export class ChatExecutionControlOperations {
     chatId: string,
     current: StoredChatExecutionControlState,
     transition: ControlTransition<T>,
+    source: AutomationMutation | 'lifecycle',
   ): Promise<{ value: T; control: StoredChatExecutionControlState; changed: boolean }> {
     if (transition.outcome.status === 'rejected') {
       throw transitionError(transition.outcome.rejection, current);
@@ -518,6 +534,7 @@ export class ChatExecutionControlOperations {
         changed: false,
       };
     }
+    if (source !== 'lifecycle') this.host.observeMutation?.(chatId, source);
     return {
       value: transition.outcome.value,
       control: await this.#commit(chatId, transition.next, transition.publicChanged),
