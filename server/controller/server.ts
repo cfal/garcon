@@ -72,6 +72,7 @@ import { CommandLedger } from './commands/command-ledger.js';
 import { ChatCommandService } from './commands/chat-command-service.js';
 import { AutomationLifecycle } from './automation/lifecycle.js';
 import { ChatMutationGuard } from './automation/mutation-guard.js';
+import { createWorkflowProviderReferences } from './workflows/setup.js';
 import { queuedSteerContentResolver } from './commands/steer-file-context.js';
 import { KeyedPromiseLock } from '../common/keyed-lock.js';
 import { ChatHandler } from './ws/chat.js';
@@ -334,7 +335,8 @@ export async function startServer(): Promise<void> {
     if (workspaceMigrations.initialVersion >= 5) {
       await finalizeCarryOverMigrationValidation(workspaceDir);
     }
-    const apiProviders = providerPolicy.service(() => [chatRegistry, agentOwnership, scheduledPromptStore, pullRequestReviews, settings]);
+    const workflowReferences = createWorkflowProviderReferences(workspaceDir, () => settings.hasInitializedWorkflowStorage());
+    const apiProviders = providerPolicy.service(() => [chatRegistry, agentOwnership, scheduledPromptStore, pullRequestReviews, settings, workflowReferences]);
     const modelCatalogResponseCache = new ModelCatalogResponseCache();
     executors.onAvailabilityChanged((executorId) => modelCatalogResponseCache.clear(executorId));
     executors.onChanged(() => {

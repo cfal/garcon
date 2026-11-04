@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { chmodSync, existsSync, mkdirSync, statSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { WorkflowStore, inspectWorkflowProviderReferences } from '../store.js';
+import { WorkflowService } from '../service.js';
 import { fixture, plan, local, browser } from './fixture.js';
 
 const fixtures: ReturnType<typeof fixture>[] = [];
@@ -56,10 +57,14 @@ test('SQLite excludes unsettled attempts even across generations', () => {
   const id = f.create().workflowId;
   f.activate(id);
   f.store.read(database => {
-    const insert = database.query(`INSERT INTO attempts VALUES (?,?,?,1,?,'sha256:synthetic','dispatching',?,'leased',NULL,?,NULL,NULL,NULL,'null',NULL,'2026-01-01T00:00:00.000Z')`);
+    const insert = database.query(`INSERT INTO attempts (id,workflow_id,task_id,plan_revision,generation,input_digest,
+      dispatch_phase,resolution,control_state,request_id,target_json,created_at)
+      VALUES (?,?,?,1,?,'sha256:synthetic','dispatching',?,'leased',?,'null','2026-01-01T00:00:00.000Z')`);
     insert.run('first', id, 'check', 1, 'unknown', 'request-one');
     expect(() => insert.run('second', id, 'check', 2, 'open', 'request-two')).toThrow();
-    database.query("UPDATE attempts SET resolution='abandoned' WHERE id='first'").run();
+    database.query("UPDATE attempts SET resolution='abandoned',control_state='released' WHERE id='first'").run();
+    expect(() => insert.run('second', id, 'check', 2, 'open', 'request-two')).toThrow();
+    database.query("UPDATE attempts SET dispatch_phase='settled' WHERE id='first'").run();
     insert.run('second', id, 'check', 2, 'open', 'request-two');
   });
 });
@@ -96,4 +101,26 @@ test('corrupt and newer schema storage is never replaced or migrated', () => {
   expect(inspectWorkflowProviderReferences(f.directory, true)).toBeNull();
   const verify = new Database(path, { readonly: true });
   expect(verify.query('PRAGMA user_version').get()).toEqual({ user_version: 99 }); verify.close();
+});
+
+test('post-commit invalidation failures do not make a durable mutation appear rejected', () => {
+  const f = setup();
+  const service = new WorkflowService(f.store, { enabled: () => true,
+    onInvalidated() { throw new Error('Synthetic invalidation failure'); } });
+  const request = { operationId: crypto.randomUUID(), mutation: { action: 'create', plan: plan(), captainChatId: null } };
+  const result = service.execute(request, browser);
+  expect(service.execute(request, browser)).toEqual(result);
+  expect(service.detail(result.workflowId).draft.plan).toEqual(plan());
+});
+
+test('a failed post-commit control callback fences future effects while retaining its mutation result', () => {
+  const f = setup(); const id = f.create().workflowId; f.activate(id);
+  const service = new WorkflowService(f.store, { enabled: () => true,
+    onControl() { throw new Error('Synthetic control failure'); } });
+  const request = { operationId: crypto.randomUUID(), mutation: { action: 'stop', workflowId: id } };
+  const result = service.execute(request, browser);
+  expect(() => service.detail(id)).toThrow(expect.objectContaining({ code: 'WORKFLOW_UNAVAILABLE' }));
+  f.reopen();
+  expect(f.service.execute(request, browser)).toEqual(result);
+  expect(f.service.detail(id).workflow.desired).toBe('paused');
 });

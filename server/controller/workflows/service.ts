@@ -36,8 +36,14 @@ export class WorkflowService {
     });
     if (committed.changed) {
       const action = request.mutation.action;
-      if (action === 'pause' || action === 'stop' || action === 'cancel' || action === 'activate') this.options.onControl?.(committed.result.workflowId, action);
-      this.options.onInvalidated?.(committed.result.workflowId, committed.result.collectionRevision);
+      try {
+        if (action === 'pause' || action === 'stop' || action === 'cancel' || action === 'activate') this.options.onControl?.(committed.result.workflowId, action);
+      } catch (error) {
+        this.store.close();
+        console.error('Workflow control delivery failed; storage fenced', error);
+      }
+      try { this.options.onInvalidated?.(committed.result.workflowId, committed.result.collectionRevision); }
+      catch (error) { console.error('Workflow invalidation delivery failed', error); }
     }
     return committed.result;
   }

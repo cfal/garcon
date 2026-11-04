@@ -6,6 +6,7 @@ import { validateWorkflowGraph, workflowDescendants } from './graph.js';
 import { workflowDigest } from './inputs.js';
 import { activationManifest, readAttempts, readGateManifests, readPlan, readTasks, requireAttempt, requireWorkflow, workflowEpoch } from './records.js';
 import { invalidatedWorkflowTasks } from './transitions.js';
+import { holdTask, releaseSettledClaims } from './attempts.js';
 
 export function mutateWorkflow(database: Database, mutation: WorkflowMutation, actor: string, now: string): string {
   if (mutation.action === 'create') {
@@ -34,9 +35,11 @@ export function mutateWorkflow(database: Database, mutation: WorkflowMutation, a
       database.query('UPDATE workflows SET desired=?,control_epoch=control_epoch+1 WHERE id=?').run(desired, workflow.id);
       if (mutation.action !== 'pause') {
         database.query(`UPDATE tasks SET hold='intervention',hold_reason=? WHERE workflow_id=? AND EXISTS
-          (SELECT 1 FROM attempts a WHERE a.workflow_id=tasks.workflow_id AND a.task_id=tasks.id AND a.resolution IN ('open','unknown'))`)
+          (SELECT 1 FROM attempts a WHERE a.workflow_id=tasks.workflow_id AND a.task_id=tasks.id
+            AND (a.resolution IN ('open','unknown') OR a.control_state='leased' OR a.dispatch_phase!='settled'))`)
           .run(`Workflow ${mutation.action} requested.`, workflow.id);
-        database.query(`UPDATE attempts SET control_state='revoked',revocation_reason=? WHERE workflow_id=? AND resolution IN ('open','unknown')`)
+        database.query(`UPDATE attempts SET control_state='revoked',revocation_reason=?,revocation_kind='intervention' WHERE workflow_id=?
+          AND (resolution IN ('open','unknown') OR control_state='leased' OR dispatch_phase!='settled')`)
           .run(`Workflow ${mutation.action} requested.`, workflow.id);
       }
       break;
@@ -65,10 +68,10 @@ export function mutateWorkflow(database: Database, mutation: WorkflowMutation, a
       const attempt = requireAttempt(database, mutation.attemptId);
       const task = readTasks(database, workflow.id).find(entry => entry.id === mutation.taskId);
       if (!task || attempt.workflowId !== workflow.id || attempt.taskId !== task.id || task.generation !== mutation.generation
-        || attempt.generation !== task.generation || task.hold !== 'none'
+        || attempt.generation !== task.generation || task.hold !== 'none' || attempt.controlState === 'leased' || attempt.dispatchPhase !== 'settled'
         || readAttempts(database, workflow.id).findLast(entry => entry.taskId === task.id)?.attemptId !== attempt.attemptId
         || !['failed', 'interrupted', 'not-started', 'abandoned'].includes(attempt.resolution)) workflowConflict('Attempt is not eligible for retry.');
-      if (database.query(`SELECT 1 FROM resource_claims WHERE attempt_id=? AND risk_released=0`).get(attempt.attemptId)) {
+      if (database.query(`SELECT 1 FROM resource_claims WHERE attempt_id=? AND risk_released=0 AND retained=0`).get(attempt.attemptId)) {
         workflowConflict('Resolve retained resources before retrying.');
       }
       invalidate(database, workflow, new Set([task.id]));
@@ -78,14 +81,25 @@ export function mutateWorkflow(database: Database, mutation: WorkflowMutation, a
       const attempt = requireAttempt(database, mutation.attemptId);
       const task = readTasks(database, workflow.id).find(entry => entry.id === mutation.taskId);
       if (!task || attempt.workflowId !== workflow.id || attempt.taskId !== task.id || attempt.generation !== mutation.generation
+        || attempt.resolution === 'open' || attempt.controlState === 'leased' || attempt.dispatchPhase !== 'settled'
         || (attempt.resolution !== 'unknown' && task.hold === 'none')) workflowConflict('Uncertain attempt changed.');
       // Runtime adoption is added by the execution service after independent observation.
       if (mutation.resolution === 'adopt') throw new DomainError('WORKFLOW_CONFLICT', 'Artifact adoption requires a current executor observation.', 409);
+      if (mutation.resolution === 'not-started' && (attempt.resolution === 'succeeded' || attempt.result?.termination === 'observed')) {
+        workflowConflict('Definite execution evidence cannot be resolved as not started.');
+      }
       database.query(`UPDATE attempts SET resolution=?,dispatch_phase='settled',control_state='released' WHERE id=?`)
         .run(mutation.resolution === 'not-started' ? 'not-started' : 'abandoned', attempt.attemptId);
       database.query(`UPDATE tasks SET hold='none',hold_reason=NULL WHERE workflow_id=? AND id=?`).run(workflow.id, task.id);
-      if (mutation.resolution === 'not-started') database.query('DELETE FROM resource_claims WHERE attempt_id=?').run(attempt.attemptId);
-      else database.query('UPDATE resource_claims SET quarantined=1,risk_released=? WHERE attempt_id=?').run(mutation.releaseRisk ? 1 : 0, attempt.attemptId);
+      if (mutation.resolution === 'not-started') {
+        releaseSettledClaims(database, attempt.attemptId);
+      }
+      else {
+        database.query('UPDATE resource_claims SET quarantined=1,risk_released=? WHERE attempt_id=?').run(mutation.releaseRisk ? 1 : 0, attempt.attemptId);
+        if (!mutation.releaseRisk && database.query('SELECT 1 FROM resource_claims WHERE attempt_id=? AND risk_released=0').get(attempt.attemptId)) {
+          holdTask(database, attempt, 'output-unknown', 'Abandoned work retains resource risk. Explicitly resolve or release that risk before continuing.');
+        }
+      }
       break;
     }
   }
@@ -114,7 +128,9 @@ function invalidate(database: Database, workflow: WorkflowRecord, roots: Readonl
   const all = next ? workflowDescendants(next, affected) : affected;
   for (const id of all) {
     database.query('UPDATE tasks SET generation=generation+1,input_digest=NULL,next_eligible_at=NULL WHERE workflow_id=? AND id=?').run(workflow.id, id);
-    database.query(`UPDATE attempts SET control_state='revoked',revocation_reason='Generation superseded.' WHERE workflow_id=? AND task_id=? AND resolution IN ('open','unknown')`).run(workflow.id, id);
+    database.query(`UPDATE attempts SET control_state='revoked',revocation_reason='Generation superseded.',revocation_kind='superseded'
+      WHERE workflow_id=? AND task_id=? AND (resolution IN ('open','unknown') OR control_state='leased' OR dispatch_phase!='settled')
+      AND revocation_kind IS NOT 'intervention'`).run(workflow.id, id);
     database.query('DELETE FROM gate_manifests WHERE workflow_id=? AND gate_id=?').run(workflow.id, id);
   }
 }
