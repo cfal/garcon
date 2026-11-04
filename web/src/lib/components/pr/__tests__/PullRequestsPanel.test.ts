@@ -432,6 +432,7 @@ describe('PullRequestsPanel', () => {
 			getDetail: async () => ({
 				...snapshot.inbox[0].pull,
 				documentId: 'document',
+				reviewId: 'synthetic:review',
 				body: '',
 				mergeable: 'mergeable',
 				checks: [
@@ -478,6 +479,7 @@ describe('PullRequestsPanel', () => {
 		const detail = {
 			...snapshot.inbox[0].pull,
 			documentId: 'document',
+			reviewId: 'synthetic:review',
 			body: '',
 			mergeable: 'mergeable',
 			checks: [],

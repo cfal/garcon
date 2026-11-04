@@ -63,6 +63,15 @@ export class GitReviewBodyScheduler<T> {
 		}
 	}
 
+	retainVisible(paths: ReadonlySet<string>): void {
+		const removed = this.visibleQueue.filter((path) => !paths.has(path));
+		this.removeQueued(this.visibleQueue, removed);
+		if (this.visibleActive && !this.visibleActive.paths.some((path) => paths.has(path))) {
+			this.visibleActive.controller.abort();
+		}
+		if (removed.length > 0) this.options.onLoadingChange(removed, false);
+	}
+
 	hasPending(path: string): boolean {
 		return (
 			this.visibleQueue.includes(path) ||

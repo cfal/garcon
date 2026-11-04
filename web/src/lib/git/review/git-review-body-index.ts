@@ -1,33 +1,17 @@
-import type {
-	GitReviewFileBody,
-	GitReviewFilePatchBody,
-} from '$lib/api/git.js';
-import { createGitPatchIndex } from './git-patch-index.js';
-import {
-	finishGitReviewPerformanceSpan,
-	startGitReviewPerformanceSpan,
-} from './git-review-performance.js';
+import type { GitReviewFileBody, GitReviewFilePatchBody } from '$lib/api/git.js';
+import { gitReviewWorker } from './git-review-worker-client.js';
+import { restoreGitPatchIndex } from './git-patch-index.js';
 
-export function createIndexedGitReviewFileBody(body: GitReviewFilePatchBody): GitReviewFileBody {
-	if (body.bodyState !== 'loaded' || body.patch === null) {
-		return {
-			...body,
-			patchIndex: null,
-		};
-	}
-	let index: GitReviewFileBody['patchIndex'] | undefined;
-	return {
-		...body,
-		get patchIndex() {
-			if (!index) {
-				const span = startGitReviewPerformanceSpan('patch-index');
-				try {
-					index = createGitPatchIndex(body.patch!, body.renderedRowCount);
-				} finally {
-					finishGitReviewPerformanceSpan(span);
-				}
-			}
-			return index;
-		},
-	};
+export async function createIndexedGitReviewFileBody(
+	body: GitReviewFilePatchBody,
+	signal?: AbortSignal,
+): Promise<GitReviewFileBody> {
+	if (signal?.aborted) throw new DOMException('Diff work cancelled.', 'AbortError');
+	if (body.bodyState !== 'loaded' || body.patch === null) return { ...body, patchIndex: null };
+	const output = await gitReviewWorker.run(
+		{ kind: 'index', patch: body.patch, renderedRowCount: body.renderedRowCount },
+		signal,
+	);
+	if (output.kind !== 'index') throw new Error('Invalid diff index reply.');
+	return { ...body, patchIndex: restoreGitPatchIndex(body.patch, output.index, output.split) };
 }

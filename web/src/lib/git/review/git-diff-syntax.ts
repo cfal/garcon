@@ -1,13 +1,14 @@
 import type { GitReviewFileBody, GitReviewFileSummary } from '$lib/api/git.js';
 import type { CodeHighlightSegment } from '$lib/highlighting/code-highlight-types.js';
 
-export const GIT_DIFF_SYNTAX_VERSION = 1;
+export const GIT_DIFF_SYNTAX_VERSION = 2;
 
 export const GIT_DIFF_SYNTAX_LIMITS = Object.freeze({
-	maxRenderedRows: 2_000,
-	maxSyntheticCharactersPerSide: 200_000,
-	maxSegmentsPerSide: 50_000,
-	parseTimeoutMs: 12,
+	maxRenderedRows: 50_000,
+	maxSyntheticCharactersPerSide: 1_000_000,
+	maxLineCharacters: 20_000,
+	maxSegmentsPerSide: 100_000,
+	parseTimeoutMs: 250,
 	workSlotTimeoutMs: 100,
 });
 
@@ -133,6 +134,7 @@ export function gitDiffSyntaxCacheKey(
 		GIT_DIFF_SYNTAX_VERSION,
 		documentId,
 		body.bodyFingerprint,
+		body.patchDigest ?? null,
 		file.originalPath ?? file.path,
 		file.path,
 	]);
@@ -147,6 +149,7 @@ class SyntheticSideBuilder {
 	append(text: string, diffLineIndex: number, hunkIndex: number): void {
 		if (this.exceeded) return;
 		if (this.lastHunkIndex !== null && this.lastHunkIndex !== hunkIndex) {
+			// Hunks are partial source; a separator cannot recover omitted parser context.
 			this.push({ text: '', diffLineIndex: null });
 		}
 		this.push({ text, diffLineIndex });
@@ -170,7 +173,10 @@ class SyntheticSideBuilder {
 		if (this.exceeded) return;
 		const separatorCharacters = this.lines.length === 0 ? 0 : 1;
 		this.characterCount += separatorCharacters + line.text.length;
-		if (this.characterCount > GIT_DIFF_SYNTAX_LIMITS.maxSyntheticCharactersPerSide) {
+		if (
+			this.characterCount > GIT_DIFF_SYNTAX_LIMITS.maxSyntheticCharactersPerSide ||
+			line.text.length > GIT_DIFF_SYNTAX_LIMITS.maxLineCharacters
+		) {
 			this.exceeded = true;
 			this.lines.length = 0;
 			return;

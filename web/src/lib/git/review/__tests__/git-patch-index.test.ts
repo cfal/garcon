@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	createGitPatchIndex,
 	getGitSplitPatchIndex,
+	restoreGitPatchIndex,
 } from '$lib/git/review/git-patch-index.js';
 
 const PATCH = `diff --git a/src/file.ts b/src/file.ts
@@ -20,6 +21,26 @@ const PATCH = `diff --git a/src/file.ts b/src/file.ts
 `;
 
 describe('createGitPatchIndex', () => {
+	it.each([
+		PATCH,
+		'@@ -1 +1,2 @@\n-\u03b1\ud83d\ude80\r\n+\u4e2d\ud83d\ude80e\u0301\r\n+\n',
+		'malformed\n@@ not a hunk\n+ignored',
+	])(
+		'round-trips typed indexes, UTF-16 text and split alignment through structured clone',
+		(patch) => {
+			const original = createGitPatchIndex(patch);
+			const split = getGitSplitPatchIndex(original);
+			const wire = structuredClone({ index: original.toData(), split: split.toData() });
+			const restored = restoreGitPatchIndex(patch, wire.index, wire.split);
+			expect(restored.rowCount).toBe(original.rowCount);
+			for (let row = 0; row < original.rowCount; row += 1)
+				expect(restored.rowAt(row)).toEqual(original.rowAt(row));
+			for (let hunk = 0; hunk < original.hunkCount; hunk += 1)
+				expect(restored.hunkAt(hunk)).toEqual(original.hunkAt(hunk));
+			for (let row = 0; row < split.rowCount; row += 1)
+				expect(getGitSplitPatchIndex(restored).entryAt(row)).toEqual(split.entryAt(row));
+		},
+	);
 	it('indexes unified rows and hunks with legacy-compatible values', () => {
 		const index = createGitPatchIndex(PATCH, 9);
 

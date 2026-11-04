@@ -8,6 +8,7 @@ import { CODEMIRROR_PACKAGES } from './codemirror-packages.ts';
 import { codeMirrorLanguageChunk } from './codemirror-chunks.ts';
 
 export default defineConfig({
+	worker: { format: 'es' },
 	plugins: [
 		tailwindcss(),
 		sveltekit({

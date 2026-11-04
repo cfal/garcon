@@ -104,14 +104,24 @@ export async function getGitReviewDocumentFileBodies(
 	}
 	markGitReviewBodyReady(gitDocumentKey(document), purpose);
 	if (response.status !== 'ready') return { ...response, documentId: gitDocumentKey(document) };
+	const indexed: Record<string, GitReviewFileBody> = {};
+	for (const [path, body] of Object.entries(response.files)) {
+		try {
+			indexed[path] = await createIndexedGitReviewFileBody(body, options?.signal ?? undefined);
+		} catch (error) {
+			if (options?.signal?.aborted) throw error;
+			indexed[path] = {
+				...body,
+				patch: null,
+				patchIndex: null,
+				bodyState: 'error',
+				error: error instanceof Error ? error.message : 'Diff indexing failed.',
+			};
+		}
+	}
 	return {
 		...response,
 		documentId: gitDocumentKey(document),
-		files: Object.fromEntries(
-			Object.entries(response.files).map(([path, body]) => [
-				path,
-				createIndexedGitReviewFileBody(body),
-			]),
-		),
+		files: indexed,
 	};
 }

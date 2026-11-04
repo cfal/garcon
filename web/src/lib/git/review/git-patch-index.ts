@@ -14,6 +14,53 @@ const ROW_KIND = Object.freeze({
 	del: 3,
 });
 
+export interface GitPatchIndexData {
+	rowKinds: Uint8Array;
+	textStarts: Uint32Array;
+	textEnds: Uint32Array;
+	beforeLines: Uint32Array;
+	afterLines: Uint32Array;
+	hunkIndices: Uint32Array;
+	diffLineIndices: Uint32Array;
+	hunkHeaders: Uint32Array;
+	hunkOldStarts: Uint32Array;
+	hunkOldLines: Uint32Array;
+	hunkNewStarts: Uint32Array;
+	hunkNewLines: Uint32Array;
+	hunkRowEnds: Uint32Array;
+}
+
+export interface GitSplitPatchIndexData {
+	leftRowIndices: Uint32Array;
+	rightRowIndices: Uint32Array;
+}
+
+export function restoreGitPatchIndex(
+	patch: string,
+	data: GitPatchIndexData,
+	split?: GitSplitPatchIndexData,
+): GitPatchIndex {
+	const index = new GitPatchIndex(
+		patch,
+		data.rowKinds,
+		data.textStarts,
+		data.textEnds,
+		data.beforeLines,
+		data.afterLines,
+		data.hunkIndices,
+		data.diffLineIndices,
+		data.hunkHeaders,
+		data.hunkOldStarts,
+		data.hunkOldLines,
+		data.hunkNewStarts,
+		data.hunkNewLines,
+		data.hunkRowEnds,
+	);
+	if (split)
+		splitIndexCache.set(index, new GitSplitPatchIndex(split.leftRowIndices, split.rightRowIndices));
+	return index;
+}
+
 class GrowingUint32 {
 	private values: Uint32Array;
 	length = 0;
@@ -67,6 +114,24 @@ class GrowingUint8 {
 export class GitPatchIndex {
 	readonly rowCount: number;
 	readonly hunkCount: number;
+
+	toData(): GitPatchIndexData {
+		return {
+			rowKinds: this.rowKinds,
+			textStarts: this.textStarts,
+			textEnds: this.textEnds,
+			beforeLines: this.beforeLines,
+			afterLines: this.afterLines,
+			hunkIndices: this.hunkIndices,
+			diffLineIndices: this.diffLineIndices,
+			hunkHeaders: this.hunkHeaders,
+			hunkOldStarts: this.hunkOldStarts,
+			hunkOldLines: this.hunkOldLines,
+			hunkNewStarts: this.hunkNewStarts,
+			hunkNewLines: this.hunkNewLines,
+			hunkRowEnds: this.hunkRowEnds,
+		};
+	}
 
 	constructor(
 		readonly patch: string,
@@ -142,6 +207,10 @@ export interface GitSplitPatchEntry {
 export class GitSplitPatchIndex {
 	readonly rowCount: number;
 
+	toData(): GitSplitPatchIndexData {
+		return { leftRowIndices: this.leftRowIndices, rightRowIndices: this.rightRowIndices };
+	}
+
 	constructor(
 		private readonly leftRowIndices: Uint32Array,
 		private readonly rightRowIndices: Uint32Array,
@@ -162,7 +231,7 @@ export function createGitPatchIndex(
 	patch: string,
 	expectedRenderedRowCount?: number,
 ): GitPatchIndex {
-	const initialRows = Math.max(16, expectedRenderedRowCount ?? 0);
+	const initialRows = Math.max(16, Math.min(patch.length, expectedRenderedRowCount ?? 0));
 	const rowKinds = new GrowingUint8(initialRows);
 	const textStarts = new GrowingUint32(initialRows);
 	const textEnds = new GrowingUint32(initialRows);
@@ -183,6 +252,11 @@ export function createGitPatchIndex(
 	let lineStart = 0;
 
 	while (lineStart < patch.length) {
+		if (expectedRenderedRowCount !== undefined && rowKinds.length > expectedRenderedRowCount) {
+			throw new Error(
+				`Diff row count mismatch: server reported ${expectedRenderedRowCount}, client indexed more rows.`,
+			);
+		}
 		const newlineIndex = patch.indexOf('\n', lineStart);
 		const lineEnd = newlineIndex < 0 ? patch.length : newlineIndex;
 		const line = patch.slice(lineStart, lineEnd);

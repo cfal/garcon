@@ -231,6 +231,55 @@ describe('GitDiffSyntaxController demand', () => {
 });
 
 describe('GitDiffSyntaxController stale work', () => {
+	it('fences exact-patch replacement even when the filesystem fingerprint is unchanged', async () => {
+		const pending = deferred<GitDiffSyntaxAttempt>();
+		const highlighter = vi.fn(async (value: GitDiffSyntaxFileInput) => highlighted(value));
+		highlighter.mockImplementationOnce(() => pending.promise);
+		const controller = new GitDiffSyntaxController(dependencies(highlighter));
+		controller.open(
+			{ documentId: 'doc', files: [file('a.ts')] },
+			{ 'a.ts': { ...body('a.ts'), patchDigest: 'a'.repeat(64) } },
+		);
+		controller.handleDemand(demand('doc', ['a.ts']));
+		await flushPromises();
+		controller.replaceBodies({ 'a.ts': { ...body('a.ts'), patchDigest: 'b'.repeat(64) } });
+		pending.resolve(highlighted(highlighter.mock.calls[0][0]));
+		await flushPromises();
+		expect(highlighter).toHaveBeenCalledTimes(2);
+		expect(controller.results['a.ts']?.cacheKey).toContain('b'.repeat(64));
+	});
+	it('requeues a demanded file when rapid navigation returns before its cancellation settles', async () => {
+		const pending = deferred<GitDiffSyntaxAttempt>();
+		const highlighter = vi.fn(async (value: GitDiffSyntaxFileInput) => highlighted(value));
+		highlighter.mockImplementationOnce(() => pending.promise);
+		const controller = new GitDiffSyntaxController(dependencies(highlighter));
+		controller.open({ documentId: 'doc', files: [file('a.ts')] }, { 'a.ts': body('a.ts') });
+		controller.handleDemand(demand('doc', ['a.ts']));
+		await flushPromises();
+		controller.handleDemand(demand('doc', []));
+		controller.handleDemand(demand('doc', ['a.ts']));
+		pending.resolve({ status: 'cancelled' });
+		await flushPromises();
+		expect(highlighter).toHaveBeenCalledTimes(2);
+		expect(controller.results['a.ts']).toBeDefined();
+	});
+	it('does not publish an aborted result even when its document and fingerprint still match', async () => {
+		const pending = deferred<GitDiffSyntaxAttempt>();
+		let signal: AbortSignal | undefined;
+		const highlighter = vi.fn((_value: GitDiffSyntaxFileInput, active: AbortSignal) => {
+			signal = active;
+			return pending.promise;
+		});
+		const controller = new GitDiffSyntaxController(dependencies(highlighter));
+		controller.open({ documentId: 'doc', files: [file('a.ts')] }, { 'a.ts': body('a.ts') });
+		controller.handleDemand(demand('doc', ['a.ts']));
+		await flushPromises();
+		controller.handleDemand(demand('doc', []));
+		expect(signal?.aborted).toBe(true);
+		pending.resolve(highlighted(highlighter.mock.calls[0][0]));
+		await flushPromises();
+		expect(controller.results).toEqual({});
+	});
 	it('discards a result after document replacement', async () => {
 		const pending = deferred<GitDiffSyntaxAttempt>();
 		const highlighter = vi.fn((_value: GitDiffSyntaxFileInput) => pending.promise);

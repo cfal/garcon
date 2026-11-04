@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
 	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
@@ -19,6 +20,7 @@
 		threadCountByFile: ReadonlyMap<string, number>;
 		onToggleViewed: (filePath: string) => void;
 		onToggleCollapsed: (filePath: string) => void;
+		onBodyDemand?: (demand: GitReviewBodyDemand) => void;
 	}
 
 	let {
@@ -30,6 +32,7 @@
 		threadCountByFile,
 		onToggleViewed,
 		onToggleCollapsed,
+		onBodyDemand = () => undefined,
 	}: PullRequestVirtualDiffSurfaceProps = $props();
 
 	const localSettings = getLocalSettings();
@@ -73,6 +76,6 @@
 	pinFileHeaders={false}
 	{fontSize}
 	scrollToRequest={null}
-	onBodyDemand={() => undefined}
+	{onBodyDemand}
 	rowSnippet={renderRow}
 />
