@@ -1,3 +1,5 @@
+import { compileHiddenBashCommandPatterns, type BashCommandMatcher } from '$shared/transcript-display-matcher.js';
+export { compileHiddenBashCommandPatterns, type BashCommandMatcher };
 import { BashToolUseMessage } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
 import {
@@ -49,46 +51,6 @@ export const HIDDEN_BASH_COMMAND_PATTERN_PRESETS = [
 		],
 	},
 ] as const satisfies readonly HiddenBashCommandPatternPreset[];
-
-export type BashCommandMatcher = (command: string) => boolean;
-
-// Globs match the whole command: '*' spans any characters including
-// newlines, '?' matches a single character, everything else is literal.
-// The u flag makes '?' match one code point so astral characters count
-// as a single character.
-function globToRegExp(pattern: string): RegExp {
-	let source = '^';
-	for (const character of pattern) {
-		if (character === '*') source += '[\\s\\S]*';
-		else if (character === '?') source += '[\\s\\S]';
-		else source += character.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	}
-	return new RegExp(`${source}$`, 'u');
-}
-
-// Regexes match substrings, grep-style; callers anchor explicitly when
-// they need whole-command matching.
-function compilePattern({ pattern, mode }: HiddenBashCommandPattern): RegExp | null {
-	if (pattern.length === 0) return null;
-	try {
-		return mode === 'regex' ? new RegExp(pattern) : globToRegExp(pattern);
-	} catch {
-		return null;
-	}
-}
-
-// Compiles once per semantic settings change so the returned reference is
-// stable for projection inputs that recompute on row churn; null means no
-// valid pattern is configured and callers skip command filtering entirely.
-export function compileHiddenBashCommandPatterns(
-	patterns: readonly HiddenBashCommandPattern[],
-): BashCommandMatcher | null {
-	const compiled = patterns
-		.map(compilePattern)
-		.filter((regex): regex is RegExp => regex !== null);
-	if (compiled.length === 0) return null;
-	return (command) => compiled.some((regex) => regex.test(command));
-}
 
 function hiddenBashCommandPatternsEqual(
 	left: readonly HiddenBashCommandPattern[],

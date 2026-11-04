@@ -1,4 +1,5 @@
-import { isToolUseMessage, type ToolUseChatMessage } from '$shared/chat-types';
+import { toolSummaryCategory, toolSummaryWeight, type SummaryCategory } from '$shared/transcript-display-policy.js';
+import { isToolUseMessage } from '$shared/chat-types';
 import type { ConversationFeedMessageRenderItem } from '$lib/chat/transcript/conversation-feed-items.js';
 import * as m from '$lib/paraglide/messages.js';
 import { getLocale } from '$lib/paraglide/runtime.js';
@@ -8,28 +9,7 @@ export interface ToolUseSummary {
 	label: string;
 }
 
-type ToolUseSummaryCategory = 'commands' | 'fileReads' | 'fileEdits' | 'other';
-
-function summaryCategory(message: ToolUseChatMessage): ToolUseSummaryCategory {
-	switch (message.type) {
-		case 'bash-tool-use':
-		case 'exec-tool-use':
-			return 'commands';
-		case 'read-tool-use':
-		case 'list-tool-use':
-		case 'grep-tool-use':
-		case 'glob-tool-use':
-			return 'fileReads';
-		case 'edit-tool-use':
-		case 'write-tool-use':
-		case 'apply-patch-tool-use':
-			return 'fileEdits';
-		default:
-				return 'other';
-	}
-}
-
-function categoryClause(category: ToolUseSummaryCategory, count: number): string {
+function categoryClause(category: SummaryCategory, count: number): string {
 	switch (category) {
 		case 'commands':
 			return m.chat_tool_group_commands({ count });
@@ -40,13 +20,6 @@ function categoryClause(category: ToolUseSummaryCategory, count: number): string
 		case 'other':
 			return m.chat_tool_group_other_actions({ count });
 	}
-}
-
-function categoryCount(message: ToolUseChatMessage): number {
-	if (message.type === 'edit-tool-use' && message.changes && message.changes.length > 0) {
-		return message.changes.length;
-	}
-	return 1;
 }
 
 function formatSentence(clauses: readonly string[]): string {
@@ -60,25 +33,29 @@ function formatSentence(clauses: readonly string[]): string {
 export function summarizeToolUses(
 	members: readonly ConversationFeedMessageRenderItem[],
 ): ToolUseSummary {
-	const counts: Record<ToolUseSummaryCategory, number> = {
+	const counts: Record<SummaryCategory, number> = {
 		commands: 0,
 		fileReads: 0,
 		fileEdits: 0,
 		other: 0,
 	};
-	const categoryOrder: ToolUseSummaryCategory[] = [];
+	const categoryOrder: SummaryCategory[] = [];
 	for (const { message } of members) {
 		if (!isToolUseMessage(message)) continue;
-		const category = summaryCategory(message);
+		const category = toolSummaryCategory(message.type);
 		if (counts[category] === 0) categoryOrder.push(category);
-		counts[category] += categoryCount(message);
+		counts[category] += toolSummaryWeight(message);
 	}
+	return summarizeToolCounts(members.length, counts, categoryOrder);
+}
+
+export function summarizeToolCounts(count: number, counts: Readonly<Record<SummaryCategory, number>>, categoryOrder: readonly SummaryCategory[]): ToolUseSummary {
 	const clauses = categoryOrder.flatMap((category) => {
 		const count = counts[category];
 		return count > 0 ? [categoryClause(category, count)] : [];
 	});
 	return {
-		count: members.length,
+		count,
 		label: formatSentence(clauses),
 	};
 }
