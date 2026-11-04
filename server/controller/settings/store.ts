@@ -103,6 +103,7 @@ function stringRecord(raw: Record<string, unknown>): Record<string, string> {
 function createEmpty(): ProjectSettings {
   return {
     features: structuredClone(DEFAULT_REMOTE_FEATURE_SETTINGS),
+    workflowStorageInitialized: false,
     ui: {},
     paths: {},
     chatNames: {},
@@ -234,6 +235,7 @@ function sanitizeProjectSettings(parsed: unknown): SanitizedSettingsResult {
   return {
     settings: {
     features,
+    workflowStorageInitialized: raw.workflowStorageInitialized !== undefined && raw.workflowStorageInitialized !== false,
     ui: normalizeUiSettings(raw.ui),
     paths: pathResult.paths,
     chatNames: isRecord(raw.chatNames) ? stringRecord(raw.chatNames) : {},
@@ -405,6 +407,7 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     notifications: readonly PendingSettingsNotification[],
   ): Promise<void> {
     const validated = sanitizeProjectSettings(settings).settings;
+    validated.workflowStorageInitialized ||= this.#getCachedSettings().workflowStorageInitialized;
     const release = this.#retainExecutorReferences?.(
       GENERATION_UI_SETTING_KEYS.map((key) => validated.ui[key]?.executorId),
       GENERATION_UI_SETTING_KEYS.map((key) => this.#getCachedSettings().ui[key]?.executorId),
@@ -502,6 +505,19 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
 
   getFeatureSettings(): ProjectSettings['features'] {
     return this.#featureSettings.getFeatureSettings();
+  }
+
+  hasInitializedWorkflowStorage(): boolean {
+    return this.#getCachedSettings().workflowStorageInitialized;
+  }
+
+  async markWorkflowStorageInitialized(): Promise<void> {
+    await this.#withLock(async () => {
+      const settings = this.#readSettings();
+      if (settings.workflowStorageInitialized) return;
+      settings.workflowStorageInitialized = true;
+      await this.#saveSettingsWithNotificationsUnlocked(settings, []);
+    });
   }
 
   async setFeatureSettings(

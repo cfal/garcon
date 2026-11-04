@@ -2,11 +2,13 @@ import type { AgentSettingsEnvelope } from './agent-integration.js';
 import type { ApiProtocol } from './api-providers.js';
 import type { PermissionMode, ThinkingMode } from './chat-modes.js';
 import type { CommandOutcome } from './command-output.js';
+import type { EffectiveAutomationInput } from './automation.js';
 
 export const WORKFLOW_LIMITS = {
   tasks: 256, edges: 1024, planBytes: 768 * 1024, promptBytes: 64 * 1024,
-  evidenceBytes: 64 * 1024, resultBytes: 1024 * 1024, pageSize: 200,
+  evidenceBytes: 64 * 1024, resultBytes: 16 * 1024, pageBytes: 2 * 1024 * 1024, pageSize: 200,
   globalAttempts: 4, workflowAttempts: 2, executorAttempts: 2, admissionAttempts: 3,
+  resourceOperations: 32, workflowResourceBytes: 4 * 1024 * 1024,
 } as const;
 
 export interface WorkflowRepositoryTarget {
@@ -15,6 +17,17 @@ export interface WorkflowRepositoryTarget {
   readonly repositoryId: string;
   readonly baseCommit: string;
   readonly remote: { readonly name: string; readonly url: string } | null;
+}
+
+export interface WorkflowManagedTarget {
+  readonly operationId: string;
+  readonly resourceKey: string;
+  readonly target: WorkflowRepositoryTarget;
+  readonly managedResourceId: string;
+  readonly repositoryIdentity: string;
+  readonly worktreeIdentity: string;
+  readonly branch: string;
+  readonly head: string;
 }
 
 export interface WorkflowAgentSelection {
@@ -75,6 +88,7 @@ export type WorkflowTaskPhase = 'blocked' | 'ready' | 'preparing' | 'running' | 
 export type WorkflowDispatchPhase = 'planned' | 'preparing' | 'prepared' | 'dispatching' | 'observed-running' | 'settled';
 export type WorkflowResolution = 'open' | 'succeeded' | 'failed' | 'interrupted' | 'not-started' | 'unknown' | 'abandoned';
 export type WorkflowHold = 'none' | 'intervention' | 'output-unknown';
+export type WorkflowRevocationKind = 'intervention' | 'superseded';
 
 export interface WorkflowRecord {
   readonly id: string;
@@ -121,12 +135,16 @@ export interface WorkflowAttempt extends WorkflowAttemptIdentity {
   readonly resolution: WorkflowResolution;
   readonly controlState: 'leased' | 'revoked' | 'released';
   readonly revocationReason: string | null;
+  readonly revocationKind: WorkflowRevocationKind | null;
+  readonly admissionFailure: boolean;
   readonly requestId: string;
   readonly serverInstanceId: string | null;
   readonly chatId: string | null;
   readonly turnId: string | null;
   readonly target: WorkflowRepositoryTarget | null;
   readonly result: WorkflowAttemptResult | null;
+  readonly effectiveInput: EffectiveAutomationInput | null;
+  readonly managedTarget: WorkflowManagedTarget | null;
   readonly createdAt: string;
 }
 
@@ -136,6 +154,7 @@ export interface WorkflowAttemptResult {
   readonly commandOutcome: CommandOutcome | null;
   readonly receivedOutputCoverage: 'complete' | 'gapped' | 'unknown';
   readonly outputCaptured: boolean;
+  readonly termination: 'observed' | 'not-started' | 'unknown';
 }
 
 export interface WorkflowArtifact {
@@ -184,6 +203,7 @@ export interface WorkflowOperationIntent {
   readonly id: string;
   readonly attemptId: string;
   readonly kind: 'worktree' | 'transfer' | 'integrate' | 'publication' | 'cleanup';
+  readonly resourceKey: string;
   readonly status: 'planned' | 'dispatching' | 'succeeded' | 'not-started' | 'unknown' | 'abandoned';
   readonly payload: string;
   readonly result: string | null;
@@ -197,6 +217,7 @@ export interface WorkflowResourceClaim {
   readonly executorId: string;
   readonly quarantined: boolean;
   readonly riskReleased: boolean;
+  readonly retained: boolean;
 }
 
 export interface WorkflowActivity {

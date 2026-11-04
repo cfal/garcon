@@ -41,6 +41,12 @@ import { AgentResumeController } from '../../chats/agent-resume-controller.js';
 import { createForkedChat as createForkedChatTransaction } from '../../chats/fork-chat.js';
 import { CommandSupport, CommandValidationError } from '../command-support.js';
 import { parseGarconCommandResult } from '../../../../common/garcon-command-results.js';
+import { WorkflowAttempts } from '../../workflows/attempts.js';
+import { WorkflowResources } from '../../workflows/resources.js';
+import { workflowEffectiveInput, workflowStartInput } from '../../workflows/inputs.js';
+import { managedTargetRequest } from '../../workflows/managed-target.js';
+import { effectFence, fixture as workflowFixture, managedTarget, plan as workflowPlan } from '../../workflows/__tests__/fixture.js';
+import { automationContentDigest } from '../../automation/input.js';
 import {
   COMMAND_CORRELATION_ID_MAX_BYTES,
   QUEUE_ENTRY_ID_MAX_BYTES,
@@ -905,6 +911,50 @@ describe('ChatCommandService', () => {
     };
     return { ...fixture, automation, lifecycle, projection, input };
   }
+
+  it('workflow agent inputs match real neutral preparation at the executor-canonical path', async () => {
+    const preamble = { id: '22222222-2222-4222-8222-222222222222', title: 'Instruction', content: 'Synthetic bounded instruction.', enabled: true,
+      scope: { type: 'global' }, agentIds: [], tagFilter: { mode: 'any', tags: [] } };
+    const core = automationFixture({ preambles: { snapshot: () => ({ revision: 1, preambles: [preamble] }) } });
+    const workflows = workflowFixture();
+    let turn;
+    try {
+      const canonical = path.join(projectBaseDir, 'managed');
+      await fs.mkdir(canonical);
+      const alias = path.join(projectBaseDir, 'alias');
+      await fs.symlink(canonical, alias);
+      const inspected = await inspectProjectDirectory(alias, 'local');
+      expect(inspected).toEqual({ kind: 'available', effectiveProjectKey: canonical });
+      const original = workflowPlan();
+      const task = { ...original.tasks[0], spec: { kind: 'agent', target: { ...original.tasks[0].spec.target, projectPath: projectBaseDir },
+        prompt: '  Synthetic agent prompt.\n', outputs: ['commit'], selection: {
+          agentId: core.input.agentId, model: core.input.model, apiProviderId: null, modelEndpointId: null,
+          modelProtocol: null, providerRevision: null, agentSettings: core.input.agentSettings,
+          permissionMode: 'default', thinkingMode: 'none', preambles: [{ id: preamble.id, contentDigest: automationContentDigest(preamble.content) }],
+        } } };
+      const id = workflows.write({ action: 'create', captainChatId: null, plan: { ...original, tasks: [task] } }).workflowId;
+      workflows.activate(id);
+      const now = () => '2026-01-01T00:00:00.000Z';
+      const attempts = new WorkflowAttempts(workflows.store, { now });
+      const resources = new WorkflowResources(workflows.store, now);
+      let attempt = attempts.reserve(id, 'check');
+      attempts.beginPreparation(attempt.attemptId);
+      const resource = managedTarget(attempt, attempt.attemptId, inspected.effectiveProjectKey);
+      resources.plan({ operationId: resource.operationId, attemptId: attempt.attemptId, kind: 'worktree',
+        resourceKey: resource.resourceKey, payload: JSON.stringify(managedTargetRequest(resource)) });
+      resources.begin(resource.operationId, effectFence());
+      resources.observe(resource.operationId, 'succeeded', JSON.stringify(resource));
+      attempt = attempts.bindTarget(attempt.attemptId, resource);
+      const input = workflowStartInput(attempt, task);
+      const prepared = await core.automation.prepare(input);
+      expect(prepared.kind).toBe('prepared');
+      turn = prepared.turn;
+      expect(turn.effectiveInput).toEqual(workflowEffectiveInput(input));
+      expect(attempts.bindPrepared(attempt.attemptId, turn.key, turn.effectiveInput).dispatchPhase).toBe('prepared');
+      expect(core.chats.addChat).not.toHaveBeenCalled();
+      expect(core.agents.startSession).not.toHaveBeenCalled();
+    } finally { await turn?.cancel(); workflows.cleanup(); }
+  });
 
   it.each(['cancel', 'expiry', 'shutdown'])('automation %s settles a reservation without publishing a chat or input', async mode => {
     const fixture = automationFixture({ preparationTimeoutMs: mode === 'expiry' ? 1 : 30_000 });
