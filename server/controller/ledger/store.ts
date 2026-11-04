@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { resendRole } from './resend-policy.js';
 import crypto from 'node:crypto';
 import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { lstat, readdir, rm } from 'node:fs/promises';
@@ -53,7 +54,6 @@ import { ensureLedgerChatDirectory, ensureLedgerRootDirectory } from './director
 import {
   isLedgerCliRowNoticeRow,
   isLedgerPreambleSelectionChangedNoticeRow,
-  isPresentationOnlyProviderRow,
   PREAMBLES_UPDATED_MESSAGE,
   transcriptViewId,
 } from './contracts.js';
@@ -519,6 +519,21 @@ export class TranscriptLedgerStore {
   recoveredHead(chatId: string): TranscriptWatermark | null {
     this.currentView(chatId);
     return this.#recoveredHeads.get(chatId) ?? null;
+  }
+
+  submissionOrdinals(chatId: string, viewId: TranscriptViewId, clientMessageIds: readonly string[]): readonly { clientMessageId: string; ordinal: number | null }[] {
+    if (clientMessageIds.length > 32 || clientMessageIds.some(id => typeof id !== 'string' || !id.length || id.length > 256)) {
+      throw new TypeError('Invalid submission lookup');
+    }
+    return this.#read(chatId, entry => {
+      this.#assertCurrent(entry, viewId);
+      const query = entry.db.query<{ ordinal: number; kind: string }, [string, string]>(
+        'SELECT ordinal, kind FROM transcript_rows WHERE view_id = ? AND client_message_id = ? AND client_message_id IS NOT NULL');
+      return clientMessageIds.map(clientMessageId => {
+        const row = query.get(viewId, clientMessageId);
+        return { clientMessageId, ordinal: row?.kind === 'user-input' ? row.ordinal : null };
+      });
+    });
   }
 
   async withStoredRowFrames<T>(chatId: string, watermark: TranscriptWatermark, fromOrdinal: number,
@@ -1042,15 +1057,9 @@ function collectResendCandidates(
   const candidates: LedgerUserInputRow[] = [];
   for (const stored of storedRows) {
     const row = decodeStoredLedgerRow(stored);
-    if (row.kind === 'user-input') {
-      if (row.detail.message.metadata?.contentMode !== 'literal' && !excludedOrdinals?.has(row.ordinal)) candidates.unshift(row);
-      continue;
-    }
-    if (row.kind === 'run-ended' && row.outcome === 'interrupted') continue;
-    if (isPresentationOnlyProviderRow(row)) continue;
-    if (row.kind === 'provider-row'
-        || row.kind === 'permission-requested'
-        || row.kind === 'run-ended') break;
+    const role = resendRole(row);
+    if (role === 'boundary') break;
+    if (role === 'candidate' && row.kind === 'user-input' && !excludedOrdinals?.has(row.ordinal)) candidates.unshift(row);
   }
   return candidates;
 }

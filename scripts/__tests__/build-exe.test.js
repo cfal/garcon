@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import path from 'node:path';
-import { compileOptionsForTarget } from '../build-exe.js';
+import { compileOptionsForTarget, EMBEDDED_WORKER_SOURCES } from '../build-exe.js';
+import { GARCON_WORKER_NAMES } from '../../server-agents/common/src/build/standalone-entrypoint.js';
+
+test('every worker has a real standalone bundle source, including display preparation and reads', async () => {
+  expect(Object.keys(EMBEDDED_WORKER_SOURCES).sort()).toEqual([...GARCON_WORKER_NAMES].sort());
+  for (const source of Object.values(EMBEDDED_WORKER_SOURCES)) {
+    expect(await Bun.file(path.resolve(import.meta.dir, '../..', source)).exists()).toBe(true);
+  }
+});
 
 describe('compileOptionsForTarget', () => {
   test('uses Bun target resolution when no executable is configured', () => {

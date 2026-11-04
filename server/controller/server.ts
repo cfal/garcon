@@ -14,6 +14,7 @@ import { AUTH_REVOKED_CLOSE_CODE, AUTH_REVOKED_CLOSE_REASON,
   AUTH_UNAVAILABLE_CLOSE_CODE, AUTH_UNAVAILABLE_CLOSE_REASON } from '../../common/ws-auth.js';
 import { createForkedChat } from './chats/fork-chat.js';
 import { wireSearchSourceAvailability, wireServerEvents, type ServerEventWiring } from './server-event-wiring.js';
+import { TranscriptDisplayService } from './transcript-display/service.js';
 import { startExecutionControlPlane } from './execution-control-plane.js';
 
 import { ChatRegistry } from './chats/store.js';
@@ -390,6 +391,18 @@ export async function startServer(): Promise<void> {
       transcriptLedger,
       transcriptAdoption,
     );
+    const transcriptDisplay = new TranscriptDisplayService({
+      workspaceDirectory: workspaceDir,
+      serverInstanceId: runtimeState.identity.instanceId,
+      ledger: transcriptLedger,
+      adoption: transcriptAdoption,
+      hasChat: chatId => chatRegistry.hasChat(chatId),
+      patterns: () => settings.getUiSettings().hiddenBashCommandPatterns ?? [],
+      onMaintenanceError: (chatId, code) => logger.warn(`Transcript display cleanup skipped ${chatId}: ${code}`),
+    });
+    chatRegistry.onChatRemoved(chatId => transcriptDisplay.forget(chatId));
+    settings.onRemoteSettingsChanged(() => transcriptDisplay.settingsChanged());
+    void transcriptDisplay.initialize().catch(() => logger.warn('Transcript display admission failed; explicit reads may retry.'));
     const { snippets, preambles } = await initializeSnippetAndPreambleServices({
       workspaceDir,
       retainExecutorReferences,
@@ -803,6 +816,9 @@ export async function startServer(): Promise<void> {
       chatRows,
       transcriptExport,
       transcriptClear,
+      transcriptDisplay,
+      transcriptLedger,
+      nativeTranscriptActivity,
       handoffArtifact,
     });
 
@@ -954,6 +970,7 @@ export async function startServer(): Promise<void> {
           unsubscribeSearchStatus,
           unsubscribeSearchAvailability,
           () => chatSearch.close(),
+          () => transcriptDisplay.close(),
           () => tokenFitting.close(),
           () => transcriptRendering.close(),
           () => executors.dispose(),

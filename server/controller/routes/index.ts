@@ -21,6 +21,7 @@ import createPromptRefinementRoutes from './prompt-refinement.js';
 import { createRuntimeRoutes } from './runtime.js';
 import { createAgentTurnReceiptRoutes } from './agent-turn-receipt.js';
 import { createChatSnapshotRoutes } from './chat-snapshot.js';
+import { createTranscriptDisplayRoutes } from './transcript-display.js';
 import { createChatRowRoutes } from './chat-rows.js';
 import { createChatClearRoutes } from './chat-clear.js';
 import type { TranscriptClearService } from '../ledger/clear.js';
@@ -119,6 +120,9 @@ export default function createAllRoutes(workspaceDir: string, {
   chatRows,
   transcriptExport,
   transcriptClear,
+  transcriptDisplay,
+  transcriptLedger,
+  nativeTranscriptActivity,
   handoffArtifact,
   executors,
   projectBasePath,
@@ -161,6 +165,9 @@ export default function createAllRoutes(workspaceDir: string, {
   chatRows: ChatRowService;
   transcriptExport: TranscriptExportService;
   transcriptClear: TranscriptClearService;
+  transcriptDisplay: Parameters<typeof createTranscriptDisplayRoutes>[0]['display'];
+  transcriptLedger: Parameters<typeof createTranscriptDisplayRoutes>[0]['ledger'];
+  nativeTranscriptActivity: Parameters<typeof createTranscriptDisplayRoutes>[0]['nativeActivity'];
   handoffArtifact: HandoffArtifactService;
   executors: ExecutorManager;
   projectBasePath: string;
@@ -171,6 +178,8 @@ export default function createAllRoutes(workspaceDir: string, {
   const gitBudget = httpIdleSeconds > 0 ? Math.max(1000, httpIdleSeconds * 1000 - 2000) : GH_DETAIL_TIMEOUT_MS;
   const usageBudget = httpIdleSeconds > 0 ? Math.min(USAGE_READ_TIMEOUT_MS, gitBudget) : USAGE_READ_TIMEOUT_MS;
   return composeRoutes(
+    createTranscriptDisplayRoutes({ display: transcriptDisplay, ledger: transcriptLedger, nativeActivity: nativeTranscriptActivity,
+      summaries: chatListProjector, execution: queue, transientFeeds }),
     createExecutorRoutes(executors),
     createUsageRoutes(new UsageService(executors), usageBudget),
     createRuntimeRoutes(runtimeState, workspaceName),
