@@ -15,8 +15,16 @@ test('only the bundled launcher receives narrowly enumerated native permissions'
   expect(capability.remote).toBeUndefined();
   expect(capability.local).toBe(true);
   expect(capability.windows).toEqual(['main']);
-  expect(capability.permissions).toEqual(['allow-saved-server', 'allow-connect-server']);
+  expect(capability.permissions).toEqual(['allow-server-choices', 'allow-connect-server', 'allow-cancel-chooser', 'allow-remove-recent']);
   expect(read('../src-tauri/build.rs')).toContain('AppManifest::new().commands');
+});
+
+test('remote bridge only requests chooser navigation, without native command permission', () => {
+  const bridge = read('../src-tauri/bridge.js');
+  expect(bridge).toContain("window.location.assign('garcon-host://switch-server/')");
+  expect(bridge).not.toContain('invoke');
+  expect(bridge).not.toContain('connect_server');
+  expect(read('../src-tauri/src/host.rs')).toContain('host.request_chooser(generation)');
 });
 
 test('CI builds all five platform families without distribution secrets', () => {

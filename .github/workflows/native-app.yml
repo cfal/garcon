@@ -7,6 +7,7 @@ on:
     paths:
       - 'native/**'
       - 'web/static/icons/**'
+      - 'web/src/lib/utils/clipboard.ts'
       - 'common/ws-auth.ts'
       - 'bunfig.toml'
       - 'package.json'
@@ -16,6 +17,7 @@ on:
     paths:
       - 'native/**'
       - 'web/static/icons/**'
+      - 'web/src/lib/utils/clipboard.ts'
       - 'common/ws-auth.ts'
       - 'bunfig.toml'
       - 'package.json'
@@ -72,7 +74,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-dev build-essential libssl-dev libxdo-dev librsvg2-dev libayatana-appindicator3-dev patchelf xvfb xauth webkit2gtk-driver
+          sudo apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-dev build-essential libssl-dev libxdo-dev librsvg2-dev libayatana-appindicator3-dev patchelf xvfb xauth webkit2gtk-driver xdotool openssl curl
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native/src-tauri -> target
@@ -98,6 +100,8 @@ jobs:
       - name: Smoke test native WebView
         if: runner.os == 'Linux'
         run: xvfb-run -a bun run test:smoke
+      - name: Validate preview packages
+        run: bun run distribution preview '${{ matrix.target }}'
       - name: Upload desktop packages
         uses: actions/upload-artifact@v4
         with:
@@ -107,6 +111,7 @@ jobs:
             native/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
             native/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             native/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            native/artifacts/distribution-${{ matrix.target }}.json
           if-no-files-found: error
       - name: Upload native smoke diagnostics
         if: always() && runner.os == 'Linux'
@@ -117,7 +122,7 @@ jobs:
           if-no-files-found: ignore
 
   android:
-    name: Android build-only debug APK
+    name: Android build-only APK and safety regressions
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -142,7 +147,7 @@ jobs:
           packages: platform-tools
       - name: Install pinned Android SDK and NDK
         run: |
-          sdkmanager 'platform-tools' 'platforms;android-37.0' 'ndk;29.0.13846066'
+          sdkmanager 'platform-tools' 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.13846066'
           echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.13846066" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         with:
@@ -156,12 +161,45 @@ jobs:
         run: bun run tauri android init --ci --skip-targets-install
       - name: Build Android APK
         run: bun run tauri android build --ci --debug --apk --target aarch64 --target x86_64
+      - name: Prepare tracked Android safety tests
+        run: bun run test:android:prepare
+      - name: Compile Android safety tests against the built host
+        run: src-tauri/gen/android/gradlew -p src-tauri/gen/android :app:assembleUniversalDebugAndroidTest -x :app:rustBuildUniversalDebug --no-daemon --max-workers=1
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-garcon-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Android fail-closed and callback-gap regressions
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          working-directory: native
+          script: src-tauri/gen/android/gradlew -p src-tauri/gen/android :app:connectedUniversalDebugAndroidTest -x :app:rustBuildUniversalDebug --no-daemon --max-workers=1
+      - name: Validate build-only APK
+        run: bun run distribution preview android
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: garcon-native-android-build-only-debug
-          path: native/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          path: |
+            native/src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk
+            native/artifacts/distribution-android.json
           if-no-files-found: error
+      - name: Upload Android safety diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-android-safety
+          path: |
+            native/src-tauri/gen/android/app/build/reports/androidTests/
+            native/src-tauri/gen/android/app/build/outputs/androidTest-results/
+          if-no-files-found: ignore
 
   ios:
     name: iOS unsigned simulator app
@@ -200,9 +238,24 @@ jobs:
           bun run tauri ios build --ci --debug --target "$target" --no-sign
       - name: Archive simulator app
         run: bun scripts/archive-ios.js
+      - name: Launch and relaunch in an isolated simulator
+        run: bun run test:ios-launch
+      - name: Validate simulator archive
+        run: bun run distribution preview ios-simulator
       - name: Upload simulator app
         uses: actions/upload-artifact@v4
         with:
           name: garcon-native-ios-simulator
-          path: native/artifacts/Garcon-simulator.app.zip
+          path: |
+            native/artifacts/Garcon-simulator.app.zip
+            native/artifacts/distribution-ios-simulator.json
           if-no-files-found: error
+      - name: Upload simulator launch diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-ios-launch
+          path: |
+            native/artifacts/ios-*.png
+            native/artifacts/ios-launch.log
+          if-no-files-found: ignore

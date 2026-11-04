@@ -11,12 +11,20 @@
   <body>
     <main>
       <header><img src="./icon.png" width="48" height="48" alt=""><h1>Garcon</h1></header>
+      <p id="current-server"></p>
+      <ul id="recent-servers" aria-label="Recent servers"></ul>
+      <button id="add-server" type="button" disabled>Add Server</button>
       <form id="server-form">
         <label for="server-url">Server URL</label>
         <input id="server-url" name="server-url" type="url" placeholder="https://garcon.example.com/" required autocapitalize="none" autocomplete="url" spellcheck="false" aria-describedby="connection-error">
         <p id="connection-error" role="alert"></p>
+        <label id="switch-warning" hidden>
+          <input id="acknowledged" type="checkbox">
+          I understand that unsent attachments, recent drafts and unsaved editor changes may be lost. Pending requests may still finish. Switching or reloading does not log out or stop server runs.
+        </label>
         <button type="submit" disabled>Connect</button>
       </form>
+      <button id="cancel" type="button" hidden>Cancel</button>
     </main>
   </body>
 </html>

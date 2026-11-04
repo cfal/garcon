@@ -4,5 +4,5 @@
   "description": "Only the bundled launcher can select a server.",
   "local": true,
   "windows": ["main"],
-  "permissions": ["allow-saved-server", "allow-connect-server"]
+  "permissions": ["allow-server-choices", "allow-connect-server", "allow-cancel-chooser", "allow-remove-recent"]
 }

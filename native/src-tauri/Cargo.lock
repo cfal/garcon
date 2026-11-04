@@ -890,11 +890,13 @@ dependencies = [
 name = "garcon-native"
 version = "0.3.4"
 dependencies = [
+ "gtk",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "url",
+ "webkit2gtk",
 ]
 
 [[package]]

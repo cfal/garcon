@@ -11,8 +11,13 @@ executor is local to that server, not the phone or desktop client.
 **Android is currently build-only:** its APK displays the launcher but the Rust
 host disables server connections. Android's navigation callback does not cover
 POST forms or their method-preserving redirects. A tested native request guard
-is required before enabling remote pages. Desktop and iOS retain remote loading;
-iOS interaction still requires simulator/device validation.
+is required before enabling remote pages. **iOS retains its existing confined
+single-WebView connection flow**, without the new switcher capability. The
+desktop chooser uses separate native windows; it is not assumed to work on
+mobile. iOS recovery still requires exiting and reopening the app, and its
+interaction behavior remains unverified without a simulator/device. See
+[platform gates and the pinned Android blocker](PLATFORM_READINESS.md) for the
+regression harness, distribution preflight, and readiness matrix.
 
 ```mermaid
 flowchart LR
@@ -35,7 +40,7 @@ bun run --cwd native tauri dev
 The CLI builds the launcher and generates platform icons from the existing Carbon
 brand asset. No frontend dev server is required. Enter the complete deployment
 URL, such as `https://example.com/tools/garcon/`. Every cold app launch returns to
-this form with the last URL filled in; it never connects automatically.
+the chooser with the last URL filled in; it never connects automatically.
 Use the server's **base URL**, not a chat, login, or share URL. The first accepted
 connection attempt reserves that origin's mount, even if the server fails to load.
 Correcting an incorrect mount later requires a different hostname or resetting
@@ -56,7 +61,7 @@ Run these commands inside `native/`. Rust builds should set `CARGO_BUILD_JOBS=1`
 # Desktop, on the corresponding operating system.
 bun run tauri build --ci --no-sign -- --locked
 
-# Android, after installing platforms;android-37.0, NDK 29.0.13846066, and JDK 25.
+# Android, with platforms;android-37.0, build-tools;37.0.0, NDK 29.0.13846066, JDK 25.
 export NDK_HOME="$ANDROID_HOME/ndk/29.0.13846066"
 rustup target add aarch64-linux-android x86_64-linux-android
 bun run build
@@ -101,8 +106,9 @@ secrets. Its artifacts are:
 - iOS: unsigned simulator `.app` zip matching the runner architecture.
 
 The workflow pins Rust, Bun, Tauri, SDK/NDK selections, and dependency lockfiles.
-Runner images, Xcode, and Android Build Tools provisioned by Gradle can still
-change. Build success does not establish store acceptance or support for every
+Runner images, Xcode, and the emulator's system WebView can still change.
+Build Tools 37.0.0 is installed for APK verification; Gradle's pinned plugin owns
+the build tool selection. Build success does not establish store acceptance or support for every
 older WebView. Linux runtime WebKitGTK must support the existing web application.
 Unsigned desktop packages may trigger OS security warnings or be blocked.
 
@@ -117,33 +123,61 @@ xvfb-run -a bun run --cwd native test:smoke
 ```
 
 Build the launcher with `bun run --cwd native build` before running Rust checks
-from a clean checkout. Linux smoke tests need `webkit2gtk-driver`, `xvfb`, and
-`xauth`. They use isolated app data and synthetic servers, never an existing
+from a clean checkout. Linux smoke tests need `webkit2gtk-driver`, `xvfb`,
+`xauth`, `xdotool`, `openssl`, and `curl`. Native menu shortcuts use OS-level input;
+WebDriver DOM key events are not proof of native menu activation. Tests use
+isolated app data and synthetic servers, never an existing
 user server. The real native WebView is tested for launcher rendering, root and
 mounted URLs, bearer HTTP and WebSocket transport, remote command denial,
 navigation confinement, saved selection, and sibling-mount rejection.
+External-link checks register an isolated synthetic HTTP/HTTPS application,
+verifying OS dispatch without opening the user's browser or contacting external
+sites. The smoke runner honors `CARGO_TARGET_DIR`, `GARCON_NATIVE_SMOKE_TMP`, and
+`TMPDIR`. Root/mount fixtures also check trusted pointer/keyboard activation,
+file-input assignment, multipart upload bytes, shared clipboard copy/paste, focus,
+and unchanged socket count, both initially and after replacing a remote window.
+These checks do not qualify the OS file chooser or a real Garcon terminal session.
 The smoke test uses WebKit's default renderer: forcing
 `WEBKIT_DISABLE_DMABUF_RENDERER=1` stalls screenshot capture on WebKitGTK 2.50.4
 under Xvfb.
+The synthetic remote page executes test assertions through its own WebSocket
+because WebKitGTK automation can hang when evaluating scripts in a second
+app-created window. WebDriver script evaluation remains on the host chooser;
+remote assertions use the fixture socket, while trusted input uses WebDriver.
+This is test-fixture code only, not a production native bridge. The TLS fixture first proves it serves
+HTTP using an explicitly insecure test-only curl request, then asserts that the
+native client aborts after the self-signed certificate without completing its
+handshake. The app never disables certificate verification.
 
 These synthetic transport checks do not replace testing Garcon login and chat
-flows on each real platform. Android/iOS/Windows/macOS currently have build gates,
-not native interaction gates. Before distribution, verify real authenticated
+flows on each real platform. Android adds CI emulator fail-closed/callback-gap
+regressions; iOS adds an isolated simulator launch/relaunch gate. These additions
+remain unrun on this Linux VM and do not establish workflow correctness.
+Windows/macOS remain build-only outside host unit tests. Before distribution, verify real authenticated
 Garcon sessions, chat streaming, attachments, terminal input, background/resume,
 keyboard/safe areas, TLS failures, and server upgrades on those platforms.
 
 ## Preview Boundaries
 
-- Only the bundled launcher can invoke the two native commands. The remote UI
-  has no native capabilities, filesystem/process access, or general network bridge.
-- On desktop/iOS, top-level navigation is restricted to the selected origin and mount. External
-  navigation and desktop popup requests are blocked. External links and provider
-  login popups are not supported in this preview; use an ordinary browser for
-  those flows. Mobile popup behavior still requires device validation.
-- Recovery is a **full app exit/force-quit and reopen**. There is no always-visible
-  native mobile toolbar or automatic load-failure recovery yet. Android Back is
-  not a guaranteed return to the launcher. An unreachable server can leave the
-  current WebView on its loading/error page until the app is restarted.
+- Only the bundled launcher can invoke the four native commands. The remote UI
+  has no Tauri command permissions, filesystem/process access, or general network bridge.
+- On desktop/iOS, top-level navigation remains restricted to the selected origin
+  and mount. Linux supports the external links described below. Other platforms,
+  same-window external navigation, and provider-login popups remain blocked.
+  Mobile popup behavior still requires device validation.
+- The desktop **Server** menu offers **Switch Server** (`Cmd/Ctrl+Shift+S`) and
+  **Reload Server** (`Cmd/Ctrl+R`) independently of remote page health. Both open
+  the host-owned chooser. Confirming either action requires acknowledging possible
+  unsaved-state loss. Cancel keeps the original page and its in-memory state alive.
+- iOS still navigates the original launcher WebView to the selected deployment.
+  It receives no chooser adapter or additional native permissions. It has no new
+  in-session chooser/reload recovery; failed loads retain the baseline exit and
+  reopen recovery path. Android connections remain disabled independently.
+- Confirming destroys the outgoing remote window before creating its replacement.
+  There is one local chooser and at most one remote window, never a retained page
+  per server. A failed load retains the native menu; failed window creation retains
+  the chooser. Switching does not log out or send Stop. Previously admitted server
+  requests may still complete; switching is not rollback or proof of cancellation.
 - The host remembers one mount per origin, across selections and restarts, with
   a maximum of 32 origins. A sibling mount is rejected because Garcon's auth,
   drafts, and caches share browser-origin storage. Different origins remain
@@ -157,6 +191,9 @@ keyboard/safe areas, TLS failures, and server upgrades on those platforms.
   **all** OS-managed app data, including browser data and native settings. Removing
   only `servers.json` is not a safe reset. Garcon's existing logout remains the
   server-session revocation operation.
+- Removing a recent entry does not remove its mount reservation, credentials, or
+  browser data. The previous last-server settings format is read without losing
+  reservations. Removed recents remain removed across restarts.
 - Remote service-worker behavior is unchanged. Where supported, cached shells
   can be stale after server upgrades; this preview does not promise offline
   operation or strict revision admission. Native cache/recovery policy must be
@@ -164,6 +201,93 @@ keyboard/safe areas, TLS failures, and server upgrades on those platforms.
 - Browser notifications are not mobile push. Notifications, blob downloads,
   clipboard access, file pickers, and external authentication need platform
   validation and narrow native adapters where necessary.
+
+## Chooser Contract
+
+The remote page receives an optional, top-frame-only capability:
+`window.__GARCON_NATIVE__ = { version: 1, requestServerChooser(): void }`.
+The browser application discovers it through
+`web/src/lib/native/server-chooser.ts`; ordinary browsers have no capability.
+This is a request, not an acknowledgement or a navigation API. It takes no URL,
+returns no settings, and grants no Tauri IPC permission.
+
+The host-injected implementation requests the exact navigation sentinel
+`garcon-host://switch-server/`. A Rust `on_navigation` closure captures the
+remote window's generation, rejects stale generations, opens the local chooser
+idempotently, and returns `false` so the remote document does not navigate.
+All other navigations are checked against that generation's deployment. The
+callback identifies the owning WebView, not an independently authenticated
+initiating frame; even a subframe provoking this sentinel can only request the
+same non-destructive chooser. No saved data or navigation authority is returned.
+The injected adapter is installed only in the top frame. All remote IPC remains
+denied by the local-only `main` capability. This avoids wildcard remote ACLs and
+does not depend on caller-supplied origin strings or Tauri detection as authority.
+
+The caller model was checked against the pinned Tauri 2.12.5 source:
+[navigation callbacks are attached to the WebView](https://github.com/tauri-apps/tauri/blob/993038c49185307dfc895ab7657d77ca0d5ed7c7/crates/tauri/src/webview/webview_window.rs#L266),
+while [IPC independently checks the native-delivered request URL and window/WebView labels](https://github.com/tauri-apps/tauri/blob/993038c49185307dfc895ab7657d77ca0d5ed7c7/crates/tauri/src/webview/mod.rs#L2010).
+Real WebView smoke coverage verifies command denial and sentinel interception;
+source inspection alone does not establish cross-platform interaction support.
+
+Local-only host commands:
+
+- `server_choices()` returns `{ generation, recents, lastUrl, currentUrl,
+  canCancel, pending, action: "switch" | "reload" }`.
+- `connect_server({ url, generation, acknowledged })` validates URL/mount and
+  acknowledgement, durably reserves the mount, fences the old generation, waits
+  for destruction, and creates the replacement. A stale generation is rejected.
+- `cancel_chooser({ generation })` hides only the chooser and focuses the existing
+  page. It never reloads, logs out, clears storage, or sends Stop.
+- `remove_recent({ url, generation })` removes only the recent-list entry.
+
+Draft audit: chat text is debounced to origin-local storage (250 ms); attachments
+are memory-only. File recovery checkpoints use asynchronous IndexedDB writes
+(750 ms idle, 5 s maximum interval), may fail, and do not cover every pending edit.
+Both switch and reload therefore require a host-owned loss acknowledgement,
+including menu-initiated recovery when page JavaScript is unavailable. No async
+unload flush is treated as a durability guarantee. The existing storage scopes
+and executor-qualified recovery identities are unchanged.
+
+The bundled-UI workstream must preserve this optional adapter contract, replace
+the remote-navigation sentinel with an equally narrow host request if its local
+origin model requires it, and independently partition credentials/drafts by
+deployment. Do not grant its UI the launcher's `connect_server` permission.
+The chooser adapter owns only chooser requests. Linux external-link handling is
+installed independently on each replacement remote WebView and does not extend
+the injected capability.
+
+## Linux External Links
+
+The host handles WebKitGTK new-window link activations, including keyboard Enter,
+and opens validated cross-origin HTTP(S) URLs in the OS default browser. Garcon's
+Markdown, pull-request, and settings documentation links already use this path.
+The current WebView stays on its selected deployment; no native popup is created.
+No JavaScript bridge, remote capability, plugin permission, or executor operation
+is added. Browser clients are unchanged. The OS browser resolves URLs on the client;
+this does not tunnel an executor's `localhost` or reinterpret executor file paths.
+
+Admission requires a native user gesture, a link navigation, GET, no redirect,
+and a current page inside the active deployment. Scripted `window.open`, synthetic
+clicks without a user gesture, same-origin destinations (including sibling mounts),
+credentials, non-HTTP(S) schemes, noncanonical URLs, escaped/repeated-slash paths,
+and URLs over 8 KiB are rejected. Launches are capped at one per second without
+queuing or retries. The URL is passed to GTK's URI launcher, never to a shell.
+An OS dispatch failure shows a host-owned error dialog; successful dispatch does
+not promise the browser completed loading.
+
+Authentication paths/hosts, OAuth/device-code query fields, and token-like fragments
+are conservatively excluded. These exclusions are not a general authentication URL
+classifier: arbitrary websites can redirect to login. They do not implement provider
+authentication, return callbacks, or credential transfer. Those workflows remain a
+separate design and must not be routed through this feature.
+
+Tauri 2.12.5's portable navigation and new-window callbacks do not expose a trusted
+user-gesture flag. Other OS adapters and same-window links remain fail-closed rather
+than infer user intent from remote JavaScript. The Linux hook observes only
+`NewWindowAction`; the existing document-navigation guard and popup denial remain
+installed. Every replacement remote WebView receives the hook. Its captured
+transition generation and the active deployment are checked before dispatch;
+requests from a retiring page or while switching are rejected.
 
 ## Later Work
 

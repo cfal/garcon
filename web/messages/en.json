@@ -3256,5 +3256,7 @@
 				"countPlural=other": "{formatted} sessions"
 			}
 		}
-	]
+	],
+	"native_switch_server": "Switch Server",
+	"native_switch_server_unavailable": "Switch Server unavailable"
 }

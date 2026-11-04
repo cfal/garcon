@@ -17,7 +17,7 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; }
-main { max-width: 440px; margin: 15vh auto 0; padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); }
+main { max-width: 520px; margin: 0 auto; padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); }
 header { display: flex; align-items: center; gap: 12px; margin-bottom: 36px; }
 h1 { font-size: 24px; font-weight: 650; margin: 0; }
 label { display: block; margin-bottom: 8px; }
@@ -27,3 +27,14 @@ button { border: 0; padding: 10px 16px; background: var(--accent); color: var(--
 button:disabled { opacity: .55; cursor: default; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 #connection-error { color: var(--danger); min-height: 24px; margin: 12px 0; overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+#current-server { overflow-wrap: anywhere; }
+#recent-servers { padding: 0; list-style: none; max-height: 200px; overflow-y: auto; }
+#recent-servers li { display: flex; gap: 8px; margin-bottom: 8px; }
+#recent-servers button { text-align: left; background: var(--input); color: var(--foreground); border: 1px solid var(--border); overflow-wrap: anywhere; min-width: 0; }
+#recent-servers button:last-child { flex: 0 0 48px; text-align: center; }
+#recent-servers [aria-current] { border-color: var(--accent); }
+#add-server, #cancel { background: var(--input); color: var(--foreground); border: 1px solid var(--border); margin-bottom: 20px; }
+#cancel { margin-top: 12px; }
+#switch-warning { font-size: 14px; line-height: 1.5; margin: 12px 0 20px; }
+#acknowledged { width: 20px; min-height: 20px; height: 20px; vertical-align: middle; margin-right: 8px; }

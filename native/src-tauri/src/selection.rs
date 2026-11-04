@@ -2,11 +2,13 @@ use crate::deployment::Deployment;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
-#[derive(Default, Deserialize, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct SavedSelection {
     last_url: Option<String>,
     mounts: BTreeMap<String, String>,
+    #[serde(default)]
+    recents: Option<Vec<String>>,
 }
 
 pub struct ServerSelection {
@@ -48,6 +50,30 @@ impl ServerSelection {
         self.saved.last_url.clone()
     }
 
+    pub fn recents(&self) -> Vec<String> {
+        self.saved
+            .recents
+            .clone()
+            .unwrap_or_else(|| self.saved.last_url.iter().cloned().collect())
+    }
+
+    pub fn remove_recent(&mut self, url: &str) -> Result<(), String> {
+        let mut candidate = self.saved.clone();
+        candidate.recents = Some(
+            self.recents()
+                .into_iter()
+                .filter(|entry| entry != url)
+                .collect(),
+        );
+        if candidate.last_url.as_deref() == Some(url) {
+            candidate.last_url = candidate
+                .recents
+                .as_ref()
+                .and_then(|entries| entries.first().cloned());
+        }
+        self.persist(candidate)
+    }
+
     pub fn select(&mut self, deployment: Deployment) -> Result<(), String> {
         let url = deployment.url();
         let origin = url.origin().ascii_serialization();
@@ -62,10 +88,20 @@ impl ServerSelection {
         }
         let mut mounts = self.saved.mounts.clone();
         mounts.insert(origin, url.path().into());
+        let mut recents = self.recents();
+        recents.retain(|entry| entry != url.as_str());
+        recents.insert(0, url.to_string());
         let candidate = SavedSelection {
             last_url: Some(url.to_string()),
             mounts,
+            recents: Some(recents),
         };
+        self.persist(candidate)?;
+        self.active = Some(deployment);
+        Ok(())
+    }
+
+    fn persist(&mut self, candidate: SavedSelection) -> Result<(), String> {
         let parent = self.path.parent().ok_or("Invalid settings directory.")?;
         fs::create_dir_all(parent).map_err(|_| "Unable to create the app settings directory.")?;
         let temporary = self.path.with_extension("json.new");
@@ -74,7 +110,6 @@ impl ServerSelection {
         fs::write(&temporary, bytes).map_err(|_| "Unable to save server settings.")?;
         fs::rename(&temporary, &self.path).map_err(|_| "Unable to publish server settings.")?;
         self.saved = candidate;
-        self.active = Some(deployment);
         Ok(())
     }
 }
@@ -82,6 +117,62 @@ impl ServerSelection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removing_a_recent_keeps_its_mount_reservation() {
+        let directory =
+            std::env::temp_dir().join(format!("garcon-native-recents-{}", std::process::id()));
+        let path = directory.join("servers.json");
+        let mut selection = ServerSelection::load(path.clone()).unwrap();
+        for url in [
+            "https://a.test/one/",
+            "https://b.test/two/",
+            "https://a.test/one/",
+        ] {
+            selection
+                .select(Deployment::parse(url, false).unwrap())
+                .unwrap();
+        }
+        assert_eq!(
+            selection.recents(),
+            ["https://a.test/one/", "https://b.test/two/"]
+        );
+        selection.remove_recent("https://a.test/one/").unwrap();
+        drop(selection);
+        let mut selection = ServerSelection::load(path).unwrap();
+        assert_eq!(selection.recents(), ["https://b.test/two/"]);
+        assert!(
+            selection
+                .select(Deployment::parse("https://a.test/other/", false).unwrap())
+                .is_err()
+        );
+        drop(selection);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn upgrades_the_last_server_without_forgetting_old_mounts() {
+        let directory =
+            std::env::temp_dir().join(format!("garcon-native-upgrade-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("servers.json");
+        fs::write(
+            &path,
+            r#"{"last_url":"https://a.test/one/","mounts":{"https://a.test":"/one/"}}"#,
+        )
+        .unwrap();
+        let mut selection = ServerSelection::load(path).unwrap();
+        assert_eq!(selection.recents(), ["https://a.test/one/"]);
+        selection.remove_recent("https://a.test/one/").unwrap();
+        assert!(selection.recents().is_empty());
+        assert!(
+            selection
+                .select(Deployment::parse("https://a.test/two/", false).unwrap())
+                .is_err()
+        );
+        drop(selection);
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn remembers_mounts_across_servers_and_restarts() {
