@@ -1139,6 +1139,18 @@ const TOOL_USE_MESSAGE_TYPES = new Set<ToolUseMessageType>(
   Object.keys(TOOL_USE_MESSAGE_PARSERS) as ToolUseMessageType[],
 );
 
+const NON_TOOL_MESSAGE_TYPES = {
+  'user-message': true, 'assistant-message': true, 'command-output': true, 'command-result': true,
+  thinking: true, 'tool-result': true, error: true, 'transcript-notice': true, 'cli-row': true,
+  'permission-request': true, 'permission-resolved': true, 'permission-cancelled': true,
+  'permission-expired': true, compaction: true, 'agent-switch': true,
+} satisfies Record<Exclude<ChatMessage['type'], ToolUseMessageType>, true>;
+
+export function isChatMessageType(value: unknown): value is ChatMessage['type'] {
+  return typeof value === 'string' && (TOOL_USE_MESSAGE_TYPES.has(value as ToolUseMessageType)
+    || Object.hasOwn(NON_TOOL_MESSAGE_TYPES, value));
+}
+
 function parseToolUseMessage(data: Record<string, unknown>): ToolUseChatMessage | null {
   // Stored Cursor questions predate the shared question contract.
   const type = data.type === 'cursor-ask-question-tool-use' ? 'ask-user-question-tool-use' : data.type;

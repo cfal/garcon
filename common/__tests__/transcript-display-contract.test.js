@@ -1,0 +1,57 @@
+import { expect, test } from 'bun:test';
+import { displayCutsKey, displayProfileKey, parseBodyDependencyRequest, parseBodyDependencyResponse,
+  parseDisplayDescriptor, parseDisplayWindowRequest, parseDisplayWindowResponse, parseMemberWindowRequest } from '../transcript-display-contract.ts';
+
+const profile = { combine: true, showThinking: true, hiddenToolGroups: [], bashRevision: 'revision' };
+const certificate = { serverInstanceId: 'server', chatId: 'chat', transcriptViewId: 'view', policyRevision: 1,
+  profileKey: displayProfileKey(profile), bashRevision: 'revision', watermark: 10, cutsKey: displayCutsKey([]) };
+const request = { chatId: 'chat', transcriptViewId: 'view', policyRevision: 1, profile, cuts: [], limit: 50, anchor: { kind: 'newest' } };
+const group = { kind: 'tool-group', base: { afterBreaker: 0, beforeBreaker: 11, firstMember: 1, lastMember: 10, openAtWatermark: true },
+  fragment: { after: 0, through: 10 }, firstMember: 1, lastMember: 10, count: 10,
+  totals: { commands: 10, fileReads: 0, fileEdits: 0, other: 0 }, categoryOrder: ['commands'] };
+const window = { kind: 'available', certificate, sourceHead: 10, structuralPreparedThrough: 10, bashPreparedThrough: 10,
+  interval: { after: 0, through: 10 }, items: [group], earlier: { kind: 'exhausted-through-watermark' },
+  later: { kind: 'exhausted-through-watermark' }, cutPlacements: [], publicTail: null };
+
+test('round trips a certified aggregate without member identities or bodies', () => {
+  expect(parseDisplayWindowRequest(JSON.parse(JSON.stringify(request)))).toEqual(request);
+  expect(parseDisplayWindowResponse(JSON.parse(JSON.stringify(window)))).toEqual(window);
+});
+
+test('rejects unsafe counts, unknown categories, reversed intervals and unknown rendered types', () => {
+  for (const changed of [{ count: Number.MAX_SAFE_INTEGER + 1 }, { count: 11 }, { firstMember: 11 },
+    { categoryOrder: ['commands', 'commands'] }, { fragment: { after: 5, through: 4 } }]) {
+    expect(() => parseDisplayDescriptor({ ...group, ...changed })).toThrow(TypeError);
+  }
+  expect(() => parseDisplayDescriptor({ kind: 'row', ordinal: 1, messageType: 'unrecognized', layout: 'standard',
+    estimatedBodyBytes: 0, permissionOccurrenceId: null })).toThrow(TypeError);
+  expect(() => parseDisplayWindowResponse({ ...window, items: [group, group] })).toThrow(TypeError);
+  expect(() => parseDisplayWindowResponse({ ...window, certificate: { ...certificate, watermark: 9 } })).toThrow(TypeError);
+});
+
+test('rejects foreign profile, view, watermark and cut cursors', () => {
+  for (const changed of [{ profileKey: 'wrong' }, { cutsKey: 'wrong' }, { transcriptViewId: 'foreign' }, { bashRevision: 'old' }]) {
+    expect(() => parseDisplayWindowRequest({ ...request, anchor: { kind: 'before', cursor: {
+      certificate: { ...certificate, ...changed }, boundaryOrdinal: 10 } } })).toThrow(TypeError);
+  }
+  expect(() => parseDisplayWindowRequest({ ...request, profile: { ...profile, hiddenToolGroups: ['bash', 'bash'] } })).toThrow(TypeError);
+  expect(() => parseDisplayWindowRequest({ ...request, cuts: Array(33).fill({ id: 'cut', afterOrdinal: 1, anchorRule: 'raw-position' }) })).toThrow(TypeError);
+});
+
+test('bounds member requests inside the certified fragment', () => {
+  const members = { certificate, profile, cuts: [], base: group.base, fragment: group.fragment, limit: 50, anchor: { kind: 'first' } };
+  expect(parseMemberWindowRequest(members)).toEqual(members);
+  expect(() => parseMemberWindowRequest({ ...members, fragment: { after: 0, through: 11 } })).toThrow(TypeError);
+  expect(() => parseMemberWindowRequest({ ...members, anchor: { kind: 'around', ordinal: 12 } })).toThrow(TypeError);
+});
+
+test('bounds hydration addresses and rejects future evidence and conflicting outcomes', () => {
+  const bodies = { certificate, profile, cuts: [], seedOrdinals: [1], residentOrdinals: [], limitBodies: 10, estimatedByteBudget: 1000 };
+  expect(parseBodyDependencyRequest(bodies)).toEqual(bodies);
+  expect(() => parseBodyDependencyRequest({ ...bodies, seedOrdinals: [11] })).toThrow(TypeError);
+  expect(() => parseBodyDependencyRequest({ ...bodies, seedOrdinals: Array(51).fill(1) })).toThrow(TypeError);
+  const response = { certificate, details: [{ ordinal: 1, pairedUse: 1, pairedResult: 11, questionWrapper: null, permissionTerminal: null, commandFormat: null }],
+    bodies: [], deferredOrdinals: [], nonRenderedOrdinals: [], oversizedOrdinal: null };
+  expect(() => parseBodyDependencyResponse(response)).toThrow(TypeError);
+  expect(() => parseBodyDependencyResponse({ ...response, details: [], deferredOrdinals: [1], nonRenderedOrdinals: [1] })).toThrow(TypeError);
+});
