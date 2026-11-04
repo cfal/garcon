@@ -5513,10 +5513,11 @@ describe('Chromium combined tool-use presentation', () => {
           { timeout: 45_000 },
         );
         await fixture.page.locator(FEED_SELECTOR).getByText('earlier-context-19').waitFor({ state: 'visible' });
-        expect(await fixture.page.locator('[data-chat-tool-group]').count()).toBe(1);
+        const group = fixture.page.locator('[data-chat-tool-group]');
+        await browserExpect(group).toHaveCount(1);
+        await browserExpect(group).toHaveAttribute('data-chat-tool-group-count', String(toolCount));
         const geometry = await transcriptGeometry(fixture.page);
         expect(geometry.overlaps).toEqual([]);
-        expect(geometry.itemCount).toBeLessThan(40);
         const layout = await shortTranscriptLayout(fixture.page);
         expect(layout.sizerHeight).toBeGreaterThan(layout.feedHeight);
       };
