@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./workflows": "./workflows.ts",
+    "./workflow-validation": "./workflow-validation.ts",
     "./base-path": "./base-path.ts",
     "./command-output": "./command-output.ts",
     "./agent-auth": "./agent-auth.ts",
