@@ -56,6 +56,7 @@ import { ProducerLease } from './producer-lease.js';
 import { projectFinalResponse } from './final-response.js';
 import { parseCommandWorkingDirectory, type CommandWorkingDirectory } from '../../../common/command-output.js';
 import { TranscriptLedgerStore, type StoredRowsWork } from './store.js';
+import type { StoredLedgerRow } from './codec.js';
 import { messageForConversationRow, previewMessages } from './projection.js';
 import { normalizeNotice, type NormalizedTranscriptNotice, type TranscriptNoticeInput } from './notice.js';
 
@@ -571,6 +572,24 @@ export class TranscriptLedgerService {
 
   rowPagesThrough(chatId: string, watermark: TranscriptWatermark, fromOrdinal = 1, signal?: AbortSignal): AsyncIterable<readonly LedgerRow[]> {
     return this.#store.rowPagesThrough(chatId, watermark, fromOrdinal, signal);
+  }
+
+  recoveredHead(chatId: string): TranscriptWatermark | null {
+    return this.#store.recoveredHead(chatId);
+  }
+
+  withStoredRowFrames<T>(chatId: string, watermark: TranscriptWatermark, fromOrdinal: number,
+    consume: (frames: AsyncIterable<readonly StoredLedgerRow[]>) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.#store.withStoredRowFrames(chatId, watermark, fromOrdinal, consume, signal);
+  }
+
+  storedRowsByOrdinals(chatId: string, watermark: TranscriptWatermark, ordinals: readonly number[]): readonly StoredLedgerRow[] {
+    return this.#store.storedRowsByOrdinals(chatId, watermark, ordinals);
+  }
+
+  withStoredRowsByOrdinals<T>(chatId: string, watermark: TranscriptWatermark, ordinals: readonly number[],
+    consume: (rows: readonly StoredLedgerRow[]) => Promise<T>): Promise<T> {
+    return this.#store.withStoredRowsByOrdinals(chatId, watermark, ordinals, consume);
   }
 
   withStoredRowsThrough<T>(chatId: string, watermark: TranscriptWatermark, work: StoredRowsWork<T>, signal?: AbortSignal): Promise<T> {

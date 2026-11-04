@@ -59,6 +59,7 @@ import {
 } from './contracts.js';
 import {
   IncompleteLedgerCheckpointError,
+  LedgerBulkOperationAbandonedError,
   LedgerFencedError,
   LedgerSchemaError,
   StaleTranscriptViewError,
@@ -131,6 +132,8 @@ export class TranscriptLedgerStore {
   readonly #now: () => string;
   readonly #synchronous: 'NORMAL' | 'FULL';
   readonly #connections = new Map<string, ConnectionEntry>();
+  readonly #recoveredHeads = new Map<string, TranscriptWatermark | null>();
+  #readEpoch = 0;
   readonly #failedCloseEntries = new Map<string, ConnectionEntry>();
   readonly #openFailures = new Map<string, Error>();
   readonly #failureFences = new LedgerFailureFences<ConnectionEntry>();
@@ -513,6 +516,64 @@ export class TranscriptLedgerStore {
     return this.#streamPages(chatId, watermark, readBoundedPage, signal, fromOrdinal);
   }
 
+  recoveredHead(chatId: string): TranscriptWatermark | null {
+    this.currentView(chatId);
+    return this.#recoveredHeads.get(chatId) ?? null;
+  }
+
+  async withStoredRowFrames<T>(chatId: string, watermark: TranscriptWatermark, fromOrdinal: number,
+    consume: (frames: AsyncIterable<readonly StoredLedgerRow[]>) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const assertActive = this.#readGuard(chatId);
+    const read = (db: Database, viewId: TranscriptViewId, after: number, through: number) =>
+      readBoundedStoredPage(db, viewId, after, through, { rows: 256, bytes: 2 * 1024 * 1024 });
+    try {
+      const result = await consume(this.#streamPages(chatId, watermark, read, signal, fromOrdinal));
+      signal?.throwIfAborted();
+      assertActive();
+      this.#read(chatId, entry => this.#assertCurrent(entry, watermark.viewId));
+      return result;
+    } catch (error) {
+      if (!hasNodeErrorCode(error, UNDECODABLE_LEDGER_ROW)) throw error;
+      assertActive();
+      return this.#read(chatId, entry => {
+        this.#assertCurrent(entry, watermark.viewId);
+        throw error;
+      });
+    }
+  }
+
+  storedRowsByOrdinals(chatId: string, watermark: TranscriptWatermark, ordinals: readonly number[]): readonly StoredLedgerRow[] {
+    if (ordinals.length > 200 || ordinals.some(ordinal => !Number.isSafeInteger(ordinal) || ordinal < 1 || ordinal > watermark.ordinal)) {
+      throw new TypeError('Invalid bounded transcript address request');
+    }
+    return this.#read(chatId, entry => {
+      this.#assertCurrent(entry, watermark.viewId);
+      const query = entry.db.query<StoredLedgerRow, [string, number]>(
+        'SELECT view_id, ordinal, kind, at, client_message_id, payload_json FROM transcript_rows WHERE view_id = ? AND ordinal = ?',
+      );
+      return [...new Set(ordinals)].flatMap(ordinal => {
+        const row = query.get(watermark.viewId, ordinal);
+        return row ? [row] : [];
+      });
+    });
+  }
+
+  async withStoredRowsByOrdinals<T>(chatId: string, watermark: TranscriptWatermark, ordinals: readonly number[],
+    consume: (rows: readonly StoredLedgerRow[]) => Promise<T>): Promise<T> {
+    const assertActive = this.#readGuard(chatId);
+    const rows = this.storedRowsByOrdinals(chatId, watermark, ordinals);
+    try {
+      const result = await consume(rows);
+      assertActive();
+      this.#read(chatId, entry => this.#assertCurrent(entry, watermark.viewId));
+      return result;
+    } catch (error) {
+      if (!hasNodeErrorCode(error, UNDECODABLE_LEDGER_ROW)) throw error;
+      assertActive();
+      return this.#read(chatId, entry => { this.#assertCurrent(entry, watermark.viewId); throw error; });
+    }
+  }
+
   // Reads stored rows for work that decodes them after the read, such as on a Worker. A row
   // that fails to decode there fences the chat while its view is current, as a read that
   // decodes rows does.
@@ -557,14 +618,17 @@ export class TranscriptLedgerStore {
       throw new TypeError('Transcript starting ordinal is invalid');
     }
     let after = fromOrdinal - 1;
+    const assertActive = this.#readGuard(chatId);
     for (;;) {
       signal?.throwIfAborted();
+      assertActive();
       const page = this.#read(chatId, (entry) => {
         this.#assertCurrent(entry, watermark.viewId);
         return readPage(entry.db, watermark.viewId, after, watermark.ordinal);
       });
       yield page.rows;
       signal?.throwIfAborted();
+      assertActive();
       if (page.exhausted) {
         this.#read(chatId, entry => this.#assertCurrent(entry, watermark.viewId));
         return;
@@ -754,6 +818,7 @@ export class TranscriptLedgerStore {
     this.closeChat(chatId);
     this.#openFailures.delete(chatId);
     this.#failureFences.delete(chatId);
+    this.#recoveredHeads.delete(chatId);
     this.#discardDirectory(chatId);
   }
 
@@ -790,6 +855,7 @@ export class TranscriptLedgerStore {
   }
 
   close(): void {
+    this.#readEpoch += 1;
     this.#staging.abandonAll();
     const entries = new Map(this.#failedCloseEntries);
     for (const [chatId, entry] of this.#connections) entries.set(chatId, entry);
@@ -876,6 +942,14 @@ export class TranscriptLedgerStore {
   #read<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
     return this.#failureFences.read(chatId, () => this.#availableConnection(chatId), work);
   }
+  #readGuard(chatId: string): () => void {
+    const epoch = this.#readEpoch, generation = this.#staging.generation(chatId);
+    return () => {
+      if (epoch !== this.#readEpoch || generation !== this.#staging.generation(chatId)) {
+        throw new LedgerBulkOperationAbandonedError(chatId);
+      }
+    };
+  }
   #write<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
     return this.#failureFences.write(
       chatId,
@@ -919,6 +993,11 @@ export class TranscriptLedgerStore {
       finishActivity();
     }
     this.#connections.set(chatId, opened);
+    // Keeps the pre-append recovery boundary even after an LRU close and ordinal regrowth.
+    if (!this.#recoveredHeads.has(chatId)) {
+      this.#recoveredHeads.set(chatId, opened.current
+        ? { viewId: opened.current.viewId, ordinal: opened.nextOrdinal - 1 } : null);
+    }
     while (this.#connections.size > this.#cacheSize) {
       const oldest = this.#connections.entries().next().value as [string, ConnectionEntry] | undefined;
       if (!oldest) break;

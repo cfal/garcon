@@ -247,6 +247,7 @@ export function readBoundedStoredPage(
   viewId: TranscriptViewId,
   afterOrdinal: number,
   throughOrdinal: number,
+  limits = { rows: BULK_READ_ROWS, bytes: BULK_READ_BYTES },
 ): BoundedPage<StoredLedgerRow> {
   const statement = db.prepare<StoredLedgerRow, [string, number, number]>(`
     SELECT view_id, ordinal, kind, at, client_message_id, payload_json
@@ -258,9 +259,10 @@ export function readBoundedStoredPage(
     const rows: StoredLedgerRow[] = [];
     let bytes = 0;
     for (const stored of statement.iterate(viewId, afterOrdinal, throughOrdinal)) {
+      if (rows.length && bytes + stored.payload_json.length > limits.bytes) return { rows, exhausted: false };
       rows.push(stored);
       bytes += stored.payload_json.length;
-      if (rows.length >= BULK_READ_ROWS || bytes >= BULK_READ_BYTES) return { rows, exhausted: false };
+      if (rows.length >= limits.rows || bytes >= limits.bytes) return { rows, exhausted: false };
     }
     return { rows, exhausted: true };
   } finally {
