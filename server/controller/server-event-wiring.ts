@@ -437,6 +437,11 @@ export function wireServerEvents({
     }
     publishTransientFeedMutation(transientFeeds.apply(event));
     if (event.type !== 'run-ended') return;
+    commandLedger.recordExecutionEvidence(event.chatId, event.runId, {
+      outcome: event.row.outcome, origin: event.row.origin,
+      failureCertainty: event.failureCertainty ?? 'unknown',
+      commandOutcome: event.commandOutcome ?? null, receivedOutputCoverage: event.receivedOutputCoverage ?? 'unknown',
+    });
     await commandLedger.setTurnResult(event.chatId, event.runId, event.finalResponse);
   });
   const publishProcessing = (chatId: string) => {

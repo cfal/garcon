@@ -1,6 +1,6 @@
 import { parseChatMessage, isToolUseMessage } from '@garcon/common/chat-types';
 import { isInputFormatByModel } from '@garcon/common/input-format';
-import { parseCommandWorkingDirectory } from '@garcon/common/command-output';
+import { parseCommandOutcome, parseCommandWorkingDirectory } from '@garcon/common/command-output';
 import { parseAgentUsageReport } from '@garcon/common/usage';
 import {
   AgentCallError,
@@ -579,10 +579,13 @@ function decodeProducerEvent(
   event: AgentProducerNotification['event'],
   scope: AgentResourceScope,
 ): AgentProducerNotification['event'] {
-  if (event.type === 'run-ended' && event.workingDirectory !== undefined) {
-    const workingDirectory = parseCommandWorkingDirectory(event.workingDirectory);
-    if (!workingDirectory) throw new Error('Invalid completion working directory');
-    return { ...event, workingDirectory };
+  if (event.type === 'run-ended') {
+    const workingDirectory = event.workingDirectory === undefined ? undefined : parseCommandWorkingDirectory(event.workingDirectory);
+    if (workingDirectory === null) throw new Error('Invalid completion working directory');
+    const commandOutcome = event.commandOutcome == null ? null : parseCommandOutcome(event.commandOutcome);
+    if (event.commandOutcome != null && !commandOutcome) throw new Error('Invalid command completion outcome');
+    return { ...event, ...(workingDirectory ? { workingDirectory } : {}),
+      ...(event.commandOutcome === undefined ? {} : { commandOutcome }) };
   }
   if (event.type === 'publication-failed') {
     if (!isFailureDetail(event.error)) throw new Error('Invalid producer publication failure');

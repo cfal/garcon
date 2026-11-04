@@ -34,6 +34,7 @@
 	import { createMinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
+	import { allowsChatNotifications } from '$lib/chat/sessions/chat-session-records.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
 	import { ChatProcessingReconciler } from '$lib/ws/chat-processing-reconciler.svelte.js';
@@ -376,6 +377,7 @@
 			const chat = chatSessions.byId[id];
 			return (
 				!!chat &&
+				allowsChatNotifications(chat) &&
 				modelCatalog.forExecutor(chat.executorId).getAgent(chat.agentId)?.executionPolicy ===
 					'conversation'
 			);

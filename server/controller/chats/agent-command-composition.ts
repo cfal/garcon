@@ -7,7 +7,7 @@ import type { ChatIdRequestSink, AgentStartRequestSink, AgentResumeRequestSink, 
 import { AgentCommandRejections } from './agent-command-rejections.js';
 import { TicketCommandController, type TicketCommandControllerOptions } from '../tickets/command-controller.js';
 import type { TicketRuntime } from '../tickets/setup.js';
-import { transcriptViewId } from '../ledger/contracts.js';
+import { transcriptViewId, type TranscriptViewId } from '../ledger/contracts.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import type { SettingsStore } from '../settings/store.js';
@@ -23,6 +23,7 @@ import type { AgentStartSelectionService } from '../agents/agent-start-selection
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import type { ChatIdAllocator } from './chat-id-allocator.js';
 import type { ScheduledPromptScheduler } from '../scheduled-prompts/scheduler.js';
+import { denyInBandCommand } from './in-band-command-policy.js';
 
 type AgentCommandSetting = 'chatIdDiscovery' | 'sendMessage' | 'startAgent' | 'resumeAgent' | 'schedule' | 'tickets';
 const logger = createLogger('agent-commands');
@@ -53,9 +54,11 @@ export class AgentCommandComposition {
   #schedules: AgentScheduleController | null = null;
   #tickets: TicketCommandController | null = null;
   #rejections: AgentCommandRejections | null = null;
+  #registry: ChatRegistry | null = null;
 
   readonly commandRejections: GarconCommandRejectionSink = {
     reject: (source, issues) => {
+      if (this.#denied(source)) return;
       if (!this.#rejections) throw new Error('Agent command replies are not initialized');
       this.#rejections.reject(source, issues);
     },
@@ -63,6 +66,7 @@ export class AgentCommandComposition {
 
   readonly ticketCommands: TicketCommandRequestSink = {
     request: (source, command) => {
+      if (this.#denied(source)) return;
       if (!this.#tickets) throw new Error('Ticket command controller is not initialized');
       this.#tickets.request(source, command);
     },
@@ -70,6 +74,7 @@ export class AgentCommandComposition {
 
   readonly agentStarts: AgentStartRequestSink = {
     request: (source, command) => {
+      if (this.#denied(source)) return;
       if (!this.#starts) throw new Error('Agent start controller is not initialized');
       this.#starts.request(source, command);
     },
@@ -77,6 +82,7 @@ export class AgentCommandComposition {
 
   readonly agentSchedules: AgentScheduleRequestSink = {
     request: (source, command) => {
+      if (this.#denied(source)) return;
       if (!this.#schedules) throw new Error('Agent schedule controller is not initialized');
       this.#schedules.request(source, command);
     },
@@ -84,6 +90,7 @@ export class AgentCommandComposition {
 
   readonly agentResumes: AgentResumeRequestSink = {
     request: (source, command) => {
+      if (this.#denied(source)) return;
       if (!this.#resumes) throw new Error('Agent resume controller is not initialized');
       this.#resumes.request(source, command);
     },
@@ -91,6 +98,7 @@ export class AgentCommandComposition {
 
   readonly chatIdRequests: ChatIdRequestSink = {
     request: (input) => {
+      if (this.#denied(input)) return;
       if (!this.#chatIdDiscovery) {
         throw new Error('Chat ID discovery controller is not initialized');
       }
@@ -100,6 +108,7 @@ export class AgentCommandComposition {
 
   readonly agentStops: AgentStopRequestSink = {
     request: (source, command) => {
+      if (this.#denied(source)) return;
       if (!this.#stops) throw new Error('Agent stop controller is not initialized');
       this.#stops.request(source, command);
     },
@@ -117,6 +126,7 @@ export class AgentCommandComposition {
   initialize(options: AgentCommandCompositionOptions): void {
     if (this.#chatIdDiscovery) throw new Error('Agent command controllers are already initialized');
     this.#notices = options.notices;
+    this.#registry = options.registry;
     this.#rejections = new AgentCommandRejections({
       ...options,
       getSettings: () => options.settings.getFeatureSettings().agentCommands,
@@ -168,6 +178,11 @@ export class AgentCommandComposition {
     this.#rejections?.discardSource(chatId);
     this.#chatIdDiscovery?.discard(chatId);
     this.interAgentMessages.discardSource(chatId);
+  }
+
+  #denied(source: { chatId: string; viewId: TranscriptViewId }): boolean {
+    if (!this.#registry || !this.#notices) throw new Error('Agent command policy is not initialized');
+    return denyInBandCommand(source, this.#registry, this.#notices);
   }
 
   shutdown(): void {

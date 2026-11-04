@@ -203,6 +203,14 @@
 		onNewChat();
 	}
 
+	async function handlePromoteChat(chatId: string): Promise<void> {
+		try {
+			await controller.promoteChat(chatId);
+		} catch (error) {
+			reportActionFailure('Failed to promote chat:', m.notifications_promote_chat_failed(), error);
+		}
+	}
+
 	const quickMoveQueue = createPerListWriteQueue<PersistedChatOrderGroup, QuickMoveWrite>(
 		async ({ chatId, placement }) => {
 			await controller.reorderChat(chatId, placement);
@@ -440,6 +448,7 @@
 			{chatListAutohideAvailable}
 			dockOnRight={localSettings.chatListDock === 'right'}
 			sidebarMenuSearches={sidebarSearch.sidebarMenuSearches}
+			hasAutomationChats={sidebarSearch.hasAutomationChats}
 			sidebarPillSearches={sidebarSearch.sidebarPillSearches}
 			activeQuery={sidebarSearch.activeQuery}
 			onOpenSearchDialog={() => sidebarSearch.openSearchDialog()}
@@ -495,6 +504,7 @@
 				void onForkChat(id);
 			}}
 			{onShareChat}
+			onPromoteChat={(id) => { void handlePromoteChat(id); }}
 			onTagClick={handleTagClick}
 			{onManageTags}
 			onOpenInNewWindow={onOpenChatInNewWindow}

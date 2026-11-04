@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../common/automation.js';
 import { describe, expect, it, mock } from 'bun:test';
 import { ChatListProjector } from '../chat-list-projector.ts';
 
@@ -65,6 +66,16 @@ function makeDeps() {
 }
 
 describe('ChatListProjector', () => {
+  it('projects legacy defaults and suppresses automation unread without hiding exact reads', () => {
+    const { deps, session } = makeDeps();
+    const projector = new ChatListProjector(deps);
+    expect(projector.buildOne(CHAT_ID).presentation).toEqual(CONVERSATION_PRESENTATION);
+    expect(projector.buildOne(CHAT_ID).isUnread).toBe(true);
+    session.presentation = { collection: 'automation', notifications: 'attention-only' };
+    expect(projector.buildSummary(CHAT_ID).chat.presentation).toEqual(session.presentation);
+    expect(projector.buildOne(CHAT_ID).isUnread).toBe(false);
+    expect(projector.buildMany([[CHAT_ID, session]]).size).toBe(1);
+  });
   it('projects the complete canonical list entry for list and command paths', async () => {
     const { deps, session } = makeDeps();
     const projector = new ChatListProjector(deps);
@@ -112,6 +123,7 @@ describe('ChatListProjector', () => {
 
     expect(projector.buildSummary(CHAT_ID)).toEqual({
       chat: {
+        presentation: CONVERSATION_PRESENTATION,
         id: CHAT_ID,
         agentId: 'claude',
         agentOwnershipEpoch: 'epoch-1',

@@ -73,6 +73,7 @@
 		onShowDetails: (chat: ChatSessionRecord) => void;
 		onForkChat: (sourceChatId: string) => void;
 		onShareChat: (chat: ChatSessionRecord) => void;
+		onPromoteChat?: (chatId: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chat: ChatSessionRecord) => void;
 		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
@@ -107,6 +108,7 @@
 		onShowDetails,
 		onForkChat,
 		onShareChat,
+		onPromoteChat,
 		onTagClick,
 		onManageTags,
 		onOpenInNewWindow,
@@ -963,6 +965,7 @@
 						{onShowDetails}
 						{onForkChat}
 						{onShareChat}
+						{onPromoteChat}
 						{onTagClick}
 						{onManageTags}
 						{onOpenInNewWindow}

@@ -104,6 +104,11 @@ or network bandwidth.
 
 ## HTTP Transparency
 
+Chat list and snapshot responses include the neutral `presentation` fields.
+Unfiltered chat enumeration includes automation workers; `collection=conversation`,
+`collection=automation`, and `collection=all` filter lists identically through the
+gateway and direct controller. CLI metadata filters use the same collection values.
+
 Both endpoints serve the same application request. For example:
 
 ```text
@@ -263,6 +268,12 @@ separate default-off `allowExecutorManagement` grant. Provider credential
 administration, authentication/account routes, and Files/Git/Terminal APIs remain
 excluded. `PUT app/settings` accepts only the exact transcript-search-enabled
 boolean patch. Broad endpoint allowlisting never replaces nested payload validation.
+
+Guarded automation chats additionally require a current authenticated browser
+session for permission decisions. Both direct local-capability requests and
+delegated executor requests are denied before decision replay, acceptance, or
+permission claims. The permission-decision route remains allowlisted for ordinary
+chats; the owning controller service enforces the per-chat restriction.
 
 CLI tag replacement uses `GET chats/tags` for durability recovery and
 `PUT chats/tags` for an atomic desired-state write. Browser optimistic PATCH is

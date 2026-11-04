@@ -1,5 +1,7 @@
 import { resolveFileMentionsInCommand } from "../../runtime/projects/file-mentions.ts";
 import { describe, expect, it, mock } from 'bun:test';
+import { ChatMutationGuard } from '../automation/mutation-guard.ts';
+import { AutomationLifecycle } from '../automation/lifecycle.ts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -20,6 +22,8 @@ import { TranscriptLedgerStore } from '../ledger/store.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { AttentionTracker } from '../notifications/attention-tracker.js';
 import { WorkingDirectorySettler } from '../projects/working-directory-settlement.js';
+import { createChatPresentationRoutes } from '../routes/chat-presentation.js';
+import { parseServerWsMessage } from '../../../common/ws-events.js';
 import {
   attachNativeMessageSource,
   getNativeMessageRevisionSource,
@@ -231,6 +235,7 @@ function createFixture(overrides = {}) {
       turnId === 'turn-1' ? { payload: { clientMessageId: 'message-1' } } : null
     )),
     setTurnResult: mock(async () => undefined),
+    recordExecutionEvidence: mock(() => undefined),
     settleTerminal: mock(async () => undefined),
     markPublicTerminal: mock(async () => undefined),
     markInterruptedWithoutRunTerminal: mock(async () => undefined),
@@ -402,6 +407,7 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
     },
   };
   const agents = new AgentRegistry({
+    mutationGuard: new ChatMutationGuard(new KeyedPromiseLock(), new AutomationLifecycle()),
     resolveFileMentions: resolveFileMentionsInCommand,
     registry: { getChat: () => entry, updateChat: (_chatId, patch) => Object.assign(entry, patch) },
     integrations: { require: () => integration, get: () => integration, list: () => [integration] },
@@ -1263,6 +1269,25 @@ describe('server event wiring', () => {
     pending.resolve();
     await repair;
     expect(fixture.published).toEqual([{ type: 'chat-list-refresh-requested', reason: 'metadata-repaired', chatId: null }]);
+  });
+
+  it.each(['normal', 'pinned', 'archived'])('broadcasts %s chat promotion through the browser contract', async orderGroup => {
+    const fixture = createFixture();
+    const chatId = '1783725900000800';
+    const ensureInNormal = mock(async () => {});
+    const routes = createChatPresentationRoutes({
+      registry: { updateChat: async () => ({ id: chatId }) },
+      chatMutationLock: new KeyedPromiseLock(),
+      settings: { ensureInNormal, emitListChanged: (reason, id) => fixture.settings.list(reason, id) },
+      chatListProjector: { buildOne: () => ({ chatId, orderGroup }) },
+    });
+    const url = new URL('http://localhost/api/v1/chats/promote');
+    const response = await routes[url.pathname].POST(new Request(url, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId }) }), url);
+    expect(response.status).toBe(200);
+    expect(ensureInNormal).not.toHaveBeenCalled();
+    expect(fixture.published).toEqual([{ type: 'chat-list-refresh-requested', reason: 'chat-presentation-changed', chatId }]);
+    expect(parseServerWsMessage(fixture.published[0])).toEqual(fixture.published[0]);
   });
 
   it('updates preview without scheduling a duplicate search rebuild for transcript commits', async () => {

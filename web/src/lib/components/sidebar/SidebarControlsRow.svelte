@@ -25,6 +25,8 @@
 	import History from '@lucide/svelte/icons/history';
 	import Activity from '@lucide/svelte/icons/activity';
 	import CircleDot from '@lucide/svelte/icons/circle-dot';
+	import Bot from '@lucide/svelte/icons/bot';
+	import MessagesSquare from '@lucide/svelte/icons/messages-square';
 	import List from '@lucide/svelte/icons/list';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
 	import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
@@ -48,6 +50,7 @@
 		chatListAutohideAvailable?: boolean;
 		dockOnRight?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
+		hasAutomationChats?: boolean;
 		hasAdjacentSearchContext?: boolean;
 		onOpenSearchDialog: () => void;
 		onCreateChat: () => void;
@@ -79,6 +82,7 @@
 		chatListAutohideAvailable = false,
 		dockOnRight = false,
 		sidebarMenuSearches = [],
+		hasAutomationChats = false,
 		hasAdjacentSearchContext = false,
 		onOpenSearchDialog,
 		onCreateChat,
@@ -163,6 +167,17 @@
 				<EllipsisVertical class="h-3.5 w-3.5" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
+				{#if hasAutomationChats}
+					<DropdownMenuItem onclick={() => onApplySidebarMenuSearch?.('collection:conversation')}>
+						<MessagesSquare class="h-3.5 w-3.5" />
+						{m.sidebar_collection_conversations()}
+					</DropdownMenuItem>
+					<DropdownMenuItem onclick={() => onApplySidebarMenuSearch?.('collection:automation')}>
+						<Bot class="h-3.5 w-3.5" />
+						{m.sidebar_collection_automation()}
+					</DropdownMenuItem>
+					<DropdownMenuSeparator />
+				{/if}
 				{#if sidebarMenuSearches.length > 0}
 					{#each sidebarMenuSearches as search (search.id)}
 						<DropdownMenuItem onclick={() => onApplySidebarMenuSearch?.(search.query)}>

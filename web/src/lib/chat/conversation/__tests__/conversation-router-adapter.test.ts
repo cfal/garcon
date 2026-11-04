@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	buildRouterStores,
@@ -24,6 +25,7 @@ vi.mock('$app/navigation', () => ({
 
 function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		projectPath: '/repo',
 		orderGroup: 'normal',

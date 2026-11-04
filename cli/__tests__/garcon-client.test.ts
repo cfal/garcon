@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../common/automation.js';
 import { describe, expect, spyOn, test } from 'bun:test';
 import crypto from 'node:crypto';
 import type {
@@ -59,6 +60,7 @@ function validSnapshot(overrides: Record<string, unknown> = {}): Record<string, 
     observedAt: '2026-08-04T12:00:00.000Z',
     messageLimit: 10,
     chat: {
+      presentation: CONVERSATION_PRESENTATION,
       id: runRequest.chatId,
       title: 'Review',
       agentId: 'codex',
@@ -112,6 +114,7 @@ function validSnapshot(overrides: Record<string, unknown> = {}): Record<string, 
 function validChatList(): Record<string, unknown> {
   return {
     sessions: [{
+      presentation: CONVERSATION_PRESENTATION,
       id: runRequest.chatId,
       parentChat: null,
       agentId: 'codex',

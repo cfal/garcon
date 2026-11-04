@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../common/automation.js';
 import { expect, test } from 'bun:test';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { rm, stat, truncate } from 'node:fs/promises';
@@ -131,6 +132,7 @@ function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
 
 function sidebarChat(chatId: string): Record<string, unknown> {
   return {
+    presentation: CONVERSATION_PRESENTATION,
     id: chatId,
     parentChat: null,
     projectPath: '/workspace/search-gate',

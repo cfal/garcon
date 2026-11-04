@@ -28,6 +28,7 @@ interface Invocation {
   cancellation: AbortController;
   settled: Promise<void>;
   handle: AgentExecutionHandle;
+  commandOutcome: CommandOutcome | null;
 }
 
 export class ShellExecution {
@@ -123,6 +124,7 @@ export class ShellExecution {
     const invocation: Invocation = {
       binding, sessionId, startedAt: new Date().toISOString(), cancellation: new AbortController(),
       settled: Promise.resolve(), handle: createAgentResourceRef(this.host.scope, 'execution'),
+      commandOutcome: null,
     };
     this.#handles.bind(invocation.handle, invocation);
     this.#active.set(request.chatId, invocation);
@@ -131,7 +133,8 @@ export class ShellExecution {
     invocation.settled = (command
       ? this.#run(invocation, request, command.parsed, command.shell)
       : this.#recordNote(invocation, request))
-      .catch((error): AgentRunEndedEvent => ({ type: 'run-ended', runId: request.runId, outcome: 'failed', error: failureDetail(error) }))
+      .catch((error): AgentRunEndedEvent => ({ type: 'run-ended', runId: request.runId, outcome: 'failed',
+        error: failureDetail(error), ...(command ? { commandOutcome: incompleteOutcome(invocation.commandOutcome, error) } : {}) }))
       .then(terminal => {
         options?.signal?.removeEventListener('abort', cancelAdmission);
         if (this.#active.get(request.chatId) === invocation) this.#active.delete(request.chatId);
@@ -248,11 +251,12 @@ export class ShellExecution {
         cwd: result.cwd.kind === 'invalid' ? { kind: 'unavailable', reason: result.cwd.reason } : result.cwd,
         capture,
       };
+      invocation.commandOutcome = outcome;
       const message = new CommandResultMessage(new Date().toISOString(), commandId, outcome);
       const publishedOutput = publishOutput();
       commandLog.append(commandId, message);
       this.#emit(invocation.binding, { type: 'rows', rows: [{ message }] });
-      const terminal = { type: 'run-ended', runId: request.runId, workingDirectory: outcome.cwd } as const;
+      const terminal = { type: 'run-ended', runId: request.runId, workingDirectory: outcome.cwd, commandOutcome: outcome } as const;
       if (outcome.outcome === 'finished') {
         let text = publishedOutput.find(message => message.channel === 'stdout')?.content ?? '';
         if (output.truncated) {
@@ -267,8 +271,13 @@ export class ShellExecution {
       if (outcome.outcome === 'interrupted') return { ...terminal, outcome: 'interrupted' };
       return { ...terminal, outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: message.content } };
     } catch (error) {
-      publishOutput();
       let failure = failureDetail(error);
+      const commandOutcome = incompleteOutcome(invocation.commandOutcome, error);
+      invocation.commandOutcome = commandOutcome;
+      try { publishOutput(); }
+      catch (publicationError) {
+        this.host.logger.error('Shell output is incomplete', { reason: String(publicationError) });
+      }
       if (log && commandRecorded) {
         const message = new CommandResultMessage(new Date().toISOString(), commandId, {
           outcome: invocation.cancellation.signal.aborted ? 'interrupted' : 'failed', exitCode: null, signal: null,
@@ -283,8 +292,8 @@ export class ShellExecution {
         }
       }
       return invocation.cancellation.signal.aborted
-        ? { type: 'run-ended', runId: request.runId, outcome: 'interrupted' }
-        : { type: 'run-ended', runId: request.runId, outcome: 'failed', error: failure };
+        ? { type: 'run-ended', runId: request.runId, outcome: 'interrupted', commandOutcome }
+        : { type: 'run-ended', runId: request.runId, outcome: 'failed', error: failure, commandOutcome };
     } finally {
       log?.close();
       if (log && !('nativeSession' in request) && !sessionPublished) await this.store.remove(invocation.sessionId);
@@ -336,4 +345,9 @@ function createNativeInput(
 
 function busy(): AgentIntegrationError {
   return new AgentIntegrationError('SESSION_BUSY', 'The previous shell invocation or native import has not settled.', true);
+}
+
+function incompleteOutcome(observed: CommandOutcome | null, error: unknown): CommandOutcome {
+  return { outcome: 'unknown', exitCode: null, signal: null,
+    cwd: { kind: 'unavailable', reason: String(error).slice(0, 1024) }, ...observed, capture: 'incomplete' };
 }

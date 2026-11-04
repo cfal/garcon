@@ -7,6 +7,7 @@ import {
 	deleteChat,
 	reorderChat,
 	sortChatOrder,
+	promoteChat,
 } from '$lib/api/chats.js';
 import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
@@ -63,6 +64,11 @@ export class SidebarController {
 
 	async bulkDelete(chatIds: string[]): Promise<void> {
 		await Promise.all(chatIds.map((id) => deleteChat(id)));
+		await this.deps.onQuietRefresh();
+	}
+
+	async promoteChat(chatId: string): Promise<void> {
+		await promoteChat(chatId);
 		await this.deps.onQuietRefresh();
 	}
 

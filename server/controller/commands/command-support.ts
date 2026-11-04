@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type { DerivedChatNameInput } from '../chats/chat-title.js';
+import type { ChatPresentation, ChatAutomationPolicy } from '../../../common/automation.js';
 import type { ApiProtocol } from '../../../common/api-providers.js';
 import type { AgentSettingsEnvelope } from '../../../common/agent-integration.js';
 import {
@@ -65,7 +66,7 @@ import {
   withCurrentExecutionControl,
 } from '../lib/command-execution-control-error.js';
 import { CommandValidationError } from '../lib/command-validation-error.js';
-import { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import type { ChatMutationGuard } from '../automation/mutation-guard.js';
 import { interactiveDeadline } from '../../common/interactive-deadline.js';
 import { ChatCommandSettlement } from './chat-command-settlement.ts';
 import {
@@ -188,7 +189,7 @@ export interface ChatCommandServiceDeps {
   >;
   transientFeeds: Pick<ChatTransientFeedStore, 'validateAction'>;
   preambles: Pick<PreambleService, 'snapshot'>;
-  chatMutationLock?: KeyedPromiseLock;
+  mutationGuard: ChatMutationGuard;
   chatTags: Pick<ChatTagMutationService, 'applyDeltaWhileChatLocked'>;
 }
 
@@ -263,6 +264,8 @@ export interface ScheduledChatStartInput {
 }
 
 export interface NormalizedChatStart {
+  presentation?: ChatPresentation;
+  automationPolicy?: ChatAutomationPolicy;
   executorId: string;
   title: string | null;
   transcriptSnapshot: TranscriptWatermark | null;
@@ -355,10 +358,7 @@ export function agentTurnResultFromRecord(
 
 export class CommandSupport {
   readonly settlement: ChatCommandSettlement;
-  readonly #chatMutationLocks: KeyedPromiseLock;
-
   constructor(readonly deps: ChatCommandServiceDeps) {
-    this.#chatMutationLocks = deps.chatMutationLock ?? new KeyedPromiseLock();
     this.settlement = new ChatCommandSettlement(deps.ledger);
   }
 
@@ -366,12 +366,12 @@ export class CommandSupport {
   // requested, so operations queued behind a long wait give up in turn.
   withChatMutationLock<T>(chatId: string, fn: (deadline: number) => Promise<T>): Promise<T> {
     const deadline = interactiveDeadline();
-    return this.#chatMutationLocks.runExclusive(`chat:${chatId}`, () => fn(deadline));
+    return this.deps.mutationGuard.lock.runExclusive(`chat:${chatId}`, () => fn(deadline));
   }
 
   withChatMutationLocks<T>(chatIds: string[], fn: (deadline: number) => Promise<T>): Promise<T> {
     const deadline = interactiveDeadline();
-    return this.#chatMutationLocks.runExclusiveMany(
+    return this.deps.mutationGuard.lock.runExclusiveMany(
       chatIds.map((chatId) => `chat:${chatId}`), () => fn(deadline),
     );
   }

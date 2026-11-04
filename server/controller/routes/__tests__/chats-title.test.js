@@ -164,7 +164,10 @@ function makeJsonRequest(pathname, method, body) {
 }
 
 describe('GET /api/chats title resolution', () => {
-  const handler = chatsRoutes['/api/v1/chats'].GET;
+  const handler = () => {
+    const url = new URL('http://localhost/api/v1/chats');
+    return chatsRoutes['/api/v1/chats'].GET(new Request(url), url);
+  };
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());

@@ -33,6 +33,8 @@ import { QueueCommands } from './queue-commands.js';
 import { SessionCommands } from './session-commands.js';
 import { StartCommands } from './start-commands.js';
 import { SteerCommands } from './steer-commands.js';
+import { AutomationService, type AutomationServiceOptions } from '../automation/service.js';
+import type { ServerPrincipal } from '../lib/http-route-types.js';
 
 export {
   CommandExecutionControlError,
@@ -47,6 +49,7 @@ export type {
 } from './command-support.js';
 
 export class ChatCommandService {
+  readonly #support: CommandSupport;
   readonly #start: StartCommands;
   readonly #fork: ForkCommands;
   readonly #selfHandoff: SelfHandoffCommands;
@@ -56,12 +59,17 @@ export class ChatCommandService {
 
   constructor(private readonly deps: ChatCommandServiceDeps) {
     const support = new CommandSupport(deps);
+    this.#support = support;
     this.#start = new StartCommands(support);
     this.#fork = new ForkCommands(support);
     this.#selfHandoff = new SelfHandoffCommands(support);
     this.#queue = new QueueCommands(support);
     this.#session = new SessionCommands(support);
     this.#steer = new SteerCommands(support);
+  }
+
+  createAutomationService(options: AutomationServiceOptions): AutomationService {
+    return new AutomationService(this.#support, this.#start, options);
   }
 
   async waitForBackgroundTasks(): Promise<void> {
@@ -144,8 +152,8 @@ export class ChatCommandService {
     return this.#queue.mutateQueue(input);
   }
 
-  submitPermissionDecision(input: PermissionDecisionInput) {
-    return this.#session.submitPermissionDecision(input);
+  submitPermissionDecision(input: PermissionDecisionInput, principal: ServerPrincipal | null) {
+    return this.#session.submitPermissionDecision(input, principal);
   }
 
   submitStop(input: StopInput) {

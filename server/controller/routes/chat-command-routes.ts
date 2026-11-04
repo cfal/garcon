@@ -60,6 +60,7 @@ import {
 import { commandHttpError, parseCommandRequest } from '../lib/command-http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { withJsonBody } from '../lib/json-route.js';
+import type { HttpRouteContext } from '../lib/http-route-types.js';
 import { requireStringField } from './route-helpers.js';
 
 // Bun interprets zero as an unlimited idle window for provider-native forks.
@@ -355,10 +356,10 @@ export function createChatCommandRoutes({ commands, registry, agents, queue }: {
     }
   }
 
-  async function postPermissionDecision(body: unknown): Promise<Response> {
+  async function postPermissionDecision(body: unknown, _request: Request, _url: URL, _server?: unknown, context?: HttpRouteContext): Promise<Response> {
     try {
       const input = parseCommandRequest(parsePermissionDecisionCommandRequest, body);
-      const result = await commands.submitPermissionDecision(input);
+      const result = await commands.submitPermissionDecision(input, context?.principal ?? null);
       return Response.json(result);
     } catch (error: unknown) {
       return commandHttpError(error);

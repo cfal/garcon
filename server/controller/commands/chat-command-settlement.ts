@@ -10,6 +10,7 @@ import {
 } from '../chat-execution/types.ts';
 import { DomainError } from '../../common/domain-error.ts';
 import type { SteerDeliveryOutcome } from '../../../common/chat-command-contracts.ts';
+import { AgentCallError } from '@garcon/server-agent-interface';
 
 export class ChatCommandSettlement implements CommandSettlementPort {
   constructor(private readonly ledger: CommandLedger) {}
@@ -83,10 +84,17 @@ export class ChatCommandSettlement implements CommandSettlementPort {
     });
   }
 
+  recordOperationFailure(command: AcceptedExecutionCommand, error: unknown): void {
+    this.ledger.recordDispatchFailure(command.key, error instanceof AgentCallError ? error.outcome : 'untyped');
+  }
+
   async settleOperationFailure(command: AcceptedExecutionCommand, error: unknown): Promise<void> {
+    this.recordOperationFailure(command, error);
+    const domainError = error instanceof DomainError ? error
+      : error instanceof AgentCallError && error.cause instanceof DomainError ? error.cause : null;
     await this.ledger.settleTerminal(command.key, 'failed', {
       error: error instanceof Error ? error.message : String(error),
-      errorCode: error instanceof DomainError ? error.code : 'INTERNAL_ERROR',
+      errorCode: domainError?.code ?? 'INTERNAL_ERROR',
     });
   }
 

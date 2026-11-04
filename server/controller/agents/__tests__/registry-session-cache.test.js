@@ -1,5 +1,8 @@
 import { resolveFileMentionsInCommand } from "../../../runtime/projects/file-mentions.ts";
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { ChatMutationGuard } from '../../automation/mutation-guard.ts';
+import { AutomationLifecycle } from '../../automation/lifecycle.ts';
+import { automationContentDigest } from '../../automation/input.ts';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -69,6 +72,7 @@ describe('AgentRegistry session cache', () => {
     },
   ) {
     return new AgentRegistry({
+      mutationGuard: new ChatMutationGuard(new KeyedPromiseLock(), new AutomationLifecycle()),
     resolveFileMentions: resolveFileMentionsInCommand,
       registry: chats,
       integrations,
@@ -301,6 +305,50 @@ describe('AgentRegistry session cache', () => {
   function catalog(...preambles) {
     return { snapshot: () => ({ revision: preambles.length, preambles }) };
   }
+
+  it.each(['changed', 'missing', 'revoked', 'canceled'])('fences automation %s at input composition after delayed adoption', async kind => {
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    let preambles = [definition(PREAMBLE_A, 'Synthetic', 'Approved input')];
+    const lifecycle = new AutomationLifecycle();
+    const control = lifecycle.acquire({ serverInstanceId: 'synthetic', chatId: CHAT_ID, turnId: 'synthetic-turn', clientRequestId: 'synthetic-request' });
+    const canceled = new AbortController();
+    const automation = { control, canceled: canceled.signal, inputPublished: false,
+      effective: { preambles: [{ id: PREAMBLE_A, contentDigest: automationContentDigest('Approved input') }] } };
+    const registry = createRegistry({ ensure: async () => { entered.resolve(); await release.promise; return ledger.currentView(CHAT_ID); } },
+      { snapshot: () => ({ revision: 1, preambles }) });
+    setSelection([PREAMBLE_A]);
+    armBoundary('synthetic-owner');
+    const admitting = registry.admitInput(CHAT_ID, new UserMessage(AT, 'Synthetic prompt'), {
+      clientRequestId: 'synthetic-request', clientMessageId: 'synthetic-message', turnId: 'synthetic-turn', automation,
+    });
+    const rejected = expect(admitting).rejects.toBeDefined();
+    await entered.promise;
+    if (kind === 'changed') preambles = [definition(PREAMBLE_A, 'Synthetic', 'Unapproved replacement')];
+    if (kind === 'missing') preambles = [];
+    if (kind === 'revoked') lifecycle.observe(CHAT_ID, 'steer');
+    if (kind === 'canceled') canceled.abort(new Error('Synthetic cancellation'));
+    release.resolve();
+    await rejected;
+    expect(automation.inputPublished).toBe(false);
+    expect(ledger.currentRows(CHAT_ID)).toEqual([]);
+    control.release();
+  });
+
+  it('records automation publication before post-commit preamble bookkeeping can fail', async () => {
+    const registry = createRegistry({ ensure: async () => ledger.currentView(CHAT_ID) });
+    armBoundary('synthetic-owner');
+    const control = new AutomationLifecycle().acquire({ serverInstanceId: 'synthetic', chatId: CHAT_ID, turnId: 'synthetic-turn', clientRequestId: 'synthetic-request' });
+    const automation = { control, canceled: new AbortController().signal, inputPublished: false, effective: { preambles: [] } };
+    const update = spyOn(chats, 'updateChat').mockImplementation(() => { throw new Error('Synthetic bookkeeping failure'); });
+    try {
+      await expect(registry.admitInput(CHAT_ID, new UserMessage(AT, 'Synthetic prompt'), {
+        clientRequestId: 'synthetic-request', clientMessageId: 'synthetic-message', turnId: 'synthetic-turn', automation,
+      })).rejects.toThrow('Synthetic bookkeeping failure');
+      expect(automation.inputPublished).toBe(true);
+      expect(ledger.currentRows(CHAT_ID).map(row => row.kind)).toEqual(['user-input']);
+    } finally { update.mockRestore(); control.release(); }
+  });
 
   function admit(
     registry,

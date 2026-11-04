@@ -37,6 +37,8 @@ import type {
 	SetLastSelectedChatResponse,
 } from '$shared/chat-list';
 import { parseChatListResponse } from '$shared/chat-list';
+import { parsePromoteChatResponse, type PromoteChatResponse } from '$shared/chat-presentation-contracts';
+
 import type {
 	AgentInterruptAndSendCommandRequest,
 	AgentInterruptAndSendResponse,
@@ -162,6 +164,12 @@ export type ListChatsResponse = ChatListResponse;
 /** Lists all chat sessions. */
 export async function listChats(): Promise<ListChatsResponse> {
 	return parseChatListResponse(await apiGet<unknown>('/api/v1/chats'));
+}
+
+export async function promoteChat(chatId: string): Promise<PromoteChatResponse> {
+	const response = parsePromoteChatResponse(await apiPost('/api/v1/chats/promote', { chatId }));
+	if (!response || response.chat.id !== chatId) throw new Error('Invalid chat promotion response');
+	return response;
 }
 
 export async function setLastSelectedChat(

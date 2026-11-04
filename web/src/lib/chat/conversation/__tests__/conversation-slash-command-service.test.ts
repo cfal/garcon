@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { compactChat, forkChat, forkRunChat, selfHandoffRunChat } from '$lib/api/chats.js';
@@ -48,6 +49,7 @@ function deferred<T>() {
 
 function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id: 'chat-1',
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
@@ -79,6 +81,7 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 
 function createServerEntry(id: string) {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id,
 		parentChat: null,
 		agentId: 'claude',

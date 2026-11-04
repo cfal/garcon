@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { describe, expect, it } from 'vitest';
 import {
 	buildSidebarChatOrderMap,
@@ -57,6 +58,7 @@ function chat(
 	overrides: Partial<ChatSessionRecord> = {},
 ): ChatSessionRecord {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id,
 		projectPath,
 		orderGroup: 'normal',

@@ -3,6 +3,7 @@ import { ProducerBindings } from '../producer-bindings.ts';
 import { ProducerLease } from '../../ledger/producer-lease.ts';
 import { LedgerFencedError } from '../../ledger/errors.ts';
 import { createProducerFixture } from './producer-fixture.ts';
+import { TranscriptOutputCoverage } from '../../ledger/output-coverage.ts';
 
 test('deduplicates subscriptions while live integrations outlast all of their bindings', async () => {
   const producer = createProducerFixture();
@@ -112,6 +113,28 @@ test('sink rejection is reported without escaping into other producer routes', a
     fenced.close();
     healthy.close();
   }
+});
+
+test('rejected local rows mark a gap even when the terminal is accepted intact', async () => {
+  const producer = createProducerFixture();
+  const coverage = new TranscriptOutputCoverage();
+  coverage.beginRun('chat');
+  const watch = coverage.watch('chat');
+  const errors = [];
+  const terminals = [];
+  const manager = new ProducerBindings(error => errors.push(error), () => {}, chatId => coverage.markGap(chatId), () => {}, () => {});
+  const lease = new ProducerLease(event => {
+    if (event.type === 'rows') throw new TypeError('Synthetic row canonicalization failure');
+    if (event.type === 'run-ended') terminals.push(coverage.endRun('chat', 'provider', 'definite'));
+  }, () => {});
+  const binding = await manager.bind({ producers: producer.producers }, 'chat', lease);
+  try {
+    producer.emit(binding, { type: 'rows', rows: [] });
+    producer.emit(binding, { type: 'run-ended', runId: 'synthetic-turn', outcome: 'finished' });
+    expect(errors).toHaveLength(1);
+    expect(watch.gapped.aborted).toBe(true);
+    expect(terminals).toEqual(['gapped']);
+  } finally { lease.close(); watch.release(); coverage.close(); }
 });
 
 test('every concurrent acquisition rejects closure during worker registration', async () => {

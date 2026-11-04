@@ -334,6 +334,7 @@ export const CHAT_LIST_INVALIDATION_REASONS = [
   'chats-reordered',
   'agent-handoff',
   'execution-settings-updated',
+  'chat-presentation-changed',
   'metadata-repaired',
 ] as const;
 

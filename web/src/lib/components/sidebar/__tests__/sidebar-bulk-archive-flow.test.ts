@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as chatsApi from '$lib/api/chats';
@@ -16,6 +17,7 @@ function makeServerChat(
 	lastActivityAt: string | null = null,
 ): ChatListEntry {
 	return {
+		presentation: CONVERSATION_PRESENTATION,
 		id,
 		projectPath: '/workspace/repo',
 		orderGroup: archived ? 'archived' : 'normal',

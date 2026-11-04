@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../common/automation.js';
 import { describe, expect, test } from 'bun:test';
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import {
@@ -32,6 +33,7 @@ function snapshot(overrides: Partial<ChatSnapshotResponse> = {}): ChatSnapshotRe
     observedAt: TIMESTAMP,
     messageLimit: 10,
     chat: {
+      presentation: CONVERSATION_PRESENTATION,
       id: CHAT_ID,
       title: 'Implement validation',
       agentId: 'codex',

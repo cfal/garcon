@@ -12,6 +12,7 @@ import type {
 } from './types.ts';
 
 interface SteerInputDeliveryOptions {
+  observeMutation?: (chatId: string, action: 'steer' | 'control-input') => void;
   turnRunner: AgentTurnRunnerPort;
   ownership: ExecutionOwnership;
   isShuttingDown(): boolean;
@@ -74,6 +75,7 @@ export class SteerInputDelivery {
       // The provider refuses a turn it cannot steer yet. Refusing first keeps a
       // steer that was never delivered out of the transcript.
       if (!target.providerTarget) throw steerTurnNotReadyError();
+      this.options.observeMutation?.(chatId, 'steer');
       inserted = await this.options.admitInput(chatId, content, {
         clientRequestId: options.clientRequestId,
         clientMessageId: options.clientMessageId,
@@ -118,6 +120,7 @@ export class SteerInputDelivery {
         target.providerTarget,
         async () => {
           this.#assertTarget(chatId, target);
+          this.options.observeMutation?.(chatId, 'control-input');
           deliveryPrepared = true;
         },
         target.deadline,

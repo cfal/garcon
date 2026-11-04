@@ -14,11 +14,104 @@ import { LedgerFencedError, PermissionNotActionableError } from '../errors.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptSinkClosedError } from '../errors.js';
 import { TranscriptLedgerStore } from '../store.ts';
+import { ProducerBindings } from '../../agents/producer-bindings.ts';
+import { createProducerFixture } from '../../agents/__tests__/producer-fixture.ts';
+import { denyInBandCommand } from '../../chats/in-band-command-policy.ts';
 
 const TS = '2026-08-12T00:00:00.000Z';
 const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 
 describe('TranscriptLedgerService', () => {
+  it.each(['idle', 'successor'])('retains a late binding gap through %s output observation', async timing => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const producer = ledger.openProducer('chat-1', 'test');
+      const observation = ledger.outputCoverage.watch('chat-1');
+      ledger.beginRun('chat-1', 'run-1');
+      producer.sink.publish({ type: 'run-ended', runId: 'run-1', outcome: 'finished' });
+      await tick();
+      if (timing === 'successor') ledger.beginRun('chat-1', 'run-2');
+      ledger.markOutputGap('chat-1');
+      expect(observation.gapped.aborted).toBe(true);
+      observation.release();
+      observation.release();
+      const later = ledger.outputCoverage.watch('chat-1');
+      later.release();
+      ledger.markOutputGap('chat-1');
+      expect(later.gapped.aborted).toBe(false);
+    });
+  });
+
+  it('settles malformed local terminals as unknown and closes only the captured binding', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      const producer = createProducerFixture();
+      const events = [];
+      ledger.subscribe(event => events.push(event));
+      const bindings = new ProducerBindings(() => {}, (chatId, _lease, error) => {
+        ledger.failRun(chatId, ledger.activeRunId(chatId), error);
+      }, () => {}, () => {}, () => {});
+      const binding = await bindings.bind({ producers: producer.producers }, 'chat-1', lease);
+      producer.emit(binding, { type: 'run-ended', runId: 'run-1', outcome: 'finished', commandOutcome: {} });
+      await tick();
+      expect(lease.closed).toBe(true);
+      expect(ledger.isRunActive('chat-1')).toBe(false);
+      expect(events.at(-1)).toMatchObject({ type: 'run-ended', runId: 'run-1', commandOutcome: null,
+        failureCertainty: 'unknown', receivedOutputCoverage: 'unknown', row: { outcome: 'failed', origin: 'core' } });
+    });
+  });
+
+  it('preserves producer uncertainty before generic terminal error projection', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const producer = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      const events = [];
+      ledger.subscribe(event => events.push(event));
+      producer.sink.publish({ type: 'run-ended', runId: 'run-1', outcome: 'failed', error: { code: 'OUTCOME_UNKNOWN' } });
+      await tick();
+      expect(events.at(-1)).toMatchObject({ failureCertainty: 'unknown' });
+    });
+  });
+
+  it('notifies committed command rows before synchronous denial notices', async () => {
+    let activeLedger;
+    await withService(async ({ ledger }) => {
+      activeLedger = ledger;
+      ledger.initializeChat('chat-1');
+      const producer = ledger.openProducer('chat-1', 'test');
+      const delivered = [];
+      ledger.subscribe(event => { if (event.type === 'rows') delivered.push(...event.rows.map(row => row.ordinal)); });
+      producer.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(TS, '<garcon-get-chat-id />\nSynthetic reply') }] });
+      await tick();
+      expect(delivered).toEqual([1, 2, 3]);
+      expect(ledger.currentRows('chat-1').at(-1).detail.type).toBe('in-band-command-denied');
+    }, { chatIdRequests: { request: source => {
+      denyInBandCommand(source, { getChat: () => ({ automationPolicy: { inBandCommands: 'deny' } }) }, activeLedger);
+    } } });
+  });
+  it('retains command outcomes and output gaps only as process-local terminal evidence', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const producer = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      const events = [];
+      ledger.subscribe(event => events.push(event));
+      ledger.markOutputGap('chat-1');
+      const commandOutcome = { outcome: 'failed', exitCode: 3, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/synthetic' } };
+      producer.sink.publish({ type: 'run-ended', runId: 'run-1', outcome: 'failed', commandOutcome });
+      await tick();
+      expect(events.at(-1)).toMatchObject({ commandOutcome, receivedOutputCoverage: 'gapped', failureCertainty: 'definite' });
+      expect(ledger.currentRows('chat-1')[0]).not.toHaveProperty('commandOutcome');
+      expect(ledger.currentRows('chat-1')[0]).not.toHaveProperty('receivedOutputCoverage');
+      ledger.beginRun('chat-1', 'run-2');
+      ledger.failRun('chat-1', 'run-2', { code: 'SYNTHETIC' }, 'not-started');
+      await tick();
+      expect(events.at(-1)).toMatchObject({ receivedOutputCoverage: 'complete', failureCertainty: 'not-started' });
+    });
+  });
   it('retires permission controls after their committed request and before an unpersisted failure', async () => {
     await withService(async ({ ledger, root }) => {
       ledger.initializeChat('chat-1');

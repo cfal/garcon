@@ -51,6 +51,7 @@
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { buildSubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
 	import { playCompletionSound } from '$lib/notifications/completion-sound.js';
+	import { allowsChatNotifications } from '$lib/chat/sessions/chat-session-records.js';
 	import {
 		getChatSessions,
 		getLocalSettings,
@@ -239,6 +240,7 @@
 		readReceiptOutbox,
 		notifyCompletion: (chatId) => {
 			if (!allowsConversationalActions(chatId)) return;
+			if (!allowsChatNotifications(sessions.byId[chatId])) return;
 			void playCompletionSound({
 				mode: localSettings.completionSoundMode,
 				volume: localSettings.completionSoundVolume,

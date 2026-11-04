@@ -1,3 +1,4 @@
+import { CONVERSATION_PRESENTATION } from '../../../../../../common/automation.js';
 import { describe, expect, it, vi } from 'vitest';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import {
@@ -17,6 +18,7 @@ const model = {
 
 function harness() {
 	const chat: ChatSessionRecord = {
+		presentation: CONVERSATION_PRESENTATION,
 		...model,
 		id: 'chat-1',
 		projectPath: '/local',

@@ -1,4 +1,7 @@
 import crypto from 'crypto';
+import type { AutomationStartInput } from '../../../common/automation.js';
+import type { AutomationInputConstraints } from '../automation/input.js';
+import { AutomationCommandSettlement } from '../automation/settlement.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { parseChatRowTitle } from '../../../common/chat-row-contracts.js';
 import { normalizeScheduledChatTitle } from '../../../common/scheduled-prompts.js';
@@ -47,6 +50,25 @@ export class StartCommands {
 
   private get deps() {
     return this.support.deps;
+  }
+
+  async normalizeAutomationStart(input: AutomationStartInput, chatId: NormalizedChatStart['chatId'], deadline: number): Promise<NormalizedChatStart> {
+    const normalized = await this.normalizeStart({
+      ...input, chatId, origin: 'automation', clientMessageId: crypto.randomUUID(), images: [],
+      orderedPreambleIds: input.preambles.map(preamble => preamble.id),
+    }, chatId, deadline);
+    return { ...normalized, presentation: { ...input.presentation }, automationPolicy: { ...input.automationPolicy } };
+  }
+
+  consumeAutomationStartLocked(
+    input: NormalizedChatStart, reservation: CommandLedgerRecord, automation: AutomationInputConstraints,
+    deadline: number, dispatchReady: Promise<void>,
+  ): Promise<CommandLedgerRecord> {
+    automation.control.revoked.throwIfAborted();
+    if (this.deps.chats.getChat(input.chatId)) throw new CommandValidationError('CHAT_ID_COLLISION', 'Automation target already exists', 409);
+    const record = this.deps.ledger.consumeStartReservation(reservation.key, reservation.turnId!);
+    if (!record) throw new CommandValidationError('IDEMPOTENCY_CONFLICT', 'Prepared start is no longer available', 409);
+    return this.publishAcceptedStart(input, record, deadline, automation.canceled, dispatchReady, automation);
   }
 
   async submitStart(input: ChatStartInput): Promise<StartChatCommandResponse> {
@@ -257,19 +279,29 @@ export class StartCommands {
       return ledger.record;
     }
 
+    return this.publishAcceptedStart(input, ledger.record, deadline, signal, dispatchReady);
+  }
+
+  private async publishAcceptedStart(
+    input: NormalizedChatStart, record: CommandLedgerRecord, deadline: number,
+    signal?: AbortSignal, dispatchReady?: Promise<void>, automation?: AutomationInputConstraints,
+  ): Promise<CommandLedgerRecord> {
+    const turnId = record.turnId!;
+
     let registered = false;
     let seedOwned = false;
     let titleOwned = false;
     let compensated = false;
     const admission: AcceptedDirectInput = {
       command: {
-        key: ledger.record.key,
+        key: record.key,
         chatId: input.chatId,
         clientRequestId: input.clientRequestId,
         turnId,
       },
       content: input.command,
       options: {
+        automation,
         commandType: 'chat-start',
         clientRequestId: input.clientRequestId,
         clientMessageId: input.clientMessageId,
@@ -278,7 +310,8 @@ export class StartCommands {
         agentSettings: input.agentSettings,
       },
       userMessagePresentation: input.userMessagePresentation,
-      settlement: this.support.settlement,
+      controlLease: automation?.control,
+      settlement: automation ? new AutomationCommandSettlement(this.deps.ledger) : this.support.settlement,
       admissionDeadline: deadline,
       preparation: {
         operation: 'chat-start',
@@ -295,6 +328,8 @@ export class StartCommands {
             await this.deps.transcripts.seedChat(input.chatId, rows, rows.length + 1);
           }
           registered = this.deps.chats.addChat({
+            presentation: input.presentation,
+            automationPolicy: input.automationPolicy,
             executorId: input.executorId,
             id: input.chatId,
             agentId: input.agentId,
@@ -320,7 +355,7 @@ export class StartCommands {
             titleOwned = true;
             await this.deps.settings.setSessionName(input.chatId, input.title);
           }
-          await this.deps.settings.ensureInNormal(input.chatId);
+          if (input.origin !== 'automation') await this.deps.settings.ensureInNormal(input.chatId);
           await this.deps.chats.flush();
           signal?.throwIfAborted();
           if (input.origin === 'agent-command' && !this.deps.metadata.getChatMetadata(input.chatId)) {
@@ -328,6 +363,7 @@ export class StartCommands {
           }
         },
         compensate: async () => {
+          if (automation && (automation.inputPublished || automation.control.actorRevoked.aborted)) return;
           if (registered) {
             this.deps.chats.removeChat(input.chatId, 'start-compensation');
             await this.deps.chats.flush();
@@ -351,8 +387,11 @@ export class StartCommands {
         try {
           if (dispatchReady) await dispatchReady;
           executionAdmission.signal.throwIfAborted();
+          automation?.control.revoked.throwIfAborted();
+          automation?.canceled.throwIfAborted();
           progress?.report('preparing-context');
           await this.deps.agents.startSession(input.chatId, input.command, {
+            automation,
             projectPath: input.projectPath,
             images: input.images.length > 0 ? input.images : undefined,
             clientRequestId: input.clientRequestId,
@@ -367,8 +406,7 @@ export class StartCommands {
             } : executionAdmission,
             agentSettings: input.agentSettings,
             ...(progress ? { onContextPreparation: (phase) => progress.report(phase) } : {}),
-            // Only an agent-command start dispatches after releasing the chat lock.
-            ...(input.origin === 'agent-command' ? {} : { dispatchDeadline: deadline }),
+            ...(input.origin === 'agent-command' || input.origin === 'automation' ? {} : { dispatchDeadline: deadline }),
           });
         } catch (error) {
           progress?.fail(error);
@@ -376,7 +414,7 @@ export class StartCommands {
         }
       },
     };
-    const admissionResult = input.origin === 'agent-command'
+    const admissionResult = input.origin === 'agent-command' || input.origin === 'automation'
       ? this.deps.queue.scheduleDirectInput(admission)
       : this.deps.queue.runInitialInput(admission);
     await admissionResult.catch((error: unknown) => {
@@ -384,9 +422,9 @@ export class StartCommands {
       throw error;
     });
 
-    if (input.origin === 'agent-command') {
+    if (input.origin === 'agent-command' || input.origin === 'automation') {
       if (input.title === null) this.generateTitle(input);
-      return ledger.record;
+      return record;
     }
 
     if (!this.deps.metadata.getChatMetadata(input.chatId)) this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
@@ -400,11 +438,11 @@ export class StartCommands {
     }
 
     if (input.title === null) this.generateTitle(input);
-    const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed', 'finished'], {
+    const accepted = await this.deps.ledger.updateUnlessStatus(record.key, ['failed', 'finished'], {
       status: 'running',
       turnId,
     });
-    return accepted ?? ledger.record;
+    return accepted ?? record;
   }
 
   private generateTitle(input: NormalizedChatStart): void {
@@ -425,6 +463,7 @@ export class StartCommands {
       commandLedgerKey('chat-start', chatId, input.clientRequestId),
     );
     if (!existing) return null;
+    if (existing.status === 'reserved') throw new CommandValidationError('IDEMPOTENCY_CONFLICT', 'Start identity is reserved', 409);
     if (existing.payloadHash !== commandPayloadHash(startReplayPayload(input, chatId))) {
       throw new CommandValidationError(
         'IDEMPOTENCY_CONFLICT',
@@ -454,7 +493,7 @@ export class StartCommands {
 
 }
 
-function startPayload(input: NormalizedChatStart): Record<string, unknown> {
+export function startPayload(input: NormalizedChatStart): Record<string, unknown> {
   return {
     executorId: input.executorId,
     title: input.title,
@@ -512,6 +551,11 @@ function startReplayPayload(
 }
 
 function requestedStartTitle(input: ChatStartInput): string | null {
+  if (input.origin === 'automation') {
+    const title = parseChatRowTitle(input.title);
+    if (!title) throw new CommandValidationError('VALIDATION_FAILED', 'Automation requires an explicit title');
+    return title;
+  }
   if (input.origin === 'agent-command') return parseChatRowTitle(input.title) ?? null;
   if (input.origin !== 'scheduled' || input.title === undefined) return null;
   const title = normalizeScheduledChatTitle(input.title);
