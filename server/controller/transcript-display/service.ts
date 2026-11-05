@@ -13,6 +13,7 @@ import { displayCutsKey, displayProfileKey, type BodyDependencyRequest, type Cer
   type DisplayWindowRequest, type DisplayWindowResponse, type MemberWindowRequest } from '../../../common/transcript-display-contract.js';
 import type { HiddenBashCommandPattern } from '../../../common/hidden-bash-command-patterns.js';
 import { DisplayWorkerClient } from './worker-client.js';
+import type { DisplayWorkerResults, DisplayWorkerTask } from './worker-protocol.js';
 import { sourceFingerprint } from './store.js';
 import type { AuxiliaryPreparing, DisplayAuxiliaryRequest } from '../../../common/transcript-display-auxiliary.js';
 import { ChatPlanPresentationStore } from './plan-presentation.js';
@@ -20,16 +21,17 @@ import type { PlanPresentationRequest } from '../../../common/transcript-display
 import { displayErrorCode as errorCode, transientDisplayFailure } from './errors.js';
 
 interface DisplayJob {
-  chatId: string; viewId: string; path: string; generation: number; frontier: number; goal: number;
+  chatId: string; viewId: string; path: string; frontier: number; goal: number;
   tailOrdinal: number | null; ready: boolean; failure: string | null; activeAt: number;
   bash: Map<string, { frontier: number; failure: string | null; pruning: boolean }>;
   auxiliaryFrontier: number; auxiliaryRequested: boolean; auxiliaryFailure: string | null;
   phase: 'structure' | 'bash' | 'auxiliary'; initialize: Promise<void>;
 }
-interface Retirement { work: () => Promise<void>; promise: Promise<void>; failed: boolean }
+interface Retirement { kind: 'maintenance' | 'eviction'; work: () => Promise<void>; promise: Promise<void>; failed: boolean }
 export interface DisplayStatus {
   readonly chatId: string; readonly transcriptViewId: string; readonly policyRevision: number;
   readonly bashRevision: string; readonly preparedThrough: number; readonly structuralPreparedThrough: number;
+  readonly auxiliaryRevision: number;
   readonly phase: 'preparing' | 'available' | 'failed'; readonly errorCode: string | null;
 }
 export interface TranscriptDisplayOptions {
@@ -40,6 +42,7 @@ export interface TranscriptDisplayOptions {
   readonly hasChat: (chatId: string) => boolean;
   readonly patterns: () => readonly HiddenBashCommandPattern[];
   readonly onStatus?: (status: DisplayStatus) => void;
+  readonly onPlanChanged?: (snapshot: import('../../../common/transcript-display-open.js').PlanPresentationSnapshot) => void;
   readonly diskBudget?: number;
   readonly freeSpaceReserve?: number;
   readonly onMaintenanceError?: (chatId: string, code: string) => void;
@@ -52,20 +55,20 @@ export class TranscriptDisplayService {
   readonly #reader = new DisplayWorkerClient('reader');
   readonly #jobs = new Map<string, DisplayJob>();
   readonly #retirements = new Map<string, Retirement>();
-  readonly #files = new Map<string, { path: string; bytes: number; usedAt: number }>();
+  readonly #files = new Map<string, { bytes: number; usedAt: number }>();
   readonly #abort = new AbortController();
   readonly #unsubscribe: () => void;
-  #generation = 0;
   #running: Promise<void> | null = null;
   #revision = '';
   #patterns: readonly HiddenBashCommandPattern[] = [];
   #visibleFrames = 0;
   #wakePending = false;
+  #frames = { count: 0, rows: 0, estimatedBytes: 0, evictions: 0 };
   readonly #statusTimers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(readonly options: TranscriptDisplayOptions) {
-    this.plans = new ChatPlanPresentationStore(options.serverInstanceId);
+    this.plans = new ChatPlanPresentationStore(options.serverInstanceId, options.onPlanChanged);
     this.#root = path.resolve(options.workspaceDirectory, 'transcript-display');
     this.settingsChanged();
     this.#unsubscribe = options.ledger.subscribe(event => {
@@ -92,7 +95,8 @@ export class TranscriptDisplayService {
   async planBody(request: PlanPresentationRequest, signal?: AbortSignal): Promise<string> {
     const ordinal = this.plans.requirePending(request), head = this.currentHead(request.chatId, request.transcriptViewId);
     const result = await this.options.ledger.withStoredRowsByOrdinals(request.chatId, head, [ordinal],
-      rows => this.#reader.request({ kind: 'present-plan', rows }, signal));
+      rows => this.#reader.request({ kind: 'present-plan', rows, identity: { serverInstanceId: this.serverInstanceId,
+        chatId: request.chatId, transcriptViewId: request.transcriptViewId } }, signal));
     this.currentHead(request.chatId, request.transcriptViewId); this.plans.requirePending(request);
     return result;
   }
@@ -104,7 +108,7 @@ export class TranscriptDisplayService {
       if (this.#abort.signal.aborted) return;
       if (!/^[A-Za-z0-9_-]+$/.test(entry.name)) continue;
       if (this.#jobs.has(entry.name)) continue;
-      const retirement = this.#scheduleRetirement(entry.name, async () => {
+      const retirement = this.#scheduleRetirement(entry.name, 'maintenance', async () => {
         const directory = path.join(this.#root, entry.name);
         if (!this.options.hasChat(entry.name) || !entry.isDirectory() || entry.isSymbolicLink()) {
           await rm(directory, { recursive: true, force: true }); return;
@@ -121,7 +125,7 @@ export class TranscriptDisplayService {
         const filePath = path.join(directory, filename), usedAt = (await lstat(directory)).mtimeMs;
         const bytes = await displayFileBytes(filePath);
         if (this.#retirements.get(entry.name) !== retirement) return;
-        this.#files.set(entry.name, { path: filePath, bytes, usedAt });
+        this.#files.set(entry.name, { bytes, usedAt });
         recent.push({ chatId: entry.name, mtime: usedAt });
         recent.sort((a, b) => b.mtime - a.mtime); if (recent.length > 8) recent.pop();
       });
@@ -167,39 +171,41 @@ export class TranscriptDisplayService {
     if (W > head) throw new DomainError('DISPLAY_STALE_WATERMARK', 'Transcript source changed. Refresh the window.', 409, true);
     if (!job.ready || frontier < Math.max(W, request.requiredThrough ?? 0) || job.failure
       || (!request.profile.hiddenToolGroups.includes('bash') && job.bash.get(this.#revision)?.failure)) return this.#unavailable(job, request, head, frontier);
-    const response = await this.#reader.request({ kind: 'window', path: job.path, request, watermark: W, sourceHead: head,
+    const response = await this.#read(job, { kind: 'window', path: job.path, request, watermark: W, sourceHead: head,
       bashFrontier: frontier, serverInstanceId: this.serverInstanceId, filteredBash: this.#patterns.length > 0 }, signal);
-    this.#current(job); this.#head(job);
+    this.#current(job);
     return response;
   }
 
   async members(request: MemberWindowRequest, signal?: AbortSignal) {
     const job = this.#certifiedJob(request);
-    const result = await this.#reader.request({ kind: 'members', path: job.path, request, filteredBash: this.#patterns.length > 0 }, signal);
-    this.#current(job); this.#head(job); return result;
+    const result = await this.#read(job, { kind: 'members', path: job.path, request, filteredBash: this.#patterns.length > 0 }, signal);
+    this.#current(job); return result;
   }
 
   async resolve(request: DisplayWindowRequest, ordinal: number, signal?: AbortSignal) {
     const job = this.#admit(request.chatId, request.transcriptViewId, true);
     this.#validateRevision(request.policyRevision, request.profile.bashRevision);
-    const head = this.#head(job).ordinal, watermark = Math.min(head, this.#frontier(job, request.profile.hiddenToolGroups.includes('bash')));
-    if (!job.ready) return { kind: 'preparing' as const, ordinal, landedOrdinal: null };
-    const result = await this.#reader.request({ kind: 'resolve', path: job.path, request, watermark, sourceHead: head, ordinal, filteredBash: this.#patterns.length > 0 }, signal);
-    this.#current(job); this.#head(job); return result;
+    const head = this.#head(job).ordinal, frontier = this.#frontier(job, request.profile.hiddenToolGroups.includes('bash'));
+    const watermark = request.atWatermark ?? Math.min(head, frontier);
+    if (watermark > head) throw new DomainError('DISPLAY_STALE_WATERMARK', 'Transcript source changed.', 409, true);
+    if (!job.ready || watermark > frontier) return { kind: 'preparing' as const, ordinal, landedOrdinal: null };
+    const result = await this.#read(job, { kind: 'resolve', path: job.path, request, watermark, sourceHead: head, ordinal, filteredBash: this.#patterns.length > 0 }, signal);
+    this.#current(job); return result;
   }
 
   async bodies(request: BodyDependencyRequest, signal?: AbortSignal): Promise<string> {
     const job = this.#certifiedJob(request);
-    const plan = await this.#reader.request({ kind: 'body-plan', path: job.path, request }, signal);
+    const plan = await this.#read(job, { kind: 'body-plan', path: job.path, request }, signal);
     this.#current(job);
     const watermark = { viewId: transcriptViewId(job.viewId), ordinal: request.certificate.watermark };
     const result = await this.options.ledger.withStoredRowsByOrdinals(job.chatId, watermark, plan.ordinals,
       rows => this.#reader.request({ kind: 'hydrate', request, plan, rows }, signal));
-    this.#current(job); this.#head(job); return result;
+    this.#current(job); return result;
   }
 
   async retry(chatId: string): Promise<void> {
-    const job = this.#jobs.get(chatId);
+    let job = this.#jobs.get(chatId);
     if (!job) return;
     this.#current(job);
     clearTimeout(this.#retryTimers.get(chatId)); this.#retryTimers.delete(chatId);
@@ -207,7 +213,8 @@ export class TranscriptDisplayService {
     job.failure = null; job.auxiliaryFailure = null;
     job.ready = false;
     await job.initialize; this.#current(job);
-    job.initialize = this.#initializeJob(job); await job.initialize;
+    job = this.#reinitialize(job);
+    await job.initialize;
     this.#current(job);
     if (job.ready && job.bash.get(revision)?.failure) {
       await this.#builder.request({ kind: 'filter-failed', path: job.path, revision, retry: true });
@@ -226,9 +233,9 @@ export class TranscriptDisplayService {
     if (watermark > sourceHead) throw new DomainError('DISPLAY_STALE_WATERMARK', 'Refresh transcript summaries.', 409, true);
     const identity = { serverInstanceId: this.serverInstanceId, chatId: job.chatId, transcriptViewId: job.viewId, watermark, sourceHead };
     const failure = job.failure ?? (kind === 'subagents' ? job.auxiliaryFailure : null);
-    if (!job.ready || frontier < watermark || (kind === 'subagents' && frontier === 0 && sourceHead > 0) || failure) return { ...identity, watermark: Math.min(frontier, sourceHead),
+    if (!job.ready || frontier < watermark || (frontier === 0 && sourceHead > 0) || failure) return { ...identity, watermark: Math.min(frontier, sourceHead),
       kind: failure ? 'failed' : 'preparing', errorCode: failure } satisfies AuxiliaryPreparing;
-    const result = await this.#reader.request({ kind, path: job.path, request, identity }, signal);
+    const result = await this.#read(job, { kind, path: job.path, request, identity }, signal);
     this.#current(job); return result;
   }
 
@@ -237,24 +244,65 @@ export class TranscriptDisplayService {
     this.#evict(chatId);
   }
 
-  #evict(chatId: string): void {
+  #rebuild(job: DisplayJob): DisplayJob {
+    this.#current(job);
+    this.#evict(job.chatId);
+    const replacement = this.#admit(job.chatId, job.viewId, false);
+    replacement.activeAt = job.activeAt;
+    replacement.auxiliaryRequested = job.auxiliaryRequested;
+    return replacement;
+  }
+
+  #reinitialize(job: DisplayJob): DisplayJob {
+    this.#current(job);
+    this.#retireJob(job.chatId);
+    const replacement = this.#admit(job.chatId, job.viewId, false);
+    replacement.activeAt = job.activeAt;
+    replacement.auxiliaryRequested = job.auxiliaryRequested;
+    return replacement;
+  }
+
+  async #read<K extends DisplayWorkerTask['kind']>(job: DisplayJob, task: Extract<DisplayWorkerTask, { kind: K }>, signal?: AbortSignal): Promise<DisplayWorkerResults[K]> {
+    this.#current(job);
+    try {
+      return await this.#reader.request(task, signal);
+    } catch (error) {
+      const code = errorCode(error);
+      if (this.#jobs.get(job.chatId) === job && !this.#abort.signal.aborted
+        && (code === 'DISPLAY_STORE_INVALID' || (code === 'DISPLAY_INDEX_FAILED' && await displayFileMissing(job.path)))) {
+        if (this.#jobs.get(job.chatId) === job && !this.#abort.signal.aborted) this.#rebuild(job);
+      }
+      throw error;
+    }
+  }
+
+  #evict(chatId: string): Retirement {
+    if (this.#jobs.has(chatId)) this.#frames.evictions++;
+    this.#retireJob(chatId);
+    const file = this.#files.get(chatId);
+    return this.#scheduleRetirement(chatId, 'eviction', async () => {
+      await rm(path.join(this.#root, chatId), { recursive: true, force: true });
+      if (this.#files.get(chatId) === file) this.#files.delete(chatId);
+    });
+  }
+
+  #retireJob(chatId: string): void {
     clearTimeout(this.#statusTimers.get(chatId)); this.#statusTimers.delete(chatId);
     clearTimeout(this.#retryTimers.get(chatId)); this.#retryTimers.delete(chatId);
     const job = this.#jobs.get(chatId); this.#jobs.delete(chatId);
-    this.#files.delete(chatId);
-    this.#scheduleRetirement(chatId, async () => {
-      await job?.initialize;
+    const initialization = job?.initialize;
+    this.#scheduleRetirement(chatId, 'maintenance', async () => {
+      await initialization;
       if (job) {
         await this.#builder.request({ kind: 'close', path: job.path });
         await this.#reader.request({ kind: 'close', path: job.path });
       }
-      await rm(path.join(this.#root, chatId), { recursive: true, force: true });
     });
   }
 
-  #scheduleRetirement(chatId: string, work: () => Promise<void>): Retirement {
+  #scheduleRetirement(chatId: string, kind: Retirement['kind'], work: () => Promise<void>): Retirement {
     const previous = this.#retirements.get(chatId);
-    const retirement: Retirement = { failed: true, promise: Promise.resolve(), work: async () => {
+    const retirement: Retirement = { kind, failed: true, promise: Promise.resolve(), work: async () => {
       if (previous) await this.#resumeRetirement(chatId, previous);
       await work();
     } };
@@ -292,7 +340,7 @@ export class TranscriptDisplayService {
     let job = this.#jobs.get(chatId);
     if (job && job.viewId !== viewId) { this.forget(chatId); job = undefined; }
     if (!job) {
-      job = { chatId, viewId, path: path.join(this.#root, chatId, displayFilename(viewId)), generation: ++this.#generation,
+      job = { chatId, viewId, path: path.join(this.#root, chatId, displayFilename(viewId)),
         frontier: 0, goal: head.ordinal, tailOrdinal: null, ready: false, failure: null, activeAt: 0,
         bash: new Map(), auxiliaryFrontier: 0, auxiliaryRequested: false, auxiliaryFailure: null,
         phase: 'structure', initialize: Promise.resolve() };
@@ -385,15 +433,20 @@ export class TranscriptDisplayService {
         const needsAuxiliary = job.auxiliaryRequested && !job.auxiliaryFailure && job.auxiliaryFrontier < job.frontier;
         const phases = ['structure', 'bash', 'auxiliary'] as const;
         const start = phases.indexOf(job.phase);
-        const phase = [...phases.slice(start), ...phases.slice(0, start)].find(phase =>
-          phase === 'structure' ? job.frontier < job.goal : phase === 'bash' ? needsBash : needsAuxiliary);
+        const phase = [...phases.slice(start), ...phases.slice(0, start)].find(phase => {
+          switch (phase) {
+            case 'structure': return job.frontier < job.goal;
+            case 'bash': return needsBash;
+            case 'auxiliary': return needsAuxiliary;
+          }
+        });
         if (phase === 'auxiliary') {
           try {
             job.auxiliaryFrontier = await this.#builder.request({ kind: 'auxiliary-frame', path: job.path, goal: job.frontier });
             this.#current(job);
           } catch (error) {
             this.#current(job);
-            if (transientDisplayFailure(errorCode(error))) throw error;
+            if (transientDisplayFailure(errorCode(error)) || errorCode(error) === 'DISPLAY_STORE_INVALID') throw error;
             job.auxiliaryFailure = errorCode(error);
           }
           job.phase = 'structure';
@@ -403,6 +456,9 @@ export class TranscriptDisplayService {
           await this.options.ledger.withStoredRowFrames(job.chatId, goal, job.frontier + 1, async frames => {
             for await (const rows of frames) {
               this.#current(job);
+              this.#frames.count++;
+              this.#frames.rows += rows.length;
+              this.#frames.estimatedBytes += rows.reduce((bytes, row) => bytes + row.payload_json.length * 2, 0);
               const result = await this.#builder.request({ kind: 'frame', path: job.path, rows, goal: goal.ordinal,
                 serverInstanceId: this.serverInstanceId, previousTail });
               this.#current(job); job.frontier = result.frontier; job.tailOrdinal = result.tailOrdinal; break;
@@ -436,7 +492,14 @@ export class TranscriptDisplayService {
         this.#notify(job);
         await this.#recordFileSize(job);
       } catch (error) {
-        if (this.#jobs.get(job.chatId) === job && !this.#abort.signal.aborted) this.#fail(job, error);
+        if (this.#jobs.get(job.chatId) === job && !this.#abort.signal.aborted) {
+          try {
+            if (errorCode(error) === 'DISPLAY_STORE_INVALID') this.#rebuild(job);
+            else this.#fail(job, error);
+          } catch (rebuildError) {
+            if (this.#jobs.get(job.chatId) === job) this.#fail(job, rebuildError);
+          }
+        }
       }
       await Bun.sleep(Math.min(100, Math.max(1, performance.now() - started)));
     }
@@ -452,14 +515,14 @@ export class TranscriptDisplayService {
     this.#retryTimers.set(job.chatId, setTimeout(() => {
       this.#retryTimers.delete(job.chatId);
       if (this.#abort.signal.aborted || this.#jobs.get(job.chatId) !== job) return;
-      job.failure = null;
-      job.initialize = this.#initializeJob(job);
+      try { this.#reinitialize(job); }
+      catch (error) { if (this.#jobs.get(job.chatId) === job) this.#fail(job, error); }
     }, 1000));
   }
   async #recordFileSize(job: DisplayJob): Promise<void> {
     const bytes = await displayFileBytes(job.path);
     this.#current(job);
-    this.#files.set(job.chatId, { path: job.path, bytes, usedAt: job.activeAt });
+    this.#files.set(job.chatId, { bytes, usedAt: job.activeAt });
   }
   async #admitDisk(job: DisplayJob): Promise<void> {
     const estimate = 2 * 1024 * 1024, budget = this.options.diskBudget ?? 1024 * 1024 * 1024;
@@ -470,19 +533,43 @@ export class TranscriptDisplayService {
     if (enough()) return;
     const inactive = [...this.#files].filter(([chatId, file]) => chatId !== job.chatId && Date.now() - file.usedAt >= 10000)
       .sort((left, right) => left[1].usedAt - right[1].usedAt);
-    for (const [chatId, file] of inactive) {
-      this.#evict(chatId);
-      await this.#retirements.get(chatId)?.promise; this.#current(job);
-      total -= file.bytes; free += file.bytes;
+    for (const [chatId] of inactive) {
+      this.#current(job);
+      const existing = this.#retirements.get(chatId);
+      const retirement = existing?.kind === 'eviction' && !this.#jobs.has(chatId) ? existing : this.#evict(chatId);
+      const removed = await this.#resumeRetirement(chatId, retirement).then(() => true, () => false);
+      this.#current(job);
+      if (!removed) continue;
+      total = [...this.#files.values()].reduce((sum, file) => sum + file.bytes, 0);
+      const available = await statfs(this.#root); this.#current(job);
+      free = available.bavail * available.bsize;
       if (enough()) return;
       await Bun.sleep(0);
     }
     throw new DomainError('DISPLAY_DISK_FULL', 'Transcript display preparation needs more free space.', 503, true);
   }
+  auxiliaryRevision(chatId: string, viewId: string): number {
+    const job = this.#jobs.get(chatId);
+    return job?.viewId === viewId ? job.auxiliaryFrontier : 0;
+  }
+
+  get metrics() {
+    return { ...this.#frames, jobs: this.#jobs.size, retirements: this.#retirements.size,
+      derivedBytes: [...this.#files.values()].reduce((bytes, file) => bytes + file.bytes, 0),
+      builder: this.#builder.metrics, reader: this.#reader.metrics,
+      frontiers: [...this.#jobs.values()].map(job => ({ chatId: job.chatId, sourceHead: job.goal,
+        preparedThrough: this.#frontier(job), auxiliaryThrough: job.auxiliaryFrontier,
+        lag: Math.max(0, job.goal - this.#frontier(job)), failed: job.failure !== null })) };
+  }
+
   #status(job: DisplayJob): DisplayStatus {
     const preparedThrough = this.#frontier(job), errorCode = job.failure ?? job.bash.get(this.#revision)?.failure ?? null;
+    let phase: DisplayStatus['phase'] = 'preparing';
+    if (errorCode) phase = 'failed';
+    else if (job.ready && preparedThrough >= job.goal) phase = 'available';
     return { chatId: job.chatId, transcriptViewId: job.viewId, policyRevision: DISPLAY_POLICY_REVISION, bashRevision: this.#revision,
-      preparedThrough, structuralPreparedThrough: job.frontier, phase: errorCode ? 'failed' : job.ready && preparedThrough >= job.goal ? 'available' : 'preparing', errorCode };
+      preparedThrough, structuralPreparedThrough: job.frontier, auxiliaryRevision: job.auxiliaryFrontier,
+      phase, errorCode };
   }
   #notify(job: DisplayJob): void {
     if (this.#abort.signal.aborted || this.#statusTimers.has(job.chatId)) return;
@@ -493,7 +580,10 @@ export class TranscriptDisplayService {
   }
   #unavailable(job: DisplayJob, request: DisplayWindowRequest, head: number, frontier: number): DisplayUnavailable {
     const failure = job.failure ?? (request.profile.hiddenToolGroups.includes('bash') ? null : job.bash.get(this.#revision)?.failure);
-    return { kind: failure ? 'failed' : job.frontier ? 'lagging' : 'preparing', serverInstanceId: this.serverInstanceId,
+    let kind: DisplayUnavailable['kind'] = 'preparing';
+    if (failure) kind = 'failed';
+    else if (job.frontier) kind = 'lagging';
+    return { kind, serverInstanceId: this.serverInstanceId,
       chatId: job.chatId, transcriptViewId: job.viewId, policyRevision: DISPLAY_POLICY_REVISION, profileKey: displayProfileKey(request.profile),
       bashRevision: this.#revision, sourceHead: head, preparedThrough: frontier, errorCode: failure ?? null, retryAfterMs: failure ? null : 250 };
   }
@@ -532,6 +622,14 @@ export class TranscriptDisplayService {
 
 function displayFilename(viewId: string): string {
   return `${createHash('sha256').update(JSON.stringify([viewId, DISPLAY_POLICY_REVISION])).digest('hex')}.sqlite`;
+}
+
+async function displayFileMissing(filename: string): Promise<boolean> {
+  try { await lstat(filename); return false; }
+  catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return true;
+    throw error;
+  }
 }
 
 async function displayFileBytes(filename: string): Promise<number> {

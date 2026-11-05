@@ -33,7 +33,6 @@ import type {
   LedgerRowDraft,
   LedgerRunEndedRow,
   LedgerSessionRow,
-  LedgerUserInputDetail,
   TranscriptPage,
   TranscriptNativeActivityState,
   TranscriptView,
@@ -59,6 +58,7 @@ import { TranscriptLedgerStore, type StoredRowsWork } from './store.js';
 import type { StoredLedgerRow } from './codec.js';
 import { messageForConversationRow, previewMessages } from './projection.js';
 import { normalizeNotice, type NormalizedTranscriptNotice, type TranscriptNoticeInput } from './notice.js';
+import { inputDetail, inputKey } from './input-submission.js';
 
 export interface TranscriptProducerLease {
   readonly sink: AgentProducerSink;
@@ -986,26 +986,6 @@ export class TranscriptLedgerService {
       }
     });
   }
-}
-
-function inputKey(chatId: string, clientMessageId: string): string {
-  return `${chatId}\u0000${clientMessageId}`;
-}
-
-function inputDetail(input: {
-  readonly message: UserMessage;
-  readonly attachments: readonly AgentAttachment[];
-  readonly clientMessageId: string | null;
-  readonly steer: boolean;
-}): LedgerUserInputDetail {
-  return {
-    clientMessageId: input.clientMessageId,
-    message: input.message,
-    attachments: input.attachments,
-    steer: input.steer,
-    preambleBoundary: null,
-    preamblePrefixReceipt: null,
-  };
 }
 
 function timestampAtOrAfter(candidate: string, floor: string | null): string {

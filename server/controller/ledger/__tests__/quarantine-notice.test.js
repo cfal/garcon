@@ -59,7 +59,7 @@ describe('carryover migration quarantine notice', () => {
         broadcast: () => undefined,
         updateMetadata: (_chatId, _viewId, messages) => metadataUpdates.push(...messages),
         replaceMetadata: () => undefined,
-        resendCandidates: () => [],
+        serverInstanceId: 'instance-1', planRevision: () => 0, auxiliaryRevision: () => 0,
       });
       fanout({ type: 'rows', chatId: CHAT_ID, viewId: VIEW_ID, rows });
 

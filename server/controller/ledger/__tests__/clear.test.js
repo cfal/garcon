@@ -273,7 +273,8 @@ it.each(['Synthetic first new prompt', 'New Session'])('derives post-Clear previ
     metadata.addNewChatMetadata(chatId, 'Synthetic previous prompt');
     const tasks = [];
     const fanout = createTranscriptEventFanout({
-      chatExists: () => true, schedule: (_id, task) => tasks.push(task), broadcast: () => {}, resendCandidates: () => [],
+      chatExists: () => true, schedule: (_id, task) => tasks.push(task), broadcast: () => {},
+      serverInstanceId: 'instance-1', planRevision: () => 0, auxiliaryRevision: () => 0,
       updateMetadata: (id, viewId, messages) => metadata.updateFromAppendedMessages(id, viewId, messages),
       replaceMetadata: (id, viewId) => metadata.replaceFromTranscriptView(id, viewId, ledger.conversationMessagePages(id)),
     });

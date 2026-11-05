@@ -14,6 +14,7 @@ export interface BodyReadPlan {
 
 export function planBodyRead(store: DisplayStore, request: BodyDependencyRequest): BodyReadPlan {
   const { watermark } = request.certificate;
+  store.requirePrepared(watermark);
   const features = new Map<number, DisplayFeature>();
   const getFeature = (ordinal: number) => {
     const feature = features.get(ordinal) ?? store.get<DisplayFeature>('SELECT * FROM feature WHERE ordinal = ? AND ordinal <= ?', ordinal, watermark);

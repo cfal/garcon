@@ -1,4 +1,4 @@
-import { CHAT_PROCESSING_PHASES, type ChatProcessingPhase } from './chat-types.js';
+import { CHAT_PROCESSING_PHASES, parseChatMessage, type ChatProcessingPhase, type ExitPlanModeToolUseMessage } from './chat-types.js';
 import { parseChatSnapshotChat, type ChatSnapshotChat } from './chat-snapshot.js';
 import { parseChatExecutionControlState, type ChatExecutionControlState } from './chat-execution-control.js';
 import { parseChatTransientFeedSnapshot, type ChatTransientFeedSnapshot } from './chat-transient-feed.js';
@@ -26,6 +26,14 @@ export interface PlanPresentationRequest {
   readonly transcriptViewId: string;
   readonly ordinal?: number;
   readonly afterOrdinal?: number;
+}
+export interface PlanPresentationDetail extends Pick<PlanPresentationRequest, 'serverInstanceId' | 'chatId' | 'transcriptViewId'> { readonly ordinal: number; readonly message: ExitPlanModeToolUseMessage }
+export function parsePlanPresentationDetail(value: unknown): PlanPresentationDetail {
+  const raw = displayRecord(value), message = parseChatMessage(raw.message);
+  if (message?.type !== 'exit-plan-mode-tool-use') throw new TypeError('Invalid plan detail');
+  const identity = parsePlanPresentationRequest(raw);
+  return { serverInstanceId: identity.serverInstanceId, chatId: identity.chatId, transcriptViewId: identity.transcriptViewId,
+    ordinal: displayInteger(raw.ordinal, 1), message };
 }
 export interface DisplayPreparationStatus {
   readonly policyRevision: number;
@@ -84,6 +92,7 @@ export function parseDisplayOpenResponse(value: unknown): DisplayOpenResponse {
   const serverInstanceId = displayString(raw.serverInstanceId), transcriptViewId = displayString(raw.transcriptViewId, 256), sourceHead = displayInteger(raw.sourceHead);
   const transientFeed = parseChatTransientFeedSnapshot(raw.transientFeed), control = parseChatExecutionControlState(raw.control), plan = parsePlanPresentationSnapshot(raw.plan);
   if (!transientFeed || !control || transientFeed.chatId !== chat.id || transientFeed.transcriptViewId !== transcriptViewId
+    || transientFeed.serverInstanceId !== serverInstanceId || control.serverInstanceId !== serverInstanceId
     || plan.chatId !== chat.id || plan.transcriptViewId !== transcriptViewId || plan.serverInstanceId !== serverInstanceId) throw new TypeError('Foreign display snapshot');
   const processingPhase = raw.processingPhase === null ? null : CHAT_PROCESSING_PHASES.find(phase => phase === raw.processingPhase);
   if (processingPhase === undefined) throw new TypeError('Invalid processing phase');
@@ -91,5 +100,8 @@ export function parseDisplayOpenResponse(value: unknown): DisplayOpenResponse {
     const input = displayRecord(value);
     return { clientMessageId: displayString(input.clientMessageId, 256), ordinal: input.ordinal === null ? null : displayInteger(input.ordinal, 1, sourceHead) };
   });
-  return { serverInstanceId, chat, transcriptViewId, sourceHead, transientFeed, control, plan, submissions, processingPhase, display: parseDisplayPreparationStatus(raw.display) };
+  const display = parseDisplayPreparationStatus(raw.display);
+  if (new Set(submissions.map(input => input.clientMessageId)).size !== submissions.length || display.preparedThrough > sourceHead
+    || (plan.latestEnterOrdinal ?? 0) > sourceHead || plan.exits.some(exit => exit.ordinal > sourceHead)) throw new TypeError('Invalid display snapshot frontier');
+  return { serverInstanceId, chat, transcriptViewId, sourceHead, transientFeed, control, plan, submissions, processingPhase, display };
 }

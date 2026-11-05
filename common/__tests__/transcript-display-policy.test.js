@@ -7,6 +7,19 @@ import { bashRevisionInput, compileHiddenBashCommandPatterns } from '../transcri
 const at = '2026-01-01T00:00:00.000Z';
 
 describe('transcript display structural policy', () => {
+  test.each([
+    ['bash-tool-use', 'commands'],
+    ['exec-tool-use', 'commands'],
+    ['read-tool-use', 'fileReads'],
+    ['write-tool-use', 'fileEdits'],
+    ['edit-tool-use', 'fileEdits'],
+    ['mcp-tool-use', 'other'],
+    ['unknown-tool-use', 'other'],
+    ['external-tool-use', 'other'],
+  ])('summarizes %s as %s', (type, category) => {
+    expect(toolSummaryCategory(type)).toBe(category);
+  });
+
   test('hide groups partition known tools without treating every bash-group tool as a command', () => {
     expect(HIDEABLE_TOOL_GROUPS).toHaveLength(7);
     const types = HIDEABLE_TOOL_GROUPS.flatMap(group => group.toolTypes);

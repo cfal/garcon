@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { AssistantMessage, BashToolUseMessage, ErrorMessage, parseChatMessage, parseChatMessages } from '../chat-types.js';
-import { parseTranscriptMessage } from '../chat-view.js';
-import { parseServerWsMessage } from '../ws-events.js';
+import { parseChatHistoryResponse, parseTranscriptMessage } from '../chat-view.js';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 const invalid = [null, undefined, false, 42, 'message', [], {},
@@ -41,12 +40,16 @@ describe('unsupported chat message types', () => {
 
       const first = new AssistantMessage(timestamp, 'Synthetic first message');
       const last = new AssistantMessage(timestamp, 'Synthetic last message');
-      const batch = parseServerWsMessage({
-        type: 'chat-messages',
+      const batch = parseChatHistoryResponse({ chatId: '1700000000000001', limit: 3 }, {
+        historyState: { kind: 'complete' },
         chatId: '1700000000000001',
         transcriptViewId: 'synthetic-view',
-        firstOrdinal: 1,
+        limit: 3,
         lastOrdinal: 3,
+        pageOldestOrdinal: 1,
+        pageNewestOrdinal: 3,
+        nextBeforeOrdinal: null,
+        hasMore: false,
         resendCandidates: [],
         messages: [
           { ordinal: 1, message: first },

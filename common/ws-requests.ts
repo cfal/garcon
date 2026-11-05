@@ -44,45 +44,6 @@ export class ReconnectStateQueryRequest {
   }
 }
 
-export class ChatSubscribeRequest {
-  readonly type = 'chat-subscribe' as const;
-  constructor(
-    public clientRequestId: string | null,
-    public chatId: string | null,
-    public transcriptViewId: string,
-    public afterOrdinal: number,
-    public throughOrdinal?: number,
-  ) { }
-
-  static fromJson(data: Record<string, unknown>): ChatSubscribeRequest | null {
-    if (
-      typeof data.afterOrdinal !== 'number'
-      || !Number.isSafeInteger(data.afterOrdinal)
-      || data.afterOrdinal < 0
-      || typeof data.transcriptViewId !== 'string'
-      || data.transcriptViewId.length === 0
-    ) return null;
-    const throughOrdinal = data.throughOrdinal === undefined
-      ? undefined
-      : data.throughOrdinal;
-    if (
-      throughOrdinal !== undefined
-      && (
-        typeof throughOrdinal !== 'number'
-        || !Number.isSafeInteger(throughOrdinal)
-        || throughOrdinal < data.afterOrdinal
-      )
-    ) return null;
-    return new ChatSubscribeRequest(
-      strOrNull(data.clientRequestId),
-      strOrNull(data.chatId),
-      data.transcriptViewId,
-      data.afterOrdinal,
-      throughOrdinal,
-    );
-  }
-}
-
 export class ChatReloadRequest {
   readonly type = 'chat-reload' as const;
   constructor(
@@ -126,7 +87,6 @@ export class WsPingRequest {
 
 export type ClientWsMessage =
   | ReconnectStateQueryRequest
-  | ChatSubscribeRequest
   | ChatReloadRequest
   | ChatReloadCancelRequest
   | WsPingRequest;
@@ -135,8 +95,6 @@ export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMes
   switch (data.type) {
     case 'reconnect-state-query':
       return ReconnectStateQueryRequest.fromJson(data);
-    case 'chat-subscribe':
-      return ChatSubscribeRequest.fromJson(data);
     case 'chat-reload':
       return ChatReloadRequest.fromJson(data);
     case 'chat-reload-cancel':

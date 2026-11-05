@@ -3,7 +3,7 @@ import { DomainError } from '../../common/domain-error.js';
 import type { DisplayWorkerReply, DisplayWorkerRequest, DisplayWorkerResults, DisplayWorkerTask } from './worker-protocol.js';
 
 interface Pending {
-  id: number; task: DisplayWorkerTask; timeout: number; signal?: AbortSignal;
+  id: number; task: DisplayWorkerTask; timeout: number;
   resolve(value: unknown): void; reject(error: unknown): void;
 }
 
@@ -31,8 +31,11 @@ export class DisplayWorkerClient {
   #timer: ReturnType<typeof setTimeout> | undefined;
   #closed = false;
   #unavailable = false;
+  #totals = { completed: 0, failures: 0, timeouts: 0, durationMs: 0, statements: 0, responseBytes: 0, queuePeak: 0 };
 
   constructor(readonly role: 'builder' | 'reader', readonly options: WorkerOptions = {}) {}
+
+  get metrics() { return { ...this.#totals, queued: this.#queue.length, active: Number(this.#active !== null), retiring: this.#retiring !== null }; }
 
   request<K extends DisplayWorkerTask['kind']>(task: Extract<DisplayWorkerTask, { kind: K }>, signal?: AbortSignal, timeout = 10000): Promise<DisplayWorkerResults[K]> {
     if (this.#closed) return Promise.reject(new Error('Display worker closed'));
@@ -49,11 +52,13 @@ export class DisplayWorkerClient {
           pending.reject(signal?.reason);
         }
       };
-      const pending: Pending = { id: ++this.#nextId, task, timeout, signal,
+      const pending: Pending = { id: ++this.#nextId, task, timeout,
         resolve: value => { signal?.removeEventListener('abort', abort); resolve(value as DisplayWorkerResults[K]); },
         reject: error => { signal?.removeEventListener('abort', abort); reject(error); } };
       signal?.addEventListener('abort', abort, { once: true });
-      this.#queue.push(pending); this.#pump();
+      this.#queue.push(pending);
+      this.#totals.queuePeak = Math.max(this.#totals.queuePeak, this.#queue.length);
+      this.#pump();
     });
   }
 
@@ -77,8 +82,11 @@ export class DisplayWorkerClient {
       return;
     }
     this.#active = pending;
-    this.#timer = setTimeout(() => this.#retire(worker, Object.assign(new Error('Display work timed out'),
-      { code: pending.task.kind === 'bash' ? 'DISPLAY_FILTER_TIMEOUT' : 'DISPLAY_TIMEOUT' })), pending.timeout);
+    this.#timer = setTimeout(() => {
+      this.#totals.timeouts++;
+      this.#retire(worker, Object.assign(new Error('Display work timed out'),
+        { code: pending.task.kind === 'bash' ? 'DISPLAY_FILTER_TIMEOUT' : 'DISPLAY_TIMEOUT' }));
+    }, pending.timeout);
     try { worker.postMessage({ id: pending.id, task: pending.task }); }
     catch { this.#retire(worker, new DomainError('DISPLAY_UNAVAILABLE', 'Transcript display request could not start.', 503, true)); }
   }
@@ -94,8 +102,18 @@ export class DisplayWorkerClient {
         this.#retire(worker, new Error('Invalid display worker reply')); return;
       }
       clearTimeout(this.#timer); this.#active = null;
-      if (reply.ok) pending.resolve(reply.result);
-      else pending.reject(Object.assign(new Error(reply.code), { code: reply.code }));
+      if (reply.ok) {
+        this.#totals.completed++;
+        if (reply.metrics) {
+          this.#totals.durationMs += reply.metrics.durationMs;
+          this.#totals.statements += reply.metrics.statements;
+          this.#totals.responseBytes += reply.metrics.responseBytes;
+        }
+        pending.resolve(reply.result);
+      } else {
+        this.#totals.failures++;
+        pending.reject(Object.assign(new Error(reply.code), { code: reply.code }));
+      }
       this.#pump();
     };
     worker.onerror = () => this.#retire(worker, new DomainError('DISPLAY_UNAVAILABLE', 'Display worker failed', 503, true));

@@ -63,6 +63,12 @@ export class DisplayStore {
     this.db.query(sql).run(...args);
   }
   manifest(): DisplayManifest | null { return this.get<DisplayManifest>('SELECT * FROM manifest WHERE singleton = 1'); }
+  requirePrepared(watermark: number): void {
+    const manifest = this.manifest();
+    if (!manifest || watermark < 0 || watermark > manifest.prepared_through) {
+      throw Object.assign(new Error('Display prefix is not prepared'), { code: 'DISPLAY_PREPARING' });
+    }
+  }
   initialize(chatId: string, viewId: string, serverInstanceId: string): void {
     const existing = this.manifest();
     if (existing) {

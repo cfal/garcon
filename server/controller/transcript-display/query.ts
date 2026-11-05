@@ -21,8 +21,7 @@ export class DisplayQuery {
 
   constructor(readonly store: DisplayStore, readonly profile: DisplayProfile, readonly watermark: number,
     readonly cuts: readonly DisplayCut[], readonly useBashPostings: boolean) {
-    const manifest = store.manifest();
-    if (!manifest || watermark > manifest.prepared_through || watermark < 0) throw new Error('Display prefix is not prepared');
+    store.requirePrepared(watermark);
     if (useBashPostings && !profile.hiddenToolGroups.includes('bash')) {
       const revision = store.get<{ status: string; prepared_through: number }>('SELECT status, prepared_through FROM bash_revision WHERE revision = ?', profile.bashRevision);
       if (!revision || revision.status === 'pruning' || revision.prepared_through < watermark) {
@@ -138,10 +137,14 @@ export class DisplayQuery {
         items = [...prefix, ...earlier, center, ...later];
       }
     }
-    const interval = items.length ? { after: descriptorBounds(items[0]).after, through: descriptorBounds(items.at(-1)!).through }
-      : request.anchor.kind === 'before' ? { after: 0, through: request.anchor.cursor.boundaryOrdinal - 1 }
-        : request.anchor.kind === 'after' ? { after: request.anchor.cursor.boundaryOrdinal, through: this.watermark }
-          : { after: 0, through: this.watermark };
+    let interval = { after: 0, through: this.watermark };
+    if (items.length) {
+      interval = { after: descriptorBounds(items[0]).after, through: descriptorBounds(items.at(-1)!).through };
+    } else if (request.anchor.kind === 'before') {
+      interval.through = request.anchor.cursor.boundaryOrdinal - 1;
+    } else if (request.anchor.kind === 'after') {
+      interval.after = Math.min(request.anchor.cursor.boundaryOrdinal, this.watermark);
+    }
     const earlier = this.seek(this.classes, 0, interval.after, true);
     const later = this.seek(this.classes, interval.through, this.watermark);
     const tail = this.store.get<{ ordinal: number; content_digest: string | null; combined_digest: string | null }>(
@@ -194,8 +197,9 @@ export class DisplayQuery {
     if (!feature?.message_type) return { kind: 'non-rendered', ordinal, landedOrdinal: null };
     if (this.eligible(ordinal)) return { kind: feature.role === 'member' && this.profile.combine ? 'group-member' : 'visible-row', ordinal, landedOrdinal: ordinal };
     if (feature.message_type === 'tool-result') {
-      const pair = this.store.get<{ use_ordinal: number }>('SELECT use_ordinal FROM tool_pair WHERE result_ordinal = ? AND evidence_ordinal <= ?', ordinal, this.watermark);
+      const pair = this.store.get<{ use_ordinal: number; wrapper_ordinal: number | null }>('SELECT use_ordinal, wrapper_ordinal FROM tool_pair WHERE result_ordinal = ? AND evidence_ordinal <= ?', ordinal, this.watermark);
       if (pair && this.eligible(pair.use_ordinal)) return { kind: 'attached-detail', ordinal, landedOrdinal: pair.use_ordinal };
+      if (pair?.wrapper_ordinal && this.eligible(pair.wrapper_ordinal)) return { kind: 'attached-detail', ordinal, landedOrdinal: pair.wrapper_ordinal };
     }
     return { kind: feature.role === 'hidden' ? 'non-rendered' : 'filtered', ordinal,
       landedOrdinal: this.seek(this.classes, 0, ordinal, true) ?? this.seek(this.classes, ordinal, this.watermark) };
