@@ -1,0 +1,51 @@
+# garcon
+
+> A self-hosted, browser-based visual workspace for running and coordinating coding agents like Claude Code, Codex, and OpenCode, from prompt through review to commit.
+
+Runs on Bun with git and a modern browser; the server starts at http://127.0.0.1:8080 with account setup at /setup, and an official multi-platform container image is published for every commit on main. It orchestrates chats, terminals, files, Git, and pull request commands on the host, supports direct API providers plus Ollama and OpenRouter presets, and includes a CLI that drives visible chats on a running server. Documentation covers quick start, Docker usage, agent setup, delegation, boards, canvases, and usage costing.
+
+## Docs
+
+- [garcon README](https://raw.githubusercontent.com/cfal/garcon/main/README.md): Overview of Garcon, a self-hosted visual workspace for coding agents, with quick start steps and host requirements.
+- [Usage](https://raw.githubusercontent.com/cfal/garcon/main/docs/usage.md): Token usage and estimated API cost per executor over 7, 30, or 90 days, including data flow from Claude and Codex transcripts.
+- [Garcon CLI And Server](https://raw.githubusercontent.com/cfal/garcon/main/docs/cli.md): Running the Garcon CLI and server, with configuration options and environment variables like GARCON_PORT and GARCON_BASE_PATH.
+- [Archive Undo](https://raw.githubusercontent.com/cfal/garcon/main/docs/archive-undo.md): Temporary Undo action for confirmed chat archives, using the PUT /api/v1/chats/archive desired-state contract and restore behavior.
+- [Desktop split-chat performance investigation](https://raw.githubusercontent.com/cfal/garcon/main/docs/desktop-split-chat-performance.md): Investigation of split-chat performance, replacing reactive Svelte arrays with $state.raw and lazy derivations, including baseline reproduction.
+- [Docker](https://raw.githubusercontent.com/cfal/garcon/main/docs/docker.md): Running the official ghcr.io/cfal/garcon container image via docker-compose, image tags, and building from source with custom UID and GID.
+- [Server Structure And Executor Terminology](https://raw.githubusercontent.com/cfal/garcon/main/docs/file-structure.md): Server layout, executor terminology, and the renamed APIs like ExecutionRuntime, with no compatibility aliases.
+- [Inline chat queue](https://raw.githubusercontent.com/cfal/garcon/main/docs/inline-chat-queue-design.md): Design of the queued message list above the composer: drag ordering, expansion, Steer, editing drawer, and pause controls.
+- [Local Models in Garcon](https://raw.githubusercontent.com/cfal/garcon/main/docs/local-models.md): Running local models via Ollama and other OpenAI- or Anthropic-compatible servers, with provider setup steps and prerequisites.
+- [Provider Automatic Compaction Rows](https://raw.githubusercontent.com/cfal/garcon/main/docs/provider-compaction-rows-design.md): Design for showing automatic context compaction rows from Claude, OpenCode, and Pi using the existing CompactionMessage contract.
+- [Custom Providers On Executors](https://raw.githubusercontent.com/cfal/garcon/main/docs/providers.md): Executor-scoped custom provider profiles with controller-owned configuration, credential storage, and explicit shared-deletion acknowledgement.
+- [Pull Request Reviews](https://raw.githubusercontent.com/cfal/garcon/main/docs/pull-request-reviews.md): Reviewing GitHub pull requests as chats: connecting repositories via gh, scheduled scans, the global inbox, and Settings → GitHub management.
+- [Robustness residuals after PR #791](https://raw.githubusercontent.com/cfal/garcon/main/docs/robustness-residuals-design.md): Evidence and decisions for the six residual items from PR #791's review, including the responsiveness limit raised from 100 ms to 200…
+- [Snippets in scheduled prompts](https://raw.githubusercontent.com/cfal/garcon/main/docs/scheduled-prompt-snippets.md): Task names, custom chat title templates with `{{chat_id}}` and date tokens, and inserting snippets with the `;;` trigger in scheduled prompts.
+- [Scheduled prompts](https://raw.githubusercontent.com/cfal/garcon/main/docs/scheduled-prompts.md): Pausing and resuming scheduled prompts, persistence across restarts, resume and overdue behavior, the enablement API, and CLI management.
+- [Shell Commands And Notes In Chat](https://raw.githubusercontent.com/cfal/garcon/main/docs/shell.md): Running Sh, Bash, Zsh, or Fish commands on the selected executor, plus plain-text and sanitized Markdown notes saved without launching a process.
+- [Startup CPU and Notifications](https://raw.githubusercontent.com/cfal/garcon/main/docs/startup-cpu-and-notifications.md): Diagnosis of startup CPU from empty queue drains and repeated ledger reads, plus the changes separating ownership cleanup from executor readiness.
+- [Transcript Ledger V5 Conformance Test Suite](https://raw.githubusercontent.com/cfal/garcon/main/docs/transcript-ledger-v5-cts.md): Conformance test suite for Transcript Ledger V5, with catalog revisions and PR anchors for compaction, export, preambles, and receipt rules.
+- [Garcon Transcript Ledger V5: Core-Owned Append-Only Authority](https://raw.githubusercontent.com/cfal/garcon/main/docs/transcript-ledger-v5-design.md): Confirmed /clear as a core-owned append-only view replacement, its admission limits, atomic promotion, and paced startup repair.
+- [Web font optimization](https://raw.githubusercontent.com/cfal/garcon/main/docs/web-fonts.md): Hand-subset Departure and JetBrains Mono faces, why Inter stays unmodified, source inventories, and the usage fidelity budget.
+
+## Brand
+
+- [Garcon brand mark](https://raw.githubusercontent.com/cfal/garcon/main/docs/brand/README.md): Fork Tail brand mark meaning, Forest/Carbon colors, sizing and usage rules, and repository icon application.
+
+## Executor
+
+- [CLI Access Through Executors](https://raw.githubusercontent.com/cfal/garcon/main/docs/executor/cli.md): Reusing the controller-to-worker Noise WebSocket for reverse-direction CLI requests, loopback gateway, and credential handling.
+- [Executors In The App](https://raw.githubusercontent.com/cfal/garcon/main/docs/executor/app-integration.md): Historical proposal for executor, agent, and destination selection in the composer, with superseded transport and UI details.
+- [Files On Executors](https://raw.githubusercontent.com/cfal/garcon/main/docs/executor/files.md): Bounded inline RPC file service over executor Noise lanes: browsing, directory creation, reads, revisions, and saves.
+- [Git On Executors](https://raw.githubusercontent.com/cfal/garcon/main/docs/executor/git.md): Typed Git and GitHub services working across Local and remote executors: status, staging, branches, blame, stashes, remotes, worktrees, pull-request review, and commit-message…
+- [Executor Interfaces](https://raw.githubusercontent.com/cfal/garcon/main/docs/executor/interface.md): Historical first-stage design for the Executor Interfaces boundary: single-executor configuration, transcript-ledger-v5 execution state, and superseded transport behavior.
+- [Terminals On Executors](https://raw.githubusercontent.com/cfal/garcon/main/docs/executor/terminal.md): Terminal contracts on Local and remote executors: PTY lifetime, replay, session limits, Noise WebSocket sharing, and truncated output-tail recovery.
+- [Executor Transport](https://raw.githubusercontent.com/cfal/garcon/main/docs/executor/transport.md): Current remote executor transport: Noise-encrypted primary and bulk WebSocket lanes, TLS requirements, version handshake binding, and reconnection delays.
+- [Executor UI And Ticket Defaults](https://raw.githubusercontent.com/cfal/garcon/main/docs/executor/ui-and-ticket-defaults.md): Implemented executor defaults: the shared executor selector UI, executor-scoped directory and model choices, and ticket project resolution for New Chat and Scheduled…
+
+## Screenshots
+
+- [Inline chat queue captures](https://raw.githubusercontent.com/cfal/garcon/main/docs/screenshots/inline-chat-queue/README.md): Committed screenshots of the desktop and mobile inline chat queue: compact rows, expanded messages, keyboard reordering, menus, and editors.
+
+## Optional
+
+- [Contributing](https://raw.githubusercontent.com/cfal/garcon/main/CONTRIBUTING.md): How to fork and branch, run local validation with bun, follow pull request guidelines, and keep Svelte 5 code quality.
