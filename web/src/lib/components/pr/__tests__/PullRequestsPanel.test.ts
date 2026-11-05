@@ -240,6 +240,17 @@ describe('PullRequestsPanel', () => {
 			};
 		}
 
+		function refreshedSnapshot(
+			revision: number,
+			metadata: Partial<PullRequestSummary>,
+		): PullRequestReviewsSnapshot {
+			return {
+				...snapshot,
+				revision,
+				inbox: [{ ...snapshot.inbox[0], pull: { ...snapshot.inbox[0].pull, ...metadata } }],
+			};
+		}
+
 		it.each(['head', 'executor', 'project', 'repository', 'host'])(
 			'discards mounted detail and fences a pending metadata reply when %s changes',
 			async (change) => {
@@ -257,16 +268,7 @@ describe('PullRequestsPanel', () => {
 				await waitFor(() =>
 					expect(document.querySelector('[data-git-diff-review-row]')).not.toBeNull(),
 				);
-				const refreshed = {
-					...snapshot,
-					revision: 2,
-					inbox: [
-						{
-							...snapshot.inbox[0],
-							pull: { ...snapshot.inbox[0].pull, updatedAt: '2026-01-02T00:00:00Z' },
-						},
-					],
-				};
+				const refreshed = refreshedSnapshot(2, { updatedAt: '2026-01-02T00:00:00Z' });
 				controller.reviews.apply(refreshed);
 				await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(2));
 				const changed = structuredClone(refreshed);
@@ -334,11 +336,7 @@ describe('PullRequestsPanel', () => {
 					vi.mocked(gitReviewWorker.run).mock.calls.filter(([input]) => input.kind === 'index')
 						.length;
 				expect(indexCalls()).toBe(1);
-				controller.reviews.apply({
-					...snapshot,
-					revision: 2,
-					inbox: [{ ...snapshot.inbox[0], pull: { ...snapshot.inbox[0].pull, ...metadata } }],
-				});
+				controller.reviews.apply(refreshedSnapshot(2, metadata));
 				await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(2));
 				await tick();
 				expect(document.querySelector('[data-git-virtual-diff-root]')).toBe(viewport);
@@ -429,16 +427,7 @@ describe('PullRequestsPanel', () => {
 			await fireEvent.click(screen.getByRole('tab', { name: /Changes/ }));
 			await waitFor(() => expect(gitReviewWorker.run).toHaveBeenCalledOnce());
 			const signal = vi.mocked(gitReviewWorker.run).mock.calls[0][1];
-			controller.reviews.apply({
-				...snapshot,
-				revision: 2,
-				inbox: [
-					{
-						...snapshot.inbox[0],
-						pull: { ...snapshot.inbox[0].pull, updatedAt: '2026-01-02T00:00:00Z' },
-					},
-				],
-			});
+			controller.reviews.apply(refreshedSnapshot(2, { updatedAt: '2026-01-02T00:00:00Z' }));
 			await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(2));
 			await tick();
 			expect(signal?.aborted).toBe(false);

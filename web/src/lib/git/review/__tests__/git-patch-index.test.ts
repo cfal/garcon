@@ -32,6 +32,14 @@ describe('createGitPatchIndex', () => {
 			const split = getGitSplitPatchIndex(original);
 			const wire = structuredClone({ index: original.toData(), split: split.toData() });
 			const restored = restoreGitPatchIndex(patch, wire.index, wire.split);
+			const restoredData = restored.toData();
+			for (const key of Object.keys(wire.index) as (keyof typeof wire.index)[]) {
+				expect(restoredData[key]).toBe(wire.index[key]);
+			}
+			expect(restored.toData()).not.toBe(restoredData);
+			expect(getGitSplitPatchIndex(restored).toData().leftRowIndices).toBe(
+				wire.split.leftRowIndices,
+			);
 			expect(restored.rowCount).toBe(original.rowCount);
 			for (let row = 0; row < original.rowCount; row += 1)
 				expect(restored.rowAt(row)).toEqual(original.rowAt(row));

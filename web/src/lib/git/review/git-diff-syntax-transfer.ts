@@ -1,5 +1,9 @@
 import type { CodeHighlightSegment } from '$lib/highlighting/code-highlight-types.js';
-import type { GitDiffSyntaxAttempt, GitDiffSyntaxSideResult } from './git-diff-syntax.js';
+import type {
+	GitDiffFileSyntaxResult,
+	GitDiffSyntaxAttempt,
+	GitDiffSyntaxSideResult,
+} from './git-diff-syntax.js';
 
 export interface GitDiffSyntaxSideData extends Omit<GitDiffSyntaxSideResult, 'lines'> {
 	text: string;
@@ -14,10 +18,7 @@ export type GitDiffSyntaxTransfer =
 	| Exclude<GitDiffSyntaxAttempt, { status: 'highlighted' }>
 	| {
 			status: 'highlighted';
-			result: Omit<
-				Extract<GitDiffSyntaxAttempt, { status: 'highlighted' }>['result'],
-				'before' | 'after'
-			> & {
+			result: Omit<GitDiffFileSyntaxResult, 'before' | 'after'> & {
 				before: GitDiffSyntaxSideData | null;
 				after: GitDiffSyntaxSideData | null;
 			};

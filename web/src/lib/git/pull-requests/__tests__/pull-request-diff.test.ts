@@ -8,8 +8,8 @@ import type {
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import { GitDiffSyntaxController } from '$lib/git/review/git-diff-syntax-controller.svelte.js';
 
-function document(documentId: string) {
-	const files: GitReviewFileSummary[] = ['a.ts', 'b.ts', 'c.ts'].map((path) => ({
+function document(documentId: string, paths = ['a.ts', 'b.ts', 'c.ts']) {
+	const files: GitReviewFileSummary[] = paths.map((path) => ({
 		path,
 		category: 'normal',
 		isGenerated: false,
@@ -57,6 +57,27 @@ const indexed = (body: GitReviewFilePatchBody): GitReviewFileBody => ({
 });
 
 describe('PR diff demand', () => {
+	it('trims the oldest unpinned bodies while retaining demanded paths', async () => {
+		const paths = Array.from({ length: 130 }, (_, index) => `file-${index}.ts`);
+		const index = vi.fn(async (body: GitReviewFilePatchBody) => indexed(body));
+		const controller = new PullRequestDiffController(index, plainSyntax());
+		controller.open(document('many-files', paths));
+		controller.handleDemand({
+			documentId: 'many-files',
+			kind: 'viewport',
+			filePaths: paths.slice(0, 128),
+		});
+		await vi.waitFor(() => expect(Object.keys(controller.fileBodies)).toHaveLength(128));
+		controller.handleDemand({
+			documentId: 'many-files',
+			kind: 'viewport',
+			filePaths: [paths[0], paths[128], paths[129]],
+		});
+		await vi.waitFor(() => expect(controller.fileBodies[paths[129]]).toBeDefined());
+		expect(Object.keys(controller.fileBodies)).toEqual([paths[0], ...paths.slice(3)]);
+		expect(index).toHaveBeenCalledTimes(130);
+		controller.close();
+	});
 	it('retries only local index failures on refresh without restarting loaded or pending bodies', async () => {
 		const pending = Promise.withResolvers<GitReviewFileBody>();
 		const index = vi.fn(async (body: GitReviewFilePatchBody, _signal?: AbortSignal) =>

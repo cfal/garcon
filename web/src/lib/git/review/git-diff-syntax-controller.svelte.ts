@@ -58,21 +58,9 @@ const DEFAULT_CACHE_LIMITS: GitDiffSyntaxCacheLimits = Object.freeze({
 	segments: 200_000,
 });
 
-type GitDiffSyntaxHighlighterModule = typeof import('./git-review-worker-operations.js');
-
-let highlighterModulePromise: Promise<GitDiffSyntaxHighlighterModule> | null = null;
-
-function loadGitDiffSyntaxHighlighter(): Promise<GitDiffSyntaxHighlighterModule> {
-	highlighterModulePromise ??= import('./git-review-worker-operations.js').catch((error) => {
-		highlighterModulePromise = null;
-		throw error;
-	});
-	return highlighterModulePromise;
-}
-
 const DEFAULT_DEPENDENCIES = {
 	waitForWorkSlot: waitForGitDiffSyntaxWorkSlot,
-	loadHighlighter: loadGitDiffSyntaxHighlighter,
+	loadHighlighter: () => import('./git-review-worker-operations.js'),
 } satisfies GitDiffSyntaxControllerDependencies;
 
 export class GitDiffSyntaxController {

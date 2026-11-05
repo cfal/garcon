@@ -11,6 +11,8 @@ type PullRequestDiffDocument = Pick<
 	'reviewId' | 'documentId' | 'headRefOid' | 'files' | 'fileBodies'
 >;
 
+const MAX_CACHED_BODIES = 128;
+
 export class PullRequestDiffController {
 	fileBodies = $state.raw<Record<string, GitReviewFileBody>>({});
 	loadingBodies = $state.raw<Set<string>>(new Set());
@@ -49,8 +51,7 @@ export class PullRequestDiffController {
 			if (previous !== detail && failedPaths.length > 0) {
 				const next = { ...this.fileBodies };
 				for (const path of failedPaths) delete next[path];
-				this.fileBodies = next;
-				this.syntax.replaceBodies(next);
+				this.replaceBodies(next);
 				this.requestDemanded();
 			}
 			return;
@@ -97,12 +98,15 @@ export class PullRequestDiffController {
 						bodyState: 'error',
 						error: 'Diff exceeds the loaded review budget.',
 					};
-				for (const path of Object.keys(next)) {
-					if (Object.keys(next).length <= 128) break;
-					if (!this.demanded.has(path)) delete next[path];
+				const paths = Object.keys(next);
+				let retainedCount = paths.length;
+				for (const path of paths) {
+					if (retainedCount <= MAX_CACHED_BODIES) break;
+					if (this.demanded.has(path)) continue;
+					delete next[path];
+					retainedCount -= 1;
 				}
-				this.fileBodies = next;
-				this.syntax.replaceBodies(next);
+				this.replaceBodies(next);
 			},
 			onError: () => undefined,
 			onLoadingChange: (paths, loading) => {
@@ -135,6 +139,11 @@ export class PullRequestDiffController {
 		this.fileBodies = {};
 		this.loadingBodies = new Set();
 		this.syntax.close();
+	}
+
+	private replaceBodies(bodies: Record<string, GitReviewFileBody>): void {
+		this.fileBodies = bodies;
+		this.syntax.replaceBodies(bodies);
 	}
 
 	private requestDemanded(): void {

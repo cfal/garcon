@@ -59,7 +59,7 @@
 				files: detail.files,
 				limits: DEFAULT_GIT_REVIEW_DOCUMENT_LIMITS,
 			},
-			visibleFilePaths: detail.files.map((file) => file.path),
+			visibleFilePaths: filePaths,
 			fileBodies: diff.fileBodies,
 			syntaxResults: diff.syntax.results,
 			loadingBodies: diff.loadingBodies,
