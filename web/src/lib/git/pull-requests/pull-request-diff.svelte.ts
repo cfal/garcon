@@ -8,7 +8,7 @@ import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand
 
 type PullRequestDiffDocument = Pick<
 	PullRequestDetail,
-	'reviewId' | 'documentId' | 'files' | 'fileBodies'
+	'reviewId' | 'documentId' | 'headRefOid' | 'files' | 'fileBodies'
 >;
 
 export class PullRequestDiffController {
@@ -18,6 +18,7 @@ export class PullRequestDiffController {
 	private detail: PullRequestDiffDocument | null = null;
 	private scheduler: GitReviewBodyScheduler<GitReviewFileBody> | null = null;
 	private demanded = new Set<string>();
+	private readonly failedIndexBodies = new WeakSet<GitReviewFileBody>();
 
 	constructor(
 		private readonly indexBody = createIndexedGitReviewFileBody,
@@ -32,6 +33,7 @@ export class PullRequestDiffController {
 		const previous = this.detail;
 		if (
 			previous?.reviewId === detail.reviewId &&
+			previous.headRefOid === detail.headRefOid &&
 			previous.files.length === detail.files.length &&
 			previous.files.every(
 				(file, index) =>
@@ -41,6 +43,16 @@ export class PullRequestDiffController {
 		) {
 			// Metadata revisions retain the content document that owns rows and in-flight work.
 			this.detail = detail;
+			const failedPaths = Object.keys(this.fileBodies).filter((path) =>
+				this.failedIndexBodies.has(this.fileBodies[path]),
+			);
+			if (previous !== detail && failedPaths.length > 0) {
+				const next = { ...this.fileBodies };
+				for (const path of failedPaths) delete next[path];
+				this.fileBodies = next;
+				this.syntax.replaceBodies(next);
+				this.requestDemanded();
+			}
 			return;
 		}
 		this.close();
@@ -55,13 +67,15 @@ export class PullRequestDiffController {
 					return await this.indexBody(body, signal);
 				} catch (error) {
 					if (signal.aborted) throw error;
-					return {
+					const failed: GitReviewFileBody = {
 						...body,
 						patchIndex: null,
 						patch: null,
 						bodyState: 'error',
 						error: error instanceof Error ? error.message : 'Diff indexing failed.',
 					};
+					this.failedIndexBodies.add(failed);
+					return failed;
 				}
 			},
 			onResult: (body) => {

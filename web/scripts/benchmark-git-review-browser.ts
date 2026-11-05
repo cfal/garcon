@@ -40,6 +40,8 @@ declare global {
 			color(): Promise<string>;
 			cancelProbe(): Promise<{ status: string; cancellationMs: number }>;
 			openPullRequest(): Promise<void>;
+			beginPullRequestRefresh(): Promise<void>;
+			finishPullRequestRefresh(): Promise<void>;
 			refreshPullRequest(): Promise<void>;
 			unicodeProbe(): Promise<{ expected: string; indexed: string; highlighted: string | null }>;
 		};
@@ -385,11 +387,16 @@ try {
 					rowTop: row.getBoundingClientRect().top,
 				});
 				const before = snapshot();
-				await window.reviewBenchmark.refreshPullRequest();
+				await window.reviewBenchmark.beginPullRequestRefresh();
+				const pending = snapshot();
+				const retainedWhileLoading = row === document.querySelector('[data-git-diff-review-row]');
+				await window.reviewBenchmark.finishPullRequestRefresh();
 				await new Promise(requestAnimationFrame);
 				await new Promise(requestAnimationFrame);
 				return {
 					before,
+					pending,
+					retainedWhileLoading,
 					after: snapshot(),
 					rowRetained: row === document.querySelector('[data-git-diff-review-row]'),
 				};
@@ -397,6 +404,11 @@ try {
 			assert.ok(metadataRefresh.before.selected.length > 0);
 			assert.ok(metadataRefresh.before.scrollTop >= 100000);
 			assert.ok(metadataRefresh.rowRetained, 'Metadata refresh must not remount PR rows');
+			assert.ok(
+				metadataRefresh.retainedWhileLoading,
+				'Pending inbox refresh must not unmount PR rows',
+			);
+			assert.deepEqual(metadataRefresh.pending, metadataRefresh.before);
 			assert.deepEqual(metadataRefresh.after, metadataRefresh.before);
 			await page.screenshot({ path: resolve(output, `${viewport.width}-pr-refresh.png`) });
 			await page.evaluate(() => {

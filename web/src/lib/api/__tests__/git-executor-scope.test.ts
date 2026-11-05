@@ -164,7 +164,13 @@ describe('Git executor response boundaries', () => {
 	});
 
 	it('qualifies PR rendering identities by executor, instance, project, and GitHub repository', async () => {
-		const payload = { ...scope, number: 1, updatedAt: '2026-01-01', fileBodies: {} };
+		const payload = {
+			...scope,
+			number: 1,
+			headRefOid: 'a'.repeat(40),
+			updatedAt: '2026-01-01',
+			fileBodies: {},
+		};
 		fetchMock.mockImplementation(async () => response(payload));
 		const prTarget = { ...target, repository: { host: 'github.com', nameWithOwner: 'acme/app' } };
 		const first = await getPullRequest(prTarget, 1);
@@ -182,5 +188,9 @@ describe('Git executor response boundaries', () => {
 		const refreshed = await getPullRequest(prTarget, 1);
 		expect(refreshed.reviewId).toBe(first.reviewId);
 		expect(refreshed.documentId).not.toBe(first.documentId);
+		fetchMock.mockResolvedValue(response({ ...payload, headRefOid: 'b'.repeat(40) }));
+		const replacedHead = await getPullRequest(prTarget, 1);
+		expect(replacedHead.reviewId).toBe(first.reviewId);
+		expect(replacedHead.documentId).not.toBe(first.documentId);
 	});
 });

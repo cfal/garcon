@@ -2,8 +2,7 @@
 	import { onDestroy, tick } from 'svelte';
 	import { setLocalSettings } from '$lib/context';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
-	import type { PullRequestDetail } from '$lib/api/pull-requests.js';
-	import PullRequestChangesTab from '$lib/components/pr/PullRequestChangesTab.svelte';
+	import PullRequestPanelHarness from './PullRequestPanelHarness.svelte';
 	import {
 		DEFAULT_GIT_REVIEW_DOCUMENT_LIMITS,
 		type GitReviewFileBody,
@@ -24,7 +23,8 @@
 	let mode = $state<'unified' | 'split'>('unified');
 	let documentId = $state('synthetic:0');
 	let demandDriven = $state(false);
-	let pullRequest = $state.raw<PullRequestDetail | null>(null);
+	let pullRequest = $state(false);
+	let pullRequestPanel = $state<ReturnType<typeof PullRequestPanelHarness> | undefined>();
 	let scrollRequest = $state<{ filePath: string; token: number } | null>(null);
 	const review = new PullRequestDiffController();
 	const settings = createLocalSettingsStore();
@@ -55,7 +55,7 @@
 	);
 
 	async function run(count: number, lines: number, split = false, lineLength = 0) {
-		pullRequest = null;
+		pullRequest = false;
 		demandDriven = false;
 		review.close();
 		data = fixture(count, lines, lineLength);
@@ -124,7 +124,7 @@
 		};
 	}
 	async function openReview(count: number, lines: number, split = false) {
-		pullRequest = null;
+		pullRequest = false;
 		data = fixture(count, lines);
 		demandDriven = true;
 		mode = split ? 'split' : 'unified';
@@ -132,6 +132,7 @@
 		review.open({
 			reviewId: documentId,
 			documentId,
+			headRefOid: 'a'.repeat(40),
 			files: data.files,
 			fileBodies: Object.fromEntries(data.bodies.map((body) => [body.path, body])),
 		});
@@ -162,6 +163,7 @@
 				review.open({
 					reviewId: documentId,
 					documentId: `${documentId}:metadata-refresh`,
+					headRefOid: 'a'.repeat(40),
 					files: data.files,
 					fileBodies: Object.fromEntries(data.bodies.map((body) => [body.path, body])),
 				});
@@ -170,43 +172,14 @@
 			},
 			openPullRequest: async () => {
 				review.close();
-				const fixtureData = fixture(1, 12000);
-				pullRequest = {
-					reviewId: 'executor:repository:1',
-					documentId: 'revision:1',
-					number: 1,
-					title: 'Synthetic change',
-					body: '',
-					state: 'open',
-					isDraft: false,
-					author: 'synthetic',
-					headRefName: 'synthetic',
-					baseRefName: 'main',
-					headRefOid: 'a'.repeat(40),
-					additions: 12000,
-					deletions: 0,
-					changedFiles: 1,
-					createdAt: '2026-01-01',
-					updatedAt: '2026-01-01',
-					url: 'https://example.invalid/repository/pull/1',
-					mergeable: 'mergeable',
-					reviewDecision: null,
-					checks: [],
-					threads: [],
-					files: fixtureData.files,
-					fileBodies: Object.fromEntries(fixtureData.bodies.map((body) => [body.path, body])),
-				};
+				pullRequest = true;
 				await tick();
 			},
+			beginPullRequestRefresh: () => pullRequestPanel!.beginRefresh(),
+			finishPullRequestRefresh: () => pullRequestPanel!.finishRefresh(),
 			refreshPullRequest: async () => {
-				if (!pullRequest) throw new Error('No open pull request');
-				pullRequest = {
-					...structuredClone(pullRequest),
-					documentId: `${pullRequest.documentId}:refresh`,
-					updatedAt: '2026-01-02',
-					title: 'Refreshed synthetic change',
-				};
-				await tick();
+				await pullRequestPanel!.beginRefresh();
+				await pullRequestPanel!.finishRefresh();
 			},
 			unicodeProbe: async () => {
 				const input = fixture(1, 1);
@@ -273,7 +246,7 @@
 		/></label
 	>
 	{#if pullRequest}
-		<PullRequestChangesTab detail={pullRequest} />
+		<PullRequestPanelHarness bind:this={pullRequestPanel} />
 	{:else}
 		<GitVirtualDiffViewport
 			layoutIdentity={activeDocumentId}

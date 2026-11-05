@@ -66,6 +66,7 @@ export async function getPullRequest(
 				target.repository.host,
 				target.repository.nameWithOwner,
 				detail.number,
+				detail.headRefOid,
 				detail.updatedAt,
 			]),
 		}),

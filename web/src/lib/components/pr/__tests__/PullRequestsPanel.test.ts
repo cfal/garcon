@@ -1,5 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
+import { getLocalSettings } from '$lib/context';
+import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+import { createGitPatchIndex, getGitSplitPatchIndex } from '$lib/git/review/git-patch-index.js';
+import { gitReviewWorker } from '$lib/git/review/git-review-worker-client.js';
+import { installGitVirtualDiffTestLayout } from '$lib/components/git/__tests__/git-virtual-diff-test-layout.js';
 import PullRequestsPanel from '../PullRequestsPanel.svelte';
 import {
 	PullRequestReviewsStore,
@@ -12,13 +18,18 @@ import {
 	type PullRequestReviewsSnapshot,
 } from '$shared/pull-request-reviews';
 import type { PullRequestSummary } from '$shared/gh';
-import type { PullRequestDetail } from '$lib/api/pull-requests';
+import type { getPullRequest, PullRequestDetail } from '$lib/api/pull-requests';
 import type {
 	getPullRequestReviewRuns,
 	getPullRequestReviewRun,
 } from '$lib/api/pull-request-reviews';
 
 afterEach(cleanup);
+
+vi.mock('$lib/context', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/context')>()),
+	getLocalSettings: vi.fn(),
+}));
 
 const HEAD = 'a'.repeat(40);
 
@@ -119,7 +130,7 @@ const snapshot: PullRequestReviewsSnapshot = {
 function setup(
 	options: {
 		getRuns?: () => Promise<PullRequestReviewRunDetail[]>;
-		getDetail?: () => Promise<PullRequestDetail>;
+		getDetail?: typeof getPullRequest;
 		getPage?: typeof getPullRequestReviewRuns;
 		getRun?: typeof getPullRequestReviewRun;
 		snapshot?: PullRequestReviewsSnapshot;
@@ -166,6 +177,289 @@ function setup(
 }
 
 describe('PullRequestsPanel', () => {
+	describe('detail refresh lifecycle', () => {
+		let settings: ReturnType<typeof createLocalSettingsStore>;
+		beforeEach(() => {
+			installGitVirtualDiffTestLayout({ viewportHeight: 400, width: 800 });
+			settings = createLocalSettingsStore();
+			vi.mocked(getLocalSettings).mockReturnValue(settings);
+			vi.spyOn(gitReviewWorker, 'run').mockImplementation(async (input) => {
+				if (input.kind === 'highlight')
+					return {
+						kind: 'highlight',
+						attempt: { status: 'plain', reason: 'unsupported-language' },
+					};
+				const index = createGitPatchIndex(input.patch, input.renderedRowCount);
+				return {
+					kind: 'index',
+					index: index.toData(),
+					split: getGitSplitPatchIndex(index).toData(),
+				};
+			});
+		});
+		afterEach(() => {
+			cleanup();
+			settings.destroy();
+			vi.restoreAllMocks();
+		});
+
+		function diffDetail(): PullRequestDetail {
+			const patch = `@@ -0,0 +1,3000 @@\n${Array.from({ length: 3000 }, (_, i) => `+const synthetic${i} = true;`).join('\n')}\n`;
+			const file = {
+				path: 'synthetic.ts',
+				category: 'normal' as const,
+				isGenerated: false,
+				isBinary: false,
+				isTooLarge: false,
+				bodyFingerprint: 'synthetic',
+				bodyState: 'unloaded' as const,
+				estimatedRows: 3001,
+				indexStatus: 'M' as const,
+				workTreeStatus: ' ' as const,
+				additions: 3000,
+				deletions: 0,
+			};
+			return {
+				...snapshot.inbox[0].pull,
+				reviewId: 'synthetic:review',
+				documentId: 'revision:1',
+				body: '',
+				mergeable: 'mergeable',
+				checks: [],
+				threads: [],
+				files: [file],
+				fileBodies: {
+					[file.path]: {
+						...file,
+						bodyState: 'loaded',
+						patch,
+						patchBytes: patch.length,
+						renderedRowCount: 3001,
+					},
+				},
+			};
+		}
+
+		it.each(['head', 'executor', 'project', 'repository', 'host'])(
+			'discards mounted detail and fences a pending metadata reply when %s changes',
+			async (change) => {
+				const original = diffDetail();
+				const stale = Promise.withResolvers<PullRequestDetail>();
+				const replacement = Promise.withResolvers<PullRequestDetail>();
+				const getDetail = vi
+					.fn<typeof getPullRequest>()
+					.mockResolvedValueOnce(original)
+					.mockReturnValueOnce(stale.promise)
+					.mockReturnValue(replacement.promise);
+				const { controller } = setup({ getDetail });
+				await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+				await fireEvent.click(screen.getByRole('tab', { name: /Changes/ }));
+				await waitFor(() =>
+					expect(document.querySelector('[data-git-diff-review-row]')).not.toBeNull(),
+				);
+				const refreshed = {
+					...snapshot,
+					revision: 2,
+					inbox: [
+						{
+							...snapshot.inbox[0],
+							pull: { ...snapshot.inbox[0].pull, updatedAt: '2026-01-02T00:00:00Z' },
+						},
+					],
+				};
+				controller.reviews.apply(refreshed);
+				await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(2));
+				const changed = structuredClone(refreshed);
+				changed.revision = 3;
+				if (change === 'head') changed.inbox[0].pull.headRefOid = 'b'.repeat(40);
+				if (change === 'executor')
+					changed.repositories[0].target.executorId = '11111111-1111-4111-8111-111111111111';
+				if (change === 'project') changed.repositories[0].target.projectPath = '/other/app';
+				if (change === 'repository') {
+					changed.repositories[0].nameWithOwner = 'acme/other';
+					changed.repositories[0].url = 'https://github.com/acme/other';
+				}
+				if (change === 'host') changed.repositories[0].url = 'https://git.example.invalid/acme/app';
+				controller.reviews.apply(changed);
+				await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(3));
+				await tick();
+				expect(controller.detail).toBeNull();
+				expect(document.querySelector('[data-git-virtual-diff-root]')).toBeNull();
+				expect(getDetail.mock.calls[1][2]?.signal?.aborted).toBe(true);
+				stale.resolve(original);
+				await tick();
+				expect(controller.detail).toBeNull();
+				replacement.resolve({
+					...original,
+					documentId: 'replacement',
+					headRefOid: changed.inbox[0].pull.headRefOid,
+				});
+				await waitFor(() => expect(controller.detail?.documentId).toBe('replacement'));
+				controller.dispose();
+			},
+		);
+
+		it.each([
+			{ updatedAt: '2026-01-02T00:00:00Z' },
+			{ checksState: 'failing' as const },
+			{ reviewDecision: 'approved' as const },
+		])(
+			'retains mounted deep rows and progress through an inbox metadata refresh: %j',
+			async (metadata) => {
+				const original = diffDetail();
+				const replacement = Promise.withResolvers<PullRequestDetail>();
+				const getDetail = vi
+					.fn<() => Promise<PullRequestDetail>>()
+					.mockResolvedValueOnce(original)
+					.mockReturnValue(replacement.promise);
+				const { controller } = setup({ getDetail });
+				await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+				await fireEvent.click(screen.getByRole('tab', { name: /Changes/ }));
+				await waitFor(() =>
+					expect(document.querySelector('[data-git-diff-review-row]')).not.toBeNull(),
+				);
+				await fireEvent.click(screen.getByRole('button', { name: 'Viewed' }));
+				await fireEvent.click(screen.getByRole('button', { name: /synthetic.ts/ }));
+				const viewport = document.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
+				viewport.scrollTop = 20000;
+				await fireEvent.scroll(viewport);
+				await waitFor(() =>
+					expect(
+						Number(document.querySelector<HTMLElement>('[data-git-virtual-row]')?.dataset.index),
+					).toBeGreaterThan(500),
+				);
+				const row = document.querySelector('[data-git-diff-review-row]');
+				const text = row?.textContent;
+				const indexCalls = () =>
+					vi.mocked(gitReviewWorker.run).mock.calls.filter(([input]) => input.kind === 'index')
+						.length;
+				expect(indexCalls()).toBe(1);
+				controller.reviews.apply({
+					...snapshot,
+					revision: 2,
+					inbox: [{ ...snapshot.inbox[0], pull: { ...snapshot.inbox[0].pull, ...metadata } }],
+				});
+				await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(2));
+				await tick();
+				expect(document.querySelector('[data-git-virtual-diff-root]')).toBe(viewport);
+				expect(document.querySelector('[data-git-diff-review-row]')).toBe(row);
+				expect(viewport.scrollTop).toBe(20000);
+				replacement.resolve({
+					...structuredClone(original),
+					...metadata,
+					documentId: 'revision:2',
+				});
+				await waitFor(() => expect(controller.isDetailLoading).toBe(false));
+				expect(document.querySelector('[data-git-diff-review-row]')).toBe(row);
+				expect(row?.textContent).toBe(text);
+				expect(viewport.scrollTop).toBe(20000);
+				expect(indexCalls()).toBe(1);
+				viewport.scrollTop = 0;
+				await fireEvent.scroll(viewport);
+				await waitFor(() =>
+					expect(screen.getByRole('button', { name: 'Viewed' }).getAttribute('aria-pressed')).toBe(
+						'true',
+					),
+				);
+				expect(
+					screen.getByRole('button', { name: /synthetic.ts/ }).getAttribute('aria-expanded'),
+				).toBe('true');
+				controller.dispose();
+			},
+		);
+
+		it('fences a head replacement learned from live detail before the inbox changes', async () => {
+			const original = diffDetail();
+			const replacement = Promise.withResolvers<PullRequestDetail>();
+			const oldIndex = Promise.withResolvers<Awaited<ReturnType<typeof gitReviewWorker.run>>>();
+			const newIndex = Promise.withResolvers<Awaited<ReturnType<typeof gitReviewWorker.run>>>();
+			vi.mocked(gitReviewWorker.run)
+				.mockReturnValueOnce(oldIndex.promise)
+				.mockReturnValueOnce(newIndex.promise);
+			const getDetail = vi
+				.fn<() => Promise<PullRequestDetail>>()
+				.mockResolvedValueOnce(original)
+				.mockReturnValue(replacement.promise);
+			const { controller } = setup({ getDetail });
+			await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+			await fireEvent.click(screen.getByRole('tab', { name: /Changes/ }));
+			await waitFor(() => expect(gitReviewWorker.run).toHaveBeenCalledOnce());
+			const oldSignal = vi.mocked(gitReviewWorker.run).mock.calls[0][1];
+			const refresh = controller.loadDetail();
+			replacement.resolve({
+				...structuredClone(original),
+				headRefOid: 'b'.repeat(40),
+				documentId: 'revision:head-b',
+			});
+			await refresh;
+			await tick();
+			expect(controller.selectedEntry?.pull.headRefOid).toBe(HEAD);
+			expect(oldSignal?.aborted).toBe(true);
+			await waitFor(() => expect(gitReviewWorker.run).toHaveBeenCalledTimes(2));
+			const index = createGitPatchIndex(original.fileBodies['synthetic.ts'].patch!, 3001);
+			const output = {
+				kind: 'index' as const,
+				index: index.toData(),
+				split: getGitSplitPatchIndex(index).toData(),
+			};
+			oldIndex.resolve(output);
+			await tick();
+			expect(document.querySelector('[data-git-diff-review-row]')).toBeNull();
+			newIndex.resolve(output);
+			await waitFor(() =>
+				expect(document.querySelector('[data-git-diff-review-row]')).not.toBeNull(),
+			);
+			expect(
+				document.querySelector('[data-git-virtual-row]')?.getAttribute('data-git-virtual-row-id'),
+			).toContain('revision:head-b');
+			controller.dispose();
+		});
+
+		it('does not cancel pending indexing while inbox metadata detail is loading', async () => {
+			const original = diffDetail();
+			const replacement = Promise.withResolvers<PullRequestDetail>();
+			const pendingIndex = Promise.withResolvers<Awaited<ReturnType<typeof gitReviewWorker.run>>>();
+			vi.mocked(gitReviewWorker.run).mockReturnValueOnce(pendingIndex.promise);
+			const getDetail = vi
+				.fn<() => Promise<PullRequestDetail>>()
+				.mockResolvedValueOnce(original)
+				.mockReturnValue(replacement.promise);
+			const { controller } = setup({ getDetail });
+			await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+			await fireEvent.click(screen.getByRole('tab', { name: /Changes/ }));
+			await waitFor(() => expect(gitReviewWorker.run).toHaveBeenCalledOnce());
+			const signal = vi.mocked(gitReviewWorker.run).mock.calls[0][1];
+			controller.reviews.apply({
+				...snapshot,
+				revision: 2,
+				inbox: [
+					{
+						...snapshot.inbox[0],
+						pull: { ...snapshot.inbox[0].pull, updatedAt: '2026-01-02T00:00:00Z' },
+					},
+				],
+			});
+			await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(2));
+			await tick();
+			expect(signal?.aborted).toBe(false);
+			replacement.resolve({ ...structuredClone(original), documentId: 'revision:2' });
+			await waitFor(() => expect(controller.isDetailLoading).toBe(false));
+			expect(signal?.aborted).toBe(false);
+			const index = createGitPatchIndex(original.fileBodies['synthetic.ts'].patch!, 3001);
+			pendingIndex.resolve({
+				kind: 'index',
+				index: index.toData(),
+				split: getGitSplitPatchIndex(index).toData(),
+			});
+			await waitFor(() =>
+				expect(document.querySelector('[data-git-diff-review-row]')).not.toBeNull(),
+			);
+			expect(
+				vi.mocked(gitReviewWorker.run).mock.calls.filter(([input]) => input.kind === 'index'),
+			).toHaveLength(1);
+			controller.dispose();
+		});
+	});
 	it('distinguishes repositories on different hosts in the inbox filter', async () => {
 		setup({
 			snapshot: {

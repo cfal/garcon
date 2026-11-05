@@ -38,6 +38,7 @@ export class PullRequestsStore implements PortableSingletonController {
 	#visible = false;
 	#detailController: AbortController | null = null;
 	#detailVersion: string | null = null;
+	#detailIdentity: string | null = null;
 	#runsController: AbortController | null = null;
 	#runController: AbortController | null = null;
 	#runsVersion: number | null = null;
@@ -142,6 +143,7 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.#runController?.abort();
 		this.#detailController = null;
 		this.#detailVersion = null;
+		this.#detailIdentity = null;
 		this.#runsController = null;
 		this.#runController = null;
 		this.#runsVersion = null;
@@ -169,7 +171,6 @@ export class PullRequestsStore implements PortableSingletonController {
 		}
 		if (!this.#visible || !entry) return;
 		if (this.#selectedDetailVersion() !== this.#detailVersion) {
-			this.detail = null;
 			void this.loadDetail();
 		}
 		if (entry.historyRevision !== this.#runsVersion) void this.loadRuns();
@@ -221,6 +222,10 @@ export class PullRequestsStore implements PortableSingletonController {
 		const entry = this.selectedEntry;
 		const repository = this.selectedRepository;
 		if (!entry || !repository) return;
+		const identity = this.#selectedDetailIdentity();
+		// Keeps mounted review state during metadata reads, never across owners or heads.
+		if (identity !== this.#detailIdentity) this.detail = null;
+		this.#detailIdentity = identity;
 		const version = this.#selectedDetailVersion();
 		this.#detailVersion = version;
 		this.#detailController?.abort();
@@ -256,7 +261,7 @@ export class PullRequestsStore implements PortableSingletonController {
 		}
 	}
 
-	#selectedDetailVersion(): string | null {
+	#selectedDetailIdentity(): string | null {
 		const entry = this.selectedEntry;
 		const repository = this.selectedRepository;
 		if (!entry || !repository) return null;
@@ -268,6 +273,15 @@ export class PullRequestsStore implements PortableSingletonController {
 			repository.nameWithOwner,
 			repository.url,
 			entry.pull.headRefOid,
+		]);
+	}
+
+	#selectedDetailVersion(): string | null {
+		const entry = this.selectedEntry;
+		const identity = this.#selectedDetailIdentity();
+		if (!entry || !identity) return null;
+		return JSON.stringify([
+			identity,
 			entry.pull.updatedAt,
 			entry.pull.checksState,
 			entry.pull.reviewDecision,

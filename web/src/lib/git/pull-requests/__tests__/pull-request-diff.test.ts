@@ -35,7 +35,13 @@ function document(documentId: string) {
 			},
 		]),
 	);
-	return { reviewId: 'executor:repository:1', documentId, files, fileBodies };
+	return {
+		reviewId: 'executor:repository:1',
+		documentId,
+		headRefOid: 'a'.repeat(40),
+		files,
+		fileBodies,
+	};
 }
 function plainSyntax() {
 	return new GitDiffSyntaxController({
@@ -51,6 +57,58 @@ const indexed = (body: GitReviewFilePatchBody): GitReviewFileBody => ({
 });
 
 describe('PR diff demand', () => {
+	it('retries only local index failures on refresh without restarting loaded or pending bodies', async () => {
+		const pending = Promise.withResolvers<GitReviewFileBody>();
+		const index = vi.fn(async (body: GitReviewFilePatchBody, _signal?: AbortSignal) =>
+			indexed(body),
+		);
+		index.mockRejectedValueOnce(new Error('Synthetic Worker startup failure'));
+		const controller = new PullRequestDiffController(index, plainSyntax());
+		const original = document('same');
+		controller.open(original);
+		const demand = { documentId: 'same', kind: 'viewport' as const, filePaths: ['a.ts', 'b.ts'] };
+		controller.handleDemand(demand);
+		await vi.waitFor(() => expect(controller.loadingBodies.size).toBe(0));
+		expect(controller.fileBodies['a.ts'].bodyState).toBe('error');
+		const loaded = controller.fileBodies['b.ts'];
+		expect(loaded.patchIndex).not.toBeNull();
+		controller.handleDemand(demand);
+		controller.handleDemand({ ...demand, filePaths: [] });
+		controller.handleDemand(demand);
+		expect(index).toHaveBeenCalledTimes(2);
+		index.mockImplementationOnce(() => pending.promise);
+		controller.handleDemand({ ...demand, filePaths: ['a.ts', 'b.ts', 'c.ts'] });
+		const pendingSignal = index.mock.calls[2][1];
+		controller.open({ ...structuredClone(original), documentId: 'metadata-refresh' });
+		expect(controller.fileBodies['a.ts']).toBeUndefined();
+		expect(controller.fileBodies['b.ts']).toBe(loaded);
+		expect(pendingSignal?.aborted).toBe(false);
+		pending.resolve(indexed(original.fileBodies['c.ts']));
+		await vi.waitFor(() => expect(controller.fileBodies['a.ts'].bodyState).toBe('loaded'));
+		expect(index).toHaveBeenCalledTimes(4);
+		expect(controller.documentId).toBe('same');
+		controller.close();
+	});
+	it('retains terminal server errors across unchanged refreshes', async () => {
+		const index = vi.fn(async (body: GitReviewFilePatchBody) => ({ ...body, patchIndex: null }));
+		const controller = new PullRequestDiffController(index, plainSyntax());
+		const original = document('same');
+		original.fileBodies['a.ts'] = {
+			...original.fileBodies['a.ts'],
+			bodyState: 'error',
+			patch: null,
+			error: 'Unavailable patch',
+		};
+		controller.open(original);
+		controller.handleDemand({ documentId: 'same', kind: 'viewport', filePaths: ['a.ts'] });
+		await vi.waitFor(() => expect(controller.loadingBodies.size).toBe(0));
+		const failed = controller.fileBodies['a.ts'];
+		controller.open({ ...structuredClone(original), documentId: 'metadata-refresh' });
+		controller.handleDemand({ documentId: 'same', kind: 'viewport', filePaths: ['a.ts'] });
+		expect(controller.fileBodies['a.ts']).toBe(failed);
+		expect(index).toHaveBeenCalledOnce();
+		controller.close();
+	});
 	it('preserves in-flight indexing and loaded bodies on an unchanged refresh', async () => {
 		const pending = Promise.withResolvers<GitReviewFileBody>();
 		const index = vi.fn(async (body: GitReviewFilePatchBody, _signal?: AbortSignal) =>
