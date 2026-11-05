@@ -24,7 +24,7 @@ test('remote bridge only requests chooser navigation, without native command per
   expect(bridge).toContain("window.location.assign('garcon-host://switch-server/')");
   expect(bridge).not.toContain('invoke');
   expect(bridge).not.toContain('connect_server');
-  expect(read('../src-tauri/src/host.rs')).toContain('host.request_chooser(generation)');
+  expect(read('../src-tauri/src/host.rs')).toContain('host.request_chooser(Some(id)');
 });
 
 test('server pages retain browser file drag and drop instead of native path events', () => {
@@ -38,7 +38,7 @@ test('desktop chrome hides the window menu without removing recovery accelerator
   expect(chrome).toContain('window.hide_menu()?');
   expect(chrome).toContain('gtk_window.connect_key_press_event');
   expect(chrome).toContain('header.set_show_close_button(true)');
-  expect(chrome).toContain('"Switch Server"');
+  expect(chrome).toContain('"Open Server"');
   for (const owner of ['host.rs', 'lib.rs']) {
     expect(read(`../src-tauri/src/${owner}`)).toContain('chrome::show_initial(');
   }

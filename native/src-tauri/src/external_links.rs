@@ -39,11 +39,8 @@ fn page_destination(
     source: &str,
     target: &str,
 ) -> Option<Url> {
-    if host.pending || !host.accepts(generation) {
-        return None;
-    }
-    let deployment = host.selection.as_ref().ok()?.active.as_ref()?;
-    destination(deployment, source, target)
+    let window = host.windows.get(&generation)?;
+    destination(&window.deployment, source, target)
 }
 
 #[cfg(any(target_os = "linux", test))]
@@ -196,18 +193,24 @@ mod tests {
             "garcon-native-link-generation-{}",
             std::process::id()
         ));
-        let mut selection =
+        let selection =
             crate::selection::ServerSelection::load(directory.join("servers.json")).unwrap();
-        selection.active = Some(Deployment::parse("https://selected.test/garcon/", false).unwrap());
         let mut host = crate::switcher::Switcher::new(Ok(selection));
-        host.generation = 2;
+        host.windows.insert(
+            2,
+            crate::switcher::ServerWindow {
+                deployment: Deployment::parse("https://selected.test/garcon/", false).unwrap(),
+                name: None,
+            },
+        );
         let target = "https://external.example.test/guide";
         assert!(page_destination(&host, 2, SOURCE, target).is_some());
         assert!(page_destination(&host, 1, SOURCE, target).is_none());
         host.pending = true;
-        assert!(page_destination(&host, 2, SOURCE, target).is_none());
+        assert!(page_destination(&host, 2, SOURCE, target).is_some());
         host.pending = false;
-        host.generation = 3;
+        let window = host.windows.remove(&2).unwrap();
+        host.windows.insert(3, window);
         assert!(page_destination(&host, 2, SOURCE, target).is_none());
         assert!(page_destination(&host, 3, SOURCE, target).is_some());
         drop(host);

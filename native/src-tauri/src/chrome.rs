@@ -27,6 +27,8 @@ pub fn show_initial(window: &WebviewWindow) -> tauri::Result<()> {
         use tauri::Manager;
 
         let handle = window.app_handle().clone();
+        let source = crate::switcher::window_id(window.label());
+        let title = window.title()?;
         let window = window.clone();
         let dispatch = window.clone();
         dispatch.run_on_main_thread(move || {
@@ -39,19 +41,23 @@ pub fn show_initial(window: &WebviewWindow) -> tauri::Result<()> {
                 use gtk::glib::Propagation;
 
                 match recovery_shortcut(event.keyval(), event.state()) {
-                    Some(RecoveryShortcut::Switch) => {
-                        crate::host::request_host_chooser(&shortcut_handle, ChooserAction::Switch)
-                    }
-                    Some(RecoveryShortcut::Reload) => {
-                        crate::host::request_host_chooser(&shortcut_handle, ChooserAction::Reload)
-                    }
+                    Some(RecoveryShortcut::Switch) => crate::host::request_host_chooser(
+                        &shortcut_handle,
+                        source,
+                        ChooserAction::Open,
+                    ),
+                    Some(RecoveryShortcut::Reload) => crate::host::request_host_chooser(
+                        &shortcut_handle,
+                        source,
+                        ChooserAction::Reload,
+                    ),
                     Some(RecoveryShortcut::Quit) => shortcut_handle.exit(0),
                     None => return Propagation::Proceed,
                 }
                 Propagation::Stop
             });
             let header = gtk::HeaderBar::new();
-            header.set_title(Some("Garcon"));
+            header.set_title(Some(&title));
             header.set_has_subtitle(false);
             header.set_show_close_button(true);
             header.style_context().add_class("garcon-titlebar");
@@ -61,11 +67,12 @@ pub fn show_initial(window: &WebviewWindow) -> tauri::Result<()> {
                     gtk::IconSize::Menu,
                 );
                 chooser.set_focus_on_click(false);
-                chooser.set_tooltip_text(Some("Switch Server"));
+                chooser.set_tooltip_text(Some("Open Server"));
                 chooser.connect_clicked(move |_| {
                     crate::host::request_host_chooser(
                         &handle,
-                        crate::switcher::ChooserAction::Switch,
+                        source,
+                        crate::switcher::ChooserAction::Open,
                     );
                 });
                 header.pack_start(&chooser);

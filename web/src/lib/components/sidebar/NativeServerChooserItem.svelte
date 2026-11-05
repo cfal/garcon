@@ -23,6 +23,6 @@
 {#if chooser}
 	<DropdownMenuItem onSelect={openChooser}>
 		<Server class="h-3.5 w-3.5" />
-		{failed ? m.native_switch_server_unavailable() : m.native_switch_server()}
+		{failed ? m.native_open_server_unavailable() : m.native_open_server()}
 	</DropdownMenuItem>
 {/if}

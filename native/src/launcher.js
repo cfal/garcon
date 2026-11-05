@@ -1,16 +1,19 @@
 /**
  * @typedef {object} ServerChoices
  * @property {number} generation
- * @property {string[]} recents
+ * @property {{url: string, name: string | null}[]} recents
  * @property {string | null} lastUrl
  * @property {string | null} currentUrl
+ * @property {string | null} currentName
  * @property {boolean} canCancel
  * @property {boolean} pending
- * @property {'switch' | 'reload'} action
+ * @property {'open' | 'reload'} action
  */
 export async function mountLauncher(document, invoke) {
   const form = document.querySelector('#server-form');
   const input = document.querySelector('#server-url');
+  const name = document.querySelector('#server-name');
+  const add = document.querySelector('#add-server');
   const button = form.querySelector('button[type=submit]');
   const error = document.querySelector('#connection-error');
   const recents = document.querySelector('#recent-servers');
@@ -24,6 +27,16 @@ export async function mountLauncher(document, invoke) {
   let ready = false;
   let refreshId = 0;
   let refreshRequested = false;
+
+  function savedName(value) {
+    try {
+      const url = new URL(value.trim());
+      if (!url.pathname.endsWith('/')) url.pathname += '/';
+      return choices?.recents.find(server => server.url === url.href)?.name ?? '';
+    } catch {
+      return '';
+    }
+  }
 
   function setPending(value) {
     pending = value;
@@ -57,23 +70,35 @@ export async function mountLauncher(document, invoke) {
       const result = await invoke('server_choices');
       if (id !== refreshId) return;
       choices = result;
-      input.value = (choices.action === 'reload' ? choices.currentUrl : choices.lastUrl) ?? '';
-      current.textContent = choices.currentUrl ? `Current: ${choices.currentUrl}` : '';
+      const reload = choices.action === 'reload';
+      input.value = (reload ? choices.currentUrl : choices.lastUrl) ?? '';
+      name.value = reload ? (choices.currentName ?? '') : savedName(input.value);
+      input.readOnly = reload;
+      name.readOnly = reload;
+      current.textContent = choices.currentUrl ? `Opened from: ${choices.currentUrl}` : '';
       cancel.hidden = !choices.canCancel;
-      warning.hidden = !choices.currentUrl;
+      warning.hidden = !reload;
       acknowledgement.checked = false;
-      acknowledgement.required = !!choices.currentUrl;
-      button.textContent = choices.action === 'reload' ? 'Reload Server' : choices.currentUrl ? 'Switch Server' : 'Connect';
+      acknowledgement.required = reload;
+      button.textContent = reload ? 'Reload Server' : 'Open Server';
+      recents.hidden = reload;
+      add.hidden = reload;
       recents.replaceChildren();
-      for (const url of choices.recents) {
+      for (const server of choices.recents) {
+        const { url } = server;
         const row = document.createElement('li');
         const select = document.createElement('button');
         select.type = 'button';
-        select.textContent = url;
+        select.textContent = server.name ?? url;
+        if (server.name) {
+          const address = document.createElement('small');
+          address.textContent = url;
+          select.append(address);
+        }
         if (url === choices.currentUrl) select.setAttribute('aria-current', 'true');
         select.addEventListener('click', () => {
           input.value = url;
-          button.textContent = url === choices.currentUrl ? 'Reload Server' : 'Switch Server';
+          name.value = server.name ?? '';
           acknowledgement.checked = false;
           input.focus();
         });
@@ -92,6 +117,7 @@ export async function mountLauncher(document, invoke) {
       ready = !choices.pending;
       setPending(false);
     } catch (cause) {
+      if (id !== refreshId) return;
       error.textContent = typeof cause === 'string' ? cause : 'Unable to read saved server settings. Restart the app to retry.';
     }
   }
@@ -99,20 +125,24 @@ export async function mountLauncher(document, invoke) {
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!ready || pending || !form.reportValidity()) return;
-    await run(() => invoke('connect_server', { url: input.value, generation: choices.generation, acknowledged: acknowledgement.checked }));
+    const attemptedUrl = input.value;
+    const attemptedName = name.value;
+    await run(() => invoke('connect_server', { url: attemptedUrl, name: attemptedName, generation: choices.generation, acknowledged: acknowledgement.checked }));
     if (error.textContent) {
       const message = error.textContent;
-      const attemptedUrl = input.value;
       await refresh();
       input.value = attemptedUrl;
+      name.value = attemptedName;
       error.textContent = message;
     }
   });
 
-  document.querySelector('#add-server').addEventListener('click', () => {
+  input.addEventListener('input', () => { name.value = savedName(input.value); });
+  add.addEventListener('click', () => {
     input.value = '';
+    name.value = '';
     acknowledgement.checked = false;
-    button.textContent = choices.currentUrl ? 'Switch Server' : 'Connect';
+    button.textContent = 'Open Server';
     input.focus();
   });
   cancel.addEventListener('click', () => void run(() => invoke('cancel_chooser', { generation: choices.generation })));

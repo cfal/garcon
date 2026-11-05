@@ -3257,7 +3257,7 @@
 			}
 		}
 	],
-	"native_switch_server": "Switch Server",
-	"native_switch_server_unavailable": "Switch Server unavailable",
+	"native_open_server": "Open Server",
+	"native_open_server_unavailable": "Open Server unavailable",
 	"native_connected_to_server": "Connected to {server}"
 }

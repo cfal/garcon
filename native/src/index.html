@@ -17,12 +17,14 @@
       <form id="server-form">
         <label for="server-url">Server URL</label>
         <input id="server-url" name="server-url" type="url" placeholder="https://garcon.example.com/" required autocapitalize="none" autocomplete="url" spellcheck="false" aria-describedby="connection-error">
+        <label for="server-name">Name (optional)</label>
+        <input id="server-name" name="server-name" type="text" maxlength="120" autocomplete="off" placeholder="Work">
         <p id="connection-error" role="alert"></p>
         <label id="switch-warning" hidden>
           <input id="acknowledged" type="checkbox">
-          I understand that unsent attachments, recent drafts and unsaved editor changes may be lost. Pending requests may still finish. Switching or reloading does not log out or stop server runs.
+          I understand that reloading this window may lose unsent attachments, recent drafts and unsaved editor changes. Pending requests may still finish. Reloading does not log out or stop server runs.
         </label>
-        <button type="submit" disabled>Connect</button>
+        <button type="submit" disabled>Open Server</button>
       </form>
       <button id="cancel" type="button" hidden>Cancel</button>
     </main>

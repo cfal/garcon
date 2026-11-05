@@ -52,10 +52,10 @@ pub fn run() {
                             return false;
                         };
                         let active = host
-                            .selection
-                            .as_ref()
-                            .ok()
-                            .and_then(|selection| selection.active.as_ref());
+                            .windows
+                            .values()
+                            .next_back()
+                            .map(|window| &window.deployment);
                         platform::main_navigation_allowed(mode, active, url, dev_url.as_ref())
                     })
                     .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
@@ -71,7 +71,7 @@ pub fn run() {
                         api.prevent_close();
                         return;
                     }
-                    if host.remote_label.is_some() {
+                    if mode == platform::ConnectionMode::Switcher && !host.windows.is_empty() {
                         api.prevent_close();
                         let generation = host.generation;
                         drop(host);

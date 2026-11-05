@@ -9,13 +9,20 @@ struct SavedSelection {
     mounts: BTreeMap<String, String>,
     #[serde(default)]
     recents: Option<Vec<String>>,
+    #[serde(default)]
+    names: BTreeMap<String, String>,
+}
+
+#[derive(Serialize)]
+pub struct SavedServer {
+    pub url: String,
+    pub name: Option<String>,
 }
 
 pub struct ServerSelection {
     _lock: fs::File,
     path: PathBuf,
     saved: SavedSelection,
-    pub active: Option<Deployment>,
 }
 
 impl ServerSelection {
@@ -42,7 +49,6 @@ impl ServerSelection {
             _lock: lock,
             path,
             saved,
-            active: None,
         })
     }
 
@@ -55,6 +61,16 @@ impl ServerSelection {
             .recents
             .clone()
             .unwrap_or_else(|| self.saved.last_url.iter().cloned().collect())
+    }
+
+    pub fn saved_servers(&self) -> Vec<SavedServer> {
+        self.recents()
+            .into_iter()
+            .map(|url| SavedServer {
+                name: self.saved.names.get(&url).cloned(),
+                url,
+            })
+            .collect()
     }
 
     pub fn remove_recent(&mut self, url: &str) -> Result<(), String> {
@@ -74,7 +90,22 @@ impl ServerSelection {
         self.persist(candidate)
     }
 
-    pub fn select(&mut self, deployment: Deployment) -> Result<(), String> {
+    pub fn select_named(
+        &mut self,
+        deployment: &Deployment,
+        name: Option<String>,
+    ) -> Result<Option<String>, String> {
+        let name = name
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty());
+        if name
+            .as_ref()
+            .is_some_and(|name| name.chars().count() > 120 || name.chars().any(char::is_control))
+        {
+            return Err(
+                "Use a server name of at most 120 characters without control characters.".into(),
+            );
+        }
         let url = deployment.url();
         let origin = url.origin().ascii_serialization();
         if let Some(mount) = self.saved.mounts.get(&origin) {
@@ -91,14 +122,20 @@ impl ServerSelection {
         let mut recents = self.recents();
         recents.retain(|entry| entry != url.as_str());
         recents.insert(0, url.to_string());
+        let mut names = self.saved.names.clone();
+        if let Some(name) = &name {
+            names.insert(url.to_string(), name.clone());
+        } else {
+            names.remove(url.as_str());
+        }
         let candidate = SavedSelection {
             last_url: Some(url.to_string()),
             mounts,
             recents: Some(recents),
+            names,
         };
         self.persist(candidate)?;
-        self.active = Some(deployment);
-        Ok(())
+        Ok(name)
     }
 
     fn persist(&mut self, candidate: SavedSelection) -> Result<(), String> {
@@ -119,6 +156,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn persists_names_and_allows_clearing_them_without_forgetting_mounts() {
+        let directory =
+            std::env::temp_dir().join(format!("garcon-native-names-{}", std::process::id()));
+        let path = directory.join("servers.json");
+        let deployment = Deployment::parse("https://a.test/mount/", false).unwrap();
+        let mut selection = ServerSelection::load(path.clone()).unwrap();
+        assert_eq!(
+            selection
+                .select_named(&deployment, Some("  Work  ".into()))
+                .unwrap()
+                .as_deref(),
+            Some("Work")
+        );
+        drop(selection);
+        let mut selection = ServerSelection::load(path).unwrap();
+        assert_eq!(selection.saved_servers()[0].name.as_deref(), Some("Work"));
+        for invalid in ["x".repeat(121), "line\nbreak".into()] {
+            assert!(selection.select_named(&deployment, Some(invalid)).is_err());
+            assert_eq!(selection.saved_servers()[0].name.as_deref(), Some("Work"));
+        }
+        selection
+            .select_named(&deployment, Some("  ".into()))
+            .unwrap();
+        assert!(selection.saved_servers()[0].name.is_none());
+        assert!(
+            selection
+                .select_named(
+                    &Deployment::parse("https://a.test/other/", false).unwrap(),
+                    None
+                )
+                .is_err()
+        );
+        drop(selection);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn removing_a_recent_keeps_its_mount_reservation() {
         let directory =
             std::env::temp_dir().join(format!("garcon-native-recents-{}", std::process::id()));
@@ -130,7 +204,7 @@ mod tests {
             "https://a.test/one/",
         ] {
             selection
-                .select(Deployment::parse(url, false).unwrap())
+                .select_named(&Deployment::parse(url, false).unwrap(), None)
                 .unwrap();
         }
         assert_eq!(
@@ -143,7 +217,10 @@ mod tests {
         assert_eq!(selection.recents(), ["https://b.test/two/"]);
         assert!(
             selection
-                .select(Deployment::parse("https://a.test/other/", false).unwrap())
+                .select_named(
+                    &Deployment::parse("https://a.test/other/", false).unwrap(),
+                    None
+                )
                 .is_err()
         );
         drop(selection);
@@ -167,7 +244,10 @@ mod tests {
         assert!(selection.recents().is_empty());
         assert!(
             selection
-                .select(Deployment::parse("https://a.test/two/", false).unwrap())
+                .select_named(
+                    &Deployment::parse("https://a.test/two/", false).unwrap(),
+                    None
+                )
                 .is_err()
         );
         drop(selection);
@@ -181,24 +261,35 @@ mod tests {
         let path = directory.join("servers.json");
         let mut selection = ServerSelection::load(path.clone()).unwrap();
         selection
-            .select(Deployment::parse("https://a.test/one", false).unwrap())
+            .select_named(
+                &Deployment::parse("https://a.test/one", false).unwrap(),
+                None,
+            )
             .unwrap();
         selection
-            .select(Deployment::parse("https://b.test/two", false).unwrap())
+            .select_named(
+                &Deployment::parse("https://b.test/two", false).unwrap(),
+                None,
+            )
             .unwrap();
         drop(selection);
         let mut reloaded = ServerSelection::load(path).unwrap();
-        assert!(reloaded.active.is_none());
         assert_eq!(reloaded.last_url().as_deref(), Some("https://b.test/two/"));
         assert!(
             reloaded
-                .select(Deployment::parse("https://a.test/other", false).unwrap())
+                .select_named(
+                    &Deployment::parse("https://a.test/other", false).unwrap(),
+                    None
+                )
                 .unwrap_err()
                 .contains("https://a.test/one/")
         );
         assert!(
             reloaded
-                .select(Deployment::parse("https://a.test/one", false).unwrap())
+                .select_named(
+                    &Deployment::parse("https://a.test/one", false).unwrap(),
+                    None
+                )
                 .is_ok()
         );
         drop(reloaded);
@@ -243,16 +334,25 @@ mod tests {
         let mut selection = ServerSelection::load(directory.join("servers.json")).unwrap();
         for index in 0..32 {
             selection
-                .select(Deployment::parse(&format!("https://server-{index}.test/"), false).unwrap())
+                .select_named(
+                    &Deployment::parse(&format!("https://server-{index}.test/"), false).unwrap(),
+                    None,
+                )
                 .unwrap();
         }
         assert!(
             selection
-                .select(Deployment::parse("https://overflow.test/", false).unwrap())
+                .select_named(
+                    &Deployment::parse("https://overflow.test/", false).unwrap(),
+                    None
+                )
                 .is_err()
         );
         selection
-            .select(Deployment::parse("https://server-0.test/", false).unwrap())
+            .select_named(
+                &Deployment::parse("https://server-0.test/", false).unwrap(),
+                None,
+            )
             .unwrap();
         drop(selection);
         fs::remove_dir_all(directory).unwrap();

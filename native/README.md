@@ -46,6 +46,14 @@ connection attempt reserves that origin's mount, even if the server fails to loa
 Correcting an incorrect mount later requires a different hostname or resetting
 all app data, including credentials and drafts.
 
+On desktop, **Open Server** always creates a new window, even for a server that
+is already open. Other windows remain alive with their drafts and connections.
+An optional name is saved with the URL and used as `<name> — Garcon` in the new
+window's title. Without a name, the title is `<hostname> — Garcon`, excluding
+the port and mount path. Removing a name restores the hostname fallback.
+Windows for the same origin share login and browser storage, like browser tabs;
+they are not separate accounts. Different origins retain their own storage.
+
 Release builds require HTTPS with valid certificates. Debug builds additionally
 allow HTTP on `localhost`, `127.0.0.1`, and `::1` for local tests. A phone's
 localhost is the phone, not the development machine. No release ATS exception,
@@ -137,7 +145,7 @@ sites. The smoke runner honors `CARGO_TARGET_DIR`, `GARCON_NATIVE_SMOKE_TMP`, an
 file-input assignment, multipart upload bytes, shared clipboard copy/paste, focus,
 OS-level Ctrl+C/Ctrl+Z delivery to page key handlers, and unchanged socket count,
 both initially and after replacing a remote window.
-Switch/cancel/reload shortcuts are exercised across eight further replacements
+Open/cancel/reload shortcuts are exercised across eight further reloads
 for each root/mount fixture, requiring a fresh chooser-open event rather than
 accepting stale hidden-page controls. Linux registers its recovery handlers on
 each native window without installing a menubar; hiding GTK menus also disables
@@ -180,15 +188,17 @@ keyboard/safe areas, TLS failures, and server upgrades on those platforms.
   and mount. Linux supports the external links described below. Other platforms,
   same-window external navigation, and provider-login popups remain blocked.
   Mobile popup behavior still requires device validation.
-- The sidebar menu's **Switch Server** action opens the host-owned chooser. The
+- The sidebar menu's **Open Server** action opens the host-owned chooser. The
   Linux in-window menubar is removed and the Windows menubar is hidden. Existing host recovery accelerators
   (`Cmd/Ctrl+Shift+S` for the chooser and `Cmd/Ctrl+R` for reload) remain active even
   when the page is unavailable; these are not previous/next-server shortcuts.
   macOS keeps its standard app/edit menu, with recovery actions under **Garcon**
-  rather than a separate **Server** menu. Confirming either action still requires
-  acknowledging possible unsaved-state loss. Cancel preserves the current page.
+  rather than a separate **Server** menu. Only **Reload Server** requires
+  acknowledging possible unsaved-state loss; opening another window does not.
+  Cancel preserves all pages and returns focus to the requesting window when it
+  is still open, otherwise to another server window.
 - Linux uses a compact, theme-aware GTK titlebar with native window controls and
-  a **Switch Server** icon for pointer-accessible recovery. Windows/macOS retain
+  an **Open Server** icon for pointer-accessible recovery. Windows/macOS retain
   their OS titlebars; no frameless window or remote window-control commands are
   introduced. Titlebar dimensions still respect the system theme and scaling.
 - After its first authenticated WebSocket connection, a native-capable web page
@@ -200,11 +210,14 @@ keyboard/safe areas, TLS failures, and server upgrades on those platforms.
   It receives no chooser adapter or additional native permissions. It has no new
   in-session chooser/reload recovery; failed loads retain the baseline exit and
   reopen recovery path. Android connections remain disabled independently.
-- Confirming destroys the outgoing remote window before creating its replacement.
-  There is one local chooser and at most one remote window, never a retained page
-  per server. A failed load retains host recovery; failed window creation retains
-  the chooser. Switching does not log out or send Stop. Previously admitted server
-  requests may still complete; switching is not rollback or proof of cancellation.
+- Opening never closes or replaces another server window. Each window has its own
+  deployment-bound navigation and external-link checks. Closing one window leaves
+  the others running; closing the last server window returns to the chooser.
+  Closing the chooser cancels it when server windows remain, otherwise exits.
+  Explicit reload replaces only its requesting window after confirmation. A failed
+  load retains host recovery; failed creation retains the chooser. Opening or
+  closing windows does not log out or send Stop. Previously admitted server
+  requests may still complete; closing is not rollback or proof of cancellation.
 - The host remembers one mount per origin, across selections and restarts, with
   a maximum of 32 origins. A sibling mount is rejected because Garcon's auth,
   drafts, and caches share browser-origin storage. Different origins remain
@@ -240,9 +253,9 @@ returns no settings, and grants no Tauri IPC permission.
 
 The host-injected implementation requests the exact navigation sentinel
 `garcon-host://switch-server/`. A Rust `on_navigation` closure captures the
-remote window's generation, rejects stale generations, opens the local chooser
+remote window's identity, rejects retired windows, opens the local chooser
 idempotently, and returns `false` so the remote document does not navigate.
-All other navigations are checked against that generation's deployment. The
+All other navigations are checked against that window's deployment. The
 callback identifies the owning WebView, not an independently authenticated
 initiating frame; even a subframe provoking this sentinel can only request the
 same non-destructive chooser. No saved data or navigation authority is returned.
@@ -259,10 +272,18 @@ source inspection alone does not establish cross-platform interaction support.
 Local-only host commands:
 
 - `server_choices()` returns `{ generation, recents, lastUrl, currentUrl,
-  canCancel, pending, action: "switch" | "reload" }`.
-- `connect_server({ url, generation, acknowledged })` validates URL/mount and
-  acknowledgement, durably reserves the mount, fences the old generation, waits
-  for destruction, and creates the replacement. A stale generation is rejected.
+  currentName, canCancel, pending, action: "open" | "reload" }`. Each recent is
+  `{ url, name }`; `currentUrl` identifies the chooser's requesting window, not a
+  global active server. The generation fences chooser snapshots independently of
+  each server window's lifetime.
+- `connect_server({ url, name, generation, acknowledged })` validates URL/mount and
+  the optional name, durably reserves the mount and saves the name, then creates a
+  new window. Names are trimmed, limited to 120 characters and reject controls.
+  A stale generation is rejected. In reload mode, only the captured requesting
+  window's URL is accepted; acknowledgement is required before retiring and
+  replacing that window. Reload preserves its title without changing saved names
+  or recents. Closing the source invalidates the reload snapshot,
+  rather than redirecting reload to another window.
 - `cancel_chooser({ generation })` hides only the chooser and focuses the existing
   page. It never reloads, logs out, clears storage, or sends Stop.
 - `remove_recent({ url, generation })` removes only the recent-list entry.
@@ -270,8 +291,9 @@ Local-only host commands:
 Draft audit: chat text is debounced to origin-local storage (250 ms); attachments
 are memory-only. File recovery checkpoints use asynchronous IndexedDB writes
 (750 ms idle, 5 s maximum interval), may fail, and do not cover every pending edit.
-Both switch and reload therefore require a host-owned loss acknowledgement,
-including menu-initiated recovery when page JavaScript is unavailable. No async
+Reload therefore requires a host-owned loss acknowledgement, including
+menu-initiated recovery when page JavaScript is unavailable. Opening a server
+does not destroy any existing document and needs no loss acknowledgement. No async
 unload flush is treated as a durability guarantee. The existing storage scopes
 and executor-qualified recovery identities are unchanged.
 
@@ -280,7 +302,7 @@ the remote-navigation sentinel with an equally narrow host request if its local
 origin model requires it, and independently partition credentials/drafts by
 deployment. Do not grant its UI the launcher's `connect_server` permission.
 The chooser adapter owns only chooser requests. Linux external-link handling is
-installed independently on each replacement remote WebView and does not extend
+installed independently on each remote WebView and does not extend
 the injected capability.
 
 ## Linux External Links
@@ -313,8 +335,8 @@ user-gesture flag. Other OS adapters and same-window links remain fail-closed ra
 than infer user intent from remote JavaScript. The Linux hook observes only
 `NewWindowAction`; the existing document-navigation guard and popup denial remain
 installed. Every replacement remote WebView receives the hook. Its captured
-transition generation and the active deployment are checked before dispatch;
-requests from a retiring page or while switching are rejected.
+window identity and its deployment are checked before dispatch; requests from a
+retired page are rejected. Opening another window does not revoke a live page.
 
 ## Later Work
 

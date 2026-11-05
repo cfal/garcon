@@ -49,6 +49,9 @@ const stderr = new Response(driver.stderr).text();
 const endpoint = `http://127.0.0.1:${port}`;
 let session;
 let chooserHandle;
+let remoteTitle;
+let beforeOpen = [];
+let reloading = false;
 
 async function webdriver(path, body, method = body === undefined ? 'GET' : 'POST') {
   const response = await fetch(endpoint + path, {
@@ -90,22 +93,40 @@ async function closeApp() {
   session = undefined;
 }
 
-async function connect(url) {
-  console.log(`Connecting synthetic server: ${url}`);
-  await evaluate('document.querySelector("#server-url").value = arguments[0]; document.querySelector("#acknowledged").checked = true; document.querySelector("form").requestSubmit();', [url]);
+async function closeRemote(handle, title = remoteTitle) {
+  const window = await focusNativeRemote(title);
+  const raise = Bun.spawn(['xdotool', 'windowraise', window], { stdout: 'ignore', stderr: 'inherit' });
+  assert.equal(await raise.exited, 0, 'native window must be raised before pointer input');
+  const geometry = Bun.spawn(['xdotool', 'getwindowgeometry', '--shell', window], { stdout: 'pipe', stderr: 'inherit' });
+  const width = Number((await new Response(geometry.stdout).text()).match(/^WIDTH=(\d+)$/m)?.[1]);
+  assert.equal(await geometry.exited, 0);
+  assert.ok(width > 100);
+  console.log('Closing native window', { title, width, handle });
+  const click = Bun.spawn(['xdotool', 'mousemove', '--window', window, String(width - 20), '16', 'click', '1'], { stdout: 'ignore', stderr: 'inherit' });
+  assert.equal(await click.exited, 0, 'native titlebar close button');
+  await until(async () => !(await webdriver(`/session/${session}/window/handles`)).includes(handle), 'closed server window');
 }
 
-async function replacementRemote(previous) {
-  console.log('Waiting for replacement remote window');
+async function connect(url, name = '') {
+  console.log(`Connecting synthetic server: ${url}`);
+  beforeOpen = await webdriver(`/session/${session}/window/handles`);
+  reloading = await evaluate('return document.querySelector("#server-form button").textContent === "Reload Server"');
+  remoteTitle = `${name.trim() || new URL(url).hostname} \u2014 Garcon`;
+  await evaluate('document.querySelector("#server-url").value = arguments[0]; document.querySelector("#server-name").value = arguments[1]; document.querySelector("#acknowledged").checked = true; document.querySelector("form").requestSubmit();', [url, name]);
+}
+
+async function openedRemote() {
+  console.log('Waiting for a new remote window');
   let current;
   await until(async () => {
     const handles = await webdriver(`/session/${session}/window/handles`);
-    const remote = handles.find(handle => handle !== chooserHandle && handle !== previous);
+    const remote = handles.find(handle => !beforeOpen.includes(handle));
     if (!remote) return false;
-    assert.equal(handles.length, 2, 'exactly one host chooser and one remote page');
+    assert.equal(handles.length, beforeOpen.length + (reloading ? 0 : 1), 'only reload may replace a server window');
+    if (!reloading) assert.ok(beforeOpen.every(handle => handles.includes(handle)), 'opening must keep every existing window');
     current = remote;
     return true;
-  }, 'single replacement remote window');
+  }, 'new remote window');
   await until(() => evaluate('return !document.querySelector("#server-form button").disabled'), 'completed host transition');
   return current;
 }
@@ -118,18 +139,19 @@ async function openChooser(remote) {
 async function hostShortcutChooser(key, shift = false) {
   const opened = await evaluate('return window.chooserOpenCount');
   await nativeRemoteKey(shift ? `ctrl+shift+${key}` : `ctrl+${key}`);
-  const action = key === 'r' ? 'Reload Server' : 'Switch Server';
+  const action = key === 'r' ? 'Reload Server' : 'Open Server';
   await until(() => evaluate(`return window.chooserOpenCount > arguments[1]
     && !document.querySelector('#cancel').hidden
     && !document.querySelector('#server-form button').disabled
     && document.querySelector('#server-form button').textContent === arguments[0]`, [action, opened]), 'native recovery chooser');
 }
 
-async function focusNativeRemote() {
-  const visible = Bun.spawn(['xdotool', 'search', '--onlyvisible', '--name', '^Garcon$'], { stdout: 'pipe', stderr: 'pipe' });
+async function focusNativeRemote(title = remoteTitle) {
+  const pattern = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const visible = Bun.spawn(['xdotool', 'search', '--onlyvisible', '--name', `^${pattern}$`], { stdout: 'pipe', stderr: 'pipe' });
   const windows = (await new Response(visible.stdout).text()).trim().split('\n');
   assert.equal(await visible.exited, 0, 'native window must be visible');
-  assert.equal(windows.length, 1, 'only the remote window is visible before a native recovery request');
+  assert.equal(windows.length, 1, 'the named test window must be unambiguous');
   const focus = Bun.spawn(['xdotool', 'windowfocus', '--sync', windows[0]], { stdout: 'ignore', stderr: 'inherit' });
   assert.equal(await focus.exited, 0, 'native remote window focus');
   return windows[0];
@@ -166,11 +188,11 @@ async function settleChooserPaint() {
       document.fonts.ready.then(() => requestAnimationFrame(() => requestAnimationFrame(() => done(null))));`,
     args: [],
   });
-  assert.equal(await evaluate(`return ['#switch-warning', '#cancel'].every(selector => {
+  assert.equal(await evaluate(`return ['#server-name', '#cancel'].every(selector => {
     const element = document.querySelector(selector);
     const rect = element.getBoundingClientRect();
     return !element.hidden && rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.bottom <= innerHeight;
-  }) && !document.querySelector('#server-form button').disabled`), true, 'settled warning and Cancel fit in the chooser');
+  }) && document.querySelector('#switch-warning').hidden && !document.querySelector('#server-form button').disabled`), true, 'name and Cancel fit; opening is non-destructive');
 }
 
 async function assertNavigationBlocked(url, currentUrl, remote) {
@@ -196,12 +218,13 @@ async function assertPostNavigationBlocked(url, currentUrl, remote) {
 
 async function assertRemoteWorkflows(remote, handle) {
   const connections = remote.socketConnections();
+  const windowCount = (await webdriver(`/session/${session}/window/handles`)).length;
   await webdriver(`/session/${session}/window`, { handle });
   try {
     await checkWorkflows({
       evaluate: remote.run,
       webdriver: (path, body) => webdriver(`/session/${session}${path}`, body),
-      until, workflows, remoteUrl: remote.url, nativeKey: nativeRemoteKey,
+      until, workflows, remoteUrl: remote.url, nativeKey: nativeRemoteKey, windowCount,
     });
     assert.equal(remote.socketConnections(), connections, 'native workflows must not replace the app socket');
   } finally {
@@ -216,6 +239,7 @@ function fixture(base, outsideUrl) {
   let socketConnections = 0;
   let requests = 0;
   let activeSocket;
+  const sockets = new Map();
   let nextId = 0;
   const waiters = new Map();
   const server = Bun.serve({
@@ -258,8 +282,11 @@ function fixture(base, outsideUrl) {
         </script>`, { headers: { 'Content-Type': 'text/html' } });
     },
     websocket: {
-      open(socket) { activeSocket = socket; socketConnections++; },
-      close(socket) { if (activeSocket === socket) activeSocket = undefined; },
+      open(socket) { activeSocket = socket; sockets.set(++socketConnections, socket); },
+      close(socket) {
+        if (activeSocket === socket) activeSocket = undefined;
+        for (const [id, current] of sockets) if (current === socket) sockets.delete(id);
+      },
       message(_socket, message) {
         const { id, result, error } = JSON.parse(String(message));
         const waiter = waiters.get(id);
@@ -271,22 +298,27 @@ function fixture(base, outsideUrl) {
       },
     },
   });
-  return {
+  const client = {
     url: `http://127.0.0.1:${server.port}${base}/`,
     connected: () => apiReceived && socketReceived && !!activeSocket,
     socketConnections: () => socketConnections,
     requests: () => requests,
-    async run(script, args = []) {
-      await until(() => !!activeSocket, 'synthetic page command socket');
+    page() {
+      const connection = socketConnections;
+      return { ...client, run: (script, args) => client.run(script, args, connection) };
+    },
+    async run(script, args = [], connection) {
+      await until(() => connection ? sockets.has(connection) : !!activeSocket, 'synthetic page command socket');
       const id = ++nextId;
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => { waiters.delete(id); reject(new Error(`Synthetic page timed out: ${script}`)); }, 10_000);
         waiters.set(id, { resolve, reject, timer });
-        activeSocket.send(JSON.stringify({ id, script, args }));
+        (connection ? sockets.get(connection) : activeSocket).send(JSON.stringify({ id, script, args }));
       });
     },
     stop: () => server.stop(true),
   };
+  return client;
 }
 
 async function untrustedTlsFixture() {
@@ -346,10 +378,11 @@ try {
       assert.equal(rendered, null, 'launcher assets must render before capture');
       const screenshot = await webdriver(`/session/${session}/screenshot`);
       await Bun.write(resolve(artifacts, base ? 'launcher-mobile.png' : 'launcher.png'), Buffer.from(screenshot, 'base64'));
-      await connect(remote.url);
+      await connect(remote.url, 'Synthetic A');
       await until(() => remote.connected(), 'host-created remote HTTP and WebSocket');
       console.log('Remote transport connected');
-      const aHandle = await replacementRemote();
+      const aHandle = await openedRemote();
+      const aPage = remote.page();
       await until(() => remote.run('return document.body.dataset.connected === "true"'), 'remote HTTP and WebSocket');
       assert.equal(remote.connected(), true);
       const denied = await remote.run(`
@@ -386,7 +419,7 @@ try {
       }
       await remote.run('window.cancelSentinel = "synthetic-unsaved"; localStorage.setItem("synthetic-auth", "synthetic-a"); document.cookie = "synthetic-session=synthetic-a; path=/";');
       await openChooser(remote);
-      assert.equal(await evaluate('return document.querySelector("#current-server").textContent'), `Current: ${remote.url}`);
+      assert.equal(await evaluate('return document.querySelector("#current-server").textContent'), `Opened from: ${remote.url}`);
       assert.equal(await evaluate('return document.documentElement.scrollWidth <= innerWidth'), true);
       await settleChooserPaint();
       await Bun.write(resolve(artifacts, base ? 'chooser-mobile.png' : 'chooser.png'), Buffer.from(await webdriver(`/session/${session}/screenshot`), 'base64'));
@@ -402,9 +435,12 @@ try {
       assert.equal(await remote.run('return document.activeElement.id'), focusBeforeTitlebar);
       assert.equal(await remote.run('return window.cancelSentinel'), 'synthetic-unsaved', 'titlebar chooser cancel retains the page');
       await nativeTitlebarChooser();
-      await connect(outside.url);
-      const bHandle = await replacementRemote(aHandle);
+      await connect(outside.url, 'Synthetic B');
+      let bHandle = await openedRemote();
       await until(() => outside.connected(), 'server B');
+      assert.equal(await aPage.run('return window.cancelSentinel'), 'synthetic-unsaved', 'opening B preserves A');
+      assert.equal(await aPage.run('return location.href'), remote.url, 'A retains its own navigation boundary');
+      await assertNavigationBlocked(outside.url, remote.url, aPage);
       assert.equal(await outside.run('return localStorage.getItem("synthetic-auth")'), null, 'origins must not share credentials');
       await openChooser(outside);
       const stale = await webdriver(`/session/${session}/execute/async`, {
@@ -413,12 +449,31 @@ try {
         args: [remote.url],
       });
       assert.equal(stale, true, 'stale chooser submissions must be rejected');
-      await connect(remote.url);
-      const beforeReload = await replacementRemote(bHandle);
-      await until(() => remote.connected(), 'server A restored');
+      const beforeDuplicate = remote.socketConnections();
+      await connect(remote.url, 'Synthetic Duplicate');
+      const beforeReload = await openedRemote();
+      await until(() => remote.socketConnections() > beforeDuplicate && remote.connected(), 'independent duplicate server A');
       assert.equal(await remote.run('return localStorage.getItem("synthetic-auth")'), 'synthetic-a');
       assert.equal(await remote.run('return document.cookie.includes("synthetic-session=synthetic-a")'), true);
-      assert.equal(await remote.run('return typeof window.cancelSentinel'), 'undefined', 'old remote page must not remain alive');
+      assert.equal(await remote.run('return typeof window.cancelSentinel'), 'undefined', 'duplicate opens a fresh document');
+      assert.equal(await aPage.run('return window.cancelSentinel'), 'synthetic-unsaved', 'duplicate leaves the original page alive');
+      await remote.run('window.duplicateSentinel = "duplicate-unsaved";');
+      const bConnections = outside.socketConnections();
+      remoteTitle = 'Synthetic B \u2014 Garcon';
+      await hostShortcutChooser('r');
+      await connect(outside.url, 'Synthetic B');
+      bHandle = await openedRemote();
+      await until(() => outside.socketConnections() > bConnections && outside.connected(), 'reload B while both A windows remain alive');
+      assert.equal(await aPage.run('return window.cancelSentinel'), 'synthetic-unsaved', 'B reload preserves original A');
+      assert.equal(await remote.run('return window.duplicateSentinel'), 'duplicate-unsaved', 'B reload preserves duplicate A');
+      remoteTitle = 'Synthetic Duplicate \u2014 Garcon';
+      await closeRemote(bHandle, 'Synthetic B \u2014 Garcon');
+      assert.equal(await aPage.run('return window.cancelSentinel'), 'synthetic-unsaved', 'closing B does not close A');
+      await openChooser(aPage);
+      await closeRemote(aHandle, 'Synthetic A \u2014 Garcon');
+      await until(() => evaluate('return document.querySelector("#current-server").textContent === "" && !document.querySelector("#cancel").hidden'), 'closed chooser source is not retargeted');
+      await evaluate('document.querySelector("#cancel").click();');
+      assert.equal(await remote.run('return location.href'), remote.url, 'duplicate survives closing original and cancelling chooser');
       await assertRemoteWorkflows(remote, beforeReload);
       await remote.run(`window.nativeKeys = []; document.addEventListener('keydown', event => window.nativeKeys.push([event.key, event.ctrlKey, event.shiftKey]));`);
       await hostShortcutChooser('r').catch(async error => {
@@ -426,8 +481,8 @@ try {
         throw error;
       });
       await until(() => evaluate('return document.querySelector("#server-form button").textContent === "Reload Server"'), 'host reload confirmation');
-      await connect(remote.url);
-      let previousHandle = await replacementRemote(beforeReload);
+      await connect(remote.url, 'Synthetic Duplicate');
+      let previousHandle = await openedRemote();
       await until(() => remote.connected(), 'host reload');
       // Repeated replacements exercise recovery handler ownership and native window cleanup.
       for (let replacement = 0; replacement < 8; replacement++) {
@@ -437,16 +492,19 @@ try {
         await until(() => remote.run('return document.hasFocus()'), 'cancelled chooser focus');
         assert.equal(await remote.run('return window.reloadSentinel'), 'synthetic-unsaved');
         await hostShortcutChooser('r');
-        await connect(remote.url);
-        previousHandle = await replacementRemote(previousHandle);
+        await connect(remote.url, 'Synthetic Duplicate');
+        previousHandle = await openedRemote();
         await until(() => remote.connected(), 'repeated host reload');
         assert.equal(await remote.run('return typeof window.reloadSentinel'), 'undefined');
         assert.equal(await remote.run('return localStorage.getItem("synthetic-auth")'), 'synthetic-a');
       }
-      console.log('Native recovery lifecycle passed: titlebar button, switch, cancel and reload across eight replacement windows.');
+      console.log('Native recovery lifecycle passed: independent windows, source-only reload, native close, cancel and eight further reloads.');
+      await closeRemote(previousHandle);
+      await until(() => evaluate('return !document.querySelector("#server-form button").disabled && document.querySelector("#cancel").hidden'), 'last server close returns to the chooser');
       await closeApp();
       await openApp();
       assert.equal(await evaluate('return document.querySelector("#server-url").value'), remote.url);
+      assert.equal(await evaluate('return document.querySelector("#server-name").value'), 'Synthetic Duplicate', 'custom name survives restart');
       await connect(new URL('/different-mount/', remote.url).href);
       await until(() => evaluate('return document.querySelector("[role=alert]").textContent.includes("another mount")'), 'sibling mount rejection');
       await closeApp();
@@ -455,28 +513,26 @@ try {
   await openApp();
   const unreachable = `http://127.0.0.1:${await unusedPort()}/`;
   await connect(unreachable);
-  await replacementRemote();
+  await openedRemote();
   await hostShortcutChooser('s', true);
-  assert.equal(await evaluate('return document.querySelector("#current-server").textContent'), `Current: ${unreachable}`);
+  assert.equal(await evaluate('return document.querySelector("#current-server").textContent'), `Opened from: ${unreachable}`);
   await Bun.write(resolve(artifacts, 'chooser-recovery.png'), Buffer.from(await webdriver(`/session/${session}/screenshot`), 'base64'));
   await connect('http://not-loopback.test/');
   await until(() => evaluate('return document.querySelector("[role=alert]").textContent.includes("Use HTTPS")'), 'bad URL recovery');
   const recovered = fixture('');
   try {
-    const handles = await webdriver(`/session/${session}/window/handles`);
-    const failedHandle = handles.find(handle => handle !== chooserHandle);
     await connect(recovered.url);
-    await replacementRemote(failedHandle);
+    await openedRemote();
     await until(() => recovered.connected(), 'recovery after unreachable server');
   } finally { await closeApp(); recovered.stop(); }
   const untrusted = await untrustedTlsFixture();
   try {
     await openApp();
     await connect(untrusted.url);
-    await replacementRemote();
+    await openedRemote();
     await until(() => untrusted.rejected(), 'native rejection of the synthetic TLS certificate');
     await hostShortcutChooser('s', true);
-    assert.equal(await evaluate('return document.querySelector("#current-server").textContent'), `Current: ${untrusted.url}`);
+    assert.equal(await evaluate('return document.querySelector("#current-server").textContent'), `Opened from: ${untrusted.url}`);
   } finally { await closeApp(); await untrusted.stop(); }
   const config = await Bun.file(resolve(root, 'src-tauri/tauri.conf.json')).json();
   await Bun.write(resolve(isolation, config.identifier, 'servers.json'), '{');

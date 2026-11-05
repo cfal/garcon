@@ -10,7 +10,7 @@ afterEach(() => {
 it('omits the native action in browsers', async () => {
 	render(Host);
 	await fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
-	expect(screen.queryByText('Switch Server')).toBeNull();
+	expect(screen.queryByText('Open Server')).toBeNull();
 });
 
 it('requests the chooser without navigating or logging out', async () => {
@@ -18,7 +18,7 @@ it('requests the chooser without navigating or logging out', async () => {
 	window.__GARCON_NATIVE__ = { version: 1, requestServerChooser };
 	render(Host);
 	await fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
-	await fireEvent.click(await screen.findByRole('menuitem', { name: 'Switch Server' }));
+	await fireEvent.click(await screen.findByRole('menuitem', { name: 'Open Server' }));
 	expect(requestServerChooser).toHaveBeenCalledTimes(1);
 });
 
@@ -31,6 +31,6 @@ it('keeps a failed request retryable', async () => {
 	};
 	render(Host);
 	await fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
-	await fireEvent.click(await screen.findByRole('menuitem', { name: 'Switch Server' }));
-	expect(await screen.findByRole('menuitem', { name: 'Switch Server unavailable' })).toBeTruthy();
+	await fireEvent.click(await screen.findByRole('menuitem', { name: 'Open Server' }));
+	expect(await screen.findByRole('menuitem', { name: 'Open Server unavailable' })).toBeTruthy();
 });

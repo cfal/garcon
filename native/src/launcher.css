@@ -21,6 +21,8 @@ main { max-width: 520px; margin: 0 auto; padding: max(24px, env(safe-area-inset-
 header { display: flex; align-items: center; gap: 12px; margin-bottom: 36px; }
 h1 { font-size: 24px; font-weight: 650; margin: 0; }
 label { display: block; margin-bottom: 8px; }
+#server-url { margin-bottom: 16px; }
+#recent-servers small { display: block; font-weight: 400; overflow-wrap: anywhere; }
 input, button { width: 100%; min-height: 48px; border-radius: 6px; font: inherit; }
 input { padding: 10px 12px; border: 1px solid var(--border); background: var(--input); color: var(--foreground); }
 button { border: 0; padding: 10px 16px; background: var(--accent); color: var(--accent-foreground); font-weight: 600; cursor: pointer; }

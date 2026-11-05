@@ -38,7 +38,7 @@ x-scheme-handler/https=garcon-smoke-browser.desktop
   return { env, browserLog, attachment, clipboardScript: await clipboard.outputs[0].text() };
 }
 
-export async function checkWorkflows({ evaluate, webdriver, until, workflows, remoteUrl, nativeKey }) {
+export async function checkWorkflows({ evaluate, webdriver, until, workflows, remoteUrl, nativeKey, windowCount }) {
   const launches = async () => (await Bun.file(workflows.browserLog).text()).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
   const before = (await launches()).length;
   const target = 'https://external.example.test/guide?q=synthetic#section';
@@ -65,7 +65,7 @@ export async function checkWorkflows({ evaluate, webdriver, until, workflows, re
   await until(async () => (await launches()).length > before, 'native user-activated external link');
   assert.deepEqual((await launches()).slice(before), [[target]], 'only the trusted anchor may launch an OS URL');
   assert.equal(await evaluate('return location.href'), remoteUrl);
-  assert.equal((await webdriver('/window/handles')).length, 2, 'only the chooser and current remote page may survive');
+  assert.equal((await webdriver('/window/handles')).length, windowCount, 'external links must not create a native popup');
 
   // Gives policy-denial checks an open rate gate so they cannot pass due to throttling.
   await evaluate('return new Promise(resolve => setTimeout(resolve, 1100))');
@@ -88,7 +88,7 @@ export async function checkWorkflows({ evaluate, webdriver, until, workflows, re
   await until(async () => (await launches()).length > before + 1, 'keyboard-activated external link');
   assert.deepEqual((await launches()).slice(before), [[target], [keyboardTarget]], 'denied destinations must never reach the OS');
   assert.equal(await evaluate('return location.href'), remoteUrl);
-  console.log('Native external links passed: pointer + keyboard, synthetic/scripted popups, auth exclusions, scheme/credential/mount denial, one remote WebView.');
+  console.log('Native external links passed: pointer + keyboard, synthetic/scripted popups, auth exclusions, scheme/credential/mount denial, unchanged native window count.');
   await evaluate('document.querySelector("#external-link").remove(); document.querySelector("#script-popup").remove()');
 
   await until(() => evaluate('return typeof window.copyToClipboard === "function"'), 'shared clipboard helper');
