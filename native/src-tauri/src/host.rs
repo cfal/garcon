@@ -1,13 +1,16 @@
+#[cfg(desktop)]
+use crate::switcher::{CHOOSER_REQUEST, ChooserAction};
 use crate::{
     deployment::Deployment,
     platform::{ConnectionMode, connection_mode},
-    switcher::{CHOOSER_REQUEST, ChooserAction, ServerChoices, Switcher},
+    switcher::{ServerChoices, Switcher},
 };
 use std::sync::Mutex;
 use tauri::{Manager, WebviewWindow};
 
 pub type Host = Mutex<Switcher>;
 
+#[cfg(any(desktop, test))]
 fn dispatch_chooser_request(host: &Host, generation: u64, dispatch: impl FnOnce()) {
     let requested = host
         .lock()
@@ -75,6 +78,7 @@ pub fn cancel_chooser(
     };
     window.hide().map_err(|_| "Unable to close the chooser.")?;
     if let Some(remote) = window.app_handle().get_webview_window(&label) {
+        #[cfg(desktop)]
         let _ = remote.unminimize();
         let _ = remote.set_focus();
     }
@@ -151,6 +155,11 @@ async fn replace_remote(
                 let _ = sender.try_send(());
             }
         });
+        // Releases per-window menu state before GTK can reuse the window address.
+        #[cfg(not(target_os = "macos"))]
+        previous
+            .remove_menu()
+            .map_err(|_| "Unable to detach the previous server menu. Restart the app to retry.")?;
         previous
             .destroy()
             .map_err(|_| "Unable to close the previous server page. Restart the app to retry.")?;
@@ -218,6 +227,7 @@ async fn replace_remote(
     Ok(())
 }
 
+#[cfg(desktop)]
 pub fn present_chooser(app: &tauri::AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window("main") {
         window.show()?;

@@ -79,6 +79,8 @@ async function launchApp() {
 async function openApp() {
   await launchApp();
   await until(() => evaluate('return !!document.querySelector("#server-form button:not(:disabled)")'), 'launcher readiness');
+  await evaluate(`window.chooserOpenCount = 0;
+    window.addEventListener('garcon-chooser-open', () => window.chooserOpenCount++);`);
 }
 
 async function closeApp() {
@@ -114,9 +116,13 @@ async function openChooser(remote) {
 }
 
 async function menuChooser(key, shift = false) {
+  const opened = await evaluate('return window.chooserOpenCount');
   await nativeRemoteKey(shift ? `ctrl+shift+${key}` : `ctrl+${key}`);
   const action = key === 'r' ? 'Reload Server' : 'Switch Server';
-  await until(() => evaluate('return !document.querySelector("#cancel").hidden && document.querySelector("#server-form button").textContent === arguments[0]', [action]), 'native menu chooser');
+  await until(() => evaluate(`return window.chooserOpenCount > arguments[1]
+    && !document.querySelector('#cancel').hidden
+    && !document.querySelector('#server-form button').disabled
+    && document.querySelector('#server-form button').textContent === arguments[0]`, [action, opened]), 'native menu chooser');
 }
 
 async function nativeRemoteKey(key) {
@@ -398,8 +404,23 @@ try {
       });
       await until(() => evaluate('return document.querySelector("#server-form button").textContent === "Reload Server"'), 'host reload confirmation');
       await connect(remote.url);
-      await replacementRemote(beforeReload);
+      let previousHandle = await replacementRemote(beforeReload);
       await until(() => remote.connected(), 'host reload');
+      // Repeated replacements exercise native menu cleanup and GTK address reuse.
+      for (let replacement = 0; replacement < 8; replacement++) {
+        await remote.run('window.reloadSentinel = "synthetic-unsaved";');
+        await menuChooser('s', true);
+        await evaluate('document.querySelector("#cancel").click();');
+        await until(() => remote.run('return document.hasFocus()'), 'cancelled chooser focus');
+        assert.equal(await remote.run('return window.reloadSentinel'), 'synthetic-unsaved');
+        await menuChooser('r');
+        await connect(remote.url);
+        previousHandle = await replacementRemote(previousHandle);
+        await until(() => remote.connected(), 'repeated host reload');
+        assert.equal(await remote.run('return typeof window.reloadSentinel'), 'undefined');
+        assert.equal(await remote.run('return localStorage.getItem("synthetic-auth")'), 'synthetic-a');
+      }
+      console.log('Native menu lifecycle passed: switch, cancel and reload across eight replacement windows.');
       await closeApp();
       await openApp();
       assert.equal(await evaluate('return document.querySelector("#server-url").value'), remote.url);

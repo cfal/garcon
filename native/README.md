@@ -137,6 +137,11 @@ sites. The smoke runner honors `CARGO_TARGET_DIR`, `GARCON_NATIVE_SMOKE_TMP`, an
 file-input assignment, multipart upload bytes, shared clipboard copy/paste, focus,
 OS-level Ctrl+C/Ctrl+Z delivery to page key handlers, and unchanged socket count,
 both initially and after replacing a remote window.
+Switch/cancel/reload shortcuts are exercised across eight further replacements
+for each root/mount fixture, requiring a fresh chooser-open event rather than
+accepting stale hidden-page controls. Per-window menus are detached before
+destruction on Linux/Windows; otherwise GTK window-address reuse can leave a
+replacement without its native menu. macOS retains its app-wide menu.
 These checks do not qualify the OS file chooser or a real Garcon terminal session.
 The Linux WebDriver probe emitted cancellation without presenting an OS dialog;
 file assignment is not evidence of native picker selection/cancellation behavior.
