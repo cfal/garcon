@@ -7,6 +7,7 @@ import { AssistantMessage, BashToolUseMessage, CommandResultMessage } from '../.
 import { emptyStoredChatExecutionControl } from '../chat-execution/control-state.ts';
 import { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import { ProjectUnavailableError } from '../../common/domain-error.ts';
+import { ChatPlanPresentationStore } from '../transcript-display/plan-presentation.js';
 import { wireSearchSourceAvailability, wireServerEvents } from '../server-event-wiring.js';
 import { ChatExecutionCoordinator } from '../chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../chat-execution/chat-execution-control-repository.js';
@@ -281,6 +282,8 @@ function createFixture(overrides = {}) {
     metadata,
     currentTranscriptMessagePages: overrides.currentTranscriptMessagePages ?? (async function* () {}),
     transientFeeds,
+    planPresentation: new ChatPlanPresentationStore('server-instance-test'),
+    auxiliaryRevision: () => 0,
     commandLedger,
     shareStore,
     telegramNotifier: { setBotToken: noOp, ...overrides.telegramNotifier },
@@ -477,7 +480,7 @@ describe('server event wiring', () => {
       await ledger.waitForTurnTerminal('chat-1', 'turn-1', new AbortController().signal);
       await fixture.wiring.waitForIdle();
       const events = fixture.published.slice(cursor);
-      const messages = events.findIndex((event) => event.type === 'chat-messages' && event.turnId === 'turn-1');
+      const messages = events.findIndex((event) => event.type === 'chat-transcript-head-updated');
       const stopped = events.findIndex((event) => event.type === 'chat-session-stopped');
       const idle = events.findIndex((event) => event.type === 'chat-processing-updated' && event.phase === null);
       expect(messages).toBeGreaterThanOrEqual(0);
@@ -538,8 +541,8 @@ describe('server event wiring', () => {
           expect(notice.kind).toBe('notice');
           expect(rows.filter(row => row.kind === 'notice')).toHaveLength(1);
           expect(rows.find(row => row.kind === 'run-ended')).toMatchObject({ outcome, origin: 'provider' });
-          const noticeIndex = fixture.published.findIndex(message => message.type === 'chat-messages'
-            && message.messages.some(row => row.message.type === 'transcript-notice' && row.message.content === notice.message));
+          const noticeIndex = fixture.published.findIndex(message => message.type === 'chat-transcript-head-updated'
+            && message.sourceHead >= notice.ordinal);
           const terminalIndex = fixture.published.findIndex(message => message.type === 'agent-run-failed');
           const idleIndex = fixture.published.findLastIndex(message => message.type === 'chat-processing-updated');
           expect(noticeIndex).toBeGreaterThanOrEqual(0);
@@ -1043,9 +1046,9 @@ describe('server event wiring', () => {
     await fixture.wiring.waitForIdle();
 
     const types = fixture.published.map((message) => message.type);
-    expect(types).toContain('chat-messages');
+    expect(types).toContain('chat-transcript-head-updated');
     expect(types).toContain('chat-preambles-invalidated');
-    expect(types.indexOf('chat-messages')).toBeLessThan(types.indexOf('chat-preambles-invalidated'));
+    expect(types.indexOf('chat-transcript-head-updated')).toBeLessThan(types.indexOf('chat-preambles-invalidated'));
     expect(fixture.published.at(-1)).toMatchObject({
       type: 'chat-preambles-invalidated',
       chatId: 'chat-1',
@@ -1062,18 +1065,16 @@ describe('server event wiring', () => {
     await fixture.wiring.waitForIdle();
 
     expect(fixture.published.map((message) => message.type)).toEqual([
-      'chat-messages',
-      'chat-messages',
+      'chat-transcript-head-updated',
       'chat-processing-updated',
       'agent-run-finished',
     ]);
     expect(fixture.published[0]).toMatchObject({
       transcriptViewId: 'view-1',
-      firstOrdinal: 2,
-      lastOrdinal: 2,
-      messages: [{ ordinal: 2, message: { content: 'answer' } }],
+      sourceHead: 3,
+      preview: { ordinal: 2, text: 'answer', timestamp: at },
     });
-    expect(fixture.published[3]).toMatchObject({
+    expect(fixture.published[2]).toMatchObject({
       type: 'agent-run-finished',
       outcome: 'finished',
     });
@@ -1134,10 +1135,10 @@ describe('server event wiring', () => {
       await Promise.resolve();
       await fixture.wiring.waitForIdle();
       expect(fixture.published.map(message => message.type)).toEqual([
-        'chat-messages', 'chat-transient-feed-mutation', 'chat-transient-feed-mutation',
+        'chat-transient-feed-mutation', 'chat-transient-feed-mutation', 'chat-transcript-head-updated',
       ]);
-      expect(fixture.published[1]).toMatchObject({ transientRevision: 1, mutation: { kind: 'upsert' } });
-      expect(fixture.published[2]).toMatchObject({
+      expect(fixture.published[0]).toMatchObject({ transientRevision: 1, mutation: { kind: 'upsert' } });
+      expect(fixture.published[1]).toMatchObject({
         serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: view.viewId,
         transientRevision: 2, mutation: { kind: 'remove', permissionOccurrenceId: occurrence },
       });
@@ -1198,7 +1199,7 @@ describe('server event wiring', () => {
     await fixture.wiring.waitForIdle();
 
     const types = fixture.published.map((message) => message.type);
-    expect(types.indexOf('chat-messages')).toBeLessThan(types.indexOf('chat-processing-updated'));
+    expect(types.indexOf('chat-transcript-head-updated')).toBeLessThan(types.indexOf('chat-processing-updated'));
     expect(types.indexOf('chat-processing-updated')).toBeLessThan(types.indexOf('agent-run-failed'));
     expect(fixture.commandLedger.settleTerminal).toHaveBeenCalledWith(
       'agent-run:chat-1:request-1',
@@ -1228,7 +1229,7 @@ describe('server event wiring', () => {
     expect(fixture.commandLedger.settleTerminal).toHaveBeenCalledTimes(1);
     expect(fixture.commandLedger.markPublicTerminal).toHaveBeenCalledTimes(1);
     const types = fixture.published.map(message => message.type);
-    expect(types.lastIndexOf('chat-messages')).toBeLessThan(types.indexOf('agent-run-failed'));
+    expect(types.lastIndexOf('chat-transcript-head-updated')).toBeLessThan(types.indexOf('agent-run-failed'));
 
     report(first, 'chat-1', { ...turn, turnId: 'turn-2', clientRequestId: 'request-2' });
     report(first, 'chat-2');
@@ -1279,7 +1280,7 @@ describe('server event wiring', () => {
     expect(fixture.searchIndex.catalogMayHaveChanged).not.toHaveBeenCalled();
   });
 
-  it('suppresses resend candidates in commit broadcasts while processing', async () => {
+  it('never broadcasts resend bodies or folds candidates on commit', async () => {
     const fixture = createFixture({
       agentRegistry: {
         resendCandidates: mock(() => [{ ordinal: 1, content: 'prompt', attachmentNames: [] }]),
@@ -1291,9 +1292,9 @@ describe('server event wiring', () => {
     await fixture.wiring.waitForIdle();
 
     expect(fixture.published[0]).toMatchObject({
-      type: 'chat-messages',
-      resendCandidates: [],
+      type: 'chat-transcript-head-updated',
     });
+    expect(fixture.published[0]).not.toHaveProperty('resendCandidates');
     expect(fixture.agentRegistry.resendCandidates).not.toHaveBeenCalled();
   });
 
@@ -1366,14 +1367,10 @@ describe('server event wiring', () => {
         transcriptViewId: 'view-2',
       }),
       expect.objectContaining({
-        type: 'chat-messages',
+        type: 'chat-transcript-head-updated',
         transcriptViewId: 'view-2',
-        firstOrdinal: 1,
-        lastOrdinal: 1,
-        messages: [{
-          ordinal: 1,
-          message: expect.objectContaining({ content: 'replacement live row' }),
-        }],
+        sourceHead: 1,
+        preview: { ordinal: 1, text: 'replacement live row', timestamp: at },
       }),
     ]);
   });
@@ -1386,7 +1383,7 @@ describe('server event wiring', () => {
     await fixture.wiring.waitForIdle();
 
     expect(fixture.published.map((message) => message.type)).toEqual([
-      'chat-messages',
+      'chat-transcript-head-updated',
       'chat-session-created',
     ]);
     expect(fixture.searchIndex.catalogMayHaveChanged).toHaveBeenCalledWith('chat-1');
@@ -1416,7 +1413,7 @@ describe('server event wiring', () => {
     await fixture.wiring.waitForIdle();
     expect(fixture.commandLedger.markInterruptedWithoutRunTerminal).toHaveBeenCalledWith('chat-1', 'reserved-start', 'user-stop');
     expect(fixture.published.map((event) => event.type))
-      .toEqual(['chat-messages', 'chat-session-stopped', 'chat-processing-updated']);
+      .toEqual(['chat-transcript-head-updated', 'chat-session-stopped', 'chat-processing-updated']);
   });
 
   it('repairs an idle processing phase before publishing an already-idle Stop', async () => {
@@ -1436,12 +1433,13 @@ describe('server event wiring', () => {
     ]);
   });
 
-  it('broadcasts view-qualified execution control updates', () => {
+  it('broadcasts view-qualified execution control updates', async () => {
     const fixture = createFixture();
     const control = emptyStoredChatExecutionControl('server-instance-test');
     control.version = 2;
 
     fixture.queue.control('chat-1', control);
+    await fixture.wiring.waitForIdle();
 
     expect(fixture.published).toEqual([expect.objectContaining({
       type: 'chat-execution-control-updated',
@@ -1470,7 +1468,7 @@ describe('server event wiring', () => {
     fixture.wiring.notifyChatSettingsUpdated('chat-1');
     await fixture.wiring.waitForIdle();
     expect(fixture.published.map((event) => event.type)).toEqual([
-      'chat-messages', 'chat-list-refresh-requested',
+      'chat-transcript-head-updated', 'chat-list-refresh-requested',
     ]);
     expect(fixture.published.at(-1)).toMatchObject({
       reason: 'execution-settings-updated', chatId: 'chat-1',

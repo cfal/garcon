@@ -57,7 +57,10 @@ describe('NativeActivityPageReader', () => {
       if (source.includes('.requestCheck(')) requestCheckCallers.push(`server/${file}`);
     }
 
-    expect(requestCheckCallers).toEqual(['server/controller/ledger/native-activity-page-reader.ts']);
+    expect(requestCheckCallers).toEqual([
+      'server/controller/ledger/native-activity-page-reader.ts',
+      'server/controller/routes/transcript-display.ts',
+    ]);
   });
 });
 

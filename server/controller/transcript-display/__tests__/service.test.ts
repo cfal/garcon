@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { AssistantMessage, BashToolUseMessage, ToolResultMessage, UserMessage } from '../../../../common/chat-types.js';
@@ -103,6 +103,145 @@ test('lost frame acknowledgements reconcile the persisted checkpoint on retry', 
   } finally { worker.mockRestore(); }
 });
 
+async function sidecar(): Promise<string> {
+  const directory = path.join(root, 'transcript-display', 'chat');
+  return path.join(directory, (await readdir(directory)).find(file => file.endsWith('.sqlite'))!);
+}
+
+test('retry retires cached handles before rebuilding a missing warm sidecar', async () => {
+  const view = seed('chat', 2), input = request('chat', view.viewId);
+  const before = await ready(input), filename = await sidecar();
+  await rm(filename);
+  await display.retry('chat');
+  expect((await ready(input)).items).toEqual(before.items);
+  expect(await fs.stat(filename)).toBeDefined();
+  expect(ledger.highWatermark('chat').ordinal).toBe(before.sourceHead);
+});
+
+test.each(['missing', 'invalid'] as const)('retrying a %s sidecar fences an already completed read from the retired generation', async condition => {
+  const view = seed('chat', 2), input = request('chat', view.viewId);
+  await ready(input);
+  const original = DisplayWorkerClient.prototype.request;
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  let held = false, invalidate = false;
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind === 'inspect' && invalidate) {
+      invalidate = false;
+      throw Object.assign(new Error('Synthetic invalid sidecar'), { code: 'DISPLAY_STORE_INVALID' });
+    }
+    const result = await original.call(this, task, ...args);
+    if (task.kind === 'window' && !held) { held = true; entered.resolve(); await release.promise; }
+    return result;
+  });
+  const pending = display.window(input);
+  try {
+    await entered.promise;
+    if (condition === 'missing') await rm(await sidecar());
+    else invalidate = true;
+    await display.retry('chat');
+    expect((await ready(input)).items[1]).toMatchObject({ count: 2 });
+    release.resolve();
+    await expect(pending).rejects.toMatchObject({ code: 'DISPLAY_SUPERSEDED' });
+  } finally { release.resolve(); await pending.catch(() => undefined); worker.mockRestore(); }
+});
+
+test('retry racing deletion cannot make retirement wait on its replacement initialization', async () => {
+  const view = seed('chat', 1);
+  await ready(request('chat', view.viewId));
+  const original = DisplayWorkerClient.prototype.request;
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  let failures = 1, held = false;
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind === 'close') {
+      if (failures-- > 0) throw Object.assign(new Error('Busy'), { code: 'DISPLAY_BUSY' });
+      if (!held) { held = true; entered.resolve(); await release.promise; }
+    }
+    return original.call(this, task, ...args);
+  });
+  let retry: Promise<void> | undefined;
+  try {
+    display.forget('chat');
+    await display.open('chat');
+    const deadline = Date.now() + 5000;
+    while (!(await display.open('chat')).display.errorCode && Date.now() < deadline) await Bun.sleep(5);
+    retry = display.retry('chat');
+    const outcome = retry.catch(error => error);
+    await entered.promise;
+    registry.delete('chat');
+    display.forget('chat');
+    release.resolve();
+    expect(await outcome).toMatchObject({ code: 'SESSION_NOT_FOUND' });
+    await display.close();
+    expect(display.metrics.retirements).toBe(0);
+  } finally { release.resolve(); await retry?.catch(() => undefined); worker.mockRestore(); }
+});
+
+test('zero-frontier user and resend summaries are preparing rather than authoritative empty lists', async () => {
+  const view = seed('chat', 2);
+  const original = DisplayWorkerClient.prototype.request;
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind === 'frame') { entered.resolve(); await release.promise; }
+    return original.call(this, task, ...args);
+  });
+  try {
+    await display.open('chat');
+    await entered.promise;
+    for (const kind of ['user-rows', 'resend'] as const) {
+      expect(await display.auxiliary(kind, { chatId: 'chat', transcriptViewId: view.viewId, limit: 50 })).toMatchObject({ kind: 'preparing', watermark: 0 });
+    }
+  } finally { release.resolve(); worker.mockRestore(); }
+});
+
+test('reader corruption beyond the inspected manifest retires and rebuilds a warm generation', async () => {
+  const view = seed('chat', 2000), input = request('chat', view.viewId);
+  const before = await ready(input), filename = await sidecar();
+  const db = new Database(filename);
+  db.run('PRAGMA wal_checkpoint(TRUNCATE)');
+  const page = db.query<{ rootpage: number }, []>("SELECT rootpage FROM sqlite_schema WHERE name = 'posting'").get()!.rootpage;
+  const pageSize = db.query<{ page_size: number }, []>('PRAGMA page_size').get()!.page_size;
+  db.close();
+  const file = await open(filename, 'r+');
+  try { await file.write(Buffer.alloc(pageSize), 0, pageSize, (page - 1) * pageSize); }
+  finally { await file.close(); }
+  const original = DisplayWorkerClient.prototype.request;
+  let evictedReader = false;
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind === 'window' && !evictedReader) {
+      evictedReader = true;
+      await original.call(this, { kind: 'close', path: filename });
+    }
+    return original.call(this, task, ...args);
+  });
+  try {
+    await expect(display.window(input)).rejects.toMatchObject({ code: 'DISPLAY_STORE_INVALID' });
+    expect((await ready(input)).items).toEqual(before.items);
+    expect(ledger.highWatermark('chat').ordinal).toBe(before.sourceHead);
+  } finally { worker.mockRestore(); }
+});
+
+test.each(['frame', 'auxiliary-frame'] as const)('builder %s corruption rebuilds without a manual retry', async (kind) => {
+  const view = seed('chat', 2), input = request('chat', view.viewId);
+  await ready(input);
+  const original = DisplayWorkerClient.prototype.request;
+  let failed = false;
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(function(task, ...args) {
+    if (task.kind === kind && !failed) {
+      failed = true;
+      return Promise.reject(Object.assign(new Error('Synthetic corruption'), { code: 'DISPLAY_STORE_INVALID' }));
+    }
+    return original.call(this, task, ...args);
+  });
+  try {
+    if (kind === 'frame') ledger.openProducer('chat', 'synthetic').sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(at, 'Later answer') }] });
+    else await display.auxiliary('subagents', { chatId: 'chat', transcriptViewId: view.viewId, limit: 50 });
+    const deadline = Date.now() + 5000;
+    while (!failed && Date.now() < deadline) await Bun.sleep(5);
+    expect(failed).toBe(true);
+    expect((await ready(input)).items[1]).toMatchObject({ count: 2 });
+  } finally { worker.mockRestore(); }
+});
+
 test('a failed close retains its fence but can retire and readmit on retry', async () => {
   const view = seed('chat', 1), input = request('chat', view.viewId);
   await ready(input);
@@ -120,6 +259,105 @@ test('a failed close retains its fence but can retire and readmit on retry', asy
     await display.retry('chat');
     expect((await ready(input)).items[1]).toMatchObject({ count: 1 });
   } finally { worker.mockRestore(); }
+});
+
+test('disk admission retries failed evictions without counting their files as freed', async () => {
+  const oldView = seed('chat', 1);
+  await ready(request('chat', oldView.viewId));
+  const filename = await sidecar(), retainedBytes = display.metrics.derivedBytes;
+  const nextView = seed('next', 1), input = request('next', nextView.viewId);
+  const now = Date.now(), clock = spyOn(Date, 'now').mockReturnValue(now + 20_000);
+  const originalStat = fs.statfs, originalRequest = DisplayWorkerClient.prototype.request;
+  let failed = false;
+  const disk = spyOn(fs, 'statfs').mockImplementation(async function(directory, options) {
+    const result = await originalStat(directory, options);
+    const exists = await fs.stat(filename).then(() => true, () => false);
+    return exists ? { ...result, bavail: 0 } : result;
+  });
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(function(task, ...args) {
+    if (task.kind === 'close' && task.path === filename && !failed) {
+      failed = true;
+      return Promise.reject(Object.assign(new Error('Busy'), { code: 'DISPLAY_BUSY' }));
+    }
+    return originalRequest.call(this, task, ...args);
+  });
+  try {
+    let status = (await display.open('next')).display;
+    for (let i = 0; !status.errorCode && i < 100; i++) {
+      await Bun.sleep(5);
+      status = (await display.open('next')).display;
+    }
+    expect(status.errorCode).toBe('DISPLAY_DISK_FULL');
+    expect(display.metrics.derivedBytes).toBeGreaterThanOrEqual(retainedBytes);
+    expect(await fs.stat(filename)).toBeDefined();
+    await display.retry('next');
+    expect((await ready(input)).items[1]).toMatchObject({ count: 1 });
+    expect(await fs.stat(filename).catch(() => null)).toBeNull();
+  } finally { worker.mockRestore(); disk.mockRestore(); clock.mockRestore(); }
+});
+
+test('disk eviction chains deletion behind a paused close-only retry', async () => {
+  const view = seed('chat', 1);
+  await ready(request('chat', view.viewId));
+  const filename = await sidecar();
+  const options = { ...display.options, diskBudget: 1024 * 1024 * 1024 };
+  await display.close();
+  display = new TranscriptDisplayService(options);
+  await display.initialize();
+  for (let i = 0; i < 100 && !(await display.open('chat')).display.preparedThrough; i++) await Bun.sleep(5);
+  options.diskBudget = 2 * 1024 * 1024;
+  registry.add('next');
+  const next = ledger.initializeChat('next');
+  const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 20_000);
+  const original = DisplayWorkerClient.prototype.request;
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  let held = false;
+  const worker = spyOn(DisplayWorkerClient.prototype, 'request').mockImplementation(async function(task, ...args) {
+    if (task.kind === 'close' && task.path === filename && !held) {
+      held = true; entered.resolve(); await release.promise;
+    }
+    return original.call(this, task, ...args);
+  });
+  const retry = display.retry('chat').catch(error => error);
+  try {
+    await entered.promise;
+    await display.open('next');
+    const deadline = performance.now() + 5000;
+    while (!display.metrics.evictions && performance.now() < deadline) await Bun.sleep(5);
+    expect(display.metrics.evictions).toBeGreaterThan(0);
+    release.resolve();
+    for (let i = 0; i < 100 && (await display.open('next')).display.phase !== 'available'; i++) await Bun.sleep(5);
+    expect((await display.open('next')).display.phase).toBe('available');
+    expect(await fs.stat(filename).catch(() => null)).toBeNull();
+    expect(display.metrics.evictions).toBeGreaterThan(0);
+    expect((await display.window(request('next', next.viewId))).kind).toBe('available');
+  } finally { release.resolve(); await retry; worker.mockRestore(); clock.mockRestore(); }
+});
+
+test('superseded disk admission cannot evict another chat after yielding', async () => {
+  for (const id of ['chat', 'second', 'third']) {
+    const view = seed(id, 1);
+    await ready(request(id, view.viewId));
+  }
+  const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 20_000);
+  const originalStat = fs.statfs, originalSleep = Bun.sleep;
+  const disk = spyOn(fs, 'statfs').mockImplementation(async (directory, options) => ({ ...await originalStat(directory, options), bavail: 0 }));
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  let held = false;
+  const sleep = spyOn(Bun, 'sleep').mockImplementation(async duration => {
+    if (duration === 0 && !held) { held = true; entered.resolve(); await release.promise; }
+    else await originalSleep(duration);
+  });
+  const retry = display.retry('chat').catch(error => error);
+  try {
+    await entered.promise;
+    display.forget('chat');
+    release.resolve();
+    expect(await retry).toMatchObject({ code: 'DISPLAY_SUPERSEDED' });
+    expect((await readdir(path.join(root, 'transcript-display', 'third'))).some(file => file.endsWith('.sqlite'))).toBe(true);
+    await display.close();
+    expect(display.metrics.retirements).toBe(0);
+  } finally { release.resolve(); await retry; sleep.mockRestore(); disk.mockRestore(); clock.mockRestore(); }
 });
 
 test('startup enumeration fences replacement preparation before removing obsolete files', async () => {
@@ -202,7 +440,7 @@ test('invalid auxiliary frontiers are rebuilt without touching the source', asyn
   expect(await display.auxiliary('subagents', { chatId: 'chat', transcriptViewId: view.viewId, limit: 50 })).toMatchObject({ kind: 'preparing' });
 });
 
-test('rollback and ordinal regrowth before lazy index admission forces rebuilding', async () => {
+test('[TLV5-DISPLAY.09-CORE-UNIT-01] rollback and ordinal regrowth before lazy index admission forces rebuilding', async () => {
   const view = seed('chat', 10);
   await ready(request('chat', view.viewId));
   await display.close(); ledger.close();

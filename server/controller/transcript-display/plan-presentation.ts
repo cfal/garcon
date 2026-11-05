@@ -11,7 +11,7 @@ interface ChatPlans {
 
 export class ChatPlanPresentationStore {
   readonly #chats = new Map<string, ChatPlans>();
-  constructor(readonly serverInstanceId: string) {}
+  constructor(readonly serverInstanceId: string, private readonly onChanged?: (snapshot: PlanPresentationSnapshot) => void) {}
 
   apply(event: TranscriptCommitEvent): void {
     if (event.type === 'view-replaced') { this.clear(event.chatId); return; }
@@ -52,8 +52,11 @@ export class ChatPlanPresentationStore {
     this.#instance(request);
     if (!request.ordinal) throw new TypeError('Plan ordinal is required');
     const plans = this.#chats.get(request.chatId);
-    if (plans?.viewId === request.transcriptViewId && plans.exits.delete(request.ordinal)) plans.revision++;
-    return this.snapshot(request.chatId, request.transcriptViewId);
+    const changed = plans?.viewId === request.transcriptViewId && plans.exits.delete(request.ordinal);
+    if (changed) plans.revision++;
+    const snapshot = this.snapshot(request.chatId, request.transcriptViewId);
+    if (changed) this.onChanged?.(snapshot);
+    return snapshot;
   }
   #instance(request: PlanPresentationRequest): void {
     if (request.serverInstanceId !== this.serverInstanceId) throw new DomainError('DISPLAY_STALE_CERTIFICATE', 'Refresh the current plan suggestions.', 409, true);

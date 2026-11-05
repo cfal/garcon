@@ -4,7 +4,6 @@ import crypto from 'node:crypto';
 import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { lstat, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { yieldToEventLoop } from '@garcon/server-agent-common/shared/event-loop';
 import { trackActivity } from '../../common/event-loop-stalls.js';
 import {
   encodeDrafts,
@@ -14,7 +13,6 @@ import {
   readBoundedPage,
   readBoundedStoredPage,
   StagingViews,
-  type BoundedPage,
 } from './staging-views.js';
 import {
   parseChatRowContent,
@@ -96,6 +94,7 @@ import {
 } from './preamble-application.js';
 import { matchingInputSubmission, readSubmission } from './input-submission.js';
 import { findTicketOutcomeOrdinal } from './ticket-outcome-query.js';
+import { StoredLedgerReads } from './stored-reads.js';
 
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
 const PREVIEW_EDGE_ROWS = 32;
@@ -133,6 +132,13 @@ export class TranscriptLedgerStore {
   readonly #synchronous: 'NORMAL' | 'FULL';
   readonly #connections = new Map<string, ConnectionEntry>();
   readonly #recoveredHeads = new Map<string, TranscriptWatermark | null>();
+  readonly #storedReads = new StoredLedgerReads({
+    read: (chatId, viewId, work) => this.#read(chatId, entry => {
+      this.#assertCurrent(entry, viewId);
+      return work(entry.db);
+    }),
+    captureGuard: chatId => this.#readGuard(chatId),
+  });
   #readEpoch = 0;
   readonly #failedCloseEntries = new Map<string, ConnectionEntry>();
   readonly #openFailures = new Map<string, Error>();
@@ -509,11 +515,11 @@ export class TranscriptLedgerStore {
   }
 
   rowsThrough(chatId: string, watermark: TranscriptWatermark): Promise<readonly LedgerRow[]> {
-    return this.#pagesThrough(chatId, watermark, readBoundedPage);
+    return this.#storedReads.pagesThrough(chatId, watermark, readBoundedPage);
   }
 
   rowPagesThrough(chatId: string, watermark: TranscriptWatermark, fromOrdinal = 1, signal?: AbortSignal): AsyncIterable<readonly LedgerRow[]> {
-    return this.#streamPages(chatId, watermark, readBoundedPage, signal, fromOrdinal);
+    return this.#storedReads.streamPages(chatId, watermark, readBoundedPage, signal, fromOrdinal);
   }
 
   recoveredHead(chatId: string): TranscriptWatermark | null {
@@ -522,78 +528,28 @@ export class TranscriptLedgerStore {
   }
 
   submissionOrdinals(chatId: string, viewId: TranscriptViewId, clientMessageIds: readonly string[]): readonly { clientMessageId: string; ordinal: number | null }[] {
-    if (clientMessageIds.length > 32 || clientMessageIds.some(id => typeof id !== 'string' || !id.length || id.length > 256)) {
-      throw new TypeError('Invalid submission lookup');
-    }
-    return this.#read(chatId, entry => {
-      this.#assertCurrent(entry, viewId);
-      const query = entry.db.query<{ ordinal: number; kind: string }, [string, string]>(
-        'SELECT ordinal, kind FROM transcript_rows WHERE view_id = ? AND client_message_id = ? AND client_message_id IS NOT NULL');
-      return clientMessageIds.map(clientMessageId => {
-        const row = query.get(viewId, clientMessageId);
-        return { clientMessageId, ordinal: row?.kind === 'user-input' ? row.ordinal : null };
-      });
-    });
+    return this.#storedReads.submissionOrdinals(chatId, viewId, clientMessageIds);
   }
 
   async withStoredRowFrames<T>(chatId: string, watermark: TranscriptWatermark, fromOrdinal: number,
     consume: (frames: AsyncIterable<readonly StoredLedgerRow[]>) => Promise<T>, signal?: AbortSignal): Promise<T> {
-    const assertActive = this.#readGuard(chatId);
-    const read = (db: Database, viewId: TranscriptViewId, after: number, through: number) =>
-      readBoundedStoredPage(db, viewId, after, through, { rows: 256, bytes: 2 * 1024 * 1024 });
-    try {
-      const result = await consume(this.#streamPages(chatId, watermark, read, signal, fromOrdinal));
-      signal?.throwIfAborted();
-      assertActive();
-      this.#read(chatId, entry => this.#assertCurrent(entry, watermark.viewId));
-      return result;
-    } catch (error) {
-      if (!hasNodeErrorCode(error, UNDECODABLE_LEDGER_ROW)) throw error;
-      assertActive();
-      return this.#read(chatId, entry => {
-        this.#assertCurrent(entry, watermark.viewId);
-        throw error;
-      });
-    }
+    return this.#storedReads.withFrames(chatId, watermark, fromOrdinal, consume, signal);
   }
 
   storedRowsByOrdinals(chatId: string, watermark: TranscriptWatermark, ordinals: readonly number[]): readonly StoredLedgerRow[] {
-    if (ordinals.length > 200 || ordinals.some(ordinal => !Number.isSafeInteger(ordinal) || ordinal < 1 || ordinal > watermark.ordinal)) {
-      throw new TypeError('Invalid bounded transcript address request');
-    }
-    return this.#read(chatId, entry => {
-      this.#assertCurrent(entry, watermark.viewId);
-      const query = entry.db.query<StoredLedgerRow, [string, number]>(
-        'SELECT view_id, ordinal, kind, at, client_message_id, payload_json FROM transcript_rows WHERE view_id = ? AND ordinal = ?',
-      );
-      return [...new Set(ordinals)].flatMap(ordinal => {
-        const row = query.get(watermark.viewId, ordinal);
-        return row ? [row] : [];
-      });
-    });
+    return this.#storedReads.byOrdinals(chatId, watermark, ordinals);
   }
 
   async withStoredRowsByOrdinals<T>(chatId: string, watermark: TranscriptWatermark, ordinals: readonly number[],
     consume: (rows: readonly StoredLedgerRow[]) => Promise<T>): Promise<T> {
-    const assertActive = this.#readGuard(chatId);
-    const rows = this.storedRowsByOrdinals(chatId, watermark, ordinals);
-    try {
-      const result = await consume(rows);
-      assertActive();
-      this.#read(chatId, entry => this.#assertCurrent(entry, watermark.viewId));
-      return result;
-    } catch (error) {
-      if (!hasNodeErrorCode(error, UNDECODABLE_LEDGER_ROW)) throw error;
-      assertActive();
-      return this.#read(chatId, entry => { this.#assertCurrent(entry, watermark.viewId); throw error; });
-    }
+    return this.#storedReads.withOrdinals(chatId, watermark, ordinals, consume);
   }
 
   // Reads stored rows for work that decodes them after the read, such as on a Worker. A row
   // that fails to decode there fences the chat while its view is current, as a read that
   // decodes rows does.
   async withStoredRowsThrough<T>(chatId: string, watermark: TranscriptWatermark, work: StoredRowsWork<T>, signal?: AbortSignal): Promise<T> {
-    const rows = await this.#pagesThrough(chatId, watermark, readBoundedStoredPage, signal);
+    const rows = await this.#storedReads.pagesThrough(chatId, watermark, readBoundedStoredPage, signal);
     signal?.throwIfAborted();
     try {
       return await work(rows);
@@ -603,53 +559,6 @@ export class TranscriptLedgerStore {
         this.#assertCurrent(entry, watermark.viewId);
         throw error;
       });
-    }
-  }
-
-  // Reads in bounded pages. Rows at or below a watermark never change, so pages taken across
-  // event-loop turns form one consistent prefix; a replaced view fails as stale.
-  async #pagesThrough<Row extends { readonly ordinal: number }>(
-    chatId: string,
-    watermark: TranscriptWatermark,
-    readPage: (db: Database, viewId: TranscriptViewId, after: number, through: number) => BoundedPage<Row>,
-    signal?: AbortSignal,
-  ): Promise<readonly Row[]> {
-    const rows: Row[] = [];
-    for await (const page of this.#streamPages(chatId, watermark, readPage, signal)) rows.push(...page);
-    return rows;
-  }
-
-  async *#streamPages<Row extends { readonly ordinal: number }>(
-    chatId: string,
-    watermark: TranscriptWatermark,
-    readPage: (db: Database, viewId: TranscriptViewId, after: number, through: number) => BoundedPage<Row>,
-    signal?: AbortSignal,
-    fromOrdinal = 1,
-  ): AsyncGenerator<readonly Row[]> {
-    if (!Number.isSafeInteger(watermark.ordinal) || watermark.ordinal < 0) {
-      throw new TypeError('Transcript watermark ordinal is invalid');
-    }
-    if (!Number.isSafeInteger(fromOrdinal) || fromOrdinal < 1) {
-      throw new TypeError('Transcript starting ordinal is invalid');
-    }
-    let after = fromOrdinal - 1;
-    const assertActive = this.#readGuard(chatId);
-    for (;;) {
-      signal?.throwIfAborted();
-      assertActive();
-      const page = this.#read(chatId, (entry) => {
-        this.#assertCurrent(entry, watermark.viewId);
-        return readPage(entry.db, watermark.viewId, after, watermark.ordinal);
-      });
-      yield page.rows;
-      signal?.throwIfAborted();
-      assertActive();
-      if (page.exhausted) {
-        this.#read(chatId, entry => this.#assertCurrent(entry, watermark.viewId));
-        return;
-      }
-      after = page.rows[page.rows.length - 1]!.ordinal;
-      await yieldToEventLoop();
     }
   }
 

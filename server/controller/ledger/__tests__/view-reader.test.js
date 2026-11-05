@@ -271,7 +271,7 @@ describe('TranscriptViewReader', () => {
       .rejects.toBeInstanceOf(StaleTranscriptViewError);
   });
 
-  it('[TLV5-REPLAY.04-CORE-UNIT-01] replays the complete committed ordinal range even when no row renders', async () => {
+  it('[TLV5-PAGE.11-CORE-UNIT-01] reads the complete committed ordinal range even when no row renders', async () => {
     await withReader(async ({ ledger, reader, viewId }) => {
       const lease = ledger.openProducer('chat-1', 'test');
       lease.sink.publish({

@@ -1,4 +1,6 @@
 import type { Database } from 'bun:sqlite';
+import type { AgentAttachment } from '../../../common/agent-execution.js';
+import type { UserMessage } from '../../../common/chat-types.js';
 import {
   decodeStoredLedgerRow,
   submissionFingerprint,
@@ -12,6 +14,26 @@ import type {
 } from './contracts.js';
 import { SubmissionConflictError } from './errors.js';
 import { runQuery } from './sqlite-operations.js';
+
+export function inputKey(chatId: string, clientMessageId: string): string {
+  return `${chatId}\u0000${clientMessageId}`;
+}
+
+export function inputDetail(input: {
+  readonly message: UserMessage;
+  readonly attachments: readonly AgentAttachment[];
+  readonly clientMessageId: string | null;
+  readonly steer: boolean;
+}): LedgerUserInputDetail {
+  return {
+    clientMessageId: input.clientMessageId,
+    message: input.message,
+    attachments: input.attachments,
+    steer: input.steer,
+    preambleBoundary: null,
+    preamblePrefixReceipt: null,
+  };
+}
 
 export function readSubmission(
   db: Database,

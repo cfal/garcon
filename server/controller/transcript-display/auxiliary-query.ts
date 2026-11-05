@@ -8,6 +8,7 @@ const userSummary = (row: UserRecord): UserRowSummary => ({ ordinal: row.ordinal
   attachmentCount: row.attachment_count, presentation: row.presentation_json ? parseUserMessagePresentation(JSON.parse(row.presentation_json)) : undefined });
 
 export function queryUserRows(store: DisplayStore, request: DisplayAuxiliaryRequest, identity: DisplayAuxiliaryIdentity): UserRowPage {
+  store.requirePrepared(identity.watermark);
   const recall = request.mode === 'recall';
   const rows = store.all<UserRecord>(`SELECT * FROM user_navigation ${recall ? 'INDEXED BY user_recall' : ''}
     WHERE ordinal < ? ${recall ? 'AND nonblank = 1' : ''} ORDER BY ordinal DESC LIMIT ?`,
@@ -17,6 +18,7 @@ export function queryUserRows(store: DisplayStore, request: DisplayAuxiliaryRequ
 }
 
 export function queryResend(store: DisplayStore, request: DisplayAuxiliaryRequest, identity: DisplayAuxiliaryIdentity): ResendSummaryPage {
+  store.requirePrepared(identity.watermark);
   const boundary = store.get<{ ordinal: number }>('SELECT ordinal FROM resend_boundary WHERE ordinal <= ? ORDER BY ordinal DESC LIMIT 1', identity.watermark)?.ordinal ?? 0;
   const lo = store.get<{ rank: number }>('SELECT rank FROM resend_input WHERE ordinal <= ? ORDER BY ordinal DESC LIMIT 1', boundary)?.rank ?? 0;
   const hi = store.get<{ rank: number }>('SELECT rank FROM resend_input WHERE ordinal <= ? ORDER BY ordinal DESC LIMIT 1', identity.watermark)?.rank ?? 0;

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { displayCutsKey, displayProfileKey, parseBodyDependencyRequest, parseBodyDependencyResponse,
   parseDisplayDescriptor, parseDisplayWindowRequest, parseDisplayWindowResponse, parseMemberWindowRequest } from '../transcript-display-contract.ts';
+import { parseSubagentSummaryPage } from '../transcript-display-auxiliary.ts';
 
 const profile = { combine: true, showThinking: true, hiddenToolGroups: [], bashRevision: 'revision' };
 const certificate = { serverInstanceId: 'server', chatId: 'chat', transcriptViewId: 'view', policyRevision: 1,
@@ -13,7 +14,7 @@ const window = { kind: 'available', certificate, sourceHead: 10, structuralPrepa
   interval: { after: 0, through: 10 }, items: [group], earlier: { kind: 'exhausted-through-watermark' },
   later: { kind: 'exhausted-through-watermark' }, cutPlacements: [], publicTail: null };
 
-test('round trips a certified aggregate without member identities or bodies', () => {
+test('[TLV5-DISPLAY.01-CONTRACT-01] round trips a certified aggregate without member identities or bodies', () => {
   expect(parseDisplayWindowRequest(JSON.parse(JSON.stringify(request)))).toEqual(request);
   expect(parseDisplayWindowResponse(JSON.parse(JSON.stringify(window)))).toEqual(window);
 });
@@ -29,13 +30,15 @@ test('rejects unsafe counts, unknown categories, reversed intervals and unknown 
   expect(() => parseDisplayWindowResponse({ ...window, certificate: { ...certificate, watermark: 9 } })).toThrow(TypeError);
 });
 
-test('rejects foreign profile, view, watermark and cut cursors', () => {
+test('[TLV5-L08.01-CONTRACT-01] rejects foreign profile, view, watermark and cut cursors', () => {
   for (const changed of [{ profileKey: 'wrong' }, { cutsKey: 'wrong' }, { transcriptViewId: 'foreign' }, { bashRevision: 'old' }]) {
     expect(() => parseDisplayWindowRequest({ ...request, anchor: { kind: 'before', cursor: {
       certificate: { ...certificate, ...changed }, boundaryOrdinal: 10 } } })).toThrow(TypeError);
   }
   expect(() => parseDisplayWindowRequest({ ...request, profile: { ...profile, hiddenToolGroups: ['bash', 'bash'] } })).toThrow(TypeError);
   expect(() => parseDisplayWindowRequest({ ...request, cuts: Array(33).fill({ id: 'cut', afterOrdinal: 1, anchorRule: 'raw-position' }) })).toThrow(TypeError);
+  expect(() => parseDisplayWindowRequest({ ...request, anchor: { kind: 'before', cursor: { certificate, boundaryOrdinal: 0 } } })).toThrow(TypeError);
+  expect(parseDisplayWindowRequest({ ...request, anchor: { kind: 'after', cursor: { certificate, boundaryOrdinal: 0 } } }).anchor.cursor.boundaryOrdinal).toBe(0);
 });
 
 test('bounds member requests inside the certified fragment', () => {
@@ -54,4 +57,17 @@ test('bounds hydration addresses and rejects future evidence and conflicting out
     bodies: [], deferredOrdinals: [], nonRenderedOrdinals: [], oversizedOrdinal: null };
   expect(() => parseBodyDependencyResponse(response)).toThrow(TypeError);
   expect(() => parseBodyDependencyResponse({ ...response, details: [], deferredOrdinals: [1], nonRenderedOrdinals: [1] })).toThrow(TypeError);
+});
+
+test.each(['model', 'path', 'message', 'lastActionLabel'])('bounds optional subagent %s previews without rejecting empty strings', (key) => {
+  const entry = { id: 'agent', kind: 'subagent', name: 'Worker', status: 'idle', statusLabel: 'Idle', anchorOrdinal: 1 };
+  const page = { kind: 'available', serverInstanceId: 'server', chatId: 'chat', transcriptViewId: 'view',
+    watermark: 1, sourceHead: 1, nextAfterOrder: null };
+  for (const value of [undefined, '', 'x'.repeat(300)]) {
+    const parsed = parseSubagentSummaryPage({ ...page, entries: [{ ...entry, [key]: value }] });
+    expect(parsed.entries[0][key]).toBe(value);
+  }
+  for (const value of [null, false, 0, {}, 'x'.repeat(301)]) {
+    expect(() => parseSubagentSummaryPage({ ...page, entries: [{ ...entry, [key]: value }] })).toThrow('Invalid subagent preview');
+  }
 });

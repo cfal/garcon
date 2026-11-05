@@ -21,7 +21,7 @@ export type DisplayWorkerTask =
   | { kind: 'members'; path: string; request: MemberWindowRequest; filteredBash: boolean }
   | { kind: 'resolve'; path: string; request: DisplayWindowRequest; watermark: number; sourceHead: number; ordinal: number; filteredBash: boolean }
   | { kind: 'body-plan'; path: string; request: BodyDependencyRequest }
-  | { kind: 'present-plan'; rows: readonly StoredLedgerRow[] }
+  | { kind: 'present-plan'; rows: readonly StoredLedgerRow[]; identity: { serverInstanceId: string; chatId: string; transcriptViewId: string } }
   | { kind: 'hydrate'; request: BodyDependencyRequest; plan: BodyReadPlan; rows: readonly StoredLedgerRow[] };
 
 export interface DisplayInspection {
@@ -53,5 +53,6 @@ export interface DisplayWorkerResults {
   'present-plan': string;
 }
 export interface DisplayWorkerRequest { readonly id: number; readonly task: DisplayWorkerTask }
-export type DisplayWorkerReply = { readonly id: number; readonly ok: true; readonly result: unknown }
+export interface DisplayWorkerMetrics { readonly durationMs: number; readonly statements: number; readonly responseBytes: number }
+export type DisplayWorkerReply = { readonly id: number; readonly ok: true; readonly result: unknown; readonly metrics?: DisplayWorkerMetrics }
   | { readonly id: number; readonly ok: false; readonly code: string };

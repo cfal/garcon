@@ -1,14 +1,6 @@
-import type { ResendCandidate, TranscriptMessage } from './chat-view';
-import {
-  isRelationallyValidNewestTranscriptPage,
-  parseResendCandidates,
-  parseTranscriptMessages,
-} from './chat-view';
 import {
   parseChatTransientFeedMutation,
-  parseChatTransientFeedSnapshot,
   type ChatTransientFeedMutation,
-  type ChatTransientFeedSnapshot,
 } from './chat-transient-feed';
 import {
   CHAT_STOP_OUTCOMES,
@@ -53,38 +45,8 @@ import {
   type ProjectUnavailableReason,
 } from './project-resolution';
 import { isRecord } from './json';
-
-export class ChatMessagesMessage {
-  readonly type = 'chat-messages' as const;
-  constructor(
-    public chatId: string,
-    public transcriptViewId: string,
-    public messages: TranscriptMessage[],
-    public firstOrdinal: number,
-    public lastOrdinal: number,
-    public resendCandidates: ResendCandidate[],
-    public turnId?: string,
-    public clientRequestId?: string,
-    public upstreamRequestId?: string,
-  ) {}
-}
-
-export class ChatSubscribedMessage {
-  readonly type = 'chat-subscribed' as const;
-  constructor(
-    public clientRequestId: string,
-    public chatId: string,
-    public transcriptViewId: string,
-    public messages: TranscriptMessage[],
-    public firstOrdinal: number,
-    public lastOrdinal: number,
-    public nextAfterOrdinal: number,
-    public throughOrdinal: number,
-    public hasMore: boolean,
-    public resendCandidates: ResendCandidate[],
-    public transientFeed: ChatTransientFeedSnapshot,
-  ) {}
-}
+import { parseTranscriptDisplayEvent, type TranscriptDisplayEvent } from './transcript-display-events.js';
+export { ChatTranscriptHeadUpdatedMessage, ChatInputCommittedMessage, ChatDisplayStateUpdatedMessage } from './transcript-display-events.js';
 
 export class ChatTranscriptReplacedMessage {
   readonly type = 'chat-transcript-replaced' as const;
@@ -134,12 +96,7 @@ export class ChatReloadedMessage {
     public clientRequestId: string,
     public chatId: string,
     public transcriptViewId: string,
-    public messages: TranscriptMessage[],
     public lastOrdinal: number,
-    public pageOldestOrdinal: number,
-    public pageNewestOrdinal: number,
-    public nextBeforeOrdinal: number | null,
-    public hasMore: boolean,
   ) {}
 }
 
@@ -453,8 +410,7 @@ export class ClientRequestErrorMessage {
 }
 
 export type ServerWsMessage =
-  | ChatMessagesMessage
-  | ChatSubscribedMessage
+  | TranscriptDisplayEvent
   | ChatTranscriptReplacedMessage
   | ChatTransientFeedMutationMessage
   | ChatReloadProgressMessage
@@ -503,18 +459,6 @@ function requiredPath(v: unknown): string | null {
 
 function nonNegativeInt(v: unknown): number | null {
   return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : null;
-}
-
-function isValidTranscriptSpan(
-  firstOrdinal: number,
-  lastOrdinal: number,
-  messages: readonly TranscriptMessage[],
-): boolean {
-  if (firstOrdinal < 1 || lastOrdinal < firstOrdinal - 1) return false;
-  if (lastOrdinal < firstOrdinal && messages.length > 0) return false;
-  return messages.every((entry) => (
-    entry.ordinal >= firstOrdinal && entry.ordinal <= lastOrdinal
-  ));
 }
 
 function reconnectControlResults(value: unknown): ReconnectControlResult[] | null {
@@ -568,81 +512,10 @@ export function parseServerWsMessage(
   data: Record<string, unknown>,
 ): ServerWsMessage | null {
   switch (data.type) {
-    case 'chat-messages': {
-      const chatId = requiredStr(data.chatId);
-      const transcriptViewId = requiredStr(data.transcriptViewId);
-      const firstOrdinal = nonNegativeInt(data.firstOrdinal);
-      const lastOrdinal = nonNegativeInt(data.lastOrdinal);
-      if (!chatId || !transcriptViewId || firstOrdinal === null || lastOrdinal === null) return null;
-      const messages = parseTranscriptMessages(data.messages);
-      const resendCandidates = parseResendCandidates(data.resendCandidates);
-      if (messages === null || resendCandidates === null
-          || !isValidTranscriptSpan(firstOrdinal, lastOrdinal, messages)) {
-        return null;
-      }
-      return new ChatMessagesMessage(
-        chatId,
-        transcriptViewId,
-        messages,
-        firstOrdinal,
-        lastOrdinal,
-        resendCandidates,
-        typeof data.turnId === 'string' ? data.turnId : undefined,
-        typeof data.clientRequestId === 'string'
-          ? data.clientRequestId
-          : undefined,
-        typeof data.upstreamRequestId === 'string'
-          ? data.upstreamRequestId
-          : undefined,
-      );
-    }
-    case 'chat-subscribed': {
-      const clientRequestId = requiredStr(data.clientRequestId);
-      const chatId = requiredStr(data.chatId);
-      const transcriptViewId = requiredStr(data.transcriptViewId);
-      const firstOrdinal = nonNegativeInt(data.firstOrdinal);
-      const lastOrdinal = nonNegativeInt(data.lastOrdinal);
-      const nextAfterOrdinal = nonNegativeInt(data.nextAfterOrdinal);
-      const throughOrdinal = nonNegativeInt(data.throughOrdinal);
-      if (
-        !clientRequestId ||
-        !chatId ||
-        !transcriptViewId ||
-        firstOrdinal === null ||
-        lastOrdinal === null ||
-        nextAfterOrdinal === null ||
-        throughOrdinal === null ||
-        typeof data.hasMore !== 'boolean'
-      )
-        return null;
-      const messages = parseTranscriptMessages(data.messages);
-      const resendCandidates = parseResendCandidates(data.resendCandidates);
-      const transientFeed = parseChatTransientFeedSnapshot(data.transientFeed);
-      if (messages === null || resendCandidates === null
-          || !transientFeed) return null;
-      if (
-        !isValidTranscriptSpan(firstOrdinal, lastOrdinal, messages)
-        || nextAfterOrdinal !== lastOrdinal
-        || nextAfterOrdinal > throughOrdinal
-        || data.hasMore !== (nextAfterOrdinal < throughOrdinal)
-        || (data.hasMore && lastOrdinal < firstOrdinal)
-      ) return null;
-      if (transientFeed.chatId !== chatId
-          || transientFeed.transcriptViewId !== transcriptViewId) return null;
-      return new ChatSubscribedMessage(
-        clientRequestId,
-        chatId,
-        transcriptViewId,
-        messages,
-        firstOrdinal,
-        lastOrdinal,
-        nextAfterOrdinal,
-        throughOrdinal,
-        data.hasMore,
-        resendCandidates,
-        transientFeed,
-      );
-    }
+    case 'chat-transcript-head-updated':
+    case 'chat-input-committed':
+    case 'chat-display-state-updated':
+      return parseTranscriptDisplayEvent(data);
     case 'chat-transcript-replaced': {
       const chatId = requiredStr(data.chatId);
       const previousTranscriptViewId = requiredStr(data.previousTranscriptViewId);
@@ -681,45 +554,8 @@ export function parseServerWsMessage(
       const chatId = requiredStr(data.chatId);
       const transcriptViewId = requiredStr(data.transcriptViewId);
       const lastOrdinal = nonNegativeInt(data.lastOrdinal);
-      const pageOldestOrdinal = nonNegativeInt(data.pageOldestOrdinal);
-      const pageNewestOrdinal = nonNegativeInt(data.pageNewestOrdinal);
-      const rawNextBeforeOrdinal = data.nextBeforeOrdinal;
-      const nextBeforeOrdinal = rawNextBeforeOrdinal === null
-        ? null
-        : nonNegativeInt(rawNextBeforeOrdinal);
-      if (
-        !clientRequestId ||
-        !chatId ||
-        !transcriptViewId ||
-        lastOrdinal === null ||
-        pageOldestOrdinal === null ||
-        pageNewestOrdinal === null ||
-        (rawNextBeforeOrdinal !== null && (nextBeforeOrdinal === null || nextBeforeOrdinal <= 1)) ||
-        typeof data.hasMore !== 'boolean'
-      )
-        return null;
-      const messages = parseTranscriptMessages(data.messages);
-      if (messages === null) return null;
-      const page = {
-        messages,
-        lastOrdinal,
-        pageOldestOrdinal,
-        pageNewestOrdinal,
-        nextBeforeOrdinal,
-        hasMore: data.hasMore,
-      };
-      if (!isRelationallyValidNewestTranscriptPage(page)) return null;
-      return new ChatReloadedMessage(
-        clientRequestId,
-        chatId,
-        transcriptViewId,
-        messages,
-        lastOrdinal,
-        pageOldestOrdinal,
-        pageNewestOrdinal,
-        nextBeforeOrdinal,
-        data.hasMore,
-      );
+      if (!clientRequestId || !chatId || !transcriptViewId || lastOrdinal === null) return null;
+      return new ChatReloadedMessage(clientRequestId, chatId, transcriptViewId, lastOrdinal);
     }
     case 'agent-run-finished': {
       const chatId = requiredStr(data.chatId);

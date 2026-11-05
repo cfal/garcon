@@ -8,7 +8,6 @@ import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
 import { TranscriptHistoryUnavailableError } from '../../chats/errors.js';
 import { DomainError } from '../../../common/domain-error.js';
-import { StaleTranscriptViewError } from '../../ledger/errors.js';
 
 const chatViewMessage = {
   ordinal: 1,
@@ -27,29 +26,6 @@ const mockRegistry = {
     agentSessionId: 'abc',
     agentOwnershipEpoch: 'epoch-1',
   })),
-};
-
-const mockTransientFeeds = {
-  snapshot: mock(({ chatId, transcriptViewId }) => ({
-    serverInstanceId: 'server-instance-test',
-    chatId,
-    transcriptViewId,
-    transientRevision: 0,
-    rows: [],
-  })),
-};
-
-const mockChatViews = {
-  readReplay: mock(() => ({
-    transcriptViewId: 'view-1',
-    messages: [chatViewMessage],
-    firstOrdinal: 2,
-    lastOrdinal: 2,
-    nextAfterOrdinal: 2,
-    throughOrdinal: 2,
-    hasMore: false,
-  })),
-  resendCandidates: mock(() => []),
 };
 
 const mockTranscriptReload = mock(() => Promise.resolve({
@@ -83,11 +59,8 @@ const injectedMocks = [
   mockProcessing.phase,
   mockProcessing.snapshot,
   mockRegistry.getChat,
-  mockChatViews.readReplay,
-  mockChatViews.resendCandidates,
   mockTranscriptReload,
   mockQueue.readChatExecutionControl,
-  mockTransientFeeds.snapshot,
 ];
 
 const moduleMocks = [sendWebSocketJson];
@@ -96,10 +69,8 @@ function createHandler() {
   const instance = new ChatHandler({
     serverInstanceId: 'server-instance-test',
     processing: mockProcessing,
-    chatViews: mockChatViews,
     transcriptReload: mockTranscriptReload,
     queue: mockQueue,
-    transientFeeds: mockTransientFeeds,
     registry: mockRegistry,
   });
   return instance.createHandler();
@@ -146,23 +117,9 @@ describe('chat WebSocket handler', () => {
       agentOwnershipEpoch: 'epoch-1',
     });
     mockQueue.readChatExecutionControl.mockResolvedValue(storedQueue());
-    mockChatViews.readReplay.mockReturnValue({
-      transcriptViewId: 'view-1',
-      messages: [chatViewMessage],
-      firstOrdinal: 2,
-      lastOrdinal: 2,
-      nextAfterOrdinal: 2,
-      throughOrdinal: 2,
-      hasMore: false,
-    });
-    mockChatViews.resendCandidates.mockReturnValue([]);
     mockTranscriptReload.mockResolvedValue({
       transcriptViewId: 'view-2',
-      messages: [chatViewMessage],
       lastOrdinal: 1,
-      pageOldestOrdinal: 1,
-      pageNewestOrdinal: 1,
-      hasMore: false,
     });
     ws = createMockWs();
     chatHandler = createHandler();
@@ -403,7 +360,7 @@ describe('chat WebSocket handler', () => {
     expect(typeof lastSentPayload().serverTime).toBe('string');
   });
 
-  for (const type of ['chat-subscribe', 'chat-reload']) {
+  for (const type of ['chat-reload']) {
     for (const chatId of [undefined, null, '', 123]) {
       for (const cursor of [{}, { transcriptViewId: 'view-1', afterOrdinal: 0 }]) {
         it(`correlates ${type} with invalid chatId ${chatId} and cursor ${JSON.stringify(cursor)}`, async () => {
@@ -414,7 +371,6 @@ describe('chat WebSocket handler', () => {
             type: 'client-request-error', clientRequestId: 'req-missing-chat',
             requestType: type, code: 'MISSING_CHAT_ID', retryable: false,
           });
-          expect(mockChatViews.readReplay).not.toHaveBeenCalled();
         });
       }
     }
@@ -430,248 +386,9 @@ describe('chat WebSocket handler', () => {
     expect(lastSentPayload().clientRequestId).toBeUndefined();
   });
 
-  it('answers a malformed correlated subscribe instead of replaying or staying silent', async () => {
-    await chatHandler.message(ws, {
-      type: 'chat-subscribe',
-      chatId: '123',
-      clientRequestId: 'req-sub-invalid-cursor',
-      transcriptViewId: 'view-1',
-      afterOrdinal: 'not-an-ordinal',
-    });
-
-    expect(mockChatViews.readReplay).not.toHaveBeenCalled();
-    expect(lastSentPayload()).toMatchObject({
-      type: 'client-request-error',
-      clientRequestId: 'req-sub-invalid-cursor',
-      requestType: 'chat-subscribe',
-      code: 'REQUEST_VALIDATION_FAILED',
-      retryable: false,
-      chatId: '123',
-    });
-  });
-
-  it('replays view-qualified deltas for a subscribe cursor', async () => {
-    mockChatViews.resendCandidates.mockReturnValueOnce([
-      { ordinal: 1, content: 'hello', attachmentNames: [] },
-    ]);
-    await chatHandler.message(ws, {
-      type: 'chat-subscribe',
-      chatId: '123',
-      clientRequestId: 'req-sub-1',
-      transcriptViewId: 'view-1',
-      afterOrdinal: 1,
-    });
-
-    expect(mockChatViews.readReplay).toHaveBeenCalledWith('123', 'view-1', 1);
-    expect(lastSentPayload()).toMatchObject({
-      type: 'chat-subscribed',
-      clientRequestId: 'req-sub-1',
-      chatId: '123',
-      transcriptViewId: 'view-1',
-      messages: [chatViewMessage],
-      firstOrdinal: 2,
-      lastOrdinal: 2,
-      resendCandidates: [{ ordinal: 1, content: 'hello', attachmentNames: [] }],
-      transientFeed: { transcriptViewId: 'view-1', rows: [] },
-    });
-  });
-
-  it('captures a bounded replay watermark and returns its continuation fields', async () => {
-    const replayMessage = { ...chatViewMessage, ordinal: 11 };
-    mockChatViews.readReplay.mockReturnValueOnce({
-      transcriptViewId: 'view-1',
-      messages: [replayMessage],
-      firstOrdinal: 11,
-      lastOrdinal: 200,
-      nextAfterOrdinal: 200,
-      throughOrdinal: 600,
-      hasMore: true,
-    });
-
-    await chatHandler.message(ws, {
-      type: 'chat-subscribe',
-      chatId: '123',
-      clientRequestId: 'req-sub-bounded-first',
-      transcriptViewId: 'view-1',
-      afterOrdinal: 10,
-    });
-
-    expect(mockChatViews.readReplay).toHaveBeenCalledWith('123', 'view-1', 10);
-    expect(lastSentPayload()).toMatchObject({
-      type: 'chat-subscribed',
-      clientRequestId: 'req-sub-bounded-first',
-      chatId: '123',
-      transcriptViewId: 'view-1',
-      nextAfterOrdinal: 200,
-      throughOrdinal: 600,
-      hasMore: true,
-    });
-  });
-
-  it('rejects a replay row that cannot fit in one bounded response frame', async () => {
-    mockChatViews.readReplay.mockReturnValueOnce({
-      transcriptViewId: 'view-1',
-      messages: [{
-        ordinal: 2,
-        message: {
-          type: 'assistant-message',
-          content: 'x'.repeat(1024 * 1024),
-          timestamp: '2024-01-01T00:00:00Z',
-        },
-      }],
-      firstOrdinal: 2,
-      lastOrdinal: 2,
-      nextAfterOrdinal: 2,
-      throughOrdinal: 2,
-      hasMore: false,
-    });
-
-    await chatHandler.message(ws, {
-      type: 'chat-subscribe',
-      chatId: '123',
-      clientRequestId: 'req-sub-oversized-row',
-      transcriptViewId: 'view-1',
-      afterOrdinal: 1,
-    });
-
-    expect(sendWebSocketJson).toHaveBeenCalledTimes(1);
-    expect(lastSentPayload()).toMatchObject({
-      type: 'client-request-error',
-      clientRequestId: 'req-sub-oversized-row',
-      requestType: 'chat-subscribe',
-      code: 'HISTORY_LOAD_FAILED',
-      retryable: false,
-      chatId: '123',
-      message: 'A transcript replay row exceeds the WebSocket response limit',
-    });
-    expect(Buffer.byteLength(JSON.stringify(lastSentPayload()), 'utf8')).toBeLessThan(1024);
-  });
-
-  it('rejects a replay request when its response is dropped by the socket', async () => {
-    sendWebSocketJson.mockImplementation(() => false);
-
-    await expect(chatHandler.message(ws, {
-      type: 'chat-subscribe',
-      chatId: '123',
-      clientRequestId: 'req-sub-dropped',
-      transcriptViewId: 'view-1',
-      afterOrdinal: 10,
-    })).rejects.toThrow();
-
-    expect(mockChatViews.readReplay).toHaveBeenCalledWith('123', 'view-1', 10);
-    expect(sendWebSocketJson).toHaveBeenCalledWith(
-      ws,
-      expect.objectContaining({
-        type: 'chat-subscribed',
-        clientRequestId: 'req-sub-dropped',
-      }),
-    );
-  });
-
-  it('[TLV5-REPLAY.02-CONTRACT-01] repeats the captured replay watermark on continuation requests', async () => {
-    mockChatViews.readReplay.mockReturnValueOnce({
-      transcriptViewId: 'view-1',
-      messages: [],
-      firstOrdinal: 201,
-      lastOrdinal: 400,
-      nextAfterOrdinal: 400,
-      throughOrdinal: 600,
-      hasMore: true,
-    });
-
-    await chatHandler.message(ws, {
-      type: 'chat-subscribe',
-      chatId: '123',
-      clientRequestId: 'req-sub-bounded-next',
-      transcriptViewId: 'view-1',
-      afterOrdinal: 200,
-      throughOrdinal: 600,
-    });
-
-    expect(mockChatViews.readReplay).toHaveBeenCalledWith('123', 'view-1', 200, 600);
-    expect(lastSentPayload()).toMatchObject({
-      type: 'chat-subscribed',
-      clientRequestId: 'req-sub-bounded-next',
-      chatId: '123',
-      transcriptViewId: 'view-1',
-      messages: [],
-      nextAfterOrdinal: 400,
-      throughOrdinal: 600,
-      hasMore: true,
-    });
-  });
-
-  it('suppresses resend candidates while the chat is processing', async () => {
-    mockProcessing.phase.mockReturnValueOnce('running');
-    mockChatViews.resendCandidates.mockReturnValueOnce([
-      { ordinal: 1, content: 'hello', attachmentNames: [] },
-    ]);
-
-    await chatHandler.message(ws, {
-      type: 'chat-subscribe',
-      chatId: '123',
-      clientRequestId: 'req-sub-running',
-      transcriptViewId: 'view-1',
-      afterOrdinal: 1,
-    });
-
-    expect(lastSentPayload()).toMatchObject({
-      type: 'chat-subscribed',
-      resendCandidates: [],
-    });
-    expect(mockChatViews.resendCandidates).not.toHaveBeenCalled();
-  });
-
-  it('returns a typed stale-view error when replay addresses a replaced view', async () => {
-    mockChatViews.readReplay.mockRejectedValueOnce(
-      new StaleTranscriptViewError('123', 'view-1', 'view-2'),
-    );
-
-    await chatHandler.message(ws, {
-      type: 'chat-subscribe',
-      chatId: '123',
-      clientRequestId: 'req-sub-stale',
-      transcriptViewId: 'view-1',
-      afterOrdinal: 99,
-    });
-
-    expect(lastSentPayload()).toMatchObject({
-      type: 'client-request-error',
-      clientRequestId: 'req-sub-stale',
-      chatId: '123',
-      code: 'STALE_TRANSCRIPT_VIEW',
-      retryable: false,
-    });
-  });
-
-  it('[TLV5-L11.01-WS-CONTRACT-01] reports a fenced replay with a fixed non-retryable error', async () => {
-    const sentinel = '/sentinel-root/chat-sentinel/ledger.sqlite';
-    mockChatViews.readReplay.mockRejectedValueOnce(
-      new TranscriptHistoryUnavailableError({
-        kind: 'degraded',
-        errorCode: 'LEDGER_FENCED',
-        retryable: false,
-      }, { cause: new Error(sentinel) }),
-    );
-
-    await chatHandler.message(ws, {
-      type: 'chat-subscribe',
-      chatId: '123',
-      clientRequestId: 'req-sub-fenced',
-      transcriptViewId: 'view-1',
-      afterOrdinal: 0,
-    });
-
-    expect(lastSentPayload()).toEqual({
-      type: 'client-request-error',
-      clientRequestId: 'req-sub-fenced',
-      requestType: 'chat-subscribe',
-      code: 'HISTORY_LOAD_FAILED',
-      message: 'The transcript ledger is unavailable',
-      retryable: false,
-      chatId: '123',
-    });
-    expect(JSON.stringify(lastSentPayload())).not.toContain(sentinel);
+  it('does not serve the retired raw subscribe protocol', async () => {
+    await chatHandler.message(ws, { type: 'chat-subscribe', chatId: '123', clientRequestId: 'retired', transcriptViewId: 'view-1', afterOrdinal: 0 });
+    expect(sendWebSocketJson).not.toHaveBeenCalled();
   });
 
   it('returns the replacement transcript after a manual native reload', async () => {
@@ -690,12 +407,9 @@ describe('chat WebSocket handler', () => {
       clientRequestId: 'req-reload-1',
       chatId: '123',
       transcriptViewId: 'view-2',
-      messages: [chatViewMessage],
       lastOrdinal: 1,
-      pageOldestOrdinal: 1,
-      pageNewestOrdinal: 1,
-      hasMore: false,
     });
+    expect(lastSentPayload()).not.toHaveProperty('messages');
     expect(ws.publish).not.toHaveBeenCalled();
   });
 
@@ -706,12 +420,8 @@ describe('chat WebSocket handler', () => {
       onProgress({ phase: 'saving', rows: 500 });
       return {
         transcriptViewId: 'view-2',
-        messages: [chatViewMessage],
-        lastOrdinal: 1,
-        pageOldestOrdinal: 1,
-        pageNewestOrdinal: 1,
-        hasMore: false,
-      };
+          lastOrdinal: 1,
+            };
     });
 
     await chatHandler.message(ws, { type: 'chat-reload', chatId: '123', clientRequestId: 'req-progress' });
@@ -739,11 +449,7 @@ describe('chat WebSocket handler', () => {
     await Bun.sleep(1_100);
     pending.resolve({
       transcriptViewId: 'view-2',
-      messages: [chatViewMessage],
       lastOrdinal: 1,
-      pageOldestOrdinal: 1,
-      pageNewestOrdinal: 1,
-      hasMore: false,
     });
     await reloading;
 

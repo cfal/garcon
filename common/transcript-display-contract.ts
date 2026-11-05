@@ -223,7 +223,7 @@ export function parseDisplayWindowRequest(value: unknown): DisplayWindowRequest 
   else if (anchor.kind === 'around') parsedAnchor = { kind: 'around', ordinal: displayInteger(anchor.ordinal, 1) };
   else if (anchor.kind === 'before' || anchor.kind === 'after') {
     const cursor = displayRecord(anchor.cursor);
-    parsedAnchor = { kind: anchor.kind, cursor: { certificate: parseDisplayCertificate(cursor.certificate), boundaryOrdinal: displayInteger(cursor.boundaryOrdinal) } };
+    parsedAnchor = { kind: anchor.kind, cursor: { certificate: parseDisplayCertificate(cursor.certificate), boundaryOrdinal: displayInteger(cursor.boundaryOrdinal, anchor.kind === 'before' ? 1 : 0) } };
   } else throw new TypeError('Invalid display anchor');
   const request: DisplayWindowRequest = { chatId: displayString(raw.chatId, 128), transcriptViewId: displayString(raw.transcriptViewId, 256),
     policyRevision: displayInteger(raw.policyRevision, 1), profile: parseDisplayProfile(raw.profile), cuts: parseDisplayCuts(raw.cuts),

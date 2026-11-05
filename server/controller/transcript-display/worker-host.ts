@@ -39,7 +39,7 @@ export function runDisplayWorker(role: 'builder' | 'reader'): void {
       if (role !== 'reader' || task.rows.length !== 1) throw new TypeError('Invalid plan detail request');
       const message = ledgerRowToMessage(decodeStoredLedgerRow(task.rows[0]));
       if (message?.type !== 'exit-plan-mode-tool-use') throw new TypeError('Invalid plan body');
-      return JSON.stringify({ ordinal: task.rows[0].ordinal, message });
+      return JSON.stringify({ ...task.identity, ordinal: task.rows[0].ordinal, message });
     }
     const store = storeFor(task.path);
     switch (task.kind) {
@@ -85,8 +85,15 @@ export function runDisplayWorker(role: 'builder' | 'reader'): void {
   }
   self.onmessage = (event: MessageEvent<DisplayWorkerRequest>) => {
     const { id, task } = event.data;
+    const started = performance.now();
+    const before = 'path' in task ? stores.get(task.path)?.statements ?? 0 : 0;
     let reply: DisplayWorkerReply;
-    try { reply = { id, ok: true, result: execute(task) }; }
+    try {
+      const result = execute(task);
+      const statements = 'path' in task ? Math.max(0, (stores.get(task.path)?.statements ?? 0) - before) : 0;
+      reply = { id, ok: true, result, metrics: { durationMs: performance.now() - started, statements,
+        responseBytes: typeof result === 'string' ? Buffer.byteLength(result, 'utf8') : 0 } };
+    }
     catch (error) {
       const code = error instanceof TypeError ? 'DISPLAY_INVALID_REQUEST' : displayErrorCode(error);
       reply = { id, ok: false, code };

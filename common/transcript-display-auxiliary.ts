@@ -92,7 +92,12 @@ export function parseSubagentSummaryPage(value: unknown): AuxiliaryResponse<Suba
   const entries = displayArray(raw.entries, 50).map(value => {
     const entry = displayRecord(value), status = statuses.find(status => status === entry.status);
     if (entry.kind !== 'subagent' || !status) throw new TypeError('Invalid subagent summary');
-    const optional = (key: string) => entry[key] === undefined ? undefined : typeof entry[key] === 'string' && entry[key].length <= 300 ? entry[key] : (() => { throw new TypeError('Invalid subagent preview'); })();
+    const optional = (key: string): string | undefined => {
+      const preview = entry[key];
+      if (preview === undefined) return undefined;
+      if (typeof preview !== 'string' || preview.length > 300) throw new TypeError('Invalid subagent preview');
+      return preview;
+    };
     return { id: displayString(entry.id), kind: 'subagent' as const, name: displayString(entry.name, 300), status,
       statusLabel: displayString(entry.statusLabel, 300), model: optional('model'), path: optional('path'), message: optional('message'),
       lastActionLabel: optional('lastActionLabel'), anchorOrdinal: displayInteger(entry.anchorOrdinal, 1, identity.watermark) };

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { AssistantMessage, BashToolUseMessage, GlobToolUseMessage, ToolResultMessage, UserMessage } from '../../../../common/chat-types.js';
+import { AssistantMessage, AskUserQuestionToolUseMessage, BashToolUseMessage, GlobToolUseMessage, PermissionRequestMessage, ToolResultMessage, UserMessage } from '../../../../common/chat-types.js';
 import type { ChatMessage } from '../../../../common/chat-types.js';
 import type { DisplayProfile, DisplayWindowRequest } from '../../../../common/transcript-display-contract.js';
+import { parseDisplayWindowResponse } from '../../../../common/transcript-display-contract.js';
 import { DISPLAY_POLICY_REVISION } from '../../../../common/transcript-display-policy.js';
 import { encodeLedgerDraft, type StoredLedgerRow } from '../../ledger/codec.js';
 import { DisplayStore } from '../store.js';
@@ -9,6 +10,8 @@ import { appendDisplayFrame } from '../extractor.js';
 import { DisplayQuery, displayCertificate } from '../query.js';
 import { prepareBashFrame, pruneBashRevision } from '../bash-revision.js';
 import { planBodyRead } from '../details.js';
+import { queryResend, queryUserRows } from '../auxiliary-query.js';
+import { displayErrorCode } from '../errors.js';
 
 const at = '2026-01-01T00:00:00.000Z';
 const profile: DisplayProfile = { combine: true, showThinking: true, hiddenToolGroups: [], bashRevision: 'patterns' };
@@ -32,6 +35,54 @@ function query(store: DisplayStore, limit = 50, anchor: DisplayWindowRequest['an
 }
 
 describe('persistent transcript display read model', () => {
+  test('an after cursor beyond the watermark returns a valid exhausted interval', () => {
+    const store = create();
+    appendDisplayFrame(store, stored([new UserMessage(at, 'Generic prompt'), new AssistantMessage(at, 'Generic answer')]), 2, 'server');
+    const initial = query(store);
+    const next = parseDisplayWindowResponse(query(store, 50, {
+      kind: 'after', cursor: { certificate: initial.certificate, boundaryOrdinal: 3 },
+    }));
+    expect(next).toMatchObject({ kind: 'available', interval: { after: 2, through: 2 }, items: [], later: { kind: 'exhausted-through-watermark' } });
+  });
+  test.each([
+    ['SQLITE_CORRUPT_INDEX', 'DISPLAY_STORE_INVALID'], ['SQLITE_NOTADB', 'DISPLAY_STORE_INVALID'],
+    ['SQLITE_BUSY_RECOVERY', 'DISPLAY_BUSY'], ['SQLITE_BUSY_SNAPSHOT', 'DISPLAY_BUSY'],
+    ['SQLITE_LOCKED_SHAREDCACHE', 'DISPLAY_BUSY'], ['SQLITE_FULL', 'DISPLAY_DISK_FULL'],
+  ])('maps extended SQLite failure %s to %s', (code, expected) => {
+    expect(displayErrorCode(Object.assign(new Error('Synthetic failure'), { code }))).toBe(expected);
+  });
+
+  test('freshly rebuilt stores cannot certify bodies or auxiliary pages beyond their frontier', () => {
+    const store = create();
+    const identity = { serverInstanceId: 'server', chatId: 'chat', transcriptViewId: 'view', watermark: 2, sourceHead: 2 };
+    const request = { chatId: 'chat', transcriptViewId: 'view', limit: 50 };
+    const reads = [
+      () => new DisplayQuery(store, profile, 2, [], false),
+      () => planBodyRead(store, { certificate: displayCertificate('server', { ...request, profile, cuts: [] }, 2),
+        profile, cuts: [], seedOrdinals: [1], residentOrdinals: [], limitBodies: 50, estimatedByteBudget: 10000 }),
+      () => queryUserRows(store, request, identity),
+      () => queryResend(store, request, identity),
+    ];
+    for (const read of reads) {
+      try { read(); throw new Error('An unprepared prefix was accepted'); }
+      catch (error) { expect(error).toMatchObject({ code: 'DISPLAY_PREPARING' }); }
+    }
+  });
+
+  test.each([true, false])('resolves question results to their visible wrapper, wrapper-first=%s', (wrapperFirst) => {
+    const store = create();
+    const question = new AskUserQuestionToolUseMessage(at, 'question', 'Generic title', []);
+    const wrapper = new PermissionRequestMessage(at, 'occurrence', question);
+    const messages = [...(wrapperFirst ? [wrapper, question] : [question, wrapper]), new ToolResultMessage(at, 'question', 'Generic answer')];
+    appendDisplayFrame(store, stored(messages), 3, 'server');
+    expect(new DisplayQuery(store, profile, 3, [], false).resolve(3, 3)).toEqual({
+      kind: 'attached-detail', ordinal: 3, landedOrdinal: wrapperFirst ? 1 : 2,
+    });
+    expect(new DisplayQuery(store, profile, 2, [], false).resolve(3, 3).kind).toBe('preparing');
+    store.run('UPDATE tool_pair SET wrapper_ordinal = 4');
+    expect(new DisplayQuery(store, profile, 3, [], false).resolve(3, 3).kind).toBe('non-rendered');
+  });
+
   test('a partially pruned Bash revision is never certified and rebuilds after pruning', () => {
     const store = create();
     const rows = stored(Array.from({ length: 2600 }, (_, i) => new BashToolUseMessage(at, `tool-${i}`, 'true')));
@@ -58,7 +109,7 @@ describe('persistent transcript display read model', () => {
     expect(after.interval).toEqual({ after: 2, through: 2 });
     expect(after.earlier.kind).toBe('more');
   });
-  test('prepared traversal and middle-target extents do not enumerate a collapsed run', () => {
+  test('[TLV5-DISPLAY.01-CORE-UNIT-01] prepared traversal and middle-target extents do not enumerate a collapsed run', () => {
     const counts: number[] = [];
     for (const members of [600, 1500, 40000]) {
       const store = create();
@@ -78,7 +129,7 @@ describe('persistent transcript display read model', () => {
     expect(new Set(counts).size).toBe(1);
   });
 
-  test('uses exact FIFO across frames and never attaches future evidence to old details', () => {
+  test('[TLV5-DISPLAY.02-CORE-UNIT-01] uses exact FIFO across frames and never attaches future evidence to old details', () => {
     const store = create();
     const rows = stored([new GlobToolUseMessage(at, 'same', '*'), new BashToolUseMessage(at, 'same', 'true'),
       new UserMessage(at, 'Between occurrences'), new ToolResultMessage(at, 'same', 'files'), new ToolResultMessage(at, 'same', 'ok')]);
