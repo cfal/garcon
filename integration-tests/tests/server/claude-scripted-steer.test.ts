@@ -60,7 +60,7 @@ describe('scripted Claude strict steering', () => {
       if (!firstTurnId) throw new Error('Scripted Claude start did not return a turn identity.');
       await held.requested;
 
-      await fixture.client.enqueueNew(chatId, futurePrompt);
+      const queuedSubmission63 = await fixture.client.enqueueNew(chatId, futurePrompt);
       const paused = await fixture.client.pauseQueue(chatId);
       expect(paused.control.queue.entries.map((entry) => entry.content)).toEqual([futurePrompt]);
       expect(paused.control.queue.pause?.kind).toBe('manual');
@@ -120,7 +120,7 @@ describe('scripted Claude strict steering', () => {
       await fixture.client.resumeQueue(chatId, stillPaused.queue.pause!.id);
       const futureInput = await fixture.client.waitForCommittedUserInput(
         chatId,
-        futurePrompt,
+        queuedSubmission63.clientMessageId,
         { afterIndex: futureCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {

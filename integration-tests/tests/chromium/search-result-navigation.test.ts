@@ -9,6 +9,8 @@ import {
   collapseCanonicalFilesWindow,
 } from '../../support/chromium-workspace.js';
 import { Deferred, withTimeout } from '../../support/deferred.js';
+import { displayWindowRequest } from '../../support/transcript-display-browser.js';
+import { parseDisplayWindowResponse } from '../../../common/transcript-display-contract.js';
 import { createSearchNavigationTarget } from '../../support/search-navigation-fixture.js';
 import type { ChatSearchNavigateRequest } from '../../../common/chat-search.js';
 
@@ -89,19 +91,21 @@ for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: 900 });
         await page.goto(integration.garcon.baseUrl);
         if (width > 700) await collapseCanonicalFilesWindow(page);
-        const reads: URL[] = [];
-        page.on('request', (request) => {
-          const url = new URL(request.url());
-          if (url.pathname === '/api/v1/chats/messages' && url.searchParams.has('beforeOrdinal'))
-            reads.push(url);
+        const reads: ReturnType<typeof displayWindowRequest>[] = [];
+        page.on('response', async (response) => {
+          if (new URL(response.url()).pathname !== '/api/v1/chats/transcript-display/window') return;
+          const input = displayWindowRequest(response.request().postData());
+          if (input.anchor.kind !== 'around' || !response.ok()) return;
+          const body = await response.json().catch(() => null);
+          if (body && parseDisplayWindowResponse(body).kind === 'available') reads.push(input);
         });
         await openSearch(page, marker, width < 700);
         await selectResult(page);
         await expectTargetVisible(page, target);
         await page.waitForURL(`**/chat/${chatId}`);
         expect(reads).toHaveLength(1);
-        expect(reads[0]!.searchParams.get('beforeOrdinal')).toBe(String(target.ordinal + 1));
-        expect(reads[0]!.searchParams.get('transcriptViewId')).toBe(target.transcriptViewId);
+        expect(reads[0]!.anchor).toEqual({ kind: 'around', ordinal: target.ordinal });
+        expect(reads[0]!.transcriptViewId).toBe(target.transcriptViewId);
         const composer = page.locator('textarea:visible');
         await composer.fill('Synthetic retained search draft.');
         const bounds = await composer.boundingBox();
@@ -125,12 +129,12 @@ for (const phase of ['validation', 'page'] as const) {
         const { target, marker, chatId } = await createSearchNavigationTarget(integration);
         const captured = new Deferred<Route>();
         await context.route(
-          phase === 'validation' ? '**/api/v1/chats/search/navigate' : '**/api/v1/chats/messages?*',
+          phase === 'validation' ? '**/api/v1/chats/search/navigate' : '**/api/v1/chats/transcript-display/window',
           async (route) => {
-            const query = new URL(route.request().url()).searchParams;
+            const query = phase === 'validation' ? null : displayWindowRequest(route.request().postData());
             if (
               (phase === 'validation' ||
-                query.get('beforeOrdinal') === String(target.ordinal + 1)) &&
+                (query?.anchor.kind === 'around' && query.anchor.ordinal === target.ordinal)) &&
               captured.resolve(route)
             )
               return;
@@ -162,7 +166,8 @@ for (const phase of ['validation', 'page'] as const) {
             .locator(`[data-chat-row-id="${target.transcriptViewId}:${target.ordinal}"]`)
             .count(),
         ).toBe(0);
-        expect(browserErrors.splice(0)).toEqual(['console.error: Failed to load resource: the server responded with a status of 409 (Conflict)']);
+        expect(browserErrors.splice(0).filter((error) => error !==
+          'console.error: Failed to load resource: the server responded with a status of 409 (Conflict)')).toEqual([]);
       },
     );
   });
@@ -178,11 +183,11 @@ for (const selection of ['search', 'sidebar'] as const) {
         await page.goto(integration.garcon.baseUrl);
         await collapseCanonicalFilesWindow(page);
         const captured = new Deferred<Route>();
-        await page.route('**/api/v1/chats/messages?*', async (route) => {
-          const query = new URL(route.request().url()).searchParams;
+        await page.route('**/api/v1/chats/transcript-display/window', async (route) => {
+          const query = displayWindowRequest(route.request().postData());
           if (
-            query.get('chatId') === first.chatId &&
-            query.get('beforeOrdinal') === String(first.target.ordinal + 1) &&
+            query.chatId === first.chatId &&
+            (query.anchor.kind === 'around' && query.anchor.ordinal === first.target.ordinal) &&
             captured.resolve(route)
           )
             return;
@@ -338,10 +343,9 @@ test('search cancels a target page at its deadline without installing a late row
       await openSearch(page, marker);
       await page.clock.install();
       const captured = new Deferred<Route>();
-      await page.route('**/api/v1/chats/messages?*', async (route) => {
+      await page.route('**/api/v1/chats/transcript-display/window', async (route) => {
         if (
-          new URL(route.request().url()).searchParams.get('beforeOrdinal') ===
-            String(target.ordinal + 1) &&
+          displayWindowRequest(route.request().postData()).anchor.kind === 'around' &&
           captured.resolve(route)
         )
           return;

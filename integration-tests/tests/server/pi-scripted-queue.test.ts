@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
 import {
   chatCompletionsText,
@@ -71,7 +70,7 @@ describe('scripted Pi queue lifecycle', () => {
 
       const secondInput = await fixture.client.waitForCommittedUserInput(
         chatId,
-        secondPrompt,
+        secondEntry.clientMessageId,
         { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       const secondTerminal = await fixture.client.waitForTurnTerminal(chatId, undefined, {
@@ -81,7 +80,7 @@ describe('scripted Pi queue lifecycle', () => {
       expectFinished(secondTerminal.type);
       const thirdInput = await fixture.client.waitForCommittedUserInput(
         chatId,
-        thirdPrompt,
+        thirdEntry.clientMessageId,
         { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       const thirdTerminal = await fixture.client.waitForTurnTerminal(chatId, undefined, {
@@ -133,16 +132,13 @@ describe('scripted Pi queue lifecycle', () => {
           command: firstPrompt,
         }));
 
-        await fixture.client.waitForEvent(
-          (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-            && event.chatId === chatId
-            && event.messages.some((entry) => (
+        await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) => (
               entry.message.type === 'transcript-notice'
               && entry.message.detail?.type === 'chat-id-disclosure'
             )),
-          `Pi chat ID disclosure for ${chatId}`,
-          { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-        );
+        { afterOrdinal: fixture.client.observedHead(chatId, cursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: `Pi chat ID disclosure for ${chatId}` },
+      );
         await writeFile(releasePath, 'release', 'utf8');
 
         const steeredRequest = await steeredHeld.requested;
@@ -200,7 +196,7 @@ describe('scripted Pi queue lifecycle', () => {
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
       await firstHeld.requested;
-      await fixture.client.enqueueNew(chatId, queuedPrompt);
+      const queuedSubmission200 = await fixture.client.enqueueNew(chatId, queuedPrompt);
       const paused = await fixture.client.pauseQueue(chatId);
       expect(paused.control.queue.pause?.kind).toBe('manual');
 
@@ -221,7 +217,7 @@ describe('scripted Pi queue lifecycle', () => {
       await fixture.client.resumeQueue(chatId, paused.control.queue.pause!.id);
       const queuedInput = await fixture.client.waitForCommittedUserInput(
         chatId,
-        queuedPrompt,
+        queuedSubmission200.clientMessageId,
         { afterIndex: resumeCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {
@@ -284,7 +280,7 @@ describe('scripted Pi queue lifecycle', () => {
       })).type);
       const queuedInput = await fixture.client.waitForCommittedUserInput(
         chatId,
-        queuedPrompt,
+        clientMessageId,
         { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {
@@ -340,7 +336,7 @@ describe('scripted Pi queue lifecycle', () => {
       })).type);
       const survivorInput = await fixture.client.waitForCommittedUserInput(
         chatId,
-        survivorPrompt,
+        survivor.clientMessageId,
         { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {

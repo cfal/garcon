@@ -110,7 +110,8 @@ function defineSteeringConformance(
           await held.requested;
 
           const queuedPrompts = sourceIndex === 0 ? [steerPrompt, futurePrompt] : [futurePrompt, steerPrompt];
-          for (const content of queuedPrompts) await fixture.client.enqueueNew(chatId, content);
+          const queued = [];
+          for (const content of queuedPrompts) queued.push(await fixture.client.enqueueNew(chatId, content));
           const paused = await fixture.client.pauseQueue(chatId);
           expect(paused.control.queue.entries.map((entry) => entry.content)).toEqual(queuedPrompts);
           const source = paused.control.queue.entries[sourceIndex];
@@ -154,7 +155,7 @@ function defineSteeringConformance(
           await fixture.client.resumeQueue(chatId, stillPaused.queue.pause!.id);
           const futureInput = await fixture.client.waitForCommittedUserInput(
             chatId,
-            futurePrompt,
+            queued[sourceIndex === 0 ? 1 : 0]!.clientMessageId,
             { afterIndex: futureCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
           );
           const futureTerminal = await fixture.client.waitForTurnTerminal(

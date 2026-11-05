@@ -3,7 +3,6 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { StartChatCommandRequest } from '../../../common/chat-command-contracts.js';
 import type { AgentStartOutcomeNoticeDetail } from '../../../common/garcon-agent-result.js';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { escapeGarconXmlText } from '../../../common/garcon-command-envelope.js';
 import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
 import { parseGarconCommandRejection, type GarconCommandRejection } from '../../../common/garcon-command-rejection.js';
@@ -72,12 +71,11 @@ async function environmentFor(
 }
 
 async function childOutcome(fixture: IntegrationFixture, chatId: string, status: string, afterIndex: number): Promise<AgentStartOutcomeNoticeDetail> {
-  const event = await fixture.client.waitForEvent(
-    (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === chatId
-      && event.messages.some(({ message }) => message.type === 'transcript-notice'
+  const event = await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some(({ message }) => message.type === 'transcript-notice'
         && message.detail?.type === 'agent-start-outcome' && message.detail.status === status),
-    `child ${status} outcome`, { afterIndex, timeoutMs: 60_000 },
-  );
+        { afterOrdinal: fixture.client.observedHead(chatId, afterIndex), timeoutMs: 60_000, description: `child ${status} outcome` },
+      );
   const detail = messagesOfType(event.messages, 'transcript-notice').find((notice) =>
     notice.detail?.type === 'agent-start-outcome' && notice.detail.status === status)?.detail;
   if (detail?.type !== 'agent-start-outcome') throw new Error('Missing child outcome');
@@ -238,11 +236,10 @@ describe('scripted provider agent commands', () => {
             await waitForCommandDeliveryCount(fixture, 3);
             await writeFile(gates[1]!, 'release', 'utf8');
           }
-          await fixture.client.waitForEvent(
-            (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === source
-              && event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Synthetic completion observed.'),
-            'exact resumed result observed', { afterIndex: cursor, timeoutMs: 90_000 },
-          );
+          await fixture.client.waitForMessages(source,
+        (event) => event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Synthetic completion observed.'),
+        { afterOrdinal: fixture.client.observedHead(source, cursor), timeoutMs: 90_000, description: 'exact resumed result observed' },
+      );
           const history = await fixture.client.getMessages(source);
           const rejection = rejected as GarconCommandRejection | null;
           expect(rejection?.sourceViewId).toBe(history.transcriptViewId);
@@ -310,18 +307,10 @@ describe('scripted provider agent commands', () => {
             if (createsChild) environment.script(reply);
             const cursor = fixture.client.markEvents();
             await fixture.client.startChat(start);
-            await fixture.client.waitForEvent(
-              (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === source
-                && event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Synthetic result acknowledged.'),
-              'private action result acknowledged', { afterIndex: cursor, timeoutMs: 90_000 },
-            );
-            if (createsChild) {
-              await fixture.client.waitForEvent(
-                (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId !== source
-                  && event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Synthetic child complete.'),
-                'independent child completed', { afterIndex: cursor, timeoutMs: 90_000 },
-              );
-            }
+            await fixture.client.waitForMessages(source,
+        (event) => event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Synthetic result acknowledged.'),
+        { afterOrdinal: fixture.client.observedHead(source, cursor), timeoutMs: 90_000, description: 'private action result acknowledged' },
+      );
             const transcript = await fixture.client.getMessages(source);
             expect(userContents(transcript.messages)).toEqual([start.command]);
             const outcomes = messagesOfType(transcript.messages, 'transcript-notice').filter((notice) =>
@@ -342,6 +331,11 @@ describe('scripted provider agent commands', () => {
                 agentId: start.agentId, model: start.model, apiProviderId: null, modelEndpointId: null, modelProtocol: null,
                 thinkingMode: start.thinkingMode, permissionMode: start.permissionMode,
               });
+              await fixture.client.waitForMessages(child!.id,
+                (page) => page.messages.some(({ message }) => message.type === 'assistant-message'
+                  && message.content === 'Synthetic child complete.'),
+                { timeoutMs: 90_000, description: 'independent child completed' },
+              );
               expect(received.some((input) => input.endsWith(childPrompt))).toBe(true);
               expect(userContents((await fixture.client.getMessages(child!.id)).messages)).toEqual([childPrompt]);
             } else {
@@ -374,11 +368,10 @@ describe('scripted provider agent commands', () => {
         const cursor = fixture.client.markEvents();
         const start = scriptedOpenCodeStartRequest({ chatId, projectPath: fixture.dirs.project, command: 'Issue the synthetic command.' });
         const active = await fixture.client.startChat(start);
-        const event = await fixture.client.waitForEvent(
-          (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === chatId
-            && event.messages.some(({ message }) => message.type === 'transcript-notice' && message.detail?.type === 'agent-schedule-outcome'),
-          'schedule creation outcome', { afterIndex: cursor, timeoutMs: 60_000 },
-        );
+        const event = await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some(({ message }) => message.type === 'transcript-notice' && message.detail?.type === 'agent-schedule-outcome'),
+        { afterOrdinal: fixture.client.observedHead(chatId, cursor), timeoutMs: 60_000, description: 'schedule creation outcome' },
+      );
         const outcome = messagesOfType(event.messages, 'transcript-notice').find((notice) => notice.detail?.type === 'agent-schedule-outcome')?.detail;
         if (outcome?.type !== 'agent-schedule-outcome' || outcome.status !== 'created') throw new Error('Schedule was not created');
         const result = garconCommandResultContent(outcome);

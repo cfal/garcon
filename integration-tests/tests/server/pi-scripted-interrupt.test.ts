@@ -202,9 +202,8 @@ function expectPiStoppedTurnEventOrder(
     && event.intent === 'stop'
     && event.outcome === 'interrupt-requested');
   const interruption = events.findIndex((event) =>
-    event.type === 'chat-messages'
-    && event.chatId === chatId
-    && event.turnId === turnId);
+    event.type === 'chat-transcript-head-updated'
+    && event.chatId === chatId);
 
   expect(interruption).toBeGreaterThanOrEqual(0);
   expect(stopped).toBeGreaterThan(interruption);

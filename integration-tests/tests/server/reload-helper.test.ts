@@ -11,7 +11,7 @@ const remoteBusy = 'The turn is still running on the executor. Reload from nativ
 test.each(['CHAT_RUNNING', 'HISTORY_LOAD_FAILED'] as const)('Reload waits for %s idle admission', async code => {
   const sleep = spyOn(Bun, 'sleep').mockResolvedValue(undefined);
   const refusal = new GarconWsRequestError(new ClientRequestErrorMessage('request', 'chat-reload', code, remoteBusy, true, 'chat'));
-  const response = new ChatReloadedMessage('request', 'chat', 'view', [], 0, 0, 0, null, false);
+  const response = new ChatReloadedMessage('request', 'chat', 'view', 0);
   const client = { reloadChat: mock(async () => response).mockRejectedValueOnce(refusal) } satisfies Pick<GarconTestClient, 'reloadChat'>;
   await reloadFromNativeHistory({ client }, 'chat');
   expect(client.reloadChat).toHaveBeenCalledTimes(2);

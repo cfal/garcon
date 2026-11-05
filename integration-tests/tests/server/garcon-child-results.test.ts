@@ -3,7 +3,6 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentChildOutcomeNoticeDetail } from '../../../common/garcon-agent-result.js';
 import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import type { ChatRegistrySnapshot } from '../../../server/controller/chats/registry-contracts.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
@@ -12,11 +11,10 @@ async function outcome(fixture: IntegrationFixture, chatId: string, ref: string,
   const matches = (detail: unknown): detail is AgentChildOutcomeNoticeDetail => !!detail && typeof detail === 'object'
     && 'type' in detail && (detail.type === 'agent-start-outcome' || detail.type === 'agent-resume-outcome')
     && 'ref' in detail && detail.ref === ref && 'status' in detail && detail.status === status;
-  const event = await fixture.client.waitForEvent(
-    (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === chatId
-      && event.messages.some(({ message }) => message.type === 'transcript-notice' && matches(message.detail)),
-    `${ref} ${status}`, { afterIndex, timeoutMs: 30_000 },
-  );
+  const event = await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some(({ message }) => message.type === 'transcript-notice' && matches(message.detail)),
+        { afterOrdinal: fixture.client.observedHead(chatId, afterIndex), timeoutMs: 30_000, description: `${ref} ${status}` },
+      );
   const detail = messagesOfType(event.messages, 'transcript-notice').find((message) => matches(message.detail))?.detail;
   if (!matches(detail)) throw new Error('Missing child outcome');
   return detail;
@@ -48,10 +46,9 @@ describe('delegated snapshot turns and results', () => {
       expect(interrupted).toMatchObject({ chatId: admitted.chatId, reason: interruption, output: { availability: 'unavailable', reason: 'no-final-response' } });
       expect((await terminal.received).lastUserText).toBe(garconCommandResultContent(interrupted));
       terminal.releaseText('Synthetic interruption observed.');
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === parent
-          && event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Synthetic interruption observed.'),
-        'child interruption result consumed', { afterIndex: cursor },
+      await fixture.client.waitForMessages(parent,
+        (event) => event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Synthetic interruption observed.'),
+        { afterOrdinal: fixture.client.observedHead(parent, cursor), description: 'child interruption result consumed' },
       );
       expect(userContents((await fixture.client.getMessages(parent)).messages)).toEqual(['Delegate the synthetic interruptible task.']);
       expect((await fixture.client.listChats()).sessions.some((chat) => chat.id === admitted.chatId)).toBe(interruption === 'user-stop');
@@ -75,10 +72,9 @@ describe('delegated snapshot turns and results', () => {
       await child.received;
       expect((await ack.received).lastUserText).toBe(garconCommandResultContent(admitted));
       ack.releaseText('Pending admission observed.');
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === parent
-          && event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Pending admission observed.'),
-        'pending acknowledgment consumed', { afterIndex: cursor },
+      await fixture.client.waitForMessages(parent,
+        (event) => event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Pending admission observed.'),
+        { afterOrdinal: fixture.client.observedHead(parent, cursor), description: 'pending acknowledgment consumed' },
       );
       child.expectAbort();
       const requestCount = model.requests().length;
@@ -153,10 +149,9 @@ describe('delegated snapshot turns and results', () => {
       expect(resumedResult).toMatchObject({ output: { text: 'Only the resumed answer.' } });
       expect((await resumeResult.received).lastUserText).toBe(garconCommandResultContent(resumedResult));
       resumeResult.releaseText('Resume completion received.');
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === parent
-          && event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Resume completion received.'),
-        'resume completion acknowledged', { afterIndex: cursor },
+      await fixture.client.waitForMessages(parent,
+        (event) => event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Resume completion received.'),
+        { afterOrdinal: fixture.client.observedHead(parent, cursor), description: 'resume completion acknowledged' },
       );
       const parentHistory = await fixture.client.getMessages(parent);
       expect(userContents(parentHistory.messages)).toEqual([prompt]);

@@ -443,7 +443,7 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
         const typed = await textarea.inputValue();
         if (width === 390) await page.getByRole("button", { name: "Send message", exact: true }).click();
         else await editor.press("Enter");
-        await integration.client.waitForCommittedUserInput(ids[0], typed);
+        await integration.client.waitForMessages(ids[0], page => page.messages.some(row => row.message.type === 'user-message' && row.message.content === typed));
         await browserExpect(textarea).toHaveValue("");
         await integration.client.waitForProcessing(ids[0], false);
         await browserExpect(editor).toBeFocused();
@@ -735,7 +735,7 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await page.keyboard.type(" submitted");
       const submitted = await textarea.inputValue();
       await editor.press("Enter");
-      await integration.client.waitForCommittedUserInput(ids[0], submitted);
+      await integration.client.waitForMessages(ids[0], page => page.messages.some(row => row.message.type === 'user-message' && row.message.content === submitted));
       await browserExpect(textarea).toHaveValue("");
       await browserExpect(editor).toHaveCount(1);
       await integration.client.waitForProcessing(ids[0], false);
@@ -819,7 +819,7 @@ test("formatted newline intent escapes containers under either submission prefer
       await editor.press(newline);
       await page.keyboard.type('submitted');
       await editor.press(sendByShiftEnter ? 'Shift+Enter' : 'Enter');
-      await integration.client.waitForCommittedUserInput(chatId, '> abc\n\nsubmitted');
+      await integration.client.waitForMessages(chatId, page => page.messages.some(row => row.message.type === 'user-message' && row.message.content === '> abc\n\nsubmitted'));
       await integration.client.waitForProcessing(chatId, false);
       await browserExpect(editor).toHaveCount(1);
     }
@@ -835,7 +835,7 @@ test("formatted newline intent escapes containers under either submission prefer
       element.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();
       element.closest('form')!.requestSubmit();
     });
-    await integration.client.waitForCommittedUserInput(chatId, '- [x] same tick');
+    await integration.client.waitForMessages(chatId, page => page.messages.some(row => row.message.type === 'user-message' && row.message.content === '- [x] same tick'));
     await integration.client.waitForProcessing(chatId, false);
     const largeTable = '| Row | Text |\n| --- | --- |\n' + Array.from({ length: 150 }, (_, index) =>
       `| ${index} | ${'sample '.repeat(22)} |`,

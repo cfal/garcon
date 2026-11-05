@@ -4,7 +4,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, test } from 'bun:test';
 import type {
   AgentRunFailedMessage,
-  ChatMessagesMessage,
   ChatSessionStoppedMessage,
 } from '../../../common/ws-events.js';
 import { GarconApiError, type GarconTestClient } from '../../support/garcon-client.js';
@@ -29,10 +28,10 @@ async function waitForFile(filePath: string): Promise<void> {
 async function waitForQueuedInputCommit(
   client: GarconTestClient,
   chatId: string,
-  content: string,
+  clientMessageId: string,
   afterIndex = 0,
 ) {
-  return await client.waitForCommittedUserInput(chatId, content, { afterIndex });
+  return await client.waitForCommittedUserInput(chatId, clientMessageId, { afterIndex });
 }
 
 describe('queue lifecycle', () => {
@@ -88,7 +87,7 @@ describe('queue lifecycle', () => {
       await heldB.received;
       heldB.releaseEcho();
       await heldC.received;
-      await waitForQueuedInputCommit(fixture.client, chatId, 'fifo-c');
+      await waitForQueuedInputCommit(fixture.client, chatId, queuedC.clientMessageId);
       const finalCursor = fixture.client.markEvents();
       heldC.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: finalCursor });
@@ -234,7 +233,7 @@ describe('queue lifecycle', () => {
       await heldC.received;
       heldC.releaseEcho();
       await heldB.received;
-      await waitForQueuedInputCommit(fixture.client, chatId, 'reorder-b');
+      await waitForQueuedInputCommit(fixture.client, chatId, queuedB.clientMessageId);
       const terminalCursor = fixture.client.markEvents();
       heldB.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, undefined, {
@@ -262,7 +261,7 @@ describe('queue lifecycle', () => {
       });
       await heldA.received;
       const queuedB = await fixture.client.enqueueNew(chatId, 'rebase-b');
-      await fixture.client.enqueueNew(chatId, 'rebase-c');
+      const queuedSubmission264 = await fixture.client.enqueueNew(chatId, 'rebase-c');
       const queuedD = await fixture.client.enqueueNew(chatId, 'rebase-d');
       const observed = queuedD.control.queue;
       const entryB = observed.entries.find((entry) => entry.id === queuedB.entryId)!;
@@ -298,7 +297,7 @@ describe('queue lifecycle', () => {
       await heldD.received;
       heldD.releaseEcho();
       await heldC.received;
-      await waitForQueuedInputCommit(fixture.client, chatId, 'rebase-c');
+      await waitForQueuedInputCommit(fixture.client, chatId, queuedSubmission264.clientMessageId);
       const terminalCursor = fixture.client.markEvents();
       heldC.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, undefined, {
@@ -326,7 +325,7 @@ describe('queue lifecycle', () => {
       });
       await heldA.received;
       const queuedB = await fixture.client.enqueueNew(chatId, 'retry-b');
-      await fixture.client.enqueueNew(chatId, 'retry-c');
+      const queuedSubmission328 = await fixture.client.enqueueNew(chatId, 'retry-c');
       const queuedD = await fixture.client.enqueueNew(chatId, 'retry-d');
       const observed = queuedD.control.queue;
       const entryB = observed.entries.find((entry) => entry.id === queuedB.entryId)!;
@@ -347,7 +346,7 @@ describe('queue lifecycle', () => {
         expectedTargetRevision: entryB.revision,
       });
 
-      await waitForQueuedInputCommit(fixture.client, chatId, 'retry-b');
+      await waitForQueuedInputCommit(fixture.client, chatId, queuedB.clientMessageId);
       const failureCursor = fixture.client.markEvents();
       heldB.releaseStreamError('intentional queued turn failure');
       expect((await fixture.client.waitForTurnTerminal(chatId, undefined, {
@@ -369,7 +368,7 @@ describe('queue lifecycle', () => {
       await heldD.received;
       heldD.releaseEcho();
       await heldC.received;
-      await waitForQueuedInputCommit(fixture.client, chatId, 'retry-c');
+      await waitForQueuedInputCommit(fixture.client, chatId, queuedSubmission328.clientMessageId);
       const terminalCursor = fixture.client.markEvents();
       heldC.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, undefined, {
@@ -438,7 +437,7 @@ describe('queue lifecycle', () => {
       const heldEdited = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'edited-b' });
       heldA.releaseEcho();
       await heldEdited.received;
-      await waitForQueuedInputCommit(fixture.client, chatId, 'edited-b');
+      await waitForQueuedInputCommit(fixture.client, chatId, queuedB.clientMessageId);
       const cursor = fixture.client.markEvents();
       heldEdited.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
@@ -464,7 +463,7 @@ describe('queue lifecycle', () => {
         agent: fixture.directAgents.openAi,
       });
       await heldA.received;
-      await fixture.client.enqueueNew(chatId, 'pause-b');
+      const queuedSubmission466 = await fixture.client.enqueueNew(chatId, 'pause-b');
 
       const firstPause = await fixture.client.pauseQueue(chatId);
       expect(firstPause.control.queue.pause?.kind).toBe('manual');
@@ -490,7 +489,7 @@ describe('queue lifecycle', () => {
 		const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'pause-b' });
 		await fixture.client.resumeQueue(chatId, secondPause.control.queue.pause!.id);
       await heldB.received;
-      await waitForQueuedInputCommit(fixture.client, chatId, 'pause-b');
+      await waitForQueuedInputCommit(fixture.client, chatId, queuedSubmission466.clientMessageId);
       const cursor = fixture.client.markEvents();
       heldB.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
@@ -509,7 +508,7 @@ describe('queue lifecycle', () => {
         agent: fixture.directAgents.openAi,
       });
       await heldA.received;
-      await fixture.client.enqueueNew(chatId, 'stop-b');
+      const queuedSubmission511 = await fixture.client.enqueueNew(chatId, 'stop-b');
       expect((await fixture.client.ping()).processing).toEqual({
         outcome: 'snapshot',
         chats: [{ chatId, phase: 'running' }],
@@ -551,7 +550,7 @@ describe('queue lifecycle', () => {
       const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'stop-a\n\nstop-b' });
       await fixture.client.resumeQueue(chatId, stopped.control.queue.pause!.id);
       await heldB.received;
-      await waitForQueuedInputCommit(fixture.client, chatId, 'stop-b');
+      await waitForQueuedInputCommit(fixture.client, chatId, queuedSubmission511.clientMessageId);
       const cursor = fixture.client.markEvents();
       heldB.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
@@ -806,15 +805,15 @@ describe('queue lifecycle', () => {
         agent: fixture.directAgents.openAi,
       });
       await heldActive.received;
-      await fixture.client.enqueueNew(chatId, 'drain-stop-b');
-      await fixture.client.enqueueNew(chatId, 'drain-stop-c');
+      const queuedSubmission808 = await fixture.client.enqueueNew(chatId, 'drain-stop-b');
+      const queuedSubmission809 = await fixture.client.enqueueNew(chatId, 'drain-stop-c');
       const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'drain-stop-b' });
       heldActive.releaseEcho();
       await heldB.received;
 
       // Admission commits the drained input's user row at dispatch, so it is
       // already durable rather than pending while the provider holds the turn.
-      await waitForQueuedInputCommit(fixture.client, chatId, 'drain-stop-b');
+      await waitForQueuedInputCommit(fixture.client, chatId, queuedSubmission808.clientMessageId);
       const duringDrain = await fixture.client.getMessages(chatId);
       expect(countUserContent(duringDrain.messages, 'drain-stop-b')).toBe(1);
       const stopCursor = fixture.client.markEvents();
@@ -836,7 +835,7 @@ describe('queue lifecycle', () => {
       const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: resumedPrompt });
       await fixture.client.resumeQueue(chatId, stopped.control.queue.pause!.id);
       await heldC.received;
-      await waitForQueuedInputCommit(fixture.client, chatId, 'drain-stop-c');
+      await waitForQueuedInputCommit(fixture.client, chatId, queuedSubmission809.clientMessageId);
       const completionCursor = fixture.client.markEvents();
       heldC.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, undefined, {
@@ -896,14 +895,10 @@ describe('queue lifecycle', () => {
         event.type === 'chat-session-stopped'
         && event.chatId === chatId
         && event.intent === 'interrupt-and-send')).toHaveLength(1);
-      const successorMessageEvent = await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
+      const successorMessageEvent = await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) =>
             entry.message.type === 'user-message' && entry.message.content === 'interrupt-b'),
-        'interrupt successor user message',
-        { afterIndex: eventCursor },
+        { afterOrdinal: fixture.client.observedHead(chatId, eventCursor), description: 'interrupt successor user message' },
       );
       const successor = successorMessageEvent.messages.find((entry) =>
         entry.message.type === 'user-message' && entry.message.content === 'interrupt-b');
@@ -916,8 +911,10 @@ describe('queue lifecycle', () => {
       expect(successor?.message.type === 'user-message'
         ? successor.message.metadata?.turnId
         : undefined).toBeUndefined();
-      expect(successorMessageEvent.clientRequestId).toBeUndefined();
-      expect(successorMessageEvent.turnId).toBeUndefined();
+      const successorId = successor?.message.type === 'user-message' ? successor.message.metadata?.clientMessageId : null;
+      if (!successorId) throw new Error('Successor input omitted its canonical submission identity');
+      const successorAck = await fixture.client.waitForCommittedUserInput(chatId, successorId, { afterIndex: eventCursor });
+      expect(successorAck.ordinal).toBe(successor!.ordinal);
       heldA.releaseText('stale response must be ignored');
       const finalCursor = fixture.client.markEvents();
       heldB.releaseEcho();

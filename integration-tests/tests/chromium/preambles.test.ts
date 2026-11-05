@@ -3,7 +3,6 @@ import { Buffer } from 'node:buffer';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CDPSession, Locator, Page } from 'playwright';
-import type { CompleteChatHistoryResponse } from '../../../common/chat-view.js';
 import type {
   PreambleDefinitionInput,
   PreamblesMutationResponse,
@@ -11,6 +10,7 @@ import type {
 } from '../../../common/preambles.js';
 import { type ChromiumFixture, withChromiumFixture } from '../../support/chromium-fixture.js';
 import { Deferred, withTimeout } from '../../support/deferred.js';
+import { waitForDisplayIdle } from '../../support/transcript-display-browser.js';
 
 interface ViewportScenario {
   name: string;
@@ -519,6 +519,8 @@ describe('Chromium preambles', () => {
       );
       const feed = fixture.page.locator('[data-chat-scroll-viewport]');
       await feed.waitFor();
+      await feed.locator('[data-chat-message-type="user-message"]').waitFor();
+      await waitForDisplayIdle(fixture.page);
       const composer = fixture.page.locator('textarea[placeholder="Reply..."]:visible');
       await composer.fill('preserved draft');
       await composer.focus();
@@ -605,23 +607,14 @@ describe('Chromium preambles', () => {
         ).toBeTrue();
 
         markPhase('opening and measuring the applied target');
-        const targetPage = await fixture.integration.client.get<CompleteChatHistoryResponse>(
-          `/api/v1/chats/messages?chatId=${encodeURIComponent(targetChatId)}&limit=50`,
-        );
         const targetHistoryResponse = new Deferred<void>();
         let targetHistoryRequestCount = 0;
-        await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
-          const url = new URL(route.request().url());
-          if (url.searchParams.get('chatId') === targetChatId) {
+        await fixture.page.route('**/api/v1/chats/transcript-display/open', async (route) => {
+          if (route.request().postDataJSON().chatId === targetChatId) {
             targetHistoryRequestCount += 1;
-            await route.fulfill({
-              json: {
-                ...targetPage,
-                messages: [],
-                pageOldestOrdinal: 0,
-                resendCandidates: [],
-              },
-            });
+            const response = await route.fetch();
+            expect(await response.json()).not.toHaveProperty('messages');
+            await route.fulfill({ response });
             targetHistoryResponse.resolve(undefined);
             return;
           }
@@ -632,7 +625,7 @@ describe('Chromium preambles', () => {
         await withTimeout(
           targetHistoryResponse.promise,
           10_000,
-          () => 'Timed out waiting for the empty target-history response.',
+          () => 'Timed out waiting for the body-free target display open.',
         );
         expect(targetHistoryRequestCount).toBeGreaterThan(0);
         const notice = fixture.page
@@ -694,7 +687,7 @@ describe('Chromium preambles', () => {
         expect(noticeLayout.titleRows).toBeGreaterThan(1);
         expect(noticeLayout.documentOverflow).toBeLessThanOrEqual(1);
       } finally {
-        await fixture.page.unroute('**/api/v1/chats/messages?**').catch(() => undefined);
+        await fixture.page.unroute('**/api/v1/chats/transcript-display/open').catch(() => undefined);
         if (!heldReleased) held.releaseText('chromium preamble background response');
         if (turnId) {
           await fixture.integration.client

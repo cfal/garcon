@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
 import {
   claudeText,
@@ -79,12 +78,11 @@ describe('scripted Claude background settlement', () => {
           chatId, projectPath: fixture.dirs.project, command: prompt, permissionMode: 'bypassPermissions',
         }));
         for (const [reply, gate] of [[launched, childGate], [peerReply, reportGate]] as const) {
-          await fixture.client.waitForEvent(
-            (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-              && event.chatId === chatId && event.messages.some((entry) =>
+          await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) =>
                 entry.message.type === 'assistant-message' && entry.message.content === reply),
-            'synthetic parent response', { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-          );
+        { afterOrdinal: fixture.client.observedHead(chatId, cursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'synthetic parent response' },
+      );
           expect(fixture.client.eventsSince(cursor)).not.toContainEqual(expect.objectContaining({
             type: 'agent-run-finished', chatId, turnId: turn.turnId,
           }));
@@ -150,15 +148,11 @@ describe('scripted Claude background settlement', () => {
         command: prompt,
         permissionMode: 'bypassPermissions',
       }));
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
+      await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) =>
             entry.message.type === 'assistant-message'
             && entry.message.content.includes(launched)),
-        'scripted Claude background launch response',
-        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        { afterOrdinal: fixture.client.observedHead(chatId, cursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'scripted Claude background launch response' },
       );
       expect(fixture.client.eventsSince(cursor)).not.toContainEqual(expect.objectContaining({
         type: 'agent-run-finished',
@@ -184,7 +178,7 @@ describe('scripted Claude background settlement', () => {
       })).type);
       const successorInput = await fixture.client.waitForCommittedUserInput(
         chatId,
-        successorPrompt,
+        queued.clientMessageId,
         { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {

@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { withTimeout } from '../../support/deferred.js';
 import {
@@ -62,15 +61,12 @@ describe('scripted Codex strict steering', () => {
       const firstTurnId = first.turnId;
       if (!firstTurnId) throw new Error('Scripted Codex start did not return a turn identity.');
       await held.requested;
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-          && event.chatId === chatId
-          && assistantContents(event.messages).includes(publishedReply),
-        'completed assistant output before steering',
-        { afterIndex: firstCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      await fixture.client.waitForMessages(chatId,
+        (event) => assistantContents(event.messages).includes(publishedReply),
+        { afterOrdinal: fixture.client.observedHead(chatId, firstCursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'completed assistant output before steering' },
       );
 
-      await fixture.client.enqueueNew(chatId, futurePrompt);
+      const queuedSubmission70 = await fixture.client.enqueueNew(chatId, futurePrompt);
       const paused = await fixture.client.pauseQueue(chatId);
       expect(paused.control.queue.entries.map((entry) => entry.content)).toEqual([futurePrompt]);
       expect(paused.control.queue.pause?.kind).toBe('manual');
@@ -117,7 +113,7 @@ describe('scripted Codex strict steering', () => {
       await fixture.client.resumeQueue(chatId, stillPaused.queue.pause!.id);
       const futureInput = await fixture.client.waitForCommittedUserInput(
         chatId,
-        futurePrompt,
+        queuedSubmission70.clientMessageId,
         { afterIndex: futureCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {
@@ -185,16 +181,13 @@ describe('scripted Codex strict steering', () => {
           permissionMode: 'bypassPermissions',
         }));
 
-        await fixture.client.waitForEvent(
-          (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-            && event.chatId === chatId
-            && event.messages.some((entry) => (
+        await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) => (
               entry.message.type === 'transcript-notice'
               && entry.message.detail?.type === 'chat-id-disclosure'
             )),
-          `Codex chat ID disclosure for ${chatId}`,
-          { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-        );
+        { afterOrdinal: fixture.client.observedHead(chatId, cursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: `Codex chat ID disclosure for ${chatId}` },
+      );
         await writeFile(firstReleasePath, 'release', 'utf8');
 
         const firstSteeredRequest = await firstSteeredHeld.requested;
@@ -203,16 +196,13 @@ describe('scripted Codex strict steering', () => {
         );
         const secondCursor = fixture.client.markEvents();
         firstSteeredHeld.release();
-        await fixture.client.waitForEvent(
-          (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-            && event.chatId === chatId
-            && event.messages.some((entry) => (
+        await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) => (
               entry.message.type === 'transcript-notice'
               && entry.message.detail?.type === 'chat-id-disclosure'
             )),
-          `second Codex chat ID disclosure for ${chatId}`,
-          { afterIndex: secondCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-        );
+        { afterOrdinal: fixture.client.observedHead(chatId, secondCursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: `second Codex chat ID disclosure for ${chatId}` },
+      );
         await writeFile(secondReleasePath, 'release', 'utf8');
 
         const secondSteeredRequest = await secondSteeredHeld.requested;

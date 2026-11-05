@@ -187,7 +187,7 @@ describe('scripted Claude steering before the turn can take it', () => {
 
       await gate.open();
       await held.requested;
-      await fixture.client.waitForCommittedUserInput(chatId, queuedPrompt, { afterIndex: cursor });
+      await fixture.client.waitForCommittedUserInput(chatId, queued.clientMessageId, { afterIndex: cursor });
       await fixture.client.pauseQueue(chatId);
       await waitForQueuedContents(fixture.client, chatId, [futurePrompt]);
       held.release();

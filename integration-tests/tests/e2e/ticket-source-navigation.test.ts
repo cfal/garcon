@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { parseDisplayWindowRequest, type DisplayWindowRequest } from '../../../common/transcript-display-contract.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { createTicketSource } from '../../support/ticket-source-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
@@ -16,16 +17,19 @@ test('opens a cold source chat at an older visible outcome using one targeted pa
     await fixture.page.waitForSelector('.ticket-detail-title');
     await app.clickButton('Activity');
     await app.waitForText('Open source');
-    const reads: string[] = [];
+    const reads: DisplayWindowRequest[] = [];
     fixture.page.on('request', (request) => {
       const url = new URL(request.url());
-      if (url.pathname === '/api/v1/chats/messages' && url.searchParams.has('beforeOrdinal')) reads.push(request.url());
+      if (url.pathname === '/api/v1/chats/transcript-display/window') {
+        const input = parseDisplayWindowRequest(JSON.parse(request.postData() ?? 'null'));
+        if (input.anchor.kind === 'around') reads.push(input);
+      }
     });
     await app.clickButton('Open source');
     await fixture.page.waitForSelector(`[data-chat-row-id="${target.transcriptViewId}:${target.ordinal}"]`);
     expect(reads).toHaveLength(1);
-    expect(new URL(reads[0]!).searchParams.get('beforeOrdinal')).toBe(String(target.ordinal + 1));
-    expect(new URL(reads[0]!).searchParams.get('transcriptViewId')).toBe(target.transcriptViewId);
+    expect(reads[0]!.anchor).toEqual({ kind: 'around', ordinal: target.ordinal });
+    expect(reads[0]!.transcriptViewId).toBe(target.transcriptViewId);
     fixture.assertNoBrowserErrors();
   });
 });

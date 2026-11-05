@@ -103,7 +103,7 @@ test('New Chat formats pasted Markdown, retains its source and draft, and submit
     await composer.getByRole('button', { name: 'Start session' }).click();
     await browserExpect.poll(async () => (await integration.client.listChats()).sessions.length).toBe(1);
     const [chat] = (await integration.client.listChats()).sessions;
-    await integration.client.waitForCommittedUserInput(chat.id, edited);
+    await integration.client.waitForMessages(chat.id, page => page.messages.some(row => row.message.type === 'user-message' && row.message.content === edited));
     assertNoBrowserErrors();
   }, undefined, { composerInputMode: null });
 }, 120_000);

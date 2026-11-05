@@ -1,6 +1,5 @@
 import type { ApiProviderCatalogEntry } from '../../common/api-providers.js';
 import type { AgentStartOutcomeNoticeDetail } from '../../common/garcon-agent-result.js';
-import type { ChatMessagesMessage } from '../../common/ws-events.js';
 import { messagesOfType } from './chat-assertions.js';
 import type { IntegrationFixture } from './integration-fixture.js';
 import { INTEGRATION_OPENAI_API_KEY } from './openai-test-contract.js';
@@ -47,13 +46,13 @@ export async function requestSnapshotChild(fixture: IntegrationFixture, parent: 
 export async function waitForStartOutcome(
   fixture: IntegrationFixture, parent: string, status: AgentStartOutcomeNoticeDetail['status'], cursor: number,
 ): Promise<AgentStartOutcomeNoticeDetail> {
-  const event = await fixture.client.waitForEvent(
-    (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === parent
-      && event.messages.some(({ message }) => message.type === 'transcript-notice'
+  const page = await fixture.client.waitForMessages(parent,
+    (page) => page.messages.some(({ message }) => message.type === 'transcript-notice'
         && message.detail?.type === 'agent-start-outcome' && message.detail.status === status),
-    `delegated startup ${status}`, { afterIndex: cursor },
+    { description: `delegated startup ${status}` },
   );
-  const detail = messagesOfType(event.messages, 'transcript-notice')
+  await fixture.client.waitForHead(parent, page.lastOrdinal, { afterIndex: cursor });
+  const detail = messagesOfType(page.messages, 'transcript-notice')
     .find((message) => message.detail?.type === 'agent-start-outcome' && message.detail.status === status)?.detail;
   if (detail?.type !== 'agent-start-outcome') throw new Error('Missing delegated startup outcome');
   return detail;

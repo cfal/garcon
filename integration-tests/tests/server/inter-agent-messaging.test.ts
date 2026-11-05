@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import {
   assistantContents,
   messagesOfType,
@@ -45,15 +44,12 @@ describe('inter-agent messaging', () => {
 
       const hiddenRequest = await hiddenTargetTurn.received;
       expect(hiddenRequest.lastUserText).toBe(envelope);
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-          && event.chatId === sourceChatId
-          && event.messages.some((entry) => (
+      await fixture.client.waitForMessages(sourceChatId,
+        (event) => event.messages.some((entry) => (
             entry.message.type === 'transcript-notice'
             && entry.message.detail?.type === 'inter-agent-message-outcome'
           )),
-        'source inter-agent message outcome',
-        { afterIndex: eventCursor },
+        { afterOrdinal: fixture.client.observedHead(sourceChatId, eventCursor), description: 'source inter-agent message outcome' },
       );
 
       const source = await fixture.client.getMessages(sourceChatId);
@@ -145,15 +141,12 @@ describe('inter-agent messaging', () => {
       expect(await fixture.client.waitForTurnTerminal(targetChatId, targetStarted.turnId))
         .toMatchObject({ type: 'agent-run-finished', outcome: 'interrupted' });
 
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-          && event.chatId === sourceChatId
-          && event.messages.some((entry) => (
+      await fixture.client.waitForMessages(sourceChatId,
+        (event) => event.messages.some((entry) => (
             entry.message.type === 'transcript-notice'
             && entry.message.detail?.type === 'inter-agent-message-outcome'
           )),
-        'queued source inter-agent outcome',
-        { afterIndex: sourceCursor },
+        { afterOrdinal: fixture.client.observedHead(sourceChatId, sourceCursor), description: 'queued source inter-agent outcome' },
       );
       const source = await fixture.client.getMessages(sourceChatId);
       expect(messagesOfType(source.messages, 'transcript-notice')).toContainEqual(expect.objectContaining({
@@ -210,15 +203,12 @@ describe('inter-agent messaging', () => {
       });
       await sourceTurn.received;
       sourceTurn.releaseText(command);
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-          && event.chatId === sourceChatId
-          && event.messages.some((entry) => (
+      await fixture.client.waitForMessages(sourceChatId,
+        (event) => event.messages.some((entry) => (
             entry.message.type === 'transcript-notice'
             && entry.message.detail?.type === 'inter-agent-message-outcome'
           )),
-        'queued source inter-agent outcome',
-        { afterIndex: sourceCursor },
+        { afterOrdinal: fixture.client.observedHead(sourceChatId, sourceCursor), description: 'queued source inter-agent outcome' },
       );
       expect((await fixture.client.waitForTurnTerminal(
         sourceChatId,

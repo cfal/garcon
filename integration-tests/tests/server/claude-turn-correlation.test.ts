@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import type {
   AgentRunFailedMessage,
-  ChatMessagesMessage,
 } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
@@ -466,15 +465,11 @@ describe('Claude turn correlation', () => {
         command: 'respond after the internal turn',
       });
 
-      const assistant = await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
+      const assistant = await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) =>
             entry.message.type === 'assistant-message'
             && entry.message.content === 'response after internal turn'),
-        'Claude response after internal result',
-        { afterIndex: cursor },
+        { afterOrdinal: fixture.client.observedHead(chatId, cursor), description: 'Claude response after internal result' },
       );
       const terminal = await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
         afterIndex: cursor,
@@ -557,7 +552,7 @@ describe('Claude turn correlation', () => {
       })).type).toBe('agent-run-finished');
       const committed = await fixture.client.waitForCommittedUserInput(
         chatId,
-        'queue-second',
+        queued.clientMessageId,
         { afterIndex: queueCursor },
       );
       expect((await fixture.client.waitForTurnTerminal(chatId, undefined, {
@@ -643,7 +638,7 @@ describe('Claude turn correlation', () => {
       })).type).toBe('agent-run-finished');
       const committed = await fixture.client.waitForCommittedUserInput(
         chatId,
-        'after-background',
+        queued.clientMessageId,
         { afterIndex: queueCursor },
       );
       expect((await fixture.client.waitForTurnTerminal(chatId, undefined, {

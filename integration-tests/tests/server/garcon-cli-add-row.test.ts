@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { displayBodies, displayRequest } from '../../support/transcript-display.js';
 import { fileURLToPath } from 'node:url';
 import type { CliBodyDisclosure, CliPresentationStyle } from '../../../common/cli-presentation.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { cliEnvironment } from '../../support/cli-environment.js';
 import {
   withCliFixture,
@@ -213,12 +213,9 @@ describe('garcon-cli add-row', () => {
         customContent,
         { color: '7C3AED,c4b5fd', markdown: true, collapsible: true },
       );
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage => event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) => contentOf(entry.message) === customContent),
-        'the custom chat row broadcast',
-        { afterIndex: eventCursor },
+      await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some((entry) => contentOf(entry.message) === customContent),
+        { afterOrdinal: fixture.client.observedHead(chatId, eventCursor), description: 'the custom chat row broadcast' },
       );
 
       expect(info).toEqual({
@@ -262,14 +259,10 @@ describe('garcon-cli add-row', () => {
       expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId))
         .toMatchObject({ isProcessing: true });
 
-      const chatRowEvents = fixture.client.eventsSince(eventCursor).flatMap((event) => (
-        event.type === 'chat-messages' && event.chatId === chatId
-          ? event.messages.filter((entry) => (
-              [info.ordinal, notice.ordinal, error.ordinal, custom.ordinal].includes(entry.ordinal)
-            ))
-          : []
-      ));
-      expect(chatRowEvents.map((entry) => ({
+      await fixture.client.waitForHead(chatId, custom.ordinal, { afterIndex: eventCursor });
+      const rowPage = await fixture.client.getMessages(chatId);
+      const addedRows = rowPage.messages.filter(entry => [info.ordinal, notice.ordinal, error.ordinal, custom.ordinal].includes(entry.ordinal));
+      expect(addedRows.map((entry) => ({
         ordinal: entry.ordinal,
         type: entry.message.type,
         content: contentOf(entry.message),
@@ -454,13 +447,12 @@ describe('garcon-cli add-row', () => {
       expect(status).toContain(`cli-row (CLI error) — ${errorTitle}`);
       expect(status).toContain(`cli-row (CLI custom) — ${customTitle}`);
 
-      const replay = await fixture.client.subscribe(
-        chatId,
-        initial.transcriptViewId,
-        info.ordinal - 1,
-        custom.ordinal,
-      );
-      expect(replay.messages.map((entry) => ({
+      const open = await fixture.client.openDisplay({ chatId, expectedTranscriptViewId: initial.transcriptViewId,
+        reason: 'reconnect', outstandingClientMessageIds: [] });
+      const request = displayRequest(open);
+      const window = await fixture.client.waitForDisplayWindow(request);
+      const hydrated = await displayBodies(fixture.client, request, window, [info.ordinal, notice.ordinal, error.ordinal, custom.ordinal]);
+      expect(hydrated.bodies.map((entry) => ({
         ordinal: entry.ordinal,
         type: entry.message.type,
         content: contentOf(entry.message),

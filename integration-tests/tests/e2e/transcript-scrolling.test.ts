@@ -65,7 +65,8 @@ async function installPageRequestGate(page: Page): Promise<void> {
       const requestUrl = input instanceof Request ? input.url : String(input);
       const url = new URL(requestUrl, globalThis.location.href);
       const isPageRequest =
-        url.pathname === "/api/v1/chats/messages" && url.searchParams.has("beforeOrdinal");
+        url.pathname === "/api/v1/chats/transcript-display/window" &&
+        typeof init?.body === 'string' && JSON.parse(init.body).anchor?.kind === 'before';
       if (!isPageRequest) return nativeFetch(input, init);
       gate.requestCount += 1;
       if (gate.armed) {

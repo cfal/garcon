@@ -108,11 +108,8 @@ describe('scripted Codex interrupt lifecycle', () => {
         marker: recoveryReply,
         afterIndex: recoveryCursor,
       });
-      const liveMessages = fixture.client.eventsSince(recoveryCursor).flatMap((event) =>
-        event.type === 'chat-messages'
-          && event.chatId === chatId
-          ? event.messages
-          : []);
+      const liveMessages = (await fixture.client.getMessages(chatId)).messages
+        .filter(entry => entry.ordinal > fixture.client.observedHead(chatId, recoveryCursor));
       expect(assistantContents(liveMessages).filter((content) => content === recoveryReply))
         .toEqual([recoveryReply]);
       const liveRecoveryCommands = messagesOfType(liveMessages, 'bash-tool-use')

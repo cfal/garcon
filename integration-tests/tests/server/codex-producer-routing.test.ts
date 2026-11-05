@@ -625,12 +625,6 @@ function transientPermissionControl(
   };
 }
 
-function chatRows(events: readonly ServerWsMessage[], chatId: string) {
-  return events.flatMap((event) => (
-    event.type === 'chat-messages' && event.chatId === chatId ? event.messages : []
-  ));
-}
-
 function messageIdentity(entry: {
   readonly message: { readonly type: string; readonly content?: unknown };
 }): [string, unknown] {

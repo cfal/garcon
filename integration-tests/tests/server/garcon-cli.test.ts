@@ -1132,10 +1132,9 @@ describe('garcon-cli', () => {
       expect(sent.stdout).toMatch(/^chat id: \d{16}\ndelivery: new-turn\nturn id: [0-9a-f-]+\n$/);
       const turnId = sent.stdout.match(/turn id: ([0-9a-f-]+)\n/)?.[1];
       if (!turnId) throw new Error('resume-async omitted the turn id.');
-      const committed = await fixture.client.waitForCommittedUserInput(
-        chatId,
-        'cli-async-message',
-        { afterIndex: cursor, timeoutMs: 30_000 },
+      const committed = await fixture.client.waitForMessages(chatId,
+        page => page.messages.some(entry => entry.message.type === 'user-message' && entry.message.content === 'cli-async-message'),
+        { afterOrdinal: fixture.client.observedHead(chatId, cursor), timeoutMs: 30_000 },
       );
       expect(committed.messages).toHaveLength(1);
       expect(committed.messages[0]?.message).toMatchObject({

@@ -7,7 +7,6 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { isRecord } from '../../../common/json.js';
 import {
   assistantContents,
@@ -580,15 +579,11 @@ describe('scripted Claude fork lifecycle matrix', () => {
         command: sourcePrompt,
         permissionMode: 'bypassPermissions',
       }));
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === sourceChatId
-          && event.messages.some((entry) =>
+      await fixture.client.waitForMessages(sourceChatId,
+        (event) => event.messages.some((entry) =>
             entry.message.type === 'assistant-message'
             && entry.message.content.includes(launchedReply)),
-        'scripted Claude background launch reply',
-        { afterIndex: sourceCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        { afterOrdinal: fixture.client.observedHead(sourceChatId, sourceCursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'scripted Claude background launch reply' },
       );
       expect((await fixture.client.ping()).processing).toEqual({
         outcome: 'snapshot',

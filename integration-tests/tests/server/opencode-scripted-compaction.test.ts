@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { TranscriptMessage } from '../../../common/chat-view.js';
-import type { ChatMessagesMessage, ChatSessionStoppedMessage } from '../../../common/ws-events.js';
+import type { ChatSessionStoppedMessage } from '../../../common/ws-events.js';
 import {
   assistantContents,
   messagesOfType,
@@ -596,16 +596,12 @@ async function exerciseInterruptedCompaction(
 
       if (phase === 'continuation') {
         // Native progress and Stop do not acknowledge in-flight provider publication.
-        await fixture.client.waitForEvent(
-          (event): event is ChatMessagesMessage =>
-            event.type === 'chat-messages'
-            && event.chatId === chatId
-            && event.messages.some(({ message }) => (
+        await fixture.client.waitForMessages(chatId,
+        (event) => event.messages.some(({ message }) => (
               message.type === 'compaction' && message.trigger === 'auto'
             )),
-          'committed OpenCode automatic compaction before Stop',
-          { afterIndex: eventCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-        );
+        { afterOrdinal: fixture.client.observedHead(chatId, eventCursor), timeoutMs: LIVE_TURN_TIMEOUT_MS, description: 'committed OpenCode automatic compaction before Stop' },
+      );
       }
 
       await stopChat(fixture, chatId);

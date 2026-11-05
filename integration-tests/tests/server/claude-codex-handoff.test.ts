@@ -68,7 +68,7 @@ test('carries history once across Claude to Codex to Claude and drains the desti
         expectFinished((await fixture.client.waitForTurnTerminal(chatId, active.turnId, {
           timeoutMs: LIVE_TURN_TIMEOUT_MS,
         })).type);
-        const input = await fixture.client.waitForCommittedUserInput(chatId, queuedPrompt, {
+        const input = await fixture.client.waitForCommittedUserInput(chatId, queued.clientMessageId, {
           afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS,
         });
         expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {
