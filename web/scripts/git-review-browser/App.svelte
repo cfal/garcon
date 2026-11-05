@@ -232,10 +232,17 @@
 			},
 			cancelProbe,
 			inspect: () => ({
-				documentId,
+				documentId: review.documentId,
 				loaded: Object.keys(review.fileBodies),
 				highlighted: Object.keys(review.syntax.results),
 				pending: [...review.loadingBodies],
+				rowCounts: Object.fromEntries(
+					Object.entries(review.fileBodies).map(([path, body]) => [
+						path,
+						body.patchIndex?.rowCount,
+					]),
+				),
+				syntaxKeys: Object.values(review.syntax.results).map((result) => result.cacheKey),
 			}),
 			navigate: (filePath: string) => {
 				scrollRequest = { filePath, token: performance.now() };

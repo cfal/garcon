@@ -27,7 +27,14 @@ declare global {
 			): Promise<BenchmarkMeasurement>;
 			openReview(count: number, lines: number, split?: boolean): Promise<string>;
 			refreshReview(): Promise<boolean>;
-			inspect(): { documentId: string; loaded: string[]; highlighted: string[]; pending: string[] };
+			inspect(): {
+				documentId: string | null;
+				loaded: string[];
+				highlighted: string[];
+				pending: string[];
+				rowCounts: Record<string, number | undefined>;
+				syntaxKeys: string[];
+			};
 			navigate(path: string): void;
 			clearColors(): Promise<void>;
 			color(): Promise<string>;
@@ -332,9 +339,14 @@ try {
 			await page.evaluate(() => window.reviewBenchmark.openReview(1, 12000, true));
 			const current = await page.evaluate(() => window.reviewBenchmark.openReview(1, 42));
 			await page.waitForFunction(() => window.reviewBenchmark.inspect().highlighted.length > 0);
+			const replacement = await page.evaluate(() => window.reviewBenchmark.inspect());
+			assert.equal(replacement.documentId, current);
+			assert.deepEqual(replacement.rowCounts, { 'synthetic/file-0.ts': 43 });
+			assert.equal(replacement.syntaxKeys.length, 1);
 			assert.equal(
-				(await page.evaluate(() => window.reviewBenchmark.inspect())).documentId,
+				JSON.parse(replacement.syntaxKeys[0])[1],
 				current,
+				'Replacement syntax must belong to the current content document',
 			);
 			const cancellation = await page.evaluate(() => window.reviewBenchmark.cancelProbe());
 			assert.equal(cancellation.status, 'cancelled');
@@ -412,7 +424,7 @@ try {
 				initialDemand: demand,
 				selectionAndScroll: after,
 				refresh,
-				rapidSwitch: 'passed',
+				rapidSwitch: replacement,
 				cancellation,
 				unicode,
 				metadataRefresh,
