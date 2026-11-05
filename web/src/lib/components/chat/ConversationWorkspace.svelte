@@ -2,7 +2,7 @@
 	// Owns the singleton conversation runtime, composer, and dialogs while
 	// rendered panels own transcript presentation and scrolling.
 
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import PromptComposer from './composer/PromptComposer.svelte';
 	import QueuedInputEditorDialog from './queue/QueuedInputEditorDialog.svelte';
@@ -15,11 +15,9 @@
 		StaleConversationSurfaceError,
 		type ConversationPanelActions,
 	} from './conversation-panel-actions.js';
-	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-	import { recentRecallPrompts } from '$lib/chat/composer/prompt-recall';
+	import { displayPromptRecall } from '$lib/chat/transcript/display-prompt-recall.js';
 	import { sameGitProject } from '$lib/git/targets/git-target.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
-	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import type { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
@@ -35,7 +33,6 @@
 	import { createDrainCursor } from '$lib/ws/drain';
 	import { ChatReconnectCoordinator } from '$lib/ws/reconnect-coordinator.svelte';
 	import { mountConversationRouter } from '$lib/chat/conversation/conversation-router-adapter.svelte.js';
-	import { applyChatMessageBatchActivity } from '$lib/chat/sessions/chat-message-batch-activity.js';
 	import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
 	import type { ConversationPanelRegistration } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import { requiresQueuedSubmission } from '$lib/chat/conversation/submission-classifier.js';
@@ -49,7 +46,10 @@
 	import { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
 	import type { QueueEntry } from '$lib/types/chat';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
-	import { buildSubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
+	import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
+	import { DisplaySummaryController } from '$lib/chat/transcript/display-summary-controller.svelte.js';
+	import { transcriptDisplayApi } from '$lib/api/transcript-display.js';
+	import TranscriptSummaryPager from './transcript/TranscriptSummaryPager.svelte';
 	import { playCompletionSound } from '$lib/notifications/completion-sound.js';
 	import {
 		getChatSessions,
@@ -93,13 +93,11 @@
 		onComposerNoticeChange?: (notice: ComposerAvailabilityNoticePresentation | null) => void;
 		onChooseProjectFolder?: (chatId: string) => void;
 		subagentToolbar: SubagentToolbarState;
-		transcriptCache?: ChatTranscriptCache;
 		reserveMobileToolbar?: boolean;
 		isVisible?: boolean;
 		isPresented?: boolean;
 	}
 
-	const fallbackTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 
 	let {
 		onRegisterSubmit,
@@ -112,16 +110,12 @@
 		onComposerNoticeChange,
 		onChooseProjectFolder,
 		subagentToolbar,
-		transcriptCache: providedTranscriptCache,
 		reserveMobileToolbar = false,
 		isVisible = true,
 		isPresented: isPresentedOverride,
 	}: ConversationWorkspaceProps = $props();
 	const isPresented = $derived(isPresentedOverride ?? isVisible);
 
-	function getInitialTranscriptCache(): ChatTranscriptCache {
-		return providedTranscriptCache ?? fallbackTranscriptCache;
-	}
 
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
@@ -140,7 +134,6 @@
 	const conversationPanels = getConversationPanels();
 	const conversationLifecycles = getConversationLifecycles();
 
-	const transcriptCache = getInitialTranscriptCache();
 	const chatState = new CurrentConversationPanelTranscript({
 		panels: conversationPanels,
 		getSelectedChatId: () => sessions.selectedChatId,
@@ -185,45 +178,44 @@
 		panels: conversationPanels,
 		conversationUi,
 		sessions,
-		getBackgroundCursors: () => transcriptCache.listCursors(20),
-		markBackgroundStale: (chatId) => conversationPanels.markChatStale(chatId),
-		onBackgroundMessages: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) => {
-			const applied = transcriptCache.applyMessages(chatId, transcriptViewId, {
-				messages,
-				firstOrdinal,
-				lastOrdinal,
-			});
-			if (applied.status !== 'applied') return false;
-			applyChatMessageBatchActivity(
-				sessions,
-				chatId,
-				messages.map((entry) => entry.message),
-			);
-			return true;
-		},
 	});
 
 	setComposerState(composerState);
 	setAgentState(agentState);
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
-	const subagentModel = $derived(
-		buildSubagentManagementModel(chatState.displayMessages, {
-			rootTitle: sessions.selectedChat?.title || 'Root',
-			rootModel: sessions.selectedChat?.model ?? agentState.model,
-			rootStatus: selectedIsProcessing ? 'running' : 'idle',
-		}),
-	);
+	const planPaging = $derived(sessions.selectedChatId ? conversationUi.planPresentationFor(sessions.selectedChatId) : null);
+	const subagentPages = new DisplaySummaryController(transcriptDisplayApi.subagents, page => page.nextAfterOrder, 'afterOrder');
+	const resendPages = new DisplaySummaryController(transcriptDisplayApi.resend, page => page.nextBeforeOrdinal, 'beforeOrdinal',
+		page => conversationPanels.replaceResendCandidates(page.chatId, page.rows));
+	const subagentModel = $derived.by<SubagentManagementModel>(() => {
+		const subagents = [...(subagentPages.page?.entries ?? [])];
+		return { subagents, entries: [{ id: 'root', kind: 'root', name: sessions.selectedChat?.title || 'Root',
+			model: sessions.selectedChat?.model ?? agentState.model, status: selectedIsProcessing ? 'running' : 'idle',
+			statusLabel: selectedIsProcessing ? 'Running' : 'Idle' }, ...subagents] };
+	});
+	$effect(() => {
+		const snapshot = chatState.openSnapshot;
+		const target = snapshot && snapshot.chat.id === sessions.selectedChatId ? { chatId: snapshot.chat.id,
+			transcriptViewId: snapshot.transcriptViewId, serverInstanceId: snapshot.serverInstanceId } : null;
+		const head = chatState.lastOrdinal, processing = selectedIsProcessing;
+		untrack(() => { subagentPages.configure(target, head); resendPages.configure(target, head, !processing); });
+	});
+	$effect(() => {
+		const revision = currentPanel()?.transcript.readinessRevision;
+		if (revision) untrack(() => { subagentPages.ready(); resendPages.ready(); });
+	});
+	onDestroy(() => { subagentPages.reset(); resendPages.reset(); });
 	const canInterruptSelectedChat = $derived(
 		selectedIsProcessing && lifecycle.loadingStatus?.can_interrupt !== false,
 	);
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
+		chatState.destroy();
 		controller.executorHandoff.cancel();
 		reloadDialog.dispose();
 		controller.clearHistory.handleChatSwitch(null);
 		drainHandle.cleanup();
-		transcriptCache.flush();
 	});
 
 	mountConversationRouter({
@@ -259,6 +251,12 @@
 
 	function currentPanel() {
 		return conversationPanels.composerPanel;
+	}
+	function promptRecallSource() {
+		const transcript = currentPanel()?.transcript;
+		const open = transcript?.openSnapshot;
+		return transcript && open ? displayPromptRecall(open, transcript.lastOrdinal,
+			() => transcript.controller.profile?.bashRevision ?? open.display.bashRevision) : null;
 	}
 
 	function panelForChat(chatId: string) {
@@ -488,14 +486,12 @@
 		transcript: chatState,
 		getSelectedChatId: () => sessions.selectedChatId,
 		reloadTranscript: (chatId) => controller.loadChat(chatId),
-		restoreLatestTranscript: (chatId) =>
-			panelForChat(chatId)?.scroll.restoreLatestWindow(chatId) ?? Promise.resolve(false),
-		loadOlderMessages: (chatId) =>
-			panelForChat(chatId)?.scroll.loadEarlierPageForNavigator(chatId) ??
-			Promise.resolve('invalidated'),
-		jumpToRow: (target) =>
-			panelForChat(target.chatId)?.scroll.jumpToMessageRow(target) ??
-			Promise.resolve('unavailable'),
+		jumpToRow: async (target) => {
+			const panel = panelForChat(target.chatId);
+			if (!panel || target.ordinal === undefined) return 'unavailable';
+			const result = await panel.navigateToTranscriptRow({ ...target, ordinal: target.ordinal }, new AbortController().signal, () => panelForChat(target.chatId) === panel);
+			return result === 'completed' || result === 'cancelled' ? result : 'unavailable';
+		},
 	});
 
 	onMount(() => {
@@ -510,6 +506,7 @@
 				return subagentModel;
 			},
 			jumpToTool: jumpToToolInput,
+			paging: subagentPages,
 		});
 
 		return () => {
@@ -602,8 +599,11 @@
 		queuedInputEditor.close();
 	}
 
-	function jumpToToolInput(anchorId: string): void {
-		void currentPanel()?.scroll.jumpToDomAnchor(anchorId);
+	function jumpToToolInput(ordinal: number): void {
+		const panel = currentPanel();
+		if (!panel) return;
+		void panel.navigateToTranscriptRow({ chatId: panel.chatId, transcriptViewId: panel.transcript.transcriptViewId, ordinal },
+			new AbortController().signal, () => currentPanel() === panel);
 	}
 
 	// Exposes a chat submit function for sibling components (e.g. git review).
@@ -628,7 +628,7 @@
 			throw new Error(m.sidebar_chats_reload_requires_open_chat());
 		}
 		if (reloadDialog.open) throw new Error(m.sidebar_chats_reload_already_pending());
-		return reloadDialog.request(chatId, [...chatState.resendCandidates]);
+		return reloadDialog.request(chatId, [...chatState.resendCandidates], resendPages.page?.total ?? chatState.resendCandidates.length);
 	}
 
 	async function reloadFromNative(
@@ -867,6 +867,12 @@
 		data-conversation-composer-host={composerAnchorSurfaceId}
 		data-reserve-mobile-toolbar={reserveMobileToolbar}
 	>
+		{#if planPaging && (planPaging.pendingExitCount > 1 || planPaging.error)}
+			<div class="border-t border-border bg-background text-sm" data-plan-suggestions>
+				<p class="px-3 pt-2 text-muted-foreground">{planPaging.pendingExitCount} pending plans</p>
+				<TranscriptSummaryPager paging={planPaging} />
+			</div>
+		{/if}
 		<PromptComposer
 			{isVisible}
 			{isPresented}
@@ -889,10 +895,12 @@
 			onAgentSettingChange={(descriptor, value) =>
 				controller.handleAgentSettingChange(descriptor, value)}
 			resendCandidates={chatState.resendCandidates}
+			resendPaging={resendPages}
 			recallIdentity={sessions.selectedChatId && chatState.activeChatId === sessions.selectedChatId
 				? `${sessions.selectedChatId}:${chatState.transcriptViewId}`
 				: null}
-			recallPrompts={recentRecallPrompts(chatState.entries)}
+			recallSource={promptRecallSource()}
+			onRecallError={(message) => chatState.appendLocalNotice('error', message)}
 			onExcludeResendCandidate={(ordinal) => chatState.excludeResendCandidate(ordinal)}
 		/>
 	</div>
@@ -930,6 +938,7 @@
 	{/if}
 
 	<ReloadChatDialog
+		totalCandidates={reloadDialog.totalCandidates}
 		open={reloadDialog.open}
 		candidates={reloadDialog.candidates}
 		busy={reloadDialog.running}

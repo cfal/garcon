@@ -5,7 +5,7 @@ import ResendCandidateChips from '../ResendCandidateChips.svelte';
 it('exposes the appearance hook without changing resend exclusion', async () => {
 	const onExclude = vi.fn();
 	render(ResendCandidateChips, {
-		candidates: [{ ordinal: 1, content: 'Synthetic pending input', attachmentNames: [] }],
+		candidates: [{ ordinal: 1, preview: 'Synthetic pending input', attachmentCount: 0, timestamp: '2026-01-01T00:00:00.000Z' }],
 		onExclude,
 	});
 	const chip = screen.getByText('Synthetic pending input').parentElement;

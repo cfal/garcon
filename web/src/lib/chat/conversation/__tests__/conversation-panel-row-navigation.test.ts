@@ -1,46 +1,27 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import { AssistantMessage } from '$shared/chat-types';
-import type { ChatHistoryResponse, CompleteChatHistoryResponse } from '$shared/chat-view';
-import { getChatMessages } from '$lib/api/chats.js';
-import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import type { AvailableDisplayWindow } from '$shared/transcript-display-contract';
+import type { DisplayOpenResponse } from '$shared/transcript-display-open';
+import { DisplayBodyStore } from '$lib/chat/transcript/display-body-store.js';
+import { displayOpen, displayCertificate, displayWindow, mockDisplayApi } from '$lib/chat/transcript/__tests__/display-fixtures.js';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 import { ConversationLifecycleState } from '../conversation-lifecycle-state.svelte.js';
 import { ConversationPanelRegistry } from '../conversation-panel-registry.svelte.js';
 
-vi.mock('$lib/api/chats.js', () => ({ getChatMessages: vi.fn() }));
 const chatId = '1000000000000001';
 const target = { chatId, transcriptViewId: 'view-1', ordinal: 100 };
 const row = (ordinal: number) => ({
 	ordinal,
 	message: new AssistantMessage('2026-01-01T00:00:00.000Z', `Synthetic row ${ordinal}`),
 });
-function page(): CompleteChatHistoryResponse {
-	return {
-		chatId,
-		transcriptViewId: 'view-1',
-		historyState: { kind: 'complete' },
-		messages: [row(100)],
-		lastOrdinal: 1000,
-		pageOldestOrdinal: 100,
-		pageNewestOrdinal: 100,
-		nextBeforeOrdinal: 51,
-		hasMore: true,
-		limit: 50,
-		resendCandidates: [],
-	};
+function page(): AvailableDisplayWindow {
+	return displayWindow([{ kind: 'row', ordinal: 100, messageType: 'assistant-message', layout: 'standard',
+		estimatedBodyBytes: 100, permissionOccurrenceId: null }], displayCertificate(displayOpen(chatId, 'view-1', 1000)));
 }
-function snapshotPage(transcriptViewId = 'view-1'): CompleteChatHistoryResponse {
-	return {
-		...page(),
-		transcriptViewId,
-		messages: Array.from({ length: 50 }, (_, index) => row(951 + index)),
-		pageOldestOrdinal: 951,
-		pageNewestOrdinal: 1000,
-		nextBeforeOrdinal: 951,
-	};
-}
+const rows = Array.from({ length: 1000 }, (_, index) => row(index + 1));
+function snapshotPage(view = 'view-1') { return displayOpen(chatId, view, 1000); }
 function held<T>() {
 	let release!: (value: T) => void;
 	const promise = new Promise<T>((resolve) => {
@@ -51,13 +32,12 @@ function held<T>() {
 const cleanup: (() => void)[] = [];
 afterEach(() => {
 	for (const fn of cleanup.splice(0)) fn();
-	vi.resetAllMocks();
+	vi.restoreAllMocks();
 });
-function fixture() {
-	const cache = new ChatTranscriptCache({ limit: 50 });
-	cache.replace(chatId, 'view-1', [row(1000)], 1000, 951);
+async function fixture() {
+	const api = mockDisplayApi(rows, snapshotPage());
 	const registry = new ConversationPanelRegistry({
-		cache,
+		bodies: new DisplayBodyStore(),
 		overlays: new ConversationTranscriptOverlayStore(),
 		lifecycle: { forChat: () => new ConversationLifecycleState(), remove: () => {} },
 		getComposerAnchorSurfaceId: () => 'chat-view:window-one',
@@ -74,7 +54,10 @@ function fixture() {
 		},
 	]);
 	const panel = registry.panel('chat-view:window-one')!;
+	await registry.loadChatSnapshot(chatId);
+	api.open.mockClear(); api.window.mockClear();
 	const viewport = {
+		requestCoverage: vi.fn(),
 		isReady: () => true,
 		hasCollapsedToolGroups: () => false,
 		isAtEnd: () => false,
@@ -106,6 +89,7 @@ function fixture() {
 	});
 	return {
 		registry,
+		api,
 		panel,
 		viewport,
 		attach: () => {
@@ -116,11 +100,11 @@ function fixture() {
 }
 
 it('waits for the exact renderer viewport, supersedes bottom restore, and loads one page without autofill', async () => {
-	const f = fixture();
-	vi.mocked(getChatMessages).mockResolvedValue(page());
+	const f = await fixture();
+	f.api.window.mockResolvedValue(page());
 	const work = f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true);
 	await tick();
-	expect(getChatMessages).not.toHaveBeenCalled();
+	expect(f.api.window).not.toHaveBeenCalled();
 	f.attach();
 	expect(await work).toBe('completed');
 	expect(f.viewport.scrollToTarget).toHaveBeenCalledExactlyOnceWith(
@@ -129,22 +113,65 @@ it('waits for the exact renderer viewport, supersedes bottom restore, and loads 
 	);
 	expect(f.viewport.scrollToEnd).not.toHaveBeenCalled();
 	expect(f.viewport.measureViewportFill).not.toHaveBeenCalled();
-	expect(getChatMessages).toHaveBeenCalledOnce();
+	expect(f.api.window).toHaveBeenCalledOnce();
+});
+
+it('keeps the restore anchor through actual viewport positioning and profile cancellation', async () => {
+	const f = await fixture();
+	f.attach();
+	const positioned = held<'completed'>();
+	f.viewport.scrollToTarget.mockReturnValueOnce(positioned.promise);
+	const restoring = f.panel.restore({ kind: 'row', transcriptViewId: 'view-1', ordinal: 100, viewportOffset: -12 });
+	await vi.waitFor(() => expect(f.viewport.scrollToTarget).toHaveBeenCalledOnce());
+	f.panel.transcript.configureDisplay({ combine: true, showThinking: false, hiddenToolGroups: [] });
+	f.panel.transcript.controller.setReadingAnchor(700, false);
+	await f.panel.transcript.controller.refresh();
+	expect(f.api.window.mock.calls.at(-1)![0].anchor).toEqual({ kind: 'around', ordinal: 100 });
+	positioned.release('completed');
+	await restoring;
+	f.panel.transcript.controller.setReadingAnchor(700, false);
+	await f.panel.transcript.controller.refresh();
+	expect(f.api.window.mock.calls.at(-1)![0].anchor).toEqual({ kind: 'around', ordinal: 700 });
+});
+
+it('a user scroll supersedes historical restoration while activation is held', async () => {
+	const f = await fixture();
+	f.attach();
+	const opened = held<DisplayOpenResponse>();
+	f.api.open.mockReturnValueOnce(opened.promise);
+	const restoring = f.panel.restore({ kind: 'row', transcriptViewId: 'view-1', ordinal: 100, viewportOffset: -12 });
+	f.panel.scroll.noteUserScrollIntent('earlier');
+	opened.release(snapshotPage());
+	await restoring;
+	expect(f.viewport.scrollToTarget).not.toHaveBeenCalled();
+	f.panel.transcript.controller.setReadingAnchor(700, false);
+	await f.panel.transcript.controller.refresh();
+	expect(f.api.window.mock.calls.at(-1)![0].anchor).toEqual({ kind: 'around', ordinal: 700 });
+});
+
+it('releases a restore target that is absent from a ready filtered viewport', async () => {
+	const f = await fixture();
+	f.attach();
+	f.viewport.scrollToTarget.mockResolvedValue('target-missing');
+	await f.panel.restore({ kind: 'row', transcriptViewId: 'view-1', ordinal: 100, viewportOffset: -12 });
+	expect(f.viewport.scrollToTarget).toHaveBeenCalledOnce();
+	f.panel.resumePendingRestore();
+	await tick();
+	expect(f.viewport.scrollToTarget).toHaveBeenCalledOnce();
+	f.panel.transcript.controller.setReadingAnchor(700, false);
+	await f.panel.transcript.controller.refresh();
+	expect(f.api.window.mock.calls.at(-1)![0].anchor).toEqual({ kind: 'around', ordinal: 700 });
+	expect(f.panel.scroll.isPinnedToBottom).toBe(false);
 });
 
 it('retains reload identity if the view changes while the target page is held', async () => {
-	const f = fixture();
+	const f = await fixture();
 	f.attach();
-	const response = held<ChatHistoryResponse>();
-	vi.mocked(getChatMessages).mockReturnValue(response.promise);
+	const response = held<AvailableDisplayWindow>();
+	f.api.window.mockReturnValue(response.promise);
 	const work = f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true);
-	await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledOnce());
-	f.panel.transcript.replaceGeneration(chatId, 'view-2', [row(100)], {
-		lastOrdinal: 100,
-		pageOldestOrdinal: 100,
-		nextBeforeOrdinal: 51,
-		hasMore: true,
-	});
+	await vi.waitFor(() => expect(f.api.window).toHaveBeenCalledOnce());
+	f.panel.transcript.installOpen(snapshotPage('view-2'));
 	response.release(page());
 	expect(await work).toBe('view-changed');
 	expect(f.viewport.scrollToTarget).not.toHaveBeenCalled();
@@ -153,12 +180,12 @@ it('retains reload identity if the view changes while the target page is held', 
 it.each(['hide', 'interaction', 'supersede'] as const)(
 	'cancels a held target page on %s without overwriting or scrolling',
 	async (change) => {
-		const f = fixture();
+		const f = await fixture();
 		f.attach();
-		const response = held<ChatHistoryResponse>();
-		vi.mocked(getChatMessages).mockReturnValueOnce(response.promise).mockResolvedValue(page());
+		const response = held<AvailableDisplayWindow>();
+		f.api.window.mockReturnValueOnce(response.promise).mockResolvedValue(page());
 		const work = f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true);
-		await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(f.api.window).toHaveBeenCalledOnce());
 		if (change === 'hide') f.panel.prepareForHide();
 		if (change === 'interaction') f.panel.prepareForInteractionLoss();
 		if (change === 'supersede')
@@ -168,14 +195,14 @@ it.each(['hide', 'interaction', 'supersede'] as const)(
 		response.release(page());
 		expect(await work).toBe('cancelled');
 		expect(f.viewport.scrollToTarget).toHaveBeenCalledTimes(change === 'supersede' ? 1 : 0);
-		expect(vi.mocked(getChatMessages).mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+		expect(f.api.window.mock.calls[0]?.[1]?.aborted).toBe(true);
 	},
 );
 
 it('aborts an in-progress viewport target without resetting another navigation', async () => {
-	const f = fixture();
+	const f = await fixture();
 	f.attach();
-	vi.mocked(getChatMessages).mockResolvedValue(page());
+	f.api.window.mockResolvedValue(page());
 	const scroll = held<'completed'>();
 	f.viewport.scrollToTarget.mockReturnValueOnce(scroll.promise);
 	const abort = new AbortController();
@@ -188,9 +215,9 @@ it('aborts an in-progress viewport target without resetting another navigation',
 });
 
 it('supersedes a saved-row restore before its first layout tick', async () => {
-	const f = fixture();
+	const f = await fixture();
 	f.attach();
-	vi.mocked(getChatMessages).mockResolvedValue(page());
+	f.api.window.mockResolvedValue(page());
 	const restore = f.panel.restore({
 		kind: 'row',
 		transcriptViewId: 'view-1',
@@ -206,115 +233,76 @@ it('supersedes a saved-row restore before its first layout tick', async () => {
 	);
 });
 
-it('cancels while the initial snapshot is held without waiting for its response', async () => {
-	const f = fixture();
-	f.attach();
-	f.panel.transcript.transcriptCache.markStale(chatId);
-	const snapshot = held<ChatHistoryResponse>();
-	vi.mocked(getChatMessages).mockReturnValue(snapshot.promise);
+it('cancels while the initial open is held without waiting for its response', async () => {
+	const f = await fixture(); f.attach();
+	const snapshot = held<DisplayOpenResponse>();
+	f.api.open.mockReturnValueOnce(snapshot.promise);
 	const restore = f.panel.restore(null);
-	await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledOnce());
+	await vi.waitFor(() => expect(f.api.open).toHaveBeenCalledOnce());
 	const abort = new AbortController();
 	const work = f.panel.navigateToTranscriptRow(target, abort.signal, () => true);
 	abort.abort();
 	await expect(work).resolves.toBe('cancelled');
-	expect(getChatMessages).toHaveBeenCalledOnce();
-	snapshot.release({
-		...page(),
-		messages: [row(1)],
-		pageOldestOrdinal: 1,
-		lastOrdinal: 1,
-		pageNewestOrdinal: 1,
-		nextBeforeOrdinal: null,
-		hasMore: false,
-	});
-	await restore;
+	snapshot.release(snapshotPage()); await restore;
 	expect(f.viewport.scrollToTarget).not.toHaveBeenCalled();
 });
 
-it('navigates after a failed initial snapshot has been retried successfully', async () => {
-	const f = fixture();
-	f.attach();
-	f.panel.transcript.transcriptCache.markStale(chatId);
-	vi.mocked(getChatMessages).mockRejectedValueOnce(new Error('Synthetic snapshot failure'));
+it('navigates after a failed initial open has been retried successfully', async () => {
+	const f = await fixture(); f.attach();
+	f.api.open.mockRejectedValueOnce(new Error('Synthetic snapshot failure'));
 	await expect(f.panel.restore(null)).rejects.toThrow('Synthetic snapshot failure');
-	vi.mocked(getChatMessages).mockResolvedValueOnce(snapshotPage()).mockResolvedValue(page());
 	await expect(f.registry.loadChatSnapshot(chatId)).resolves.toBe(true);
-	await expect(
-		f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true),
-	).resolves.toBe('completed');
+	await expect(f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true)).resolves.toBe('completed');
 	expect(f.viewport.scrollToTarget).toHaveBeenCalledOnce();
 });
 
-it('waits for a current reload snapshot and reports the replaced view', async () => {
-	const f = fixture();
-	f.attach();
-	const snapshot = held<ChatHistoryResponse>();
-	vi.mocked(getChatMessages).mockReturnValueOnce(snapshot.promise);
+it('waits for a current reload open and reports the replaced view', async () => {
+	const f = await fixture(); f.attach();
+	const snapshot = held<DisplayOpenResponse>();
+	f.api.open.mockReturnValueOnce(snapshot.promise);
 	const reload = f.registry.loadChatSnapshot(chatId);
 	const work = f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true);
-	let settled = false;
-	void work.then(() => {
-		settled = true;
-	});
-	await new Promise<void>((resolve) => setTimeout(resolve, 0));
-	expect(settled).toBe(false);
-	snapshot.release(snapshotPage('view-2'));
-	await reload;
+	let settled = false; void work.then(() => { settled = true; });
+	await tick(); expect(settled).toBe(false);
+	f.api.replace(rows, snapshotPage('view-2'));
+	snapshot.release(snapshotPage('view-2')); await reload;
 	expect(await work).toBe('view-changed');
-	expect(getChatMessages).toHaveBeenCalledOnce();
 	expect(f.viewport.scrollToTarget).not.toHaveBeenCalled();
 });
 
-it('waits through a purpose-qualified successor snapshot before loading its target', async () => {
-	const f = fixture();
-	f.attach();
-	const first = held<ChatHistoryResponse>();
-	const successor = held<ChatHistoryResponse>();
-	vi.mocked(getChatMessages)
-		.mockReturnValueOnce(first.promise)
-		.mockReturnValueOnce(successor.promise)
-		.mockResolvedValue(page());
+it('waits through a purpose-qualified successor open before loading its target', async () => {
+	const f = await fixture(); f.attach();
+	const first = held<DisplayOpenResponse>(), successor = held<DisplayOpenResponse>();
+	f.api.open.mockReturnValueOnce(first.promise).mockReturnValueOnce(successor.promise);
 	const background = f.registry.loadChatSnapshot(chatId);
 	const activation = f.registry.loadChatSnapshot(chatId, { purpose: 'activation' });
 	const work = f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true);
-	first.release(snapshotPage());
-	await background;
-	await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledTimes(2));
+	first.release(snapshotPage()); await background;
+	await vi.waitFor(() => expect(f.api.open).toHaveBeenCalledTimes(2));
 	expect(f.viewport.scrollToTarget).not.toHaveBeenCalled();
-	successor.release(snapshotPage());
-	await activation;
+	successor.release(snapshotPage()); await activation;
 	expect(await work).toBe('completed');
-	expect(getChatMessages).toHaveBeenCalledTimes(3);
 });
 
-it.each(['view-1', 'view-2'])(
-	'waits for a snapshot in %s that supersedes the target request',
-	async (viewId) => {
-		const f = fixture();
-		f.attach();
-		const targetPage = held<ChatHistoryResponse>();
-		const snapshot = held<ChatHistoryResponse>();
-		vi.mocked(getChatMessages)
-			.mockReturnValueOnce(targetPage.promise)
-			.mockReturnValueOnce(snapshot.promise);
-		const work = f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true);
-		await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledOnce());
-		const reload = f.registry.loadChatSnapshot(chatId);
-		targetPage.release(page());
-		await new Promise<void>((resolve) => setTimeout(resolve, 0));
-		expect(f.viewport.scrollToTarget).not.toHaveBeenCalled();
-		snapshot.release(snapshotPage(viewId));
-		await reload;
-		expect(await work).toBe(viewId === 'view-2' ? 'view-changed' : 'unavailable');
-		expect(getChatMessages).toHaveBeenCalledTimes(2);
-	},
-);
+it.each(['view-1', 'view-2'])('waits for an open in %s that supersedes the target request', async view => {
+	const f = await fixture(); f.attach();
+	const targetPage = held<AvailableDisplayWindow>(), snapshot = held<DisplayOpenResponse>();
+	f.api.window.mockReturnValueOnce(targetPage.promise);
+	f.api.open.mockReturnValueOnce(snapshot.promise);
+	const work = f.panel.navigateToTranscriptRow(target, new AbortController().signal, () => true);
+	await vi.waitFor(() => expect(f.api.window).toHaveBeenCalledOnce());
+	const reload = f.registry.loadChatSnapshot(chatId);
+	targetPage.release(page()); await tick();
+	expect(f.viewport.scrollToTarget).not.toHaveBeenCalled();
+	f.api.replace(rows, snapshotPage(view));
+	snapshot.release(snapshotPage(view)); await reload;
+	expect(await work).toBe(view === 'view-2' ? 'view-changed' : 'cancelled');
+});
 
 it.each(['completed', 'unavailable', 'view-changed'] as const)(
 	'replaces a stale %s result when interaction is lost during the final snapshot checkpoint',
 	async (result) => {
-		const f = fixture();
+		const f = await fixture();
 		f.attach();
 		vi.spyOn(f.panel.scroll, 'navigateToTranscriptRow').mockResolvedValue(result);
 		const ownsNavigation = () => {

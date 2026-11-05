@@ -56,6 +56,8 @@
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
 	import { userMessageBodyDisclosure } from '$lib/chat/transcript/user-message-body-disclosure.js';
 	import ChatToolEventRenderer from '../tools/ChatToolEventRenderer.svelte';
+	import ChatToolExpandableEvent from '../tools/ChatToolExpandableEvent.svelte';
+	import { extractContentString } from '$lib/chat/tools/tool-display-presenters';
 	import {
 		ContextMenu,
 		ContextMenuTrigger,
@@ -96,6 +98,7 @@
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;
+		onDismissPlan?: () => void;
 		showThinking?: boolean;
 		chatContext?: ConversationMessageChatContext | null;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
@@ -127,6 +130,7 @@
 		permissionActionable = false,
 		onPermissionDecision,
 		onExitPlanMode,
+		onDismissPlan,
 		showThinking = true,
 		chatContext = null,
 		onForkChat,
@@ -222,7 +226,7 @@
 	);
 	const exitPlanPermissionRequest = $derived(
 		asToolUse?.type === 'exit-plan-mode-tool-use'
-			? new PermissionRequestMessage(message.timestamp, `plan-exit-${asToolUse.toolId}`, asToolUse)
+			? new PermissionRequestMessage(message.timestamp, `plan:${rowId}`, asToolUse)
 			: null,
 	);
 	const historicalQuestion = $derived.by(() => {
@@ -721,6 +725,7 @@
 							actionable={permissionActionable}
 							onDecision={onPermissionDecision ?? ignorePermissionDecision}
 							{onExitPlanMode}
+							{onDismissPlan}
 							{chatContext}
 							draft={permissionDraft?.(exitPlanPermissionRequest.permissionOccurrenceId)}
 							{acquireTransientActivity}
@@ -754,6 +759,17 @@
 							{disclosureState}
 							{acquireTransientActivity}
 						/>
+						{#if toolResult && disclosureState?.open('tool-result', 'attached', false)}
+							<ChatToolExpandableEvent
+								toolName=""
+								title={m.chat_tool_result()}
+								toolId={`attached-${rowId}`}
+								open={true}
+								onOpenChange={open => disclosureState?.setOpen('tool-result', 'attached', open, false)}
+							>
+								<CodeBlock text={extractContentString(toolResult.content)} />
+							</ChatToolExpandableEvent>
+						{/if}
 					{:else if asToolResult && pairedToolUse}
 						<ChatToolEventRenderer
 							toolMessage={pairedToolUse}

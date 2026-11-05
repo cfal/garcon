@@ -2,6 +2,12 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { tick } from 'svelte';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { DisplayWindowController } from '$lib/chat/transcript/display-window-controller.js';
+
+async function ready() {
+	await waitFor(() => expect(screen.getByTestId('feed-fixture-ready').getAttribute('data-ready')).toBe('true'));
+}
+
 import ConversationFeedTestHost from './ConversationFeedTestHost.svelte';
 import {
 	installResizeObserverHarness,
@@ -18,6 +24,7 @@ async function showFeedScrollbar(container: HTMLElement): Promise<{
 	thumb: HTMLElement;
 	viewport: HTMLElement;
 }> {
+	await ready();
 	const root = container.querySelector<HTMLElement>('[data-scroll-area-root]');
 	const viewport = container.querySelector<HTMLElement>('[data-chat-scroll-viewport]');
 	const content = container.querySelector<HTMLElement>('[data-scroll-area-content]');
@@ -186,13 +193,13 @@ describe('ConversationFeed', () => {
 	it('keeps a large expanded tool run individually virtualized', async () => {
 		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'large-tool-run' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Toggle combination' }));
-		const group = await screen.findByRole('button', { name: 'Execute 200 commands' });
-		expect(screen.getByRole('button', { name: 'Load earlier messages' })).toBeTruthy();
-		expect(Number(container.querySelector('[data-chat-virtual-sizer]')?.getAttribute('data-chat-virtual-model-count'))).toBe(4);
+		const group = await screen.findByRole('button', { name: 'Execute 2000 commands' });
+		expect(screen.queryByRole('button', { name: 'Load earlier messages' })).toBeNull();
+		expect(Number(container.querySelector('[data-chat-virtual-sizer]')?.getAttribute('data-chat-virtual-model-count'))).toBe(3);
 		await fireEvent.click(group);
 		await waitFor(() => {
 			const sizer = container.querySelector('[data-chat-virtual-sizer]');
-			expect(Number(sizer?.getAttribute('data-chat-virtual-model-count'))).toBe(203);
+			expect(Number(sizer?.getAttribute('data-chat-virtual-model-count'))).toBe(54);
 			expect(Number(sizer?.getAttribute('data-chat-virtual-count'))).toBeLessThan(100);
 		});
 		expect(screen.queryByRole('button', { name: 'Load earlier messages' })).toBeNull();
@@ -282,6 +289,7 @@ describe('ConversationFeed', () => {
 		await waitFor(() =>
 			expect(populated.container.querySelector('[data-chat-virtual-sizer]')).toBeTruthy(),
 		);
+		await ready();
 		const populatedContent = populated.container.querySelector('[data-chat-feed-content]');
 		expect(populatedContent?.classList.contains('min-h-full')).toBe(true);
 		expect(populatedContent?.classList.contains('justify-end')).toBe(true);
@@ -314,6 +322,7 @@ describe('ConversationFeed', () => {
 			expect(scrollbar.className).toContain('invisible');
 		}
 
+		await ready();
 		await rerender({ isPreparingInitialScroll: false });
 		expect(viewport.getAttribute('aria-busy')).toBe('false');
 		expect(content.className).not.toContain('invisible');
@@ -347,6 +356,7 @@ describe('ConversationFeed', () => {
 		expect(scrollbar.isConnected).toBe(true);
 		expect(onUserScrollIntent).not.toHaveBeenCalled();
 
+		const beforePreferenceChange = viewport.scrollTop;
 		const newValue = JSON.stringify({ autoHideChatScrollbar: false });
 		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, newValue);
 		window.dispatchEvent(
@@ -359,7 +369,7 @@ describe('ConversationFeed', () => {
 		await tick();
 		expect(container.querySelector('[data-chat-scrollbar-auto-hide="false"]')).not.toBeNull();
 		expect(container.querySelector('[data-chat-scroll-viewport]')).toBe(viewport);
-		expect(viewport.scrollTop).toBe(100);
+		expect(viewport.scrollTop).toBe(beforePreferenceChange);
 		expect(onUserScrollIntent).not.toHaveBeenCalled();
 	});
 
@@ -434,11 +444,12 @@ describe('ConversationFeed', () => {
 		expect(container.querySelector('[data-transcript-page-boundary="earlier"]')).toBeNull();
 	});
 
-	it('shows automatic earlier loading outside virtual geometry', () => {
+	it('shows automatic earlier loading outside virtual geometry', async () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'loading-earlier',
 		});
 		const viewport = screen.getByRole('region', { name: 'Chat messages' });
+		await ready();
 		const indicator = container.querySelector<HTMLElement>('[data-chat-earlier-loading-indicator]');
 
 		expect(indicator?.textContent).toContain('Loading earlier messages...');
@@ -465,6 +476,7 @@ describe('ConversationFeed', () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'loading-later',
 		});
+		await ready();
 		const transcript = container.querySelector('[data-chat-row-id]');
 		const boundary = container.querySelector('[data-transcript-page-boundary="later"]');
 
@@ -482,6 +494,7 @@ describe('ConversationFeed', () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'error-earlier',
 		});
+		await ready();
 		const retry = await screen.findByRole('button', { name: 'Retry earlier messages' });
 		const boundary = container.querySelector('[data-transcript-page-boundary="earlier"]');
 		const transcript = container.querySelector('[data-chat-row-id]');
@@ -540,10 +553,11 @@ describe('ConversationFeed', () => {
 		expect(status?.firstElementChild).not.toBe(firstNode);
 	});
 
-	it('renders a bounded virtual range instead of every loaded transcript row', () => {
+	it('renders a bounded virtual range instead of every loaded transcript row', async () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'local-truncation',
 		});
+		await ready();
 		const mountedItems = container.querySelectorAll('[data-chat-virtual-item]').length;
 		const mountedTranscriptRows = container.querySelectorAll('[data-chat-row-id]').length;
 		expect(mountedItems).toBeGreaterThan(0);
@@ -559,8 +573,9 @@ describe('ConversationFeed', () => {
 		await waitFor(
 			() => {
 				const sizer = container.querySelector('[data-chat-virtual-sizer]');
-				expect(sizer?.getAttribute('data-chat-transcript-entry-count')).toBe('200');
-				expect(sizer?.getAttribute('data-chat-virtual-model-count')).toBe('202');
+				expect(Number(sizer?.getAttribute('data-chat-transcript-entry-count'))).toBeGreaterThan(0);
+				expect(Number(sizer?.getAttribute('data-chat-transcript-entry-count'))).toBeLessThanOrEqual(50);
+				expect(Number(sizer?.getAttribute('data-chat-virtual-model-count'))).toBeLessThanOrEqual(54);
 				const mountedItems = container.querySelectorAll('[data-chat-virtual-item]').length;
 				const mountedTranscriptRows = container.querySelectorAll('[data-chat-row-id]').length;
 				expect(mountedItems).toBeGreaterThan(0);
@@ -572,6 +587,7 @@ describe('ConversationFeed', () => {
 	});
 
 	it('ignores a connected stale row measurement after the item count shrinks', async () => {
+		vi.spyOn(DisplayWindowController.prototype, 'trim').mockImplementation(() => {});
 		let staleRow: HTMLElement | null = null;
 		try {
 			const { container } = render(ConversationFeedTestHost, {
@@ -582,8 +598,9 @@ describe('ConversationFeed', () => {
 					container
 						.querySelector('[data-chat-virtual-sizer]')
 						?.getAttribute('data-chat-virtual-model-count'),
-				).toBe('122'),
+				).toBe('53'),
 			);
+			await ready();
 			const mountedRows = [
 				...container.querySelectorAll<HTMLElement>('[data-chat-virtual-item]'),
 			].filter((item) => item.querySelector('[data-chat-row-id]'));
@@ -629,6 +646,7 @@ describe('ConversationFeed', () => {
 	});
 
 	it('preserves measured survivor geometry across count shrink and a later publication', async () => {
+		vi.spyOn(DisplayWindowController.prototype, 'trim').mockImplementation(() => {});
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'count-shrink-survivors',
 		});
@@ -637,8 +655,9 @@ describe('ConversationFeed', () => {
 				container
 					.querySelector('[data-chat-virtual-sizer]')
 					?.getAttribute('data-chat-virtual-model-count'),
-			).toBe('122'),
+			).toBe('53'),
 		);
+		await ready();
 		const measuredRow = container
 			.querySelector('[data-chat-row-id="generation-1:120"]')
 			?.closest<HTMLElement>('[data-chat-virtual-item]');

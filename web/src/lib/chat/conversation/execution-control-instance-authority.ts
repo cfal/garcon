@@ -23,6 +23,11 @@ export class ExecutionControlInstanceAuthority {
 		return this.#confirmedSocketInstanceId === serverInstanceId;
 	}
 
+	acceptsNotification(serverInstanceId: string): boolean {
+		return (this.#confirmedSocketInstanceId === null || this.#confirmedSocketInstanceId === serverInstanceId)
+			&& !this.#supersededInstanceIds.has(serverInstanceId);
+	}
+
 	confirmSocketInstance(serverInstanceId: string): ExecutionControlInstanceAcceptance {
 		this.#confirmedSocketInstanceId = serverInstanceId;
 		if (this.#currentInstanceId === serverInstanceId) return { kind: 'current' };

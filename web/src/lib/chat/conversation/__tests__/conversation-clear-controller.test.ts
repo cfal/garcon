@@ -54,7 +54,7 @@ it.each([400, 403, 409])('disarms a malformed HTTP %s reply and reconciles witho
 	await controller.confirm();
 	expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? 'GET'])).toEqual([
 		['/api/v1/chats/clear', 'POST'],
-		['/api/v1/chats/snapshot?chatId=1780000000000001&limit=1', 'GET'],
+		['/api/v1/chats/snapshot?chatId=1780000000000001&limit=0', 'GET'],
 	]);
 	expect(controller.isOpen).toBe(false);
 	expect(controller.error).toBeNull();

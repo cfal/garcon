@@ -103,9 +103,9 @@ export class ConversationClearController {
 
 	async #reconcileUnknownOutcome(request: ClearChatRequest): Promise<void> {
 		try {
-			const snapshot = await getChatSnapshot(request.chatId, 1);
-			if (snapshot.chat.id !== request.chatId || snapshot.transcript.availability !== 'available') return;
-			if (snapshot.transcript.transcriptViewId === request.transcriptViewId) return;
+			const snapshot = await getChatSnapshot(request.chatId, 0);
+			if (snapshot.chat.id !== request.chatId) return;
+			if (snapshot.transientFeed.transcriptViewId === request.transcriptViewId) return;
 			await this.#recoverViewReplacement(request);
 		} catch {
 			// A failed read cannot establish whether the mutation committed.

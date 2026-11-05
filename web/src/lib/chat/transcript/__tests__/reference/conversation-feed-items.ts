@@ -1,5 +1,6 @@
 import {
 	AskUserQuestionToolUseMessage,
+	BashToolUseMessage,
 	PermissionCancelledMessage,
 	PermissionExpiredMessage,
 	PermissionRequestMessage,
@@ -12,9 +13,16 @@ import type { ChatDisplayRow } from '../../active-transcript-state.svelte.js';
 import type { LocalNoticeRow } from '$lib/chat/transcript/local-notice.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import { hasEmptyRequiredInput, intrinsicDisplayRole, toolResultVisible } from '$shared/transcript-display-policy.js';
-import { isHiddenBashToolUse, type BashCommandMatcher } from '../../hidden-bash-commands.js';
+import type { BashCommandMatcher } from '$shared/transcript-display-matcher.js';
 import { projectCommandOutput } from '$shared/command-output-projection.js';
 import { trailingDiagnosticNoticeDuplicate, commandResultPresentation } from '../../command-result-presentation.js';
+
+export function isHiddenBashToolUse(
+	message: ChatMessage | undefined,
+	matchesHiddenBashCommand: BashCommandMatcher,
+): boolean {
+	return message instanceof BashToolUseMessage && matchesHiddenBashCommand(message.command);
+}
 
 export interface PermissionTerminalState {
 	permissionOccurrenceId: string;

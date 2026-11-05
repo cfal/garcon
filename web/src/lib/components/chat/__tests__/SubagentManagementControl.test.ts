@@ -22,7 +22,7 @@ function makeModel(): SubagentManagementModel {
 				statusLabel: 'Waiting',
 				model: 'gpt-5.5',
 				lastActionLabel: 'Waiting',
-				anchorId: 'tool-input-tool-subagent-1',
+				anchorOrdinal: 7,
 			},
 		],
 		subagents: [
@@ -34,7 +34,7 @@ function makeModel(): SubagentManagementModel {
 				statusLabel: 'Waiting',
 				model: 'gpt-5.5',
 				lastActionLabel: 'Waiting',
-				anchorId: 'tool-input-tool-subagent-1',
+				anchorOrdinal: 7,
 			},
 		],
 	};
@@ -82,7 +82,7 @@ describe('SubagentManagementControl', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
 		await fireEvent.click(await screen.findByRole('button', { name: /review-auth/ }));
 
-		expect(onJumpToTool).toHaveBeenCalledWith('tool-input-tool-subagent-1');
+		expect(onJumpToTool).toHaveBeenCalledWith(7);
 		await waitFor(() => expect(screen.queryByText('Main chat')).toBeNull());
 	});
 

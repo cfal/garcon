@@ -1,128 +1,93 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage } from '$shared/chat-types';
-import type { TranscriptMessage } from '$shared/chat-view';
 import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
-import { ChatTranscriptCache } from '../chat-transcript-cache.svelte.js';
 import { InactiveTranscriptWindowStore } from '../inactive-transcript-window-store.js';
+import { displayOpen, displayRow, DISPLAY_TIME, mockDisplayApi } from './display-fixtures.js';
 
-function transcript(chatId: string, content = 'message'): ActiveTranscriptState {
-	const cache = new ChatTranscriptCache({ limit: 2, persistenceDelayMs: 60_000 });
-	const window = new ActiveTranscriptState(cache);
-	const messages: TranscriptMessage[] = [
-		{ ordinal: 1, message: new AssistantMessage('2026-08-30T00:00:00.000Z', content) },
-		{ ordinal: 2, message: new AssistantMessage('2026-08-30T00:00:00.000Z', content) },
-	];
-	window.replaceGeneration(chatId, 'view-1', messages, {
-		lastOrdinal: 2,
-		pageOldestOrdinal: 1,
-		nextBeforeOrdinal: null,
-		hasMore: false,
-	});
+const transcripts: ActiveTranscriptState[] = [];
+afterEach(() => { for (const transcript of transcripts.splice(0)) transcript.dispose(); vi.restoreAllMocks(); });
+async function transcript(chatId: string, content = 'message'): Promise<ActiveTranscriptState> {
+	const rows = [1, 2].map(ordinal => displayRow(ordinal, new AssistantMessage(DISPLAY_TIME, content)));
+	const api = mockDisplayApi(rows, displayOpen(chatId, 'view-1', 2));
+	const window = new ActiveTranscriptState();
+	transcripts.push(window);
+	await window.loadMessages(chatId);
+	api.open.mockRestore(); api.window.mockRestore(); api.bodies.mockRestore(); api.resolve.mockRestore(); api.retry.mockRestore();
 	return window;
 }
-
-function park(
-	store: InactiveTranscriptWindowStore,
-	surfaceId: string,
-	chatId: string,
-	window = transcript(chatId),
-): void {
-	store.park({ surfaceId, chatId, transcript: window, target: { kind: 'end' } });
+async function park(store: InactiveTranscriptWindowStore, surfaceId: string, chatId: string, window?: ActiveTranscriptState) {
+	store.park({ surfaceId, chatId, transcript: window ?? await transcript(chatId), target: { kind: 'end' } });
 }
 
 describe('InactiveTranscriptWindowStore', () => {
-	it('evicts whole least-recently-parked windows', () => {
+	it('evicts whole least-recently-parked windows and releases their body leases', async () => {
 		const store = new InactiveTranscriptWindowStore({ windows: 2, messages: 10, bytes: 100_000 });
-		park(store, 'left', 'chat-1');
-		park(store, 'left', 'chat-2');
-		park(store, 'left', 'chat-3');
+		const first = await transcript('chat-1');
+		await park(store, 'left', 'chat-1', first);
+		await park(store, 'left', 'chat-2');
+		await park(store, 'left', 'chat-3');
 		expect(store.take('left', 'chat-1')).toBeNull();
+		expect(first.bodyStore.count).toBe(0);
 		expect(store.take('left', 'chat-2')).not.toBeNull();
 		expect(store.take('left', 'chat-3')).not.toBeNull();
 	});
 
-	it('keeps different surfaces of one chat independent', () => {
+	it('keeps different surfaces of one chat independent', async () => {
 		const store = new InactiveTranscriptWindowStore();
-		const left = transcript('chat-1');
-		const right = transcript('chat-1');
-		park(store, 'left', 'chat-1', left);
-		park(store, 'right', 'chat-1', right);
+		const left = await transcript('chat-1'), right = await transcript('chat-1');
+		await park(store, 'left', 'chat-1', left);
+		await park(store, 'right', 'chat-1', right);
 		expect(store.take('left', 'chat-1')?.transcript).toBe(left);
 		expect(store.take('right', 'chat-1')?.transcript).toBe(right);
 	});
 
-	it('rejects oversized and stale windows rather than truncating their context', () => {
-		const store = new InactiveTranscriptWindowStore({ windows: 2, messages: 10, bytes: 1_000 });
-		park(store, 'left', 'chat-1', transcript('chat-1', 'x'.repeat(1_000)));
+	it('rejects oversized windows rather than truncating their context', async () => {
+		const store = new InactiveTranscriptWindowStore({ windows: 2, messages: 10, bytes: 2000 });
+		const large = await transcript('chat-1', 'x'.repeat(2000));
+		await park(store, 'left', 'chat-1', large);
 		expect(store.size).toBe(0);
-		const current = transcript('chat-2');
-		park(store, 'left', 'chat-2', current);
-		current.transcriptCache.markStale('chat-2');
-		expect(store.take('left', 'chat-2')).toBeNull();
+		expect(large.bodyStore.count).toBe(0);
+	});
+	it('uses cached payload estimates when parking', async () => {
+		const store = new InactiveTranscriptWindowStore();
+		const window = await transcript('chat-1');
+		const stringify = vi.spyOn(JSON, 'stringify');
+		await park(store, 'left', 'chat-1', window);
+		expect(stringify.mock.calls.some(([value]) => value && typeof value === 'object' && 'message' in value)).toBe(false);
+		expect(store.size).toBe(1);
 	});
 
-	it('evicts an inactive window that grows past the aggregate message limit', () => {
-		const store = new InactiveTranscriptWindowStore({ windows: 2, messages: 2, bytes: 100_000 });
-		const window = transcript('chat-1');
-		park(store, 'left', 'chat-1', window);
-		const incoming: TranscriptMessage = {
-			ordinal: 3,
-			message: new AssistantMessage('2026-08-30T00:00:00.000Z', 'third'),
-		};
-		const outcome = window.transcriptCache.applyMessages('chat-1', 'view-1', {
-			firstOrdinal: 3,
-			lastOrdinal: 3,
-			messages: [incoming],
-		});
-		if (outcome.status !== 'applied') throw new Error('Expected a committed append');
-		store.applySharedCommit({
-			chatId: 'chat-1',
-			transcriptViewId: 'view-1',
-			messages: [incoming],
-			firstOrdinal: 3,
-			lastOrdinal: 3,
-			resendCandidates: [],
-			noticeRevision: 0,
-			outcome,
-			overlayMutation: { feedStructureChanged: false },
-		}, { feedStructureChanged: false });
-		expect(store.size).toBe(0);
+	it('bounds aggregate body residency across windows', async () => {
+		const store = new InactiveTranscriptWindowStore({ windows: 4, messages: 3, bytes: 100_000 });
+		await park(store, 'left', 'chat-1');
+		await park(store, 'left', 'chat-2');
+		expect(store.size).toBe(1);
+		expect(store.take('left', 'chat-1')).toBeNull();
 	});
 
-	it('recalculates retained bytes when a commit restores a different cache window', () => {
-		const store = new InactiveTranscriptWindowStore({ windows: 2, messages: 10, bytes: 2_000 });
-		const window = transcript('chat-1');
-		park(store, 'left', 'chat-1', window);
-		const largeMessages: TranscriptMessage[] = [1, 2, 3].map((ordinal) => ({
-			ordinal,
-			message: new AssistantMessage('2026-08-30T00:00:00.000Z', 'x'.repeat(1_000)),
-		}));
-		window.transcriptCache.replace('chat-1', 'view-1', largeMessages, 3, null);
-		const incoming: TranscriptMessage = {
-			ordinal: 4,
-			message: new AssistantMessage('2026-08-30T00:00:00.000Z', 'x'.repeat(1_000)),
-		};
-		const outcome = window.transcriptCache.applyMessages('chat-1', 'view-1', {
-			firstOrdinal: 4,
-			lastOrdinal: 4,
-			messages: [incoming],
-		});
-		if (outcome.status !== 'applied') throw new Error('Expected a committed append');
+	it('records a dirty head without replay or hydration', async () => {
+		const store = new InactiveTranscriptWindowStore();
+		const window = await transcript('chat-1');
+		await park(store, 'left', 'chat-1', window);
+		store.observeHead('chat-1', 'view-1', 40000);
+		expect(window.lastOrdinal).toBe(40000);
+		expect(window.loadedThroughOrdinal).toBe(2);
+		expect(window.bodyStore.count).toBe(2);
+		expect(window.controller.parked).toBe(true);
+		expect(await window.controller.refresh()).toBe('blocked');
+		expect(store.size).toBe(1);
+	});
 
-		store.applySharedCommit({
-			chatId: 'chat-1',
-			transcriptViewId: 'view-1',
-			messages: [incoming],
-			firstOrdinal: 4,
-			lastOrdinal: 4,
-			resendCandidates: [],
-			noticeRevision: 0,
-			outcome,
-			overlayMutation: { feedStructureChanged: false },
-		}, { feedStructureChanged: false });
-
-		expect(window.loadedThroughOrdinal).toBe(4);
-		expect(window.hasLaterMessages).toBe(false);
+	it('invalidates replaced views, deleted chats, and removed surfaces', async () => {
+		const store = new InactiveTranscriptWindowStore();
+		await park(store, 'left', 'chat-1');
+		store.observeHead('chat-1', 'view-2', 2);
+		expect(store.size).toBe(0);
+		await park(store, 'left', 'chat-2');
+		store.removeChat('chat-2');
+		expect(store.size).toBe(0);
+		await park(store, 'right', 'chat-3');
+		store.pruneSurfaces(new Set(['left']));
 		expect(store.size).toBe(0);
 	});
 });

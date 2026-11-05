@@ -51,8 +51,8 @@ describe('SubagentToolbarState', () => {
 		model = makeModel('review');
 		expect(toolbar.model).toBe(model);
 
-		toolbar.jumpToTool('tool-input-review');
-		expect(jumpToTool).toHaveBeenCalledWith('tool-input-review');
+		toolbar.jumpToTool(42);
+		expect(jumpToTool).toHaveBeenCalledWith(42);
 	});
 
 	it('clears its source when the registration is released', () => {

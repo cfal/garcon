@@ -1,7 +1,7 @@
 import type { ConversationNativeScrollActivity } from './conversation-native-scroll-settlement.js';
 
 export type ConversationViewportTarget =
-	{ kind: 'row'; id: string } |
+	{ kind: 'row'; id: string; revealDetail?: boolean } |
 	{ kind: 'presentation-row'; id: string } |
 	{ kind: 'dom-anchor'; id: string };
 export type ConversationViewportIntentSource = 'viewport' | 'scrollbar-drag';
@@ -21,6 +21,7 @@ export interface ConversationViewportPosition {
 }
 
 export interface ConversationViewportPort {
+	requestCoverage(): void;
 	isReady(): boolean;
 	hasCollapsedToolGroups(): boolean;
 	isAtEnd(threshold?: number): boolean;

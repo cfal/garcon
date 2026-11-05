@@ -54,8 +54,8 @@
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 	import { ConversationLifecycleRegistry } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
 	import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+	import { DisplayBodyStore } from '$lib/chat/transcript/display-body-store.js';
 	import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
-	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 	import GitBranchSelector from '$lib/components/git/GitBranchSelector.svelte';
 	import type { FocusOwner } from '$lib/workspace/surface-types.js';
@@ -321,7 +321,7 @@
 	});
 	setConversationLifecycles(conversationLifecycles);
 	const conversationPanels = new ConversationPanelRegistry({
-		cache: new ChatTranscriptCache({ limit: 100 }),
+		bodies: new DisplayBodyStore(),
 		lifecycle: conversationLifecycles,
 		overlays: new ConversationTranscriptOverlayStore(),
 		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,

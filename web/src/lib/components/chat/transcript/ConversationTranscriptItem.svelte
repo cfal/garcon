@@ -73,6 +73,8 @@
 		),
 	);
 	const disclosureState = $derived(itemState?.disclosurePort(item.id));
+	const pendingPlan = $derived(pendingPermissionRequests.find(request =>
+		request.permissionOccurrenceId === `plan:${item.id}` && request.planReference && !request.control));
 
 	function permissionActionableFor(message: ChatMessage): boolean {
 		if (message instanceof PermissionRequestMessage) {
@@ -82,7 +84,7 @@
 			));
 		}
 		if (message.type !== 'exit-plan-mode-tool-use') return false;
-		return pendingPermissionOccurrences.has(`plan-exit-${message.toolId}`);
+		return pendingPermissionOccurrences.has(`plan:${item.id}`);
 	}
 
 	function permissionTerminalFor(message: ChatMessage): PermissionTerminalState | undefined {
@@ -90,7 +92,7 @@
 			return renderModel.permissionTerminalByOccurrence.get(message.permissionOccurrenceId);
 		}
 		if (message.type !== 'exit-plan-mode-tool-use') return undefined;
-		const permissionOccurrenceId = `plan-exit-${message.toolId}`;
+		const permissionOccurrenceId = `plan:${item.id}`;
 		if (pendingPermissionOccurrences.has(permissionOccurrenceId)) return undefined;
 		return { permissionOccurrenceId, state: 'resolved', allowed: true };
 	}
@@ -127,6 +129,8 @@
 			permissionActionable={permissionActionableFor(message)}
 			{onPermissionDecision}
 			{onExitPlanMode}
+			onDismissPlan={pendingPlan && onExitPlanMode
+				? () => onExitPlanMode?.(pendingPlan!.permissionOccurrenceId, 'dismiss', '') : undefined}
 			{showThinking}
 			{chatContext}
 			{onForkChat}

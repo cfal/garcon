@@ -8,6 +8,10 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
 	import { PermissionRequestMessage } from '$shared/chat-types';
+	import type { GroupDescriptor, MemberWindowRequest } from '$shared/transcript-display-contract';
+	import ChevronUp from '@lucide/svelte/icons/chevron-up';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import Ellipsis from '@lucide/svelte/icons/ellipsis';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
@@ -44,7 +48,8 @@
 		canForkAtMessageNow: boolean;
 		itemState: ConversationFeedItemState;
 		acquireTransientActivity: (close: () => void) => () => void;
-		onToggleToolGroup?: (memberIds: readonly string[], expanded: boolean) => void;
+		onToggleToolGroup?: (group: GroupDescriptor, expanded: boolean) => void;
+		onLoadMembers?: (group: GroupDescriptor, anchor: MemberWindowRequest['anchor']) => void;
 	}
 
 	let {
@@ -69,6 +74,7 @@
 		itemState,
 		acquireTransientActivity,
 		onToggleToolGroup = () => {},
+		onLoadMembers = () => {},
 	}: Props = $props();
 
 	function permissionRequestMessage(request: PendingPermissionRequest): PermissionRequestMessage {
@@ -116,12 +122,21 @@
 	/>
 {:else if item.kind === 'later-boundary'}
 	<TranscriptPageBoundary direction="later" pageState={laterPageState} onRequest={onLoadLater} />
+{:else if item.kind === 'retained-gap'}
+	<div role="separator" aria-label={m.chat_feed_retained_boundary()} class="flex h-6 items-center gap-2 text-muted-foreground">
+		<span class="flex-1 border-t border-dashed border-border"></span>
+		<Ellipsis class="size-4" />
+		<span class="flex-1 border-t border-dashed border-border"></span>
+	</div>
 {:else if item.kind === 'permission'}
 	<div class:pt-2={item.leadingSpacing}>
 		{#if onPermissionDecision}
 			<PermissionRequestRow
 				request={permissionRequestMessage(item.request)}
 				onDecision={onPermissionDecision}
+				{onExitPlanMode}
+				onDismissPlan={item.request.planReference && !item.request.control && onExitPlanMode
+					? () => onExitPlanMode?.(item.request.permissionOccurrenceId, 'dismiss', '') : undefined}
 				{chatContext}
 				draft={itemState.permissionDraft(item.request.permissionOccurrenceId)}
 				{acquireTransientActivity}
@@ -135,7 +150,12 @@
 	</div>
 {:else if item.kind === 'tool-group'}
 	<ConversationToolGroupRow {item} onToggle={onToggleToolGroup} />
-{:else}
+{:else if item.kind === 'member-boundary'}
+	<Button variant="ghost" size="sm" class="my-1 text-muted-foreground" onclick={() => onLoadMembers(item.group, item.anchor)}>
+		{#if item.anchor.kind === 'before'}<ChevronUp class="size-4" />{:else}<ChevronDown class="size-4" />{/if}
+		{item.remaining.toLocaleString()} {item.anchor.kind === 'before' ? 'earlier' : 'later'} actions
+	</Button>
+{:else if item.kind === 'transcript'}
 	<div class="flow-root">
 		<ConversationTranscriptItem
 			item={item.item}

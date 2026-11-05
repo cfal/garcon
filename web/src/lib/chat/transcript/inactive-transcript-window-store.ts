@@ -1,14 +1,6 @@
-import type { TranscriptMessage } from '$shared/chat-view';
+import type { ActiveTranscriptState } from './active-transcript-state.svelte.js';
 import type { ConversationPanelRestoreTarget } from './conversation-panel-restore-target.js';
-import {
-	type SharedTranscriptCommit,
-	ActiveTranscriptState,
-} from './active-transcript-state.svelte.js';
 import type { ConversationTranscriptOverlayMutation } from './conversation-transcript-overlay-store.svelte.js';
-
-const MAX_INACTIVE_WINDOWS = 4;
-const MAX_INACTIVE_MESSAGES = 8_000;
-const MAX_INACTIVE_BYTES = 24 * 1024 * 1024;
 
 export interface InactiveTranscriptWindow {
 	readonly surfaceId: string;
@@ -17,156 +9,51 @@ export interface InactiveTranscriptWindow {
 	readonly target: ConversationPanelRestoreTarget;
 }
 
-interface StoredWindow extends InactiveTranscriptWindow {
-	messageCount: number;
-	estimatedBytes: number;
-}
-
-function estimatedMessageBytes(message: TranscriptMessage): number {
-	try {
-		const serialized = JSON.stringify(message);
-		return serialized ? serialized.length * 2 + 128 : Infinity;
-	} catch {
-		return Infinity;
-	}
-}
-
-function estimatedTranscriptBytes(messages: readonly TranscriptMessage[], limit: number): number {
-	let estimatedBytes = 0;
-	for (const message of messages) {
-		estimatedBytes += estimatedMessageBytes(message);
-		if (estimatedBytes > limit) return estimatedBytes;
-	}
-	return estimatedBytes;
-}
-
 export class InactiveTranscriptWindowStore {
-	#windows = new Map<string, StoredWindow>();
-
-	constructor(
-		private readonly limits = {
-			windows: MAX_INACTIVE_WINDOWS,
-			messages: MAX_INACTIVE_MESSAGES,
-			bytes: MAX_INACTIVE_BYTES,
-		},
-	) {}
-
-	get size(): number {
-		return this.#windows.size;
-	}
-
-	hasChat(chatId: string): boolean {
-		for (const window of this.#windows.values()) {
-			if (window.chatId === chatId) return true;
-		}
-		return false;
-	}
-
+	#windows = new Map<string, InactiveTranscriptWindow & { count: number; bytes: number }>();
+	constructor(private readonly limits = { windows: 4, messages: 8000, bytes: 24 * 1024 * 1024 }) {}
+	get size(): number { return this.#windows.size; }
+	transcriptsForChat(chatId: string): readonly ActiveTranscriptState[] { return [...this.#windows.values()].filter(window => window.chatId === chatId).map(window => window.transcript); }
+	#key(surfaceId: string, chatId: string): string { return JSON.stringify([surfaceId, chatId]); }
 	park(window: InactiveTranscriptWindow): void {
-		const key = this.#key(window.surfaceId, window.chatId);
-		this.#windows.delete(key);
-		const messageCount = window.transcript.entries.length;
-		if (messageCount === 0 || messageCount > this.limits.messages) return;
-		const estimatedBytes = estimatedTranscriptBytes(window.transcript.entries, this.limits.bytes);
-		if (estimatedBytes > this.limits.bytes) return;
-		this.#windows.set(key, { ...window, messageCount, estimatedBytes });
-		this.#prune();
+		this.discard(window.surfaceId, window.chatId);
+		const snapshot = window.transcript.display;
+		const details = [...snapshot.details.values(), ...snapshot.protectedRows.map(row => row.detail)];
+		const usage = window.transcript.bodyStore.usage(window.transcript.controller);
+		const bytes = usage.bytes + JSON.stringify([snapshot.window, snapshot.expansions, snapshot.protectedRows, details]).length * 2;
+		if (!snapshot.window || usage.count > this.limits.messages || bytes > this.limits.bytes) { window.transcript.dispose(); return; }
+		window.transcript.controller.park();
+		this.#windows.set(this.#key(window.surfaceId, window.chatId), { ...window, count: usage.count, bytes });
+		let count = 0, total = 0;
+		for (const entry of this.#windows.values()) { count += entry.count; total += entry.bytes; }
+		while (this.size > this.limits.windows || count > this.limits.messages || total > this.limits.bytes) {
+			const oldest = this.#windows.values().next().value;
+			if (!oldest) break;
+			count -= oldest.count; total -= oldest.bytes;
+			this.discard(oldest.surfaceId, oldest.chatId);
+		}
 	}
-
 	take(surfaceId: string, chatId: string): InactiveTranscriptWindow | null {
-		const key = this.#key(surfaceId, chatId);
-		const window = this.#windows.get(key);
-		if (!window) return null;
+		const key = this.#key(surfaceId, chatId), window = this.#windows.get(key);
 		this.#windows.delete(key);
-		const cached = window.transcript.transcriptCache.readAppliedCursor(chatId);
-		if (
-			!cached
-			|| cached.stale
-			|| cached.transcriptViewId !== window.transcript.transcriptViewId
-			|| cached.lastOrdinal !== window.transcript.lastOrdinal
-		) return null;
-		return window;
+		return window ?? null;
 	}
-
 	discard(surfaceId: string, chatId: string): void {
-		this.#windows.delete(this.#key(surfaceId, chatId));
+		const key = this.#key(surfaceId, chatId);
+		this.#windows.get(key)?.transcript.dispose();
+		this.#windows.delete(key);
 	}
-
-	applySharedCommit(
-		commit: SharedTranscriptCommit,
-		overlayMutation: ConversationTranscriptOverlayMutation,
-	): void {
-		for (const [key, window] of this.#windows) {
-			if (window.chatId !== commit.chatId) continue;
-			const previousEntries = window.transcript.entries;
-			const result = window.transcript.applySharedCommit(commit);
-			if (result !== 'applied') {
-				this.#windows.delete(key);
-				continue;
-			}
-			if (overlayMutation.feedStructureChanged) {
-				window.transcript.applySharedOverlayMutation(overlayMutation);
-			}
-			const entries = window.transcript.entries;
-			window.messageCount = entries.length;
-			const prefixPreserved = previousEntries.every((entry, index) => entries[index] === entry);
-			if (prefixPreserved) {
-				for (const message of entries.slice(previousEntries.length)) {
-					window.estimatedBytes += estimatedMessageBytes(message);
-				}
-			} else {
-				window.estimatedBytes = estimatedTranscriptBytes(entries, this.limits.bytes);
-			}
+	observeHead(chatId: string, view: string, ordinal: number): void {
+		for (const window of this.#windows.values()) {
+			if (window.chatId !== chatId) continue;
+			if (window.transcript.transcriptViewId !== view) this.discard(window.surfaceId, chatId);
+			else window.transcript.observeHead(view, ordinal);
 		}
-		this.#prune();
 	}
-
 	applyOverlayMutation(chatId: string, mutation: ConversationTranscriptOverlayMutation): void {
-		if (!mutation.feedStructureChanged) return;
-		for (const window of this.#windows.values()) {
-			if (window.chatId === chatId) window.transcript.applySharedOverlayMutation(mutation);
-		}
+		for (const window of this.#windows.values()) if (window.chatId === chatId) window.transcript.applySharedOverlayMutation(mutation);
 	}
-
-	removeChat(chatId: string): void {
-		for (const [key, window] of this.#windows) {
-			if (window.chatId === chatId) this.#windows.delete(key);
-		}
-	}
-
-	pruneSurfaces(existingSurfaceIds: ReadonlySet<string>): void {
-		for (const [key, window] of this.#windows) {
-			if (!existingSurfaceIds.has(window.surfaceId)) this.#windows.delete(key);
-		}
-	}
-
-	clear(): void {
-		this.#windows.clear();
-	}
-
-	#prune(): void {
-		let messageCount = 0;
-		let estimatedBytes = 0;
-		for (const window of this.#windows.values()) {
-			messageCount += window.messageCount;
-			estimatedBytes += window.estimatedBytes;
-		}
-		while (
-			this.#windows.size > this.limits.windows
-			|| messageCount > this.limits.messages
-			|| estimatedBytes > this.limits.bytes
-		) {
-			const oldestKey = this.#windows.keys().next().value;
-			if (!oldestKey) return;
-			const oldest = this.#windows.get(oldestKey);
-			if (!oldest) return;
-			this.#windows.delete(oldestKey);
-			messageCount -= oldest.messageCount;
-			estimatedBytes -= oldest.estimatedBytes;
-		}
-	}
-
-	#key(surfaceId: string, chatId: string): string {
-		return JSON.stringify([surfaceId, chatId]);
-	}
+	removeChat(chatId: string): void { for (const window of this.#windows.values()) if (window.chatId === chatId) this.discard(window.surfaceId, chatId); }
+	pruneSurfaces(ids: ReadonlySet<string>): void { for (const window of this.#windows.values()) if (!ids.has(window.surfaceId)) this.discard(window.surfaceId, window.chatId); }
+	clear(): void { for (const window of this.#windows.values()) window.transcript.dispose(); this.#windows.clear(); }
 }

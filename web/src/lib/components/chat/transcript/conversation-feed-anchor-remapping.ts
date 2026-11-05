@@ -1,5 +1,6 @@
 import type { VirtualMutationAnchor } from '$lib/virt/virtual-list-types.js';
-import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
+import type { ConversationViewportTarget } from '$lib/chat/transcript/conversation-viewport-port.js';
+import { groupContainingRow, type ConversationVirtualFeedModel, type ConversationVirtualTarget } from './conversation-feed-virtual-items.js';
 import {
 	conversationAnchorFallbackKeys,
 	type ConversationVirtualAnchor,
@@ -10,23 +11,39 @@ export interface RemappedConversationAnchor {
 	readonly anchor: ConversationVirtualAnchor;
 }
 
+export function resolveConversationTarget(
+	target: ConversationViewportTarget,
+	model: ConversationVirtualFeedModel,
+): ConversationVirtualTarget | undefined {
+	if (target.kind === 'dom-anchor') return model.targetByDomAnchorId.get(target.id);
+	const group = groupContainingRow(model, target.id);
+	const index = model.indexByRowId.get(target.id) ?? (group ? model.indexByKey.get(group.key) : undefined);
+	if (index === undefined) return undefined;
+	const item = model.items[index];
+	const innerRowId = target.kind === 'presentation-row' && item?.kind === 'tool-group'
+		? item.anchorId : target.id;
+	return { index, innerRowId };
+}
+
 function replacementKey(
 	key: string,
 	previous: ConversationVirtualFeedModel,
 	next: ConversationVirtualFeedModel,
 ): string | undefined {
 	if (next.indexByKey.has(key)) return key;
-	const previousIndex = previous.indexByKey.get(key);
-	const previousItem = previousIndex === undefined ? undefined : previous.items[previousIndex];
-	const rowIds = previousItem?.kind === 'tool-group'
-		? previousItem.members.map((member) => member.item.id)
-		: [previous.representativeRowIdByKey.get(key)];
-	for (const rowId of rowIds) {
-		if (rowId === undefined) continue;
-		const index = next.indexByRowId.get(rowId);
-		if (index === undefined) continue;
-		const nextKey = next.items[index]?.key;
+	const rowId = previous.representativeRowIdByKey.get(key);
+	if (rowId !== undefined) {
+		const group = groupContainingRow(next, rowId);
+		const index = next.indexByRowId.get(rowId) ?? (group ? next.indexByKey.get(group.key) : undefined);
+		const nextKey = index === undefined ? undefined : next.items[index]?.key;
 		if (nextKey) return nextKey;
+	}
+	const prior = previous.items[previous.indexByKey.get(key) ?? -1];
+	if (prior?.kind === 'tool-group') {
+		const group = next.items.find(item => item.kind === 'tool-group'
+			&& item.descriptor.firstMember <= prior.descriptor.lastMember
+			&& item.descriptor.lastMember >= prior.descriptor.firstMember);
+		if (group) return group.key;
 	}
 	return undefined;
 }

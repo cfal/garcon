@@ -14,7 +14,6 @@ import type { ConversationLifecycleState } from '$lib/chat/conversation/conversa
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract.js';
-import type { ResendCandidate } from '$shared/chat-view';
 import type { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
 import type { ConversationLifecyclePort } from './conversation-lifecycle-registry.svelte.js';
@@ -66,7 +65,6 @@ export interface ConversationRouterDeps extends ConversationRouterStoreDeps {
 }
 
 export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRouterStores {
-	const transcriptCache = deps.panels.transcriptCache;
 	return {
 		agentSettings: {
 			permissionMode: (chatId) => {
@@ -84,29 +82,15 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 		},
 		chatState: {
 			getCursor: () => deps.chatState.getCursor(),
-			getChatCursor: (chatId) => transcriptCache.readAppliedCursor(chatId),
-			applyChatMessages: (
-				chatId,
-				transcriptViewId,
-				messages,
-				firstOrdinal,
-				lastOrdinal,
-				resendCandidates: ResendCandidate[],
-			) => {
-				const result = deps.panels.applyCommittedBatch({
-					chatId,
-					transcriptViewId,
-					messages,
-					firstOrdinal,
-					lastOrdinal,
-					resendCandidates,
-					noticeRevision: deps.panels.noticeRevisionFor(chatId),
-				});
-				if (result.kind === 'applied') {
-					return result.localRecoverySurfaceIds.length === 0 ? 'applied' : 'gap-detected';
+			getChatCursor: (chatId) => deps.panels.knownHead(chatId),
+			observeHead: (chatId, view, ordinal, types) => deps.panels.observeHead(chatId, view, ordinal, types),
+			acknowledgeInput: (chatId, view, id, ordinal) => deps.panels.acknowledgeInput(chatId, view, id, ordinal),
+			displayReady: message => {
+				for (const panel of deps.panels.panelsForChat(message.chatId)) {
+					panel.transcript.displayReady(message);
 				}
-				return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
 			},
+			observeOpenSnapshots: listener => deps.panels.observeOpenSnapshots(listener),
 			reloadChatTranscript: (chatId) => {
 				void deps.panels.loadChatSnapshot(chatId).catch(() => {});
 			},
@@ -139,7 +123,6 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				deps.chatState.discardChat(chatId);
 				deps.panels.handleViewReplacement(chatId);
 			},
-			markChatTranscriptValidated: (chatId) => transcriptCache.markValidated(chatId),
 		},
 		lifecycle: {
 			currentChatId: () => deps.lifecycle.currentChatId,

@@ -1,158 +1,78 @@
 import { describe, expect, it } from 'vitest';
-import {
-	AssistantMessage,
-	CommandOutputMessage,
-	CommandResultMessage,
-	BashToolUseMessage,
-	ReadToolUseMessage,
-	ToolResultMessage,
-	UserMessage,
-	type ChatMessage,
-} from '$shared/chat-types';
-import { ConversationFeedRenderModelController } from '../conversation-feed-render-model.js';
-import type { ChatDisplayRow } from '../active-transcript-state.svelte.js';
+import { AssistantMessage, BashToolUseMessage, CommandOutputMessage, ToolResultMessage, PermissionRequestMessage, PermissionResolvedMessage } from '$shared/chat-types';
+import { displayRenderModel } from '../display-render-model.js';
+import { DisplayBodyStore } from '../display-body-store.js';
+import { emptyDisplayWindow, type DisplayWindowSnapshot } from '../display-window-controller.js';
+import { displayCertificate, displayDetail, displayOpen, displayWindow, DISPLAY_TIME } from './display-fixtures.js';
 
-const TS = '2026-08-03T00:00:00.000Z';
-
-function row(ordinal: number, message: ChatMessage): ChatDisplayRow {
-	return { kind: 'message', id: `generation-1:${ordinal}`, ordinal, message };
+const certificate = displayCertificate(displayOpen('chat-1', 'view-1', 100));
+function snapshot(): DisplayWindowSnapshot {
+	return { ...emptyDisplayWindow(), window: displayWindow([], certificate), phase: 'available' };
+}
+function bodyStore(): DisplayBodyStore {
+	const bodies = new DisplayBodyStore();
+	bodies.resetInstance(certificate.serverInstanceId);
+	return bodies;
 }
 
-describe('ConversationFeedRenderModelController', () => {
-	it('rebuilds prior output when a complete result makes Markdown eligible', () => {
-		const controller = new ConversationFeedRenderModelController();
-		const context = { executorId: 'local', projectPath: '/project' };
-		const first = row(1, new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', '# first', context));
-		const initial = controller.reconcile('surface', [first]);
-		expect(initial.items[0]).toMatchObject({ message: { format: 'plain' } });
-		const next = controller.reconcileDetailed('surface', [first,
-			row(2, new CommandResultMessage(TS, 'command-1', { outcome: 'finished', exitCode: 0, signal: null,
-				capture: 'complete', cwd: { kind: 'reported', path: '/project' } }))]);
-		expect(next.change.kind).toBe('rebuilt');
-		expect(next.model.items[0]).toMatchObject({ id: first.id, message: { content: '# first', format: 'markdown' } });
-		expect(initial.items[0]).toMatchObject({ message: { format: 'plain' } });
+describe('display render model', () => {
+	it('uses only certified seeds and never scans resident neighbors for pairing', () => {
+		const bodies = bodyStore();
+		const tool = new BashToolUseMessage(DISPLAY_TIME, 'reused', 'true');
+		const result = new ToolResultMessage(DISPLAY_TIME, 'reused', { content: 'First result' }, false);
+		bodies.put(certificate, [{ ordinal: 1, message: tool, submissionClientMessageId: null },
+			{ ordinal: 2, message: result, submissionClientMessageId: null },
+			{ ordinal: 3, message: new ToolResultMessage(DISPLAY_TIME, 'reused', { content: 'Later result' }, false), submissionClientMessageId: null }]);
+		const input = { ...snapshot(), details: new Map([[1, displayDetail(1, { pairedResult: 2 })]]) };
+		const model = displayRenderModel(input, bodies);
+		expect(model.items.map(row => row.id)).toEqual(['view-1:1']);
+		expect(model.toolResultByUseRowId.get('view-1:1')).toBe(result);
+		expect(model.toolResultRowIdByUseRowId.get('view-1:1')).toBe('view-1:2');
+		expect(displayRenderModel({ ...input, details: new Map([[1, displayDetail(1)]]) }, bodies).toolResultByUseRowId.size).toBe(0);
 	});
 
-	it('publishes streamed message and tool rows once in exact transcript order', () => {
-		const controller = new ConversationFeedRenderModelController();
-		const source = [
-			row(1, new UserMessage(TS, 'run this')),
-			row(2, new AssistantMessage(TS, 'I will inspect it.')),
-			row(3, new BashToolUseMessage(TS, 'bash-1', 'pwd')),
-			row(4, new ToolResultMessage(TS, 'bash-1', { content: '/tmp' }, false)),
-			row(5, new AssistantMessage(TS, 'The first result is ready.')),
-			row(6, new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts')),
-			row(7, new BashToolUseMessage(TS, 'bash-2', 'bun test')),
-			row(8, new AssistantMessage(TS, 'Finished.')),
-		];
-		const expectedIds: string[][] = [
-			['generation-1:1'],
-			['generation-1:1', 'generation-1:2'],
-			['generation-1:1', 'generation-1:2', 'generation-1:3'],
-			['generation-1:1', 'generation-1:2', 'generation-1:3', 'generation-1:4'],
-			['generation-1:1', 'generation-1:2', 'generation-1:3', 'generation-1:4', 'generation-1:5'],
-			[
-				'generation-1:1',
-				'generation-1:2',
-				'generation-1:3',
-				'generation-1:4',
-				'generation-1:5',
-				'generation-1:6',
-			],
-			[
-				'generation-1:1',
-				'generation-1:2',
-				'generation-1:3',
-				'generation-1:4',
-				'generation-1:5',
-				'generation-1:6',
-				'generation-1:7',
-			],
-			[
-				'generation-1:1',
-				'generation-1:2',
-				'generation-1:3',
-				'generation-1:4',
-				'generation-1:5',
-				'generation-1:6',
-				'generation-1:7',
-				'generation-1:8',
-			],
-		];
-
-		for (let count = 1; count <= source.length; count += 1) {
-			const reconciliation = controller.reconcileDetailed(
-				'chat-1:generation-1',
-				source.slice(0, count),
-			);
-			expect(reconciliation.model.items.map((item) => item.id)).toEqual(expectedIds[count - 1]);
-			expect(new Set(reconciliation.model.items.map((item) => item.id)).size).toBe(
-				reconciliation.model.items.length,
-			);
-		}
+	it('applies W-qualified command evidence without mutating immutable bodies', () => {
+		const bodies = bodyStore();
+		const output = new CommandOutputMessage(DISPLAY_TIME, 'command-1', 'stdout', 'markdown', '# Output', null);
+		bodies.put(certificate, [{ ordinal: 2, message: output, submissionClientMessageId: null }]);
+		const input = { ...snapshot(), details: new Map([[2, displayDetail(2, { commandFormat: 'plain' })]]) };
+		expect(displayRenderModel(input, bodies).items[0]).toMatchObject({ id: 'view-1:2', message: { format: 'plain' } });
+		expect(output.format).toBe('markdown');
+		input.details.set(2, displayDetail(2, { commandFormat: 'markdown' }));
+		expect(displayRenderModel(input, bodies).items[0]).toMatchObject({ message: { format: 'markdown' } });
 	});
 
-	it('reports only individual tool and message rows as incremental appends', () => {
-		const controller = new ConversationFeedRenderModelController();
-		const user = row(1, new UserMessage(TS, 'start'));
-		const bash = row(2, new BashToolUseMessage(TS, 'bash-1', 'pwd'));
-		const result = row(3, new ToolResultMessage(TS, 'bash-1', { content: '/tmp' }, false));
-		const assistant = row(4, new AssistantMessage(TS, 'done'));
-
-		expect(controller.reconcileDetailed('surface', [user]).change.kind).toBe('rebuilt');
-		expect(controller.reconcileDetailed('surface', [user, bash]).change).toMatchObject({
-			kind: 'tail-appended',
-			appendedItems: [{ id: bash.id }],
-		});
-		expect(controller.reconcileDetailed('surface', [user, bash, result]).change).toMatchObject({
-			kind: 'tail-appended',
-			appendedItems: [{ id: result.id }],
-		});
-		expect(
-			controller.reconcileDetailed('surface', [user, bash, result, assistant]).change,
-		).toMatchObject({ kind: 'tail-appended', appendedItems: [{ id: assistant.id }] });
+	it('keeps distinct equal-content occurrences and never renders merely cached bodies', () => {
+		const bodies = bodyStore();
+		for (const ordinal of [1, 2, 3]) bodies.put(certificate, [{ ordinal, message: new AssistantMessage(DISPLAY_TIME, 'Equal'), submissionClientMessageId: null }]);
+		const input = { ...snapshot(), details: new Map([[1, displayDetail(1)], [2, displayDetail(2)]]) };
+		expect(displayRenderModel(input, bodies).items.map(row => row.id)).toEqual(['view-1:1', 'view-1:2']);
 	});
 
-	it('rebuilds an interior insertion without changing surviving row identity', () => {
-		const controller = new ConversationFeedRenderModelController();
-		const first = row(1, new AssistantMessage(TS, 'first'));
-		const last = row(3, new AssistantMessage(TS, 'last'));
-		controller.reconcile('surface', [first, last]);
-
-		const inserted = row(2, new BashToolUseMessage(TS, 'bash-1', 'pwd'));
-		const reconciliation = controller.reconcileDetailed('surface', [first, inserted, last]);
-
-		expect(reconciliation.change.kind).toBe('rebuilt');
-		expect(reconciliation.model.items.map((item) => item.id)).toEqual([
-			first.id,
-			inserted.id,
-			last.id,
+	it('renders a historical permission terminal from its explicit dependency, without granting a capability', () => {
+		const bodies = bodyStore();
+		const tool = new BashToolUseMessage(DISPLAY_TIME, 'tool-1', 'true');
+		bodies.put(certificate, [
+			{ ordinal: 4, message: new PermissionRequestMessage(DISPLAY_TIME, 'occurrence-1', tool), submissionClientMessageId: null },
+			{ ordinal: 7, message: new PermissionResolvedMessage(DISPLAY_TIME, 'occurrence-1', true), submissionClientMessageId: null },
 		]);
+		const input = { ...snapshot(), details: new Map([[4, displayDetail(4, { permissionTerminal: 7 })]]) };
+		const model = displayRenderModel(input, bodies);
+		expect(model.items).toHaveLength(1);
+		expect(model.permissionTerminalByOccurrence.get('occurrence-1')).toEqual({ permissionOccurrenceId: 'occurrence-1', state: 'resolved', allowed: true });
+		expect(model.items[0]).not.toHaveProperty('control');
 	});
 
-	it('[TLV5-L02.03-WEB-UNIT-01] keeps distinct identical assistant messages because their row ids differ', () => {
-		const controller = new ConversationFeedRenderModelController();
-		const messages = [
-			row(10, new AssistantMessage(TS, 'Standing by.')),
-			row(11, new AssistantMessage(TS, 'Standing by.')),
-		];
-
-		const model = controller.reconcile('surface', messages);
-
-		expect(model.items.map((item) => item.id)).toEqual(['generation-1:10', 'generation-1:11']);
-		expect(model.items).toHaveLength(2);
+	it('keeps protected old detail evidence outside the new completeness claim', () => {
+		const bodies = bodyStore();
+		const tool = new BashToolUseMessage(DISPLAY_TIME, 'tool', 'true');
+		bodies.put(certificate, [{ ordinal: 4, message: tool, submissionClientMessageId: null }]);
+		const input = { ...snapshot(), protectedRows: [{ certificate: { ...certificate, watermark: 10 }, detail: displayDetail(4), layout: 'standard' as const }] };
+		expect(displayRenderModel(input, bodies).items).toMatchObject([{ id: 'view-1:4', message: tool }]);
+		expect(input.window?.items).toEqual([]);
 	});
 
-	it('reuses an unchanged model and rebuilds on a surface change', () => {
-		const controller = new ConversationFeedRenderModelController();
-		const messages = [row(1, new AssistantMessage(TS, 'one'))];
-		const first = controller.reconcileDetailed('chat-1:generation-1', messages);
-		const unchanged = controller.reconcileDetailed('chat-1:generation-1', messages);
-		const switched = controller.reconcileDetailed('chat-2:generation-1', messages);
-
-		expect(unchanged.change.kind).toBe('unchanged');
-		expect(unchanged.model).toBe(first.model);
-		expect(switched.change.kind).toBe('rebuilt');
-		expect(switched.model.items.map((item) => item.id)).toEqual(['generation-1:1']);
+	it('returns no rows without a certified window', () => {
+		expect(displayRenderModel(emptyDisplayWindow(), new DisplayBodyStore()).items).toEqual([]);
 	});
 });

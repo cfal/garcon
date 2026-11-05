@@ -1,91 +1,42 @@
 import { describe, expect, it } from 'vitest';
-import {
-	BashToolUseMessage,
-	EditToolUseMessage,
-	ExecToolUseMessage,
-	ExternalToolUseMessage,
-	McpToolUseMessage,
-	ReadToolUseMessage,
-	UnknownToolUseMessage,
-	WriteToolUseMessage,
-} from '$shared/chat-types';
-import type { ConversationFeedMessageRenderItem } from '$lib/chat/transcript/conversation-feed-items.js';
-import { summarizeToolUses } from '../tool-use-summary.js';
+import { summarizeToolCounts } from '../tool-use-summary.js';
 
-const TS = '2026-08-03T00:00:00.000Z';
-
-function item(message: ConversationFeedMessageRenderItem['message'], index: number): ConversationFeedMessageRenderItem {
-	return { kind: 'message', id: `view:${index}`, index, ordinal: index, message };
-}
-
-describe('summarizeToolUses', () => {
-		it('counts invocations by category in first-occurrence order', () => {
-		const members = [
-			...Array.from({ length: 3 }, (_, index) => item(new ReadToolUseMessage(TS, `read-${index}`, '/private/a'), index)),
-			...Array.from({ length: 5 }, (_, index) => item(new WriteToolUseMessage(TS, `write-${index}`, '/private/b', 'secret'), index + 3)),
-			...Array.from({ length: 4 }, (_, index) => item(new BashToolUseMessage(TS, `bash-${index}`, 'private command'), index + 8)),
-			item(new ExecToolUseMessage(TS, 'exec', 'private code', 'private language'), 12),
-			item(new McpToolUseMessage(TS, 'mcp', 'private server', 'private tool', { secret: 'hidden' }), 13),
-		];
-		const summary = summarizeToolUses(members);
-		expect(summary.count).toBe(14);
-		expect(summary.label).toBe('Read 3 files, edit 5 files, execute 5 commands, an action');
-		expect(summary.label).not.toMatch(/private|secret/);
+describe('summarizeToolCounts', () => {
+	it('formats certified totals in their first-occurrence order', () => {
+		const summary = summarizeToolCounts(14,
+			{ commands: 5, fileReads: 3, fileEdits: 5, other: 1 },
+			['fileReads', 'fileEdits', 'commands', 'other']);
+		expect(summary).toEqual({ count: 14, label: 'Read 3 files, edit 5 files, execute 5 commands, an action' });
 	});
 
-	it('combines related message types into readable action categories', () => {
-		const summary = summarizeToolUses([
-			item(new ReadToolUseMessage(TS, 'r', '/a'), 1),
-			item(new WriteToolUseMessage(TS, 'w', '/a'), 2),
-			item(new BashToolUseMessage(TS, 'b', 'pwd'), 3),
-			item(new EditToolUseMessage(TS, 'e', '/a'), 4),
-		]);
+	it('combines singular and plural action categories', () => {
+		const summary = summarizeToolCounts(4,
+			{ commands: 1, fileReads: 1, fileEdits: 2, other: 0 },
+			['fileReads', 'fileEdits', 'commands']);
 		expect(summary.label).toBe('Read a file, edit 2 files, execute a command');
 	});
 
-	it('summarizes provider tools without exposing names or payloads', () => {
-		const summary = summarizeToolUses([
-			item(new UnknownToolUseMessage(TS, 'u', 'private_raw_name', { secret: 'hidden' }), 1),
-			item(new ExternalToolUseMessage(TS, 'e', 'private_external_name', { secret: 'hidden' }), 2),
-			item(new McpToolUseMessage(TS, 'm', 'private_server', 'private_tool', { secret: 'hidden' }), 3),
-		]);
+	it('formats generic actions without tool names or payloads', () => {
+		const summary = summarizeToolCounts(3,
+			{ commands: 0, fileReads: 0, fileEdits: 0, other: 3 }, ['other']);
 		expect(summary.label).toBe('3 actions');
-		expect(summary.label).not.toMatch(/private|secret|hidden/);
 	});
 
-	it('combines Bash and Exec without exposing user-controlled labels', () => {
-		const summary = summarizeToolUses([
-			item(new BashToolUseMessage(TS, 'bash', 'private shell command'), 1),
-			item(new ExecToolUseMessage(TS, 'a', 'secret command', 'private-language-name'), 1),
-			item(new ExecToolUseMessage(TS, 'b', 'another secret', 'javascript'), 2),
-		]);
+	it('formats command totals', () => {
+		const summary = summarizeToolCounts(3,
+			{ commands: 3, fileReads: 0, fileEdits: 0, other: 0 }, ['commands']);
 		expect(summary.label).toBe('Execute 3 commands');
-		expect(summary.label).not.toMatch(/secret|private|javascript/);
 	});
 
-	it('counts every file in a multi-file edit', () => {
-		const edit = new EditToolUseMessage(
-			TS,
-			'edit',
-			undefined,
-			undefined,
-			undefined,
-			[
-				{ path: '/private/a', kind: 'update' },
-				{ path: '/private/b', kind: 'create' },
-				{ path: '/private/c', kind: 'delete' },
-			],
-		);
-		const summary = summarizeToolUses([item(edit, 1)]);
-		expect(summary.count).toBe(1);
-		expect(summary.label).toBe('Edit 3 files');
-		expect(summary.label).not.toMatch(/private/);
+	it('keeps invocation count separate from weighted file totals', () => {
+		const summary = summarizeToolCounts(1,
+			{ commands: 0, fileReads: 0, fileEdits: 3, other: 0 }, ['fileEdits']);
+		expect(summary).toEqual({ count: 1, label: 'Edit 3 files' });
 	});
 
-	it('uses singular grammar for one tool', () => {
-		const summary = summarizeToolUses([
-			item(new ReadToolUseMessage(TS, 'read', '/private/file'), 1),
-		]);
+	it('uses singular grammar and omits zero-count clauses', () => {
+		const summary = summarizeToolCounts(1,
+			{ commands: 0, fileReads: 1, fileEdits: 0, other: 0 }, ['commands', 'fileReads', 'other']);
 		expect(summary.label).toBe('Read a file');
 	});
 });

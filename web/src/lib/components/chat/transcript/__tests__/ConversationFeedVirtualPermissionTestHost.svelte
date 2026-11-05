@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import ConversationFeedVirtualItem from '../ConversationFeedVirtualItem.svelte';
+	import type { ComponentProps } from 'svelte';
 	import { ConversationFeedItemState } from '../ConversationFeedItemState.svelte.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
-	import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
+	import { certifiedFeed } from './display-feed-fixtures.js';
 	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { setAppShell, setChatSessions, setFileSessions, setNotifications } from '$lib/context';
@@ -16,6 +17,7 @@
 	const SOURCE_CHAT_ID = '1788592720180699';
 	const TARGET_CHAT_ID = '1788592720180600';
 	const TIMESTAMP = '2026-09-05T00:00:00.000Z';
+	const { onExitPlanMode, onPermissionDecision = () => {} }: Pick<ComponentProps<typeof ConversationFeedVirtualItem>, 'onExitPlanMode' | 'onPermissionDecision'> = $props();
 
 	setCanonicalWorkspaceLayout();
 	setNotifications(createNotificationsStore());
@@ -61,6 +63,7 @@
 	const request: PendingPermissionRequest = {
 		chatId: SOURCE_CHAT_ID,
 		permissionOccurrenceId: 'permission-chat-links',
+		planReference: { serverInstanceId: 'instance-1', chatId: SOURCE_CHAT_ID, transcriptViewId: 'view-1', ordinal: 1 },
 		requestedTool: new ExitPlanModeToolUseMessage(
 			TIMESTAMP,
 			'tool-chat-links',
@@ -78,7 +81,7 @@
 
 <ConversationFeedVirtualItem
 	{item}
-	renderModel={buildConversationFeedRenderModel([])}
+	renderModel={certifiedFeed([]).renderModel}
 	showThinking={true}
 	pendingPermissionRequests={[request]}
 	chatContext={{ chatId: SOURCE_CHAT_ID, projectPath: '/workspace/project' }}
@@ -86,7 +89,8 @@
 	laterPageState={{ status: 'idle', error: null }}
 	onLoadEarlier={() => {}}
 	onLoadLater={() => {}}
-	onPermissionDecision={() => {}}
+	{onPermissionDecision}
+	{onExitPlanMode}
 	canForkAtMessageNow={true}
 	itemState={new ConversationFeedItemState()}
 	acquireTransientActivity={() => () => {}}

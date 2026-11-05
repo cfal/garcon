@@ -1,51 +1,11 @@
-import { ThinkingMessage } from '$shared/chat-types';
-import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import {
-	conversationFeedEndBehavior,
-	conversationFeedMutationKindsSince,
-	type ConversationFeedMutationClock,
-	type ConversationFeedMutationKind,
-} from '$lib/chat/transcript/conversation-feed-mutations.js';
-import {
-	ConversationFeedRenderModelController,
-	type ConversationFeedRenderModelReconciliation,
-} from '$lib/chat/transcript/conversation-feed-render-model.js';
-import {
-	conversationFeedItemLayout,
-	filterHiddenToolRenderItems,
-	type ConversationFeedRenderItem,
-	type ConversationFeedRenderModel,
-} from '$lib/chat/transcript/conversation-feed-items.js';
-import type { PendingPermissionRequest } from '$lib/types/chat';
-import type { BashCommandMatcher } from '$lib/chat/transcript/hidden-bash-commands.js';
-import {
-	buildConversationVirtualFeedModel,
-	estimateConversationFeedItemSize,
-	appendConversationVirtualTranscriptTail,
-	type ConversationEarlierBoundaryMode,
-	type ConversationVirtualFeedModel,
-	type ToolGroupVirtualFeedItem,
-} from './conversation-feed-virtual-items.js';
+import { conversationFeedEndBehavior, conversationFeedMutationKindsSince, type ConversationFeedMutationClock, type ConversationFeedMutationKind } from '$lib/chat/transcript/conversation-feed-mutations.js';
+import type { ConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
+import { buildConversationVirtualFeedModel, estimateConversationFeedItemSize, type ConversationVirtualFeedInput, type ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
 
-export interface ConversationFeedProjectionInput {
-	surfaceIdentity: string;
-	rows: ChatDisplayRow[];
+export interface ConversationFeedProjectionInput extends ConversationVirtualFeedInput {
 	mutationClock: ConversationFeedMutationClock;
-	hiddenToolTypes: readonly string[];
-	hiddenBashCommands: BashCommandMatcher | null;
-	showThinking: boolean;
 	isLiveWindow: boolean;
-	showRefreshError: boolean;
-	earlierBoundary: ConversationEarlierBoundaryMode;
-	showLaterBoundary: boolean;
-	reserveComposerCapSpace: boolean;
-	transcriptViewId: string;
-	pendingPermissions: PendingPermissionRequest[];
-	combineToolUseMessages: boolean;
-	expandedToolMemberIds: ReadonlySet<string>;
-	protectedVirtualKeys: readonly string[];
 }
-
 export interface ConversationVirtualGeometrySnapshot {
 	surfaceIdentity: string;
 	geometryRevision: number;
@@ -55,7 +15,6 @@ export interface ConversationVirtualGeometrySnapshot {
 	mutationKinds: ReadonlySet<ConversationFeedMutationKind>;
 	endBehavior: ReturnType<typeof conversationFeedEndBehavior>;
 }
-
 export interface ConversationFeedProjection {
 	renderModel: ConversationFeedRenderModel;
 	model: ConversationVirtualFeedModel;
@@ -63,260 +22,36 @@ export interface ConversationFeedProjection {
 	projectedDataRevision: number;
 }
 
-function arraysEqual<T>(left: readonly T[], right: readonly T[]): boolean {
-	return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function toolGroups(model: ConversationVirtualFeedModel): ToolGroupVirtualFeedItem[] {
-	return model.items.filter((item): item is ToolGroupVirtualFeedItem => item.kind === 'tool-group');
-}
-
-function sameToolGroupPresentation(
-	left: ToolGroupVirtualFeedItem,
-	right: ToolGroupVirtualFeedItem,
-): boolean {
-	if (
-		left.key !== right.key ||
-		left.expanded !== right.expanded ||
-		left.members.length !== right.members.length
-	) {
-		return false;
-	}
-	return left.members.every((member, index) => {
-		const other = right.members[index];
-		if (member.item.id !== other.item.id) return false;
-		if (member.item.kind !== 'message' || other.item.kind !== 'message') return true;
-		return member.item.message.type === other.item.message.type;
-	});
-}
-
-function toolGroupPresentationChanged(
-	previous: ConversationVirtualFeedModel | undefined,
-	next: ConversationVirtualFeedModel,
-): boolean {
-	if (!previous) return true;
-	const before = toolGroups(previous);
-	const after = toolGroups(next);
-	if (before.length !== after.length) return true;
-	for (const [index, group] of before.entries()) {
-		const current = after[index];
-		if (!current || !sameToolGroupPresentation(group, current)) return true;
-	}
-	return false;
-}
-
-function sameInput(
-	left: ConversationFeedProjectionInput | null,
-	right: ConversationFeedProjectionInput,
-): boolean {
-	return Boolean(
-		left &&
-		left.surfaceIdentity === right.surfaceIdentity &&
-		left.rows === right.rows &&
-		left.mutationClock.dataRevision === right.mutationClock.dataRevision &&
-		left.mutationClock.lastRevisionByKind === right.mutationClock.lastRevisionByKind &&
-		left.hiddenToolTypes === right.hiddenToolTypes &&
-		left.hiddenBashCommands === right.hiddenBashCommands &&
-		left.showThinking === right.showThinking &&
-		left.combineToolUseMessages === right.combineToolUseMessages &&
-		(!right.combineToolUseMessages ||
-			(left.expandedToolMemberIds === right.expandedToolMemberIds &&
-				left.protectedVirtualKeys === right.protectedVirtualKeys)) &&
-		left.isLiveWindow === right.isLiveWindow &&
-		left.showRefreshError === right.showRefreshError &&
-		left.earlierBoundary === right.earlierBoundary &&
-		left.showLaterBoundary === right.showLaterBoundary &&
-		left.reserveComposerCapSpace === right.reserveComposerCapSpace &&
-		left.pendingPermissions === right.pendingPermissions,
-	);
-}
-
-function sameProjectionConfiguration(
-	left: ConversationFeedProjectionInput | null,
-	right: ConversationFeedProjectionInput,
-): boolean {
-	return Boolean(
-		left &&
-		left.surfaceIdentity === right.surfaceIdentity &&
-		left.hiddenToolTypes === right.hiddenToolTypes &&
-		left.hiddenBashCommands === right.hiddenBashCommands &&
-		left.showThinking === right.showThinking &&
-		left.combineToolUseMessages === right.combineToolUseMessages &&
-		(!right.combineToolUseMessages ||
-			(left.expandedToolMemberIds === right.expandedToolMemberIds &&
-				left.protectedVirtualKeys === right.protectedVirtualKeys)) &&
-		left.isLiveWindow === right.isLiveWindow &&
-		left.showRefreshError === right.showRefreshError &&
-		left.earlierBoundary === right.earlierBoundary &&
-		left.showLaterBoundary === right.showLaterBoundary &&
-		left.reserveComposerCapSpace === right.reserveComposerCapSpace &&
-		left.pendingPermissions.length === right.pendingPermissions.length &&
-		left.pendingPermissions.every(
-			(permission, index) => permission === right.pendingPermissions[index],
-		),
-	);
-}
-
 export class ConversationFeedProjectionState {
-	#renderModel = new ConversationFeedRenderModelController();
-	#lastInput: ConversationFeedProjectionInput | null = null;
-	#lastProjection: ConversationFeedProjection | null = null;
-	#lastProjectedDataRevision = 0;
-	#geometryRevision = 0;
-
+	#last: ConversationFeedProjection | null = null;
+	#revision = 0;
 	reconcile(input: ConversationFeedProjectionInput): ConversationFeedProjection {
-		if (sameInput(this.#lastInput, input) && this.#lastProjection) return this.#lastProjection;
-
-		const reconciliation = this.#renderModel.reconcileDetailed(input.surfaceIdentity, input.rows);
-		const renderModel = reconciliation.model;
-		const mutationKinds = new Set(
-			conversationFeedMutationKindsSince(input.mutationClock, this.#lastProjectedDataRevision),
-		);
-		const incremental = this.#reconcileIncremental(input, reconciliation, mutationKinds);
-		if (incremental) return incremental;
-
-		const visibleTranscriptItems = this.#visibleTranscriptItems(renderModel.items, input);
-		const model = buildConversationVirtualFeedModel({
-			surfaceIdentity: input.surfaceIdentity,
-			showRefreshError: input.showRefreshError,
-			earlierBoundary: input.earlierBoundary,
-			showLaterBoundary: input.showLaterBoundary,
-			reserveComposerCapSpace: input.reserveComposerCapSpace,
-			transcriptItems: visibleTranscriptItems,
-			transcriptViewId: input.transcriptViewId,
-			pendingPermissions: input.pendingPermissions,
-			combineToolUseMessages: input.combineToolUseMessages,
-			expandedToolMemberIds: input.expandedToolMemberIds,
-			protectedVirtualKeys: input.protectedVirtualKeys,
-		});
-		const keys = model.items.map((item) => item.key);
-		const estimates = model.items.map(estimateConversationFeedItemSize);
-		const previousGeometry = this.#lastProjection?.geometry;
-		const identityChanged = previousGeometry?.surfaceIdentity !== input.surfaceIdentity;
-		const geometryChanged =
-			!previousGeometry ||
-			identityChanged ||
-			!arraysEqual(previousGeometry.keys, keys) ||
-			!arraysEqual(previousGeometry.estimates, estimates) ||
-			(input.combineToolUseMessages &&
-				toolGroupPresentationChanged(this.#lastProjection?.model, model));
-
-		if (!previousGeometry) mutationKinds.add('initial');
-		else if (geometryChanged && mutationKinds.size === 0) {
-			mutationKinds.add('presentation-structure');
-		}
-
-		const geometry = geometryChanged
-			? {
-					surfaceIdentity: input.surfaceIdentity,
-					geometryRevision: ++this.#geometryRevision,
-					keys,
-					estimates,
-					measurementReset: 'none' as const,
-					mutationKinds,
-					endBehavior: conversationFeedEndBehavior(mutationKinds, input.isLiveWindow),
-				}
-			: previousGeometry;
-
-		return this.#commitProjection(input, renderModel, model, geometry);
-	}
-
-	#reconcileIncremental(
-		input: ConversationFeedProjectionInput,
-		reconciliation: ConversationFeedRenderModelReconciliation,
-		mutationKinds: Set<ConversationFeedMutationKind>,
-	): ConversationFeedProjection | null {
-		const previous = this.#lastProjection;
-		if (input.combineToolUseMessages) return null;
-		if (!previous || !sameProjectionConfiguration(this.#lastInput, input)) return null;
-
-		let model: ConversationVirtualFeedModel;
-		let geometry = previous.geometry;
-		if (reconciliation.change.kind === 'unchanged') {
-			model = previous.model;
-		} else if (reconciliation.change.kind === 'tail-appended') {
-			const visibleAppendedItems = this.#visibleTranscriptItems(
-				reconciliation.change.appendedItems,
-				input,
-			);
-			if (visibleAppendedItems.length === 0) {
-				return this.#commitProjection(input, reconciliation.model, previous.model, geometry);
-			}
-			const appended = appendConversationVirtualTranscriptTail(
-				previous.model,
-				input.surfaceIdentity,
-				visibleAppendedItems,
-			);
-			if (!appended) return null;
-			model = appended;
-			if (mutationKinds.size === 0) mutationKinds.add('presentation-structure');
-			const keys = previous.geometry.keys.slice();
-			const estimates = previous.geometry.estimates.slice();
-			const insertIndex = previous.model.transcriptEndIndex;
-			if (insertIndex > previous.model.transcriptStartIndex) {
-				estimates[insertIndex - 1] = estimateConversationFeedItemSize(model.items[insertIndex - 1]);
-			}
-			const insertedItems = model.items.slice(
-				insertIndex,
-				insertIndex + visibleAppendedItems.length,
-			);
-			keys.splice(insertIndex, 0, ...insertedItems.map((item) => item.key));
-			estimates.splice(insertIndex, 0, ...insertedItems.map(estimateConversationFeedItemSize));
+		const model = buildConversationVirtualFeedModel(input);
+		const mutationKinds = new Set(conversationFeedMutationKindsSince(input.mutationClock, this.#last?.projectedDataRevision ?? 0));
+		const keys = model.items.map(item => item.key), estimates = model.items.map(estimateConversationFeedItemSize);
+		const previous = this.#last?.geometry;
+		const changed = !previous || previous.surfaceIdentity !== input.surfaceIdentity || keys.length !== previous.keys.length
+			|| keys.some((key, index) => key !== previous.keys[index] || estimates[index] !== previous.estimates[index]);
+		if (!previous) mutationKinds.add('initial');
+		else if (changed && !mutationKinds.size) mutationKinds.add('presentation-structure');
+		let geometry: ConversationVirtualGeometrySnapshot;
+		if (changed) {
 			geometry = {
 				surfaceIdentity: input.surfaceIdentity,
-				geometryRevision: ++this.#geometryRevision,
+				geometryRevision: ++this.#revision,
 				keys,
 				estimates,
 				measurementReset: 'none',
 				mutationKinds,
 				endBehavior: conversationFeedEndBehavior(mutationKinds, input.isLiveWindow),
 			};
+		} else if (mutationKinds.size) {
+			geometry = { ...previous, mutationKinds, endBehavior: conversationFeedEndBehavior(mutationKinds, input.isLiveWindow) };
 		} else {
-			return null;
+			geometry = previous;
 		}
-
-		return this.#commitProjection(input, reconciliation.model, model, geometry);
+		this.#last = { renderModel: input.renderModel, model, geometry, projectedDataRevision: input.mutationClock.dataRevision };
+		return this.#last;
 	}
-
-	#commitProjection(
-		input: ConversationFeedProjectionInput,
-		renderModel: ConversationFeedRenderModel,
-		model: ConversationVirtualFeedModel,
-		geometry: ConversationVirtualGeometrySnapshot,
-	): ConversationFeedProjection {
-		this.#lastProjectedDataRevision = input.mutationClock.dataRevision;
-		this.#lastInput = input;
-		this.#lastProjection = {
-			renderModel,
-			model,
-			geometry,
-			projectedDataRevision: input.mutationClock.dataRevision,
-		};
-		return this.#lastProjection;
-	}
-
-	#visibleTranscriptItems(
-		items: ConversationFeedRenderItem[],
-		input: ConversationFeedProjectionInput,
-	): ConversationFeedRenderItem[] {
-		return filterHiddenToolRenderItems(
-			items,
-			input.hiddenToolTypes,
-			input.hiddenBashCommands,
-		).filter(
-			(item) =>
-				conversationFeedItemLayout(item) !== 'hidden' &&
-				(item.kind !== 'message' ||
-					!(item.message instanceof ThinkingMessage) ||
-					input.showThinking),
-		);
-	}
-
-	reset(): void {
-		this.#renderModel.reset();
-		this.#lastInput = null;
-		this.#lastProjection = null;
-		this.#lastProjectedDataRevision = 0;
-		this.#geometryRevision = 0;
-	}
+	reset(): void { this.#last = null; this.#revision = 0; }
 }

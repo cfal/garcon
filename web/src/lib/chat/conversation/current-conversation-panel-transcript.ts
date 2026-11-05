@@ -1,20 +1,18 @@
 import type { ChatMessage } from '$shared/chat-types';
-import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import type { UserRowSummary } from '$shared/transcript-display-auxiliary';
+import type { TranscriptMessage } from '$shared/chat-view';
 import type { ConversationFeedMutationClock } from '$lib/chat/transcript/conversation-feed-mutations.js';
 import {
 	ActiveTranscriptState,
 	type ActiveTranscriptPort,
 	type ChatCursor,
 	type ChatLoadMessagesOptions,
-	type ChatRestoreResult,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
-import { echoedClientMessageIds } from '$lib/chat/transcript/transcript-row-projection.js';
 import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
 
 export class CurrentConversationPanelTranscript implements ActiveTranscriptPort {
-	readonly transcriptCache;
 	readonly #fallback;
 	readonly #optimisticChatIds = new Map<string, string>();
 
@@ -24,9 +22,10 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 			getSelectedChatId: () => string | null;
 		},
 	) {
-		this.transcriptCache = options.panels.transcriptCache;
-		this.#fallback = new ActiveTranscriptState(this.transcriptCache);
+		this.#fallback = new ActiveTranscriptState();
 	}
+	get bodyStore() { return this.#transcript().bodyStore; }
+	get serverInstanceId(): string { return this.openSnapshot?.serverInstanceId ?? ''; }
 
 	get activeChatId(): string | null {
 		return this.#current()?.chatId ?? this.#fallback.activeChatId;
@@ -40,7 +39,7 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		return this.#transcript().entries;
 	}
 
-	get resendCandidates(): readonly ResendCandidate[] {
+	get resendCandidates(): readonly UserRowSummary[] {
 		const chatId = this.options.getSelectedChatId();
 		return chatId ? (this.options.panels.overlayFor(chatId)?.includedResendCandidates ?? []) : [];
 	}
@@ -63,11 +62,12 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	}
 
 	get transcriptViewId(): string {
-		return this.#transcript().transcriptViewId;
+		return this.#current()?.transcript.transcriptViewId ?? this.openSnapshot?.transcriptViewId ?? '';
 	}
 
 	get lastOrdinal(): number {
-		return this.#transcript().lastOrdinal;
+		const chatId = this.activeChatId;
+		return this.#current()?.transcript.lastOrdinal ?? (chatId ? this.options.panels.knownHead(chatId)?.lastOrdinal : 0) ?? 0;
 	}
 
 	get hasEarlierMessages(): boolean {
@@ -99,14 +99,14 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	}
 
 	getCursor(): ChatCursor {
-		return this.#transcript().getCursor();
+		return { transcriptViewId: this.transcriptViewId, lastOrdinal: this.lastOrdinal };
 	}
+	forkSelection(ordinal: number) { return this.#transcript().forkSelection(ordinal); }
 
 	getCursorForChat(chatId: string): ChatCursor {
 		const panel = this.#panelForChat(chatId);
 		if (panel) return panel.transcript.getCursor();
-		if (this.#fallback.activeChatId === chatId) return this.#fallback.getCursor();
-		const cursor = this.transcriptCache.readAppliedCursor(chatId);
+		const cursor = this.options.panels.knownHead(chatId);
 		return {
 			transcriptViewId: cursor?.transcriptViewId ?? '',
 			lastOrdinal: cursor?.lastOrdinal ?? 0,
@@ -114,41 +114,10 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	}
 
 	getKnownHeadForChat(chatId: string): ChatCursor {
-		const transcript = this.#panelForChat(chatId)?.transcript;
-		if (transcript) return { transcriptViewId: transcript.transcriptViewId, lastOrdinal: transcript.lastOrdinal };
-		const cached = this.transcriptCache.get(chatId);
-		return { transcriptViewId: cached?.transcriptViewId ?? '', lastOrdinal: cached?.lastOrdinal ?? 0 };
+		return this.getCursorForChat(chatId);
 	}
 
-	applyMessages(
-		chatId: string,
-		transcriptViewId: string,
-		messages: TranscriptMessage[],
-		firstOrdinal: number,
-		lastOrdinal: number,
-		resendCandidates: ResendCandidate[] = [],
-	): 'applied' | 'view-changed' | 'gap-detected' {
-		const result = this.options.panels.applyCommittedBatch({
-			chatId,
-			transcriptViewId,
-			messages,
-			firstOrdinal,
-			lastOrdinal,
-			resendCandidates,
-			noticeRevision: this.options.panels.noticeRevisionFor(chatId),
-		});
-		if (result.kind === 'applied') {
-			for (const clientMessageId of echoedClientMessageIds(messages)) {
-				if (this.#optimisticChatIds.get(clientMessageId) === chatId) {
-					this.#optimisticChatIds.delete(clientMessageId);
-				}
-			}
-			return result.localRecoverySurfaceIds.length === 0 ? 'applied' : 'gap-detected';
-		}
-		return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
-	}
-
-	setResendCandidates(candidates: readonly ResendCandidate[]): void {
+	setResendCandidates(candidates: readonly UserRowSummary[]): void {
 		const chatId = this.options.getSelectedChatId();
 		if (chatId) this.options.panels.replaceResendCandidates(chatId, candidates);
 	}
@@ -164,16 +133,16 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	}
 
 	async loadMessages(chatId: string, options?: ChatLoadMessagesOptions): Promise<ChatMessage[]> {
-		const panel = this.#panelForChat(chatId);
-		if (!panel) {
-			const messages = await this.#fallback.loadMessages(chatId, options);
-			for (const mounted of this.options.panels.panelsForChat(chatId)) {
-				if (!mounted.transcript.isLoadingMessages) mounted.transcript.installCachedSnapshot(chatId);
-			}
-			return this.#panelForChat(chatId)?.transcript.chatMessages ?? messages;
+		if (!this.#panelForChat(chatId) && this.options.getSelectedChatId() === chatId) {
+			if (this.#fallback.activeChatId !== chatId) this.#fallback.activateChat(chatId);
+			this.#fallback.beginOpen();
 		}
-		await this.options.panels.loadChatSnapshot(chatId, options);
-		return this.#panelForChat(chatId)?.transcript.chatMessages ?? panel.transcript.chatMessages;
+		try {
+			await this.options.panels.loadChatSnapshot(chatId, options);
+			return this.#panelForChat(chatId)?.transcript.chatMessages ?? [];
+		} finally {
+			if (this.#fallback.activeChatId === chatId) this.#fallback.invalidatePendingLoads();
+		}
 	}
 
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void {
@@ -182,12 +151,11 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	}
 
 	async recoverViewReplacement(chatId: string, previousViewId: string): Promise<void> {
-		const currentViewId = this.transcriptCache.get(chatId)?.transcriptViewId;
+		const currentViewId = this.options.panels.knownHead(chatId)?.transcriptViewId;
 		// A delivered replacement or a later view already owns the presentation.
 		if (currentViewId && currentViewId !== previousViewId) return;
 		this.discardChat(chatId);
 		this.options.panels.handleViewReplacement(chatId);
-		this.transcriptCache.remove(chatId);
 		for (const panel of this.options.panels.panelsForChat(chatId)) panel.transcript.clearMessages();
 		if (!this.hasMountedPresentation(chatId)) {
 			if (this.options.getSelectedChatId() !== chatId) return;
@@ -203,8 +171,6 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	appendServerNotice(chatId: string, noticeType: LocalNoticeType, content: string): void {
 		this.options.panels.appendServerNotice(chatId, noticeType, content);
 	}
-
-	discardServerNotices(_chatId: string): void {}
 
 	clearLocalNotices(): void {
 		const chatId = this.options.getSelectedChatId();
@@ -249,15 +215,17 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		return this.options.panels.panelsForChat(chatId).length > 0;
 	}
 
-	activateChat(chatId: string | null): ChatRestoreResult | null {
-		if (!chatId) return this.#fallback.activateChat(null);
-		if (this.#current()?.chatId === chatId) return null;
-		return this.#fallback.activateChat(chatId);
+	activateChat(chatId: string | null): void {
+		if (chatId && this.#current()?.chatId === chatId) return;
+		this.#fallback.activateChat(chatId || null);
 	}
 
-	revealAllLoadedMessages(): void {
-		this.#transcript().revealAllLoadedMessages();
+	get openSnapshot() {
+		const chatId = this.activeChatId;
+		return this.#current()?.transcript.openSnapshot ?? (chatId ? this.options.panels.openSnapshot(chatId) : null);
 	}
+	get bodyCertificate() { return this.#transcript().display.window?.certificate ?? null; }
+	destroy(): void { this.#fallback.dispose(); this.#optimisticChatIds.clear(); }
 
 	#current() {
 		return this.options.panels.composerPanel;

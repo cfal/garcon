@@ -52,8 +52,7 @@
 		UserMessageNavigatorRegistration,
 	} from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 	import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
-	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
-	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import { DisplayBodyStore } from '$lib/chat/transcript/display-body-store.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 	import { ConversationLifecycleRegistry } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
 	import {
@@ -117,7 +116,7 @@
 	const surfaceFrames = getSurfaceFrames();
 	const processingReconciler = getChatProcessingReconciler();
 	const subagentToolbar = new SubagentToolbarState();
-	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
+	const displayBodies = new DisplayBodyStore();
 	const conversationUi = new ConversationUiState();
 	setConversationUi(conversationUi);
 	const conversationLifecycles = new ConversationLifecycleRegistry({
@@ -128,12 +127,15 @@
 	setConversationLifecycles(conversationLifecycles);
 	const conversationTranscriptOverlays = new ConversationTranscriptOverlayStore();
 	const conversationPanels = new ConversationPanelRegistry({
-		cache: chatTranscriptCache,
+		bodies: displayBodies,
+		onOpen: (snapshot) => {
+			conversationUi.setTransientFeedFromSnapshot(snapshot.transientFeed);
+			conversationUi.setExecutionControlFromRefresh(snapshot.chat.id, snapshot.control);
+		},
 		lifecycle: conversationLifecycles,
 		overlays: conversationTranscriptOverlays,
 		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,
 		getSelectedChatId: () => sessions.selectedChatId,
-		retainInactiveWindows: () => localSettings.combineToolUseMessages,
 	});
 	setConversationPanels(conversationPanels);
 	const auth = getAuth();
@@ -723,7 +725,6 @@
 				onComposerNoticeChange={(notice) => (composerNotice = notice)}
 				{subagentToolbar}
 				{chatActions}
-				transcriptCache={chatTranscriptCache}
 			/>
 		</div>
 	</div>

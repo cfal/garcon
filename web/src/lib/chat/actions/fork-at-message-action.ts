@@ -1,4 +1,5 @@
-import type { TranscriptMessage } from '$shared/chat-view';
+import type { DisplayBody } from '$shared/transcript-display-contract';
+import type { DisplayOpenResponse } from '$shared/transcript-display-open';
 
 interface ForkActionInput {
 	supportsFork: boolean;
@@ -40,33 +41,18 @@ export function canUseForkAtMessageAction(input: ForkAtMessageActionInput): bool
 }
 
 export function selectForkAtMessage(
-	entries: readonly TranscriptMessage[],
+	body: DisplayBody | undefined,
 	transcriptViewId: string,
-	ordinal: number,
 ): ForkAtMessageSelection | null {
-	const selected = entries.find((entry) => entry.ordinal === ordinal);
-	if (!selected || !transcriptViewId) return null;
-	const clientMessageId = forkClientMessageId(selected);
-	const unique = clientMessageId && entries.filter(
-		(entry) => forkClientMessageId(entry) === clientMessageId,
-	).length === 1;
-	return { ordinal, transcriptViewId, clientMessageId: unique ? clientMessageId : null };
+	if (!body || !transcriptViewId) return null;
+	return { ordinal: body.ordinal, transcriptViewId, clientMessageId: body.submissionClientMessageId };
 }
 
 export function remapForkAtMessage(
-	entries: readonly TranscriptMessage[],
-	transcriptViewId: string,
+	open: Pick<DisplayOpenResponse, 'transcriptViewId' | 'submissions'>,
 	selection: ForkAtMessageSelection,
 ): ForkAtMessageSelection | null {
-	// Content and tool IDs cannot identify a row across replaced, bounded history windows.
-	if (!selection.clientMessageId || !transcriptViewId) return null;
-	const matches = entries.filter(
-		(entry) => forkClientMessageId(entry) === selection.clientMessageId,
-	);
-	if (matches.length !== 1) return null;
-	return { ...selection, ordinal: matches[0]!.ordinal, transcriptViewId };
-}
-
-function forkClientMessageId({ message }: TranscriptMessage): string | null {
-	return message.type === 'user-message' ? message.metadata?.clientMessageId ?? null : null;
+	if (!selection.clientMessageId) return null;
+	const match = open.submissions.find(input => input.clientMessageId === selection.clientMessageId && input.ordinal !== null);
+	return match?.ordinal ? { ...selection, ordinal: match.ordinal, transcriptViewId: open.transcriptViewId } : null;
 }

@@ -19,8 +19,9 @@ describe('ReloadChatDialog', () => {
 			candidates: [
 				{
 					ordinal: 4,
-					content: 'Please keep this pending prompt',
-					attachmentNames: ['notes.txt'],
+					preview: 'Please keep this pending prompt',
+					attachmentCount: 1,
+					timestamp: '2026-01-01T00:00:00.000Z',
 				},
 			],
 			onCancel: vi.fn(),
@@ -31,7 +32,7 @@ describe('ReloadChatDialog', () => {
 			screen.getByRole('heading', { name: m.sidebar_chats_reload_confirm_title() }),
 		).toBeTruthy();
 		expect(screen.getByText('Please keep this pending prompt')).toBeTruthy();
-		expect(screen.getByText('notes.txt')).toBeTruthy();
+		expect(screen.getByText('1 attachments')).toBeTruthy();
 		expect(screen.queryByRole('status')).toBeNull();
 
 		await fireEvent.click(

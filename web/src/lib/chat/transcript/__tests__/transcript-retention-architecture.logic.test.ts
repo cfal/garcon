@@ -16,12 +16,11 @@ describe('transcript retention architecture', () => {
 		expect(mutations).not.toContain("'history-pruned'");
 	});
 
-	it('[TLV5-PAGE.09-WEB-STATIC-01] routes rendered-panel snapshots through visible-demand paging', () => {
+	it('[TLV5-DISPLAY.01-WEB-STATIC-01] uses one certified read path instead of scanning hidden raw rows', () => {
 		const activeTranscript = transcriptSource('active-transcript-state.svelte.ts');
 
-		expect(activeTranscript).toMatch(
-			/import[\s\S]*\bloadTranscriptPageDemand\b[\s\S]*from\s+['"][^'"]*transcript-page-demand\.js['"]/,
-		);
-		expect(activeTranscript).toMatch(/\bloadTranscriptPageDemand\s*\(/);
+		expect(activeTranscript).toContain('DisplayWindowController');
+		expect(activeTranscript).not.toMatch(/getChatMessages|loadTranscriptPageDemand|applyMessages|transcriptCache/);
+		expect(transcriptSource('display-window-controller.ts')).not.toContain('collapsedGroupByMemberRowId');
 	});
 });

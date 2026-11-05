@@ -17,10 +17,13 @@
 		FLOATING_TOOLBAR_RAIL_CLASS,
 	} from '$lib/components/shared/floating-toolbar-styles.js';
 	import { cn } from '$lib/utils/cn';
+	import type { DisplaySummaryPaging } from '$lib/chat/transcript/display-summary-controller.svelte.js';
+	import TranscriptSummaryPager from './transcript/TranscriptSummaryPager.svelte';
 
 	interface Props {
 		model: SubagentManagementModel;
-		onJumpToTool?: (anchorId: string) => void;
+		onJumpToTool?: (ordinal: number) => void;
+		paging?: DisplaySummaryPaging;
 		sizing?: {
 			controlHeightPx: number;
 			iconSizePx: number;
@@ -28,7 +31,7 @@
 		};
 	}
 
-	let { model, onJumpToTool, sizing }: Props = $props();
+	let { model, onJumpToTool, sizing, paging }: Props = $props();
 
 	let open = $state(false);
 
@@ -75,13 +78,13 @@
 	}
 
 	function selectEntry(entry: SubagentManagementEntry): void {
-		if (!entry.anchorId) return;
+		if (!entry.anchorOrdinal) return;
 		open = false;
-		onJumpToTool?.(entry.anchorId);
+		onJumpToTool?.(entry.anchorOrdinal);
 	}
 </script>
 
-{#if model.subagents.length > 0}
+{#if model.subagents.length > 0 || paging?.updating || paging?.error}
 	<Popover.Root bind:open>
 		<div class={FLOATING_TOOLBAR_RAIL_CLASS}>
 			<Popover.Trigger
@@ -139,7 +142,7 @@
 						<button
 							type="button"
 							class="group flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-hidden disabled:cursor-default disabled:hover:bg-transparent"
-							disabled={!entry.anchorId}
+							disabled={!entry.anchorOrdinal}
 							onclick={() => selectEntry(entry)}
 						>
 							<span
@@ -150,7 +153,7 @@
 								<div class="truncate text-sm font-medium">{entry.name}</div>
 								<div class="truncate text-xs text-muted-foreground">{detailFor(entry)}</div>
 							</div>
-							{#if entry.anchorId}
+							{#if entry.anchorOrdinal}
 								<CornerDownLeft
 									class="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
 									aria-hidden="true"
@@ -160,6 +163,7 @@
 					</li>
 				{/each}
 			</ul>
+			{#if paging}<TranscriptSummaryPager {paging} />{/if}
 		</Popover.Content>
 	</Popover.Root>
 {/if}

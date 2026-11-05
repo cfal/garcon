@@ -1,7 +1,8 @@
 import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import { BashToolUseMessage, UserMessage } from '$shared/chat-types';
-import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
+import { certifiedFeed, displayGroup } from './display-feed-fixtures.js';
+import { displayCertificate, displayOpen } from '$lib/chat/transcript/__tests__/display-fixtures.js';
 import { installResizeObserverHarness, ResizeObserverHarness } from '$lib/components/shared/__tests__/resize-observer-harness';
 import type { ConversationFeedMutationKind } from '$lib/chat/transcript/conversation-feed-mutations.js';
 import type { ConversationFeedProjection } from '../ConversationFeedProjectionState.svelte.js';
@@ -22,60 +23,55 @@ function projection(
 	revision: number,
 	memberIds: readonly string[] = ['member', 'mate'],
 ): ConversationFeedProjection {
-	const transcript = (id: string, index: number, tool = false): TranscriptVirtualFeedItem => ({
+	const ordinalFor = (id: string) => id === 'member' ? 2 : id === 'mate' ? 3 : id.charCodeAt(0) - 95;
+	const transcript = (id: string, ordinal: number, tool = false): TranscriptVirtualFeedItem => ({
 		kind: 'transcript',
 		key: id,
 		item: {
 			kind: 'message',
-			id,
-			index,
-			ordinal: index + 1,
+			id: `view:${ordinal}`,
+			index: ordinal - 1,
+			ordinal,
 			message: tool
 				? new BashToolUseMessage(timestamp, id, 'pwd')
 				: new UserMessage(timestamp, id),
 		},
 		spacingAfter: 'none',
 	});
-	const members = memberIds.map((id, index) => transcript(id, index + 1, true));
+	const members = memberIds.map(id => transcript(id, ordinalFor(id), true));
 	const group: ToolGroupVirtualFeedItem = {
 		kind: 'tool-group',
 		key: `summary:${memberIds[0]}`,
 		anchorId: `tool-group:${memberIds[0]}`,
-		members,
+		descriptor: displayGroup(ordinalFor(memberIds[0]), ordinalFor(memberIds.at(-1)!), members.length),
 		expanded: false,
 		spacingAfter: 'none',
 	};
 	const items: ConversationVirtualFeedItem[] = [
-		transcript('before', 0),
+		transcript('before', 1),
 		...(collapsed ? [group] : members),
-		transcript('tail', members.length + 1),
+		transcript('tail', 5),
 	];
 	const indexByKey = new Map(items.map((item, index): [string, number] => [item.key, index]));
 	const model: ConversationVirtualFeedModel = {
 		items,
+		transcriptViewId: 'view',
 		indexByKey,
 		indexByRowId: new Map([
-			['before', 0],
-			...members.map((member, index): [string, number] => [
-				member.item.id,
-				collapsed ? 1 : index + 1,
-			]),
-			['tail', items.length - 1],
+			['view:1', 0],
+			...(collapsed ? [] : members.map((member, index): [string, number] => [member.item.id, index + 1])),
+			['view:5', items.length - 1],
 		]),
 		targetByDomAnchorId: new Map(),
-		memberRowIdByDomAnchorId: new Map(),
 		representativeRowIdByKey: new Map(items.map((item): [string, string] => [
 			item.key,
-			item.kind === 'tool-group' ? memberIds[0] : item.key,
+			item.kind === 'tool-group' ? `view:${item.descriptor.firstMember}` : item.kind === 'transcript' ? item.item.id : item.key,
 		])),
-		collapsedGroupByMemberRowId: new Map(
-			collapsed ? members.map((member): [string, ToolGroupVirtualFeedItem] => [member.item.id, group]) : [],
-		),
 		transcriptStartIndex: 0,
 		transcriptEndIndex: items.length,
 	};
 	return {
-		renderModel: buildConversationFeedRenderModel([]),
+		renderModel: certifiedFeed([]).renderModel,
 		model,
 		geometry: {
 			surfaceIdentity: 'same-surface',
@@ -99,35 +95,30 @@ function fallbackProjection(
 	includeAppend: boolean,
 ): ConversationFeedProjection {
 	const row = (id: string, ordinal: number, tool = false) => ({
-		kind: 'message' as const,
-		id: `view:${ordinal}`,
-		index: ordinal,
 		ordinal,
 		message: tool
 			? new BashToolUseMessage(timestamp, id, 'pwd')
 			: new UserMessage(timestamp, id),
 	});
-	const model = buildConversationVirtualFeedModel({
-		surfaceIdentity: 'same-surface',
-		transcriptViewId: 'view',
-		showRefreshError: false,
-		earlierBoundary: 'hidden',
-		showLaterBoundary: false,
-		reserveComposerCapSpace: false,
-		pendingPermissions: [],
-		combineToolUseMessages,
-		expandedToolMemberIds: new Set(),
-		protectedVirtualKeys: [],
-		transcriptItems: [
+	const rows = [
 			row('leading', 1),
 			row('before', 2),
 			...(includeTools ? [row('a', 3, true), row('b', 4, true)] : []),
 			row('tail', 5),
 			...(includeAppend ? [row('appended', 6)] : []),
-		],
+		];
+	const feed = certifiedFeed(rows, {
+		certificate: displayCertificate(displayOpen('chat-1', 'view', includeAppend ? 6 : 5)),
+		input: { surfaceIdentity: 'same-surface' },
 	});
+	if (combineToolUseMessages && includeTools) {
+		feed.display = { ...feed.display, window: { ...feed.display.window!, items: [
+			...feed.display.window!.items.slice(0, 2), displayGroup(3, 4, 2), ...feed.display.window!.items.slice(4),
+		] } };
+	}
+	const model = buildConversationVirtualFeedModel(feed);
 	return {
-		renderModel: buildConversationFeedRenderModel([]),
+		renderModel: feed.renderModel,
 		model,
 		geometry: {
 			surfaceIdentity: 'same-surface',
