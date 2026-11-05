@@ -115,24 +115,41 @@ async function openChooser(remote) {
   await until(() => evaluate('return !document.querySelector("#cancel").hidden && !document.querySelector("#server-form button").disabled'), 'chooser readiness');
 }
 
-async function menuChooser(key, shift = false) {
+async function hostShortcutChooser(key, shift = false) {
   const opened = await evaluate('return window.chooserOpenCount');
   await nativeRemoteKey(shift ? `ctrl+shift+${key}` : `ctrl+${key}`);
   const action = key === 'r' ? 'Reload Server' : 'Switch Server';
   await until(() => evaluate(`return window.chooserOpenCount > arguments[1]
     && !document.querySelector('#cancel').hidden
     && !document.querySelector('#server-form button').disabled
-    && document.querySelector('#server-form button').textContent === arguments[0]`, [action, opened]), 'native menu chooser');
+    && document.querySelector('#server-form button').textContent === arguments[0]`, [action, opened]), 'native recovery chooser');
 }
 
-async function nativeRemoteKey(key) {
-  // Native menu accelerators require OS input, not synthesized DOM keyboard events.
+async function focusNativeRemote() {
   const visible = Bun.spawn(['xdotool', 'search', '--onlyvisible', '--name', '^Garcon$'], { stdout: 'pipe', stderr: 'pipe' });
   const windows = (await new Response(visible.stdout).text()).trim().split('\n');
   assert.equal(await visible.exited, 0, 'native window must be visible');
-  assert.equal(windows.length, 1, 'only the remote window is visible before a native menu request');
+  assert.equal(windows.length, 1, 'only the remote window is visible before a native recovery request');
   const focus = Bun.spawn(['xdotool', 'windowfocus', '--sync', windows[0]], { stdout: 'ignore', stderr: 'inherit' });
   assert.equal(await focus.exited, 0, 'native remote window focus');
+  return windows[0];
+}
+
+async function nativeTitlebarChooser() {
+  const opened = await evaluate('return window.chooserOpenCount');
+  const window = await focusNativeRemote();
+  const click = Bun.spawn(['xdotool', 'mousemove', '--window', window, '24', '16', 'click', '1'], {
+    stdout: 'ignore', stderr: 'inherit',
+  });
+  assert.equal(await click.exited, 0, 'native titlebar recovery button');
+  await until(() => evaluate(`return window.chooserOpenCount > arguments[0]
+    && !document.querySelector('#cancel').hidden
+    && !document.querySelector('#server-form button').disabled`, [opened]), 'titlebar chooser');
+}
+
+async function nativeRemoteKey(key) {
+  // Host recovery requires OS input, not synthesized DOM keyboard events.
+  await focusNativeRemote();
   await nativeKey(key);
 }
 
@@ -140,7 +157,7 @@ async function nativeKey(key) {
   const input = Bun.spawn(['xdotool', 'key', '--clearmodifiers', key], {
     stdout: 'ignore', stderr: 'inherit',
   });
-  assert.equal(await input.exited, 0, 'native menu keyboard input');
+  assert.equal(await input.exited, 0, 'native keyboard input');
 }
 
 async function settleChooserPaint() {
@@ -378,7 +395,13 @@ try {
       assert.equal(await evaluate('return document.querySelector("#server-url").value'), 'https://edited.test/', 'repeated requests must not reset chooser edits');
       await evaluate('document.querySelector("#cancel").click();');
       assert.equal(await remote.run('return window.cancelSentinel'), 'synthetic-unsaved');
-      await openChooser(remote);
+      const focusBeforeTitlebar = await remote.run('return document.activeElement.id');
+      await nativeTitlebarChooser();
+      await evaluate('document.querySelector("#cancel").click();');
+      await until(() => remote.run('return document.hasFocus()'), 'titlebar chooser cancel restores page focus');
+      assert.equal(await remote.run('return document.activeElement.id'), focusBeforeTitlebar);
+      assert.equal(await remote.run('return window.cancelSentinel'), 'synthetic-unsaved', 'titlebar chooser cancel retains the page');
+      await nativeTitlebarChooser();
       await connect(outside.url);
       const bHandle = await replacementRemote(aHandle);
       await until(() => outside.connected(), 'server B');
@@ -398,29 +421,29 @@ try {
       assert.equal(await remote.run('return typeof window.cancelSentinel'), 'undefined', 'old remote page must not remain alive');
       await assertRemoteWorkflows(remote, beforeReload);
       await remote.run(`window.nativeKeys = []; document.addEventListener('keydown', event => window.nativeKeys.push([event.key, event.ctrlKey, event.shiftKey]));`);
-      await menuChooser('r').catch(async error => {
-        console.error('Menu diagnostics', await remote.run('return { keys: window.nativeKeys, active: document.activeElement.tagName }'), await evaluate('return { button: document.querySelector("#server-form button").textContent, cancelHidden: document.querySelector("#cancel").hidden }'));
+      await hostShortcutChooser('r').catch(async error => {
+        console.error('Recovery diagnostics', await remote.run('return { keys: window.nativeKeys, active: document.activeElement.tagName }'), await evaluate('return { button: document.querySelector("#server-form button").textContent, cancelHidden: document.querySelector("#cancel").hidden }'));
         throw error;
       });
       await until(() => evaluate('return document.querySelector("#server-form button").textContent === "Reload Server"'), 'host reload confirmation');
       await connect(remote.url);
       let previousHandle = await replacementRemote(beforeReload);
       await until(() => remote.connected(), 'host reload');
-      // Repeated replacements exercise native menu cleanup and GTK address reuse.
+      // Repeated replacements exercise recovery handler ownership and native window cleanup.
       for (let replacement = 0; replacement < 8; replacement++) {
         await remote.run('window.reloadSentinel = "synthetic-unsaved";');
-        await menuChooser('s', true);
+        await hostShortcutChooser('s', true);
         await evaluate('document.querySelector("#cancel").click();');
         await until(() => remote.run('return document.hasFocus()'), 'cancelled chooser focus');
         assert.equal(await remote.run('return window.reloadSentinel'), 'synthetic-unsaved');
-        await menuChooser('r');
+        await hostShortcutChooser('r');
         await connect(remote.url);
         previousHandle = await replacementRemote(previousHandle);
         await until(() => remote.connected(), 'repeated host reload');
         assert.equal(await remote.run('return typeof window.reloadSentinel'), 'undefined');
         assert.equal(await remote.run('return localStorage.getItem("synthetic-auth")'), 'synthetic-a');
       }
-      console.log('Native menu lifecycle passed: switch, cancel and reload across eight replacement windows.');
+      console.log('Native recovery lifecycle passed: titlebar button, switch, cancel and reload across eight replacement windows.');
       await closeApp();
       await openApp();
       assert.equal(await evaluate('return document.querySelector("#server-url").value'), remote.url);
@@ -433,7 +456,7 @@ try {
   const unreachable = `http://127.0.0.1:${await unusedPort()}/`;
   await connect(unreachable);
   await replacementRemote();
-  await menuChooser('s', true);
+  await hostShortcutChooser('s', true);
   assert.equal(await evaluate('return document.querySelector("#current-server").textContent'), `Current: ${unreachable}`);
   await Bun.write(resolve(artifacts, 'chooser-recovery.png'), Buffer.from(await webdriver(`/session/${session}/screenshot`), 'base64'));
   await connect('http://not-loopback.test/');
@@ -452,7 +475,7 @@ try {
     await connect(untrusted.url);
     await replacementRemote();
     await until(() => untrusted.rejected(), 'native rejection of the synthetic TLS certificate');
-    await menuChooser('s', true);
+    await hostShortcutChooser('s', true);
     assert.equal(await evaluate('return document.querySelector("#current-server").textContent'), `Current: ${untrusted.url}`);
   } finally { await closeApp(); await untrusted.stop(); }
   const config = await Bun.file(resolve(root, 'src-tauri/tauri.conf.json')).json();

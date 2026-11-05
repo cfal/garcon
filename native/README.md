@@ -124,7 +124,7 @@ xvfb-run -a bun run --cwd native test:smoke
 
 Build the launcher with `bun run --cwd native build` before running Rust checks
 from a clean checkout. Linux smoke tests need `webkit2gtk-driver`, `xvfb`,
-`xauth`, `xdotool`, `openssl`, and `curl`. Native menu shortcuts use OS-level input;
+`xauth`, `xdotool`, `openssl`, and `curl`. Native recovery shortcuts use OS-level input;
 WebDriver DOM key events are not proof of native menu activation. Tests use
 isolated app data and synthetic servers, never an existing
 user server. The real native WebView is tested for launcher rendering, root and
@@ -139,9 +139,11 @@ OS-level Ctrl+C/Ctrl+Z delivery to page key handlers, and unchanged socket count
 both initially and after replacing a remote window.
 Switch/cancel/reload shortcuts are exercised across eight further replacements
 for each root/mount fixture, requiring a fresh chooser-open event rather than
-accepting stale hidden-page controls. Per-window menus are detached before
-destruction on Linux/Windows; otherwise GTK window-address reuse can leave a
-replacement without its native menu. macOS retains its app-wide menu.
+accepting stale hidden-page controls. Linux registers its recovery handlers on
+each native window without installing a menubar; hiding GTK menus also disables
+their accelerators. Windows retains a hidden menu for accelerators, detached
+before window destruction. macOS retains its app-wide menu. The isolated Linux test environment
+shares only system icon and MIME-type resources, not user application associations.
 These checks do not qualify the OS file chooser or a real Garcon terminal session.
 The Linux WebDriver probe emitted cancellation without presenting an OS dialog;
 file assignment is not evidence of native picker selection/cancellation behavior.
@@ -178,17 +180,29 @@ keyboard/safe areas, TLS failures, and server upgrades on those platforms.
   and mount. Linux supports the external links described below. Other platforms,
   same-window external navigation, and provider-login popups remain blocked.
   Mobile popup behavior still requires device validation.
-- The desktop **Server** menu offers **Switch Server** (`Cmd/Ctrl+Shift+S`) and
-  **Reload Server** (`Cmd/Ctrl+R`) independently of remote page health. Both open
-  the host-owned chooser. Confirming either action requires acknowledging possible
-  unsaved-state loss. Cancel keeps the original page and its in-memory state alive.
+- The sidebar menu's **Switch Server** action opens the host-owned chooser. The
+  Linux in-window menubar is removed and the Windows menubar is hidden. Existing host recovery accelerators
+  (`Cmd/Ctrl+Shift+S` for the chooser and `Cmd/Ctrl+R` for reload) remain active even
+  when the page is unavailable; these are not previous/next-server shortcuts.
+  macOS keeps its standard app/edit menu, with recovery actions under **Garcon**
+  rather than a separate **Server** menu. Confirming either action still requires
+  acknowledging possible unsaved-state loss. Cancel preserves the current page.
+- Linux uses a compact, theme-aware GTK titlebar with native window controls and
+  a **Switch Server** icon for pointer-accessible recovery. Windows/macOS retain
+  their OS titlebars; no frameless window or remote window-control commands are
+  introduced. Titlebar dimensions still respect the system theme and scaling.
+- After its first authenticated WebSocket connection, a native-capable web page
+  briefly shows **Connected to &lt;server&gt;**, including the deployment mount.
+  Failed connection attempts do not show success, and routine reconnects do not
+  repeat the toast. This uses the existing web notification surface, not another
+  privileged window. Ordinary browsers are unchanged.
 - iOS still navigates the original launcher WebView to the selected deployment.
   It receives no chooser adapter or additional native permissions. It has no new
   in-session chooser/reload recovery; failed loads retain the baseline exit and
   reopen recovery path. Android connections remain disabled independently.
 - Confirming destroys the outgoing remote window before creating its replacement.
   There is one local chooser and at most one remote window, never a retained page
-  per server. A failed load retains the native menu; failed window creation retains
+  per server. A failed load retains host recovery; failed window creation retains
   the chooser. Switching does not log out or send Stop. Previously admitted server
   requests may still complete; switching is not rollback or proof of cancellation.
 - The host remembers one mount per origin, across selections and restarts, with

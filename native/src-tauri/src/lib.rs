@@ -1,3 +1,4 @@
+mod chrome;
 mod deployment;
 mod external_links;
 mod host;
@@ -19,6 +20,8 @@ pub fn run() {
             host::remove_recent
         ])
         .setup(|app| {
+            #[cfg(target_os = "linux")]
+            chrome::setup()?;
             let mode = platform::connection_mode(std::env::consts::OS);
             let selection = if mode == platform::ConnectionMode::Disabled {
                 // Android's navigation callback excludes POST, including method-preserving redirects.
@@ -33,7 +36,7 @@ pub fn run() {
                     .and_then(|directory| ServerSelection::load(directory.join("servers.json")))
             };
             app.manage(Mutex::new(switcher::Switcher::new(selection)));
-            #[cfg(desktop)]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             host::install_menu(app.handle())?;
             let dev_url = app.config().build.dev_url.clone();
             let navigation_app = app.handle().clone();
@@ -41,6 +44,7 @@ pub fn run() {
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                     .title("Garcon")
                     .inner_size(520.0, 720.0)
+                    .visible(cfg!(mobile))
                     .disable_drag_drop_handler()
                     .on_navigation(move |url| {
                         let host = navigation_app.state::<host::Host>();
@@ -79,6 +83,8 @@ pub fn run() {
                     }
                 }
             });
+            #[cfg(desktop)]
+            chrome::show_initial(&chooser)?;
             Ok(())
         })
         .run(tauri::generate_context!())

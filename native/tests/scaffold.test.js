@@ -33,6 +33,20 @@ test('server pages retain browser file drag and drop instead of native path even
   }
 });
 
+test('desktop chrome hides the window menu without removing recovery accelerators', () => {
+  const chrome = read('../src-tauri/src/chrome.rs');
+  expect(chrome).toContain('window.hide_menu()?');
+  expect(chrome).toContain('gtk_window.connect_key_press_event');
+  expect(chrome).toContain('header.set_show_close_button(true)');
+  expect(chrome).toContain('"Switch Server"');
+  for (const owner of ['host.rs', 'lib.rs']) {
+    expect(read(`../src-tauri/src/${owner}`)).toContain('chrome::show_initial(');
+  }
+  const host = read('../src-tauri/src/host.rs');
+  expect(host).toContain('Some("CmdOrCtrl+Shift+S")');
+  expect(host).toContain('Some("CmdOrCtrl+R")');
+});
+
 test('CI builds all five platform families without distribution secrets', () => {
   const desktop = workflow.jobs.desktop.strategy.matrix.include;
   expect(desktop.map(row => row.target)).toEqual([

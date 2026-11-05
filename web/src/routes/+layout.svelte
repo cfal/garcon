@@ -11,6 +11,7 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import GarconMark from '$lib/components/shared/GarconMark.svelte';
 	import FontPreloads from '$lib/components/layout/FontPreloads.svelte';
+	import { installNativeConnectionNotification } from '$lib/native/connection-notification.js';
 
 	import { createAuthStore } from '$lib/stores/auth.svelte.js';
 	import ReauthenticationOverlay from '$lib/components/auth/ReauthenticationOverlay.svelte';
@@ -388,6 +389,13 @@
 			if (!connected) browserNotificationsRouter.clearPermissions();
 		});
 	});
+	onMount(() =>
+		installNativeConnectionNotification(
+			ws,
+			notifications,
+			new URL(resolve('/'), window.location.origin),
+		),
+	);
 	// Pushes settings-changed WebSocket messages into the remote store.
 	const settingsRouter = new RemoteSettingsRouter(ws, remoteSettings);
 	const transcriptSearchStatus = new TranscriptSearchStatusController(ws, (status) =>

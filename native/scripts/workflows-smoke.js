@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, symlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 export async function prepareWorkflows(isolation) {
   const browserLog = resolve(isolation, 'browser.jsonl');
   const applications = resolve(isolation, 'applications');
   await mkdir(applications, { recursive: true });
+  // GTK titlebar icons need system image types, not the user's application associations.
+  for (const directory of ['mime', 'icons']) {
+    await symlink(`/usr/share/${directory}`, resolve(isolation, directory));
+  }
   await Bun.write(browserLog, '');
   const attachment = resolve(isolation, 'synthetic-attachment.txt');
   await Bun.write(attachment, 'Synthetic attachment content.');

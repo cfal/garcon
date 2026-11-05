@@ -155,7 +155,7 @@ async fn replace_remote(
                 let _ = sender.try_send(());
             }
         });
-        // Releases per-window menu state before GTK can reuse the window address.
+        // Releases per-window accelerator state before destruction.
         #[cfg(not(target_os = "macos"))]
         previous
             .remove_menu()
@@ -181,6 +181,7 @@ async fn replace_remote(
     )
     .title("Garcon")
     .inner_size(1200.0, 800.0)
+    .visible(false)
     // File attachments use browser File events, not Tauri's native path events.
     .disable_drag_drop_handler()
     .initialization_script(include_str!("../bridge.js"))
@@ -224,6 +225,8 @@ async fn replace_remote(
         .remote_label = Some(label);
     crate::external_links::install(&window, generation)
         .map_err(|_| "Unable to install native link handling. Choose another server or retry.")?;
+    crate::chrome::show_initial(&window)
+        .map_err(|_| "Unable to show the server page. Choose another server or retry.")?;
     Ok(())
 }
 
@@ -239,6 +242,30 @@ pub fn present_chooser(app: &tauri::AppHandle) -> tauri::Result<()> {
 }
 
 #[cfg(desktop)]
+pub fn request_host_chooser(app: &tauri::AppHandle, action: ChooserAction) {
+    {
+        let host = app.state::<Host>();
+        let Ok(mut host) = host.lock() else {
+            return;
+        };
+        if host.pending {
+            return;
+        }
+        if host.chooser_open {
+            drop(host);
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            return;
+        }
+        host.action = action;
+        host.chooser_open = true;
+    }
+    let _ = present_chooser(app);
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
     let switch = MenuItem::with_id(
@@ -256,7 +283,16 @@ pub fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         Some("CmdOrCtrl+R"),
     )?;
     let quit = PredefinedMenuItem::quit(app, None)?;
-    let server = Submenu::with_items(app, "Server", true, &[&switch, &reload, &quit])?;
+    let server = Submenu::with_items(
+        app,
+        if cfg!(target_os = "macos") {
+            "Garcon"
+        } else {
+            "Server"
+        },
+        true,
+        &[&switch, &reload, &quit],
+    )?;
     let edit = Submenu::with_items(
         app,
         "Edit",
@@ -277,26 +313,7 @@ pub fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
             "reload-server" => ChooserAction::Reload,
             _ => return,
         };
-        {
-            let host = app.state::<Host>();
-            let Ok(mut host) = host.lock() else {
-                return;
-            };
-            if host.pending {
-                return;
-            }
-            if host.chooser_open {
-                drop(host);
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-                return;
-            }
-            host.action = action;
-            host.chooser_open = true;
-        }
-        let _ = present_chooser(app);
+        request_host_chooser(app, action);
     });
     Ok(())
 }
