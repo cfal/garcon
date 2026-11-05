@@ -68,6 +68,14 @@ The controller owns chats, ledgers, queues, schedules, provider configuration/cr
   in `controller/ledger/`.
 - `controller/chats/shares/` owns published snapshot storage, paging, and
   presentation. HTTP adaptation remains in `controller/routes/shares.ts`.
+- `controller/transcript-display/` owns the rebuildable display read model,
+  fixed builder/reader Workers, certified browser windows/member pages, and
+  bounded details/auxiliary folds. Its per-chat/view SQLite files live under
+  `<controller-data-root>/transcript-display/`, outside authoritative ledgers.
+  Workers receive acknowledged stored-row frames and never open the ledger.
+  Compact browser notifications follow committed source facts; derived
+  readiness is independent of lifecycle and execution. Raw HTTP, CLI, export,
+  shares and search retain their own ledger reads.
 - `controller/chats/token-fitting/` owns bounded token estimation and fitting
   shared by carryover and handoff artifacts. Transcript rendering and export
   retain their existing concern directories and Worker boundaries.
