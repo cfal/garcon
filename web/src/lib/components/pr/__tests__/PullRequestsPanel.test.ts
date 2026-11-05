@@ -151,8 +151,10 @@ function setup(
 	const getRuns = vi.fn(options.getRuns ?? (async () => [run]));
 	const details = new Map<string, PullRequestReviewRunDetail>();
 	const getRun = vi.fn(options.getRun ?? (async (id: string) => details.get(id)!));
+	const notifyError = vi.fn();
 	const controller = new PullRequestsStore({
 		reviews: new PullRequestReviewsStore(api),
+		notifyError,
 		getDetail,
 		getRuns:
 			options.getPage ??
@@ -173,7 +175,7 @@ function setup(
 		controller,
 		onOpenChat,
 	});
-	return { api, onOpenChat, controller, getDetail, getRuns, getRun };
+	return { api, onOpenChat, controller, getDetail, getRuns, getRun, notifyError };
 }
 
 describe('PullRequestsPanel', () => {
@@ -310,11 +312,13 @@ describe('PullRequestsPanel', () => {
 			async (metadata) => {
 				const original = diffDetail();
 				const replacement = Promise.withResolvers<PullRequestDetail>();
+				const failedRefresh = Promise.withResolvers<PullRequestDetail>();
 				const getDetail = vi
 					.fn<() => Promise<PullRequestDetail>>()
 					.mockResolvedValueOnce(original)
-					.mockReturnValue(replacement.promise);
-				const { controller } = setup({ getDetail });
+					.mockReturnValueOnce(replacement.promise)
+					.mockReturnValue(failedRefresh.promise);
+				const { controller, notifyError } = setup({ getDetail });
 				await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
 				await fireEvent.click(screen.getByRole('tab', { name: /Changes/ }));
 				await waitFor(() =>
@@ -348,6 +352,21 @@ describe('PullRequestsPanel', () => {
 					documentId: 'revision:2',
 				});
 				await waitFor(() => expect(controller.isDetailLoading).toBe(false));
+				expect(document.querySelector('[data-git-diff-review-row]')).toBe(row);
+				expect(row?.textContent).toBe(text);
+				expect(viewport.scrollTop).toBe(20000);
+				expect(indexCalls()).toBe(1);
+				controller.reviews.apply(
+					refreshedSnapshot(3, { ...metadata, updatedAt: '2026-01-03T00:00:00Z' }),
+				);
+				await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(3));
+				await tick();
+				expect(document.querySelector('[data-git-diff-review-row]')).toBe(row);
+				failedRefresh.reject(new Error('Metadata refresh unavailable.'));
+				await waitFor(() => expect(controller.isDetailLoading).toBe(false));
+				expect(controller.detailError).toBe('Metadata refresh unavailable.');
+				expect(notifyError).toHaveBeenCalledWith('Metadata refresh unavailable.');
+				expect(document.querySelector('[data-git-virtual-diff-root]')).toBe(viewport);
 				expect(document.querySelector('[data-git-diff-review-row]')).toBe(row);
 				expect(row?.textContent).toBe(text);
 				expect(viewport.scrollTop).toBe(20000);
@@ -450,41 +469,82 @@ describe('PullRequestsPanel', () => {
 			controller.dispose();
 		});
 
-		it('does not cancel pending indexing while inbox metadata detail is loading', async () => {
-			const original = diffDetail();
-			const replacement = Promise.withResolvers<PullRequestDetail>();
-			const pendingIndex = Promise.withResolvers<Awaited<ReturnType<typeof gitReviewWorker.run>>>();
-			vi.mocked(gitReviewWorker.run).mockReturnValueOnce(pendingIndex.promise);
-			const getDetail = vi
-				.fn<() => Promise<PullRequestDetail>>()
-				.mockResolvedValueOnce(original)
-				.mockReturnValue(replacement.promise);
-			const { controller } = setup({ getDetail });
-			await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
-			await fireEvent.click(screen.getByRole('tab', { name: /Changes/ }));
-			await waitFor(() => expect(gitReviewWorker.run).toHaveBeenCalledOnce());
-			const signal = vi.mocked(gitReviewWorker.run).mock.calls[0][1];
-			controller.reviews.apply(refreshedSnapshot(2, { updatedAt: '2026-01-02T00:00:00Z' }));
-			await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(2));
-			await tick();
-			expect(signal?.aborted).toBe(false);
-			replacement.resolve({ ...structuredClone(original), documentId: 'revision:2' });
-			await waitFor(() => expect(controller.isDetailLoading).toBe(false));
-			expect(signal?.aborted).toBe(false);
-			const index = createGitPatchIndex(original.fileBodies['synthetic.ts'].patch!, 3001);
-			pendingIndex.resolve({
-				kind: 'index',
-				index: index.toData(),
-				split: getGitSplitPatchIndex(index).toData(),
-			});
-			await waitFor(() =>
-				expect(document.querySelector('[data-git-diff-review-row]')).not.toBeNull(),
-			);
-			expect(
-				vi.mocked(gitReviewWorker.run).mock.calls.filter(([input]) => input.kind === 'index'),
-			).toHaveLength(1);
-			controller.dispose();
-		});
+		it.each(['succeeds', 'fails'])(
+			'does not cancel pending indexing when inbox metadata refresh %s',
+			async (outcome) => {
+				const original = diffDetail();
+				const replacement = Promise.withResolvers<PullRequestDetail>();
+				const pendingIndex =
+					Promise.withResolvers<Awaited<ReturnType<typeof gitReviewWorker.run>>>();
+				vi.mocked(gitReviewWorker.run).mockReturnValueOnce(pendingIndex.promise);
+				const getDetail = vi
+					.fn<() => Promise<PullRequestDetail>>()
+					.mockResolvedValueOnce(original)
+					.mockReturnValue(replacement.promise);
+				const { controller, notifyError } = setup({ getDetail });
+				await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+				await fireEvent.click(screen.getByRole('tab', { name: /Changes/ }));
+				await waitFor(() => expect(gitReviewWorker.run).toHaveBeenCalledOnce());
+				const signal = vi.mocked(gitReviewWorker.run).mock.calls[0][1];
+				const displayedDetail = controller.detail;
+				controller.reviews.apply(refreshedSnapshot(2, { updatedAt: '2026-01-02T00:00:00Z' }));
+				await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(2));
+				await tick();
+				expect(signal?.aborted).toBe(false);
+				if (outcome === 'succeeds')
+					replacement.resolve({ ...structuredClone(original), documentId: 'revision:2' });
+				else replacement.reject(new Error('Metadata refresh unavailable.'));
+				await waitFor(() => expect(controller.isDetailLoading).toBe(false));
+				if (outcome === 'fails') {
+					expect(controller.detail).toBe(displayedDetail);
+					expect(controller.detailError).toBe('Metadata refresh unavailable.');
+					expect(notifyError).toHaveBeenCalledWith('Metadata refresh unavailable.');
+				}
+				expect(signal?.aborted).toBe(false);
+				const index = createGitPatchIndex(original.fileBodies['synthetic.ts'].patch!, 3001);
+				pendingIndex.resolve({
+					kind: 'index',
+					index: index.toData(),
+					split: getGitSplitPatchIndex(index).toData(),
+				});
+				await waitFor(() =>
+					expect(document.querySelector('[data-git-diff-review-row]')).not.toBeNull(),
+				);
+				expect(
+					vi.mocked(gitReviewWorker.run).mock.calls.filter(([input]) => input.kind === 'index'),
+				).toHaveLength(1);
+				controller.dispose();
+			},
+		);
+
+		it.each(['initial', 'head', 'executor'])(
+			'keeps detail empty when the %s load fails',
+			async (change) => {
+				const replacement = Promise.withResolvers<PullRequestDetail>();
+				const getDetail = vi.fn<typeof getPullRequest>();
+				if (change !== 'initial') getDetail.mockResolvedValueOnce(diffDetail());
+				getDetail.mockReturnValue(replacement.promise);
+				const { controller, notifyError } = setup({ getDetail });
+				await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+				await fireEvent.click(screen.getByRole('tab', { name: /Changes/ }));
+				if (change !== 'initial') {
+					await waitFor(() =>
+						expect(document.querySelector('[data-git-diff-review-row]')).not.toBeNull(),
+					);
+					const changed = structuredClone(refreshedSnapshot(2, {}));
+					if (change === 'head') changed.inbox[0].pull.headRefOid = 'b'.repeat(40);
+					else changed.repositories[0].target.executorId = '11111111-1111-4111-8111-111111111111';
+					controller.reviews.apply(changed);
+					await waitFor(() => expect(getDetail).toHaveBeenCalledTimes(2));
+				}
+				replacement.reject(new Error('Detail unavailable.'));
+				await screen.findByText('Detail unavailable.');
+				expect(controller.detail).toBeNull();
+				expect(document.querySelector('[data-git-virtual-diff-root]')).toBeNull();
+				expect(notifyError).toHaveBeenCalledWith('Detail unavailable.');
+				controller.dispose();
+			},
+		);
 	});
 	it('distinguishes repositories on different hosts in the inbox filter', async () => {
 		setup({

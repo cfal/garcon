@@ -255,7 +255,6 @@ export class PullRequestsStore implements PortableSingletonController {
 		} catch (error) {
 			if (controller.signal.aborted || version !== this.#selectedDetailVersion()) return;
 			const message = errorMessage(error, m.pull_request_load_failed());
-			this.detail = null;
 			this.detailError = message;
 			this.#deps.notifyError?.(message);
 		} finally {

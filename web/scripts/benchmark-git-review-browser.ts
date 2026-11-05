@@ -128,7 +128,8 @@ try {
 		await cdp.send('Performance.enable');
 		const pageErrors: string[] = [];
 		page.on('pageerror', (error) => pageErrors.push(error.message));
-		await page.goto(server.resolvedUrls!.local[0]);
+		// Cold Vite compilation is setup, outside the measured review workloads.
+		await page.goto(server.resolvedUrls!.local[0], { timeout: 120_000 });
 		await page.waitForFunction(() => 'reviewBenchmark' in window);
 		await page.evaluate(() => document.fonts.ready.then(() => undefined));
 		const workloads = [
