@@ -32,6 +32,11 @@ describe('classifyGhError', () => {
     expect(result.status).toBe(429);
   });
 
+  it('classifies a secondary rate limit before its HTTP 403', () => {
+    const result = classifyGhError(new Error('gh: You have exceeded a secondary rate limit. (HTTP 403)'));
+    expect(result.code).toBe('RATE_LIMITED');
+  });
+
   it('falls back to UNKNOWN with status 500', () => {
     const result = classifyGhError(new Error('something unexpected happened'));
     expect(result.code).toBe('UNKNOWN');

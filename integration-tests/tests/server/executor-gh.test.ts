@@ -21,19 +21,43 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const list = await fixture.client.get<ExecutionGhResults['listPullRequests']>(`/api/v1/gh/pull-requests?${query}`);
       expect(list).toMatchObject(scope);
       expect(list.repo?.nameWithOwner).toBe('synthetic-worker/repository');
-      const detailQuery = new URLSearchParams(query);
-      detailQuery.set('repositoryHost', new URL(list.repo!.url).hostname);
-      detailQuery.set('repositoryName', list.repo!.nameWithOwner);
-      const detail = await fixture.client.get<ExecutionGhResults['getPullRequest']>(`/api/v1/gh/pull-request?${detailQuery}&number=1`);
-      expect(detail).toMatchObject(scope);
-      expect(detail.body.length).toBe(1024 * 1024);
-      expect(detail.fileBodies['example.txt'].patch).toContain('+changed');
-      expect(detail.threads).toEqual([]);
+      const pullQuery = new URLSearchParams(query);
+      pullQuery.set('repositoryHost', new URL(list.repo!.url).hostname);
+      pullQuery.set('repositoryName', list.repo!.nameWithOwner);
+      pullQuery.set('number', '1');
+      const callsPath = join(project, 'gh-calls.jsonl');
+      const takeCalls = async () => {
+        const lines = (await Bun.file(callsPath).exists()) ? (await Bun.file(callsPath).text()).trim().split('\n').filter(Boolean) : [];
+        await rm(callsPath, { force: true });
+        return lines.map(line => (JSON.parse(line) as string[]).slice(0, 2).join(' '));
+      };
+      const diffQuery = (commits: { baseRefOid: string; headRefOid: string }) => {
+        const diffParams = new URLSearchParams(pullQuery);
+        diffParams.set('baseRefOid', commits.baseRefOid);
+        diffParams.set('headRefOid', commits.headRefOid);
+        return `/api/v1/gh/pull-request/diff?${diffParams}`;
+      };
+      await takeCalls();
+      const pullStatus = await fixture.client.get<ExecutionGhResults['getPullRequestStatus']>(`/api/v1/gh/pull-request/status?${pullQuery}`);
+      expect(pullStatus).toMatchObject({ ...scope, baseRefOid: 'e'.repeat(40), headRefOid: 'a'.repeat(40) });
+      expect(pullStatus.body.length).toBe(1024 * 1024);
+      // A status refresh neither reads nor returns the diff or review comments.
+      expect(await takeCalls()).toEqual(['repo view', 'pr view']);
+      expect(pullStatus).not.toHaveProperty('fileBodies');
+      const commits = { baseRefOid: pullStatus.baseRefOid, headRefOid: pullStatus.headRefOid };
+      const diff = await fixture.client.get<ExecutionGhResults['getPullRequestDiff']>(diffQuery(commits));
+      expect(diff).toMatchObject({ ...scope, ...commits });
+      expect(diff.fileBodies['example.txt'].patch).toContain('+changed');
+      expect(await takeCalls()).toEqual(['repo view', 'pr view', 'api --hostname', 'pr view']);
+      expect(await rejectionOf(fixture.client.get(`/api/v1/gh/pull-request/review-threads?${pullQuery}`))).toMatchObject({ status: 403, body: { errorCode: 'GH_FORBIDDEN' } });
+      expect(await rejectionOf(fixture.client.get(diffQuery({ ...commits, headRefOid: 'b'.repeat(40) })))).toMatchObject({ status: 409, body: { errorCode: 'GH_STALE_PULL_REQUEST' } });
 
       const configPath = join(project, 'gh-fixture.json');
       const specialPath = 'a\tb.txt';
+      const movedBase = 'f'.repeat(40);
       await writeFile(configPath, JSON.stringify({
         label: 'synthetic-worker',
+        pulls: [{ number: 1, baseRefOid: movedBase }],
         commentPages: [
           [{ id: 1, path: specialPath, line: 1, side: 'RIGHT', body: 'first page' }],
           [{ id: 2, path: specialPath, line: 2, side: 'RIGHT', body: 'second page' }],
@@ -41,17 +65,33 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         diff: 'diff --git "a/a\\tb.txt" "b/a\\tb.txt"\n--- "a/a\\tb.txt"\n+++ "b/a\\tb.txt"\n@@ -1 +1 @@\n--- i;\n+++ i;\n',
         files: [{ path: specialPath, additions: 1, deletions: 1 }],
       }));
-      const named = await fixture.client.get<ExecutionGhResults['getPullRequest']>(`/api/v1/gh/pull-request?${detailQuery}&number=1`);
+      await takeCalls();
+      const moved = await fixture.client.get<ExecutionGhResults['getPullRequestStatus']>(`/api/v1/gh/pull-request/status?${pullQuery}`);
+      expect(moved.baseRefOid).toBe(movedBase);
+      const named = await fixture.client.get<ExecutionGhResults['getPullRequestDiff']>(diffQuery({ ...commits, baseRefOid: movedBase }));
       expect(named.files).toMatchObject([{ path: specialPath }]);
       expect(Object.keys(named.fileBodies)).toEqual([specialPath]);
       expect(named.fileBodies[specialPath].patch).toContain('+++ i;');
-      expect(named.threads.flatMap(thread => thread.comments.map(comment => comment.body))).toEqual(['first page', 'second page']);
+      // The executor keeps the diff of each commit pair it read and proves access with one light read.
+      await takeCalls();
+      expect((await fixture.client.get<ExecutionGhResults['getPullRequestDiff']>(diffQuery({ ...commits, baseRefOid: movedBase }))).fileBodies[specialPath].patch).toContain('+++ i;');
+      expect(await takeCalls()).toEqual(['repo view', 'pr view']);
+      const threads = await fixture.client.get<ExecutionGhResults['getPullRequestReviewThreads']>(`/api/v1/gh/pull-request/review-threads?${pullQuery}`);
+      expect(threads).toMatchObject(scope);
+      expect(threads.threads.flatMap(thread => thread.comments.map(comment => comment.body))).toEqual(['first page', 'second page']);
+      // The executor revalidates an unchanged listing page by page and reuses its cached bodies.
+      await rm(callsPath, { force: true });
+      const revalidated = await fixture.client.get<ExecutionGhResults['getPullRequestReviewThreads']>(`/api/v1/gh/pull-request/review-threads?${pullQuery}`);
+      expect(revalidated.threads).toEqual(threads.threads);
+      const apiCalls = (await Bun.file(callsPath).text()).trim().split('\n').map(line => JSON.parse(line) as string[]).filter(args => args[0] === 'api');
+      expect(apiCalls.map(args => args.some(arg => arg.startsWith('If-None-Match: W/')))).toEqual([true, true]);
       await writeFile(configPath, JSON.stringify({ label: 'synthetic-worker', bodyBytes: 4 * 1024 * 1024 }));
-      expect(await rejectionOf(fixture.client.get(`/api/v1/gh/pull-request?${detailQuery}&number=1`))).toMatchObject({ status: 413, body: { errorCode: 'GIT_RESULT_TOO_LARGE' } });
-      const diff = `diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -0,0 +1,350 @@\n${`+${'\t'.repeat(9999)}\n`.repeat(350)}`
+      expect(await rejectionOf(fixture.client.get(`/api/v1/gh/pull-request/status?${pullQuery}`))).toMatchObject({ status: 413, body: { errorCode: 'GIT_RESULT_TOO_LARGE' } });
+      const limitedBase = 'd'.repeat(40);
+      const largeDiff = `diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -0,0 +1,350 @@\n${`+${'\t'.repeat(9999)}\n`.repeat(350)}`
         + 'diff --git a/small.txt b/small.txt\n--- a/small.txt\n+++ b/small.txt\n@@ -1 +1 @@\n-old\n+small change\n';
-      await writeFile(configPath, JSON.stringify({ label: 'synthetic-worker', diff }));
-      const limited = await fixture.client.get<ExecutionGhResults['getPullRequest']>(`/api/v1/gh/pull-request?${detailQuery}&number=1`);
+      await writeFile(configPath, JSON.stringify({ label: 'synthetic-worker', diff: largeDiff, pulls: [{ number: 1, baseRefOid: limitedBase }] }));
+      const limited = await fixture.client.get<ExecutionGhResults['getPullRequestDiff']>(diffQuery({ ...commits, baseRefOid: limitedBase }));
       expect(limited.fileBodies['example.txt']).toMatchObject({ bodyState: 'too-large', limitReason: 'file-too-many-bytes', patch: null });
       expect(limited.fileBodies['small.txt'].patch).toContain('+small change');
       if (executorId !== 'local') {

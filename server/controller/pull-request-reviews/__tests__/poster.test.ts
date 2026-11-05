@@ -48,7 +48,8 @@ function harness() {
   };
   const executors = { requireExecutor: () => ({ getGhService: async () => ({
       ...gh, getStatus: async () => { throw new Error('Unused'); },
-      getPullRequest: async () => { throw new Error('Unused'); }, listPullRequests: async () => { throw new Error('Unused'); },
+      getPullRequestStatus: async () => { throw new Error('Unused'); }, getPullRequestDiff: async () => { throw new Error('Unused'); },
+      getPullRequestReviewThreads: async () => { throw new Error('Unused'); }, listPullRequests: async () => { throw new Error('Unused'); },
     }) }) };
   const poster = new PullRequestReviewPoster({
     store, executors, changed() {}, now: () => Date.parse('2026-03-01T00:00:00Z'),

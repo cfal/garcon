@@ -8,7 +8,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { checkStateClass, checksSummary, sortChecksForReview } from './pr-display';
 
-	let { checks }: { checks: PullRequestCheck[] } = $props();
+	let { checks }: { checks: readonly PullRequestCheck[] } = $props();
 
 	const ordered = $derived(sortChecksForReview(checks));
 	const summary = $derived(checksSummary(checks));

@@ -75,7 +75,8 @@ export function classifyGhError(error: unknown): ClassifiedGhError {
     return { code: 'NOT_FOUND', status: 404, message: 'Pull request not found.' };
   }
 
-  if (text.includes('api rate limit') || text.includes('rate limit exceeded')) {
+  // GitHub reports a secondary limit as HTTP 403 "You have exceeded a secondary rate limit".
+  if (text.includes('api rate limit') || text.includes('rate limit exceeded') || text.includes('secondary rate limit')) {
     return {
       code: 'RATE_LIMITED',
       status: 429,

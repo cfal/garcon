@@ -128,7 +128,7 @@ test('worktree creation blocks Refresh and reports uncertainty after dialog disc
   }, undefined, remoteOptions);
 }, 120_000);
 
-test('failed PR detail refresh waits for an explicit retry', async () => {
+test('failed PR status refresh keeps the shown diff and waits for an explicit retry', async () => {
   await withChromiumFixture('git-pr-detail-retry', async (fixture, phase) => {
     const { page, integration } = fixture;
     const { client, executionDirs } = integration;
@@ -139,7 +139,12 @@ test('failed PR detail refresh waits for an explicit retry', async () => {
     const panel = page.locator('[data-workspace-surface-id="singleton:pull-requests"][aria-hidden="false"]');
     let requests = 0;
     let failing = false;
-    await page.route('**/api/v1/gh/pull-request?**', async route => {
+    let diffRequests = 0;
+    await page.route('**/api/v1/gh/pull-request/diff?**', async route => {
+      diffRequests++;
+      await route.continue();
+    });
+    await page.route('**/api/v1/gh/pull-request/status?**', async route => {
       requests++;
       if (failing) await route.fulfill({ status: 503, json: { error: 'Synthetic PR detail unavailable', errorCode: 'GH_OPERATION_FAILED' } });
       else await route.continue();
@@ -153,12 +158,16 @@ test('failed PR detail refresh waits for an explicit retry', async () => {
     await panel.locator('[data-pr-detail]').getByText('Synthetic PR detail unavailable', { exact: true }).waitFor();
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     expect(requests).toBe(2);
+    // The diff of unchanged commits stays shown beside the failure rather than blanking.
+    await panel.locator('[data-pr-detail]').getByText('+changed', { exact: true }).waitFor();
     phase('explicit detail retry');
     failing = false;
-    const retried = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/gh/pull-request');
+    const retried = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/gh/pull-request/status');
     await panel.locator('[data-pr-detail]').getByRole('button', { name: 'Retry', exact: true }).click();
     expect((await retried).status()).toBe(200);
     expect(requests).toBe(3);
+    await panel.locator('[data-pr-refresh-failure]').waitFor({ state: 'detached' });
+    expect(diffRequests).toBe(1);
     assertOnlyExpectedHttpErrors(fixture, 1);
   }, undefined, {
     ...remoteOptions,
@@ -170,7 +179,7 @@ test('failed PR detail refresh waits for an explicit retry', async () => {
       await chmod(join(bin, 'gh'), 0o755);
       await symlink(process.execPath, join(bin, 'bun'));
       await symlink(Bun.which('git')!, join(bin, 'git'));
-      await writeFile(join(dirs.project, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic-worker', commentsFail: true }));
+      await writeFile(join(dirs.project, 'gh-fixture.json'), JSON.stringify({ label: 'synthetic-worker' }));
     },
   });
 }, 120_000);

@@ -147,8 +147,16 @@ test('invalid Git requests never acquire a remote session', async () => {
   const services = new RemoteGitServices({ latest: untouched, acquire: untouched, send: untouched, call: untouched } satisfies RemoteSessions);
   await expect(services.git.stagePaths({ projectPath: '/repo', paths: ['x'.repeat(300_000)], mode: 'stage' }))
     .rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
-  await expect(services.gh.getPullRequest({ projectPath: '/repo', number: -1 }))
+  const repository = { host: 'github.com', nameWithOwner: 'acme/app' };
+  const commits = { baseRefOid: 'e'.repeat(40), headRefOid: 'a'.repeat(40) };
+  await expect(services.gh.getPullRequestStatus({ projectPath: '/repo', repository, number: -1 }))
     .rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
+  await expect(services.gh.getPullRequestReviewThreads({ projectPath: '/repo', repository, number: -1 }))
+    .rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
+  for (const invalid of [{ ...commits, headRefOid: 'HEAD' }, { headRefOid: commits.headRefOid }, { ...commits, extra: 'x' }]) {
+    await expect(services.gh.getPullRequestDiff({ projectPath: '/repo', repository, number: 1, commits: invalid as typeof commits }))
+      .rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
+  }
 });
 
 for (const fault of ['size', 'escaping', 'executor'] as const) {

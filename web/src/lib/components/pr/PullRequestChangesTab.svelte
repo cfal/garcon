@@ -3,16 +3,17 @@
 	import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
 	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
 	import { DEFAULT_GIT_REVIEW_DOCUMENT_LIMITS } from '$lib/api/git.js';
-	import type { PullRequestDetail } from '$lib/api/pull-requests';
+	import type { PullRequestDiff, PullRequestThread } from '$lib/api/pull-requests';
 	import { buildGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 	import { buildPullRequestVirtualRowSource } from '$lib/git/pull-requests/pull-request-virtual-row-source.js';
 	import PullRequestVirtualDiffSurface from './PullRequestVirtualDiffSurface.svelte';
 
 	interface Props {
-		detail: PullRequestDetail;
+		diff: PullRequestDiff;
+		threads: readonly PullRequestThread[];
 	}
 
-	let { detail }: Props = $props();
+	let { diff, threads }: Props = $props();
 
 	let viewedFiles = $state<Set<string>>(new Set());
 	let collapsedFiles = $state<Set<string>>(new Set());
@@ -20,7 +21,7 @@
 	// Resets per-PR view state whenever the shown pull request changes.
 	let trackedNumber = $state<number | null>(null);
 	$effect(() => {
-		const current = detail.number;
+		const current = diff.number;
 		if (current !== trackedNumber) {
 			trackedNumber = current;
 			viewedFiles = new Set();
@@ -28,30 +29,29 @@
 		}
 	});
 
-	const filePaths = $derived(detail.files.map((file) => file.path));
+	const filePaths = $derived(diff.files.map((file) => file.path));
 	const allCollapsed = $derived(filePaths.length > 0 && collapsedFiles.size >= filePaths.length);
 	const viewedCount = $derived(viewedFiles.size);
 	const viewedPercent = $derived(
 		filePaths.length ? Math.round((viewedCount / filePaths.length) * 100) : 0,
 	);
-	const threadsById = $derived(new Map(detail.threads.map((thread) => [thread.id, thread])));
+	const threadsById = $derived(new Map(threads.map((thread) => [thread.id, thread])));
 	const threadCountByFile = $derived.by(() => {
 		const counts = new Map<string, number>();
-		for (const thread of detail.threads)
-			counts.set(thread.path, (counts.get(thread.path) ?? 0) + 1);
+		for (const thread of threads) counts.set(thread.path, (counts.get(thread.path) ?? 0) + 1);
 		return counts;
 	});
 	const diffSource = $derived.by(() => {
 		const baseSource = buildGitVirtualReviewRowSource({
 			summary: {
-				documentId: detail.documentId,
+				documentId: diff.documentId,
 				project: '',
 				context: 3,
-				files: detail.files,
+				files: diff.files,
 				limits: DEFAULT_GIT_REVIEW_DOCUMENT_LIMITS,
 			},
-			visibleFilePaths: detail.files.map((file) => file.path),
-			fileBodies: detail.fileBodies,
+			visibleFilePaths: diff.files.map((file) => file.path),
+			fileBodies: diff.fileBodies,
 			loadingBodies: new Set<string>(),
 			focusedFilePath: null,
 			diffMode: 'unified',
@@ -61,9 +61,9 @@
 		});
 		return buildPullRequestVirtualRowSource({
 			baseSource,
-			files: detail.files,
-			fileBodies: detail.fileBodies,
-			threads: detail.threads,
+			files: diff.files,
+			fileBodies: diff.fileBodies,
+			threads,
 			collapsedFilePaths: collapsedFiles,
 		});
 	});
@@ -97,9 +97,9 @@
 
 <div class="border-b border-border">
 	<div class="flex items-center justify-between px-3 py-1.5 text-xs text-muted-foreground">
-		<span>{m.pull_request_changed_files({ count: detail.files.length })}</span>
+		<span>{m.pull_request_changed_files({ count: diff.files.length })}</span>
 		<div class="flex items-center gap-3">
-			{#if detail.files.length > 0}
+			{#if diff.files.length > 0}
 				<button
 					type="button"
 					class="inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
@@ -115,7 +115,7 @@
 				</button>
 			{/if}
 			<span class="tabular-nums"
-				>{m.pull_request_viewed_count({ count: viewedCount, total: detail.files.length })}</span
+				>{m.pull_request_viewed_count({ count: viewedCount, total: diff.files.length })}</span
 			>
 		</div>
 	</div>
@@ -126,13 +126,13 @@
 		></div>
 	</div>
 </div>
-{#if detail.files.length === 0}
+{#if diff.files.length === 0}
 	<div class="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
 		{m.pull_request_no_changes()}
 	</div>
 {:else}
 	<PullRequestVirtualDiffSurface
-		documentId={detail.documentId}
+		documentId={diff.documentId}
 		source={diffSource}
 		{viewedFiles}
 		{collapsedFiles}

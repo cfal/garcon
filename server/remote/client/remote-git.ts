@@ -63,7 +63,10 @@ export class RemoteGitServices {
     this.gh = {
       getStatus: (options) => this.#ghCall('getStatus', {}, options),
       listPullRequests: (request, options) => this.#ghCall('listPullRequests', request, options),
-      getPullRequest: (request, options) => this.#ghCall('getPullRequest', request, options),
+      getPullRequestFingerprints: (request, options) => this.#ghCall('getPullRequestFingerprints', request, options),
+      getPullRequestStatus: (request, options) => this.#ghCall('getPullRequestStatus', request, options),
+      getPullRequestDiff: (request, options) => this.#ghCall('getPullRequestDiff', request, options),
+      getPullRequestReviewThreads: (request, options) => this.#ghCall('getPullRequestReviewThreads', request, options),
       getPullRequestReviewTarget: (request, options) => this.#ghCall('getPullRequestReviewTarget', request, options),
       createPullRequestComment: (request, options) => this.#ghCall('createPullRequestComment', request, options),
       minimizePullRequestComment: (request, options) => this.#ghCall('minimizePullRequestComment', request, options),

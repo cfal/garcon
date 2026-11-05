@@ -14,7 +14,7 @@ import { createLogger } from '../../common/log.js';
 import { assertRealWithinBase, resolveRealWithinBase } from '../../common/path-boundary.js';
 import { toNativePath, toExecutorPath } from '../../common/executor-path.js';
 import { createGitOperations } from './git-service.js';
-import { createGhOperations } from '../gh/gh-service.js';
+import { createGhOperations, GhReadCaches } from '../gh/gh-service.js';
 import { withGitOperation, gitOutputTruncated, restrictGitWorkingRoot } from './operation-context.js';
 import { withRepositoryMutation } from './repository-coordination.js';
 import { readOnlyGitOptions, resolvePathWithinProject, runGit } from './run.js';
@@ -71,24 +71,31 @@ export class GitRuntime {
   readonly #abort = new AbortController();
   readonly #operations;
   readonly #gh;
+  readonly #ghCaches = new GhReadCaches();
   #reads = 0;
   #mutations = 0;
 
   constructor(private readonly configuration: GitExecutorOptions) {
     this.#operations = createGitOperations({ assertProjectPathAllowed: (input) => this.#path(input), reviewRegistry: configuration.reviewRegistry });
-    this.#gh = createGhOperations(toNativePath(configuration.projectBasePath));
+    this.#gh = createGhOperations(toNativePath(configuration.projectBasePath), this.#ghCaches);
     this.git = this.#gitService();
     this.gh = {
       getStatus: (options) => this.#ghCall('getStatus', {}, options),
       listPullRequests: (request, options) => this.#ghCall('listPullRequests', request, options),
-      getPullRequest: (request, options) => this.#ghCall('getPullRequest', request, options),
+      getPullRequestFingerprints: (request, options) => this.#ghCall('getPullRequestFingerprints', request, options),
+      getPullRequestStatus: (request, options) => this.#ghCall('getPullRequestStatus', request, options),
+      getPullRequestDiff: (request, options) => this.#ghCall('getPullRequestDiff', request, options),
+      getPullRequestReviewThreads: (request, options) => this.#ghCall('getPullRequestReviewThreads', request, options),
       getPullRequestReviewTarget: (request, options) => this.#ghCall('getPullRequestReviewTarget', request, options),
       createPullRequestComment: (request, options) => this.#ghCall('createPullRequestComment', request, options),
       minimizePullRequestComment: (request, options) => this.#ghCall('minimizePullRequestComment', request, options),
     };
   }
 
-  dispose(): void { this.#abort.abort(); }
+  dispose(): void {
+    this.#abort.abort();
+    this.#ghCaches.clear();
+  }
 
   async #path(input: string): Promise<string> {
     const native = toNativePath(input);
@@ -237,7 +244,12 @@ export class GitRuntime {
       const timeoutMs = Math.max(1, Math.min(options?.timeoutMs ?? ghOperationTimeoutMs(method), ghOperationTimeoutMs(method)));
       const payload = await this.#admit(`gh.${method}`, mutation, { ...options, timeoutMs }, async (callOptions) => {
         if (method === 'getStatus') return this.#gh.getStatus(callOptions.signal);
-        const input = request as Exclude<GhRequests[keyof GhRequests], Record<string, never>>;
+        // Fingerprints address repositories by name and read no checkout.
+        if (method === 'getPullRequestFingerprints') {
+          this.#available(callOptions);
+          return this.#ghOperation(method, request, callOptions.signal);
+        }
+        const input = request as Exclude<GhRequests[keyof GhRequests], Record<string, never> | GhRequests['getPullRequestFingerprints']>;
         const projectPath = await this.#repository(input.projectPath, callOptions);
         this.#available(callOptions);
         return this.#ghOperation(method, { ...input, projectPath }, callOptions.signal);
@@ -256,7 +268,10 @@ export class GitRuntime {
     switch (method) {
       case 'getStatus': return this.#gh.getStatus(signal);
       case 'listPullRequests': return this.#gh.listPullRequests({ ...request as GhRequests['listPullRequests'], signal });
-      case 'getPullRequest': return this.#gh.getPullRequest({ ...request as GhRequests['getPullRequest'], signal });
+      case 'getPullRequestFingerprints': return this.#gh.getPullRequestFingerprints({ ...request as GhRequests['getPullRequestFingerprints'], signal });
+      case 'getPullRequestStatus': return this.#gh.getPullRequestStatus({ ...request as GhRequests['getPullRequestStatus'], signal });
+      case 'getPullRequestDiff': return this.#gh.getPullRequestDiff({ ...request as GhRequests['getPullRequestDiff'], signal });
+      case 'getPullRequestReviewThreads': return this.#gh.getPullRequestReviewThreads({ ...request as GhRequests['getPullRequestReviewThreads'], signal });
       case 'getPullRequestReviewTarget': return this.#gh.getPullRequestReviewTarget({ ...request as GhRequests['getPullRequestReviewTarget'], signal });
       case 'createPullRequestComment': return this.#gh.createPullRequestComment({ ...request as GhRequests['createPullRequestComment'], signal });
       case 'minimizePullRequestComment': return this.#gh.minimizePullRequestComment({ ...request as GhRequests['minimizePullRequestComment'], signal });

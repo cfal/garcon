@@ -25,10 +25,14 @@ show their host in the manager, inbox, filters, and recovery list.
    connected on the same executor, is refused. Matching owner/name pairs on
    different GitHub hosts are separate connections.
 2. **Scan.** Every 5 minutes, and at once after a connect, edit, or Scan now,
-   the controller lists the repository's open pull requests through the
-   executor's `gh`. An unreachable executor marks the repository paused and
-   keeps its last list; it is never shown as having no pull requests.
-   Up to four repositories scan independently, with one scan per repository.
+   the controller checks the repository's open pull requests through the
+   executor's `gh`. A connect, edit, Scan now, the first scan after a restart
+   or an unsuccessful scan, and at least every 30 minutes, lists them in full.
+   Between those, repositories on the same executor and GitHub host are
+   checked together, up to 25 per GraphQL query, by fingerprint (see
+   [Fingerprints](#fingerprints)). An unreachable executor marks the repository
+   paused and keeps its last list; it is never shown as having no pull
+   requests. Up to four scans run at once; a fingerprint batch is one scan.
    Scan now requests take the next available slot and coalesce while that
    repository is already scanning.
 3. **Select.** With automatic review on, a pull request is reviewed when it
@@ -165,6 +169,55 @@ loads and shows history or body read failures with Retry. Review and Post remain
 disabled until the required reads succeed. Changes to that pull request refresh
 its history, including an older selected run after a posting result changes.
 
+The Changes and Checks tabs read status, diff, and review threads separately.
+Every successful repository scan refreshes status for the selected visible PR,
+including when the check rollup is unchanged: names, URLs, and individual check
+outcomes can change without affecting it. This costs one light status read for
+that selection per scan. Review activity invalidates threads;
+unchanged thread pages revalidate with conditional requests. The diff is read
+again only when status reports a different base or head commit.
+Each part keeps its last loaded content through a failed refresh and shows the
+failure beside it with Retry; a failed diff or status is not retried until the
+user asks or a scan reports a change to that pull request.
+
+Each selection schedules status, diff, and review-thread reads in sequence so
+it occupies at most one query slot during a cold load. Concurrent diff misses
+serialize by repository and commit pair; each caller checks its own access
+before reusing the result. Diff bodies come from GitHub's immutable commit-pair
+comparison, including their file statistics, rather than the mutable PR ref.
+Review-thread snapshots carry the base and head observed before and after
+their read. The Changes tab publishes only matching diff and thread generations
+and retains the previous coherent pair while a replacement loads or fails.
+
+## Fingerprints
+
+A fingerprint is the part of a pull request summary that decides which reads
+are stale: `updatedAt`, draft state, head and base commits, the check rollup
+state, review decision, mergeability, and review and review-thread counts. A fingerprint batch costs one `gh` call for up to 25
+repositories; a full read costs at least three per repository (`gh repo view`,
+the list query, and the team review-request search).
+
+- Unchanged fingerprints keep the saved repository list without a full list read.
+  The selected visible PR still refreshes its check details.
+- The check rollup, mergeability, and the review decision change without
+  moving `updatedAt`; their new values are applied to the saved list.
+- Any other change (a pull request opened, closed, or reopened, a push, a new
+  base, new reviews, an edit that moves `updatedAt`, another `gh` account, or a
+  renamed repository) lists that repository in full.
+- A repository the batch could not read, or with more than 100 open pull
+  requests, is listed in full, so its outcome is the full read's.
+- A batch that fails as a whole lists each repository in full, except when
+  GitHub reports a rate limit: then each repository records the failure, keeps
+  its list, and is checked by fingerprint again at the next interval rather
+  than listed in full, even past the 30-minute full-read interval. Once a
+  fingerprint succeeds, one overdue full read is scheduled. A forced full read
+  that fails for another reason clears the previous rate-limit marker.
+
+Automatic review selection runs after every successful check, because the
+debounce period and daily limit move with time. Labels and team review
+requests that change without moving `updatedAt`, and a checkout retargeted to
+another repository, are noticed by the next full read.
+
 ## Safety
 
 A pull request is untrusted input to an agent Garcon does not sandbox. By
@@ -185,7 +238,7 @@ starts from the new-chat default; which mode lets each agent run `gh` and
   with `nextCursor`), `/runs/stop`, `/runs/post`, `/runs/abandon`
   (requires `{runId, confirm: true}`).
 - WebSocket: `pull-request-reviews-invalidated` carries the store revision.
-- Executor: three `ExecutionGhService` additions, described in the
+- Executor: four `ExecutionGhService` additions, described in the
   [Git contract](./executor/git.md).
 - No CLI commands.
 
