@@ -40,7 +40,7 @@ export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze
     'codex-fixture', 'delegated-start-interleavings', 'fake-claude-model',
     'opencode-supervisor', 'project-path-publication',
     'execution-backend', 'fake-chat-completions-model', 'fixture-auth', 'git-fixture', 'support-contract',
-    'persisted-chat-support', 'reload-helper', 'live-claude-protocol-probe',
+    'persisted-chat-support', 'reload-helper', 'visible-response-helper', 'live-claude-protocol-probe',
     'live-codex-protocol-probe', 'live-codex-credential-proxy',
     'garcon-agent-command-reload', 'garcon-schedule-pipeline',
   ].map(name => [name, 'Support-library or injected controller unit contract, not executor dispatch.'])),
